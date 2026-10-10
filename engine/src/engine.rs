@@ -256,7 +256,7 @@ impl Core {
             .into_iter()
             .find(|p| Some(&p.id) == c.project_id.as_ref())
             .map(|p| PathBuf::from(p.path))
-            .ok_or_else(|| "This project is no longer in Faber.".to_string())
+            .ok_or_else(|| "error.projectGone".to_string())
     }
 
     fn load(&mut self, id: &str) -> Option<&mut Conversation> {
@@ -284,7 +284,11 @@ impl Core {
 
     fn save_settings(&mut self, patch: Settings) -> Settings {
         let before = self.store.settings();
-        let settings = Settings { appearance: patch.appearance.or(before.appearance), user_hooks: patch.user_hooks.or(before.user_hooks) };
+        let settings = Settings {
+            appearance: patch.appearance.or(before.appearance),
+            user_hooks: patch.user_hooks.or(before.user_hooks),
+            language: patch.language.or(before.language),
+        };
         self.store.save_settings(&settings);
         // Idle project CLIs restart on their next turn, so a changed hooks choice applies right away.
         if settings.user_hooks != before.user_hooks {
@@ -468,9 +472,9 @@ impl Core {
             l.session.close();
             self.live.remove(conv);
         }
-        let c = self.convs.get(conv).ok_or("This conversation is no longer in Faber.")?;
+        let c = self.convs.get(conv).ok_or("error.conversationGone")?;
         let cwd = self.cwd_of(c)?;
-        let cli = self.opts.clis.get(&pick.vendor).ok_or("That subscription is not connected.")?.clone();
+        let cli = self.opts.clis.get(&pick.vendor).ok_or("error.notConnected")?.clone();
         let base_spawn = self.opts.spawn.clone();
         let prefix = cli.prefix.clone();
         let command = cli.command.clone();
@@ -557,12 +561,12 @@ impl Core {
     }
 
     fn send(&mut self, req: SendRequest) -> Result<String, String> {
-        let pick = pick_model(&req.choice, &self.vendors()).ok_or("No connected subscription can answer this. Connect one in Settings.")?;
+        let pick = pick_model(&req.choice, &self.vendors()).ok_or("error.noSubscription")?;
         let existing = req.conversation_id.as_deref().and_then(|id| self.load(id).map(|c| c.id.clone()));
         if let Some(id) = &existing
             && self.live.get(id).is_some_and(|l| l.turn.is_some())
         {
-            return Err("Wait for the current answer or stop it first.".into());
+            return Err("error.busy".into());
         }
         let draft = self.draft.clone().filter(|d| self.convs.get(d).is_some_and(|c| c.area == req.area && c.project_id == req.project_id));
         let id = match existing {
@@ -581,7 +585,7 @@ impl Core {
             self.opts.data_dir.join("attachments").join(&id)
         };
         let at = now();
-        let c = self.convs.get_mut(&id).ok_or("This conversation is no longer in Faber.")?;
+        let c = self.convs.get_mut(&id).ok_or("error.conversationGone")?;
         if c.title.is_empty() {
             c.title = req.text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(60).collect();
         }
@@ -628,8 +632,8 @@ impl Core {
     // Edit a message or redo an answer with another model: a new conversation keeps everything before that message,
     // with the chat workspace copied, and sends the new text. The original stays as it was.
     fn branch(&mut self, req: BranchRequest) -> Result<String, String> {
-        let source = self.load(&req.conversation_id).cloned().ok_or("That message is no longer in this conversation.")?;
-        let at = source.messages.iter().position(|m| m.id == req.message_id).ok_or("That message is no longer in this conversation.")?;
+        let source = self.load(&req.conversation_id).cloned().ok_or("error.messageGone")?;
+        let at = source.messages.iter().position(|m| m.id == req.message_id).ok_or("error.messageGone")?;
         let id = self.blank(source.area, source.project_id.clone());
         let from = self.workspace_of(&source.id);
         let to = self.workspace_of(&id);

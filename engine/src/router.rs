@@ -32,13 +32,13 @@ pub fn pick_model(choice: &Choice, available: &[Vendor]) -> Option<Pick> {
     };
     if choice.vendor != "auto" {
         let vendor = Vendor::ALL.into_iter().find(|v| v.name() == choice.vendor)?;
-        return available.contains(&vendor).then(|| pick(vendor, choice.model.as_deref(), "chosen by you"));
+        return available.contains(&vendor).then(|| pick(vendor, choice.model.as_deref(), "reason.chosen"));
     }
     if available.contains(&Vendor::Claude) {
-        return Some(pick(Vendor::Claude, Some("sonnet"), "Auto: everyday default"));
+        return Some(pick(Vendor::Claude, Some("sonnet"), "reason.autoDefault"));
     }
     if available.contains(&Vendor::Codex) {
-        return Some(pick(Vendor::Codex, None, "Auto: the only connected subscription"));
+        return Some(pick(Vendor::Codex, None, "reason.autoOnly"));
     }
     None
 }

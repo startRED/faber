@@ -58,7 +58,7 @@ async fn a_chat_turn_streams_to_the_screen_and_is_saved_with_model_reason_sessio
     assert_eq!(reply.status, Some(Status::Done));
     assert!(reply.text.contains("Rayleigh"));
     assert_eq!(reply.model.as_deref(), Some("claude-haiku-5-5"));
-    assert_eq!(reply.reason.as_deref(), Some("chosen by you"));
+    assert_eq!(reply.reason.as_deref(), Some("reason.chosen"));
     assert!(f.args.lock().unwrap()[0].contains(&"--restricted".to_string()));
     let saved = read_json(&dir.path().join("conversations").join(format!("{id}.json")));
     assert_eq!(saved["sessions"]["claude"], "c5b9834c-dfc7-4086-beed-2212be93b722");
@@ -257,11 +257,11 @@ async fn the_hooks_choice_is_saved_and_restarts_idle_project_clis_with_it() {
     let last_args = || f.args.lock().unwrap().last().cloned().unwrap_or_default().join(" ");
     engine.warm(warm());
     assert!(last_args().contains("disableAllHooks"));
-    engine.save_settings(Settings { user_hooks: Some(true), appearance: None });
+    engine.save_settings(Settings { user_hooks: Some(true), ..Settings::default() });
     engine.warm(warm());
     assert!(!last_args().contains("disableAllHooks"));
     let appearance = serde_json::json!({ "mode": "light" }).as_object().cloned();
-    engine.save_settings(Settings { appearance, user_hooks: None });
+    engine.save_settings(Settings { appearance, ..Settings::default() });
     engine.shutdown();
     assert_eq!(read_json(&dir.path().join("settings.json")), serde_json::json!({ "userHooks": true, "appearance": { "mode": "light" } }));
 }
@@ -289,10 +289,7 @@ fn a_model_joining_midway_gets_the_earlier_conversation_as_text() {
 fn auto_picks_a_connected_vendor_and_says_why_a_missing_one_is_refused() {
     let auto = choice("auto", None);
     let only_codex = pick_model(&auto, &[Vendor::Codex]).unwrap();
-    assert_eq!(
-        (only_codex.vendor, only_codex.reason.as_str(), only_codex.effort.as_str()),
-        (Vendor::Codex, "Auto: the only connected subscription", "medium")
-    );
+    assert_eq!((only_codex.vendor, only_codex.reason.as_str(), only_codex.effort.as_str()), (Vendor::Codex, "reason.autoOnly", "medium"));
     assert_eq!(pick_model(&auto, &[Vendor::Claude, Vendor::Codex]).unwrap().vendor, Vendor::Claude);
     assert!(pick_model(&choice("claude", None), &[Vendor::Codex]).is_none());
     assert!(pick_model(&auto, &[]).is_none());
