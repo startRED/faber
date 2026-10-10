@@ -8,11 +8,16 @@ permissions:
   contents: write
 
 jobs:
-  # One job creates the release so the three build jobs upload to it instead of racing to create it.
+  # One job creates the release so the build jobs upload to it instead of racing to create it.
   create:
     runs-on: ubuntu-latest
+    outputs:
+      id: ${{ steps.release.outputs.id }}
     steps:
-      - run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "Faber $GITHUB_REF_NAME" --generate-notes
+      - id: release
+        run: |
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "Faber $GITHUB_REF_NAME" --generate-notes
+          echo "id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" --jq .id)" >> "$GITHUB_OUTPUT"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -21,16 +26,31 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
+        include:
+          - os: windows-latest
+            args: ''
+          - os: macos-latest
+            args: --target universal-apple-darwin
+          - os: ubuntu-latest
+            args: ''
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
+      - name: webview libraries (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf
       - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
       - run: npm ci
-      - run: npm run build
-      - run: npm run release
+      - uses: tauri-apps/tauri-action@v0
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          releaseId: ${{ needs.create.outputs.id }}
+          args: ${{ matrix.args }}

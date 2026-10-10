@@ -39,8 +39,9 @@ Themes are plain files, so people can share them and the curated catalog can off
 
 ## How automated runs see the app
 
-The UI runs in Electron's Chromium, so tests and judges drive the real app with Playwright's Electron support:
-`npm run test:e2e` launches the built app with `FABER_HIDDEN=1` (the window renders offscreen and never takes the
-user's screen), reads the page, clicks and types like a person, and saves screenshots to `test-results/e2e/`. CI runs
-it on all three systems and keeps the screenshots as artifacts. Anything outside the page (tray, notifications,
+On Windows the UI runs in WebView2, which exposes Chromium's DevTools port, so tests and judges drive the real app
+with Playwright: `npm run test:e2e` builds the app and starts it with `FABER_HIDDEN=1` (the window sits offscreen with
+its own browser profile and never takes the user's screen) and `FABER_CDP_PORT`, reads the page, clicks and types like
+a person, and saves screenshots to `test-results/e2e/`. CI runs it on Windows and keeps the screenshots as artifacts;
+the macOS and Linux webviews have no such port, so those systems run every other check. Anything outside the page (tray, notifications,
 installer, updates) is checked through the operating system's accessibility layer and file versions.

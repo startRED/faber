@@ -1,16 +1,12 @@
 import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
+import solid from 'vite-plugin-solid';
 
-// Only in `npm run dev`: hot reload needs an inline script and a websocket, which the shipped policy forbids.
-const devPolicy = {
-  name: 'faber-dev-policy',
-  apply: 'serve' as const,
-  transformIndexHtml: (html: string) => html.replace("default-src 'self';", "default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' ws://localhost:*;"),
-};
-
+// The screen lives in ui/; Tauri loads the built files from dist/, or this dev server during `npm run dev`.
 export default defineConfig({
-  root: 'src/renderer',
+  root: 'ui',
   base: './',
-  plugins: [react(), devPolicy],
-  build: { outDir: '../../dist/renderer', emptyOutDir: true },
+  plugins: [solid()],
+  clearScreen: false,
+  server: { port: 5173, strictPort: true },
+  build: { outDir: '../dist', emptyOutDir: true, target: 'es2023' },
 });

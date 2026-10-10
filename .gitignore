@@ -10,3 +10,4 @@ Thumbs.db
 .env.*
 test-results/
 target/
+src-tauri/gen/

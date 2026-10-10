@@ -144,9 +144,9 @@ fixed rules.
 ## Architecture
 
 ```text
-App (Electron: window, tray, notifications, auto-update)
- └─ UI (React + TypeScript) ── JSON-RPC over a local WebSocket ──┐   (swappable shell)
-Engine (separate Node process; keeps running with the window closed)
+App (Tauri 2: window, tray, notifications, auto-update)
+ └─ UI (SolidJS + TypeScript, in the system webview) ── fixed command list ──┐
+Engine (Rust crate inside the app today; a separate process later, so work survives the app)
  ├─ Lead agent: live CLI session + Faber toolbox (MCP)
  ├─ Drivers: Claude Code (stream-json), Codex (app-server), ACP, OpenCode
  ├─ Capability manifest per CLI and version
@@ -158,9 +158,15 @@ Engine (separate Node process; keeps running with the window closed)
  └─ Live manifest: compatibility matrix, provider policy switch, driver descriptors
 ```
 
-- **Electron and TypeScript.** The UI needs the same Chromium on all three systems for the terminal, the 3D viewer,
-  video and canvas. TypeScript has official SDKs for MCP, ACP and the Codex SDK, plus node-pty. The UI talks to the
-  engine over a WebSocket, so the shell can be swapped if the memory target fails.
+- **Rust, Tauri 2 and SolidJS.** Chosen on 2026-10-10, while the app was still small, for weight and memory: Tauri
+  uses the system webview (WebView2 on Windows) instead of shipping Chromium, and the engine is native code with no
+  Node runtime. SolidJS updates only what changed, which suits answers streaming in. C++ only where a library leaves
+  no choice. The cost: three webviews instead of one Chromium (WebView2, WebKit on macOS, WebKitGTK on Linux), so
+  anything heavy on screen (terminal, 3D viewer, video) is tested on all three. The first Electron version stays
+  tagged as `electron-f1`.
+- **Languages.** English, Portuguese (Brazil), Spanish, French and German from the start, following the system
+  language unless the user picks one in Settings. Every text is written by hand, never machine-translated; a new
+  language needs a native speaker to review it.
 - **The user's own setup comes along.** Projects use the skills, MCP servers and plugins already configured in each
   CLI, and Faber's catalog installs into that same configuration, so a tool works the same inside and outside Faber.
   The user's hooks are off by default (they can rewrite answers or block steps) and can be turned on in Settings.
@@ -224,8 +230,8 @@ Engine (separate Node process; keeps running with the window closed)
 
 ## Distribution
 
-- GitHub Releases on every tag: `.exe` installer and portable `.zip` for Windows (x64 and arm64), `.dmg` for macOS,
-  AppImage, `.deb` and `.rpm` for Linux, plus `SHA256SUMS.txt`. Windows is the primary platform.
+- GitHub Releases on every tag: `.exe` installer for Windows, a universal `.dmg` for macOS, AppImage and `.deb` for
+  Linux. Windows is the primary platform; arm64 Windows and `.rpm` come later.
 - No paid signing at first. Windows shows a SmartScreen notice that the download page explains; after the first
   release the project applies to the SignPath Foundation, which signs open-source projects for free. macOS builds are
   not notarized, so users allow the app once in System Settings, and Faber notifies them about updates instead of
