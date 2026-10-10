@@ -16,9 +16,14 @@ const SKY: &str = "In one sentence: why is the sky blue?";
 const TWO_WRITES: &str = "Create a.txt containing 'one'. Then create b.txt containing 'two'. Use the Write tool for each, one at a time.";
 
 fn engine(dir: &Path, vendor: Vendor, spawn: Spawner) -> (Engine, UnboundedReceiver<AppEvent>) {
+    engine_idle(dir, vendor, spawn, Duration::from_secs(120))
+}
+
+fn engine_idle(dir: &Path, vendor: Vendor, spawn: Spawner, idle: Duration) -> (Engine, UnboundedReceiver<AppEvent>) {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let clis = BTreeMap::from([(vendor, Cli { command: vendor.name().into(), prefix: vec![] })]);
-    let opts = EngineOptions { data_dir: dir.into(), clis, spawn, windows: false, max_warm: 3, runtime: tokio::runtime::Handle::current() };
+    let opts =
+        EngineOptions { data_dir: dir.into(), clis, spawn, windows: false, max_warm: 3, idle, runtime: tokio::runtime::Handle::current() };
     (Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))), rx)
 }
 
@@ -105,6 +110,21 @@ async fn after_reopening_the_app_the_conversation_resumes_its_cli_session() {
     assert_eq!(args[args.iter().position(|a| a == "--resume").unwrap() + 1], "3ee0bd99-72d2-4c5b-8420-a9f85ee53981");
     assert_eq!(reply.text.trim(), "pong");
     assert_eq!(second.open(&id).unwrap().messages.len(), 4);
+}
+
+#[tokio::test]
+async fn an_idle_claude_process_closes_and_the_next_message_resumes_its_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "chat"));
+    let (engine, mut rx) = engine_idle(dir.path(), Vendor::Claude, f.spawn.clone(), Duration::from_millis(50));
+    let id = engine.send(ask(Area::Chat, SKY, choice("claude", Some("haiku")))).unwrap();
+    finished(&mut rx, |_| {}).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    engine.send(SendRequest { conversation_id: Some(id), ..ask(Area::Chat, "And at sunset?", choice("claude", Some("haiku"))) }).unwrap();
+    engine.shutdown();
+    let args = f.args.lock().unwrap();
+    assert_eq!(args.len(), 2, "the first process closed while idle");
+    assert!(args[1].contains(&"--resume".to_string()));
 }
 
 #[tokio::test]

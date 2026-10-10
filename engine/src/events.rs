@@ -71,25 +71,35 @@ pub enum SessionCommand {
 }
 
 /// One live conversation with a CLI. Commands are queued, so the caller never waits on the process.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Session {
-    tx: tokio::sync::mpsc::UnboundedSender<SessionCommand>,
+    send: std::sync::Arc<dyn Fn(SessionCommand) + Send + Sync>,
+}
+
+impl std::fmt::Debug for Session {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Session")
+    }
 }
 
 impl Session {
     pub(crate) fn new(tx: tokio::sync::mpsc::UnboundedSender<SessionCommand>) -> Self {
-        Session { tx }
+        Self::from_fn(move |cmd| drop(tx.send(cmd)))
+    }
+    /// A session whose commands go wherever `send` puts them, such as a thread in a shared process.
+    pub(crate) fn from_fn(send: impl Fn(SessionCommand) + Send + Sync + 'static) -> Self {
+        Session { send: std::sync::Arc::new(send) }
     }
     pub fn send(&self, turn: UserTurn) {
-        let _ = self.tx.send(SessionCommand::Send(turn));
+        (self.send)(SessionCommand::Send(turn));
     }
     pub fn answer(&self, request_id: &str, allow: bool) {
-        let _ = self.tx.send(SessionCommand::Answer { request_id: request_id.to_string(), allow });
+        (self.send)(SessionCommand::Answer { request_id: request_id.to_string(), allow });
     }
     pub fn interrupt(&self) {
-        let _ = self.tx.send(SessionCommand::Interrupt);
+        (self.send)(SessionCommand::Interrupt);
     }
     pub fn close(&self) {
-        let _ = self.tx.send(SessionCommand::Close);
+        (self.send)(SessionCommand::Close);
     }
 }

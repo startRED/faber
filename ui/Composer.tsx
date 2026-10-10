@@ -65,6 +65,8 @@ export function Composer(props: Props) {
   const hasContent = () => draft().text.trim() !== '' || draft().images.length > 0 || draft().files.length > 0;
   const canSend = () => !props.busy && hasContent() && props.vendors.length > 0;
 
+  // The first keystroke starts the CLI, not focus: the box is focused as soon as Faber opens, and an unused Claude
+  // process costs about 120 MB.
   const warm = () => {
     if (!warmed) {
       warmed = true;
@@ -117,7 +119,6 @@ export function Composer(props: Props) {
           setDraft((d) => ({ ...d, text }));
           warm();
         }}
-        onFocus={warm}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
             e.preventDefault();

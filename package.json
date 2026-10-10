@@ -23,7 +23,7 @@
     "lint": "oxlint ui tests",
     "typecheck": "tsc --noEmit",
     "test": "node --test --test-isolation=none \"tests/**/*.test.ts\"",
-    "test:e2e": "tauri build --debug --no-bundle && node --test --test-isolation=none \"tests/e2e/*.e2e.ts\"",
+    "test:e2e": "tauri build --debug --no-bundle -- --target-dir ../target/e2e && node --test --test-isolation=none \"tests/e2e/*.e2e.ts\"",
     "tauri": "tauri"
   },
   "dependencies": {

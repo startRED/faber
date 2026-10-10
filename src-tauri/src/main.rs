@@ -18,7 +18,7 @@ use std::time::Duration;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::window::Color;
-use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent, Wry};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, Wry};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_updater::{Update, UpdaterExt};
@@ -31,6 +31,8 @@ struct Faber {
     tray: Mutex<Option<[MenuItem<Wry>; 2]>>,
     /// A newer version, already downloaded; it installs when Faber quits.
     update: Mutex<Option<(Update, Vec<u8>)>>,
+    data_dir: PathBuf,
+    hidden: bool,
 }
 
 type Res<T> = Result<T, String>;
@@ -239,16 +241,21 @@ fn fetch_update(app: &AppHandle) {
     });
 }
 
+/// Brings the window back, building the screen again if it was closed to the tray.
 fn show(app: &AppHandle) {
-    if let Some(w) = main_window(app) {
+    let window = main_window(app).or_else(|| {
+        let faber = app.state::<Faber>();
+        create_window(app, faber.hidden, &faber.data_dir).ok()
+    });
+    if let Some(w) = window {
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
     }
 }
 
-fn create_window(app: &tauri::App, hidden: bool, data_dir: &Path) -> tauri::Result<()> {
-    let handle = app.handle().clone();
+fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Result<tauri::WebviewWindow> {
+    let handle = app.clone();
     let mut builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
         .title("Faber")
         .inner_size(1280.0, 800.0)
@@ -274,18 +281,7 @@ fn create_window(app: &tauri::App, hidden: bool, data_dir: &Path) -> tauri::Resu
             "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port={port}"
         ));
     }
-    let window = builder.build()?;
-    // Closing the window keeps Faber in the tray, so warm sessions and running answers survive.
-    if !hidden {
-        let w = window.clone();
-        window.on_window_event(move |e| {
-            if let WindowEvent::CloseRequested { api, .. } = e {
-                api.prevent_close();
-                let _ = w.hide();
-            }
-        });
-    }
-    Ok(())
+    builder.build()
 }
 
 fn create_tray(app: &tauri::App) -> tauri::Result<()> {
@@ -358,6 +354,7 @@ fn main() {
                 spawn: real_spawner(),
                 windows: cfg!(windows),
                 max_warm: 3,
+                idle: Duration::from_secs(120),
                 runtime: tauri::async_runtime::handle().inner().clone(),
             };
             app.manage(Faber {
@@ -365,11 +362,13 @@ fn main() {
                 models: Mutex::default(),
                 tray: Mutex::default(),
                 update: Mutex::default(),
+                data_dir: data_dir.clone(),
+                hidden,
             });
             if let Some(codex) = clis.get(&Vendor::Codex) {
                 load_models(app.handle(), codex.clone(), data_dir.clone());
             }
-            create_window(app, hidden, &data_dir)?;
+            create_window(app.handle(), hidden, &data_dir)?;
             if !hidden {
                 create_tray(app)?;
             }
@@ -381,7 +380,14 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("Faber failed to start")
-        .run(|app, event| {
+        .run(move |app, event| {
+            // Closing the window frees the screen (about 90 MB) but keeps Faber in the tray, so running answers
+            // finish; only Quit, or a test run, ends it.
+            if let RunEvent::ExitRequested { code: None, api, .. } = &event
+                && !hidden
+            {
+                api.prevent_exit();
+            }
             if let RunEvent::Exit = event {
                 let faber = app.state::<Faber>();
                 faber.engine.shutdown();

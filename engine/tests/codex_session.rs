@@ -1,11 +1,12 @@
 mod support;
 
 use faber_engine::codex::{
-    CodexLaunch, CodexOptions, CodexTurnState, codex_args, codex_thread, list_codex_models, parse_codex_notification, start_codex,
+    CodexServer, CodexServerOptions, CodexThread, CodexTurnState, codex_args, codex_thread, list_codex_models, parse_codex_notification,
 };
 use faber_engine::events::{EngineEvent, Session, UserTurn};
 use faber_engine::model::Area;
 use serde_json::json;
+use std::sync::Arc;
 use std::time::Duration;
 use support::{Entry, drive, fake, fixture, text_of};
 
@@ -15,10 +16,14 @@ async fn run(
     resume: Option<&str>,
     react: impl FnMut(&EngineEvent, &Session) -> bool,
 ) -> (Vec<EngineEvent>, Vec<String>) {
-    let launch = CodexLaunch { area: Area::Chat, model: None, effort: None, resume: resume.map(String::from), user_hooks: false };
+    let thread = CodexThread { cwd: ".".into(), model: None, effort: None, resume: resume.map(String::from) };
     drive(
         entries,
-        |spawn, sink| start_codex(CodexOptions { bin: "codex".into(), cwd: ".".into(), launch, windows: false, spawn }, sink),
+        |spawn, sink| {
+            let opts =
+                CodexServerOptions { bin: "codex".into(), cwd: ".".into(), area: Area::Chat, user_hooks: false, windows: false, spawn };
+            CodexServer::start(opts).open(thread, sink)
+        },
         first,
         react,
     )
@@ -185,4 +190,43 @@ async fn a_cli_that_never_answers_gives_an_empty_list_instead_of_hanging() {
     let f = fake(vec![]);
     let models = list_codex_models("codex", ".".as_ref(), false, f.spawn.clone(), Duration::from_millis(50)).await;
     assert!(models.is_empty());
+}
+
+#[tokio::test]
+async fn one_process_serves_two_conversations_at_once_and_keeps_their_answers_apart() {
+    let f = fake(fixture("codex", "two"));
+    let opts = CodexServerOptions {
+        bin: "codex".into(),
+        cwd: ".".into(),
+        area: Area::Chat,
+        user_hooks: false,
+        windows: false,
+        spawn: f.spawn.clone(),
+    };
+    let server = CodexServer::start(opts);
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let open = |name: &'static str| {
+        let tx = tx.clone();
+        let thread = CodexThread { cwd: ".".into(), model: None, effort: Some("medium".into()), resume: None };
+        server.open(thread, Arc::new(move |e| drop(tx.send((name, e)))))
+    };
+    let (a, b) = (open("a"), open("b"));
+    a.send(UserTurn::text("In one word: what color is the sky on a clear day?"));
+    b.send(UserTurn::text("In one word: what color is fresh grass?"));
+    let (mut events_a, mut events_b) = (vec![], vec![]);
+    let done = |events: &Vec<EngineEvent>| events.iter().any(|e| matches!(e, EngineEvent::Done { .. }));
+    while !(done(&events_a) && done(&events_b)) {
+        let (name, e) = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.expect("stalled").expect("server gone");
+        if name == "a" { events_a.push(e) } else { events_b.push(e) }
+    }
+    a.close();
+    b.close();
+    assert_eq!(*f.mismatches.lock().unwrap(), Vec::<String>::new());
+    assert_eq!(f.args.lock().unwrap().len(), 1, "both conversations share one process");
+    assert_eq!(text_of(&events_a).trim(), "Blue");
+    assert_eq!(text_of(&events_b).trim(), "Green");
+    let started = |events: &[EngineEvent]| {
+        events.iter().find_map(|e| if let EngineEvent::Started { session_id, .. } = e { Some(session_id.clone()) } else { None })
+    };
+    assert_ne!(started(&events_a), started(&events_b));
 }

@@ -2,7 +2,7 @@
 
 use crate::claude::{ClaudeLaunch, ClaudeOptions, EventSink, start_claude};
 use crate::cli::Cli;
-use crate::codex::{CodexLaunch, CodexOptions, start_codex};
+use crate::codex::{CodexServer, CodexServerOptions, CodexThread};
 use crate::events::{EngineEvent, Session, UserTurn};
 use crate::model::*;
 use crate::proc::Spawner;
@@ -31,7 +31,10 @@ pub struct EngineOptions {
     pub clis: BTreeMap<Vendor, Cli>,
     pub spawn: Spawner,
     pub windows: bool,
+    /// At most this many idle Claude processes stay ready; Codex conversations share one process and do not count.
     pub max_warm: usize,
+    /// An idle Claude process closes after this long; its next turn resumes the same session.
+    pub idle: Duration,
     /// Where session and timer tasks run, so the engine can be called from any thread.
     pub runtime: tokio::runtime::Handle,
 }
@@ -137,6 +140,8 @@ struct Core {
     pending: HashMap<String, String>,
     next_sid: u64,
     tick: u64,
+    /// The shared Codex processes, one per area and hooks choice.
+    codex: HashMap<(Area, bool), CodexServer>,
 }
 
 /// A handle to the engine; clones share the same engine.
@@ -162,6 +167,7 @@ impl Engine {
                 pending: HashMap::new(),
                 next_sid: 0,
                 tick: 0,
+                codex: HashMap::new(),
             })
         });
         Engine { core, runtime }
@@ -230,6 +236,9 @@ impl Engine {
         self.with(|c| {
             for (_, l) in c.live.drain() {
                 l.session.close();
+            }
+            for (_, server) in c.codex.drain() {
+                server.retire();
             }
         })
     }
@@ -302,6 +311,9 @@ impl Core {
                 if let Some(l) = self.live.remove(&id) {
                     l.session.close();
                 }
+            }
+            if let Some(server) = self.codex.remove(&(Area::Project, before.user_hooks == Some(true))) {
+                server.retire();
             }
         }
         settings
@@ -430,6 +442,25 @@ impl Core {
         self.save(conv);
         self.push(conv, turn_id.as_deref(), true);
         (self.emit)(AppEvent::List);
+        self.close_when_idle(conv);
+    }
+
+    /// A Claude process costs about 120 MB just waiting, so it closes when it has been idle for a while; the next
+    /// turn resumes the same session. Any newer use cancels the timer.
+    fn close_when_idle(&self, conv: &str) {
+        let Some(l) = self.live.get(conv).filter(|l| l.vendor == Vendor::Claude) else { return };
+        let (sid, used, idle) = (l.sid, l.used, self.opts.idle);
+        let (me, conv) = (self.me.clone(), conv.to_string());
+        tokio::spawn(async move {
+            tokio::time::sleep(idle).await;
+            let Some(core) = me.upgrade() else { return };
+            let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+            if core.live.get(&conv).is_some_and(|l| l.sid == sid && l.used == used && l.turn.is_none())
+                && let Some(l) = core.live.remove(&conv)
+            {
+                l.session.close();
+            }
+        });
     }
 
     fn push(&mut self, conv: &str, message_id: Option<&str>, immediate: bool) {
@@ -493,26 +524,40 @@ impl Core {
         });
         let user_hooks = self.store.settings().user_hooks == Some(true);
         let resume = c.sessions.get(&pick.vendor).cloned();
+        let area = c.area;
         let session = match pick.vendor {
             Vendor::Claude => start_claude(
                 ClaudeOptions {
                     bin: cli.command,
                     cwd,
-                    launch: ClaudeLaunch { area: c.area, model: pick.model.clone(), effort: Some(pick.effort.clone()), resume, user_hooks },
+                    launch: ClaudeLaunch { area, model: pick.model.clone(), effort: Some(pick.effort.clone()), resume, user_hooks },
                     spawn,
                 },
                 sink,
             ),
-            Vendor::Codex => start_codex(
-                CodexOptions {
-                    bin: cli.command,
-                    cwd,
-                    launch: CodexLaunch { area: c.area, model: pick.model.clone(), effort: Some(pick.effort.clone()), resume, user_hooks },
-                    windows: self.opts.windows,
-                    spawn,
-                },
-                sink,
-            ),
+            Vendor::Codex => {
+                let windows = self.opts.windows;
+                let home = self.opts.data_dir.clone();
+                let server = self
+                    .codex
+                    .entry((area, user_hooks))
+                    .and_modify(|s| {
+                        if !s.is_alive() {
+                            *s = CodexServer::start(CodexServerOptions {
+                                bin: cli.command.clone(),
+                                cwd: home.clone(),
+                                area,
+                                user_hooks,
+                                windows,
+                                spawn: spawn.clone(),
+                            });
+                        }
+                    })
+                    .or_insert_with(|| {
+                        CodexServer::start(CodexServerOptions { bin: cli.command.clone(), cwd: home, area, user_hooks, windows, spawn })
+                    });
+                server.open(CodexThread { cwd, model: pick.model.clone(), effort: Some(pick.effort.clone()), resume }, sink)
+            }
         };
         self.live.insert(
             conv.to_string(),
@@ -527,10 +572,15 @@ impl Core {
                 used: self.tick,
             },
         );
-        // ponytail: count-based warm limit; switch to the visible RAM budget once memory is measured.
-        while self.live.len() > self.opts.max_warm {
-            let Some(oldest) =
-                self.live.iter().filter(|(_, l)| l.turn.is_none() && l.sid != sid).min_by_key(|(_, l)| l.used).map(|(id, _)| id.clone())
+        // ponytail: count-based limit on idle Claude processes; a RAM budget across all CLIs comes with parallel workers.
+        let claude = |l: &Live| l.vendor == Vendor::Claude;
+        while self.live.values().filter(|l| claude(l)).count() > self.opts.max_warm {
+            let Some(oldest) = self
+                .live
+                .iter()
+                .filter(|(_, l)| claude(l) && l.turn.is_none() && l.sid != sid)
+                .min_by_key(|(_, l)| l.used)
+                .map(|(id, _)| id.clone())
             else {
                 break;
             };
@@ -538,6 +588,8 @@ impl Core {
                 l.session.close();
             }
         }
+        // A process started early (while the user types) closes too if the message never comes.
+        self.close_when_idle(conv);
         Ok(())
     }
 

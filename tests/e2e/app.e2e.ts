@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,7 +13,7 @@ import { es } from '../../ui/locales/es.ts';
 import { ptBR } from '../../ui/locales/pt-BR.ts';
 
 const here = (path: string) => fileURLToPath(new URL(path, import.meta.url));
-const BIN = here(`../../target/debug/faber${process.platform === 'win32' ? '.exe' : ''}`);
+const BIN = here(`../../target/e2e/debug/faber${process.platform === 'win32' ? '.exe' : ''}`);
 // Only WebView2 (Windows) speaks the DevTools protocol; macOS and Linux webviews cannot be driven this way.
 const skip = process.platform !== 'win32' && 'needs WebView2';
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -42,7 +43,17 @@ async function launch(claude?: string, dataDir = mkdtempSync(join(tmpdir(), 'fab
     app.kill();
     await once(app, 'exit');
   };
-  return { page, close, dataDir };
+  return { page, close, dataDir, pid: app.pid! };
+}
+
+// What Faber may use with no CLI running, as Task Manager counts it (private working set of the app and its webview).
+// The product limit is 500 MB when Faber is complete; the test keeps half of it as room for what is still to come.
+const BUDGET_MB = 250;
+
+function memoryMb(root: number): number {
+  const ps = `$all = Get-CimInstance Win32_Process; function T($i) { $i; $all | ? { $_.ParentProcessId -eq $i } | % { T $_.ProcessId } }; $ids = @(T ${root}); ` +
+    `$w = Get-CimInstance Win32_PerfRawData_PerfProc_Process | ? { $ids -contains [int]$_.IDProcess }; [math]::Round(($w | Measure-Object WorkingSetPrivate -Sum).Sum / 1MB)`;
+  return Number(execFileSync('powershell.exe', ['-NoProfile', '-Command', ps], { maxBuffer: 1 << 20 }).toString().trim());
 }
 
 async function shot(page: Page, name: string) {
@@ -172,6 +183,49 @@ test('appearance changes apply at once and are kept after reopening', { skip }, 
     await page.getByRole('heading', { name: en['set.general'] }).waitFor();
     await page.getByRole('button', { name: en['set.projects'] }).last().click();
     assert.equal(await page.getByRole('checkbox').isChecked(), true);
+  } finally {
+    await close();
+  }
+});
+
+test('with no CLI running, Faber stays within its memory budget', { skip }, async () => {
+  const { page, close, pid } = await launch();
+  try {
+    await page.getByRole('heading', { name: en['empty.noAiTitle'] }).waitFor();
+    await sleep(2000);
+    const mb = memoryMb(pid);
+    console.log(`idle: ${mb} MB`);
+    assert.ok(mb <= BUDGET_MB, `${mb} MB is over the ${BUDGET_MB} MB budget`);
+  } finally {
+    await close();
+  }
+});
+
+test('a conversation with a thousand messages opens quickly and stays within the budget', { skip }, async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'faber-e2e-'));
+  const id = randomUUID();
+  const at = Date.now();
+  const paragraph = 'Rayleigh scattering sends **short blue wavelengths** in every direction, so the sky looks blue. ';
+  const fence = '`'.repeat(3);
+  const answer = (i: number) => [paragraph.repeat(6), '- one\n- two', `${fence}js\nconsole.log(${i});\n${fence}`].join('\n\n');
+  const messages = Array.from({ length: 1000 }, (_, i) =>
+    i % 2 === 0
+      ? { id: randomUUID(), role: 'user', text: `Question ${i / 2}: why is the sky blue?`, at: at + i }
+      : { id: randomUUID(), role: 'assistant', text: answer(i), at: at + i, vendor: 'claude', model: 'claude-haiku-5-5', status: 'done' },
+  );
+  mkdirSync(join(dataDir, 'conversations'));
+  writeFileSync(join(dataDir, 'conversations', `${id}.json`), JSON.stringify({ id, title: 'Long one', area: 'chat', sessions: {}, createdAt: at, updatedAt: at, messages }));
+  const { page, close, pid } = await launch('chat', dataDir);
+  try {
+    const started = Date.now();
+    await page.locator('.list .item', { hasText: 'Long one' }).click();
+    await page.locator('article.ai').last().waitFor();
+    const openMs = Date.now() - started;
+    await sleep(2000);
+    const mb = memoryMb(pid);
+    console.log(`1000 messages: opened in ${openMs} ms, ${mb} MB`);
+    assert.ok(openMs < 3000, `opening took ${openMs} ms`);
+    assert.ok(mb <= BUDGET_MB, `${mb} MB is over the ${BUDGET_MB} MB budget`);
   } finally {
     await close();
   }

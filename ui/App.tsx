@@ -11,13 +11,24 @@ import { Thread } from './Thread.tsx';
 type Area = 'chat' | 'project';
 type Quota = { vendor: Vendor; window: string; used: number; resetsAt: number };
 
-function loadChoice(): Choice {
+// Small per-window conveniences; storage can be missing, and the app works without it.
+function recall<T>(key: string, fallback: T): T {
   try {
-    return JSON.parse(localStorage.getItem('faber.choice') ?? '') as Choice;
+    return (JSON.parse(localStorage.getItem(key) ?? 'null') as T | null) ?? fallback;
   } catch {
-    return { vendor: 'auto' };
+    return fallback;
   }
 }
+function remember(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // per-viewer convenience only
+  }
+}
+
+// Where the user was, so the screen rebuilt after closing to the tray opens in the same place.
+type Place = { area: Area; projectId?: string; id?: string };
 
 function untilReset(resetsAt: number): string {
   const hours = (resetsAt * 1000 - Date.now()) / 3_600_000;
@@ -42,7 +53,7 @@ export function App() {
   const [area, setArea] = createSignal<Area>('chat');
   const [projectId, setProjectId] = createSignal<string>();
   const [current, setCurrent] = createSignal<Conversation>();
-  const [choice, setChoice] = createSignal<Choice>(loadChoice());
+  const [choice, setChoice] = createSignal<Choice>(recall<Choice>('faber.choice', { vendor: 'auto' }));
   const [quotas, setQuotas] = createSignal<Record<string, Quota>>({});
   const [error, setError] = createSignal<string>();
   const [settingsOpen, setSettingsOpen] = createSignal(false);
@@ -63,6 +74,12 @@ export function App() {
       useLanguage(s.settings.language);
       setState(s);
       setLoaded(true);
+      const place = recall<Place | undefined>('faber.place', undefined);
+      if (place) {
+        setArea(place.area);
+        setProjectId(place.projectId);
+        if (place.id && s.conversations.some((c) => c.id === place.id)) void open(place.id);
+      }
     });
     const stopFollowing = followSystem(() => appearance());
     const unlisten = api.on((e) => {
@@ -99,6 +116,7 @@ export function App() {
 
   const open = async (id: string | undefined) => {
     currentId = id;
+    remember('faber.place', { area: area(), projectId: projectId(), id } satisfies Place);
     setError(undefined);
     stick = true;
     setCurrent((id ? await api.open(id) : undefined) ?? undefined);
@@ -106,11 +124,7 @@ export function App() {
 
   const pickChoice = (c: Choice) => {
     setChoice(c);
-    try {
-      localStorage.setItem('faber.choice', JSON.stringify(c));
-    } catch {
-      // per-viewer convenience only
-    }
+    remember('faber.choice', c);
   };
 
   const target = () => ({ area: area(), projectId: area() === 'project' ? projectId() : undefined });

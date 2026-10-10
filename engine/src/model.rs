@@ -24,7 +24,7 @@ impl Vendor {
 }
 
 /// Chat never touches the user's files; a project works inside a folder the user opened.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Area {
     Chat,
