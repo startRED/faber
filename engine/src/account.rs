@@ -4,7 +4,7 @@
 //! Claude Code: `claude auth login`, `claude auth status` prints JSON with `loggedIn` and exits 0 when signed in, 1
 //! when not (https://code.claude.com/docs/en/cli-reference).
 //! Codex: `codex login`, `codex login status` prints the active mode and exits 0 when signed in
-//! (https://learn.chatgpt.com/docs/developer-commands?surface=cli).
+//! (https://developers.openai.com/codex/cli/reference/#codex-login).
 
 use crate::cli::Cli;
 use crate::model::Vendor;
@@ -37,7 +37,7 @@ pub fn status_args(vendor: Vendor) -> &'static [&'static str] {
     }
 }
 
-// A status line is short; anything longer is not a status and is never kept.
+// Bound transient output, including diagnostics, before discarding it after the verdict.
 const OUTPUT_LIMIT: u64 = 64 * 1024;
 
 /// Runs the status command without a shell. Its output is read into memory only to reach a verdict, then dropped;
@@ -48,27 +48,30 @@ pub async fn check(vendor: Vendor, cli: &Cli, spawn: &Spawner, cwd: &Path, timeo
     drop(p.stdin); // nothing to type: a CLI waiting for input sees end of input instead
     let mut child = p.child;
     let run = async {
-        let (out, err) = tokio::join!(read_all(Some(p.stdout)), read_all(p.stderr));
+        let (Some(out), Some(err)) = tokio::join!(read_all(Some(p.stdout)), read_all(p.stderr)) else { return AccountStatus::Unknown };
         let code = match &mut child {
             Some(c) => c.wait().await.ok().and_then(|s| s.code()),
             None => None,
         };
-        verdict(vendor, &format!("{out}\n{err}"), code)
+        if vendor == Vendor::Claude { verdict(vendor, &out, code) } else { verdict(vendor, &format!("{out}\n{err}"), code) }
     };
     tokio::time::timeout(timeout, run).await.unwrap_or(AccountStatus::Unknown)
 }
 
-async fn read_all(stream: Option<Box<dyn AsyncRead + Send + Unpin>>) -> String {
+async fn read_all(stream: Option<Box<dyn AsyncRead + Send + Unpin>>) -> Option<String> {
     let mut buf = Vec::new();
     if let Some(s) = stream {
-        let _ = s.take(OUTPUT_LIMIT).read_to_end(&mut buf).await;
+        s.take(OUTPUT_LIMIT + 1).read_to_end(&mut buf).await.ok()?;
     }
-    String::from_utf8_lossy(&buf).into_owned()
+    if buf.len() as u64 > OUTPUT_LIMIT {
+        return None;
+    }
+    String::from_utf8(buf).ok()
 }
 
 fn verdict(vendor: Vendor, output: &str, code: Option<i32>) -> AccountStatus {
     let said = match vendor {
-        Vendor::Claude => output.lines().find_map(|l| serde_json::from_str::<serde_json::Value>(l.trim()).ok()?["loggedIn"].as_bool()),
+        Vendor::Claude => serde_json::from_str::<serde_json::Value>(output).ok().and_then(|v| v["loggedIn"].as_bool()),
         // ponytail: Codex documents only its exit code; the wording is matched for replays, which have none.
         Vendor::Codex => output.lines().map(str::trim).find_map(|l| {
             let l = l.to_ascii_lowercase();

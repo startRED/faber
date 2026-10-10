@@ -98,6 +98,20 @@ type Calls = Arc<Mutex<Vec<(String, Vec<String>)>>>;
 
 struct PendingReader;
 
+struct FailedStatusReader(bool);
+
+impl AsyncRead for FailedStatusReader {
+    fn poll_read(mut self: Pin<&mut Self>, _cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
+        if self.0 {
+            Poll::Ready(Err(std::io::Error::other("status stream failed")))
+        } else {
+            self.0 = true;
+            buf.put_slice(b"Logged in using ChatGPT\n");
+            Poll::Ready(Ok(()))
+        }
+    }
+}
+
 impl AsyncRead for PendingReader {
     fn poll_read(self: Pin<&mut Self>, _cx: &mut Context<'_>, _buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
         Poll::Pending
@@ -200,6 +214,105 @@ async fn c1_2_signed_out_and_unresponsive_accounts_finish_within_the_timeout() {
             engine.shutdown();
         }
     }
+}
+
+#[tokio::test]
+async fn account_status_reads_a_complete_json_object_without_mixing_stderr_into_it() {
+    for (stdout, expected) in [
+        ("{\n  \"loggedIn\": true,\n  \"authMethod\": \"claude.ai\",\n  \"apiProvider\": \"firstParty\"\n}\n", "signedIn"),
+        ("{\n  \"loggedIn\": false,\n  \"authMethod\": \"none\",\n  \"apiProvider\": \"firstParty\"\n}\n", "signedOut"),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let (spawn, _) = status_spawner(stdout, "Diagnostic on stderr\n", false);
+        let (engine, _) = engine(dir.path(), BTreeMap::from([(Vendor::Claude, native_cli())]), spawn);
+        assert_eq!(serde_json::to_value(engine.account_status(Vendor::Claude, Duration::from_millis(100)).await).unwrap(), json!(expected));
+        engine.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn account_status_rejects_failed_or_oversized_output() {
+    for failed in [true, false] {
+        let dir = tempfile::tempdir().unwrap();
+        let spawn: Spawner = Arc::new(move |_, _, _| {
+            let stdout: Box<dyn AsyncRead + Send + Unpin> = if failed {
+                Box::new(FailedStatusReader(false))
+            } else {
+                Box::new(std::io::Cursor::new("Logged in using ChatGPT\n".repeat(5000).into_bytes()))
+            };
+            Ok(Proc { stdin: Box::new(tokio::io::sink()), stdout, stderr: None, child: None })
+        });
+        let (engine, _) = engine(dir.path(), BTreeMap::from([(Vendor::Codex, native_cli())]), spawn);
+        assert_eq!(serde_json::to_value(engine.account_status(Vendor::Codex, Duration::from_millis(100)).await).unwrap(), json!("unknown"));
+        engine.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn replacing_an_active_shared_server_retires_it_as_soon_as_its_answer_finishes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut entries: Vec<_> = support::fixture("codex", "chat").into_iter().take_while(|e| !(e.input && e.msg["id"] == 4)).collect();
+    // Closing a thread asks the existing driver to interrupt its last known turn.
+    entries.push(support::Entry {
+        input: true,
+        msg: json!({
+            "id": 4, "method": "turn/interrupt", "params": {
+                "threadId": "01a12513-0e42-7b63-9a21-c8698f522c12", "turnId": "01a12513-0ee8-7061-88de-3e38fd266879"
+            }
+        }),
+    });
+    let replay = support::fake(entries);
+    let dropped = Arc::new(AtomicBool::new(false));
+    let spawn: Spawner = {
+        let replay = replay.spawn.clone();
+        let observed = dropped.clone();
+        Arc::new(move |bin, args, cwd| {
+            let mut proc = replay(bin, args, cwd)?;
+            proc.stdout = Box::new(ObservedOutput { inner: proc.stdout, dropped: observed.clone() });
+            Ok(proc)
+        })
+    };
+    let (engine, mut events) = engine(dir.path(), BTreeMap::from([(Vendor::Codex, native_cli())]), spawn);
+    engine
+        .send(SendRequest {
+            conversation_id: None,
+            area: Area::Chat,
+            project_id: None,
+            text: "In one sentence: why is the sky blue?".into(),
+            images: vec![],
+            files: vec![],
+            choice: Choice { vendor: "codex".into(), model: None },
+        })
+        .unwrap();
+    // The current-thread runtime has not polled the replay yet: the turn is in flight.
+    engine.replace_clis(BTreeMap::new());
+    assert!(engine.state().vendors.is_empty());
+    let reply = tokio::time::timeout(Duration::from_secs(3), async {
+        while let Some(event) = events.recv().await {
+            if let AppEvent::Message { message, .. } = event
+                && message.role == Role::Assistant
+                && message.status == Some(Status::Done)
+            {
+                return message;
+            }
+        }
+        panic!("the active answer ended before completion");
+    })
+    .await
+    .expect("the active answer must finish on the old process");
+    assert_eq!(
+        reply.text,
+        "The sky appears blue because air molecules scatter shorter blue wavelengths of sunlight more than longer red wavelengths."
+    );
+    let retired = tokio::time::timeout(Duration::from_millis(500), async {
+        while !dropped.load(Ordering::SeqCst) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    engine.shutdown();
+    assert!(retired.is_ok(), "the old shared process remained alive after its last answer finished");
+    assert!(replay.mismatches.lock().unwrap().is_empty());
 }
 
 #[test]

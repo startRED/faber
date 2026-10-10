@@ -7,8 +7,7 @@ import { delimiter, dirname, join } from 'node:path';
 
 const root = join(import.meta.dirname, '..');
 
-// cargo comes from PATH, CARGO_HOME or the default ~/.cargo. Rust installed outside the default folders (see AGENTS.md)
-// keeps rustup next to cargo: <root>/cargo/bin and <root>/rustup.
+// Rust can live outside the default folders; see AGENTS.md.
 function cargo(): { bin: string; env: NodeJS.ProcessEnv } {
   const exe = process.platform === 'win32' ? 'cargo.exe' : 'cargo';
   const path = process.env.PATH ?? process.env.Path ?? '';
@@ -22,10 +21,12 @@ function cargo(): { bin: string; env: NodeJS.ProcessEnv } {
   return { bin: join(dir, exe), env };
 }
 
-// The engine checks sign-in, finds installed CLIs and swaps them while running; its proofs replay fake CLIs only.
 test('the engine checks accounts, finds default installations and swaps CLIs without reopening', () => {
   const { bin, env } = cargo();
-  const run = spawnSync(bin, ['test', '-p', 'faber-engine', '--test', 'account'], { cwd: root, env, encoding: 'utf8', shell: false });
+  // Keep the existing engine regressions in this proof without changing their source.
+  const run = spawnSync(bin, ['test', '-p', 'faber-engine', '--test', 'account', '--test', 'engine'], {
+    cwd: root, env, shell: false, stdio: 'inherit', timeout: 1_800_000,
+  });
   assert.equal(run.error, undefined, `cargo could not start: ${run.error}`);
-  assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`.trim().slice(-3000));
+  assert.equal(run.status, 0, 'The account acceptance proofs failed; see the Cargo output above.');
 });

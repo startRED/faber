@@ -493,6 +493,11 @@ impl Core {
         self.save(conv);
         self.push(conv, turn_id.as_deref(), true);
         (self.emit)(AppEvent::List);
+        if self.live.get(conv).is_some_and(|l| self.opts.clis.get(&l.vendor) != Some(&l.cli))
+            && let Some(l) = self.live.remove(conv)
+        {
+            l.session.close();
+        }
         self.close_when_idle(conv);
     }
 
