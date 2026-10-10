@@ -67,7 +67,7 @@ export function startCodex(
     }
   });
   proc.once('exit', (code) => {
-    if (!closed) onEvent({ type: 'error', message: `Codex stopped (exit ${code}). ${tail()}`.trim() });
+    if (!closed) onEvent({ type: 'error', message: `Codex stopped (exit ${code}). ${tail()}`.trim(), fatal: true });
   });
 
   request('initialize', { clientInfo: { name: 'faber', title: 'Faber', version: '0.0.0' }, capabilities: { experimentalApi: false, requestAttestation: false } }, () => {

@@ -1,4 +1,4 @@
-import { createInterface } from 'node:readline';
+﻿import { createInterface } from 'node:readline';
 import type { EngineEvent, Session } from '../events.ts';
 import { realSpawn, stderrTail, type Spawner } from '../proc.ts';
 import { claudeArgs, type ClaudeLaunch } from './args.ts';
@@ -30,7 +30,7 @@ export function startClaude(
     }
   });
   proc.once('exit', (code) => {
-    if (!closed) onEvent({ type: 'error', message: `Claude Code stopped (exit ${code}). ${tail()}`.trim() });
+    if (!closed) onEvent({ type: 'error', message: `Claude Code stopped (exit ${code}). ${tail()}`.trim(), fatal: true });
   });
 
   return {

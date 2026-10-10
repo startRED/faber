@@ -12,8 +12,16 @@ export interface Proc {
 
 export type Spawner = (bin: string, args: string[], cwd: string) => Proc;
 
-export const realSpawn: Spawner = (bin, args, cwd) =>
-  spawn(bin, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+export const realSpawn: Spawner = (bin, args, cwd) => {
+  const child = spawn(bin, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  // A missing binary emits 'error' instead of 'exit'; report it the same way so it never crashes the app.
+  child.on('error', (err) => {
+    child.stderr.emit('data', Buffer.from(String(err)));
+    child.emit('exit', null);
+  });
+  child.stdin.on('error', () => {});
+  return child;
+};
 
 // Keeps the end of stderr so a crash can say why.
 export function stderrTail(proc: Proc): () => string {

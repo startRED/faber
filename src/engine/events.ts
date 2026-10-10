@@ -1,4 +1,4 @@
-// What every driver reports to the app, whatever CLI is behind it.
+﻿// What every driver reports to the app, whatever CLI is behind it.
 export type EngineEvent =
   | { type: 'started'; sessionId: string; model: string }
   | { type: 'text'; delta: string }
@@ -9,7 +9,8 @@ export type EngineEvent =
   | { type: 'quota'; window: string; used: number; resetsAt: number }
   // costUsd is the CLI's own API-priced figure when it reports one (Claude Code does, Codex does not).
   | { type: 'done'; ok: boolean; reason: string; costUsd?: number; inputTokens: number; outputTokens: number }
-  | { type: 'error'; message: string };
+  // fatal: the CLI process is gone and the next turn needs a new one.
+  | { type: 'error'; message: string; fatal?: boolean };
 
 // One live conversation with a CLI, whatever the vendor.
 export interface Session {
