@@ -12,10 +12,26 @@ A release that makes any goal worse does not ship.
 | :--- | :--- | :--- |
 | Quality (Projects) | blind judge from another vendor plus executable proof | wins or ties 9 of 10 requests |
 | Quality (Chat) | blind judge against the same question asked on claude.ai and ChatGPT; sources checked | wins or ties 8 of 10; zero invented citations |
-| Quota and tokens | share of subscription quota per approved task | ≤ 70% of the plain CLI |
+| Quota and tokens | tokens per approved task, priced at API rates (input, output, cache) | ≤ 70% of the plain CLI's cost for the same task |
 | Speed | time to first token with a warm session | ≤ 2 s |
 | Precision | corrections the user asks for after "done" | half of the plain CLI |
 | Efficiency | idle RAM without a CLI open; installer size; sessions broken by CLI updates | ≤ 250 MB; ≤ 120 MB; 0 |
+
+### Measuring without burning the user's quota
+
+- Cost is measured in tokens reported by each CLI, priced at API rates, never as a share of the subscription.
+- Each release runs a rotating sample of ~8 requests; the full ~40 run only for v0.5 and v1.0.
+- Plain-CLI baselines are recorded once per model version and reused.
+- The judge is blind: answers arrive anonymized in random order. A cheap model screens; a strong model only breaks
+  close calls.
+- Benchmark runs never take more than 10% of a 5-hour window and wait while someone else is using the account (see
+  shared-account mode below). Where a plan includes API credit, the Claude side can run on an API key instead.
+
+### Shared-account mode
+
+Many people share one subscription (family, small teams). Faber watches the quota readout: if it drops faster than
+Faber's own usage explains, someone else is using the account, so background work (benchmarks, harvesting expiring
+quota, re-runs) pauses until the account is quiet again.
 
 ## Works with the plans you have
 
