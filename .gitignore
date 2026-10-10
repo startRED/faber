@@ -9,3 +9,4 @@ Thumbs.db
 .env
 .env.*
 test-results/
+target/
