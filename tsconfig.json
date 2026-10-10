@@ -11,7 +11,7 @@
     "allowImportingTsExtensions": true,
     "erasableSyntaxOnly": true,
     "verbatimModuleSyntax": true,
-    "types": ["node"]
+    "types": ["node", "vite/client"]
   },
   "include": ["src/renderer", "tests", "vite.config.ts"]
 }

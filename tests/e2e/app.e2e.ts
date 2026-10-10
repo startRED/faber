@@ -1,22 +1,66 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { _electron as electron } from 'playwright-core';
 
-// Launches the real built app (run `npm run build` first), hidden, and saves what a judge would see.
-test('the app opens and shows its name and version', async () => {
+const here = (path: string) => fileURLToPath(new URL(path, import.meta.url));
+
+// Launches the built app offscreen with its own data folder. `claude` is a recorded session to replay, if any.
+async function launch(claude?: string) {
   // Linux CI runners cannot use Chromium's setuid sandbox helper.
   const args = process.platform === 'linux' && process.env.CI ? ['.', '--no-sandbox'] : ['.'];
-  const app = await electron.launch({ args, env: { ...process.env, FABER_HIDDEN: '1' } });
+  const cli = claude ? JSON.stringify({ command: process.execPath, prefix: [here('../support/fake-cli.ts'), here(`../fixtures/claude/${claude}.jsonl`)] }) : '';
+  const env = { ...process.env, FABER_HIDDEN: '1', FABER_DATA_DIR: mkdtempSync(join(tmpdir(), 'faber-e2e-')), FABER_CLI_CLAUDE: cli, FABER_CLI_CODEX: '' };
+  const app = await electron.launch({ args, env });
+  const window = await app.firstWindow();
+  return { app, window };
+}
+
+async function shot(window: Awaited<ReturnType<typeof launch>>['window'], name: string) {
+  mkdirSync('test-results/e2e', { recursive: true });
+  await window.screenshot({ path: `test-results/e2e/${name}.png` });
+}
+
+test('the app opens on an empty chat and fits the window', async () => {
+  const { app, window } = await launch('chat');
   try {
-    const window = await app.firstWindow();
-    await window.getByRole('heading', { name: 'Faber' }).waitFor();
-    const text = await window.locator('main').innerText();
-    assert.match(text, /v\d+\.\d+\.\d+/);
+    await window.getByRole('heading', { name: 'What can I help with?' }).waitFor();
+    assert.match(await window.locator('.foot').innerText(), /Claude · v\d+\.\d+\.\d+/);
     const scrolls = await window.evaluate(() => document.documentElement.scrollHeight > innerHeight);
-    assert.equal(scrolls, false, 'the home screen should fit without a scrollbar');
-    mkdirSync('test-results/e2e', { recursive: true });
-    await window.screenshot({ path: 'test-results/e2e/home.png' });
+    assert.equal(scrolls, false, 'the window should not scroll as a whole');
+    await shot(window, 'home');
+  } finally {
+    await app.close();
+  }
+});
+
+test('a chat streams an answer with the model and the reason, and lands in the sidebar', async () => {
+  const { app, window } = await launch('chat');
+  try {
+    await window.getByLabel('Message').fill('In one sentence: why is the sky blue?');
+    await window.getByLabel('Message').press('Enter');
+    const answer = window.getByRole('article', { name: 'Answer' });
+    await answer.locator('.actions').waitFor();
+    const text = await answer.innerText();
+    assert.match(text, /Rayleigh/);
+    assert.match(text, /Haiku 5\.5/);
+    assert.match(text, /Auto: everyday default/);
+    assert.match(text, /at API prices/);
+    await window.locator('.list .item', { hasText: 'In one sentence: why is the sky blue?' }).waitFor();
+    await shot(window, 'chat');
+  } finally {
+    await app.close();
+  }
+});
+
+test('with no AI installed, the app says what to do', async () => {
+  const { app, window } = await launch();
+  try {
+    await window.getByRole('heading', { name: 'No AI found' }).waitFor();
+    assert.equal(await window.getByRole('button', { name: 'Send' }).isDisabled(), true);
   } finally {
     await app.close();
   }

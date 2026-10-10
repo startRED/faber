@@ -1,4 +1,4 @@
-﻿{
+{
   "compilerOptions": {
     "target": "ES2023",
     "module": "NodeNext",
@@ -12,5 +12,5 @@
     "verbatimModuleSyntax": true,
     "types": ["node"]
   },
-  "include": ["src/main", "src/engine"]
+  "include": ["src/main", "src/engine", "src/preload"]
 }
