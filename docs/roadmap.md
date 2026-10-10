@@ -93,6 +93,7 @@ session of one CLI. It gets a toolbox from Faber (an MCP server shared by every 
 | `judge.creative` | two judges from different vendors, in fresh sessions |
 | `snapshot` / `undo` | snapshot before touching files; undo any local step |
 | `catalog.search` / `catalog.install` | finds and installs a tool from its original source, license shown first |
+| `faber.tools` / `faber.settings` | manages Faber itself: installs, updates, configures and removes any tool (catalog or the user's own) and changes settings, behind the approval gate |
 | `pc.*` | computer control through the accessibility tree, screenshots as a fallback |
 | `memory.search` | searches past conversations, decisions and the user's taste |
 | `quota.get` | remaining quota per subscription and when it renews |
@@ -101,8 +102,10 @@ session of one CLI. It gets a toolbox from Faber (an MCP server shared by every 
 
 1. Faber never reads, copies or stores logins. Sign-in happens in each CLI's own flow, and CLIs run unmodified.
 2. Files are snapshotted before they change, so every local action can be undone.
-3. Sending, publishing, paying, deleting outside a copy or installing something new asks for approval every time.
-   Nothing else does.
+3. Sending, publishing, paying or deleting outside a copy asks for approval every time. Changing Faber itself
+   (installing, updating or removing a tool, changing a setting) asks too, with "allow once" and "always allow this
+   kind" on the card, and a "full trust for Faber's own setup" switch in Settings. Full trust never covers sending,
+   publishing, paying or deleting. Every self-change is logged and keeps the previous version. Nothing else asks.
 4. "Done" requires evidence: a test that ran, a recording, or judge scores.
 5. In code, the writer never reviews its own work. Creative work gets two judges from different vendors.
 6. A mission never stops to wait for the user. Without an answer in time, it takes the safest path and logs it.
