@@ -117,7 +117,7 @@ fn parse_url(raw: &str) -> Result<SimpleUrl, String> {
 pub fn is_loopback(addr: &str) -> bool {
     if let Ok(url) = parse_url(addr) {
         let h = url.host.trim().to_ascii_lowercase();
-        if h == "localhost" || h == "127.0.0.1" || h == "::1" || h.starts_with("127.") {
+        if h == "localhost" {
             return true;
         }
         if let Ok(ip) = h.parse::<std::net::IpAddr>() {
@@ -198,16 +198,25 @@ pub fn sha256_hex(data: &[u8]) -> String {
 }
 
 fn http_get_loopback(url_str: &str) -> Result<Vec<u8>, String> {
+    if !is_loopback(url_str) {
+        return Err("URL is not a loopback address".into());
+    }
     let url = parse_url(url_str)?;
     let host = &url.host;
     let port = url.port;
     let path = &url.path;
 
     use std::io::{Read, Write};
-    use std::net::TcpStream;
+    use std::net::{TcpStream, ToSocketAddrs};
     use std::time::Duration;
 
-    let mut stream = TcpStream::connect((host.as_str(), port)).map_err(|e| format!("Failed to connect to {host}:{port}: {e}"))?;
+    let addrs: Vec<std::net::SocketAddr> =
+        format!("{host}:{port}").to_socket_addrs().map_err(|e| format!("Failed to resolve {host}:{port}: {e}"))?.collect();
+    if addrs.is_empty() || !addrs.iter().all(|a| a.ip().is_loopback()) {
+        return Err(format!("Host {host} does not resolve to loopback address"));
+    }
+
+    let mut stream = TcpStream::connect(&addrs[..]).map_err(|e| format!("Failed to connect to {host}:{port}: {e}"))?;
     stream.set_read_timeout(Some(Duration::from_secs(10))).ok();
     stream.set_write_timeout(Some(Duration::from_secs(10))).ok();
 
@@ -267,10 +276,15 @@ fn extract_zip_stored(bytes: &[u8], dest_dir: &Path) -> Result<(), String> {
         }
         let name = std::str::from_utf8(&bytes[name_start..name_start + name_len]).map_err(|e| e.to_string())?;
         let clean_name = name.replace('\\', "/");
-        if clean_name.contains("..") || clean_name.starts_with('/') {
+        if clean_name.contains("..") || clean_name.starts_with('/') || clean_name.contains(':') {
             return Err("Unsafe zip path".into());
         }
-        let out_path = dest_dir.join(&clean_name);
+        let clean_rel = sanitize_zip_path(&clean_name)?;
+        let out_path = dest_dir.join(&clean_rel);
+        if !out_path.starts_with(dest_dir) {
+            return Err("Zip path escapes destination directory".into());
+        }
+
         if clean_name.ends_with('/') {
             std::fs::create_dir_all(&out_path).map_err(|e| e.to_string())?;
         } else {
@@ -279,6 +293,10 @@ fn extract_zip_stored(bytes: &[u8], dest_dir: &Path) -> Result<(), String> {
             }
             if method == 0 {
                 std::fs::write(&out_path, &bytes[data_start..data_start + comp_size]).map_err(|e| e.to_string())?;
+                extracted_any = true;
+            } else if method == 8 {
+                let decompressed = inflate_raw(&bytes[data_start..data_start + comp_size])?;
+                std::fs::write(&out_path, &decompressed).map_err(|e| e.to_string())?;
                 extracted_any = true;
             } else {
                 return Err(format!("Unsupported compression method in zip: {method}"));
@@ -290,6 +308,277 @@ fn extract_zip_stored(bytes: &[u8], dest_dir: &Path) -> Result<(), String> {
         return Err("No valid entries found in ZIP archive".into());
     }
     Ok(())
+}
+
+fn sanitize_zip_path(name: &str) -> Result<std::path::PathBuf, String> {
+    let p = Path::new(name);
+    let mut clean = std::path::PathBuf::new();
+    for comp in p.components() {
+        match comp {
+            std::path::Component::Normal(c) => clean.push(c),
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => return Err("Parent traversal in zip path".into()),
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                return Err("Absolute path in zip entry".into());
+            }
+        }
+    }
+    let clean_str = clean.to_string_lossy();
+    if clean_str.is_empty() || clean_str.contains(':') || clean_str.starts_with('/') || clean_str.starts_with('\\') {
+        return Err("Unsafe zip path".into());
+    }
+    Ok(clean)
+}
+
+struct BitReader<'a> {
+    data: &'a [u8],
+    pos: usize,
+    bits: u64,
+    num_bits: u8,
+}
+
+impl<'a> BitReader<'a> {
+    fn new(data: &'a [u8]) -> Self {
+        Self { data, pos: 0, bits: 0, num_bits: 0 }
+    }
+
+    fn fill(&mut self, n: u8) -> bool {
+        while self.num_bits < n {
+            if self.pos < self.data.len() {
+                self.bits |= (self.data[self.pos] as u64) << self.num_bits;
+                self.pos += 1;
+                self.num_bits += 8;
+            } else {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn consume(&mut self, n: u8) {
+        self.bits >>= n;
+        self.num_bits = self.num_bits.saturating_sub(n);
+    }
+
+    fn read_bits(&mut self, n: u8) -> Result<u16, String> {
+        if n == 0 {
+            return Ok(0);
+        }
+        if !self.fill(n) && self.num_bits < n {
+            return Err("Unexpected end of compressed data".into());
+        }
+        let val = (self.bits & ((1u64 << n) - 1)) as u16;
+        self.consume(n);
+        Ok(val)
+    }
+
+    fn drop_to_byte_boundary(&mut self) {
+        let rem = self.num_bits % 8;
+        self.consume(rem);
+    }
+}
+
+struct HuffmanTree {
+    nodes: Vec<[i16; 2]>,
+}
+
+impl HuffmanTree {
+    fn from_lengths(lengths: &[u8]) -> Self {
+        let mut bl_count = [0usize; 16];
+        for &len in lengths {
+            if len > 0 && (len as usize) < 16 {
+                bl_count[len as usize] += 1;
+            }
+        }
+        let mut next_code = [0u32; 16];
+        let mut code = 0u32;
+        for bits in 1..=15 {
+            code = (code + bl_count[bits - 1] as u32) << 1;
+            next_code[bits] = code;
+        }
+
+        let mut nodes: Vec<[i16; 2]> = vec![[-1, -1]];
+        for (sym, &len) in lengths.iter().enumerate() {
+            if len == 0 || len > 15 {
+                continue;
+            }
+            let c = next_code[len as usize];
+            next_code[len as usize] += 1;
+
+            let mut curr = 0usize;
+            for i in (0..len).rev() {
+                let bit = ((c >> i) & 1) as usize;
+                let child = nodes[curr][bit];
+                if i == 0 {
+                    nodes[curr][bit] = -2 - (sym as i16);
+                } else if child >= 0 {
+                    curr = child as usize;
+                } else {
+                    let new_node = nodes.len();
+                    nodes.push([-1, -1]);
+                    nodes[curr][bit] = new_node as i16;
+                    curr = new_node;
+                }
+            }
+        }
+        Self { nodes }
+    }
+
+    fn decode(&self, reader: &mut BitReader) -> Result<u16, String> {
+        let mut curr = 0usize;
+        loop {
+            let bit = reader.read_bits(1)? as usize;
+            let child = self.nodes[curr][bit];
+            if child < -1 {
+                return Ok((-child - 2) as u16);
+            }
+            if child < 0 {
+                return Err("Invalid Huffman code in stream".into());
+            }
+            curr = child as usize;
+        }
+    }
+}
+
+const LENGTH_BASE: [u16; 29] =
+    [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258];
+const LENGTH_EXTRA: [u8; 29] = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0];
+
+const DIST_BASE: [u16; 30] = [
+    1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385,
+    24577,
+];
+const DIST_EXTRA: [u8; 30] = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13];
+
+const CODE_LEN_ORDER: [usize; 19] = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
+
+fn decode_deflate_block(
+    reader: &mut BitReader,
+    lit_tree: &HuffmanTree,
+    dist_tree: &HuffmanTree,
+    output: &mut Vec<u8>,
+) -> Result<(), String> {
+    loop {
+        let sym = lit_tree.decode(reader)?;
+        if sym < 256 {
+            output.push(sym as u8);
+        } else if sym == 256 {
+            break;
+        } else if sym <= 285 {
+            let idx = (sym - 257) as usize;
+            let base_len = LENGTH_BASE[idx];
+            let extra_bits = LENGTH_EXTRA[idx];
+            let length = base_len + reader.read_bits(extra_bits)?;
+
+            let dist_sym = dist_tree.decode(reader)?;
+            if dist_sym >= 30 {
+                return Err("Invalid distance code".into());
+            }
+            let d_idx = dist_sym as usize;
+            let base_dist = DIST_BASE[d_idx];
+            let d_extra = DIST_EXTRA[d_idx];
+            let dist = (base_dist + reader.read_bits(d_extra)?) as usize;
+
+            if dist > output.len() {
+                return Err("Distance beyond output buffer".into());
+            }
+            let start = output.len() - dist;
+            for i in 0..length as usize {
+                let b = output[start + i];
+                output.push(b);
+            }
+        } else {
+            return Err("Invalid literal/length code".into());
+        }
+    }
+    Ok(())
+}
+
+fn fixed_lit_tree() -> HuffmanTree {
+    let mut lengths = [0u8; 288];
+    lengths[..144].fill(8);
+    lengths[144..256].fill(9);
+    lengths[256..280].fill(7);
+    lengths[280..288].fill(8);
+    HuffmanTree::from_lengths(&lengths)
+}
+
+fn fixed_dist_tree() -> HuffmanTree {
+    let lengths = [5u8; 32];
+    HuffmanTree::from_lengths(&lengths)
+}
+
+pub fn inflate_raw(data: &[u8]) -> Result<Vec<u8>, String> {
+    let mut reader = BitReader::new(data);
+    let mut output = Vec::new();
+    loop {
+        let bfinal = reader.read_bits(1)?;
+        let btype = reader.read_bits(2)?;
+        match btype {
+            0 => {
+                reader.drop_to_byte_boundary();
+                let len = reader.read_bits(16)? as usize;
+                let nlen = reader.read_bits(16)? as usize;
+                if (len ^ nlen) != 0xffff {
+                    return Err("Invalid uncompressed block length".into());
+                }
+                for _ in 0..len {
+                    let b = reader.read_bits(8)? as u8;
+                    output.push(b);
+                }
+            }
+            1 => {
+                let lit_tree = fixed_lit_tree();
+                let dist_tree = fixed_dist_tree();
+                decode_deflate_block(&mut reader, &lit_tree, &dist_tree, &mut output)?;
+            }
+            2 => {
+                let hlit = (reader.read_bits(5)? + 257) as usize;
+                let hdist = (reader.read_bits(5)? + 1) as usize;
+                let hclen = (reader.read_bits(4)? + 4) as usize;
+
+                let mut clen_lengths = [0u8; 19];
+                for i in 0..hclen {
+                    clen_lengths[CODE_LEN_ORDER[i]] = reader.read_bits(3)? as u8;
+                }
+                let clen_tree = HuffmanTree::from_lengths(&clen_lengths);
+
+                let mut all_lengths = Vec::with_capacity(hlit + hdist);
+                while all_lengths.len() < hlit + hdist {
+                    let sym = clen_tree.decode(&mut reader)?;
+                    match sym {
+                        0..=15 => all_lengths.push(sym as u8),
+                        16 => {
+                            if all_lengths.is_empty() {
+                                return Err("Invalid repeat in code lengths".into());
+                            }
+                            let last = *all_lengths.last().unwrap();
+                            let count = 3 + reader.read_bits(2)? as usize;
+                            all_lengths.resize(all_lengths.len() + count, last);
+                        }
+                        17 => {
+                            let count = 3 + reader.read_bits(3)? as usize;
+                            all_lengths.resize(all_lengths.len() + count, 0);
+                        }
+                        18 => {
+                            let count = 11 + reader.read_bits(7)? as usize;
+                            all_lengths.resize(all_lengths.len() + count, 0);
+                        }
+                        _ => return Err("Unexpected symbol in code lengths".into()),
+                    }
+                }
+
+                let lit_tree = HuffmanTree::from_lengths(&all_lengths[..hlit]);
+                let dist_tree = HuffmanTree::from_lengths(&all_lengths[hlit..hlit + hdist]);
+                decode_deflate_block(&mut reader, &lit_tree, &dist_tree, &mut output)?;
+            }
+            _ => return Err(format!("Invalid deflate block type: {btype}")),
+        }
+        if bfinal == 1 {
+            break;
+        }
+    }
+    Ok(output)
 }
 
 fn user_home_dir() -> PathBuf {
@@ -306,6 +595,7 @@ pub async fn setup_check(app: AppHandle, faber: State<'_, Faber>, vendor: String
     };
     let clis = detect_clis();
     let installed = clis.contains_key(&v);
+    faber.engine.replace_clis(clis.clone());
     let account = if installed { faber.engine.account_status(v, Duration::from_secs(5)).await } else { AccountStatus::Unknown };
 
     if account == AccountStatus::SignedIn {
@@ -511,7 +801,14 @@ pub async fn setup_install(app: AppHandle, faber: State<'_, Faber>, vendor: Stri
             "destination": destination,
         });
 
-        let fetch = |url: &str| tauri::async_runtime::block_on(faber_engine::install::default_fetch(url));
+        let fetch = |url: &str| {
+            std::thread::spawn({
+                let u = url.to_string();
+                move || tauri::async_runtime::block_on(faber_engine::install::default_fetch(&u))
+            })
+            .join()
+            .unwrap_or_else(|_| Err(std::io::Error::other("fetch thread panicked")))
+        };
         let register = |dir: &Path| faber_engine::install::default_register_path(dir);
         let progress = |val: serde_json::Value| {
             let stage = val["stage"].as_str().unwrap_or("failed");
