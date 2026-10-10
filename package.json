@@ -1,7 +1,7 @@
 {
   "name": "faber",
   "productName": "Faber",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "One app for everything AI can do.",
   "license": "Apache-2.0",
   "private": true,
