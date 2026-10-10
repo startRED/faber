@@ -7,8 +7,17 @@ export type EngineEvent =
   | { type: 'tool-result'; id: string; ok: boolean; text: string }
   | { type: 'permission'; requestId: string; tool: string; input: unknown }
   | { type: 'quota'; window: string; used: number; resetsAt: number }
-  | { type: 'done'; ok: boolean; reason: string; costUsd: number; inputTokens: number; outputTokens: number }
+  // costUsd is the CLI's own API-priced figure when it reports one (Claude Code does, Codex does not).
+  | { type: 'done'; ok: boolean; reason: string; costUsd?: number; inputTokens: number; outputTokens: number }
   | { type: 'error'; message: string };
+
+// One live conversation with a CLI, whatever the vendor.
+export interface Session {
+  send(turn: UserTurn): void;
+  answer(requestId: string, allow: boolean): void;
+  interrupt(): void;
+  close(): void;
+}
 
 // A user turn: plain text plus optional attachments.
 export interface UserTurn {

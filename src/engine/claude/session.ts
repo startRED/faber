@@ -1,44 +1,20 @@
-import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import type { Readable } from 'node:stream';
-import type { EngineEvent, UserTurn } from '../events.ts';
+import type { EngineEvent, Session } from '../events.ts';
+import { realSpawn, stderrTail, type Spawner } from '../proc.ts';
 import { claudeArgs, type ClaudeLaunch } from './args.ts';
 import { parseClaudeMessage } from './parse.ts';
-
-// The slice of a child process the session needs, so tests can replay a recording without spawning anything.
-export interface Proc {
-  stdin: { write(chunk: string): unknown; end(): unknown };
-  stdout: Readable;
-  stderr: Readable;
-  kill(): unknown;
-  once(event: 'exit', listener: (code: number | null) => void): unknown;
-}
-export type Spawner = (bin: string, args: string[], cwd: string) => Proc;
-
-const realSpawn: Spawner = (bin, args, cwd) =>
-  spawn(bin, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
-
-export interface ClaudeSession {
-  send(turn: UserTurn): void;
-  answer(requestId: string, allow: boolean): void;
-  interrupt(): void;
-  close(): void;
-}
 
 export function startClaude(
   opts: { bin: string; cwd: string; launch: ClaudeLaunch; spawn?: Spawner },
   onEvent: (event: EngineEvent) => void,
-): ClaudeSession {
+): Session {
   const proc = (opts.spawn ?? realSpawn)(opts.bin, claudeArgs(opts.launch), opts.cwd);
+  const tail = stderrTail(proc);
   const pending = new Map<string, unknown>();
-  let stderrTail = '';
-  let finished = false;
+  let closed = false;
   let controlId = 0;
   const write = (msg: object) => proc.stdin.write(JSON.stringify(msg) + '\n');
 
-  proc.stderr.on('data', (chunk: Buffer) => {
-    stderrTail = (stderrTail + chunk.toString()).slice(-2000);
-  });
   createInterface({ input: proc.stdout }).on('line', (line) => {
     if (!line.trim()) return;
     let msg;
@@ -54,7 +30,7 @@ export function startClaude(
     }
   });
   proc.once('exit', (code) => {
-    if (!finished) onEvent({ type: 'error', message: `Claude Code stopped (exit ${code}). ${stderrTail.trim()}`.trim() });
+    if (!closed) onEvent({ type: 'error', message: `Claude Code stopped (exit ${code}). ${tail()}`.trim() });
   });
 
   return {
@@ -83,7 +59,7 @@ export function startClaude(
       write({ type: 'control_request', request_id: `faber-${++controlId}`, request: { subtype: 'interrupt' } });
     },
     close() {
-      finished = true;
+      closed = true;
       proc.stdin.end();
       proc.kill();
     },

@@ -1,32 +1,13 @@
-import { test } from 'node:test';
+﻿import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fileURLToPath } from 'node:url';
 import { claudeArgs } from '../src/engine/claude/args.ts';
-import { startClaude, type ClaudeSession } from '../src/engine/claude/session.ts';
-import type { EngineEvent } from '../src/engine/events.ts';
-import { readCassette, replay, type Entry } from './support/replay.ts';
+import { startClaude } from '../src/engine/claude/session.ts';
+import type { EngineEvent, Session } from '../src/engine/events.ts';
+import { drive, fixture as cassette, textOf as text, type Entry } from './support/replay.ts';
 
-const fixture = (name: string) => readCassette(fileURLToPath(new URL(`./fixtures/claude/${name}.jsonl`, import.meta.url)));
-
-// Runs a recorded session through the real driver. `react` lets the test answer like the app would.
-function run(entries: Entry[], first: string, react: (e: EngineEvent, s: ClaudeSession, all: EngineEvent[]) => boolean) {
-  const proc = replay(entries);
-  const events: EngineEvent[] = [];
-  return new Promise<{ events: EngineEvent[]; mismatches: string[] }>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`stalled after ${JSON.stringify(events.at(-1))}`)), 2000);
-    const session = startClaude({ bin: 'claude', cwd: '.', launch: { area: 'chat' }, spawn: () => proc }, (e) => {
-      events.push(e);
-      if (react(e, session, events)) {
-        clearTimeout(timer);
-        session.close();
-        resolve({ events, mismatches: proc.mismatches });
-      }
-    });
-    session.send({ text: first });
-  });
-}
-
-const text = (events: EngineEvent[]) => events.map((e) => (e.type === 'text' ? e.delta : '')).join('');
+const fixture = (name: string) => cassette('claude', name);
+const run = (entries: Entry[], first: string, react: (e: EngineEvent, s: Session) => boolean) =>
+  drive(entries, (spawn, on) => startClaude({ bin: 'claude', cwd: '.', launch: { area: 'chat' }, spawn }, on), first, react);
 const recordedText = (entries: Entry[]) =>
   entries
     .filter((e) => e.msg.type === 'assistant')
@@ -42,7 +23,7 @@ async function checkChat(entries: Entry[]) {
   assert.equal(text(events), recordedText(entries));
   assert.ok(events.some((e) => e.type === 'quota' && e.window === 'five_hour' && e.used === 0.07));
   const done = events.at(-1);
-  assert.ok(done?.type === 'done' && done.ok && done.costUsd > 0 && done.outputTokens === 73);
+  assert.ok(done?.type === 'done' && done.ok && (done.costUsd ?? 0) > 0 && done.outputTokens === 73);
 }
 
 test('chat: streams text, model, quota and cost from a recorded session', () => checkChat(fixture('chat')));
