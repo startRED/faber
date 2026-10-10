@@ -120,7 +120,10 @@ function createWindow(): void {
     return { action: 'deny' };
   });
   win.webContents.on('will-navigate', (event) => event.preventDefault());
-  void win.loadFile(join(here, '../renderer/index.html'), { query: { version: app.getVersion() } });
+  // `npm run dev` serves the screen from Vite, so edits show without rebuilding.
+  const devUrl = process.env.FABER_DEV_URL;
+  if (devUrl) void win.loadURL(`${devUrl}?version=${app.getVersion()}`);
+  else void win.loadFile(join(here, '../renderer/index.html'), { query: { version: app.getVersion() } });
 }
 
 function checkForUpdates(): void {

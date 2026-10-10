@@ -19,6 +19,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.main.json && vite build",
     "start": "npm run build && electron .",
+    "dev": "node scripts/dev.mjs",
     "lint": "oxlint src tests",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.json --noEmit",
     "test": "node --test --test-isolation=none \"tests/**/*.test.ts\"",
