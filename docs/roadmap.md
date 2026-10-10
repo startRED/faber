@@ -87,6 +87,28 @@ session of one CLI. It gets a toolbox from Faber (an MCP server shared by every 
 - find what it lacks: search the catalog and beyond, show the license, install from the source, test on a copy and
   save the path as a recipe ("make a Terraria mod").
 
+**Powers, not tracks.** A fixed line per kind of request (thumbnail, video, site, research) runs steps a request does
+not need and has nothing for a request no line covers. Faber gives the lead agent the powers those lines rely on and
+lets it compose them per request, the way a senior professional would:
+
+| Power | What it gives the agent |
+| :--- | :--- |
+| Ask only what changes the result | a question card with a default that applies by itself if nobody answers |
+| Learn from what worked | find the outliers in a topic (videos, titles, sites) and why they worked, with links |
+| Cheap draft before expensive work | rough sketches or three quick versions, picked before hours go into the final one |
+| See it where it will live | render the result at its real size and context (a thumbnail in a phone feed, a page on a phone) |
+| Another model checks | a blind review or judge from another vendor; in code the writer never approves its own work |
+| Better than the original or it does not stay | blind side-by-side of the edit against the original; the original wins ties |
+| Proof before work | the agent states how success is checked, then runs it; "done" needs that evidence |
+| Facts with sources | every claim tied to the page that proves it; numbers computed by a program and recomputed |
+| Redo only the part that changed | deliverables are pieces with owners and dependencies; a change reruns the owner and what depends on it |
+| Pick up where it stopped | every step is durable; killing the engine or rebooting loses nothing |
+| Drive the user's apps | Blender, Photoshop, Premiere and others through their scripting, on a copy |
+| Remember taste | the user's opinions on past work steer the next one; questions shrink with use |
+
+Recipes from past work are hints the agent may read, never a track it must follow. The guardrails below are the only
+fixed rules.
+
 ### Toolbox
 
 | Tool | What it does |
