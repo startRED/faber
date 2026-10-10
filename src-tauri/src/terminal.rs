@@ -13,10 +13,39 @@ pub fn is_safe(cmd: &TerminalCommand) -> bool {
     std::iter::once(cmd.command.as_str()).chain(cmd.args.iter().map(String::as_str)).chain([cwd.as_ref()]).all(|p| !p.contains(UNSAFE))
 }
 
+use std::sync::Mutex;
+
+static HIDDEN_CHILDREN: Mutex<Vec<std::process::Child>> = Mutex::new(Vec::new());
+
+pub fn terminate_hidden() {
+    if let Ok(mut children) = HIDDEN_CHILDREN.lock() {
+        for child in children.iter_mut() {
+            let _ = child.kill();
+        }
+        children.clear();
+    }
+}
+
 pub fn open(cmd: &TerminalCommand) -> io::Result<()> {
     // Windows and macOS build a line for a shell, so every piece is checked first.
     if !is_safe(cmd) {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "refusing to open a terminal with shell characters"));
+    }
+    let hidden = std::env::var("FABER_HIDDEN").is_ok_and(|v| v == "1");
+    if hidden {
+        let mut command = Command::new(&cmd.command);
+        command.args(&cmd.args).current_dir(&cmd.cwd);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
+        let child = command.spawn()?;
+        if let Ok(mut children) = HIDDEN_CHILDREN.lock() {
+            children.push(child);
+        }
+        return Ok(());
     }
     let quoted = std::iter::once(&cmd.command).chain(&cmd.args).map(|p| format!("\"{p}\"")).collect::<Vec<_>>().join(" ");
     #[cfg(windows)]

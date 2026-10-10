@@ -2,10 +2,11 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod setup;
 mod terminal;
 
 use base64::Engine as _;
-use faber_engine::cli::{Cli, find_cli};
+use faber_engine::cli::Cli;
 use faber_engine::codex::{ModelInfo, list_codex_models};
 use faber_engine::model::{Conversation, Project, Settings, Vendor};
 use faber_engine::proc::{Spawner, real_spawner};
@@ -23,16 +24,16 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_updater::{Update, UpdaterExt};
 
-struct Faber {
-    engine: Engine,
+pub(crate) struct Faber {
+    pub(crate) engine: Engine,
     /// ChatGPT models this account can use; empty until the Codex CLI answers.
-    models: Mutex<Vec<ModelInfo>>,
+    pub(crate) models: Mutex<Vec<ModelInfo>>,
     /// The tray menu's two items, renamed when the screen changes language.
-    tray: Mutex<Option<[MenuItem<Wry>; 2]>>,
+    pub(crate) tray: Mutex<Option<[MenuItem<Wry>; 2]>>,
     /// A newer version, already downloaded; it installs when Faber quits.
-    update: Mutex<Option<(Update, Vec<u8>)>>,
-    data_dir: PathBuf,
-    hidden: bool,
+    pub(crate) update: Mutex<Option<(Update, Vec<u8>)>>,
+    pub(crate) data_dir: PathBuf,
+    pub(crate) hidden: bool,
 }
 
 type Res<T> = Result<T, String>;
@@ -193,19 +194,9 @@ async fn set_tray(faber: State<'_, Faber>, open: String, quit: String) -> Res<()
     Ok(())
 }
 
-/// Each CLI is found on PATH. FABER_CLI_<NAME> (a JSON Cli, or empty for none) replaces it, so end-to-end tests
-/// can replay a recorded session through a fake CLI instead of a real subscription.
+/// Uses setup module to detect CLIs on this computer.
 fn detect_clis() -> BTreeMap<Vendor, Cli> {
-    Vendor::ALL
-        .into_iter()
-        .filter_map(|v| {
-            let cli = match std::env::var(format!("FABER_CLI_{}", v.name().to_uppercase())) {
-                Ok(json) => serde_json::from_str(&json).ok(),
-                Err(_) => find_cli(v.name()),
-            };
-            cli.map(|c| (v, c))
-        })
-        .collect()
+    setup::detect_clis()
 }
 
 /// Same folder the Electron versions used, so conversations carry over.
@@ -217,7 +208,7 @@ fn data_dir(app: &AppHandle) -> tauri::Result<PathBuf> {
 }
 
 /// Asks Codex for this account's models in the background; the picker fills in when it answers.
-fn load_models(app: &AppHandle, codex: Cli, cwd: PathBuf) {
+pub(crate) fn load_models(app: &AppHandle, codex: Cli, cwd: PathBuf) {
     let real = real_spawner();
     let prefix = codex.prefix.clone();
     let spawn: Spawner = Arc::new(move |bin, args, cwd| real(bin, &prefix.iter().chain(args).cloned().collect::<Vec<_>>(), cwd));
@@ -347,7 +338,10 @@ fn main() {
             read_image,
             open_terminal,
             open_link,
-            set_tray
+            set_tray,
+            setup::setup_check,
+            setup::setup_install,
+            setup::setup_sign_in
         ])
         .setup(move |app| {
             let data_dir = data_dir(app.handle())?;
@@ -398,6 +392,7 @@ fn main() {
                 api.prevent_exit();
             }
             if let RunEvent::Exit = event {
+                terminal::terminate_hidden();
                 let faber = app.state::<Faber>();
                 faber.engine.shutdown();
                 // On Windows this starts the installer, which replaces Faber and needs it closed.
