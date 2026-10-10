@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { Area } from './claude/args.ts';
 import { startClaude } from './claude/session.ts';
@@ -7,8 +7,9 @@ import { startCodex } from './codex/session.ts';
 import type { EngineEvent, Session } from './events.ts';
 import { realSpawn, type Spawner } from './proc.ts';
 import type { Cli } from './resolve-cli.ts';
-import { pickModel, type Choice } from './router.ts';
+import { pickModel, type Choice, type Pick } from './router.ts';
 import { createStore, type Conversation, type Message, type Project, type Summary, type Vendor } from './store.ts';
+import { insideFolder, newFiles } from './workspace.ts';
 
 export type AppEvent =
   | { type: 'message'; conversationId: string; message: Message }
@@ -36,6 +37,7 @@ export interface SendRequest {
 interface Live {
   vendor: Vendor;
   model?: string;
+  effort: string;
   conversation: Conversation;
   session: Session;
   turn?: Message;
@@ -52,8 +54,8 @@ export function withHistory(history: Message[], text: string): string {
 export function createEngine(opts: EngineOptions, emit: (event: AppEvent) => void) {
   const store = createStore(opts.dataDir);
   const now = opts.now ?? Date.now;
-  const chatHome = join(opts.dataDir, 'chat-home');
-  mkdirSync(chatHome, { recursive: true });
+  // Each chat conversation gets a private workspace folder: code runs and files are created there, never elsewhere.
+  const workspaceOf = (id: string) => join(opts.dataDir, 'chat', id);
   const live = new Map<string, Live>();
   const timers = new Map<string, NodeJS.Timeout>();
   const vendors = Object.keys(opts.clis) as Vendor[];
@@ -74,7 +76,10 @@ export function createEngine(opts: EngineOptions, emit: (event: AppEvent) => voi
   };
 
   const cwdOf = (c: Conversation) => {
-    if (c.area === 'chat') return chatHome;
+    if (c.area === 'chat') {
+      mkdirSync(workspaceOf(c.id), { recursive: true });
+      return workspaceOf(c.id);
+    }
     const project = store.projects().find((p) => p.id === c.projectId);
     if (!project) throw new Error('This project is no longer in Faber.');
     return project.path;
@@ -87,7 +92,7 @@ export function createEngine(opts: EngineOptions, emit: (event: AppEvent) => voi
       case 'started':
         c.sessions[entry.vendor] = e.sessionId;
         if (m) m.model = e.model;
-        store.save(c);
+        if (c.messages.length) store.save(c); // a draft is saved only once something is sent
         break;
       case 'text':
         if (m) m.text += e.delta;
@@ -104,6 +109,7 @@ export function createEngine(opts: EngineOptions, emit: (event: AppEvent) => voi
         break;
       }
       case 'permission':
+        if (c.allowAlways?.includes(e.tool)) return entry.session.answer(e.requestId, true);
         if (m) m.permission = { requestId: e.requestId, tool: e.tool, input: e.input };
         return push(c.id, m, true);
       case 'quota':
@@ -127,15 +133,19 @@ export function createEngine(opts: EngineOptions, emit: (event: AppEvent) => voi
     const c = entry.conversation;
     const m = entry.turn;
     entry.turn = undefined;
+    if (m && c.area === 'chat') {
+      const files = newFiles(workspaceOf(c.id), m.at);
+      if (files.length) m.files = files;
+    }
     c.updatedAt = now();
     store.save(c);
     push(c.id, m, true);
     emit({ type: 'list' });
   }
 
-  function launch(c: Conversation, vendor: Vendor, model: string | undefined): Live {
+  function launch(c: Conversation, { vendor, model, effort }: Pick): Live {
     const current = live.get(c.id);
-    if (current && current.vendor === vendor && current.model === model) {
+    if (current && current.vendor === vendor && current.model === model && current.effort === effort) {
       live.delete(c.id);
       live.set(c.id, current); // most recently used goes last
       return current;
@@ -143,13 +153,13 @@ export function createEngine(opts: EngineOptions, emit: (event: AppEvent) => voi
     current?.session.close();
     const cli = opts.clis[vendor]!;
     const spawn: Spawner = (_bin, args, cwd) => (opts.spawn ?? realSpawn)(cli.command, [...cli.prefix, ...args], cwd);
-    const entry = { vendor, model, conversation: c } as Live;
+    const entry = { vendor, model, effort, conversation: c } as Live;
     const onEvent = (e: EngineEvent) => handle(entry, e);
     const common = { bin: cli.command, cwd: cwdOf(c), spawn };
     entry.session =
       vendor === 'claude'
-        ? startClaude({ ...common, launch: { area: c.area, model, resume: c.sessions.claude } }, onEvent)
-        : startCodex({ ...common, platform: opts.platform, launch: { area: c.area, model, resume: c.sessions.codex } }, onEvent);
+        ? startClaude({ ...common, launch: { area: c.area, model, effort, resume: c.sessions.claude } }, onEvent)
+        : startCodex({ ...common, platform: opts.platform, launch: { area: c.area, model, effort, resume: c.sessions.codex } }, onEvent);
     live.delete(c.id);
     live.set(c.id, entry);
     // ponytail: count-based warm limit; switch to the visible RAM budget once memory is measured.
@@ -164,6 +174,9 @@ export function createEngine(opts: EngineOptions, emit: (event: AppEvent) => voi
   }
 
   const load = (id: string) => live.get(id)?.conversation ?? store.get(id);
+  const blank = (area: Area, projectId: string | undefined, at: number): Conversation => ({ id: randomUUID(), title: '', area, projectId, sessions: {}, createdAt: at, updatedAt: at, messages: [] });
+  // A new conversation still being typed: its CLI starts before the first message is sent.
+  let draft: Conversation | undefined;
 
   return {
     vendors,
@@ -179,16 +192,10 @@ export function createEngine(opts: EngineOptions, emit: (event: AppEvent) => voi
       const existing = req.conversationId ? load(req.conversationId) : undefined;
       if (existing && live.get(existing.id)?.turn) throw new Error('Wait for the current answer or stop it first.');
       const at = now();
-      const c: Conversation = existing ?? {
-        id: randomUUID(),
-        title: req.text.trim().replace(/\s+/g, ' ').slice(0, 60),
-        area: req.area,
-        projectId: req.projectId,
-        sessions: {},
-        createdAt: at,
-        updatedAt: at,
-        messages: [],
-      };
+      const reuseDraft = !existing && draft?.area === req.area && draft.projectId === req.projectId;
+      const c = existing ?? (reuseDraft ? draft! : blank(req.area, req.projectId, at));
+      if (reuseDraft) draft = undefined;
+      if (!c.title) c.title = req.text.trim().replace(/\s+/g, ' ').slice(0, 60);
       const joiningLate = !c.sessions[pick.vendor] && c.messages.length > 0;
       const history = c.messages.slice();
       const reply: Message = { id: randomUUID(), role: 'assistant', text: '', at, vendor: pick.vendor, model: pick.model, reason: pick.reason, tools: [], status: 'streaming' };
@@ -196,24 +203,42 @@ export function createEngine(opts: EngineOptions, emit: (event: AppEvent) => voi
       c.updatedAt = at;
       store.save(c);
       emit({ type: 'list' });
-      const entry = launch(c, pick.vendor, pick.model);
+      const entry = launch(c, pick);
       entry.turn = reply;
       entry.session.send({ text: joiningLate ? withHistory(history, req.text) : req.text, images: req.images });
       push(c.id, reply, true);
       return c.id;
     },
     // Starts the CLI before the user finishes typing, so the first word arrives sooner.
-    warm(conversationId: string, choice: Choice): void {
-      const c = load(conversationId);
-      const pick = pickModel(choice, vendors);
-      if (c && pick && !live.get(c.id)?.turn) launch(c, pick.vendor, pick.model);
+    warm(req: { conversationId?: string; area: Area; projectId?: string; choice: Choice }): void {
+      const pick = pickModel(req.choice, vendors);
+      if (!pick) return;
+      let c = req.conversationId ? load(req.conversationId) : undefined;
+      if (!c) {
+        if (!draft || draft.area !== req.area || draft.projectId !== req.projectId) {
+          if (draft) {
+            live.get(draft.id)?.session.close();
+            live.delete(draft.id);
+            rmSync(workspaceOf(draft.id), { recursive: true, force: true });
+          }
+          draft = blank(req.area, req.projectId, now());
+        }
+        c = draft;
+      }
+      if (!live.get(c.id)?.turn) launch(c, pick);
     },
     interrupt(conversationId: string): void {
       live.get(conversationId)?.session.interrupt();
     },
-    answer(conversationId: string, requestId: string, allow: boolean): void {
+    answer(conversationId: string, requestId: string, allow: boolean, always = false): void {
       const entry = live.get(conversationId);
       if (!entry) return;
+      const tool = entry.turn?.permission?.tool;
+      if (allow && always && tool) {
+        const c = entry.conversation;
+        c.allowAlways = [...new Set([...(c.allowAlways ?? []), tool])];
+        store.save(c);
+      }
       entry.session.answer(requestId, allow);
       if (entry.turn?.permission?.requestId === requestId) entry.turn.permission = undefined;
       push(conversationId, entry.turn, true);
@@ -229,7 +254,13 @@ export function createEngine(opts: EngineOptions, emit: (event: AppEvent) => voi
       live.get(id)?.session.close();
       live.delete(id);
       store.remove(id);
+      rmSync(workspaceOf(id), { recursive: true, force: true });
       emit({ type: 'list' });
+    },
+    // The absolute path of a file in a chat workspace, or undefined if the path points outside it.
+    workspaceFile(conversationId: string, path: string): string | undefined {
+      const full = insideFolder(workspaceOf(conversationId), path);
+      return full && existsSync(full) ? full : undefined;
     },
     addProject(path: string): Project {
       const projects = store.projects();

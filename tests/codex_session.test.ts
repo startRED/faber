@@ -93,15 +93,17 @@ test('codex: a message that arrives whole, without deltas, is still shown once',
   assert.deepEqual(parseCodexNotification(done('b'), state), []);
 });
 
-test('codex chat cannot run commands; projects can, behind approval', () => {
-  const chat = codexArgs('chat', 'linux');
-  assert.ok(chat.join(' ').includes('--disable shell_tool'));
-  assert.ok(!chat.join(' ').includes('windows.sandbox'));
-  assert.ok(codexArgs('project', 'win32').includes('windows.sandbox="unelevated"'));
-  assert.ok(!codexArgs('project', 'win32').includes('shell_tool'));
-  assert.deepEqual(
-    { sandbox: codexThread('chat').sandbox, approval: codexThread('chat').approvalPolicy },
-    { sandbox: 'read-only', approval: 'never' },
-  );
-  assert.equal(codexThread('project', 'gpt-6-luna').approvalPolicy, 'on-request');
+test('codex chat is lean and sandboxed; projects keep the user setup without hooks', () => {
+  const chat = codexArgs('chat', 'linux').join(' ');
+  assert.ok(chat.includes('--disable plugins') && chat.includes('mcp_servers={}') && chat.includes('project_doc_max_bytes=0'));
+  assert.ok(chat.includes('--disable hooks') && !chat.includes('windows.sandbox'));
+  const project = codexArgs('project', 'win32').join(' ');
+  assert.ok(project.includes('windows.sandbox="unelevated"') && project.includes('--disable hooks'));
+  assert.ok(!project.includes('plugins') && !project.includes('mcp_servers'));
+  assert.ok(!codexArgs('project', 'linux', true).includes('hooks'));
+  for (const area of ['chat', 'project'] as const) {
+    assert.equal(codexThread(area).sandbox, 'workspace-write');
+    assert.equal(codexThread(area).approvalPolicy, 'on-request');
+  }
+  assert.ok(codexThread('chat').baseInstructions);
 });

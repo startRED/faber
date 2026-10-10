@@ -1,4 +1,4 @@
-﻿import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { posix, win32 } from 'node:path';
 
 export interface Cli {

@@ -1,4 +1,4 @@
-﻿import type { EngineEvent } from '../events.ts';
+import type { EngineEvent } from '../events.ts';
 
 type Json = Record<string, any>;
 

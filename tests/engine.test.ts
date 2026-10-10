@@ -79,6 +79,59 @@ test('after reopening the app, the conversation resumes its CLI session', async 
   assert.equal(second.engine.open(id)?.messages.length, 4);
 });
 
+test('a new chat starts its CLI while the user types and keeps it for the first message', async () => {
+  let spawns = 0;
+  const dir = dataDir();
+  let finished: (m: Message) => void = () => {};
+  const done = new Promise<Message>((r) => (finished = r));
+  const engine = createEngine(
+    { dataDir: dir, clis: { claude: { command: 'claude', prefix: [] } }, spawn: () => (spawns++, replay(fixture('claude', 'chat'))) },
+    (e) => e.type === 'message' && e.message.status !== 'streaming' && finished(e.message),
+  );
+  const choice = { vendor: 'claude', model: 'haiku' } as const;
+  engine.warm({ area: 'chat', choice });
+  engine.warm({ area: 'chat', choice });
+  assert.equal(spawns, 1);
+  assert.deepEqual(engine.state().conversations, []);
+  engine.send({ area: 'chat', text: 'In one sentence: why is the sky blue?', choice });
+  assert.equal((await done).status, 'done');
+  assert.equal(spawns, 1);
+  assert.equal(engine.state().conversations.length, 1);
+  engine.shutdown();
+});
+
+test('"always allow" answers the next request for the same tool without asking again', async () => {
+  // The recording denied the second Write; here the engine must allow it by itself.
+  let answers = 0;
+  const entries = fixture('claude', 'tools').map((e) =>
+    e.msg.type === 'control_response' && answers++ === 1
+      ? { ...e, msg: { ...e.msg, response: { ...e.msg.response, response: { behavior: 'allow' } } } }
+      : e,
+  );
+  const asked: string[] = [];
+  let finished: () => void = () => {};
+  const done = new Promise<void>((r) => (finished = r));
+  let id = '';
+  const engine = createEngine({ dataDir: dataDir(), clis: { claude: { command: 'claude', prefix: [] } }, spawn: () => replay(entries) }, (e) => {
+    if (e.type !== 'message') return;
+    const p = e.message.permission;
+    if (p && !asked.includes(p.requestId)) {
+      asked.push(p.requestId);
+      setImmediate(() => engine.answer(id, p.requestId, true, true));
+    }
+    if (e.message.status !== 'streaming') finished();
+  });
+  id = engine.send({
+    area: 'chat',
+    text: "Create a.txt containing 'one'. Then create b.txt containing 'two'. Use the Write tool for each, one at a time.",
+    choice: { vendor: 'claude' },
+  });
+  await done;
+  engine.shutdown();
+  assert.equal(asked.length, 1);
+  assert.deepEqual(engine.open(id)?.allowAlways, ['Write']);
+});
+
 test('a model joining midway gets the earlier conversation as text', () => {
   const text = withHistory(
     [
@@ -91,7 +144,7 @@ test('a model joining midway gets the earlier conversation as text', () => {
 });
 
 test('Auto picks a connected vendor and says why; a missing one is refused', () => {
-  assert.deepEqual(pickModel({ vendor: 'auto' }, ['codex']), { vendor: 'codex', reason: 'Auto: the only connected subscription' });
+  assert.deepEqual(pickModel({ vendor: 'auto' }, ['codex']), { vendor: 'codex', effort: 'medium', reason: 'Auto: the only connected subscription' });
   assert.equal(pickModel({ vendor: 'auto' }, ['claude', 'codex'])?.vendor, 'claude');
   assert.equal(pickModel({ vendor: 'claude' }, ['codex']), undefined);
   assert.equal(pickModel({ vendor: 'auto' }, []), undefined);

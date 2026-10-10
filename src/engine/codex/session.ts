@@ -1,4 +1,4 @@
-﻿import { createInterface } from 'node:readline';
+import { createInterface } from 'node:readline';
 import type { Area } from '../claude/args.ts';
 import type { EngineEvent, Session } from '../events.ts';
 import { realSpawn, stderrTail, type Spawner } from '../proc.ts';

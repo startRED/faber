@@ -1,4 +1,4 @@
-﻿import { test } from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { claudeArgs } from '../src/engine/claude/args.ts';
 import { startClaude } from '../src/engine/claude/session.ts';
@@ -80,13 +80,15 @@ test('resume: a new process continues the same session', async () => {
   assert.equal(text(events).trim(), 'pong');
 });
 
-test('chat can never touch files; projects keep only project settings', () => {
+test('chat is lean and confined to its workspace; projects get the user setup without hooks', () => {
   const chat = claudeArgs({ area: 'chat', resume: 'abc', model: 'haiku' });
-  assert.ok(chat.includes('--restricted'));
-  assert.equal(chat[chat.indexOf('--tools') + 1], 'WebSearch,WebFetch');
+  assert.ok(chat.includes('--restricted') && chat.includes('--strict-mcp-config'));
+  assert.equal(chat[chat.indexOf('--tools') + 1], 'Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch');
+  assert.equal(chat[chat.indexOf('--permission-mode') + 1], 'acceptEdits');
   assert.equal(chat[chat.indexOf('--resume') + 1], 'abc');
   assert.equal(chat[chat.indexOf('--model') + 1], 'haiku');
   const project = claudeArgs({ area: 'project' });
-  assert.ok(!project.includes('--restricted'));
-  assert.equal(project[project.indexOf('--setting-sources') + 1], 'project,local');
+  assert.ok(!project.includes('--restricted') && !project.includes('--strict-mcp-config'));
+  assert.deepEqual(JSON.parse(project[project.indexOf('--settings') + 1]!), { disableAllHooks: true });
+  assert.ok(!claudeArgs({ area: 'project', userHooks: true }).includes('--settings'));
 });

@@ -1,4 +1,4 @@
-﻿// What every driver reports to the app, whatever CLI is behind it.
+// What every driver reports to the app, whatever CLI is behind it.
 export type EngineEvent =
   | { type: 'started'; sessionId: string; model: string }
   | { type: 'text'; delta: string }

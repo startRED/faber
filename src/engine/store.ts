@@ -1,4 +1,4 @@
-﻿import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Area } from './claude/args.ts';
 
@@ -24,6 +24,8 @@ export interface Message {
   thinking?: string;
   tools?: ToolUse[];
   permission?: { requestId: string; tool: string; input: unknown };
+  // Chat only: files the answer created or changed in the conversation's workspace.
+  files?: { path: string; size: number }[];
   status?: 'streaming' | 'done' | 'stopped' | 'error';
   error?: string;
   costUsd?: number;
@@ -38,6 +40,8 @@ export interface Conversation {
   projectId?: string;
   // One CLI session per vendor, so switching models keeps each vendor's own history and cache.
   sessions: Partial<Record<Vendor, string>>;
+  // Tools the user chose to always allow in this conversation.
+  allowAlways?: string[];
   createdAt: number;
   updatedAt: number;
   messages: Message[];
