@@ -271,6 +271,15 @@ fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Resul
             }
             inside
         });
+    // The top bar of the page is the title bar (ui/WindowControls.tsx); macOS keeps its traffic lights over it.
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        builder = builder.decorations(false);
+    }
     // Automated runs (tests, judges) stay offscreen with their own browser profile, so they never steal the screen
     // or share state between runs.
     if hidden {

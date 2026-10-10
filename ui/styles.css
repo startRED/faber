@@ -25,7 +25,12 @@ button { cursor: pointer; }
 
 .app { display: grid; grid-template-rows: 44px 1fr; height: 100%; }
 
-.top { display: flex; align-items: center; gap: 14px; padding: 0 14px; border-bottom: 1px solid var(--line); font-family: var(--ui); }
+.top { display: flex; align-items: center; gap: 14px; padding: 0 0 0 14px; border-bottom: 1px solid var(--line); font-family: var(--ui); user-select: none; }
+.top.mac { padding: 0 14px 0 78px; } /* room for the traffic lights */
+.caption { display: flex; align-self: stretch; margin-left: -4px; }
+.caption button { width: 46px; border: 0; background: none; color: var(--soft); display: grid; place-items: center; }
+.caption button:hover { background: var(--surface); color: var(--fg); }
+.caption .close:hover { background: #c42b1c; color: #fff; }
 .top strong { font-size: 14px; letter-spacing: 0.02em; }
 .toggle { display: flex; padding: 3px; gap: 2px; background: var(--surface); border-radius: calc(var(--radius) - 1px); }
 .toggle button { padding: 3px 11px; font-size: 12px; border: 0; border-radius: calc(var(--radius) - 3px); background: none; color: var(--muted); }

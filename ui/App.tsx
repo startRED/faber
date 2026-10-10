@@ -7,6 +7,7 @@ import { en, type Key } from './locales/en.ts';
 import { modelOptions, vendorName } from './models.ts';
 import { Settings } from './Settings.tsx';
 import { Thread } from './Thread.tsx';
+import { mac, WindowControls } from './WindowControls.tsx';
 
 type Area = 'chat' | 'project';
 type Quota = { vendor: Vendor; window: string; used: number; resetsAt: number };
@@ -213,8 +214,9 @@ export function App() {
 
   return (
     <div class="app">
-      <header class="top">
-        <strong>Faber</strong>
+      {/* The top bar is the window's title bar: empty space drags the window, double click maximizes. */}
+      <header class="top" classList={{ mac }} data-tauri-drag-region>
+        <strong data-tauri-drag-region>Faber</strong>
         <div class="toggle" role="group" aria-label={t('area.label')}>
           <button aria-pressed={area() === 'chat'} onClick={() => switchArea('chat')}>
             {t('area.chat')}
@@ -223,7 +225,7 @@ export function App() {
             {t('area.projects')}
           </button>
         </div>
-        <div class="quota" aria-label={t('quota.label')}>
+        <div class="quota" aria-label={t('quota.label')} data-tauri-drag-region>
           <For each={byVendor()}>
             {(q) => (
               <span class="q" title={t('quota.window', { window: windowName(q.window) })}>
@@ -235,6 +237,7 @@ export function App() {
         <button class="gear" aria-pressed={settingsOpen()} onClick={() => setSettingsOpen((o) => !o)} title={t('settings.shortcut')}>
           {t('settings.open')}
         </button>
+        <WindowControls />
       </header>
       <Show
         when={!settingsOpen()}

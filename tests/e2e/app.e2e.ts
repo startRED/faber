@@ -67,6 +67,9 @@ test('the app opens on an empty chat and fits the window', { skip }, async () =>
     await page.getByRole('heading', { name: en['empty.chatTitle'] }).waitFor();
     assert.match(await page.locator('.foot').innerText(), /Claude · v\d+\.\d+\.\d+/);
     assert.equal(await page.evaluate(() => document.documentElement.scrollHeight > innerHeight), false, 'the window should not scroll as a whole');
+    // No system title bar: the top bar carries the window buttons and drags the window.
+    for (const name of [en['window.minimize'], en['window.maximize'], en['window.close']]) await page.getByRole('button', { name, exact: true }).waitFor();
+    assert.equal(await page.locator('header.top').getAttribute('data-tauri-drag-region'), '');
     await shot(page, 'home');
   } finally {
     await close();
