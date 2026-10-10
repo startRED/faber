@@ -290,6 +290,16 @@ export function createEngine(opts: EngineOptions, emit: (event: AppEvent) => voi
       rmSync(join(opts.dataDir, 'attachments', id), { recursive: true, force: true });
       emit({ type: 'list' });
     },
+    // How to continue this conversation in the CLI's own terminal interface, with the vendor that answered last.
+    terminal(conversationId: string): { command: string; args: string[]; cwd: string } | undefined {
+      const c = load(conversationId);
+      const vendor = c?.messages.findLast((m) => m.vendor)?.vendor;
+      const session = vendor && c?.sessions[vendor];
+      const cli = vendor && opts.clis[vendor];
+      if (!c || !vendor || !session || !cli) return undefined;
+      const resume = vendor === 'claude' ? ['--resume', session] : ['resume', session];
+      return { command: cli.command, args: [...cli.prefix, ...resume], cwd: cwdOf(c) };
+    },
     // The absolute path of a file in a chat workspace, or undefined if the path points outside it.
     workspaceFile(conversationId: string, path: string): string | undefined {
       const full = insideFolder(workspaceOf(conversationId), path);

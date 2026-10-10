@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { createEngine, type AppEvent, type Engine } from '../engine/engine.ts';
 import { resolveCli, type Cli } from '../engine/resolve-cli.ts';
 import type { Vendor } from '../engine/store.ts';
+import { openTerminal } from './terminal.ts';
 import { updateMode } from './update-policy.ts';
 
 const { autoUpdater } = electronUpdater;
@@ -67,6 +68,12 @@ async function call(method: string, arg: any): Promise<unknown> {
       const target = await dialog.showSaveDialog(win, { defaultPath: basename(source) });
       if (target.canceled || !target.filePath) return false;
       await copyFile(source, target.filePath);
+      return true;
+    }
+    case 'openTerminal': {
+      const command = engine.terminal(arg);
+      if (!command) return false;
+      openTerminal(command);
       return true;
     }
     case 'showFile': {

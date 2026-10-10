@@ -152,6 +152,9 @@ const Answer = memo(function Answer({ m, prompt, conversationId, vendors, onAnsw
               ))}
             </select>
           )}
+          <button onClick={() => void api.openTerminal(conversationId)} title="Continue this conversation in the CLI's own terminal">
+            Open in terminal
+          </button>
           <span>{usage(m)}</span>
         </div>
       )}

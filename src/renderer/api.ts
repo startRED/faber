@@ -31,6 +31,7 @@ export const api = {
   rename: (id: string, title: string) => bridge.call('rename', { id, title }),
   remove: (id: string) => bridge.call('remove', id),
   saveFile: (conversationId: string, path: string) => bridge.call('saveFile', { conversationId, path }) as Promise<boolean>,
+  openTerminal: (conversationId: string) => bridge.call('openTerminal', conversationId) as Promise<boolean>,
   showFile: (conversationId: string, path: string) => bridge.call('showFile', { conversationId, path }),
   readImage: (conversationId: string, path: string) => bridge.call('readImage', { conversationId, path }) as Promise<string | undefined>,
   addProject: () => bridge.call('addProject') as Promise<Project | undefined>,

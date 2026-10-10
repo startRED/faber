@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { createEngine, withHistory, type AppEvent } from '../src/engine/engine.ts';
 import { resolveCli } from '../src/engine/resolve-cli.ts';
 import { pickModel } from '../src/engine/router.ts';
+import { openTerminal } from '../src/main/terminal.ts';
 import type { Message } from '../src/engine/store.ts';
 import { fixture, replay } from './support/replay.ts';
 
@@ -215,6 +216,21 @@ test('editing a message branches into a new conversation and leaves the original
   assert.deepEqual(branch.branchOf, { conversationId: id, messageId: first.id });
   assert.equal(branch.messages.length, 2);
   assert.equal(readFileSync(join(dir, 'chat', branchId, 'notes.txt'), 'utf8'), 'made earlier');
+});
+
+test('"Open in terminal" resumes the same CLI session in the conversation folder; shell characters are refused', { timeout: 5000 }, async () => {
+  const dir = dataDir();
+  const { engine, done } = engineWith(dir, 'chat', { args: [] });
+  const id = engine.send({ area: 'chat', text: 'In one sentence: why is the sky blue?', choice: { vendor: 'claude', model: 'haiku' } });
+  await done;
+  engine.shutdown();
+  assert.deepEqual(engine.terminal(id), {
+    command: 'claude',
+    args: ['--resume', 'c5b9834c-dfc7-4086-beed-2212be93b722'],
+    cwd: join(dir, 'chat', id),
+  });
+  assert.equal(engine.terminal('missing'), undefined);
+  assert.throws(() => openTerminal({ command: 'claude', args: ['--resume', 'x & del *'], cwd: dir }), /Refusing/);
 });
 
 test('a model joining midway gets the earlier conversation as text', () => {
