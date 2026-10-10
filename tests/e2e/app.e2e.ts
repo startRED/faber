@@ -221,6 +221,11 @@ test('a conversation with a thousand messages opens quickly and stays within the
     await page.locator('.list .item', { hasText: 'Long one' }).click();
     await page.locator('article.ai').last().waitFor();
     const openMs = Date.now() - started;
+    const drawn = await page.locator('article.ai').count();
+    assert.ok(drawn <= 25, `${drawn} answers drawn at once`);
+    // Scrolling up draws the earlier messages, keeping the reader's place.
+    await page.locator('.thread').evaluate((el) => (el.scrollTop = 0));
+    await page.waitForFunction((n) => document.querySelectorAll('article.ai').length > n, drawn);
     await sleep(2000);
     const mb = memoryMb(pid);
     console.log(`1000 messages: opened in ${openMs} ms, ${mb} MB`);

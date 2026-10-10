@@ -232,11 +232,13 @@ function Mine(props: { m: Accessor<Message>; onBranch: OnBranch }) {
 }
 
 // Messages only grow at the end, so each position keeps its component while the answer streams into it.
-export function Thread(props: Shared & { messages: Message[] }) {
+// Only the messages from `from` on are drawn.
+export function Thread(props: Shared & { messages: Message[]; from: number }) {
+  const prompt = (at: number) => (props.messages[at - 1]?.role === 'user' ? props.messages[at - 1] : undefined);
   return (
-    <Index each={props.messages}>
+    <Index each={props.messages.slice(props.from)}>
       {(m, i) => (
-        <Show when={m().role === 'user'} fallback={<Answer {...props} m={m} prompt={props.messages[i - 1]?.role === 'user' ? props.messages[i - 1] : undefined} />}>
+        <Show when={m().role === 'user'} fallback={<Answer {...props} m={m} prompt={prompt(props.from + i)} />}>
           <Mine m={m} onBranch={props.onBranch} />
         </Show>
       )}

@@ -30,6 +30,9 @@ function remember(key: string, value: unknown) {
 // Where the user was, so the screen rebuilt after closing to the tray opens in the same place.
 type Place = { area: Area; projectId?: string; id?: string };
 
+// A long conversation draws only its latest messages, and more as the user scrolls up, so memory stays flat.
+const PAGE = 40;
+
 function untilReset(resetsAt: number): string {
   const hours = (resetsAt * 1000 - Date.now()) / 3_600_000;
   if (hours <= 0) return t('quota.now');
@@ -59,6 +62,7 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = createSignal(false);
   const [appearance, setAppearance] = createSignal<Appearance>(toAppearance(undefined));
   const [confirming, setConfirming] = createSignal<string>();
+  const [from, setFrom] = createSignal(0);
   let currentId: string | undefined;
   let thread: HTMLDivElement | undefined;
   let stick = true;
@@ -119,7 +123,19 @@ export function App() {
     remember('faber.place', { area: area(), projectId: projectId(), id } satisfies Place);
     setError(undefined);
     stick = true;
-    setCurrent((id ? await api.open(id) : undefined) ?? undefined);
+    const c = (id ? await api.open(id) : undefined) ?? undefined;
+    setFrom(Math.max(0, (c?.messages.length ?? 0) - PAGE));
+    setCurrent(c);
+  };
+
+  const onScroll = (el: HTMLDivElement) => {
+    stick = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    if (el.scrollTop < 400 && from() > 0) {
+      // The earlier messages appear above; keep what the user is reading in place.
+      const before = el.scrollHeight;
+      setFrom((f) => Math.max(0, f - PAGE));
+      el.scrollTop += el.scrollHeight - before;
+    }
   };
 
   const pickChoice = (c: Choice) => {
@@ -273,12 +289,13 @@ export function App() {
             </div>
           </aside>
           <main class="main">
-            <div class="thread" ref={(el) => (thread = el)} onScroll={(e) => (stick = e.currentTarget.scrollHeight - e.currentTarget.scrollTop - e.currentTarget.clientHeight < 40)}>
+            <div class="thread" ref={(el) => (thread = el)} onScroll={(e) => onScroll(e.currentTarget)}>
               <div class="col">
                 <Show when={current()?.messages.length ? current() : undefined} fallback={<Empty loaded={loaded()} vendors={state().vendors.length} area={area()} project={project()} />}>
                   {(c) => (
                     <Thread
                       messages={c().messages}
+                      from={from()}
                       conversationId={c().id}
                       options={options()}
                       onAnswer={(requestId, allow, always) => void api.answer(c().id, requestId, allow, always)}
