@@ -233,6 +233,22 @@ test('"Open in terminal" resumes the same CLI session in the conversation folder
   assert.throws(() => openTerminal({ command: 'claude', args: ['--resume', 'x & del *'], cwd: dir }), /Refusing/);
 });
 
+test('the hooks choice is saved and restarts idle project CLIs with it', () => {
+  const dir = dataDir();
+  const seen = { args: [] as string[] };
+  const { engine } = engineWith(dir, 'chat', seen);
+  const project = engine.addProject(dir);
+  const warm = () => engine.warm({ area: 'project', projectId: project.id, choice: { vendor: 'claude' } });
+  warm();
+  assert.match(seen.args.join(' '), /disableAllHooks/);
+  engine.saveSettings({ userHooks: true });
+  warm();
+  assert.doesNotMatch(seen.args.join(' '), /disableAllHooks/);
+  engine.saveSettings({ appearance: { mode: 'light' } });
+  engine.shutdown();
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, 'settings.json'), 'utf8')), { userHooks: true, appearance: { mode: 'light' } });
+});
+
 test('a model joining midway gets the earlier conversation as text', () => {
   const text = withHistory(
     [

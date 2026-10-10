@@ -12,6 +12,7 @@ export interface CodexLaunch {
   model?: string;
   effort?: string;
   resume?: string;
+  userHooks?: boolean;
 }
 
 // One `codex app-server` process per conversation, spoken to over JSON-RPC on stdio.
@@ -19,8 +20,8 @@ export function startCodex(
   opts: { bin: string; cwd: string; launch: CodexLaunch; platform?: NodeJS.Platform; spawn?: Spawner },
   onEvent: (event: EngineEvent) => void,
 ): Session {
-  const { area, model, effort, resume } = opts.launch;
-  const proc = (opts.spawn ?? realSpawn)(opts.bin, codexArgs(area, opts.platform ?? process.platform), opts.cwd);
+  const { area, model, effort, resume, userHooks } = opts.launch;
+  const proc = (opts.spawn ?? realSpawn)(opts.bin, codexArgs(area, opts.platform ?? process.platform, userHooks), opts.cwd);
   const tail = stderrTail(proc);
   const waiting = new Map<number, (msg: Json) => void>();
   const approvals = new Map<string, number | string>();

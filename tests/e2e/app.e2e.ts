@@ -9,11 +9,11 @@ import { _electron as electron } from 'playwright-core';
 const here = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 
 // Launches the built app offscreen with its own data folder. `claude` is a recorded session to replay, if any.
-async function launch(claude?: string) {
+async function launch(claude?: string, dataDir = mkdtempSync(join(tmpdir(), 'faber-e2e-'))) {
   // Linux CI runners cannot use Chromium's setuid sandbox helper.
   const args = process.platform === 'linux' && process.env.CI ? ['.', '--no-sandbox'] : ['.'];
   const cli = claude ? JSON.stringify({ command: process.execPath, prefix: [here('../support/fake-cli.ts'), here(`../fixtures/claude/${claude}.jsonl`)] }) : '';
-  const env = { ...process.env, FABER_HIDDEN: '1', FABER_DATA_DIR: mkdtempSync(join(tmpdir(), 'faber-e2e-')), FABER_CLI_CLAUDE: cli, FABER_CLI_CODEX: '' };
+  const env = { ...process.env, FABER_HIDDEN: '1', FABER_DATA_DIR: dataDir, FABER_CLI_CLAUDE: cli, FABER_CLI_CODEX: '' };
   const app = await electron.launch({ args, env });
   const window = await app.firstWindow();
   return { app, window };
@@ -79,6 +79,36 @@ test('with no AI installed, the app says what to do', async () => {
   try {
     await window.getByRole('heading', { name: 'No AI found' }).waitFor();
     assert.equal(await window.getByRole('button', { name: 'Send' }).isDisabled(), true);
+  } finally {
+    await app.close();
+  }
+});
+
+test('appearance changes apply at once and are kept after reopening', async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'faber-e2e-'));
+  const bg = (window: Awaited<ReturnType<typeof launch>>['window']) => window.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  let { app, window } = await launch('chat', dataDir);
+  try {
+    await window.getByRole('button', { name: 'Settings' }).click();
+    await window.getByRole('heading', { name: 'Appearance' }).waitFor();
+    await window.getByRole('button', { name: 'Light' }).click();
+    assert.equal(await bg(window), 'rgb(246, 247, 249)');
+    await window.getByRole('button', { name: 'Cockpit' }).click();
+    assert.equal(await bg(window), 'rgb(0, 0, 0)');
+    assert.equal(await window.getByRole('button', { name: 'Compact' }).getAttribute('aria-pressed'), 'true');
+    await shot(window, 'settings-cockpit');
+    await window.getByRole('button', { name: 'Projects' }).last().click();
+    await window.getByRole('checkbox').check();
+  } finally {
+    await app.close();
+  }
+  ({ app, window } = await launch('chat', dataDir));
+  try {
+    await window.getByRole('heading', { name: 'What can I help with?' }).waitFor();
+    await window.waitForFunction(() => getComputedStyle(document.body).backgroundColor === 'rgb(0, 0, 0)');
+    await window.keyboard.press('Control+,');
+    await window.getByRole('button', { name: 'Projects' }).last().click();
+    assert.equal(await window.getByRole('checkbox').isChecked(), true);
   } finally {
     await app.close();
   }

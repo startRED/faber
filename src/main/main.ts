@@ -62,6 +62,8 @@ async function call(method: string, arg: any): Promise<unknown> {
       return engine.remove(arg);
     case 'removeProject':
       return engine.removeProject(arg);
+    case 'saveSettings':
+      return engine.saveSettings(arg);
     case 'saveFile': {
       const source = engine.workspaceFile(arg.conversationId, arg.path);
       if (!source || !win) return false;

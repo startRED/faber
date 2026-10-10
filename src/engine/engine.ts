@@ -8,7 +8,7 @@ import type { EngineEvent, Session } from './events.ts';
 import { realSpawn, type Spawner } from './proc.ts';
 import type { Cli } from './resolve-cli.ts';
 import { pickModel, type Choice, type Pick } from './router.ts';
-import { createStore, type Conversation, type Message, type Project, type Summary, type Vendor } from './store.ts';
+import { createStore, type Conversation, type Message, type Project, type Settings, type Summary, type Vendor } from './store.ts';
 import { insideFolder, newFiles, saveFiles } from './workspace.ts';
 
 export type AppEvent =
@@ -167,10 +167,11 @@ export function createEngine(opts: EngineOptions, emit: (event: AppEvent) => voi
     const entry = { vendor, model, effort, conversation: c } as Live;
     const onEvent = (e: EngineEvent) => handle(entry, e);
     const common = { bin: cli.command, cwd: cwdOf(c), spawn };
+    const base = { area: c.area, model, effort, userHooks: store.settings().userHooks };
     entry.session =
       vendor === 'claude'
-        ? startClaude({ ...common, launch: { area: c.area, model, effort, resume: c.sessions.claude } }, onEvent)
-        : startCodex({ ...common, platform: opts.platform, launch: { area: c.area, model, effort, resume: c.sessions.codex } }, onEvent);
+        ? startClaude({ ...common, launch: { ...base, resume: c.sessions.claude } }, onEvent)
+        : startCodex({ ...common, platform: opts.platform, launch: { ...base, resume: c.sessions.codex } }, onEvent);
     live.delete(c.id);
     live.set(c.id, entry);
     // ponytail: count-based warm limit; switch to the visible RAM budget once memory is measured.
@@ -191,8 +192,23 @@ export function createEngine(opts: EngineOptions, emit: (event: AppEvent) => voi
 
   const engine = {
     vendors,
-    state(): { conversations: Summary[]; projects: Project[]; vendors: Vendor[] } {
-      return { conversations: store.list().filter((c) => c.title), projects: store.projects(), vendors };
+    state(): { conversations: Summary[]; projects: Project[]; vendors: Vendor[]; settings: Settings } {
+      return { conversations: store.list().filter((c) => c.title), projects: store.projects(), vendors, settings: store.settings() };
+    },
+    saveSettings(patch: Settings): Settings {
+      const before = store.settings();
+      const settings = { ...before, ...patch };
+      store.saveSettings(settings);
+      // Idle project CLIs restart on their next turn, so a changed hooks choice applies right away.
+      if (settings.userHooks !== before.userHooks) {
+        for (const [id, l] of live) {
+          if (l.conversation.area === 'project' && !l.turn) {
+            l.session.close();
+            live.delete(id);
+          }
+        }
+      }
+      return settings;
     },
     open(id: string): Conversation | undefined {
       return load(id);

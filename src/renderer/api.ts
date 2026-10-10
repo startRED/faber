@@ -1,14 +1,15 @@
 import type { AppEvent, SendRequest } from '../engine/engine.ts';
 import type { Choice } from '../engine/router.ts';
-import type { Conversation, Project, Summary, Vendor } from '../engine/store.ts';
+import type { Conversation, Project, Settings, Summary, Vendor } from '../engine/store.ts';
 
-export type { AppEvent, Choice, Conversation, Project, Summary, Vendor };
+export type { AppEvent, Choice, Conversation, Project, Settings, Summary, Vendor };
 export type { Message, ToolUse } from '../engine/store.ts';
 
 export interface AppState {
   conversations: Summary[];
   projects: Project[];
   vendors: Vendor[];
+  settings: Settings;
 }
 
 interface Bridge {
@@ -36,5 +37,6 @@ export const api = {
   readImage: (conversationId: string, path: string) => bridge.call('readImage', { conversationId, path }) as Promise<string | undefined>,
   addProject: () => bridge.call('addProject') as Promise<Project | undefined>,
   removeProject: (id: string) => bridge.call('removeProject', id),
+  saveSettings: (patch: Settings) => bridge.call('saveSettings', patch) as Promise<Settings>,
   on: (listener: (event: AppEvent) => void) => bridge.on(listener),
 };

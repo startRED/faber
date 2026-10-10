@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api, type AppState, type Choice, type Conversation, type Message, type Vendor } from './api.ts';
+import { applyAppearance, followSystem, toAppearance, type Appearance } from './appearance.ts';
 import { Composer, type Draft } from './Composer.tsx';
 import { vendorName } from './models.ts';
+import { Settings } from './Settings.tsx';
 import { Thread } from './Thread.tsx';
 
 type Area = 'chat' | 'project';
@@ -28,7 +30,7 @@ function upsert(c: Conversation, m: Message): Conversation {
 }
 
 export function App({ version }: { version: string }) {
-  const [state, setState] = useState<AppState>({ conversations: [], projects: [], vendors: [] });
+  const [state, setState] = useState<AppState>({ conversations: [], projects: [], vendors: [], settings: {} });
   const [loaded, setLoaded] = useState(false);
   const [area, setArea] = useState<Area>('chat');
   const [projectId, setProjectId] = useState<string>();
@@ -36,11 +38,23 @@ export function App({ version }: { version: string }) {
   const [choice, setChoice] = useState<Choice>(loadChoice);
   const [quotas, setQuotas] = useState<Record<string, Quota>>({});
   const [error, setError] = useState<string>();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [appearance, setAppearance] = useState<Appearance>(() => toAppearance(undefined));
+  const appearanceRef = useRef(appearance);
   const currentId = useRef<string | undefined>(undefined);
   const thread = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
 
   const refresh = useCallback(() => api.state().then((s) => (setState(s), setLoaded(true))), []);
+  useEffect(() => {
+    void api.state().then((s) => {
+      const a = toAppearance(s.settings.appearance);
+      appearanceRef.current = a;
+      setAppearance(a);
+      applyAppearance(a);
+    });
+    return followSystem(() => appearanceRef.current);
+  }, []);
   useEffect(() => {
     void refresh();
     return api.on((e) => {
@@ -67,8 +81,11 @@ export function App({ version }: { version: string }) {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
         e.preventDefault();
+        setSettingsOpen(false);
         void open(undefined);
       }
+      if ((e.ctrlKey || e.metaKey) && e.key === ',') setSettingsOpen(true);
+      if (e.key === 'Escape') setSettingsOpen(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -104,7 +121,19 @@ export function App({ version }: { version: string }) {
     }
   };
 
+  const changeAppearance = (a: Appearance) => {
+    appearanceRef.current = a;
+    setAppearance(a);
+    applyAppearance(a);
+    void api.saveSettings({ appearance: { ...a } });
+  };
+  const saveSettings = async (patch: AppState['settings']) => {
+    const settings = await api.saveSettings(patch);
+    setState((s) => ({ ...s, settings }));
+  };
+
   const switchArea = (next: Area) => {
+    setSettingsOpen(false);
     setArea(next);
     void open(undefined);
   };
@@ -147,102 +176,109 @@ export function App({ version }: { version: string }) {
             </span>
           ))}
         </div>
+        <button className="gear" aria-pressed={settingsOpen} onClick={() => setSettingsOpen((o) => !o)} title="Settings (Ctrl ,)">
+          Settings
+        </button>
       </header>
-      <div className="body">
-        <aside className="side">
-          <nav className="nav">
-            {area === 'chat' ? (
-              <button className="item" onClick={() => void open(undefined)}>
-                <span>+ New chat</span>
-                <kbd>Ctrl N</kbd>
-              </button>
-            ) : (
-              <>
-                <button className="item" onClick={() => void addProject()}>
-                  <span>+ Add project folder</span>
+      {settingsOpen ? (
+        <Settings appearance={appearance} saved={state.settings} onAppearance={changeAppearance} onSave={(p) => void saveSettings(p)} onClose={() => setSettingsOpen(false)} />
+      ) : (
+        <div className="body">
+          <aside className="side">
+            <nav className="nav">
+              {area === 'chat' ? (
+                <button className="item" onClick={() => void open(undefined)}>
+                  <span>+ New chat</span>
+                  <kbd>Ctrl N</kbd>
                 </button>
-                {state.projects.map((p) => (
-                  <button key={p.id} className="item" aria-current={p.id === projectId} title={p.path} onClick={() => (setProjectId(p.id), void open(undefined))}>
-                    <span>{p.name}</span>
-                  </button>
-                ))}
-                {project && (
-                  <button className="item" onClick={() => void open(undefined)}>
-                    <span>+ New conversation</span>
-                  </button>
-                )}
-              </>
-            )}
-          </nav>
-          <div className="list">
-            {list.length > 0 && <small>{area === 'chat' ? 'Chats' : project?.name}</small>}
-            {list.map((c) => (
-              <div key={c.id} className="item" aria-current={c.id === current?.id} role="button" tabIndex={0} onClick={() => void open(c.id)} onKeyDown={(e) => e.key === 'Enter' && void open(c.id)}>
-                <span>{c.title}</span>
-                <button className="x" aria-label={`Delete ${c.title}`} onClick={(e) => (e.stopPropagation(), void remove(c.id))}>
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-          <div className="foot">
-            {state.vendors.length ? state.vendors.map(vendorName).join(' · ') : 'No AI connected'} · v{version}
-          </div>
-        </aside>
-        <main className="main">
-          <div className="thread" ref={thread} onScroll={(e) => (stick.current = e.currentTarget.scrollHeight - e.currentTarget.scrollTop - e.currentTarget.clientHeight < 40)}>
-            <div className="col">
-              {current?.messages.length ? (
-                <Thread
-                  messages={current.messages}
-                  conversationId={current.id}
-                  vendors={state.vendors}
-                  onAnswer={(requestId, allow, always) => void api.answer(current.id, requestId, allow, always)}
-                  onBranch={(messageId, text, picked) => void branch(messageId, text, picked ?? choice)}
-                />
               ) : (
-                <div className="empty">
-                  {!loaded ? null : state.vendors.length === 0 ? (
-                    <>
-                      <h1>No AI found</h1>
-                      <p>Install Claude Code or Codex and sign in with your subscription, then reopen Faber.</p>
-                    </>
-                  ) : needsProject ? (
-                    <>
-                      <h1>Open a project</h1>
-                      <p>Add a folder and Faber works inside it, like a coding agent.</p>
-                    </>
-                  ) : area === 'project' ? (
-                    <>
-                      <h1>{project?.name}</h1>
-                      <p>Faber works inside {project?.path}</p>
-                    </>
-                  ) : (
-                    <>
-                      <h1>What can I help with?</h1>
-                      <p>Chat never changes files on your computer.</p>
-                    </>
+                <>
+                  <button className="item" onClick={() => void addProject()}>
+                    <span>+ Add project folder</span>
+                  </button>
+                  {state.projects.map((p) => (
+                    <button key={p.id} className="item" aria-current={p.id === projectId} title={p.path} onClick={() => (setProjectId(p.id), void open(undefined))}>
+                      <span>{p.name}</span>
+                    </button>
+                  ))}
+                  {project && (
+                    <button className="item" onClick={() => void open(undefined)}>
+                      <span>+ New conversation</span>
+                    </button>
                   )}
-                </div>
+                </>
               )}
-              {error && <div className="note err" role="alert">{error}</div>}
+            </nav>
+            <div className="list">
+              {list.length > 0 && <small>{area === 'chat' ? 'Chats' : project?.name}</small>}
+              {list.map((c) => (
+                <div key={c.id} className="item" aria-current={c.id === current?.id} role="button" tabIndex={0} onClick={() => void open(c.id)} onKeyDown={(e) => e.key === 'Enter' && void open(c.id)}>
+                  <span>{c.title}</span>
+                  <button className="x" aria-label={`Delete ${c.title}`} onClick={(e) => (e.stopPropagation(), void remove(c.id))}>
+                    ×
+                  </button>
+                </div>
+              ))}
             </div>
-          </div>
-          {!needsProject && (
-            <Composer
-              key={current?.id ?? `new-${area}-${projectId}`}
-              vendors={state.vendors}
-              choice={choice}
-              onChoice={pickChoice}
-              busy={busy}
-              placeholder={area === 'chat' ? 'Ask anything' : 'Ask Faber to do something in this folder'}
-              onSend={(d) => void send(d)}
-              onStop={() => current && void api.interrupt(current.id)}
-              onWarm={() => void api.warm({ conversationId: current?.id, area, projectId: area === 'project' ? projectId : undefined, choice })}
-            />
-          )}
-        </main>
-      </div>
+            <div className="foot">
+              {state.vendors.length ? state.vendors.map(vendorName).join(' · ') : 'No AI connected'} · v{version}
+            </div>
+          </aside>
+          <main className="main">
+            <div className="thread" ref={thread} onScroll={(e) => (stick.current = e.currentTarget.scrollHeight - e.currentTarget.scrollTop - e.currentTarget.clientHeight < 40)}>
+              <div className="col">
+                {current?.messages.length ? (
+                  <Thread
+                    messages={current.messages}
+                    conversationId={current.id}
+                    vendors={state.vendors}
+                    onAnswer={(requestId, allow, always) => void api.answer(current.id, requestId, allow, always)}
+                    onBranch={(messageId, text, picked) => void branch(messageId, text, picked ?? choice)}
+                  />
+                ) : (
+                  <div className="empty">
+                    {!loaded ? null : state.vendors.length === 0 ? (
+                      <>
+                        <h1>No AI found</h1>
+                        <p>Install Claude Code or Codex and sign in with your subscription, then reopen Faber.</p>
+                      </>
+                    ) : needsProject ? (
+                      <>
+                        <h1>Open a project</h1>
+                        <p>Add a folder and Faber works inside it, like a coding agent.</p>
+                      </>
+                    ) : area === 'project' ? (
+                      <>
+                        <h1>{project?.name}</h1>
+                        <p>Faber works inside {project?.path}</p>
+                      </>
+                    ) : (
+                      <>
+                        <h1>What can I help with?</h1>
+                        <p>Chat never changes files on your computer.</p>
+                      </>
+                    )}
+                  </div>
+                )}
+                {error && <div className="note err" role="alert">{error}</div>}
+              </div>
+            </div>
+            {!needsProject && (
+              <Composer
+                key={current?.id ?? `new-${area}-${projectId}`}
+                vendors={state.vendors}
+                choice={choice}
+                onChoice={pickChoice}
+                busy={busy}
+                placeholder={area === 'chat' ? 'Ask anything' : 'Ask Faber to do something in this folder'}
+                onSend={(d) => void send(d)}
+                onStop={() => current && void api.interrupt(current.id)}
+                onWarm={() => void api.warm({ conversationId: current?.id, area, projectId: area === 'project' ? projectId : undefined, choice })}
+              />
+            )}
+          </main>
+        </div>
+      )}
     </div>
   );
 }

@@ -59,6 +59,13 @@ export interface Project {
 
 export type Summary = Pick<Conversation, 'id' | 'title' | 'area' | 'projectId' | 'updatedAt'>;
 
+// The user's choices, in one plain file. Appearance belongs to the screen, so the engine only keeps it.
+export interface Settings {
+  appearance?: Record<string, string | null>;
+  // Projects run the user's own CLI hooks too (off by default: a hook can block or slow every turn).
+  userHooks?: boolean;
+}
+
 // Plain JSON files in the app's data folder: readable by people and by any future tool.
 // Writes go to a temp file first, so a crash never leaves a half-written conversation.
 export function createStore(dataDir: string) {
@@ -76,6 +83,7 @@ export function createStore(dataDir: string) {
     }
   };
   const projectsFile = join(dataDir, 'projects.json');
+  const settingsFile = join(dataDir, 'settings.json');
 
   return {
     list(): Summary[] {
@@ -100,6 +108,12 @@ export function createStore(dataDir: string) {
     },
     saveProjects(projects: Project[]): void {
       write(projectsFile, projects);
+    },
+    settings(): Settings {
+      return read<Settings>(settingsFile, {});
+    },
+    saveSettings(settings: Settings): void {
+      write(settingsFile, settings);
     },
   };
 }
