@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { Area } from './claude/args.ts';
 import { startClaude } from './claude/session.ts';
@@ -189,7 +189,7 @@ export function createEngine(opts: EngineOptions, emit: (event: AppEvent) => voi
   // A new conversation still being typed: its CLI starts before the first message is sent.
   let draft: Conversation | undefined;
 
-  return {
+  const engine = {
     vendors,
     state(): { conversations: Summary[]; projects: Project[]; vendors: Vendor[] } {
       return { conversations: store.list().filter((c) => c.title), projects: store.projects(), vendors };
@@ -223,6 +223,20 @@ export function createEngine(opts: EngineOptions, emit: (event: AppEvent) => voi
       entry.session.send({ text: joiningLate ? withHistory(history, text) : text, images: req.images });
       push(c.id, reply, true);
       return c.id;
+    },
+    // Edit a message or redo an answer with another model: a new conversation keeps everything before that message,
+    // with the chat workspace copied, and sends the new text. The original stays as it was.
+    branch(req: { conversationId: string; messageId: string; text: string; choice: Choice }): string {
+      const source = load(req.conversationId);
+      const at = source?.messages.findIndex((m) => m.id === req.messageId) ?? -1;
+      if (!source || at < 0) throw new Error('That message is no longer in this conversation.');
+      const c = blank(source.area, source.projectId, now());
+      c.title = `↳ ${source.title.replace(/^↳ /, '')}`;
+      c.branchOf = { conversationId: source.id, messageId: req.messageId };
+      c.messages = source.messages.slice(0, at).map((m) => ({ ...m, permissions: undefined, status: m.status === 'streaming' ? 'stopped' : m.status }));
+      if (source.area === 'chat' && existsSync(workspaceOf(source.id))) cpSync(workspaceOf(source.id), workspaceOf(c.id), { recursive: true });
+      store.save(c);
+      return engine.send({ conversationId: c.id, area: c.area, projectId: c.projectId, text: req.text, choice: req.choice });
     },
     // Starts the CLI before the user finishes typing, so the first word arrives sooner.
     warm(req: { conversationId?: string; area: Area; projectId?: string; choice: Choice }): void {
@@ -299,6 +313,7 @@ export function createEngine(opts: EngineOptions, emit: (event: AppEvent) => voi
       live.clear();
     },
   };
+  return engine;
 }
 
 export type Engine = ReturnType<typeof createEngine>;

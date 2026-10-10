@@ -44,6 +44,8 @@ export interface Conversation {
   sessions: Partial<Record<Vendor, string>>;
   // Tools the user chose to always allow in this conversation.
   allowAlways?: string[];
+  // Set when this conversation was branched from another one at a message.
+  branchOf?: { conversationId: string; messageId: string };
   createdAt: number;
   updatedAt: number;
   messages: Message[];

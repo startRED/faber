@@ -56,6 +56,24 @@ test('a chat streams an answer with the model and the reason, and lands in the s
   }
 });
 
+test('editing a message sends it as a branch and keeps the original conversation', async () => {
+  const { app, window } = await launch('chat');
+  try {
+    const question = 'In one sentence: why is the sky blue?';
+    await window.getByLabel('Message').fill(question);
+    await window.getByLabel('Message').press('Enter');
+    await window.getByRole('article', { name: 'Answer' }).locator('.actions').waitFor();
+    await window.locator('.you').hover();
+    await window.getByRole('button', { name: 'Edit message' }).click();
+    await window.getByRole('button', { name: 'Send as a branch' }).click();
+    await window.getByRole('article', { name: 'Answer' }).locator('.actions').waitFor();
+    await window.waitForFunction(() => document.querySelectorAll('.list .item').length === 2);
+    await shot(window, 'branch');
+  } finally {
+    await app.close();
+  }
+});
+
 test('with no AI installed, the app says what to do', async () => {
   const { app, window } = await launch();
   try {

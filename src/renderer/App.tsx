@@ -94,6 +94,16 @@ export function App({ version }: { version: string }) {
     }
   };
 
+  const branch = async (messageId: string, text: string, picked: Choice) => {
+    if (!current) return;
+    setError(undefined);
+    try {
+      await open(await api.branch({ conversationId: current.id, messageId, text, choice: picked }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message.replace(/^Error invoking remote method 'faber': (Error: )?/, '') : String(err));
+    }
+  };
+
   const switchArea = (next: Area) => {
     setArea(next);
     void open(undefined);
@@ -183,7 +193,13 @@ export function App({ version }: { version: string }) {
           <div className="thread" ref={thread} onScroll={(e) => (stick.current = e.currentTarget.scrollHeight - e.currentTarget.scrollTop - e.currentTarget.clientHeight < 40)}>
             <div className="col">
               {current?.messages.length ? (
-                <Thread messages={current.messages} conversationId={current.id} onAnswer={(requestId, allow, always) => void api.answer(current.id, requestId, allow, always)} />
+                <Thread
+                  messages={current.messages}
+                  conversationId={current.id}
+                  vendors={state.vendors}
+                  onAnswer={(requestId, allow, always) => void api.answer(current.id, requestId, allow, always)}
+                  onBranch={(messageId, text, picked) => void branch(messageId, text, picked ?? choice)}
+                />
               ) : (
                 <div className="empty">
                   {!loaded ? null : state.vendors.length === 0 ? (

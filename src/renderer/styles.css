@@ -95,6 +95,13 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 .actions { display: flex; gap: 14px; align-items: center; font-family: var(--ui); font-size: 11px; color: var(--muted); }
 .actions button { border: 0; background: none; color: var(--muted); padding: 0; }
 .actions button:hover { color: var(--fg); }
+.redo { appearance: none; border: 0; background: none; color: var(--muted); font: inherit; padding: 0; cursor: pointer; }
+.redo:hover { color: var(--fg); }
+.you { position: relative; }
+.you .edit { position: absolute; left: -44px; top: 10px; border: 0; background: none; color: var(--muted); font-family: var(--ui); font-size: 11px; visibility: hidden; }
+.you:hover .edit, .you .edit:focus-visible { visibility: visible; }
+.you.editing { width: 80%; display: grid; gap: 8px; }
+.you.editing textarea { resize: vertical; border: 0; outline: none; background: none; line-height: 1.5; }
 
 .composer { max-width: 760px; width: calc(100% - 32px); margin: 0 auto 18px; padding: 12px 14px; display: grid; gap: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: calc(var(--radius) + 6px); }
 .composer textarea { resize: none; border: 0; outline: none; background: none; max-height: 240px; line-height: 1.5; padding: 0; }

@@ -23,6 +23,7 @@ export const api = {
   state: () => bridge.call('state') as Promise<AppState>,
   open: (id: string) => bridge.call('open', id) as Promise<Conversation | undefined>,
   send: (req: SendRequest) => bridge.call('send', req) as Promise<string>,
+  branch: (req: { conversationId: string; messageId: string; text: string; choice: Choice }) => bridge.call('branch', req) as Promise<string>,
   warm: (req: { conversationId?: string; area: 'chat' | 'project'; projectId?: string; choice: Choice }) => bridge.call('warm', req),
   interrupt: (id: string) => bridge.call('interrupt', id),
   answer: (conversationId: string, requestId: string, allow: boolean, always = false) =>

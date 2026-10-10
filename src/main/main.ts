@@ -47,6 +47,8 @@ async function call(method: string, arg: any): Promise<unknown> {
       return engine.open(arg);
     case 'send':
       return engine.send(arg);
+    case 'branch':
+      return engine.branch(arg);
     case 'warm':
       return engine.warm(arg);
     case 'interrupt':

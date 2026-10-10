@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createEngine, withHistory, type AppEvent } from '../src/engine/engine.ts';
@@ -62,7 +62,7 @@ test('after reopening the app, the conversation resumes its CLI session', { time
   const file = join(dir, 'conversations', `${id}.json`);
   const saved = JSON.parse(readFileSync(file, 'utf8'));
   saved.sessions.claude = '3ee0bd99-72d2-4c5b-8420-a9f85ee53981';
-  (await import('node:fs')).writeFileSync(file, JSON.stringify(saved));
+  writeFileSync(file, JSON.stringify(saved));
 
   const seen = { args: [] as string[] };
   const second = engineWith(dir, 'resume', seen);
@@ -185,6 +185,36 @@ test('text blocks around a tool are kept apart', { timeout: 5000 }, async () => 
   const [commentary, final] = reply.text.split('\n\n');
   assert.match(commentary!, /a\.txt/);
   assert.ok(final && final.length > 0, `expected two blocks in: ${reply.text}`);
+});
+
+test('editing a message branches into a new conversation and leaves the original as it was', { timeout: 5000 }, async () => {
+  const dir = dataDir();
+  const dones: Message[] = [];
+  let next: () => void = () => {};
+  const engine = createEngine({ dataDir: dir, clis: { claude: { command: 'claude', prefix: [] } }, spawn: () => replay(fixture('claude', 'chat')) }, (e) => {
+    if (e.type === 'message' && e.message.status !== 'streaming') {
+      dones.push(e.message);
+      next();
+    }
+  });
+  const wait = () => new Promise<void>((r) => (next = r));
+  const text = 'In one sentence: why is the sky blue?';
+  const choice = { vendor: 'claude', model: 'haiku' } as const;
+  let done = wait();
+  const id = engine.send({ area: 'chat', text, choice });
+  await done;
+  writeFileSync(join(dir, 'chat', id, 'notes.txt'), 'made earlier');
+  const first = engine.open(id)!.messages[0]!;
+  done = wait();
+  const branchId = engine.branch({ conversationId: id, messageId: first.id, text, choice });
+  await done;
+  engine.shutdown();
+  assert.notEqual(branchId, id);
+  assert.equal(engine.open(id)!.messages.length, 2);
+  const branch = engine.open(branchId)!;
+  assert.deepEqual(branch.branchOf, { conversationId: id, messageId: first.id });
+  assert.equal(branch.messages.length, 2);
+  assert.equal(readFileSync(join(dir, 'chat', branchId, 'notes.txt'), 'utf8'), 'made earlier');
 });
 
 test('a model joining midway gets the earlier conversation as text', () => {

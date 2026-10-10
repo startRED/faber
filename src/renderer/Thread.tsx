@@ -1,8 +1,8 @@
 import { memo, useEffect, useState } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { api, type Message, type ToolUse } from './api.ts';
-import { prettyModel } from './models.ts';
+import { api, type Choice, type Message, type ToolUse, type Vendor } from './api.ts';
+import { modelOptions, prettyModel } from './models.ts';
 
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
 
@@ -61,11 +61,15 @@ function usage(m: Message): string {
 }
 
 type OnAnswer = (requestId: string, allow: boolean, always?: boolean) => void;
+type OnBranch = (messageId: string, text: string, choice?: Choice) => void;
 
 interface AnswerProps {
   m: Message;
+  prompt?: Message;
   conversationId: string;
+  vendors: Vendor[];
   onAnswer: OnAnswer;
+  onBranch: OnBranch;
 }
 
 function Ask({ permission, onAnswer }: { permission: NonNullable<Message['permissions']>[number]; onAnswer: OnAnswer }) {
@@ -90,7 +94,7 @@ function Ask({ permission, onAnswer }: { permission: NonNullable<Message['permis
   );
 }
 
-const Answer = memo(function Answer({ m, conversationId, onAnswer }: AnswerProps) {
+const Answer = memo(function Answer({ m, prompt, conversationId, vendors, onAnswer, onBranch }: AnswerProps) {
   const streaming = m.status === 'streaming';
   return (
     <article className="ai" aria-label="Answer" aria-busy={streaming}>
@@ -131,6 +135,23 @@ const Answer = memo(function Answer({ m, conversationId, onAnswer }: AnswerProps
       {!streaming && (
         <div className="actions">
           <button onClick={() => void navigator.clipboard.writeText(m.text)}>Copy</button>
+          {prompt && (
+            <select
+              className="redo"
+              aria-label="Redo with another model"
+              value=""
+              onChange={(e) => onBranch(prompt.id, prompt.text, modelOptions(vendors)[Number(e.target.value)]!.choice)}
+            >
+              <option value="" disabled>
+                Redo with…
+              </option>
+              {modelOptions(vendors).map((o, i) => (
+                <option key={o.label} value={i}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          )}
           <span>{usage(m)}</span>
         </div>
       )}
@@ -138,22 +159,46 @@ const Answer = memo(function Answer({ m, conversationId, onAnswer }: AnswerProps
   );
 });
 
-export function Thread({ messages, conversationId, onAnswer }: { messages: Message[] } & Omit<AnswerProps, 'm'>) {
+// The user's message; "Edit" sends the new text as a branch, keeping the original conversation as it was.
+function Mine({ m, onBranch }: { m: Message; onBranch: OnBranch }) {
+  const [editing, setEditing] = useState<string>();
+  if (editing !== undefined) {
+    return (
+      <form className="you editing" onSubmit={(e) => (e.preventDefault(), editing.trim() && onBranch(m.id, editing))}>
+        <textarea aria-label="Edit message" value={editing} rows={Math.min(10, editing.split('\n').length + 1)} onChange={(e) => setEditing(e.target.value)} autoFocus />
+        <div className="actions">
+          <button type="submit">Send as a branch</button>
+          <button type="button" onClick={() => setEditing(undefined)}>
+            Cancel
+          </button>
+        </div>
+      </form>
+    );
+  }
+  return (
+    <div className="you">
+      {m.images?.map((img, i) => <img key={i} alt="Attached image" src={`data:${img.mediaType};base64,${img.base64}`} />)}
+      {m.attachments?.map((name) => (
+        <span key={name} className="chip attached">
+          {name}
+        </span>
+      ))}
+      {m.text}
+      <button className="edit" onClick={() => setEditing(m.text)} aria-label="Edit message">
+        Edit
+      </button>
+    </div>
+  );
+}
+
+export function Thread({ messages, conversationId, vendors, onAnswer, onBranch }: { messages: Message[] } & Omit<AnswerProps, 'm' | 'prompt'>) {
   return (
     <>
-      {messages.map((m) =>
+      {messages.map((m, i) =>
         m.role === 'user' ? (
-          <div key={m.id} className="you">
-            {m.images?.map((img, i) => <img key={i} alt="Attached image" src={`data:${img.mediaType};base64,${img.base64}`} />)}
-            {m.attachments?.map((name) => (
-              <span key={name} className="chip attached">
-                {name}
-              </span>
-            ))}
-            {m.text}
-          </div>
+          <Mine key={m.id} m={m} onBranch={onBranch} />
         ) : (
-          <Answer key={m.id} m={m} conversationId={conversationId} onAnswer={onAnswer} />
+          <Answer key={m.id} m={m} prompt={messages[i - 1]?.role === 'user' ? messages[i - 1] : undefined} conversationId={conversationId} vendors={vendors} onAnswer={onAnswer} onBranch={onBranch} />
         ),
       )}
     </>
