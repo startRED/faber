@@ -24,7 +24,8 @@
     "test": "node --test --test-isolation=none \"tests/**/*.test.ts\"",
     "test:watch": "node --test --test-isolation=none --watch \"tests/**/*.test.ts\"",
     "dist": "npm run build && electron-builder --publish never",
-    "release": "electron-builder --publish always"
+    "release": "electron-builder --publish always",
+    "test:e2e": "npm run build && node --test --test-isolation=none \"tests/e2e/*.e2e.ts\""
   },
   "dependencies": {
     "electron-updater": "6.8.9"
@@ -37,6 +38,7 @@
     "electron": "44.4.5",
     "electron-builder": "26.16.1",
     "oxlint": "1.85.0",
+    "playwright-core": "1.63.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "typescript": "7.0.2",

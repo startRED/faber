@@ -14,6 +14,8 @@ function createWindow(): void {
     height: 800,
     title: 'Faber',
     backgroundColor: '#111216',
+    // Automated runs (tests, judges) render offscreen so they never steal the user's screen.
+    show: process.env.FABER_HIDDEN !== '1',
     webPreferences: { sandbox: true, contextIsolation: true },
   });
   void win.loadFile(join(here, '../renderer/index.html'), { query: { version: app.getVersion() } });

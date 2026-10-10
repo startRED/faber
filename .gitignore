@@ -8,3 +8,4 @@ coverage/
 Thumbs.db
 .env
 .env.*
+test-results/
