@@ -258,21 +258,174 @@ fn decode_chunked(mut data: &[u8]) -> Result<Vec<u8>, String> {
     Ok(body)
 }
 
-fn extract_zip_stored(bytes: &[u8], dest_dir: &Path) -> Result<(), String> {
+pub fn crc32_ieee(data: &[u8]) -> u32 {
+    const TABLE: [u32; 256] = {
+        let mut table = [0u32; 256];
+        let mut i = 0;
+        while i < 256 {
+            let mut c = i as u32;
+            let mut j = 0;
+            while j < 8 {
+                if c & 1 != 0 {
+                    c = 0xedb8_8320 ^ (c >> 1);
+                } else {
+                    c >>= 1;
+                }
+                j += 1;
+            }
+            table[i] = c;
+            i += 1;
+        }
+        table
+    };
+
+    let mut crc = 0xffff_ffffu32;
+    for &b in data {
+        let idx = ((crc ^ (b as u32)) & 0xff) as usize;
+        crc = TABLE[idx] ^ (crc >> 8);
+    }
+    !crc
+}
+
+fn find_eocd(bytes: &[u8]) -> Option<usize> {
+    if bytes.len() < 22 {
+        return None;
+    }
+    let min_pos = bytes.len().saturating_sub(22 + 65535);
+    for i in (min_pos..=bytes.len() - 22).rev() {
+        if &bytes[i..i + 4] == b"PK\x05\x06" {
+            let comment_len = u16::from_le_bytes([bytes[i + 20], bytes[i + 21]]) as usize;
+            if i + 22 + comment_len == bytes.len() {
+                return Some(i);
+            }
+        }
+    }
+    for i in (min_pos..=bytes.len() - 22).rev() {
+        if &bytes[i..i + 4] == b"PK\x05\x06" {
+            return Some(i);
+        }
+    }
+    None
+}
+
+fn extract_zip_from_cd(bytes: &[u8], dest_dir: &Path, eocd: usize) -> Result<(), String> {
+    let cd_size = u32::from_le_bytes([bytes[eocd + 12], bytes[eocd + 13], bytes[eocd + 14], bytes[eocd + 15]]) as usize;
+    let cd_offset = u32::from_le_bytes([bytes[eocd + 16], bytes[eocd + 17], bytes[eocd + 18], bytes[eocd + 19]]) as usize;
+
+    if cd_offset + cd_size > bytes.len() || cd_offset > eocd {
+        return Err("Central directory offset or size out of bounds".into());
+    }
+
+    let mut cd_pos = cd_offset;
+    let cd_end = cd_offset + cd_size;
+    let mut extracted_any = false;
+
+    while cd_pos + 46 <= cd_end {
+        if &bytes[cd_pos..cd_pos + 4] != b"PK\x01\x02" {
+            break;
+        }
+        let method = u16::from_le_bytes([bytes[cd_pos + 10], bytes[cd_pos + 11]]);
+        let crc32 = u32::from_le_bytes([bytes[cd_pos + 16], bytes[cd_pos + 17], bytes[cd_pos + 18], bytes[cd_pos + 19]]);
+        let comp_size = u32::from_le_bytes([bytes[cd_pos + 20], bytes[cd_pos + 21], bytes[cd_pos + 22], bytes[cd_pos + 23]]) as usize;
+        let uncomp_size = u32::from_le_bytes([bytes[cd_pos + 24], bytes[cd_pos + 25], bytes[cd_pos + 26], bytes[cd_pos + 27]]) as usize;
+        let name_len = u16::from_le_bytes([bytes[cd_pos + 28], bytes[cd_pos + 29]]) as usize;
+        let extra_len = u16::from_le_bytes([bytes[cd_pos + 30], bytes[cd_pos + 31]]) as usize;
+        let comment_len = u16::from_le_bytes([bytes[cd_pos + 32], bytes[cd_pos + 33]]) as usize;
+        let local_header_offset =
+            u32::from_le_bytes([bytes[cd_pos + 42], bytes[cd_pos + 43], bytes[cd_pos + 44], bytes[cd_pos + 45]]) as usize;
+
+        let entry_total_len = 46 + name_len + extra_len + comment_len;
+        if cd_pos + entry_total_len > bytes.len() {
+            return Err("Truncated central directory entry".into());
+        }
+
+        let name = std::str::from_utf8(&bytes[cd_pos + 46..cd_pos + 46 + name_len]).map_err(|e| e.to_string())?;
+        cd_pos += entry_total_len;
+
+        let clean_name = name.replace('\\', "/");
+        if clean_name.contains("..") || clean_name.starts_with('/') || clean_name.contains(':') {
+            return Err("Unsafe zip path".into());
+        }
+        let clean_rel = sanitize_zip_path(&clean_name)?;
+        let out_path = dest_dir.join(&clean_rel);
+        if !out_path.starts_with(dest_dir) {
+            return Err("Zip path escapes destination directory".into());
+        }
+
+        if clean_name.ends_with('/') {
+            std::fs::create_dir_all(&out_path).map_err(|e| e.to_string())?;
+            continue;
+        }
+
+        if local_header_offset + 30 > bytes.len() {
+            return Err("Truncated local file header".into());
+        }
+        if &bytes[local_header_offset..local_header_offset + 4] != b"PK\x03\x04" {
+            return Err("Invalid local file header signature".into());
+        }
+
+        let local_name_len = u16::from_le_bytes([bytes[local_header_offset + 26], bytes[local_header_offset + 27]]) as usize;
+        let local_extra_len = u16::from_le_bytes([bytes[local_header_offset + 28], bytes[local_header_offset + 29]]) as usize;
+        let data_start = local_header_offset + 30 + local_name_len + local_extra_len;
+
+        if data_start + comp_size > bytes.len() {
+            return Err("Truncated zip entry data".into());
+        }
+
+        if let Some(parent) = out_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+
+        let comp_data = &bytes[data_start..data_start + comp_size];
+        if method == 0 {
+            if crc32 != 0 {
+                let actual_crc = crc32_ieee(comp_data);
+                if actual_crc != crc32 {
+                    return Err(format!("CRC32 mismatch in zip entry {clean_name}: expected {crc32:08x}, got {actual_crc:08x}"));
+                }
+            }
+            std::fs::write(&out_path, comp_data).map_err(|e| e.to_string())?;
+            extracted_any = true;
+        } else if method == 8 {
+            let decompressed = if comp_size == 0 && uncomp_size == 0 { Vec::new() } else { inflate_raw(comp_data)? };
+            if uncomp_size > 0 && decompressed.len() != uncomp_size {
+                return Err(format!("Uncompressed size mismatch: expected {uncomp_size}, got {}", decompressed.len()));
+            }
+            if crc32 != 0 {
+                let actual_crc = crc32_ieee(&decompressed);
+                if actual_crc != crc32 {
+                    return Err(format!("CRC32 mismatch in zip entry {clean_name}: expected {crc32:08x}, got {actual_crc:08x}"));
+                }
+            }
+            std::fs::write(&out_path, &decompressed).map_err(|e| e.to_string())?;
+            extracted_any = true;
+        } else {
+            return Err(format!("Unsupported compression method in zip: {method}"));
+        }
+    }
+
+    if !extracted_any {
+        return Err("No valid entries found in ZIP archive".into());
+    }
+    Ok(())
+}
+
+fn extract_zip_local(bytes: &[u8], dest_dir: &Path) -> Result<(), String> {
     let mut pos = 0;
     let mut extracted_any = false;
     while pos + 30 <= bytes.len() {
         if &bytes[pos..pos + 4] != b"PK\x03\x04" {
             break;
         }
+        let flags = u16::from_le_bytes([bytes[pos + 6], bytes[pos + 7]]);
         let method = u16::from_le_bytes([bytes[pos + 8], bytes[pos + 9]]);
         let comp_size = u32::from_le_bytes([bytes[pos + 18], bytes[pos + 19], bytes[pos + 20], bytes[pos + 21]]) as usize;
         let name_len = u16::from_le_bytes([bytes[pos + 26], bytes[pos + 27]]) as usize;
         let extra_len = u16::from_le_bytes([bytes[pos + 28], bytes[pos + 29]]) as usize;
         let name_start = pos + 30;
         let data_start = name_start + name_len + extra_len;
-        if data_start + comp_size > bytes.len() {
-            return Err("Truncated zip entry".into());
+        if data_start > bytes.len() {
+            return Err("Truncated zip header".into());
         }
         let name = std::str::from_utf8(&bytes[name_start..name_start + name_len]).map_err(|e| e.to_string())?;
         let clean_name = name.replace('\\', "/");
@@ -287,27 +440,61 @@ fn extract_zip_stored(bytes: &[u8], dest_dir: &Path) -> Result<(), String> {
 
         if clean_name.ends_with('/') {
             std::fs::create_dir_all(&out_path).map_err(|e| e.to_string())?;
+            pos = data_start + comp_size;
         } else {
             if let Some(parent) = out_path.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
             }
             if method == 0 {
+                if data_start + comp_size > bytes.len() {
+                    return Err("Truncated zip entry".into());
+                }
                 std::fs::write(&out_path, &bytes[data_start..data_start + comp_size]).map_err(|e| e.to_string())?;
                 extracted_any = true;
+                pos = data_start + comp_size;
             } else if method == 8 {
-                let decompressed = inflate_raw(&bytes[data_start..data_start + comp_size])?;
-                std::fs::write(&out_path, &decompressed).map_err(|e| e.to_string())?;
-                extracted_any = true;
+                if (flags & 0x08) != 0 && comp_size == 0 {
+                    let (decompressed, consumed) = inflate_raw_with_consumed(&bytes[data_start..])?;
+                    std::fs::write(&out_path, &decompressed).map_err(|e| e.to_string())?;
+                    extracted_any = true;
+                    let mut desc_pos = data_start + consumed;
+                    if desc_pos + 16 <= bytes.len() && &bytes[desc_pos..desc_pos + 4] == b"PK\x07\x08" {
+                        desc_pos += 16;
+                    } else if desc_pos + 12 <= bytes.len() {
+                        desc_pos += 12;
+                    }
+                    pos = desc_pos;
+                } else {
+                    if data_start + comp_size > bytes.len() {
+                        return Err("Truncated zip entry".into());
+                    }
+                    let decompressed = inflate_raw(&bytes[data_start..data_start + comp_size])?;
+                    std::fs::write(&out_path, &decompressed).map_err(|e| e.to_string())?;
+                    extracted_any = true;
+                    pos = data_start + comp_size;
+                }
             } else {
                 return Err(format!("Unsupported compression method in zip: {method}"));
             }
         }
-        pos = data_start + comp_size;
     }
     if !extracted_any {
         return Err("No valid entries found in ZIP archive".into());
     }
     Ok(())
+}
+
+pub fn extract_zip_stored(bytes: &[u8], dest_dir: &Path) -> Result<(), String> {
+    if let Some(eocd) = find_eocd(bytes) {
+        match extract_zip_from_cd(bytes, dest_dir, eocd) {
+            Ok(()) => return Ok(()),
+            Err(e) if e.contains("Unsafe") || e.contains("escapes") || e.contains("Parent") || e.contains("Absolute") => {
+                return Err(e);
+            }
+            Err(_) => {}
+        }
+    }
+    extract_zip_local(bytes, dest_dir)
 }
 
 fn sanitize_zip_path(name: &str) -> Result<std::path::PathBuf, String> {
@@ -508,7 +695,7 @@ fn fixed_dist_tree() -> HuffmanTree {
     HuffmanTree::from_lengths(&lengths)
 }
 
-pub fn inflate_raw(data: &[u8]) -> Result<Vec<u8>, String> {
+pub fn inflate_raw_with_consumed(data: &[u8]) -> Result<(Vec<u8>, usize), String> {
     let mut reader = BitReader::new(data);
     let mut output = Vec::new();
     loop {
@@ -578,7 +765,12 @@ pub fn inflate_raw(data: &[u8]) -> Result<Vec<u8>, String> {
             break;
         }
     }
-    Ok(output)
+    let consumed = reader.pos.saturating_sub((reader.num_bits / 8) as usize);
+    Ok((output, consumed))
+}
+
+pub fn inflate_raw(data: &[u8]) -> Result<Vec<u8>, String> {
+    inflate_raw_with_consumed(data).map(|(out, _)| out)
 }
 
 fn user_home_dir() -> PathBuf {
@@ -762,13 +954,27 @@ pub async fn setup_install(app: AppHandle, faber: State<'_, Faber>, vendor: Stri
             }
 
             emit_progress("install", None, None);
-            if archive_bytes.starts_with(b"PK\x03\x04") {
+            if archive_bytes.starts_with(b"PK\x03\x04") || archive_bytes.starts_with(b"PK\x05\x06") {
                 extract_zip_stored(&archive_bytes, &dest_dir).map_err(|e| {
                     emit_progress("failed", Some("error.setup.install"), Some(&e));
                     "error.setup.install".to_string()
                 })?;
                 // Promote codex-{triple}.exe to codex.exe if needed
                 let root_codex = dest_dir.join("codex.exe");
+                if !root_codex.is_file() {
+                    let sub_bin = dest_dir.join("bin");
+                    if sub_bin.is_dir()
+                        && let Ok(entries) = std::fs::read_dir(&sub_bin)
+                    {
+                        for entry in entries.flatten() {
+                            let path = entry.path();
+                            if path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("codex") && n.ends_with(".exe")) {
+                                let _ = std::fs::rename(&path, &root_codex);
+                                break;
+                            }
+                        }
+                    }
+                }
                 if !root_codex.is_file()
                     && let Ok(entries) = std::fs::read_dir(&dest_dir)
                 {
@@ -914,5 +1120,152 @@ mod tests {
         assert_eq!(val["step"], "failed");
         assert_eq!(val["error"], "error.setup.download");
         assert_eq!(val["detail"], "Connection refused");
+    }
+
+    #[test]
+    fn crc32_matches_standard_vectors() {
+        assert_eq!(crc32_ieee(b""), 0x0000_0000);
+        assert_eq!(crc32_ieee(b"abc"), 0x3524_41c2);
+        assert_eq!(crc32_ieee(b"123456789"), 0xcbf4_3926);
+    }
+
+    fn deflate_stored_block(data: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.push(0x01); // bfinal = 1, btype = 00
+        let len = data.len() as u16;
+        let nlen = !len;
+        out.extend_from_slice(&len.to_le_bytes());
+        out.extend_from_slice(&nlen.to_le_bytes());
+        out.extend_from_slice(data);
+        out
+    }
+
+    fn build_test_zip(entries: &[(&str, &[u8], bool)]) -> Vec<u8> {
+        let mut archive = Vec::new();
+        let mut cd_records = Vec::new();
+
+        for (name, content, use_descriptor) in entries {
+            let local_offset = archive.len() as u32;
+            let comp_data = deflate_stored_block(content);
+            let comp_size = comp_data.len() as u32;
+            let uncomp_size = content.len() as u32;
+            let crc = crc32_ieee(content);
+
+            // Local file header
+            archive.extend_from_slice(b"PK\x03\x04");
+            archive.extend_from_slice(&20u16.to_le_bytes());
+            let flags: u16 = if *use_descriptor { 0x08 } else { 0 };
+            archive.extend_from_slice(&flags.to_le_bytes());
+            archive.extend_from_slice(&8u16.to_le_bytes()); // method: 8 (DEFLATE)
+            archive.extend_from_slice(&0u16.to_le_bytes()); // mod time
+            archive.extend_from_slice(&0u16.to_le_bytes()); // mod date
+            if *use_descriptor {
+                archive.extend_from_slice(&0u32.to_le_bytes());
+                archive.extend_from_slice(&0u32.to_le_bytes());
+                archive.extend_from_slice(&0u32.to_le_bytes());
+            } else {
+                archive.extend_from_slice(&crc.to_le_bytes());
+                archive.extend_from_slice(&comp_size.to_le_bytes());
+                archive.extend_from_slice(&uncomp_size.to_le_bytes());
+            }
+            archive.extend_from_slice(&(name.len() as u16).to_le_bytes());
+            archive.extend_from_slice(&0u16.to_le_bytes());
+            archive.extend_from_slice(name.as_bytes());
+
+            // Compressed payload
+            archive.extend_from_slice(&comp_data);
+
+            // Data descriptor
+            if *use_descriptor {
+                archive.extend_from_slice(b"PK\x07\x08");
+                archive.extend_from_slice(&crc.to_le_bytes());
+                archive.extend_from_slice(&comp_size.to_le_bytes());
+                archive.extend_from_slice(&uncomp_size.to_le_bytes());
+            }
+
+            // Central directory entry
+            let mut cd = Vec::new();
+            cd.extend_from_slice(b"PK\x01\x02");
+            cd.extend_from_slice(&20u16.to_le_bytes());
+            cd.extend_from_slice(&20u16.to_le_bytes());
+            cd.extend_from_slice(&flags.to_le_bytes());
+            cd.extend_from_slice(&8u16.to_le_bytes());
+            cd.extend_from_slice(&0u16.to_le_bytes());
+            cd.extend_from_slice(&0u16.to_le_bytes());
+            cd.extend_from_slice(&crc.to_le_bytes());
+            cd.extend_from_slice(&comp_size.to_le_bytes());
+            cd.extend_from_slice(&uncomp_size.to_le_bytes());
+            cd.extend_from_slice(&(name.len() as u16).to_le_bytes());
+            cd.extend_from_slice(&0u16.to_le_bytes());
+            cd.extend_from_slice(&0u16.to_le_bytes());
+            cd.extend_from_slice(&0u16.to_le_bytes());
+            cd.extend_from_slice(&0u16.to_le_bytes());
+            cd.extend_from_slice(&0u32.to_le_bytes());
+            cd.extend_from_slice(&local_offset.to_le_bytes());
+            cd.extend_from_slice(name.as_bytes());
+            cd_records.push(cd);
+        }
+
+        let cd_offset = archive.len() as u32;
+        let mut cd_bytes = Vec::new();
+        for rec in &cd_records {
+            cd_bytes.extend_from_slice(rec);
+        }
+        let cd_size = cd_bytes.len() as u32;
+        archive.extend_from_slice(&cd_bytes);
+
+        // EOCD
+        archive.extend_from_slice(b"PK\x05\x06");
+        archive.extend_from_slice(&0u16.to_le_bytes());
+        archive.extend_from_slice(&0u16.to_le_bytes());
+        archive.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+        archive.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+        archive.extend_from_slice(&cd_size.to_le_bytes());
+        archive.extend_from_slice(&cd_offset.to_le_bytes());
+        archive.extend_from_slice(&0u16.to_le_bytes());
+
+        archive
+    }
+
+    #[test]
+    fn zip_deflate_extraction_with_and_without_data_descriptor_and_confinement() {
+        let temp_base = std::env::temp_dir()
+            .join(format!("faber_test_zip_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&temp_base).unwrap();
+
+        // 1. Deflate ZIP WITHOUT data descriptor
+        let dir1 = temp_base.join("no_desc");
+        std::fs::create_dir_all(&dir1).unwrap();
+        let zip_no_desc = build_test_zip(&[("codex.exe", b"binary without descriptor", false)]);
+        let res1 = extract_zip_stored(&zip_no_desc, &dir1);
+        assert!(res1.is_ok(), "Expected extraction without descriptor to succeed: {res1:?}");
+        assert_eq!(std::fs::read(dir1.join("codex.exe")).unwrap(), b"binary without descriptor");
+
+        // 2. Deflate ZIP WITH data descriptor (flag bit 3, sizes zero in local header)
+        let dir2 = temp_base.join("with_desc");
+        std::fs::create_dir_all(&dir2).unwrap();
+        let zip_with_desc = build_test_zip(&[("codex.exe", b"binary with descriptor flag", true)]);
+        let res2 = extract_zip_stored(&zip_with_desc, &dir2);
+        assert!(res2.is_ok(), "Expected extraction with descriptor to succeed: {res2:?}");
+        assert_eq!(std::fs::read(dir2.join("codex.exe")).unwrap(), b"binary with descriptor flag");
+
+        // 3. Mixed entries in one ZIP (one with descriptor, one without)
+        let dir3 = temp_base.join("mixed");
+        std::fs::create_dir_all(&dir3).unwrap();
+        let zip_mixed =
+            build_test_zip(&[("bin/codex.exe", b"bin codex payload", true), ("resources/config.json", b"{\"setting\": true}", false)]);
+        let res3 = extract_zip_stored(&zip_mixed, &dir3);
+        assert!(res3.is_ok(), "Expected mixed ZIP extraction to succeed: {res3:?}");
+        assert_eq!(std::fs::read(dir3.join("bin/codex.exe")).unwrap(), b"bin codex payload");
+        assert_eq!(std::fs::read(dir3.join("resources/config.json")).unwrap(), b"{\"setting\": true}");
+
+        // 4. Confinement: path traversal must be rejected
+        let dir4 = temp_base.join("traversal");
+        std::fs::create_dir_all(&dir4).unwrap();
+        let zip_traversal = build_test_zip(&[("../escaped.exe", b"evil", true)]);
+        let res4 = extract_zip_stored(&zip_traversal, &dir4);
+        assert!(res4.is_err(), "Expected path traversal to be rejected");
+
+        let _ = std::fs::remove_dir_all(&temp_base);
     }
 }
