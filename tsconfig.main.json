@@ -1,16 +1,16 @@
-{
+﻿{
   "compilerOptions": {
     "target": "ES2023",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
-    "rootDir": "src/main",
-    "outDir": "dist/main",
+    "rootDir": "src",
+    "outDir": "dist",
     "skipLibCheck": true,
     "rewriteRelativeImportExtensions": true,
     "erasableSyntaxOnly": true,
     "verbatimModuleSyntax": true,
     "types": ["node"]
   },
-  "include": ["src/main"]
+  "include": ["src/main", "src/engine"]
 }
