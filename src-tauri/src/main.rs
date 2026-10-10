@@ -21,6 +21,7 @@ use tauri::window::Color;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent, Wry};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
+use tauri_plugin_updater::{Update, UpdaterExt};
 
 struct Faber {
     engine: Engine,
@@ -28,6 +29,8 @@ struct Faber {
     models: Mutex<Vec<ModelInfo>>,
     /// The tray menu's two items, renamed when the screen changes language.
     tray: Mutex<Option<[MenuItem<Wry>; 2]>>,
+    /// A newer version, already downloaded; it installs when Faber quits.
+    update: Mutex<Option<(Update, Vec<u8>)>>,
 }
 
 type Res<T> = Result<T, String>;
@@ -224,6 +227,18 @@ fn load_models(app: &AppHandle, codex: Cli, cwd: PathBuf) {
     });
 }
 
+/// Looks for a newer release once per start and downloads it in the background, signed with Faber's own key.
+fn fetch_update(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let Ok(updater) = app.updater() else { return };
+        let Ok(Some(update)) = updater.check().await else { return };
+        if let Ok(bytes) = update.download(|_, _| {}, || {}).await {
+            *lock(&app.state::<Faber>().update) = Some((update, bytes));
+        }
+    });
+}
+
 fn show(app: &AppHandle) {
     if let Some(w) = main_window(app) {
         let _ = w.show();
@@ -308,6 +323,7 @@ fn main() {
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             state,
             open,
@@ -344,7 +360,12 @@ fn main() {
                 max_warm: 3,
                 runtime: tauri::async_runtime::handle().inner().clone(),
             };
-            app.manage(Faber { engine: Engine::new(opts, emit), models: Mutex::default(), tray: Mutex::default() });
+            app.manage(Faber {
+                engine: Engine::new(opts, emit),
+                models: Mutex::default(),
+                tray: Mutex::default(),
+                update: Mutex::default(),
+            });
             if let Some(codex) = clis.get(&Vendor::Codex) {
                 load_models(app.handle(), codex.clone(), data_dir.clone());
             }
@@ -352,13 +373,22 @@ fn main() {
             if !hidden {
                 create_tray(app)?;
             }
+            // Only installed builds update themselves; source runs and test runs never do.
+            if !hidden && !cfg!(debug_assertions) && std::env::var_os("FABER_DATA_DIR").is_none() {
+                fetch_update(app.handle());
+            }
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("Faber failed to start")
         .run(|app, event| {
             if let RunEvent::Exit = event {
-                app.state::<Faber>().engine.shutdown();
+                let faber = app.state::<Faber>();
+                faber.engine.shutdown();
+                // On Windows this starts the installer, which replaces Faber and needs it closed.
+                if let Some((update, bytes)) = lock(&faber.update).take() {
+                    let _ = update.install(bytes);
+                }
             }
         });
 }
