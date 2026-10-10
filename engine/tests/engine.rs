@@ -41,7 +41,7 @@ async fn finished(rx: &mut UnboundedReceiver<AppEvent>, mut react: impl FnMut(&M
         let e = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.expect("no finished answer in time").expect("engine gone");
         if let AppEvent::Message { message, .. } = e {
             react(&message);
-            if message.status != Some(Status::Streaming) {
+            if message.role == Role::Assistant && message.status != Some(Status::Streaming) {
                 return *message;
             }
         }
@@ -79,7 +79,7 @@ async fn quota_readings_reach_the_screen_with_their_vendor() {
     let mut quota = false;
     while let Ok(Some(e)) = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await {
         quota |= matches!(&e, AppEvent::Quota { vendor: Vendor::Claude, .. });
-        if matches!(&e, AppEvent::Message { message, .. } if message.status != Some(Status::Streaming)) {
+        if matches!(&e, AppEvent::Message { message, .. } if message.role == Role::Assistant && message.status != Some(Status::Streaming)) {
             break;
         }
     }
@@ -104,8 +104,11 @@ async fn after_reopening_the_app_the_conversation_resumes_its_cli_session() {
     let (second, mut rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
     let text = "What single word did you reply with last time? Answer with only that word.";
     second.send(SendRequest { conversation_id: Some(id.clone()), ..ask(Area::Chat, text, choice("claude", Some("haiku"))) }).unwrap();
-    let reply = finished(&mut rx, |_| {}).await;
+    // The screen gets the user's own message too, not only the answer: in an open conversation nothing else adds it.
+    let mut shown = false;
+    let reply = finished(&mut rx, |m| shown |= m.role == Role::User && m.text == text).await;
     second.shutdown();
+    assert!(shown, "the user's message never reached the screen");
     let args = f.args.lock().unwrap()[0].clone();
     assert_eq!(args[args.iter().position(|a| a == "--resume").unwrap() + 1], "3ee0bd99-72d2-4c5b-8420-a9f85ee53981");
     assert_eq!(reply.text.trim(), "pong");

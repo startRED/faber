@@ -666,11 +666,14 @@ impl Core {
         reply.tools = Some(vec![]);
         reply.status = Some(Status::Streaming);
         let reply_id = reply.id.clone();
+        let question_id = question.id.clone();
         c.messages.push(question);
         c.messages.push(reply);
         c.updated_at = at;
         self.save(&id);
         (self.emit)(AppEvent::List);
+        // An open conversation only grows through these events, so the question goes out as well as the answer.
+        self.emit_message(&id, &question_id);
         self.launch(&id, &pick)?;
         if let Some(l) = self.live.get_mut(&id) {
             l.turn = Some(reply_id.clone());
