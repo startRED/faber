@@ -22,7 +22,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // `claude` is a recorded session to replay through the fake CLI, if any.
 async function launch(claude?: string, dataDir = mkdtempSync(join(tmpdir(), 'faber-e2e-')), language = 'en') {
   const settings = join(dataDir, 'settings.json');
-  if (!existsSync(settings)) writeFileSync(settings, JSON.stringify({ language }));
+  if (!existsSync(settings)) writeFileSync(settings, JSON.stringify({ language, setup: 'done' }));
   const port = 9300 + Math.floor(Math.random() * 600);
   const cli = claude ? JSON.stringify({ command: process.execPath, prefix: [here('../support/fake-cli.ts'), here(`../fixtures/claude/${claude}.jsonl`)] }) : '';
   const env = { ...process.env, FABER_HIDDEN: '1', FABER_DATA_DIR: dataDir, FABER_CLI_CLAUDE: cli, FABER_CLI_CODEX: '', FABER_CDP_PORT: String(port) };
@@ -134,6 +134,11 @@ test('with no AI installed, the app says what to do', { skip }, async () => {
   const { page, close } = await launch();
   try {
     await page.getByRole('heading', { name: en['empty.noAiTitle'] }).waitFor();
+    const body = await page.locator('.empty p').innerText();
+    assert.equal(body, en['empty.noAiBody']);
+    assert.match(body, /Settings/);
+    assert.match(body, /Subscriptions/i);
+    assert.doesNotMatch(body, /reopen|restart|relaunch/i);
     assert.equal(await page.getByRole('button', { name: en['composer.send'] }).isDisabled(), true);
   } finally {
     await close();

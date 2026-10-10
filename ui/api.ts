@@ -69,6 +69,7 @@ export interface Settings {
   appearance?: Record<string, string | null>;
   userHooks?: boolean;
   language?: string;
+  setup?: 'done' | 'skipped';
 }
 export interface ModelInfo {
   id: string;
@@ -92,10 +93,25 @@ export interface Attachment {
   name: string;
   base64: string;
 }
+export type AccountStatus = 'signedIn' | 'signedOut' | 'unknown';
+export interface CheckResult {
+  vendor: Vendor;
+  installed: boolean;
+  account: AccountStatus;
+  canInstall: boolean;
+}
+export interface SetupProgressEvent {
+  type: 'setup';
+  vendor: Vendor;
+  step: string;
+  error?: string;
+  detail?: string;
+}
 export type AppEvent =
   | { type: 'message'; conversationId: string; message: Message }
   | { type: 'quota'; vendor: Vendor; window: string; used: number; resetsAt: number }
-  | { type: 'list' };
+  | { type: 'list' }
+  | SetupProgressEvent;
 
 export interface SendRequest {
   conversationId?: string;
@@ -127,6 +143,9 @@ export const api = {
   openTerminal: (id: string) => invoke<boolean>('open_terminal', { id }),
   openLink: (url: string) => invoke<void>('open_link', { url }),
   setTray: (open: string, quit: string) => invoke<void>('set_tray', { open, quit }),
+  setupCheck: (vendor: Vendor) => invoke<CheckResult>('setup_check', { vendor }),
+  setupInstall: (vendor: Vendor) => invoke<void>('setup_install', { vendor }),
+  setupSignIn: (vendor: Vendor) => invoke<void>('setup_sign_in', { vendor }),
   on: (listener: (event: AppEvent) => void) => listen<AppEvent>('faber:event', (e) => listener(e.payload)),
 };
 

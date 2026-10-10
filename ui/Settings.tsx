@@ -25,6 +25,7 @@ function Choices<T extends string>(props: { label: string; value: T | undefined;
 const SECTIONS = [
   ['general', 'set.general'],
   ['appearance', 'set.appearance'],
+  ['subscriptions', 'set.subscriptions'],
   ['projects', 'set.projects'],
 ] as const;
 
@@ -34,6 +35,7 @@ interface Props {
   onAppearance: (a: Appearance) => void;
   onSave: (patch: Saved) => void;
   onClose: () => void;
+  onOpenSetup?: () => void;
 }
 
 export function Settings(props: Props) {
@@ -100,6 +102,20 @@ export function Settings(props: Props) {
             <Choices label={t('set.density')} value={a().density} onPick={(density) => set({ density })} options={[['comfortable', t('set.densityComfortable')], ['compact', t('set.densityCompact')]]} />
             <Choices label={t('set.corners')} value={a().corners} onPick={(corners) => set({ corners })} options={[['round', t('set.cornersRound')], ['square', t('set.cornersSquare')]]} />
             <p class="hint">{t('set.themeHint')}</p>
+          </Match>
+          <Match when={section() === 'subscriptions'}>
+            <div class="row">
+              <span>{t('set.subscriptions')}</span>
+              <div>
+                <button
+                  type="button"
+                  class="btn secondary"
+                  onClick={() => props.onOpenSetup?.()}
+                >
+                  {t('set.openSetup')}
+                </button>
+              </div>
+            </div>
           </Match>
           <Match when={section() === 'projects'}>
             <div class="row">

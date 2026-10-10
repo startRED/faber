@@ -6,6 +6,8 @@ import { fromEngine, lang, t, useLanguage } from './i18n.ts';
 import { en, type Key } from './locales/en.ts';
 import { modelOptions, vendorName } from './models.ts';
 import { Settings } from './Settings.tsx';
+import { Setup } from './Setup.tsx';
+import { shouldOpenSetup } from './setup.ts';
 import { Thread } from './Thread.tsx';
 import { mac, WindowControls } from './WindowControls.tsx';
 
@@ -61,6 +63,7 @@ export function App() {
   const [quotas, setQuotas] = createSignal<Record<string, Quota>>({});
   const [error, setError] = createSignal<string>();
   const [settingsOpen, setSettingsOpen] = createSignal(false);
+  const [setupOpen, setSetupOpen] = createSignal(false);
   const [appearance, setAppearance] = createSignal<Appearance>(toAppearance(undefined));
   const [confirming, setConfirming] = createSignal<string>();
   const [from, setFrom] = createSignal(0);
@@ -79,6 +82,9 @@ export function App() {
       useLanguage(s.settings.language);
       setState(s);
       setLoaded(true);
+      if (shouldOpenSetup(s.settings, s.conversations)) {
+        setSetupOpen(true);
+      }
       const place = recall<Place | undefined>('faber.place', undefined);
       if (place) {
         setArea(place.area);
@@ -96,10 +102,14 @@ export function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
         e.preventDefault();
         setSettingsOpen(false);
+        setSetupOpen(false);
         void open(undefined);
       }
       if ((e.ctrlKey || e.metaKey) && e.key === ',') setSettingsOpen(true);
-      if (e.key === 'Escape') setSettingsOpen(false);
+      if (e.key === 'Escape') {
+        setSettingsOpen(false);
+        setSetupOpen(false);
+      }
     };
     window.addEventListener('keydown', onKey);
     onCleanup(() => {
@@ -240,9 +250,34 @@ export function App() {
         <WindowControls />
       </header>
       <Show
-        when={!settingsOpen()}
-        fallback={<Settings appearance={appearance()} saved={state().settings} onAppearance={changeAppearance} onSave={saveSettings} onClose={() => setSettingsOpen(false)} />}
+        when={!setupOpen()}
+        fallback={
+          <Setup
+            onClose={() => setSetupOpen(false)}
+            onFinish={(result) => {
+              saveSettings({ setup: result });
+              setSetupOpen(false);
+              void refresh();
+            }}
+          />
+        }
       >
+        <Show
+          when={!settingsOpen()}
+          fallback={
+            <Settings
+              appearance={appearance()}
+              saved={state().settings}
+              onAppearance={changeAppearance}
+              onSave={saveSettings}
+              onClose={() => setSettingsOpen(false)}
+              onOpenSetup={() => {
+                setSettingsOpen(false);
+                setSetupOpen(true);
+              }}
+            />
+          }
+        >
         <div class="body">
           <aside class="side">
             <nav class="nav">
@@ -331,7 +366,8 @@ export function App() {
           </main>
         </div>
       </Show>
-    </div>
+    </Show>
+  </div>
   );
 }
 
