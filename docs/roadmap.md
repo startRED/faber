@@ -17,6 +17,16 @@ A release that makes any goal worse does not ship.
 | Precision | corrections the user asks for after "done" | half of the plain CLI |
 | Efficiency | idle RAM without a CLI open; installer size; sessions broken by CLI updates | ≤ 250 MB; ≤ 120 MB; 0 |
 
+## Works with the plans you have
+
+Faber does not assume any particular subscription. On first run the user ticks what they have (Claude, ChatGPT,
+Gemini, GitHub Copilot, Cursor, or none); Faber installs each official CLI and opens its own sign-in. The router and
+the toolbox only use what is connected, and new providers arrive as driver descriptors in the live manifest.
+
+- **Several vendors:** reviews and second opinions come from another vendor.
+- **One vendor:** reviews come from a different model of the same vendor in a fresh session, and the UI says so.
+- **No subscription:** free or local models through OpenCode, or the user's own API keys.
+
 ## Faber's own test system
 
 The runner is Node's built-in one (part of Node itself, C++ and V8, no dependencies), with every test in one
@@ -32,7 +42,7 @@ process. What is built specifically for Faber is the layer above it:
 
 - **Chat** works like claude.ai and ChatGPT, with everything they have and more. It has many conversations and no
   folders, and it never changes files on the computer: it only reads what the user attaches, and what it creates stays
-  inside the app until the user downloads it or moves it to a project. The user picks Claude, ChatGPT or Auto, and
+  inside the app until the user downloads it or moves it to a project. The user picks any connected model or Auto, and
   every answer shows the model and, in Auto, the reason in one line.
 - **Projects** works like Claude Code: open a folder, keep many projects and many conversations per project. This is
   where the lead agent acts. A Chat conversation can move to a project with its full context.
@@ -123,11 +133,25 @@ Engine (separate Node process; keeps running with the window closed)
 
 ## Curated catalog and live manifest
 
-- Nothing ships in the installer. On first run the user says what they want to do, Faber suggests packs per area,
-  and the user picks. Each item downloads from its original source with a pinned version, a checksum and its SPDX
-  license on screen. Non-commercial licenses get a warning. Models that require accepting a license on their hosting
-  site ask the user to accept it there.
+- Nothing ships in the installer. On first run the user picks the areas they work in; Faber shows the packs for
+  those areas with the recommended items already ticked. Everything is optional: untick anything, or press "Install
+  all recommended". Installs run in the background while the user starts working. Each item downloads from its
+  original source with a pinned version, a checksum and its SPDX license on screen. Non-commercial licenses get a
+  warning. Models that require accepting a license on their hosting site ask the user to accept it there.
+- **Curation is strict.** An item enters only if it: has a license that allows the use; is maintained; installs
+  from source in an automated smoke test; passes the security scan; is not a weaker duplicate of another item; and
+  works with at least one supported CLI. Each item has a tier (Essential, Recommended, Extra, Experimental), the areas
+  it serves, the CLIs it works with and its requirements (OS, GPU memory, apps such as Blender). "Recommended" needs
+  evidence: the benchmark shows it helps, or it is the reference tool for its job.
+- **Video and music are covered.** Composed video (HyperFrames plus FFmpeg) works with any subscription, because the
+  CLI writes the composition. AI-generated music, voice and footage come from local models in the catalog when the
+  user has a capable GPU.
+- **Total freedom.** "Add your own" takes a GitHub link, a folder, a package, an MCP server command or URL, a plugin
+  marketplace, or a skill the agent writes from a conversation. Users can also point Faber at other catalogs (a team's
+  or a friend's). Own items go through the same security scan, which warns but never blocks.
 - Updates are never automatic: diff, quarantine, previous version kept.
+- The catalog is maintained by a weekly scout run, community pull requests and CI checks (license, link health,
+  activity, smoke test, scan).
 - A public repository publishes signed static files (no backend): the catalog, a nightly compatibility matrix built
   from recorded sessions against the newest CLI versions (users only move to green versions), a per-provider policy
   switch, and declarative driver descriptors so a CLI format change can be fixed without an app release. If GitHub is

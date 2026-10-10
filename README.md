@@ -4,16 +4,16 @@
 
 Faber is an open-source desktop app for Windows, macOS and Linux with two areas:
 
-- **Chat**: many conversations, no folders, never touches your files. Pick Claude, ChatGPT or Auto, and always see
-  which model answered and why. It adds a second opinion from another vendor, sources checked by a different model,
+- **Chat**: many conversations, no folders, never touches your files. Pick any model from the plans you have, or
+  Auto, and always see which model answered and why. It adds a second opinion from another vendor, sources checked by a different model,
   deep research with several models in parallel, branching conversations, editable memory and sandboxed data analysis.
 - **Projects**: open a folder, like in Claude Code, and talk to a lead agent that can do anything AI can do: organize
   a folder, plan a project with you, build a complete app ready to ship, make thumbnails, videos, 3D models, games,
   pixel art and game mods, or drive the apps on your PC. There is no fixed list of skills. The lead agent coordinates
   models from different vendors that build, review and verify the work.
 
-Faber runs the official AI command-line tools (Claude Code, Codex and others) with the subscriptions you already
-pay for. No API key is required, and Faber never reads or stores your logins.
+Faber runs the official AI command-line tools (Claude Code, Codex and others) with whichever subscriptions you
+already pay for, one or several. No API key is required, and Faber never reads or stores your logins.
 
 > **Status:** early development. Nothing to install yet. Follow the [roadmap](docs/roadmap.md).
 
