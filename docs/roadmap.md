@@ -164,6 +164,18 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
   no choice. The cost: three webviews instead of one Chromium (WebView2, WebKit on macOS, WebKitGTK on Linux), so
   anything heavy on screen (terminal, 3D viewer, video) is tested on all three. The first Electron version stays
   tagged as `electron-f1`.
+- **A memory budget, enforced by a test.** Faber itself (window open, no CLI running) stays under 500 MB when it is
+  complete; the end-to-end test fails above 250 MB so there is room for what is still to come. Measured on 2026-10-10
+  as Task Manager counts it (private working set): 89 MB idle, 114 MB with a thousand-message conversation open
+  (only the latest messages are drawn, more on scrolling up), 4 MB closed to the tray (the screen is freed; the engine
+  keeps running and the window comes back where it was). For comparison, the Claude desktop app used 2.5 GB that day.
+- **CLIs that cost almost nothing while idle.** A Claude Code process takes about 120 MB just waiting (more in long
+  sessions, and each session starts its own copies of the user's MCP servers), and it has no way to serve two
+  conversations. So Faber starts it on the first keystroke, not when the window opens, and closes it after two idle
+  minutes; the next turn resumes the same session. Codex's app-server can serve many conversations as threads, so one
+  shared process per area holds them all (about 50 MB for three). Next: one shared copy of each MCP server for all
+  sessions of a project, and a RAM budget across all CLIs once the lead agent runs workers in parallel (workers queue
+  instead of going over it).
 - **Languages.** English, Portuguese (Brazil), Spanish, French and German from the start, following the system
   language unless the user picks one in Settings. Every text is written by hand, never machine-translated; a new
   language needs a native speaker to review it.
