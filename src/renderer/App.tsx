@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api, type AppState, type Choice, type Conversation, type Message, type Vendor } from './api.ts';
 import { applyAppearance, followSystem, toAppearance, type Appearance } from './appearance.ts';
 import { Composer, type Draft } from './Composer.tsx';
-import { vendorName } from './models.ts';
+import { modelOptions, vendorName } from './models.ts';
 import { Settings } from './Settings.tsx';
 import { Thread } from './Thread.tsx';
 
@@ -150,6 +150,7 @@ export function App({ version }: { version: string }) {
     if (currentId.current === id) void open(undefined);
   };
 
+  const options = useMemo(() => modelOptions(state.vendors, state.models), [state.vendors, state.models]);
   const project = state.projects.find((p) => p.id === projectId);
   const list = state.conversations.filter((c) => c.area === area && (area === 'chat' || c.projectId === projectId));
   const busy = current?.messages.at(-1)?.status === 'streaming';
@@ -231,7 +232,7 @@ export function App({ version }: { version: string }) {
                   <Thread
                     messages={current.messages}
                     conversationId={current.id}
-                    vendors={state.vendors}
+                    options={options}
                     onAnswer={(requestId, allow, always) => void api.answer(current.id, requestId, allow, always)}
                     onBranch={(messageId, text, picked) => void branch(messageId, text, picked ?? choice)}
                   />
@@ -267,6 +268,7 @@ export function App({ version }: { version: string }) {
               <Composer
                 key={current?.id ?? `new-${area}-${projectId}`}
                 vendors={state.vendors}
+                options={options}
                 choice={choice}
                 onChoice={pickChoice}
                 busy={busy}

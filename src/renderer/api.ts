@@ -1,8 +1,9 @@
+import type { ModelInfo } from '../engine/codex/models.ts';
 import type { AppEvent, SendRequest } from '../engine/engine.ts';
 import type { Choice } from '../engine/router.ts';
 import type { Conversation, Project, Settings, Summary, Vendor } from '../engine/store.ts';
 
-export type { AppEvent, Choice, Conversation, Project, Settings, Summary, Vendor };
+export type { AppEvent, Choice, Conversation, ModelInfo, Project, Settings, Summary, Vendor };
 export type { Message, ToolUse } from '../engine/store.ts';
 
 export interface AppState {
@@ -10,6 +11,8 @@ export interface AppState {
   projects: Project[];
   vendors: Vendor[];
   settings: Settings;
+  // ChatGPT models this account can use; empty until the Codex CLI answers.
+  models?: ModelInfo[];
 }
 
 interface Bridge {

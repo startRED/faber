@@ -3,7 +3,9 @@ import electronUpdater from 'electron-updater';
 import { copyFile, readFile, stat } from 'node:fs/promises';
 import { basename, dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { listCodexModels, type ModelInfo } from '../engine/codex/models.ts';
 import { createEngine, type AppEvent, type Engine } from '../engine/engine.ts';
+import { realSpawn } from '../engine/proc.ts';
 import { resolveCli, type Cli } from '../engine/resolve-cli.ts';
 import type { Vendor } from '../engine/store.ts';
 import { openTerminal } from './terminal.ts';
@@ -26,6 +28,7 @@ const hidden = process.env.FABER_HIDDEN === '1';
 if (process.env.FABER_DATA_DIR) app.setPath('userData', process.env.FABER_DATA_DIR);
 let win: BrowserWindow | undefined;
 let engine: Engine;
+let models: ModelInfo[] = [];
 
 // Each CLI is found on PATH. FABER_CLI_<NAME> (a JSON Cli) replaces it, so end-to-end tests can run a recorded
 // session through a fake CLI instead of a real subscription.
@@ -43,7 +46,7 @@ function detectClis(): Partial<Record<Vendor, Cli>> {
 async function call(method: string, arg: any): Promise<unknown> {
   switch (method) {
     case 'state':
-      return engine.state();
+      return { ...engine.state(), models };
     case 'open':
       return engine.open(arg);
     case 'send':
@@ -138,7 +141,17 @@ function checkForUpdates(): void {
 }
 
 void app.whenReady().then(() => {
-  engine = createEngine({ dataDir: app.getPath('userData'), clis: detectClis() }, (event: AppEvent) => win?.webContents.send('faber:event', event));
+  const clis = detectClis();
+  const emit = (event: AppEvent) => win?.webContents.send('faber:event', event);
+  engine = createEngine({ dataDir: app.getPath('userData'), clis }, emit);
+  const codex = clis.codex;
+  if (codex) {
+    const spawn = (_bin: string, args: string[], cwd: string) => realSpawn(codex.command, [...codex.prefix, ...args], cwd);
+    void listCodexModels({ bin: codex.command, cwd: app.getPath('userData'), spawn }).then((list) => {
+      models = list;
+      emit({ type: 'list' });
+    });
+  }
   ipcMain.handle('faber', (_event, method: string, arg: unknown) => call(method, arg));
   createWindow();
   checkForUpdates();

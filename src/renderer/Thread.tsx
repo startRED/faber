@@ -1,8 +1,8 @@
 import { memo, useEffect, useState } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { api, type Choice, type Message, type ToolUse, type Vendor } from './api.ts';
-import { modelOptions, prettyModel } from './models.ts';
+import { api, type Choice, type Message, type ToolUse } from './api.ts';
+import { prettyModel, type Option } from './models.ts';
 
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
 
@@ -67,7 +67,7 @@ interface AnswerProps {
   m: Message;
   prompt?: Message;
   conversationId: string;
-  vendors: Vendor[];
+  options: Option[];
   onAnswer: OnAnswer;
   onBranch: OnBranch;
 }
@@ -94,7 +94,7 @@ function Ask({ permission, onAnswer }: { permission: NonNullable<Message['permis
   );
 }
 
-const Answer = memo(function Answer({ m, prompt, conversationId, vendors, onAnswer, onBranch }: AnswerProps) {
+const Answer = memo(function Answer({ m, prompt, conversationId, options, onAnswer, onBranch }: AnswerProps) {
   const streaming = m.status === 'streaming';
   return (
     <article className="ai" aria-label="Answer" aria-busy={streaming}>
@@ -140,12 +140,12 @@ const Answer = memo(function Answer({ m, prompt, conversationId, vendors, onAnsw
               className="redo"
               aria-label="Redo with another model"
               value=""
-              onChange={(e) => onBranch(prompt.id, prompt.text, modelOptions(vendors)[Number(e.target.value)]!.choice)}
+              onChange={(e) => onBranch(prompt.id, prompt.text, options[Number(e.target.value)]!.choice)}
             >
               <option value="" disabled>
                 Redo with…
               </option>
-              {modelOptions(vendors).map((o, i) => (
+              {options.map((o, i) => (
                 <option key={o.label} value={i}>
                   {o.label}
                 </option>
@@ -194,14 +194,14 @@ function Mine({ m, onBranch }: { m: Message; onBranch: OnBranch }) {
   );
 }
 
-export function Thread({ messages, conversationId, vendors, onAnswer, onBranch }: { messages: Message[] } & Omit<AnswerProps, 'm' | 'prompt'>) {
+export function Thread({ messages, conversationId, options, onAnswer, onBranch }: { messages: Message[] } & Omit<AnswerProps, 'm' | 'prompt'>) {
   return (
     <>
       {messages.map((m, i) =>
         m.role === 'user' ? (
           <Mine key={m.id} m={m} onBranch={onBranch} />
         ) : (
-          <Answer key={m.id} m={m} prompt={messages[i - 1]?.role === 'user' ? messages[i - 1] : undefined} conversationId={conversationId} vendors={vendors} onAnswer={onAnswer} onBranch={onBranch} />
+          <Answer key={m.id} m={m} prompt={messages[i - 1]?.role === 'user' ? messages[i - 1] : undefined} conversationId={conversationId} options={options} onAnswer={onAnswer} onBranch={onBranch} />
         ),
       )}
     </>

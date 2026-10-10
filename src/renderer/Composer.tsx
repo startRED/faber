@@ -1,6 +1,6 @@
 import { useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
 import type { Choice, Vendor } from './api.ts';
-import { modelOptions } from './models.ts';
+import type { Option } from './models.ts';
 
 export interface Draft {
   text: string;
@@ -12,6 +12,7 @@ const EMPTY: Draft = { text: '', images: [], files: [] };
 
 interface Props {
   vendors: Vendor[];
+  options: Option[];
   choice: Choice;
   onChoice: (choice: Choice) => void;
   busy: boolean;
@@ -54,12 +55,11 @@ async function attach(list: Iterable<File>, draft: Draft): Promise<{ draft: Draf
   return { draft: { text, images, files }, names };
 }
 
-export function Composer({ vendors, choice, onChoice, busy, placeholder, onSend, onStop, onWarm }: Props) {
+export function Composer({ vendors, options, choice, onChoice, busy, placeholder, onSend, onStop, onWarm }: Props) {
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [names, setNames] = useState<string[]>([]);
   const warmed = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
-  const options = modelOptions(vendors);
   const selected = options.findIndex((o) => o.choice.vendor === choice.vendor && o.choice.model === choice.model);
   const hasContent = draft.text.trim() !== '' || draft.images.length > 0 || draft.files.length > 0;
   const canSend = !busy && hasContent && vendors.length > 0;

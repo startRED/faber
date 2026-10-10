@@ -1,4 +1,4 @@
-import type { Choice, Vendor } from './api.ts';
+import type { Choice, ModelInfo, Vendor } from './api.ts';
 
 export interface Option {
   label: string;
@@ -7,15 +7,18 @@ export interface Option {
 
 const VENDOR_NAME: Record<Vendor, string> = { claude: 'Claude', codex: 'ChatGPT' };
 
-// ponytail: fixed list per vendor; read each CLI's model list once the capability probe lands.
-export function modelOptions(vendors: Vendor[]): Option[] {
+// Claude Code has no model list, so its aliases are fixed; ChatGPT's list comes from the account (main.ts).
+export function modelOptions(vendors: Vendor[], codexModels: ModelInfo[] = []): Option[] {
   const options: Option[] = [{ label: 'Auto', choice: { vendor: 'auto' } }];
   if (vendors.includes('claude')) {
     for (const [label, model] of [['Opus', 'opus'], ['Sonnet', 'sonnet'], ['Haiku', 'haiku']] as const) {
       options.push({ label: `Claude ${label}`, choice: { vendor: 'claude', model } });
     }
   }
-  if (vendors.includes('codex')) options.push({ label: 'ChatGPT (your default)', choice: { vendor: 'codex' } });
+  if (vendors.includes('codex')) {
+    options.push({ label: 'ChatGPT (your default)', choice: { vendor: 'codex' } });
+    for (const m of codexModels) options.push({ label: prettyModel(m.id), choice: { vendor: 'codex', model: m.id } });
+  }
   return options;
 }
 
