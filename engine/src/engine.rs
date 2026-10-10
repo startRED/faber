@@ -93,7 +93,10 @@ pub struct TerminalCommand {
 
 struct Live {
     vendor: Vendor,
+    /// The model asked for (none = the account's default).
     model: Option<String>,
+    /// The model the CLI says it runs, once it has said so.
+    running: Option<String>,
     effort: String,
     /// Tells this process's events apart from those of a replaced one.
     sid: u64,
@@ -333,6 +336,10 @@ impl Core {
         let turn_id = entry.turn.clone();
         match event {
             EngineEvent::Started { session_id, model } => {
+                // A CLI started while the user typed reports its model before any answer exists; later answers use it too.
+                if let Some(l) = self.live.get_mut(conv) {
+                    l.running = Some(model.clone());
+                }
                 if let Some(m) = self.turn(conv) {
                     m.model = Some(model);
                 }
@@ -564,6 +571,7 @@ impl Core {
             Live {
                 vendor: pick.vendor,
                 model: pick.model.clone(),
+                running: None,
                 effort: pick.effort.clone(),
                 sid,
                 session,
@@ -675,6 +683,11 @@ impl Core {
         // An open conversation only grows through these events, so the question goes out as well as the answer.
         self.emit_message(&id, &question_id);
         self.launch(&id, &pick)?;
+        if let Some(running) = self.live.get(&id).and_then(|l| l.running.clone())
+            && let Some(m) = self.convs.get_mut(&id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id))
+        {
+            m.model = Some(running);
+        }
         if let Some(l) = self.live.get_mut(&id) {
             l.turn = Some(reply_id.clone());
             let text = if joining_late { with_history(&history, &text) } else { text };

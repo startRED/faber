@@ -148,6 +148,19 @@ async fn a_new_chat_starts_its_cli_while_the_user_types_and_keeps_it_for_the_fir
 }
 
 #[tokio::test]
+async fn an_answer_names_the_model_the_cli_runs_even_when_it_started_while_the_user_typed() {
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, mut rx) = engine(dir.path(), Vendor::Codex, fake(fixture("codex", "chat")).spawn);
+    engine.warm(WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: choice("codex", None) });
+    // The account default is only known once the CLI reports it, which happens before the message is sent.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    engine.send(ask(Area::Chat, SKY, choice("codex", None))).unwrap();
+    let reply = finished(&mut rx, |_| {}).await;
+    engine.shutdown();
+    assert_eq!(reply.model.as_deref(), Some("gpt-6-luna"));
+}
+
+#[tokio::test]
 async fn always_allow_answers_the_next_request_for_the_same_tool_without_asking_again() {
     // The recording denied the second Write; here the engine must allow it by itself.
     let mut answers = 0;
