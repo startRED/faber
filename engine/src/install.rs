@@ -283,8 +283,9 @@ pub async fn install_windows(
             }
         };
         let version = std::str::from_utf8(&latest_bytes).map_err(|e| e.to_string()).map(|s| s.trim().to_string()).unwrap_or_default();
-        if version.is_empty() {
-            let detail = "Empty version string returned for Claude".to_string();
+        // the version names a file in the staging folder: `..\` or a drive letter there would write outside it
+        if !valid_version(&version) {
+            let detail = format!("Unexpected version string returned for Claude: {version:?}");
             notify(progress, "failed", Some(("error.setup.download", &detail)));
             return Err(json!({ "key": "error.setup.download", "detail": detail }));
         }
@@ -649,20 +650,45 @@ pub async fn default_fetch(url: &str) -> io::Result<Vec<u8>> {
     Ok(bytes.to_vec())
 }
 
-/// Registers the given directory into the user PATH via Windows registry.
+/// A release version such as `2.1.80` or `2.1.80-beta+1`: nothing that could leave the folder it names a file in.
+pub fn valid_version(v: &str) -> bool {
+    !v.is_empty() && v.len() <= 64 && v.chars().all(|c| c.is_ascii_alphanumeric() || ".-+".contains(c)) && !v.contains("..")
+}
+
+/// The user's PATH with `dir` appended, or `None` when it is already there.
+pub fn path_with(current: &str, dir: &str) -> Option<String> {
+    let present = current.split(';').any(|p| p.trim_end_matches('\\').eq_ignore_ascii_case(dir.trim_end_matches('\\')));
+    match (present, current.trim_end_matches(';')) {
+        (true, _) => None,
+        (false, "") => Some(dir.to_string()),
+        (false, kept) => Some(format!("{kept};{dir}")),
+    }
+}
+
+/// Registers the given directory into the user PATH via Windows registry. The value keeps its type: Windows stores it as
+/// REG_EXPAND_SZ so entries like `%USERPROFILE%\...` expand, and rewriting it as REG_SZ would break them. A value that
+/// cannot be read is an error, never an empty PATH to overwrite.
 pub fn default_register_path(dir: &Path) -> io::Result<()> {
     #[cfg(windows)]
     {
-        use winreg::RegKey;
-        use winreg::enums::HKEY_CURRENT_USER;
+        use winreg::enums::{HKEY_CURRENT_USER, RegType};
+        use winreg::{RegKey, RegValue};
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
         let (env, _) = hkcu.create_subkey("Environment")?;
-        let current: String = env.get_value("Path").or_else(|_| env.get_value("PATH")).unwrap_or_default();
-        let dir_str = dir.to_string_lossy();
-        let parts: Vec<&str> = current.split(';').filter(|s| !s.is_empty()).collect();
-        if !parts.iter().any(|p| p.eq_ignore_ascii_case(&dir_str)) {
-            let new_path = if current.is_empty() { dir_str.to_string() } else { format!("{current};{dir_str}") };
-            env.set_value("Path", &new_path)?;
+        let (current, vtype) = match env.get_raw_value("Path") {
+            Ok(v) if v.vtype == RegType::REG_SZ || v.vtype == RegType::REG_EXPAND_SZ => {
+                let units: Vec<u16> = v.bytes.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
+                let text = String::from_utf16(&units).map_err(|_| io::Error::other("the user PATH is not valid text"))?;
+                (text.trim_end_matches('\0').to_string(), v.vtype)
+            }
+            Ok(_) => return Err(io::Error::other("the user PATH has an unexpected registry type")),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => (String::new(), RegType::REG_EXPAND_SZ),
+            Err(e) => return Err(e),
+        };
+        let dir = dir.to_str().ok_or_else(|| io::Error::other("the folder name is not valid text"))?;
+        if let Some(new) = path_with(&current, dir) {
+            let bytes: Vec<u8> = new.encode_utf16().chain([0]).flat_map(u16::to_le_bytes).collect();
+            env.set_raw_value("Path", &RegValue { bytes: bytes.into(), vtype })?;
         }
         Ok(())
     }

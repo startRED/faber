@@ -563,3 +563,25 @@ async fn F10_other_profile() {
         .expect_err("Installer must fail when executable is placed in another user's profile");
     assert_eq!(error["key"], "error.setup.install");
 }
+
+#[test]
+fn the_user_path_gains_the_folder_once_and_keeps_every_other_entry() {
+    use faber_engine::install::path_with;
+    let current = r"%USERPROFILE%\AppData\Local\Microsoft\WindowsApps;C:\Tools;";
+    assert_eq!(
+        path_with(current, r"C:\Users\a\.local\bin").as_deref(),
+        Some(r"%USERPROFILE%\AppData\Local\Microsoft\WindowsApps;C:\Tools;C:\Users\a\.local\bin")
+    );
+    assert_eq!(path_with(current, r"c:\tools\"), None);
+    assert_eq!(path_with("", r"C:\x").as_deref(), Some(r"C:\x"));
+}
+
+#[test]
+fn a_version_that_could_leave_the_staging_folder_is_refused() {
+    use faber_engine::install::valid_version;
+    assert!(valid_version("2.1.80"));
+    assert!(valid_version("2.1.80-beta+1"));
+    for bad in ["", "..", r"..\..\Startup\x", "C:x", "2.1/../x", "a b"] {
+        assert!(!valid_version(bad), "{bad:?}");
+    }
+}
