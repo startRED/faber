@@ -4,6 +4,10 @@ Status: planning (October 2026). Nothing is implemented yet.
 
 ## Goals
 
+**The bar:** working through Faber must beat talking to a model directly (in Claude Code, Codex, claude.ai or
+ChatGPT) at everything. Nothing a direct session can do may be missing or worse in Faber; the goals below measure
+where Faber must be better.
+
 Every release is measured against plain Claude Code and plain Codex on the same ~40 real requests (organizing a
 folder, planning an app in conversation, a complete app, a thumbnail, a video, a 3D model, a game mod, research).
 A release that makes any goal worse does not ship.
@@ -62,8 +66,9 @@ process. What is built specifically for Faber is the layer above it:
 ## Two areas
 
 - **Chat** works like claude.ai and ChatGPT, with everything they have and more. It has many conversations and no
-  folders, and it never changes files on the computer: it only reads what the user attaches, and what it creates stays
-  inside the app until the user downloads it or moves it to a project. The user picks any connected model or Auto, and
+  folders, and it never changes files on the computer: it only reads what the user attaches. Each conversation has a
+  private workspace inside the app where the model runs code, draws charts and creates files; they stay there until
+  the user saves them or moves the conversation to a project. Commands that could reach outside it ask first. The user picks any connected model or Auto, and
   every answer shows the model and, in Auto, the reason in one line.
 - **Projects** works like Claude Code: open a folder, keep many projects and many conversations per project. This is
   where the lead agent acts. A Chat conversation can move to a project with its full context.
@@ -134,6 +139,9 @@ Engine (separate Node process; keeps running with the window closed)
 - **Electron and TypeScript.** The UI needs the same Chromium on all three systems for the terminal, the 3D viewer,
   video and canvas. TypeScript has official SDKs for MCP, ACP and the Codex SDK, plus node-pty. The UI talks to the
   engine over a WebSocket, so the shell can be swapped if the memory target fails.
+- **The user's own setup comes along.** Projects use the skills, MCP servers and plugins already configured in each
+  CLI, and Faber's catalog installs into that same configuration, so a tool works the same inside and outside Faber.
+  The user's hooks are off by default (they can rewrite answers or block steps) and can be turned on in Settings.
 - **Use everything each CLI has.** Each driver declares, per CLI version, what exists: resume, fork, MCP, skills,
   plugins, hooks, subagents, plan mode, sandbox, web search, image generation, computer use, review, quota readout.
   A probe checks this on install and on every update, so new CLI features show up by themselves. If Faber cannot parse
