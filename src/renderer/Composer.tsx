@@ -5,7 +5,10 @@ import { modelOptions } from './models.ts';
 export interface Draft {
   text: string;
   images: { mediaType: string; base64: string }[];
+  files: { name: string; base64: string }[];
 }
+
+const EMPTY: Draft = { text: '', images: [], files: [] };
 
 interface Props {
   vendors: Vendor[];
@@ -18,7 +21,9 @@ interface Props {
   onWarm: () => void;
 }
 
-const MAX_TEXT_FILE = 200_000;
+// Small text files go inside the message (no tool call needed); anything else is attached as a file.
+const INLINE_TEXT = 50_000;
+const TEXT = /\.(txt|md|csv|json|ya?ml|toml|xml|html?|css|[cm]?[jt]sx?|py|rb|go|rs|java|kt|c|h|cpp|cs|php|sh|ps1|sql|log|ini)$/i;
 
 function readAs(file: File, how: 'text' | 'dataUrl'): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -30,31 +35,34 @@ function readAs(file: File, how: 'text' | 'dataUrl'): Promise<string> {
   });
 }
 
-// Images go to the model as images; any other file is read as text and attached to the message.
-async function attach(files: Iterable<File>, draft: Draft): Promise<{ draft: Draft; files: string[] }> {
+// Images go to the model as images, small text files inside the message, and anything else as a file the model opens.
+async function attach(list: Iterable<File>, draft: Draft): Promise<{ draft: Draft; names: string[] }> {
   const names: string[] = [];
-  let { text, images } = draft;
-  for (const file of files) {
+  let { text, images, files } = draft;
+  for (const file of list) {
     if (file.type.startsWith('image/')) {
       const url = await readAs(file, 'dataUrl');
       images = [...images, { mediaType: file.type, base64: url.slice(url.indexOf(',') + 1) }];
+    } else if ((file.type.startsWith('text/') || TEXT.test(file.name)) && file.size <= INLINE_TEXT) {
+      text = `${text}${text ? '\n\n' : ''}Attached file ${file.name}:\n\`\`\`\n${await readAs(file, 'text')}\n\`\`\``;
     } else {
-      const body = (await readAs(file, 'text')).slice(0, MAX_TEXT_FILE);
-      text = `${text}${text ? '\n\n' : ''}Attached file ${file.name}:\n\`\`\`\n${body}\n\`\`\``;
+      const url = await readAs(file, 'dataUrl');
+      files = [...files, { name: file.name, base64: url.slice(url.indexOf(',') + 1) }];
     }
     names.push(file.name);
   }
-  return { draft: { text, images }, files: names };
+  return { draft: { text, images, files }, names };
 }
 
 export function Composer({ vendors, choice, onChoice, busy, placeholder, onSend, onStop, onWarm }: Props) {
-  const [draft, setDraft] = useState<Draft>({ text: '', images: [] });
-  const [files, setFiles] = useState<string[]>([]);
+  const [draft, setDraft] = useState<Draft>(EMPTY);
+  const [names, setNames] = useState<string[]>([]);
   const warmed = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const options = modelOptions(vendors);
   const selected = options.findIndex((o) => o.choice.vendor === choice.vendor && o.choice.model === choice.model);
-  const canSend = !busy && (draft.text.trim() !== '' || draft.images.length > 0) && vendors.length > 0;
+  const hasContent = draft.text.trim() !== '' || draft.images.length > 0 || draft.files.length > 0;
+  const canSend = !busy && hasContent && vendors.length > 0;
 
   const warm = () => {
     if (!warmed.current) {
@@ -65,14 +73,14 @@ export function Composer({ vendors, choice, onChoice, busy, placeholder, onSend,
   const send = () => {
     if (!canSend) return;
     onSend(draft);
-    setDraft({ text: '', images: [] });
-    setFiles([]);
+    setDraft(EMPTY);
+    setNames([]);
     warmed.current = false;
   };
   const add = async (list: Iterable<File>) => {
     const result = await attach(list, draft);
     setDraft(result.draft);
-    setFiles((f) => [...f, ...result.files]);
+    setNames((n) => [...n, ...result.names]);
   };
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -101,15 +109,15 @@ export function Composer({ vendors, choice, onChoice, busy, placeholder, onSend,
         void add(e.dataTransfer.files);
       }}
     >
-      {files.length > 0 && (
+      {names.length > 0 && (
         <div className="chips">
-          {files.map((name, i) => (
+          {names.map((name, i) => (
             <span key={i} className="chip">
               {name}
             </span>
           ))}
           <span className="chip">
-            <button type="button" onClick={() => (setDraft((d) => ({ ...d, images: [] })), setFiles([]))} aria-label="Remove attachments">
+            <button type="button" onClick={() => (setDraft((d) => ({ ...d, images: [], files: [] })), setNames([]))} aria-label="Remove attachments">
               clear ×
             </button>
           </span>

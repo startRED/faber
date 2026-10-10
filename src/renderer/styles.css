@@ -105,6 +105,7 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 select.pill { appearance: none; padding-right: 22px; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(100% - 12px) 50%, calc(100% - 8px) 50%; background-size: 4px 4px; background-repeat: no-repeat; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { display: inline-flex; align-items: center; gap: 6px; font-family: var(--ui); font-size: 11px; padding: 3px 8px; border-radius: 8px; background: var(--line); color: var(--soft); }
+.chip.attached { display: inline-flex; margin: 0 6px 8px 0; }
 .chip button { border: 0; background: none; color: var(--muted); padding: 0; }
 .send { width: 30px; height: 30px; border-radius: 50%; border: 0; background: var(--accent); color: var(--bg); display: grid; place-items: center; font-size: 14px; }
 .send:disabled { opacity: 0.35; cursor: default; }

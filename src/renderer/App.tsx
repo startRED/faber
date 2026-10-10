@@ -87,7 +87,7 @@ export function App({ version }: { version: string }) {
     setError(undefined);
     stick.current = true;
     try {
-      const id = await api.send({ conversationId: current?.id, area, projectId: area === 'project' ? projectId : undefined, text: draft.text, images: draft.images, choice });
+      const id = await api.send({ conversationId: current?.id, area, projectId: area === 'project' ? projectId : undefined, text: draft.text, images: draft.images, files: draft.files, choice });
       if (id !== currentId.current) await open(id);
     } catch (err) {
       setError(err instanceof Error ? err.message.replace(/^Error invoking remote method 'faber': (Error: )?/, '') : String(err));

@@ -145,6 +145,11 @@ export function Thread({ messages, conversationId, onAnswer }: { messages: Messa
         m.role === 'user' ? (
           <div key={m.id} className="you">
             {m.images?.map((img, i) => <img key={i} alt="Attached image" src={`data:${img.mediaType};base64,${img.base64}`} />)}
+            {m.attachments?.map((name) => (
+              <span key={name} className="chip attached">
+                {name}
+              </span>
+            ))}
             {m.text}
           </div>
         ) : (

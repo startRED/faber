@@ -9,7 +9,7 @@ import { realSpawn, type Spawner } from './proc.ts';
 import type { Cli } from './resolve-cli.ts';
 import { pickModel, type Choice, type Pick } from './router.ts';
 import { createStore, type Conversation, type Message, type Project, type Summary, type Vendor } from './store.ts';
-import { insideFolder, newFiles } from './workspace.ts';
+import { insideFolder, newFiles, saveFiles } from './workspace.ts';
 
 export type AppEvent =
   | { type: 'message'; conversationId: string; message: Message }
@@ -31,6 +31,7 @@ export interface SendRequest {
   projectId?: string;
   text: string;
   images?: { mediaType: string; base64: string }[];
+  files?: { name: string; base64: string }[];
   choice: Choice;
 }
 
@@ -208,14 +209,18 @@ export function createEngine(opts: EngineOptions, emit: (event: AppEvent) => voi
       if (!c.title) c.title = req.text.trim().replace(/\s+/g, ' ').slice(0, 60);
       const joiningLate = !c.sessions[pick.vendor] && c.messages.length > 0;
       const history = c.messages.slice();
+      // Attached files are saved where the model can open them with its own tools (PDFs, spreadsheets, archives...).
+      const saved = req.files?.length ? saveFiles(c.area === 'chat' ? join(workspaceOf(c.id), 'attachments') : join(opts.dataDir, 'attachments', c.id), req.files) : [];
+      const shown = saved.map((p) => (c.area === 'chat' ? `attachments/${basename(p)}` : p));
+      const text = shown.length ? `${req.text}\n\nAttached files${c.area === 'chat' ? ' (in your working folder)' : ''}:\n${shown.map((p) => `- ${p}`).join('\n')}` : req.text;
       const reply: Message = { id: randomUUID(), role: 'assistant', text: '', at, vendor: pick.vendor, model: pick.model, reason: pick.reason, tools: [], status: 'streaming' };
-      c.messages.push({ id: randomUUID(), role: 'user', text: req.text, at, images: req.images }, reply);
+      c.messages.push({ id: randomUUID(), role: 'user', text: req.text, at, images: req.images, attachments: saved.map((p) => basename(p)) }, reply);
       c.updatedAt = at;
       store.save(c);
       emit({ type: 'list' });
       const entry = launch(c, pick);
       entry.turn = reply;
-      entry.session.send({ text: joiningLate ? withHistory(history, req.text) : req.text, images: req.images });
+      entry.session.send({ text: joiningLate ? withHistory(history, text) : text, images: req.images });
       push(c.id, reply, true);
       return c.id;
     },
@@ -268,6 +273,7 @@ export function createEngine(opts: EngineOptions, emit: (event: AppEvent) => voi
       live.delete(id);
       store.remove(id);
       rmSync(workspaceOf(id), { recursive: true, force: true });
+      rmSync(join(opts.dataDir, 'attachments', id), { recursive: true, force: true });
       emit({ type: 'list' });
     },
     // The absolute path of a file in a chat workspace, or undefined if the path points outside it.

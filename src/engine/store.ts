@@ -18,6 +18,7 @@ export interface Message {
   text: string;
   at: number;
   images?: { mediaType: string; base64: string }[];
+  attachments?: string[];
   vendor?: Vendor;
   model?: string;
   reason?: string;
