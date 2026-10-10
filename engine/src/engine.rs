@@ -1,5 +1,6 @@
 //! The engine: conversations, live CLI sessions, permissions, branches and attachments.
 
+use crate::account::{self, AccountStatus};
 use crate::claude::{ClaudeLaunch, ClaudeOptions, EventSink, start_claude};
 use crate::cli::Cli;
 use crate::codex::{CodexServer, CodexServerOptions, CodexThread};
@@ -105,6 +106,8 @@ struct Live {
     turn: Option<String>,
     break_pending: bool,
     used: u64,
+    /// The CLI this process was started with; a replaced CLI starts a new process on the next turn.
+    cli: Cli,
 }
 
 const HISTORY_LIMIT: usize = 20_000;
@@ -235,6 +238,29 @@ impl Engine {
             (c.emit)(AppEvent::List);
         })
     }
+    /// Swaps the CLIs in use, for example after one was installed or signed in to. Idle processes of a changed CLI
+    /// close and the shared Codex processes retire, so the next turn starts the new one; a turn in flight finishes
+    /// on the old process first.
+    pub fn replace_clis(&self, clis: BTreeMap<Vendor, Cli>) {
+        self.with(|c| c.replace_clis(clis))
+    }
+    /// Asks the CLI whether it is signed in. The answer is the verdict only; the CLI's output is not kept.
+    pub async fn account_status(&self, vendor: Vendor, timeout: Duration) -> AccountStatus {
+        let Some((cli, spawn, cwd)) =
+            self.with(|c| Some((c.opts.clis.get(&vendor)?.clone(), c.opts.spawn.clone(), c.opts.data_dir.clone())))
+        else {
+            return AccountStatus::Unknown;
+        };
+        account::check(vendor, &cli, &spawn, &cwd, timeout).await
+    }
+    /// The CLI's own sign-in, to run in a terminal the user sees.
+    pub fn login_command(&self, vendor: Vendor) -> Option<TerminalCommand> {
+        self.with(|c| {
+            let cli = c.opts.clis.get(&vendor)?.clone();
+            let args = cli.prefix.into_iter().chain(account::login_args(vendor).iter().map(|a| a.to_string())).collect();
+            Some(TerminalCommand { command: cli.command, args, cwd: c.opts.data_dir.clone() })
+        })
+    }
     pub fn shutdown(&self) {
         self.with(|c| {
             for (_, l) in c.live.drain() {
@@ -250,6 +276,23 @@ impl Engine {
 impl Core {
     fn vendors(&self) -> Vec<Vendor> {
         self.opts.clis.keys().copied().collect()
+    }
+
+    fn replace_clis(&mut self, clis: BTreeMap<Vendor, Cli>) {
+        let changed = |v: Vendor| self.opts.clis.get(&v) != clis.get(&v);
+        let stale: Vec<String> =
+            self.live.iter().filter(|(_, l)| l.turn.is_none() && changed(l.vendor)).map(|(id, _)| id.clone()).collect();
+        if changed(Vendor::Codex) {
+            for (_, server) in self.codex.drain() {
+                server.retire();
+            }
+        }
+        for id in stale {
+            if let Some(l) = self.live.remove(&id) {
+                l.session.close();
+            }
+        }
+        self.opts.clis = clis;
     }
 
     // Each chat conversation gets a private workspace folder: code runs and files are created there, never elsewhere.
@@ -300,6 +343,7 @@ impl Core {
             appearance: patch.appearance.or(before.appearance),
             user_hooks: patch.user_hooks.or(before.user_hooks),
             language: patch.language.or(before.language),
+            setup: patch.setup.or(before.setup),
         };
         self.store.save_settings(&settings);
         // Idle project CLIs restart on their next turn, so a changed hooks choice applies right away.
@@ -502,8 +546,9 @@ impl Core {
 
     fn launch(&mut self, conv: &str, pick: &Pick) -> Result<(), String> {
         self.tick += 1;
+        let cli = self.opts.clis.get(&pick.vendor).cloned();
         if let Some(l) = self.live.get_mut(conv) {
-            if l.vendor == pick.vendor && l.model == pick.model && l.effort == pick.effort {
+            if l.vendor == pick.vendor && l.model == pick.model && l.effort == pick.effort && Some(&l.cli) == cli.as_ref() {
                 l.used = self.tick; // most recently used
                 return Ok(());
             }
@@ -512,7 +557,7 @@ impl Core {
         }
         let c = self.convs.get(conv).ok_or("error.conversationGone")?;
         let cwd = self.cwd_of(c)?;
-        let cli = self.opts.clis.get(&pick.vendor).ok_or("error.notConnected")?.clone();
+        let cli = cli.ok_or("error.notConnected")?;
         let base_spawn = self.opts.spawn.clone();
         let prefix = cli.prefix.clone();
         let command = cli.command.clone();
@@ -535,7 +580,7 @@ impl Core {
         let session = match pick.vendor {
             Vendor::Claude => start_claude(
                 ClaudeOptions {
-                    bin: cli.command,
+                    bin: cli.command.clone(),
                     cwd,
                     launch: ClaudeLaunch { area, model: pick.model.clone(), effort: Some(pick.effort.clone()), resume, user_hooks },
                     spawn,
@@ -578,6 +623,7 @@ impl Core {
                 turn: None,
                 break_pending: false,
                 used: self.tick,
+                cli,
             },
         );
         // ponytail: count-based limit on idle Claude processes; a RAM budget across all CLIs comes with parallel workers.

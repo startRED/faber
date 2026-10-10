@@ -67,8 +67,34 @@ fn shim_targets(shim: &str) -> Vec<String> {
     found.into_iter().map(|(_, t)| t).collect()
 }
 
-/// Looks the CLI up on this computer's real PATH.
+impl Cli {
+    /// Finds a CLI on PATH, then in the folders the official installers use, which an app started from the desktop
+    /// may not have on its PATH: the native installer's `~/.local/bin` (https://code.claude.com/docs/en/setup), npm's
+    /// global folder on Windows, and Homebrew's on macOS.
+    pub fn find_in(
+        name: &str,
+        path_var: &str,
+        windows: bool,
+        env: &dyn Fn(&str) -> Option<String>,
+        exists: &dyn Fn(&str) -> bool,
+        read: &dyn Fn(&str) -> String,
+    ) -> Option<Cli> {
+        let mut dirs = vec![path_var.to_string()];
+        if windows {
+            dirs.extend(env("USERPROFILE").map(|h| format!("{h}\\.local\\bin")));
+            dirs.extend(env("APPDATA").map(|a| format!("{a}\\npm")));
+        } else {
+            dirs.extend(env("HOME").map(|h| format!("{h}/.local/bin")));
+            dirs.extend(["/opt/homebrew/bin".to_string(), "/usr/local/bin".to_string()]);
+        }
+        resolve_cli(name, &dirs.join(if windows { ";" } else { ":" }), windows, exists, read)
+    }
+}
+
+/// Looks the CLI up on this computer.
 pub fn find_cli(name: &str) -> Option<Cli> {
     let path_var = std::env::var("PATH").or_else(|_| std::env::var("Path")).unwrap_or_default();
-    resolve_cli(name, &path_var, cfg!(windows), &|p| Path::new(p).is_file(), &|p| std::fs::read_to_string(p).unwrap_or_default())
+    Cli::find_in(name, &path_var, cfg!(windows), &|k| std::env::var(k).ok(), &|p| Path::new(p).is_file(), &|p| {
+        std::fs::read_to_string(p).unwrap_or_default()
+    })
 }

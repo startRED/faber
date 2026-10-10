@@ -203,4 +203,14 @@ pub struct Settings {
     /// The language of the screen ("en", "pt-BR"...); none follows the system.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
+    /// What the user did with the first-run guide; none means it has not run yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup: Option<Setup>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Setup {
+    Done,
+    Skipped,
 }
