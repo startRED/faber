@@ -2,13 +2,20 @@ import { PassThrough } from 'node:stream';
 
 export type Entry = { dir: 'in' | 'out'; msg: Record<string, any> };
 
+function canonical(val: unknown): string {
+  if (val === null || typeof val !== 'object') return JSON.stringify(val);
+  if (Array.isArray(val)) return `[${val.map(canonical).join(',')}]`;
+  const keys = Object.keys(val as Record<string, unknown>).sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${canonical((val as Record<string, unknown>)[k])}`).join(',')}}`;
+}
+
 // What must match between what Faber sends and what was recorded (the same rule as engine/tests/support).
 function key(msg: Record<string, any>): string {
   // Codex app-server speaks JSON-RPC: requests and notifications have a method, answers have an id.
-  if (msg.method === 'turn/start') return `turn/start ${msg.id} ${JSON.stringify(msg.params?.input)}`;
+  if (msg.method === 'turn/start') return `turn/start ${msg.id} ${canonical(msg.params?.input)}`;
   if (msg.method) return `${msg.method}${msg.id === undefined ? '' : ` ${msg.id}`}`;
   if (msg.id !== undefined) return `answer ${msg.id} ${msg.result?.decision ?? ''}`;
-  if (msg.type === 'user') return `user ${JSON.stringify(msg.message?.content)}`;
+  if (msg.type === 'user') return `user ${canonical(msg.message?.content)}`;
   if (msg.type === 'control_request') return `control_request ${msg.request?.subtype}`;
   if (msg.type === 'control_response') {
     const r = msg.response;

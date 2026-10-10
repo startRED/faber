@@ -1,0 +1,5 @@
+{
+  "vendor": "claude",
+  "version": "2.1.296",
+  "chat": "../claude/chat.jsonl"
+}

@@ -1,0 +1,6 @@
+{
+  "vendor": "codex",
+  "version": "0.161.0",
+  "chat": "../codex/chat.jsonl",
+  "models": "../codex/models.jsonl"
+}
