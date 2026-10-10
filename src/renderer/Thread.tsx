@@ -68,7 +68,7 @@ interface AnswerProps {
   onAnswer: OnAnswer;
 }
 
-function Ask({ permission, onAnswer }: { permission: NonNullable<Message['permission']>; onAnswer: OnAnswer }) {
+function Ask({ permission, onAnswer }: { permission: NonNullable<Message['permissions']>[number]; onAnswer: OnAnswer }) {
   const { title, note, body } = describe(permission.tool, permission.input);
   return (
     <div className="ask" role="alertdialog" aria-label="Permission request">
@@ -113,10 +113,11 @@ const Answer = memo(function Answer({ m, conversationId, onAnswer }: AnswerProps
           ))}
         </div>
       )}
-      {m.permission && <Ask permission={m.permission} onAnswer={onAnswer} />}
+      {m.permissions?.[0] && <Ask key={m.permissions[0].requestId} permission={m.permissions[0]} onAnswer={onAnswer} />}
+      {(m.permissions?.length ?? 0) > 1 && <div className="note">{m.permissions!.length - 1} more waiting</div>}
       <div className="md">
         <Markdown remarkPlugins={[remarkGfm]}>{m.text}</Markdown>
-        {streaming && !m.permission && <span className="cursor" aria-hidden="true" />}
+        {streaming && !m.permissions?.length && <span className="cursor" aria-hidden="true" />}
       </div>
       {!!m.files?.length && (
         <div className="files" aria-label="Files">

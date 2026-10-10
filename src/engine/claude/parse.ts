@@ -16,6 +16,7 @@ export function parseClaudeMessage(msg: Json): EngineEvent[] {
     case 'system':
       return msg.subtype === 'init' ? [{ type: 'started', sessionId: msg.session_id, model: msg.model }] : [];
     case 'stream_event': {
+      if (msg.event?.type === 'content_block_start' && msg.event.content_block?.type === 'text') return [{ type: 'break' }];
       const delta = msg.event?.type === 'content_block_delta' ? msg.event.delta : undefined;
       if (delta?.type === 'text_delta') return [{ type: 'text', delta: delta.text }];
       if (delta?.type === 'thinking_delta') return [{ type: 'thinking', delta: delta.thinking }];

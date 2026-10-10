@@ -23,7 +23,8 @@ export interface Message {
   reason?: string;
   thinking?: string;
   tools?: ToolUse[];
-  permission?: { requestId: string; tool: string; input: unknown };
+  // Permission requests waiting for the user, oldest first; a model can ask for several tools at once.
+  permissions?: { requestId: string; tool: string; input: unknown }[];
   // Chat only: files the answer created or changed in the conversation's workspace.
   files?: { path: string; size: number }[];
   status?: 'streaming' | 'done' | 'stopped' | 'error';

@@ -32,7 +32,7 @@ function engineWith(dir: string, cassette: string, seen: { args: string[] }) {
   return { engine, events, done };
 }
 
-test('a chat turn streams to the screen and is saved with model, reason, session and cost', async () => {
+test('a chat turn streams to the screen and is saved with model, reason, session and cost', { timeout: 5000 }, async () => {
   const dir = dataDir();
   const seen = { args: [] as string[] };
   const { engine, events, done } = engineWith(dir, 'chat', seen);
@@ -51,7 +51,7 @@ test('a chat turn streams to the screen and is saved with model, reason, session
   assert.ok(saved.messages[1].costUsd > 0);
 });
 
-test('after reopening the app, the conversation resumes its CLI session', async () => {
+test('after reopening the app, the conversation resumes its CLI session', { timeout: 5000 }, async () => {
   const dir = dataDir();
   const first = engineWith(dir, 'chat', { args: [] });
   const id = first.engine.send({ area: 'chat', text: 'In one sentence: why is the sky blue?', choice: { vendor: 'claude', model: 'haiku' } });
@@ -79,7 +79,7 @@ test('after reopening the app, the conversation resumes its CLI session', async 
   assert.equal(second.engine.open(id)?.messages.length, 4);
 });
 
-test('a new chat starts its CLI while the user types and keeps it for the first message', async () => {
+test('a new chat starts its CLI while the user types and keeps it for the first message', { timeout: 5000 }, async () => {
   let spawns = 0;
   const dir = dataDir();
   let finished: (m: Message) => void = () => {};
@@ -100,7 +100,7 @@ test('a new chat starts its CLI while the user types and keeps it for the first 
   engine.shutdown();
 });
 
-test('"always allow" answers the next request for the same tool without asking again', async () => {
+test('"always allow" answers the next request for the same tool without asking again', { timeout: 5000 }, async () => {
   // The recording denied the second Write; here the engine must allow it by itself.
   let answers = 0;
   const entries = fixture('claude', 'tools').map((e) =>
@@ -114,7 +114,7 @@ test('"always allow" answers the next request for the same tool without asking a
   let id = '';
   const engine = createEngine({ dataDir: dataDir(), clis: { claude: { command: 'claude', prefix: [] } }, spawn: () => replay(entries) }, (e) => {
     if (e.type !== 'message') return;
-    const p = e.message.permission;
+    const p = e.message.permissions?.[0];
     if (p && !asked.includes(p.requestId)) {
       asked.push(p.requestId);
       setImmediate(() => engine.answer(id, p.requestId, true, true));
@@ -130,6 +130,61 @@ test('"always allow" answers the next request for the same tool without asking a
   engine.shutdown();
   assert.equal(asked.length, 1);
   assert.deepEqual(engine.open(id)?.allowAlways, ['Write']);
+});
+
+test('two permission requests at once wait in a queue and both get answered', { timeout: 5000 }, async () => {
+  const shown: number[] = [];
+  const answered = new Set<string>();
+  let finished: (m: Message) => void = () => {};
+  const done = new Promise<Message>((r) => (finished = r));
+  let id = '';
+  const engine = createEngine(
+    { dataDir: dataDir(), clis: { claude: { command: 'claude', prefix: [] } }, spawn: () => replay(fixture('claude', 'parallel')) },
+    (e) => {
+      if (e.type !== 'message') return;
+      const waiting = e.message.permissions ?? [];
+      if (waiting.length) shown.push(waiting.length);
+      const first = waiting[0];
+      if (first && !answered.has(first.requestId)) {
+        answered.add(first.requestId);
+        setImmediate(() => engine.answer(id, first.requestId, true));
+      }
+      if (e.message.status !== 'streaming') finished(e.message);
+    },
+  );
+  id = engine.send({
+    area: 'chat',
+    text: 'Search the web for the latest stable version of Node.js and, in parallel, for the latest version of Python. Run both searches at the same time, then answer in two lines.',
+    choice: { vendor: 'claude' },
+  });
+  const reply = await done;
+  engine.shutdown();
+  assert.equal(answered.size, 2);
+  assert.ok(shown.includes(2), 'both requests were waiting at the same time');
+  assert.equal(reply.status, 'done');
+  assert.equal(reply.permissions, undefined);
+});
+
+test('text blocks around a tool are kept apart', { timeout: 5000 }, async () => {
+  let finished: (m: Message) => void = () => {};
+  const done = new Promise<Message>((r) => (finished = r));
+  let id = '';
+  let asked = 0;
+  const engine = createEngine(
+    { dataDir: dataDir(), clis: { codex: { command: 'codex', prefix: [] } }, spawn: () => replay(fixture('codex', 'tools')) },
+    (e) => {
+      if (e.type !== 'message') return;
+      const p = e.message.permissions?.[0];
+      if (p && Number(p.requestId) === asked) setImmediate(() => engine.answer(id, p.requestId, asked++ === 0));
+      if (e.message.status !== 'streaming') finished(e.message);
+    },
+  );
+  id = engine.send({ area: 'project', projectId: engine.addProject(dataDir()).id, text: 'Create a.txt containing one. Then create b.txt containing two. Make each file in a separate step.', choice: { vendor: 'codex' } });
+  const reply = await done;
+  engine.shutdown();
+  const [commentary, final] = reply.text.split('\n\n');
+  assert.match(commentary!, /a\.txt/);
+  assert.ok(final && final.length > 0, `expected two blocks in: ${reply.text}`);
 });
 
 test('a model joining midway gets the earlier conversation as text', () => {

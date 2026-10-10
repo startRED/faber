@@ -41,6 +41,7 @@ interface Live {
   conversation: Conversation;
   session: Session;
   turn?: Message;
+  breakPending?: boolean;
 }
 
 const HISTORY_LIMIT = 20_000;
@@ -94,8 +95,17 @@ export function createEngine(opts: EngineOptions, emit: (event: AppEvent) => voi
         if (m) m.model = e.model;
         if (c.messages.length) store.save(c); // a draft is saved only once something is sent
         break;
+      case 'break':
+        if (m?.text) entry.breakPending = true;
+        break;
       case 'text':
-        if (m) m.text += e.delta;
+        if (m) {
+          if (entry.breakPending && e.delta) {
+            m.text += '\n\n';
+            entry.breakPending = false;
+          }
+          m.text += e.delta;
+        }
         break;
       case 'thinking':
         if (m) m.thinking = (m.thinking ?? '') + e.delta;
@@ -110,19 +120,19 @@ export function createEngine(opts: EngineOptions, emit: (event: AppEvent) => voi
       }
       case 'permission':
         if (c.allowAlways?.includes(e.tool)) return entry.session.answer(e.requestId, true);
-        if (m) m.permission = { requestId: e.requestId, tool: e.tool, input: e.input };
+        if (m) m.permissions = [...(m.permissions ?? []), { requestId: e.requestId, tool: e.tool, input: e.input }];
         return push(c.id, m, true);
       case 'quota':
         return emit({ type: 'quota', vendor: entry.vendor, window: e.window, used: e.used, resetsAt: e.resetsAt });
       case 'done':
-        if (m) Object.assign(m, { status: e.ok ? 'done' : 'stopped', costUsd: e.costUsd, inputTokens: e.inputTokens, outputTokens: e.outputTokens, permission: undefined });
+        if (m) Object.assign(m, { status: e.ok ? 'done' : 'stopped', costUsd: e.costUsd, inputTokens: e.inputTokens, outputTokens: e.outputTokens, permissions: undefined });
         return finish(entry);
       case 'error':
         if (!e.fatal) {
           if (m) m.error = e.message;
           break;
         }
-        if (m) Object.assign(m, { status: 'error', error: e.message, permission: undefined });
+        if (m) Object.assign(m, { status: 'error', error: e.message, permissions: undefined });
         live.delete(c.id);
         return finish(entry);
     }
@@ -232,16 +242,19 @@ export function createEngine(opts: EngineOptions, emit: (event: AppEvent) => voi
     },
     answer(conversationId: string, requestId: string, allow: boolean, always = false): void {
       const entry = live.get(conversationId);
-      if (!entry) return;
-      const tool = entry.turn?.permission?.tool;
-      if (allow && always && tool) {
+      const m = entry?.turn;
+      if (!entry || !m) return;
+      const tool = m.permissions?.find((p) => p.requestId === requestId)?.tool;
+      // "Always" also answers the other waiting requests for the same tool.
+      const answered = always && allow && tool ? (m.permissions ?? []).filter((p) => p.tool === tool) : (m.permissions ?? []).filter((p) => p.requestId === requestId);
+      if (always && allow && tool) {
         const c = entry.conversation;
         c.allowAlways = [...new Set([...(c.allowAlways ?? []), tool])];
         store.save(c);
       }
-      entry.session.answer(requestId, allow);
-      if (entry.turn?.permission?.requestId === requestId) entry.turn.permission = undefined;
-      push(conversationId, entry.turn, true);
+      for (const p of answered) entry.session.answer(p.requestId, allow);
+      m.permissions = m.permissions?.filter((p) => !answered.includes(p));
+      push(conversationId, m, true);
     },
     rename(id: string, title: string): void {
       const c = load(id);

@@ -29,6 +29,7 @@ export function parseCodexNotification(msg: Json, tokens: CodexTurnState): Engin
     case 'item/reasoning/summaryTextDelta':
       return [{ type: 'thinking', delta: p.delta }];
     case 'item/started':
+      if (p.item?.type === 'agentMessage') return [{ type: 'break' }];
       if (NOT_TOOLS.has(p.item?.type)) return [];
       return [{ type: 'tool', id: p.item.id, name: p.item.type, input: p.item.command ?? p.item.query ?? p.item.changes ?? p.item }];
     case 'item/completed': {

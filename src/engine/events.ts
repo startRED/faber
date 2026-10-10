@@ -2,6 +2,8 @@
 export type EngineEvent =
   | { type: 'started'; sessionId: string; model: string }
   | { type: 'text'; delta: string }
+  // A new block of text starts (for example after a tool ran), so it must not run into the previous one.
+  | { type: 'break' }
   | { type: 'thinking'; delta: string }
   | { type: 'tool'; id: string; name: string; input: unknown }
   | { type: 'tool-result'; id: string; ok: boolean; text: string }

@@ -25,7 +25,10 @@ export function claudeArgs({ area, model, effort, resume, userHooks }: ClaudeLau
     '--permission-prompt-tool', 'stdio',
     '--exclude-dynamic-system-prompt-sections',
   ];
-  if (area === 'chat') args.push('--restricted', '--strict-mcp-config', '--tools', CHAT_TOOLS, '--permission-mode', 'acceptEdits');
+  if (area === 'chat') {
+    // Searching and reading pages never asks, like claude.ai.
+    args.push('--restricted', '--strict-mcp-config', '--tools', CHAT_TOOLS, '--permission-mode', 'acceptEdits', '--allowedTools', 'WebSearch,WebFetch');
+  }
   else if (!userHooks) args.push('--settings', JSON.stringify({ disableAllHooks: true }));
   if (model) args.push('--model', model);
   if (effort) args.push('--effort', effort);
