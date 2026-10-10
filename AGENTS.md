@@ -20,4 +20,21 @@ with the user's own subscriptions. Read [docs/roadmap.md](docs/roadmap.md) befor
 
 ## Proof commands
 
-None yet. The first phase (F0) adds lint, typecheck and tests, and lists them here.
+All four exit 0 before any commit:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
+
+Tests use Node's built-in runner (`node --test`) on `.ts` files directly. Unit tests never spawn processes, touch
+real git or call a real CLI; those belong to a separate integration tier.
+
+## Layout
+
+- `src/main/`: Electron main process (compiled by `tsc` to `dist/main/`).
+- `src/renderer/`: React UI (built by Vite to `dist/renderer/`).
+- `tests/`: `*.test.ts`, one file per module.
+- `electron-builder.yml` and `.github/workflows/release.yml`: installers published to GitHub Releases on every `v*` tag.
