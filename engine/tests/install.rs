@@ -585,3 +585,37 @@ fn a_version_that_could_leave_the_staging_folder_is_refused() {
         assert!(!valid_version(bad), "{bad:?}");
     }
 }
+
+#[test]
+fn a_loopback_source_replaces_every_official_host_and_nothing_else() {
+    use faber_engine::install::{allowed_url, loopback_origin};
+    assert_eq!(loopback_origin("http://127.0.0.1:4100/").as_deref(), Some("http://127.0.0.1:4100"));
+    assert_eq!(loopback_origin("http://[::1]:4100").as_deref(), Some("http://[::1]:4100"));
+    for bad in ["http://localhost:4100", "http://192.168.1.5:4100", "https://127.0.0.1:4100", "http://127.0.0.1", "github.com"] {
+        assert_eq!(loopback_origin(bad), None, "{bad}");
+    }
+    let origin = Some("http://127.0.0.1:4100");
+    assert!(allowed_url("http://127.0.0.1:4100/releases/latest", &[], origin).is_ok());
+    assert!(allowed_url("http://127.0.0.1:4101/codex.zip", &[], origin).is_err());
+    assert!(allowed_url("https://github.com/openai/codex/releases/download/x.zip", &[], origin).is_err());
+    assert!(allowed_url("http://127.0.0.1:4100/x", &[], None).is_err());
+}
+
+#[tokio::test]
+async fn an_install_whose_source_is_not_loopback_stops_before_any_download() {
+    let request = json!({
+        "vendor": "codex", "windows": true, "arch": "x86_64",
+        "data_dir": std::env::temp_dir().join("faber-loopback-refused"),
+        "destination": std::env::temp_dir().join("faber-loopback-refused/bin"),
+        "sources": { "loopback": "http://192.168.1.5:4100", "codex_release": "http://192.168.1.5:4100/releases/latest" },
+    });
+    let fetched = std::sync::Mutex::new(Vec::<String>::new());
+    let fetch = |url: &str| {
+        fetched.lock().unwrap().push(url.to_string());
+        Err(std::io::Error::other("no network in tests"))
+    };
+    let spawn: Spawner = std::sync::Arc::new(|_, _, _| Err(std::io::Error::other("nothing runs")));
+    let err = Cli::install_windows(&request, &fetch, &|_| Ok(()), spawn, &|_| {}).await.unwrap_err();
+    assert_eq!(err["key"], "error.setup.download");
+    assert!(fetched.lock().unwrap().is_empty());
+}

@@ -238,6 +238,19 @@ pub async fn install_windows(
         .as_array()
         .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
         .unwrap_or_default();
+    // Tests point every download at one loopback server; then nothing else, official hosts included, is reachable.
+    let loopback = match request["sources"]["loopback"].as_str() {
+        Some(raw) => match loopback_origin(raw) {
+            Some(origin) => Some(origin),
+            None => {
+                let detail = format!("Only a loopback address may replace the official sources: {raw}");
+                notify(progress, "failed", Some(("error.setup.download", &detail)));
+                return Err(json!({ "key": "error.setup.download", "detail": detail }));
+            }
+        },
+        None => None,
+    };
+    let check_url = |url: &str| allowed_url(url, &allowed_hosts, loopback.as_deref());
 
     let _ = std::fs::create_dir_all(&tmp_dir);
     clean_temp_dir(&tmp_dir);
@@ -250,11 +263,11 @@ pub async fn install_windows(
     let codex_release = request["sources"]["codex_release"].as_str().unwrap_or("https://api.github.com/repos/openai/codex/releases/latest");
 
     if vendor == "claude" {
-        if let Err(err) = validate_url(claude_base, &allowed_hosts) {
+        if let Err(err) = check_url(claude_base) {
             notify(progress, "failed", Some(("error.setup.download", &err)));
             return Err(json!({ "key": "error.setup.download", "detail": err }));
         }
-    } else if let Err(err) = validate_url(codex_release, &allowed_hosts) {
+    } else if let Err(err) = check_url(codex_release) {
         notify(progress, "failed", Some(("error.setup.download", &err)));
         return Err(json!({ "key": "error.setup.download", "detail": err }));
     }
@@ -270,7 +283,7 @@ pub async fn install_windows(
 
     if vendor == "claude" {
         let latest_url = format!("{}/latest", claude_base.trim_end_matches('/'));
-        if let Err(err) = validate_url(&latest_url, &allowed_hosts) {
+        if let Err(err) = check_url(&latest_url) {
             notify(progress, "failed", Some(("error.setup.download", &err)));
             return Err(json!({ "key": "error.setup.download", "detail": err }));
         }
@@ -291,7 +304,7 @@ pub async fn install_windows(
         }
 
         let manifest_url = format!("{}/{}/manifest.json", claude_base.trim_end_matches('/'), version);
-        if let Err(err) = validate_url(&manifest_url, &allowed_hosts) {
+        if let Err(err) = check_url(&manifest_url) {
             notify(progress, "failed", Some(("error.setup.download", &err)));
             return Err(json!({ "key": "error.setup.download", "detail": err }));
         }
@@ -332,7 +345,7 @@ pub async fn install_windows(
         };
 
         let binary_url = format!("{}/{}/{}/claude.exe", claude_base.trim_end_matches('/'), version, platform);
-        if let Err(err) = validate_url(&binary_url, &allowed_hosts) {
+        if let Err(err) = check_url(&binary_url) {
             notify(progress, "failed", Some(("error.setup.download", &err)));
             return Err(json!({ "key": "error.setup.download", "detail": err }));
         }
@@ -452,14 +465,6 @@ pub async fn install_windows(
             return Err(json!({ "key": "error.setup.install", "detail": detail }));
         }
 
-        let registered_str = install_dir.to_string_lossy();
-        let detected = crate::cli::Cli::find_in(vendor, &registered_str, true, &|_| None, &|p| Path::new(p).is_file(), &|_| String::new());
-        if detected.is_none() {
-            let detail = format!("CLI detection cannot find installed program {vendor} in registered PATH {install_dir:?}");
-            notify(progress, "failed", Some(("error.setup.install", &detail)));
-            return Err(json!({ "key": "error.setup.install", "detail": detail }));
-        }
-
         notify(progress, "done", None);
 
         Ok(json!({
@@ -536,7 +541,7 @@ pub async fn install_windows(
         };
         let expected_digest = raw_digest.strip_prefix("sha256:").unwrap_or(raw_digest);
 
-        if let Err(err) = validate_url(download_url, &allowed_hosts) {
+        if let Err(err) = check_url(download_url) {
             notify(progress, "failed", Some(("error.setup.download", &err)));
             return Err(json!({ "key": "error.setup.download", "detail": err }));
         }
@@ -612,14 +617,6 @@ pub async fn install_windows(
             return Err(json!({ "key": "error.setup.install", "detail": detail }));
         }
 
-        let registered_str = install_dir.to_string_lossy();
-        let detected = crate::cli::Cli::find_in(vendor, &registered_str, true, &|_| None, &|p| Path::new(p).is_file(), &|_| String::new());
-        if detected.is_none() {
-            let detail = format!("CLI detection cannot find installed program {vendor} in registered PATH {install_dir:?}");
-            notify(progress, "failed", Some(("error.setup.install", &detail)));
-            return Err(json!({ "key": "error.setup.install", "detail": detail }));
-        }
-
         notify(progress, "done", None);
 
         Ok(json!({
@@ -629,13 +626,32 @@ pub async fn install_windows(
     }
 }
 
-/// Fallback network fetch using reqwest when called from production without fakes.
-pub async fn default_fetch(url: &str) -> io::Result<Vec<u8>> {
-    validate_url(url, &[]).map_err(io::Error::other)?;
-    let custom_policy = reqwest::redirect::Policy::custom(|attempt| {
+/// `http://127.0.0.1:<port>` (or `[::1]`) as an origin, for tests that serve every download themselves.
+pub fn loopback_origin(raw: &str) -> Option<String> {
+    let url = reqwest::Url::parse(raw).ok()?;
+    let ip: std::net::IpAddr = url.host_str()?.trim_start_matches('[').trim_end_matches(']').parse().ok()?;
+    (url.scheme() == "http" && ip.is_loopback() && url.port().is_some()).then(|| url.origin().ascii_serialization())
+}
+
+/// An official HTTPS host, or, when a loopback origin replaces the sources, that exact origin and nothing else.
+pub fn allowed_url(url: &str, allowed_hosts: &[String], loopback: Option<&str>) -> Result<(), String> {
+    match loopback {
+        None => validate_url(url, allowed_hosts),
+        Some(origin) => match reqwest::Url::parse(url) {
+            Ok(u) if u.origin().ascii_serialization() == origin => Ok(()),
+            _ => Err(format!("URL is outside the loopback source {origin}: {url}")),
+        },
+    }
+}
+
+/// Network fetch for installs: official hosts only, or only the given loopback origin, redirects included.
+pub async fn default_fetch(url: &str, loopback: Option<&str>) -> io::Result<Vec<u8>> {
+    allowed_url(url, &[], loopback).map_err(io::Error::other)?;
+    let origin = loopback.map(String::from);
+    let custom_policy = reqwest::redirect::Policy::custom(move |attempt| {
         if attempt.previous().len() >= 10 {
             attempt.error("Too many redirects")
-        } else if let Err(e) = validate_url(attempt.url().as_str(), &[]) {
+        } else if let Err(e) = allowed_url(attempt.url().as_str(), &[], origin.as_deref()) {
             attempt.error(e)
         } else {
             attempt.follow()

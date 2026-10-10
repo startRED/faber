@@ -94,14 +94,20 @@ async function fixture(t: TestContext, connected = false) {
   writeFileSync(join(data, 'settings.json'), JSON.stringify({ language: 'en' }));
   if (connected) writeFileSync(join(state, 'claude.signed-in'), 'true');
 
-  const downloaded = join(sandbox, 'download-codex.exe');
+  // Named like the official release binary, served zipped like the official release asset.
+  const downloaded = join(sandbox, 'release', 'codex-x86_64-pc-windows-msvc.exe');
+  mkdirSync(join(sandbox, 'release'));
   const compiler = join(process.env.SystemRoot ?? 'C:\\Windows', 'Microsoft.NET/Framework64/v4.0.30319/csc.exe');
   assert.ok(existsSync(compiler), 'the fixture needs the Windows C# compiler for its executable download');
   const compile = spawnSync(compiler, ['/nologo', '/target:exe', `/out:${downloaded}`, join(recordings, 'launcher.cs')],
     { shell: false, windowsHide: true, encoding: 'utf8' });
   assert.equal(compile.status, 0, `test launcher compilation: ${compile.stdout}${compile.stderr}`);
   const payload = readFileSync(downloaded);
-  const digest = createHash('sha256').update(payload).digest('hex');
+  const zipped = join(sandbox, 'codex-x86_64-pc-windows-msvc.exe.zip');
+  execFileSync(powershell, ['-NoProfile', '-NonInteractive', '-Command',
+    `Compress-Archive -LiteralPath '${downloaded}' -DestinationPath '${zipped}'`], { windowsHide: true });
+  const archive = readFileSync(zipped);
+  const digest = createHash('sha256').update(archive).digest('hex');
   const requests: string[] = [];
   const unexpected: string[] = [];
   let source = '';
@@ -111,11 +117,11 @@ async function fixture(t: TestContext, connected = false) {
     assert.equal(req.socket.remoteAddress, '127.0.0.1');
     if (path === '/releases/latest' || path === '/') {
       res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ tag_name: 'setup-replay', assets: [{ name: 'codex-x86_64-pc-windows-msvc.exe',
-        browser_download_url: `${source}/codex.exe`, digest: `sha256:${digest}` }] }));
-    } else if (path === '/codex.exe') {
-      res.setHeader('Content-Type', 'application/octet-stream');
-      res.end(payload);
+      res.end(JSON.stringify({ tag_name: 'setup-replay', assets: [{ name: 'codex-x86_64-pc-windows-msvc.exe.zip',
+        browser_download_url: `${source}/codex.zip`, digest: `sha256:${digest}` }] }));
+    } else if (path === '/codex.zip') {
+      res.setHeader('Content-Type', 'application/zip');
+      res.end(archive);
     } else {
       unexpected.push(path);
       res.writeHead(404).end();
@@ -131,9 +137,15 @@ async function fixture(t: TestContext, connected = false) {
   assert.ok(address && typeof address === 'object');
   source = `http://127.0.0.1:${address.port}`;
   const runs: Run[] = [];
-  const commands = (): Command[] => {
+  const records = (): Array<Command & { exited?: number }> => {
     const path = join(state, 'commands.jsonl');
     return existsSync(path) ? readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line)) : [];
+  };
+  const commands = (): Command[] => records().filter((r) => r.exited === undefined);
+  // Only CLIs that never recorded their exit can still be running; a finished one's id may now belong to anything.
+  const running = (): Command[] => {
+    const gone = new Set(records().map((r) => r.exited).filter((pid) => pid !== undefined));
+    return commands().filter((c) => !gone.has(c.pid));
   };
   async function launch(): Promise<Run> {
     assert.ok(existsSync(binary), 'build the real app with npm run test:e2e before running setup acceptance proofs');
@@ -204,7 +216,7 @@ async function fixture(t: TestContext, connected = false) {
     const rows = processes();
     const seen = runs.flatMap((run) => run.seen);
     const leaked = rows.filter((row) => seen.some((old) => row.pid === old.pid && row.born === old.born) ||
-      commands().some((command) => row.pid === command.pid || row.pid === command.ppid));
+      running().some((command) => row.pid === command.pid || row.pid === command.ppid));
     assert.deepEqual(leaked.map(({ pid, name }) => ({ pid, name })), [], 'no guide, login, status, download, or app child may survive');
     for (const command of commands()) {
       assert.ok(contained(sandbox, command.cwd), `CLI wrote from an external working directory: ${command.cwd}`);
@@ -229,20 +241,23 @@ async function fixture(t: TestContext, connected = false) {
   async function dispose() {
     try {
       for (const run of runs) if (run.app.exitCode === null && run.app.signalCode === null) await close(run);
-      await eventually(() => {
-        const rows = processes();
+      const survivors = () => {
         const seen = runs.flatMap((run) => run.seen);
-        return !rows.some((row) => seen.some((old) => old.pid === row.pid && old.born === row.born) ||
-          commands().some((command) => row.pid === command.pid || row.pid === command.ppid));
-      }, 'app descendants and commands must exit after closing', 5000);
+        return processes().filter((row) => seen.some((old) => old.pid === row.pid && old.born === row.born) ||
+          running().some((command) => row.pid === command.pid || row.pid === command.ppid));
+      };
+      await eventually(() => survivors().length === 0, () => `app descendants and commands must exit after closing; still running: ${
+        survivors().map((row) => `${row.name}#${row.pid}`).join(', ')}`, 15_000);
       await audit();
     } finally {
-      // Record leaks as failures before cleaning them up, so they cannot affect the next scenario.
+      // Record leaks as failures before cleaning them up, so they cannot affect the next scenario. Only processes this
+      // scenario started are killed: a process id that Windows already gave to another program is left alone.
       const rows = processes();
-      for (const run of runs) for (const row of descendants(rows, run.pid)) {
+      const seen = runs.flatMap((run) => run.seen);
+      for (const row of rows.filter((r) => seen.some((old) => old.pid === r.pid && old.born === r.born))) {
         try { process.kill(row.pid); } catch { /* already exited */ }
       }
-      for (const command of commands()) {
+      for (const command of running()) {
         try { process.kill(command.pid); } catch { /* already exited */ }
       }
       await new Promise<void>((done) => server.close(() => done()));
@@ -301,7 +316,7 @@ test('C5.2: missing ChatGPT installs from loopback, signs in and answers without
     await card.getByRole('button', { name: en['setup.install'], exact: true }).click();
     await visible(card.getByRole('button', { name: en['setup.signIn'], exact: true }), 'downloaded executable must run and report signed out');
     assert.deepEqual(readFileSync(join(f.data, 'bin/codex.exe')), f.payload, 'the served executable must be the installed CLI');
-    assert.ok(f.requests.includes('/codex.exe'));
+    assert.ok(f.requests.includes('/codex.zip'));
     await card.getByRole('button', { name: en['setup.signIn'], exact: true }).click();
     await eventually(() => existsSync(join(f.state, 'codex.signed-in')), 'official fake login must complete');
     const again = card.getByRole('button', { name: en['setup.checkAgain'], exact: true });

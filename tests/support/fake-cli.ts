@@ -27,6 +27,8 @@ if (cassette.endsWith('.setup.json')) {
   const targets = [audit];
   if (JSON.stringify(args) === JSON.stringify(login)) targets.push(marker);
   appendFileSync(audit, JSON.stringify({ pid: process.pid, ppid: process.ppid, cwd: process.cwd(), vendor: setup.vendor, args, targets }) + '\n');
+  // Windows reuses process ids: once this one is gone, its id must not count as a leaked CLI.
+  process.on('exit', () => appendFileSync(audit, JSON.stringify({ exited: process.pid }) + '\n'));
   if (args[0] === '--version') {
     process.stdout.write(`${setup.version}\n`);
     process.exit(0);
