@@ -24,8 +24,13 @@ A release that makes any goal worse does not ship.
 - Plain-CLI baselines are recorded once per model version and reused.
 - The judge is blind: answers arrive anonymized in random order. A cheap model screens; a strong model only breaks
   close calls.
-- Benchmark runs never take more than 10% of a 5-hour window and wait while someone else is using the account (see
-  shared-account mode below). Where a plan includes API credit, the Claude side can run on an API key instead.
+- Each run has a budget in API-equivalent dollars (initially about US$ 3 for the sample and US$ 20 for the full set,
+  adjustable in settings). Every model is priced at its own rate, per vendor, model and effort, from a dated price
+  table (models.dev and LiteLLM), and the run stops when the budget is reached.
+- Runs wait while someone else is using the account (see shared-account mode below). Where a plan includes API
+  credit, that vendor's side can run on an API key instead of the subscription.
+- Subscriptions limit usage in different shapes (rolling windows, weekly caps, monthly caps, or none). Each provider
+  declares its own shape in its driver descriptor; nothing in Faber assumes a 5-hour window.
 
 ### Shared-account mode
 
@@ -140,7 +145,8 @@ Engine (separate Node process; keeps running with the window closed)
 - **Measured quality.** The proof is defined before the work. A ghost client from another vendor uses the result like
   a regular person and records the screen. Reviewers are checked with a planted defect on a copy, adopted only after
   offline validation. When a new model ships, Faber replays the user's best past work and reports what improved.
-- **Quota as a perishable resource.** Near a quota reset, Faber spends what is left on deferrable work. One to three
+- **Quota as a perishable resource.** For providers whose limits reset, Faber spends what would be lost near the
+  reset on deferrable work. One to three
   CLIs stay warm within a visible RAM budget. The CLI starts booting at the first keystroke. Each step loads only the
   tools it needs, and related requests stay in the same session while the prompt cache is warm.
 - **Safety for non-programmers.** Work in external apps happens on a copy the user promotes with one click. Canary
