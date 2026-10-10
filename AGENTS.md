@@ -29,8 +29,10 @@ npm test
 npm run build
 ```
 
-Tests use Node's built-in runner (`node --test`) on `.ts` files directly. Unit tests never spawn processes, touch
-real git or call a real CLI; those belong to a separate integration tier.
+Tests use Node's built-in runner (`node --test`) on `.ts` files directly, all in one process
+(`--test-isolation=none`, measured ~30% faster than one process per file on Windows). Because files share the
+process, a test never leaves global state behind. `npm run test:watch` keeps that process open and reruns on change.
+Unit tests never spawn processes, touch real git or call a real CLI; those belong to a separate integration tier.
 
 ## Layout
 

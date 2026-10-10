@@ -21,7 +21,8 @@
     "start": "npm run build && electron .",
     "lint": "oxlint src tests",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.json --noEmit",
-    "test": "node --test \"tests/**/*.test.ts\"",
+    "test": "node --test --test-isolation=none \"tests/**/*.test.ts\"",
+    "test:watch": "node --test --test-isolation=none --watch \"tests/**/*.test.ts\"",
     "dist": "npm run build && electron-builder --publish never",
     "release": "electron-builder --publish always"
   },
