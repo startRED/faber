@@ -127,9 +127,10 @@ export function App({ version }: { version: string }) {
     applyAppearance(a);
     void api.saveSettings({ appearance: { ...a } });
   };
-  const saveSettings = async (patch: AppState['settings']) => {
-    const settings = await api.saveSettings(patch);
-    setState((s) => ({ ...s, settings }));
+  // The switch moves at once; the file is written in the background.
+  const saveSettings = (patch: AppState['settings']) => {
+    setState((s) => ({ ...s, settings: { ...s.settings, ...patch } }));
+    void api.saveSettings(patch);
   };
 
   const switchArea = (next: Area) => {
@@ -182,7 +183,7 @@ export function App({ version }: { version: string }) {
         </button>
       </header>
       {settingsOpen ? (
-        <Settings appearance={appearance} saved={state.settings} onAppearance={changeAppearance} onSave={(p) => void saveSettings(p)} onClose={() => setSettingsOpen(false)} />
+        <Settings appearance={appearance} saved={state.settings} onAppearance={changeAppearance} onSave={saveSettings} onClose={() => setSettingsOpen(false)} />
       ) : (
         <div className="body">
           <aside className="side">

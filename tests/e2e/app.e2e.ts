@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -99,6 +99,9 @@ test('appearance changes apply at once and are kept after reopening', async () =
     await shot(window, 'settings-cockpit');
     await window.getByRole('button', { name: 'Projects' }).last().click();
     await window.getByRole('checkbox').check();
+    // The file is written in the background; closing earlier could lose the last choice.
+    const saved = () => existsSync(join(dataDir, 'settings.json')) && readFileSync(join(dataDir, 'settings.json'), 'utf8').includes('"userHooks": true');
+    while (!saved()) await new Promise((r) => setTimeout(r, 20));
   } finally {
     await app.close();
   }
