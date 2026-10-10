@@ -17,6 +17,17 @@ A release that makes any goal worse does not ship.
 | Precision | corrections the user asks for after "done" | half of the plain CLI |
 | Efficiency | idle RAM without a CLI open; installer size; sessions broken by CLI updates | ≤ 250 MB; ≤ 120 MB; 0 |
 
+## Faber's own test system
+
+The runner is Node's built-in one (part of Node itself, C++ and V8, no dependencies), with every test in one
+process. What is built specifically for Faber is the layer above it:
+
+1. **Fake CLIs that replay recorded sessions.** No test calls a real model or spends quota, and each runs in
+   milliseconds. Changing one field of a recording must turn its test red.
+2. **Affected tests only.** A change runs just the tests that depend on the files it touched; CI runs everything.
+3. **The benchmark of ~40 real requests** that measures the five goals against plain Claude Code and plain Codex on
+   every release.
+
 ## Two areas
 
 - **Chat** works like claude.ai and ChatGPT, with everything they have and more. It has many conversations and no
