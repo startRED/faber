@@ -7,6 +7,7 @@ pub mod cli;
 pub mod codex;
 pub mod engine;
 pub mod events;
+pub mod install;
 pub mod model;
 pub mod proc;
 pub mod router;

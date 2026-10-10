@@ -89,6 +89,17 @@ impl Cli {
         }
         resolve_cli(name, &dirs.join(if windows { ";" } else { ":" }), windows, exists, read)
     }
+
+    /// Installs an official CLI on Windows (Claude Code native installer or Codex GitHub release archive).
+    pub async fn install_windows(
+        request: &serde_json::Value,
+        fetch: &(dyn Fn(&str) -> std::io::Result<Vec<u8>> + Send + Sync),
+        register: &(dyn Fn(&Path) -> std::io::Result<()> + Send + Sync),
+        spawn: crate::proc::Spawner,
+        progress: &(dyn Fn(serde_json::Value) + Send + Sync),
+    ) -> Result<serde_json::Value, serde_json::Value> {
+        crate::install::install_windows(request, fetch, register, spawn, progress).await
+    }
 }
 
 /// Looks the CLI up on this computer.
