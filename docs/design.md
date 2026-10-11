@@ -66,10 +66,8 @@ These colours are fixed meanings, not decoration:
   measured the short way round the circle. The bands of coral and amber overlap, so the allowed hues are 64° to 221°
   and 269° to 350°. A colour whose three channels are within 16 of each other has no hue and is exempt.
 - An accent that lacks contrast is corrected automatically, then checked against the hue rule again.
-- The lock is a reversible default. It is an AI proposal that conflicts with the owner's own words ("customize it any
-  way you like"), so it is open until the owner decides. It lives in three places only: the hue block of the validator,
-  the `locked` section of `themes.json` and the read-only row in Settings. Dropping the lock removes those three and
-  nothing else.
+- The lock is the owner's decision. It lives in three places only: the hue block of the validator, the `locked`
+  section of `themes.json` and the read-only row in Settings.
 
 ### Contrast
 

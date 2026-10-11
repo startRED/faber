@@ -476,16 +476,15 @@ The visual direction lives in [design.md](design.md). In short:
 - One screen structure. Three themes (Dark Room, the default; Workshop; Workbench) and three presets (Morning,
   High contrast, Cobalt) are only sets of token overrides on a shared base.
 - People can customize almost everything, and a custom look saves to a small file that can be shared. Three meaning
-  colours are locked for now: amber for "needs you", coral for Claude and violet for Codex. The lock is provisional, a
-  reversible default: it clashes with the owner's own wish that people customize the look any way they like, so it stays
-  open until the owner decides. Dropping it touches only the colour validator, the theme data and one row in Settings.
+  colours are locked by the owner's decision: amber for "needs you", coral for Claude and violet for Codex.
 - The symbol is "Curioso", a lime creature that peeks. The app icon is one dark icon in every Windows mode.
 
 ## License
 
-Faber is under the GNU Affero General Public License v3 (`LICENSE` names the exact variant). Anyone may use and change
-it. A modified version that is distributed, or offered as a service, must publish its code. What users create with
-Faber belongs to them.
+Faber is under the Functional Source License, Version 1.1, ALv2 Future License (`LICENSE`, SPDX `FSL-1.1-ALv2`).
+Faber is source-available, not open source. Anyone may use, change and share it for any purpose except a Competing Use,
+as defined in `LICENSE`. Each version becomes Apache 2.0 two years after its release. What users create with Faber
+belongs to them.
 
 ## Provider terms
 
@@ -516,7 +515,7 @@ each version, the benchmark measures it, and the version ships only with the mai
 
 | Phase | Scope | What comes with it |
 | :-- | :--- | :--- |
-| 1 | New base | the AGPL license and these documents, Faber's own Rust test runner, the design system and themes, the identity, the shell layout and running list, the tray number and notifications, the first run and tutorial, Settings, and the CLI download written straight to disk. No public release: it is checked in the live app and a local installer build |
+| 1 | New base | the FSL-1.1-ALv2 license and these documents, Faber's own Rust test runner, the design system and themes, the identity, the shell layout and running list, the tray number and notifications, the first run and tutorial, Settings, and the CLI download written straight to disk. No public release: it is checked in the live app and a local installer build |
 | 2 | Full Chat | the benchmark, visual answers, asking Faber about Faber, search, moving a chat to a project, Auto learning from approvals, the draft routed at most twice per message, reporting failed writes of conversation and project files, and closing the engine gaps of rules 2, 3, 5 and 6 |
 | 3 | Projects with the lead agent | the lead agent, toolbox, 15 powers, modes, guardrails and big-work rules, the progress view, the decision list, the catalog, learning and the `.faber/` folder, and rules 4 and 7 |
 | 4 | Excellent software, ending when Faber builds Faber | nightly CLI version tests and the live manifest, one shared copy of each MCP server per project, and a RAM budget for parallel workers |

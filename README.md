@@ -2,7 +2,7 @@
 
 **One app for everything AI can do.**
 
-Faber is an open-source desktop app that runs the official Claude Code and Codex command-line tools with the
+Faber is a source-available desktop app that runs the official Claude Code and Codex command-line tools with the
 subscriptions you already pay for. It aims to do anything AI can do, at commercial quality, so you never need another
 AI app. It is for anyone: if you use AI every day it feels familiar, and if you never have, you learn it by using it.
 It runs on Windows, macOS and Linux, with Windows first.
@@ -85,4 +85,4 @@ Windows it also drives a hidden Faber through WebView2; run `cargo t --all` when
 
 ## License
 
-[AGPL-3.0-only](LICENSE)
+[FSL-1.1-ALv2](LICENSE)

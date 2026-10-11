@@ -404,14 +404,14 @@ a story [R61].
 
 ## A15. License
 
-- **The decision.** Faber moves from Apache-2.0 to AGPL-3.0 [R25].
-  - Anyone may use and change it.
-  - A modified version that is distributed, or offered as a service, must publish its code.
+- **The decision.** Faber is licensed under the Functional Source License 1.1, ALv2 Future License (SPDX
+  `FSL-1.1-ALv2`) [R79]. It replaces the AGPL-3.0 choice of R25.
+  - Faber is source-available, not open source. Anyone may use, change and share it for any purpose except a
+    Competing Use, as defined in `LICENSE`.
+  - Each version becomes Apache-2.0 two years after its release.
   - What users create with Faber belongs to them.
-- **Pending change.** The repository still says Apache-2.0 in `LICENSE`, `package.json`, `package-lock.json`,
-  `Cargo.toml`, `README.md` and `AGENTS.md` [code]. Phase 1 changes all of them in one small commit of its own (B1).
-- **Still open.** Whether the identifier is "AGPL-3.0-only" or "AGPL-3.0-or-later" is Open question 2. Until Erick
-  answers, "AGPL-3.0-only" is the reversible default on the unmerged branch `phase-1-base` (AI-24).
+- **Changes.** Phase 1 changes `LICENSE`, `NOTICE`, the license fields and the documents in one small commit of its
+  own (B1).
 
 ## A16. Distribution
 
@@ -2457,29 +2457,13 @@ There are 25 AI choices in total.
 
 # Open questions for Erick
 
-These are the questions that R72 keeps for Erick: one clashes with a decision he wrote, and one is about the license.
-R76 says they wait for him. Until he answers, Phase 1 builds the recommended option as a reversible default on the
-local branch `phase-1-base`. That branch is not merged and not pushed until both are answered (AI-24). An answer that
-differs from the recommended option is then one small change, as described under each question.
+Both questions are answered by Erick, so the reversible defaults of AI-24 are no longer open.
 
-1. **Locked meaning colours, or full freedom?**
-   - **What R58 says.** Erick said people customize the look "any way they like" [R58]. R58 is Erick's, so it outranks
-     the lock, which comes from R60 and the design notes (AI-authored).
-   - **What the design does.** The design locks three colours and refuses accents close to them [R60, notes, tokens].
-     The three colours are amber ("needs you"), Claude coral and Codex violet. They answer "who is doing this?" and
-     "is something waiting for me?" at a glance.
-   - **The choices.**
-     - A: Keep the lock. Everything else stays free. (Recommended.)
-     - B: Allow changing everything, including these three colours.
-   - **If he picks B.** Remove the hue block from the validator, the `locked` section of `themes.json` and the read-only
-     row in Settings (A13, B3, B8). Nothing else depends on the lock.
-2. **Exact AGPL license identifier.**
-   - **What R25 says.** R25 chose AGPL-3.0 but not the variant.
-   - **The choices.**
-     - A: "AGPL-3.0-only". Future AGPL versions apply only if Erick relicenses. (Recommended: Erick keeps control.)
-     - B: "AGPL-3.0-or-later". Anyone may use the code under a later AGPL version published by the FSF.
-   - **If he picks B.** Swap the identifier in the license commit of B1 (`package.json`, `package-lock.json`,
-     `Cargo.toml`, `README.md`, `AGENTS.md`) or revert that commit. No other file changes.
+1. **Locked meaning colours, or full freedom?** Answered: the three meaning colours stay locked [R77]. Amber ("needs
+   you"), Claude coral and Codex violet are fixed, and the design refuses accents close to them. The lock lives in the
+   hue block of the validator, the `locked` section of `themes.json` and the read-only row in Settings (A13, B3, B8).
+2. **License identifier.** Answered: FSL-1.1-ALv2 [R79], replacing the AGPL-3.0 choice of R25. Faber is source-available,
+   not open source. Each version becomes Apache-2.0 two years after its release (A15, B1).
 
 ---
 

@@ -3,7 +3,7 @@
   "productName": "Faber",
   "version": "0.0.2",
   "description": "One app for everything AI can do.",
-  "license": "AGPL-3.0-only",
+  "license": "FSL-1.1-ALv2",
   "private": true,
   "type": "module",
   "author": {
