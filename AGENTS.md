@@ -1,6 +1,6 @@
 # Faber: guide for agents
 
-Faber is an open-source desktop app (Apache-2.0) with a Chat area and a Projects area that run the official AI CLIs
+Faber is an open-source desktop app (AGPL-3.0-only) with a Chat area and a Projects area that run the official AI CLIs
 with the user's own subscriptions. Read [docs/roadmap.md](docs/roadmap.md) before changing scope.
 
 ## Rules

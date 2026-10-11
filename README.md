@@ -32,4 +32,4 @@ already pay for, one or several. No API key is required, and Faber never reads o
 
 ## License
 
-[Apache-2.0](LICENSE)
+[AGPL-3.0-only](LICENSE)
