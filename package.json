@@ -20,10 +20,8 @@
     "ui:dev": "vite",
     "build": "vite build",
     "dist": "tauri build",
-    "lint": "oxlint ui tests",
+    "lint": "oxlint ui tests/ui",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --test-isolation=none \"tests/**/*.test.ts\"",
-    "test:e2e": "tauri build --debug --no-bundle -- --target-dir ../target/e2e && node --test --test-isolation=none \"tests/e2e/*.e2e.ts\"",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -40,7 +38,6 @@
     "@tauri-apps/cli": "2.12.1",
     "@types/node": "24.19.0",
     "oxlint": "1.87.0",
-    "playwright-core": "1.63.0",
     "typescript": "7.0.2",
     "vite": "8.3.4",
     "vite-plugin-solid": "2.11.14"

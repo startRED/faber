@@ -456,8 +456,8 @@ The catalog screens and the catalog step in the first run arrive in Phase 3, wit
 ## Faber's own test system
 
 One Rust program replaces the whole Node test suite. The reason is to avoid the CPU and RAM load that a heavy test
-suite causes. Node stays a development tool for Vite, `tsc` and `oxlint`; it never runs tests and never ships. Until the
-Rust program lands, the suite is still Node's built-in runner.
+suite causes. Node stays a development tool for Vite, `tsc` and `oxlint`; it never runs tests and never ships.
+The program is `faber-test`, run as `cargo t`.
 
 1. **One light program.** It compiles with half the cores. Locally it runs only the tests that depend on the files a
    change touched. The full set runs on GitHub, on Windows, macOS and Linux.

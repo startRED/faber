@@ -192,11 +192,29 @@ inside its own area.
   itself: it moves no focus at any width, nothing behind it becomes inert, and it ends above the composer so the
   composer is never covered. Opened by the user, the overlay is modal.
 
-## How automated runs see the app
+## Screen tests
 
-On Windows the UI runs in WebView2, which exposes Chromium's DevTools port, so tests and judges drive the real app
-with Playwright: `npm run test:e2e` builds the app and starts it with `FABER_HIDDEN=1` (the window sits offscreen with
-its own browser profile and never takes the user's screen) and `FABER_CDP_PORT`, reads the page, clicks and types like
-a person, and saves screenshots to `test-results/e2e/`. CI runs it on Windows and keeps the screenshots as artifacts;
-the macOS and Linux webviews have no such port, so those systems run every other check. Anything outside the page (tray, notifications,
-installer, updates) is checked through the operating system's accessibility layer and file versions.
+Faber's own test runner (`cargo t`, the `testkit/` crate) tests the screen in two ways, both against a hidden test build
+of the app. `FABER_HIDDEN=1` keeps the window offscreen with its own browser profile, so it never takes the user's screen.
+
+- **Checks** (`tests/ui/*.check.ts`) test the screen's own logic. The test build opens `index.html?checks`, runs them when
+  the page loads, writes the result to the file named by `FABER_CHECKS_OUT` and exits. No DevTools port is involved, so
+  they run on Windows, macOS and Linux (Linux under `xvfb-run -a`).
+- **Scenarios** (`testkit/src/screen/`, written in Rust) drive the real app like a person: they read the page, click and
+  type, and save screenshots (named checkpoints, and every failure) to `target/faber-test/shots/`. On Windows the UI
+  runs in WebView2, which exposes Chromium's DevTools port (`FABER_CDP_PORT`); the macOS and Linux webviews have no such
+  port, so those systems skip this suite and run every other check.
+
+Every launch is sandboxed: a temporary home, an empty `PATH`, no provider variables, a dead proxy and no real CLI (a fake
+CLI replays the recordings in `tests/fixtures/`). Each scenario is audited afterwards for leaked processes, writes outside
+the sandbox and a changed environment. The checks and the hooks that report them exist only in the test build
+(`--features test-hooks`, `vite build --mode test`); the production app and its `dist/` contain none of them. CI runs
+`cargo t --all` on all three systems and keeps the Windows screenshots as artifacts. Anything outside the page (tray,
+notifications, installer, updates) is checked through the operating system's accessibility layer and file versions.
+
+Test launches also pass the browser engine switches that turn off crash reports and SmartScreen address lookups, and the
+sandbox removes every `WEBVIEW2_*` override from the environment. That limits what a test sends; it is not a firewall.
+Nothing blocks the network at the operating system, and WebView2 has no documented switch for crash uploads, so a request
+that bypasses the switches is not seen. The audit sees only requests that reach the fake release server.
+Known limit: the loopback-only rule is not enforced. Test processes get dead proxy variables and the switches above, but
+nothing stops a program from opening its own connection; blocking outbound traffic for test processes is deferred.

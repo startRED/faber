@@ -7,6 +7,10 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+# Test builds only (testkit/): a command the screen's checks report through, and the page that runs them. Never default.
+test-hooks = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

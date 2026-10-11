@@ -2,6 +2,10 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+// The test hooks (`report_checks`, the checks page) never ship: a release build cannot be made with them.
+#[cfg(all(feature = "test-hooks", not(debug_assertions)))]
+compile_error!("the `test-hooks` feature is for debug test builds only; it must not be enabled in a release build");
+
 mod setup;
 mod terminal;
 
@@ -200,6 +204,18 @@ async fn set_tray(faber: State<'_, Faber>, open: String, quit: String) -> Res<()
     Ok(())
 }
 
+/// Test builds only: the screen's checks (tests/ui/) send their result here. It goes to the file named by
+/// `FABER_CHECKS_OUT`, written whole before it appears, and then the app ends.
+#[cfg(feature = "test-hooks")]
+#[tauri::command]
+async fn report_checks(app: AppHandle, json: String) -> Res<()> {
+    let out = PathBuf::from(std::env::var_os("FABER_CHECKS_OUT").ok_or("FABER_CHECKS_OUT is not set")?);
+    let part = out.with_extension("part");
+    std::fs::write(&part, json).and_then(|()| std::fs::rename(&part, &out)).map_err(|e| e.to_string())?;
+    app.exit(0);
+    Ok(())
+}
+
 /// Uses setup module to detect CLIs on this computer.
 fn detect_clis() -> BTreeMap<Vendor, Cli> {
     setup::detect_clis()
@@ -256,7 +272,13 @@ fn show(app: &AppHandle) {
 
 fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Result<tauri::WebviewWindow> {
     let handle = app.clone();
-    let mut builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
+    // A test build started with `FABER_CHECKS_OUT` opens the page that runs the screen's checks and reports them.
+    #[cfg(feature = "test-hooks")]
+    let url =
+        if std::env::var_os("FABER_CHECKS_OUT").is_some() { WebviewUrl::App("index.html?checks".into()) } else { WebviewUrl::default() };
+    #[cfg(not(feature = "test-hooks"))]
+    let url = WebviewUrl::default();
+    let mut builder = WebviewWindowBuilder::new(app, "main", url)
         .title("Faber")
         .inner_size(1280.0, 800.0)
         .min_inner_size(720.0, 480.0)
@@ -285,10 +307,18 @@ fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Resul
     if hidden {
         builder = builder.position(-32000.0, -32000.0).skip_taskbar(true).focused(false).data_directory(data_dir.join("webview"));
     }
-    if let Ok(port) = std::env::var("FABER_CDP_PORT") {
-        builder = builder.additional_browser_args(&format!(
-            "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port={port}"
-        ));
+    // An automated launch (hidden, or with a DevTools port) also asks the browser engine not to collect or upload crash
+    // reports and not to ask SmartScreen about addresses. WebView2 has no documented switch for crash uploads and Tauri
+    // does not expose its crash-reporting setting, so the Chromium switches are the best control there is; they limit
+    // what a test sends, they are no firewall (see docs/design.md).
+    let port = std::env::var("FABER_CDP_PORT").ok();
+    if hidden || port.is_some() {
+        let mut args =
+            "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-breakpad --disable-crash-reporter".to_string();
+        if let Some(port) = port {
+            args.push_str(&format!(" --remote-debugging-port={port}"));
+        }
+        builder = builder.additional_browser_args(&args);
     }
     builder.build()
 }
@@ -351,7 +381,9 @@ fn main() {
             set_tray,
             setup::setup_check,
             setup::setup_install,
-            setup::setup_sign_in
+            setup::setup_sign_in,
+            #[cfg(feature = "test-hooks")]
+            report_checks
         ])
         .setup(move |app| {
             let data_dir = data_dir(app.handle())?;

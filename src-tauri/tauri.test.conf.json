@@ -1,0 +1,11 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "build": {
+    "frontendDist": "../dist-test",
+    "beforeBuildCommand": null,
+    "beforeDevCommand": null
+  },
+  "bundle": {
+    "active": false
+  }
+}

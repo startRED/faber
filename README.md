@@ -73,15 +73,15 @@ npm run dev
 ```bash
 npm run lint
 npm run typecheck
-npm test
 npm run build
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cargo clippy -p faber --features test-hooks -- -D warnings
+cargo t
 ```
 
-On Windows, `npm run test:e2e` also builds the app and drives it in a hidden window. Run it when the screen or the shell
-changes.
+`cargo t` runs only the tests that depend on the files you changed; `cargo t --all` runs everything, as CI does. On
+Windows it also drives a hidden Faber through WebView2; run `cargo t --all` when the screen or the shell changes.
 
 ## License
 

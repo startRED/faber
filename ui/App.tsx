@@ -1,10 +1,11 @@
 import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, onMount, Show, Switch } from 'solid-js';
-import { api, errorText, type AppState, type Choice, type Conversation, type Message, type Settings as Saved, type Vendor } from './api.ts';
+import { api, errorText, type AppState, type Choice, type Conversation, type Settings as Saved, type Vendor } from './api.ts';
 import { applyAppearance, followSystem, toAppearance, type Appearance } from './appearance.ts';
 import { Composer, type Draft } from './Composer.tsx';
 import { fromEngine, lang, t, useLanguage } from './i18n.ts';
 import { en, type Key } from './locales/en.ts';
 import { modelOptions, vendorName } from './models.ts';
+import { createOpening, upsert } from './opening.ts';
 import { Settings } from './Settings.tsx';
 import { Setup } from './Setup.tsx';
 import { shouldOpenSetup } from './setup.ts';
@@ -47,12 +48,6 @@ function windowName(window: string): string {
   return key in en ? t(key as Key) : window.replace('_', ' ');
 }
 
-function upsert(c: Conversation, m: Message): Conversation {
-  const i = c.messages.findIndex((x) => x.id === m.id);
-  const messages = i < 0 ? [...c.messages, m] : c.messages.map((x, j) => (j === i ? m : x));
-  return { ...c, messages };
-}
-
 export function App() {
   const [state, setState] = createSignal<AppState>({ conversations: [], projects: [], vendors: [], settings: {}, models: [], version: '' });
   const [loaded, setLoaded] = createSignal(false);
@@ -67,7 +62,7 @@ export function App() {
   const [appearance, setAppearance] = createSignal<Appearance>(toAppearance(undefined));
   const [confirming, setConfirming] = createSignal<string>();
   const [from, setFrom] = createSignal(0);
-  let currentId: string | undefined;
+  const opening = createOpening();
   let thread: HTMLDivElement | undefined;
   let stick = true;
 
@@ -96,7 +91,9 @@ export function App() {
     const unlisten = api.on((e) => {
       if (e.type === 'list') void refresh();
       if (e.type === 'quota') setQuotas((q) => ({ ...q, [`${e.vendor}:${e.window}`]: e }));
-      if (e.type === 'message' && e.conversationId === currentId) setCurrent((c) => c && upsert(c, e.message));
+      if (e.type === 'message' && opening.hear(e.conversationId, e.message) === 'apply') {
+        setCurrent((c) => (c?.id === e.conversationId ? upsert(c, e.message) : c));
+      }
     });
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
@@ -130,13 +127,16 @@ export function App() {
   );
 
   const open = async (id: string | undefined) => {
-    currentId = id;
+    const token = opening.begin(id);
     remember('faber.place', { area: area(), projectId: projectId(), id } satisfies Place);
     setError(undefined);
     stick = true;
-    const c = (id ? await api.open(id) : undefined) ?? undefined;
-    setFrom(Math.max(0, (c?.messages.length ?? 0) - PAGE));
-    setCurrent(c);
+    const snapshot = (id ? await api.open(id) : undefined) ?? undefined;
+    // Messages that came while the snapshot was on its way are already in it, merged by `opening`.
+    const done = opening.finish(token, snapshot);
+    if (done.stale) return;
+    setFrom(Math.max(0, (done.conversation?.messages.length ?? 0) - PAGE));
+    setCurrent(done.conversation);
   };
 
   const onScroll = (el: HTMLDivElement) => {
@@ -168,7 +168,7 @@ export function App() {
     stick = true;
     try {
       const id = await api.send({ conversationId: current()?.id, ...target(), text: draft.text, images: draft.images, files: draft.files, choice: picked() });
-      if (id !== currentId) await open(id);
+      if (id !== opening.id) await open(id);
     } catch (err) {
       fail(err);
     }
@@ -214,7 +214,7 @@ export function App() {
     if (confirming() !== id) return setConfirming(id);
     setConfirming(undefined);
     await api.remove(id);
-    if (currentId === id) void open(undefined);
+    if (opening.id === id) void open(undefined);
   };
 
   const options = createMemo(() => (lang(), modelOptions(state().vendors, state().models)));

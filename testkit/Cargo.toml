@@ -1,0 +1,40 @@
+[package]
+name = "faber-testkit"
+description = "Faber's own test runner, and the fake CLI it replays recordings with."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "faber-test"
+path = "src/bin/faber-test.rs"
+
+[[bin]]
+name = "fake-cli"
+path = "src/bin/fake-cli.rs"
+
+[dependencies]
+base64 = "0.22"
+ctrlc = "3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tempfile = "3"
+tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+zip = { version = "4", default-features = false, features = ["deflate"] }
+
+[target.'cfg(not(windows))'.dependencies]
+sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
+
+[target.'cfg(windows)'.dependencies]
+win32job = "2"
+winreg = "0.56"
+wmi = "0.18"
+
+[dev-dependencies]
+toml = "0.8"
+
+[lints]
+workspace = true

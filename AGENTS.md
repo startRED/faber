@@ -31,9 +31,10 @@ with the user's own subscriptions. Read [docs/roadmap.md](docs/roadmap.md) befor
   about windows.
 - `src-tauri/`: the Tauri 2 shell. One window, a tray icon, and the fixed list of commands the screen may call.
 - `ui/`: the screen in SolidJS + TypeScript, built by Vite into `dist/`.
-- `tests/`: UI tests (`*.test.ts`, Node's runner) and the end-to-end test (`tests/e2e/`), which drives the real app
-  through WebView2's DevTools port with a fake CLI replaying `tests/fixtures/`. The engine's own tests replay the same
-  fixtures (`engine/tests/`).
+- `tests/`: the screen's checks (`tests/ui/*.check.ts`, run inside a hidden test build) and the recordings the fake CLI
+  replays (`tests/fixtures/`). The engine's own tests replay the same fixtures (`engine/tests/`).
+- `testkit/`: Faber's own test runner (`cargo t`) and the fake CLI. It runs only the tests that depend on what changed,
+  launches a hidden test build inside a sandbox and audits every run ([docs/design.md](docs/design.md#screen-tests)).
 
 ## Proof commands
 
@@ -42,16 +43,16 @@ All exit 0 before any commit:
 ```bash
 npm run lint
 npm run typecheck
-npm test
 npm run build
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cargo clippy -p faber --features test-hooks -- -D warnings
+cargo t
 ```
 
-`npm run test:e2e` (Windows) builds the app and runs the end-to-end test in a hidden window; run it when the screen
-or the shell changes. `npm run dev` opens the app from source with live reload. Unit tests never spawn processes,
-touch real git or call a real CLI.
+`cargo t` runs only the tests that depend on the files you changed; `cargo t --all` runs everything, as CI does (the
+`rust` and `ui` suites everywhere, `screen` on Windows). Run `--all` when the screen or the shell changes. `npm run dev`
+opens the app from source with live reload. Unit tests never spawn processes, touch real git or call a real CLI.
 
 On the maintainer's PC, Rust lives outside the default folders; export these before any `cargo` or `npm run dev`:
 

@@ -1,0 +1,198 @@
+//! Building the test app: the screen with Vite in test mode, then the shell with the Tauri CLI. Both are started as
+//! `node <script>`, never through `npm`, a `.cmd` shim or a shell. The production `dist/` is never touched.
+
+use crate::app::Paths;
+use sha2::{Digest, Sha256};
+use std::path::Path;
+use std::process::Command;
+use std::time::SystemTime;
+
+/// Where Vite writes the test screen (relative to the repository). The shell embeds it.
+pub const TEST_DIST: &str = "dist-test";
+
+/// The arguments of the Vite build. `vite.config.ts` has `root: 'ui'`, so `--outDir` is relative to that folder.
+pub fn vite_args() -> Vec<String> {
+    ["node_modules/vite/bin/vite.js", "build", "--mode", "test", "--outDir", "../dist-test", "--emptyOutDir"].map(String::from).to_vec()
+}
+
+/// The arguments of the Tauri build. After the `--`, Cargo's: its own target folder (absolute, because Cargo reads it
+/// from `src-tauri`) and the number of jobs.
+pub fn tauri_args(target_dir: &Path, jobs: usize) -> Vec<String> {
+    let mut args: Vec<String> = [
+        "node_modules/@tauri-apps/cli/tauri.js",
+        "build",
+        "--debug",
+        "--no-bundle",
+        "--features",
+        "test-hooks",
+        "--config",
+        "src-tauri/tauri.test.conf.json",
+        "--",
+        "--target-dir",
+    ]
+    .map(String::from)
+    .to_vec();
+    args.push(target_dir.to_string_lossy().into_owned());
+    args.extend(["-j".to_string(), jobs.to_string()]);
+    args
+}
+
+/// A fingerprint of a folder: every file's relative path, size and modification time. `absent` when it does not exist.
+/// The test build must leave the production `dist/` exactly as it found it.
+pub fn fingerprint(dir: &Path) -> String {
+    fn walk(dir: &Path, base: &Path, out: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, base, out);
+            } else if let Ok(meta) = entry.metadata() {
+                let modified = meta.modified().ok().and_then(|m| m.duration_since(SystemTime::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
+                out.push(format!("{} {} {modified}", path.strip_prefix(base).unwrap_or(&path).display(), meta.len()));
+            }
+        }
+    }
+    if !dir.exists() {
+        return "absent".into();
+    }
+    let mut lines = Vec::new();
+    walk(dir, dir, &mut lines);
+    lines.sort();
+    format!("{:x}", Sha256::digest(lines.join("\n")))
+}
+
+fn run(what: &str, mut command: Command) -> Result<(), String> {
+    let output = command.output().map_err(|e| format!("cannot start the {what}: {e}"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(format!(
+        "the {what} failed ({})\n{}{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    ))
+}
+
+/// Builds the fake CLI next to the runner, with `jobs` cores for Cargo. `cargo run` builds only the binary it runs.
+pub fn ensure_fake_cli(paths: &Paths, jobs: usize) -> Result<(), String> {
+    let mut command = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
+    command.current_dir(&paths.root).args(["build", "--quiet", "-j", &jobs.to_string(), "--package", "faber-testkit", "--bin", "fake-cli"]);
+    run("build of the fake CLI", command)?;
+    if paths.fake_cli.exists() { Ok(()) } else { Err(format!("the fake CLI is not at {}", paths.fake_cli.display())) }
+}
+
+/// Builds the test app into `target/faber-test/`, once per run, with `jobs` cores for Cargo.
+pub fn build_test_app(paths: &Paths, jobs: usize) -> Result<(), String> {
+    let production = paths.root.join("dist");
+    let before = fingerprint(&production);
+    let mut vite = Command::new("node");
+    vite.current_dir(&paths.root).args(vite_args());
+    run("Vite build", vite)?;
+    let mut tauri = Command::new("node");
+    tauri.current_dir(&paths.root).args(tauri_args(&paths.root.join("target/faber-test"), jobs));
+    run("Tauri build", tauri)?;
+    if fingerprint(&production) != before {
+        return Err("the test build changed dist/, which only the production build may write".into());
+    }
+    if paths.app.exists() { Ok(()) } else { Err(format!("the test build did not produce {}", paths.app.display())) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vite_builds_in_test_mode_into_its_own_folder_without_the_shell() {
+        let args = vite_args();
+        assert_eq!(args[0], "node_modules/vite/bin/vite.js", "node runs Vite's own script, not npm");
+        let at = |flag: &str| args.iter().position(|a| a == flag).unwrap_or_else(|| panic!("{flag} is missing"));
+        assert_eq!(args[at("--mode") + 1], "test");
+        assert_eq!(args[at("--outDir") + 1], "../dist-test");
+        assert!(args.contains(&"--emptyOutDir".to_string()));
+        assert!(!args.iter().any(|a| a.contains("npm") || a.ends_with(".cmd")));
+    }
+
+    #[test]
+    fn tauri_builds_a_debug_app_with_the_test_hooks_and_the_override_config() {
+        let args = tauri_args(Path::new("/work/target/faber-test"), 4);
+        assert_eq!(args[0], "node_modules/@tauri-apps/cli/tauri.js");
+        let before_cargo = &args[..args.iter().position(|a| a == "--").unwrap()];
+        for needed in ["build", "--debug", "--no-bundle"] {
+            assert!(before_cargo.contains(&needed.to_string()), "{needed}");
+        }
+        let at = |flag: &str| before_cargo.iter().position(|a| a == flag).unwrap();
+        assert_eq!(before_cargo[at("--features") + 1], "test-hooks");
+        assert_eq!(before_cargo[at("--config") + 1], "src-tauri/tauri.test.conf.json");
+        let cargo_args = &args[args.iter().position(|a| a == "--").unwrap() + 1..];
+        assert_eq!(cargo_args, ["--target-dir", "/work/target/faber-test", "-j", "4"]);
+    }
+
+    #[test]
+    fn the_fingerprint_changes_when_a_file_is_added_changed_or_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(fingerprint(&dir.path().join("missing")), "absent");
+        let empty = fingerprint(dir.path());
+        std::fs::write(dir.path().join("index.html"), "one").unwrap();
+        let one = fingerprint(dir.path());
+        assert_ne!(one, empty);
+        assert_eq!(fingerprint(dir.path()), one, "the same folder gives the same fingerprint");
+        std::fs::write(dir.path().join("index.html"), "three").unwrap();
+        assert_ne!(fingerprint(dir.path()), one, "a file that changed size");
+        std::fs::create_dir(dir.path().join("assets")).unwrap();
+        std::fs::write(dir.path().join("assets/app.js"), "x").unwrap();
+        let two = fingerprint(dir.path());
+        std::fs::remove_file(dir.path().join("assets/app.js")).unwrap();
+        assert_ne!(fingerprint(dir.path()), two);
+    }
+
+    fn repo_file(path: &str) -> String {
+        let root = Paths::discover().unwrap().root;
+        std::fs::read_to_string(root.join(path)).unwrap_or_else(|e| panic!("{path}: {e}"))
+    }
+
+    #[test]
+    fn the_test_override_config_embeds_dist_test_and_runs_no_hook_and_makes_no_bundle() {
+        let config: serde_json::Value = serde_json::from_str(&repo_file("src-tauri/tauri.test.conf.json")).unwrap();
+        assert_eq!(config["build"]["frontendDist"], "../dist-test");
+        assert!(config["build"].get("beforeBuildCommand").is_some_and(|v| v.is_null()), "the production hook runs through a shell");
+        assert!(config["build"].get("beforeDevCommand").is_some_and(|v| v.is_null()));
+        assert_eq!(config["bundle"]["active"], false);
+    }
+
+    #[test]
+    fn the_test_hooks_feature_exists_and_is_never_a_default() {
+        let manifest: toml::Table = repo_file("src-tauri/Cargo.toml").parse().unwrap();
+        let features = manifest["features"].as_table().expect("src-tauri/Cargo.toml has [features]");
+        assert!(features.contains_key("test-hooks"));
+        let default = features.get("default").and_then(|d| d.as_array()).map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>());
+        assert!(!default.unwrap_or_default().contains(&"test-hooks"));
+    }
+
+    // The checks live only in a test build. When a production `dist/` exists, nothing in it may carry them.
+    #[test]
+    fn the_production_dist_holds_no_checks() {
+        let dist = Paths::discover().unwrap().root.join("dist");
+        if !dist.exists() {
+            return;
+        }
+        fn files(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    files(&path, out);
+                } else {
+                    out.push(path);
+                }
+            }
+        }
+        let mut all = Vec::new();
+        files(&dist, &mut all);
+        for file in all.iter().filter(|f| matches!(f.extension().and_then(|e| e.to_str()), Some("js" | "html" | "css"))) {
+            let text = std::fs::read_to_string(file).unwrap_or_default();
+            for marker in ["__faberChecks", "__faberText", "report_checks"] {
+                assert!(!text.contains(marker), "{} contains {marker}", file.display());
+            }
+        }
+    }
+}
