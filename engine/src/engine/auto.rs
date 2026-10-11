@@ -1,8 +1,8 @@
-//! Auto: routes a conversation's first message blind (see `route`), guessing while the user types so the answer can
-//! start the moment it is sent. Later messages stay with the routed model.
+//! Auto: routes a conversation's first message (see `route`), guessing while the user types so the answer can start
+//! the moment it is sent. Later messages stay with the routed model.
 
 use super::*;
-use crate::route::{INSTRUCTIONS, ROUTER, Routed, blind, candidates, read};
+use crate::route::{INSTRUCTIONS, ROUTER, Routed, candidates, priced, question, read};
 use tokio::sync::oneshot;
 
 /// How long a sent message waits for its route before the everyday default answers. The router (GPT-6 Luna at
@@ -91,18 +91,17 @@ impl Core {
     }
 
     fn start_guess(&mut self, request: String, attached: usize, warm: Option<String>) {
-        let cands = candidates(&self.vendors(), &self.codex_models);
         let used = |vendor: Vendor| self.used.iter().filter(|((v, _), _)| *v == vendor).map(|(_, u)| *u).fold(0.0, f64::max);
-        let b = blind(&request, attached, &cands, &used, Uuid::new_v4().as_u64_pair().0);
+        let cands = priced(&candidates(&self.vendors(), &self.codex_models), &used);
         // One candidate needs no router: the everyday default answers.
-        let (answer, stop) = if cands.len() > 1 { self.ask_router(b.prompt.clone()) } else { (None, None) };
+        let (answer, stop) = if cands.len() > 1 { self.ask_router(question(&request, attached)) } else { (None, None) };
         if let Some(old) = self.guess.replace(Guess { request: request.clone(), result: None, waiters: vec![], warm, stop }) {
             stop_router(old.stop);
         }
         let me = self.me.clone();
         tokio::spawn(async move {
             let routed = match answer {
-                Some(rx) => tokio::time::timeout(ASK_LIMIT, rx).await.ok().and_then(|r| r.ok()).flatten().and_then(|a| read(&a, &b)),
+                Some(rx) => tokio::time::timeout(ASK_LIMIT, rx).await.ok().and_then(|r| r.ok()).flatten().and_then(|a| read(&a, &cands)),
                 None => None,
             };
             if let Some(core) = me.upgrade() {

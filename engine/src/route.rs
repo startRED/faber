@@ -1,7 +1,9 @@
-//! Auto: a small model that is already running picks who answers, without ever seeing a model or company name.
+//! Auto: a small model that is already running reads the request and says what kind of task it is and how hard; a fixed
+//! table then picks the cheapest model that clears the bar for it, priced by the quota left on each subscription.
 //!
-//! Each model a vendor makes tends to prefer that vendor's models, so candidates reach the router as letters with
-//! measured numbers, shuffled on every request. A few fixed rules check the pick afterwards.
+//! The router never sees a model or company name, not even as anonymous candidates: each vendor's models tend to prefer
+//! that vendor's models, and on 44 real requests (10/10/2026) a router choosing among anonymous profiles still overspent
+//! on 5 of them. It judges requests well; weighing price against quality is the table's job.
 
 use crate::model::Vendor;
 use crate::router::Pick;
@@ -45,14 +47,15 @@ pub const ROUTER: [(Vendor, &str, &str); 2] = [(Vendor::Codex, "gpt-6-luna", "me
 pub const KINDS: [&str; 7] = ["chat", "writing", "code", "math", "research", "image", "other"];
 pub const LEVELS: [&str; 3] = ["easy", "medium", "hard"];
 
-pub const INSTRUCTIONS: &str = "You route a user's request to the best candidate model. Never answer the request itself.
-Candidates are anonymous letters with measured numbers: iq = general reasoning index (0-100); agent = multi-step coding \
-and terminal work (0-100); secs = time for a typical answer; cost = how much one task weighs on the user's quota right now.
-Choose the candidate that gives the best result for this request without wasting quota or time: casual chat, translation \
-and short facts need a fast cheap one; writing and analysis need high iq; code changes, debugging and multi-file work \
-need high agent; very hard or high-stakes work needs the strongest.
+pub const INSTRUCTIONS: &str = "You classify a user's request for a router. Never answer the request itself.
+kind: chat (casual talk, greetings, short facts), writing (texts, emails, translation, stories, plans), code (programs, \
+debugging, code review, changes to software), math (calculations, equations, proofs), research (analysis, comparisons, \
+explanations, advice), image (making or editing pictures), other.
+difficulty: easy (a quick answer any competent person gets right), medium (needs care, several steps or some \
+expertise), hard (expert work where a subtle mistake is costly: proofs, multi-file changes, concurrency, architecture, \
+legal, medical or financial analysis).
 Reply with one line of JSON only: \
-{\"pick\":\"<letter>\",\"kind\":\"chat|writing|code|math|research|image|other\",\"difficulty\":\"easy|medium|hard\",\"confidence\":<0..1>}";
+{\"kind\":\"chat|writing|code|math|research|image|other\",\"difficulty\":\"easy|medium|hard\",\"confidence\":<0..1>}";
 
 /// The profiles this user can run: a connected CLI and, for Codex, a model the account lists.
 pub fn candidates(available: &[Vendor], codex_models: &[String]) -> Vec<Profile> {
@@ -62,47 +65,30 @@ pub fn candidates(available: &[Vendor], codex_models: &[String]) -> Vec<Profile>
         .collect()
 }
 
-/// What the router is asked, and which profile each letter stands for.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Blind {
-    pub prompt: String,
-    pub letters: Vec<Profile>,
+/// `used` is the share of each vendor's quota already spent (0 to 1): a task costs more where little is left.
+pub fn priced(candidates: &[Profile], used: &dyn Fn(Vendor) -> f64) -> Vec<Profile> {
+    candidates
+        .iter()
+        .map(|p| {
+            let left = (1.0 - used(p.vendor).clamp(0.0, 0.95)) as f32;
+            Profile { cost: p.cost / (left * left), ..*p }
+        })
+        .collect()
 }
 
 // Requests longer than this are cut for routing only; the answer gets the whole text.
 const REQUEST_CHARS: usize = 4000;
 
-/// `used` is the share of each vendor's quota already spent (0 to 1): a task costs more where little is left.
-pub fn blind(request: &str, attached: usize, candidates: &[Profile], used: &dyn Fn(Vendor) -> f64, seed: u64) -> Blind {
-    let mut letters = candidates.to_vec();
-    // splitmix64: a fresh order on every request, the same order for the same seed.
-    let mut state = seed;
-    let mut next = || {
-        state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let z = (state ^ (state >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        let z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        z ^ (z >> 31)
-    };
-    for i in (1..letters.len()).rev() {
-        letters.swap(i, (next() % (i as u64 + 1)) as usize);
-    }
-    let lines: Vec<String> = letters
-        .iter()
-        .enumerate()
-        .map(|(i, p)| {
-            let left = (1.0 - used(p.vendor).clamp(0.0, 0.95)) as f32;
-            let letter = (b'A' + i as u8) as char;
-            format!("{letter}: iq {} agent {} secs {:.0} cost {:.2}", p.iq, p.agent, p.secs, p.cost / (left * left))
-        })
-        .collect();
+/// What the router reads: the request alone.
+pub fn question(request: &str, attached: usize) -> String {
     let mut text: String = request.chars().take(REQUEST_CHARS).collect();
     if attached > 0 {
         text.push_str(&format!("\n[{attached} attached file(s) or image(s)]"));
     }
-    Blind { prompt: format!("Candidates:\n{}\n\nRequest:\n{text}", lines.join("\n")), letters }
+    text
 }
 
-/// The router's pick, checked.
+/// The router's verdict and the model the table picked for it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Routed {
     pub profile: Profile,
@@ -124,42 +110,49 @@ impl Routed {
 
 #[derive(Deserialize)]
 struct Answer {
-    pick: String,
     #[serde(default)]
     kind: String,
-    #[serde(default)]
     difficulty: String,
     #[serde(default)]
     confidence: f64,
 }
 
-/// Reads the router's JSON line and applies the fixed rules; None when the answer names no candidate.
-pub fn read(answer: &str, blind: &Blind) -> Option<Routed> {
+/// Reads the router's JSON line; None when it is not one.
+pub fn read(answer: &str, candidates: &[Profile]) -> Option<Routed> {
     let json = &answer[answer.find('{')?..=answer.rfind('}')?];
     let a: Answer = serde_json::from_str(json).ok()?;
-    let letter = a.pick.trim().bytes().next()?.to_ascii_uppercase();
-    let profile = *blind.letters.get(letter.checked_sub(b'A')? as usize)?;
     let kind = KINDS.into_iter().find(|k| *k == a.kind).unwrap_or("other");
-    let difficulty = LEVELS.into_iter().find(|l| *l == a.difficulty).unwrap_or("medium");
-    Some(check(Routed { profile, kind, difficulty, confidence: a.confidence.clamp(0.0, 1.0) }, &blind.letters))
+    let difficulty = LEVELS.into_iter().find(|l| *l == a.difficulty)?;
+    choose(kind, difficulty, a.confidence.clamp(0.0, 1.0), candidates)
 }
 
-/// Unsure picks the strongest; hard work and code changes never go to a model below the bar for them.
-pub fn check(mut r: Routed, candidates: &[Profile]) -> Routed {
-    let strongest = candidates.iter().max_by_key(|p| (p.iq, p.agent)).copied().unwrap_or(r.profile);
-    if r.confidence < 0.5 {
-        r.profile = strongest;
-        return r;
-    }
-    let (iq, agent) = match (r.difficulty, r.kind) {
-        ("hard", "code") => (47, 44),
-        ("hard", _) => (47, 0),
+/// The bar a task must clear: (general intelligence, agentic coding).
+fn bar(kind: &str, difficulty: &str) -> (u8, u8) {
+    match (difficulty, kind) {
+        ("easy", "code") => (0, 15),
+        ("easy", _) => (0, 0),
         ("medium", "code") => (0, 30),
-        _ => (0, 0),
-    };
-    if r.profile.iq < iq || r.profile.agent < agent {
-        let fit = candidates.iter().filter(|p| p.iq >= iq && p.agent >= agent).min_by(|a, b| a.cost.total_cmp(&b.cost));
-        r.profile = fit.copied().unwrap_or(strongest);
+        // A wrong number reads as right: math gets the hard bar a level early.
+        ("medium", "math") => (47, 0),
+        ("medium", _) => (41, 0),
+        ("hard", "code") => (47, 44),
+        _ => (47, 0),
     }
-    r
+}
+
+/// The cheapest candidate that clears the bar (the faster on a tie), or the strongest when none does. An unsure verdict
+/// gets the next level's bar.
+pub fn choose(kind: &'static str, difficulty: &'static str, confidence: f64, candidates: &[Profile]) -> Option<Routed> {
+    let level = match (confidence < 0.5, difficulty) {
+        (true, "easy") => "medium",
+        (true, _) => "hard",
+        (false, level) => level,
+    };
+    let (iq, agent) = bar(kind, level);
+    let profile = candidates
+        .iter()
+        .filter(|p| p.iq >= iq && p.agent >= agent)
+        .min_by(|a, b| a.cost.total_cmp(&b.cost).then(a.secs.total_cmp(&b.secs)))
+        .or_else(|| candidates.iter().max_by_key(|p| (p.iq, p.agent)))?;
+    Some(Routed { profile: *profile, kind, difficulty, confidence })
 }

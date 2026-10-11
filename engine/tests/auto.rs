@@ -14,10 +14,6 @@ use support::{fake, fixture};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 const SKY: &str = "In one sentence: why is the sky blue?";
-// The anonymous numbers of two candidates, as the router sees them.
-const LUNA: &str = "iq 29 agent 3 ";
-const HAIKU: &str = "iq 34 agent 15 ";
-
 type Calls = Arc<Mutex<Vec<String>>>;
 
 fn engine(dir: &Path, vendor: Vendor, spawn: Spawner, ask: Ask) -> (Engine, UnboundedReceiver<AppEvent>) {
@@ -38,12 +34,11 @@ fn engine(dir: &Path, vendor: Vendor, spawn: Spawner, ask: Ask) -> (Engine, Unbo
     (engine, rx)
 }
 
-/// A router that picks the candidate with these numbers, whatever letter the shuffle gave it.
-fn router(numbers: &'static str, kind: &'static str, level: &'static str, calls: Calls) -> Ask {
+/// A router that always gives this verdict.
+fn router(kind: &'static str, level: &'static str, calls: Calls) -> Ask {
     Arc::new(move |prompt: String| {
-        let letter = prompt.lines().find(|l| l.contains(numbers)).and_then(|l| l.chars().next()).unwrap();
         calls.lock().unwrap().push(prompt);
-        Box::pin(async move { Some(format!(r#"{{"pick":"{letter}","kind":"{kind}","difficulty":"{level}","confidence":0.95}}"#)) })
+        Box::pin(async move { Some(format!(r#"{{"kind":"{kind}","difficulty":"{level}","confidence":0.95}}"#)) })
     })
 }
 
@@ -68,8 +63,7 @@ async fn finished(rx: &mut UnboundedReceiver<AppEvent>) -> Message {
 async fn auto_routes_the_first_message_blind_and_says_why() {
     let dir = tempfile::tempdir().unwrap();
     let calls = Calls::default();
-    let (engine, mut rx) =
-        engine(dir.path(), Vendor::Codex, fake(fixture("codex", "chat")).spawn, router(LUNA, "chat", "easy", calls.clone()));
+    let (engine, mut rx) = engine(dir.path(), Vendor::Codex, fake(fixture("codex", "chat")).spawn, router("chat", "easy", calls.clone()));
     engine.send(auto(SKY)).unwrap();
     let reply = finished(&mut rx).await;
     engine.shutdown();
@@ -95,8 +89,7 @@ async fn a_router_without_an_answer_leaves_the_everyday_default() {
 async fn a_draft_routed_while_typing_answers_without_asking_again() {
     let dir = tempfile::tempdir().unwrap();
     let calls = Calls::default();
-    let (engine, mut rx) =
-        engine(dir.path(), Vendor::Codex, fake(fixture("codex", "chat")).spawn, router(LUNA, "chat", "easy", calls.clone()));
+    let (engine, mut rx) = engine(dir.path(), Vendor::Codex, fake(fixture("codex", "chat")).spawn, router("chat", "easy", calls.clone()));
     let typing =
         WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: Choice { vendor: "auto".into(), model: None } };
     // Most of the message: the route still holds once the last words are typed.
@@ -114,7 +107,7 @@ async fn later_messages_stay_with_the_routed_model() {
     let dir = tempfile::tempdir().unwrap();
     let calls = Calls::default();
     let f = fake(fixture("claude", "chat"));
-    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone(), router(HAIKU, "chat", "easy", calls.clone()));
+    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone(), router("chat", "easy", calls.clone()));
     let id = engine.send(auto(SKY)).unwrap();
     let first = finished(&mut rx).await;
     engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto("And at sunset?") }).unwrap();

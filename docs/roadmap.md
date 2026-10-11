@@ -56,12 +56,14 @@ the toolbox only use what is connected, and new providers arrive as driver descr
 
 Each vendor's model tends to prefer its own company's models, so in Auto no model ever sees a model's name.
 
-- A small, fast model that is already running (GPT-6 Luna or Haiku at medium effort, whichever is connected) crosses
-  the request with the candidates' profiles and picks who answers.
-- Each candidate is a letter with a profile: general intelligence and agentic coding scores, seconds per task, and cost
-  per task priced by the quota left on its subscription right now. The letters are shuffled on every request. The
-  router returns a letter, the kind of task, how hard it is and its confidence; low confidence picks the strongest
-  model, and fixed floors keep hard or coding work off weak models (done, `engine/src/route.rs`).
+- A small, fast model that is already running (GPT-6 Luna or Haiku at medium effort, whichever is connected) reads
+  the request alone and says what kind of task it is and how hard. It never sees the candidates.
+- A fixed table then picks the cheapest model that clears the bar for that kind and level: each model's profile has
+  general intelligence and agentic coding scores, seconds per task, and cost per task priced by the quota left on its
+  subscription right now, so a nearly spent subscription hands its work to the other one (done, `engine/src/route.rs`).
+- Measured on 10/10/2026 with the real router on 22 requests, run twice: 81 of 88 picks right, half the routes under
+  2.8 s and nine in ten under 3.9 s. An earlier design that let the router choose among anonymous, shuffled profiles
+  got 76 of 88, spent more and was slower: the router judges requests well, the table weighs price against quality.
 - Profiles start from public benchmarks (Artificial Analysis, read 22/09 to 08/10/2026, compiled in for now) and move
   to Faber's own scoreboard as it fills: which answers users kept, redid or rejected. Later they ship in the live
   manifest, so a new model joins without an app release.
