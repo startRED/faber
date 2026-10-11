@@ -47,7 +47,9 @@ theme shows as designed.
 
 A custom look saves to a small file that can be shared (`.faber-theme.json`). The file stores choices, never CSS. It is
 checked when it is opened: an unknown key, a wrong type, a value outside the allowed list or a file over 20,000 bytes
-is refused, and nothing changes. Everything that sets a colour goes through one colour validator.
+is refused, and nothing changes. One exception: keys that start with `amber`, `claude` or `codex` inside `colors` are
+dropped without failing, because the meaning colours are not up to a theme file. Everything that sets a colour goes
+through one colour validator.
 
 ### Meaning colours are locked
 

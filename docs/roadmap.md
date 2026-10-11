@@ -476,7 +476,9 @@ The visual direction lives in [design.md](design.md). In short:
 - One screen structure. Three themes (Dark Room, the default; Workshop; Workbench) and three presets (Morning,
   High contrast, Cobalt) are only sets of token overrides on a shared base.
 - People can customize almost everything, and a custom look saves to a small file that can be shared. Three meaning
-  colours stay fixed: amber for "needs you", coral for Claude and violet for Codex.
+  colours are locked for now: amber for "needs you", coral for Claude and violet for Codex. The lock is provisional, a
+  reversible default: it clashes with the owner's own wish that people customize the look any way they like, so it stays
+  open until the owner decides. Dropping it touches only the colour validator, the theme data and one row in Settings.
 - The symbol is "Curioso", a lime creature that peeks. The app icon is one dark icon in every Windows mode.
 
 ## License
