@@ -35,20 +35,26 @@ function processes(): ProcessRow[] {
   const script = '$memory = @{}; Get-CimInstance Win32_PerfRawData_PerfProc_Process | ForEach-Object { ' +
     '$memory[[int]$_.IDProcess] = $_.WorkingSetPrivate }; ' +
     '@(Get-CimInstance Win32_Process | ForEach-Object { [pscustomobject]@{ pid = [int]$_.ProcessId; ' +
-    'parent = [int]$_.ParentProcessId; name = $_.Name; born = [string]$_.CreationDate; bytes = $memory[[int]$_.ProcessId] } }) | ConvertTo-Json -Compress';
+    'parent = [int]$_.ParentProcessId; name = $_.Name; born = [string]$_.CreationDate.Ticks; bytes = $memory[[int]$_.ProcessId] } }) | ConvertTo-Json -Compress';
   return JSON.parse(execFileSync(powershell, ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', windowsHide: true }));
 }
+// A child is born after its parent. Windows reuses process ids, so a process whose parent id now belongs to a younger
+// process (csrss.exe and winlogon.exe outlive the smss.exe that started them) is not part of the tree. `born` is the
+// creation time in ticks, all the same width, so text order is time order.
 function descendants(rows: ProcessRow[], pid: number): ProcessRow[] {
-  const ids = new Set([pid]);
+  const born = new Map([[pid, rows.find((row) => row.pid === pid)?.born ?? '']]);
   let changed = true;
   while (changed) {
     changed = false;
-    for (const row of rows) if (ids.has(row.parent) && !ids.has(row.pid)) {
-      ids.add(row.pid);
-      changed = true;
+    for (const row of rows) {
+      const parent = born.get(row.parent);
+      if (parent !== undefined && !born.has(row.pid) && row.born >= parent) {
+        born.set(row.pid, row.born);
+        changed = true;
+      }
     }
   }
-  return rows.filter((row) => ids.has(row.pid));
+  return rows.filter((row) => born.has(row.pid));
 }
 function userPath(): string {
   return execFileSync(powershell, ['-NoProfile', '-NonInteractive', '-Command',
