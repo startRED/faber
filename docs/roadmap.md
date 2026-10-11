@@ -54,21 +54,19 @@ the toolbox only use what is connected, and new providers arrive as driver descr
 
 ### Auto: a blind router
 
-Each vendor's model tends to prefer its own company's models, so in Auto no model ever chooses a model.
+Each vendor's model tends to prefer its own company's models, so in Auto no model ever sees a model's name.
 
-- A decision model classifies the request: what kind of task it is (code, writing, math, images, long documents,
-  quick chat) and how hard, with a confidence. It returns a label, never text, and never sees a model or company name.
-- A table, not a model, turns the label into the model that answers: measured strength for that kind of task, speed,
-  and the quota price on its subscription right now. Low confidence picks the strongest model.
-- The table starts from public benchmarks, each number linked to its source, and moves to Faber's own scoreboard as
-  it fills: which answers users kept, redid or rejected. It ships in the live manifest, so a new model joins without
-  an app release.
-- The classifier starts as the cheapest connected model on a process that is already running, asked only for the
-  label. A small local decision model (open weights from the catalog, no quota, nothing leaves the computer) replaces
-  it once, fine-tuned on Faber's labels, it beats that baseline on the same labeled set. Hosted classifiers stay
-  optional, with the user's own key, because they send the request to another company.
-- Routing has a budget of about one second; past it, the turn starts with the last good pick. The answer shows the
-  chosen model and the reason in one line.
+- A small, fast model that is already running (GPT-6 Luna or Haiku at medium effort, whichever is connected) crosses
+  the request with the candidates' profiles and picks who answers.
+- Each candidate is a letter with a profile: measured strength per kind of task (code, writing, math, images, long
+  documents, quick chat), speed, and the quota price on its subscription right now. The letters are shuffled on every
+  request. The router returns a letter, its confidence and a one-line reason; low confidence picks the strongest model.
+- Profiles start from public benchmarks, each number linked to its source, and move to Faber's own scoreboard as it
+  fills: which answers users kept, redid or rejected. They ship in the live manifest, so a new model joins without an
+  app release.
+- No local model and no hosted classifier: routing spends only the subscriptions the user already has.
+- Routing runs on the first message of a conversation and again only when the request changes kind. It has a time
+  budget; past it, the turn starts with the last good pick. The answer shows the chosen model and the reason.
 - The router is measured too: on the benchmark of real requests, its picks must match always using the strongest
   model while spending less quota.
 
