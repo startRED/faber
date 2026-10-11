@@ -2311,7 +2311,7 @@ Each item below is out of Phase 1. The phase comes from R45, or from AI-1 where 
    Windows, Linux and macOS (the `rust` and `ui` suites on all three, `screen` on Windows) is not part of this list:
    it needs a push, so it is the gate for merging `phase-1-base` after Erick approves the first push (item 11).
 2. **Old suite gone.** No Node test file and no `playwright-core` remain.
-3. **License.** The license is AGPL in `LICENSE`, `package.json`, `package-lock.json`, `Cargo.toml`, `README.md` and
+3. **License.** The license is `FSL-1.1-ALv2` [R79] in `LICENSE`, `package.json`, `package-lock.json`, `Cargo.toml`, `README.md` and
    `AGENTS.md`, in one commit of its own.
 4. **Documents.** `docs/roadmap.md` and `docs/design.md` match this document.
 5. **Looks.** The six looks render s1, a chat thread, Settings and the first run, and every one passes the twenty-six
