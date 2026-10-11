@@ -27,6 +27,8 @@
     "shortDescription": "One app for everything AI can do.",
     "icon": [
       "icons/32x32.png",
+      "icons/16x16.png",
+      "icons/24x24.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",

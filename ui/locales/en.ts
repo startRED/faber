@@ -4,6 +4,8 @@ export const en = {
   'area.chat': 'Chat',
   'area.projects': 'Projects',
   'area.label': 'Area',
+  // The name of the app, read by screen readers for the drawing of the lockup. It is the same in every language.
+  'brand.name': 'Faber',
   'quota.label': 'Quota',
   'quota.window': '{window} window',
   'quota.five_hour': '5-hour',

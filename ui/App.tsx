@@ -5,6 +5,7 @@ import { inOrder, saveAndApply, watchSystem } from './appearance.ts';
 import { Composer, type Draft } from './Composer.tsx';
 import { failureText, lang, t, useLanguage } from './i18n.ts';
 import { en, type Key } from './locales/en.ts';
+import { Lockup, Peek } from './Mark.tsx';
 import { modelOptions, vendorName } from './models.ts';
 import { createOpening, upsert } from './opening.ts';
 import { Settings } from './Settings.tsx';
@@ -232,9 +233,9 @@ export function App(props: { initial: AppState }) {
     <div class="app">
       {/* The top bar is the window's title bar: empty space drags the window, double click maximizes. */}
       <header class="top" classList={{ mac }} data-tauri-drag-region>
-        <strong class="brand" data-tauri-drag-region>
-          Faber
-        </strong>
+        <span class="brand" data-tauri-drag-region>
+          <Lockup height={20} />
+        </span>
         <div class="toggle" role="group" aria-label={t('area.label')}>
           <button aria-pressed={area() === 'chat'} onClick={() => switchArea('chat')}>
             {t('area.chat')}
@@ -405,10 +406,12 @@ function Empty(props: { vendors: number; area: Area; project?: { name: string; p
           <p>{t('empty.noAiBody')}</p>
         </Match>
         <Match when={props.area === 'project' && !props.project}>
+          <Peek />
           <h1 class="display">{t('empty.openProjectTitle')}</h1>
           <p>{t('empty.openProjectBody')}</p>
         </Match>
         <Match when={props.area === 'project'}>
+          <Peek />
           <h1 class="display">{props.project?.name}</h1>
           <p>{t('empty.projectBody', { path: props.project?.path ?? '' })}</p>
         </Match>

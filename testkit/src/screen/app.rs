@@ -2,7 +2,7 @@
 
 use super::{Result, Scenario, ask, claude_chat, ensure, eventually, no_cli, pause, same, start_settings};
 use crate::app::Ctx;
-use crate::page::{Page, css, role_any};
+use crate::page::{Page, css, role, role_any};
 use serde_json::json;
 use std::time::{Duration, Instant};
 
@@ -50,6 +50,10 @@ pub fn scenarios() -> Vec<Scenario> {
         Scenario { name: "editing a message sends it as a branch and keeps the original conversation", run: edits_as_a_branch },
         Scenario { name: "deleting a conversation asks once, then removes it", run: deletes_after_asking },
         Scenario { name: "with no AI installed, the app says what to do", run: says_what_to_do },
+        Scenario {
+            name: "the title bar shows the lockup in ink, and Curioso peeks only into the empty states of a project",
+            run: shows_the_brand,
+        },
         Scenario { name: "the screen speaks the chosen language and switches at once", run: switches_language },
         Scenario { name: "appearance changes apply at once and are kept after reopening", run: keeps_appearance },
         Scenario {
@@ -85,6 +89,62 @@ fn opens_empty(ctx: &mut Ctx) -> Result {
     }
     same(page.attr(&css("header.top"), "data-tauri-drag-region")?, Some(String::new()), "the top bar drags the window")?;
     ctx.shot(&mut app, "home")
+}
+
+/// The colour a custom property gives to text: the page's own computed colour, so the rest can be compared with it.
+const COLOUR_OF: &str = "(name) => { const p = document.createElement('i'); p.style.color = `var(${name})`; document.body.append(p); const c = getComputedStyle(p).color; p.remove(); return c; }";
+
+/// The drawings of Curioso on the stage: how many there are, how big each is, and the colour it is drawn in.
+fn peeks() -> String {
+    format!(
+        "(() => {{ const colour = {COLOUR_OF}; return {{ ink3: colour('--ink-3'), found: [...document.querySelectorAll('.empty svg')].map((s) => {{ const r = s.getBoundingClientRect(); return {{ w: r.width, h: r.height, fill: getComputedStyle(s.querySelector('path')).fill }}; }}) }}; }})()"
+    )
+}
+
+fn shows_the_brand(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    // One project with no conversations, so the screen can show the second empty state.
+    let folder = ctx.sb.data.join("demo");
+    std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+    let projects = json!([{ "id": "demo", "name": "Demo", "path": folder.to_string_lossy() }]);
+    std::fs::write(ctx.sb.data.join("projects.json"), projects.to_string()).map_err(|e| e.to_string())?;
+    let launch = claude_chat(ctx);
+    let mut app = ctx.launch(launch)?;
+    let page = &mut app.page;
+    let title = page.named("heading", "empty.chatTitle")?;
+    page.wait_visible(&title)?;
+    // The title bar: the drawing of the lockup, named Faber, 20 px tall, in the ink colour of the look.
+    let lockup = format!(
+        "(() => {{ const colour = {COLOUR_OF}; const s = document.querySelector('header.top .brand svg'); return {{ name: s.getAttribute('aria-label'), h: s.getBoundingClientRect().height, fill: getComputedStyle(s.querySelector('path')).fill, ink: colour('--ink') }}; }})()"
+    );
+    let found = page.eval(&lockup)?;
+    same(found["name"].as_str(), Some("Faber"), "the lockup is named")?;
+    same(found["h"].as_f64(), Some(20.0), "the lockup's height")?;
+    same(found["fill"].as_str(), found["ink"].as_str(), "the lockup is drawn in ink")?;
+    // The new conversation has no Curioso.
+    same(page.eval(&peeks())?["found"].as_array().map(Vec::len), Some(0), "drawings of Curioso on the new conversation")?;
+    // The two empty states of the Projects area each have one, 64 px, in the third ink.
+    let projects = page.named("button", "area.projects")?;
+    page.click(&projects)?;
+    let open = page.named("heading", "empty.openProjectTitle")?;
+    page.wait_visible(&open)?;
+    let looks = |page: &mut Page, what: &str| -> Result {
+        let found = page.eval(&peeks())?;
+        let list = found["found"].as_array().cloned().unwrap_or_default();
+        same(list.len(), 1, &format!("drawings of Curioso on {what}"))?;
+        same(list[0]["w"].as_f64(), Some(64.0), "his width")?;
+        same(list[0]["h"].as_f64(), Some(64.0), "his height")?;
+        same(list[0]["fill"].as_str(), found["ink3"].as_str(), "his colour")
+    };
+    looks(page, "no project open")?;
+    ctx.shot(&mut app, "peek-no-project")?;
+    let page = &mut app.page;
+    let demo = css(".nav .item").has_text("Demo");
+    page.click(&demo)?;
+    let name = role("heading", "Demo");
+    page.wait_visible(&name)?;
+    looks(page, "a project with no conversations")?;
+    ctx.shot(&mut app, "peek-project")
 }
 
 fn streams_an_answer(ctx: &mut Ctx) -> Result {

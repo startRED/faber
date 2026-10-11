@@ -19,7 +19,9 @@ input, textarea { caret-color: var(--accent); }
 .app { display: grid; grid-template-rows: 40px 1fr; height: 100%; background: var(--frame); }
 .top { display: flex; align-items: center; gap: 14px; padding: 0 0 0 20px; user-select: none; }
 .top.mac { padding: 0 14px 0 78px; } /* room for the traffic lights */
-.brand { font-family: var(--font-display); font-size: calc(var(--fs-ui) + 5px); font-weight: 600; font-stretch: var(--display-stretch); letter-spacing: -0.02em; line-height: 1; color: var(--ink); }
+/* The lockup is a drawing in the ink colour, in every theme. The drag region is the span: Tauri reads the attribute only on the element clicked. */
+.brand { display: flex; color: var(--ink); }
+.brand svg { display: block; pointer-events: none; }
 .caption { display: flex; align-self: stretch; margin-left: -4px; }
 .caption button { width: 46px; display: grid; place-items: center; color: var(--ink-3); border-radius: 0; }
 .caption button:hover { background: var(--s3); color: var(--ink); }
@@ -73,6 +75,9 @@ input, textarea { caret-color: var(--accent); }
 .empty { display: grid; justify-items: start; gap: 16px; padding-top: 14vh; }
 .empty h1 { font-size: min(var(--fs-display), 9vw); max-width: 8.4em; overflow-wrap: anywhere; }
 .empty p { margin: 0; color: var(--ink-2); font-size: var(--fs-lead); max-width: 44ch; line-height: 1.5; }
+/* Curioso peeks over a ledge: only the top 44 of his 64 px show, with both eyes, above a hairline. */
+.peek { width: min(100%, 44ch); height: 45px; overflow: hidden; color: var(--ink-3); border-bottom: 1px solid var(--line-2); }
+.peek svg { display: block; margin-left: -2px; } /* the drawing has 2 px of room on its left; his edge lines up with the heading */
 
 /* Messages */
 .you { position: relative; justify-self: end; max-width: min(80%, 500px); padding: 11px 15px; background: var(--s2); border-radius: var(--r-lg) var(--r-lg) var(--r-xs) var(--r-lg); box-shadow: var(--card-shadow); font-size: var(--fs-read); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }

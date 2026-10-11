@@ -4,6 +4,7 @@ export const ptBR: Messages = {
   'area.chat': 'Chat',
   'area.projects': 'Projetos',
   'area.label': 'Área',
+  'brand.name': 'Faber',
   'quota.label': 'Cota',
   'quota.window': 'janela de {window}',
   'quota.five_hour': '5 horas',

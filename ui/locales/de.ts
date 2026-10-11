@@ -4,6 +4,7 @@ export const de: Messages = {
   'area.chat': 'Chat',
   'area.projects': 'Projekte',
   'area.label': 'Bereich',
+  'brand.name': 'Faber',
   'quota.label': 'Kontingent',
   'quota.window': '{window}-Fenster',
   'quota.five_hour': '5-Stunden',
