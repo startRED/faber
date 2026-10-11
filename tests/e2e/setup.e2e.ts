@@ -4,7 +4,7 @@ import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_pr
 import { once } from 'node:events';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { chromium, type Browser, type Locator, type Page } from 'playwright-core';
@@ -73,7 +73,8 @@ type Run = { page: Page; browser: Browser; app: ChildProcess; pid: number; seen:
 
 async function fixture(t: TestContext, connected = false) {
   assert.ok(existsSync(binary), 'build the real app with npm run test:e2e before running setup acceptance proofs');
-  const root = mkdtempSync(join(tmpdir(), 'faber-setup-e2e-'));
+  // CI temp can be an 8.3 short path (RUNNER~1) while processes report the long one; compare long paths.
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'faber-setup-e2e-')));
   // Also clean up failures during fixture construction, before dispose is available.
   t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   const observed = join(root, 'observed');

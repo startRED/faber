@@ -216,9 +216,11 @@ impl Rig {
     fn assert_detected(&self, name: &str, report: &Value) {
         let install_path = PathBuf::from(report["command"].as_str().unwrap());
         let path_var = install_path.parent().unwrap().to_string_lossy().into_owned();
-        let found = Cli::find_in(name, &path_var, true, &|_| None, &|p| Path::new(p).is_file(), &|_| String::new());
+        // Windows detection joins with `\`; map it to this platform's separator so the check runs on every OS.
+        let native = |p: &str| p.replace('\\', std::path::MAIN_SEPARATOR_STR);
+        let found = Cli::find_in(name, &path_var, true, &|_| None, &|p| Path::new(&native(p)).is_file(), &|_| String::new());
         let found = found.expect("Existing CLI detection must find the installed native executable");
-        assert_eq!(found.command, report["command"].as_str().unwrap());
+        assert_eq!(native(&found.command), report["command"].as_str().unwrap());
         assert!(found.prefix.is_empty());
     }
 }
