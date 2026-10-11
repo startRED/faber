@@ -87,21 +87,22 @@ export function inOrder(): <T>(job: () => Promise<T>) => Promise<T> {
 }
 
 /** Previews drafts. Each request carries a number that grows with every request sent; an answer is applied only if
- * its number is still the latest, so a quick run of changes can never end on an older draft. `cancel` makes every request
- * still on its way stale: the screen that sent them is gone, or the saved look is about to be applied. */
+ * its number is still the latest, so a quick run of changes can never end on an older draft. `apply` and `fail` are
+ * also told which draft the answer is for. `cancel` makes every request still on its way stale: the screen that sent
+ * them is gone, or the saved look is about to be applied. */
 export function previewer(
   request: (draft: Appearance) => Promise<Look>,
-  apply: (look: Look) => void,
-  fail: (err: unknown) => void,
+  apply: (look: Look, draft: Appearance) => void,
+  fail: (err: unknown, draft: Appearance) => void,
 ): ((draft: Appearance) => Promise<void>) & { cancel: () => void } {
   let latest = 0;
   const preview = async (draft: Appearance) => {
     const mine = ++latest;
     try {
       const look = await request(draft);
-      if (mine === latest) apply(look);
+      if (mine === latest) apply(look, draft);
     } catch (err) {
-      if (mine === latest) fail(err);
+      if (mine === latest) fail(err, draft);
     }
   };
   return Object.assign(preview, { cancel: () => void latest++ });

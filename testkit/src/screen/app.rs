@@ -65,7 +65,7 @@ pub fn scenarios() -> Vec<Scenario> {
             run: shows_the_brand,
         },
         Scenario { name: "the screen speaks the chosen language and switches at once", run: switches_language },
-        Scenario { name: "appearance changes apply at once and are kept after reopening", run: keeps_appearance },
+        Scenario { name: "a look and the choices around it are used with one click and kept after reopening", run: keeps_appearance },
         Scenario {
             name: "every look fits the new conversation at 720x480, 1100x700, 1280x800 and 1440x900 and draws its own effect",
             run: fits_every_look,
@@ -219,7 +219,8 @@ fn says_what_to_do(ctx: &mut Ctx) -> Result {
     let body = page.inner_text(&css(".empty p"))?;
     same(body.clone(), page.text_of("empty.noAiBody")?, "the empty state says what to do")?;
     ensure(body.contains("Settings"), || format!("it should point to Settings: {body}"))?;
-    ensure(body.to_lowercase().contains("subscriptions"), || format!("it should mention Subscriptions: {body}"))?;
+    let section = page.text_of("set.subscriptions")?;
+    ensure(body.contains(&section), || format!("it should name the section {section}: {body}"))?;
     let lower = body.to_lowercase();
     ensure(!["reopen", "restart", "relaunch"].iter().any(|w| lower.contains(w)), || format!("it should not ask to restart: {body}"))?;
     let send = page.named("button", "composer.send")?;
@@ -261,10 +262,19 @@ fn back_to_chat(page: &mut Page) -> Result {
     page.wait_visible(&title)
 }
 
-/// Clicks the card of a look and waits until the page wears it.
+/// Clicks "Use this look": the draft is saved, and the page wears it once the save worked.
+fn use_look(page: &mut Page) -> Result {
+    let apply = page.named("button", "set.use")?;
+    page.click(&apply)
+}
+
+/// Clicks the card of a look and, unless the page wears that look already, "Use this look"; waits until the page wears it.
 fn pick_look(page: &mut Page, id: &str) -> Result {
     let card = page.named("button", &format!("look.{id}.name"))?;
     page.click(&card)?;
+    if page.eval("document.documentElement.dataset.base")?.as_str() != Some(id) {
+        use_look(page)?;
+    }
     page.wait_for(&format!("the {id} look"), &format!("document.documentElement.dataset.base === '{id}'"))
 }
 
@@ -283,6 +293,7 @@ fn keeps_appearance(ctx: &mut Ctx) -> Result {
     same(page.eval(frame)?.as_str(), Some("rgb(233, 237, 231)"), "Morning frame")?;
     let compact = page.named("button", "set.densityCompact")?;
     page.click(&compact)?;
+    use_look(page)?;
     page.wait_for("compact density", &format!("{density} === 0.8"))?;
     // A new theme keeps the text size, the density and the motion.
     pick_look(page, "bancada")?;
@@ -292,10 +303,10 @@ fn keeps_appearance(ctx: &mut Ctx) -> Result {
     pause(0.5);
     ctx.shot(&mut app, "settings-workbench")?;
     let page = &mut app.page;
-    let projects = page.named("button", "set.projects")?.last();
-    page.click(&projects)?;
-    page.check(&role_any("checkbox"))?;
-    // The look applies once it is saved, but the checkbox does not wait for the screen; closing earlier could lose it.
+    let general = page.named("button", "set.general")?;
+    page.click(&general)?;
+    page.check(&role_any("switch"))?;
+    // The look applies once it is saved, but the switch does not wait for the screen; closing earlier could lose it.
     let file = ctx.sb.data.join("settings.json");
     eventually("the choices to reach settings.json", Duration::from_secs(15), || {
         std::fs::read_to_string(&file).is_ok_and(|text| {
@@ -318,9 +329,7 @@ fn keeps_appearance(ctx: &mut Ctx) -> Result {
     page.press("Control+,")?;
     let general = page.named("heading", "set.general")?;
     page.wait_visible(&general)?;
-    let projects = page.named("button", "set.projects")?.last();
-    page.click(&projects)?;
-    same(page.is_checked(&role_any("checkbox"))?, true, "the saved choice")
+    same(page.is_checked(&role_any("switch"))?, true, "the saved choice")
 }
 
 fn fits_every_look(ctx: &mut Ctx) -> Result {
@@ -387,46 +396,36 @@ fn refused_save(ctx: &mut Ctx) -> Result {
     std::fs::create_dir(&blocker).map_err(|e| e.to_string())?;
     let morning = page.named("button", "look.manha.name")?;
     page.click(&morning)?;
+    // Choosing a look saves nothing, so there is nothing to refuse yet: the alert comes with "Use this look".
+    same(page.count(&css(".toast"))?, 0, "an alert before anything was saved")?;
+    use_look(page)?;
     let toast = css(".toast[role=alert]");
     page.wait_visible(&toast)?;
     let sentence = page.text_of("error.settings.saveFailed")?;
     ensure(page.inner_text(&toast)?.contains(&sentence), || format!("the alert should say {sentence:?}"))?;
     same(page.eval(base)?.as_str(), Some("sala"), "the look after a failed save")?;
-    same(page.attr(&morning, "aria-pressed")?, Some("false".to_string()), "the card of the look that was not saved")?;
-    // The slider, the colour input and the switches move before their save is answered; a refused save puts each back.
-    let moved = r#"(() => {
-      const fire = (e) => e.dispatchEvent(new Event('change', { bubbles: true }));
-      const size = document.getElementById('set-text-size');
-      size.value = '17';
-      fire(size);
-      const color = document.querySelector('.dot.custom input');
-      color.value = '#336699';
-      fire(color);
-      const glow = document.querySelectorAll('.sw2')[2];
-      glow.checked = !glow.checked;
-      fire(glow);
-    })()"#;
-    let (size, color, glow) = (
-        "document.getElementById('set-text-size').value",
-        "document.querySelector('.dot.custom input').value",
-        "document.querySelectorAll('.sw2')[2].checked",
-    );
-    let (size_before, color_before, glow_before) = (page.eval(size)?, page.eval(color)?, page.eval(glow)?);
-    page.eval(moved)?;
-    page.wait_for(
-        "the slider, the colour and the switch to be put back",
-        &format!("{size} === {size_before} && {color} === {color_before} && {glow} === {glow_before}"),
-    )?;
-    let file = ctx.sb.data.join("settings.json");
-    let text = std::fs::read_to_string(&file).map_err(|e| e.to_string())?;
-    ensure(!text.contains("manha"), || format!("settings.json should be as it was: {text}"))?;
+    // The draft stays, so the person can try again.
+    same(page.attr(&morning, "aria-pressed")?, Some("true".to_string()), "the card of the look that was not saved")?;
     pause(0.6);
     ctx.shot(&mut app, "settings-save-failed")?;
-
-    // Once the disk works again the same click saves, and the alert goes away.
-    std::fs::remove_dir(&blocker).map_err(|e| e.to_string())?;
     let page = &mut app.page;
-    page.click(&morning)?;
+    // A switch moves before its save is answered; a refused save puts it back.
+    let general = page.named("button", "set.general")?;
+    page.click(&general)?;
+    let hooks = role_any("switch");
+    let before = page.is_checked(&hooks)?;
+    page.click(&hooks)?;
+    page.wait_for("the switch to be put back", &format!("document.querySelector('.sw2').checked === {before}"))?;
+    let file = ctx.sb.data.join("settings.json");
+    let text = std::fs::read_to_string(&file).map_err(|e| e.to_string())?;
+    ensure(!text.contains("manha") && !text.contains("\"userHooks\": true"), || format!("settings.json should be as it was: {text}"))?;
+
+    // Once the disk works again the same draft saves, and the alert goes away.
+    std::fs::remove_dir(&blocker).map_err(|e| e.to_string())?;
+    let appearance = page.named("button", "set.appearance")?;
+    page.click(&appearance)?;
+    same(page.attr(&morning, "aria-pressed")?, Some("true".to_string()), "the draft after a visit to another section")?;
+    use_look(page)?;
     page.wait_for("the Morning look", &format!("{base} === 'manha'"))?;
     page.wait_for("the alert to go", "!document.querySelector('.toast')")
 }
@@ -452,16 +451,18 @@ fn recovers_old_appearance(ctx: &mut Ctx) -> Result {
     pick_look(page, "oficina")?;
     let compact = page.named("button", "set.densityCompact")?;
     page.click(&compact)?;
+    use_look(page)?;
     page.wait_for("compact density", "parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dens')) === 0.8")?;
     // Reduced motion keeps short fades only: no thumb travel and no fade longer than 120 ms.
     let reduced = page.named("button", "look.motion.reduced")?;
     page.click(&reduced)?;
+    use_look(page)?;
     page.wait_for("reduced motion", "document.documentElement.dataset.motion === 'reduced'")?;
     let seen = page.eval(
         r#"(() => {
           const thumb = getComputedStyle(document.querySelector('.sw2'), '::after');
           const longest = (e) => Math.max(...getComputedStyle(e).transitionDuration.split(', ').map(parseFloat));
-          return { travels: thumb.transitionProperty.includes('transform') || thumb.transitionProperty === 'all', longest: Math.max(longest(document.querySelector('.sw2')), longest(document.querySelector('.preset')), longest(document.querySelector('.btn, .item')), parseFloat(thumb.transitionDuration)) };
+          return { travels: thumb.transitionProperty.includes('transform') || thumb.transitionProperty === 'all', longest: Math.max(longest(document.querySelector('.sw2')), longest(document.querySelector('.preset .thumb')), longest(document.querySelector('.btn, .item')), parseFloat(thumb.transitionDuration)) };
         })()"#,
     )?;
     same(seen["travels"].as_bool(), Some(false), "the switch thumb travels in reduced motion")?;
@@ -591,7 +592,7 @@ mod tests {
             "deleting a conversation asks once, then removes it",
             "with no AI installed, the app says what to do",
             "the screen speaks the chosen language and switches at once",
-            "appearance changes apply at once and are kept after reopening",
+            "a look and the choices around it are used with one click and kept after reopening",
             "with no CLI running, Faber stays within its memory budget",
             "a conversation with a thousand messages opens quickly and stays within the budget",
         ] {

@@ -1,6 +1,6 @@
-import { createSignal, For, type JSX, onCleanup, onMount, Show } from 'solid-js';
+import { createEffect, createSignal, For, type JSX, onCleanup, onMount, Show } from 'solid-js';
 import themes from '../src-tauri/src/themes.json';
-import { api, type Appearance, type Experience, type Motion } from './api.ts';
+import { api, type Appearance, type Experience, type Look, type Motion } from './api.ts';
 import { appliedLook, applyLook, motion as motionNow, previewer, switchTheme } from './appearance.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { t } from './i18n.ts';
@@ -63,14 +63,21 @@ export function Title(props: { id: string; text: string }) {
   );
 }
 
-/** One small live render of the app, drawn with the tokens of its own look. It is a picture: nothing in it can be used. */
-function Mini(props: { base: string }) {
+/** One small live render of the app, drawn with the tokens of its own look. It is a picture: nothing in it can be used.
+ * A `base` asks the shell for that theme as designed; a `look` is drawn as given (the preview of Settings). */
+export function Mini(props: { base?: string; look?: Look }) {
   let el: HTMLSpanElement | undefined;
   onMount(() => {
-    void api
-      .previewLook({ base: props.base })
-      .then((look) => el && applyLook(look, el))
-      .catch(() => undefined);
+    if (props.base) {
+      void api
+        .previewLook({ base: props.base })
+        .then((look) => el && applyLook(look, el))
+        .catch(() => undefined);
+    }
+  });
+  createEffect(() => {
+    const look = props.look;
+    if (look && el) applyLook(look, el);
   });
   const title = () => t('first.mini.title');
   const at = () => title().lastIndexOf(' ');
@@ -85,6 +92,9 @@ function Mini(props: { base: string }) {
       </span>
       <span class="m-main">
         <span class="grain" />
+        <span class="m-amb m-beam" />
+        <span class="m-amb m-loom" />
+        <span class="m-amb m-flow" />
         <span class="m-h display">
           {title().slice(0, at())} <em>{title().slice(at() + 1)}</em>
         </span>

@@ -21,7 +21,6 @@ use look::{Failure, Look, ThemeFile};
 use serde::Serialize;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -169,7 +168,7 @@ async fn save_theme(app: AppHandle, appearance: Map<String, Value>, name: String
         dialog = dialog.set_parent(&w);
     }
     let Some(target) = dialog.blocking_save_file() else { return Ok(false) };
-    std::fs::write(target.into_path().map_err(|e| e.to_string())?, json).map_err(|e| e.to_string())?;
+    look::export_theme(&target.into_path().map_err(|_| Failure::key("error.theme.write"))?, &json)?;
     Ok(true)
 }
 
@@ -180,12 +179,7 @@ async fn open_theme(app: AppHandle) -> Result<Option<ThemeFile>, Failure> {
         dialog = dialog.set_parent(&w);
     }
     let Some(picked) = dialog.blocking_pick_file() else { return Ok(None) };
-    // One byte past the limit is enough to refuse a file without loading it.
-    let mut bytes = Vec::new();
-    std::fs::File::open(picked.into_path().map_err(|e| e.to_string())?)
-        .and_then(|f| f.take(look::max_theme_bytes() + 1).read_to_end(&mut bytes))
-        .map_err(|e| e.to_string())?;
-    look::parse_theme_file(&bytes).map(Some)
+    look::import_theme(&picked.into_path().map_err(|_| Failure::key("error.theme.read"))?).map(Some)
 }
 
 #[tauri::command]

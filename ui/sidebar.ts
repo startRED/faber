@@ -1,4 +1,4 @@
-import type { QuotaReading, RunningItem, Vendor } from './api.ts';
+import type { CheckResult, QuotaReading, RunningItem, Vendor } from './api.ts';
 
 // The data behind the sidebar: how the chats are grouped, which quota reading each vendor shows, and what the tail of a
 // project says. Pure functions, so the screen's checks run them with a fixed clock.
@@ -36,6 +36,38 @@ const expired = (q: QuotaReading, now: number) => q.resetsAt > 0 && q.resetsAt *
 export function tightest(quotas: Quotas, vendor: Vendor, now: number): QuotaReading | undefined {
   const live = Object.values(quotas).filter((q) => q.vendor === vendor && !expired(q, now));
   return live.reduce<QuotaReading | undefined>((best, q) => (best && best.used >= q.used ? best : q), undefined);
+}
+
+/** One line of the usage limits in Settings. A reading that still counts has `used` (a share from 0 to 1) and, when the CLI
+ * said when the window resets, `resetsAt` (seconds). A window whose reading is old has only its name; a vendor that has
+ * not reported at all has one line with no window. */
+export interface UsageRow {
+  window?: string;
+  used?: number;
+  resetsAt?: number;
+}
+
+const WINDOW_ORDER = ['five_hour', 'seven_day'];
+
+/** The lines of one vendor: every window it has reported, the short ones first. */
+export function usageRows(quotas: Quotas, vendor: Vendor, now: number): UsageRow[] {
+  const mine = Object.values(quotas).filter((q) => q.vendor === vendor);
+  if (mine.length === 0) return [{}];
+  const rank = (window: string) => (WINDOW_ORDER.includes(window) ? WINDOW_ORDER.indexOf(window) : WINDOW_ORDER.length);
+  return mine
+    .sort((a, b) => rank(a.window) - rank(b.window) || (a.window < b.window ? -1 : 1))
+    .map((q) => (expired(q, now) ? { window: q.window } : { window: q.window, used: q.used, resetsAt: q.resetsAt }));
+}
+
+/** What Settings says about one account. An installed CLI is not a connected account: only the CLI saying it is signed in
+ * is. `undefined` is a check still on its way, `'failed'` one that could not run. */
+export type AccountLine = 'checking' | 'connected' | 'notConnected' | 'unsure';
+
+export function accountLine(check: CheckResult | 'failed' | undefined): AccountLine {
+  if (!check) return 'checking';
+  if (check === 'failed') return 'unsure';
+  if (check.account === 'signedIn') return 'connected';
+  return check.account === 'unknown' && check.installed ? 'unsure' : 'notConnected';
 }
 
 /** What a project's row says about its running conversations: how many wait for the user, and whether any runs. */

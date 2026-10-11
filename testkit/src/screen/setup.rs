@@ -259,9 +259,8 @@ fn c5_3(ctx: &mut Ctx, none: bool) -> Result {
         app.page.wait_visible(&title)?;
         let body = app.page.inner_text(&css(".empty p"))?;
         same(body.clone(), app.page.text_of("empty.noAiBody")?, "no-subscription guidance")?;
-        ensure(body.contains("Settings") && body.contains("Subscriptions"), || {
-            format!("it should point to Settings and Subscriptions: {body}")
-        })?;
+        let section = app.page.text_of("set.subscriptions")?;
+        ensure(body.contains("Settings") && body.contains(&section), || format!("it should point to Settings and {section}: {body}"))?;
         let lower = body.to_lowercase();
         ensure(!["restart", "reopen", "relaunch"].iter().any(|w| lower.contains(w)), || format!("it should not ask to restart: {body}"))?;
         let guide = guide(&mut app)?;

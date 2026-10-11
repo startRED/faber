@@ -24,7 +24,7 @@ import { modelOptions, prettyModel } from './models.ts';
 import { createOpening, upsert } from './opening.ts';
 import { Running } from './Running.tsx';
 import { createAutoOpen, openPlace, type Place, placeOfRunning, store, waitingKeys } from './running.ts';
-import { Settings } from './Settings.tsx';
+import { type Keep, type Section, Settings } from './Settings.tsx';
 import { Setup } from './Setup.tsx';
 import { continuePatch, type FirstStep, firstRunStep, lookDue, setupPatch } from './setup.ts';
 import { Sidebar } from './Sidebar.tsx';
@@ -73,6 +73,10 @@ export function App(props: { initial: AppState }) {
   // The text of the last refused or failed save of settings; the page stays as it was.
   const [saveError, setSaveError] = createSignal<string>();
   const [settingsOpen, setSettingsOpen] = createSignal(false);
+  // The section a link into Settings names (the quota in the sidebar names the usage limits), and what Settings kept while
+  // the account cards were open from it: closing them brings Settings back as it was.
+  const [settingsAt, setSettingsAt] = createSignal<Section>();
+  const [back, setBack] = createSignal<Keep>();
   // The first run: step 1 (the accounts) or step 2 (the look) while one is due, else none. `setupOpen` is the same account
   // cards opened later, from the no-AI state or from Settings: they never reopen the first run.
   const [step, setStep] = createSignal<FirstStep | undefined>(firstRunStep(props.initial.settings, props.initial.conversations));
@@ -111,8 +115,9 @@ export function App(props: { initial: AppState }) {
   let work: HTMLElement | undefined;
   let fill: ((text: string) => void) | undefined;
   let stick = true;
-  // Where focus was, until the tutorial took it.
-  let lastFocus: HTMLElement | undefined;
+  // Where focus was, until the tutorial took it. Weak, so a control that left the page (Settings closed with the focus in
+  // it) is not kept alive, with everything it hangs from, until focus moves again.
+  let lastFocus: WeakRef<HTMLElement> | undefined;
 
   const area = () => place().area;
   const projectId = () => place().projectId;
@@ -122,6 +127,19 @@ export function App(props: { initial: AppState }) {
       setState(s);
     });
   const fail = (err: unknown) => setError(failureText(err));
+  const openSettings = (at?: Section) => {
+    setSettingsAt(at);
+    setSettingsOpen(true);
+  };
+  const closeSettings = () => {
+    setSettingsOpen(false);
+    setBack(undefined);
+  };
+  // The account cards close to where they were opened from: Settings when it sent them, else the shell.
+  const closeSetup = () => {
+    setSetupOpen(false);
+    if (back()) setSettingsOpen(true);
+  };
   const items = () => store.list().items;
   const needing = () => items().filter((i) => i.state === 'needsYou').length;
 
@@ -224,7 +242,7 @@ export function App(props: { initial: AppState }) {
   };
   const fresh = (next: Pick<Place, 'area' | 'projectId'>) => go({ ...next, id: undefined });
   const openSummary = (c: Summary) => {
-    setSettingsOpen(false);
+    closeSettings();
     closeSide(false);
     void go(openPlace(place(), c));
   };
@@ -232,7 +250,7 @@ export function App(props: { initial: AppState }) {
   // the composer and the next send all point at the same place. A conversation that is gone does nothing.
   const openRunning = (item: RunningItem) => {
     if (!state().conversations.some((c) => c.id === item.conversationId)) return;
-    setSettingsOpen(false);
+    closeSettings();
     if (!docked()) closeColumn();
     void go(placeOfRunning(place(), item));
   };
@@ -275,7 +293,7 @@ export function App(props: { initial: AppState }) {
       }
       if (ctrl && e.key.toLowerCase() === 'n') {
         e.preventDefault();
-        setSettingsOpen(false);
+        closeSettings();
         opener = undefined; // the new conversation's composer takes focus, not the control that opened the cards
         setSetupOpen(false);
         closeSide(false);
@@ -286,7 +304,7 @@ export function App(props: { initial: AppState }) {
         }
         void fresh(place()).then(focusComposer);
       }
-      if (ctrl && e.key === ',') setSettingsOpen(true);
+      if (ctrl && e.key === ',') openSettings();
       if (ctrl && e.key === '.') {
         e.preventDefault();
         toggleColumn();
@@ -295,13 +313,13 @@ export function App(props: { initial: AppState }) {
         if (sideOverlay() && inShell) return closeSide();
         // A column the user opened over the stage is modal; one that opened itself answers Esc only while focus is in it.
         if (inShell && columnOpen() && (trapped() || column?.contains(document.activeElement))) return closeColumn();
-        setSettingsOpen(false);
-        setSetupOpen(false);
+        if (setupOpen()) closeSetup();
+        else closeSettings();
         setSaveError(undefined);
       }
     };
     const watchFocus = (e: FocusEvent) => {
-      if (!tourOpen() && e.target instanceof HTMLElement) lastFocus = e.target;
+      if (!tourOpen() && e.target instanceof HTMLElement) lastFocus = new WeakRef(e.target);
     };
     document.addEventListener('focusin', watchFocus);
     const typingEvents = ['keydown', 'input', 'compositionstart', 'compositionupdate', 'compositionend'];
@@ -415,11 +433,9 @@ export function App(props: { initial: AppState }) {
     }
   };
   const saveSettings = (patch: Saved) => inTurn(() => persist(patch));
-  const changeAppearance = (next: (current: Appearance | undefined) => Appearance) =>
-    inTurn(() => persist({ appearance: next(state().settings.appearance) }));
 
   const switchArea = (next: Place['area']) => {
-    setSettingsOpen(false);
+    closeSettings();
     closeSide(false);
     void fresh({ area: next, projectId: projectId() });
   };
@@ -470,7 +486,8 @@ export function App(props: { initial: AppState }) {
   const endTour = () => {
     setTourEnded(true);
     void saveSettings({ tutorialDone: true });
-    const back = lastFocus?.isConnected ? lastFocus : document.querySelector<HTMLElement>('.composer textarea');
+    const was = lastFocus?.deref();
+    const back = was?.isConnected ? was : document.querySelector<HTMLElement>('.composer textarea');
     back?.focus();
   };
   const composerKey = () => place().id ?? `new-${area()}-${projectId() ?? ''}`;
@@ -540,7 +557,7 @@ export function App(props: { initial: AppState }) {
                     if (!saved) return;
                     // Step 1 hands over to step 2 once its choice is stored; the cards opened later only close.
                     if (step()) setStep(lookDue(state().settings) ? 'look' : undefined);
-                    setSetupOpen(false);
+                    closeSetup();
                     void refresh();
                   })
                 }
@@ -574,12 +591,18 @@ export function App(props: { initial: AppState }) {
             <Settings
               look={state().look}
               saved={state().settings}
-              onAppearance={changeAppearance}
+              vendors={state().vendors}
+              quotas={quotas()}
+              now={clock()}
+              start={back()?.section ?? settingsAt()}
+              kept={back()?.draft}
               onSave={saveSettings}
-              onClose={() => setSettingsOpen(false)}
-              onOpenSetup={() => {
-                setSettingsOpen(false);
+              onClose={closeSettings}
+              onOpenSetup={(keep) => {
+                setBack(keep);
+                // The cards remember the focused control before Settings is taken off the screen with it.
                 openSetup();
+                setSettingsOpen(false);
               }}
             />
           }
@@ -610,7 +633,7 @@ export function App(props: { initial: AppState }) {
                 onAddProject={() => void addProject()}
                 onOpen={openSummary}
                 onRemove={(id) => void remove(id)}
-                onSettings={() => (closeSide(false), setSettingsOpen(true))}
+                onSettings={(at) => (closeSide(false), openSettings(at))}
               />
             </aside>
             <Show when={sideOverlay()}>

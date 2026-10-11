@@ -5,6 +5,8 @@
 use serde::Serialize;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
+use std::io::{self, Read, Write};
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 type Obj = Map<String, Value>;
@@ -32,7 +34,7 @@ pub struct Failure {
 }
 
 impl Failure {
-    fn key(key: &str) -> Self {
+    pub fn key(key: &str) -> Self {
         Failure { key: key.into(), detail: None }
     }
 
@@ -631,6 +633,38 @@ pub fn write_theme_file(appearance: &Obj, name: &str) -> Result<String, Failure>
     Ok(serde_json::to_string_pretty(&out).expect("plain data always serializes") + "\n")
 }
 
+/// Writes `target` through a sibling file and renames it over the target only when the whole write worked, so a full disk
+/// or a crash halfway leaves the file that was there as it was.
+fn replace_file(target: &Path, write: impl FnOnce(&mut std::fs::File) -> io::Result<()>) -> io::Result<()> {
+    let mut name = target.as_os_str().to_owned();
+    name.push(".faber-tmp");
+    let temp = PathBuf::from(name);
+    let done = std::fs::File::create(&temp).and_then(|mut file| {
+        write(&mut file)?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&temp, target)
+    });
+    if done.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    done
+}
+
+/// Saves a theme file the person picked a place for. The words of a failure are ours; the system's stay out of the screen.
+pub fn export_theme(target: &Path, json: &str) -> Result<(), Failure> {
+    replace_file(target, |file| file.write_all(json.as_bytes())).map_err(|_| Failure::key("error.theme.write"))
+}
+
+/// Reads a theme file the person picked. One byte past the limit is enough to refuse it without loading all of it.
+pub fn import_theme(path: &Path) -> Result<ThemeFile, Failure> {
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .and_then(|file| file.take(max_theme_bytes() + 1).read_to_end(&mut bytes))
+        .map_err(|_| Failure::key("error.theme.read"))?;
+    parse_theme_file(&bytes)
+}
+
 /// The window's first paint: the look's `frame` colour.
 pub fn frame_color(look: &Look) -> Rgb {
     rgb_of(&look.vars, "frame")
@@ -1047,5 +1081,45 @@ mod tests {
         assert!(validated(&parsed.appearance.to_map()).is_ok());
         example["extra"] = json!(true);
         assert!(parse_theme_file(&serde_json::to_vec(&example).unwrap()).is_err());
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("faber-look-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_theme_export_that_fails_halfway_leaves_the_old_file_and_no_leftover() {
+        let dir = scratch("export");
+        let file = dir.join("my-theme.json");
+        std::fs::write(&file, "old theme").unwrap();
+        // A disk that fills up after some of the bytes: the write errors out partway.
+        let failed = replace_file(&file, |f| {
+            f.write_all(b"half of the new")?;
+            Err(io::Error::other("disk full"))
+        });
+        assert!(failed.is_err());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "old theme");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "no temporary file is left behind");
+        export_theme(&file, "new theme").unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "new theme");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        // A folder where the file should go cannot be replaced: the failure is a key, not the system's sentence.
+        let folder = dir.join("folder.json");
+        std::fs::create_dir(&folder).unwrap();
+        assert_eq!(export_theme(&folder, "x").unwrap_err(), Failure::key("error.theme.write"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_theme_file_that_cannot_be_read_fails_with_a_key() {
+        let dir = scratch("import");
+        assert_eq!(import_theme(&dir.join("missing.json")).unwrap_err(), Failure::key("error.theme.read"));
+        let file = dir.join("ok.json");
+        export_theme(&file, &write_theme_file(&sala().to_map(), "Mine").unwrap()).unwrap();
+        assert_eq!(import_theme(&file).unwrap().name, "Mine");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

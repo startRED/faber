@@ -17,6 +17,7 @@ import './i18n.check.ts';
 import './models.check.ts';
 import './opening.check.ts';
 import './running.check.ts';
+import './settings.check.ts';
 import './setup.check.ts';
 import './tutorial.check.ts';
 

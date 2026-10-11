@@ -8,13 +8,13 @@ import { vendorName } from './models.ts';
 import type { Place } from './running.ts';
 import { groupChats, type Quotas, tailOf, tightest } from './sidebar.ts';
 
-function untilReset(resetsAt: number): string {
+export function untilReset(resetsAt: number): string {
   const hours = (resetsAt * 1000 - Date.now()) / 3_600_000;
   if (hours <= 0) return t('quota.now');
   return hours < 24 ? t('quota.hours', { n: Math.ceil(hours) }) : t('quota.days', { n: Math.ceil(hours / 24) });
 }
 
-function windowName(window: string): string {
+export function windowName(window: string): string {
   const key = `quota.${window}`;
   return key in en ? t(key as Key) : window.replace('_', ' ');
 }
@@ -39,7 +39,8 @@ interface Props {
   onAddProject: () => void;
   onOpen: (conversation: Summary) => void;
   onRemove: (id: string) => void;
-  onSettings: () => void;
+  /** Opens Settings; the quota of a vendor opens it at the usage limits. */
+  onSettings: (section?: 'usage') => void;
 }
 
 /** The sidebar: new conversation, the two areas, the projects with their conversations, the chats by day, and at the
@@ -187,7 +188,7 @@ export function Sidebar(props: Props) {
               return (
                 <button
                   class="vendor"
-                  onClick={() => props.onSettings()}
+                  onClick={() => props.onSettings('usage')}
                   title={q() ? `${t('quota.window', { window: windowName(q()!.window) })} · ${untilReset(q()!.resetsAt)}` : t('side.usage')}
                 >
                   <VendorMark vendor={v} />

@@ -568,7 +568,7 @@ fn gives_way_to_no_ai(ctx: &mut Ctx) -> Result {
 }
 
 /// The recording `claude/chat.jsonl` with its reset times moved to the future: a reading past its reset says nothing.
-fn chat_with_future_resets(ctx: &Ctx) -> std::result::Result<Launch, String> {
+pub(super) fn chat_with_future_resets(ctx: &Ctx) -> std::result::Result<Launch, String> {
     let source = ctx.paths.fixtures.join("claude/chat.jsonl");
     let text = std::fs::read_to_string(&source).map_err(|e| format!("{}: {e}", source.display()))?;
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e| e.to_string())?.as_secs();

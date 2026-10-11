@@ -113,9 +113,10 @@ own inks.
   variables, the motion level, the effect switches and any notice. The screen never computes a colour.
 - `state()` returns the look of the saved appearance, and `main.tsx` writes it on `<html>` before the first frame. The
   window background is the look's frame colour, so the first paint already matches.
-- Settings applies a choice at once, but only after `save_settings` succeeded. That command answers with the settings as
-  stored and the look computed from them. A refused look (a hue too close to a meaning colour, a failing pair) or a
-  failed write changes nothing and shows its sentence. The draft and preview flow comes with the Settings rebuild.
+- A look is a draft in Settings (see "Settings" below). "Use this look" calls `save_settings`, which answers with the
+  settings as stored and the look computed from them, and the page wears that look only after the save succeeded. A
+  refused look (a hue too close to a meaning colour, a failing pair) or a failed write changes nothing, keeps the draft
+  and shows its sentence.
 - A saved appearance that no longer parses, such as the old Mono, Studio and Cockpit maps, falls back to Dark Room.
 
 ## Identity
@@ -223,6 +224,32 @@ inside its own area.
 - Items are grouped by project. Projects that have something needing the user come first, and inside a project the
   amber item comes first. The order is stable, so rows do not jump.
 - With no items it shows an empty state with Curioso.
+
+### Settings
+
+- Settings replaces the shell, as before, with a list of five sections on the left: General, Appearance, Connected
+  accounts, Usage limits and Privacy. Ctrl comma opens it on General, the quota of a vendor in the sidebar opens it on
+  Usage limits, and Esc or Back closes it.
+- General has the language and the switch that lets Projects run the person's own CLI hooks. A switch saves at once and
+  goes back to where it was if the save is refused.
+- Appearance is a draft. The six looks are small live renders; the controls (accent with a hex field, background, the two
+  fonts, text size, density, corners, motion) and the three effect switches change the draft, and the preview panel on
+  the right wears the answer of `preview_look` with the measured contrast of text, faint text and the accent. The panel
+  says "Not applied yet" until "Use this look", which sits in a bar that stays in view. "Back to default" returns the
+  draft to Dark Room. The three meaning colours are shown read-only, with their shapes and words.
+- A refused accent, or a look with a failing pair, shows its sentence in the bar and "Use this look" stays as it was; a
+  refused accent puts the draft back to the last one the shell accepted.
+- An account counts as connected only when its CLI says someone is signed in; an installed CLI that says nobody is, or
+  that cannot answer, is shown as such. The check runs each time the section opens.
+- The preview draws the effect of the new conversation (a still picture of the beam, the loom or the line) and the two
+  lights, so each of the three switches shows what it does before "Use this look".
+- A theme file is written beside its destination and renamed over it only when the whole write worked, so a full disk
+  leaves an old file as it was. A failed read or write shows words of Faber's own, never the system's.
+- "Manage accounts" opens the account cards alone. Closing them (or Esc) brings Settings back on the same section, with
+  the draft that was not applied.
+- Usage limits lists, per connected vendor, every window it has reported with its used share and reset time. An old
+  reading, or none, shows "—".
+- Privacy has three statements: telemetry is off, history stays on this PC, and Faber never reads the CLI logins.
 
 ### First run and tutorial
 
