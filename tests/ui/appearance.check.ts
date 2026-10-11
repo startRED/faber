@@ -1,7 +1,7 @@
 import themes from '../../src-tauri/src/themes.json';
 import { createLoop, shouldRun } from '../../ui/Ambient.tsx';
-import type { Appearance, Look, SavedSettings } from '../../ui/api.ts';
-import { applyLook, effectiveMotion, inOrder, previewer, saveAndApply, switchTheme, watchSystem, windowHidden } from '../../ui/appearance.ts';
+import type { AppState, Appearance, Look, SavedSettings } from '../../ui/api.ts';
+import { applyLook, effectiveMotion, inOrder, previewer, refreshed, saveAndApply, switchTheme, watchSystem, windowHidden } from '../../ui/appearance.ts';
 import { en } from '../../ui/locales/en.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
@@ -286,4 +286,24 @@ check('appearance: every option the screen lists from themes.json has its text',
   for (const id of Object.keys(controls.motion)) [`look.motion.${id}`, `look.motion.${id}Hint`].forEach(need);
   for (const id of Object.keys(controls.effects)) need(`look.effect.${id}`);
   equal(controls.themes.length + controls.presets.length, 6);
+});
+
+check('refreshed: a state asked for before a save brings the rest back but never the old settings or look', () => {
+  const state = (settings: AppState['settings'], look: Look, conversations: number): AppState => ({
+    conversations: Array.from({ length: conversations }, (_, i) => ({ id: String(i), title: 't', area: 'chat', updatedAt: i })),
+    projects: [],
+    vendors: [],
+    settings,
+    look,
+    models: [],
+    running: { revision: 1, items: [] },
+    quotas: [],
+    version: '1',
+  });
+  const newer = state({ language: 'pt-BR' }, sala({ scheme: 'light' }), 1);
+  const older = state({ language: 'en' }, sala(), 2);
+  const merged = refreshed(newer, older);
+  equal(merged.settings.language, 'pt-BR');
+  equal(merged.look.scheme, 'light');
+  equal(merged.conversations.length, 2, 'what the refresh owns is taken');
 });

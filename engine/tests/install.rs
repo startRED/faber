@@ -194,7 +194,7 @@ impl Rig {
     }
 
     fn temporary(&self) -> PathBuf {
-        PathBuf::from(self.request["data_dir"].as_str().unwrap()).join("install-tmp")
+        PathBuf::from(self.request["data_dir"].as_str().unwrap()).join("install-tmp").join(self.request["vendor"].as_str().unwrap())
     }
 
     async fn run(&self) -> Result<Value, Value> {
@@ -1055,4 +1055,49 @@ async fn a_server_that_stalls_halfway_fails_the_download_and_leaves_no_part_file
     assert!(started.elapsed() < std::time::Duration::from_secs(30));
     assert!(!part.exists());
     drop(hold_tx);
+}
+
+#[tokio::test]
+async fn installing_one_cli_never_touches_the_staging_of_the_other() {
+    let claude = Rig::new("claude");
+    let codex_staging = claude.temporary().with_file_name("codex");
+    std::fs::create_dir_all(codex_staging.join("download")).unwrap();
+    std::fs::write(codex_staging.join("download/codex.zip.part"), b"half a download").unwrap();
+    claude.run().await.expect("Claude installs while Codex is still downloading");
+    assert_eq!(std::fs::read(codex_staging.join("download/codex.zip.part")).unwrap(), b"half a download");
+}
+
+#[tokio::test]
+async fn a_second_request_for_the_same_cli_leaves_the_first_one_alone() {
+    let rig = Rig::new("claude");
+    let scripted = scripted_download(&rig.responses);
+    let (request, second) = (rig.request.clone(), Arc::new(Mutex::new(None)));
+    let heard = second.clone();
+    // The download of the first install asks for a second install of the same CLI, as a reopened account card would.
+    let download = move |url: &str, path: &Path| {
+        let request = request.clone();
+        let again = std::thread::spawn(move || {
+            let idle: Spawner = Arc::new(|_, _, _| Err(io::Error::other("the second request must not start anything")));
+            let (fetch, download) =
+                (|_: &str| Err(io::Error::other("no network")), |_: &str, _: &Path| Err(io::Error::other("no network")));
+            tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(Cli::install_windows(
+                &request,
+                &fetch,
+                &download,
+                &|_| Ok(()),
+                idle,
+                &|_| {},
+            ))
+        })
+        .join()
+        .unwrap();
+        *heard.lock().unwrap() = Some(again);
+        scripted(url, path)
+    };
+    rig.run_with(&download).await.expect("The first install finishes although a second was asked for");
+    let again = second.lock().unwrap().take().expect("the download ran");
+    assert_eq!(again.expect("a repeated request is not an error")["alreadyRunning"], true);
+    assert_eq!(rig.calls.lock().unwrap().len(), 1, "only the first install started the installer");
+    assert_eq!(rig.events.lock().unwrap().last().unwrap()["stage"], "done");
+    rig.assert_empty_temporary();
 }

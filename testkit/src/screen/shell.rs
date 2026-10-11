@@ -43,7 +43,7 @@ pub fn scenarios() -> Vec<Scenario> {
         },
         Scenario { name: "the column over the stage leaves the greeting's composer in reach", run: leaves_the_greeting_composer },
         Scenario {
-            name: "a modal dialog keeps Tab inside it, Ctrl+N leaves it, and a resize moves focus with it",
+            name: "a modal dialog keeps Tab inside it, Ctrl+N leaves it, a resize moves focus with it, and two dialogs never stack",
             run: keeps_focus_in_dialogs,
         },
         Scenario {
@@ -288,7 +288,7 @@ fn fits_large_text(ctx: &mut Ctx) -> Result {
 }
 
 /// A launch that stops at a question: the recording asks to write two files and waits for the answers.
-fn two_writes(ctx: &Ctx) -> Launch {
+pub(super) fn two_writes(ctx: &Ctx) -> Launch {
     Launch {
         claude: CliSlot::Fake,
         codex: CliSlot::Off,
@@ -298,7 +298,7 @@ fn two_writes(ctx: &Ctx) -> Launch {
 }
 
 /// Sends the request and returns once the first question has been asked.
-fn ask_two_writes(page: &mut Page) -> Result {
+pub(super) fn ask_two_writes(page: &mut Page) -> Result {
     // Auto would send the request to a router process first, which would replay this recording instead of the chat.
     let model = page.labelled("composer.model")?;
     page.select_option(&model, "Claude Haiku")?;
@@ -760,6 +760,27 @@ fn keeps_focus_in_dialogs(ctx: &mut Ctx) -> Result {
     page.wait_visible(&css(".side.shown"))?;
     page.wait_for("focus to move into the sidebar", "!!document.activeElement.closest('.side')")?;
     tab_stays_in(page, "side", "720, the sidebar")?;
+    // Two dialogs never stack: Ctrl+. with the sidebar open swaps it for the column, which is whole and not inert.
+    page.press("Control+.")?;
+    page.wait_gone(&css(".side.shown"))?;
+    page.wait_visible(&css(".work > .runcol"))?;
+    page.wait_for("focus to move into the column", "!!document.activeElement.closest('.runcol')")?;
+    same(
+        page.eval("!document.querySelector('.runcol').closest('[inert]')")?.as_bool(),
+        Some(true),
+        "the column is not inert under the sidebar",
+    )?;
+    tab_stays_in(page, "column", "720, the column that replaced the sidebar")?;
+    page.press("Escape")?;
+    page.wait_gone(&css(".runcol"))?;
+    // The same chord does nothing while Settings is open: it would change a column nobody can see.
+    page.press("Control+,")?;
+    page.wait_gone(&css(".shell"))?;
+    page.press("Control+.")?;
+    page.press("Escape")?;
+    page.wait_visible(&css(".shell"))?;
+    pause(0.3);
+    ensure(!page.is_visible(&css(".runcol"))?, || "Ctrl+. in Settings opened the column behind it".to_string())?;
     page.cdp.call("Emulation.clearDeviceMetricsOverride", json!({}))?;
     Ok(())
 }

@@ -5,6 +5,7 @@ import {
   type Appearance,
   type AppState,
   type Choice,
+  type AppEvent,
   type Conversation,
   type Experience,
   type RunningItem,
@@ -12,7 +13,7 @@ import {
   type Summary,
   type Vendor,
 } from './api.ts';
-import { inOrder, saveAndApply, watchSystem } from './appearance.ts';
+import { inOrder, refreshed, saveAndApply, watchSystem } from './appearance.ts';
 import { Composer, type Draft } from './Composer.tsx';
 import { LookStep } from './FirstRun.tsx';
 import { keepFocusIn } from './focus.ts';
@@ -58,7 +59,7 @@ const TYPING = 'textarea, input:not([type=checkbox], [type=radio], [type=range],
 
 /** `initial` is the state the page started from; `main.tsx` has already applied its look and handed the running list to
  * the store. */
-export function App(props: { initial: AppState }) {
+export function App(props: { initial: AppState; inbox: { take: (listener: ((event: AppEvent) => void) | undefined) => void } }) {
   const saved = recall<Place | undefined>('faber.place', undefined);
   useLanguage(props.initial.settings.language);
   const [state, setState] = createSignal<AppState>(props.initial);
@@ -124,7 +125,7 @@ export function App(props: { initial: AppState }) {
   const refresh = () =>
     api.state().then((s) => {
       store.offer(s.running);
-      setState(s);
+      setState((current) => refreshed(current, s));
     });
   const fail = (err: unknown) => setError(failureText(err));
   const openSettings = (at?: Section) => {
@@ -150,6 +151,8 @@ export function App(props: { initial: AppState }) {
   let sideEl: HTMLElement | undefined;
   let menuButton: HTMLButtonElement | undefined;
   const openSide = () => {
+    // The column over the stage, if open, makes way: the sidebar overlay is a dialog of its own.
+    if (columnOpen() && !docked()) closeColumn();
     setSideOpen(true);
     queueMicrotask(() => sideEl?.querySelector<HTMLElement>('button')?.focus());
   };
@@ -178,6 +181,8 @@ export function App(props: { initial: AppState }) {
     if (columnOpen()) return;
     // Every question waiting now is on screen, so none of them opens the column again.
     autoOpen.seen(waitingKeys(items()));
+    // Two modal dialogs never stack: one the user opens closes the sidebar overlay.
+    if (user) closeSide(false);
     setByUser(user);
     setColumnOpen(true);
     if (user && !docked()) queueMicrotask(() => column?.querySelector<HTMLElement>('button')?.focus());
@@ -258,7 +263,9 @@ export function App(props: { initial: AppState }) {
   onMount(() => {
     if (saved?.id && props.initial.conversations.some((c) => c.id === saved.id)) void go({ ...saved, area: saved.area ?? 'chat' });
     const stopFollowing = watchSystem();
-    const unlisten = api.on((e) => {
+    // The restored conversation is already opening (`go` above), so what the inbox held since the page started is kept for
+    // its snapshot and nothing is lost between the two.
+    props.inbox.take((e) => {
       if (e.type === 'list') void refresh();
       if (e.type === 'quota') setQuotas((q) => withQuota(q, e));
       if (e.type === 'message' && opening.hear(e.conversationId, e.message) === 'apply') {
@@ -307,7 +314,8 @@ export function App(props: { initial: AppState }) {
       if (ctrl && e.key === ',') openSettings();
       if (ctrl && e.key === '.') {
         e.preventDefault();
-        toggleColumn();
+        // Settings and the account cards replace the shell: the column is not on screen to toggle.
+        if (inShell) toggleColumn();
       }
       if (e.key === 'Escape') {
         if (sideOverlay() && inShell) return closeSide();
@@ -327,7 +335,7 @@ export function App(props: { initial: AppState }) {
     window.addEventListener('keydown', onKey);
     onCleanup(() => {
       stopFollowing();
-      void unlisten.then((stop) => stop());
+      props.inbox.take(undefined);
       clearInterval(minute);
       clearTimeout(retry);
       for (const type of typingEvents) window.removeEventListener(type, typing, true);
@@ -457,6 +465,9 @@ export function App(props: { initial: AppState }) {
   const needsProject = () => area() === 'project' && !project();
   // The new conversation of a chat with a connected AI is the one place the effects of a look appear.
   const newChat = () => area() === 'chat' && state().vendors.length > 0 && !current()?.messages.length;
+  // A new conversation the user is in, not a remembered one that is still on its way: the tutorial would open over it and
+  // vanish when its messages arrive.
+  const startsFresh = () => newChat() && !loading() && !place().id;
   // An installed CLI is not a connected account: the tutorial waits for the CLI itself to say it is signed in. It asks
   // again when the installed ones change and when the account cards or a first-run step close.
   const [signedIn, setSignedIn] = createSignal(0);
@@ -476,7 +487,7 @@ export function App(props: { initial: AppState }) {
     tutorialDue({
       tutorialDone: state().settings.tutorialDone,
       vendors: state().vendors.length > 0 ? signedIn() : 0,
-      onNewChat: newChat(),
+      onNewChat: startsFresh(),
       covered: !!step() || setupOpen() || settingsOpen(),
       endedHere: tourEnded(),
     }),

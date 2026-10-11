@@ -14,6 +14,7 @@ import { runAll, type Result } from './check.ts';
 import './appearance.check.ts';
 import './check.check.ts';
 import './i18n.check.ts';
+import './inbox.check.ts';
 import './models.check.ts';
 import './opening.check.ts';
 import './running.check.ts';

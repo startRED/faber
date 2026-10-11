@@ -49,10 +49,27 @@ pub fn clean_temp_dir(dir: &Path) {
     }
 }
 
-struct CleanupGuard<'a>(&'a Path);
-impl Drop for CleanupGuard<'_> {
+/// Staging folders of the installs running now. Two installs of one CLI would delete each other's files, so the second
+/// does not start.
+static RUNNING: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+/// Owns one install's staging folder: empties it when the install ends, however it ends.
+struct CleanupGuard(PathBuf);
+impl CleanupGuard {
+    /// `None` while another install already owns this folder.
+    fn claim(dir: &Path) -> Option<Self> {
+        let mut running = RUNNING.lock().unwrap_or_else(|e| e.into_inner());
+        if running.iter().any(|d| d == dir) {
+            return None;
+        }
+        running.push(dir.to_path_buf());
+        Some(Self(dir.to_path_buf()))
+    }
+}
+impl Drop for CleanupGuard {
     fn drop(&mut self) {
-        clean_temp_dir(self.0);
+        clean_temp_dir(&self.0);
+        RUNNING.lock().unwrap_or_else(|e| e.into_inner()).retain(|d| d != &self.0);
     }
 }
 
@@ -263,7 +280,8 @@ pub async fn install_windows(
 
     let data_dir = PathBuf::from(request["data_dir"].as_str().unwrap_or("."));
     let destination = PathBuf::from(request["destination"].as_str().unwrap_or("."));
-    let tmp_dir = data_dir.join("install-tmp");
+    // One staging folder per CLI, so installing both at once cannot clean up the other's download or extraction.
+    let tmp_dir = data_dir.join("install-tmp").join(vendor);
     // Downloads never share a folder with an extraction tree: an archive must not be published as release content.
     let download_dir = tmp_dir.join("download");
 
@@ -285,9 +303,13 @@ pub async fn install_windows(
     };
     let check_url = |url: &str| allowed_url(url, &allowed_hosts, loopback.as_deref());
 
+    // The same CLI is already being installed (the account cards were closed and opened again): that install reports
+    // its own progress, so this request has nothing to add.
+    let Some(_guard) = CleanupGuard::claim(&tmp_dir) else {
+        return Ok(json!({ "alreadyRunning": true }));
+    };
     let _ = std::fs::create_dir_all(&tmp_dir);
     clean_temp_dir(&tmp_dir);
-    let _guard = CleanupGuard(&tmp_dir);
 
     // Stage: prerequisite
     notify(progress, "prerequisite", None);

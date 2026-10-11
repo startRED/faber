@@ -56,6 +56,10 @@ pub fn scenarios() -> Vec<Scenario> {
             name: "first run, tutorial: an installed CLI that is signed out starts none, and signing in does",
             run: signed_out_cli_starts_no_tutorial,
         },
+        Scenario {
+            name: "first run, tutorial: a remembered conversation that is still opening never gets the tutorial over it",
+            run: no_tutorial_over_a_restored_chat,
+        },
     ]
 }
 
@@ -634,6 +638,34 @@ fn signed_out_cli_starts_no_tutorial(ctx: &mut Ctx) -> Result {
     page.press("Escape")?;
     page.wait_visible(&css(".coach"))?;
     skip_tour(page)?;
+    ctx.close(app.id)
+}
+
+fn no_tutorial_over_a_restored_chat(ctx: &mut Ctx) -> Result {
+    super::shell::seed(ctx, "old", "An old chat", None, 1_790_000_000_000)?;
+    ctx.write_settings(&json!({ "language": "en", "setup": "done", "appearance": { "base": "sala" }, "tutorialDone": false }))?;
+    let launch = claude_chat(ctx);
+    let mut app = ctx.launch(launch)?;
+    let page = &mut app.page;
+    page.wait_visible(&css(".coach"))?;
+    // The window remembers the old conversation, and from now on its snapshot takes 8 s to arrive, from the first frame on.
+    page.eval("localStorage.setItem('faber.place', JSON.stringify({ area: 'chat', id: 'old' }))")?;
+    page.cdp.call("Page.enable", json!({}))?;
+    page.cdp.call(
+        "Page.addScriptToEvaluateOnNewDocument",
+        json!({ "source": "(() => { const real = window.fetch.bind(window); window.fetch = (url, init) => String(url).endsWith('/open') ? new Promise((r) => setTimeout(r, 8000)).then(() => real(url, init)) : real(url, init); })()" }),
+    )?;
+    page.eval("location.reload()")?;
+    page.wait_for("the page to start over with the hold in place", "String(window.fetch).includes('setTimeout')")?;
+    // The check of the account takes a moment; the tutorial must not start while the conversation is still on its way.
+    for _ in 0..25 {
+        same(page.count(&css(".tour"))?, 0, "no tutorial over a conversation that is still opening")?;
+        pause(0.2);
+    }
+    page.wait_visible(&css("article").has_text("An old chat: the answer"))?;
+    pause(0.5);
+    same(page.count(&css(".tour"))?, 0, "no tutorial over the opened conversation")?;
+    ensure(settings(ctx)["tutorialDone"] == false, || "the tutorial is still to come".to_string())?;
     ctx.close(app.id)
 }
 

@@ -1,5 +1,5 @@
 import { createSignal } from 'solid-js';
-import type { Appearance, Look, Motion, SavedSettings, Settings } from './api.ts';
+import type { Appearance, AppState, Look, Motion, SavedSettings, Settings } from './api.ts';
 
 // Applying a look (docs/design.md, "Looks"). The shell computes every look; this module only writes it to the page.
 
@@ -18,6 +18,10 @@ export const windowHidden = hidden;
 
 /** A system that asks for less motion turns `full` into `reduced`; the other levels already ask for less. */
 export const effectiveMotion = (level: Motion, systemReducesMotion: boolean): Motion => (level === 'full' && systemReducesMotion ? 'reduced' : level);
+
+/** A state asked for from the engine takes everything but the settings and the look. Saves own those: a request sent before
+ * a save would otherwise bring the old ones back over the new. */
+export const refreshed = (current: AppState, fresh: AppState): AppState => ({ ...fresh, settings: current.settings, look: current.look });
 
 const on = (flag: boolean) => (flag ? 'on' : 'off');
 
