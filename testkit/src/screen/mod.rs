@@ -4,6 +4,7 @@
 pub mod app;
 #[cfg(windows)]
 pub mod containment;
+pub mod permissions;
 pub mod setup;
 
 use crate::app::{Ctx, Paths};
@@ -23,7 +24,7 @@ pub struct Scenario {
 }
 
 pub fn all() -> Vec<Scenario> {
-    let all = app::scenarios().into_iter().chain(setup::scenarios());
+    let all = app::scenarios().into_iter().chain(permissions::scenarios()).chain(setup::scenarios());
     #[cfg(windows)]
     let all = all.chain(containment::scenarios());
     all.collect()

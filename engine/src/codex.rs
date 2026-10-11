@@ -2,7 +2,7 @@
 //! thread in it.
 
 use crate::claude::EventSink;
-use crate::events::{EngineEvent, Session, SessionCommand, UserTurn};
+use crate::events::{Delivery, EngineEvent, Session, SessionCommand, UserTurn};
 use crate::model::Area;
 use crate::proc::{self, Spawner};
 use serde::Serialize;
@@ -299,7 +299,7 @@ async fn serve(started: std::io::Result<proc::Proc>, area: Area, mut rx: Unbound
         ($method:expr, $params:expr, $kind:expr) => {{
             next_id += 1;
             waiting.insert(next_id, $kind);
-            proc::write_line(&mut *stdin, &json!({ "id": next_id, "method": $method, "params": $params })).await;
+            let _ = proc::write_line(&mut *stdin, &json!({ "id": next_id, "method": $method, "params": $params })).await;
         }};
     }
     macro_rules! stop {
@@ -355,7 +355,7 @@ async fn serve(started: std::io::Result<proc::Proc>, area: Area, mut rx: Unbound
                         }
                         match kind {
                             Waiting::Initialize => {
-                                proc::write_line(&mut *stdin, &json!({ "method": "initialized" })).await;
+                                let _ = proc::write_line(&mut *stdin, &json!({ "method": "initialized" })).await;
                                 ready = true;
                                 for key in std::mem::take(&mut pending) {
                                     let Some(t) = threads.get(&key) else { continue };
@@ -391,10 +391,12 @@ async fn serve(started: std::io::Result<proc::Proc>, area: Area, mut rx: Unbound
                                 (t.sink)(EngineEvent::Permission { request_id: key, tool, input });
                             }
                             // The conversation is gone, so nobody can say yes.
-                            (true, None) => proc::write_line(&mut *stdin, &json!({ "id": id, "result": { "decision": "decline" } })).await,
+                            (true, None) => {
+                                let _ = proc::write_line(&mut *stdin, &json!({ "id": id, "result": { "decision": "decline" } })).await;
+                            }
                             (false, _) => {
                                 let error = json!({ "id": id, "error": { "code": -32601, "message": format!("Faber does not handle {method} yet") } });
-                                proc::write_line(&mut *stdin, &error).await;
+                                let _ = proc::write_line(&mut *stdin, &error).await;
                             }
                         }
                     }
@@ -441,11 +443,31 @@ async fn serve(started: std::io::Result<proc::Proc>, area: Area, mut rx: Unbound
                             None => t.queued.push(turn),
                         }
                     }
-                    SessionCommand::Answer { request_id, allow } => {
-                        if let Some(id) = threads.get_mut(&key).and_then(|t| t.approvals.remove(&request_id)) {
-                            let decision = if allow { "accept" } else { "decline" };
-                            proc::write_line(&mut *stdin, &json!({ "id": id, "result": { "decision": decision } })).await;
-                        }
+                    SessionCommand::Answer { request_id, allow, ack } => {
+                        // The approval stays pending until the write worked, so a failed write can be answered again.
+                        let delivery = match threads.get(&key).and_then(|t| t.approvals.get(&request_id)).cloned() {
+                            None => Delivery::Unknown,
+                            Some(id) => {
+                                let decision = if allow { "accept" } else { "decline" };
+                                match proc::write_line(&mut *stdin, &json!({ "id": id, "result": { "decision": decision } })).await {
+                                    Ok(()) => {
+                                        if let Some(t) = threads.get_mut(&key) {
+                                            t.approvals.remove(&request_id);
+                                        }
+                                        Delivery::Delivered
+                                    }
+                                    Err(e) => {
+                                        // A half-written or unflushed line cannot be sent again: end the process, and the
+                                        // end of its output tells the engine.
+                                        if e.torn {
+                                            proc::stop(&mut *stdin, &mut child).await;
+                                        }
+                                        Delivery::WriteFailed
+                                    }
+                                }
+                            }
+                        };
+                        let _ = ack.send(delivery);
                     }
                     SessionCommand::Interrupt => {
                         if let Some((thread, turn)) = threads.get(&key).and_then(|t| Some((t.id.clone()?, t.turn.clone()?))) {
@@ -499,12 +521,12 @@ pub async fn list_codex_models(bin: &str, cwd: &Path, windows: bool, spawn: Spaw
     let mut lines = BufReader::new(p.stdout).lines();
     let ask = async {
         let init = json!({ "id": 1, "method": "initialize", "params": { "clientInfo": { "name": "faber", "title": "Faber", "version": "0.0.0" } } });
-        proc::write_line(&mut *stdin, &init).await;
+        let _ = proc::write_line(&mut *stdin, &init).await;
         while let Ok(Some(line)) = lines.next_line().await {
             let Ok(msg) = serde_json::from_str::<Value>(&line) else { continue };
             if msg["id"] == 1 {
-                proc::write_line(&mut *stdin, &json!({ "method": "initialized" })).await;
-                proc::write_line(&mut *stdin, &json!({ "id": 2, "method": "model/list", "params": {} })).await;
+                let _ = proc::write_line(&mut *stdin, &json!({ "method": "initialized" })).await;
+                let _ = proc::write_line(&mut *stdin, &json!({ "id": 2, "method": "model/list", "params": {} })).await;
             } else if msg["id"] == 2 {
                 return msg["result"]["data"]
                     .as_array()

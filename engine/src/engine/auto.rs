@@ -116,7 +116,7 @@ impl Core {
     }
 
     fn start_guess(&mut self, request: String, attached: usize, warm: Option<String>, only: Option<Vendor>) {
-        let used = |vendor: Vendor| self.used.iter().filter(|((v, _), _)| *v == vendor).map(|(_, u)| *u).fold(0.0, f64::max);
+        let used = |vendor: Vendor| self.quotas.iter().filter(|((v, _), _)| *v == vendor).map(|(_, q)| q.used).fold(0.0, f64::max);
         let vendors: Vec<Vendor> = self.vendors().into_iter().filter(|v| only.is_none_or(|o| o == *v)).collect();
         let cands = priced(&candidates(&vendors, &self.codex_models), &used);
         // One candidate needs no router: the everyday default answers.
@@ -222,12 +222,7 @@ impl Core {
         }
         self.save(id);
         if let Err(error) = self.start(id, reply_id, &pick, text, images) {
-            if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id)) {
-                m.status = Some(Status::Error);
-                m.error = Some(error);
-            }
-            self.save(id);
-            self.push(id, Some(reply_id), true);
+            self.fail_reply(id, reply_id, error);
         }
     }
 

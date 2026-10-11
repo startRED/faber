@@ -1,9 +1,11 @@
 mod support;
 
 use faber_engine::claude::{ClaudeLaunch, ClaudeOptions, claude_args, start_claude};
-use faber_engine::events::{EngineEvent, UserTurn};
+use faber_engine::events::{Delivery, EngineEvent, UserTurn};
 use faber_engine::model::Area;
-use support::{Entry, drive, fixture, text_of};
+use std::sync::Arc;
+use std::time::Duration;
+use support::{Entry, drive, fake, fixture, next_permission, text_of};
 
 fn launch(area: Area) -> ClaudeLaunch {
     ClaudeLaunch { area, model: None, effort: None, resume: None, user_hooks: false, instructions: None }
@@ -79,7 +81,7 @@ async fn permissions_the_first_write_is_allowed_and_the_second_denied() {
         |e, s| {
             if let EngineEvent::Permission { request_id, tool, .. } = e {
                 asks.push(tool.clone());
-                s.answer(request_id, asks.len() == 1);
+                drop(s.answer(request_id, asks.len() == 1));
             }
             matches!(e, EngineEvent::Done { .. })
         },
@@ -90,6 +92,69 @@ async fn permissions_the_first_write_is_allowed_and_the_second_denied() {
     let results: Vec<bool> =
         events.iter().filter_map(|e| if let EngineEvent::ToolResult { ok, .. } = e { Some(*ok) } else { None }).collect();
     assert_eq!(results, [true, false]);
+}
+
+#[tokio::test]
+async fn an_answer_that_fails_to_write_keeps_the_request_and_the_retry_is_written_once() {
+    let f = fake(fixture("claude", "tools"));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let opts = ClaudeOptions { bin: "claude".into(), cwd: ".".into(), launch: launch(Area::Chat), spawn: f.spawn.clone() };
+    let session = start_claude(opts, Arc::new(move |e| drop(tx.send(e))));
+    session.send(UserTurn::text(
+        "Create a.txt containing 'one'. Then create b.txt containing 'two'. Use the Write tool for each, one at a time.",
+    ));
+    let request = next_permission(&mut rx).await;
+    let written = || f.wire.lines_with("control_response");
+
+    f.wire.refuse_next(1);
+    assert_eq!(session.answer(&request, true).await, Ok(Delivery::WriteFailed));
+    assert_eq!(written(), 0, "the refused write left nothing on the wire");
+    // The session still holds the request, so the same answer can be given again.
+    assert_eq!(session.answer(&request, true).await, Ok(Delivery::Delivered));
+    assert_eq!(written(), 1);
+    // A request the session never held, and one it has already delivered, write nothing.
+    assert_eq!(session.answer("never-asked", true).await, Ok(Delivery::Unknown));
+    assert_eq!(session.answer(&request, true).await, Ok(Delivery::Unknown));
+    assert_eq!(written(), 1);
+    session.close();
+    assert_eq!(*f.mismatches.lock().unwrap(), Vec::<String>::new());
+}
+
+/// A write the pipe cut short, or a flush that failed, may have put the line (or part of it) in front of the CLI, so
+/// the session must not send it again: it ends the process, and the retry writes nothing.
+#[tokio::test]
+async fn an_answer_that_may_be_half_written_is_never_written_again() {
+    for tear in [true, false] {
+        let f = fake(fixture("claude", "tools"));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let opts = ClaudeOptions { bin: "claude".into(), cwd: ".".into(), launch: launch(Area::Chat), spawn: f.spawn.clone() };
+        let session = start_claude(opts, Arc::new(move |e| drop(tx.send(e))));
+        session.send(UserTurn::text(
+            "Create a.txt containing 'one'. Then create b.txt containing 'two'. Use the Write tool for each, one at a time.",
+        ));
+        let request = next_permission(&mut rx).await;
+        let before = f.wire.len();
+
+        if tear {
+            f.wire.tear_next(10);
+        } else {
+            f.wire.refuse_next_flush();
+        }
+        assert_eq!(session.answer(&request, true).await, Ok(Delivery::WriteFailed), "tear: {tear}");
+        let after = f.wire.len();
+        assert!(after > before, "the first attempt put bytes on the wire (tear: {tear})");
+
+        // The same answer again must not write a byte: the session is ending.
+        assert_ne!(session.answer(&request, true).await, Ok(Delivery::Delivered), "tear: {tear}");
+        assert_eq!(f.wire.len(), after, "nothing was written again (tear: {tear})");
+        let ended = loop {
+            match tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.expect("the session did not end") {
+                Some(EngineEvent::Error { fatal: true, .. }) | None => break true,
+                Some(_) => {}
+            }
+        };
+        assert!(ended);
+    }
 }
 
 #[tokio::test]

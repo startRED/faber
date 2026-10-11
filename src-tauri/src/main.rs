@@ -124,9 +124,8 @@ async fn interrupt(faber: State<'_, Faber>, id: String) -> Res<()> {
 }
 
 #[tauri::command]
-async fn answer(faber: State<'_, Faber>, id: String, request_id: String, allow: bool, always: bool) -> Res<()> {
-    faber.engine.answer(&id, &request_id, allow, always);
-    Ok(())
+async fn answer(faber: State<'_, Faber>, id: String, turn_id: String, request_id: String, allow: bool, always: bool) -> Res<()> {
+    faber.engine.answer(&id, &turn_id, &request_id, allow, always).await
 }
 
 #[tauri::command]

@@ -359,7 +359,7 @@ export function App(props: { initial: AppState }) {
                       from={from()}
                       conversationId={c().id}
                       options={options()}
-                      onAnswer={(requestId, allow, always) => void api.answer(c().id, requestId, allow, always)}
+                      onAnswer={(turnId, requestId, allow, always) => void api.answer(c().id, turnId, requestId, allow, always).catch(() => {})}
                       onBranch={(messageId, text, chosen) => void branch(messageId, text, chosen ?? picked())}
                     />
                   )}

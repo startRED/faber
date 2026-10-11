@@ -61,11 +61,27 @@ impl UserTurn {
     }
 }
 
+/// What a session says about an answer it was given, once it has done the work.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Delivery {
+    /// The answer was written and flushed to the CLI's input.
+    Delivered,
+    /// The session holds no such pending request, so it wrote nothing.
+    Unknown,
+    /// The write or the flush failed. The session keeps the request, so the same answer can be given again.
+    WriteFailed,
+}
+
 /// What the engine can ask of a live CLI session.
 #[derive(Debug)]
 pub enum SessionCommand {
     Send(UserTurn),
-    Answer { request_id: String, allow: bool },
+    /// `ack` hears what became of the answer. A session that is gone drops it, and the receiver then fails.
+    Answer {
+        request_id: String,
+        allow: bool,
+        ack: tokio::sync::oneshot::Sender<Delivery>,
+    },
     Interrupt,
     Close,
 }
@@ -93,8 +109,12 @@ impl Session {
     pub fn send(&self, turn: UserTurn) {
         (self.send)(SessionCommand::Send(turn));
     }
-    pub fn answer(&self, request_id: &str, allow: bool) {
-        (self.send)(SessionCommand::Answer { request_id: request_id.to_string(), allow });
+    /// The receiver hears whether the CLI got the answer. If the session is gone it fails instead, because the
+    /// command, and the sender in it, were dropped.
+    pub fn answer(&self, request_id: &str, allow: bool) -> tokio::sync::oneshot::Receiver<Delivery> {
+        let (ack, delivered) = tokio::sync::oneshot::channel();
+        (self.send)(SessionCommand::Answer { request_id: request_id.to_string(), allow, ack });
+        delivered
     }
     pub fn interrupt(&self) {
         (self.send)(SessionCommand::Interrupt);

@@ -4,10 +4,15 @@
 use faber_engine::claude::EventSink;
 use faber_engine::events::{EngineEvent, Session, UserTurn};
 use faber_engine::proc::{Proc, Spawner};
-use serde_json::Value;
+use serde_json::{Value, json};
+use std::io;
+use std::pin::Pin;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::sync::mpsc::UnboundedReceiver;
 
 #[derive(Debug, Clone)]
 pub struct Entry {
@@ -30,6 +35,41 @@ pub fn fixture(vendor: &str, name: &str) -> Vec<Entry> {
 
 pub fn text_of(events: &[EngineEvent]) -> String {
     events.iter().filter_map(|e| if let EngineEvent::Text(t) = e { Some(t.as_str()) } else { None }).collect()
+}
+
+/// A hand-written Claude session of two turns. Each turn asks to use the Write tool under request id `request` and
+/// ends once the question is allowed, so the same request id comes up again in the second turn.
+pub fn claude_two_turns(request: &str) -> Vec<Entry> {
+    let user = |text: &str| Entry {
+        input: true,
+        msg: json!({ "type": "user", "message": { "role": "user", "content": text }, "parent_tool_use_id": null, "session_id": "" }),
+    };
+    let ask = |file: &str| Entry {
+        input: false,
+        msg: json!({
+            "type": "control_request",
+            "request_id": request,
+            "request": { "subtype": "can_use_tool", "tool_name": "Write", "input": { "file_path": file, "content": "x" } }
+        }),
+    };
+    let allowed = |file: &str| Entry {
+        input: true,
+        msg: json!({
+            "type": "control_response",
+            "response": {
+                "subtype": "success",
+                "request_id": request,
+                "response": { "behavior": "allow", "updatedInput": { "file_path": file, "content": "x" } }
+            }
+        }),
+    };
+    let init =
+        Entry { input: false, msg: json!({ "type": "system", "subtype": "init", "session_id": "two-turns", "model": "claude-haiku-5-5" }) };
+    let result = || Entry {
+        input: false,
+        msg: json!({ "type": "result", "subtype": "success", "is_error": false, "total_cost_usd": 0.0, "usage": {} }),
+    };
+    vec![user("first"), init, ask("a.txt"), allowed("a.txt"), result(), user("second"), ask("b.txt"), allowed("b.txt"), result()]
 }
 
 // What must match between what the driver sends and what was recorded.
@@ -59,6 +99,92 @@ fn key(msg: &Value) -> String {
 
 pub type Mismatches = Arc<Mutex<Vec<String>>>;
 
+/// What the fake processes were sent, and a switch that makes their next writes fail, as if the process had closed
+/// its input. Every process a spawner makes shares one `Wire`.
+#[derive(Clone, Default)]
+pub struct Wire {
+    written: Arc<Mutex<Vec<u8>>>,
+    refuse: Arc<AtomicUsize>,
+    /// Bytes the next write lets through before the write after it fails (0 = off).
+    tear: Arc<AtomicUsize>,
+    /// Set once a write was cut short: every write after it fails.
+    torn: Arc<std::sync::atomic::AtomicBool>,
+    /// The next flushes fail.
+    refuse_flush: Arc<AtomicUsize>,
+}
+
+impl Wire {
+    /// The next `n` writes fail; the ones after them pass through again.
+    pub fn refuse_next(&self, n: usize) {
+        self.refuse.store(n, Ordering::SeqCst);
+    }
+
+    /// The next write lets only its first `n` bytes through and succeeds; the write after it fails, as a pipe does that
+    /// closes in the middle of a line.
+    pub fn tear_next(&self, n: usize) {
+        self.tear.store(n, Ordering::SeqCst);
+    }
+
+    /// The next flush fails, after the bytes before it went through.
+    pub fn refuse_next_flush(&self) {
+        self.refuse_flush.store(1, Ordering::SeqCst);
+    }
+
+    /// How many bytes went through so far.
+    pub fn len(&self) -> usize {
+        self.written.lock().unwrap().len()
+    }
+
+    /// How many of the lines written so far hold `needle`.
+    pub fn lines_with(&self, needle: &str) -> usize {
+        String::from_utf8_lossy(&self.written.lock().unwrap()).lines().filter(|l| l.contains(needle)).count()
+    }
+
+    fn wrap(&self, p: Proc) -> Proc {
+        Proc { stdin: Box::new(Tap { inner: p.stdin, wire: self.clone() }), ..p }
+    }
+}
+
+struct Tap {
+    inner: Box<dyn AsyncWrite + Send + Unpin>,
+    wire: Wire,
+}
+
+impl AsyncWrite for Tap {
+    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
+        if self.wire.refuse.load(Ordering::SeqCst) > 0 {
+            self.wire.refuse.fetch_sub(1, Ordering::SeqCst);
+            return Poll::Ready(Err(io::Error::other("the process closed its input")));
+        }
+        if self.wire.torn.load(Ordering::SeqCst) {
+            return Poll::Ready(Err(io::Error::other("the process closed its input")));
+        }
+        let tear = self.wire.tear.swap(0, Ordering::SeqCst);
+        let buf = if tear > 0 {
+            self.wire.torn.store(true, Ordering::SeqCst);
+            &buf[..tear.min(buf.len())]
+        } else {
+            buf
+        };
+        let done = Pin::new(&mut self.inner).poll_write(cx, buf);
+        if let Poll::Ready(Ok(n)) = &done {
+            self.wire.written.lock().unwrap().extend_from_slice(&buf[..*n]);
+        }
+        done
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        if self.wire.refuse_flush.swap(0, Ordering::SeqCst) > 0 {
+            return Poll::Ready(Err(io::Error::other("the process closed its input")));
+        }
+        Pin::new(&mut self.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
+}
+
 /// A fake CLI process that replays a recorded session. Each line the driver writes is checked against the next
 /// recorded input; then the recorded outputs up to the following input are streamed back.
 pub fn replay(entries: Vec<Entry>, mismatches: Mismatches) -> Proc {
@@ -76,7 +202,9 @@ pub fn replay(entries: Vec<Entry>, mismatches: Mismatches) -> Proc {
                 at += 1;
             }
             let Ok(Some(line)) = lines.next_line().await else { break };
-            let sent = key(&serde_json::from_str(&line).unwrap());
+            // A line cut short is the writer's failure, not a mismatch of the recording.
+            let Ok(sent) = serde_json::from_str(&line) else { continue };
+            let sent = key(&sent);
             let expected = if at < entries.len() && entries[at].input { key(&entries[at].msg) } else { "(no input expected)".into() };
             if sent == expected {
                 at += 1;
@@ -89,22 +217,35 @@ pub fn replay(entries: Vec<Entry>, mismatches: Mismatches) -> Proc {
     Proc { stdin: Box::new(driver_in), stdout: Box::new(driver_out), stderr: None, child: None }
 }
 
-/// A spawner that replays `entries` each time it is called, recording the arguments it got.
+/// A spawner that replays `entries` each time it is called, recording the arguments it got and every line written.
 pub struct Fake {
     pub spawn: Spawner,
     pub mismatches: Mismatches,
     pub args: Arc<Mutex<Vec<Vec<String>>>>,
+    pub wire: Wire,
 }
 
 pub fn fake(entries: Vec<Entry>) -> Fake {
     let mismatches: Mismatches = Arc::default();
     let args: Arc<Mutex<Vec<Vec<String>>>> = Arc::default();
-    let (m, a) = (mismatches.clone(), args.clone());
+    let wire = Wire::default();
+    let (m, a, w) = (mismatches.clone(), args.clone(), wire.clone());
     let spawn: Spawner = Arc::new(move |_bin, argv, _cwd| {
         a.lock().unwrap().push(argv.to_vec());
-        Ok(replay(entries.clone(), m.clone()))
+        Ok(w.wrap(replay(entries.clone(), m.clone())))
     });
-    Fake { spawn, mismatches, args }
+    Fake { spawn, mismatches, args, wire }
+}
+
+/// The request id of the next permission question a session asks.
+pub async fn next_permission(rx: &mut UnboundedReceiver<EngineEvent>) -> String {
+    loop {
+        let e =
+            tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.expect("no permission question in time").expect("session ended");
+        if let EngineEvent::Permission { request_id, .. } = e {
+            return request_id;
+        }
+    }
 }
 
 /// Runs a recorded session through a real driver. `react` answers like the app would and returns true when done.

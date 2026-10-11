@@ -43,6 +43,15 @@ fn ask(area: Area, text: &str, choice: Choice) -> SendRequest {
     SendRequest { conversation_id: None, area, project_id: None, text: text.into(), images: vec![], files: vec![], choice }
 }
 
+/// Answers the way the screen does, in the background: the engine confirms an answer only once the CLI has it, and
+/// the callbacks of `finished` cannot wait. `m` is the message that holds the card.
+fn answer(engine: &Engine, id: &str, m: &Message, request_id: &str, allow: bool, always: bool) {
+    let (engine, id, turn, request) = (engine.clone(), id.to_string(), m.id.clone(), request_id.to_string());
+    tokio::spawn(async move {
+        let _ = engine.answer(&id, &turn, &request, allow, always).await;
+    });
+}
+
 /// Waits for the next finished answer, letting `react` answer what the screen would.
 async fn finished(rx: &mut UnboundedReceiver<AppEvent>, mut react: impl FnMut(&Message)) -> Message {
     loop {
@@ -215,7 +224,7 @@ async fn always_allow_answers_the_next_request_for_the_same_tool_without_asking_
             && !asked.contains(&p.request_id)
         {
             asked.push(p.request_id.clone());
-            engine.answer(&id, &p.request_id, true, true);
+            answer(&engine, &id, m, &p.request_id, true, true);
         }
     })
     .await;
@@ -240,7 +249,7 @@ async fn two_permission_requests_at_once_wait_in_a_queue_and_both_get_answered()
             && !answered.contains(&first.request_id)
         {
             answered.push(first.request_id.clone());
-            engine.answer(&id, &first.request_id, true, false);
+            answer(&engine, &id, m, &first.request_id, true, false);
         }
     })
     .await;
@@ -265,7 +274,7 @@ async fn text_blocks_around_a_tool_are_kept_apart() {
         {
             let allow = asked.is_empty();
             asked.insert(p.request_id.clone(), allow);
-            engine.answer(&id, &p.request_id, allow, false);
+            answer(&engine, &id, m, &p.request_id, allow, false);
         }
     })
     .await;

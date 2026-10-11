@@ -4,12 +4,12 @@ use faber_engine::codex::{
     CodexServer, CodexServerOptions, CodexThread, CodexTurnState, codex_args, codex_thread, list_codex_models, parse_codex_notification,
     thread_params,
 };
-use faber_engine::events::{EngineEvent, Session, UserTurn};
+use faber_engine::events::{Delivery, EngineEvent, Session, UserTurn};
 use faber_engine::model::Area;
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
-use support::{Entry, drive, fake, fixture, text_of};
+use support::{Entry, drive, fake, fixture, next_permission, text_of};
 
 async fn run(
     entries: Vec<Entry>,
@@ -98,7 +98,7 @@ async fn codex_permissions_the_first_command_is_allowed_and_the_second_declined(
         |e, s| {
             if let EngineEvent::Permission { request_id, tool, .. } = e {
                 asks.push(tool.clone());
-                s.answer(request_id, asks.len() == 1);
+                drop(s.answer(request_id, asks.len() == 1));
             }
             matches!(e, EngineEvent::Done { .. })
         },
@@ -109,6 +109,75 @@ async fn codex_permissions_the_first_command_is_allowed_and_the_second_declined(
     let results: Vec<bool> =
         events.iter().filter_map(|e| if let EngineEvent::ToolResult { ok, .. } = e { Some(*ok) } else { None }).collect();
     assert_eq!(results, [true, false]);
+}
+
+#[tokio::test]
+async fn codex_an_answer_that_fails_to_write_keeps_the_approval_and_the_retry_is_written_once() {
+    let f = fake(fixture("codex", "tools"));
+    let opts = CodexServerOptions {
+        bin: "codex".into(),
+        cwd: ".".into(),
+        area: Area::Chat,
+        user_hooks: false,
+        windows: false,
+        spawn: f.spawn.clone(),
+    };
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let thread = CodexThread { cwd: ".".into(), model: None, effort: None, resume: None, instructions: None };
+    let session = CodexServer::start(opts).open(thread, Arc::new(move |e| drop(tx.send(e))));
+    session.send(UserTurn::text("Create a.txt containing one. Then create b.txt containing two. Make each file in a separate step."));
+    let request = next_permission(&mut rx).await;
+    assert_eq!(request, "0", "Codex numbers its requests from 0 in each server");
+    let written = || f.wire.lines_with("\"decision\"");
+
+    f.wire.refuse_next(1);
+    assert_eq!(session.answer(&request, true).await, Ok(Delivery::WriteFailed));
+    assert_eq!(written(), 0, "the refused write left nothing on the wire");
+    // The thread still holds the approval, so the same answer can be given again.
+    assert_eq!(session.answer(&request, true).await, Ok(Delivery::Delivered));
+    assert_eq!(written(), 1);
+    // An approval the thread never held, and one it has already delivered, write nothing.
+    assert_eq!(session.answer("7", true).await, Ok(Delivery::Unknown));
+    assert_eq!(session.answer(&request, true).await, Ok(Delivery::Unknown));
+    assert_eq!(written(), 1);
+    session.close();
+    assert_eq!(*f.mismatches.lock().unwrap(), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn codex_an_answer_that_may_be_half_written_is_never_written_again() {
+    let f = fake(fixture("codex", "tools"));
+    let opts = CodexServerOptions {
+        bin: "codex".into(),
+        cwd: ".".into(),
+        area: Area::Chat,
+        user_hooks: false,
+        windows: false,
+        spawn: f.spawn.clone(),
+    };
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let thread = CodexThread { cwd: ".".into(), model: None, effort: None, resume: None, instructions: None };
+    let session = CodexServer::start(opts).open(thread, Arc::new(move |e| drop(tx.send(e))));
+    session.send(UserTurn::text("Create a.txt containing one. Then create b.txt containing two. Make each file in a separate step."));
+    let request = next_permission(&mut rx).await;
+    assert_eq!(request, "0", "Codex numbers its requests from 0 in each server");
+    let before = f.wire.len();
+
+    f.wire.tear_next(10);
+    assert_eq!(session.answer(&request, true).await, Ok(Delivery::WriteFailed));
+    let after = f.wire.len();
+    assert!(after > before, "the first attempt put bytes on the wire");
+
+    // The same answer again must not write a byte: the shared process is ending, for every thread in it.
+    assert_ne!(session.answer(&request, true).await, Ok(Delivery::Delivered));
+    assert_eq!(f.wire.len(), after, "nothing was written again");
+    let ended = loop {
+        match tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.expect("the session did not end") {
+            Some(EngineEvent::Error { fatal: true, .. }) | None => break true,
+            Some(_) => {}
+        }
+    };
+    assert!(ended);
 }
 
 #[tokio::test]

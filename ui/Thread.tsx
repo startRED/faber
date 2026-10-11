@@ -71,7 +71,8 @@ function usage(m: Message): string {
   return parts.join(' · ');
 }
 
-type OnAnswer = (requestId: string, allow: boolean, always?: boolean) => void;
+/** `turnId` is the id of the message that holds the card. */
+type OnAnswer = (turnId: string, requestId: string, allow: boolean, always?: boolean) => void;
 type OnBranch = (messageId: string, text: string, choice?: Choice) => void;
 
 interface Shared {
@@ -81,7 +82,7 @@ interface Shared {
   onBranch: OnBranch;
 }
 
-function Ask(props: { permission: Permission; onAnswer: OnAnswer }) {
+function Ask(props: { permission: Permission; turnId: string; onAnswer: OnAnswer }) {
   const d = () => describe(props.permission.tool, props.permission.input);
   return (
     <div class="ask" role="alertdialog" aria-label={t('ask.label')}>
@@ -91,13 +92,13 @@ function Ask(props: { permission: Permission; onAnswer: OnAnswer }) {
       </Show>
       <pre>{d().body}</pre>
       <div>
-        <button class="btn primary" onClick={() => props.onAnswer(props.permission.requestId, true)}>
+        <button class="btn primary" onClick={() => props.onAnswer(props.turnId, props.permission.requestId, true)}>
           {t('ask.allow')}
         </button>
-        <button class="btn" onClick={() => props.onAnswer(props.permission.requestId, true, true)}>
+        <button class="btn" onClick={() => props.onAnswer(props.turnId, props.permission.requestId, true, true)}>
           {t('ask.always')}
         </button>
-        <button class="btn" onClick={() => props.onAnswer(props.permission.requestId, false)}>
+        <button class="btn" onClick={() => props.onAnswer(props.turnId, props.permission.requestId, false)}>
           {t('ask.deny')}
         </button>
       </div>
@@ -135,7 +136,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
         </div>
       </Show>
       <Show when={waiting()[0]} keyed>
-        {(p) => <Ask permission={p} onAnswer={props.onAnswer} />}
+        {(p) => <Ask permission={p} turnId={m().id} onAnswer={props.onAnswer} />}
       </Show>
       <Show when={waiting().length > 1}>
         <div class="note">{t('ask.moreWaiting', { n: waiting().length - 1 })}</div>

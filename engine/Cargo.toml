@@ -23,6 +23,8 @@ winreg = "0.56"
 
 [dev-dependencies]
 tempfile = "3"
+# The paused clock of the tests that wait out the router (30 s) and an answer's acknowledgement (5 s).
+tokio = { version = "1", features = ["test-util"] }
 
 [lints]
 workspace = true

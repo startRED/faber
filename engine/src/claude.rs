@@ -1,6 +1,6 @@
 //! Claude Code driver: one long-lived `claude -p` process per conversation, spoken to in stream-json over stdio.
 
-use crate::events::{EngineEvent, Session, SessionCommand, UserTurn};
+use crate::events::{Delivery, EngineEvent, Session, SessionCommand, UserTurn};
 use crate::model::Area;
 use crate::proc::{self, Spawner};
 use serde_json::{Value, json};
@@ -206,17 +206,38 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                     }
                 }
                 cmd = rx.recv(), if !closed => match cmd {
-                    Some(SessionCommand::Send(turn)) => proc::write_line(&mut *stdin, &user_message(&turn)).await,
-                    Some(SessionCommand::Answer { request_id, allow }) => {
-                        let input = pending.remove(&request_id).unwrap_or(Value::Null);
-                        let response = if allow { json!({ "behavior": "allow", "updatedInput": input }) } else { json!({ "behavior": "deny", "message": "The user declined." }) };
-                        let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id, "response": response } });
-                        proc::write_line(&mut *stdin, &msg).await;
+                    Some(SessionCommand::Send(turn)) => {
+                        let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
+                    }
+                    Some(SessionCommand::Answer { request_id, allow, ack }) => {
+                        // The request stays pending until the write worked, so a failed write can be answered again.
+                        let delivery = match pending.get(&request_id) {
+                            None => Delivery::Unknown,
+                            Some(input) => {
+                                let response = if allow { json!({ "behavior": "allow", "updatedInput": input }) } else { json!({ "behavior": "deny", "message": "The user declined." }) };
+                                let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id, "response": response } });
+                                match proc::write_line(&mut *stdin, &msg).await {
+                                    Ok(()) => {
+                                        pending.remove(&request_id);
+                                        Delivery::Delivered
+                                    }
+                                    Err(e) => {
+                                        // A half-written or unflushed line cannot be sent again: end the process, and the
+                                        // end of its output tells the engine.
+                                        if e.torn {
+                                            proc::stop(&mut *stdin, &mut child).await;
+                                        }
+                                        Delivery::WriteFailed
+                                    }
+                                }
+                            }
+                        };
+                        let _ = ack.send(delivery);
                     }
                     Some(SessionCommand::Interrupt) => {
                         control_id += 1;
                         let msg = json!({ "type": "control_request", "request_id": format!("faber-{control_id}"), "request": { "subtype": "interrupt" } });
-                        proc::write_line(&mut *stdin, &msg).await;
+                        let _ = proc::write_line(&mut *stdin, &msg).await;
                     }
                     Some(SessionCommand::Close) | None => {
                         closed = true;

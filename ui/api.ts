@@ -186,7 +186,8 @@ export const api = {
   routeDraft: (req: { conversationId?: string; area: Area; projectId?: string; choice: Choice }, text: string) =>
     invoke<void>('route_draft', { req, text }),
   interrupt: (id: string) => invoke<void>('interrupt', { id }),
-  answer: (id: string, requestId: string, allow: boolean, always = false) => invoke<void>('answer', { id, requestId, allow, always }),
+  answer: (id: string, turnId: string, requestId: string, allow: boolean, always = false) =>
+    invoke<void>('answer', { id, turnId, requestId, allow, always }),
   rename: (id: string, title: string) => invoke<void>('rename', { id, title }),
   remove: (id: string) => invoke<void>('remove', { id }),
   removeProject: (id: string) => invoke<void>('remove_project', { id }),

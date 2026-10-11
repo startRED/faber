@@ -58,12 +58,27 @@ pub(crate) fn stderr_tail(stderr: Option<Box<dyn AsyncRead + Send + Unpin>>) -> 
     tail
 }
 
-pub(crate) async fn write_line(stdin: &mut (dyn AsyncWrite + Send + Unpin), msg: &serde_json::Value) {
+/// Why a line may not have reached the CLI. When `torn` is set some bytes, or all of them, were written before the
+/// failure, so sending the line again could corrupt the stream or repeat the line; the caller must end the process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct WriteError {
+    pub torn: bool,
+}
+
+/// Writes one JSON line and flushes it. Only a caller that must know whether the CLI got the line looks at the
+/// result; for the others a dead process shows up as the end of its output.
+pub(crate) async fn write_line(stdin: &mut (dyn AsyncWrite + Send + Unpin), msg: &serde_json::Value) -> Result<(), WriteError> {
     let mut line = msg.to_string();
     line.push('\n');
-    // A dead process shows up as end of output; the write error itself adds nothing.
-    let _ = stdin.write_all(line.as_bytes()).await;
-    let _ = stdin.flush().await;
+    let mut done = 0;
+    while done < line.len() {
+        match stdin.write(&line.as_bytes()[done..]).await {
+            Ok(n) if n > 0 => done += n,
+            _ => return Err(WriteError { torn: done > 0 }),
+        }
+    }
+    // A flush that fails may still have let the whole line through.
+    stdin.flush().await.map_err(|_| WriteError { torn: true })
 }
 
 /// Ends a process: closes its input, then kills it. Returns its exit code when it had one.

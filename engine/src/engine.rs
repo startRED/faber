@@ -11,7 +11,7 @@ use crate::router::{Choice, Pick, pick_model};
 use crate::store::Store;
 use crate::workspace::{Attachment, inside_folder, new_files, save_files};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
+mod answer;
 mod auto;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -26,6 +27,7 @@ mod auto;
 pub enum AppEvent {
     Message { conversation_id: String, message: Box<Message> },
     Quota { vendor: Vendor, window: String, used: f64, resets_at: f64 },
+    Running { revision: u64, items: Vec<RunningItem> },
     List,
 }
 
@@ -91,6 +93,11 @@ pub struct AppState {
     pub projects: Vec<Project>,
     pub vendors: Vec<Vendor>,
     pub settings: Settings,
+    /// The running list as last emitted, with its revision.
+    pub running: Running,
+    /// The latest reading of each vendor's quota windows, with the time each resets. The screen decides which count as
+    /// expired; the engine reports what the CLIs said.
+    pub quotas: Vec<QuotaReading>,
 }
 
 /// How to continue a conversation in the CLI's own terminal interface.
@@ -169,8 +176,10 @@ struct Core {
     codex_recommended: Option<String>,
     /// Every model the account can run on Codex, once listed.
     codex_models: Vec<String>,
-    /// The latest share of each quota window spent, per vendor.
-    used: HashMap<(Vendor, String), f64>,
+    /// The latest reading of each quota window, per vendor. Auto prices the models by the share used.
+    quotas: HashMap<(Vendor, String), QuotaReading>,
+    /// The running list as last emitted.
+    running: Running,
     /// Auto's route for the latest first message or draft.
     guess: Option<auto::Guess>,
     next_draft: Option<auto::Draft>,
@@ -203,7 +212,8 @@ impl Engine {
                 codex: HashMap::new(),
                 codex_recommended: None,
                 codex_models: vec![],
-                used: HashMap::new(),
+                quotas: HashMap::new(),
+                running: Running::default(),
                 guess: None,
                 next_draft: None,
                 spare: None,
@@ -257,9 +267,6 @@ impl Engine {
             None => c.stop_waiting(id),
         })
     }
-    pub fn answer(&self, id: &str, request_id: &str, allow: bool, always: bool) {
-        self.with(|c| c.answer(id, request_id, allow, always))
-    }
     pub fn rename(&self, id: &str, title: &str) {
         self.with(|c| c.rename(id, title))
     }
@@ -280,7 +287,7 @@ impl Engine {
         self.with(|c| {
             let projects: Vec<Project> = c.store.projects().into_iter().filter(|p| p.id != id).collect();
             c.store.save_projects(&projects);
-            (c.emit)(AppEvent::List);
+            c.list_changed();
         })
     }
     /// Swaps the CLIs in use, for example after one was installed or signed in to. Idle processes of a changed CLI
@@ -377,11 +384,15 @@ impl Core {
     }
 
     fn state(&self) -> AppState {
+        let mut quotas: Vec<QuotaReading> = self.quotas.values().cloned().collect();
+        quotas.sort_by(|a, b| (a.vendor, &a.window).cmp(&(b.vendor, &b.window)));
         AppState {
             conversations: self.store.list().into_iter().filter(|c| !c.title.is_empty()).collect(),
             projects: self.store.projects(),
             vendors: self.vendors(),
             settings: self.store.settings(),
+            running: self.running.clone(),
+            quotas,
         }
     }
 
@@ -442,6 +453,8 @@ impl Core {
                 if !c.messages.is_empty() {
                     self.save(conv);
                 }
+                // The turn's reply now names its model.
+                self.refresh_running();
                 return;
             }
             EngineEvent::Break => {
@@ -484,10 +497,7 @@ impl Core {
             EngineEvent::Permission { request_id, tool, input } => {
                 let allowed = self.convs.get(conv).and_then(|c| c.allow_always.as_ref()).is_some_and(|a| a.contains(&tool));
                 if allowed {
-                    if let Some(l) = self.live.get(conv) {
-                        l.session.answer(&request_id, true);
-                    }
-                    return;
+                    return self.auto_answer(conv, vec![Permission { request_id, tool, input }]);
                 }
                 if let Some(m) = self.turn(conv) {
                     m.permissions.get_or_insert_default().push(Permission { request_id, tool, input });
@@ -495,7 +505,8 @@ impl Core {
                 return self.push(conv, turn_id.as_deref(), true);
             }
             EngineEvent::Quota { window, used, resets_at } => {
-                self.used.insert((vendor, window.clone()), used);
+                let reading = QuotaReading { vendor, window: window.clone(), used, resets_at };
+                self.quotas.insert((vendor, window.clone()), reading);
                 return (self.emit)(AppEvent::Quota { vendor, window, used, resets_at });
             }
             EngineEvent::Done { ok, cost_usd, input_tokens, output_tokens, .. } => {
@@ -542,7 +553,7 @@ impl Core {
         c.updated_at = now();
         self.save(conv);
         self.push(conv, turn_id.as_deref(), true);
-        (self.emit)(AppEvent::List);
+        self.list_changed();
         if self.live.get(conv).is_some_and(|l| self.opts.clis.get(&l.vendor) != Some(&l.cli))
             && let Some(l) = self.live.remove(conv)
         {
@@ -593,10 +604,60 @@ impl Core {
         });
     }
 
-    fn emit_message(&self, conv: &str, message_id: &str) {
+    fn emit_message(&mut self, conv: &str, message_id: &str) {
         if let Some(m) = self.convs.get(conv).and_then(|c| c.messages.iter().find(|m| m.id == message_id)) {
             (self.emit)(AppEvent::Message { conversation_id: conv.to_string(), message: Box::new(m.clone()) });
         }
+        self.refresh_running();
+    }
+
+    /// Tells the screen the conversations changed, and the running list with them.
+    fn list_changed(&mut self) {
+        (self.emit)(AppEvent::List);
+        self.refresh_running();
+    }
+
+    /// The conversations to show in the running list, in the order the screen draws them: blocks that hold a question
+    /// first, then the sidebar's project order with Chat last; inside a block the questions first, oldest first.
+    fn running_items(&self) -> Vec<RunningItem> {
+        let mut items: Vec<RunningItem> = self.convs.values().filter_map(running_item).collect();
+        if items.is_empty() {
+            return items;
+        }
+        // ponytail: projects.json is read on every refresh while something runs; keep the order in memory if a profile shows it.
+        let projects = self.store.projects();
+        let block = |i: &RunningItem| match (i.area, &i.project_id) {
+            (Area::Chat, _) => (usize::MAX, String::new()),
+            (Area::Project, Some(id)) => (projects.iter().position(|p| &p.id == id).unwrap_or(usize::MAX - 1), id.clone()),
+            (Area::Project, None) => (usize::MAX - 1, String::new()),
+        };
+        let asking: HashSet<(usize, String)> = items.iter().filter(|i| i.state == RunState::NeedsYou).map(block).collect();
+        items.sort_by_cached_key(|i| {
+            let block = block(i);
+            (!asking.contains(&block), block, i.state == RunState::Working, i.since, i.conversation_id.clone())
+        });
+        items
+    }
+
+    /// Recomputes the running list and emits it with the next revision, but only if it differs from the last one emitted.
+    /// It runs wherever the engine emits a `Message` or a `List`, so every change of a turn or a permission passes here.
+    fn refresh_running(&mut self) {
+        let items = self.running_items();
+        if items == self.running.items {
+            return;
+        }
+        self.running = Running { revision: self.running.revision + 1, items: items.clone() };
+        (self.emit)(AppEvent::Running { revision: self.running.revision, items });
+    }
+
+    /// Ends a reply that never got a CLI: it shows the error and leaves the running list.
+    pub(super) fn fail_reply(&mut self, id: &str, reply_id: &str, error: String) {
+        if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id)) {
+            m.status = Some(Status::Error);
+            m.error = Some(error);
+        }
+        self.save(id);
+        self.push(id, Some(reply_id), true);
     }
 
     /// The shared Codex process for an area and hooks choice, started again if it died.
@@ -801,7 +862,7 @@ impl Core {
         c.messages.push(reply);
         c.updated_at = at;
         self.save(&id);
-        (self.emit)(AppEvent::List);
+        self.list_changed();
         // An open conversation only grows through these events, so the question goes out as well as the answer.
         self.emit_message(&id, &question_id);
         let text = if joining_late { with_history(&history, &text) } else { text };
@@ -820,7 +881,11 @@ impl Core {
             });
             return Ok(id);
         }
-        self.start(&id, &reply_id, &pick, text, req.images)?;
+        if let Err(error) = self.start(&id, &reply_id, &pick, text, req.images) {
+            // The reply never got a CLI: it ends with the error instead of staying in the running list for good.
+            self.fail_reply(&id, &reply_id, error.clone());
+            return Err(error);
+        }
         Ok(id)
     }
 
@@ -906,34 +971,6 @@ impl Core {
         }
     }
 
-    fn answer(&mut self, conv: &str, request_id: &str, allow: bool, always: bool) {
-        let Some(turn_id) = self.live.get(conv).and_then(|l| l.turn.clone()) else { return };
-        let Some(m) = self.turn(conv) else { return };
-        let waiting = m.permissions.clone().unwrap_or_default();
-        let tool = waiting.iter().find(|p| p.request_id == request_id).map(|p| p.tool.clone());
-        // "Always" also answers the other waiting requests for the same tool.
-        let answered: Vec<String> = match (&tool, always && allow) {
-            (Some(tool), true) => waiting.iter().filter(|p| &p.tool == tool).map(|p| p.request_id.clone()).collect(),
-            _ => waiting.iter().filter(|p| p.request_id == request_id).map(|p| p.request_id.clone()).collect(),
-        };
-        m.permissions = Some(waiting.into_iter().filter(|p| !answered.contains(&p.request_id)).collect());
-        if let (Some(tool), true) = (tool, always && allow)
-            && let Some(c) = self.convs.get_mut(conv)
-        {
-            let list = c.allow_always.get_or_insert_default();
-            if !list.contains(&tool) {
-                list.push(tool);
-            }
-            self.save(conv);
-        }
-        if let Some(l) = self.live.get(conv) {
-            for id in &answered {
-                l.session.answer(id, allow);
-            }
-        }
-        self.push(conv, Some(&turn_id), true);
-    }
-
     fn rename(&mut self, id: &str, title: &str) {
         let Some(c) = self.load(id) else { return };
         let title: String = title.trim().chars().take(120).collect();
@@ -941,7 +978,7 @@ impl Core {
             c.title = title;
         }
         self.save(id);
-        (self.emit)(AppEvent::List);
+        self.list_changed();
     }
 
     fn remove(&mut self, id: &str) {
@@ -954,7 +991,7 @@ impl Core {
             let _ = std::fs::remove_dir_all(self.workspace_of(id));
             let _ = std::fs::remove_dir_all(self.opts.data_dir.join("attachments").join(id));
         }
-        (self.emit)(AppEvent::List);
+        self.list_changed();
     }
 
     fn terminal(&mut self, id: &str) -> Option<TerminalCommand> {
@@ -982,7 +1019,7 @@ impl Core {
         let project = Project { id: new_id(), name, path: path.to_string() };
         projects.push(project.clone());
         self.store.save_projects(&projects);
-        (self.emit)(AppEvent::List);
+        self.list_changed();
         project
     }
 }
@@ -1000,6 +1037,27 @@ fn same_as_before(c: &Conversation, live: Option<&Live>) -> Option<Pick> {
     let effort = live.filter(|l| l.vendor == vendor).map_or_else(|| "medium".to_string(), |l| l.effort.clone());
     let reason = last.reason.clone().filter(|r| r != "reason.routing").unwrap_or_else(|| "reason.autoDefault".into());
     Some(Pick { vendor, model: last.model.clone(), effort, reason })
+}
+
+/// The row of the running list for a conversation, if its latest reply is streaming or has unanswered permissions.
+fn running_item(c: &Conversation) -> Option<RunningItem> {
+    let reply = c.messages.last().filter(|m| m.role == Role::Assistant)?;
+    let permissions = reply.permissions.clone().unwrap_or_default();
+    if reply.status != Some(Status::Streaming) && permissions.is_empty() {
+        return None;
+    }
+    Some(RunningItem {
+        conversation_id: c.id.clone(),
+        turn_id: reply.id.clone(),
+        title: c.title.clone(),
+        area: c.area,
+        project_id: c.project_id.clone(),
+        vendor: reply.vendor,
+        model: reply.model.clone(),
+        state: if permissions.is_empty() { RunState::Working } else { RunState::NeedsYou },
+        since: reply.at,
+        permissions,
+    })
 }
 
 fn copy_dir(from: &Path, to: &Path) {

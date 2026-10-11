@@ -191,6 +191,57 @@ pub struct Summary {
     pub updated_at: u64,
 }
 
+/// Where a running conversation stands: answering, or waiting for the user.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RunState {
+    Working,
+    NeedsYou,
+}
+
+/// One conversation that is answering now or waits for the user: a row of the running list.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunningItem {
+    pub conversation_id: String,
+    /// The id of the turn's reply message. With the request id it names a question, because request ids repeat.
+    pub turn_id: String,
+    /// Empty while the conversation has none.
+    pub title: String,
+    pub area: Area,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    /// None while Auto is still choosing the model.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vendor: Option<Vendor>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    pub state: RunState,
+    /// The `at` of the turn's reply message.
+    pub since: u64,
+    /// The questions the user has not answered yet.
+    pub permissions: Vec<Permission>,
+}
+
+/// The running list as the engine last sent it. The revision grows by one with every list the engine emits, so a
+/// snapshot and an event can be told apart by age.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct Running {
+    pub revision: u64,
+    pub items: Vec<RunningItem>,
+}
+
+/// The latest reading of one quota window of one vendor.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuotaReading {
+    pub vendor: Vendor,
+    pub window: String,
+    pub used: f64,
+    /// Seconds since the Unix epoch, as the CLI reports it; 0 when it did not say.
+    pub resets_at: f64,
+}
+
 /// The user's choices, in one plain file. Appearance belongs to the screen, so the engine only keeps it.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
