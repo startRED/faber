@@ -71,7 +71,7 @@ Each vendor's model tends to prefer its own company's models, so in Auto no mode
 - Routing runs on the first message of a conversation, and on the next ones while only an easy model was needed (a
   greeting first). Those stay with their subscription, so the CLI keeps the history, and only move up. Once a message
   needed more, the conversation stays with that model. While the user types, the draft is routed in advance, so most
-  answers start the moment they are sent. A sent message waits at most 4 s for its route; past it, the turn starts
+  answers start the moment they are sent. A sent message waits at most 30 s for its route; past it, the turn starts
   with the everyday default. The answer shows the chosen model and the reason. Routing again when a harder request
   follows a medium one comes later.
 - The router is measured too: on the benchmark of real requests, its picks must match always using the strongest
@@ -133,6 +133,49 @@ lets it compose them per request, the way a senior professional would:
 
 Recipes from past work are hints the agent may read, never a track it must follow. The guardrails below are the only
 fixed rules.
+
+### Normal and autonomous modes
+
+In both modes the agent decides what it can and asks only what changes the result; it never stops just to report.
+
+- **Normal**: the user works alongside. A question card waits for the user, with its default ready, and the actions
+  guardrail 3 covers ask for approval.
+- **Autonomous**: nobody needs to be there. Question cards apply their default at once and log it. Sending,
+  publishing, paying or deleting outside a copy is never approved on its own: it is parked with a note and the rest
+  goes on. Changes to Faber itself follow the user's trust setting, parked without full trust. The work runs to the end
+  within the quota and time cap, then leaves a report: what was done, what was decided alone and why, what is parked.
+- **Switches at any moment, effective at once**: one click in the conversation (and a shortcut), also while the agent
+  is answering or a mission is running. Turning it on resolves open question cards with their defaults and parks
+  waiting approvals, without restarting anything: the user who was working in Normal and has to sleep just turns it
+  on. Turning it off brings the next questions back to the user.
+
+### Building software: one voice, a team behind it
+
+Normal mode feels like Claude Code: the user talks only to Faber. Behind it, Claude and Codex sessions work in
+parallel, each on what it does best, and the result must read as if one careful team made it.
+
+- **The lead keeps the thread.** One live session plans, splits the work and answers the user. Workers get a short
+  brief and return a short report; a worker that stays on a part keeps its session while the prompt cache is warm, and
+  each step loads only what it needs.
+- **One map of the product, read before and updated after every change.** The design system (tokens, components,
+  type, spacing, voice) and an inventory of every screen, button and flow with its purpose. A worker building UI starts
+  from it; nothing ships that the map does not account for.
+- **No duplicates, no strangers.** Before a new screen, button or setting, the agent searches the inventory for one
+  with the same purpose and extends it instead. Code checks enforce the design system: only its tokens and components.
+  A coherence pass looks at the whole app, every screen side by side at each size, not just the diff, and flags
+  anything that does not look or behave like the rest.
+- **Design starts from references.** Three directions grounded in real references come first; in autonomous mode the
+  two judges from different vendors pick, with a written rubric. The final screens are checked in a real browser at
+  1920, 1440 and phone width.
+- **Done means it works.** The proof is written before the work and run after it: unit tests, end-to-end runs in a
+  real browser or the real app, and a ghost user from another vendor that uses the result like a person, recorded.
+  A bug hunter tries edge cases and broken paths on purpose. Every bug found gets its root cause fixed and a test that
+  fails without the fix.
+- **Everything persists.** The mode, the plan, each worker's progress and session, the product map, open question
+  cards, parked actions and the report are saved as they change. Closing Faber, a crash or a reboot resumes exactly
+  where it was, autonomous runs included; Faber keeps working from the tray when its window is closed.
+- **Measured against the TL-ADE.** The same requests run on both: design scores from blind judges, bugs found after
+  delivery, coherence findings, time, tokens and how often the user had to step in.
 
 ### Toolbox
 
@@ -287,7 +330,7 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
 | F2 | Setup and catalog v0 | from zero to the first result in ≤ 5 min: detects CLIs, installs from official sources, opens each CLI's own login, verifies |
 | v0.1 | First public alpha | |
 | F3 | Open project folder, snapshots and undo | conformance validator green; "organize my downloads" undoes completely |
-| F4 | Toolbox and missions | a small complete app comes out of one conversation, with proof and review; survives killing the engine mid-run |
+| F4 | Toolbox and missions, normal and autonomous modes | a small complete app comes out of one conversation, with proof and review; survives killing the engine mid-run; switching to autonomous mid-run finishes it with nobody there |
 | F5 | Quota and router | quota per approved task ≤ 85% of the plain CLI on the benchmark |
 | F6 | Store and tool discovery | a skill installed once appears in every CLI; a request with no known tool finds, installs and proves one on a copy |
 | v0.5 | Daily-driver release | |
