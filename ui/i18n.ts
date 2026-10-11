@@ -48,6 +48,12 @@ export function t(key: Key, vars: Record<string, string | number> = {}): string 
   return fill(form, vars);
 }
 
+/** A text with its placeholders still in it, as `{one, other}`. The tray is outside the page, so the shell fills them. */
+export function templates(key: Key, code: Lang = lang()): { one: string; other: string } {
+  const entry = (LANGUAGES.find((l) => l.code === code)?.messages ?? en)[key];
+  return typeof entry === 'string' ? { one: entry, other: entry } : entry;
+}
+
 /** Texts that arrive from the engine as keys (errors, routing reasons); anything else is shown as it came. */
 export function fromEngine(text: string | undefined, vars: Record<string, string | number> = {}): string {
   if (!text) return '';

@@ -159,8 +159,9 @@ must be copied there.
 3. `icon.ico` is the scratch folder's ICO with its 16 and 24 px frames replaced by those two PNG files, byte for byte (its
    frames are PNG). The six sizes are 16, 24, 32, 48, 64 and 256.
 4. `tray-16.png` and `tray-24.png` are copies of `16x16.png` and `24x24.png`, and `tray-32.png` is a copy of `32x32.png`.
-   B6 picks one by display scale; until then the tray uses the window icon, which Tauri takes from the largest frame of
-   `icon.ico`.
+   The tray (`src-tauri/src/tray.rs`) picks one by display scale: the smallest of the three that is not smaller than 16 px
+   times the scale. It draws the amber badge of B6 on that picture at run time. If a picture fails to decode, the tray
+   uses the window icon, which Tauri takes from the largest frame of `icon.ico`.
 5. `src-tauri/tests/icons.rs` checks the sizes and that the 16 and 24 px frames equal their PNG files.
 
 ## Layout

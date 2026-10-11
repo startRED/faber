@@ -9,6 +9,7 @@ compile_error!("the `test-hooks` feature is for debug test builds only; it must 
 mod look;
 mod setup;
 mod terminal;
+mod tray;
 
 use base64::Engine as _;
 use faber_engine::cli::Cli;
@@ -24,10 +25,8 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tauri::menu::{Menu, MenuItem};
-use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::window::Color;
-use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, Wry};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_updater::{Update, UpdaterExt};
@@ -36,8 +35,6 @@ pub(crate) struct Faber {
     pub(crate) engine: Engine,
     /// ChatGPT models this account can use; empty until the Codex CLI answers.
     pub(crate) models: Mutex<Vec<ModelInfo>>,
-    /// The tray menu's two items, renamed when the screen changes language.
-    pub(crate) tray: Mutex<Option<[MenuItem<Wry>; 2]>>,
     /// A newer version, already downloaded; it installs when Faber quits.
     pub(crate) update: Mutex<Option<(Update, Vec<u8>)>>,
     pub(crate) data_dir: PathBuf,
@@ -250,13 +247,10 @@ async fn open_link(app: AppHandle, url: String) -> Res<()> {
     app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
 }
 
+/// The words the shell shows by itself (tray menu, tooltip, notification), sent whenever the language changes.
 #[tauri::command]
-async fn set_tray(faber: State<'_, Faber>, open: String, quit: String) -> Res<()> {
-    if let Some([o, q]) = &*lock(&faber.tray) {
-        o.set_text(open).map_err(|e| e.to_string())?;
-        q.set_text(quit).map_err(|e| e.to_string())?;
-    }
-    Ok(())
+async fn set_shell_texts(app: AppHandle, texts: tray::ShellTexts) -> Res<()> {
+    tray::set_texts(&app, texts)
 }
 
 /// Test builds only: the screen's checks (tests/ui/) send their result here. It goes to the file named by
@@ -380,31 +374,6 @@ fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Resul
     builder.build()
 }
 
-fn create_tray(app: &tauri::App) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, "open", "Open Faber", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit Faber", true, None::<&str>)?;
-    let mut tray = TrayIconBuilder::new()
-        .tooltip("Faber")
-        .menu(&Menu::with_items(app, &[&open, &quit])?)
-        .show_menu_on_left_click(false)
-        .on_menu_event(|app, e| match e.id().as_ref() {
-            "open" => show(app),
-            "quit" => app.exit(0),
-            _ => {}
-        })
-        .on_tray_icon_event(|tray, e| {
-            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = e {
-                show(tray.app_handle());
-            }
-        });
-    if let Some(icon) = app.default_window_icon() {
-        tray = tray.icon(icon.clone());
-    }
-    tray.build(app)?;
-    *lock(&app.state::<Faber>().tray) = Some([open, quit]);
-    Ok(())
-}
-
 fn main() {
     let hidden = std::env::var("FABER_HIDDEN").is_ok_and(|v| v == "1");
     let mut builder = tauri::Builder::default();
@@ -414,6 +383,7 @@ fn main() {
     }
     builder
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
@@ -438,7 +408,7 @@ fn main() {
             read_image,
             open_terminal,
             open_link,
-            set_tray,
+            set_shell_texts,
             setup::setup_check,
             setup::setup_install,
             setup::setup_sign_in,
@@ -448,9 +418,18 @@ fn main() {
         .setup(move |app| {
             let data_dir = data_dir(app.handle())?;
             std::fs::create_dir_all(&data_dir)?;
+            app.manage(tray::Tray::default());
             let clis = detect_clis();
             let handle = app.handle().clone();
             let emit = Arc::new(move |e: AppEvent| {
+                // The engine calls this with its lock held, and the tray waits for the main thread, which can be waiting
+                // for that lock. So the tray works on its own thread; it keeps the newest list, whatever the order.
+                if let AppEvent::Running { revision, items } = &e
+                    && !hidden
+                {
+                    let (app, revision, items) = (handle.clone(), *revision, items.clone());
+                    tauri::async_runtime::spawn_blocking(move || tray::on_running(&app, revision, &items));
+                }
                 let _ = handle.emit("faber:event", e);
             });
             let opts = EngineOptions {
@@ -466,7 +445,6 @@ fn main() {
             app.manage(Faber {
                 engine: Engine::new(opts, emit),
                 models: Mutex::default(),
-                tray: Mutex::default(),
                 update: Mutex::default(),
                 data_dir: data_dir.clone(),
                 hidden,
@@ -476,7 +454,7 @@ fn main() {
             }
             create_window(app.handle(), hidden, &data_dir)?;
             if !hidden {
-                create_tray(app)?;
+                tray::create(app)?;
             }
             // Only installed builds update themselves; source runs and test runs never do.
             if !hidden && !cfg!(debug_assertions) && std::env::var_os("FABER_DATA_DIR").is_none() {

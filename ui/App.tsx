@@ -4,7 +4,7 @@ import { api, type Appearance, type AppState, type Choice, type Conversation, ty
 import { inOrder, saveAndApply, watchSystem } from './appearance.ts';
 import { Composer, type Draft } from './Composer.tsx';
 import { Icon, VendorMark } from './Glyphs.tsx';
-import { failureText, lang, t, useLanguage } from './i18n.ts';
+import { failureText, lang, t, templates, useLanguage } from './i18n.ts';
 import { createWidth } from './layout.ts';
 import { Lockup, Peek } from './Mark.tsx';
 import { modelOptions, prettyModel } from './models.ts';
@@ -277,8 +277,23 @@ export function App(props: { initial: AppState }) {
     });
   });
 
-  // The tray menu lives outside the page, so it gets its words from here.
-  createEffect(on(lang, () => void api.setTray(t('tray.open'), t('tray.quit')).catch(() => undefined)));
+  // The tray (menu, tooltip, notification) lives outside the page, so the shell gets its words from here. It keeps
+  // them while the window is closed.
+  createEffect(
+    on(
+      lang,
+      () =>
+        void api
+          .setShellTexts({
+            open: t('tray.open'),
+            quit: t('tray.quit'),
+            running: templates('tray.running'),
+            needsYou: templates('tray.needsYou'),
+            notify: templates('tray.notify').other,
+          })
+          .catch(() => undefined),
+    ),
+  );
 
   // Follow the answer while it streams, unless the user scrolled up to read.
   createEffect(

@@ -208,6 +208,20 @@ export interface SendRequest {
   choice: Choice;
 }
 
+/** A text in two forms: `one` for a count of 1, `other` for any other count. */
+export interface Plural {
+  one: string;
+  other: string;
+}
+/** The words the shell shows by itself. Counts are `{n}` and the conversation is `{title}`; the shell fills them. */
+export interface ShellTexts {
+  open: string;
+  quit: string;
+  running: Plural;
+  needsYou: Plural;
+  notify: string;
+}
+
 // Typed calls into the engine (the commands in src-tauri/src/lib.rs).
 export const api = {
   state: () => invoke<AppState>('state'),
@@ -233,7 +247,7 @@ export const api = {
   readImage: (id: string, path: string) => invoke<string | null>('read_image', { id, path }),
   openTerminal: (id: string) => invoke<boolean>('open_terminal', { id }),
   openLink: (url: string) => invoke<void>('open_link', { url }),
-  setTray: (open: string, quit: string) => invoke<void>('set_tray', { open, quit }),
+  setShellTexts: (texts: ShellTexts) => invoke<void>('set_shell_texts', { texts }),
   setupCheck: (vendor: Vendor) => invoke<CheckResult>('setup_check', { vendor }),
   setupInstall: (vendor: Vendor) => invoke<void>('setup_install', { vendor }),
   setupSignIn: (vendor: Vendor) => invoke<void>('setup_sign_in', { vendor }),
