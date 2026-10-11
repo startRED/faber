@@ -43,7 +43,6 @@ export const de: Messages = {
   'composer.send': 'Senden',
   'composer.stop': 'Stoppen',
   'model.auto': 'Automatisch',
-  'model.chatgptDefault': 'ChatGPT (dein Standard)',
   'model.default': 'Standardmodell',
   'reason.chosen': 'von dir gewählt',
   'reason.autoDefault': 'Automatisch: die Wahl für den Alltag',

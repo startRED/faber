@@ -22,11 +22,13 @@ pub struct Pick {
 /// Medium effort by default: high quality for most work without spending quota on easy turns.
 const EFFORT: &str = "medium";
 
+/// ChatGPT without a model runs `codex_recommended`, the account's recommended model (the one ChatGPT on the web
+/// uses), so a default someone set by hand in the CLI's own settings never answers by surprise.
 // ponytail: fixed default until the measured router (phase F5) replaces it; the reason line is already shown.
-pub fn pick_model(choice: &Choice, available: &[Vendor]) -> Option<Pick> {
+pub fn pick_model(choice: &Choice, available: &[Vendor], codex_recommended: Option<&str>) -> Option<Pick> {
     let pick = |vendor, model: Option<&str>, reason: &str| Pick {
         vendor,
-        model: model.map(String::from),
+        model: model.or(codex_recommended.filter(|_| vendor == Vendor::Codex)).map(String::from),
         effort: EFFORT.into(),
         reason: reason.into(),
     };

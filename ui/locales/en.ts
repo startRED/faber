@@ -43,7 +43,6 @@ export const en = {
   'composer.send': 'Send',
   'composer.stop': 'Stop',
   'model.auto': 'Auto',
-  'model.chatgptDefault': 'ChatGPT (your default)',
   'model.default': 'Default model',
   'reason.chosen': 'chosen by you',
   'reason.autoDefault': 'Auto: everyday default',

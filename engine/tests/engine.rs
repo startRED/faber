@@ -346,11 +346,23 @@ fn a_model_joining_midway_gets_the_earlier_conversation_as_text() {
 #[test]
 fn auto_picks_a_connected_vendor_and_says_why_a_missing_one_is_refused() {
     let auto = choice("auto", None);
-    let only_codex = pick_model(&auto, &[Vendor::Codex]).unwrap();
+    let only_codex = pick_model(&auto, &[Vendor::Codex], None).unwrap();
     assert_eq!((only_codex.vendor, only_codex.reason.as_str(), only_codex.effort.as_str()), (Vendor::Codex, "reason.autoOnly", "medium"));
-    assert_eq!(pick_model(&auto, &[Vendor::Claude, Vendor::Codex]).unwrap().vendor, Vendor::Claude);
-    assert!(pick_model(&choice("claude", None), &[Vendor::Codex]).is_none());
-    assert!(pick_model(&auto, &[]).is_none());
+    assert_eq!(pick_model(&auto, &[Vendor::Claude, Vendor::Codex], None).unwrap().vendor, Vendor::Claude);
+    assert!(pick_model(&choice("claude", None), &[Vendor::Codex], None).is_none());
+    assert!(pick_model(&auto, &[], None).is_none());
+}
+
+#[test]
+fn chatgpt_without_a_model_runs_the_accounts_recommended_one_not_a_hand_set_cli_default() {
+    let recommended = Some("gpt-6.1-sol");
+    let model = |c: Choice| pick_model(&c, &[Vendor::Codex], recommended).unwrap().model;
+    assert_eq!(model(choice("codex", None)).as_deref(), Some("gpt-6.1-sol"));
+    assert_eq!(model(choice("auto", None)).as_deref(), Some("gpt-6.1-sol"));
+    assert_eq!(model(choice("codex", Some("gpt-6-luna"))).as_deref(), Some("gpt-6-luna"));
+    // Before the account's list arrives, the CLI decides as before.
+    assert_eq!(pick_model(&choice("codex", None), &[Vendor::Codex], None).unwrap().model, None);
+    assert_eq!(pick_model(&choice("claude", None), &[Vendor::Claude], recommended).unwrap().model, None);
 }
 
 #[test]

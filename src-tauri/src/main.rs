@@ -215,7 +215,9 @@ pub(crate) fn load_models(app: &AppHandle, codex: Cli, cwd: PathBuf) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let list = list_codex_models(&codex.command, &cwd, cfg!(windows), spawn, Duration::from_secs(20)).await;
-        *lock(&app.state::<Faber>().models) = list;
+        let faber = app.state::<Faber>();
+        faber.engine.set_codex_recommended(list.iter().find(|m| m.is_default).map(|m| m.id.clone()));
+        *lock(&faber.models) = list;
         let _ = app.emit("faber:event", AppEvent::List);
     });
 }

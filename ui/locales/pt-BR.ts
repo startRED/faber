@@ -43,7 +43,6 @@ export const ptBR: Messages = {
   'composer.send': 'Enviar',
   'composer.stop': 'Parar',
   'model.auto': 'Automático',
-  'model.chatgptDefault': 'ChatGPT (o seu padrão)',
   'model.default': 'Modelo padrão',
   'reason.chosen': 'escolhido por você',
   'reason.autoDefault': 'Automático: padrão do dia a dia',

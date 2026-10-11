@@ -156,6 +156,8 @@ struct Core {
     tick: u64,
     /// The shared Codex processes, one per area and hooks choice.
     codex: HashMap<(Area, bool), CodexServer>,
+    /// The ChatGPT model the account recommends, once the CLI has listed the models.
+    codex_recommended: Option<String>,
 }
 
 /// A handle to the engine; clones share the same engine.
@@ -182,6 +184,7 @@ impl Engine {
                 next_sid: 0,
                 tick: 0,
                 codex: HashMap::new(),
+                codex_recommended: None,
             })
         });
         Engine { core, runtime }
@@ -194,6 +197,9 @@ impl Engine {
 
     pub fn vendors(&self) -> Vec<Vendor> {
         self.with(|c| c.vendors())
+    }
+    pub fn set_codex_recommended(&self, model: Option<String>) {
+        self.with(|c| c.codex_recommended = model)
     }
     pub fn state(&self) -> AppState {
         self.with(|c| c.state())
@@ -682,7 +688,7 @@ impl Core {
     }
 
     fn send(&mut self, req: SendRequest) -> Result<String, String> {
-        let pick = pick_model(&req.choice, &self.vendors()).ok_or("error.noSubscription")?;
+        let pick = pick_model(&req.choice, &self.vendors(), self.codex_recommended.as_deref()).ok_or("error.noSubscription")?;
         let existing = req.conversation_id.as_deref().and_then(|id| self.load(id).map(|c| c.id.clone()));
         if let Some(id) = &existing
             && self.live.get(id).is_some_and(|l| l.turn.is_some())
@@ -794,7 +800,7 @@ impl Core {
 
     // Starts the CLI before the user finishes typing, so the first word arrives sooner.
     fn warm(&mut self, req: WarmRequest) {
-        let Some(pick) = pick_model(&req.choice, &self.vendors()) else { return };
+        let Some(pick) = pick_model(&req.choice, &self.vendors(), self.codex_recommended.as_deref()) else { return };
         let existing = req.conversation_id.as_deref().and_then(|id| self.load(id).map(|c| c.id.clone()));
         let id = match existing {
             Some(id) => id,
