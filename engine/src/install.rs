@@ -3,10 +3,15 @@
 use crate::proc::Spawner;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
+/// Fetches a small metadata document into memory (the Claude version and manifest, the Codex release JSON).
 pub type Fetch<'a> = dyn Fn(&str) -> io::Result<Vec<u8>> + Send + Sync + 'a;
+/// Streams a payload into the file at the given path and returns its SHA-256 as lowercase hex. The file is closed
+/// when the call returns, and a failed call leaves no file behind.
+pub type Download<'a> = dyn Fn(&str, &Path) -> io::Result<String> + Send + Sync + 'a;
 pub type Register<'a> = dyn Fn(&Path) -> io::Result<()> + Send + Sync + 'a;
 pub type Progress<'a> = dyn Fn(Value) + Send + Sync + 'a;
 
@@ -49,6 +54,31 @@ impl Drop for CleanupGuard<'_> {
     fn drop(&mut self) {
         clean_temp_dir(self.0);
     }
+}
+
+/// Reports a failed stage and builds the error that `install_windows` returns for it.
+fn failure(progress: &Progress<'_>, key: &str, detail: String) -> Value {
+    notify(progress, "failed", Some((key, &detail)));
+    json!({ "key": key, "detail": detail })
+}
+
+/// Downloads a payload into `part`. Whatever fails, the partial file is gone afterwards: a broken connection is
+/// `error.setup.download`, a file that cannot be written is `error.setup.install`.
+fn download_payload(download: &Download<'_>, url: &str, part: &Path, what: &str, progress: &Progress<'_>) -> Result<String, Value> {
+    download(url, part).map_err(|e| {
+        let _ = std::fs::remove_file(part);
+        let key = if is_write_failure(&e) { "error.setup.install" } else { "error.setup.download" };
+        failure(progress, key, format!("Failed to download {what}: {e}"))
+    })
+}
+
+/// Compares the hash of a downloaded payload with the published one. A payload that does not match is deleted at once.
+fn verify_payload(part: &Path, got: &str, expected: &str, what: &str, progress: &Progress<'_>) -> Result<(), Value> {
+    if got.eq_ignore_ascii_case(expected) {
+        return Ok(());
+    }
+    let _ = std::fs::remove_file(part);
+    Err(failure(progress, "error.setup.checksum", format!("Checksum mismatch for {what}: expected {expected}, got {got}")))
 }
 
 fn notify(progress: &Progress<'_>, stage: &str, err: Option<(&str, &str)>) {
@@ -156,8 +186,8 @@ fn publish_staging_to_destination(staging_dir: &Path, dest_dir: &Path) -> Result
     Ok(())
 }
 
-fn extract_zip(archive_bytes: &[u8], dest_dir: &Path) -> Result<(), String> {
-    let mut zip = zip::ZipArchive::new(io::Cursor::new(archive_bytes)).map_err(|e| format!("Failed to read ZIP archive: {e}"))?;
+fn extract_zip(archive: std::fs::File, dest_dir: &Path) -> Result<(), String> {
+    let mut zip = zip::ZipArchive::new(io::BufReader::new(archive)).map_err(|e| format!("Failed to read ZIP archive: {e}"))?;
     for i in 0..zip.len() {
         let mut file = zip.by_index(i).map_err(|e| format!("Failed to read ZIP entry: {e}"))?;
         let enclosed = match file.enclosed_name() {
@@ -178,8 +208,8 @@ fn extract_zip(archive_bytes: &[u8], dest_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn extract_tar_gz(archive_bytes: &[u8], dest_dir: &Path) -> Result<(), String> {
-    let gz = flate2::read::GzDecoder::new(io::Cursor::new(archive_bytes));
+fn extract_tar_gz(archive: std::fs::File, dest_dir: &Path) -> Result<(), String> {
+    let gz = flate2::read::GzDecoder::new(archive);
     let mut tar = tar::Archive::new(gz);
     let entries = tar.entries().map_err(|e| format!("Failed to read tar entries: {e}"))?;
     for entry in entries {
@@ -204,6 +234,7 @@ fn extract_tar_gz(archive_bytes: &[u8], dest_dir: &Path) -> Result<(), String> {
 pub async fn install_windows(
     request: &Value,
     fetch: &Fetch<'_>,
+    download: &Download<'_>,
     register: &Register<'_>,
     spawn: Spawner,
     progress: &Progress<'_>,
@@ -233,6 +264,8 @@ pub async fn install_windows(
     let data_dir = PathBuf::from(request["data_dir"].as_str().unwrap_or("."));
     let destination = PathBuf::from(request["destination"].as_str().unwrap_or("."));
     let tmp_dir = data_dir.join("install-tmp");
+    // Downloads never share a folder with an extraction tree: an archive must not be published as release content.
+    let download_dir = tmp_dir.join("download");
 
     let allowed_hosts: Vec<String> = request["sources"]["allowed_hosts"]
         .as_array()
@@ -276,6 +309,9 @@ pub async fn install_windows(
         let detail = format!("Failed to create destination directory: {e}");
         notify(progress, "failed", Some(("error.setup.install", &detail)));
         return Err(json!({ "key": "error.setup.install", "detail": detail }));
+    }
+    if let Err(e) = std::fs::create_dir_all(&download_dir) {
+        return Err(failure(progress, "error.setup.install", format!("Failed to create download directory: {e}")));
     }
 
     // Stage: download
@@ -349,36 +385,20 @@ pub async fn install_windows(
             notify(progress, "failed", Some(("error.setup.download", &err)));
             return Err(json!({ "key": "error.setup.download", "detail": err }));
         }
-        let binary_bytes = match fetch(&binary_url) {
-            Ok(b) => b,
-            Err(e) => {
-                let detail = format!("Failed to download Claude executable: {e}");
-                notify(progress, "failed", Some(("error.setup.download", &detail)));
-                return Err(json!({ "key": "error.setup.download", "detail": detail }));
-            }
-        };
+        let part = download_dir.join(format!("claude-{version}-{platform}.exe.part"));
+        let digest = download_payload(download, &binary_url, &part, "Claude executable", progress)?;
 
         // Stage: verify
         notify(progress, "verify", None);
-
-        let mut hasher = Sha256::new();
-        hasher.update(&binary_bytes);
-        let digest = format!("{:x}", hasher.finalize());
-
-        if !digest.eq_ignore_ascii_case(&expected_checksum) {
-            let detail = format!("Checksum mismatch for Claude binary: expected {expected_checksum}, got {digest}");
-            notify(progress, "failed", Some(("error.setup.checksum", &detail)));
-            return Err(json!({ "key": "error.setup.checksum", "detail": detail }));
-        }
+        verify_payload(&part, &digest, &expected_checksum, "Claude binary", progress)?;
 
         // Stage: install
         notify(progress, "install", None);
 
+        // The download's handle is already closed, so Windows lets the renamed file start.
         let staged_exe = tmp_dir.join(format!("claude-{version}-{platform}.exe"));
-        if let Err(e) = std::fs::write(&staged_exe, &binary_bytes) {
-            let detail = format!("Failed to write staged Claude executable: {e}");
-            notify(progress, "failed", Some(("error.setup.install", &detail)));
-            return Err(json!({ "key": "error.setup.install", "detail": detail }));
+        if let Err(e) = std::fs::rename(&part, &staged_exe) {
+            return Err(failure(progress, "error.setup.install", format!("Failed to stage Claude executable: {e}")));
         }
 
         let staged_str = match staged_exe.to_str() {
@@ -546,27 +566,12 @@ pub async fn install_windows(
             return Err(json!({ "key": "error.setup.download", "detail": err }));
         }
 
-        let archive_bytes = match fetch(download_url) {
-            Ok(b) => b,
-            Err(e) => {
-                let detail = format!("Failed to download Codex archive: {e}");
-                notify(progress, "failed", Some(("error.setup.download", &detail)));
-                return Err(json!({ "key": "error.setup.download", "detail": detail }));
-            }
-        };
+        let part = download_dir.join(format!("codex-{triple}.part"));
+        let digest = download_payload(download, download_url, &part, "Codex archive", progress)?;
 
         // Stage: verify
         notify(progress, "verify", None);
-
-        let mut hasher = Sha256::new();
-        hasher.update(&archive_bytes);
-        let digest = format!("{:x}", hasher.finalize());
-
-        if !digest.eq_ignore_ascii_case(expected_digest) {
-            let detail = format!("Checksum mismatch for Codex archive: expected {expected_digest}, got {digest}");
-            notify(progress, "failed", Some(("error.setup.checksum", &detail)));
-            return Err(json!({ "key": "error.setup.checksum", "detail": detail }));
-        }
+        verify_payload(&part, &digest, expected_digest, "Codex archive", progress)?;
 
         // Stage: install
         notify(progress, "install", None);
@@ -579,11 +584,12 @@ pub async fn install_windows(
             return Err(json!({ "key": "error.setup.install", "detail": detail }));
         }
 
-        let extract_result = if download_url.ends_with(".zip") {
-            extract_zip(&archive_bytes, &staging_dir)
-        } else {
-            extract_tar_gz(&archive_bytes, &staging_dir)
+        let archive = match std::fs::File::open(&part) {
+            Ok(file) => file,
+            Err(e) => return Err(failure(progress, "error.setup.install", format!("Failed to open the downloaded archive: {e}"))),
         };
+        let extract_result =
+            if download_url.ends_with(".zip") { extract_zip(archive, &staging_dir) } else { extract_tar_gz(archive, &staging_dir) };
 
         if let Err(detail) = extract_result {
             notify(progress, "failed", Some(("error.setup.install", &detail)));
@@ -644,8 +650,42 @@ pub fn allowed_url(url: &str, allowed_hosts: &[String], loopback: Option<&str>) 
     }
 }
 
-/// Network fetch for installs: official hosts only, or only the given loopback origin, redirects included.
-pub async fn default_fetch(url: &str, loopback: Option<&str>) -> io::Result<Vec<u8>> {
+/// The most a metadata document may hold. A server that sends more is refused, so it cannot fill memory.
+pub const METADATA_LIMIT: usize = 4 * 1024 * 1024;
+
+/// A write that failed on this computer, as opposed to a network that failed. `install_windows` tells them apart.
+#[derive(Debug)]
+struct WriteFailure(io::Error);
+
+impl std::fmt::Display for WriteFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "could not write the file: {}", self.0)
+    }
+}
+
+impl std::error::Error for WriteFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.0)
+    }
+}
+
+/// Marks an error as a failed write (a full disk, a locked file), which a `Download` returns for `error.setup.install`.
+pub fn write_failure(e: io::Error) -> io::Error {
+    io::Error::new(e.kind(), WriteFailure(e))
+}
+
+/// Whether a `Download` failed on this computer instead of on the network.
+pub fn is_write_failure(e: &io::Error) -> bool {
+    e.get_ref().is_some_and(|inner| inner.is::<WriteFailure>())
+}
+
+/// How long a connection may stay silent, while connecting or between two received chunks, before a fetch or a
+/// download fails. A stalled server must not hold the install (and the screen's thread) forever.
+pub const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Starts a GET: official hosts only, or only the given loopback origin, redirects included. Silence for longer than
+/// `idle` fails the request; a loopback origin never goes through a proxy.
+async fn get(url: &str, loopback: Option<&str>, idle: Duration) -> io::Result<reqwest::Response> {
     allowed_url(url, &[], loopback).map_err(io::Error::other)?;
     let origin = loopback.map(String::from);
     let custom_policy = reqwest::redirect::Policy::custom(move |attempt| {
@@ -657,13 +697,74 @@ pub async fn default_fetch(url: &str, loopback: Option<&str>) -> io::Result<Vec<
             attempt.follow()
         }
     });
-    let client = reqwest::Client::builder().redirect(custom_policy).build().map_err(io::Error::other)?;
+    let mut builder = reqwest::Client::builder().redirect(custom_policy).connect_timeout(idle).read_timeout(idle);
+    if loopback.is_some() {
+        builder = builder.no_proxy();
+    }
+    let client = builder.build().map_err(io::Error::other)?;
     let res = client.get(url).send().await.map_err(io::Error::other)?;
     if !res.status().is_success() {
         return Err(io::Error::other(format!("HTTP error {}", res.status())));
     }
-    let bytes = res.bytes().await.map_err(io::Error::other)?;
-    Ok(bytes.to_vec())
+    Ok(res)
+}
+
+/// Network fetch of a metadata document: at most `METADATA_LIMIT` bytes, held in memory.
+pub async fn default_fetch(url: &str, loopback: Option<&str>) -> io::Result<Vec<u8>> {
+    let mut res = get(url, loopback, IDLE_TIMEOUT).await?;
+    let too_big = || io::Error::other(format!("The document is larger than {METADATA_LIMIT} bytes: {url}"));
+    if res.content_length().is_some_and(|n| n > METADATA_LIMIT as u64) {
+        return Err(too_big());
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = res.chunk().await.map_err(io::Error::other)? {
+        if body.len() + chunk.len() > METADATA_LIMIT {
+            return Err(too_big());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
+/// Network download of a payload into the file at `dest`, one received chunk at a time, hashing as it goes. Returns the
+/// SHA-256 in lowercase hex. The file is closed before this returns, and a failure deletes it.
+pub async fn default_download(url: &str, dest: &Path, loopback: Option<&str>) -> io::Result<String> {
+    download_with(url, dest, loopback, IDLE_TIMEOUT, |path| std::fs::File::create(path)).await
+}
+
+/// `default_download` with the silence limit and the destination's writer supplied by the caller, so a test can make
+/// the disk fail or the server stall.
+pub async fn download_with<W: Write>(
+    url: &str,
+    dest: &Path,
+    loopback: Option<&str>,
+    idle: Duration,
+    create: impl FnOnce(&Path) -> io::Result<W>,
+) -> io::Result<String> {
+    let result = stream_to(url, dest, loopback, idle, create).await;
+    if result.is_err() {
+        let _ = std::fs::remove_file(dest);
+    }
+    result
+}
+
+async fn stream_to<W: Write>(
+    url: &str,
+    dest: &Path,
+    loopback: Option<&str>,
+    idle: Duration,
+    create: impl FnOnce(&Path) -> io::Result<W>,
+) -> io::Result<String> {
+    let mut res = get(url, loopback, idle).await?;
+    let mut out = create(dest).map_err(write_failure)?;
+    let mut hasher = Sha256::new();
+    while let Some(chunk) = res.chunk().await.map_err(io::Error::other)? {
+        hasher.update(&chunk);
+        out.write_all(&chunk).map_err(write_failure)?;
+    }
+    out.flush().map_err(write_failure)?;
+    // `out` is dropped here, before the caller sees the hash, so Windows lets the file be renamed, run or deleted.
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 /// A release version such as `2.1.80` or `2.1.80-beta+1`: nothing that could leave the folder it names a file in.

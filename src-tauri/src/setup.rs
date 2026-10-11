@@ -182,9 +182,11 @@ pub async fn setup_install(app: AppHandle, faber: State<'_, Faber>, vendor: Stri
 
     let fetch = |url: &str| {
         let (url, loopback) = (url.to_string(), source.clone());
-        std::thread::spawn(move || tauri::async_runtime::block_on(faber_engine::install::default_fetch(&url, loopback.as_deref())))
-            .join()
-            .unwrap_or_else(|_| Err(std::io::Error::other("fetch thread panicked")))
+        run_on_thread(async move { faber_engine::install::default_fetch(&url, loopback.as_deref()).await })
+    };
+    let download = |url: &str, dest: &Path| {
+        let (url, dest, loopback) = (url.to_string(), dest.to_path_buf(), source.clone());
+        run_on_thread(async move { faber_engine::install::default_download(&url, &dest, loopback.as_deref()).await })
     };
     let register = |dir: &Path| if source.is_some() { Ok(()) } else { faber_engine::install::default_register_path(dir) };
     let progress = |val: serde_json::Value| {
@@ -192,7 +194,7 @@ pub async fn setup_install(app: AppHandle, faber: State<'_, Faber>, vendor: Stri
         emit_progress(stage, val["key"].as_str(), val["detail"].as_str());
     };
 
-    faber_engine::cli::Cli::install_windows(&request, &fetch, &register, faber_engine::proc::real_spawner(), &progress)
+    faber_engine::cli::Cli::install_windows(&request, &fetch, &download, &register, faber_engine::proc::real_spawner(), &progress)
         .await
         .map_err(|err| err["key"].as_str().unwrap_or("error.setup.install").to_string())?;
 
@@ -205,6 +207,13 @@ pub async fn setup_install(app: AppHandle, faber: State<'_, Faber>, vendor: Stri
     let _ = app.emit("faber:event", AppEvent::List);
 
     Ok(())
+}
+
+/// Runs a network job to the end on its own thread, because the installer calls it from a synchronous callback.
+fn run_on_thread<T: Send + 'static>(job: impl std::future::Future<Output = std::io::Result<T>> + Send + 'static) -> std::io::Result<T> {
+    std::thread::spawn(move || tauri::async_runtime::block_on(job))
+        .join()
+        .unwrap_or_else(|_| Err(std::io::Error::other("network thread panicked")))
 }
 
 #[cfg(test)]
