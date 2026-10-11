@@ -106,6 +106,7 @@ export function Composer(props: Props) {
   return (
     <form
       class="composer"
+      data-tour="composer"
       onSubmit={(e) => {
         e.preventDefault();
         send();
@@ -165,6 +166,7 @@ export function Composer(props: Props) {
         <div class="r">
           <select
             class="pill"
+            data-tour="auto"
             aria-label={t('composer.model')}
             value={selected()}
             onChange={(e) => {

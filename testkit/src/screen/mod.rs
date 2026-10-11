@@ -4,12 +4,13 @@
 pub mod app;
 #[cfg(windows)]
 pub mod containment;
+pub mod first_run;
 pub mod permissions;
 pub mod setup;
 pub mod shell;
 
 use crate::app::{Ctx, Paths};
-use crate::page::Page;
+use crate::page::{Page, css};
 use crate::plan::Suite;
 use crate::report::{Outcome, file_name};
 use crate::sandbox::{CliSlot, Launch};
@@ -25,7 +26,12 @@ pub struct Scenario {
 }
 
 pub fn all() -> Vec<Scenario> {
-    let all = app::scenarios().into_iter().chain(permissions::scenarios()).chain(shell::scenarios()).chain(setup::scenarios());
+    let all = app::scenarios()
+        .into_iter()
+        .chain(permissions::scenarios())
+        .chain(shell::scenarios())
+        .chain(setup::scenarios())
+        .chain(first_run::scenarios());
     #[cfg(windows)]
     let all = all.chain(containment::scenarios());
     all.collect()
@@ -85,9 +91,31 @@ pub fn no_cli() -> Launch {
     Launch::default()
 }
 
-/// The settings a scenario starts with: this language, and the first-run guide already done.
+/// The settings a scenario starts with: this language, and the first run already done: the accounts step, the look step
+/// (the default look, chosen) and the tutorial.
 pub fn start_settings(ctx: &Ctx, language: &str) -> Result {
-    ctx.write_settings(&serde_json::json!({ "language": language, "setup": "done" }))
+    ctx.write_settings(&serde_json::json!({
+        "language": language,
+        "setup": "done",
+        "appearance": { "base": "sala" },
+        "tutorialDone": true
+    }))
+}
+
+/// Step 2 of the first run, passed with its defaults: the screen shows its heading, and Continue leaves it.
+pub fn pass_look(page: &mut Page) -> Result {
+    let heading = page.named("heading", "first.look.title")?;
+    page.wait_visible(&heading)?;
+    let go = page.named("button", "first.continue")?;
+    page.click(&go)?;
+    page.wait_gone(&heading)
+}
+
+/// Ends the tutorial the way a person in a hurry does, with Esc, and waits for the screen to be usable again.
+pub fn skip_tour(page: &mut Page) -> Result {
+    page.wait_visible(&css(".coach"))?;
+    page.press("Escape")?;
+    page.wait_gone(&css(".tour"))
 }
 
 pub fn ensure(condition: bool, message: impl FnOnce() -> String) -> Result {

@@ -404,6 +404,8 @@ impl Core {
             user_hooks: patch.user_hooks.or(before.user_hooks),
             language: patch.language.or(before.language),
             setup: patch.setup.or(before.setup),
+            experience: patch.experience.or(before.experience),
+            tutorial_done: patch.tutorial_done.or(before.tutorial_done),
         };
         self.store.save_settings(&settings).map_err(|_| "error.settings.saveFailed".to_string())?;
         // Idle project CLIs restart on their next turn, so a changed hooks choice applies right away.

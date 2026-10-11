@@ -113,11 +113,16 @@ export interface Failure {
 }
 export type ThemeFile = Appearance & { name: string };
 
+/** The answer to "Do you already use AI?". No answer counts as a beginner. */
+export type Experience = 'beginner' | 'experienced';
 export interface Settings {
   appearance?: Appearance;
   userHooks?: boolean;
   language?: string;
   setup?: 'done' | 'skipped';
+  experience?: Experience;
+  /** False once the first run asked for the tutorial; true once it ended or was skipped. */
+  tutorialDone?: boolean;
 }
 export interface ModelInfo {
   id: string;

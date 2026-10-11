@@ -18,6 +18,7 @@ import './models.check.ts';
 import './opening.check.ts';
 import './running.check.ts';
 import './setup.check.ts';
+import './tutorial.check.ts';
 
 type Vars = Record<string, string | number>;
 

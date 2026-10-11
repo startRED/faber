@@ -1,17 +1,23 @@
 import { createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 import { api, errorText, type Vendor } from './api.ts';
+import { Stage, Title } from './FirstRun.tsx';
+import { Icon, VendorMark } from './Glyphs.tsx';
 import { fromEngine, t } from './i18n.ts';
+import { Peek } from './Mark.tsx';
 import {
   OFFICIAL_PAGES,
   setupCard,
   toggleSubscription,
   type Check,
+  type SetupMode,
   type SetupProgress,
   type Subscription,
 } from './setup.ts';
 
 export interface SetupProps {
-  onClose?: () => void;
+  /** `firstRun` is step 1 of 3. `manage` is only the account cards with a Close button. */
+  mode: SetupMode;
+  /** Saves the setup decision. Resolving does not close anything: the screen decides what comes next. */
   onFinish: (result: 'done' | 'skipped') => void;
 }
 
@@ -87,39 +93,33 @@ export function Setup(props: SetupProps) {
     });
   });
 
-  return (
-    <div class="setup-container" role="dialog" aria-modal="true" aria-labelledby="setup-heading">
-      <div class="setup-card-panel">
-        <header class="setup-header">
-          <h1 id="setup-heading">{t('setup.title')}</h1>
-          <p class="setup-body-text">{t('setup.body')}</p>
-        </header>
+  const first = () => props.mode === 'firstRun';
+  const choices: [Subscription, string][] = [
+    ['claude', t('setup.claude')],
+    ['codex', t('setup.chatgpt')],
+    ['none', t('setup.none')],
+  ];
 
-        <div class="setup-choices" role="group" aria-label={t('setup.title')}>
-          <button
-            type="button"
-            class="opt"
-            aria-pressed={selected().includes('claude')}
-            onClick={() => onToggle('claude')}
-          >
-            {t('setup.claude')}
-          </button>
-          <button
-            type="button"
-            class="opt"
-            aria-pressed={selected().includes('codex')}
-            onClick={() => onToggle('codex')}
-          >
-            {t('setup.chatgpt')}
-          </button>
-          <button
-            type="button"
-            class="opt"
-            aria-pressed={selected().includes('none')}
-            onClick={() => onToggle('none')}
-          >
-            {t('setup.none')}
-          </button>
+  return (
+    <Stage step={first() ? 1 : undefined} labelledby="setup-heading">
+      <div class="fr-col">
+        <Show when={first()}>
+          <Peek />
+        </Show>
+        <Title id="setup-heading" text={t('setup.title')} />
+        <p class="sub">{t('setup.body')}</p>
+
+        <div class="picks" role="group" aria-label={t('setup.title')}>
+          <For each={choices}>
+            {([option, label]) => (
+              <button type="button" class="pick" aria-pressed={selected().includes(option)} onClick={() => onToggle(option)}>
+                <Show when={option !== 'none'}>
+                  <VendorMark vendor={option as Vendor} />
+                </Show>
+                {label}
+              </button>
+            )}
+          </For>
         </div>
 
         <div class="setup-cards">
@@ -214,24 +214,25 @@ export function Setup(props: SetupProps) {
             }}
           </For>
         </div>
-
-        <footer class="setup-footer">
-          <button
-            type="button"
-            class="btn secondary"
-            onClick={() => props.onFinish('skipped')}
-          >
+      </div>
+      <div class="first-foot">
+        <Show
+          when={first()}
+          fallback={
+            <button type="button" class="btn primary big" onClick={() => props.onFinish('done')}>
+              {t('setup.close')}
+            </button>
+          }
+        >
+          <button type="button" class="btn ghost" onClick={() => props.onFinish('skipped')}>
             {t('setup.skip')}
           </button>
-          <button
-            type="button"
-            class="btn primary"
-            onClick={() => props.onFinish('done')}
-          >
-            {t('setup.done')}
+          <button type="button" class="btn primary big" onClick={() => props.onFinish('done')}>
+            {t('first.continue')}
+            <Icon name="right" small />
           </button>
-        </footer>
+        </Show>
       </div>
-    </div>
+    </Stage>
   );
 }

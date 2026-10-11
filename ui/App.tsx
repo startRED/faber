@@ -1,8 +1,21 @@
 import { createEffect, createMemo, createSignal, Match, on, onCleanup, onMount, Show, Switch } from 'solid-js';
 import { Ambient } from './Ambient.tsx';
-import { api, type Appearance, type AppState, type Choice, type Conversation, type RunningItem, type Settings as Saved, type Summary } from './api.ts';
+import {
+  api,
+  type Appearance,
+  type AppState,
+  type Choice,
+  type Conversation,
+  type Experience,
+  type RunningItem,
+  type Settings as Saved,
+  type Summary,
+  type Vendor,
+} from './api.ts';
 import { inOrder, saveAndApply, watchSystem } from './appearance.ts';
 import { Composer, type Draft } from './Composer.tsx';
+import { LookStep } from './FirstRun.tsx';
+import { keepFocusIn } from './focus.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { failureText, lang, t, templates, useLanguage } from './i18n.ts';
 import { createWidth } from './layout.ts';
@@ -13,10 +26,12 @@ import { Running } from './Running.tsx';
 import { createAutoOpen, openPlace, type Place, placeOfRunning, store, waitingKeys } from './running.ts';
 import { Settings } from './Settings.tsx';
 import { Setup } from './Setup.tsx';
-import { shouldOpenSetup } from './setup.ts';
+import { continuePatch, type FirstStep, firstRunStep, lookDue, setupPatch } from './setup.ts';
 import { Sidebar } from './Sidebar.tsx';
 import { seedQuotas, withQuota } from './sidebar.ts';
 import { Thread } from './Thread.tsx';
+import { tutorialDue } from './tour.ts';
+import { Tutorial } from './Tutorial.tsx';
 import { Welcome } from './Welcome.tsx';
 import { mac, WindowControls } from './WindowControls.tsx';
 
@@ -40,24 +55,6 @@ function remember(key: string, value: unknown) {
 const PAGE = 40;
 
 const TYPING = 'textarea, input:not([type=checkbox], [type=radio], [type=range], [type=color], [type=file]), [contenteditable]';
-const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
-
-/** Tab and Shift+Tab stay inside an open modal dialog: past its last stop they go back to its first, and the other way. */
-function keepFocusIn(e: KeyboardEvent, dialog: HTMLElement | undefined) {
-  if (!dialog) return;
-  const stops = [...dialog.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
-    (el) => !(el as HTMLButtonElement).disabled && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden',
-  );
-  const first = stops[0];
-  const last = stops.at(-1);
-  if (!first || !last) return;
-  const at = document.activeElement;
-  const inside = !!at && dialog.contains(at);
-  if (e.shiftKey ? !inside || at === first : !inside || at === last) {
-    e.preventDefault();
-    (e.shiftKey ? last : first).focus();
-  }
-}
 
 /** `initial` is the state the page started from; `main.tsx` has already applied its look and handed the running list to
  * the store. */
@@ -76,7 +73,34 @@ export function App(props: { initial: AppState }) {
   // The text of the last refused or failed save of settings; the page stays as it was.
   const [saveError, setSaveError] = createSignal<string>();
   const [settingsOpen, setSettingsOpen] = createSignal(false);
-  const [setupOpen, setSetupOpen] = createSignal(shouldOpenSetup(props.initial.settings, props.initial.conversations));
+  // The first run: step 1 (the accounts) or step 2 (the look) while one is due, else none. `setupOpen` is the same account
+  // cards opened later, from the no-AI state or from Settings: they never reopen the first run.
+  const [step, setStep] = createSignal<FirstStep | undefined>(firstRunStep(props.initial.settings, props.initial.conversations));
+  const [setupOpen, setSetupOpen] = createSignal(false);
+  // The control that opened the account cards, by its `data-restore`: the shell is drawn again when they close, so focus
+  // goes to the new copy of that control.
+  let opener: string | undefined;
+  const openSetup = () => {
+    const from = document.activeElement;
+    opener = from instanceof HTMLElement ? from.closest<HTMLElement>('[data-restore]')?.dataset.restore : undefined;
+    setSetupOpen(true);
+  };
+  createEffect(
+    on(
+      setupOpen,
+      (open) => {
+        const key = opener;
+        if (open || !key) return;
+        opener = undefined;
+        setTimeout(() => document.querySelector<HTMLElement>(`[data-restore="${key}"]`)?.focus());
+      },
+      { defer: true },
+    ),
+  );
+  // The tutorial ended in this window, whether or not the save of `tutorialDone` worked.
+  const [tourEnded, setTourEnded] = createSignal(false);
+  // The choices of step 2 while the person is back at step 1, so going back and forward loses nothing.
+  const [kept, setKept] = createSignal<{ appearance: Appearance; experience?: Experience }>();
   const [from, setFrom] = createSignal(0);
   // True from the moment the user picks a conversation until its snapshot is in: the screen still shows the old
   // conversation then, so nothing may be sent or warmed for either.
@@ -87,6 +111,8 @@ export function App(props: { initial: AppState }) {
   let work: HTMLElement | undefined;
   let fill: ((text: string) => void) | undefined;
   let stick = true;
+  // Where focus was, until the tutorial took it.
+  let lastFocus: HTMLElement | undefined;
 
   const area = () => place().area;
   const projectId = () => place().projectId;
@@ -233,14 +259,24 @@ export function App(props: { initial: AppState }) {
     const focusComposer = () => document.querySelector<HTMLTextAreaElement>('.composer textarea')?.focus();
     const onKey = (e: KeyboardEvent) => {
       const ctrl = e.ctrlKey || e.metaKey;
+      // A first-run step and a tutorial card are modal: their own buttons are the only way on, so Esc, Ctrl N, Ctrl , and
+      // Ctrl . do nothing (the card handles its own keys, ui/Tutorial.tsx).
+      if (step() || tourOpen()) {
+        if (ctrl && ['n', ',', '.'].includes(e.key.toLowerCase())) e.preventDefault();
+        if (step() && e.key === 'Tab' && !ctrl && !e.altKey) keepFocusIn(e, document.querySelector<HTMLElement>('.fr-stage'));
+        return;
+      }
       const inShell = !settingsOpen() && !setupOpen();
-      if (e.key === 'Tab' && inShell && !ctrl && !e.altKey) {
-        if (sideOverlay()) keepFocusIn(e, sideEl);
+      if (e.key === 'Tab' && !ctrl && !e.altKey) {
+        if (!inShell) {
+          if (setupOpen()) keepFocusIn(e, document.querySelector<HTMLElement>('.fr-stage'));
+        } else if (sideOverlay()) keepFocusIn(e, sideEl);
         else if (trapped()) keepFocusIn(e, column);
       }
       if (ctrl && e.key.toLowerCase() === 'n') {
         e.preventDefault();
         setSettingsOpen(false);
+        opener = undefined; // the new conversation's composer takes focus, not the control that opened the cards
         setSetupOpen(false);
         closeSide(false);
         // A modal column would leave the new conversation's composer out of reach.
@@ -264,6 +300,10 @@ export function App(props: { initial: AppState }) {
         setSaveError(undefined);
       }
     };
+    const watchFocus = (e: FocusEvent) => {
+      if (!tourOpen() && e.target instanceof HTMLElement) lastFocus = e.target;
+    };
+    document.addEventListener('focusin', watchFocus);
     const typingEvents = ['keydown', 'input', 'compositionstart', 'compositionupdate', 'compositionend'];
     for (const type of typingEvents) window.addEventListener(type, typing, true);
     window.addEventListener('keydown', onKey);
@@ -274,6 +314,7 @@ export function App(props: { initial: AppState }) {
       clearTimeout(retry);
       for (const type of typingEvents) window.removeEventListener(type, typing, true);
       window.removeEventListener('keydown', onKey);
+      document.removeEventListener('focusin', watchFocus);
     });
   });
 
@@ -400,6 +441,38 @@ export function App(props: { initial: AppState }) {
   const needsProject = () => area() === 'project' && !project();
   // The new conversation of a chat with a connected AI is the one place the effects of a look appear.
   const newChat = () => area() === 'chat' && state().vendors.length > 0 && !current()?.messages.length;
+  // An installed CLI is not a connected account: the tutorial waits for the CLI itself to say it is signed in. It asks
+  // again when the installed ones change and when the account cards or a first-run step close.
+  const [signedIn, setSignedIn] = createSignal(0);
+  const wantsTour = createMemo(() => state().settings.tutorialDone === false && !tourEnded());
+  const installed = createMemo(() => state().vendors.join());
+  let asked = 0;
+  createEffect(() => {
+    const vendors = (installed() ? installed().split(',') : []) as Vendor[];
+    if (!wantsTour() || step() || setupOpen() || settingsOpen()) return;
+    const mine = ++asked;
+    void Promise.all(vendors.map((v) => api.setupCheck(v).then((c) => c.account === 'signedIn', () => false))).then((answers) => {
+      if (mine === asked) setSignedIn(answers.filter(Boolean).length);
+    });
+  });
+  // The tutorial starts at the new conversation, with an AI connected, when the first run asked for it.
+  const tourOpen = createMemo(() =>
+    tutorialDue({
+      tutorialDone: state().settings.tutorialDone,
+      vendors: state().vendors.length > 0 ? signedIn() : 0,
+      onNewChat: newChat(),
+      covered: !!step() || setupOpen() || settingsOpen(),
+      endedHere: tourEnded(),
+    }),
+  );
+  // Finishing or skipping saves `tutorialDone`. If that save fails the tutorial still ends for this window, and may show
+  // once more at the next launch. Focus goes back to where it was before the tutorial began, or to the composer.
+  const endTour = () => {
+    setTourEnded(true);
+    void saveSettings({ tutorialDone: true });
+    const back = lastFocus?.isConnected ? lastFocus : document.querySelector<HTMLElement>('.composer textarea');
+    back?.focus();
+  };
   const composerKey = () => place().id ?? `new-${area()}-${projectId() ?? ''}`;
   const title = () => state().conversations.find((c) => c.id === place().id)?.title ?? current()?.title;
   // The model the open conversation is answering with now, else the one the next message will go to.
@@ -455,18 +528,44 @@ export function App(props: { initial: AppState }) {
         </div>
       </Show>
       <Show
-        when={!setupOpen()}
+        when={!step() && !setupOpen()}
         fallback={
-          <Setup
-            onClose={() => setSetupOpen(false)}
-            onFinish={(result) =>
-              void saveSettings({ setup: result }).then((saved) => {
-                if (!saved) return;
-                setSetupOpen(false);
-                void refresh();
-              })
+          <Show
+            when={step() === 'look'}
+            fallback={
+              <Setup
+                mode={step() ? 'firstRun' : 'manage'}
+                onFinish={(result) =>
+                  void saveSettings(setupPatch(result)).then((saved) => {
+                    if (!saved) return;
+                    // Step 1 hands over to step 2 once its choice is stored; the cards opened later only close.
+                    if (step()) setStep(lookDue(state().settings) ? 'look' : undefined);
+                    setSetupOpen(false);
+                    void refresh();
+                  })
+                }
+              />
             }
-          />
+          >
+            <LookStep
+              initial={kept()?.appearance ?? state().settings.appearance}
+              experience={kept()?.experience ?? state().settings.experience}
+              onBack={(appearance, experience) => {
+                setKept({ appearance, experience });
+                setStep('accounts');
+              }}
+              onError={(err) => setSaveError(failureText(err))}
+              onContinue={async (appearance, experience) => {
+                const saved = await saveSettings(continuePatch(appearance, experience, state().settings.tutorialDone));
+                if (saved) {
+                  // The first conversation is a new one, whatever place was remembered from an older version.
+                  setStep(undefined);
+                  void fresh({ area: 'chat' });
+                }
+                return saved;
+              }}
+            />
+          </Show>
         }
       >
         <Show
@@ -480,12 +579,12 @@ export function App(props: { initial: AppState }) {
               onClose={() => setSettingsOpen(false)}
               onOpenSetup={() => {
                 setSettingsOpen(false);
-                setSetupOpen(true);
+                openSetup();
               }}
             />
           }
         >
-          <div class="shell" classList={{ docked: columnOpen() && docked() }}>
+          <div class="shell" classList={{ docked: columnOpen() && docked() }} inert={tourOpen()}>
             <aside
               class="side"
               classList={{ shown: sideOverlay() }}
@@ -563,6 +662,7 @@ export function App(props: { initial: AppState }) {
                   </Show>
                   <button
                     class="run-btn"
+                    data-tour="run"
                     classList={{ need: needing() > 0 }}
                     ref={(el) => (runButton = el)}
                     aria-expanded={columnOpen()}
@@ -597,7 +697,7 @@ export function App(props: { initial: AppState }) {
                       <div class="col">
                         <Show
                           when={current()?.messages.length ? current() : undefined}
-                          fallback={<Empty vendors={state().vendors.length} area={area()} project={project()} onConnect={() => setSetupOpen(true)} />}
+                          fallback={<Empty vendors={state().vendors.length} area={area()} project={project()} onConnect={openSetup} />}
                         >
                           {(c) => (
                             <Thread
@@ -645,6 +745,9 @@ export function App(props: { initial: AppState }) {
           </div>
         </Show>
       </Show>
+      <Show when={tourOpen()}>
+        <Tutorial experience={state().settings.experience} onEnd={endTour} />
+      </Show>
     </div>
   );
 }
@@ -657,7 +760,7 @@ function Empty(props: { vendors: number; area: Place['area']; project?: { name: 
           <Peek />
           <h1 class="display">{t('empty.noAiTitle')}</h1>
           <p>{t('empty.noAiBody')}</p>
-          <button class="btn primary" onClick={() => props.onConnect()}>
+          <button class="btn primary" data-restore="connect" onClick={() => props.onConnect()}>
             {t('empty.noAiButton')}
           </button>
         </Match>

@@ -1,6 +1,6 @@
 //! The app scenarios: what a person sees and does in a chat, in settings, and how much memory the app uses.
 
-use super::{Result, Scenario, ask, claude_chat, ensure, eventually, no_cli, pause, same, start_settings};
+use super::{Result, Scenario, ask, claude_chat, ensure, eventually, no_cli, pass_look, pause, same, start_settings};
 use crate::app::Ctx;
 use crate::page::{Page, css, role, role_any};
 use serde_json::json;
@@ -419,7 +419,7 @@ fn refused_save(ctx: &mut Ctx) -> Result {
     )?;
     let file = ctx.sb.data.join("settings.json");
     let text = std::fs::read_to_string(&file).map_err(|e| e.to_string())?;
-    ensure(!text.contains("appearance"), || format!("settings.json should be as it was: {text}"))?;
+    ensure(!text.contains("manha"), || format!("settings.json should be as it was: {text}"))?;
     pause(0.6);
     ctx.shot(&mut app, "settings-save-failed")?;
 
@@ -436,11 +436,14 @@ fn recovers_old_appearance(ctx: &mut Ctx) -> Result {
     ctx.write_settings(&json!({
         "language": "en",
         "setup": "done",
+        "tutorialDone": true,
         "appearance": { "mode": "dark", "accent": "mono", "ui": "geistmono", "read": "geist", "density": "comfortable", "corners": "round" }
     }))?;
     let launch = claude_chat(ctx);
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
+    // The old value is unusable, so the screen has no look to show and asks for one, once (step 2 of the first run).
+    pass_look(page)?;
     let title = page.named("heading", "empty.chatTitle")?;
     page.wait_visible(&title)?;
     same(page.eval("document.documentElement.dataset.base")?.as_str(), Some("sala"), "the look of an old appearance")?;

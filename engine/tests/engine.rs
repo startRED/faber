@@ -1,7 +1,7 @@
 mod support;
 
 use faber_engine::cli::{Cli, resolve_cli};
-use faber_engine::model::{Area, Message, Role, Settings, Status, Vendor};
+use faber_engine::model::{Area, Experience, Message, Role, Settings, Setup, Status, Vendor};
 use faber_engine::proc::Spawner;
 use faber_engine::router::{Choice, pick_model};
 use faber_engine::{AppEvent, BranchRequest, Engine, EngineOptions, SendRequest, WarmRequest};
@@ -339,6 +339,28 @@ async fn the_hooks_choice_is_saved_and_restarts_idle_project_clis_with_it() {
     engine.save_settings(Settings { appearance, ..Settings::default() }).unwrap();
     engine.shutdown();
     assert_eq!(read_json(&dir.path().join("settings.json")), serde_json::json!({ "userHooks": true, "appearance": { "base": "oficina" } }));
+}
+
+#[tokio::test]
+async fn the_first_run_choices_survive_a_patch_that_does_not_mention_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "chat"));
+    let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let first =
+        Settings { experience: Some(Experience::Experienced), tutorial_done: Some(false), setup: Some(Setup::Done), ..Settings::default() };
+    engine.save_settings(first).unwrap();
+    // Reconnecting an account, changing the language and finishing the tutorial each send a patch of their own.
+    engine.save_settings(Settings { setup: Some(Setup::Skipped), ..Settings::default() }).unwrap();
+    engine.save_settings(Settings { language: Some("pt-BR".into()), ..Settings::default() }).unwrap();
+    let kept = engine.state().settings;
+    assert_eq!((kept.experience, kept.tutorial_done), (Some(Experience::Experienced), Some(false)));
+    let done = engine.save_settings(Settings { tutorial_done: Some(true), ..Settings::default() }).unwrap();
+    assert_eq!((done.experience, done.tutorial_done), (Some(Experience::Experienced), Some(true)));
+    engine.shutdown();
+    assert_eq!(
+        read_json(&dir.path().join("settings.json")),
+        serde_json::json!({ "language": "pt-BR", "setup": "skipped", "experience": "experienced", "tutorialDone": true })
+    );
 }
 
 #[tokio::test]

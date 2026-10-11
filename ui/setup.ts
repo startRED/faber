@@ -1,4 +1,4 @@
-import type { Vendor } from './api.ts';
+import type { Appearance, Experience, Settings, Vendor } from './api.ts';
 
 export type Subscription = 'claude' | 'codex' | 'none';
 
@@ -49,6 +49,57 @@ export function shouldOpenSetup(
     return false;
   }
   return conversations.length === 0;
+}
+
+/** The two steps that come before the first conversation. Step 3 is the new conversation itself. */
+export type FirstStep = 'accounts' | 'look';
+
+/** `firstRun` is step 1 of 3 and moves on to step 2. `manage` is only the account cards with a Close button: it saves
+ * `setup` and nothing else, so reconnecting an account later can neither restart the first run nor reset the tutorial. */
+export type SetupMode = 'firstRun' | 'manage';
+
+/** Step 2 is due until an appearance with a `base` is saved. That covers new users after step 1 and, once, an install
+ * that was saved by an older version (whose appearance has no `base`, so the engine hands the screen none). */
+export function lookDue(settings: Pick<Settings, 'appearance'> | undefined): boolean {
+  return !settings?.appearance?.base;
+}
+
+/** The step the window opens at: step 1 under the old rule, else step 2 when it is due, else none. */
+export function firstRunStep(settings: Settings | undefined, conversations: readonly unknown[]): FirstStep | undefined {
+  if (shouldOpenSetup(settings, conversations)) return 'accounts';
+  return lookDue(settings) ? 'look' : undefined;
+}
+
+/** What `setup` saves, in either mode. Nothing else about the first run changes with it. */
+export function setupPatch(result: 'done' | 'skipped'): Settings {
+  return { setup: result };
+}
+
+export type SizeChoice = 'small' | 'normal' | 'large';
+/** "Normal" is the theme's own size, so it is no saved value at all. */
+const SIZES: Record<SizeChoice, number | undefined> = { small: 13, normal: undefined, large: 16 };
+
+/** The appearance with a text size chosen; normal clears the field. */
+export function withSize(appearance: Appearance, size: SizeChoice): Appearance {
+  const next = { ...appearance };
+  const px = SIZES[size];
+  if (px === undefined) delete next.textSize;
+  else next.textSize = px;
+  return next;
+}
+
+/** Which "Aa" is on: none when the size was set to something else, such as 14.5 in Settings. */
+export function sizeOf(appearance: Appearance): SizeChoice | undefined {
+  return (Object.keys(SIZES) as SizeChoice[]).find((k) => SIZES[k] === appearance.textSize);
+}
+
+/** What Continue on step 2 saves, in one call. `tutorialDone` is left out when it is already true, so an install that
+ * finished the tutorial is not taught again; no answer to the question leaves `experience` out, and counts as a beginner. */
+export function continuePatch(appearance: Appearance, experience: Experience | undefined, tutorialDone: boolean | undefined): Settings {
+  const patch: Settings = { appearance };
+  if (experience) patch.experience = experience;
+  if (tutorialDone !== true) patch.tutorialDone = false;
+  return patch;
 }
 
 /**

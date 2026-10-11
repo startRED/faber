@@ -231,6 +231,7 @@ fn key_info(key: &str) -> Result<(String, String, u32, Option<&'static str>), St
         "Enter" => fixed("Enter", "Enter", 13, Some("\r")),
         "Escape" => fixed("Escape", "Escape", 27, None),
         "Tab" => fixed("Tab", "Tab", 9, None),
+        "Space" => fixed(" ", "Space", 32, Some(" ")),
         "ArrowLeft" => fixed("ArrowLeft", "ArrowLeft", 37, None),
         "ArrowRight" => fixed("ArrowRight", "ArrowRight", 39, None),
         "." => fixed(".", "Period", 190, Some(".")),
@@ -301,6 +302,12 @@ mod tests {
     use super::*;
     use std::net::TcpListener;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn space_is_a_key_the_client_knows() {
+        let (name, code, virtual_key, text) = key_info("Space").unwrap();
+        assert_eq!((name.as_str(), code.as_str(), virtual_key, text), (" ", "Space", 32, Some(" ")));
+    }
 
     /// A stand-in for the app's DevTools port: the target list over HTTP and a scripted WebSocket.
     fn mock() -> (u16, Arc<Mutex<Vec<Value>>>) {

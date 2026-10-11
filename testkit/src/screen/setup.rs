@@ -1,10 +1,11 @@
 //! The first-run guide, end to end: connecting an installed CLI, installing one from a loopback release, the choice to
 //! have none, memory with the guide open, and that closing it leaves no process or file behind.
 //!
-//! The guide opens because these scenarios start with settings that do not say the first run is done. A scenario that
+//! The guide is step 1 of the first run. It opens because these scenarios start with settings that do not say the first
+//! run is done; each one passes step 2 (the look) and, when an AI is connected, skips the tutorial. A scenario that
 //! installs leaves `FABER_CLI_CODEX` absent, so the engine finds the program the guide just put in the data folder.
 
-use super::{Result, Scenario, ask, ensure, eventually, same};
+use super::{Result, Scenario, ask, ensure, eventually, pass_look, pause, same, skip_tour};
 use crate::app::{Ctx, Opened};
 use crate::page::{Loc, css};
 use crate::sandbox::{CliSlot, Launch};
@@ -18,8 +19,16 @@ pub fn scenarios() -> Vec<Scenario> {
         Scenario { name: "C5.2: missing ChatGPT installs from loopback, signs in and answers without reopening", run: c5_2 },
         Scenario { name: "C5.3: None persists, shows connection guidance and never reopens setup automatically", run: c5_3_none },
         Scenario { name: "C5.3: Skip persists, shows connection guidance and never reopens setup automatically", run: c5_3_skip },
-        Scenario { name: "C5.4: the open guide with no conversation uses at most 250 MB", run: c5_4 },
+        Scenario { name: "C5.4: the open guide and the look step, with no conversation, use at most 250 MB", run: c5_4 },
         Scenario { name: "C5.5: closing the guide leaves no setup child or external writes", run: c5_5 },
+        Scenario {
+            name: "first run: None to the end shows no tutorial, and connecting an account afterwards starts it",
+            run: none_then_connect,
+        },
+        Scenario {
+            name: "reconnecting an account saves the setup choice and keeps the finished tutorial and the first-run answers",
+            run: reconnect_keeps_the_first_run,
+        },
     ]
 }
 
@@ -75,8 +84,9 @@ fn connected(app: &mut Opened, vendor: &str) -> Result {
     Ok(())
 }
 
+/// Continue on step 1, which hands over to step 2.
 fn finish(app: &mut Opened) -> Result {
-    click_in_guide(app, "setup.done")?;
+    click_in_guide(app, "first.continue")?;
     let guide = guide(app)?;
     app.page.wait_gone(&guide)
 }
@@ -107,6 +117,8 @@ fn c5_1(ctx: &mut Ctx) -> Result {
     ensure(lines.iter().any(|l| l == "auth status"), || format!("the guide should check the sign-in: {lines:?}"))?;
     ensure(!lines.iter().any(|l| l == "auth login"), || format!("the guide must not sign in again: {lines:?}"))?;
     finish(&mut app)?;
+    pass_look(&mut app.page)?;
+    skip_tour(&mut app.page)?;
     ready_to_chat(&mut app)?;
     answered(&mut app, "Rayleigh")?;
     ctx.close(app.id)
@@ -118,6 +130,19 @@ fn c5_2(ctx: &mut Ctx) -> Result {
     let mut app = ctx.launch(launch)?;
     wait_for_guide(&mut app)?;
     click_in_guide(&mut app, "setup.chatgpt")?;
+    install_and_connect_codex(ctx, &mut app)?;
+    finish(&mut app)?;
+    pass_look(&mut app.page)?;
+    skip_tour(&mut app.page)?;
+    ready_to_chat(&mut app)?;
+    answered(&mut app, "scatter")?;
+    same(ctx.exited(app.id), None, "the original app must still be running")?;
+    ctx.close(app.id)
+}
+
+/// ChatGPT's card is open and its program is not installed: installs it from the loopback release, signs in, and waits until
+/// the card says it is connected.
+fn install_and_connect_codex(ctx: &mut Ctx, app: &mut Opened) -> Result {
     let absent = app.page.text_of("setup.notInstalled")?;
     app.page.wait_visible(&card("codex").text(&absent).exact())?;
     let install = card("codex").role("button", &app.page.text_of("setup.install")?).exact();
@@ -135,14 +160,76 @@ fn c5_2(ctx: &mut Ctx) -> Result {
     if app.page.is_visible(&again)? {
         app.page.click(&again)?;
     }
-    connected(&mut app, "codex")?;
+    connected(app, "codex")?;
     let lines: Vec<String> = ctx.records()?.iter().map(|c| c.line()).collect();
     ensure(lines.iter().any(|l| l == "login"), || format!("the guide should sign in: {lines:?}"))?;
-    ensure(lines.iter().any(|l| l == "login status"), || format!("the guide should check the sign-in: {lines:?}"))?;
+    ensure(lines.iter().any(|l| l == "login status"), || format!("the guide should check the sign-in: {lines:?}"))
+}
+
+fn none_then_connect(ctx: &mut Ctx) -> Result {
+    start(ctx, false)?;
+    let launch = codex_missing(ctx);
+    let mut app = ctx.launch(launch)?;
+    wait_for_guide(&mut app)?;
+    click_in_guide(&mut app, "setup.none")?;
     finish(&mut app)?;
-    ready_to_chat(&mut app)?;
-    answered(&mut app, "scatter")?;
-    same(ctx.exited(app.id), None, "the original app must still be running")?;
+    pass_look(&mut app.page)?;
+    // With no AI connected the new conversation gives way to the empty state, and the tutorial does not start. Focus went to
+    // the composer when step 2 closed.
+    let title = app.page.named("heading", "empty.noAiTitle")?;
+    app.page.wait_visible(&title)?;
+    app.page.wait_for("focus in the composer", "document.activeElement === document.querySelector('.composer textarea')")?;
+    pause(0.5);
+    same(app.page.count(&css(".tour"))?, 0, "no tutorial with no AI")?;
+    // The button of the empty state opens the account cards in their plain mode; connecting there brings the tutorial.
+    let open = app.page.named("button", "empty.noAiButton")?;
+    app.page.click(&open)?;
+    wait_for_guide(&mut app)?;
+    click_in_guide(&mut app, "setup.chatgpt")?;
+    install_and_connect_codex(ctx, &mut app)?;
+    let close = css(".fr-stage").role("button", &app.page.text_of("setup.close")?).exact();
+    app.page.click(&close)?;
+    app.page.wait_visible(&css(".coach"))?;
+    skip_tour(&mut app.page)?;
+    let file = ctx.sb.data.join("settings.json");
+    eventually("the end of the tutorial to be saved", Duration::from_secs(15), || {
+        std::fs::read_to_string(&file)
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .is_some_and(|settings| settings["tutorialDone"] == true)
+    })?;
+    ctx.close(app.id)
+}
+
+fn reconnect_keeps_the_first_run(ctx: &mut Ctx) -> Result {
+    ctx.serve_release()?;
+    // A person who skipped the accounts long ago, finished the tutorial, and answered the first-run question.
+    let kept = serde_json::json!({ "base": "oficina", "textSize": 16 });
+    ctx.write_settings(
+        &serde_json::json!({ "language": "en", "setup": "skipped", "appearance": kept, "experience": "experienced", "tutorialDone": true }),
+    )?;
+    let launch = codex_missing(ctx);
+    let mut app = ctx.launch(launch)?;
+    let open = app.page.named("button", "empty.noAiButton")?;
+    app.page.wait_visible(&open)?;
+    app.page.click(&open)?;
+    wait_for_guide(&mut app)?;
+    click_in_guide(&mut app, "setup.chatgpt")?;
+    install_and_connect_codex(ctx, &mut app)?;
+    let close = css(".fr-stage").role("button", &app.page.text_of("setup.close")?).exact();
+    app.page.click(&close)?;
+    let guide = guide(&mut app)?;
+    app.page.wait_gone(&guide)?;
+    // The decision is saved, and what the first run stored is as it was: a finished tutorial is not taught again.
+    let file = ctx.sb.data.join("settings.json");
+    let read = || std::fs::read_to_string(&file).ok().and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
+    eventually("the setup choice to be saved", Duration::from_secs(15), || read().is_some_and(|s| s["setup"] == "done"))?;
+    let settings = read().unwrap_or_default();
+    same(&settings["appearance"], &kept, "the saved look")?;
+    same(settings["experience"].as_str(), Some("experienced"), "the answer to the question about AI")?;
+    same(settings["tutorialDone"].as_bool(), Some(true), "the finished tutorial")?;
+    pause(1.0);
+    same(app.page.count(&css(".tour"))?, 0, "a finished tutorial never starts again")?;
     ctx.close(app.id)
 }
 
@@ -164,6 +251,8 @@ fn c5_3(ctx: &mut Ctx, none: bool) -> Result {
     } else {
         click_in_guide(&mut app, "setup.skip")?;
     }
+    // Neither choice skips step 2, and with no AI connected there is no tutorial to follow it.
+    pass_look(&mut app.page)?;
     let wanted = if none { "done" } else { "skipped" };
     for launch in 0..2 {
         let title = app.page.named("heading", "empty.noAiTitle")?;
@@ -177,6 +266,8 @@ fn c5_3(ctx: &mut Ctx, none: bool) -> Result {
         ensure(!["restart", "reopen", "relaunch"].iter().any(|w| lower.contains(w)), || format!("it should not ask to restart: {body}"))?;
         let guide = guide(&mut app)?;
         same(app.page.count(&guide)?, 0, "the saved choice must suppress the guide")?;
+        same(app.page.count(&css(".fr-stage"))?, 0, "nor any other step of the first run")?;
+        same(app.page.count(&css(".tour"))?, 0, "with no AI there is no tutorial")?;
         let file = ctx.sb.data.join("settings.json");
         eventually("the setup decision to be durable before closing", Duration::from_secs(15), || {
             std::fs::read_to_string(&file)
@@ -195,10 +286,8 @@ fn c5_3(ctx: &mut Ctx, none: bool) -> Result {
     ensure(lines.is_empty(), || format!("None and Skip must not start a CLI: {lines:?}"))
 }
 
-fn c5_4(ctx: &mut Ctx) -> Result {
-    start(ctx, false)?;
-    let mut app = ctx.launch(Launch::default())?;
-    wait_for_guide(&mut app)?;
+/// Three samples of the app and its WebView2 children together, noted by name and held to the budget.
+fn measure(ctx: &mut Ctx, app: &Opened, what: &str) -> Result {
     let mut samples = Vec::new();
     for _ in 0..3 {
         let (mb, webview) = ctx.memory_mb(app.id)?;
@@ -208,8 +297,25 @@ fn c5_4(ctx: &mut Ctx) -> Result {
     }
     let most = samples.iter().copied().fold(0.0, f64::max);
     let shown: Vec<String> = samples.iter().map(|mb| format!("{mb:.1}")).collect();
-    ctx.notes.push(format!("open guide: {} MB", shown.join(", ")));
-    ensure(most <= BUDGET_MB, || format!("open guide: {} MB; limit {BUDGET_MB} MB", shown.join(", ")))?;
+    ctx.notes.push(format!("{what}: {} MB", shown.join(", ")));
+    ensure(most <= BUDGET_MB, || format!("{what}: {} MB; limit {BUDGET_MB} MB", shown.join(", ")))
+}
+
+fn c5_4(ctx: &mut Ctx) -> Result {
+    start(ctx, false)?;
+    let mut app = ctx.launch(Launch::default())?;
+    wait_for_guide(&mut app)?;
+    measure(ctx, &app, "open guide")?;
+    // Step 2 draws three small copies of the screen, each with its own fonts: the measurement of the first run's heaviest page.
+    click_in_guide(&mut app, "setup.skip")?;
+    let heading = app.page.named("heading", "first.look.title")?;
+    app.page.wait_visible(&heading)?;
+    app.page.wait_for(
+        "the three pictures to be drawn",
+        "[...document.querySelectorAll('.tcard .mini')].map((m) => m.dataset.base).join() === 'sala,oficina,bancada'",
+    )?;
+    pause(1.0);
+    measure(ctx, &app, "open look step")?;
     let lines: Vec<String> = ctx.records()?.iter().map(|c| c.line()).collect();
     ensure(lines.is_empty(), || format!("opening the guide must not keep an idle CLI alive: {lines:?}"))?;
     ctx.close(app.id)
@@ -236,7 +342,7 @@ mod tests {
     // R5.5 and the replay check are `rust` suite tests (`sandbox`, `app` and `fake`), because they need no app.
     #[test]
     fn the_setup_scenarios_of_the_node_suite_are_all_ported() {
-        let names: Vec<&str> = scenarios().iter().map(|s| s.name).collect();
+        let names: Vec<&str> = scenarios().iter().map(|s| s.name).filter(|n| n.starts_with("C5.")).collect();
         let starts: Vec<&str> = names.iter().map(|n| n.split(':').next().unwrap()).collect();
         assert_eq!(starts, ["C5.1", "C5.2", "C5.3", "C5.3", "C5.4", "C5.5"]);
         assert!(names[2].contains("None") && names[3].contains("Skip"));

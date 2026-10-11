@@ -257,6 +257,19 @@ pub struct Settings {
     /// What the user did with the first-run guide; none means it has not run yet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub setup: Option<Setup>,
+    /// The answer to "Do you already use AI?"; none means no answer, which counts as a beginner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub experience: Option<Experience>,
+    /// False once the first run asked for the tutorial, true once it ended or was skipped; none before the first run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tutorial_done: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Experience {
+    Beginner,
+    Experienced,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

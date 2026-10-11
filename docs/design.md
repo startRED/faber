@@ -224,6 +224,27 @@ inside its own area.
   amber item comes first. The order is stable, so rows do not jump.
 - With no items it shows an empty state with Curioso.
 
+### First run and tutorial
+
+- The first run has three steps in a window with no sidebar: connected accounts, appearance, first conversation. A stepper
+  at the top shows the place. Each step is a modal dialog: its heading takes focus when it opens, and Esc and the
+  shortcuts of the shell (Ctrl N, Ctrl comma, Ctrl period) do nothing until a button is used.
+- Step 1 is the account cards, with Continue and Skip; both go on to step 2. Opened later, from the no-AI state or from
+  Settings, the same cards have no stepper and only a Close button. They save `setup` and nothing else, so reconnecting an
+  account never restarts the first run or the tutorial.
+- Step 2 shows the three themes side by side, each a small live render drawn with its own tokens. A choice changes the whole
+  screen at once and saves nothing. Under the cards: text size (three "Aa" sizes), density, motion, and "Do you already use
+  AI?" (Never, A lot). Continue saves the appearance, the answer and `tutorialDone: false` in one call. Back keeps the
+  choices. An install saved by an older version, whose appearance has no `base`, sees step 2 once.
+- The tutorial starts at the new conversation, with an AI connected, while `tutorialDone` is false. A beginner gets three
+  cards (Chat, Projects, Follow along); someone who answered "A lot" gets two (Auto, the running list); no answer counts as
+  a beginner. A card has Curioso, "n of total", a title, one or two sentences, and Next (Got it on the last) and Skip.
+  A ring and a pointer mark the real element the card is about (`data-tour`). When that element is missing or hidden, such
+  as the Projects button below 900 px, the card is centred.
+- The tutorial is modal: the shell is inert, focus starts on Next and stays on the card, and Esc skips. Finishing or
+  skipping saves `tutorialDone: true` and gives focus back to where it was, or to the composer. It never reopens. If the
+  save fails it still ends for that window and may show once more at the next launch.
+
 ## Rules for every screen
 
 - Every text on screen lives in `ui/locales/`, written by hand in each language.

@@ -258,7 +258,9 @@ fn follows_the_width(ctx: &mut Ctx) -> Result {
 }
 
 fn fits_large_text(ctx: &mut Ctx) -> Result {
-    ctx.write_settings(&json!({ "language": "en", "setup": "done", "appearance": { "base": "sala", "textSize": 18 } }))?;
+    ctx.write_settings(
+        &json!({ "language": "en", "setup": "done", "appearance": { "base": "sala", "textSize": 18 }, "tutorialDone": true }),
+    )?;
     let launch = claude_chat(ctx);
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
@@ -602,7 +604,7 @@ fn shows_the_quota(ctx: &mut Ctx) -> Result {
 // ---- Seeded conversations and the checks of the second pass of the review.
 
 /// Writes a finished conversation of two messages to the data folder, newest by `at`.
-fn seed(ctx: &Ctx, id: &str, title: &str, project: Option<&str>, at: u64) -> Result {
+pub(super) fn seed(ctx: &Ctx, id: &str, title: &str, project: Option<&str>, at: u64) -> Result {
     let folder = ctx.sb.data.join("conversations");
     std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
     let messages = json!([

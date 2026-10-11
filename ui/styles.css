@@ -10,14 +10,14 @@ button, textarea, select, input { font: inherit; color: inherit; }
 button { cursor: pointer; background: none; border: 0; padding: 0; }
 input, textarea { caret-color: var(--accent); }
 :focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; border-radius: var(--r-xs); }
-.thread, .list, .nav, .s-main, .md pre, .setup-container { scrollbar-width: thin; scrollbar-color: var(--line-3) transparent; }
+.thread, .list, .nav, .s-main, .md pre, .firstrun { scrollbar-width: thin; scrollbar-color: var(--line-3) transparent; }
 
 .display { font-family: var(--font-display); font-weight: var(--display-weight); font-stretch: var(--display-stretch); letter-spacing: var(--display-tracking); line-height: var(--display-leading); text-wrap: balance; margin: 0; }
 .display em { font-style: var(--em-style); color: var(--em-color); font-weight: var(--em-weight); }
 
 /* The window: a title bar over the frame, the sidebar on the frame, and the stage where the work happens. */
 .app { display: grid; grid-template-rows: 36px minmax(0, 1fr); height: 100%; background: var(--frame); }
-.top { display: flex; align-items: center; gap: 14px; padding: 0 0 0 20px; user-select: none; }
+.top { display: flex; align-items: center; gap: 14px; padding: 0 0 0 20px; user-select: none; position: relative; z-index: 60; } /* above a tutorial's dim (50): the window's buttons stay in reach */
 .top.mac { padding: 0 14px 0 78px; } /* room for the traffic lights */
 /* The lockup is a drawing in the ink colour, in every theme. The drag region is the span: Tauri reads the attribute only on the element clicked. */
 .brand { display: flex; color: var(--ink); }
@@ -96,7 +96,7 @@ input, textarea { caret-color: var(--accent); }
 
 /* The stage: a top bar over the work area. The work area holds the thread, the composer and, when it overlays the
    stage, the running column. */
-.main, .s-main, .setup-container { margin: 0 var(--stage-inset) var(--stage-inset) 0; border-radius: var(--r-stage); background: var(--bg); box-shadow: var(--stage-shadow); min-height: 0; min-width: 0; }
+.main, .s-main { margin: 0 var(--stage-inset) var(--stage-inset) 0; border-radius: var(--r-stage); background: var(--bg); box-shadow: var(--stage-shadow); min-height: 0; min-width: 0; }
 .main { position: relative; overflow: hidden; display: grid; grid-template-rows: 52px minmax(0, 1fr); }
 .shell.docked > .main { margin-right: 0; border-radius: var(--r-stage) 0 0 var(--r-stage); }
 .topbar { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 0 16px 0 24px; border-bottom: 1px solid var(--line); position: relative; z-index: 3; }
@@ -324,19 +324,37 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .check input { margin-top: 4px; accent-color: var(--accent); }
 .check small { display: block; color: var(--ink-3); font-size: calc(var(--fs-ui) - 1.5px); }
 
-/* Setup guide */
-.setup-container { overflow-y: auto; padding: 32px 24px; display: grid; place-items: start center; }
-.setup-card-panel { width: 100%; max-width: 600px; display: grid; gap: 20px; }
-.setup-header h1 { margin: 0 0 6px 0; font-size: var(--fs-h2); }
-.setup-body-text { margin: 0; font-size: var(--fs-ui); color: var(--ink-2); line-height: 1.5; }
-.setup-choices { display: flex; flex-wrap: wrap; gap: 8px; }
-.opt { padding: 0 12px; height: 32px; border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-2); font-size: calc(var(--fs-ui) - 0.5px); font-weight: 500; }
-.opt:hover { background: var(--s3); color: var(--ink); }
-.opt[aria-pressed='true'] { box-shadow: inset 0 0 0 1.5px var(--accent); color: var(--ink); background: var(--accent-soft); }
-.setup-cards { display: grid; gap: 14px; }
+/* The first run: a stage with no sidebar, a stepper on top and the step below it (ui/FirstRun.tsx, ui/Setup.tsx). */
+.fr-stage { display: grid; grid-template-rows: 52px minmax(0, 1fr); margin: 0 var(--stage-inset) var(--stage-inset); border-radius: var(--r-stage); background: var(--bg); box-shadow: var(--stage-shadow); min-height: 0; min-width: 0; overflow: hidden; }
+.fr-stage.plain { grid-template-rows: minmax(0, 1fr); }
+.fr-top { display: flex; align-items: center; padding: 0 clamp(24px, 5vw, 64px); border-bottom: 1px solid var(--line); }
+.stepper { display: flex; align-items: center; gap: 10px; margin: 0; padding: 0; list-style: none; font-size: calc(var(--fs-ui) - 1px); color: var(--ink-3); }
+.stepper li { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.stepper li + li::before { content: ''; width: 24px; height: 1px; margin-right: 4px; background: var(--line-3); }
+.stepper .done { color: var(--ink-2); }
+.stepper .done svg { color: var(--accent-text); }
+.stepper .cur { color: var(--ink); font-weight: 600; }
+.firstrun { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 28px clamp(24px, 5vw, 64px) 32px; }
+.fr-col { flex: none; width: min(100%, 720px); margin-top: clamp(0px, 6vh, 56px); }
+.fr-title { margin-top: 22px; font-size: min(var(--fs-h1), 9vw); overflow-wrap: anywhere; outline: none; }
+.fr-col .peek { margin-top: 4px; }
+.fr-col .fr-title { margin-top: 18px; }
+.firstrun .sub { margin: 10px 0 0; max-width: 72ch; text-wrap: pretty; color: var(--ink-2); font-size: var(--fs-lead); line-height: 1.5; }
+.first-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; margin-top: auto; padding-top: 28px; }
+.first-foot p { margin: 0 auto 0 0; color: var(--ink-3); font-size: calc(var(--fs-ui) - 1px); }
+.btn.ghost { box-shadow: none; }
+.btn.big { height: 40px; padding: 0 22px; font-size: calc(var(--fs-ui) + 0.5px); }
+
+/* Step 1: which subscriptions the person has. */
+.picks { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
+.pick { display: inline-flex; align-items: center; gap: 10px; min-width: 156px; min-height: 56px; padding: 0 20px; border-radius: var(--r-md); background: var(--s1); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink); font-size: calc(var(--fs-ui) + 1px); font-weight: 500; text-align: left; transition: box-shadow var(--dur-ui) var(--ease), background var(--dur-fast); }
+.pick:hover { background: var(--s2); box-shadow: inset 0 0 0 1px var(--line-3); }
+.pick[aria-pressed='true'] { background: var(--accent-soft); box-shadow: inset 0 0 0 1.5px var(--accent), var(--focus-light); }
+.pick .mk { width: 12px; height: 12px; }
+.setup-cards { display: grid; gap: 12px; margin-top: 20px; }
 .setup-card { display: grid; gap: 12px; padding: 14px 16px; background: var(--card-bg); box-shadow: var(--card-shadow); border-radius: var(--r-md); }
 .setup-card-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.setup-card-header h2 { margin: 0; font-size: var(--fs-lead); font-weight: 600; }
+.setup-card-header h2 { display: flex; align-items: center; gap: 10px; margin: 0; font-size: var(--fs-lead); font-weight: 600; }
 .setup-badge { font-size: calc(var(--fs-ui) - 2px); padding: 3px 8px; border-radius: var(--r-pill); background: var(--s1); color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--line-2); }
 .setup-badge.connected { color: var(--ink); box-shadow: inset 0 0 0 1px var(--accent-line); background: var(--accent-soft); }
 .setup-step { font-size: calc(var(--fs-ui) - 1px); color: var(--ink-2); }
@@ -347,7 +365,71 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .setup-details summary:hover { color: var(--ink); }
 .setup-details pre { margin: 6px 0 0 0; padding: 8px; font-family: var(--font-mono); font-size: calc(var(--fs-ui) - 2px); background: var(--bg); box-shadow: inset 0 0 0 1px var(--line); border-radius: var(--r-xs); overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
 .setup-card-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.setup-footer { display: flex; justify-content: flex-end; gap: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+
+/* Step 2: the three looks side by side, each drawn with its own tokens, then the first settings. */
+.themes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin-top: 24px; }
+.tcard { display: grid; gap: 12px; align-content: start; min-width: 0; padding: 12px 12px 14px; border-radius: var(--r-lg); background: var(--s1); box-shadow: inset 0 0 0 1px var(--line); text-align: left; transition: box-shadow var(--dur-ui) var(--ease), transform var(--dur-ui) var(--ease); }
+.tcard:hover { transform: translateY(-2px); }
+.tcard[aria-pressed='true'] { box-shadow: inset 0 0 0 1.5px var(--accent), var(--focus-light); }
+.tcard .meta { display: flex; align-items: flex-start; gap: 10px; padding: 0 4px; }
+.tcard .radio { flex: none; display: grid; place-items: center; width: 18px; height: 18px; margin-top: 2px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--control-line); }
+.tcard[aria-pressed='true'] .radio { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.tcard[aria-pressed='true'] .radio::after { content: ''; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
+.tcard .txt { display: grid; gap: 2px; min-width: 0; }
+.tcard .nm { display: flex; align-items: center; gap: 8px; font-size: calc(var(--fs-ui) + 1px); font-weight: 600; color: var(--ink); }
+.tcard .nm small { font-size: calc(var(--fs-ui) - 2px); font-weight: 500; color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--line-2); border-radius: var(--r-xs); padding: 0 6px; }
+.tcard .ds { font-size: calc(var(--fs-ui) - 1px); color: var(--ink-2); line-height: 1.4; }
+.mini { display: grid; grid-template-columns: 62px minmax(0, 1fr); width: 100%; height: 214px; position: relative; overflow: hidden; border-radius: var(--r-md); background: var(--frame); box-shadow: 0 0 0 1px var(--line-2); color: var(--ink); font-family: var(--font-ui); font-stretch: var(--ui-stretch); font-size: var(--fs-ui); line-height: 1.45; text-align: left; }
+.m-side { display: flex; flex-direction: column; gap: 8px; padding: 12px 10px; }
+.m-side i { display: block; height: 5px; border-radius: 3px; background: var(--ink-3); opacity: 0.4; }
+.m-side i.on { width: 70%; background: var(--accent); opacity: 1; }
+.m-main { position: relative; display: flex; flex-direction: column; gap: 8px; margin: 6px 6px 6px 0; padding: 13px 14px; overflow: hidden; border-radius: calc(var(--r-stage) * 0.6); background: var(--bg); box-shadow: var(--stage-shadow); }
+.mini .grain { border-radius: inherit; }
+.m-h { font-size: calc(var(--fs-h2) * 0.62); line-height: 1.04; }
+.m-bar { display: block; height: var(--bar-h); border-radius: var(--bar-r); overflow: hidden; background: var(--bar-track); }
+.m-bar i { display: block; width: 42%; height: 100%; background: var(--bar-fill); }
+.m-ask { display: flex; align-items: center; gap: 6px; padding: 6px 8px; overflow: hidden; border-radius: var(--r-sm); background: linear-gradient(var(--amber-soft), var(--amber-soft)), var(--card-bg); box-shadow: inset 0 0 0 1px var(--amber-line); color: var(--amber-ink); font-size: calc(var(--fs-ui) * 0.78); font-weight: 600; white-space: nowrap; }
+.m-row { display: flex; align-items: center; gap: 8px; font-size: calc(var(--fs-ui) * 0.78); }
+.mini .mk { width: 7px; height: 7px; }
+.m-foot { display: flex; align-items: center; gap: 6px; margin-top: auto; }
+.m-in { flex: 1; min-width: 0; height: 22px; padding: 0 8px; display: flex; align-items: center; overflow: hidden; border-radius: var(--r-pill); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-3); font-size: 10.5px; white-space: nowrap; }
+.m-btn { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: var(--r-pill); background: var(--accent); color: var(--accent-ink); font-size: 10.5px; font-weight: 600; }
+.first-ctl { display: grid; grid-template-columns: 1fr 1fr 1.2fr 1.5fr; gap: 22px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
+.sizes { display: flex; align-items: flex-end; gap: 6px; }
+.sizes button { flex: 1; display: grid; place-items: center; height: 44px; border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-2); font-weight: 500; }
+.sizes button:hover { color: var(--ink); }
+.sizes button[aria-pressed='true'] { background: var(--accent-soft); box-shadow: inset 0 0 0 1.5px var(--accent); color: var(--ink); }
+.choice2 { display: grid; gap: 6px; }
+.choice2 button { display: grid; padding: 8px 12px; border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--line-2); font-size: calc(var(--fs-ui) - 0.5px); font-weight: 500; text-align: left; }
+.choice2 button small { font-weight: 400; color: var(--ink-3); font-size: calc(var(--fs-ui) - 1.5px); }
+.choice2 button:hover { box-shadow: inset 0 0 0 1px var(--line-3); }
+.choice2 button[aria-pressed='true'] { background: var(--accent-soft); box-shadow: inset 0 0 0 1.5px var(--accent); }
+@media (max-width: 1099px) {
+  .first-ctl { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 899px) {
+  .themes { grid-template-columns: minmax(0, 1fr); }
+  .tcard .mini { height: 190px; }
+}
+
+/* The tutorial (ui/Tutorial.tsx): the screen is dimmed, a ring marks the element a card points at, and the card is a small
+   dialog with Curioso, the step, a few words and its buttons. */
+.tour { position: fixed; inset: 0; z-index: 50; }
+.tour-dim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.6); }
+.tour-dim.clear { background: transparent; }
+.tour-ring { position: absolute; left: 0; top: 0; border-radius: var(--r-md); box-shadow: 0 0 0 1.5px var(--accent), 0 0 0 200vmax rgba(0, 0, 0, 0.6); pointer-events: none; transition: transform var(--dur-move) var(--ease); }
+.coach { position: fixed; display: grid; gap: 8px; width: min(340px, calc(100vw - 24px)); padding: 14px 18px 16px; border-radius: var(--r-lg); background: var(--s2); box-shadow: var(--lift-shadow); animation: arrive var(--dur-arrive) var(--ease) both; }
+.coach::after { content: ''; display: none; position: absolute; width: 12px; height: 12px; background: var(--s2); transform: rotate(45deg); }
+.coach[data-side]::after { display: block; }
+.coach[data-side='top']::after { top: -6px; left: calc(var(--pointer) - 6px); }
+.coach[data-side='bottom']::after { bottom: -6px; left: calc(var(--pointer) - 6px); }
+.coach[data-side='left']::after { left: -6px; top: calc(var(--pointer) - 6px); }
+.coach[data-side='right']::after { right: -6px; top: calc(var(--pointer) - 6px); }
+.coach-head { display: flex; align-items: center; justify-content: space-between; color: var(--ink); }
+.coach-n { color: var(--ink-3); font-size: calc(var(--fs-ui) - 1.5px); }
+.coach h2 { font-size: var(--fs-h3); }
+.coach p { margin: 0; color: var(--ink-2); line-height: 1.5; }
+.coach-act { display: flex; gap: 8px; margin-top: 8px; }
 
 /* The effects of the new conversation (ui/Ambient.tsx). The tokens --amb-beam, --amb-loom and --amb-flow are `none`
    for a look that does not have the effect, and for every look when the ambient switch is off. */
@@ -391,10 +473,10 @@ html[data-motion='full'] .amb-glow .beam { animation: glow 7s var(--ease-io) inf
 /* Reduced keeps only short fades: every duration is capped at 120 ms and the switch thumb stops travelling. */
 [data-motion='reduced'] * { --dur-fast: 120ms; --dur-ui: 120ms; --dur-move: 120ms; --dur-arrive: 120ms; }
 :is([data-motion='reduced'], [data-motion='none']) .sw2::after { transition: background var(--dur-fast); }
-[data-motion='reduced'] :is(.ask, .toast, .ri.need) { animation: fade 120ms ease-out both; }
+[data-motion='reduced'] :is(.ask, .toast, .ri.need, .coach) { animation: fade 120ms ease-out both; }
 @keyframes fade { from { opacity: 0; } }
 :is([data-motion='reduced'], [data-motion='none']) .btn:active { transform: none; }
-:is([data-motion='reduced'], [data-motion='none']) :is(.try button:hover > span, .rrow:hover > *) { transform: none; }
+:is([data-motion='reduced'], [data-motion='none']) :is(.try button:hover > span, .rrow:hover > *, .tcard:hover) { transform: none; }
 [data-motion='none'], [data-motion='none'] * { --dur-fast: 0ms; --dur-ui: 0ms; --dur-move: 0ms; --dur-arrive: 0ms; }
 [data-motion='none'] *, [data-motion='none'] *::before, [data-motion='none'] *::after { animation: none !important; transition: none !important; }
 html.hidden-win .amb * { animation-play-state: paused !important; }
@@ -403,9 +485,9 @@ html.hidden-win .amb * { animation-play-state: paused !important; }
   :root { --arrive-y: 0px; }
   * { --dur-fast: 120ms; --dur-ui: 120ms; --dur-move: 120ms; --dur-arrive: 120ms; }
   .sw2::after { transition: background var(--dur-fast); }
-  :is(.try button:hover > span, .rrow:hover > *) { transform: none; }
+  :is(.try button:hover > span, .rrow:hover > *, .tcard:hover) { transform: none; }
   .cursor, .live, .live::after, .run-dot, .loom-row, .loom-shuttle, .flow-trace, .amb-glow .beam { animation: none !important; }
   .loom-shuttle, .flow-trace { opacity: 0; }
-  .ask, .toast, .ri.need { animation: fade 120ms ease-out both; }
+  .ask, .toast, .ri.need, .coach { animation: fade 120ms ease-out both; }
   .btn:active { transform: none; }
 }

@@ -203,6 +203,31 @@ check('appearance: two previews answered in reverse order leave the screen on th
   deepEqual(failed, [{ key: 'error.look.pairFailed' }]);
 });
 
+check('appearance: a cancelled preview never applies or fails, and a later one still does', async () => {
+  const calls: Array<{ resolve: (look: Look) => void; reject: (err: unknown) => void }> = [];
+  const shown: string[] = [];
+  const failed: unknown[] = [];
+  const preview = previewer(
+    () => new Promise<Look>((resolve, reject) => calls.push({ resolve, reject })),
+    (look) => shown.push(look.appearance.base),
+    (err) => failed.push(err),
+  );
+  const answer = (base: string) => sala({ appearance: { ...sala().appearance, base } });
+  // The step is closed (or the saved look is about to apply) while two requests are on their way.
+  const gone = [preview({ base: 'oficina' }), preview({ base: 'bancada' })];
+  preview.cancel();
+  calls[0]!.resolve(answer('oficina'));
+  calls[1]!.reject({ key: 'error.look.pairFailed' });
+  await Promise.all(gone);
+  deepEqual(shown, []);
+  deepEqual(failed, []);
+  // The step opens again with its own previews.
+  const next = preview({ base: 'bancada' });
+  calls[2]!.resolve(answer('bancada'));
+  await next;
+  deepEqual(shown, ['bancada']);
+});
+
 check('appearance: a rejected save leaves the page as it was, and an accepted one applies the look it answers with', async () => {
   const restore = keepRoot();
   try {

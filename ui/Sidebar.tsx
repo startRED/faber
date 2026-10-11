@@ -96,7 +96,7 @@ export function Sidebar(props: Props) {
           <Icon name="chat" />
           <span>{t('area.chat')}</span>
         </button>
-        <button class="area" aria-pressed={props.place.area === 'project'} onClick={() => props.onArea('project')}>
+        <button class="area" data-tour="projects" aria-pressed={props.place.area === 'project'} onClick={() => props.onArea('project')}>
           <Icon name="folder" />
           <span>{t('area.projects')}</span>
           <span class="count num">{props.projects.length}</span>
