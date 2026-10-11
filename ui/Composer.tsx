@@ -1,4 +1,4 @@
-import { createSignal, For, Show } from 'solid-js';
+import { createSignal, For, onCleanup, Show } from 'solid-js';
 import type { Choice, Vendor } from './api.ts';
 import { t } from './i18n.ts';
 import type { Option } from './models.ts';
@@ -21,6 +21,8 @@ interface Props {
   onSend: (draft: Draft) => void;
   onStop: () => void;
   onWarm: () => void;
+  /** The user stopped typing for a moment: Auto routes the draft before it is sent. */
+  onPause: (text: string) => void;
 }
 
 // Small text files go inside the message (no tool call needed); anything else is attached as a file.
@@ -60,6 +62,8 @@ export function Composer(props: Props) {
   const [draft, setDraft] = createSignal<Draft>(EMPTY);
   const [names, setNames] = createSignal<string[]>([]);
   let warmed = false;
+  let pause: ReturnType<typeof setTimeout> | undefined;
+  onCleanup(() => clearTimeout(pause));
   let fileInput: HTMLInputElement | undefined;
   const selected = () => Math.max(0, props.options.findIndex((o) => o.choice.vendor === props.choice.vendor && o.choice.model === props.choice.model));
   const hasContent = () => draft().text.trim() !== '' || draft().images.length > 0 || draft().files.length > 0;
@@ -75,6 +79,7 @@ export function Composer(props: Props) {
   };
   const send = () => {
     if (!canSend()) return;
+    clearTimeout(pause);
     props.onSend(draft());
     setDraft(EMPTY);
     setNames([]);
@@ -118,6 +123,8 @@ export function Composer(props: Props) {
           const text = e.currentTarget.value;
           setDraft((d) => ({ ...d, text }));
           warm();
+          clearTimeout(pause);
+          if (text.trim()) pause = setTimeout(() => props.onPause(text), 600);
         }}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {

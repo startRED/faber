@@ -58,15 +58,18 @@ Each vendor's model tends to prefer its own company's models, so in Auto no mode
 
 - A small, fast model that is already running (GPT-6 Luna or Haiku at medium effort, whichever is connected) crosses
   the request with the candidates' profiles and picks who answers.
-- Each candidate is a letter with a profile: measured strength per kind of task (code, writing, math, images, long
-  documents, quick chat), speed, and the quota price on its subscription right now. The letters are shuffled on every
-  request. The router returns a letter, its confidence and a one-line reason; low confidence picks the strongest model.
-- Profiles start from public benchmarks, each number linked to its source, and move to Faber's own scoreboard as it
-  fills: which answers users kept, redid or rejected. They ship in the live manifest, so a new model joins without an
-  app release.
+- Each candidate is a letter with a profile: general intelligence and agentic coding scores, seconds per task, and cost
+  per task priced by the quota left on its subscription right now. The letters are shuffled on every request. The
+  router returns a letter, the kind of task, how hard it is and its confidence; low confidence picks the strongest
+  model, and fixed floors keep hard or coding work off weak models (done, `engine/src/route.rs`).
+- Profiles start from public benchmarks (Artificial Analysis, read 22/09 to 08/10/2026, compiled in for now) and move
+  to Faber's own scoreboard as it fills: which answers users kept, redid or rejected. Later they ship in the live
+  manifest, so a new model joins without an app release.
 - No local model and no hosted classifier: routing spends only the subscriptions the user already has.
-- Routing runs on the first message of a conversation and again only when the request changes kind. It has a time
-  budget; past it, the turn starts with the last good pick. The answer shows the chosen model and the reason.
+- Routing runs on the first message of a conversation; later messages stay with the routed model. While the user
+  types, the draft is routed in advance, so most answers start the moment they are sent. A sent message waits at most
+  4 s for its route; past it, the turn starts with the everyday default. The answer shows the chosen model and the
+  reason. Routing again when the request changes kind comes later.
 - The router is measured too: on the benchmark of real requests, its picks must match always using the strongest
   model while spending less quota.
 

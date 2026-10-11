@@ -92,6 +92,12 @@ async fn warm(faber: State<'_, Faber>, req: WarmRequest) -> Res<()> {
 }
 
 #[tauri::command]
+async fn route_draft(faber: State<'_, Faber>, req: WarmRequest, text: String) -> Res<()> {
+    faber.engine.route_draft(req, text);
+    Ok(())
+}
+
+#[tauri::command]
 async fn interrupt(faber: State<'_, Faber>, id: String) -> Res<()> {
     faber.engine.interrupt(&id);
     Ok(())
@@ -216,7 +222,8 @@ pub(crate) fn load_models(app: &AppHandle, codex: Cli, cwd: PathBuf) {
     tauri::async_runtime::spawn(async move {
         let list = list_codex_models(&codex.command, &cwd, cfg!(windows), spawn, Duration::from_secs(20)).await;
         let faber = app.state::<Faber>();
-        faber.engine.set_codex_recommended(list.iter().find(|m| m.is_default).map(|m| m.id.clone()));
+        let recommended = list.iter().find(|m| m.is_default).map(|m| m.id.clone());
+        faber.engine.set_codex_models(list.iter().map(|m| m.id.clone()).collect(), recommended);
         *lock(&faber.models) = list;
         let _ = app.emit("faber:event", AppEvent::List);
     });
@@ -328,6 +335,7 @@ fn main() {
             send,
             branch,
             warm,
+            route_draft,
             interrupt,
             answer,
             rename,
@@ -361,6 +369,7 @@ fn main() {
                 max_warm: 3,
                 idle: Duration::from_secs(120),
                 runtime: tauri::async_runtime::handle().inner().clone(),
+                ask: None,
             };
             app.manage(Faber {
                 engine: Engine::new(opts, emit),

@@ -149,6 +149,13 @@ export function App() {
     }
   };
 
+  // A saved choice that is no longer in the list (a model the account dropped, or the old generic ChatGPT entry)
+  // falls back to Auto without forgetting it, so it comes back if the model does.
+  const picked = (): Choice => {
+    const c = choice();
+    return options().some((o) => o.choice.vendor === c.vendor && o.choice.model === c.model) ? c : { vendor: 'auto' };
+  };
+
   const pickChoice = (c: Choice) => {
     setChoice(c);
     remember('faber.choice', c);
@@ -160,7 +167,7 @@ export function App() {
     setError(undefined);
     stick = true;
     try {
-      const id = await api.send({ conversationId: current()?.id, ...target(), text: draft.text, images: draft.images, files: draft.files, choice: choice() });
+      const id = await api.send({ conversationId: current()?.id, ...target(), text: draft.text, images: draft.images, files: draft.files, choice: picked() });
       if (id !== currentId) await open(id);
     } catch (err) {
       fail(err);
@@ -337,7 +344,7 @@ export function App() {
                       conversationId={c().id}
                       options={options()}
                       onAnswer={(requestId, allow, always) => void api.answer(c().id, requestId, allow, always)}
-                      onBranch={(messageId, text, picked) => void branch(messageId, text, picked ?? choice())}
+                      onBranch={(messageId, text, chosen) => void branch(messageId, text, chosen ?? picked())}
                     />
                   )}
                 </Show>
@@ -353,13 +360,16 @@ export function App() {
                 <Composer
                   vendors={state().vendors}
                   options={options()}
-                  choice={choice()}
+                  choice={picked()}
                   onChoice={pickChoice}
                   busy={busy()}
                   placeholder={area() === 'chat' ? t('composer.chatPlaceholder') : t('composer.projectPlaceholder')}
                   onSend={(d) => void send(d)}
                   onStop={() => current() && void api.interrupt(current()!.id)}
-                  onWarm={() => void api.warm({ conversationId: current()?.id, ...target(), choice: choice() })}
+                  onWarm={() => void api.warm({ conversationId: current()?.id, ...target(), choice: picked() })}
+                  onPause={(text) => {
+                    if (picked().vendor === 'auto' && !current()?.messages.length) void api.routeDraft({ conversationId: current()?.id, ...target(), choice: picked() }, text);
+                  }}
                 />
               </Show>
             </Show>

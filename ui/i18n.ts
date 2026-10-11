@@ -50,5 +50,8 @@ export function t(key: Key, vars: Record<string, string | number> = {}): string 
 /** Texts that arrive from the engine as keys (errors, routing reasons); anything else is shown as it came. */
 export function fromEngine(text: string | undefined): string {
   if (!text) return '';
+  // Auto's reason, "reason.route.<kind>.<level>": the kind of task and how hard it is.
+  const route = /^reason\.route\.(\w+)\.(\w+)$/.exec(text);
+  if (route) return t('reason.route', { kind: t(`kind.${route[1]}` as Key), level: t(`level.${route[2]}` as Key) });
   return text in en ? t(text as Key) : text;
 }

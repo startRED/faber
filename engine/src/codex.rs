@@ -171,6 +171,8 @@ pub struct CodexThread {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub resume: Option<String>,
+    /// A side question (such as routing) with its own instructions: it reads nothing and runs nothing.
+    pub instructions: Option<String>,
 }
 
 enum ServerCommand {
@@ -208,8 +210,13 @@ fn turn_params(thread: &str, effort: Option<&str>, turn: &UserTurn) -> Value {
     params
 }
 
-fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
+pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
     let mut params = codex_thread(area, t.model.as_deref());
+    if let Some(instructions) = &t.instructions {
+        params.insert("baseInstructions".into(), instructions.clone().into());
+        params.insert("sandbox".into(), "read-only".into());
+        params.insert("approvalPolicy".into(), "never".into());
+    }
     params.insert("cwd".into(), t.cwd.to_string_lossy().into_owned().into());
     let method = match &t.resume {
         Some(id) => {

@@ -112,7 +112,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
   return (
     <article class="ai" aria-label={t('answer.label')} aria-busy={streaming()}>
       <div class="model">
-        <b>{prettyModel(m().model)}</b>
+        <b>{m().reason === 'reason.routing' ? t('model.auto') : prettyModel(m().model)}</b>
         <Show when={m().reason}>
           <em>· {fromEngine(m().reason)}</em>
         </Show>

@@ -86,6 +86,7 @@ fn engine(dir: &Path, clis: BTreeMap<Vendor, Cli>, spawn: Spawner) -> (Engine, U
         max_warm: 3,
         idle: Duration::from_secs(120),
         runtime: tokio::runtime::Handle::current(),
+        ask: None,
     };
     (Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))), rx)
 }

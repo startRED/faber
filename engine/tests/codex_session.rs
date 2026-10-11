@@ -2,6 +2,7 @@ mod support;
 
 use faber_engine::codex::{
     CodexServer, CodexServerOptions, CodexThread, CodexTurnState, codex_args, codex_thread, list_codex_models, parse_codex_notification,
+    thread_params,
 };
 use faber_engine::events::{EngineEvent, Session, UserTurn};
 use faber_engine::model::Area;
@@ -16,7 +17,7 @@ async fn run(
     resume: Option<&str>,
     react: impl FnMut(&EngineEvent, &Session) -> bool,
 ) -> (Vec<EngineEvent>, Vec<String>) {
-    let thread = CodexThread { cwd: ".".into(), model: None, effort: None, resume: resume.map(String::from) };
+    let thread = CodexThread { cwd: ".".into(), model: None, effort: None, resume: resume.map(String::from), instructions: None };
     drive(
         entries,
         |spawn, sink| {
@@ -207,7 +208,7 @@ async fn one_process_serves_two_conversations_at_once_and_keeps_their_answers_ap
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let open = |name: &'static str| {
         let tx = tx.clone();
-        let thread = CodexThread { cwd: ".".into(), model: None, effort: Some("medium".into()), resume: None };
+        let thread = CodexThread { cwd: ".".into(), model: None, effort: Some("medium".into()), resume: None, instructions: None };
         server.open(thread, Arc::new(move |e| drop(tx.send((name, e)))))
     };
     let (a, b) = (open("a"), open("b"));
@@ -229,4 +230,17 @@ async fn one_process_serves_two_conversations_at_once_and_keeps_their_answers_ap
         events.iter().find_map(|e| if let EngineEvent::Started { session_id, .. } = e { Some(session_id.clone()) } else { None })
     };
     assert_ne!(started(&events_a), started(&events_b));
+}
+
+#[test]
+fn a_side_question_thread_has_its_own_instructions_and_reads_and_runs_nothing() {
+    let thread =
+        CodexThread { cwd: ".".into(), model: Some("gpt-6-luna".into()), effort: None, resume: None, instructions: Some("Route.".into()) };
+    let (method, params) = thread_params(Area::Chat, &thread);
+    assert_eq!(method, "thread/start");
+    assert_eq!(
+        (&params["baseInstructions"], &params["sandbox"], &params["approvalPolicy"]),
+        (&"Route.".into(), &"read-only".into(), &"never".into())
+    );
+    assert_eq!(params["model"], "gpt-6-luna");
 }

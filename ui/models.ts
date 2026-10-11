@@ -17,12 +17,8 @@ export function modelOptions(vendors: Vendor[], codexModels: ModelInfo[] = []): 
     }
   }
   if (vendors.includes('codex')) {
-    // ChatGPT alone runs the account's recommended model, the one ChatGPT on the web uses; the engine fills it in.
-    const recommended = codexModels.find((m) => m.isDefault);
-    options.push({ label: recommended ? `ChatGPT · ${prettyModel(recommended.id)}` : 'ChatGPT', choice: { vendor: 'codex' } });
-    for (const m of codexModels) {
-      if (!m.isDefault) options.push({ label: prettyModel(m.id), choice: { vendor: 'codex', model: m.id } });
-    }
+    // Each model by its own name, once the account lists them; Auto covers the moment before.
+    for (const m of codexModels) options.push({ label: prettyModel(m.id), choice: { vendor: 'codex', model: m.id } });
   }
   return options;
 }

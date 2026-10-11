@@ -22,8 +22,16 @@ fn engine(dir: &Path, vendor: Vendor, spawn: Spawner) -> (Engine, UnboundedRecei
 fn engine_idle(dir: &Path, vendor: Vendor, spawn: Spawner, idle: Duration) -> (Engine, UnboundedReceiver<AppEvent>) {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let clis = BTreeMap::from([(vendor, Cli { command: vendor.name().into(), prefix: vec![] })]);
-    let opts =
-        EngineOptions { data_dir: dir.into(), clis, spawn, windows: false, max_warm: 3, idle, runtime: tokio::runtime::Handle::current() };
+    let opts = EngineOptions {
+        data_dir: dir.into(),
+        clis,
+        spawn,
+        windows: false,
+        max_warm: 3,
+        idle,
+        runtime: tokio::runtime::Handle::current(),
+        ask: None,
+    };
     (Engine::new(opts, Arc::new(move |e| drop(tx.send(e)))), rx)
 }
 

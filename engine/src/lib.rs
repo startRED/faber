@@ -10,6 +10,7 @@ pub mod events;
 pub mod install;
 pub mod model;
 pub mod proc;
+pub mod route;
 pub mod router;
 pub mod store;
 pub mod workspace;

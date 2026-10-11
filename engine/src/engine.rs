@@ -12,10 +12,14 @@ use crate::store::Store;
 use crate::workspace::{Attachment, inside_folder, new_files, save_files};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
+
+mod auto;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
@@ -26,6 +30,9 @@ pub enum AppEvent {
 }
 
 pub type Emit = Arc<dyn Fn(AppEvent) + Send + Sync>;
+
+/// Answers a routing question in place of the CLIs; tests use it so no real model is called.
+pub type Ask = Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = Option<String>> + Send>> + Send + Sync>;
 
 pub struct EngineOptions {
     pub data_dir: PathBuf,
@@ -38,6 +45,8 @@ pub struct EngineOptions {
     pub idle: Duration,
     /// Where session and timer tasks run, so the engine can be called from any thread.
     pub runtime: tokio::runtime::Handle,
+    /// None asks the fastest cheap connected model; see `route`.
+    pub ask: Option<Ask>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -158,6 +167,13 @@ struct Core {
     codex: HashMap<(Area, bool), CodexServer>,
     /// The ChatGPT model the account recommends, once the CLI has listed the models.
     codex_recommended: Option<String>,
+    /// Every model the account can run on Codex, once listed.
+    codex_models: Vec<String>,
+    /// The latest share of each quota window spent, per vendor.
+    used: HashMap<(Vendor, String), f64>,
+    /// Auto's route for the latest first message or draft.
+    guess: Option<auto::Guess>,
+    next_draft: Option<auto::Draft>,
 }
 
 /// A handle to the engine; clones share the same engine.
@@ -185,6 +201,10 @@ impl Engine {
                 tick: 0,
                 codex: HashMap::new(),
                 codex_recommended: None,
+                codex_models: vec![],
+                used: HashMap::new(),
+                guess: None,
+                next_draft: None,
             })
         });
         Engine { core, runtime }
@@ -198,8 +218,15 @@ impl Engine {
     pub fn vendors(&self) -> Vec<Vendor> {
         self.with(|c| c.vendors())
     }
-    pub fn set_codex_recommended(&self, model: Option<String>) {
-        self.with(|c| c.codex_recommended = model)
+    pub fn set_codex_models(&self, models: Vec<String>, recommended: Option<String>) {
+        self.with(|c| {
+            c.codex_models = models;
+            c.codex_recommended = recommended;
+        })
+    }
+    /// The first message of a conversation in Auto, while the user types it.
+    pub fn route_draft(&self, req: WarmRequest, text: String) {
+        self.with(|c| c.route_draft(req, text))
     }
     pub fn state(&self) -> AppState {
         self.with(|c| c.state())
@@ -220,10 +247,9 @@ impl Engine {
         self.with(|c| c.warm(req))
     }
     pub fn interrupt(&self, id: &str) {
-        self.with(|c| {
-            if let Some(l) = c.live.get(id) {
-                l.session.interrupt();
-            }
+        self.with(|c| match c.live.get(id).filter(|l| l.turn.is_some()) {
+            Some(l) => l.session.interrupt(),
+            None => c.stop_waiting(id),
         })
     }
     pub fn answer(&self, id: &str, request_id: &str, allow: bool, always: bool) {
@@ -462,6 +488,7 @@ impl Core {
                 return self.push(conv, turn_id.as_deref(), true);
             }
             EngineEvent::Quota { window, used, resets_at } => {
+                self.used.insert((vendor, window.clone()), used);
                 return (self.emit)(AppEvent::Quota { vendor, window, used, resets_at });
             }
             EngineEvent::Done { ok, cost_usd, input_tokens, output_tokens, .. } => {
@@ -565,6 +592,39 @@ impl Core {
         }
     }
 
+    /// The shared Codex process for an area and hooks choice, started again if it died.
+    fn codex_server(&mut self, area: Area, user_hooks: bool, cli: &Cli) -> &CodexServer {
+        let opts = CodexServerOptions {
+            bin: cli.command.clone(),
+            cwd: self.opts.data_dir.clone(),
+            area,
+            user_hooks,
+            windows: self.opts.windows,
+            spawn: spawner(&self.opts.spawn, cli),
+        };
+        let server = self.codex.entry((area, user_hooks)).or_insert_with(|| CodexServer::start(opts.clone()));
+        if !server.is_alive() {
+            *server = CodexServer::start(opts);
+        }
+        server
+    }
+
+    /// Hands a turn to the conversation's CLI, starting the CLI if needed.
+    fn start(&mut self, id: &str, reply_id: &str, pick: &Pick, text: String, images: Vec<Image>) -> Result<(), String> {
+        self.launch(id, pick)?;
+        if let Some(running) = self.live.get(id).and_then(|l| l.running.clone())
+            && let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id))
+        {
+            m.model = Some(running);
+        }
+        if let Some(l) = self.live.get_mut(id) {
+            l.turn = Some(reply_id.to_string());
+            l.session.send(UserTurn { text, images });
+        }
+        self.push(id, Some(reply_id), true);
+        Ok(())
+    }
+
     fn launch(&mut self, conv: &str, pick: &Pick) -> Result<(), String> {
         self.tick += 1;
         let cli = self.opts.clis.get(&pick.vendor).cloned();
@@ -579,13 +639,7 @@ impl Core {
         let c = self.convs.get(conv).ok_or("error.conversationGone")?;
         let cwd = self.cwd_of(c)?;
         let cli = cli.ok_or("error.notConnected")?;
-        let base_spawn = self.opts.spawn.clone();
-        let prefix = cli.prefix.clone();
-        let command = cli.command.clone();
-        let spawn: Spawner = Arc::new(move |_bin, args, cwd| {
-            let all: Vec<String> = prefix.iter().cloned().chain(args.iter().cloned()).collect();
-            base_spawn(&command, &all, cwd)
-        });
+        let spawn = spawner(&self.opts.spawn, &cli);
         self.next_sid += 1;
         let sid = self.next_sid;
         let me = self.me.clone();
@@ -598,38 +652,19 @@ impl Core {
         let user_hooks = self.store.settings().user_hooks == Some(true);
         let resume = c.sessions.get(&pick.vendor).cloned();
         let area = c.area;
+        let (model, effort) = (pick.model.clone(), Some(pick.effort.clone()));
         let session = match pick.vendor {
             Vendor::Claude => start_claude(
                 ClaudeOptions {
                     bin: cli.command.clone(),
                     cwd,
-                    launch: ClaudeLaunch { area, model: pick.model.clone(), effort: Some(pick.effort.clone()), resume, user_hooks },
+                    launch: ClaudeLaunch { area, model, effort, resume, user_hooks, instructions: None },
                     spawn,
                 },
                 sink,
             ),
             Vendor::Codex => {
-                let windows = self.opts.windows;
-                let home = self.opts.data_dir.clone();
-                let server = self
-                    .codex
-                    .entry((area, user_hooks))
-                    .and_modify(|s| {
-                        if !s.is_alive() {
-                            *s = CodexServer::start(CodexServerOptions {
-                                bin: cli.command.clone(),
-                                cwd: home.clone(),
-                                area,
-                                user_hooks,
-                                windows,
-                                spawn: spawn.clone(),
-                            });
-                        }
-                    })
-                    .or_insert_with(|| {
-                        CodexServer::start(CodexServerOptions { bin: cli.command.clone(), cwd: home, area, user_hooks, windows, spawn })
-                    });
-                server.open(CodexThread { cwd, model: pick.model.clone(), effort: Some(pick.effort.clone()), resume }, sink)
+                self.codex_server(area, user_hooks, &cli).open(CodexThread { cwd, model, effort, resume, instructions: None }, sink)
             }
         };
         self.live.insert(
@@ -688,7 +723,7 @@ impl Core {
     }
 
     fn send(&mut self, req: SendRequest) -> Result<String, String> {
-        let pick = pick_model(&req.choice, &self.vendors(), self.codex_recommended.as_deref()).ok_or("error.noSubscription")?;
+        let fallback = pick_model(&req.choice, &self.vendors(), self.codex_recommended.as_deref()).ok_or("error.noSubscription")?;
         let existing = req.conversation_id.as_deref().and_then(|id| self.load(id).map(|c| c.id.clone()));
         if let Some(id) = &existing
             && self.live.get(id).is_some_and(|l| l.turn.is_some())
@@ -713,6 +748,15 @@ impl Core {
         };
         let at = now();
         let c = self.convs.get_mut(&id).ok_or("error.conversationGone")?;
+        // Auto routes a conversation's first message; later ones stay with the model it was routed to.
+        let auto = req.choice.vendor == "auto";
+        let routing = auto && c.messages.is_empty();
+        let pick = match auto && !routing {
+            true => {
+                same_as_before(c, self.live.get(&id)).filter(|p| self.opts.clis.contains_key(&p.vendor)).unwrap_or_else(|| fallback.clone())
+            }
+            false => fallback.clone(),
+        };
         if c.title.is_empty() {
             c.title = req.text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(60).collect();
         }
@@ -735,9 +779,11 @@ impl Core {
         question.images = (!req.images.is_empty()).then(|| req.images.clone());
         question.attachments = Some(saved.iter().map(|p| name(p)).collect());
         let mut reply = Message::new(new_id(), Role::Assistant, String::new(), at);
-        reply.vendor = Some(pick.vendor);
-        reply.model = pick.model.clone();
-        reply.reason = Some(pick.reason.clone());
+        if !routing {
+            reply.vendor = Some(pick.vendor);
+            reply.model = pick.model.clone();
+        }
+        reply.reason = Some(if routing { "reason.routing".into() } else { pick.reason.clone() });
         reply.tools = Some(vec![]);
         reply.status = Some(Status::Streaming);
         let reply_id = reply.id.clone();
@@ -749,18 +795,20 @@ impl Core {
         (self.emit)(AppEvent::List);
         // An open conversation only grows through these events, so the question goes out as well as the answer.
         self.emit_message(&id, &question_id);
-        self.launch(&id, &pick)?;
-        if let Some(running) = self.live.get(&id).and_then(|l| l.running.clone())
-            && let Some(m) = self.convs.get_mut(&id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id))
-        {
-            m.model = Some(running);
+        let text = if joining_late { with_history(&history, &text) } else { text };
+        if routing {
+            let route = self.route_for(&req.text, req.images.len() + req.files.len());
+            self.push(&id, Some(&reply_id), true);
+            let (me, conv, images) = (self.me.clone(), id.clone(), req.images);
+            tokio::spawn(async move {
+                let routed = tokio::time::timeout(auto::ROUTE_BUDGET, route).await.ok().and_then(|r| r.ok()).flatten();
+                if let Some(core) = me.upgrade() {
+                    core.lock().unwrap_or_else(|e| e.into_inner()).after_route(&conv, &reply_id, routed, fallback, text, images);
+                }
+            });
+            return Ok(id);
         }
-        if let Some(l) = self.live.get_mut(&id) {
-            l.turn = Some(reply_id.clone());
-            let text = if joining_late { with_history(&history, &text) } else { text };
-            l.session.send(UserTurn { text, images: req.images });
-        }
-        self.push(&id, Some(&reply_id), true);
+        self.start(&id, &reply_id, &pick, text, req.images)?;
         Ok(id)
     }
 
@@ -800,9 +848,24 @@ impl Core {
 
     // Starts the CLI before the user finishes typing, so the first word arrives sooner.
     fn warm(&mut self, req: WarmRequest) {
-        let Some(pick) = pick_model(&req.choice, &self.vendors(), self.codex_recommended.as_deref()) else { return };
+        let Some(fallback) = pick_model(&req.choice, &self.vendors(), self.codex_recommended.as_deref()) else { return };
+        let id = self.draft_for(&req);
+        if self.live.get(&id).is_some_and(|l| l.turn.is_some()) {
+            return;
+        }
+        let pick = match (req.choice.vendor == "auto", self.convs.get(&id)) {
+            // The route decides who answers a first message; until then only the router's own process gets ready.
+            (true, Some(c)) if c.messages.is_empty() => return self.warm_router(),
+            (true, Some(c)) => same_as_before(c, self.live.get(&id)).filter(|p| self.opts.clis.contains_key(&p.vendor)).unwrap_or(fallback),
+            _ => fallback,
+        };
+        let _ = self.launch(&id, &pick);
+    }
+
+    /// The conversation a warm-up or a draft route is for: the open one, or the new one being typed.
+    fn draft_for(&mut self, req: &WarmRequest) -> String {
         let existing = req.conversation_id.as_deref().and_then(|id| self.load(id).map(|c| c.id.clone()));
-        let id = match existing {
+        match existing {
             Some(id) => id,
             None => {
                 let same = self
@@ -822,9 +885,6 @@ impl Core {
                 }
                 self.draft.clone().expect("draft set above")
             }
-        };
-        if !self.live.get(&id).is_some_and(|l| l.turn.is_some()) {
-            let _ = self.launch(&id, &pick);
         }
     }
 
@@ -907,6 +967,21 @@ impl Core {
         (self.emit)(AppEvent::List);
         project
     }
+}
+
+/// Runs the CLI's real executable with its fixed prefix (a script path for npm installs) before the arguments.
+fn spawner(base: &Spawner, cli: &Cli) -> Spawner {
+    let (base, prefix, command) = (base.clone(), cli.prefix.clone(), cli.command.clone());
+    Arc::new(move |_bin, args, cwd| base(&command, &prefix.iter().chain(args).cloned().collect::<Vec<_>>(), cwd))
+}
+
+/// Auto keeps a conversation on the model its first message was routed to.
+fn same_as_before(c: &Conversation, live: Option<&Live>) -> Option<Pick> {
+    let last = c.messages.iter().rev().find(|m| m.role == Role::Assistant && m.vendor.is_some())?;
+    let vendor = last.vendor?;
+    let effort = live.filter(|l| l.vendor == vendor).map_or_else(|| "medium".to_string(), |l| l.effort.clone());
+    let reason = last.reason.clone().filter(|r| r != "reason.routing").unwrap_or_else(|| "reason.autoDefault".into());
+    Some(Pick { vendor, model: last.model.clone(), effort, reason })
 }
 
 fn copy_dir(from: &Path, to: &Path) {

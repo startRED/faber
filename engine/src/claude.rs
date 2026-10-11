@@ -16,6 +16,8 @@ pub struct ClaudeLaunch {
     pub effort: Option<String>,
     pub resume: Option<String>,
     pub user_hooks: bool,
+    /// A side question (such as routing) with its own instructions: no tools, no MCP servers.
+    pub instructions: Option<String>,
 }
 
 // Chat stays lean (about 3k tokens of setup instead of the user's full configuration) and runs in --restricted mode
@@ -40,7 +42,11 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     ]
     .map(String::from)
     .to_vec();
-    if launch.area == Area::Chat {
+    if let Some(instructions) = &launch.instructions {
+        for a in ["--system-prompt", instructions, "--tools", "", "--strict-mcp-config"] {
+            args.push(a.into());
+        }
+    } else if launch.area == Area::Chat {
         // Searching and reading pages never asks, like claude.ai.
         for a in [
             "--restricted",

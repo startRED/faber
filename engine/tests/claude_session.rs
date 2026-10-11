@@ -6,7 +6,7 @@ use faber_engine::model::Area;
 use support::{Entry, drive, fixture, text_of};
 
 fn launch(area: Area) -> ClaudeLaunch {
-    ClaudeLaunch { area, model: None, effort: None, resume: None, user_hooks: false }
+    ClaudeLaunch { area, model: None, effort: None, resume: None, user_hooks: false, instructions: None }
 }
 
 async fn run(
@@ -146,4 +146,13 @@ fn chat_is_lean_and_confined_to_its_workspace_projects_get_the_user_setup_withou
     assert!(!project.contains(&"--restricted".into()) && !project.contains(&"--strict-mcp-config".into()));
     assert_eq!(after(&project, "--settings"), r#"{"disableAllHooks":true}"#);
     assert!(!claude_args(&ClaudeLaunch { user_hooks: true, ..launch(Area::Project) }).contains(&"--settings".into()));
+}
+
+#[test]
+fn a_side_question_gets_its_own_instructions_and_no_tools() {
+    let after = |args: &[String], flag: &str| args[args.iter().position(|a| a == flag).unwrap() + 1].clone();
+    let args = claude_args(&ClaudeLaunch { instructions: Some("Route.".into()), ..launch(Area::Project) });
+    assert_eq!(after(&args, "--system-prompt"), "Route.");
+    assert_eq!(after(&args, "--tools"), "");
+    assert!(args.contains(&"--strict-mcp-config".into()) && !args.contains(&"--settings".into()));
 }

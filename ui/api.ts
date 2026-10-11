@@ -130,6 +130,8 @@ export const api = {
   send: (req: SendRequest) => invoke<string>('send', { req }),
   branch: (req: { conversationId: string; messageId: string; text: string; choice: Choice }) => invoke<string>('branch', { req }),
   warm: (req: { conversationId?: string; area: Area; projectId?: string; choice: Choice }) => invoke<void>('warm', { req }),
+  routeDraft: (req: { conversationId?: string; area: Area; projectId?: string; choice: Choice }, text: string) =>
+    invoke<void>('route_draft', { req, text }),
   interrupt: (id: string) => invoke<void>('interrupt', { id }),
   answer: (id: string, requestId: string, allow: boolean, always = false) => invoke<void>('answer', { id, requestId, allow, always }),
   rename: (id: string, title: string) => invoke<void>('rename', { id, title }),
