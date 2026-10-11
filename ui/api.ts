@@ -125,6 +125,35 @@ export interface ModelInfo {
   description?: string;
   isDefault: boolean;
 }
+/** One conversation that is answering now or waits for the user: a row of the running list (engine/src/model.rs). */
+export interface RunningItem {
+  conversationId: string;
+  /** The id of the turn's reply message. With the request id it names a question: request ids alone repeat. */
+  turnId: string;
+  /** Empty while the conversation has none. */
+  title: string;
+  area: Area;
+  projectId?: string;
+  /** None while Auto is still choosing the model. */
+  vendor?: Vendor;
+  model?: string;
+  state: 'working' | 'needsYou';
+  /** The `at` of the turn's reply message, in milliseconds. */
+  since: number;
+  permissions: Permission[];
+}
+/** The running list in the engine's order, with a revision that grows by one with every list the engine sends. */
+export interface RunningList {
+  revision: number;
+  items: RunningItem[];
+}
+/** The latest reading of one quota window of one vendor. `resetsAt` is in seconds, and 0 when the CLI did not say. */
+export interface QuotaReading {
+  vendor: Vendor;
+  window: string;
+  used: number;
+  resetsAt: number;
+}
 export interface AppState {
   conversations: Summary[];
   projects: Project[];
@@ -132,6 +161,8 @@ export interface AppState {
   settings: Settings;
   look: Look;
   models: ModelInfo[];
+  running: RunningList;
+  quotas: QuotaReading[];
   version: string;
 }
 export interface SavedSettings {
@@ -162,7 +193,8 @@ export interface SetupProgressEvent {
 }
 export type AppEvent =
   | { type: 'message'; conversationId: string; message: Message }
-  | { type: 'quota'; vendor: Vendor; window: string; used: number; resetsAt: number }
+  | ({ type: 'quota' } & QuotaReading)
+  | ({ type: 'running' } & RunningList)
   | { type: 'list' }
   | SetupProgressEvent;
 

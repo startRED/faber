@@ -17,12 +17,17 @@ interface Props {
   choice: Choice;
   onChoice: (choice: Choice) => void;
   busy: boolean;
+  /** A conversation is still opening: nothing can be sent or warmed until it is in. */
+  locked?: boolean;
   placeholder: string;
   onSend: (draft: Draft) => void;
   onStop: () => void;
   onWarm: () => void;
   /** The user stopped typing for a moment: Auto routes the draft before it is sent. */
   onPause: (text: string) => void;
+  /** Hands the screen a function that puts text in the box and focuses it, without sending (the suggestions of the new
+   * conversation use it). */
+  onReady?: (fill: (text: string) => void) => void;
 }
 
 // Small text files go inside the message (no tool call needed); anything else is attached as a file.
@@ -65,14 +70,15 @@ export function Composer(props: Props) {
   let pause: ReturnType<typeof setTimeout> | undefined;
   onCleanup(() => clearTimeout(pause));
   let fileInput: HTMLInputElement | undefined;
+  let field: HTMLTextAreaElement | undefined;
   const selected = () => Math.max(0, props.options.findIndex((o) => o.choice.vendor === props.choice.vendor && o.choice.model === props.choice.model));
   const hasContent = () => draft().text.trim() !== '' || draft().images.length > 0 || draft().files.length > 0;
-  const canSend = () => !props.busy && hasContent() && props.vendors.length > 0;
+  const canSend = () => !props.busy && !props.locked && hasContent() && props.vendors.length > 0;
 
   // The first keystroke starts the CLI, not focus: the box is focused as soon as Faber opens, and an unused Claude
   // process costs about 120 MB.
   const warm = () => {
-    if (!warmed) {
+    if (!warmed && !props.locked) {
       warmed = true;
       props.onWarm();
     }
@@ -85,6 +91,12 @@ export function Composer(props: Props) {
     setNames([]);
     warmed = false;
   };
+  props.onReady?.((text) => {
+    setDraft((d) => ({ ...d, text }));
+    warm();
+    field?.focus();
+    field?.setSelectionRange(text.length, text.length);
+  });
   const add = async (list: Iterable<File>) => {
     const result = await attach(list, draft());
     setDraft(result.draft);
@@ -140,7 +152,10 @@ export function Composer(props: Props) {
           }
         }}
         autofocus
-        ref={(el) => queueMicrotask(() => el.focus())}
+        ref={(el) => {
+          field = el;
+          queueMicrotask(() => el.focus());
+        }}
       />
       <div class="cbar">
         <button type="button" class="pill" onClick={() => fileInput?.click()}>

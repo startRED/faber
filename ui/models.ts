@@ -10,7 +10,7 @@ const VENDOR_NAME: Record<Vendor, string> = { claude: 'Claude', codex: 'ChatGPT'
 
 // Claude Code has no model list, so its aliases are fixed; ChatGPT's list comes from the account.
 export function modelOptions(vendors: Vendor[], codexModels: ModelInfo[] = []): Option[] {
-  const options: Option[] = [{ label: t('model.auto'), choice: { vendor: 'auto' } }];
+  const options: Option[] = [{ label: t('model.autoChoose'), choice: { vendor: 'auto' } }];
   if (vendors.includes('claude')) {
     for (const [label, model] of [['Opus', 'opus'], ['Sonnet', 'sonnet'], ['Haiku', 'haiku']] as const) {
       options.push({ label: `Claude ${label}`, choice: { vendor: 'claude', model } });

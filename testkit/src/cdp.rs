@@ -231,6 +231,9 @@ fn key_info(key: &str) -> Result<(String, String, u32, Option<&'static str>), St
         "Enter" => fixed("Enter", "Enter", 13, Some("\r")),
         "Escape" => fixed("Escape", "Escape", 27, None),
         "Tab" => fixed("Tab", "Tab", 9, None),
+        "ArrowLeft" => fixed("ArrowLeft", "ArrowLeft", 37, None),
+        "ArrowRight" => fixed("ArrowRight", "ArrowRight", 39, None),
+        "." => fixed(".", "Period", 190, Some(".")),
         "," => fixed(",", "Comma", 188, Some(",")),
         k if k.len() == 1 && k.as_bytes()[0].is_ascii_alphabetic() => {
             let upper = k.to_ascii_uppercase();

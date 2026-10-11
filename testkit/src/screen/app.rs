@@ -32,12 +32,22 @@ const S1: &str = r#"(() => {
   const hit = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
   // The extent of the words themselves, not of the block that holds them.
   const ink = (e) => { const range = document.createRange(); range.selectNodeContents(e); return range.getBoundingClientRect(); };
-  const text = [...document.querySelectorAll('.empty h1, .empty p')].map(ink);
-  const collide = ['.amb-loom', '.amb-flow'].filter((s) => drawn(s) && text.some((r) => hit(rect(document.querySelector(s)), r)));
-  const past = [...document.querySelectorAll('.top, .top *, .side, .side *, .empty, .empty *, .composer, .composer *')]
+  const text = [...document.querySelectorAll('.hello, .lead, .empty h1, .empty p')].map(ink);
+  // The loom fades out from its bottom right corner (its mask is clear beyond about two thirds of the way to the far corner),
+  // so words lie over it only when they come within half of that way; the flow line is drawn whole.
+  const near = (r, x, y) => Math.hypot(Math.max(r.left - x, 0, x - r.right), Math.max(r.top - y, 0, y - r.bottom));
+  const over = (s) => {
+    const box = rect(document.querySelector(s));
+    if (s === '.amb-flow') return text.some((r) => hit(box, r));
+    return text.some((r) => near(r, box.right, box.bottom) < 0.5 * Math.hypot(box.width, box.height));
+  };
+  const collide = ['.amb-loom', '.amb-flow'].filter((s) => drawn(s) && over(s));
+  const past = [...document.querySelectorAll('.top, .top *, .topbar, .topbar *, .side, .side *, .welcome-grid, .welcome-grid *, .empty, .empty *, .composer, .composer *')]
     .filter((e) => e.getBoundingClientRect().right > innerWidth + 0.5)
     .map((e) => String(e.className || e.tagName));
-  return { page: document.documentElement.scrollWidth <= innerWidth, past, collide, beam: drawn('.amb-beam'), canvas: !!document.querySelector('.amb-beam canvas'), loom: drawn('.amb-loom'), flow: drawn('.amb-flow') };
+  const hello = document.querySelector('.hello');
+  const heading = !hello || parseFloat(getComputedStyle(hello).fontSize) <= innerWidth * 0.09 + 0.5;
+  return { page: document.documentElement.scrollWidth <= innerWidth, past, collide, heading, beam: drawn('.amb-beam'), canvas: !!document.querySelector('.amb-beam canvas'), loom: drawn('.amb-loom'), flow: drawn('.amb-flow') };
 })()"#;
 
 /// The families the six looks draw with between them.
@@ -78,8 +88,8 @@ fn opens_empty(ctx: &mut Ctx) -> Result {
     let page = &mut app.page;
     let heading = page.named("heading", "empty.chatTitle")?;
     page.wait_visible(&heading)?;
-    let foot = page.inner_text(&css(".foot"))?;
-    ensure(super::has_version_after(&foot, "Claude · v"), || format!("the footer should name the CLI version, it says {foot:?}"))?;
+    let foot = page.inner_text(&css(".version"))?;
+    ensure(super::has_version_after(&foot, "v"), || format!("the footer should name the version, it says {foot:?}"))?;
     let scrolls = page.eval("document.documentElement.scrollHeight > innerHeight")?;
     same(scrolls.as_bool(), Some(false), "the window should not scroll as a whole")?;
     // No system title bar: the top bar carries the window buttons and drags the window.
@@ -139,7 +149,7 @@ fn shows_the_brand(ctx: &mut Ctx) -> Result {
     looks(page, "no project open")?;
     ctx.shot(&mut app, "peek-no-project")?;
     let page = &mut app.page;
-    let demo = css(".nav .item").has_text("Demo");
+    let demo = css(".prow .item").has_text("Demo");
     page.click(&demo)?;
     let name = role("heading", "Demo");
     page.wait_visible(&name)?;
@@ -191,8 +201,8 @@ fn deletes_after_asking(ctx: &mut Ctx) -> Result {
     ask(page, QUESTION)?;
     let actions = page.named("article", "answer.label")?.css(".actions");
     page.wait_visible(&actions)?;
-    page.hover(&css(".list .item"))?;
-    let x = css(".list .item .x");
+    page.hover(&css(".list .crow .item"))?;
+    let x = css(".list .crow .x");
     page.click(&x)?;
     let confirm = page.text_of("side.confirmDelete")?;
     same(page.inner_text(&x)?, confirm, "the first click asks")?;
@@ -343,6 +353,17 @@ fn fits_every_look(ctx: &mut Ctx) -> Result {
             ensure(seen["collide"].as_array().is_some_and(|over| over.is_empty()), || {
                 format!("{at}: these lie over the greeting: {}", seen["collide"])
             })?;
+            ensure(seen["heading"] == true, || format!("{at}: the heading is wider than 9vw in its font size"))?;
+            if width == 1100 {
+                // A suggestion fills the composer and sends nothing.
+                app.page.click(&css(".try button:nth-of-type(1)"))?;
+                same(
+                    app.page.eval("document.querySelector('.composer textarea').value.length > 0")?.as_bool(),
+                    Some(true),
+                    &format!("{at}: the suggestion in the composer"),
+                )?;
+                same(app.page.count(&css("article"))?, 0, &format!("{at}: nothing was sent"))?;
+            }
             if width >= 1280 {
                 let name = if width == 1440 { format!("s1-{id}") } else { format!("s1-{id}-{width}") };
                 ctx.shot(&mut app, &name)?;

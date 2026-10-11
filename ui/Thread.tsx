@@ -1,7 +1,8 @@
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import { createResource, createSignal, For, Index, Show, type Accessor } from 'solid-js';
-import { api, type Choice, type Message, type Permission, type ToolUse } from './api.ts';
+import { api, type Choice, type Message, type ToolUse } from './api.ts';
+import { Asks } from './Ask.tsx';
 import { fromEngine, t } from './i18n.ts';
 import { prettyModel, type Option } from './models.ts';
 
@@ -52,18 +53,6 @@ function toolLabel(tool: ToolUse): string {
   return detail ? `${tool.name}: ${String(detail)}` : tool.name;
 }
 
-// What a permission request means, in plain words.
-function describe(tool: string, input: unknown): { title: string; note?: string; body: string } {
-  const i = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
-  const raw = typeof input === 'string' ? input : JSON.stringify(input, null, 2);
-  if (tool === 'Bash' || tool === 'command') {
-    return { title: t('ask.command'), note: typeof i.description === 'string' ? i.description : undefined, body: typeof input === 'string' ? input : String(i.command ?? raw) };
-  }
-  if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'fileChange'].includes(tool)) return { title: t('ask.file'), body: String(i.file_path ?? i.path ?? raw) };
-  if (tool === 'WebFetch') return { title: t('ask.page'), body: String(i.url ?? raw) };
-  return { title: t('ask.other', { tool }), body: raw };
-}
-
 function usage(m: Message): string {
   const parts: string[] = [];
   if (m.costUsd) parts.push(t('answer.cost', { cost: m.costUsd.toFixed(4) }));
@@ -71,39 +60,12 @@ function usage(m: Message): string {
   return parts.join(' · ');
 }
 
-/** `turnId` is the id of the message that holds the card. */
-type OnAnswer = (turnId: string, requestId: string, allow: boolean, always?: boolean) => void;
 type OnBranch = (messageId: string, text: string, choice?: Choice) => void;
 
 interface Shared {
   conversationId: string;
   options: Option[];
-  onAnswer: OnAnswer;
   onBranch: OnBranch;
-}
-
-function Ask(props: { permission: Permission; turnId: string; onAnswer: OnAnswer }) {
-  const d = () => describe(props.permission.tool, props.permission.input);
-  return (
-    <div class="ask" role="alertdialog" aria-label={t('ask.label')}>
-      <b>{d().title}</b>
-      <Show when={d().note}>
-        <span class="note">{d().note}</span>
-      </Show>
-      <pre>{d().body}</pre>
-      <div>
-        <button class="btn primary" onClick={() => props.onAnswer(props.turnId, props.permission.requestId, true)}>
-          {t('ask.allow')}
-        </button>
-        <button class="btn" onClick={() => props.onAnswer(props.turnId, props.permission.requestId, true, true)}>
-          {t('ask.always')}
-        </button>
-        <button class="btn" onClick={() => props.onAnswer(props.turnId, props.permission.requestId, false)}>
-          {t('ask.deny')}
-        </button>
-      </div>
-    </div>
-  );
 }
 
 function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
@@ -135,12 +97,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
           </For>
         </div>
       </Show>
-      <Show when={waiting()[0]} keyed>
-        {(p) => <Ask permission={p} turnId={m().id} onAnswer={props.onAnswer} />}
-      </Show>
-      <Show when={waiting().length > 1}>
-        <div class="note">{t('ask.moreWaiting', { n: waiting().length - 1 })}</div>
-      </Show>
+      <Asks conversationId={props.conversationId} turnId={m().id} permissions={waiting()} />
       <div class="md" onClick={openLinks}>
         <div innerHTML={html(m().text)} />
         <Show when={streaming() && !waiting().length}>
