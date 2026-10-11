@@ -6,6 +6,7 @@
 #[cfg(all(feature = "test-hooks", not(debug_assertions)))]
 compile_error!("the `test-hooks` feature is for debug test builds only; it must not be enabled in a release build");
 
+mod look;
 mod setup;
 mod terminal;
 
@@ -15,8 +16,11 @@ use faber_engine::codex::{ModelInfo, list_codex_models};
 use faber_engine::model::{Conversation, Project, Settings, Vendor};
 use faber_engine::proc::{Spawner, real_spawner};
 use faber_engine::{AppEvent, AppState, BranchRequest, Engine, EngineOptions, SendRequest, WarmRequest};
+use look::{Failure, Look, ThemeFile};
 use serde::Serialize;
+use serde_json::{Map, Value};
 use std::collections::BTreeMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -46,8 +50,17 @@ type Res<T> = Result<T, String>;
 struct FullState {
     #[serde(flatten)]
     state: AppState,
+    /// The look of the saved appearance; the screen applies it before it renders.
+    look: Look,
     models: Vec<ModelInfo>,
     version: String,
+}
+
+/// What `save_settings` answers: the settings as stored, and the look computed from the stored appearance.
+#[derive(Serialize)]
+struct SavedSettings {
+    settings: Settings,
+    look: Look,
 }
 
 const IMAGE_TYPES: [(&str, &str); 6] = [
@@ -71,7 +84,10 @@ fn main_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
 
 #[tauri::command]
 async fn state(app: AppHandle, faber: State<'_, Faber>) -> Res<FullState> {
-    Ok(FullState { state: faber.engine.state(), models: lock(&faber.models).clone(), version: app.package_info().version.to_string() })
+    let mut state = faber.engine.state();
+    state.settings.appearance = look::usable(state.settings.appearance.take());
+    let look = look::stored(state.settings.appearance.as_ref());
+    Ok(FullState { state, look, models: lock(&faber.models).clone(), version: app.package_info().version.to_string() })
 }
 
 #[tauri::command]
@@ -131,9 +147,49 @@ async fn remove_project(faber: State<'_, Faber>, id: String) -> Res<()> {
     Ok(())
 }
 
+/// The look of an appearance that is not saved. Failing pairs come back inside the look.
 #[tauri::command]
-async fn save_settings(faber: State<'_, Faber>, patch: Settings) -> Res<Settings> {
-    Ok(faber.engine.save_settings(patch))
+async fn preview_look(appearance: Map<String, Value>) -> Result<Look, Failure> {
+    look::preview(&appearance)
+}
+
+/// A theme file comes from other people, so an appearance is checked here before anything is saved.
+#[tauri::command]
+async fn save_settings(faber: State<'_, Faber>, mut patch: Settings) -> Result<SavedSettings, Failure> {
+    if let Some(map) = &patch.appearance {
+        patch.appearance = Some(look::validated(map)?.0.to_map());
+    }
+    let mut settings = faber.engine.save_settings(patch)?;
+    settings.appearance = look::usable(settings.appearance.take());
+    let look = look::stored(settings.appearance.as_ref());
+    Ok(SavedSettings { settings, look })
+}
+
+#[tauri::command]
+async fn save_theme(app: AppHandle, appearance: Map<String, Value>, name: String) -> Result<bool, Failure> {
+    let json = look::write_theme_file(&appearance, &name)?;
+    let mut dialog = app.dialog().file().add_filter("JSON", &["json"]).set_file_name(format!("my-theme{}", look::theme_extension()));
+    if let Some(w) = main_window(&app) {
+        dialog = dialog.set_parent(&w);
+    }
+    let Some(target) = dialog.blocking_save_file() else { return Ok(false) };
+    std::fs::write(target.into_path().map_err(|e| e.to_string())?, json).map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+#[tauri::command]
+async fn open_theme(app: AppHandle) -> Result<Option<ThemeFile>, Failure> {
+    let mut dialog = app.dialog().file().add_filter("JSON", &["json"]);
+    if let Some(w) = main_window(&app) {
+        dialog = dialog.set_parent(&w);
+    }
+    let Some(picked) = dialog.blocking_pick_file() else { return Ok(None) };
+    // One byte past the limit is enough to refuse a file without loading it.
+    let mut bytes = Vec::new();
+    std::fs::File::open(picked.into_path().map_err(|e| e.to_string())?)
+        .and_then(|f| f.take(look::max_theme_bytes() + 1).read_to_end(&mut bytes))
+        .map_err(|e| e.to_string())?;
+    look::parse_theme_file(&bytes).map(Some)
 }
 
 #[tauri::command]
@@ -272,6 +328,8 @@ fn show(app: &AppHandle) {
 
 fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Result<tauri::WebviewWindow> {
     let handle = app.clone();
+    // The first paint already has the theme's own colour.
+    let [r, g, b] = look::frame_color(&look::stored(app.state::<Faber>().engine.settings().appearance.as_ref()));
     // A test build started with `FABER_CHECKS_OUT` opens the page that runs the screen's checks and reports them.
     #[cfg(feature = "test-hooks")]
     let url =
@@ -282,7 +340,7 @@ fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Resul
         .title("Faber")
         .inner_size(1280.0, 800.0)
         .min_inner_size(720.0, 480.0)
-        .background_color(Color(0x15, 0x17, 0x1b, 0xff))
+        .background_color(Color(r, g, b, 0xff))
         // The page never leaves Faber; a web link that slips through opens in the browser instead.
         .on_navigation(move |url| {
             let inside = url.scheme() == "tauri"
@@ -371,7 +429,10 @@ fn main() {
             rename,
             remove,
             remove_project,
+            preview_look,
             save_settings,
+            save_theme,
+            open_theme,
             add_project,
             save_file,
             show_file,

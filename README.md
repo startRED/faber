@@ -25,6 +25,7 @@ nobody needs an API key. Faber never reads or stores your logins: you sign in th
   branching a conversation.
 - Auto, which picks the model for each message and shows why.
 - A tray icon, five languages and self-updates.
+- Six looks: three themes and three presets, with your own accent, fonts, text size, density and motion.
 
 ## Planned
 
@@ -50,7 +51,8 @@ The rest of the direction is not built yet. The roadmap says which phase brings 
 - **Universal, not scripted.** No fixed pipelines per task. The agent decides each step; recipes are learned shortcuts,
   never menus.
 - **Nothing third-party is bundled.** This already holds for the app and the repo.
-- **Light.** Faber with no CLI running stays under 500 MB when complete. Today it measures 89 MB idle.
+- **Light.** Faber with no CLI running stays under 500 MB when complete. Today it measures about 110 MB idle on the new
+  conversation, with its dust effect running.
 
 ## Build from source
 

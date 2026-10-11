@@ -1,8 +1,9 @@
 import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, onMount, Show, Switch } from 'solid-js';
-import { api, errorText, type AppState, type Choice, type Conversation, type Settings as Saved, type Vendor } from './api.ts';
-import { applyAppearance, followSystem, toAppearance, type Appearance } from './appearance.ts';
+import { Ambient } from './Ambient.tsx';
+import { api, type Appearance, type AppState, type Choice, type Conversation, type Settings as Saved, type Vendor } from './api.ts';
+import { inOrder, saveAndApply, watchSystem } from './appearance.ts';
 import { Composer, type Draft } from './Composer.tsx';
-import { fromEngine, lang, t, useLanguage } from './i18n.ts';
+import { failureText, lang, t, useLanguage } from './i18n.ts';
 import { en, type Key } from './locales/en.ts';
 import { modelOptions, vendorName } from './models.ts';
 import { createOpening, upsert } from './opening.ts';
@@ -48,46 +49,34 @@ function windowName(window: string): string {
   return key in en ? t(key as Key) : window.replace('_', ' ');
 }
 
-export function App() {
-  const [state, setState] = createSignal<AppState>({ conversations: [], projects: [], vendors: [], settings: {}, models: [], version: '' });
-  const [loaded, setLoaded] = createSignal(false);
-  const [area, setArea] = createSignal<Area>('chat');
-  const [projectId, setProjectId] = createSignal<string>();
+/** `initial` is the state the page started from; `main.tsx` has already applied its look. */
+export function App(props: { initial: AppState }) {
+  const place = recall<Place | undefined>('faber.place', undefined);
+  useLanguage(props.initial.settings.language);
+  const [state, setState] = createSignal<AppState>(props.initial);
+  const [area, setArea] = createSignal<Area>(place?.area ?? 'chat');
+  const [projectId, setProjectId] = createSignal<string | undefined>(place?.projectId);
   const [current, setCurrent] = createSignal<Conversation>();
   const [choice, setChoice] = createSignal<Choice>(recall<Choice>('faber.choice', { vendor: 'auto' }));
   const [quotas, setQuotas] = createSignal<Record<string, Quota>>({});
   const [error, setError] = createSignal<string>();
+  // The text of the last refused or failed save of settings; the page stays as it was.
+  const [saveError, setSaveError] = createSignal<string>();
   const [settingsOpen, setSettingsOpen] = createSignal(false);
-  const [setupOpen, setSetupOpen] = createSignal(false);
-  const [appearance, setAppearance] = createSignal<Appearance>(toAppearance(undefined));
+  const [setupOpen, setSetupOpen] = createSignal(shouldOpenSetup(props.initial.settings, props.initial.conversations));
   const [confirming, setConfirming] = createSignal<string>();
   const [from, setFrom] = createSignal(0);
   const opening = createOpening();
   let thread: HTMLDivElement | undefined;
+  let main: HTMLElement | undefined;
   let stick = true;
 
-  const refresh = () => api.state().then((s) => (setState(s), setLoaded(true)));
-  const fail = (err: unknown) => setError(fromEngine(errorText(err)));
+  const refresh = () => api.state().then(setState);
+  const fail = (err: unknown) => setError(failureText(err));
 
   onMount(() => {
-    void api.state().then((s) => {
-      const a = toAppearance(s.settings.appearance);
-      setAppearance(a);
-      applyAppearance(a);
-      useLanguage(s.settings.language);
-      setState(s);
-      setLoaded(true);
-      if (shouldOpenSetup(s.settings, s.conversations)) {
-        setSetupOpen(true);
-      }
-      const place = recall<Place | undefined>('faber.place', undefined);
-      if (place) {
-        setArea(place.area);
-        setProjectId(place.projectId);
-        if (place.id && s.conversations.some((c) => c.id === place.id)) void open(place.id);
-      }
-    });
-    const stopFollowing = followSystem(() => appearance());
+    if (place?.id && props.initial.conversations.some((c) => c.id === place.id)) void open(place.id);
+    const stopFollowing = watchSystem();
     const unlisten = api.on((e) => {
       if (e.type === 'list') void refresh();
       if (e.type === 'quota') setQuotas((q) => ({ ...q, [`${e.vendor}:${e.window}`]: e }));
@@ -106,6 +95,7 @@ export function App() {
       if (e.key === 'Escape') {
         setSettingsOpen(false);
         setSetupOpen(false);
+        setSaveError(undefined);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -185,17 +175,24 @@ export function App() {
     }
   };
 
-  const changeAppearance = (a: Appearance) => {
-    setAppearance(a);
-    applyAppearance(a);
-    void api.saveSettings({ appearance: { ...a } });
+  // Saves run one at a time, so each is built from what the one before stored and answers in order.
+  const inTurn = inOrder();
+  // The page changes only after the save succeeded. A refusal or a failed write keeps it as it was and says why.
+  const persist = async (patch: Saved): Promise<boolean> => {
+    setSaveError(undefined);
+    try {
+      const saved = await saveAndApply(patch, api.saveSettings);
+      setState((s) => ({ ...s, settings: saved.settings, look: saved.look }));
+      if (patch.language !== undefined) useLanguage(saved.settings.language);
+      return true;
+    } catch (err) {
+      setSaveError(failureText(err));
+      return false;
+    }
   };
-  // The switch moves at once; the file is written in the background.
-  const saveSettings = (patch: Saved) => {
-    setState((s) => ({ ...s, settings: { ...s.settings, ...patch } }));
-    if (patch.language !== undefined) useLanguage(patch.language);
-    void api.saveSettings(patch);
-  };
+  const saveSettings = (patch: Saved) => inTurn(() => persist(patch));
+  const changeAppearance = (next: (current: Appearance | undefined) => Appearance) =>
+    inTurn(() => persist({ appearance: next(state().settings.appearance) }));
 
   const switchArea = (next: Area) => {
     setSettingsOpen(false);
@@ -227,13 +224,17 @@ export function App() {
     return [...best.values()];
   };
   const needsProject = () => area() === 'project' && !project();
+  // The new conversation of a chat with a connected AI is the one place the effects of a look appear.
+  const newChat = () => area() === 'chat' && state().vendors.length > 0 && !current()?.messages.length;
   const composerKey = () => current()?.id ?? `new-${area()}-${projectId() ?? ''}`;
 
   return (
     <div class="app">
       {/* The top bar is the window's title bar: empty space drags the window, double click maximizes. */}
       <header class="top" classList={{ mac }} data-tauri-drag-region>
-        <strong data-tauri-drag-region>Faber</strong>
+        <strong class="brand" data-tauri-drag-region>
+          Faber
+        </strong>
         <div class="toggle" role="group" aria-label={t('area.label')}>
           <button aria-pressed={area() === 'chat'} onClick={() => switchArea('chat')}>
             {t('area.chat')}
@@ -256,16 +257,26 @@ export function App() {
         </button>
         <WindowControls />
       </header>
+      <Show when={saveError()}>
+        <div class="toast" role="alert">
+          <span>{saveError()}</span>
+          <button type="button" aria-label={t('toast.dismiss')} onClick={() => setSaveError(undefined)}>
+            ×
+          </button>
+        </div>
+      </Show>
       <Show
         when={!setupOpen()}
         fallback={
           <Setup
             onClose={() => setSetupOpen(false)}
-            onFinish={(result) => {
-              saveSettings({ setup: result });
-              setSetupOpen(false);
-              void refresh();
-            }}
+            onFinish={(result) =>
+              void saveSettings({ setup: result }).then((saved) => {
+                if (!saved) return;
+                setSetupOpen(false);
+                void refresh();
+              })
+            }
           />
         }
       >
@@ -273,7 +284,7 @@ export function App() {
           when={!settingsOpen()}
           fallback={
             <Settings
-              appearance={appearance()}
+              look={state().look}
               saved={state().settings}
               onAppearance={changeAppearance}
               onSave={saveSettings}
@@ -291,7 +302,7 @@ export function App() {
               <Show
                 when={area() === 'project'}
                 fallback={
-                  <button class="item" onClick={() => void open(undefined)}>
+                  <button class="item new" onClick={() => void open(undefined)}>
                     <span>{t('side.newChat')}</span>
                     <kbd>Ctrl N</kbd>
                   </button>
@@ -333,10 +344,14 @@ export function App() {
               {state().vendors.length ? state().vendors.map(vendorName).join(' · ') : t('side.noAi')} · v{state().version}
             </div>
           </aside>
-          <main class="main">
-            <div class="thread" ref={(el) => (thread = el)} onScroll={(e) => onScroll(e.currentTarget)}>
+          <main class="main" ref={(el) => (main = el)}>
+            <Show when={newChat()}>
+              {/* The effects of the look sit behind the greeting; dust keeps clear of the text and the composer. */}
+              <Ambient vendors={state().vendors} avoid={() => [...main!.querySelectorAll('.empty h1, .empty p, .composer')]} />
+            </Show>
+            <div class="thread" classList={{ welcome: !current()?.messages.length }} ref={(el) => (thread = el)} onScroll={(e) => onScroll(e.currentTarget)}>
               <div class="col">
-                <Show when={current()?.messages.length ? current() : undefined} fallback={<Empty loaded={loaded()} vendors={state().vendors.length} area={area()} project={project()} />}>
+                <Show when={current()?.messages.length ? current() : undefined} fallback={<Empty vendors={state().vendors.length} area={area()} project={project()} />}>
                   {(c) => (
                     <Thread
                       messages={c().messages}
@@ -381,29 +396,27 @@ export function App() {
   );
 }
 
-function Empty(props: { loaded: boolean; vendors: number; area: Area; project?: { name: string; path: string } }) {
+function Empty(props: { vendors: number; area: Area; project?: { name: string; path: string } }) {
   return (
     <div class="empty">
-      <Show when={props.loaded}>
-        <Switch>
-          <Match when={props.vendors === 0}>
-            <h1>{t('empty.noAiTitle')}</h1>
-            <p>{t('empty.noAiBody')}</p>
-          </Match>
-          <Match when={props.area === 'project' && !props.project}>
-            <h1>{t('empty.openProjectTitle')}</h1>
-            <p>{t('empty.openProjectBody')}</p>
-          </Match>
-          <Match when={props.area === 'project'}>
-            <h1>{props.project?.name}</h1>
-            <p>{t('empty.projectBody', { path: props.project?.path ?? '' })}</p>
-          </Match>
-          <Match when={true}>
-            <h1>{t('empty.chatTitle')}</h1>
-            <p>{t('empty.chatBody')}</p>
-          </Match>
-        </Switch>
-      </Show>
+      <Switch>
+        <Match when={props.vendors === 0}>
+          <h1 class="display">{t('empty.noAiTitle')}</h1>
+          <p>{t('empty.noAiBody')}</p>
+        </Match>
+        <Match when={props.area === 'project' && !props.project}>
+          <h1 class="display">{t('empty.openProjectTitle')}</h1>
+          <p>{t('empty.openProjectBody')}</p>
+        </Match>
+        <Match when={props.area === 'project'}>
+          <h1 class="display">{props.project?.name}</h1>
+          <p>{t('empty.projectBody', { path: props.project?.path ?? '' })}</p>
+        </Match>
+        <Match when={true}>
+          <h1 class="display">{t('empty.chatTitle')}</h1>
+          <p>{t('empty.chatBody')}</p>
+        </Match>
+      </Switch>
     </div>
   );
 }

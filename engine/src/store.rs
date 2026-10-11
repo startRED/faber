@@ -5,6 +5,7 @@ use crate::model::{Conversation, Project, Settings, Summary};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 pub struct Store {
@@ -13,12 +14,11 @@ pub struct Store {
     settings: PathBuf,
 }
 
-fn write<T: Serialize>(path: &Path, value: &T) {
+/// Writes through a temp file. On failure the temp file is removed and the error returned; the old file stays as it was.
+fn write<T: Serialize>(path: &Path, value: &T) -> io::Result<()> {
     let tmp = path.with_extension("json.tmp");
     let json = serde_json::to_string_pretty(value).expect("plain data always serializes");
-    if fs::write(&tmp, json).is_ok() {
-        let _ = fs::rename(&tmp, path);
-    }
+    fs::write(&tmp, json).and_then(|()| fs::rename(&tmp, path)).inspect_err(|_| drop(fs::remove_file(&tmp)))
 }
 
 fn read<T: DeserializeOwned>(path: &Path) -> Option<T> {
@@ -58,7 +58,7 @@ impl Store {
     }
 
     pub fn save(&self, conversation: &Conversation) {
-        write(&self.file(&conversation.id), conversation);
+        let _ = write(&self.file(&conversation.id), conversation);
     }
 
     pub fn remove(&self, id: &str) {
@@ -72,14 +72,29 @@ impl Store {
     }
 
     pub fn save_projects(&self, projects: &[Project]) {
-        write(&self.projects, &projects);
+        let _ = write(&self.projects, &projects);
     }
 
     pub fn settings(&self) -> Settings {
         read(&self.settings).unwrap_or_default()
     }
 
-    pub fn save_settings(&self, settings: &Settings) {
-        write(&self.settings, settings);
+    pub fn save_settings(&self, settings: &Settings) -> io::Result<()> {
+        write(&self.settings, settings)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_rename_returns_the_error_and_removes_the_temp_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("settings.json");
+        fs::create_dir_all(target.join("inside")).unwrap();
+        assert!(write(&target, &Settings::default()).is_err());
+        assert!(!dir.path().join("settings.json.tmp").exists());
+        assert!(target.join("inside").is_dir(), "the destination was left alone");
     }
 }

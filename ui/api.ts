@@ -65,8 +65,56 @@ export interface Project {
   name: string;
   path: string;
 }
+// The shapes the look engine sends and takes (src-tauri/src/look.rs). The screen never computes a colour.
+export type Motion = 'full' | 'reduced' | 'none';
+export interface Effects {
+  ambient: boolean;
+  texture: boolean;
+  glow: boolean;
+}
+/** The user's choices behind a look. Only `base` is required; the rest falls back to the base's own value. */
+export interface Appearance {
+  base: string;
+  ground?: string;
+  accent?: string;
+  textFont?: string;
+  headingFont?: string;
+  textSize?: number;
+  density?: number;
+  corners?: number;
+  motion?: Motion;
+  effects?: Effects;
+  colors?: Record<string, string>;
+}
+export interface Check {
+  a: string;
+  b: string;
+  ratio: number;
+  min: number;
+  pass: boolean;
+}
+export interface Look {
+  /** CSS custom properties, without the leading dashes. */
+  vars: Record<string, string>;
+  scheme: 'dark' | 'light';
+  motion: Motion;
+  effects: Effects;
+  checks: Check[];
+  /** Translation keys, such as `look.accentAdjusted`. */
+  notices: string[];
+  /** The choices with every field filled in from the base, so a control can show what is on. */
+  /** Every choice filled in; a look with a heading of its own (Cobalt) has no `headingFont` until one is chosen. */
+  appearance: Required<Omit<Appearance, 'colors' | 'headingFont'>> & { headingFont?: string; colors?: Record<string, string> };
+}
+/** A refusal from the look engine: a translation key and the field or pairs it is about. */
+export interface Failure {
+  key: string;
+  detail?: string;
+}
+export type ThemeFile = Appearance & { name: string };
+
 export interface Settings {
-  appearance?: Record<string, string | null>;
+  appearance?: Appearance;
   userHooks?: boolean;
   language?: string;
   setup?: 'done' | 'skipped';
@@ -82,8 +130,13 @@ export interface AppState {
   projects: Project[];
   vendors: Vendor[];
   settings: Settings;
+  look: Look;
   models: ModelInfo[];
   version: string;
+}
+export interface SavedSettings {
+  settings: Settings;
+  look: Look;
 }
 export interface Choice {
   vendor: Vendor | 'auto';
@@ -138,7 +191,10 @@ export const api = {
   remove: (id: string) => invoke<void>('remove', { id }),
   removeProject: (id: string) => invoke<void>('remove_project', { id }),
   addProject: () => invoke<Project | null>('add_project'),
-  saveSettings: (patch: Settings) => invoke<Settings>('save_settings', { patch }),
+  previewLook: (appearance: Appearance) => invoke<Look>('preview_look', { appearance }),
+  saveSettings: (patch: Settings) => invoke<SavedSettings>('save_settings', { patch }),
+  saveTheme: (appearance: Appearance, name: string) => invoke<boolean>('save_theme', { appearance, name }),
+  openTheme: () => invoke<ThemeFile | null>('open_theme'),
   saveFile: (id: string, path: string) => invoke<boolean>('save_file', { id, path }),
   showFile: (id: string, path: string) => invoke<void>('show_file', { id, path }),
   readImage: (id: string, path: string) => invoke<string | null>('read_image', { id, path }),
@@ -151,5 +207,10 @@ export const api = {
   on: (listener: (event: AppEvent) => void) => listen<AppEvent>('faber:event', (e) => listener(e.payload)),
 };
 
-/** The engine reports user-facing errors as translation keys; Tauri wraps them as plain strings. */
-export const errorText = (err: unknown) => (typeof err === 'string' ? err : err instanceof Error ? err.message : String(err));
+/** The engine reports user-facing errors as translation keys; Tauri wraps them as plain strings. The look engine
+ * rejects with a `Failure` instead, so its error can name the field or the pairs. */
+export const failureOf = (err: unknown): Failure => {
+  if (typeof err === 'object' && err !== null && 'key' in err && typeof err.key === 'string') return err as Failure;
+  return { key: typeof err === 'string' ? err : err instanceof Error ? err.message : String(err) };
+};
+export const errorText = (err: unknown) => failureOf(err).key;

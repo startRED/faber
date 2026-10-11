@@ -323,13 +323,51 @@ async fn the_hooks_choice_is_saved_and_restarts_idle_project_clis_with_it() {
     let last_args = || f.args.lock().unwrap().last().cloned().unwrap_or_default().join(" ");
     engine.warm(warm());
     assert!(last_args().contains("disableAllHooks"));
-    engine.save_settings(Settings { user_hooks: Some(true), ..Settings::default() });
+    engine.save_settings(Settings { user_hooks: Some(true), ..Settings::default() }).unwrap();
     engine.warm(warm());
     assert!(!last_args().contains("disableAllHooks"));
-    let appearance = serde_json::json!({ "mode": "light" }).as_object().cloned();
-    engine.save_settings(Settings { appearance, ..Settings::default() });
+    let appearance = serde_json::json!({ "base": "oficina" }).as_object().cloned();
+    engine.save_settings(Settings { appearance, ..Settings::default() }).unwrap();
     engine.shutdown();
-    assert_eq!(read_json(&dir.path().join("settings.json")), serde_json::json!({ "userHooks": true, "appearance": { "mode": "light" } }));
+    assert_eq!(read_json(&dir.path().join("settings.json")), serde_json::json!({ "userHooks": true, "appearance": { "base": "oficina" } }));
+}
+
+#[tokio::test]
+async fn a_settings_write_that_fails_keeps_the_saved_settings_and_changes_nothing_live() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "chat"));
+    let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let project = engine.add_project(&dir.path().to_string_lossy());
+    let saved = Settings {
+        appearance: serde_json::json!({ "base": "oficina" }).as_object().cloned(),
+        user_hooks: Some(false),
+        language: Some("pt-BR".into()),
+        ..Settings::default()
+    };
+    engine.save_settings(saved.clone()).unwrap();
+    let file = dir.path().join("settings.json");
+    let bytes = std::fs::read(&file).unwrap();
+    let warm =
+        WarmRequest { conversation_id: None, area: Area::Project, project_id: Some(project.id.clone()), choice: choice("claude", None) };
+    engine.warm(warm.clone());
+    let started = f.args.lock().unwrap().len();
+
+    // A directory where the temp file goes makes the write fail while settings.json stays valid.
+    let tmp = dir.path().join("settings.json.tmp");
+    std::fs::create_dir(&tmp).unwrap();
+    let patch = Settings { user_hooks: Some(true), language: Some("de".into()), ..Settings::default() };
+    assert_eq!(engine.save_settings(patch.clone()).unwrap_err(), "error.settings.saveFailed");
+    assert_eq!(std::fs::read(&file).unwrap(), bytes);
+    assert_eq!(engine.state().settings, saved);
+    engine.warm(warm.clone());
+    assert_eq!(f.args.lock().unwrap().len(), started, "the failed save restarted an idle project CLI");
+
+    std::fs::remove_dir(&tmp).unwrap();
+    assert!(!tmp.exists());
+    let after = engine.save_settings(patch).unwrap();
+    assert_eq!((after.user_hooks, after.language.as_deref()), (Some(true), Some("de")));
+    assert_eq!(engine.state().settings, after);
+    engine.shutdown();
 }
 
 #[tokio::test]

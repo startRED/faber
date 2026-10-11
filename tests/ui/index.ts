@@ -11,6 +11,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { LANGUAGES, t } from '../../ui/i18n.ts';
 import type { Key } from '../../ui/locales/en.ts';
 import { runAll, type Result } from './check.ts';
+import './appearance.check.ts';
 import './check.check.ts';
 import './i18n.check.ts';
 import './models.check.ts';

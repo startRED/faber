@@ -1,68 +1,106 @@
-import '@fontsource-variable/jetbrains-mono';
-import '@fontsource-variable/mona-sans';
+import { createSignal } from 'solid-js';
+import type { Appearance, Look, Motion, SavedSettings, Settings } from './api.ts';
 
-// Settings > Appearance (docs/design.md). A theme is a plain object, so it can be saved, shared and offered by the catalog.
-export interface Appearance {
-  mode: 'dark' | 'black' | 'light' | 'system';
-  accent: keyof typeof ACCENTS;
-  custom: string | null; // any color the user picked, instead of a named accent
-  ui: keyof typeof UI;
-  read: keyof typeof READ | 'same';
-  density: 'comfortable' | 'compact';
-  corners: 'round' | 'square';
+// Applying a look (docs/design.md, "Looks"). The shell computes every look; this module only writes it to the page.
+
+const systemReduces = matchMedia('(prefers-reduced-motion: reduce)');
+
+const [applied, setApplied] = createSignal<Look>();
+const [reduced, setReduced] = createSignal(systemReduces.matches);
+const [hidden, setHidden] = createSignal(document.hidden);
+
+/** The look on the page, once one was applied. */
+export const appliedLook = applied;
+/** The motion level that is in force: the user's, capped by the system. */
+export const motion = (): Motion => effectiveMotion(applied()?.motion ?? 'full', reduced());
+/** True while the window is hidden; effect loops stop. */
+export const windowHidden = hidden;
+
+/** A system that asks for less motion turns `full` into `reduced`; the other levels already ask for less. */
+export const effectiveMotion = (level: Motion, systemReducesMotion: boolean): Motion => (level === 'full' && systemReducesMotion ? 'reduced' : level);
+
+const on = (flag: boolean) => (flag ? 'on' : 'off');
+
+/** Writes a look to `target`: the page itself, or an element that previews it. */
+export function applyLook(look: Look, target: HTMLElement = document.documentElement): void {
+  for (const [name, value] of Object.entries(look.vars)) target.style.setProperty(`--${name}`, value);
+  target.style.colorScheme = look.scheme;
+  target.dataset.base = look.appearance.base;
+  target.dataset.motion = effectiveMotion(look.motion, reduced());
+  target.dataset.ambient = on(look.effects.ambient);
+  target.dataset.texture = on(look.effects.texture);
+  target.dataset.glow = on(look.effects.glow);
+  if (target === document.documentElement) setApplied(look);
 }
 
-const MODES = {
-  dark: { bg: '#15171b', side: '#111316', surface: '#1d2025', surface2: '#181b1f', line: '#262a30', fg: '#e4e6ea', soft: '#b8bcc4', muted: '#7c828c' },
-  black: { bg: '#000000', side: '#050505', surface: '#121214', surface2: '#0a0a0b', line: '#1e1f22', fg: '#ececef', soft: '#b3b6bc', muted: '#76797f' },
-  light: { bg: '#f6f7f9', side: '#eef0f3', surface: '#ffffff', surface2: '#fbfbfc', line: '#dfe2e8', fg: '#16181d', soft: '#3a3f48', muted: '#6a707b' },
-};
-// [on dark, on light]
-export const ACCENTS = {
-  mono: ['#d0d3d9', '#3a3f48'],
-  sage: ['#7fb8a6', '#2f7a64'],
-  cobalt: ['#7f9cff', '#2b4ad6'],
-  amber: ['#e8b04a', '#9a6200'],
-  rose: ['#e98aa6', '#b23a62'],
-  violet: ['#b49cff', '#6a45d6'],
-  teal: ['#5cc8d6', '#11788a'],
-};
-const UI = {
-  geistmono: "'Geist Mono Variable', ui-monospace, Consolas, monospace",
-  jetbrains: "'JetBrains Mono Variable', ui-monospace, Consolas, monospace",
-  sans: "'Geist Variable', system-ui, 'Segoe UI', sans-serif",
-};
-const READ = {
-  geist: "'Geist Variable', system-ui, 'Segoe UI', sans-serif",
-  mona: "'Mona Sans Variable', system-ui, 'Segoe UI', sans-serif",
-};
-
-export const PRESETS: Record<'mono' | 'studio' | 'cockpit', Appearance> = {
-  mono: { mode: 'dark', accent: 'mono', custom: null, ui: 'geistmono', read: 'geist', density: 'comfortable', corners: 'round' },
-  studio: { mode: 'light', accent: 'cobalt', custom: null, ui: 'sans', read: 'mona', density: 'comfortable', corners: 'square' },
-  cockpit: { mode: 'black', accent: 'amber', custom: null, ui: 'jetbrains', read: 'same', density: 'compact', corners: 'square' },
-};
-
-export const toAppearance = (saved: Record<string, unknown> | undefined): Appearance => ({ ...PRESETS.mono, ...(saved as Partial<Appearance>) });
-export const presetOf = (a: Appearance) => (Object.keys(PRESETS) as (keyof typeof PRESETS)[]).find((k) => JSON.stringify(PRESETS[k]) === JSON.stringify(a));
-
-const systemLight = matchMedia('(prefers-color-scheme: light)');
-
-export function applyAppearance(a: Appearance): void {
-  const mode = a.mode === 'system' ? (systemLight.matches ? 'light' : 'dark') : a.mode;
-  const root = document.documentElement.style;
-  for (const [k, v] of Object.entries(MODES[mode])) root.setProperty(`--${k}`, v);
-  root.setProperty('--accent', a.custom ?? ACCENTS[a.accent][mode === 'light' ? 1 : 0]);
-  root.setProperty('--ui', UI[a.ui]);
-  root.setProperty('--read', a.read === 'same' ? UI[a.ui] : READ[a.read]);
-  root.setProperty('--pad', a.density === 'compact' ? '0.7' : '1');
-  root.setProperty('--radius', a.corners === 'square' ? '3px' : '10px');
-  root.colorScheme = mode === 'light' ? 'light' : 'dark';
+/** Follows the system's motion setting and the window's visibility. A change in the system setting changes only the
+ * motion level, never the rest of the look. Returns the function that stops following. */
+export function watchSystem(): () => void {
+  const onMotion = () => {
+    setReduced(systemReduces.matches);
+    const look = applied();
+    if (look) document.documentElement.dataset.motion = effectiveMotion(look.motion, systemReduces.matches);
+  };
+  const onVisibility = () => {
+    setHidden(document.hidden);
+    // The CSS animations of the effects pause with the window, like the dust loop does.
+    document.documentElement.classList.toggle('hidden-win', document.hidden);
+  };
+  systemReduces.addEventListener('change', onMotion);
+  document.addEventListener('visibilitychange', onVisibility);
+  return () => {
+    systemReduces.removeEventListener('change', onMotion);
+    document.removeEventListener('visibilitychange', onVisibility);
+  };
 }
 
-// "Follow system" changes with the operating system while the app is open.
-export function followSystem(get: () => Appearance): () => void {
-  const onChange = () => get().mode === 'system' && applyAppearance(get());
-  systemLight.addEventListener('change', onChange);
-  return () => systemLight.removeEventListener('change', onChange);
+const KEPT = ['textSize', 'density', 'motion'] as const;
+
+/** Choosing a theme or preset keeps the text size, the density and the motion, and clears every other choice, so the
+ * new theme shows as designed. */
+export function switchTheme(current: Appearance | undefined, base: string): Appearance {
+  const next: Appearance = { base };
+  for (const key of KEPT) if (current?.[key] !== undefined) Object.assign(next, { [key]: current[key] });
+  return next;
+}
+
+/** Saves a patch. Only when the save succeeded, and only when the patch changed the appearance, the look the shell
+ * answers with is applied; a rejection leaves the page as it was. */
+export async function saveAndApply(patch: Settings, save: (patch: Settings) => Promise<SavedSettings>): Promise<SavedSettings> {
+  const saved = await save(patch);
+  if (patch.appearance) applyLook(saved.look);
+  return saved;
+}
+
+/** Runs jobs one after another. Saves go through it, so a choice is built from what the save before it stored and an
+ * older answer can never land after a newer one. */
+export function inOrder(): <T>(job: () => Promise<T>) => Promise<T> {
+  let tail: Promise<unknown> = Promise.resolve();
+  return (job) => {
+    const run = tail.then(job);
+    tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  };
+}
+
+/** Previews drafts. Each request carries a number that grows with every request sent; an answer is applied only if
+ * its number is still the latest, so a quick run of changes can never end on an older draft. */
+export function previewer(
+  request: (draft: Appearance) => Promise<Look>,
+  apply: (look: Look) => void,
+  fail: (err: unknown) => void,
+): (draft: Appearance) => Promise<void> {
+  let latest = 0;
+  return async (draft) => {
+    const mine = ++latest;
+    try {
+      const look = await request(draft);
+      if (mine === latest) apply(look);
+    } catch (err) {
+      if (mine === latest) fail(err);
+    }
+  };
 }

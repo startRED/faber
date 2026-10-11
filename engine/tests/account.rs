@@ -442,7 +442,7 @@ async fn c1_5_saving_another_setting_preserves_skipped_setup_on_disk_and_in_app_
     std::fs::write(&settings_path, json!({"setup":"skipped", "language":"en"}).to_string()).unwrap();
     let (engine, _) = engine(dir.path(), BTreeMap::new(), Arc::new(|_, _, _| panic!("saving settings must not launch a CLI")));
     let patch: Settings = serde_json::from_value(json!({"userHooks":true})).unwrap();
-    let saved = serde_json::to_value(engine.save_settings(patch)).unwrap();
+    let saved = serde_json::to_value(engine.save_settings(patch).unwrap()).unwrap();
     assert_eq!(saved["setup"], "skipped", "C1.5: save_settings discarded the existing setup decision");
     assert_eq!(saved["language"], "en");
     assert_eq!(saved["userHooks"], true);

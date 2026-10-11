@@ -233,7 +233,10 @@ impl Engine {
     pub fn state(&self) -> AppState {
         self.with(|c| c.state())
     }
-    pub fn save_settings(&self, patch: Settings) -> Settings {
+    pub fn settings(&self) -> Settings {
+        self.with(|c| c.store.settings())
+    }
+    pub fn save_settings(&self, patch: Settings) -> Result<Settings, String> {
         self.with(|c| c.save_settings(patch))
     }
     pub fn open(&self, id: &str) -> Option<Conversation> {
@@ -382,7 +385,8 @@ impl Core {
         }
     }
 
-    fn save_settings(&mut self, patch: Settings) -> Settings {
+    /// Keeps the merged settings, or fails with `error.settings.saveFailed` before anything live changes.
+    fn save_settings(&mut self, patch: Settings) -> Result<Settings, String> {
         let before = self.store.settings();
         let settings = Settings {
             appearance: patch.appearance.or(before.appearance),
@@ -390,7 +394,7 @@ impl Core {
             language: patch.language.or(before.language),
             setup: patch.setup.or(before.setup),
         };
-        self.store.save_settings(&settings);
+        self.store.save_settings(&settings).map_err(|_| "error.settings.saveFailed".to_string())?;
         // Idle project CLIs restart on their next turn, so a changed hooks choice applies right away.
         if settings.user_hooks != before.user_hooks {
             let idle: Vec<String> = self
@@ -408,7 +412,7 @@ impl Core {
                 server.retire();
             }
         }
-        settings
+        Ok(settings)
     }
 
     fn turn(&mut self, conv: &str) -> Option<&mut Message> {

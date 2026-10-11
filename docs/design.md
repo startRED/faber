@@ -73,7 +73,8 @@ These colours are fixed meanings, not decoration:
 
 Every ink is checked on every surface where it appears: 26 required pairs. Plain inks need 4.5:1 on the background and
 the three surfaces. The three meaning inks need 4.5:1 on the same four. The accent needs 3:1 on the background, and its
-ink needs 4.5:1 on the accent. A look with any failing pair is never applied, and the preview names the pair. For an
+ink needs 4.5:1 on the accent. The plain inks also need 4.5:1 on the frame, where the title bar and the sidebar
+draw. A look with any failing pair is never applied, and the preview names the pair. For an
 accent the user picks, the accent ink is pure black or pure white, whichever reads better. The factory looks keep their
 own inks.
 
@@ -104,6 +105,18 @@ own inks.
     the vendors that are connected.
 - The texture switch controls grain and the dot grid. The glow switch controls the focus light and the amber light,
   which exist only in Dark Room and Cobalt; the other themes use borders.
+
+### How a look reaches the screen
+
+- `src-tauri/src/themes.json` is the single source of tokens, and `src-tauri/src/look.rs` is the only code that computes
+  a colour. It applies the theme, the user's choices and the colour validator, checks the 26 pairs, and returns the CSS
+  variables, the motion level, the effect switches and any notice. The screen never computes a colour.
+- `state()` returns the look of the saved appearance, and `main.tsx` writes it on `<html>` before the first frame. The
+  window background is the look's frame colour, so the first paint already matches.
+- Settings applies a choice at once, but only after `save_settings` succeeded. That command answers with the settings as
+  stored and the look computed from them. A refused look (a hue too close to a meaning colour, a failing pair) or a
+  failed write changes nothing and shows its sentence. The draft and preview flow comes with the Settings rebuild.
+- A saved appearance that no longer parses, such as the old Mono, Studio and Cockpit maps, falls back to Dark Room.
 
 ## Identity
 

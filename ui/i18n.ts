@@ -1,4 +1,5 @@
 import { createSignal } from 'solid-js';
+import { failureOf } from './api.ts';
 import { de } from './locales/de.ts';
 import { en, type Key, type Messages } from './locales/en.ts';
 import { es } from './locales/es.ts';
@@ -48,10 +49,16 @@ export function t(key: Key, vars: Record<string, string | number> = {}): string 
 }
 
 /** Texts that arrive from the engine as keys (errors, routing reasons); anything else is shown as it came. */
-export function fromEngine(text: string | undefined): string {
+export function fromEngine(text: string | undefined, vars: Record<string, string | number> = {}): string {
   if (!text) return '';
   // Auto's reason, "reason.route.<kind>.<level>": the kind of task and how hard it is.
   const route = /^reason\.route\.(\w+)\.(\w+)$/.exec(text);
   if (route) return t('reason.route', { kind: t(`kind.${route[1]}` as Key), level: t(`level.${route[2]}` as Key) });
-  return text in en ? t(text as Key) : text;
+  return text in en ? t(text as Key, vars) : text;
+}
+
+/** The sentence for a refusal: the shell's key, with the field or the colour pairs it is about as `{detail}`. */
+export function failureText(err: unknown): string {
+  const { key, detail } = failureOf(err);
+  return fromEngine(key, detail === undefined ? {} : { detail });
 }

@@ -2,7 +2,7 @@
 
 use super::{Result, Scenario, ask, claude_chat, ensure, eventually, no_cli, pause, same, start_settings};
 use crate::app::Ctx;
-use crate::page::{css, role_any};
+use crate::page::{Page, css, role_any};
 use serde_json::json;
 use std::time::{Duration, Instant};
 
@@ -11,6 +11,37 @@ use std::time::{Duration, Instant};
 const BUDGET_MB: f64 = 250.0;
 
 const QUESTION: &str = "In one sentence: why is the sky blue?";
+
+/// The six looks, as the screen lists them, with the effects each draws on the new conversation: the projector beam with
+/// its dust, the loom and the flow line. The loom needs a stage wider than 920 px and the flow line one wider than
+/// 1140 px, so that neither lies over the greeting; the stage is the window less the 248 px sidebar.
+const LOOKS: [(&str, bool, bool, bool); 6] = [
+    ("sala", true, false, false),
+    ("oficina", false, true, false),
+    ("bancada", false, false, true),
+    ("manha", false, false, false),
+    ("alto", false, false, false),
+    ("cobalto", true, false, false),
+];
+
+/// What the new conversation shows at the current window size: whether anything sticks out past the right edge, which
+/// of the effects of the look are drawn, and which of them lie over the greeting.
+const S1: &str = r#"(() => {
+  const drawn = (selector) => { const e = document.querySelector(selector); return !!e && getComputedStyle(e).display !== 'none'; };
+  const rect = (e) => e.getBoundingClientRect();
+  const hit = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+  // The extent of the words themselves, not of the block that holds them.
+  const ink = (e) => { const range = document.createRange(); range.selectNodeContents(e); return range.getBoundingClientRect(); };
+  const text = [...document.querySelectorAll('.empty h1, .empty p')].map(ink);
+  const collide = ['.amb-loom', '.amb-flow'].filter((s) => drawn(s) && text.some((r) => hit(rect(document.querySelector(s)), r)));
+  const past = [...document.querySelectorAll('.top, .top *, .side, .side *, .empty, .empty *, .composer, .composer *')]
+    .filter((e) => e.getBoundingClientRect().right > innerWidth + 0.5)
+    .map((e) => String(e.className || e.tagName));
+  return { page: document.documentElement.scrollWidth <= innerWidth, past, collide, beam: drawn('.amb-beam'), canvas: !!document.querySelector('.amb-beam canvas'), loom: drawn('.amb-loom'), flow: drawn('.amb-flow') };
+})()"#;
+
+/// The families the six looks draw with between them.
+const FAMILIES: [&str; 6] = ["Archivo", "Barlow Condensed", "Bodoni Moda", "IBM Plex Mono", "IBM Plex Sans", "Newsreader"];
 
 pub fn scenarios() -> Vec<Scenario> {
     vec![
@@ -21,7 +52,17 @@ pub fn scenarios() -> Vec<Scenario> {
         Scenario { name: "with no AI installed, the app says what to do", run: says_what_to_do },
         Scenario { name: "the screen speaks the chosen language and switches at once", run: switches_language },
         Scenario { name: "appearance changes apply at once and are kept after reopening", run: keeps_appearance },
+        Scenario {
+            name: "every look fits the new conversation at 720x480, 1100x700, 1280x800 and 1440x900 and draws its own effect",
+            run: fits_every_look,
+        },
+        Scenario { name: "a settings save that fails changes nothing, says why, and works again once the disk does", run: refused_save },
+        Scenario {
+            name: "an appearance saved by an older Faber starts on Dark Room, and Settings can still change the look",
+            run: recovers_old_appearance,
+        },
         Scenario { name: "with no CLI running, Faber stays within its memory budget", run: idle_memory },
+        Scenario { name: "after the six looks were applied in turn, Faber stays within its memory budget", run: memory_after_every_look },
         Scenario { name: "a conversation with a thousand messages opens quickly and stays within the budget", run: thousand_messages },
     ]
 }
@@ -134,34 +175,62 @@ fn switches_language(ctx: &mut Ctx) -> Result {
     same(page.eval("document.documentElement.lang")?.as_str(), Some("es"), "the page language after the switch")
 }
 
-fn keeps_appearance(ctx: &mut Ctx) -> Result {
-    start_settings(ctx, "en")?;
-    let launch = claude_chat(ctx);
-    let mut app = ctx.launch(launch)?;
-    let page = &mut app.page;
-    let background = "getComputedStyle(document.body).backgroundColor";
+fn open_appearance(page: &mut Page) -> Result {
     let settings = page.named("button", "settings.open")?;
     page.click(&settings)?;
     let appearance = page.named("button", "set.appearance")?;
     page.click(&appearance)?;
     let heading = page.named("heading", "set.appearance")?;
-    page.wait_visible(&heading)?;
-    let light = page.named("button", "set.modeLight")?;
-    page.click(&light)?;
-    same(page.eval(background)?.as_str(), Some("rgb(246, 247, 249)"), "light mode background")?;
-    page.click(&crate::page::role("button", "Cockpit"))?;
-    same(page.eval(background)?.as_str(), Some("rgb(0, 0, 0)"), "Cockpit background")?;
+    page.wait_visible(&heading)
+}
+
+fn back_to_chat(page: &mut Page) -> Result {
+    let back = page.named("button", "set.back")?;
+    page.click(&back)?;
+    let title = page.named("heading", "empty.chatTitle")?;
+    page.wait_visible(&title)
+}
+
+/// Clicks the card of a look and waits until the page wears it.
+fn pick_look(page: &mut Page, id: &str) -> Result {
+    let card = page.named("button", &format!("look.{id}.name"))?;
+    page.click(&card)?;
+    page.wait_for(&format!("the {id} look"), &format!("document.documentElement.dataset.base === '{id}'"))
+}
+
+fn keeps_appearance(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let launch = claude_chat(ctx);
+    let mut app = ctx.launch(launch)?;
+    let page = &mut app.page;
+    let background = "getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()";
+    let frame = "getComputedStyle(document.body).backgroundColor";
+    let density = "parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dens'))";
+    same(page.eval(background)?.as_str(), Some("#0e0e10"), "the first look is Dark Room")?;
+    open_appearance(page)?;
+    pick_look(page, "manha")?;
+    same(page.eval(background)?.as_str(), Some("#f3f5f0"), "Morning background")?;
+    same(page.eval(frame)?.as_str(), Some("rgb(233, 237, 231)"), "Morning frame")?;
     let compact = page.named("button", "set.densityCompact")?;
-    same(page.attr(&compact, "aria-pressed")?, Some("true".to_string()), "Cockpit is compact")?;
-    ctx.shot(&mut app, "settings-cockpit")?;
+    page.click(&compact)?;
+    page.wait_for("compact density", &format!("{density} === 0.8"))?;
+    // A new theme keeps the text size, the density and the motion.
+    pick_look(page, "bancada")?;
+    same(page.eval(background)?.as_str(), Some("#161916"), "Workbench background")?;
+    same(page.attr(&compact, "aria-pressed")?, Some("true".to_string()), "the density survives a change of look")?;
+    // The controls fade between their states in 140 ms; the picture is taken once they have settled.
+    pause(0.5);
+    ctx.shot(&mut app, "settings-workbench")?;
     let page = &mut app.page;
     let projects = page.named("button", "set.projects")?.last();
     page.click(&projects)?;
     page.check(&role_any("checkbox"))?;
-    // The file is written in the background; closing earlier could lose the last choice.
+    // The look applies once it is saved, but the checkbox does not wait for the screen; closing earlier could lose it.
     let file = ctx.sb.data.join("settings.json");
-    eventually("the choice to reach settings.json", Duration::from_secs(15), || {
-        std::fs::read_to_string(&file).is_ok_and(|text| text.contains("\"userHooks\": true"))
+    eventually("the choices to reach settings.json", Duration::from_secs(15), || {
+        std::fs::read_to_string(&file).is_ok_and(|text| {
+            text.contains("\"userHooks\": true") && text.contains("\"base\": \"bancada\"") && text.contains("\"density\": 0.8")
+        })
     })?;
     ctx.close(app.id)?;
 
@@ -170,7 +239,9 @@ fn keeps_appearance(ctx: &mut Ctx) -> Result {
     let page = &mut app.page;
     let title = page.named("heading", "empty.chatTitle")?;
     page.wait_visible(&title)?;
-    page.wait_for("the saved background", &format!("{background} === 'rgb(0, 0, 0)'"))?;
+    same(page.eval(background)?.as_str(), Some("#161916"), "the saved background")?;
+    same(page.eval(frame)?.as_str(), Some("rgb(25, 29, 25)"), "the saved frame")?;
+    same(page.eval(density)?.as_f64(), Some(0.8), "the saved density")?;
     // An unfocused offscreen window reopened on the same profile only takes keys after a click, like a real one.
     let composer = page.labelled("composer.message")?;
     page.click(&composer)?;
@@ -182,14 +253,200 @@ fn keeps_appearance(ctx: &mut Ctx) -> Result {
     same(page.is_checked(&role_any("checkbox"))?, true, "the saved choice")
 }
 
+fn fits_every_look(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let launch = claude_chat(ctx);
+    let mut app = ctx.launch(launch)?;
+    let title = app.page.named("heading", "empty.chatTitle")?;
+    app.page.wait_visible(&title)?;
+    for (id, beam, loom, flow) in LOOKS {
+        open_appearance(&mut app.page)?;
+        pick_look(&mut app.page, id)?;
+        back_to_chat(&mut app.page)?;
+        for (width, height) in [(720, 480), (1100, 700), (1280, 800), (1440, 900)] {
+            let size = json!({ "width": width, "height": height, "deviceScaleFactor": 1, "mobile": false });
+            app.page.cdp.call("Emulation.setDeviceMetricsOverride", size)?;
+            let seen = app.page.eval(S1)?;
+            let at = format!("{id} at {width}x{height}");
+            ensure(seen["page"] == true, || format!("{at}: the page scrolls sideways"))?;
+            ensure(seen["past"].as_array().is_some_and(|past| past.is_empty()), || {
+                format!("{at}: these stick out past the right edge: {}", seen["past"])
+            })?;
+            let (loom_room, flow_room) = (width >= 1200, width >= 1400);
+            same(
+                (seen["beam"].as_bool(), seen["canvas"].as_bool()),
+                (Some(beam), Some(true)),
+                &format!("{at}: the projector beam and its canvas"),
+            )?;
+            same(seen["loom"].as_bool(), Some(loom && loom_room), &format!("{at}: the loom"))?;
+            same(seen["flow"].as_bool(), Some(flow && flow_room), &format!("{at}: the flow line"))?;
+            ensure(seen["collide"].as_array().is_some_and(|over| over.is_empty()), || {
+                format!("{at}: these lie over the greeting: {}", seen["collide"])
+            })?;
+            if width >= 1280 {
+                let name = if width == 1440 { format!("s1-{id}") } else { format!("s1-{id}-{width}") };
+                ctx.shot(&mut app, &name)?;
+            }
+        }
+        app.page.cdp.call("Emulation.clearDeviceMetricsOverride", json!({}))?;
+    }
+    Ok(())
+}
+
+fn refused_save(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let launch = claude_chat(ctx);
+    let mut app = ctx.launch(launch)?;
+    open_appearance(&mut app.page)?;
+    let page = &mut app.page;
+    let base = "document.documentElement.dataset.base";
+    same(page.eval(base)?.as_str(), Some("sala"), "the first look")?;
+    // A folder where the temporary file goes makes every write of settings.json fail while the old file stays valid.
+    let blocker = ctx.sb.data.join("settings.json.tmp");
+    std::fs::create_dir(&blocker).map_err(|e| e.to_string())?;
+    let morning = page.named("button", "look.manha.name")?;
+    page.click(&morning)?;
+    let toast = css(".toast[role=alert]");
+    page.wait_visible(&toast)?;
+    let sentence = page.text_of("error.settings.saveFailed")?;
+    ensure(page.inner_text(&toast)?.contains(&sentence), || format!("the alert should say {sentence:?}"))?;
+    same(page.eval(base)?.as_str(), Some("sala"), "the look after a failed save")?;
+    same(page.attr(&morning, "aria-pressed")?, Some("false".to_string()), "the card of the look that was not saved")?;
+    // The slider, the colour input and the switches move before their save is answered; a refused save puts each back.
+    let moved = r#"(() => {
+      const fire = (e) => e.dispatchEvent(new Event('change', { bubbles: true }));
+      const size = document.getElementById('set-text-size');
+      size.value = '17';
+      fire(size);
+      const color = document.querySelector('.dot.custom input');
+      color.value = '#336699';
+      fire(color);
+      const glow = document.querySelectorAll('.sw2')[2];
+      glow.checked = !glow.checked;
+      fire(glow);
+    })()"#;
+    let (size, color, glow) = (
+        "document.getElementById('set-text-size').value",
+        "document.querySelector('.dot.custom input').value",
+        "document.querySelectorAll('.sw2')[2].checked",
+    );
+    let (size_before, color_before, glow_before) = (page.eval(size)?, page.eval(color)?, page.eval(glow)?);
+    page.eval(moved)?;
+    page.wait_for(
+        "the slider, the colour and the switch to be put back",
+        &format!("{size} === {size_before} && {color} === {color_before} && {glow} === {glow_before}"),
+    )?;
+    let file = ctx.sb.data.join("settings.json");
+    let text = std::fs::read_to_string(&file).map_err(|e| e.to_string())?;
+    ensure(!text.contains("appearance"), || format!("settings.json should be as it was: {text}"))?;
+    pause(0.6);
+    ctx.shot(&mut app, "settings-save-failed")?;
+
+    // Once the disk works again the same click saves, and the alert goes away.
+    std::fs::remove_dir(&blocker).map_err(|e| e.to_string())?;
+    let page = &mut app.page;
+    page.click(&morning)?;
+    page.wait_for("the Morning look", &format!("{base} === 'manha'"))?;
+    page.wait_for("the alert to go", "!document.querySelector('.toast')")
+}
+
+fn recovers_old_appearance(ctx: &mut Ctx) -> Result {
+    // What the Mono design saved: none of these fields exist in the new shape, so the whole value is unusable.
+    ctx.write_settings(&json!({
+        "language": "en",
+        "setup": "done",
+        "appearance": { "mode": "dark", "accent": "mono", "ui": "geistmono", "read": "geist", "density": "comfortable", "corners": "round" }
+    }))?;
+    let launch = claude_chat(ctx);
+    let mut app = ctx.launch(launch)?;
+    let page = &mut app.page;
+    let title = page.named("heading", "empty.chatTitle")?;
+    page.wait_visible(&title)?;
+    same(page.eval("document.documentElement.dataset.base")?.as_str(), Some("sala"), "the look of an old appearance")?;
+    open_appearance(page)?;
+    // A card keeps the density, which an old value would have carried into the save and had refused.
+    pick_look(page, "oficina")?;
+    let compact = page.named("button", "set.densityCompact")?;
+    page.click(&compact)?;
+    page.wait_for("compact density", "parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dens')) === 0.8")?;
+    // Reduced motion keeps short fades only: no thumb travel and no fade longer than 120 ms.
+    let reduced = page.named("button", "look.motion.reduced")?;
+    page.click(&reduced)?;
+    page.wait_for("reduced motion", "document.documentElement.dataset.motion === 'reduced'")?;
+    let seen = page.eval(
+        r#"(() => {
+          const thumb = getComputedStyle(document.querySelector('.sw2'), '::after');
+          const longest = (e) => Math.max(...getComputedStyle(e).transitionDuration.split(', ').map(parseFloat));
+          return { travels: thumb.transitionProperty.includes('transform') || thumb.transitionProperty === 'all', longest: Math.max(longest(document.querySelector('.sw2')), longest(document.querySelector('.preset')), longest(document.querySelector('.btn, .item')), parseFloat(thumb.transitionDuration)) };
+        })()"#,
+    )?;
+    same(seen["travels"].as_bool(), Some(false), "the switch thumb travels in reduced motion")?;
+    ensure(seen["longest"].as_f64().is_some_and(|s| s <= 0.12 + 1e-9), || format!("a fade lasts longer than 120 ms: {}", seen["longest"]))?;
+    let file = ctx.sb.data.join("settings.json");
+    eventually("the choices to reach settings.json", Duration::from_secs(15), || {
+        std::fs::read_to_string(&file)
+            .is_ok_and(|t| t.contains("\"base\": \"oficina\"") && t.contains("\"density\": 0.8") && t.contains("\"motion\": \"reduced\""))
+    })
+}
+
 fn idle_memory(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
-    let mut app = ctx.launch(no_cli())?;
-    let title = app.page.named("heading", "empty.noAiTitle")?;
+    let launch = claude_chat(ctx);
+    let mut app = ctx.launch(launch)?;
+    let title = app.page.named("heading", "empty.chatTitle")?;
     app.page.wait_visible(&title)?;
-    pause(2.0);
+    ensure(app.page.count(&css(".amb-beam canvas"))? == 1, || "the new conversation should draw the dust canvas".to_string())?;
+    // The memory below is only worth something while the dust really moves, and it stops with the window.
+    let picture = "document.querySelector('.amb-beam canvas').toDataURL()";
+    let hide = |page: &mut Page, on: bool| {
+        let getter = if on {
+            "Object.defineProperty(document, 'hidden', { configurable: true, get: () => true })"
+        } else {
+            "Reflect.deleteProperty(document, 'hidden')"
+        };
+        page.eval(&format!("(() => {{ {getter}; document.dispatchEvent(new Event('visibilitychange')); }})()")).map(|_| ())
+    };
+    let (a, b) = (app.page.eval(picture)?, {
+        pause(0.8);
+        app.page.eval(picture)?
+    });
+    ensure(a != b, || "the dust canvas should be drawing while the window is visible".to_string())?;
+    hide(&mut app.page, true)?;
+    pause(0.4);
+    let (a, b) = (app.page.eval(picture)?, {
+        pause(0.8);
+        app.page.eval(picture)?
+    });
+    hide(&mut app.page, false)?;
+    ensure(a == b, || "the dust canvas should stop drawing while the window is hidden".to_string())?;
+    pause(10.0);
+    let motion = app.page.eval("document.documentElement.dataset.motion")?;
     let (mb, _) = ctx.memory_mb(app.id)?;
-    ctx.notes.push(format!("idle: {mb:.0} MB"));
+    ctx.notes.push(format!("idle on the new conversation with the dust canvas ({} motion): {mb:.0} MB", motion.as_str().unwrap_or("?")));
+    ensure(mb <= BUDGET_MB, || format!("{mb:.0} MB is over the {BUDGET_MB} MB budget"))
+}
+
+fn memory_after_every_look(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let launch = claude_chat(ctx);
+    let mut app = ctx.launch(launch)?;
+    open_appearance(&mut app.page)?;
+    for (id, ..) in LOOKS {
+        pick_look(&mut app.page, id)?;
+    }
+    back_to_chat(&mut app.page)?;
+    // Each look drew with its own families, so by now the page has downloaded every face.
+    let loaded = app
+        .page
+        .eval("[...new Set([...document.fonts].filter((f) => f.status === 'loaded').map((f) => f.family.replace(/['\"]/g, '')))].sort()")?;
+    for family in FAMILIES {
+        ensure(loaded.as_array().is_some_and(|all| all.iter().any(|f| f == family)), || {
+            format!("{family} was never loaded; loaded: {loaded}")
+        })?;
+    }
+    pause(3.0);
+    let (mb, _) = ctx.memory_mb(app.id)?;
+    ctx.notes.push(format!("after the six looks: {mb:.0} MB"));
     ensure(mb <= BUDGET_MB, || format!("{mb:.0} MB is over the {BUDGET_MB} MB budget"))
 }
 
@@ -239,23 +496,28 @@ fn thousand_messages(ctx: &mut Ctx) -> Result {
 mod tests {
     use super::*;
 
-    // Port completeness: the nine tests of `tests/e2e/app.e2e.ts`, one to one, the appearance one unchanged.
+    // Port completeness: the nine tests of `tests/e2e/app.e2e.ts` are all still here, under their old names.
     #[test]
     fn the_nine_scenarios_of_the_node_suite_are_all_ported() {
         let names: Vec<&str> = scenarios().iter().map(|s| s.name).collect();
-        assert_eq!(
-            names,
-            [
-                "the app opens on an empty chat and fits the window",
-                "a chat streams an answer with the model and the reason, and lands in the sidebar",
-                "editing a message sends it as a branch and keeps the original conversation",
-                "deleting a conversation asks once, then removes it",
-                "with no AI installed, the app says what to do",
-                "the screen speaks the chosen language and switches at once",
-                "appearance changes apply at once and are kept after reopening",
-                "with no CLI running, Faber stays within its memory budget",
-                "a conversation with a thousand messages opens quickly and stays within the budget",
-            ]
-        );
+        for name in [
+            "the app opens on an empty chat and fits the window",
+            "a chat streams an answer with the model and the reason, and lands in the sidebar",
+            "editing a message sends it as a branch and keeps the original conversation",
+            "deleting a conversation asks once, then removes it",
+            "with no AI installed, the app says what to do",
+            "the screen speaks the chosen language and switches at once",
+            "appearance changes apply at once and are kept after reopening",
+            "with no CLI running, Faber stays within its memory budget",
+            "a conversation with a thousand messages opens quickly and stays within the budget",
+        ] {
+            assert!(names.contains(&name), "scenario lost: {name}");
+        }
+    }
+
+    #[test]
+    fn the_six_looks_are_the_six_the_screen_lists() {
+        let ids: Vec<&str> = LOOKS.iter().map(|l| l.0).collect();
+        assert_eq!(ids, ["sala", "oficina", "bancada", "manha", "alto", "cobalto"]);
     }
 }
