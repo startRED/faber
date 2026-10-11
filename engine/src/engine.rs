@@ -132,6 +132,14 @@ fn new_id() -> String {
     Uuid::new_v4().to_string()
 }
 
+/// A message no running CLI owns: nothing streams and no permission waits any more.
+fn settle(m: &mut Message) {
+    m.permissions = None;
+    if m.status == Some(Status::Streaming) {
+        m.status = Some(Status::Stopped);
+    }
+}
+
 struct Core {
     opts: EngineOptions,
     store: Store,
@@ -316,7 +324,9 @@ impl Core {
 
     fn load(&mut self, id: &str) -> Option<&mut Conversation> {
         if !self.convs.contains_key(id) {
-            let c = self.store.get(id)?;
+            let mut c = self.store.get(id)?;
+            // Read from disk, so no CLI runs it: an answer cut off by a crash shows as stopped, not typing forever.
+            c.messages.iter_mut().for_each(settle);
             self.convs.insert(id.to_string(), c);
         }
         self.convs.get_mut(id)
@@ -763,10 +773,7 @@ impl Core {
             .iter()
             .cloned()
             .map(|mut m| {
-                m.permissions = None;
-                if m.status == Some(Status::Streaming) {
-                    m.status = Some(Status::Stopped);
-                }
+                settle(&mut m);
                 m
             })
             .collect();

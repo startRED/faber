@@ -116,6 +116,28 @@ async fn after_reopening_the_app_the_conversation_resumes_its_cli_session() {
 }
 
 #[tokio::test]
+async fn an_answer_cut_off_by_a_crash_reopens_as_stopped_not_typing_forever() {
+    let dir = tempfile::tempdir().unwrap();
+    let (first, mut rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn);
+    let id = first.send(ask(Area::Chat, SKY, choice("claude", Some("haiku")))).unwrap();
+    finished(&mut rx, |_| {}).await;
+    first.shutdown();
+
+    // What the file holds when the app dies mid-answer: still streaming, a permission still waiting.
+    let file = dir.path().join("conversations").join(format!("{id}.json"));
+    let mut saved = read_json(&file);
+    saved["messages"][1]["status"] = "streaming".into();
+    saved["messages"][1]["permissions"] = serde_json::json!([{ "requestId": "r1", "tool": "Write", "input": {} }]);
+    std::fs::write(&file, saved.to_string()).unwrap();
+
+    let (second, _rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn);
+    let reply = second.open(&id).unwrap().messages[1].clone();
+    second.shutdown();
+    assert_eq!(reply.status, Some(Status::Stopped));
+    assert_eq!(reply.permissions, None);
+}
+
+#[tokio::test]
 async fn an_idle_claude_process_closes_and_the_next_message_resumes_its_session() {
     let dir = tempfile::tempdir().unwrap();
     let f = fake(fixture("claude", "chat"));
