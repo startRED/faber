@@ -255,6 +255,9 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
   login of its own.
 - OpenAI: Codex runs through its official CLI and app-server with the user's own login. Faber asks OpenAI for written
   confirmation.
+- Faber never drives a chat website (ChatGPT, Claude) in a browser or copies its login session: that breaks the
+  providers' terms and puts the user's account at risk. ChatGPT's own quota is reached through ChatGPT's official
+  connectors instead: the user chats on ChatGPT and ChatGPT calls Faber's toolbox.
 - Google's Antigravity terms forbid third-party software from accessing the service, so Gemini is off by default,
   with the clause shown on screen and an API-key option.
 
