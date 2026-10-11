@@ -124,7 +124,7 @@ export function Composer(props: Props) {
           setDraft((d) => ({ ...d, text }));
           warm();
           clearTimeout(pause);
-          if (text.trim()) pause = setTimeout(() => props.onPause(text), 600);
+          if (text.trim()) pause = setTimeout(() => props.onPause(text), 300);
         }}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {

@@ -216,6 +216,8 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
         params.insert("baseInstructions".into(), instructions.clone().into());
         params.insert("sandbox".into(), "read-only".into());
         params.insert("approvalPolicy".into(), "never".into());
+        // Nothing to resume later: it stays out of the user's Codex history.
+        params.insert("ephemeral".into(), true.into());
     }
     params.insert("cwd".into(), t.cwd.to_string_lossy().into_owned().into());
     let method = match &t.resume {

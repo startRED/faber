@@ -149,10 +149,11 @@ fn chat_is_lean_and_confined_to_its_workspace_projects_get_the_user_setup_withou
 }
 
 #[test]
-fn a_side_question_gets_its_own_instructions_and_no_tools() {
+fn a_side_question_gets_its_own_instructions_no_tools_and_no_saved_session() {
     let after = |args: &[String], flag: &str| args[args.iter().position(|a| a == flag).unwrap() + 1].clone();
     let args = claude_args(&ClaudeLaunch { instructions: Some("Route.".into()), ..launch(Area::Project) });
     assert_eq!(after(&args, "--system-prompt"), "Route.");
     assert_eq!(after(&args, "--tools"), "");
     assert!(args.contains(&"--strict-mcp-config".into()) && !args.contains(&"--settings".into()));
+    assert!(args.contains(&"--no-session-persistence".into()), "it stays out of the user's Claude history");
 }

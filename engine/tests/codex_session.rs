@@ -233,7 +233,7 @@ async fn one_process_serves_two_conversations_at_once_and_keeps_their_answers_ap
 }
 
 #[test]
-fn a_side_question_thread_has_its_own_instructions_and_reads_and_runs_nothing() {
+fn a_side_question_thread_has_its_own_instructions_reads_and_runs_nothing_and_is_not_saved() {
     let thread =
         CodexThread { cwd: ".".into(), model: Some("gpt-6-luna".into()), effort: None, resume: None, instructions: Some("Route.".into()) };
     let (method, params) = thread_params(Area::Chat, &thread);
@@ -243,4 +243,5 @@ fn a_side_question_thread_has_its_own_instructions_and_reads_and_runs_nothing() 
         (&"Route.".into(), &"read-only".into(), &"never".into())
     );
     assert_eq!(params["model"], "gpt-6-luna");
+    assert_eq!(params["ephemeral"], true, "it stays out of the user's Codex history");
 }

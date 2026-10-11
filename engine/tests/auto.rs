@@ -162,6 +162,36 @@ async fn a_conversation_that_began_with_a_greeting_moves_up_when_the_work_does()
 }
 
 #[tokio::test]
+async fn with_only_claude_the_router_process_starts_while_the_user_types() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "chat"));
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let clis = BTreeMap::from([(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] })]);
+    let opts = EngineOptions {
+        data_dir: dir.path().into(),
+        clis,
+        spawn: f.spawn.clone(),
+        windows: false,
+        max_warm: 3,
+        idle: Duration::from_secs(120),
+        runtime: tokio::runtime::Handle::current(),
+        ask: None,
+    };
+    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
+    let routers = || f.args.lock().unwrap().iter().filter(|a| a.contains(&"--system-prompt".to_string())).count();
+    engine.warm(WarmRequest {
+        conversation_id: None,
+        area: Area::Chat,
+        project_id: None,
+        choice: Choice { vendor: "auto".into(), model: None },
+    });
+    assert_eq!(routers(), 1, "a cold Claude takes about 9 s, so the router starts at the first keystroke");
+    engine.send(auto(SKY)).unwrap();
+    engine.shutdown();
+    assert_eq!(routers(), 1, "the question goes to the router that was already waiting");
+}
+
+#[tokio::test]
 async fn stop_while_the_route_is_coming_stops_the_answer() {
     let dir = tempfile::tempdir().unwrap();
     let never: Ask = Arc::new(|_| Box::pin(std::future::pending()));

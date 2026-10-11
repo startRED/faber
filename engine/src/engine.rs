@@ -174,6 +174,7 @@ struct Core {
     /// Auto's route for the latest first message or draft.
     guess: Option<auto::Guess>,
     next_draft: Option<auto::Draft>,
+    spare: Option<auto::Spare>,
 }
 
 /// A handle to the engine; clones share the same engine.
@@ -205,6 +206,7 @@ impl Engine {
                 used: HashMap::new(),
                 guess: None,
                 next_draft: None,
+                spare: None,
             })
         });
         Engine { core, runtime }
@@ -309,6 +311,7 @@ impl Engine {
             for (_, server) in c.codex.drain() {
                 server.retire();
             }
+            c.close_spare();
         })
     }
 }
@@ -861,7 +864,13 @@ impl Core {
         let pick = match (req.choice.vendor == "auto", self.convs.get(&id)) {
             // The route decides who answers a first message; until then only the router's own process gets ready.
             (true, Some(c)) if c.messages.is_empty() => return self.warm_router(),
-            (true, Some(c)) => same_as_before(c, self.live.get(&id)).filter(|p| self.opts.clis.contains_key(&p.vendor)).unwrap_or(fallback),
+            (true, Some(c)) => {
+                let pick = same_as_before(c, self.live.get(&id)).filter(|p| self.opts.clis.contains_key(&p.vendor)).unwrap_or(fallback);
+                if self.next_route(&id).is_some() {
+                    self.warm_router();
+                }
+                pick
+            }
             _ => fallback,
         };
         let _ = self.launch(&id, &pick);

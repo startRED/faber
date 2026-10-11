@@ -43,7 +43,7 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     .map(String::from)
     .to_vec();
     if let Some(instructions) = &launch.instructions {
-        for a in ["--system-prompt", instructions, "--tools", "", "--strict-mcp-config"] {
+        for a in ["--system-prompt", instructions, "--tools", "", "--strict-mcp-config", "--no-session-persistence"] {
             args.push(a.into());
         }
     } else if launch.area == Area::Chat {

@@ -5,11 +5,13 @@ use super::*;
 use crate::route::{INSTRUCTIONS, ROUTER, Routed, candidates, priced, question, read};
 use tokio::sync::oneshot;
 
-/// How long a sent message waits for its route before the everyday default answers. The router (GPT-6 Luna at
-/// medium effort on the Codex process that is already running) measured 3 to 4.5 s on 10/10/2026.
-pub(super) const ROUTE_BUDGET: Duration = Duration::from_secs(4);
-/// A route for a draft may take a little longer: the user is still typing.
-const ASK_LIMIT: Duration = Duration::from_secs(8);
+/// How long a sent message may wait for its route before the everyday default answers: a timeout, not a target (Erick,
+/// 10/10/2026), so a very long request still gets routed. The router (GPT-6 Luna at medium effort on the Codex process
+/// that is already running) measured p50 2.8 s and p90 3.9 s that day; about 2.2 s of it is the service's first word,
+/// whatever the prompt size or service tier.
+pub(super) const ROUTE_BUDGET: Duration = Duration::from_secs(30);
+/// The router itself gives up at the same point, drafts included.
+const ASK_LIMIT: Duration = ROUTE_BUDGET;
 
 /// A route for a request, ready or on its way.
 pub(super) struct Guess {
@@ -32,6 +34,14 @@ pub(super) struct Draft {
 }
 
 type Stop = Arc<Mutex<Option<Session>>>;
+
+/// A router session started ahead of its question.
+pub(super) struct Spare {
+    session: Session,
+    answer: oneshot::Receiver<Option<String>>,
+    id: u64,
+    vendor: Vendor,
+}
 
 /// A draft's route still holds for the sent text when the text only grew a little past it.
 fn covers(guessed: &str, sent: &str) -> bool {
@@ -132,18 +142,24 @@ impl Core {
 
     /// Asks the fastest cheap connected model once, in a session that reads and runs nothing.
     fn ask_router(&mut self, prompt: String) -> (Option<oneshot::Receiver<Option<String>>>, Option<Stop>) {
-        let (tx, rx) = oneshot::channel();
         if let Some(ask) = &self.opts.ask {
+            let (tx, rx) = oneshot::channel();
             let answer = ask(prompt);
             tokio::spawn(async move { drop(tx.send(answer.await)) });
             return (Some(rx), None);
         }
+        let Some(Spare { session, answer, .. }) = self.spare.take().or_else(|| self.open_router()) else { return (None, None) };
+        session.send(UserTurn::text(prompt));
+        (Some(answer), Some(Arc::new(Mutex::new(Some(session)))))
+    }
+
+    /// A router session waiting for its question: a thread on the running Codex process, or a Claude process of its own.
+    fn open_router(&mut self) -> Option<Spare> {
         let router = ROUTER.into_iter().find(|(vendor, model, _)| {
             self.opts.clis.contains_key(vendor) && (*vendor != Vendor::Codex || self.codex_models.iter().any(|m| m == model))
         });
-        let Some(((vendor, model, effort), cli)) = router.and_then(|r| Some((r, self.opts.clis.get(&r.0)?.clone()))) else {
-            return (None, None);
-        };
+        let ((vendor, model, effort), cli) = router.and_then(|r| Some((r, self.opts.clis.get(&r.0)?.clone())))?;
+        let (tx, answer) = oneshot::channel();
         let text = Arc::new(Mutex::new(String::new()));
         let tx = Arc::new(Mutex::new(Some(tx)));
         let sink: EventSink = Arc::new(move |e| match e {
@@ -161,8 +177,6 @@ impl Core {
             Vendor::Codex => {
                 self.codex_server(Area::Chat, false, &cli).open(CodexThread { cwd, model, effort, resume: None, instructions }, sink)
             }
-            // ponytail: a cold Claude process takes about 9 s, past the budget unless a draft routes it early; a warm
-            // router process comes when it proves worth its ~120 MB.
             Vendor::Claude => start_claude(
                 ClaudeOptions {
                     bin: cli.command.clone(),
@@ -173,8 +187,8 @@ impl Core {
                 sink,
             ),
         };
-        session.send(UserTurn::text(prompt));
-        (Some(rx), Some(Arc::new(Mutex::new(Some(session)))))
+        self.next_sid += 1;
+        Some(Spare { session, answer, id: self.next_sid, vendor })
     }
 
     /// Starts a routed first message once its route is known, or the everyday default when the route is late.
@@ -228,13 +242,34 @@ impl Core {
         self.push(id, Some(&reply_id), true);
     }
 
-    /// Gets the router's own process ready when the user starts typing in Auto.
+    /// Gets the router ready when the user starts typing in Auto. Codex answers on its running process; a cold Claude
+    /// process takes about 9 s, so one starts now and waits for the question, closing when it goes unused.
     pub(super) fn warm_router(&mut self) {
-        if let Some(cli) = self.opts.clis.get(&Vendor::Codex).cloned()
-            && self.codex_models.iter().any(|m| m == ROUTER[0].1)
-            && self.opts.ask.is_none()
-        {
+        if self.opts.ask.is_some() || self.spare.is_some() {
+            return;
+        }
+        let codex = self.opts.clis.get(&Vendor::Codex).cloned().filter(|_| self.codex_models.iter().any(|m| m == ROUTER[0].1));
+        if let Some(cli) = codex {
             self.codex_server(Area::Chat, false, &cli);
+            return;
+        }
+        let Some(spare) = self.open_router().filter(|s| s.vendor == Vendor::Claude) else { return };
+        let (me, id, idle) = (self.me.clone(), spare.id, self.opts.idle);
+        self.spare = Some(spare);
+        tokio::spawn(async move {
+            tokio::time::sleep(idle).await;
+            if let Some(core) = me.upgrade() {
+                let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+                if core.spare.as_ref().is_some_and(|s| s.id == id) {
+                    core.close_spare();
+                }
+            }
+        });
+    }
+
+    pub(super) fn close_spare(&mut self) {
+        if let Some(spare) = self.spare.take() {
+            spare.session.close();
         }
     }
 }
