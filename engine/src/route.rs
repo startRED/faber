@@ -106,6 +106,14 @@ impl Routed {
             reason: format!("reason.route.{}.{}", self.kind, self.difficulty),
         }
     }
+
+    /// True when the picked model is weaker than the one a conversation already has.
+    pub fn weaker_than(&self, current: &Pick) -> bool {
+        PROFILES
+            .iter()
+            .find(|p| p.vendor == current.vendor && Some(p.model) == current.model.as_deref() && p.effort == current.effort)
+            .is_some_and(|p| (p.iq, p.agent) > (self.profile.iq, self.profile.agent))
+    }
 }
 
 #[derive(Deserialize)]

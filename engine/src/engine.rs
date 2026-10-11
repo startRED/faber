@@ -747,15 +747,17 @@ impl Core {
             self.opts.data_dir.join("attachments").join(&id)
         };
         let at = now();
-        let c = self.convs.get_mut(&id).ok_or("error.conversationGone")?;
-        // Auto routes a conversation's first message; later ones stay with the model it was routed to.
         let auto = req.choice.vendor == "auto";
-        let routing = auto && c.messages.is_empty();
-        let pick = match auto && !routing {
-            true => {
+        let route = if auto { self.next_route(&id) } else { None };
+        let c = self.convs.get_mut(&id).ok_or("error.conversationGone")?;
+        let routing = route.is_some();
+        let pick = match &route {
+            Some(Some(before)) => before.clone(),
+            Some(None) => fallback.clone(),
+            None if auto => {
                 same_as_before(c, self.live.get(&id)).filter(|p| self.opts.clis.contains_key(&p.vendor)).unwrap_or_else(|| fallback.clone())
             }
-            false => fallback.clone(),
+            None => fallback.clone(),
         };
         if c.title.is_empty() {
             c.title = req.text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(60).collect();
@@ -796,14 +798,17 @@ impl Core {
         // An open conversation only grows through these events, so the question goes out as well as the answer.
         self.emit_message(&id, &question_id);
         let text = if joining_late { with_history(&history, &text) } else { text };
-        if routing {
-            let route = self.route_for(&req.text, req.images.len() + req.files.len());
+        if let Some(before) = route {
+            let only = before.as_ref().map(|p| p.vendor);
+            let route = self.route_for(&req.text, req.images.len() + req.files.len(), only);
             self.push(&id, Some(&reply_id), true);
             let (me, conv, images) = (self.me.clone(), id.clone(), req.images);
             tokio::spawn(async move {
                 let routed = tokio::time::timeout(auto::ROUTE_BUDGET, route).await.ok().and_then(|r| r.ok()).flatten();
+                // A conversation under way only moves up.
+                let routed = routed.filter(|r| before.as_ref().is_none_or(|p| !r.weaker_than(p)));
                 if let Some(core) = me.upgrade() {
-                    core.lock().unwrap_or_else(|e| e.into_inner()).after_route(&conv, &reply_id, routed, fallback, text, images);
+                    core.lock().unwrap_or_else(|e| e.into_inner()).after_route(&conv, &reply_id, routed, pick, text, images);
                 }
             });
             return Ok(id);

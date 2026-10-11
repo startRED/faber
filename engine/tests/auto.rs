@@ -36,10 +36,32 @@ fn engine(dir: &Path, vendor: Vendor, spawn: Spawner, ask: Ask) -> (Engine, Unbo
 
 /// A router that always gives this verdict.
 fn router(kind: &'static str, level: &'static str, calls: Calls) -> Ask {
+    verdicts(vec![(kind, level)], calls)
+}
+
+/// A router that gives these verdicts in turn, then keeps the last one.
+fn verdicts(list: Vec<(&'static str, &'static str)>, calls: Calls) -> Ask {
     Arc::new(move |prompt: String| {
-        calls.lock().unwrap().push(prompt);
+        let mut calls = calls.lock().unwrap();
+        let (kind, level) = list[calls.len().min(list.len() - 1)];
+        calls.push(prompt);
         Box::pin(async move { Some(format!(r#"{{"kind":"{kind}","difficulty":"{level}","confidence":0.95}}"#)) })
     })
+}
+
+/// The answer to a conversation's `n`th message once its model is known.
+async fn routed(engine: &Engine, id: &str, n: usize) -> Message {
+    for _ in 0..100 {
+        if let Some(m) = engine.open(id).and_then(|c| c.messages.get(n * 2 + 1).cloned()).filter(|m| m.model.is_some()) {
+            return m;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("message {n} was never routed");
+}
+
+fn flag(args: &[String], name: &str) -> Option<String> {
+    args.iter().position(|a| a == name).map(|i| args[i + 1].clone())
 }
 
 fn auto(text: &str) -> SendRequest {
@@ -103,11 +125,11 @@ async fn a_draft_routed_while_typing_answers_without_asking_again() {
 }
 
 #[tokio::test]
-async fn later_messages_stay_with_the_routed_model() {
+async fn once_a_message_needs_more_than_an_easy_model_the_conversation_stays_with_it() {
     let dir = tempfile::tempdir().unwrap();
     let calls = Calls::default();
     let f = fake(fixture("claude", "chat"));
-    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone(), router("chat", "easy", calls.clone()));
+    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone(), router("writing", "medium", calls.clone()));
     let id = engine.send(auto(SKY)).unwrap();
     let first = finished(&mut rx).await;
     engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto("And at sunset?") }).unwrap();
@@ -115,9 +137,28 @@ async fn later_messages_stay_with_the_routed_model() {
     engine.shutdown();
     assert_eq!(calls.lock().unwrap().len(), 1, "only the first message is routed");
     let args = f.args.lock().unwrap()[0].clone();
-    let after = |flag: &str| args[args.iter().position(|a| a == flag).unwrap() + 1].clone();
-    assert_eq!((after("--model"), after("--effort")), ("claude-haiku-5-5".to_string(), "medium".to_string()));
+    assert_eq!((flag(&args, "--model"), flag(&args, "--effort")), (Some("claude-sonnet-5-5".into()), Some("medium".into())));
     assert_eq!((second.vendor, second.model, second.reason), (Some(Vendor::Claude), first.model, first.reason));
+}
+
+#[tokio::test]
+async fn a_conversation_that_began_with_a_greeting_moves_up_when_the_work_does() {
+    let dir = tempfile::tempdir().unwrap();
+    let calls = Calls::default();
+    let f = fake(fixture("claude", "chat"));
+    let ask = verdicts(vec![("chat", "easy"), ("code", "hard")], calls.clone());
+    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone(), ask);
+    let id = engine.send(auto(SKY)).unwrap();
+    finished(&mut rx).await;
+    engine.send(SendRequest { conversation_id: Some(id.clone()), ..auto("Now refactor my billing service") }).unwrap();
+    let second = routed(&engine, &id, 1).await;
+    engine.shutdown();
+    assert_eq!((second.model.as_deref(), second.reason.as_deref()), (Some("claude-sonnet-5-5"), Some("reason.route.code.hard")));
+    let args = f.args.lock().unwrap().clone();
+    assert_eq!(flag(&args[0], "--model").as_deref(), Some("claude-haiku-5-5"));
+    // The same subscription picks the conversation up where it was, with its history.
+    assert_eq!((flag(&args[1], "--model").as_deref(), flag(&args[1], "--effort").as_deref()), (Some("claude-sonnet-5-5"), Some("high")));
+    assert!(flag(&args[1], "--resume").is_some());
 }
 
 #[tokio::test]

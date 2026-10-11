@@ -68,10 +68,12 @@ Each vendor's model tends to prefer its own company's models, so in Auto no mode
   to Faber's own scoreboard as it fills: which answers users kept, redid or rejected. Later they ship in the live
   manifest, so a new model joins without an app release.
 - No local model and no hosted classifier: routing spends only the subscriptions the user already has.
-- Routing runs on the first message of a conversation; later messages stay with the routed model. While the user
-  types, the draft is routed in advance, so most answers start the moment they are sent. A sent message waits at most
-  4 s for its route; past it, the turn starts with the everyday default. The answer shows the chosen model and the
-  reason. Routing again when the request changes kind comes later.
+- Routing runs on the first message of a conversation, and on the next ones while only an easy model was needed (a
+  greeting first). Those stay with their subscription, so the CLI keeps the history, and only move up. Once a message
+  needed more, the conversation stays with that model. While the user types, the draft is routed in advance, so most
+  answers start the moment they are sent. A sent message waits at most 4 s for its route; past it, the turn starts
+  with the everyday default. The answer shows the chosen model and the reason. Routing again when a harder request
+  follows a medium one comes later.
 - The router is measured too: on the benchmark of real requests, its picks must match always using the strongest
   model while spending less quota.
 

@@ -368,7 +368,7 @@ export function App() {
                   onStop={() => current() && void api.interrupt(current()!.id)}
                   onWarm={() => void api.warm({ conversationId: current()?.id, ...target(), choice: picked() })}
                   onPause={(text) => {
-                    if (picked().vendor === 'auto' && !current()?.messages.length) void api.routeDraft({ conversationId: current()?.id, ...target(), choice: picked() }, text);
+                    if (picked().vendor === 'auto') void api.routeDraft({ conversationId: current()?.id, ...target(), choice: picked() }, text);
                   }}
                 />
               </Show>

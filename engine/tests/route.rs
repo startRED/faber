@@ -1,5 +1,6 @@
 use faber_engine::model::Vendor;
 use faber_engine::route::{INSTRUCTIONS, Profile, candidates, choose, priced, question, read};
+use faber_engine::router::Pick;
 
 const BOTH: [Vendor; 2] = [Vendor::Claude, Vendor::Codex];
 
@@ -76,4 +77,16 @@ fn the_answer_names_the_reason() {
 fn an_answer_without_a_verdict_is_no_route() {
     assert_eq!(read("I think it is easy", &all()), None);
     assert_eq!(read(r#"{"kind":"chat","difficulty":"trivial","confidence":1}"#, &all()), None);
+}
+
+#[test]
+fn a_conversation_under_way_never_moves_down() {
+    let codex = candidates(&[Vendor::Codex], &["gpt-6.1-sol".to_string(), "gpt-6-luna".to_string()]);
+    let current =
+        |model: &str, effort: &str| Pick { vendor: Vendor::Codex, model: Some(model.into()), effort: effort.into(), reason: String::new() };
+    let easy_chat = choose("chat", "easy", 0.9, &codex).unwrap();
+    assert!(easy_chat.weaker_than(&current("gpt-6.1-sol", "low")));
+    assert!(!easy_chat.weaker_than(&current("gpt-6-luna", "medium")));
+    // A model with no profile is never treated as stronger.
+    assert!(!easy_chat.weaker_than(&current("gpt-6.1-astra", "medium")));
 }

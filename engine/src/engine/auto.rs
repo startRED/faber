@@ -1,5 +1,5 @@
-//! Auto: routes a conversation's first message (see `route`), guessing while the user types so the answer can start
-//! the moment it is sent. Later messages stay with the routed model.
+//! Auto: routes a conversation's messages (see `route`), guessing while the user types so the answer can start the
+//! moment it is sent. Once a message needed more than an easy model, the conversation stays with it.
 
 use super::*;
 use crate::route::{INSTRUCTIONS, ROUTER, Routed, candidates, priced, question, read};
@@ -18,6 +18,8 @@ pub(super) struct Guess {
     waiters: Vec<oneshot::Sender<Option<Routed>>>,
     /// The new conversation whose answering CLI starts as soon as the route is known.
     warm: Option<String>,
+    /// A conversation under way is routed inside its own subscription, where the CLI keeps the history.
+    only: Option<Vendor>,
     /// Stops the router's session when nobody waits for its answer any more.
     stop: Option<Stop>,
 }
@@ -26,6 +28,7 @@ pub(super) struct Guess {
 pub(super) struct Draft {
     request: String,
     warm: String,
+    only: Option<Vendor>,
 }
 
 type Stop = Arc<Mutex<Option<Session>>>;
@@ -37,31 +40,43 @@ fn covers(guessed: &str, sent: &str) -> bool {
 }
 
 impl Core {
-    /// While the user types a conversation's first message in Auto.
+    /// Whether Auto routes this conversation's next message: its first one (`Some(None)`), or the next ones while only
+    /// an easy model was needed, such as after a greeting (`Some(Some(the model so far))`). A conversation whose first
+    /// route came too late stays with the default, so a slow router does not hold up every message. ponytail: only the
+    /// step up from easy; a conversation that grows from medium to hard stays put until routing follows changes of kind.
+    pub(super) fn next_route(&self, id: &str) -> Option<Option<Pick>> {
+        let c = self.convs.get(id)?;
+        if c.messages.is_empty() {
+            return Some(None);
+        }
+        let before = same_as_before(c, self.live.get(id)).filter(|p| self.opts.clis.contains_key(&p.vendor))?;
+        (before.reason.starts_with("reason.route.") && before.reason.ends_with(".easy")).then_some(Some(before))
+    }
+
+    /// While the user types in Auto.
     pub(super) fn route_draft(&mut self, req: WarmRequest, text: String) {
         let text = text.trim().to_string();
         if req.choice.vendor != "auto" || text.is_empty() {
             return;
         }
         let id = self.draft_for(&req);
-        if self.convs.get(&id).is_none_or(|c| !c.messages.is_empty()) {
-            return;
-        }
+        let Some(route) = self.next_route(&id) else { return };
+        let only = route.map(|p| p.vendor);
         match &self.guess {
-            Some(g) if g.request == text => {}
-            Some(g) if g.result.is_none() => self.next_draft = Some(Draft { request: text, warm: id }),
-            _ => self.start_guess(text, 0, Some(id)),
+            Some(g) if g.request == text && g.only == only => {}
+            Some(g) if g.result.is_none() => self.next_draft = Some(Draft { request: text, warm: id, only }),
+            _ => self.start_guess(text, 0, Some(id), only),
         }
     }
 
-    /// The route for a sent first message: the draft's while it still holds, or a new one.
-    pub(super) fn route_for(&mut self, request: &str, attached: usize) -> oneshot::Receiver<Option<Routed>> {
+    /// The route for a sent message: the draft's while it still holds, or a new one.
+    pub(super) fn route_for(&mut self, request: &str, attached: usize, only: Option<Vendor>) -> oneshot::Receiver<Option<Routed>> {
         let (tx, rx) = oneshot::channel();
-        match self.guess.as_mut().filter(|g| attached == 0 && covers(&g.request, request)) {
+        match self.guess.as_mut().filter(|g| attached == 0 && g.only == only && covers(&g.request, request)) {
             Some(Guess { result: Some(routed), .. }) => drop(tx.send(routed.clone())),
             Some(g) => g.waiters.push(tx),
             None => {
-                self.start_guess(request.trim().to_string(), attached, None);
+                self.start_guess(request.trim().to_string(), attached, None, only);
                 if let Some(g) = &mut self.guess {
                     g.waiters.push(tx);
                 }
@@ -71,8 +86,8 @@ impl Core {
     }
 
     /// The router answered (or gave up): the waiting message starts, and a routed draft gets its CLI ready.
-    fn guessed(&mut self, request: &str, routed: Option<Routed>) {
-        let Some(g) = self.guess.as_mut().filter(|g| g.request == request && g.result.is_none()) else { return };
+    fn guessed(&mut self, request: &str, only: Option<Vendor>, routed: Option<Routed>) {
+        let Some(g) = self.guess.as_mut().filter(|g| g.request == request && g.only == only && g.result.is_none()) else { return };
         g.result = Some(routed.clone());
         let (waiters, warm) = (std::mem::take(&mut g.waiters), g.warm.take());
         for waiter in waiters {
@@ -84,18 +99,19 @@ impl Core {
             let _ = self.launch(&id, &r.pick());
         }
         if let Some(d) = self.next_draft.take()
-            && d.request != request
+            && (d.request != request || d.only != only)
         {
-            self.start_guess(d.request, 0, Some(d.warm));
+            self.start_guess(d.request, 0, Some(d.warm), d.only);
         }
     }
 
-    fn start_guess(&mut self, request: String, attached: usize, warm: Option<String>) {
+    fn start_guess(&mut self, request: String, attached: usize, warm: Option<String>, only: Option<Vendor>) {
         let used = |vendor: Vendor| self.used.iter().filter(|((v, _), _)| *v == vendor).map(|(_, u)| *u).fold(0.0, f64::max);
-        let cands = priced(&candidates(&self.vendors(), &self.codex_models), &used);
+        let vendors: Vec<Vendor> = self.vendors().into_iter().filter(|v| only.is_none_or(|o| o == *v)).collect();
+        let cands = priced(&candidates(&vendors, &self.codex_models), &used);
         // One candidate needs no router: the everyday default answers.
         let (answer, stop) = if cands.len() > 1 { self.ask_router(question(&request, attached)) } else { (None, None) };
-        if let Some(old) = self.guess.replace(Guess { request: request.clone(), result: None, waiters: vec![], warm, stop }) {
+        if let Some(old) = self.guess.replace(Guess { request: request.clone(), result: None, waiters: vec![], warm, only, stop }) {
             stop_router(old.stop);
         }
         let me = self.me.clone();
@@ -106,10 +122,10 @@ impl Core {
             };
             if let Some(core) = me.upgrade() {
                 let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
-                if let Some(g) = core.guess.as_mut().filter(|g| g.request == request) {
+                if let Some(g) = core.guess.as_mut().filter(|g| g.request == request && g.only == only) {
                     stop_router(g.stop.take());
                 }
-                core.guessed(&request, routed);
+                core.guessed(&request, only, routed);
             }
         });
     }
