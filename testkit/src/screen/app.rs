@@ -56,6 +56,10 @@ const FAMILIES: [&str; 6] = ["Archivo", "Barlow Condensed", "Bodoni Moda", "IBM 
 pub fn scenarios() -> Vec<Scenario> {
     vec![
         Scenario { name: "the app opens on an empty chat and fits the window", run: opens_empty },
+        Scenario {
+            name: "a chat thread with a tool card and a question card is readable and whole in each of the six looks",
+            run: thread_in_every_look,
+        },
         Scenario { name: "a chat streams an answer with the model and the reason, and lands in the sidebar", run: streams_an_answer },
         Scenario { name: "editing a message sends it as a branch and keeps the original conversation", run: edits_as_a_branch },
         Scenario { name: "deleting a conversation asks once, then removes it", run: deletes_after_asking },
@@ -380,6 +384,106 @@ fn fits_every_look(ctx: &mut Ctx) -> Result {
         }
         app.page.cdp.call("Emulation.clearDeviceMetricsOverride", json!({}))?;
     }
+    Ok(())
+}
+
+/// What a conversation shows: for the parts of a thread, the contrast of their text with the colour behind it (the same
+/// ratios the look engine promises for its pairs, measured on the page as drawn) and whether each one is whole inside the
+/// window and not covered. Each part is `[name, selector, smallest ratio, required]`.
+const THREAD: &str = r#"(() => {
+  const probe = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+  const rgba = (css) => {
+    probe.clearRect(0, 0, 1, 1);
+    probe.fillStyle = '#000';
+    probe.fillStyle = css;
+    probe.fillRect(0, 0, 1, 1);
+    const [r, g, b, a] = probe.getImageData(0, 0, 1, 1).data;
+    return [r, g, b, a / 255];
+  };
+  const over = (top, under) => [0, 1, 2].map((i) => top[i] * top[3] + under[i] * (1 - top[3])).concat(1);
+  const lum = ([r, g, b]) => {
+    const f = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+  };
+  const ratio = (x, y) => { const [hi, lo] = [lum(x), lum(y)].sort((p, q) => q - p); return (hi + 0.05) / (lo + 0.05); };
+  const behind = (el) => {
+    const layers = [];
+    for (let p = el; p; p = p.parentElement) {
+      const c = rgba(getComputedStyle(p).backgroundColor);
+      if (c[3] > 0) layers.push(c);
+      if (c[3] >= 1) break;
+    }
+    const last = layers[layers.length - 1];
+    const page = last && last[3] >= 1 ? [0, 0, 0, 0] : rgba(getComputedStyle(document.body).backgroundColor);
+    return layers.reduceRight((under, top) => over(top, under), page[3] > 0 ? page : [255, 255, 255, 1]);
+  };
+  const faded = (el) => { let o = 1; for (let p = el; p; p = p.parentElement) o *= parseFloat(getComputedStyle(p).opacity); return o; };
+  const parts = [
+    ['your message', '.thread .you', 4.5, true],
+    ['the model name', 'article.ai .model b', 4.5, true],
+    ['the tool line', 'article.ai .tools span', 4.5, true],
+    ['the question title', '.thread .ask b', 4.5, true],
+    ['the question text', '.thread .ask pre', 4.5, true],
+    ['Allow', '.thread .ask .btn.primary', 4.5, true],
+    ['the other answers', '.thread .ask .btn:not(.primary)', 4.5, true],
+    ['the answer text', 'article.ai .md p', 4.5, false],
+    ['the crumb', '.crumb b', 4.5, true],
+  ];
+  const found = [];
+  const problems = [];
+  for (const [name, selector, least, required] of parts) {
+    const all = [...document.querySelectorAll(selector)].filter((e) => e.textContent.trim());
+    if (!all.length) { if (required) problems.push(name + ' is not on screen'); continue; }
+    for (const e of all.slice(0, 3)) {
+      e.scrollIntoView({ block: 'nearest' });
+      const box = e.getBoundingClientRect();
+      const text = rgba(getComputedStyle(e).color);
+      text[3] *= faded(e);
+      const seen = ratio(over(text, behind(e)), behind(e));
+      const top = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+      found.push({ name, ratio: Math.round(seen * 100) / 100 });
+      if (seen < least) problems.push(name + ' has a contrast of ' + seen.toFixed(2) + ', under ' + least);
+      if (box.width < 1 || box.height < 1 || box.x < -0.5 || box.right > innerWidth + 0.5 || box.bottom > innerHeight + 0.5) problems.push(name + ' is cut off: ' + JSON.stringify([box.x, box.y, box.width, box.height]));
+      else if (!top || !(e.contains(top) || top.contains(e))) problems.push(name + ' is covered by ' + (top ? top.className || top.tagName : 'nothing'));
+    }
+  }
+  if (document.documentElement.scrollWidth > innerWidth) problems.push('the page scrolls sideways');
+  return { found, problems };
+})()"#;
+
+fn thread_in_every_look(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let launch = super::shell::two_writes(ctx);
+    let mut app = ctx.launch(launch)?;
+    let page = &mut app.page;
+    let size = json!({ "width": 1440, "height": 900, "deviceScaleFactor": 1, "mobile": false });
+    page.cdp.call("Emulation.setDeviceMetricsOverride", size)?;
+    super::shell::ask_two_writes(page)?;
+    // The first file is allowed, which leaves a tool card behind; the second waits as a question card.
+    let allow = page.text_of("ask.allow")?;
+    page.click(&css("article .ask").has_text("a.txt").role("button", &allow).exact())?;
+    let question = css("article .ask").has_text("b.txt");
+    page.wait_visible(&question)?;
+    for (id, ..) in LOOKS {
+        open_appearance(&mut app.page)?;
+        pick_look(&mut app.page, id)?;
+        let back = app.page.named("button", "set.back")?;
+        app.page.click(&back)?;
+        app.page.wait_visible(&question)?;
+        // The controls and the column fade for a moment; the picture and the measures are taken once they settled.
+        pause(0.7);
+        let seen = app.page.eval(THREAD)?;
+        let problems: Vec<String> =
+            seen["problems"].as_array().map(|all| all.iter().filter_map(|p| p.as_str().map(String::from)).collect()).unwrap_or_default();
+        ensure(problems.is_empty(), || format!("{id}: {}; measured {}", problems.join("; "), seen["found"]))?;
+        let lowest = seen["found"].as_array().into_iter().flatten().filter_map(|f| f["ratio"].as_f64()).fold(f64::INFINITY, f64::min);
+        ctx.notes.push(format!("{id}: lowest contrast {lowest}"));
+        ctx.shot(&mut app, &format!("chat-thread-{id}"))?;
+    }
+    let page = &mut app.page;
+    let deny = page.text_of("ask.deny")?;
+    page.click(&css("article .ask").has_text("b.txt").role("button", &deny).exact())?;
+    page.cdp.call("Emulation.clearDeviceMetricsOverride", json!({}))?;
     Ok(())
 }
 
