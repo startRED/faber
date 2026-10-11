@@ -43,10 +43,9 @@ Erick". While Erick is away, the AI approves this spec [R76]. R72 still keeps fi
 direction, his taste in visible identity, money, license, and anything that contradicts one of his earlier decisions.
 R76 says these stay noted for him to see in the morning.
 
-**Reversible defaults.** Two such questions are open: the locked meaning colours, and the exact AGPL identifier. Until
-Erick answers, Phase 1 is built on the local branch `phase-1-base` with the recommended option as a reversible default
-(AI proposal, AI-24). That branch is not merged and not pushed until he answers both. The license change is its own
-small commit (B1), so it can be swapped or reverted in one step.
+**Decided by Erick.** Both questions are now decided: the three meaning colours stay locked [R77], and the license is
+FSL-1.1-ALv2 [R79]. Phase 1 is built on the local branch `phase-1-base`, which is not merged and not pushed until Erick
+approves (AI-24). The license change is its own small commit (B1).
 
 The brief for this document asked for the catalog decisions "R94 to R100". No R row has those numbers; the R rows end
 at R76. This document reads that request as the catalog lines D94–D100 in section G of the ledger.
@@ -85,7 +84,7 @@ happen on their own. Team and admin features are out until Erick asks for them [
   - license;
   - anything that contradicts one of his earlier decisions.
   - Erick-authored decisions outrank AI proposals. While he is away, the AI approves this spec and leaves those
-    questions open for him [R76]. Phase 1 builds any of them as a reversible default on an unmerged branch (AI-24).
+    questions open for him [R76]. Phase 1 builds any such question on an unmerged branch until Erick approves (AI-24).
 - **Light.** Memory is a feature, with a hard budget (A12) [AGENTS, D14].
 - **Nothing third-party ships with the app.** Telemetry is off by default [AGENTS, roadmap].
 - **Faber builds itself.** Claude and Codex build Faber together, and whoever writes a part never reviews it [R26].
@@ -377,10 +376,8 @@ Erick called the D2 style the best one to work in, and D4 the style he likes mos
 - A theme may shift their tone for its ground, but never their hue family [tokens].
 - An accent whose hue is less than 24° from any of the three is refused [R60]. Exactly 24° passes.
 - An accent that lacks contrast is corrected automatically [R60].
-- The lock is an AI proposal: R60 and the design notes are AI-authored. It conflicts with R58, which Erick wrote
-  ("customize it any way you like"), so under the rule of precedence it is open (Open question 1). Phase 1 builds it as
-  a reversible default. The lock lives in three places only: the hue block of the validator (B3), the `locked` section
-  of `themes.json` (B3) and the read-only row in Settings (B8). Dropping the lock removes those three and nothing else.
+- The lock is Erick's decision [R77]. It lives in three places only: the hue block of the validator (B3), the `locked`
+  section of `themes.json` (B3) and the read-only row in Settings (B8).
 
 ## A14. Identity
 
@@ -581,7 +578,7 @@ Tauri shell, Chat, Projects, Auto, 5 locales and the updater.
 
 | # | Piece | Why it belongs in Phase 1 |
 | :--- | :--- | :--- |
-| B1 | License and product documents | R25 is pending. Agents build from these documents [AGENTS]. |
+| B1 | License and product documents | R25 is replaced by FSL-1.1-ALv2 [R79]. Agents build from these documents [AGENTS]. |
 | B2 | Rust test runner | R29 replaces the Node suite "from now on". Every later piece is tested with it. |
 | B3 | Design system and themes in the real UI | Every screen depends on it [R55–R60, notes]. |
 | B4 | Identity: icon, mark and wordmark | [R66–R71, R75] |
@@ -654,19 +651,18 @@ all proof commands pass [AGENTS]. A piece may take more than one commit. The con
 
 ### What changes
 
-This piece is two commits. The license goes first and alone, because Open question 2 is still Erick's. Whatever he
-decides about the identifier ("-only" or "-or-later") changes that one commit and no document.
+This piece is two commits. The license goes first and alone [R79], so it can be reverted in one step.
 
-**Commit 1, license** [R25].
+**Commit 1, license** [R79].
 
-- Replace `LICENSE` with the AGPL-3.0 text.
-- Set the license field to the AGPL identifier from Open question 2 in:
+- Replace `LICENSE` with the FSL-1.1-ALv2 text, keeping the copyright line, and add `NOTICE`.
+- Set the license field to `FSL-1.1-ALv2` in:
   - `package.json` (`license`);
   - `package-lock.json` (the `license` of the root package entry, which `npm` keeps in step with `package.json`);
   - `Cargo.toml` (`[workspace.package] license`).
-- In `README.md`, change the license line (`[Apache-2.0](LICENSE)`).
-- In `AGENTS.md`, change "(Apache-2.0)" to the AGPL identifier.
-- Until Erick answers, use "AGPL-3.0-only" (AI-24). The commit stays on `phase-1-base`, unmerged and unpushed.
+- In `README.md`, change the license line to `[FSL-1.1-ALv2](LICENSE)`.
+- In `AGENTS.md`, change the license wording to FSL-1.1-ALv2 and source-available.
+- The commit stays on `phase-1-base`, unmerged and unpushed until Erick approves (AI-24).
 
 **Commit 2, documents.**
 
@@ -721,7 +717,8 @@ None. This piece changes documents and license metadata only.
   - `package-lock.json`;
   - `Cargo.toml`;
   - `README.md` (the license line only);
-  - `AGENTS.md` (the "(Apache-2.0)" mention only).
+  - `NOTICE` (new);
+  - `AGENTS.md` (the license wording only).
 - **Commit 2, documents:**
   - `README.md`;
   - `docs/roadmap.md`;
@@ -2106,8 +2103,8 @@ Settings has an Appearance section with themes and several colours [D141]. The m
   - density (2);
   - corners (3);
   - motion (3).
-- **Locked colours.** A read-only row shows the three locked meaning colours with their shapes and words. It goes
-  with the lock if Erick drops it (Open question 1).
+- **Locked colours.** A read-only row shows the three locked meaning colours with their shapes and words, as Erick decided
+  [R77].
 - **Files.** "Save as file" and "Open file" (B3).
 - **Preview panel**, labelled "Not applied yet":
   - a scaled-down live chat;
@@ -2325,8 +2322,7 @@ Each item below is out of Phase 1. The phase comes from R45, or from AI-1 where 
 9. **Memory.** M1–M4 stay within 250 MB.
 10. **Hand check.** Erick has seen it in "Faber (ao vivo)" [D180]. The tray and notification hand check was done on a
     local installed build (B6). No public release is made (AI-3).
-11. **Branch.** All of this sits on `phase-1-base`, which is not merged and not pushed until Erick has answered Open
-    questions 1 and 2 (AI-24). The first push, which he approves, runs `cargo t --all` in CI on three systems, and the
+11. **Branch.** All of this sits on `phase-1-base`, which is not merged and not pushed until Erick approves (AI-24). The first push, which he approves, runs `cargo t --all` in CI on three systems, and the
     merge waits for that run to pass.
 
 ---
@@ -2439,9 +2435,9 @@ Each item fills a gap the sources leave open. Each is marked in the text above a
 23. **AI-23. The build team's UI tools (B0).** `redesign-existing-projects` audits a screen before a piece changes it.
     `design-taste-frontend` is the style guide and `impeccable` the judge, both already chosen by Erick for design
     [R56]; the AI only fixes when in the process each is used. All three are development tools and never ship.
-24. **AI-24. Reversible defaults on an unmerged branch.** Open questions 1 and 2 are Erick's [R72, R76]. Phase 1 builds
-    the recommended option of each on the local branch `phase-1-base`, which is not merged or pushed until he answers.
-    The license change is its own small commit. The colour lock lives in three places only.
+24. **AI-24. Decided questions on an unmerged branch.** Open questions 1 and 2 are Erick's and are decided [R77, R79].
+    Phase 1 builds on the local branch `phase-1-base`, which is not merged or pushed until Erick approves. The license
+    change is its own small commit. The colour lock lives in three places only.
 25. **AI-25. Mechanics added after the second review.**
     - `answer` takes the turn id, and the session task confirms each answer after writing it. `Engine::answer` is the
       asynchronous owner and waits for the confirmations for at most 5 s, while `Core` stays synchronous (B5a).
@@ -2457,12 +2453,12 @@ There are 25 AI choices in total.
 
 # Open questions for Erick
 
-Both questions are answered by Erick, so the reversible defaults of AI-24 are no longer open.
+Both questions are decided by Erick [R77, R79]. The branch rule of AI-24 still applies.
 
-1. **Locked meaning colours, or full freedom?** Answered: the three meaning colours stay locked [R77]. Amber ("needs
+1. **Locked meaning colours, or full freedom?** Decided: the three meaning colours stay locked [R77]. Amber ("needs
    you"), Claude coral and Codex violet are fixed, and the design refuses accents close to them. The lock lives in the
    hue block of the validator, the `locked` section of `themes.json` and the read-only row in Settings (A13, B3, B8).
-2. **License identifier.** Answered: FSL-1.1-ALv2 [R79], replacing the AGPL-3.0 choice of R25. Faber is source-available,
+2. **License identifier.** Decided: FSL-1.1-ALv2 [R79], replacing the AGPL-3.0 choice of R25. Faber is source-available,
    not open source. Each version becomes Apache-2.0 two years after its release (A15, B1).
 
 ---
