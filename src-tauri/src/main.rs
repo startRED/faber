@@ -102,6 +102,11 @@ async fn branch(faber: State<'_, Faber>, req: BranchRequest) -> Res<String> {
 }
 
 #[tauri::command]
+fn set_clock(faber: State<'_, Faber>, utc_offset: i64) {
+    faber.engine.set_utc_offset(utc_offset);
+}
+
+#[tauri::command]
 async fn warm(faber: State<'_, Faber>, req: WarmRequest) -> Res<()> {
     faber.engine.warm(req);
     Ok(())
@@ -386,6 +391,7 @@ fn main() {
             send,
             branch,
             warm,
+            set_clock,
             route_draft,
             interrupt,
             answer,
@@ -443,6 +449,7 @@ fn main() {
                 data_dir: data_dir.clone(),
                 hidden,
             });
+            app.state::<Faber>().engine.watch_accounts();
             if let Some(codex) = clis.get(&Vendor::Codex) {
                 load_models(app.handle(), codex.clone(), data_dir.clone());
             }

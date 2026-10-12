@@ -129,6 +129,9 @@ pub struct Message {
     /// True when the token numbers cover only part of the turn (sub-model work, or no usage was seen).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub incomplete: Option<bool>,
+    /// Why the quota changed the model Auto chose, when it did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pace: Option<PaceNote>,
 }
 
 impl Message {
@@ -156,6 +159,7 @@ impl Message {
             cache_write_tokens: None,
             cache_write_1h_tokens: None,
             incomplete: None,
+            pace: None,
         }
     }
 }
@@ -280,6 +284,14 @@ pub struct QuotaReading {
     pub used: f64,
     /// Seconds since the Unix epoch, as the CLI reports it; 0 when it did not say.
     pub resets_at: f64,
+}
+
+/// Why the quota changed the pick of Auto, shown under the model name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaceNote {
+    /// `step` (one rung up, bought with quota that would expire) or `low` (moved away from a vendor that is running low).
+    pub kind: String,
+    pub vendor: Vendor,
 }
 
 /// The user's choices, in one plain file. Appearance belongs to the screen, so the engine only keeps it.

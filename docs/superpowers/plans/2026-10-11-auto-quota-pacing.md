@@ -5076,6 +5076,9 @@ git commit -m "feat(engine): plan detection and the quota pulse"
 
 ### Task 8: The pacing table and dispatch through the gate
 
+Owner integration note (R89): wire `watch_accounts` in the shell and the screen's local clock offset in this commit, before Auto starts requiring confirmed billing. Replay account checks through the fake CLI; never call a real CLI in proofs. Admission is rechecked at dispatch; live work stops on unapproved overage, credit decreases or loss of confirmed subscription billing. Pulses close within 60 seconds. `engine/src/route.rs` changes only for this task's pacing table.
+
+
 Auto prices on the quota of the moment of sending, never of the moment of typing, and nothing reaches a CLI without the gate.
 
 **Files:**

@@ -28,7 +28,11 @@ impl Core {
         let sink: EventSink = Arc::new(move |e| match e {
             EngineEvent::Quota { .. } | EngineEvent::Signals(_) => {
                 if let Some(core) = me.upgrade() {
-                    core.lock().unwrap_or_else(|e| e.into_inner()).note_account_event(Vendor::Claude, e);
+                    let mut c = core.lock().unwrap_or_else(|e| e.into_inner());
+                    c.note_account_event(Vendor::Claude, e);
+                    if c.allows(Vendor::Claude, None, Purpose::Pulse, false).is_err() {
+                        stop_router(Some(closer.clone()));
+                    }
                 }
             }
             EngineEvent::Done { .. } | EngineEvent::Error { .. } => {
@@ -54,5 +58,9 @@ impl Core {
         );
         *stop.lock().unwrap_or_else(|e| e.into_inner()) = Some(session.clone());
         session.send(UserTurn::text("ok"));
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            stop_router(Some(stop));
+        });
     }
 }

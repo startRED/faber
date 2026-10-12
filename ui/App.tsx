@@ -262,6 +262,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
 
   onMount(() => {
     if (saved?.id && props.initial.conversations.some((c) => c.id === saved.id)) void go({ ...saved, area: saved.area ?? 'chat' });
+    void api.setClock(-new Date().getTimezoneOffset() * 60);
     const stopFollowing = watchSystem();
     // The restored conversation is already opening (`go` above), so what the inbox held since the page started is kept for
     // its snapshot and nothing is lost between the two.
@@ -272,7 +273,10 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
         setCurrent((c) => (c?.id === e.conversationId ? upsert(c, e.message) : c));
       }
     });
-    const minute = setInterval(() => setClock(Date.now()), 60_000);
+    const minute = setInterval(() => {
+      setClock(Date.now());
+      void api.setClock(-new Date().getTimezoneOffset() * 60);
+    }, 60_000);
     // Any key in a text field holds the running column back for a moment, whether or not the text changed (the arrows
     // move the caret), and so does an input method that is composing.
     const typing = (e: Event) => {
@@ -551,7 +555,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
         <div class="toast" role="alert">
           <span>{saveError()}</span>
           <button type="button" aria-label={t('toast.dismiss')} onClick={() => setSaveError(undefined)}>
-            ×
+            Ã—
           </button>
         </div>
       </Show>
@@ -664,14 +668,14 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                     <Match when={place().id}>
                       {area() === 'chat' ? t('area.chat') : t('crumb.project')}
                       <span class="sep" aria-hidden="true">
-                        ›
+                        â€º
                       </span>
                       <b>{title() ?? ''}</b>
                     </Match>
                     <Match when={area() === 'project' && project()}>
                       {t('crumb.project')}
                       <span class="sep" aria-hidden="true">
-                        ›
+                        â€º
                       </span>
                       <b>{project()?.name}</b>
                     </Match>

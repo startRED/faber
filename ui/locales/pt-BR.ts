@@ -327,4 +327,7 @@ export const ptBR: Messages = {
   'tour.auto.body': 'O Auto escolhe o modelo para a sua primeira mensagem e diz o motivo. Você ainda pode escolher um sozinho no seletor de modelo.',
   'tour.running.title': 'O que está rodando',
   'tour.running.body': 'Toda conversa que está trabalhando aparece na lista, no Chat e nos Projetos. O âmbar marca as que precisam de você.',
+  "error.billingUnknown": "O Automático precisa confirmar que este login usa uma assinatura.",
+  "error.billedPerUse": "O Automático não usa logins cobrados por uso. Escolha esta conta para usá-la.",
+  "error.quotaOut": "Não há cota da assinatura disponível para este pedido.",
 };

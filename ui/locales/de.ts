@@ -327,4 +327,7 @@ export const de: Messages = {
   'tour.auto.body': 'Auto wählt das Modell für deine erste Nachricht und sagt dir, warum. Du kannst trotzdem selbst eins in der Modellauswahl wählen.',
   'tour.running.title': 'Die laufende Arbeit',
   'tour.running.body': 'Jedes Gespräch, das gerade arbeitet, steht in der Liste, im Chat und in den Projekten. Bernstein markiert die, die dich brauchen.',
+  "error.billingUnknown": "Auto muss bestätigen, dass dieser Zugang ein Abonnement nutzt.",
+  "error.billedPerUse": "Auto nutzt keine Zugänge mit verbrauchsabhängiger Abrechnung. Wähle dieses Konto ausdrücklich aus, um es zu nutzen.",
+  "error.quotaOut": "Für diese Anfrage ist kein enthaltenes Kontingent verfügbar.",
 };

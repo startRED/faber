@@ -256,6 +256,7 @@ export const api = {
   openTerminal: (id: string) => invoke<boolean>('open_terminal', { id }),
   openLink: (url: string) => invoke<void>('open_link', { url }),
   setShellTexts: (texts: ShellTexts) => invoke<void>('set_shell_texts', { texts }),
+  setClock: (utcOffset: number) => invoke<void>('set_clock', { utcOffset }),
   setupCheck: (vendor: Vendor) => invoke<CheckResult>('setup_check', { vendor }),
   setupInstall: (vendor: Vendor) => invoke<void>('setup_install', { vendor }),
   setupSignIn: (vendor: Vendor) => invoke<void>('setup_sign_in', { vendor }),

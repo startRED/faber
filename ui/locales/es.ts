@@ -327,4 +327,7 @@ export const es: Messages = {
   'tour.auto.body': 'Auto elige el modelo para tu primer mensaje y te dice por qué. Aun así, puedes elegir uno tú en el selector de modelo.',
   'tour.running.title': 'Lo que está en marcha',
   'tour.running.body': 'Cada conversación que trabaja aparece en la lista, en Chat y en Proyectos. El ámbar marca las que te necesitan.',
+  "error.billingUnknown": "Auto necesita confirmar que este acceso utiliza una suscripción.",
+  "error.billedPerUse": "Auto no utiliza accesos que cobran por uso. Elige esta cuenta expresamente para utilizarla.",
+  "error.quotaOut": "No hay cuota incluida disponible para esta solicitud.",
 };

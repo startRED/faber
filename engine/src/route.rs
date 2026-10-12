@@ -5,7 +5,8 @@
 //! that vendor's models, and on 44 real requests (10/10/2026) a router choosing among anonymous profiles still overspent
 //! on 5 of them. It judges requests well; weighing price against quality is the table's job.
 
-use crate::model::Vendor;
+use crate::budget::LOW_M;
+use crate::model::{PaceNote, Vendor};
 use crate::router::Pick;
 use serde::Deserialize;
 
@@ -38,7 +39,7 @@ pub const PROFILES: [Profile; 9] = [
     p(Vendor::Codex, "gpt-6.1-sol", "high", 50, 52, 64.8, 0.32),
     p(Vendor::Codex, "gpt-6.1-sol", "medium", 48, 48, 13.4, 0.21),
     p(Vendor::Codex, "gpt-6.1-sol", "low", 42, 31, 8.6, 0.13),
-    p(Vendor::Codex, "gpt-6-luna", "medium", 29, 3, 8.8, 0.02),
+    p(Vendor::Codex, "gpt-6-luna", "medium", 30, 3, 8.8, 0.02),
 ];
 
 /// The router itself: the fastest cheap model of each vendor.
@@ -65,17 +66,6 @@ pub fn candidates(available: &[Vendor], codex_models: &[String]) -> Vec<Profile>
         .collect()
 }
 
-/// `used` is the share of each vendor's quota already spent (0 to 1): a task costs more where little is left.
-pub fn priced(candidates: &[Profile], used: &dyn Fn(Vendor) -> f64) -> Vec<Profile> {
-    candidates
-        .iter()
-        .map(|p| {
-            let left = (1.0 - used(p.vendor).clamp(0.0, 0.95)) as f32;
-            Profile { cost: p.cost / (left * left), ..*p }
-        })
-        .collect()
-}
-
 // Requests longer than this are cut for routing only; the answer gets the whole text.
 const REQUEST_CHARS: usize = 4000;
 
@@ -95,6 +85,10 @@ pub struct Routed {
     pub kind: &'static str,
     pub difficulty: &'static str,
     pub confidence: f64,
+    /// What the table compared for the pick: cost x weight x quota factor. Kept for tests and logs.
+    pub price: f64,
+    /// Set only when the quota changed the pick (see `choose_paced`).
+    pub pace: Option<PaceNote>,
 }
 
 impl Routed {
@@ -104,6 +98,7 @@ impl Routed {
             model: Some(self.profile.model.into()),
             effort: self.profile.effort.into(),
             reason: format!("reason.route.{}.{}", self.kind, self.difficulty),
+            pace: self.pace.clone(),
         }
     }
 
@@ -125,18 +120,34 @@ struct Answer {
     confidence: f64,
 }
 
+/// What the small model said about a request: the only thing kept from the router while the user types. The table runs
+/// when the message is sent, on the quota of that moment.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Asked {
+    pub kind: &'static str,
+    pub difficulty: &'static str,
+    pub confidence: f64,
+}
+
 /// Reads the router's JSON line; None when it is not one.
-pub fn read(answer: &str, candidates: &[Profile]) -> Option<Routed> {
+pub fn asked(answer: &str) -> Option<Asked> {
     let json = &answer[answer.find('{')?..=answer.rfind('}')?];
     let a: Answer = serde_json::from_str(json).ok()?;
     let kind = KINDS.into_iter().find(|k| *k == a.kind).unwrap_or("other");
     let difficulty = LEVELS.into_iter().find(|l| *l == a.difficulty)?;
-    choose(kind, difficulty, a.confidence.clamp(0.0, 1.0), candidates)
+    Some(Asked { kind, difficulty, confidence: a.confidence.clamp(0.0, 1.0) })
 }
 
-/// The bar a task must clear: (general intelligence, agentic coding).
-fn bar(kind: &str, difficulty: &str) -> (u8, u8) {
-    match (difficulty, kind) {
+/// The router's line and the table's pick with no quota information.
+pub fn read(answer: &str, candidates: &[Profile]) -> Option<Routed> {
+    let a = asked(answer)?;
+    choose(a.kind, a.difficulty, a.confidence, candidates)
+}
+
+/// The bar a task must clear: (general intelligence, agentic coding). `expert` is not a level the router can name; it is
+/// the rung above `hard` that spare quota can buy.
+fn bar(kind: &str, level: &str) -> (u8, u8) {
+    match (level, kind) {
         ("easy", "code") => (0, 15),
         ("easy", _) => (0, 0),
         ("medium", "code") => (0, 30),
@@ -144,23 +155,125 @@ fn bar(kind: &str, difficulty: &str) -> (u8, u8) {
         ("medium", "math") => (47, 0),
         ("medium", _) => (41, 0),
         ("hard", "code") => (47, 44),
+        ("expert", "code") => (50, 52),
+        ("expert", _) => (50, 0),
         _ => (47, 0),
     }
 }
 
-/// The cheapest candidate that clears the bar (the faster on a tie), or the strongest when none does. An unsure verdict
-/// gets the next level's bar.
-pub fn choose(kind: &'static str, difficulty: &'static str, confidence: f64, candidates: &[Profile]) -> Option<Routed> {
-    let level = match (confidence < 0.5, difficulty) {
+const LADDER: [&str; 4] = ["easy", "medium", "hard", "expert"];
+
+/// The bar of the nearest higher level whose bar is different; a task already at the top keeps its own.
+fn next_bar(kind: &str, level: &str) -> (u8, u8) {
+    let own = bar(kind, level);
+    let at = LADDER.iter().position(|l| *l == level).unwrap_or(2);
+    LADDER[at + 1..].iter().map(|l| bar(kind, l)).find(|b| *b != own).unwrap_or(own)
+}
+
+/// Whole-answer time a step up may take: hard code and math of medium or hard take about 3 minutes, the rest about 1.
+fn cap_secs(kind: &str, level: &str) -> f32 {
+    if (kind == "code" && level == "hard") || (kind == "math" && level != "easy") { 180.0 } else { 60.0 }
+}
+
+/// Spare quota only buys quality where quality matters.
+fn matters(kind: &str, level: &str) -> bool {
+    matches!(kind, "code" | "math" | "research") && matches!(level, "medium" | "hard")
+}
+
+/// An unsure verdict gets the next level's bar.
+fn level_of(difficulty: &'static str, confidence: f64) -> &'static str {
+    match (confidence < 0.5, difficulty) {
         (true, "easy") => "medium",
         (true, _) => "hard",
         (false, level) => level,
-    };
-    let (iq, agent) = bar(kind, level);
-    let profile = candidates
+    }
+}
+
+/// What the quota says about one profile's price.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Factor {
+    /// The price multiplier of the profile's windows (budget.rs): below 1 where quota would expire unused, above 1 where it
+    /// runs low.
+    pub m: f64,
+    /// The learned weight of the model in its vendor's quota, 0.5 to 2.
+    pub w: f64,
+    /// False when any vendor-wide window is above 0.90: such a vendor gets no step up.
+    pub step_ok: bool,
+}
+
+impl Factor {
+    pub const NEUTRAL: Factor = Factor { m: 1.0, w: 1.0, step_ok: true };
+}
+
+fn clears(p: &Profile, bar: (u8, u8)) -> bool {
+    p.iq >= bar.0 && p.agent >= bar.1
+}
+
+/// The cheapest candidate that clears the bar under `factor`, with its price and whether it was priced as a step up.
+fn cheapest(
+    kind: &str,
+    level: &str,
+    candidates: &[Profile],
+    factor: &dyn Fn(&Profile) -> Factor,
+    steps: bool,
+) -> Option<(Profile, f64, bool)> {
+    let (own, next, cap) = (bar(kind, level), next_bar(kind, level), cap_secs(kind, level));
+    let matters = matters(kind, level);
+    candidates
         .iter()
-        .filter(|p| p.iq >= iq && p.agent >= agent)
-        .min_by(|a, b| a.cost.total_cmp(&b.cost).then(a.secs.total_cmp(&b.secs)))
-        .or_else(|| candidates.iter().max_by_key(|p| (p.iq, p.agent)))?;
-    Some(Routed { profile: *profile, kind, difficulty, confidence })
+        .filter(|p| clears(p, own))
+        .map(|p| {
+            let f = factor(p);
+            let f_m = if matters { f.m } else { f.m.max(1.0) };
+            let step = steps && matters && next != own && clears(p, next) && p.secs <= cap && f.step_ok;
+            let price = p.cost as f64 * f.w * f_m * if step { f_m.min(1.0) } else { 1.0 };
+            (*p, price, step)
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1).then(a.0.secs.total_cmp(&b.0.secs)))
+}
+
+fn strongest(candidates: &[Profile]) -> Option<Profile> {
+    candidates.iter().max_by_key(|p| (p.iq, p.agent)).copied()
+}
+
+/// The cheapest candidate that clears the bar (the faster on a tie), or the strongest when none does. An unsure verdict
+/// gets the next level's bar. This is the table with no quota information.
+pub fn choose(kind: &'static str, difficulty: &'static str, confidence: f64, candidates: &[Profile]) -> Option<Routed> {
+    let level = level_of(difficulty, confidence);
+    let (profile, price) = match cheapest(kind, level, candidates, &|_| Factor::NEUTRAL, false) {
+        Some((p, price, _)) => (p, price),
+        None => {
+            let p = strongest(candidates)?;
+            (p, p.cost as f64)
+        }
+    };
+    Some(Routed { profile, kind, difficulty, confidence, price, pace: None })
+}
+
+/// The table with the quota in it. Every candidate that clears the task's own bar is in the pool at `cost x w x f`, where
+/// `f` is the profile's `m` on tasks that matter and at least 1 on the others. On a task that matters, a candidate that
+/// also clears the next bar, fits the time cap and is in a vendor with room gets the discount twice. With every factor
+/// neutral the pick is exactly `choose`'s. `pace` says why the pick differs from `choose`'s, if the quota is the reason.
+pub fn choose_paced(
+    kind: &'static str,
+    difficulty: &'static str,
+    confidence: f64,
+    candidates: &[Profile],
+    factor: &dyn Fn(&Profile) -> Factor,
+) -> Option<Routed> {
+    let level = level_of(difficulty, confidence);
+    let usual = choose(kind, difficulty, confidence, candidates)?;
+    let Some((profile, price, step)) = cheapest(kind, level, candidates, factor, true) else {
+        return Some(usual);
+    };
+    let pace = if profile == usual.profile {
+        None
+    } else if step && (profile.iq, profile.agent) > (usual.profile.iq, usual.profile.agent) {
+        Some(PaceNote { kind: "step".into(), vendor: profile.vendor })
+    } else if factor(&usual.profile).m >= LOW_M && profile.vendor != usual.profile.vendor {
+        Some(PaceNote { kind: "low".into(), vendor: usual.profile.vendor })
+    } else {
+        None
+    };
+    Some(Routed { profile, kind, difficulty, confidence, price, pace })
 }

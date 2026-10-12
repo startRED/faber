@@ -1,7 +1,7 @@
 //! The engine: conversations, live CLI sessions, permissions, branches and attachments.
 
 use crate::account::{self, AccountStatus};
-use crate::budget::Billing;
+use crate::budget::{Billing, Purpose, Reach, Why, family_of};
 use crate::claude::{ClaudeLaunch, ClaudeOptions, EventSink, start_claude};
 use crate::cli::Cli;
 use crate::codex::read_codex_limits;
@@ -136,6 +136,8 @@ struct Live {
     cli: Cli,
     /// The process continues a session an earlier process began.
     resumed: bool,
+    by_hand: bool,
+    approved: bool,
 }
 
 const HISTORY_LIMIT: usize = 20_000;
@@ -467,12 +469,17 @@ impl Core {
         self.ledger.of_mut(vendor).record(window, used, resets_at, now, self.utc_offset);
         self.save_ledger(false);
         (self.emit)(AppEvent::Quota { vendor, window: window.to_string(), used, resets_at });
+        self.stop_unapproved_paid(vendor, false);
     }
 
     /// What a CLI said about the account: merged into what the ledger knows, field by field.
     fn apply_signals(&mut self, vendor: Vendor, s: Signals) {
         let now = self.secs();
         let v = self.ledger.of_mut(vendor);
+        let spent = matches!((v.credit_balance, s.credit_balance), (Some(before), Some(after)) if after < before);
+        if s.credit_balance.is_some() {
+            v.credit_balance = s.credit_balance;
+        }
         if let Some(reach) = s.reach {
             v.reach = reach;
         }
@@ -487,6 +494,48 @@ impl Core {
         }
         if s.plan.is_some() {
             v.plan_detected(s.plan, now);
+        }
+        self.stop_unapproved_paid(vendor, spent);
+    }
+
+    fn stop_unapproved_paid(&mut self, vendor: Vendor, spent: bool) {
+        let v = self.ledger.of(vendor);
+        let paid = spent || v.overage_active || (v.paid_fallback && v.snap(self.secs()).exhausted(self.secs()));
+        let unknown = v.billing == Billing::Unknown;
+        let billed = v.billing == Billing::UsageBilled;
+        let stopped: Vec<String> = self
+            .live
+            .iter()
+            .filter(|(_, l)| {
+                l.vendor == vendor
+                    && l.turn.is_some()
+                    && ((!l.by_hand && (unknown || billed)) || (paid && !l.approved && !(l.by_hand && billed)))
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        if paid && !stopped.is_empty() {
+            self.ledger.of_mut(vendor).reach = Reach::Out(None);
+        }
+        for id in stopped {
+            if let Some(l) = self.live.remove(&id) {
+                l.session.close();
+            }
+            if let Some(m) = self.convs.get_mut(&id).and_then(|c| c.messages.last_mut()) {
+                m.status = Some(Status::Stopped);
+                m.permissions = None;
+                m.error = Some(
+                    if unknown {
+                        "error.billingUnknown"
+                    } else if billed {
+                        "error.billedPerUse"
+                    } else {
+                        "error.quotaOut"
+                    }
+                    .into(),
+                );
+                let reply_id = m.id.clone();
+                self.finish(&id, Some(reply_id));
+            }
         }
     }
 
@@ -901,8 +950,23 @@ impl Core {
         server
     }
 
+    /// The gate before a user turn (3.4): the everyday default and the profile of an existing conversation are checked here
+    /// too, not only what the table picked. A vendor the user picked by hand is allowed even when it is billed by use.
+    fn gate_turn(&self, pick: &Pick, by_hand: bool) -> Result<(), String> {
+        let family = pick.model.as_deref().and_then(family_of);
+        self.allows(pick.vendor, family, Purpose::UserTurn { by_hand }, false).map_err(|why| {
+            match why {
+                Why::Billing if self.ledger.of(pick.vendor).billing == Billing::Unknown => "error.billingUnknown",
+                Why::Billing => "error.billedPerUse",
+                Why::Exhausted | Why::Window | Why::Paid => "error.quotaOut",
+            }
+            .to_string()
+        })
+    }
+
     /// Hands a turn to the conversation's CLI, starting the CLI if needed.
-    fn start(&mut self, id: &str, reply_id: &str, pick: &Pick, text: String, images: Vec<Image>) -> Result<(), String> {
+    fn start(&mut self, id: &str, reply_id: &str, pick: &Pick, text: String, images: Vec<Image>, by_hand: bool) -> Result<(), String> {
+        self.gate_turn(pick, by_hand)?;
         self.launch(id, pick)?;
         if let Some(running) = self.live.get(id).and_then(|l| l.running.clone())
             && let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id))
@@ -911,6 +975,8 @@ impl Core {
         }
         if let Some(l) = self.live.get_mut(id) {
             l.turn = Some(reply_id.to_string());
+            l.by_hand = by_hand;
+            l.approved = false;
             l.session.send(UserTurn { text, images });
         }
         self.push(id, Some(reply_id), true);
@@ -976,6 +1042,8 @@ impl Core {
                 used: self.tick,
                 cli,
                 resumed,
+                by_hand: false,
+                approved: false,
             },
         );
         // ponytail: count-based limit on idle Claude processes; a RAM budget across all CLIs comes with parallel workers.
@@ -1102,16 +1170,18 @@ impl Core {
             self.push(&id, Some(&reply_id), true);
             let (me, conv, images) = (self.me.clone(), id.clone(), req.images);
             tokio::spawn(async move {
-                let routed = tokio::time::timeout(auto::ROUTE_BUDGET, route).await.ok().and_then(|r| r.ok()).flatten();
-                // A conversation under way only moves up.
-                let routed = routed.filter(|r| before.as_ref().is_none_or(|p| !r.weaker_than(p)));
+                let verdict = tokio::time::timeout(auto::ROUTE_BUDGET, route).await.ok().and_then(|r| r.ok()).flatten();
                 if let Some(core) = me.upgrade() {
-                    core.lock().unwrap_or_else(|e| e.into_inner()).after_route(&conv, &reply_id, routed, pick, text, images);
+                    let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+                    // The table runs now, on the quota of this moment, not on the quota the user saw while typing. A
+                    // conversation under way only moves up.
+                    let routed = verdict.and_then(|v| core.table(&v, only)).filter(|r| before.as_ref().is_none_or(|p| !r.weaker_than(p)));
+                    core.after_route(&conv, &reply_id, routed, pick, text, images);
                 }
             });
             return Ok(id);
         }
-        if let Err(error) = self.start(&id, &reply_id, &pick, text, req.images) {
+        if let Err(error) = self.start(&id, &reply_id, &pick, text, req.images, !auto) {
             // The reply never got a CLI: it ends with the error instead of staying in the running list for good.
             self.fail_reply(&id, &reply_id, error.clone());
             return Err(error);
@@ -1271,7 +1341,7 @@ fn same_as_before(c: &Conversation, live: Option<&Live>) -> Option<Pick> {
     let vendor = last.vendor?;
     let effort = live.filter(|l| l.vendor == vendor).map_or_else(|| "medium".to_string(), |l| l.effort.clone());
     let reason = last.reason.clone().filter(|r| r != "reason.routing").unwrap_or_else(|| "reason.autoDefault".into());
-    Some(Pick { vendor, model: last.model.clone(), effort, reason })
+    Some(Pick { vendor, model: last.model.clone(), effort, reason, pace: None })
 }
 
 /// The row of the running list for a conversation, if its latest reply is streaming or has unanswered permissions.

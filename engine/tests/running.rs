@@ -38,6 +38,16 @@ fn engine(dir: &Path, vendors: &[Vendor], spawn: Spawner, ask: Option<Ask>) -> (
         ask,
     };
     let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
+    for vendor in engine.vendors() {
+        engine.note_account_events(
+            vendor,
+            vec![faber_engine::events::EngineEvent::Signals(faber_engine::signals::Signals {
+                billing: Some(faber_engine::budget::Billing::Subscription),
+                ..Default::default()
+            })],
+        );
+    }
+
     engine.set_codex_models(vec!["gpt-6.1-sol".into(), "gpt-6-luna".into()], Some("gpt-6.1-sol".into()));
     (engine, rx)
 }

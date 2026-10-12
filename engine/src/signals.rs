@@ -13,6 +13,7 @@ pub struct Signals {
     pub paid_fallback: Option<bool>,
     pub plan: Option<String>,
     pub billing: Option<Billing>,
+    pub credit_balance: Option<f64>,
 }
 
 impl Signals {
@@ -56,6 +57,10 @@ pub fn codex_signals(msg: &Value) -> Signals {
     Signals {
         reach,
         paid_fallback,
+        credit_balance: r["credits"]["balance"]
+            .as_f64()
+            .or_else(|| r["credits"]["balance"].as_str()?.parse().ok())
+            .filter(|v| v.is_finite()),
         plan: r["planType"].as_str().map(String::from),
         billing: r["planType"].as_str().filter(|p| usage_plan(p)).map(|_| Billing::UsageBilled),
         ..Signals::default()

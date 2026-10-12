@@ -96,6 +96,9 @@ pub async fn setup_check(app: AppHandle, faber: State<'_, Faber>, vendor: String
     if account == AccountStatus::SignedIn {
         let updated = detect_clis();
         faber.engine.replace_clis(updated.clone());
+        if faber.engine.ledger().of(v).billing == faber_engine::budget::Billing::Unknown {
+            faber.engine.check_plans(Duration::from_secs(5)).await;
+        }
         if let Some(codex) = updated.get(&Vendor::Codex) {
             crate::load_models(&app, codex.clone(), faber.data_dir.clone());
         }

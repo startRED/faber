@@ -1,6 +1,6 @@
 //! Which model answers a turn, and why.
 
-use crate::model::Vendor;
+use crate::model::{PaceNote, Vendor};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -17,6 +17,8 @@ pub struct Pick {
     pub model: Option<String>,
     pub effort: String,
     pub reason: String,
+    /// Why the quota changed the pick, when it did (Auto only).
+    pub pace: Option<PaceNote>,
 }
 
 /// Medium effort by default: high quality for most work without spending quota on easy turns.
@@ -31,6 +33,7 @@ pub fn pick_model(choice: &Choice, available: &[Vendor], codex_recommended: Opti
         model: model.or(codex_recommended.filter(|_| vendor == Vendor::Codex)).map(String::from),
         effort: EFFORT.into(),
         reason: reason.into(),
+        pace: None,
     };
     if choice.vendor != "auto" {
         let vendor = Vendor::ALL.into_iter().find(|v| v.name() == choice.vendor)?;

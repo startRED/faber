@@ -57,6 +57,8 @@ pub struct VendorLedger {
     pub overage_active: bool,
     #[serde(skip)]
     pub paid_fallback: bool,
+    #[serde(skip)]
+    pub credit_balance: Option<f64>,
     /// When a plan check last succeeded, and how many failed in a row since.
     #[serde(skip)]
     pub plan_seen_at: Option<f64>,

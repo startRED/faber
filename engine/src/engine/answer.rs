@@ -235,6 +235,8 @@ mod tests {
                 used: 0,
                 cli: Cli { command: "claude".into(), prefix: vec![] },
                 resumed: false,
+                by_hand: true,
+                approved: false,
             };
             c.live.insert(id.clone(), live);
             c.refresh_running();

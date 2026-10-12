@@ -34,7 +34,13 @@ fn a_codex_rate_limit_update_gives_plan_credits_and_reach() {
         "secondary": null, "credits": {"hasCredits": false, "unlimited": false, "balance": "0"}, "spendControlReached": null, "planType": "pro", "rateLimitReachedType": null}}});
     assert_eq!(
         codex_signals(&msg),
-        Signals { reach: Some(Reach::Clear), paid_fallback: Some(false), plan: Some("pro".into()), ..Signals::default() }
+        Signals {
+            reach: Some(Reach::Clear),
+            paid_fallback: Some(false),
+            plan: Some("pro".into()),
+            credit_balance: Some(0.0),
+            ..Signals::default()
+        }
     );
     let out = json!({"params": {"rateLimits": {"primary": {"resetsAt": 100}, "secondary": {"resetsAt": 900}, "rateLimitReachedType": "primary", "credits": {"hasCredits": true}}}});
     let s = codex_signals(&out);

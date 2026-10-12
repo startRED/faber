@@ -328,6 +328,9 @@ export const en = {
   'tour.auto.body': 'Auto picks the model for your first message and tells you why. You can still choose one yourself in the model picker.',
   'tour.running.title': 'The running list',
   'tour.running.body': 'Every conversation that is working shows in the running list, in Chat and in Projects. Amber marks the ones that need you.',
+  "error.billingUnknown": "Auto needs confirmation that this sign-in uses a subscription.",
+  "error.billedPerUse": "Auto does not use sign-ins billed per use. Choose this account explicitly to use it.",
+  "error.quotaOut": "No included quota is available for this request.",
 } as const;
 
 export type Key = keyof typeof en;
