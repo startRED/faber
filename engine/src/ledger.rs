@@ -3,7 +3,7 @@
 //! the engine keeps one and writes it to `budget.json`.
 
 use crate::budget::{Billing, Reach, Shape, Snap, Window, vendor_wide, window_secs};
-use crate::learn::{Learned, Outside, Point, Span, Stretch, Weights, capacity_changed, outside, stretches, weights};
+use crate::learn::{Learned, Outside, Point, Span, Stretch, Weights, outside, same_models_changed, stretches, weights};
 use crate::model::Vendor;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -119,6 +119,7 @@ impl VendorLedger {
         {
             self.learned = Learned::default();
         }
+        self.weights.raw.retain(|_, r| r.is_finite() && *r > 0.0);
         self.weights.w.retain(|_, w| w.is_finite());
         self.weights.w.values_mut().for_each(|w| *w = w.clamp(0.5, 2.0));
         self.weights.capacity = self.weights.capacity.filter(|c| c.is_finite() && *c > 0.0);
@@ -200,7 +201,7 @@ impl VendorLedger {
         self.stretches = found.iter().rev().take(KEEP_STRETCHES).rev().cloned().collect();
         self.stretches_since = found.len();
         let fresh = weights(&found);
-        let changed = matches!((self.weights.capacity, fresh.capacity), (Some(old), Some(new)) if capacity_changed(old, new));
+        let changed = same_models_changed(&self.weights, &fresh);
         if changed {
             self.restart(now);
         } else {

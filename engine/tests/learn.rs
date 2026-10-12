@@ -222,3 +222,16 @@ fn an_overnight_gap_contributes_only_its_overlap_with_the_last_two_hours() {
     near(o.rate, 5.0 / 9.0, 1e-9);
     assert!(!o.jumped());
 }
+
+#[test]
+fn models_qualifying_later_do_not_fake_a_plan_change() {
+    use faber_engine::learn::same_models_changed;
+    let old = weights(&run("haiku", &[50.0; 8]));
+    let mut expanded = run("haiku", &[50.0; 8]);
+    expanded.extend(run("sonnet", &[10.0; 8]));
+    expanded.extend(run("opus", &[12.0; 8]));
+    let new = weights(&expanded);
+    assert!(capacity_changed(old.capacity.unwrap(), new.capacity.unwrap()));
+    assert!(!same_models_changed(&old, &new));
+    assert!(same_models_changed(&old, &weights(&run("haiku", &[150.0; 8]))));
+}

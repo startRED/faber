@@ -199,6 +199,9 @@ pub fn stretches(points: &[Point], spans: &[Span]) -> Vec<Stretch> {
 /// What the stretches say about a vendor's models.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Weights {
+    /// Unnormalised points per API-equivalent dollar, compared only for shared models.
+    #[serde(default)]
+    pub raw: BTreeMap<String, f64>,
     /// The weight of each model in its vendor's quota: raw points per cost over the vendor's median, 0.5 to 2. A model
     /// with too few stretches, or an unreliable estimate, has no entry and counts as 1.
     pub w: BTreeMap<String, f64>,
@@ -244,11 +247,17 @@ pub fn weights(stretches: &[Stretch]) -> Weights {
         return Weights::default();
     }
     let capacity = median(&sorted(raw.values().copied().collect()));
-    let w = raw.into_iter().map(|(m, r)| (m, (r / capacity).clamp(0.5, 2.0))).collect();
-    Weights { w, capacity: Some(capacity) }
+    let w = raw.iter().map(|(m, r)| (m.clone(), (r / capacity).clamp(0.5, 2.0))).collect();
+    Weights { raw, w, capacity: Some(capacity) }
 }
 
 /// Whether a vendor's capacity moved enough to be a different plan.
 pub fn capacity_changed(old: f64, new: f64) -> bool {
     old > 0.0 && new > 0.0 && (new / old > CAPACITY_JUMP || old / new > CAPACITY_JUMP)
+}
+
+/// Compare like with like: new models qualifying do not imply a different plan.
+pub fn same_models_changed(old: &Weights, new: &Weights) -> bool {
+    let ratios: Vec<f64> = old.raw.iter().filter_map(|(model, before)| new.raw.get(model).map(|after| after / before)).collect();
+    !ratios.is_empty() && capacity_changed(1.0, median(&sorted(ratios)))
 }
