@@ -121,20 +121,25 @@ fn quiet_week() -> Vec<Point> {
 
 #[test]
 fn a_clean_run_of_turns_on_one_model_is_a_stretch() {
-    let points = quiet_week();
-    let spans = [Span { incomplete: false, start: MONDAY + 2.0 * HOUR, end: MONDAY + 3.0 * HOUR, model: "a".into(), cost: Some(0.5) }];
-    // The 5 points between 02:00 and 03:00 for 0.5 of cost: 10 points per cost unit. The neighbours (5 points each) have
-    // no Faber turn in them, so use from elsewhere may hide in the stretch and nothing is accepted.
-    assert_eq!(stretches(&points, &spans), vec![]);
-    let mut points = quiet_week();
-    // Make the neighbours quiet: less than two points moved on either side.
-    points[2].used = points[1].used + 0.005;
-    points[4].used = points[3].used + 0.005;
-    let spans = [Span { incomplete: false, start: MONDAY + 2.0 * HOUR, end: MONDAY + 3.0 * HOUR, model: "a".into(), cost: Some(0.5) }];
+    // Claude completion readings: 15-second turns with five seconds between them, and no idle pre-turn reads.
+    let points: Vec<_> = (0..10).map(|i| at(MONDAY + i as f64 * 20.0, 5.0 + i as f64 * 3.0, MONDAY + 5.0 * HOUR)).collect();
+    let mut spans: Vec<_> = (0..9)
+        .map(|i| Span {
+            incomplete: false,
+            start: MONDAY + i as f64 * 20.0 + 5.0,
+            end: MONDAY + (i + 1) as f64 * 20.0,
+            model: "a".into(),
+            cost: Some(0.5),
+        })
+        .collect();
     let found = stretches(&points, &spans);
-    assert_eq!(found.len(), 1);
-    assert_eq!(found[0].model, "a");
-    near(found[0].ppd, (points[3].used - points[2].used) * 100.0 / 0.5, 1e-9);
+    assert_eq!(found.len(), 9);
+    for stretch in found {
+        assert_eq!(stretch.model, "a");
+        near(stretch.ppd, 6.0, 1e-9);
+    }
+    spans.remove(0);
+    assert_eq!(stretches(&points, &spans).len(), 7, "an unmetered neighbour also excludes the next stretch");
 }
 
 #[test]

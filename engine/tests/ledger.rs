@@ -113,14 +113,28 @@ fn a_typed_plan_does_not_survive_a_detection_that_disagrees() {
     assert_eq!(l.typed_plan, None);
 }
 
-/// Three hours of readings with one clean stretch in the middle: quiet, quiet, then `points` more with a turn of cost `cost`.
+/// Consecutive 15-second turns: every reading is a completion, starting from the preceding turn's baseline.
 fn block(l: &mut VendorLedger, k: usize, points: f64, cost: f64) {
-    let t = BASE + 3.0 * HOUR * k as f64;
+    let t = BASE + 15.0 * k as f64;
+    let reset = BASE + 5.0 * HOUR;
     let used = 0.05 + points * k as f64 / 100.0;
-    l.record("five_hour", used, RESET, t, 0);
-    l.record("five_hour", used, RESET, t + HOUR, 0);
-    l.span(Span { incomplete: false, start: t + HOUR, end: t + 2.0 * HOUR, model: "a".into(), cost: Some(cost) });
-    l.record("five_hour", used + points / 100.0, RESET, t + 2.0 * HOUR, 0);
+    if k == 0 {
+        l.record("five_hour", used, reset, t, 0);
+    }
+    l.span(Span { incomplete: false, start: t, end: t + 15.0, model: "a".into(), cost: Some(cost) });
+    l.record("five_hour", used + points / 100.0, reset, t + 15.0, 0);
+}
+
+#[test]
+fn calibration_fixtures_use_short_turns_and_completion_only_readings() {
+    let mut l = VendorLedger::default();
+    for k in 0..2 {
+        block(&mut l, k, 3.0, 0.5);
+    }
+    assert!(l.spans.iter().all(|s| s.end - s.start == 15.0), "ordinary turns take 15 seconds in this fixture");
+    let completions: Vec<_> = l.spans.iter().map(|s| s.end).collect();
+    let readings: Vec<_> = l.history["five_hour"].iter().skip(1).map(|p| p.at).collect();
+    assert_eq!(readings, completions, "after the previous completion's baseline, every reading ends a metered turn");
 }
 
 #[test]
@@ -129,13 +143,13 @@ fn a_capacity_that_jumps_is_a_plan_change_the_name_did_not_announce() {
     for k in 0..8 {
         block(&mut l, k, 3.0, 0.5);
     }
-    let now = BASE + 30.0 * HOUR;
+    let now = BASE + 8.0 * 15.0;
     assert!(!l.learn_weights(now));
     near(l.weights.capacity.unwrap(), 6.0);
     for k in 8..28 {
         block(&mut l, k, 3.0, 2.0);
     }
-    let later = BASE + 100.0 * HOUR;
+    let later = BASE + 28.0 * 15.0;
     assert!(l.learn_weights(later), "1.5 points per dollar against 6: an explained plan upgrade");
     assert_eq!(l.weights.capacity, None);
     assert_eq!(l.since, later);
