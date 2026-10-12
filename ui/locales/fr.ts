@@ -196,6 +196,7 @@ export const fr: Messages = {
   'set.contrastPass': 'conforme',
   'set.contrastFail': 'insuffisant',
   'set.kindTheme': 'Thème',
+  'set.kindDefault': 'Par défaut',
   'set.kindPreset': 'Style en plus',
   'set.lockedTitle': 'Couleurs au sens fixe',
   'set.lockedHint': 'Elles changent de ton avec le fond, jamais de sens.',

@@ -197,6 +197,7 @@ export const en = {
   'set.contrastPass': 'passes',
   'set.contrastFail': 'fails',
   'set.kindTheme': 'Theme',
+  'set.kindDefault': 'Default',
   'set.kindPreset': 'Extra look',
   'set.lockedTitle': 'Colors with a fixed meaning',
   'set.lockedHint': 'They change tone with the background, never meaning.',

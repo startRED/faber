@@ -196,6 +196,7 @@ export const de: Messages = {
   'set.contrastPass': 'ausreichend',
   'set.contrastFail': 'zu schwach',
   'set.kindTheme': 'Thema',
+  'set.kindDefault': 'Standard',
   'set.kindPreset': 'Zusatzlook',
   'set.lockedTitle': 'Farben mit fester Bedeutung',
   'set.lockedHint': 'Sie ändern ihren Ton mit dem Hintergrund, nie ihre Bedeutung.',

@@ -196,6 +196,7 @@ export const ptBR: Messages = {
   'set.contrastPass': 'passa',
   'set.contrastFail': 'falha',
   'set.kindTheme': 'Tema',
+  'set.kindDefault': 'Padrão',
   'set.kindPreset': 'Visual extra',
   'set.lockedTitle': 'Cores com significado fixo',
   'set.lockedHint': 'Mudam de tom com o fundo, nunca de sentido.',

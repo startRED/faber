@@ -129,11 +129,8 @@ export function AppearanceSection(props: Props) {
                 </span>
                 <span class="nm" id={`look-${id}-name`}>
                   {t(`look.${id}.name` as Key)}
-                  <Show when={id === themes.default}>
-                    <small>{t('look.default')}</small>
-                  </Show>
                 </span>
-                <span class="kind">{t(controls.themes.includes(id) ? 'set.kindTheme' : 'set.kindPreset')}</span>
+                <span class="kind">{t(id === themes.default ? 'set.kindDefault' : controls.themes.includes(id) ? 'set.kindTheme' : 'set.kindPreset')}</span>
                 <span class="sr" id={`look-${id}-desc`}>
                   {t(`look.${id}.desc` as Key)}
                 </span>

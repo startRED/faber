@@ -331,15 +331,19 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .s-main h2 { font-size: var(--fs-h2); }
 .row { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 16px; align-items: start; }
 .row > span { font-size: calc(var(--fs-ui) - 1px); color: var(--ink-3); padding-top: 5px; }
-.s-main.wide { padding-bottom: 0; }
-.s-main.wide > * { max-width: 1160px; }
+/* Appearance: the title and the controls on the left, and a column of its own on the right with the preview and the two
+   actions, set off by a line from top to bottom. A narrow window stacks them. */
+.s-main.wide { display: grid; grid-template-columns: minmax(0, 1fr) 392px; grid-template-rows: auto minmax(0, 1fr) auto; gap: 0; padding: 0; overflow: hidden; }
+.s-main.wide > * { max-width: none; }
+.s-main.wide > .s-head { grid-column: 1; grid-row: 1; padding: 24px 28px 0; }
+.s-main.wide > .ap { display: contents; }
 .s-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 14px; }
 .sr { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 /* The six looks: a small live render of each, drawn with its own tokens, then its name and what kind of look it is. */
-.presets { display: grid; grid-template-columns: repeat(auto-fill, 130px); gap: 14px 12px; }
+.presets { display: grid; grid-template-columns: repeat(auto-fill, 102px); justify-content: space-between; gap: 14px 8px; }
 .preset { display: grid; gap: 2px; align-content: start; min-width: 0; text-align: left; font-size: calc(var(--fs-ui) - 1px); font-weight: 500; color: var(--ink-2); }
-.preset .thumb { display: block; width: 130px; margin-bottom: 6px; overflow: hidden; border-radius: var(--r-sm); box-shadow: 0 0 0 1px var(--line-2); transition: box-shadow var(--dur-ui) var(--ease), transform var(--dur-ui) var(--ease); }
-.preset .thumb .mini { zoom: 0.38; width: 340px; height: 200px; border-radius: 0; box-shadow: none; pointer-events: none; }
+.preset .thumb { display: block; width: 102px; margin-bottom: 6px; overflow: hidden; border-radius: var(--r-sm); box-shadow: 0 0 0 1px var(--line-2); transition: box-shadow var(--dur-ui) var(--ease), transform var(--dur-ui) var(--ease); }
+.preset .thumb .mini { zoom: 0.3; width: 340px; height: 250px; border-radius: 0; box-shadow: none; pointer-events: none; }
 .preset:hover .thumb { transform: translateY(-2px); }
 .preset[aria-pressed='true'] { color: var(--ink); }
 .preset[aria-pressed='true'] .thumb { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3.5px var(--accent); }
@@ -380,25 +384,30 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .filerow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 14px; border-top: 1px solid var(--line); }
 .filerow .hint { margin-left: 6px; }
 /* Appearance: the controls beside the preview, and the two actions in a bar that stays in view. */
-.ap { display: grid; grid-template-columns: minmax(0, 1fr) 320px; grid-template-areas: 'main prev' 'bar bar'; gap: 20px 32px; align-items: start; }
-.ap-main { grid-area: main; display: grid; gap: 22px; min-width: 0; }
-.s-prev { grid-area: prev; position: sticky; top: 0; display: grid; gap: 12px; }
+.ap-main { grid-column: 1; grid-row: 2; display: grid; gap: 22px; align-content: start; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 18px 28px 28px; scrollbar-width: thin; scrollbar-color: var(--line-3) transparent; }
+.s-prev { grid-column: 2; grid-row: 1 / span 2; display: grid; gap: 14px; align-content: start; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 24px 28px 20px; border-left: 1px solid var(--line); scrollbar-width: thin; scrollbar-color: var(--line-3) transparent; }
 .s-prev .ph { display: flex; align-items: baseline; gap: 8px; font-size: calc(var(--fs-ui) - 1px); font-weight: 600; }
 .s-prev .ph small { margin-left: auto; font-weight: 400; color: var(--ink-3); }
 .pvbox { padding: 14px; border-radius: var(--r-md); background: var(--bench), var(--s1); box-shadow: inset 0 0 0 1px var(--line); }
-.s-prev .mini { height: 250px; grid-template-columns: 70px minmax(0, 1fr); }
+.s-prev .mini { height: 320px; grid-template-columns: 70px minmax(0, 1fr); }
 .contrast { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 .contrast div { display: grid; gap: 2px; padding: 8px 10px; border-radius: var(--r-sm); background: var(--s1); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink-3); font-size: calc(var(--fs-ui) - 2px); }
 .contrast div.bad { box-shadow: inset 0 0 0 1px var(--danger); }
 .contrast b { color: var(--ink); font-size: calc(var(--fs-ui) + 1px); font-weight: 500; white-space: nowrap; }
 .contrast em { margin-left: 5px; color: var(--ink-2); font: 400 calc(var(--fs-ui) - 2px) var(--font-ui); }
-.ap-bar { grid-area: bar; position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 0 20px; background: var(--bg); border-top: 1px solid var(--line); }
+.ap-bar { grid-column: 2; grid-row: 3; display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 14px 28px 20px; border-left: 1px solid var(--line); }
+.ap-bar .btn { flex: 1; height: 36px; }
+.ap-bar .ap-msg { flex: 0 0 100%; order: -1; }
+.ap-bar { flex-wrap: wrap; }
 .ap-msg { flex: 1; min-width: 0; margin: 0; font-size: calc(var(--fs-ui) - 1px); color: var(--ink-2); }
 .ap-msg.bad { color: var(--ink); font-weight: 500; }
 .ap-msg.bad::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; background: var(--danger); }
 @media (max-width: 1099px) {
-  .ap { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'main' 'prev' 'bar'; }
-  .s-prev { position: static; }
+  .s-main.wide { display: flex; flex-direction: column; overflow-y: auto; }
+  .s-main.wide > .s-head { padding: 24px 28px 0; }
+  .s-main.wide > .ap { display: grid; gap: 20px; }
+  .ap-main, .s-prev, .ap-bar { grid-column: auto; grid-row: auto; overflow: visible; border-left: 0; }
+  .ap-bar { position: sticky; bottom: 0; background: var(--bg); border-top: 1px solid var(--line); }
 }
 /* Accounts, usage limits and privacy. */
 .accounts { display: grid; gap: 8px; max-width: 520px; margin: 0; padding: 0; list-style: none; }
