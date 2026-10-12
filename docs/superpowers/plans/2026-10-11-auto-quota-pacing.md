@@ -6640,7 +6640,7 @@ It draws a user week from a seed, runs it with pacing off and on, and asserts on
 
 - [ ] **Step 2: Run it**
 
-Run: `cargo test -p faber-engine --test simulation` then `cargo test -p faber-engine --test simulation -- --ignored`
+Run: `cargo test -p faber-engine --test simulation` then `cargo test --release -p faber-engine --test simulation -- --ignored --nocapture`
 Expected: both pass.
 
 - [ ] **Step 3: Document**
@@ -6667,3 +6667,31 @@ git commit -m "test(engine): simulate a month of pacing and document it"
 - **Review Focus:** items 1-5 map to Task 10 tests, Task 8 tests (`a_login_billed_by_use...`, `a_clock_set_backwards...`, `a_reading_that_may_be_wrong...`), Task 5 `a_budget_file_that_is_damaged_old_or_odd...`, Task 4 sanitize, and Task 5 `a_reading_that_cannot_be_real...`.
 
 Plan complete and saved to `docs/superpowers/plans/2026-10-11-auto-quota-pacing.md`. Please review the plan. Does it capture what you want?
+
+
+## Execution record (2026-10-12)
+
+Tasks 8 through 11 are implemented and pushed, including all confirmed findings of the independent review. Task 7 was folded
+into Task 8. Account watching and local-clock wiring moved into Task 8 so R89 could not leave Auto unusable before
+billing confirmation. The actual shell command list lives in `src-tauri/src/main.rs`. Task 9 (`5e09d23`) applied R90 to
+this plan, the spec and the own-spend ledger in one commit. Follow-up `734fdb0` prices Codex's individual requests at the
+published context tier and preserves valid baselines through malformed/repeated updates; `d47ba93` flags small idle
+foreign use without treating it as Faber money. The historical prototype diffs yield to these corrections.
+
+Task 10's four described test bodies were written and extended with family, consent, resumption and shutdown cases.
+Task 11's `approve_credits`, `move_turn` and `wait_turn` commands bind the conversation, reply and vendor rather than a
+vendor-wide approval. Typing a plan cannot make unknown billing eligible. Quota failures preserve drafts and attachments;
+resumption clears only their matching restored draft and preserves newer edits.
+
+Task 12 adds the original Faber prototype simulation, the immediate-stop/latest-reading/baseline corrections to the
+manual cache probe, and documentation in `docs/design.md`. The smoke now includes seed 12, an unpaced-exhaustion case,
+so it asserts strictly fewer exhausted hours instead of a tie on the original first four seeds. All 200 monthly seeds
+ran in release mode: exhausted hours 0.135 versus 0.900, exhausted seeds 2.0% versus 14.5%, unused larger quota 2.5%,
+quality 81.42 versus 80.58, dropped tasks 0.597% (off: 0.151%). No pacing constants were tuned. The three probe tests
+use fake event streams and never call a real CLI.
+
+The owner's explicit protected-path rule overrides Task 12's proposed edit to `docs/roadmap.md`; its existing changes
+were preserved and left unstaged. Real cache measurements and the real pulse memory peak remain owner-run checks, not
+fabricated results. Native-speaker locale review remains required before release. The complete 42-key list and review
+disposition are in `docs/superpowers/auto-quota-pacing-report.md`. Every implementation/fix commit used all seven proofs
+and plain `git push`; screen and shell work used `cargo t --all`, on the hidden Windows desktop.

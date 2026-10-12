@@ -39,7 +39,10 @@ what the week looks like from here.
 The owner's father shares both accounts. Account percentage movement is never Faber's own spend. The ledger meters
 Faber's requests in API-equivalent USD per turn, including cache reads and writes. Claude's native API-rated cumulative
 cost is differenced by session; it includes its sub-model work and cache lifetimes. Codex's reported token deltas are
-priced at the published standard API rates. Missing counters are incomplete, never fabricated zeroes. User turns,
+priced at the published standard API rates, per request rather than from a multi-request turn's aggregate. Requests
+above 272,000 prompt tokens use double input/cache prices and 1.5 times output prices on the supported GPT-6 models.
+When the request-sized context is absent, a large aggregate is a marked lower bound, excluded from learning; duplicate,
+missing or regressed readings cannot re-charge earlier tokens. Missing counters are incomplete, never fabricated zeroes. User turns,
 router questions, quota pulses and hand-over summaries all count. Estimates, monetary caps and the board use only
 this own-spend ledger; account credit balances and account percentage changes cannot write own USD.
 
@@ -113,13 +116,13 @@ Derived values, per window:
     about a third). Because outside use can only add points, the **lower quartile** of the last 20 accepted stretches is
     kept, not the median. It can still be too high when outside use hides inside the stretches, so it is a ceiling on
     the truth, and when the median is more than 2x the lower quartile the model's estimate is marked unreliable and `w`
-    stays 1. For Codex the cost is the credits implied by the tokens and the published rates (only the ratio between
-    models matters). For Claude it is the per-turn `total_cost_usd` (section 6), which covers sub-model calls too.
+    stays 1. Both vendors use Faber's own per-turn API-equivalent USD under R90: Codex's individual request deltas at
+    the applicable context tier, and Claude's native cumulative-cost difference, which covers sub-model calls too.
   - `w` of a model is its raw points per dollar over the median raw value of its vendor's models, clamped to 0.5 to 2,
     and 1 until 8 accepted stretches exist for it.
   - The raw **capacity** of a vendor (the median raw points per dollar over all its models, before dividing and
-    clamping) is kept too. It is the plan-size signal: a change of more than 2x in it is a plan change (section 2),
-    because the normalized `w` would hide a fourfold change.
+    clamping) is kept too. It is the plan-size signal: a change of more than 2x over models common to both samples is
+    a plan change (section 2); newly qualifying models cannot create a false change in the median.
 
 A vendor gets one state from its **worst vendor-wide window** (the one with the highest price multiplier `m`, section
 3). A family window adds to the state only of that family's profiles and never changes the vendor's label. The state is
