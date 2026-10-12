@@ -33,6 +33,11 @@ pub struct Paths {
     pub fake_cli: PathBuf,
     pub fixtures: PathBuf,
     pub shots: PathBuf,
+    pub target: PathBuf,
+}
+
+fn test_target(root: &Path, configured: Option<&std::ffi::OsStr>) -> PathBuf {
+    root.join(configured.unwrap_or_else(|| std::ffi::OsStr::new("target"))).join("faber-test")
 }
 
 impl Paths {
@@ -41,12 +46,13 @@ impl Paths {
         let exe = std::env::current_exe().map_err(|e| format!("cannot find the runner's own path: {e}"))?;
         let bin = exe.parent().ok_or("the runner has no folder")?.to_path_buf();
         let suffix = std::env::consts::EXE_SUFFIX;
-        let target = root.join("target/faber-test");
+        let target = test_target(&root, std::env::var_os("CARGO_TARGET_DIR").as_deref());
         Ok(Paths {
             app: target.join(format!("debug/faber{suffix}")),
             fake_cli: bin.join(format!("fake-cli{suffix}")),
             fixtures: root.join("tests/fixtures"),
             shots: target.join("shots"),
+            target,
             root,
         })
     }
@@ -493,7 +499,7 @@ impl Ctx {
         if problems.is_empty() { Ok(()) } else { Err(problems.join("; ")) }
     }
 
-    /// A screenshot of a checkpoint a scenario names, in `target/faber-test/shots/`.
+    /// A screenshot of a checkpoint a scenario names, under the test build's `shots/` folder.
     pub fn shot(&self, app: &mut Opened, name: &str) -> Result<(), String> {
         app.page.screenshot(&self.paths.shots.join(format!("{name}.png")))
     }
@@ -597,6 +603,16 @@ impl Drop for Ctx {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_build_paths_follow_default_relative_and_absolute_cargo_targets() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        assert_eq!(test_target(root, None), root.join("target/faber-test"));
+        assert_eq!(test_target(root, Some(std::ffi::OsStr::new("target/proofs"))), root.join("target/proofs/faber-test"));
+        let absolute = root.join("another-target");
+        assert_eq!(test_target(root, Some(absolute.as_os_str())), absolute.join("faber-test"));
+    }
     use serde_json::json;
 
     #[test]

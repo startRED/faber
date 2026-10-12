@@ -82,7 +82,7 @@ pub fn ensure_fake_cli(paths: &Paths, jobs: usize) -> Result<(), String> {
     if paths.fake_cli.exists() { Ok(()) } else { Err(format!("the fake CLI is not at {}", paths.fake_cli.display())) }
 }
 
-/// Builds the test app into `target/faber-test/`, once per run, with `jobs` cores for Cargo.
+/// Builds the test app under Cargo's target directory, once per run, with `jobs` cores for Cargo.
 pub fn build_test_app(paths: &Paths, jobs: usize) -> Result<(), String> {
     let production = paths.root.join("dist");
     let before = fingerprint(&production);
@@ -90,7 +90,7 @@ pub fn build_test_app(paths: &Paths, jobs: usize) -> Result<(), String> {
     vite.current_dir(&paths.root).args(vite_args());
     run("Vite build", vite)?;
     let mut tauri = Command::new("node");
-    tauri.current_dir(&paths.root).args(tauri_args(&paths.root.join("target/faber-test"), jobs));
+    tauri.current_dir(&paths.root).args(tauri_args(&paths.target, jobs));
     run("Tauri build", tauri)?;
     if fingerprint(&production) != before {
         return Err("the test build changed dist/, which only the production build may write".into());

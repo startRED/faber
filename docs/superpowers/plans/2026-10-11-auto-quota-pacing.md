@@ -20,6 +20,7 @@
 - Telemetry stays off. Auto never spends paid credits or usage-billed logins without the user's approval (D11).
 - Proof commands, all exit 0 before any commit: `npm run lint`, `npm run typecheck`, `npm run build`, `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo clippy -p faber --features test-hooks -- -D warnings`, `cargo t` (`cargo t --all` when the screen or the shell changes). On the maintainer's PC export `RUSTUP_HOME='E:\Apps\rust\rustup' CARGO_HOME='E:\Apps\rust\cargo' PATH="/e/Apps/rust/cargo/bin:$PATH"` first.
 - One commit per task, made once its tests pass.
+- **R89 (Erick, 2026-10-12):** the spec wins. Auto denies `Billing::Unknown`; only a confirmed subscription can receive an automatic request. Missing quota readings are allowed only after billing is confirmed. A hand-picked user turn and a quota-free plan check keep their documented exceptions.
 
 ## Review Focus
 
@@ -1053,12 +1054,15 @@ git commit -m "feat(engine): per-turn cost, cache numbers and the cache probe"
 
 ### Task 3: Budget maths and the gate
 
+This task also removes the local test-build junction: `testkit` resolves its app and screenshots under `CARGO_TARGET_DIR/faber-test` (relative paths are resolved from the repository), and the build uses that same path. Tests cover default, relative and absolute target directories.
+
 The multiplier, the guards (stale, jumped, relearning, billing) and the one gate.
 
 **Files:**
 - `engine/src/budget.rs`
 - `engine/src/lib.rs`
 - `engine/tests/budget.rs`
+- `testkit/src/app.rs`, `testkit/src/testbuild.rs` (target-directory cleanup)
 
 **Interfaces:**
 - Consumes: nothing. Produces: `budget::{Billing, Reach, Purpose, Why, Snap, Shape, family_of, gate(snap, family, purpose, approved, now) -> Result<(), Why>}`, `Snap::{profile_m, step_ok}`, the price multiplier `m = clamp((0.3*sqrt(left)/(1-p))^2, 0.1, 25)` with `p = used / max(elapsed, 0.10)`; `elapsed` is uniform (1/7 a day) until a shape is learned (D13).
@@ -1068,7 +1072,7 @@ The multiplier, the guards (stale, jumped, relearning, billing) and the one gate
 ```diff
 --- a/engine/tests/budget.rs
 +++ b/engine/tests/budget.rs
-@@ -0,0 +1,275 @@
+@@ -0,0 +1,286 @@
 +use faber_engine::budget::{
 +    Billing, Purpose, Reach, Shape, Snap, State, Wait, Why, Window, bin, elapsed, family_of, gate, m_of, vendor_wide, wait, window_m,
 +    window_secs,
@@ -1304,8 +1308,19 @@ The multiplier, the guards (stale, jumped, relearning, billing) and the one gate
 +#[test]
 +fn the_gate_lets_a_vendor_with_no_reading_answer() {
 +    for purpose in [TURN, Purpose::Router, Purpose::Pulse, Purpose::Summary, Purpose::PlanCheck] {
-+        assert_eq!(gate(&Snap::default(), None, purpose, false, NOW), Ok(()));
++        assert_eq!(gate(&snap(vec![]), None, purpose, false, NOW), Ok(()));
 +    }
++}
++
++#[test]
++fn the_gate_denies_unknown_billing_for_every_automatic_request() {
++    let unknown = Snap::default();
++    for purpose in [TURN, Purpose::Router, Purpose::Pulse, Purpose::Summary] {
++        assert_eq!(gate(&unknown, None, purpose, false, NOW), Err(Why::Billing));
++        assert_eq!(gate(&unknown, None, purpose, true, NOW), Err(Why::Billing));
++    }
++    assert_eq!(gate(&unknown, None, Purpose::PlanCheck, false, NOW), Ok(()));
++    assert_eq!(gate(&unknown, None, Purpose::UserTurn { by_hand: true }, false, NOW), Ok(()));
 +}
 +
 +#[test]
@@ -1493,8 +1508,8 @@ Expected: compile errors or failures naming the missing items.
 +    if discount_ok && (0.0..=STALE_SECS).contains(&(now - w.read_at)) { m } else { m.max(1.0) }
 +}
 +
-+/// Whether the login is a subscription. Auto routes only to a subscription; an unproven login is allowed (the first
-+/// request is what produces the first reading) but gets no discount.
++/// Whether the login is a subscription. Auto requires a confirmed subscription even before the first quota reading.
++/// An unknown or usage-billed login is available only for a hand-picked user turn.
 +#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 +pub enum Billing {
 +    Subscription,
@@ -1674,7 +1689,7 @@ Expected: compile errors or failures naming the missing items.
 +    if purpose == Purpose::PlanCheck {
 +        return Ok(());
 +    }
-+    if s.billing == Billing::UsageBilled && purpose != (Purpose::UserTurn { by_hand: true }) {
++    if s.billing != Billing::Subscription && purpose != (Purpose::UserTurn { by_hand: true }) {
 +        return Err(Why::Billing);
 +    }
 +    if approved {
