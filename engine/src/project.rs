@@ -457,6 +457,14 @@ pub struct Task {
     /// Named proof ids.
     #[serde(default)]
     pub proofs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<wire::Labels>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kit: Option<wire::KitPin>,
     #[serde(default)]
     pub state: TaskState,
     /// A `reason.*` key while blocked or waiting.
@@ -481,6 +489,10 @@ impl Task {
             deliverables: vec![],
             writes: vec![],
             proofs: vec![],
+            labels: None,
+            checks: vec![],
+            paths: vec![],
+            kit: None,
             state: TaskState::default(),
             reason: None,
             attempts: 0,
@@ -543,13 +555,28 @@ pub struct Plan {
     /// Grows with every amendment.
     pub revision: u64,
     pub tasks: Vec<Task>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sheet: Option<wire::DeliverableSheet>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bar: Vec<wire::BarCheck>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compile_receipt: Option<String>,
     #[serde(flatten)]
     pub extra: Extra,
 }
 
 impl Plan {
     pub fn new(mission: &str, revision: u64, tasks: Vec<Task>) -> Self {
-        Plan { schema: SCHEMA, mission: mission.into(), revision, tasks, extra: Extra::new() }
+        Plan {
+            schema: SCHEMA,
+            mission: mission.into(),
+            revision,
+            tasks,
+            sheet: None,
+            bar: vec![],
+            compile_receipt: None,
+            extra: Extra::new(),
+        }
     }
 
     /// Refuses a graph with too many tasks, bad or repeated ids, missing dependencies, cycles, a deliverable claimed
@@ -792,6 +819,14 @@ pub struct Brief {
     pub lease: Option<u64>,
     #[serde(default)]
     pub stop: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requires: Vec<wire::Verbatim>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks: Vec<wire::Verbatim>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub quotes: Vec<wire::Verbatim>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kit: Option<wire::KitPin>,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -814,6 +849,10 @@ impl Brief {
             grant_micros: None,
             lease: None,
             stop: String::new(),
+            requires: vec![],
+            checks: vec![],
+            quotes: vec![],
+            kit: None,
             extra: Extra::new(),
         }
     }

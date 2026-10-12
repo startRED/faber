@@ -15,8 +15,11 @@ use super::{
 use crate::model::Vendor;
 use serde::{Deserialize, Serialize};
 
+mod rework;
+pub use rework::*;
+
 /// The envelope version this build reads and writes.
-pub const SCHEMA: u32 = 1;
+pub const SCHEMA: u32 = 2;
 /// The largest envelope, in bytes, read at all.
 pub const MAX_ENVELOPE: usize = 512 * 1024;
 /// The most paths (or other list items) one action may carry.
@@ -77,6 +80,17 @@ pub struct Envelope {
     pub contract: String,
     pub lease: u64,
     pub action: Action,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ping: Option<Ping>,
+    /// Requirement ids; TaskDraft.requires remains the task dependency graph.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requires: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub quotes: Vec<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub note: String,
 }
 
 /// One action per turn, written as `{"<name>": {...}}`.
@@ -121,6 +135,14 @@ pub struct TaskDraft {
     pub writes: Vec<String>,
     #[serde(default)]
     pub proofs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<Labels>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kit: Option<KitPin>,
 }
 
 impl TaskDraft {
@@ -133,6 +155,10 @@ impl TaskDraft {
         t.deliverables = self.deliverables.clone();
         t.writes = self.writes.clone();
         t.proofs = self.proofs.clone();
+        t.labels = self.labels.clone();
+        t.checks = self.checks.clone();
+        t.paths = self.paths.clone();
+        t.kit = self.kit.clone();
         t
     }
 }
@@ -144,6 +170,12 @@ pub struct PlanDraft {
     pub summary: String,
     pub acceptance: String,
     pub tasks: Vec<TaskDraft>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sheet: Option<DeliverableSheet>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bar: Vec<BarCheck>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compile_receipt: Option<String>,
 }
 
 /// Tasks to add or replace and task ids to drop; checked against the current plan by the coordinator.
@@ -242,6 +274,22 @@ pub struct Complete {
     #[serde(default)]
     pub findings: Vec<String>,
     pub next: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks: Vec<CheckOutcome>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub artifacts: Vec<ArtifactRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub claims: Vec<Claim>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assumption_records: Vec<Assumption>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unconfirmed: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kit_used: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub needs: Vec<String>,
 }
 
 /// Which actions each role may send. Workers cannot plan, ask the person, or spawn peers; only writers and test
@@ -305,8 +353,23 @@ fn drafts(tasks: &[TaskDraft]) -> Result<(), WireError> {
         }
         texts(&t.deliverables)?;
         texts(&t.writes)?;
+        check_ids(&t.checks)?;
+        paths(&t.paths)?;
+        if let Some(labels) = &t.labels {
+            labels.validate()?;
+        }
+        if let Some(kit) = &t.kit {
+            kit.validate()?;
+        }
     }
     Ok(())
+}
+
+fn check_ids(list: &[String]) -> Result<(), WireError> {
+    if list.len() > MAX_PATHS {
+        return Err(WireError::TooBig);
+    }
+    list.iter().try_for_each(|id| check_id(id))
 }
 
 impl Action {
@@ -320,6 +383,18 @@ impl Action {
                 text(&p.summary)?;
                 text(&p.acceptance)?;
                 drafts(&p.tasks)?;
+                if let Some(sheet) = &p.sheet {
+                    sheet.validate()?;
+                }
+                if p.bar.len() > MAX_TASKS * MAX_PATHS {
+                    return Err(WireError::TooBig);
+                }
+                for check in &p.bar {
+                    check.validate()?;
+                }
+                if let Some(receipt) = &p.compile_receipt {
+                    ids(std::slice::from_ref(receipt))?;
+                }
                 Plan::new("draft", 0, p.tasks.iter().map(TaskDraft::to_task).collect()).validate().map_err(WireError::Plan)
             }
             Action::Amend(a) => {
@@ -366,6 +441,35 @@ impl Action {
                 for list in [&c.assumptions, &c.risks, &c.not_run, &c.findings] {
                     texts(list)?;
                 }
+                if c.checks.len() > MAX_PATHS
+                    || c.artifacts.len() > MAX_PATHS
+                    || c.claims.len() > MAX_PATHS
+                    || c.assumption_records.len() > MAX_PATHS
+                    || c.needs.len() > 8
+                {
+                    return Err(WireError::TooBig);
+                }
+                if let Some(receipt) = &c.receipt {
+                    ids(std::slice::from_ref(receipt))?;
+                }
+                for check in &c.checks {
+                    check.validate()?;
+                }
+                for artifact in &c.artifacts {
+                    artifact.validate()?;
+                }
+                for claim in &c.claims {
+                    check_id(&claim.check)?;
+                    text(&claim.text)?;
+                }
+                for assumption in &c.assumption_records {
+                    assumption.validate()?;
+                }
+                texts(&c.unconfirmed)?;
+                check_ids(&c.kit_used)?;
+                for need in &c.needs {
+                    normalize_need(need)?;
+                }
                 Ok(())
             }
         }
@@ -394,6 +498,12 @@ impl Envelope {
         }
         if !allowed(role, &env.action) {
             return Err(WireError::Role);
+        }
+        ids(&env.requires)?;
+        check_ids(&env.checks)?;
+        ids(&env.quotes)?;
+        if env.note.len() > MAX_TEXT || env.note.split_whitespace().count() > 60 {
+            return Err(WireError::TooBig);
         }
         env.action.check()?;
         Ok(env)

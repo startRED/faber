@@ -335,13 +335,15 @@ nothing else moves.
 
 ### Worker envelope
 
-Every worker turn ends with one JSON object, version 1, with no unknown fields. The engine refuses an envelope over
+Every worker turn ends with one JSON object, version 2, with no unknown fields. Durable journal records remain version 1;
+old records stay readable and retain their extension data. Wire version 1 is not accepted for a new dispatch.
+The engine refuses an envelope over
 512 KB, a stale task, attempt, base, contract digest or lease generation (`error.wire.stale`), an action outside the role
 (`error.wire.role`), and a path that leaves the worktree (`error.wire.path`). A file write carries the SHA-256 of the
 content it replaces, or none for a new file.
 
 ```json
-{"schema": 1, "task": "fix", "attempt": 1, "base": "3d3d502", "contract": "<sha-256>", "lease": 4,
+{"schema": 2, "task": "fix", "attempt": 1, "base": "3d3d502", "contract": "<sha-256>", "lease": 4,
  "action": {"patch": {"ops": [
    {"write": {"path": "engine/src/x.rs", "expect": "<sha-256 of the file as read>", "content": "..."}},
    {"rename": {"from": "a.rs", "to": "b.rs", "expect": "<sha-256>"}}
@@ -360,6 +362,20 @@ content it replaces, or none for a new file.
 
 The AI answers only technical decisions; direction, taste, money and legal ones wait for the person
 (`error.decision.person`), in autonomous mode too.
+
+Wire v2 adds optional fields without changing role authority. `ping` is `Order`, `Found`, `Blocked`, `NeedEyes`,
+`DoneReady` or `Disagree`; `note` is at most 60 whitespace-delimited words. Envelope `requires`, `checks` and `quotes`
+are verbatim-text ids; task `requires` continues to mean task dependencies. Briefs retain each id's exact UTF-8 text.
+Task drafts add `labels` (verb, at most eight normalized needs, risk, freshness and facets), scoped `paths`, check ids
+and a `kit` receipt/digest pin. Plans add the deliverable `sheet`, grounded `bar` and `compileReceipt` reference.
+Completions add a check `receipt` id, bounded check outcomes, artifact paths/SHA-256 hashes, claims tied to checks,
+assumptions with provenance, `unconfirmed`, `kitUsed` and newly requested needs. Unknown nested fields remain errors.
+
+`wire::CheckReceipt` is distinct from the journal's effect `Receipt`; it binds checks and evidence to one candidate,
+model, effort and known or unknown cost, with links to effect receipts. Check results are pass, fail or not-run:
+pass requires evidence; failure and not-run require a reason. `CompileReceipt` records phase timestamps and cost tags.
+These types publish the shared T5K/T5B/T5 contract. A worker's claimed receipt is data; only engine-verified proofs and
+the independent exact-tree review can authorize acceptance. Missing optional fields do not imply a passing bar or kit.
 
 ### Screen commands and event
 
