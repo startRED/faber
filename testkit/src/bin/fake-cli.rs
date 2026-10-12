@@ -5,6 +5,17 @@ use std::io;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if let [mode, sandbox] = args.as_slice()
+        && mode == "--project-git"
+    {
+        match faber_testkit::screen::projects::probe(std::path::Path::new(sandbox)) {
+            Ok(()) => std::process::exit(0),
+            Err(error) => {
+                eprintln!("project git: {error}");
+                std::process::exit(1);
+            }
+        }
+    }
     if let Some(code) = faber_testkit::gate::run(&args) {
         std::process::exit(code);
     }

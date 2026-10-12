@@ -6,6 +6,8 @@
 //! read and rewrite them during a rollback without dropping anything. A record whose schema is newer than this build's
 //! is refused rather than guessed at ([`store::Journal`]).
 
+pub mod git;
+pub mod lease;
 pub mod store;
 pub mod wire;
 
