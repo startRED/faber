@@ -36,7 +36,7 @@ Regression tests were run red against the old guards before correction. All 20 f
 failed their named assertions, including R86 freshness/enabled-credit denial, exact profile qualification, pause,
 retained history, allocation/short-window/offset/clock/pending-exposure checks, crash/recovery, future timestamps,
 once-only receipts, live status, directory ownership and the merged warm-session lifecycle. Compilation errors do not count as killed mutations.
-The [recorded results](2026-10-12-task-3-guard-mutations.json) list each target and exit status; source files were restored.
+The [recorded results](2026-10-12-task-3-guard-mutations.json) list each target and nonzero-exit result; source files were restored.
 The Task 2 idle-interrupt test initially mistook Task 3's expected post-settlement billing-Unknown signal for process death.
 It now accepts only that signal while still rejecting lifecycle events and checking the next wire turn. Removing
 the driver's completion guard makes it fail; no timeout or retry was changed.

@@ -2,121 +2,121 @@
   {
     "mutant": "H1-reset",
     "test": "five_hour_calibration_survives_a_reset_but_not_a_plan_change",
-    "exit": 1,
-    "killed": true
+    "killed": true,
+    "nonzeroExit": true
   },
   {
     "mutant": "H3-finish",
     "test": "unknown_chat_cost_blocks_only_that_day_not_a_permanent_running_counter",
-    "exit": 1,
-    "killed": true
+    "killed": true,
+    "nonzeroExit": true
   },
   {
     "mutant": "H3-recovery",
     "test": "crashed_chat_is_reconciled_once_then_a_fresh_day_can_be_allocated",
-    "exit": 1,
-    "killed": true
+    "killed": true,
+    "nonzeroExit": true
   },
   {
     "mutant": "M1-age",
     "test": "refreshing_quota_without_paid_fallback_evidence_does_not_refresh_r86",
-    "exit": 1,
-    "killed": true
+    "killed": true,
+    "nonzeroExit": true
   },
   {
     "mutant": "M1-enabled",
     "test": "enabling_paid_fallback_closes_admission_and_live_continuation",
-    "exit": 1,
-    "killed": true
+    "killed": true,
+    "nonzeroExit": true
   },
   {
     "mutant": "M2-profile",
     "test": "routing_never_transplants_an_exposure_to_another_profile",
-    "exit": 1,
-    "killed": true
+    "killed": true,
+    "nonzeroExit": true
   },
   {
     "mutant": "M3-pause",
     "test": "a_grant_update_cannot_override_the_persons_pause",
-    "exit": 1,
-    "killed": true
+    "killed": true,
+    "nonzeroExit": true
   },
   {
     "mutant": "M4-history",
     "test": "other_windows_never_shrink_existing_primary_pacing_history",
-    "exit": 1,
-    "killed": true
+    "killed": true,
+    "nonzeroExit": true
   },
   {
     "mutant": "M5-short",
     "test": "shorter_window_dollar_room_is_reached_before_the_quota_gate",
-    "exit": 1,
-    "killed": true
+    "killed": true,
+    "nonzeroExit": true
   },
   {
     "mutant": "M5-allocation",
     "test": "an_allocation_itself_cannot_exceed_measured_room",
-    "exit": 1,
-    "killed": true
+    "killed": true,
+    "nonzeroExit": true
   },
   {
     "mutant": "M5-pending",
     "test": "late_unknown_and_live_cost_stay_reserved_across_stop_and_restart",
-    "exit": 1,
-    "killed": true
+    "killed": true,
+    "nonzeroExit": true
   },
   {
     "mutant": "M5-offset",
     "test": "a_local_offset_change_cannot_make_recorded_spend_disappear",
-    "exit": 1,
-    "killed": true
+    "killed": true,
+    "nonzeroExit": true
   },
   {
     "mutant": "M5-clock",
     "test": "clock_reversal_during_settlement_cannot_hide_today_spend",
-    "exit": 1,
-    "killed": true
+    "killed": true,
+    "nonzeroExit": true
   },
   {
     "mutant": "L2-future",
     "test": "future_report_or_pause_does_not_poison_the_admission_clock",
-    "exit": 1,
-    "killed": true
+    "killed": true,
+    "nonzeroExit": true
   },
   {
     "mutant": "L4-crash",
     "test": "an_error_records_termination_without_freeing_unknown_exposure",
-    "exit": 1,
-    "killed": true
+    "killed": true,
+    "nonzeroExit": true
   },
   {
     "mutant": "U4-idempotency",
     "test": "separate_turns_in_one_session_have_separate_once_only_receipts",
-    "exit": 1,
-    "killed": true
+    "killed": true,
+    "nonzeroExit": true
   },
   {
     "mutant": "U5-status",
     "test": "known_live_cost_holds_exposure_without_claiming_it_is_unknown",
-    "exit": 1,
-    "killed": true
+    "killed": true,
+    "nonzeroExit": true
   },
   {
     "mutant": "U6-owner",
     "test": "separate_engines_cannot_own_the_same_spending_directory",
-    "exit": 1,
-    "killed": true
+    "killed": true,
+    "nonzeroExit": true
   },
   {
     "mutant": "H2-chat",
     "test": "every_chat_path_remains_available_with_paused_or_unknown_missions",
-    "exit": 1,
-    "killed": true
+    "killed": true,
+    "nonzeroExit": true
   },
   {
     "mutant": "merge-idle",
     "test": "opus_4_interrupt_after_completion_keeps_the_warm_session",
-    "exit": 101,
-    "killed": true
+    "killed": true,
+    "nonzeroExit": true
   }
 ]
