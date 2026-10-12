@@ -247,6 +247,7 @@ fn step_two(ctx: &mut Ctx) -> Result {
 
     // The rest of the first settings, and the question that decides the tutorial.
     page.click(&tcards[1])?;
+    page.wait_for("the Workshop preview", "document.documentElement.dataset.base === 'oficina'")?;
     page.wait_for("the large text to stay", "parseFloat(getComputedStyle(document.body).fontSize) === 16")?;
     let compact = page.named("button", "set.densityCompact")?;
     page.click(&compact)?;

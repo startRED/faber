@@ -226,7 +226,8 @@ impl Page {
     }
 
     // A pointer action waits for finite layout motion, just as it already waits for visibility and enabled state.
-    const CENTER: &'static str = "el.scrollIntoView({ block: 'center', inline: 'center' }); \
+    const CENTER: &'static str = "if (document.documentElement.hasAttribute('data-theme-transition')) return { why: 'theme snapshot is changing' }; \
+        el.scrollIntoView({ block: 'center', inline: 'center' }); \
         for (let p = el; p; p = p.parentElement) { \
             if (p.getAnimations().some((a) => a.playState === 'running' && Number.isFinite(a.effect.getTiming().iterations) && \
                 a.effect.getKeyframes().some((f) => ['transform', 'width', 'height', 'paddingRight', 'gridTemplateColumns', 'gridTemplateRows'].some((key) => key in f)))) \

@@ -478,6 +478,8 @@ fn thread_in_every_look(ctx: &mut Ctx) -> Result {
     page.click(&css("article .ask").has_text("a.txt").role("button", &allow).exact())?;
     let question = css("article .ask").has_text("b.txt");
     page.wait_visible(&question)?;
+    // Let the pending question open its column before measuring settled text contrast in each look.
+    page.wait_visible(&css(".runcol"))?;
     for (id, ..) in LOOKS {
         open_appearance(&mut app.page)?;
         pick_look(&mut app.page, id)?;

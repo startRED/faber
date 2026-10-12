@@ -3,7 +3,14 @@
    a theme, a preset and a theme file are only different values for the same names. */
 
 * { box-sizing: border-box; }
-:root { --dur-exit: 180ms; --thread-tail: 64px; }
+:root {
+  --dur-exit: 180ms; --thread-tail: 64px;
+  --motion-enter: var(--dur-ui, 220ms); --motion-exit: 180ms; --motion-fast: 150ms; --motion-theme: 220ms;
+  --motion-ease-out: cubic-bezier(.16, 1, .3, 1); --motion-ease-in: cubic-bezier(.4, 0, 1, 1);
+  --motion-spring: cubic-bezier(.2, .9, .25, 1.02);
+  --motion-slide: 24px; --motion-rise: var(--arrive-y, 6px); --motion-scale: .97;
+  --motion-blur: 2px; --motion-backdrop: 8px; --motion-stagger: 18ms;
+}
 html, body, #root { height: 100%; margin: 0; }
 body { background: var(--frame); color: var(--ink); font-family: var(--font-ui); font-stretch: var(--ui-stretch); font-size: var(--fs-ui); line-height: 1.45; overflow: hidden; }
 ::selection { background: var(--selection); color: var(--ink); }
@@ -41,8 +48,8 @@ input, textarea { caret-color: var(--accent); }
 
 /* Sidebar and the shell around the stage. From 1,100 px an open running column sits beside the stage (.docked); from 900 px
    the sidebar does; below that the sidebar is behind a button. ui/layout.ts holds the same two numbers. */
-.shell { position: relative; display: grid; grid-template-columns: 248px minmax(0, 1fr) 0px; min-height: 0; overflow: clip; transition: grid-template-columns var(--dur-exit) ease-in; }
-.shell.docked { grid-template-columns: 248px minmax(0, 1fr) 352px; transition-duration: var(--dur-ui); transition-timing-function: var(--ease); }
+.shell { position: relative; display: grid; grid-template-columns: 248px minmax(0, 1fr) 0px; min-height: 0; overflow: clip; }
+.shell.docked { grid-template-columns: 248px minmax(0, 1fr) 352px; }
 .settings { display: grid; grid-template-columns: 248px 1fr; min-height: 0; }
 .side { display: flex; flex-direction: column; gap: 14px; padding: 8px 12px 40px; min-height: 0; min-width: 0; }
 .s-nav { padding: 8px 12px; align-content: start; }
@@ -113,8 +120,8 @@ input, textarea { caret-color: var(--accent); }
 /* The stage: a top bar over the work area. The work area holds the thread, the composer and, when it overlays the
    stage, the running column. */
 .main, .s-main { margin: 0 var(--stage-inset) var(--stage-inset) 0; border-radius: var(--r-stage); background: var(--bg); box-shadow: var(--stage-shadow); min-height: 0; min-width: 0; }
-.main { position: relative; overflow: hidden; display: grid; grid-template-rows: 52px minmax(0, 1fr); transition: margin-right var(--dur-exit) ease-in, border-radius var(--dur-exit) ease-in; }
-.shell.docked > .main { margin-right: 0; border-radius: var(--r-stage) 0 0 var(--r-stage); transition-duration: var(--dur-ui); transition-timing-function: var(--ease); }
+.main { position: relative; overflow: hidden; display: grid; grid-template-rows: 52px minmax(0, 1fr); }
+.shell.docked > .main { margin-right: 0; border-radius: var(--r-stage) 0 0 var(--r-stage); }
 .topbar { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 0 16px 0 24px; border-bottom: 1px solid var(--line); position: relative; z-index: 3; }
 .topbar.bare { border-bottom-color: transparent; }
 .topbar .menu { flex: none; margin-left: -8px; }
@@ -592,11 +599,23 @@ html[data-motion='full'] .amb-glow .beam { animation: glow 7s var(--ease-io) inf
 @container (max-width: 920px) { .amb-loom { display: none; } }
 @container (max-width: 1140px) { .amb-flow { display: none; } }
 
-/* Motion levels. Reduced keeps state changes and drops loops and travel; none drops everything. */
+/* Chrome moves on the compositor; the running stage uses FLIP in motion.ts, never a grid-width transition. */
+.work > .runcol, .scrim, .coach { backdrop-filter: blur(var(--motion-backdrop)); }
+.work > .runcol { background: color-mix(in srgb, var(--s1) 94%, transparent); }
+.coach { background: color-mix(in srgb, var(--s2) 96%, transparent); }
+:is(.item, .rrow, .ri) { transition: filter var(--motion-fast) var(--motion-ease-out), background-color var(--motion-fast) var(--motion-ease-out), color var(--motion-fast) var(--motion-ease-out); }
+:is(.item, .rrow, .ri):hover { filter: brightness(1.06); }
+::view-transition, ::view-transition-group(*), ::view-transition-image-pair(*),
+::view-transition-old(*), ::view-transition-new(*) { pointer-events: none; }
+::view-transition-group(root) { animation: none; }
+::view-transition-old(root) { animation: theme-out var(--motion-theme) var(--motion-ease-in) both; mix-blend-mode: normal; }
+::view-transition-new(root) { animation: theme-in var(--motion-theme) var(--motion-ease-out) both; mix-blend-mode: normal; }
+@keyframes theme-out { to { opacity: 0; } }
+@keyframes theme-in { from { opacity: 0; } }
 /* Short feedback shares the theme's curve; exits finish sooner. Native selects keep their keyboard behavior. */
 :is(button, select, .plus, .x) { transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease), filter var(--dur-fast) var(--ease); }
-button:active:not(:disabled) { transform: translateY(1px); }
-[data-base='oficina'] button:active { transform: none; }
+button:active:not(:disabled) { transform: translateY(1px) scale(.98); }
+[data-base='oficina'] button:active { transform: scale(.98); }
 :is(.ask, .toast, .ri.need, .coach) { animation-duration: var(--dur-ui); }
 .tour-ring { transition-duration: var(--dur-ui); }
 [data-motion-list] > :is(.ask, .toast, .ri.need, .coach) { animation: none; }
@@ -605,44 +624,31 @@ html.resizing :is(.shell, .main, .side, .fold, .thread.welcome, .tour-ring, .com
 @supports (appearance: base-select) {
   :is(.chip.choose select, select.pill, select.redo), select::picker(select) { appearance: base-select; }
   select::picker-icon { display: none; }
-  select::picker(select) { border: 0; border-radius: var(--r-md); padding: 4px; background: var(--s2); color: var(--ink); box-shadow: var(--lift-shadow); max-width: calc(100vw - 24px); max-height: min(360px, 70vh); overflow: auto; scrollbar-width: thin; scrollbar-color: var(--line-3) transparent; opacity: 0; transform: translateY(var(--arrive-y)); transition: opacity var(--dur-exit) ease-in, transform var(--dur-exit) ease-in, display var(--dur-exit) allow-discrete, overlay var(--dur-exit) allow-discrete; }
-  select:open::picker(select) { opacity: 1; transform: translateY(0); transition-duration: var(--dur-ui); transition-timing-function: var(--ease); }
+  select::picker(select) { border: 0; border-radius: var(--r-md); padding: 4px; background: color-mix(in srgb, var(--s2) 96%, transparent); backdrop-filter: blur(var(--motion-backdrop)); color: var(--ink); box-shadow: var(--lift-shadow); max-width: calc(100vw - 24px); max-height: min(360px, 70vh); overflow: auto; scrollbar-width: thin; scrollbar-color: var(--line-3) transparent; opacity: 0; transform: translateY(var(--motion-rise)) scale(var(--motion-scale)); transition: opacity var(--motion-exit) var(--motion-ease-in), transform var(--motion-exit) var(--motion-ease-in), display var(--motion-exit) allow-discrete, overlay var(--motion-exit) allow-discrete; }
+  select:open::picker(select) { opacity: 1; transform: translateY(0) scale(1); transition-duration: var(--motion-enter); transition-timing-function: var(--motion-spring); }
   select option { border: 0; border-radius: var(--r-xs); padding: 8px 12px; background: var(--s2); color: var(--ink-2); transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
   select option:is(:hover, :focus-visible, :checked) { background: var(--s3); color: var(--ink); }
-  @starting-style { select:open::picker(select) { opacity: 0; transform: translateY(var(--arrive-y)); } }
+  @starting-style { select:open::picker(select) { opacity: 0; transform: translateY(var(--motion-rise)) scale(var(--motion-scale)); } }
 }
 :is([data-motion='reduced'], [data-motion='none']) :is(.cursor, .live, .live::after, .run-dot, .loom-row, .loom-shuttle, .flow-trace, .amb-glow .beam, .dust i) { animation: none !important; }
 :is([data-motion='reduced'], [data-motion='none']) :is(.loom-shuttle, .flow-trace) { opacity: 0; }
 [data-motion='reduced'] { --arrive-y: 0px; }
-/* Reduced keeps only short fades: every duration is capped at 120 ms and the switch thumb stops travelling. */
-[data-motion='reduced'] * { --dur-fast: 120ms; --dur-ui: 120ms; --dur-move: 120ms; --dur-arrive: 120ms; }
-:is([data-motion='reduced'], [data-motion='none']) .sw2::after { transition: background var(--dur-fast); }
-:is([data-motion='reduced'], [data-motion='none']) .composer textarea { transition: none; }
-:is([data-motion='reduced'], [data-motion='none']) :is(.shell, .main, .side, .fold, .thread.welcome, .tour-ring) { transition: none; }
-:is([data-motion='reduced'], [data-motion='none']) button:active { transform: none; }
-[data-motion='reduced'] select::picker(select) { transform: none !important; transition-duration: 120ms; }
-[data-motion='none'] select::picker(select) { transition: none !important; }
-[data-motion='reduced'] :is(.ask, .toast, .ri.need, .coach) { animation: fade 120ms ease-out both; }
-@keyframes fade { from { opacity: 0; } }
-:is([data-motion='reduced'], [data-motion='none']) .btn:active { transform: none; }
-:is([data-motion='reduced'], [data-motion='none']) :is(.try button:hover > span, .rrow:hover > *, .tcard:hover, .preset:hover .thumb) { transform: none; }
-[data-motion='none'], [data-motion='none'] * { --dur-fast: 0ms; --dur-ui: 0ms; --dur-move: 0ms; --dur-arrive: 0ms; }
-[data-motion='none'] *, [data-motion='none'] *::before, [data-motion='none'] *::after { animation: none !important; transition: none !important; }
+/* Reduced and none are instant, including native pickers and theme snapshots. */
+:is([data-motion='reduced'], [data-motion='none']) :is(.btn:active, button:active, .try button:hover > span, .rrow:hover > *, .tcard:hover, .preset:hover .thumb) { transform: none; }
+:is([data-motion='reduced'], [data-motion='none']) *,
+:is([data-motion='reduced'], [data-motion='none']) *::before,
+:is([data-motion='reduced'], [data-motion='none']) *::after { animation: none !important; transition: none !important; }
+:is([data-motion='reduced'], [data-motion='none']) select::picker(select) { transition: none !important; transform: none !important; }
+:is(html[data-motion='reduced'], html[data-motion='none'])::view-transition-old(root),
+:is(html[data-motion='reduced'], html[data-motion='none'])::view-transition-new(root) { animation: none !important; }
 html.hidden-win .amb * { animation-play-state: paused !important; }
 /* The system preference is honoured even before the script runs. */
 @media (prefers-reduced-motion: reduce) {
-  .composer textarea { transition: none; }
-  :is(.shell, .main, .side, .fold, .thread.welcome, .tour-ring) { transition: none; }
-  button:active:not(:disabled) { transform: none; }
-  select::picker(select) { transform: none !important; transition-duration: 120ms; }
-  :root { --arrive-y: 0px; }
-  * { --dur-fast: 120ms; --dur-ui: 120ms; --dur-move: 120ms; --dur-arrive: 120ms; }
-  .sw2::after { transition: background var(--dur-fast); }
-  :is(.try button:hover > span, .rrow:hover > *, .tcard:hover, .preset:hover .thumb) { transform: none; }
-  .cursor, .live, .live::after, .run-dot, .loom-row, .loom-shuttle, .flow-trace, .amb-glow .beam, .dust i { animation: none !important; }
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+  select::picker(select) { transition: none !important; transform: none !important; }
+  ::view-transition-old(root), ::view-transition-new(root) { animation: none !important; }
+  :is(.btn:active, button:active, .try button:hover > span, .rrow:hover > *, .tcard:hover, .preset:hover .thumb) { transform: none; }
   .loom-shuttle, .flow-trace { opacity: 0; }
-  .ask, .toast, .ri.need, .coach { animation: fade 120ms ease-out both; }
-  .btn:active { transform: none; }
 }
 /* A short window: smaller pictures and tighter gaps, so the first settings, the name field and the buttons fit without scrolling. */
 @media (max-height: 940px) {

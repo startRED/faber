@@ -3,67 +3,100 @@ import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
 import { App } from '../../ui/App.tsx';
 import { api, type AppState, type Conversation } from '../../ui/api.ts';
+import { animateList } from '../../ui/motion.ts';
 import { lang, useLanguage } from '../../ui/i18n.ts';
 import { check, equal, ok } from './check.ts';
 
 const settle = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-check('interaction: the running column animates size on open and close, and reduced motion is instant', async () => {
+check('interaction: the running column slides and fades for 120ms while the thread width moves without a jump', async () => {
   const root = document.createElement('div');
   root.style.cssText = 'position:fixed;left:0;top:0;width:1200px;height:600px';
+  root.dataset.motion = 'full';
   for (const [key, value] of Object.entries(themes.css.base)) root.style.setProperty(`--${key}`, value);
-  root.innerHTML = '<div class="shell" style="height:100%"><aside class="side"></aside><main class="main"></main><aside class="runcol"></aside></div>';
+  root.innerHTML = '<div class="shell" style="height:100%"><aside class="side"></aside><main class="main"><header></header><div class="work"><div class="thread"><div class="col">A thread</div></div></div></main></div>';
   document.body.append(root);
   const shell = root.firstElementChild as HTMLElement;
   const main = root.querySelector('main')!;
-  const halfway = () => {
-    const animations = [...shell.getAnimations(), ...main.getAnimations()];
-    for (const animation of animations) {
-      animation.pause();
-      animation.currentTime = Number(animation.effect!.getComputedTiming().duration) / 2;
-    }
-    return animations;
+  const thread = root.querySelector('.thread')!;
+  const column = document.createElement('aside');
+  column.className = 'runcol';
+  const dispose = render(() => { animateList(shell); return [...shell.children] as HTMLElement[]; }, shell);
+  const toggle = (open: boolean) => {
+    shell.classList.toggle('docked', open);
+    if (open) shell.append(column); else column.remove();
   };
-  const finish = async (animations: Animation[]) => {
+  const finish = async () => {
+    const ghosts = [...(document.querySelector('.motion-exit')?.shadowRoot?.querySelectorAll<HTMLElement>('.motion-exit') ?? [])];
+    const animations = [...main.getAnimations(), ...column.getAnimations(), ...ghosts.flatMap((el) => el.getAnimations())];
     for (const animation of animations) animation.finish();
     await Promise.all(animations.map((animation) => animation.finished));
+    await settle(0);
   };
   try {
-    root.dataset.motion = 'full';
     await settle(30);
-    const closed = main.getBoundingClientRect().width;
-    shell.classList.add('docked');
-    await settle(20);
-    const entering = halfway();
-    const opening = main.getBoundingClientRect().width;
-    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      ok(shell.getAnimations().length > 0, 'opening runs a grid transition');
-      ok(opening < closed && opening > closed - 352, `opening passes through intermediate sizes: ${closed} to ${opening}`);
+    const closed = thread.getBoundingClientRect().width;
+    let open = closed;
+    for (const opening of [true, false]) {
+      const before = thread.getBoundingClientRect().width;
+      toggle(opening);
+      await settle(20);
+      const animation = main.getAnimations()[0];
+      if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        ok(animation, 'the actual stage has a FLIP animation');
+        ok(Number(animation.effect!.getComputedTiming().duration) >= 120);
+        equal(shell.getAnimations().length, 0, 'no layout animation on the grid');
+        animation.pause();
+        animation.currentTime = 0;
+        ok(Math.abs(thread.getBoundingClientRect().width - before) < 1, 'the first frame retains the previous thread width');
+        animation.currentTime = 60;
+        const early = thread.getBoundingClientRect().width;
+        animation.currentTime = 120;
+        const later = thread.getBoundingClientRect().width;
+        ok(opening ? later < early : later > early, 'the thread keeps moving through intermediate frames over 120ms');
+        if (opening) {
+          const entrance = column.getAnimations()[0]!;
+          entrance.pause();
+          entrance.currentTime = 0;
+          equal(getComputedStyle(column).opacity, '0');
+          ok(new DOMMatrix(getComputedStyle(column).transform).m41 > 0, 'the column slides in from the right');
+        }
+      }
+      await finish();
+      if (opening) open = thread.getBoundingClientRect().width;
     }
-    await finish(entering);
-    const open = main.getBoundingClientRect().width;
-    ok(Math.abs(closed - open - (352 - parseFloat(getComputedStyle(main).getPropertyValue('--stage-inset')))) < 1);
-    shell.classList.remove('docked');
-    await settle(20);
-    const exiting = halfway();
-    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      ok(shell.getAnimations().length > 0, 'closing runs a grid transition');
-      const closing = main.getBoundingClientRect().width;
-      ok(closing > open && closing < closed, 'closing passes through intermediate sizes');
-    }
-    await finish(exiting);
+    ok(closed > open + 300);
     root.dataset.motion = 'reduced';
-    shell.classList.add('docked');
-    equal(main.getBoundingClientRect().width, open, 'reduced opening changes size immediately');
-    equal(shell.getAnimations().length, 0);
-    shell.classList.remove('docked');
-    equal(main.getBoundingClientRect().width, closed, 'reduced closing changes size immediately');
-    equal(shell.getAnimations().length, 0);
+    for (const opening of [true, false]) {
+      toggle(opening);
+      equal(thread.getBoundingClientRect().width, opening ? open : closed, 'reduced motion changes the thread immediately');
+      await settle(20);
+      equal(main.getAnimations().length, 0);
+      equal(column.getAnimations().length, 0);
+      equal(document.querySelector('.motion-exit'), null);
+    }
+    // An interrupted opening starts its exit at the currently rendered width too.
+    root.dataset.motion = 'full';
+    toggle(true);
+    await settle(20);
+    const entering = main.getAnimations()[0];
+    if (entering) {
+      entering.pause();
+      entering.currentTime = 60;
+      const before = thread.getBoundingClientRect().width;
+      toggle(false);
+      await settle(0);
+      const exiting = main.getAnimations()[0]!;
+      exiting.pause();
+      exiting.currentTime = 0;
+      ok(Math.abs(thread.getBoundingClientRect().width - before) < 1, 'an interrupted toggle also retains its current width');
+    }
+    await finish();
   } finally {
+    dispose();
     root.remove();
   }
 });
-
 check('interaction: both project and conversation breadcrumbs render the single character ›', async () => {
   const stored = localStorage.getItem('faber.place');
   const language = lang();

@@ -250,7 +250,7 @@ export const de: Messages = {
   'look.motion.reduced': 'Reduziert',
   'look.motion.none': 'Keine',
   'look.motion.fullHint': 'Alles bewegt sich: Gleiten, Leuchten und der Effekt der neuen Unterhaltung.',
-  'look.motion.reducedHint': 'Nur kurze Überblendungen. Nichts wiederholt sich oder wandert. Schaltet sich selbst ein, wenn das System weniger Bewegung wünscht.',
+  'look.motion.reducedHint': 'Änderungen erfolgen sofort, ohne Animationen. Schaltet sich selbst ein, wenn das System weniger Bewegung wünscht.',
   'look.motion.noneHint': 'Keine Übergänge und keine Animation.',
   'look.effect.ambient': 'Effekt der neuen Unterhaltung',
   'look.effect.texture': 'Hintergrundtextur',

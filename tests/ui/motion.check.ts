@@ -3,6 +3,40 @@ import themes from '../../src-tauri/src/themes.json';
 import { animateDetails, animateList } from '../../ui/motion.ts';
 import { check, equal, ok } from './check.ts';
 
+check('motion: panel content staggers within 300ms and reduced motion disables all feedback', async () => {
+  const root = document.createElement('div');
+  root.className = 's-main';
+  root.style.cssText = 'position:fixed;left:0;top:0;width:400px;height:300px';
+  root.dataset.motion = 'full';
+  for (const [key, value] of Object.entries(themes.css.base)) root.style.setProperty(`--${key}`, value);
+  root.innerHTML = '<button>First</button><button>Second</button><button class="sw2">Third</button>';
+  document.body.append(root);
+  const dispose = render(() => { animateList(root); return [...root.children] as HTMLElement[]; }, root);
+  try {
+    const animations = root.getAnimations({ subtree: true });
+    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      equal(animations.length, 3);
+      const timing = animations.map((a) => a.effect!.getComputedTiming());
+      ok(Number(timing[1]!.delay) > Number(timing[0]!.delay) && Number(timing[2]!.delay) > Number(timing[1]!.delay));
+      ok(timing.every((t) => Number(t.delay) + Number(t.duration) <= 300));
+    }
+    for (const animation of animations) animation.finish();
+    await Promise.all(animations.map((a) => a.finished));
+    root.dataset.motion = 'reduced';
+    const button = root.querySelector('button')!;
+    equal(getComputedStyle(button).transitionDuration, '0s');
+    equal(getComputedStyle(root.querySelector('.sw2')!, '::after').transitionDuration, '0s');
+    root.append(document.createElement('button'));
+    button.remove();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    equal(root.getAnimations({ subtree: true }).length, 0);
+    equal(document.querySelector('.motion-exit'), null);
+  } finally {
+    dispose();
+    root.remove();
+  }
+});
+
 check('motion: removing a row animates its inert exit and the surviving row, then releases both', async () => {
   const root = document.createElement('div');
   root.style.cssText = 'position:fixed;left:10px;top:10px;width:240px;display:grid';

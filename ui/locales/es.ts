@@ -250,7 +250,7 @@ export const es: Messages = {
   'look.motion.reduced': 'Reducido',
   'look.motion.none': 'Ninguno',
   'look.motion.fullHint': 'Todo se mueve: deslizamientos, brillos y el efecto de la conversación nueva.',
-  'look.motion.reducedHint': 'Solo fundidos cortos. Nada se repite ni se desplaza. Se activa solo cuando el sistema pide menos movimiento.',
+  'look.motion.reducedHint': 'Los cambios son instantáneos, sin animaciones. Se activa solo cuando el sistema pide menos movimiento.',
   'look.motion.noneHint': 'Sin transiciones ni animación.',
   'look.effect.ambient': 'Efecto de la conversación nueva',
   'look.effect.texture': 'Textura de fondo',

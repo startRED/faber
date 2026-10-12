@@ -250,7 +250,7 @@ export const ptBR: Messages = {
   'look.motion.reduced': 'Reduzido',
   'look.motion.none': 'Nenhum',
   'look.motion.fullHint': 'Tudo se move: deslizes, brilhos e o efeito da conversa nova.',
-  'look.motion.reducedHint': 'Só esmaecer curto. Nada se repete nem se desloca. Liga sozinho quando o sistema pede menos movimento.',
+  'look.motion.reducedHint': 'As mudanças são instantâneas, sem animações. Liga sozinho quando o sistema pede menos movimento.',
   'look.motion.noneHint': 'Sem transições e sem animação.',
   'look.effect.ambient': 'Efeito da conversa nova',
   'look.effect.texture': 'Textura de fundo',

@@ -250,7 +250,7 @@ export const fr: Messages = {
   'look.motion.reduced': 'Réduit',
   'look.motion.none': 'Aucun',
   'look.motion.fullHint': 'Tout bouge : glissements, lueurs et l’effet de la nouvelle conversation.',
-  'look.motion.reducedHint': 'Seulement de courts fondus. Rien ne boucle ni ne se déplace. S’active tout seul quand le système demande moins de mouvement.',
+  'look.motion.reducedHint': 'Les changements sont immédiats, sans animation. S’active tout seul quand le système demande moins de mouvement.',
   'look.motion.noneHint': 'Ni transitions ni animation.',
   'look.effect.ambient': 'Effet de la nouvelle conversation',
   'look.effect.texture': 'Texture de fond',

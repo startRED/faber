@@ -251,7 +251,7 @@ export const en = {
   'look.motion.reduced': 'Reduced',
   'look.motion.none': 'None',
   'look.motion.fullHint': 'Everything moves: slides, glows and the effect of the new conversation.',
-  'look.motion.reducedHint': 'Only short fades. Nothing loops or travels. It turns on by itself when your system asks for less motion.',
+  'look.motion.reducedHint': 'Changes are instant, with no animations. It turns on by itself when your system asks for less motion.',
   'look.motion.noneHint': 'No transitions and no animation.',
   'look.effect.ambient': 'Effect on the new conversation',
   'look.effect.texture': 'Background texture',
