@@ -58,7 +58,9 @@ function play(el: HTMLElement, frames: Keyframe[], exit = false, delay = 0): Ani
   if (motion !== 'full') return;
   const style = getComputedStyle(el);
   const duration = Math.min(250, Math.max(150, parseFloat(style.getPropertyValue(exit ? '--motion-exit' : '--motion-enter')) || (exit ? 180 : 220)));
-  if (el.matches('.runcol, .ask, .coach, .setup-card')) frames = frames.map((frame, i) => ({ ...frame, filter: (exit ? i === 0 : i !== 0) ? 'blur(0px)' : 'blur(var(--motion-blur))' }));
+  if (el.matches('.ask, .coach, .setup-card')) frames = frames.map((frame, i) => ({ ...frame, filter: (exit ? i === 0 : i !== 0) ? 'blur(0px)' : 'blur(var(--motion-blur))' }));
+  // Large moving stages raster slowly with blurred shadows and rounded clipping; restore them at rest.
+  if (el.matches('.runcol')) frames = frames.map((frame) => ({ ...frame, boxShadow: 'none', borderRadius: '0px' }));
   const animation = el.animate(frames, {
     duration, delay: Math.min(48, delay), fill: 'backwards', easing: style.getPropertyValue(exit ? '--motion-ease-in' : '--motion-spring').trim() || (exit ? 'ease-in' : 'ease-out'),
   });
@@ -131,8 +133,10 @@ export function animateList(root: HTMLElement, subtree = false): void {
         return;
       }
       const offsets = new Map<HTMLElement, DOMMatrix>();
+      const widths = new Map<HTMLElement, number>();
       for (const el of items) {
         if (!animations.has(el)) continue;
+        if (el.matches('.main')) widths.set(el, el.getBoundingClientRect().width);
         const transform = getComputedStyle(el).transform;
         offsets.set(el, transform === 'none' ? new DOMMatrix() : new DOMMatrix(transform));
         animations.get(el)?.cancel();
@@ -143,10 +147,8 @@ export function animateList(root: HTMLElement, subtree = false): void {
       // shortcut: cap simultaneous exit copies at 12; raise only with measured memory headroom.
       for (const [el, savedRect] of before) {
         const closingSide = sidebarClosing && el === side;
-        const resizingStage = el.matches('.main') && next.has(el) && Math.abs(savedRect.width - next.get(el)!.width) > 0.5;
-        const offset = resizingStage ? offsets.get(el) : undefined;
-        const rect = closingSide ? el.getBoundingClientRect() : offset ? new DOMRect(savedRect.x + offset.m41, savedRect.y + offset.m42, savedRect.width * offset.m11, savedRect.height) : savedRect;
-        if ((!closingSide && !resizingStage && (next.has(el) || el.isConnected)) || level(root) !== 'full' || exits >= 12 || rect.bottom <= 0 || rect.top >= innerHeight || rect.right <= 0 || rect.left >= innerWidth || !rect.width || !rect.height) continue;
+        const rect = closingSide ? el.getBoundingClientRect() : savedRect;
+        if (el.matches('.main, .shell') || (!closingSide && (next.has(el) || el.isConnected)) || level(root) !== 'full' || exits >= 12 || rect.bottom <= 0 || rect.top >= innerHeight || rect.right <= 0 || rect.left >= innerWidth || !rect.width || !rect.height) continue;
         const ghost = el.cloneNode(true) as HTMLElement;
         ghost.removeAttribute('id');
         for (const child of ghost.querySelectorAll('[id]')) child.removeAttribute('id');
@@ -159,14 +161,8 @@ export function animateList(root: HTMLElement, subtree = false): void {
         if (closingSide) ghost.classList.add('shown');
         ghost.style.cssText += `;position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px;margin:0;pointer-events:none;z-index:20;animation:none`;
         exitSurface().append(ghost);
-        if (resizingStage) {
-          // Preserve the old wrapping and scroll position while the live stage moves to its new width.
-          const original = el.querySelectorAll<HTMLElement>('.thread, textarea');
-          ghost.querySelectorAll<HTMLElement>('.thread, textarea').forEach((copy, i) => { copy.scrollTop = original[i]!.scrollTop; });
-        }
         ghosts.add(ghost);
-        const target = resizingStage ? next.get(el)! : undefined;
-        const animation = play(ghost, [{ opacity: closingSide ? getComputedStyle(el).opacity : 1, transform: 'translate(0)', transformOrigin: 'top left' }, { opacity: 0, transform: target ? `translate(${target.x - rect.x}px, ${target.y - rect.y}px) scaleX(${target.width / rect.width})` : offsetOf(el), transformOrigin: 'top left' }], true);
+        const animation = play(ghost, [{ opacity: closingSide ? getComputedStyle(el).opacity : 1, transform: 'translate(0)' }, { opacity: 0, transform: offsetOf(el) }], true);
         if (animation) {
           animations.set(ghost, animation);
           void animation.finished.then(() => removeExit(ghost), () => removeExit(ghost)).finally(() => {
@@ -190,8 +186,15 @@ export function animateList(root: HTMLElement, subtree = false): void {
         } else if (level(root) === 'full' && (Math.abs(previous.x - rect.x) > 0.5 || Math.abs(previous.y - rect.y) > 0.5 || (el.matches('.main') && Math.abs(previous.width - rect.width) > 0.5))) {
           const offset = offsets.get(el);
           const y = document.documentElement.dataset.base === 'oficina' ? 0 : previous.y + (offset?.m42 ?? 0) - rect.y;
-          const scale = el.matches('.main') ? previous.width * (offset?.m11 ?? 1) / rect.width : 1;
-          animation = play(el, [{ transform: `translate(${previous.x + (offset?.m41 ?? 0) - rect.x}px, ${y}px) scaleX(${scale})`, transformOrigin: 'top left', opacity: scale === 1 ? 1 : 0 }, { transform: 'translate(0, 0) scaleX(1)', transformOrigin: 'top left', opacity: 1 }], closingColumn);
+          const from: Keyframe = { transform: `translate(${previous.x + (offset?.m41 ?? 0) - rect.x}px, ${y}px)` };
+          const to: Keyframe = { transform: 'translate(0, 0)' };
+          if (el.matches('.main') && Math.abs(previous.width - rect.width) > 0.5) {
+            from.width = `${widths.get(el) ?? previous.width}px`;
+            to.width = `${rect.width}px`;
+            from.boxShadow = to.boxShadow = 'none';
+            from.borderRadius = to.borderRadius = '0px';
+          }
+          animation = play(el, [from, to], closingColumn);
         }
         if (animation) {
           animations.set(el, animation);
@@ -266,6 +269,7 @@ export function animateDetails(root: HTMLElement): void {
     const done = () => {
       active.delete(animation);
       if (running.get(details)?.animation !== animation) return;
+      if (!opening && details.contains(document.activeElement)) summary!.focus();
       details.open = opening;
       running.delete(details);
     };

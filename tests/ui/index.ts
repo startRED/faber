@@ -22,6 +22,7 @@ import './models.check.ts';
 import './motion.check.ts';
 import './opening.check.ts';
 import './review-answer.check.ts';
+import './review-motion.check.ts';
 import './running.check.ts';
 import './settings.check.ts';
 import './setup.check.ts';

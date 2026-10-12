@@ -118,6 +118,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   let work: HTMLElement | undefined;
   let fill: ((text: string) => void) | undefined;
   let stick = true;
+  let lastScrollTop = 0;
   // Where focus was, until the tutorial took it. Weak, so a control that left the page (Settings closed with the focus in
   // it) is not kept alive, with everything it hangs from, until focus moves again.
   let lastFocus: WeakRef<HTMLElement> | undefined;
@@ -234,6 +235,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
     setLoading(next.id !== undefined);
     setError(undefined);
     stick = true;
+    lastScrollTop = 0;
     let snapshot: Conversation | undefined;
     try {
       snapshot = (next.id ? await api.open(next.id) : undefined) ?? undefined;
@@ -377,7 +379,9 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   );
 
   const onScroll = (el: HTMLDivElement) => {
-    stick = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 40) stick = true;
+    else if (el.scrollTop < lastScrollTop - 1) stick = false;
+    lastScrollTop = el.scrollTop;
     if (el.scrollTop < 400 && from() > 0) {
       // The earlier messages appear above; keep what the user is reading in place.
       const before = el.scrollHeight;
@@ -751,7 +755,14 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                   <Show
                     when={newChat()}
                     fallback={
-                      <div class="col" ref={animateList}>
+                      <div class="col" ref={(el) => {
+                        animateList(el);
+                        onMount(() => {
+                          const observer = new ResizeObserver(() => { if (thread && stick) thread.scrollTop = thread.scrollHeight; });
+                          observer.observe(el);
+                          onCleanup(() => observer.disconnect());
+                        });
+                      }}>
                         <Show
                           when={current()?.messages.length ? current() : undefined}
                           fallback={<Empty vendors={state().vendors.length} area={area()} project={project()} onConnect={openSetup} />}

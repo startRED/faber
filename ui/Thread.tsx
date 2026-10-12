@@ -93,7 +93,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
     return tool && tool.ok === undefined ? toolLabel(tool) : finalText().trim().split('\n').at(-1) || (tool ? toolLabel(tool) : m().thinking);
   };
   return (
-    <article class="ai" aria-label={t('answer.label')} ref={animateList}>
+    <article class="ai" aria-label={t('answer.label')}>
       <div class="model">
         <span class="vm" classList={{ claude: m().vendor === 'claude', codex: m().vendor === 'codex' }}>
           <VendorMark vendor={m().vendor} />
@@ -135,7 +135,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
         </Show>
       </div>
       <Show when={m().files?.length}>
-        <div class="files" aria-label={t('files.label')}>
+        <div class="files" aria-label={t('files.label')} ref={animateList}>
           <For each={m().files}>{(f) => <FileCard conversationId={props.conversationId} file={f} />}</For>
         </div>
       </Show>

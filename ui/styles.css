@@ -131,7 +131,7 @@ input, textarea { caret-color: var(--accent); }
 .topbar .right { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
 .topbar .chip { height: 30px; flex: none; }
 .work { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; min-height: 0; min-width: 0; }
-.thread { position: relative; z-index: 1; grid-column: 1; grid-row: 1; overflow-y: auto; overflow-x: hidden; padding: calc(22px * var(--dens)) 24px var(--thread-tail); }
+.thread { position: relative; z-index: 1; grid-column: 1; grid-row: 1; overflow-y: auto; overflow-x: hidden; padding: calc(22px * var(--dens)) 24px var(--thread-tail); contain: strict; }
 .dock { position: relative; z-index: 1; grid-column: 1; grid-row: 2; }
 .col { width: min(100%, 660px); margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(18px * var(--dens)); }
 .empty { display: grid; justify-items: start; gap: 16px; padding-top: 14vh; }
@@ -249,7 +249,9 @@ svg.i.sm { width: 14px; height: 14px; }
 .you:hover .edit, .you .edit:focus-visible { visibility: visible; }
 .you.editing { width: 80%; display: grid; gap: 8px; }
 .you.editing textarea { resize: vertical; border: 0; outline: none; background: none; line-height: 1.5; }
-.ai { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; font-size: var(--fs-read); line-height: 1.6; min-width: 0; }
+.ai { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; font-size: var(--fs-read); line-height: 1.6; min-width: 0; content-visibility: auto; contain-intrinsic-size: auto 240px; }
+.ai > .md > div > :is(p, ul, ol, pre, blockquote, table) { content-visibility: auto; contain-intrinsic-size: auto 3lh; }
+.ai :focus-visible { outline-offset: -2px; }
 .model { display: flex; gap: 8px; align-items: center; font-size: calc(var(--fs-ui) - 1px); color: var(--ink-3); }
 .model b { font-weight: 500; }
 .model .vm.claude b { color: var(--claude-ink); }
