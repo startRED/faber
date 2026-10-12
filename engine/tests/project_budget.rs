@@ -19,6 +19,7 @@ fn ledger() -> Ledger {
         let v = l.of_mut(vendor);
         v.billing = Billing::Subscription;
         v.paid_fallback = Some(false);
+        v.paid_fallback_at = Some(NOW);
         for i in 0..=8 {
             let at = 2.0 * DAY - (8 - i) as f64 * 1800.0;
             v.record("seven_day", i as f64 * 0.03, RESET, at, 0);
@@ -86,7 +87,7 @@ fn report(l: &mut Ledger, id: &str, cost: Option<f64>, incomplete: bool, termina
 }
 
 #[test]
-fn concurrent_mission_grants_cannot_overbook_the_shared_daily_allocation() {
+fn successive_mission_grants_cannot_overbook_the_shared_daily_allocation() {
     let mut l = ready(250_000);
     let before = serde_json::to_value(&l).unwrap();
     assert!(apply(&mut l, Change::Grant { mission: "m2".into(), grant: grant(200_000) }, NOW, 0).is_err());
@@ -143,8 +144,15 @@ fn late_unknown_and_live_cost_stay_reserved_across_stop_and_restart() {
     store.save_ledger(&l).unwrap();
     let mut restored = store.ledger_checked().unwrap();
     assert!(!Budget::load(&restored).unwrap().invocations["i1"].settled);
+    assert_eq!(Budget::load(&restored).unwrap().invocations["i1"].request.exposure_micros, Some(140_000));
     assert!(apply(&mut restored, Change::Continue { id: "i1".into() }, NOW, 0).is_err());
     restored.codex.billing = Billing::Subscription;
+    let mut smaller = grant(60_000);
+    smaller.review_micros = 0;
+    smaller.repair_micros = 0;
+    smaller.canary_micros = 0;
+    apply(&mut restored, Change::Grant { mission: "m1".into(), grant: smaller }, NOW, 0).unwrap();
+    assert!(apply(&mut restored, Change::Grant { mission: "m2".into(), grant: grant(300_000) }, NOW, 0).is_err());
     report(&mut restored, "i1", Some(0.01), false, false);
     assert!(!Budget::load(&restored).unwrap().invocations["i1"].settled, "cost alone cannot free a live process");
     report(&mut restored, "i1", Some(0.01), false, true);
@@ -347,6 +355,8 @@ fn clock_reversal_during_settlement_cannot_hide_today_spend() {
     apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 200_000 }, NOW, 0).unwrap();
     apply(&mut l, Change::Admit(request("i1", "m1", "w1", Kind::Worker, 100_000)), NOW, 0).unwrap();
     apply(&mut l, Change::Report { id: "i1".into(), event: done(Some(0.1), false), terminated: true }, NOW - DAY, 0).unwrap();
+    assert_eq!(l.codex.own_spend.get(&2), Some(&0.1));
+    assert!(!l.codex.own_spend.contains_key(&1));
     assert!(apply(&mut l, Change::Grant { mission: "m2".into(), grant: grant(100_000) }, NOW, 0).is_err());
 }
 
@@ -355,8 +365,110 @@ fn a_local_offset_change_cannot_make_recorded_spend_disappear() {
     let mut l = ready(200_000);
     apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 200_000 }, NOW, 0).unwrap();
     apply(&mut l, Change::Admit(request("i1", "m1", "w1", Kind::Worker, 100_000)), NOW, 0).unwrap();
-    report(&mut l, "i1", Some(0.1), false, true);
-    assert!(apply(&mut l, Change::Grant { mission: "m2".into(), grant: grant(100_000) }, NOW, -14 * 3600).is_err());
+    apply(&mut l, Change::Report { id: "i1".into(), event: done(Some(0.1), false), terminated: true }, NOW, -14 * 3600).unwrap();
+    assert_eq!(l.codex.own_spend.get(&1), Some(&0.1));
+    assert!(apply(&mut l, Change::Grant { mission: "m2".into(), grant: grant(100_000) }, NOW, 0).is_err());
+}
+
+#[test]
+fn five_hour_calibration_survives_a_reset_but_not_a_plan_change() {
+    let mut l = ledger();
+    for i in 0..=8 {
+        let at = 2.0 * DAY - (8 - i) as f64 * 1800.0;
+        l.codex.record("five_hour", i as f64 * 0.03, 2.0 * DAY + 100.0, at, 0);
+    }
+    l.codex.record("five_hour", 0.01, NOW + 18_000.0, NOW, 0);
+    apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 400_000 }, NOW, 0).unwrap();
+    apply(&mut l, Change::Grant { mission: "m1".into(), grant: grant(200_000) }, NOW, 0).unwrap();
+    apply(&mut l, Change::Admit(request("i1", "m1", "w1", Kind::Worker, 10_000)), NOW, 0).unwrap();
+    l.codex.since = NOW;
+    assert!(apply(&mut l, Change::Admit(request("i2", "m1", "w2", Kind::Worker, 10_000)), NOW, 0).is_err());
+}
+
+#[test]
+fn shorter_window_dollar_room_is_reached_before_the_quota_gate() {
+    let mut l = ready(200_000);
+    let points = l.codex.history["seven_day"].clone();
+    l.codex.history.insert("five_hour".into(), points);
+    l.codex.record("five_hour", 0.969, RESET, NOW, 0);
+    assert_eq!(apply(&mut l, Change::Admit(request("i1", "m1", "w1", Kind::Worker, 10_000)), NOW, 0), Err("reason.budget.daily"));
+    l.codex.record("five_hour", 0.94, RESET, NOW, 0);
+    apply(&mut l, Change::Admit(request("i2", "m1", "w1", Kind::Worker, 10_000)), NOW, 0).unwrap();
+}
+
+#[test]
+fn an_allocation_itself_cannot_exceed_measured_room() {
+    let mut l = ledger();
+    assert_eq!(apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 2_000_000 }, NOW, 0), Err("reason.budget.daily"));
+    assert!(Budget::load(&l).unwrap().allocations.is_empty());
+}
+
+#[test]
+fn refreshing_quota_without_paid_fallback_evidence_does_not_refresh_r86() {
+    let l = ready(200_000);
+    let mut value = serde_json::to_value(l).unwrap();
+    value["codex"]["paid_fallback_at"] = serde_json::json!(NOW - 7.0 * 3600.0);
+    let mut l: Ledger = serde_json::from_value(value).unwrap();
+    l.codex.billing = Billing::Subscription;
+    l.codex.record("seven_day", 0.25, RESET, NOW, 0);
+    assert_eq!(apply(&mut l, Change::Admit(request("i1", "m1", "w1", Kind::Worker, 10_000)), NOW, 0), Err("reason.budget.billing"));
+}
+
+#[test]
+fn enabling_paid_fallback_closes_admission_and_live_continuation() {
+    let mut l = ready(200_000);
+    apply(&mut l, Change::Admit(request("i1", "m1", "w1", Kind::Worker, 10_000)), NOW, 0).unwrap();
+    l.codex.paid_fallback = Some(true);
+    assert_eq!(apply(&mut l, Change::Continue { id: "i1".into() }, NOW, 0), Err("reason.budget.billing"));
+    assert_eq!(apply(&mut l, Change::Admit(request("i2", "m1", "w2", Kind::Worker, 10_000)), NOW, 0), Err("reason.budget.billing"));
+}
+
+#[test]
+fn a_grant_update_cannot_override_the_persons_pause() {
+    let mut l = ready(200_000);
+    apply(&mut l, Change::Pause { mission: "m1".into(), paused: true }, NOW, 0).unwrap();
+    apply(&mut l, Change::Grant { mission: "m1".into(), grant: grant(250_000) }, NOW, 0).unwrap();
+    assert_eq!(apply(&mut l, Change::Admit(request("i1", "m1", "w1", Kind::Worker, 10_000)), NOW, 0), Err("reason.budget.paused"));
+    apply(&mut l, Change::Pause { mission: "m1".into(), paused: false }, NOW, 0).unwrap();
+    apply(&mut l, Change::Admit(request("i1", "m1", "w1", Kind::Worker, 10_000)), NOW, 0).unwrap();
+}
+
+#[test]
+fn an_error_records_termination_without_freeing_unknown_exposure() {
+    let mut l = ready(200_000);
+    apply(&mut l, Change::Admit(request("i1", "m1", "w1", Kind::Worker, 10_000)), NOW, 0).unwrap();
+    let event = EngineEvent::Error { message: "error.cli.interruptTimeout".into(), fatal: true };
+    assert_eq!(
+        apply(&mut l, Change::Report { id: "i1".into(), event, terminated: true }, NOW, 0).unwrap(),
+        Status::Stop("reason.budget.unknown")
+    );
+    let b = Budget::load(&l).unwrap();
+    assert!(b.invocations["i1"].terminated);
+    assert!(!b.invocations["i1"].settled);
+    assert!(apply(&mut l, Change::Continue { id: "i1".into() }, NOW, 0).is_err());
+}
+
+#[test]
+fn known_live_cost_holds_exposure_without_claiming_it_is_unknown() {
+    let mut l = ready(200_000);
+    apply(&mut l, Change::Admit(request("i1", "m1", "w1", Kind::Worker, 10_000)), NOW, 0).unwrap();
+    assert_eq!(report(&mut l, "i1", Some(0.005), false, false), Status::Ready);
+    assert!(!Budget::load(&l).unwrap().invocations["i1"].settled);
+    assert_eq!(report(&mut l, "i1", None, true, false), Status::Stop("reason.budget.unknown"));
+}
+
+#[test]
+fn future_report_or_pause_does_not_poison_the_admission_clock() {
+    for pause in [false, true] {
+        let mut l = ready(200_000);
+        apply(&mut l, Change::Admit(request("i1", "m1", "w1", Kind::Worker, 10_000)), NOW, 0).unwrap();
+        if pause {
+            apply(&mut l, Change::Pause { mission: "m1".into(), paused: false }, RESET * 10.0, 0).unwrap();
+        } else {
+            apply(&mut l, Change::Report { id: "i1".into(), event: done(Some(0.005), false), terminated: true }, RESET * 10.0, 0).unwrap();
+        }
+        apply(&mut l, Change::Admit(request("i2", "m1", "w2", Kind::Worker, 10_000)), NOW, 0).unwrap();
+    }
 }
 
 #[test]
@@ -369,6 +481,7 @@ fn a_new_day_allocation_keeps_worker_lifetime_cost_and_retry_history() {
     apply(&mut l, Change::Admit(request("i1", "m1", "w1", Kind::Worker, 100_000)), NOW, 0).unwrap();
     report(&mut l, "i1", Some(0.1), false, true);
     l.codex.record("seven_day", 0.26, RESET, 3.0 * DAY, 0);
+    l.codex.paid_fallback_at = Some(3.0 * DAY);
     apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 400_000 }, 3.0 * DAY, 0).unwrap();
     assert!(apply(&mut l, Change::Admit(request("i2", "m1", "w1", Kind::Worker, 20_001)), 3.0 * DAY, 0).is_err());
     apply(&mut l, Change::Admit(request("i3", "m1", "w2", Kind::Worker, 20_000)), 3.0 * DAY, 0).unwrap();
@@ -459,4 +572,41 @@ fn an_unknown_terminal_cost_cannot_reuse_the_same_invocation_allowance() {
     report(&mut l, "i1", None, true, true);
     assert!(apply(&mut l, Change::Continue { id: "i1".into() }, NOW, 0).is_err());
     assert!(!Budget::load(&l).unwrap().invocations["i1"].settled);
+}
+
+#[test]
+fn separate_turns_in_one_session_have_separate_once_only_receipts() {
+    let mut l = ready(250_000);
+    for (id, cost) in [("i1", 0.05), ("i2", 0.07)] {
+        let mut r = request(id, "m1", "w1", Kind::Worker, 100_000);
+        r.session = "same-session".into();
+        r.fresh = id == "i1";
+        apply(&mut l, Change::Admit(r), NOW, 0).unwrap();
+        report(&mut l, id, Some(cost), false, true);
+        report(&mut l, id, Some(cost), false, true);
+        assert!(apply(&mut l, Change::Continue { id: id.into() }, NOW, 0).is_err());
+    }
+    assert!((l.codex.own_spend[&2] - 0.12).abs() < 1e-9);
+    assert_eq!(Budget::load(&l).unwrap().invocations.len(), 2);
+}
+
+#[test]
+fn crashed_chat_is_reconciled_once_then_a_fresh_day_can_be_allocated() {
+    use faber_engine::project::budget::{recover_unbounded, start_unbounded};
+    let mut l = ready(100_000);
+    start_unbounded(&mut l, Vendor::Codex, NOW).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::new(dir.path());
+    store.save_ledger(&l).unwrap();
+    let mut saved = store.ledger_checked().unwrap();
+    saved.codex.billing = Billing::Subscription;
+    assert!(recover_unbounded(&mut saved).unwrap());
+    assert!(!recover_unbounded(&mut saved).unwrap());
+    assert_eq!(Budget::load(&saved).unwrap().unbounded[&Vendor::Codex], 0);
+    assert_eq!(saved.codex.unmetered[&2], 1);
+    assert!(apply(&mut saved, Change::Admit(request("i1", "m1", "w1", Kind::Worker, 10_000)), NOW, 0).is_err());
+    saved.codex.record("seven_day", 0.26, RESET, 3.0 * DAY, 0);
+    saved.codex.paid_fallback_at = Some(3.0 * DAY);
+    apply(&mut saved, Change::Allocate { vendor: Vendor::Codex, cap_micros: 400_000 }, 3.0 * DAY, 0).unwrap();
+    apply(&mut saved, Change::Admit(request("i1", "m1", "w1", Kind::Worker, 10_000)), 3.0 * DAY, 0).unwrap();
 }

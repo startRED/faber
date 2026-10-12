@@ -104,8 +104,10 @@ pub struct Budget {
     pub invocations: BTreeMap<String, Reservation>,
     pub bases: BTreeMap<String, CostBase>,
     pub disabled: BTreeSet<String>,
-    /// Unbounded Chat/auxiliary requests cannot coexist with capped Projects work.
+    /// Active Chat/auxiliary requests close Projects admission; they never close Chat admission.
     pub unbounded: BTreeMap<Vendor, u64>,
+    #[serde(default)]
+    pub unbounded_at: BTreeMap<Vendor, f64>,
     pub last_at: f64,
     #[serde(flatten)]
     pub extra: Extra,
@@ -121,6 +123,7 @@ impl Default for Budget {
             bases: BTreeMap::new(),
             disabled: BTreeSet::new(),
             unbounded: BTreeMap::new(),
+            unbounded_at: BTreeMap::new(),
             last_at: 0.0,
             extra: Extra::new(),
         }
@@ -166,7 +169,8 @@ fn driver(r: &Invocation) -> String {
 fn conversion(ledger: &Ledger, vendor: Vendor, window: &str, model: Option<&str>) -> Result<f64, &'static str> {
     let v = ledger.of(vendor);
     let points = v.history.get(window).ok_or("reason.budget.calibration")?;
-    let current: Vec<_> = points.iter().filter(|p| p.resets_at == v.readings[window].resets_at && p.at >= v.since).copied().collect();
+    // Each stretch stays within its own reset; the same plan's measured capacity survives renewal.
+    let current: Vec<_> = points.iter().filter(|p| p.at >= v.since).copied().collect();
     let measured = stretches(&current, &v.spans);
     let mut samples: BTreeMap<&str, Vec<f64>> = BTreeMap::new();
     for s in &measured {
@@ -193,7 +197,7 @@ fn headroom(ledger: &Ledger, vendor: Vendor, model: Option<&str>, now: f64) -> R
     let snap = v.snap(now);
     gate(&snap, model.and_then(family_of), Purpose::UserTurn { by_hand: false }, false, now).map_err(|_| "reason.budget.quota")?;
     // Unlike a hand-picked Chat turn, automated roles must be unable to fall back to paid use.
-    if v.paid_fallback != Some(false) || snap.relearning {
+    if v.paid_fallback != Some(false) || v.paid_fallback_at.is_none_or(|at| !(0.0..=STALE_SECS).contains(&(now - at))) || snap.relearning {
         return Err("reason.budget.billing");
     }
     let (week, reset, start) = weekly(ledger, vendor, now)?;
@@ -228,7 +232,10 @@ fn own_today(ledger: &Ledger, vendor: Vendor, week: &str, start: f64, now: f64) 
     let v = ledger.of(vendor);
     let first = ((start - 14.0 * 3600.0) / DAY).floor() as i64;
     let last = ((now + 14.0 * 3600.0) / DAY).floor() as i64;
-    if v.unmetered.range(first..=last).any(|(_, n)| *n > 0) {
+    let sample = v.day_baselines.get(week).ok_or("reason.budget.day")?;
+    if v.unmetered.iter().any(|(day, n)| *n > sample.unmetered.get(day).copied().unwrap_or(0))
+        || sample.unmetered.iter().any(|(day, n)| *n > v.unmetered.get(day).copied().unwrap_or(0))
+    {
         return Err("reason.budget.unknown");
     }
     let baseline = &v.day_baselines.get(week).ok_or("reason.budget.day")?.own_spend;
@@ -259,7 +266,8 @@ impl Budget {
                 return Err("error.store.corrupt");
             }
         }
-        if b.allocations.values().any(|a| !a.reset.is_finite() || !a.starts_at.is_finite() || a.reset <= a.starts_at)
+        if b.unbounded_at.values().any(|at| !at.is_finite() || *at < 0.0)
+            || b.allocations.values().any(|a| !a.reset.is_finite() || !a.starts_at.is_finite() || a.reset <= a.starts_at)
             || b.grants.keys().any(|id| !valid_id(id))
         {
             return Err("error.store.corrupt");
@@ -403,7 +411,7 @@ impl Budget {
 
 /// Applies one change to a snapshot; the engine saves it atomically under its existing shared lock before effects.
 pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Result<Status, &'static str> {
-    let mut next = ledger.clone();
+    let mut reconciled = None;
     let mut b = Budget::load(ledger)?;
     // Reconciliation still records late spend after a clock reversal; it grants no new work.
     if !matches!(change, Change::Report { .. } | Change::Pause { .. }) {
@@ -413,6 +421,7 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
         return Err("reason.budget.clock");
     }
     let mut status = Status::Ready;
+    let admits = !matches!(change, Change::Report { .. } | Change::Pause { .. });
     match change {
         Change::Allocate { vendor, cap_micros }
             if b.allocations
@@ -453,6 +462,7 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
                 let increased: Vec<_> =
                     grant.vendors.iter().filter(|(v, cap)| **cap > old.vendors.get(v).copied().unwrap_or(0)).map(|(v, _)| *v).collect();
                 grant.extra.extend(old.extra.clone());
+                grant.paused = old.paused;
                 b.grants.insert(mission, grant);
                 for vendor in increased {
                     b.account(ledger, vendor, None, now)?
@@ -494,7 +504,11 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
             }
             let was_settled = r.settled;
             r.terminated |= terminated;
-            let EngineEvent::Done { cost_total_usd, .. } = &event else { return Err("reason.budget.cost") };
+            let cost_total_usd = match &event {
+                EngineEvent::Done { cost_total_usd, .. } => *cost_total_usd,
+                EngineEvent::Error { .. } => None,
+                _ => return Err("reason.budget.cost"),
+            };
             let (mut cost, mut incomplete) = usage::fresh_price(&event, &r.request.model);
             let cumulative = r.request.vendor == Vendor::Claude && cost_total_usd.is_some();
             if cumulative {
@@ -503,7 +517,7 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
                     b.bases.get(&session_key(&r.request)).or(r.base.as_ref()),
                     &r.request.session,
                     r.request.fresh,
-                    *cost_total_usd,
+                    cost_total_usd,
                 );
                 cost = settled.cost;
                 incomplete = cost.is_none();
@@ -520,7 +534,10 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
                     status = Status::Stop("reason.budget.breach");
                 } else {
                     let delta = paid - r.paid_micros;
-                    next.of_mut(r.request.vendor).spend(Some(delta as f64 / 1e6), false, now.max(b.last_at).max(r.started_at), offset);
+                    // A reconciliation clock cannot move spend outside the last trusted admission interval.
+                    let at = now.max(b.last_at).max(r.started_at).min(b.last_at.max(r.started_at) + STALE_SECS);
+                    let v = reconciled.get_or_insert_with(|| (r.request.vendor, ledger.of(r.request.vendor).clone()));
+                    v.1.spend(Some(delta as f64 / 1e6), false, at, offset);
                     r.paid_micros = paid;
                     if was_settled && delta > 0 {
                         b.disabled.insert(driver(&r.request));
@@ -529,56 +546,80 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
                     }
                     if !incomplete && terminated && !was_settled {
                         r.settled = true;
-                        let v = next.of_mut(r.request.vendor);
+                        let v = &mut v.1;
                         v.span(Span {
                             start: r.started_at,
-                            end: now.max(r.started_at),
+                            end: at,
                             model: r.request.model.clone(),
                             cost: Some(paid as f64 / 1e6),
                             incomplete: false,
                         });
-                        v.learn_weights(now);
+                        v.learn_weights(at);
                     }
                 }
             }
             if r.paid_micros > r.request.exposure_micros.unwrap_or(0) || b.disabled.contains(&driver(&r.request)) {
                 b.disabled.insert(driver(&r.request));
                 status = Status::Stop("reason.budget.breach");
-            } else if !r.settled && status == Status::Ready {
+            } else if !r.settled && (incomplete || r.terminated) && status == Status::Ready {
                 status = Status::Stop("reason.budget.unknown");
             }
         }
     }
-    b.last_at = b.last_at.max(now);
-    next.extra.insert(KEY.into(), serde_json::to_value(&b).map_err(|_| "error.store.corrupt")?);
-    *ledger = next;
+    if admits {
+        b.last_at = b.last_at.max(now);
+    }
+    let value = serde_json::to_value(&b).map_err(|_| "error.store.corrupt")?;
+    if let Some((vendor, v)) = reconciled {
+        *ledger.of_mut(vendor) = v;
+    }
+    ledger.extra.insert(KEY.into(), value);
     Ok(status)
 }
 
-/// Chat retains its existing unbounded user turns, serialized against capped mission commitments.
-pub fn start_unbounded(ledger: &mut Ledger, vendor: Vendor) -> Result<(), &'static str> {
-    let mut b = Budget::load(ledger)?;
-    if b.commitment(vendor)? > 0 {
-        return Err("reason.budget.daily");
+/// Update only active-request metadata on Chat's hot path; mission receipts belong to Projects.
+pub fn start_unbounded(ledger: &mut Ledger, vendor: Vendor, now: f64) -> Result<(), &'static str> {
+    if !now.is_finite() || now < 0.0 {
+        return Err("reason.budget.clock");
     }
-    let n = b.unbounded.entry(vendor).or_default();
-    *n = n.checked_add(1).ok_or("reason.budget.cost")?;
-    ledger.extra.insert(KEY.into(), serde_json::to_value(&b).map_err(|_| "error.store.corrupt")?);
+    if !ledger.extra.contains_key(KEY) {
+        ledger.extra.insert(KEY.into(), serde_json::to_value(Budget::default()).map_err(|_| "error.store.corrupt")?);
+    }
+    let b = ledger.extra.get_mut(KEY).and_then(serde_json::Value::as_object_mut).ok_or("error.store.corrupt")?;
+    let active = b.get("unbounded").and_then(serde_json::Value::as_object).ok_or("error.store.corrupt")?;
+    let n = active.get(vendor.name()).map_or(Ok(0), |v| v.as_u64().ok_or("error.store.corrupt"))?;
+    let count = n.checked_add(1).ok_or("reason.budget.cost")?;
+    let dates = b.entry("unboundedAt").or_insert_with(|| serde_json::json!({})).as_object_mut().ok_or("error.store.corrupt")?;
+    dates.insert(vendor.name().into(), serde_json::json!(now));
+    b["unbounded"][vendor.name()] = serde_json::json!(count);
     Ok(())
 }
 
-pub fn finish_unbounded(ledger: &mut Ledger, vendor: Vendor, complete: bool) -> Result<(), &'static str> {
-    if !ledger.extra.contains_key(KEY) || !complete {
-        return Ok(());
-    }
-    let mut b = Budget::load(ledger)?;
-    if let Some(n) = b.unbounded.get_mut(&vendor) {
-        *n = n.saturating_sub(1);
-    }
-    ledger.extra.insert(KEY.into(), serde_json::to_value(&b).map_err(|_| "error.store.corrupt")?);
+pub fn finish_unbounded(ledger: &mut Ledger, vendor: Vendor) -> Result<(), &'static str> {
+    let Some(b) = ledger.extra.get_mut(KEY) else { return Ok(()) };
+    let active = b.get_mut("unbounded").and_then(serde_json::Value::as_object_mut).ok_or("error.store.corrupt")?;
+    let n = active.get(vendor.name()).map_or(Ok(0), |v| v.as_u64().ok_or("error.store.corrupt"))?;
+    active.insert(vendor.name().into(), serde_json::json!(n.saturating_sub(1)));
     Ok(())
 }
 
-pub fn allows_unbounded(ledger: &Ledger, vendor: Vendor) -> bool {
-    Budget::load(ledger).and_then(|b| b.commitment(vendor)).is_ok_and(|held| held == 0)
+/// A persisted request from a dead engine is uncertain spend, not a permanently running process.
+pub fn recover_unbounded(ledger: &mut Ledger) -> Result<bool, &'static str> {
+    let b = Budget::load(ledger)?;
+    let mut changed = false;
+    for (vendor, n) in b.unbounded {
+        if n == 0 {
+            continue;
+        }
+        let at = b
+            .unbounded_at
+            .get(&vendor)
+            .copied()
+            .unwrap_or_else(|| ledger.of(vendor).readings.values().map(|r| r.read_at).reduce(f64::max).unwrap_or(b.last_at));
+        ledger.of_mut(vendor).spend(None, true, at, 0);
+        let count = ledger.extra.get_mut(KEY).ok_or("error.store.corrupt")?;
+        count["unbounded"][vendor.name()] = serde_json::json!(0);
+        changed = true;
+    }
+    Ok(changed)
 }

@@ -251,8 +251,15 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(opts: EngineOptions, emit: Emit) -> Engine {
-        let store = Store::new(&opts.data_dir);
-        let ledger = store.ledger();
+        let mut store = Store::new(&opts.data_dir);
+        let owned = store.claim_budget().is_ok();
+        let mut ledger = store.ledger();
+        let ledger_failed = !owned
+            || match crate::project::budget::recover_unbounded(&mut ledger) {
+                Ok(true) => store.save_ledger(&ledger).is_err(),
+                Ok(false) => false,
+                Err(_) => true,
+            };
         let quotas = remembered(&ledger, unix_secs());
         let runtime = opts.runtime.clone();
         let core = Arc::new_cyclic(|me| {
@@ -277,7 +284,7 @@ impl Engine {
                 spare: None,
                 ledger,
                 ledger_saved: 0.0,
-                ledger_failed: false,
+                ledger_failed,
                 last_pulse: 0.0,
                 utc_offset: 0,
                 offset_known: false,
@@ -492,6 +499,7 @@ impl Engine {
             }
             c.close_spare();
             c.save_ledger(true);
+            c.store.release_budget();
         })
     }
 }
@@ -546,6 +554,7 @@ impl Core {
         }
         if let Some(possible) = s.paid_fallback {
             v.paid_fallback = Some(possible);
+            v.paid_fallback_at = Some(now);
         }
         if let Some(billing) = s.billing {
             v.billing = billing;
@@ -617,7 +626,7 @@ impl Core {
         self.ledger.of_mut(vendor).spend(cost, incomplete, now, self.utc_offset);
         self.ledger.of_mut(vendor).span(Span { start, end, model: model.to_string(), cost, incomplete });
         self.ledger.of_mut(vendor).learn_weights(now);
-        if crate::project::budget::finish_unbounded(&mut self.ledger, vendor, cost.is_some() && !incomplete).is_err() {
+        if crate::project::budget::finish_unbounded(&mut self.ledger, vendor).is_err() {
             self.ledger_failed = true;
             return;
         }
@@ -1163,6 +1172,9 @@ impl Core {
             m.model = Some(running);
         }
         let started = self.secs();
+        if !self.live.contains_key(id) {
+            return Err("error.conversationGone".into());
+        }
         self.begin_unbounded(pick.vendor)?;
         if let Some(l) = self.live.get_mut(id) {
             l.started = started;

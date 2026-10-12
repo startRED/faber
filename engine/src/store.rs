@@ -102,6 +102,8 @@ pub struct Store {
     settings: PathBuf,
     budget: PathBuf,
     disk: Arc<dyn Disk>,
+    budget_owner: Option<fs::File>,
+    owner_required: bool,
 }
 
 impl Store {
@@ -119,7 +121,28 @@ impl Store {
             settings: data_dir.join("settings.json"),
             budget: data_dir.join("budget.json"),
             disk,
+            budget_owner: None,
+            owner_required: false,
         }
+    }
+
+    /// Own the spending ledger for this engine's lifetime, including builds with a custom data folder.
+    pub(crate) fn claim_budget(&mut self) -> Result<(), Fault> {
+        self.owner_required = true;
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(self.budget.with_extension("lock"))
+            .map_err(|e| Fault::of_write(&e))?;
+        file.try_lock().map_err(|_| Fault::Write)?;
+        self.budget_owner = Some(file);
+        Ok(())
+    }
+
+    pub(crate) fn release_budget(&mut self) {
+        self.budget_owner = None;
     }
 
     fn write<T: Serialize>(&self, path: &Path, value: &T) -> Result<(), Fault> {
@@ -232,6 +255,9 @@ impl Store {
 
     /// Compact on purpose: it is rewritten often and a person never has to read it.
     pub fn save_ledger(&self, ledger: &Ledger) -> Result<(), Fault> {
+        if self.owner_required && self.budget_owner.is_none() {
+            return Err(Fault::Write);
+        }
         replace(&*self.disk, &self.budget, serde_json::to_string(ledger).expect("plain data always serializes").as_bytes())
     }
 }

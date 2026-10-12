@@ -9,7 +9,8 @@ classify a brief with a model, install tools, or change the wire/kit/bar contrac
   repair and canary room, admission, continuation, pause or usage reconciliation. It persists under the existing
   engine lock before an effect is permitted. Failed writes and corrupt safety records deny admission.
 - `Engine::mission_route` filters the existing Auto candidates through mission admission and uses the same paced
-  table, including its vendor pin for independent review. Its caller supplies the classified brief; routing here spends no quota.
+  table, including its vendor pin for independent review. Its caller supplies the classified brief and an exact qualified
+  vendor/model/effort invocation; its exposure is never transplanted to another profile. Routing here spends no quota.
 - Invocation IDs are durable and cannot be dispatched twice. A worker ID stays fixed across attempts, days and vendor
   handovers. Reports use the existing token prices, cumulative session settlement, own-spend counters and learning spans.
 - T5 must obtain `exposure_micros` from a qualified T2 driver bound, including nested calls and stop latency, and must
@@ -26,17 +27,23 @@ classify a brief with a model, install tools, or change the wire/kit/bar contrac
 
 The hard Projects gate derives each daily boundary from the existing weekly reset and 1/7 line. It needs a fresh
 reading, evidence at or just before that boundary, a rounding guard, confirmed subscription billing with paid fallback
-disabled, and enough complete non-overlapping calibration stretches for the selected model. Shorter/family windows
+disabled with its own fresh explicit evidence, and enough complete non-overlapping calibration stretches for the selected model. Shorter/family windows
 also constrain admission. Missing evidence parks work; T3 runs no calibration probe to obtain it.
+Each measured interval stays inside one reset. The same plan's calibration survives resets; a plan change invalidates it.
+Existing Auto keeps all 200 readings per window; another window never evicts its primary history.
 
 Quota samples snapshot the existing own-spend counters. Their deltas measure reset-relative own cost even when the
 local offset changes. Outside account movement reduces room but is never booked as a worker's own dollars.
 Allocations pin `usage::RATE_DATE`; a new day requires an explicit bounded allocation and preserves lifetime receipts.
 Mission/vendor subgrants count once inside that shared allowance, including protected acceptance work.
 
-Chat, routing pulses and handover summaries keep their existing unbounded requests. Before sending, the engine journals
-them against the same ledger. They cannot borrow a vendor's mission commitment, and Projects cannot overlap unresolved
-unbounded usage on that vendor. An empty abort or a crash keeps that uncertainty across restart.
+Chat, routing pulses and handover summaries keep their existing unbounded requests and always take priority over missions.
+Mission grants never block Chat. Before sending, the engine journals active requests against the same ledger; Projects
+cannot admit or continue on that vendor while they run. Every terminal path retires the active count, even with unknown
+cost. A crash retires persisted active counts into existing unmetered spend. Fresh day baselines include those counters,
+so yesterday's uncertainty does not become a permanent running request. Unknown mission exposure remains reserved.
+Only explicit Pause changes an existing mission's pause; top-ups and new-day grants cannot override the person's Stop.
+An OS file lock gives each spending directory one engine writer, including builds that bypass the single-instance plugin.
 
 ## Evidence and limits
 
@@ -49,3 +56,6 @@ Auto reuse, failed writes and unresolved Chat usage without spawning a process.
 This is source and fake-CLI evidence. Real CLI containment, invocation bounds, calibration and canary qualification
 remain T2/T5/T13 gates. No real model session or paid credit was used. Invocation history is bounded at 4096 receipts;
 admission closes at that limit until safe archival is implemented. No release or installed Faber was touched.
+
+The cross-vendor review's disposition and guard-removal proofs are in
+[the follow-up report](2026-10-12-task-3-review-disposition.md).

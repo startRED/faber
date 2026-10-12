@@ -70,11 +70,7 @@ impl Core {
 
     /// The one door before a request reaches a CLI (3.4): may this vendor and family be asked for this purpose now.
     pub(super) fn allows(&self, vendor: Vendor, family: Option<&str>, purpose: Purpose, approved: bool) -> Result<(), Why> {
-        self.quota_allows(vendor, family, purpose, approved)?;
-        if purpose != Purpose::PlanCheck && !crate::project::budget::allows_unbounded(&self.ledger, vendor) {
-            return Err(Why::Window);
-        }
-        Ok(())
+        self.quota_allows(vendor, family, purpose, approved)
     }
 
     fn quota_allows(&self, vendor: Vendor, family: Option<&str>, purpose: Purpose, approved: bool) -> Result<(), Why> {

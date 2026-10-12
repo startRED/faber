@@ -36,6 +36,8 @@ pub struct Reading {
 pub struct DailySample {
     pub reading: Point,
     pub own_spend: BTreeMap<i64, f64>,
+    #[serde(default)]
+    pub unmetered: BTreeMap<i64, u32>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, serde_json::Value>,
 }
@@ -73,6 +75,8 @@ pub struct VendorLedger {
     pub overage_active: bool,
     /// None means paid fallback is still possible until the CLI explicitly rules it out.
     pub paid_fallback: Option<bool>,
+    /// Only an explicit paid-fallback field renews this evidence; quota updates do not.
+    pub paid_fallback_at: Option<f64>,
     #[serde(skip)]
     pub credit_balance: Option<f64>,
     /// When a plan check last succeeded, and how many failed in a row since.
@@ -181,7 +185,12 @@ impl VendorLedger {
             && window_secs(window) == Some(7.0 * 86_400.0)
             && let Some(start) = crate::budget::daily_start(resets_at, now)
         {
-            let sample = DailySample { reading: point, own_spend: self.own_spend.clone(), extra: BTreeMap::new() };
+            let sample = DailySample {
+                reading: point,
+                own_spend: self.own_spend.clone(),
+                unmetered: self.unmetered.clone(),
+                extra: BTreeMap::new(),
+            };
             let prior = self.daily_samples.insert(window.into(), sample.clone());
             if now == start {
                 let saved = self.day_baselines.entry(window.into()).or_insert(sample.clone());
@@ -199,7 +208,6 @@ impl VendorLedger {
             }
         }
         let primary = self.primary(now).map(String::from);
-        self.history.retain(|name, _| self.readings.contains_key(name));
         self.day_baselines.retain(|name, _| self.readings.contains_key(name));
         self.daily_samples.retain(|name, _| self.readings.contains_key(name));
         let list = self.history.entry(window.to_string()).or_default();
@@ -207,19 +215,6 @@ impl VendorLedger {
         list.push(point);
         if list.len() > KEEP_POINTS {
             list.drain(..list.len() - KEEP_POINTS);
-        }
-        while self.history.values().map(Vec::len).sum::<usize>() > KEEP_POINTS {
-            let oldest = self
-                .history
-                .iter()
-                .filter_map(|(name, list)| list.first().map(|p| (name.clone(), p.at)))
-                .min_by(|a, b| a.1.total_cmp(&b.1))
-                .map(|(name, _)| name);
-            if let Some(name) = oldest
-                && let Some(list) = self.history.get_mut(&name)
-            {
-                list.remove(0);
-            }
         }
         if primary.as_deref() == Some(window)
             && let Some(previous) = previous

@@ -40,6 +40,20 @@ fn the_history_is_bounded() {
 }
 
 #[test]
+fn other_windows_never_shrink_existing_primary_pacing_history() {
+    let mut l = VendorLedger::default();
+    for i in 0..250 {
+        for window in ["five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet"] {
+            l.record(window, 0.2, RESET, BASE + i as f64 * 60.0, 0);
+        }
+    }
+    for points in l.history.values() {
+        assert_eq!(points.len(), 200);
+        assert_eq!(points[0].at, BASE + 50.0 * 60.0);
+    }
+}
+
+#[test]
 fn the_shortest_vendor_wide_window_is_the_one_learned_from() {
     let mut l = VendorLedger::default();
     l.record("seven_day", 0.4, RESET, BASE, 0);
@@ -218,7 +232,8 @@ fn a_full_ledger_stays_small() {
         }
     }
     let size = serde_json::to_string(&ledger).unwrap().len();
-    assert!(size < 100_000, "{size} bytes");
+    // Three independent 200-point histories per vendor require 113 KB; none may evict Auto's primary evidence.
+    assert!(size < 128 * 1024, "{size} bytes");
 }
 
 #[test]
