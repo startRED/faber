@@ -218,6 +218,29 @@ pub struct Project {
     pub id: String,
     pub name: String,
     pub path: String,
+    /// The repository this folder belongs to once it is enrolled for missions. A project saved before missions has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo: Option<crate::project::RepoIdentity>,
+    /// What the person granted at mission start. None grants no effect: planning stays read-only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grant: Option<crate::project::Grant>,
+    /// Fields written by a newer Faber, kept as they were so this version never drops them.
+    #[serde(flatten)]
+    pub extra: crate::project::Extra,
+}
+
+impl Project {
+    pub fn new(id: String, name: String, path: String) -> Self {
+        Project { id, name, path, repo: None, grant: None, extra: Default::default() }
+    }
+
+    /// Whether this project may take `effect` under the grant revision the work was admitted with. A key says why not.
+    pub fn allows(&self, effect: crate::project::Effect, revision: u64) -> Result<(), &'static str> {
+        match (&self.repo, &self.grant) {
+            (Some(repo), Some(grant)) => grant.allows(repo, revision, effect),
+            _ => Err("reason.grant.none"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

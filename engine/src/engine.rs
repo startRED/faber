@@ -399,8 +399,9 @@ impl Engine {
     pub fn remove_project(&self, id: &str) {
         self.with(|c| {
             let projects: Vec<Project> = c.store.projects().into_iter().filter(|p| p.id != id).collect();
-            c.store.save_projects(&projects);
-            c.list_changed();
+            if c.store.save_projects(&projects).is_ok() {
+                c.list_changed();
+            }
         })
     }
     /// Swaps the CLIs in use, for example after one was installed or signed in to. Idle processes of a changed CLI
@@ -446,11 +447,11 @@ impl Core {
         self.clock.as_ref().map_or_else(unix_secs, |clock| clock())
     }
 
-    /// Writes the ledger, but at most every half minute unless `force`: readings come with every answer.
+    /// Writes the ledger, but at most every half minute unless `force`: readings come with every answer. A failed write is
+    /// tried again with the next reading.
     fn save_ledger(&mut self, force: bool) {
         let now = self.secs();
-        if force || !(0.0..LEDGER_EVERY).contains(&(now - self.ledger_saved)) {
-            self.store.save_ledger(&self.ledger);
+        if (force || !(0.0..LEDGER_EVERY).contains(&(now - self.ledger_saved))) && self.store.save_ledger(&self.ledger).is_ok() {
             self.ledger_saved = now;
         }
     }
@@ -1251,10 +1252,11 @@ impl Core {
             return found.clone();
         }
         let name = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string());
-        let project = Project { id: new_id(), name, path: path.to_string() };
+        let project = Project::new(new_id(), name, path.to_string());
         projects.push(project.clone());
-        self.store.save_projects(&projects);
-        self.list_changed();
+        if self.store.save_projects(&projects).is_ok() {
+            self.list_changed();
+        }
         project
     }
 }

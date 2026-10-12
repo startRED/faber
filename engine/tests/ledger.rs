@@ -1,6 +1,10 @@
 use faber_engine::budget::{Billing, Reach};
 use faber_engine::learn::Span;
 use faber_engine::ledger::{Ledger, PLAN_FRESH, RELEARN, VendorLedger};
+use faber_engine::store::{Disk, Fault, RealDisk, Store};
+use std::path::Path;
+use std::sync::Arc;
+use std::{fs, io};
 
 const HOUR: f64 = 3600.0;
 const BASE: f64 = 345_600.0 + 2.0 * 86_400.0;
@@ -220,4 +224,65 @@ fn a_ledger_read_from_a_damaged_file_cannot_hurt() {
     assert_eq!(v.learned.mass.len(), 168, "a shape of the wrong length is reset");
     assert_eq!((v.weights.w["a"], v.weights.w["b"], v.weights.capacity), (2.0, 0.5, None));
     v.shape();
+}
+
+#[test]
+fn a_damaged_ledger_blocks_projects_and_stays_quarantined_after_chat_rewrites_it() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("budget.json"), "{\"claude\": {\"readings\": ").unwrap();
+    let store = Store::new(dir.path());
+    assert_eq!(store.ledger_checked().unwrap_err(), Fault::Corrupt);
+    // Chat only learns from the ledger, so it starts again from an empty one and may save over the damaged file.
+    let chat = store.ledger();
+    assert!(chat.claude.readings.is_empty());
+    store.save_ledger(&chat).unwrap();
+    assert_eq!(store.ledger_checked().unwrap_err(), Fault::Corrupt, "a rewrite does not turn damaged safety data into an empty budget");
+    assert!(dir.path().join("budget.json.quarantine").is_file(), "the damaged copy is kept as evidence");
+}
+
+#[test]
+fn a_missing_ledger_is_an_empty_one_and_a_good_one_reads_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::new(dir.path());
+    assert!(store.ledger_checked().unwrap().claude.readings.is_empty());
+    let mut ledger = Ledger::default();
+    ledger.claude.record("five_hour", 0.3, RESET, BASE, 0);
+    store.save_ledger(&ledger).unwrap();
+    assert_eq!(store.ledger_checked().unwrap().claude.readings["five_hour"].used, 0.3);
+}
+
+/// A disk with no room left for the temporary file.
+struct FullDisk;
+impl Disk for FullDisk {
+    fn write(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
+        fs::write(path, &bytes[..bytes.len() / 3])?;
+        Err(io::Error::from(io::ErrorKind::StorageFull))
+    }
+    fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+        RealDisk.rename(from, to)
+    }
+}
+
+#[test]
+fn a_ledger_that_cannot_be_saved_says_why_and_keeps_the_old_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ledger = Ledger::default();
+    ledger.codex.record("five_hour", 0.1, RESET, BASE, 0);
+    Store::new(dir.path()).save_ledger(&ledger).unwrap();
+    let full = Store::with_disk(dir.path(), Arc::new(FullDisk));
+    ledger.codex.record("five_hour", 0.9, RESET, BASE + HOUR, 0);
+    let err = full.save_ledger(&ledger).unwrap_err();
+    assert_eq!((err, err.key()), (Fault::DiskFull, "error.store.full"));
+    assert_eq!(full.ledger_checked().unwrap().codex.readings["five_hour"].used, 0.1);
+    assert!(!dir.path().join("budget.json.tmp").exists());
+}
+
+#[test]
+fn fields_a_newer_faber_wrote_survive_in_the_ledger() {
+    let json = r#"{"daily": {"day": 3, "spent": 1.5}, "claude": {"since": 1.0, "grants": [{"id": "g1"}]}}"#;
+    let ledger: Ledger = serde_json::from_str(json).unwrap();
+    let back: serde_json::Value = serde_json::to_value(&ledger).unwrap();
+    assert_eq!(back["daily"]["spent"], 1.5, "an older Faber must not drop a newer allocation");
+    assert_eq!(back["claude"]["grants"][0]["id"], "g1");
+    assert_eq!(back["claude"]["since"], 1.0);
 }

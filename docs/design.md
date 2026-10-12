@@ -272,6 +272,126 @@ inside its own area.
   skipping saves `tutorialDone: true` and gives focus back to where it was, or to the composer. It never reopens. If the
   save fails it still ends for that window and may show once more at the next launch.
 
+## Projects: self-development missions
+
+The minimal Projects slice of R96 ([spec](superpowers/specs/2026-10-12-self-development-mvp-design.md)). The engine types
+live in `engine/src/project.rs`, `project/store.rs` and `project/wire.rs`; this section is their published contract, and
+screen work may start against it with mock data before the engine runs missions.
+
+### Screen inventory
+
+The board keeps the titlebar, sidebar, topbar, running column, tokens, type and Curioso empty states, and uses the stage
+width rather than the 660 px reading column. Below the available width the state groups stack into one scrolling list;
+nothing needs a horizontal drag.
+
+| Surface | Minimum behaviour |
+| :--- | :--- |
+| Goal | The composer's styling: the goal, a short plan and Start. The text stays after a refused enrollment or start |
+| Start card | Repository, starting revision, git mode (Seguro selected), author and self-update trust; granted once, never per step |
+| Board | Ready, Running, Review, Done and Blocked; stable task rows with builder, reviewer and reason |
+| Cost | Own cost against the live cap; the account's daily pace and its freshness beside it, separately; unknown says unknown |
+| Decisions | The Ask and running cards, with author and default; nothing approves an effect by itself |
+| Stop | A keyboard-reachable button while running; then the paused checkpoint and Resume |
+| Task detail | Scope, diff and artifacts, command results, missing checks and risks; technical logs behind a click |
+| Local build | Current, next and last good, and why promotion waits; no completion toast |
+
+Status colours always come with words and shapes. Amber stays for needs-you only: a quota wait or a dependency is not
+shown as a decision.
+
+### Records
+
+A mission keeps plain records in the repository's `.faber/missions/<id>/` folder and private state in Faber's data
+folder. Every record has a `schema` version. A reader keeps the fields it does not know and writes them back unchanged,
+and refuses a record whose schema is newer than its own (`error.journal.newer`). Ids are 1 to 64 letters, digits, `-` or
+`_`.
+
+| File | Holds |
+| :--- | :--- |
+| `mission.json` | goal, project, repository (its common git directory), base revision, `faber/<id>` branch, grant revision, run mode, state |
+| `plan.json` | the task graph and its revision |
+| `contracts/<id>.json` | owner, version, digest, base, boundary, examples, proof ids, dependencies |
+| `briefs/<task>.json` | what a fresh worker session starts from: goal, non-goals, scope, base, contract, sources, proofs, grant, stop |
+| `decisions/<id>.json` | question, kind, who asked, default, the answer and who gave it |
+| `artifacts/<id>.json` | a hand-back: changed paths, revisions, command receipts, checks not run, cost completeness, summary |
+| `receipts/<intent>.json` | an intent written before an effect, and its receipt after; an intent with no receipt is reconciled, never replayed |
+| `missions/<id>/runtime.json` (data folder) | CLI sessions per task and the leases with their processes; never in the repository |
+
+In `projects.json` a project gains `repo` (its common git directory) and `grant` (mode, revision, author, remote,
+self-update trust, revocation). A project saved before missions has neither and allows no effect. Seguro allows
+worktrees, commits with a known author and fast-forwards of the mission's branch. Equilibrado adds the push of that
+branch and one draft pull request to a named remote. Self-update needs its own trust. Each check names the grant
+revision the work was admitted under, so a new revision or a revocation stops the next effect (`reason.grant.*`).
+
+Writes replace the file atomically and flush it; a failure leaves the old file and returns `error.store.full` or
+`error.store.write`. A damaged mission record, runtime sidecar, project list (read for Projects) or quota ledger is
+`error.store.corrupt`, never empty data. A damaged `budget.json` is copied to `budget.json.quarantine`, and Projects stays
+closed while that copy exists, even after Chat has saved a fresh ledger over the damaged one.
+
+The engine refuses a plan with a cycle, a missing or repeated task, a deliverable claimed twice, a write path outside
+the repository, writes on a read-only task, or two writers that nothing orders sharing an area, parent folders and case
+aliases included (`error.plan.*`). A contract's digest is SHA-256 over its content with sorted keys. A revision sends the
+tasks built on the old digest, and everything that depends on them, back to Blocked with `reason.contract.revised`;
+nothing else moves.
+
+### Worker envelope
+
+Every worker turn ends with one JSON object, version 1, with no unknown fields. The engine refuses an envelope over
+512 KB, a stale task, attempt, base, contract digest or lease generation (`error.wire.stale`), an action outside the role
+(`error.wire.role`), and a path that leaves the worktree (`error.wire.path`). A file write carries the SHA-256 of the
+content it replaces, or none for a new file.
+
+```json
+{"schema": 1, "task": "fix", "attempt": 1, "base": "3d3d502", "contract": "<sha-256>", "lease": 4,
+ "action": {"patch": {"ops": [
+   {"write": {"path": "engine/src/x.rs", "expect": "<sha-256 of the file as read>", "content": "..."}},
+   {"rename": {"from": "a.rs", "to": "b.rs", "expect": "<sha-256>"}}
+ ]}}}
+```
+
+| Action | Who | Carries |
+| :--- | :--- | :--- |
+| `read` | every role | up to 64 paths, and symbols whose callers to find |
+| `plan` | lead | summary, acceptance, tasks (id, title, kind, requires, decisions, contracts, deliverables, writes, proofs) |
+| `amend` | lead | tasks to add or replace, ids to remove, reason |
+| `patch` | writer; test proposal, kept as an artifact | up to 64 write, rename and delete operations, each with its expected hash |
+| `proof` | lead, writer | named proof ids, never command text |
+| `decision` | lead | question, kind (technical, direction, taste, money or legal), options, default |
+| `complete` | every role | summary, changed paths, assumptions, risks, checks not run, a reviewer's verdict and findings, next |
+
+The AI answers only technical decisions; direction, taste, money and legal ones wait for the person
+(`error.decision.person`), in autonomous mode too.
+
+### Screen commands and event
+
+The commands fail with a key string, like the other shell commands, and never report a success they did not have.
+
+| Command | Request | Returns |
+| :--- | :--- | :--- |
+| `project_enroll` | `{projectId}` | the start card: repository, base, author, selected mode, revision, self-update, remote |
+| `project_grant` | `{projectId, mode, selfUpdate, revision}` | the grant |
+| `project_revoke` | `{projectId}` | nothing |
+| `mission_start` | `{projectId, goal}` | the mission id |
+| `mission_state` | `{missionId}` | the mission view |
+| `mission_mode` | `{missionId, mode}`, mode `normal` or `autonomous` | the mission view |
+| `mission_stop`, `mission_resume` | `{missionId}` | the mission view |
+| `mission_answer` | `{missionId, decisionId, answer}` | the mission view |
+
+The `mission` event carries the same view whenever it changes. Its `revision` grows with every view and the screen
+ignores an older one. Cost is in millionths of an API-equivalent dollar; `null` is unknown, never zero.
+
+```json
+{"missionId": "m1", "revision": 7, "state": "running", "mode": "normal", "gitMode": "seguro",
+ "goal": "Fix the failing normalization test", "plan": "One writer fixes clean_path; the other vendor reviews.",
+ "tasks": [{"id": "fix", "title": "Fix clean_path", "state": "running", "reason": null, "builder": "codex", "reviewer": "claude"}],
+ "cost": {"ownMicros": null, "capMicros": 2000000, "complete": false},
+ "pace": [{"vendor": "claude", "window": "seven_day", "used": 0.31, "room": 0.04, "readAt": 1791000000.0}],
+ "decisions": [], "build": null, "reason": null}
+```
+
+The keys these return (`error.store.*`, `error.journal.*`, `error.plan.*`, `error.wire.*`, `error.decision.*`,
+`reason.grant.*`, `reason.contract.revised`) get their hand-written texts in every locale together with the Projects
+screen, which owns the locale files.
+
 ## Rules for every screen
 
 - Every text on screen lives in `ui/locales/`, written by hand in each language.

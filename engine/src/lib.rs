@@ -13,6 +13,7 @@ pub mod learn;
 pub mod ledger;
 pub mod model;
 pub mod proc;
+pub mod project;
 pub mod route;
 pub mod router;
 pub mod signals;

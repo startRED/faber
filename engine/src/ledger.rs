@@ -65,6 +65,9 @@ pub struct VendorLedger {
     /// A check worked but named no plan.
     #[serde(skip)]
     pub nameless: bool,
+    /// Fields written by a newer Faber, kept as they were: an older build must not drop what it does not know.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -72,6 +75,9 @@ pub struct VendorLedger {
 pub struct Ledger {
     pub claude: VendorLedger,
     pub codex: VendorLedger,
+    /// Fields written by a newer Faber, kept as they were.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 impl Ledger {
