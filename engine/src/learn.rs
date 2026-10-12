@@ -156,6 +156,7 @@ pub fn outside(points: &[Point], spans: &[Span], now: f64) -> Outside {
             })
             .sum();
         let d = if inside.is_empty() {
+            o.foreign |= d > 0.0;
             d
         } else if let Some(expected) = expected {
             if d <= 2.0 * expected + 1.0 {

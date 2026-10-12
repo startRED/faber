@@ -279,3 +279,14 @@ fn foreign_account_drops_do_not_teach_weights_or_become_faber_spend() {
     assert!(idle_use.foreign && idle_use.outside >= 5.9);
     assert_eq!(ledger.own_spend, before, "account readings never write own USD");
 }
+
+#[test]
+fn one_idle_account_point_is_foreign_even_below_the_outside_estimate_resolution() {
+    let now = MONDAY + HOUR;
+    let points = [at(MONDAY, 10.0, MONDAY + DAY), at(now, 11.0, MONDAY + DAY)];
+    let usage = outside(&points, &[], now);
+    assert!(usage.foreign, "idle movement cannot be Faber's spend");
+    assert_eq!(usage.outside, 0.0, "the numerical estimate still ignores sub-two-point movement");
+    assert!(stretches(&points, &[]).is_empty());
+    assert!(weights(&stretches(&points, &[])).raw.is_empty());
+}
