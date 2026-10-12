@@ -114,6 +114,26 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   const width = createWidth();
   let thread: HTMLDivElement | undefined;
   let work: HTMLElement | undefined;
+  let restore: ((draft: Draft) => boolean) | undefined;
+  let clearRestored: ((draft: Draft) => boolean) | undefined;
+  const held = new Map<string, { draft: Draft; reply?: string; restored?: boolean }>();
+  let sendTicket = 0;
+  const restoreRejected = (id: string, m: import("./api.ts").Message | undefined) => {
+    const saved = held.get(id);
+    if (!saved || !m || (saved.reply && saved.reply !== m.id)) return;
+    if (m.status === "streaming") {
+      saved.reply = m.id;
+      if (saved.restored && place().id === id) clearRestored?.(saved.draft);
+      saved.restored = false;
+      return;
+    }
+    if (["error.quotaWait", "error.moveFailed", "error.quotaOut"].includes(m.error ?? "")) {
+      if (place().id !== id) return;
+      saved.restored = restore?.(saved.draft) || saved.restored;
+      if (m.error !== 'error.moveFailed') return;
+    }
+    held.delete(id);
+  };
   let fill: ((text: string) => void) | undefined;
   let stick = true;
   // Where focus was, until the tutorial took it. Weak, so a control that left the page (Settings closed with the focus in
@@ -244,6 +264,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
     setLoading(false);
     setFrom(Math.max(0, (done.conversation?.messages.length ?? 0) - PAGE));
     setCurrent(done.conversation);
+    if (done.conversation) queueMicrotask(() => restoreRejected(done.conversation!.id, done.conversation!.messages.at(-1)));
   };
   const fresh = (next: Pick<Place, 'area' | 'projectId'>) => go({ ...next, id: undefined });
   const openSummary = (c: Summary) => {
@@ -268,6 +289,8 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
     // its snapshot and nothing is lost between the two.
     props.inbox.take((e) => {
       if (e.type === 'list') void refresh();
+      if (e.type === 'usage') setState((s) => ({ ...s, usage: e.vendors }));
+      if (e.type === 'message') restoreRejected(e.conversationId, e.message.role === 'assistant' ? e.message : undefined);
       if (e.type === 'quota') setQuotas((q) => withQuota(q, e));
       if (e.type === 'message' && opening.hear(e.conversationId, e.message) === 'apply') {
         setCurrent((c) => (c?.id === e.conversationId ? upsert(c, e.message) : c));
@@ -400,6 +423,8 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   const send = async (draft: Draft) => {
     // The place is taken once: the message, and the conversation it opens, belong to the place it was written in.
     const at = place();
+    const ticket = ++sendTicket;
+    let accepted = false;
     setError(undefined);
     stick = true;
     try {
@@ -412,9 +437,21 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
         files: draft.files,
         choice: picked(),
       });
-      if (place() === at && id !== opening.id) await go({ ...at, id });
+      accepted = true;
+      if (ticket === sendTicket) held.set(id, { draft });
+      const moved = place() === at && id !== opening.id;
+      if (moved) await go({ ...at, id });
+      const sent = moved && current()?.id === id ? current() : await api.open(id);
+      if (ticket === sendTicket) {
+        const reply = sent?.messages.at(-1);
+        const tracked = held.get(id) ?? { draft };
+        tracked.reply = reply?.id;
+        held.set(id, tracked);
+        restoreRejected(id, reply);
+      }
     } catch (err) {
       fail(err);
+      if (!accepted && ticket === sendTicket && place() === at) restore?.(draft);
     }
   };
 
@@ -527,6 +564,11 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
           if (!loading() && picked().vendor === 'auto') void api.routeDraft({ conversationId: current()?.id, ...target(), choice: picked() }, text);
         }}
         onReady={(f) => (fill = f)}
+        onRestore={(f) => {
+          restore = f;
+          queueMicrotask(() => current() && restoreRejected(current()!.id, current()!.messages.at(-1)));
+        }}
+        onClearRestored={(f) => (clearRestored = f)}
       />
     </Show>
   );
@@ -609,6 +651,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
               saved={state().settings}
               vendors={state().vendors}
               quotas={quotas()}
+              usage={state().usage ?? []}
               now={clock()}
               start={back()?.section ?? settingsAt()}
               kept={back()?.draft}
@@ -740,6 +783,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                           {(c) => (
                             <Thread
                               messages={c().messages}
+                              usage={state().usage ?? []}
                               from={from()}
                               conversationId={c().id}
                               options={options()}

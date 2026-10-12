@@ -243,11 +243,21 @@ impl Snap {
     /// When the vendor can answer again, as Unix seconds: the latest reset among everything that blocks it. None when a
     /// block has no reset time (it then counts as longer than any wait). Meaningful only when `exhausted`.
     pub fn recovery(&self, now: f64) -> Option<f64> {
+        self.recovery_for(None, now)
+    }
+
+    /// A pinned family also waits for its own blocking window; another family's earlier reset cannot admit it.
+    pub fn recovery_for(&self, family: Option<&str>, now: f64) -> Option<f64> {
         let mut latest = self
             .wide(now)
             .filter(|w| w.used > ADMIT_LIMIT || (self.paid_fallback && w.used > STEP_LIMIT))
             .map(|w| w.resets_at)
             .reduce(f64::max);
+        for (name, w) in &self.windows {
+            if family.is_some() && !vendor_wide(name) && family_of(name) == family && w.live(now) && w.used >= OUT {
+                latest = Some(latest.map_or(w.resets_at, |at| at.max(w.resets_at)));
+            }
+        }
         match self.reach {
             Reach::Out(Some(until)) if until > now => latest = Some(latest.map_or(until, |a| a.max(until))),
             Reach::Out(None) => return None,

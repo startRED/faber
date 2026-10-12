@@ -271,6 +271,8 @@ pub struct RunningItem {
     pub since: u64,
     /// The questions the user has not answered yet.
     pub permissions: Vec<Permission>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wait_until: Option<f64>,
 }
 
 /// The running list as the engine last sent it. The revision grows by one with every list the engine emits, so a

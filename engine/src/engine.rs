@@ -29,12 +29,15 @@ mod answer;
 mod auto;
 mod pulse;
 mod recovery;
+mod usage_view;
+pub use usage_view::{VendorUsage, WindowUsage};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum AppEvent {
     Message { conversation_id: String, message: Box<Message> },
     Quota { vendor: Vendor, window: String, used: f64, resets_at: f64 },
+    Usage { vendors: Vec<VendorUsage> },
     Running { revision: u64, items: Vec<RunningItem> },
     List,
 }
@@ -111,6 +114,7 @@ pub struct AppState {
     /// The latest reading of each vendor's quota windows, with the time each resets. The screen decides which count as
     /// expired; the engine reports what the CLIs said.
     pub quotas: Vec<QuotaReading>,
+    pub usage: Vec<VendorUsage>,
 }
 
 /// How to continue a conversation in the CLI's own terminal interface.
@@ -291,6 +295,7 @@ impl Engine {
         self.with(|c| {
             c.utc_offset = secs.clamp(-14 * 3600, 14 * 3600);
             c.wake_waiting();
+            c.emit_usage();
         })
     }
     /// Replaces the clock; the quota arithmetic reads the time through it.
@@ -315,11 +320,17 @@ impl Engine {
             match vendor {
                 Vendor::Claude => {
                     let found = account::claude_account(&cli, &spawn, &cwd, timeout).await;
-                    self.with(|c| c.claude_plan_checked(found));
+                    self.with(|c| {
+                        c.claude_plan_checked(found);
+                        c.emit_usage();
+                    });
                 }
                 Vendor::Codex => {
                     let events = read_codex_limits(&cli.command, &cwd, windows, spawner(&spawn, &cli), timeout).await;
-                    self.with(|c| c.codex_plan_checked(events));
+                    self.with(|c| {
+                        c.codex_plan_checked(events);
+                        c.emit_usage();
+                    });
                 }
             }
         }
@@ -344,6 +355,7 @@ impl Engine {
             if !plan.is_empty() {
                 c.ledger.of_mut(vendor).typed_plan = Some(plan);
                 c.save_ledger(true);
+                c.emit_usage();
             }
         })
     }
@@ -491,6 +503,7 @@ impl Core {
         self.save_ledger(false);
         (self.emit)(AppEvent::Quota { vendor, window: window.to_string(), used, resets_at });
         self.stop_unapproved_paid(vendor, false);
+        self.emit_usage();
     }
 
     /// What a CLI said about the account: merged into what the ledger knows, field by field.
@@ -517,6 +530,7 @@ impl Core {
             v.plan_detected(s.plan, now);
         }
         self.stop_unapproved_paid(vendor, spent);
+        self.emit_usage();
     }
 
     fn stop_unapproved_paid(&mut self, vendor: Vendor, spent: bool) {
@@ -580,6 +594,7 @@ impl Core {
         self.ledger.of_mut(vendor).span(Span { start, end, model: model.to_string(), cost, incomplete });
         self.ledger.of_mut(vendor).learn_weights(now);
         self.save_ledger(true);
+        self.emit_usage();
     }
 
     fn note_turn(&mut self, conv: &str, cost: Option<f64>, incomplete: bool) {
@@ -687,6 +702,7 @@ impl Core {
             settings: self.store.settings(),
             running: self.running.clone(),
             quotas,
+            usage: self.usage(),
         }
     }
 
@@ -1072,6 +1088,9 @@ impl Core {
             m.vendor = Some(pick.vendor);
             m.model = pick.model.clone();
             m.wait_until = None;
+            if m.reason.as_deref() == Some("reason.waiting") {
+                m.reason = Some(pick.reason.clone());
+            }
             m.error = None;
             m.status = Some(Status::Streaming);
             m.permissions = None;
@@ -1487,6 +1506,7 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
         state: if permissions.is_empty() { RunState::Working } else { RunState::NeedsYou },
         since: reply.at,
         permissions,
+        wait_until: reply.wait_until.filter(|_| reply.status == Some(Status::Streaming)),
     })
 }
 

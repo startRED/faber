@@ -89,7 +89,11 @@ async fn the_plan_comes_from_the_status_command_and_nothing_else_of_it_is_kept()
     engine.shutdown();
     let saved = std::fs::read_to_string(dir.path().join("budget.json")).unwrap();
     assert!(!saved.contains("someone@example.com") && !saved.contains("Acme"));
-    assert!(events.try_recv().is_err(), "a status check says nothing to the screen");
+    while let Ok(event) = events.try_recv() {
+        assert!(matches!(event, AppEvent::Usage { .. }), "only the sanitized usage view reaches the screen");
+        let shown = format!("{event:?}");
+        assert!(!shown.contains("someone@example.com") && !shown.contains("Acme"));
+    }
 }
 
 #[tokio::test]

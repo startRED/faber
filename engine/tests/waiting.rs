@@ -132,6 +132,21 @@ async fn a_family_limit_resumes_on_another_family_of_the_same_vendor() {
     assert!(r.codex.args.lock().unwrap().is_empty());
     r.engine.shutdown();
 }
+
+#[tokio::test]
+async fn an_explicit_wait_uses_the_pinned_familys_reset() {
+    let dir = tempfile::tempdir().unwrap();
+    let r = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+    r.engine.note_account_events(Vendor::Claude, vec![quota("seven_day_opus", 600, 1.0)]);
+    let req = SendRequest { choice: Choice { vendor: "claude".into(), model: Some("opus".into()) }, ..request(None, "claude") };
+    let id = r.engine.send(req).unwrap();
+    let m = reply(&r.engine, &id, Status::Error).await;
+    assert_eq!(m.error.as_deref(), Some("error.quotaOut"));
+    r.engine.wait_turn(&id, &m.id).unwrap();
+    assert_eq!(r.engine.open(&id).unwrap().messages.last().unwrap().wait_until, Some((WHEN + 600) as f64));
+    assert!(r.claude.args.lock().unwrap().is_empty());
+    r.engine.shutdown();
+}
 fn request(id: Option<&str>, vendor: &str) -> SendRequest {
     SendRequest {
         conversation_id: id.map(String::from),

@@ -151,6 +151,7 @@ mod tests {
             model: None,
             state: if requests.is_empty() { RunState::Working } else { RunState::NeedsYou },
             since: 0,
+            wait_until: None,
             permissions: requests.iter().map(|r| Permission { request_id: (*r).into(), tool: "Write".into(), input: json!({}) }).collect(),
         }
     }

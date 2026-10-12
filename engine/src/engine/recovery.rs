@@ -1,6 +1,6 @@
 //! Move an interrupted turn once, or hold it until quota returns. Every dispatch re-enters the same gate.
 use super::*;
-use crate::budget::{Wait, wait};
+use crate::budget::{QUEUE_SECS, Wait};
 use crate::handover::{self, Partial, Plan};
 use crate::route::{Asked, KINDS, LEVELS, ROUTER};
 
@@ -137,7 +137,12 @@ impl Core {
             m.error = None;
             m.permissions = None;
             m.wait_until = None;
+            if m.reason.as_deref() == Some("reason.waiting") {
+                m.reason = Some(t.pick.reason.clone());
+            }
         }
+        self.save(id);
+        self.push(id, Some(&t.reply), true);
         if let Some(l) = self.live.remove(id) {
             l.session.close();
         }
@@ -230,15 +235,24 @@ impl Core {
     fn queue(&mut self, id: &str) -> Result<(), String> {
         let t = self.transfers.get(id).cloned().ok_or("error.permission.stale")?;
         let now = self.secs();
-        let snapshots: Vec<_> = self
+        let vendors: Vec<_> = self
             .vendors()
             .into_iter()
             .filter(|v| !t.by_hand || *v == t.pick.vendor)
             .filter(|v| self.ledger.of(*v).billing == Billing::Subscription && !(*v == Vendor::Claude && self.opts.claude_env_billed))
-            .map(|v| self.ledger.of(v).snap(now))
             .collect();
-        let snaps: Vec<_> = snapshots.iter().collect();
-        let outcome = wait(&snaps, now);
+        let earliest = if t.by_hand {
+            self.ledger.of(t.pick.vendor).snap(now).recovery_for(t.pick.model.as_deref().and_then(family_of), now)
+        } else {
+            crate::route::candidates(&vendors, &self.codex_models)
+                .iter()
+                .filter_map(|p| self.ledger.of(p.vendor).snap(now).recovery_for(family_of(p.model), now))
+                .reduce(f64::min)
+        };
+        let outcome = match earliest {
+            Some(at) if at - now <= QUEUE_SECS => Wait::Queue(at),
+            at => Wait::Refuse(at),
+        };
         let (until, queued) = match outcome {
             Wait::Queue(at) => (Some(at), true),
             Wait::Refuse(at) => (at, false),
