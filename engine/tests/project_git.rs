@@ -84,14 +84,14 @@ fn effects_require_a_current_grant_and_cas_only_the_own_branch() {
     let mut g = grant(&repo);
     let fake = Fake::replies(&["", "", "", ""]);
     let mut broker = Broker::open(repo, journal, "m1", 3, fake).unwrap();
-    assert_eq!(broker.create_branch(None, "create"), Err(GitError::Authority("reason.grant.none")));
+    assert_eq!(broker.create_branch(|| Ok(None), "create"), Err(GitError::Authority("reason.grant.none")));
     g.revision = 4;
-    assert_eq!(broker.create_branch(Some(&g), "create"), Err(GitError::Authority("reason.grant.stale")));
+    assert_eq!(broker.create_branch(|| Ok(Some(g.clone())), "create"), Err(GitError::Authority("reason.grant.stale")));
     g.revision = 3;
-    broker.create_branch(Some(&g), "create").unwrap();
-    broker.fast_forward(Some(&g), "land", BASE, NEXT).unwrap();
+    broker.create_branch(|| Ok(Some(g.clone())), "create").unwrap();
+    broker.fast_forward(|| Ok(Some(g.clone())), "land", BASE, NEXT).unwrap();
     g.revoked_at = Some(2);
-    assert_eq!(broker.fast_forward(Some(&g), "again", NEXT, BASE), Err(GitError::Authority("reason.grant.revoked")));
+    assert_eq!(broker.fast_forward(|| Ok(Some(g.clone())), "again", NEXT, BASE), Err(GitError::Authority("reason.grant.revoked")));
     let calls = &broker.executor().calls;
     let changes: Vec<_> = calls.iter().filter(|c| c.args.contains(&"update-ref".into())).collect();
     assert_eq!(changes.len(), 2);
@@ -114,10 +114,10 @@ fn stale_heads_and_unknown_delivery_preserve_evidence() {
     fake.replies.push_back(Ok(Output { success: true, stdout: vec![] }));
     fake.replies.push_back(Err(GitError::Process));
     let mut broker = Broker::open(repo, journal, "m1", 3, fake).unwrap();
-    broker.create_branch(Some(&g), "create").unwrap();
-    assert_eq!(broker.fast_forward(Some(&g), "stale", BASE, NEXT), Err(GitError::Command));
-    assert_eq!(broker.fast_forward(Some(&g), "uncertain", BASE, NEXT), Err(GitError::Process));
-    assert!(broker.fast_forward(Some(&g), "uncertain", BASE, NEXT).is_err());
+    broker.create_branch(|| Ok(Some(g.clone())), "create").unwrap();
+    assert_eq!(broker.fast_forward(|| Ok(Some(g.clone())), "stale", BASE, NEXT), Err(GitError::Command));
+    assert_eq!(broker.fast_forward(|| Ok(Some(g.clone())), "uncertain", BASE, NEXT), Err(GitError::Process));
+    assert!(broker.fast_forward(|| Ok(Some(g.clone())), "uncertain", BASE, NEXT).is_err());
     assert_eq!(broker.executor().calls.len(), 7, "uncertain effects must not repeat");
 }
 
@@ -132,7 +132,83 @@ fn review_7_null_oids_are_rejected_before_any_git_effect() {
     let data = tempfile::tempdir().unwrap();
     let journal = Journal::open(dir.path(), data.path(), "m1").unwrap();
     let mut broker = Broker::open(repo, journal, "m1", 3, Fake::replies(&["", "", "", ""])).unwrap();
-    broker.create_branch(Some(&g), "create").unwrap();
-    assert_eq!(broker.fast_forward(Some(&g), "delete", BASE, &"0".repeat(40)), Err(GitError::Ref));
+    broker.create_branch(|| Ok(Some(g.clone())), "create").unwrap();
+    assert_eq!(broker.fast_forward(|| Ok(Some(g.clone())), "delete", BASE, &"0".repeat(40)), Err(GitError::Ref));
     assert_eq!(broker.executor().calls.len(), 1);
+}
+
+struct Revokes {
+    inner: Fake,
+    grant: std::sync::Arc<std::sync::Mutex<Grant>>,
+}
+impl Executor for Revokes {
+    fn execute(&mut self, call: &Invocation) -> Result<Output, GitError> {
+        let out = self.inner.execute(call)?;
+        if call.args.contains(&"add".into()) {
+            self.grant.lock().unwrap().revoked_at = Some(2);
+        }
+        Ok(out)
+    }
+}
+
+#[test]
+fn opus_l1_revocation_after_staging_blocks_commit_dispatch() {
+    use faber_engine::project::Lease;
+    use faber_engine::project::lease::hash;
+    use faber_engine::project::wire::{FileOp, WriteOp};
+    let dir = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let repo = repository(dir.path());
+    let g = grant(&repo);
+    let live = std::sync::Arc::new(std::sync::Mutex::new(g.clone()));
+    let executor = Revokes {
+        inner: Fake::replies(&[
+            BASE,
+            "",
+            "",
+            "",
+            "src/a.rs\0",
+            NEXT,
+            NEXT,
+            &format!("{NEXT}\n{BASE}\nTest\ntest@example.invalid\nTest\ntest@example.invalid"),
+            "",
+            NEXT,
+        ]),
+        grant: live.clone(),
+    };
+    let request = Lease::new(&repo.identity.common_dir, "m1", "writer", 1, vec!["src".into()], BASE, &"a".repeat(64), 1);
+    let mut broker = Broker::open(repo, Journal::open(dir.path(), data.path(), "m1").unwrap(), "m1", 3, executor).unwrap();
+    let lease = broker.leases().acquire(request).unwrap();
+    let root = data.path().join("missions/m1/candidate");
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("src/a.rs"), "before").unwrap();
+    broker.leases().bind(&lease, &root).unwrap();
+    broker
+        .leases()
+        .patch(
+            &lease,
+            Some(&g),
+            3,
+            &FileOp::Write(WriteOp { path: "src/a.rs".into(), expect: Some(hash(b"before")), content: "approved".into() }),
+        )
+        .unwrap();
+    assert_eq!(
+        broker.commit(|| Ok(Some(live.lock().unwrap().clone())), &lease, "commit", "approved", &["src/a.rs".into()]),
+        Err(GitError::Authority("reason.grant.revoked"))
+    );
+    assert!(!broker.executor().inner.calls.iter().any(|c| c.args.contains(&"commit".into()) || c.args.contains(&"commit-tree".into())));
+}
+
+#[test]
+fn opus_h1_and_l4_command_config_overrides_are_pure_and_fail_closed() {
+    use faber_engine::project::git::config_overrides;
+    let args =
+        config_overrides(b"filter.trap.process\nfilter.trap.required\nhook.lint.command\nhook.lint.event\nhook.ref.enabled\n").unwrap();
+    assert_eq!(
+        args,
+        ["-c", "filter.trap.process=", "-c", "filter.trap.required=false", "-c", "hook.lint.enabled=false", "-c", "hook.ref.enabled=false"]
+    );
+    for bad in ["hook.unsafe name.command", "hook..command", "hook.x.command\nremote.x.url", "filter.bad;command.clean"] {
+        assert_eq!(config_overrides(bad.as_bytes()), Err(GitError::Command));
+    }
 }

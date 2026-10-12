@@ -172,23 +172,39 @@ impl Executor for Process {
         // including process filters and required filters, before any checkout, staging or commit.
         let query = Invocation::new(
             &call.cwd,
-            &["config", "--includes", "--name-only", "--get-regexp", "^filter\\..*\\.(clean|smudge|process|required)$"],
+            &["config", "--includes", "--name-only", "--get-regexp", "^(filter\\..*\\.(clean|smudge|process|required)|hook\\..*)$"],
         );
         let found = self.command(&query).args(&query.args).output().map_err(|_| GitError::Process)?;
         if !found.status.success() && found.status.code() != Some(1) {
             return Err(GitError::Command);
         }
         let mut command = self.command(call);
-        let names = String::from_utf8(found.stdout).map_err(|_| GitError::Command)?;
-        for key in names.lines() {
-            if !key.starts_with("filter.") || !key.bytes().all(|b| b.is_ascii_alphanumeric() || b".-_/".contains(&b)) {
-                return Err(GitError::Command);
-            }
-            command.args(["-c", &format!("{key}={}", if key.ends_with(".required") { "false" } else { "" })]);
-        }
+        command.args(config_overrides(&found.stdout)?);
         let out = command.args(&call.args).output().map_err(|_| GitError::Process)?;
         Ok(Output { success: out.status.success(), stdout: out.stdout })
     }
+}
+
+/// Pure argv construction for command-bearing config found through local, included and worktree config.
+pub fn config_overrides(keys: &[u8]) -> Result<Vec<String>, GitError> {
+    let keys = std::str::from_utf8(keys).map_err(|_| GitError::Command)?;
+    let mut overrides = std::collections::BTreeSet::new();
+    for key in keys.lines() {
+        if !key.bytes().all(|b| b.is_ascii_alphanumeric() || b".-_/".contains(&b)) {
+            return Err(GitError::Command);
+        }
+        if key.starts_with("filter.") {
+            overrides.insert(format!("{key}={}", if key.ends_with(".required") { "false" } else { "" }));
+        } else if let Some(name) = key.strip_prefix("hook.").and_then(|s| s.rsplit_once('.').map(|(name, _)| name)) {
+            if name.is_empty() {
+                return Err(GitError::Command);
+            }
+            overrides.insert(format!("hook.{name}.enabled=false"));
+        } else {
+            return Err(GitError::Command);
+        }
+    }
+    Ok(overrides.into_iter().flat_map(|value| ["-c".into(), value]).collect())
 }
 
 fn text(output: Output, error: GitError) -> Result<String, GitError> {
@@ -270,15 +286,16 @@ impl<E: Executor> Broker<E> {
     pub fn executor(&self) -> &E {
         &self.executor
     }
-    fn authority(&self, grant: Option<&Grant>, effect: Effect) -> Result<(), GitError> {
-        grant
-            .ok_or(GitError::Authority("reason.grant.none"))?
-            .allows(&self.repository.identity, self.revision, effect)
-            .map_err(GitError::Authority)
+    // The caller must read current authority here, rather than capture a grant snapshot at admission.
+    fn authority(&self, grant: &mut impl FnMut() -> Result<Option<Grant>, GitError>, effect: Effect) -> Result<Grant, GitError> {
+        self.leases.verify_lock()?;
+        let grant = grant()?.ok_or(GitError::Authority("reason.grant.none"))?;
+        grant.allows(&self.repository.identity, self.revision, effect).map_err(GitError::Authority)?;
+        Ok(grant)
     }
     fn effect(
         &mut self,
-        grant: Option<&Grant>,
+        grant: &mut impl FnMut() -> Result<Option<Grant>, GitError>,
         id: &str,
         kind: IntentKind,
         calls: &[Invocation],
@@ -294,38 +311,78 @@ impl<E: Executor> Broker<E> {
         self.journal().record_intent(&intent)?;
         let mut output = Output { success: true, stdout: vec![] };
         for call in calls {
-            self.authority(grant, kind.effect().ok_or(GitError::Command)?)?;
+            let current = match self.authority(grant, kind.effect().ok_or(GitError::Command)?) {
+                Ok(current) => current,
+                Err(e) => {
+                    let mut receipt = Receipt::new(id, Outcome::Failed, now());
+                    receipt.reason = Some(e.key().into());
+                    receipt.evidence = intent.expected.clone();
+                    self.journal().record_receipt(&receipt)?;
+                    return Err(e);
+                }
+            };
+            if call.author.as_ref().is_some_and(|author| current.author.as_ref() != Some(author)) {
+                return Err(GitError::Authority("reason.grant.stale"));
+            }
             // Missing delivery acknowledgment stays pending. Recovery must reconcile it rather than repeat it.
             output = self.executor.execute(call)?;
             if !output.success {
                 break;
             }
         }
+        let mut verified = Ok(());
         if kind == IntentKind::Commit && output.success {
             let head = text(output.clone(), GitError::Base)?;
             if !valid_oid(&head) || expected.iter().any(|(key, value)| *key == "parent" && *value == head) {
                 return Err(GitError::Process);
             }
-            intent.expected.insert("head".into(), head);
+            intent.expected.insert("head".into(), head.clone());
             let root = &calls.last().ok_or(GitError::Process)?.cwd;
-            let actual_tree = text(self.executor.execute(&Invocation::new(root, &["rev-parse", "HEAD^{tree}"]))?, GitError::Process)?;
-            if intent.expected.get("tree") != Some(&actual_tree) {
-                return Err(LeaseError::Quarantined.into());
+            let identity = text(
+                self.executor.execute(&Invocation::new(root, &["show", "-s", "--format=%T%n%P%n%an%n%ae%n%cn%n%ce", &head]))?,
+                GitError::Process,
+            )?;
+            let expected_identity =
+                ["tree", "parent", "name", "email", "name", "email"].map(|k| intent.expected.get(k).map(String::as_str).unwrap_or(""));
+            let identity_matches = identity.lines().collect::<Vec<_>>() == expected_identity;
+            intent.expected.insert("observedIdentity".into(), identity.clone());
+            if !identity_matches {
+                verified = Err(LeaseError::Quarantined.into());
+            } else if let Err(e) = self.authority(grant, Effect::Commit) {
+                verified = Err(e);
+            } else {
+                let parent = intent.expected.get("parent").ok_or(GitError::Process)?;
+                let cas = self.executor.execute(&Invocation::new(root, &["update-ref", "HEAD", &head, parent]))?;
+                output.success = cas.success;
+                if cas.success {
+                    let actual = text(self.executor.execute(&Invocation::new(root, &["rev-parse", "HEAD"]))?, GitError::Process)?;
+                    intent.expected.insert("observedHead".into(), actual.clone());
+                    if actual != head {
+                        verified = Err(LeaseError::Quarantined.into());
+                    } else {
+                        verified = self.leases.audit(commit_lease.ok_or(LeaseError::Stale)?).map(|_| ()).map_err(GitError::from);
+                    }
+                }
             }
-            self.leases.audit(commit_lease.ok_or(LeaseError::Stale)?)?;
         }
-        let mut receipt = Receipt::new(id, if output.success { Outcome::Done } else { Outcome::Failed }, now());
+        let mut receipt = Receipt::new(id, if output.success && verified.is_ok() { Outcome::Done } else { Outcome::Failed }, now());
         receipt.evidence = intent.expected;
         if !output.success {
             receipt.reason = Some(GitError::Command.key().into());
+        } else if let Err(e) = verified {
+            receipt.reason = Some(e.key().into());
         }
-        self.journal().record_receipt(&receipt)?;
+        if let Err(e) = self.journal().record_receipt(&receipt) {
+            self.leases.halt();
+            return Err(e.into());
+        }
         if !output.success {
             return Err(GitError::Command);
         }
+        verified?;
         Ok(output)
     }
-    pub fn create_branch(&mut self, grant: Option<&Grant>, id: &str) -> Result<(), GitError> {
+    pub fn create_branch(&mut self, mut grant: impl FnMut() -> Result<Option<Grant>, GitError>, id: &str) -> Result<(), GitError> {
         let branch = format!("refs/heads/faber/{}", self.mission);
         if self.leases.owns_branch(&branch) {
             return Err(LeaseError::Owned.into());
@@ -333,12 +390,17 @@ impl<E: Executor> Broker<E> {
         let base = self.repository.base.clone();
         let zero = "0".repeat(base.len());
         let call = Invocation::new(Path::new(&self.repository.identity.root), &["update-ref", &branch, &base, &zero]);
-        self.effect(grant, id, IntentKind::FastForward, &[call], &[("ref", &branch), ("old", &zero), ("new", &base)], None)?;
+        self.effect(&mut grant, id, IntentKind::FastForward, &[call], &[("ref", &branch), ("old", &zero), ("new", &base)], None)?;
         self.leases.record_branch(&branch)?;
         Ok(())
     }
-    pub fn worktree(&mut self, grant: Option<&Grant>, lease: &Lease, id: &str) -> Result<PathBuf, GitError> {
-        self.authority(grant, Effect::Worktree)?;
+    pub fn worktree(
+        &mut self,
+        mut grant: impl FnMut() -> Result<Option<Grant>, GitError>,
+        lease: &Lease,
+        id: &str,
+    ) -> Result<PathBuf, GitError> {
+        self.authority(&mut grant, Effect::Worktree)?;
         // A live current holder is required even before its worktree exists.
         self.leases.index(lease)?;
         let root = self
@@ -359,7 +421,7 @@ impl<E: Executor> Broker<E> {
             raw.strip_prefix("\\\\?\\").unwrap_or(raw).into()
         };
         let call = Invocation::new(Path::new(&self.repository.identity.root), &["worktree", "add", "--detach", "--", &path, &base]);
-        if let Err(e) = self.effect(grant, id, IntentKind::Worktree, &[call], &[("path", &path), ("base", &base)], None) {
+        if let Err(e) = self.effect(&mut grant, id, IntentKind::Worktree, &[call], &[("path", &path), ("base", &base)], None) {
             self.leases.quarantine(lease)?;
             return Err(e);
         }
@@ -369,8 +431,14 @@ impl<E: Executor> Broker<E> {
         }
         Ok(root)
     }
-    pub fn fast_forward(&mut self, grant: Option<&Grant>, id: &str, old: &str, new: &str) -> Result<(), GitError> {
-        self.authority(grant, Effect::FastForward)?;
+    pub fn fast_forward(
+        &mut self,
+        mut grant: impl FnMut() -> Result<Option<Grant>, GitError>,
+        id: &str,
+        old: &str,
+        new: &str,
+    ) -> Result<(), GitError> {
+        self.authority(&mut grant, Effect::FastForward)?;
         if !valid_oid(old) || !valid_oid(new) || old.len() != new.len() {
             return Err(GitError::Ref);
         }
@@ -392,20 +460,20 @@ impl<E: Executor> Broker<E> {
             return Err(GitError::Base);
         }
         let call = Invocation::new(root, &["update-ref", &branch, new, old]);
-        self.effect(grant, id, IntentKind::FastForward, &[call], &[("ref", &branch), ("old", old), ("new", new)], None)?;
+        self.effect(&mut grant, id, IntentKind::FastForward, &[call], &[("ref", &branch), ("old", old), ("new", new)], None)?;
         Ok(())
     }
     /// Task 7 supplies accepted paths after its proof/review gates. Git never stages the entire directory.
     pub fn commit(
         &mut self,
-        grant: Option<&Grant>,
+        mut grant: impl FnMut() -> Result<Option<Grant>, GitError>,
         lease: &Lease,
         id: &str,
         message: &str,
         accepted: &[String],
     ) -> Result<String, GitError> {
-        self.authority(grant, Effect::Commit)?;
-        let author = grant.and_then(|g| g.author.as_ref()).filter(|a| valid_author(a)).ok_or(GitError::Author)?.clone();
+        let author = self.authority(&mut grant, Effect::Commit)?.author.filter(valid_author).ok_or(GitError::Author)?;
+        self.leases.idle(lease)?;
         let changed = self.leases.audit(lease)?;
         let mut accepted = accepted.to_vec();
         accepted.sort();
@@ -424,14 +492,17 @@ impl<E: Executor> Broker<E> {
         }
         let mut stage = Invocation::new(&root, &["add", "--"]);
         stage.args.extend(accepted.clone());
-        let mut call = Invocation::new(&root, &["commit", "--only", "--no-gpg-sign", "-m", message, "--"]);
-        call.args.extend(accepted.clone());
-        call.author = Some(author);
-        let read_head = Invocation::new(&root, &["rev-parse", "HEAD"]);
         let result = (|| {
             // Staging is a disposable worktree effect; the commit's durable intent pins the verified index tree.
             let stage_id = format!("stage-{}", uuid::Uuid::new_v4());
-            self.effect(grant, &stage_id, IntentKind::Worktree, &[stage], &[("phase", "stage"), ("commit", id), ("parent", &head)], None)?;
+            self.effect(
+                &mut grant,
+                &stage_id,
+                IntentKind::Worktree,
+                &[stage],
+                &[("phase", "stage"), ("commit", id), ("parent", &head)],
+                None,
+            )?;
             self.leases.audit(lease)?;
             let diff = self.executor.execute(&Invocation::new(&root, &["diff", "--quiet", "--no-ext-diff", "--no-textconv", "--"]))?;
             if !diff.success {
@@ -444,11 +515,21 @@ impl<E: Executor> Broker<E> {
             if paths != accepted {
                 return Err(LeaseError::Quarantined.into());
             }
+            self.authority(&mut grant, Effect::Worktree)?;
             let tree = text(self.executor.execute(&Invocation::new(&root, &["write-tree"]))?, GitError::Process)?;
             if !valid_oid(&tree) {
                 return Err(GitError::Process);
             }
-            self.effect(grant, id, IntentKind::Commit, &[call, read_head], &[("parent", &head), ("tree", &tree)], Some(lease))
+            let mut call = Invocation::new(&root, &["commit-tree", &tree, "-p", &head, "-m", message]);
+            call.author = Some(author.clone());
+            self.effect(
+                &mut grant,
+                id,
+                IntentKind::Commit,
+                &[call],
+                &[("parent", &head), ("tree", &tree), ("name", &author.name), ("email", &author.email)],
+                Some(lease),
+            )
         })();
         let output = match result {
             Ok(output) => output,

@@ -17,7 +17,9 @@ pub fn scenarios() -> Vec<Scenario> {
     vec![
         Scenario { name: "projects git: detached work, CAS, hooks, filters, junctions and dirty owner preservation", run: local_git },
         Scenario { name: "projects git review 2 and 6: deletions commit with real git", run: deletion },
-        Scenario { name: "projects git review 5: edits during staging and commit never receive acceptance", run: race },
+        Scenario { name: "projects git review 5 and opus H3: stage races refused, commits use the verified tree", run: race },
+        Scenario { name: "projects git opus M3 and L4: candidate junction swap cannot redirect broker IO", run: path_race },
+        Scenario { name: "projects git opus M1: git clean cannot erase pending effect authority", run: cleanup },
     ]
 }
 fn local_git(ctx: &mut Ctx) -> Result {
@@ -28,6 +30,12 @@ fn deletion(ctx: &mut Ctx) -> Result {
 }
 fn race(ctx: &mut Ctx) -> Result {
     run_probe(ctx, "--project-git-race")
+}
+fn path_race(ctx: &mut Ctx) -> Result {
+    run_probe(ctx, "--project-path-race")
+}
+fn cleanup(ctx: &mut Ctx) -> Result {
+    run_probe(ctx, "--project-git-clean")
 }
 fn run_probe(ctx: &mut Ctx, mode: &str) -> Result {
     let git = faber_engine::cli::find_cli("git").ok_or("git is not installed")?;
@@ -96,6 +104,18 @@ fn git_output(program: &str, root: &Path, args: &[&str]) -> Result<std::process:
             "filter.include.smudge=",
             "-c",
             "filter.include.process=",
+            "-c",
+            "hook.post-checkout.enabled=false",
+            "-c",
+            "hook.pre-commit.enabled=false",
+            "-c",
+            "hook.post-commit.enabled=false",
+            "-c",
+            "hook.reference-transaction.enabled=false",
+            "-c",
+            "hook.included.enabled=false",
+            "-c",
+            "hook.worktree.enabled=false",
         ])
         .args(args)
         .env("GIT_CONFIG_NOSYSTEM", "1")
@@ -166,6 +186,15 @@ pub fn probe(sandbox: &Path) -> Result {
     .map_err(|e| e.to_string())?;
     git(program, &repo, &["config", "include.path", "extra-config"])?;
     git(program, &repo, &["config", "extensions.worktreeConfig", "true"])?;
+    // git 2.54 config hooks are independent of core.hooksPath.
+    for event in ["post-checkout", "pre-commit", "post-commit", "reference-transaction"] {
+        git(program, &repo, &["config", &format!("hook.{event}.event"), event])?;
+        git(program, &repo, &["config", &format!("hook.{event}.command"), "exit 99"])?;
+    }
+    let included = repo.join(".git/extra-config");
+    let mut file = std::fs::OpenOptions::new().append(true).open(included).map_err(|e| e.to_string())?;
+    std::io::Write::write_all(&mut file, b"[hook \"included\"]\n event = post-checkout\n command = exit 99\n")
+        .map_err(|e| e.to_string())?;
     let status = git(program, &repo, &["status", "--porcelain=v1", "-uall"])?;
     let index = std::fs::read(repo.join(".git/index")).map_err(|e| e.to_string())?;
     let mut process = Traced(check(Process::find())?);
@@ -176,10 +205,12 @@ pub fn probe(sandbox: &Path) -> Result {
     let records = sandbox.join("records");
     let journal = Journal::open(&repo, &records, "m1").map_err(|e| e.key())?;
     let mut broker = check(Broker::open(enrolled.clone(), journal, "m1", 3, process))?;
-    check(broker.create_branch(Some(&grant), "branch"))?;
+    check(broker.create_branch(|| Ok(Some(grant.clone())), "branch"))?;
     let lease = broker.leases().acquire(request).map_err(|e| e.key())?;
-    let worktree = check(broker.worktree(Some(&grant), &lease, "writer-worktree"))?;
+    let worktree = check(broker.worktree(|| Ok(Some(grant.clone())), &lease, "writer-worktree"))?;
     git(program, &worktree, &["config", "--worktree", "filter.include.process", "exit 99"])?;
+    git(program, &worktree, &["config", "--worktree", "hook.worktree.event", "pre-commit"])?;
+    git(program, &worktree, &["config", "--worktree", "hook.worktree.command", "exit 99"])?;
     ensure(!worktree.join("hook-ran").exists(), || "a repository hook ran".into())?;
     ensure(std::fs::read(worktree.join("src/a.rs")).map_err(|e| e.to_string())? == b"base", || {
         "the owner's edit entered the candidate".into()
@@ -192,9 +223,11 @@ pub fn probe(sandbox: &Path) -> Result {
     let create = FileOp::Write(WriteOp { path: "src/new.rs".into(), expect: None, content: "new".into() });
     broker.leases().patch(&lease, Some(&grant), 3, &create).map_err(|e| e.key())?;
     let paths = vec!["src/a.rs".into(), "src/new.rs".into()];
-    let commit = check(broker.commit(Some(&grant), &lease, "commit", "feat: fixture change", &paths))?;
-    check(broker.fast_forward(Some(&grant), "land", &base, &commit))?;
-    ensure(broker.fast_forward(Some(&grant), "stale", &base, &commit) == Err(GitError::Command), || "a stale CAS landed".into())?;
+    let commit = check(broker.commit(|| Ok(Some(grant.clone())), &lease, "commit", "feat: fixture change", &paths))?;
+    check(broker.fast_forward(|| Ok(Some(grant.clone())), "land", &base, &commit))?;
+    ensure(broker.fast_forward(|| Ok(Some(grant.clone())), "stale", &base, &commit) == Err(GitError::Command), || {
+        "a stale CAS landed".into()
+    })?;
     let occupied = sandbox.join("occupied");
     git(
         program,
@@ -213,9 +246,10 @@ pub fn probe(sandbox: &Path) -> Result {
             "faber/m1",
         ],
     )?;
-    ensure(broker.fast_forward(Some(&grant), "checked-out", &commit, &commit) == Err(GitError::Lease(LeaseError::Owned)), || {
-        "a checked-out branch was moved".into()
-    })?;
+    ensure(
+        broker.fast_forward(|| Ok(Some(grant.clone())), "checked-out", &commit, &commit) == Err(GitError::Lease(LeaseError::Owned)),
+        || "a checked-out branch was moved".into(),
+    )?;
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -277,7 +311,7 @@ fn review_writer<E: Executor>(sandbox: &Path, repository: Repository, executor: 
     let journal = Journal::open(Path::new(&repository.identity.root), &records, "m1").map_err(|e| e.key())?;
     let mut broker = check(Broker::open(repository, journal, "m1", 3, executor))?;
     let lease = broker.leases().acquire(lease).map_err(|e| e.key())?;
-    let root = check(broker.worktree(Some(&grant), &lease, "worktree"))?;
+    let root = check(broker.worktree(|| Ok(Some(grant.clone())), &lease, "worktree"))?;
     Ok((broker, grant, lease, root))
 }
 pub fn probe_deletion(sandbox: &Path) -> Result {
@@ -295,7 +329,7 @@ pub fn probe_deletion(sandbox: &Path) -> Result {
         .patch(&lease, Some(&grant), 3, &FileOp::Delete(DeleteOp { path: "src/delete.rs".into(), expect: hash(b"delete me") }))
         .map_err(|e| e.key())?;
     let commit = broker
-        .commit(Some(&grant), &lease, "delete", "fix: delete fixture file", &["src/delete.rs".into()])
+        .commit(|| Ok(Some(grant.clone())), &lease, "delete", "fix: delete fixture file", &["src/delete.rs".into()])
         .map_err(|e| format!("broker deletion: {}; real git: {evidence}", e.key()))?;
     ensure(!git(&program, &root, &["ls-tree", "--name-only", &commit, "--", "src/delete.rs"])?.contains("src/delete.rs"), || {
         "deleted file was committed".into()
@@ -308,8 +342,13 @@ struct EditDuringGit {
 }
 impl Executor for EditDuringGit {
     fn execute(&mut self, call: &Invocation) -> std::result::Result<Output, GitError> {
-        let editing = call.args.iter().any(|arg| arg == if self.during == "index" { "add" } else { self.during });
-        if editing && self.during == "commit" {
+        let command = match self.during {
+            "index" => "add",
+            "commit" | "commit-dirty" => "commit-tree",
+            other => other,
+        };
+        let editing = call.args.iter().any(|arg| arg == command);
+        if editing && matches!(self.during, "commit" | "commit-dirty") {
             std::fs::write(call.cwd.join("src/a.rs"), "unreviewed").map_err(|_| GitError::Process)?;
         }
         let out = self.inner.execute(call)?;
@@ -329,10 +368,10 @@ impl Executor for EditDuringGit {
 }
 pub fn probe_race(sandbox: &Path) -> Result {
     let mut failures = vec![];
-    for during in ["add", "index", "commit"] {
+    for during in ["add", "index", "commit", "commit-dirty"] {
         let area = sandbox.join(during);
         let (_, repository, _) = review_repository(&area)?;
-        let (mut broker, grant, lease, _) = review_writer(&area, repository, EditDuringGit { inner: check(Process::find())?, during })?;
+        let (mut broker, grant, lease, root) = review_writer(&area, repository, EditDuringGit { inner: check(Process::find())?, during })?;
         broker
             .leases()
             .patch(
@@ -342,17 +381,113 @@ pub fn probe_race(sandbox: &Path) -> Result {
                 &FileOp::Write(WriteOp { path: "src/a.rs".into(), expect: Some(hash(b"base")), content: "approved".into() }),
             )
             .map_err(|e| e.key())?;
-        let result = broker.commit(Some(&grant), &lease, "race", "fix: approved fixture", &["src/a.rs".into()]);
-        if result != Err(GitError::Lease(LeaseError::Quarantined)) {
+        let result = broker.commit(|| Ok(Some(grant.clone())), &lease, "race", "fix: approved fixture", &["src/a.rs".into()]);
+        if during == "commit" {
+            let head = result.map_err(|e| format!("verified tree commit failed: {}", e.key()))?;
+            let program = faber_engine::cli::find_cli("git").ok_or("git unavailable")?.command;
+            ensure(git(&program, &root, &["show", &format!("{head}:src/a.rs")])? == "approved", || {
+                "commit re-read unreviewed worktree bytes".into()
+            })?;
+        } else if result != Err(GitError::Lease(LeaseError::Quarantined)) {
             failures.push(format!("edit during {during} was accepted: {result:?}"));
         }
-        if during == "commit" {
+        if matches!(during, "commit" | "commit-dirty") {
             let pending = broker.journal().pending().map_err(|e| e.key())?;
-            ensure(pending.len() == 1 && pending[0].id == "race" && pending[0].expected.contains_key("tree"), || {
-                "unverified commit lost its pinned pending intent".into()
-            })?;
+            ensure(pending.is_empty(), || "a certain commit outcome stayed pending".into())?;
         }
     }
     ensure(failures.is_empty(), || failures.join("; "))?;
+    std::fs::write(sandbox.join("project-git.ok"), "ok").map_err(|e| e.to_string())
+}
+
+struct SwapDisk {
+    armed: std::sync::atomic::AtomicBool,
+    root: PathBuf,
+    redirect: PathBuf,
+}
+impl faber_engine::store::Disk for SwapDisk {
+    fn write(&self, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+        faber_engine::store::Disk::write(&faber_engine::store::RealDisk, path, bytes)
+    }
+    fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+        faber_engine::store::Disk::rename(&faber_engine::store::RealDisk, from, to)?;
+        if to.ends_with("runtime.json")
+            && self.armed.swap(false, std::sync::atomic::Ordering::SeqCst)
+            && std::fs::rename(self.root.join("src"), self.root.join("original-src")).is_ok()
+        {
+            std::fs::rename(&self.redirect, self.root.join("src"))?;
+        }
+        Ok(())
+    }
+}
+
+pub fn probe_path_race(sandbox: &Path) -> Result {
+    use faber_engine::project::lease::Leases;
+    use std::sync::{Arc, atomic::Ordering};
+    let (repo, repository, _) = review_repository(sandbox)?;
+    let data = sandbox.join("data");
+    let root = data.join("missions/m1/candidate");
+    let redirect = data.join("redirect");
+    let disk = Arc::new(SwapDisk { armed: false.into(), root: root.clone(), redirect: redirect.clone() });
+    let journal = Journal::open_with(&repo, &data, "m1", disk.clone()).map_err(|e| e.key())?;
+    let mut leases = Leases::open(repository.identity.clone(), journal, "m1").map_err(|e| e.key())?;
+    let request = Lease::new(&repository.identity.common_dir, "m1", "writer", 1, vec!["src".into()], &repository.base, &"a".repeat(64), 0);
+    let lease = leases.acquire(request).map_err(|e| e.key())?;
+    let mut grant = Grant::new(&repository.identity.common_dir, GitMode::Seguro, 3, 1);
+    grant.author = repository.author;
+    std::fs::create_dir_all(root.join("src")).map_err(|e| e.to_string())?;
+    std::fs::write(root.join("src/a.rs"), "base").map_err(|e| e.to_string())?;
+    leases.bind(&lease, &root).map_err(|e| e.key())?;
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let powershell = PathBuf::from(std::env::var_os("SystemRoot").ok_or("missing SystemRoot")?)
+            .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+        let status = Command::new(powershell)
+            .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"])
+            .arg(sandbox.join("git-junction.ps1"))
+            .arg("-Link")
+            .arg(&redirect)
+            .arg("-Target")
+            .arg(repo.join("src"))
+            .creation_flags(crate::contain::NO_WINDOW)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map_err(|e| e.to_string())?;
+        ensure(status.success(), || "candidate junction fixture failed".into())?;
+    }
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(repo.join("src"), &redirect).map_err(|e| e.to_string())?;
+    disk.armed.store(true, Ordering::SeqCst);
+    let result = leases.patch(
+        &lease,
+        Some(&grant),
+        3,
+        &FileOp::Write(WriteOp { path: "src/a.rs".into(), expect: Some(hash(b"base")), content: "approved".into() }),
+    );
+    ensure(std::fs::read(repo.join("src/a.rs")).map_err(|e| e.to_string())? == b"base", || {
+        format!("junction redirected broker write: {result:?}")
+    })?;
+    std::fs::write(sandbox.join("project-git.ok"), "ok").map_err(|e| e.to_string())
+}
+
+pub fn probe_cleanup(sandbox: &Path) -> Result {
+    use faber_engine::project::{Intent, IntentKind, Outcome, Receipt};
+    let (repo, repository, program) = review_repository(sandbox)?;
+    let (broker, _, _, _) = review_writer(sandbox, repository.clone(), check(Process::find())?)?;
+    let intent = Intent::new("uncertain", "m1", IntentKind::FastForward, 3, 1);
+    broker.journal().record_intent(&intent).map_err(|e| e.key())?;
+    broker.journal().record_receipt(&Receipt::new("uncertain", Outcome::Unknown, 2)).map_err(|e| e.key())?;
+    drop(broker);
+    // Only this disposable, clean fixture repository is cleaned. The private sidecar is outside it.
+    git(&program, &repo, &["clean", "-fdx"])?;
+    ensure(!repo.join(".faber").exists(), || "git clean did not erase the public mirror fixture".into())?;
+    let journal = Journal::open(&repo, &sandbox.join("records"), "m1").map_err(|e| e.key())?;
+    ensure(journal.pending().map_err(|e| e.key())? == vec![intent.clone()], || "git clean erased an Unknown intent".into())?;
+    ensure(journal.record_intent(&intent).is_err(), || "git clean permitted replay".into())?;
+    let broker = check(Broker::open(repository, journal, "m1", 3, check(Process::find())?))?;
+    ensure(broker.finish() == Err(GitError::Lease(LeaseError::Live)), || "cleaned mission released unreconciled ownership".into())?;
     std::fs::write(sandbox.join("project-git.ok"), "ok").map_err(|e| e.to_string())
 }
