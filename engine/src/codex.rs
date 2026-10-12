@@ -54,7 +54,8 @@ pub fn codex_thread(area: Area, model: Option<&str>, permissions: Permissions) -
     let dont_ask = area == Area::Project && permissions == Permissions::DontAsk;
     thread.insert("approvalPolicy".into(), if dont_ask { "never" } else { "on-request" }.into());
     if dont_ask {
-        thread.insert("config".into(), json!({ "sandbox_workspace_write.network_access": false }));
+        thread.remove("sandbox");
+        thread.insert("config".into(), crate::permissions::sandbox_config(Path::new(".")).into());
     }
     if area == Area::Chat {
         thread.insert("baseInstructions".into(), CHAT_INSTRUCTIONS.into());
@@ -277,7 +278,6 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
     }
     if area == Area::Project && t.permissions == Permissions::DontAsk && t.instructions.is_none() {
         params.get_mut("config").unwrap()["shell_environment_policy.set"] = crate::permissions::child_env(&t.cwd);
-        params.get_mut("config").unwrap()["shell_environment_policy.ignore_default_excludes"] = false.into();
     }
     params.insert("cwd".into(), t.cwd.to_string_lossy().into_owned().into());
     let method = match &t.resume {

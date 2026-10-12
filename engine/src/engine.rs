@@ -973,6 +973,9 @@ impl Core {
         let resume = c.sessions.get(&pick.vendor).cloned();
         let resumed = resume.is_some();
         let area = c.area;
+        if area == Area::Project && permissions == Permissions::DontAsk && !crate::permissions::prepare_tmp(&cwd) {
+            return Err("error.projectSandbox".into());
+        }
         // The conversation's own name, fixed when it began: a rename in Settings never reaches a conversation under way.
         let user_name = c.user_name.clone();
         let (model, effort) = (pick.model.clone(), Some(pick.effort.clone()));
@@ -983,6 +986,7 @@ impl Core {
                     cwd,
                     launch: ClaudeLaunch { area, model, effort, resume, user_hooks, permissions, instructions: None, user_name },
                     spawn,
+                    sandbox: self.opts.clis.get(&Vendor::Codex).cloned(),
                 },
                 sink,
             ),

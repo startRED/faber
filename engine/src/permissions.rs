@@ -1,16 +1,155 @@
-//! Project-only approval decisions. Unsupported shell syntax fails closed; this is not an OS sandbox.
+//! Project tool decisions and OS sandbox configuration. Unsupported shell syntax fails closed.
 
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use std::path::{Component, Path, PathBuf};
+
+/// A fresh name prevents a project's lower-priority settings from adding grants to the host profile.
+pub fn sandbox_config(root: &Path) -> Map<String, Value> {
+    let id = format!("faber-{}", uuid::Uuid::new_v4().simple());
+    let profile = json!({ "extends": ":workspace", "filesystem": {
+        ":root": "deny", ":minimal": "read", ":tmpdir": "deny", ":slash_tmp": "deny", "glob_scan_max_depth": 3,
+        "~/.claude": "deny", "~/.codex": "deny", "~/.gemini": "deny", "~/.ssh": "deny", "~/.aws": "deny",
+        "~/.claude.json": "deny", "~/.git-credentials": "deny", "~/.npmrc": "deny", "~/.config/gh": "deny",
+        "~/AppData/Roaming/GitHub CLI": "deny", "~/.docker": "deny", "~/.azure": "deny", "~/.kube": "deny",
+        ":workspace_roots": { ".": "write", ".git": "read", "**/.git": "read", "**/.git/**": "read", ".mcp.json": "read",
+            ".claude": "deny", ".codex": "deny", ".gemini": "deny", ".ssh": "deny", ".aws": "deny",
+            "**/*updater.key*": "deny", "**/.claude.json": "deny", "**/.git-credentials": "deny", "**/.npmrc": "deny",
+            "**/hosts.yml": "deny", "**/credentials.toml": "deny", ".env": "deny", ".env.local": "deny",
+            ".env.production": "deny", ".env.*.local": "deny" }
+    }, "network": { "enabled": false } });
+    let mut config = json!({ "default_permissions": id, format!("permissions.{id}"): profile,
+        "sandbox_workspace_write.network_access": false, "allow_login_shell": false,
+        "shell_environment_policy.set": child_env(root), "shell_environment_policy.ignore_default_excludes": false
+    })
+    .as_object()
+    .unwrap()
+    .clone();
+    if cfg!(windows) {
+        config.insert("windows.sandbox".into(), "mxc".into());
+    }
+    config
+}
+
+pub fn prepare_tmp(root: &Path) -> bool {
+    target(root, ".faber/tmp", true, true).is_some_and(|path| std::fs::create_dir_all(path).is_ok())
+}
+
+fn inline(value: &Value) -> String {
+    match value {
+        Value::Object(table) => {
+            format!("{{{}}}", table.iter().map(|(key, value)| format!("{}={}", json!(key), inline(value))).collect::<Vec<_>>().join(","))
+        }
+        // Host-generated scalars are strings, booleans or integers, whose JSON syntax is also valid TOML.
+        _ => value.to_string(),
+    }
+}
+
+fn quoted(value: &str, powershell: bool) -> String {
+    format!("'{}'", if powershell { value.replace('\'', "''") } else { value.replace('\'', "'\\''") })
+}
+
+/// Build tools execute project code only inside an OS sandbox; never approve the original command as a fallback.
+pub fn checked_input(
+    root: &Path,
+    tool: &str,
+    input: &Value,
+    sandbox: Option<&crate::cli::Cli>,
+    resolve: &dyn Fn(&str) -> Option<crate::cli::Cli>,
+) -> Option<Value> {
+    let shell = ["Bash", "PowerShell"].contains(&tool);
+    let allowed = allows(root, tool, input);
+    if allowed && !shell {
+        return Some(input.clone());
+    }
+    if !shell {
+        return None;
+    }
+    let mut args = words(input["command"].as_str()?)?;
+    let program = args[0].to_ascii_lowercase();
+    let sub = args.get(1).map(String::as_str).unwrap_or_default();
+    let build = allowed
+        || match program.as_str() {
+            "cargo" | "cargo.exe" => ["build", "check", "test", "clippy", "fmt", "t"].contains(&sub),
+            "npm" | "pnpm" | "yarn" | "bun" => ["run", "test", "build", "ci", "install"].contains(&sub),
+            "dotnet" | "go" => ["build", "test", "run"].contains(&sub),
+            "ls" | "rg" | "pwd" => true,
+            "node" | "python" | "python3" | "bash" => !sub.starts_with('-') && target(root, sub, false, true).is_some(),
+            "pwsh" | "powershell" => {
+                args.windows(2).any(|pair| pair[0].eq_ignore_ascii_case("-File") && target(root, &pair[1], false, true).is_some())
+                    && !args.iter().any(|arg| ["-c", "-Command", "-EncodedCommand"].iter().any(|flag| arg.eq_ignore_ascii_case(flag)))
+            }
+            _ => program.starts_with("./") && target(root, &args[0], true, true).is_some(),
+        };
+    if !build {
+        return None;
+    }
+    let cli = sandbox?;
+    // A JavaScript launcher could execute host NODE_OPTIONS before the sandbox exists.
+    if !cli.prefix.is_empty() {
+        return None;
+    }
+    // Windows cannot execute npm's .cmd shim directly; reuse the driver's native executable resolution.
+    if cfg!(windows) && ["npm", "pnpm", "yarn", "bun"].contains(&program.as_str()) {
+        let native = resolve(&args[0])?;
+        args = std::iter::once(native.command).chain(native.prefix).chain(args.into_iter().skip(1)).collect();
+    }
+    if cfg!(windows) && ["rm", "rmdir", "unlink", "remove-item"].contains(&program.as_str()) {
+        let (mut flags, mut recurse, mut force, mut paths) = (true, false, false, Vec::new());
+        for arg in args.iter().skip(1) {
+            if flags && arg == "--" {
+                flags = false;
+                continue;
+            }
+            if flags && arg.starts_with('-') {
+                recurse |= ["-r", "-rf", "-fr", "--recursive", "-Recurse"].iter().any(|flag| arg.eq_ignore_ascii_case(flag));
+                force |= ["-f", "-rf", "-fr", "--force", "-Force"].iter().any(|flag| arg.eq_ignore_ascii_case(flag));
+            } else {
+                paths.push(quoted(arg, true));
+            }
+        }
+        let script = format!(
+            "Microsoft.PowerShell.Management\\Remove-Item -LiteralPath @({}){}{}",
+            paths.join(","),
+            if recurse { " -Recurse" } else { "" },
+            if force { " -Force" } else { "" }
+        );
+        args = vec!["powershell.exe".into(), "-NoProfile".into(), "-NonInteractive".into(), "-Command".into(), script];
+    }
+    #[cfg(windows)]
+    if !local_path(root.to_str()?) {
+        return None;
+    }
+    #[cfg(windows)]
+    if !local_links(root, &probe_link, 40) {
+        return None;
+    }
+    let root = root.canonicalize().ok()?;
+    let root_text = root.to_string_lossy().replace("\\\\?\\", "");
+    let mut command = vec![cli.command.clone()];
+    for (key, value) in sandbox_config(Path::new(&root_text)) {
+        command.extend(["-c".into(), format!("{key}={}", inline(&value))]);
+    }
+    command.extend(["sandbox".into(), "--include-managed-config".into(), "-C".into(), root_text, "--".into()]);
+    command.extend(args);
+    let mut updated = input.clone();
+    let command = command.iter().map(|arg| quoted(arg, tool == "PowerShell")).collect::<Vec<_>>().join(" ");
+    updated["command"] = format!("{}{command}", if tool == "PowerShell" { "& " } else { "" }).into();
+    if updated.get("run_in_background").is_some() {
+        updated["run_in_background"] = false.into();
+    }
+    Some(updated)
+}
 
 /// Child commands get no Git transport or GitHub authentication, without reading any credential value.
 pub fn child_env(root: &Path) -> Value {
+    let tmp = root.join(".faber/tmp");
     json!({
-        "GIT_ALLOW_PROTOCOL": "", "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0", "GIT_CONFIG_COUNT": "2",
+        "GIT_ALLOW_PROTOCOL": "", "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0", "GIT_CONFIG_COUNT": "2", "GIT_CONFIG_PARAMETERS": "",
         "GIT_CONFIG_KEY_0": "core.fsmonitor", "GIT_CONFIG_VALUE_0": "false",
         "GIT_CONFIG_KEY_1": "core.hooksPath", "GIT_CONFIG_VALUE_1": "/dev/null",
         "GH_CONFIG_DIR": root.join(".faber/no-gh-auth").to_string_lossy(), "GH_PROMPT_DISABLED": "1",
-        "GH_TOKEN": "", "GITHUB_TOKEN": "", "GH_ENTERPRISE_TOKEN": "", "GITHUB_ENTERPRISE_TOKEN": ""
+        "GH_TOKEN": "", "GITHUB_TOKEN": "", "GH_ENTERPRISE_TOKEN": "", "GITHUB_ENTERPRISE_TOKEN": "",
+        "TMP": tmp.to_string_lossy(), "TEMP": tmp.to_string_lossy(), "TMPDIR": tmp.to_string_lossy()
     })
 }
 
@@ -34,9 +173,77 @@ fn secret(path: &Path, reading: bool) -> bool {
             || (name.starts_with(".env") && ![".env.example", ".env.sample", ".env.template", ".env.dist"].contains(&name.as_str())))
 }
 
+#[cfg(windows)]
+fn local_path(value: &str) -> bool {
+    let path = Path::new(value);
+    match path.components().next() {
+        Some(Component::Prefix(prefix)) => {
+            matches!(prefix.kind(), std::path::Prefix::Disk(_)) && path.is_absolute() && value.matches(':').count() == 1
+        }
+        Some(Component::RootDir) => false,
+        _ => !value.contains(':'),
+    }
+}
+
+#[cfg(windows)]
+fn local_links(path: &Path, probe: &dyn Fn(&Path) -> std::io::Result<Option<PathBuf>>, left: usize) -> bool {
+    if left == 0 {
+        return false;
+    }
+    let Some(text) = path.to_str() else { return false };
+    let text = if matches!(path.components().next(), Some(Component::Prefix(p)) if matches!(p.kind(), std::path::Prefix::VerbatimDisk(_))) {
+        &text[4..]
+    } else {
+        text
+    };
+    if !local_path(text) {
+        return false;
+    }
+    let Ok(path) = std::path::absolute(text) else { return false };
+    let mut part = PathBuf::new();
+    for component in path.components() {
+        part.push(component.as_os_str());
+        if matches!(component, Component::Prefix(_)) {
+            continue;
+        }
+        match probe(&part) {
+            Ok(Some(link)) => {
+                if link.components().any(|c| matches!(c, Component::ParentDir)) {
+                    return false;
+                }
+                let link = if link.is_absolute() { link } else { part.parent().unwrap_or(Path::new("")).join(link) };
+                if !local_links(&link, probe, left - 1) {
+                    return false;
+                }
+            }
+            Ok(None) => {}
+            Err(_) => return false,
+        }
+    }
+    true
+}
+
+#[cfg(windows)]
+fn probe_link(path: &Path) -> std::io::Result<Option<PathBuf>> {
+    match path.symlink_metadata() {
+        Ok(meta) if meta.file_type().is_symlink() => std::fs::read_link(path).map(Some),
+        Ok(_) => Ok(None),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
 /// Existing ancestors are resolved too, so a new file under a junction cannot escape the canonical root.
 fn target(root: &Path, value: &str, writing: bool, strict: bool) -> Option<PathBuf> {
     if value.is_empty() || value.contains(['\0', '*', '?', '[', ']', '$', '`', '~']) {
+        return None;
+    }
+    #[cfg(windows)]
+    if !local_path(value) || !local_path(root.to_str()?) {
+        return None;
+    }
+    #[cfg(windows)]
+    if !local_links(root, &probe_link, 40) {
         return None;
     }
     let root = root.canonicalize().ok()?;
@@ -44,16 +251,11 @@ fn target(root: &Path, value: &str, writing: bool, strict: bool) -> Option<PathB
     if path.components().any(|p| matches!(p, Component::ParentDir)) {
         return None;
     }
+    let path = if path.is_absolute() { path.to_path_buf() } else { root.join(path) };
     #[cfg(windows)]
-    if value.starts_with("\\\\")
-        || (value.contains(':')
-            && (value.matches(':').count() != 1
-                || value.as_bytes().get(1) != Some(&b':')
-                || !value.as_bytes().get(2).is_some_and(|b| *b == b'/' || *b == b'\\')))
-    {
+    if !local_links(&path, &probe_link, 40) {
         return None;
     }
-    let path = if path.is_absolute() { path.to_path_buf() } else { root.join(path) };
     let protected = |path: &Path| {
         path.components().any(|p| {
             let part = p.as_os_str().to_string_lossy();
@@ -127,14 +329,15 @@ fn words(command: &str) -> Option<Vec<String>> {
 
 fn git(root: &Path, args: &[String]) -> bool {
     let mut at = 0;
+    let mut cwd = root.to_path_buf();
     while let Some(arg) = args.get(at) {
         match arg.as_str() {
             "--no-pager" => at += 1,
             "-C" => {
                 let Some(dir) = args.get(at + 1) else { return false };
-                if target(root, dir, false, false).is_none() {
-                    return false;
-                }
+                let path = if Path::new(dir).is_absolute() { PathBuf::from(dir) } else { cwd.join(dir) };
+                let Some(path) = target(root, &path.to_string_lossy().replace("\\\\?\\", ""), false, false) else { return false };
+                cwd = path;
                 at += 2;
             }
             // Configuration, alternate metadata directories and aliases can run arbitrary programs.
@@ -191,6 +394,24 @@ fn git(root: &Path, args: &[String]) -> bool {
             && !arg.strip_prefix("-n").is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
     }) {
         return false;
+    }
+    let mut positional = 0;
+    while let Some(arg) = rest.get(positional) {
+        if ["--grep", "-n", "--max-count"].contains(&arg.as_str()) {
+            if rest.get(positional + 1).is_none() {
+                return false;
+            }
+            positional += 2;
+        } else {
+            // A second diff operand outside the worktree implicitly enables --no-index in Git.
+            if !arg.starts_with('-') {
+                let path = if Path::new(arg).is_absolute() { PathBuf::from(arg) } else { cwd.join(arg) };
+                if target(root, &path.to_string_lossy().replace("\\\\?\\", ""), false, false).is_none() {
+                    return false;
+                }
+            }
+            positional += 1;
+        }
     }
     match sub.as_str() {
         "status" | "log" | "rev-parse" | "ls-files" => true,
@@ -268,6 +489,7 @@ fn safe_tree(root: &Path, value: &str, writing: bool, strict: bool) -> bool {
 
 pub fn allows(root: &Path, tool: &str, input: &Value) -> bool {
     match tool {
+        "WebSearch" | "TodoWrite" => true,
         "Read" => input["file_path"].as_str().is_some_and(|p| target(root, p, false, false).is_some()),
         "Write" | "Edit" => input["file_path"].as_str().is_some_and(|p| target(root, p, true, true).is_some()),
         "NotebookEdit" => input["notebook_path"].as_str().is_some_and(|p| target(root, p, true, true).is_some()),
@@ -281,6 +503,121 @@ pub fn allows(root: &Path, tool: &str, input: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(windows)]
+    fn network_link_targets_are_rejected_before_lookup_below_the_link() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let probe = |path: &Path| {
+            seen.borrow_mut().push(path.to_path_buf());
+            Ok((path == Path::new("E:/project/link")).then(|| PathBuf::from("\\\\?\\UNC\\host\\share")))
+        };
+        assert!(!local_links(Path::new("E:/project/link/key"), &probe, 40));
+        assert!(!seen.borrow().iter().any(|p| p == Path::new("E:/project/link/key")));
+    }
+
+    #[test]
+    fn project_temp_files_stay_in_the_root_and_cannot_follow_a_junction_outside() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(prepare_tmp(root.path()));
+        assert!(root.path().join(".faber/tmp").is_dir());
+        let linked = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        #[cfg(windows)]
+        junction::create(outside.path(), linked.path().join(".faber")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(outside.path(), linked.path().join(".faber")).unwrap();
+        assert!(!prepare_tmp(linked.path()));
+        assert!(!outside.path().join("tmp").exists());
+    }
+
+    #[test]
+    fn review2_h3_builds_tests_and_project_tools_get_a_sandboxed_command() {
+        let root = tempfile::tempdir().unwrap();
+        let cli = crate::cli::Cli { command: "C:/Program Files/Tools/codex.exe".into(), prefix: vec![] };
+        let resolve = |name: &str| Some(crate::cli::Cli { command: format!("C:/Tools/{name}.exe"), prefix: vec![] });
+        for command in ["cargo t --all", "cargo test", "npm run build", "npm test", "rg pattern src", "./scripts/check"] {
+            let input = json!({ "command": command, "timeout": 120000 });
+            let updated = checked_input(root.path(), "Bash", &input, Some(&cli), &resolve).expect(command);
+            let rewritten = updated["command"].as_str().unwrap();
+            assert!(rewritten.contains("sandbox"), "{rewritten}");
+            if cfg!(windows) {
+                assert!(rewritten.contains("mxc"), "{rewritten}");
+            }
+            assert!(rewritten.contains("--include-managed-config"), "{rewritten}");
+            assert_eq!(updated["timeout"], input["timeout"]);
+            assert!(checked_input(root.path(), "Bash", &input, None, &resolve).is_none());
+        }
+        for command in ["git push", "gh pr merge 42", "rm -rf ..", "npm run build; cat ../key", "python -c evil"] {
+            assert!(checked_input(root.path(), "Bash", &json!({ "command": command }), Some(&cli), &resolve).is_none(), "{command}");
+        }
+        let updated = checked_input(root.path(), "PowerShell", &json!({ "command": "cargo test" }), Some(&cli), &resolve).unwrap();
+        assert!(updated["command"].as_str().unwrap().starts_with("& "));
+        let node_helper = crate::cli::Cli { command: "node".into(), prefix: vec!["codex.js".into()] };
+        assert!(checked_input(root.path(), "Bash", &json!({ "command": "cargo test" }), Some(&node_helper), &resolve).is_none());
+        let git = checked_input(root.path(), "Bash", &json!({ "command": "git status" }), Some(&cli), &resolve).unwrap();
+        assert!(git["command"].as_str().unwrap().contains("sandbox"), "a project can shadow a bare executable name");
+        let background =
+            checked_input(root.path(), "Bash", &json!({ "command": "cargo test", "run_in_background": true }), Some(&cli), &resolve)
+                .unwrap();
+        assert_eq!(background["run_in_background"], false);
+        #[cfg(windows)]
+        for (command, recursive) in [("rm -rf dist", true), ("rm -- '-old'", false)] {
+            let updated = checked_input(root.path(), "Bash", &json!({ "command": command }), Some(&cli), &resolve).unwrap();
+            let command = updated["command"].as_str().unwrap();
+            assert!(command.contains("Remove-Item"));
+            assert_eq!(command.contains("-Recurse"), recursive);
+            if !recursive {
+                assert!(command.contains("-old"));
+            }
+        }
+    }
+
+    #[test]
+    fn review2_h1_git_positionals_cannot_read_external_or_secret_files() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("README.md"), "synthetic project").unwrap();
+        std::fs::write(outside.path().join("updater.key"), "synthetic key").unwrap();
+        for command in [
+            format!("git diff --no-ext-diff --no-textconv {} README.md", outside.path().join("updater.key").display()),
+            "git diff --no-ext-diff --no-textconv ../outside README.md".into(),
+            "git show --no-ext-diff --no-textconv .env".into(),
+            "git log -- ../outside".into(),
+            "git ls-files -- ../outside".into(),
+        ] {
+            assert!(!allows(root.path(), "Bash", &json!({ "command": command })), "{command}");
+        }
+        assert!(allows(root.path(), "Bash", &json!({ "command": "git diff --no-ext-diff --no-textconv HEAD README.md" })));
+        assert!(allows(root.path(), "Bash", &json!({ "command": "git log --grep push -n 5" })));
+    }
+
+    #[test]
+    fn review2_h1_git_positionals_use_the_directory_selected_with_c() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("src")).unwrap();
+        #[cfg(windows)]
+        junction::create(outside.path(), root.path().join("src/escape")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(outside.path(), root.path().join("src/escape")).unwrap();
+        assert!(!allows(
+            root.path(),
+            "Bash",
+            &json!({ "command": "git -C src diff --no-ext-diff --no-textconv escape/private.txt README.md" })
+        ));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn review2_m1_network_prefixes_are_rejected_without_filesystem_lookup() {
+        for value in ["//h/s", "\\/h/s", "//./C:/x", "\\\\h\\s", "\\\\?\\C:\\x", "C:relative", "\\drive-relative"] {
+            assert!(!local_path(value), "{value}");
+        }
+        for value in ["E:/project/file", "src/file", "."] {
+            assert!(local_path(value), "{value}");
+        }
+    }
 
     #[test]
     fn h2_h3_m1_paths_resolve_existing_ancestors_and_never_touch_git_or_the_root() {

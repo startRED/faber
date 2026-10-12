@@ -202,6 +202,7 @@ impl Core {
                         user_name: None,
                     },
                     spawn: spawner(&self.opts.spawn, &cli),
+                    sandbox: None,
                 },
                 sink,
             ),

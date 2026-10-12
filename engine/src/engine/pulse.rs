@@ -50,7 +50,13 @@ impl Core {
             user_name: None,
         };
         let session = start_claude(
-            ClaudeOptions { bin: cli.command.clone(), cwd: self.opts.data_dir.clone(), launch, spawn: spawner(&self.opts.spawn, &cli) },
+            ClaudeOptions {
+                bin: cli.command.clone(),
+                cwd: self.opts.data_dir.clone(),
+                launch,
+                spawn: spawner(&self.opts.spawn, &cli),
+                sandbox: None,
+            },
             sink,
         );
         *stop.lock().unwrap_or_else(|e| e.into_inner()) = Some(session.clone());

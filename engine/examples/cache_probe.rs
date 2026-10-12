@@ -102,7 +102,10 @@ impl Probe {
             user_name: None,
             permissions: Permissions::Ask,
         };
-        let session = start_claude(ClaudeOptions { bin: cli.command.clone(), cwd: self.dir.clone(), launch, spawn: spawner(&cli) }, sink);
+        let session = start_claude(
+            ClaudeOptions { bin: cli.command.clone(), cwd: self.dir.clone(), launch, spawn: spawner(&cli), sandbox: None },
+            sink,
+        );
         (session, rx)
     }
 
@@ -121,7 +124,10 @@ impl Probe {
             user_name: None,
             permissions: Permissions::Ask,
         };
-        let session = start_claude(ClaudeOptions { bin: cli.command.clone(), cwd: self.dir.clone(), launch, spawn: spawner(&cli) }, sink);
+        let session = start_claude(
+            ClaudeOptions { bin: cli.command.clone(), cwd: self.dir.clone(), launch, spawn: spawner(&cli), sandbox: None },
+            sink,
+        );
         (session, rx)
     }
 

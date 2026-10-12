@@ -19,6 +19,11 @@ check('permissions scope H1/L3: Settings names Projects and the default is discl
   ok('project.permissionsDontAsk' in en);
 });
 
+check('review2 H2: the default disclosure explains external reads and provider transmission', () => {
+  ok(en['project.permissionsDontAsk'].includes('outside this project'));
+  ok(en['project.permissionsDontAsk'].includes('provider'));
+});
+
 const look = (over: Partial<Look> = {}): Look => ({
   vars: {},
   scheme: 'dark',

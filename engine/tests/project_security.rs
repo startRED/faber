@@ -42,7 +42,7 @@ fn c1_h4_codex_network_is_off_on_start_and_resume_even_if_user_settings_enable_i
         };
         let (_, params) = thread_params(Area::Project, &t);
         assert_eq!(params["approvalPolicy"], "never");
-        assert_eq!(params["sandbox"], "workspace-write");
+        assert!(params.get("sandbox").is_none());
         assert_eq!(params["config"]["sandbox_workspace_write.network_access"], false);
     }
 }
@@ -80,6 +80,42 @@ fn h4_remote_transports_and_github_tokens_are_disabled_for_project_children() {
 }
 
 #[test]
+fn review2_m2_child_git_parameters_cannot_override_host_configuration() {
+    let config = settings(&claude_args(&launch(Area::Project, Permissions::DontAsk)));
+    assert_eq!(config["env"]["GIT_CONFIG_PARAMETERS"], "");
+    let args = claude_args(&launch(Area::Project, Permissions::DontAsk));
+    assert!(args.windows(2).any(|pair| pair == ["--setting-sources", "user"]));
+}
+
+#[test]
+fn review2_h2_codex_selects_a_restricted_read_profile_on_start_and_resume() {
+    for resume in [None, Some("thread".into())] {
+        let t = CodexThread {
+            cwd: "project".into(),
+            model: None,
+            effort: None,
+            resume,
+            instructions: None,
+            user_name: None,
+            permissions: Permissions::DontAsk,
+        };
+        let (_, params) = thread_params(Area::Project, &t);
+        assert!(params.get("sandbox").is_none(), "legacy workspace-write must not override restricted reads");
+        let config = &params["config"];
+        let id = config["default_permissions"].as_str().expect("named project profile");
+        let profile = &config[format!("permissions.{id}")];
+        assert_eq!(profile["extends"], ":workspace");
+        assert_eq!(profile["filesystem"][":root"], "deny");
+        assert_eq!(profile["filesystem"][":minimal"], "read");
+        assert_eq!(profile["filesystem"][":workspace_roots"][".git"], "read");
+        assert_eq!(profile["network"]["enabled"], false);
+        if cfg!(windows) {
+            assert_eq!(config["windows.sandbox"], "mxc");
+        }
+    }
+}
+
+#[test]
 fn m3_all_git_commands_reach_the_host_instead_of_only_named_destructive_forms() {
     let config = settings(&claude_args(&launch(Area::Project, Permissions::DontAsk)));
     assert!(config["permissions"]["ask"].as_array().unwrap().contains(&json!("Bash")));
@@ -106,7 +142,7 @@ fn m6_sandbox_failures_are_intended_and_writable_roots_must_not_expand_into_user
         permissions: Permissions::DontAsk,
     };
     let (_, params) = thread_params(Area::Project, &t);
-    assert_eq!(params["sandbox"], "workspace-write");
+    assert!(params.get("sandbox").is_none());
     assert_eq!(params["approvalPolicy"], "never");
     assert!(params["config"].get("sandbox_workspace_write.writable_roots").is_none());
     let error = faber_engine::codex::parse_codex_notification(

@@ -370,13 +370,14 @@ fn permissions_keep_the_workspace_sandbox_and_disable_project_network_without_ap
                 };
                 let (method, params) = thread_params(area, &t);
                 assert_eq!(method, if t.resume.is_some() { "thread/resume" } else { "thread/start" });
-                assert_eq!(params["sandbox"], "workspace-write");
                 assert_eq!(params["cwd"], "project");
                 assert_eq!(params["model"], "model");
                 if area == Area::Project && permissions == Permissions::DontAsk {
+                    assert!(params.get("sandbox").is_none());
                     assert_eq!(params["approvalPolicy"], "never");
                     assert_eq!(params["config"]["sandbox_workspace_write.network_access"], false);
                 } else {
+                    assert_eq!(params["sandbox"], "workspace-write");
                     assert_eq!(params["approvalPolicy"], "on-request");
                     assert!(params.get("config").is_none());
                 }
@@ -426,7 +427,9 @@ async fn l2_serialized_start_and_resume_carry_the_no_approval_offline_policy() {
         let messages = f.wire.messages();
         let message = messages.iter().find(|m| m["method"] == if resume { "thread/resume" } else { "thread/start" }).unwrap();
         assert_eq!(message["params"]["approvalPolicy"], "never");
-        assert_eq!(message["params"]["sandbox"], "workspace-write");
+        assert!(message["params"].get("sandbox").is_none());
+        let id = message["params"]["config"]["default_permissions"].as_str().unwrap();
+        assert_eq!(message["params"]["config"][format!("permissions.{id}")]["filesystem"][":root"], "deny");
         assert_eq!(message["params"]["config"]["sandbox_workspace_write.network_access"], false);
         assert_eq!(message["params"]["config"]["shell_environment_policy.set"]["GIT_ALLOW_PROTOCOL"], "");
         session.close();

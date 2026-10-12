@@ -27,7 +27,9 @@ async fn run(
 ) -> (Vec<EngineEvent>, Vec<String>) {
     drive(
         entries,
-        |spawn, sink| start_claude(ClaudeOptions { bin: "claude".into(), cwd: ".".into(), launch: launch(Area::Chat), spawn }, sink),
+        |spawn, sink| {
+            start_claude(ClaudeOptions { bin: "claude".into(), cwd: ".".into(), launch: launch(Area::Chat), spawn, sandbox: None }, sink)
+        },
         first,
         react,
     )
@@ -107,7 +109,7 @@ async fn permissions_the_first_write_is_allowed_and_the_second_denied() {
 async fn an_answer_that_fails_to_write_keeps_the_request_and_the_retry_is_written_once() {
     let f = fake(fixture("claude", "tools"));
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    let opts = ClaudeOptions { bin: "claude".into(), cwd: ".".into(), launch: launch(Area::Chat), spawn: f.spawn.clone() };
+    let opts = ClaudeOptions { bin: "claude".into(), cwd: ".".into(), launch: launch(Area::Chat), spawn: f.spawn.clone(), sandbox: None };
     let session = start_claude(opts, Arc::new(move |e| drop(tx.send(e))));
     session.send(UserTurn::text(
         "Create a.txt containing 'one'. Then create b.txt containing 'two'. Use the Write tool for each, one at a time.",
@@ -136,7 +138,8 @@ async fn an_answer_that_may_be_half_written_is_never_written_again() {
     for tear in [true, false] {
         let f = fake(fixture("claude", "tools"));
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let opts = ClaudeOptions { bin: "claude".into(), cwd: ".".into(), launch: launch(Area::Chat), spawn: f.spawn.clone() };
+        let opts =
+            ClaudeOptions { bin: "claude".into(), cwd: ".".into(), launch: launch(Area::Chat), spawn: f.spawn.clone(), sandbox: None };
         let session = start_claude(opts, Arc::new(move |e| drop(tx.send(e))));
         session.send(UserTurn::text(
             "Create a.txt containing 'one'. Then create b.txt containing 'two'. Use the Write tool for each, one at a time.",
@@ -267,6 +270,7 @@ async fn a_project_in_bypass_mode_declines_residual_prompts_without_emitting_a_c
                     cwd: ".".into(),
                     launch: ClaudeLaunch { permissions: Permissions::DontAsk, ..launch(Area::Project) },
                     spawn,
+                    sandbox: None,
                 },
                 sink,
             )
@@ -296,6 +300,7 @@ async fn an_undelivered_automatic_permission_response_ends_the_turn_instead_of_w
             cwd: ".".into(),
             spawn: f.spawn,
             launch: ClaudeLaunch { permissions: Permissions::DontAsk, ..launch(Area::Project) },
+            sandbox: None,
         },
         sink,
     );
@@ -317,6 +322,7 @@ async fn l2_project_file_and_command_decisions_reach_stdio_without_permission_ca
             cwd: root.path().into(),
             launch: ClaudeLaunch { permissions: Permissions::DontAsk, ..launch(Area::Project) },
             spawn: f.spawn.clone(),
+            sandbox: Some(faber_engine::cli::Cli { command: "C:/Tools/codex.exe".into(), prefix: vec![] }),
         },
         Arc::new(move |e| {
             let _ = tx.send(e);
@@ -356,6 +362,40 @@ fn a_side_question_gets_its_own_instructions_no_tools_and_no_saved_session() {
     assert_eq!(after(&args, "--tools"), "");
     assert!(args.contains(&"--strict-mcp-config".into()) && !args.contains(&"--settings".into()));
     assert!(args.contains(&"--no-session-persistence".into()), "it stays out of the user's Claude history");
+}
+
+#[tokio::test]
+async fn review2_h3_the_driver_sends_only_a_sandbox_wrapped_build_without_a_card() {
+    let root = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "project-build"));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let session = start_claude(
+        ClaudeOptions {
+            bin: "claude".into(),
+            cwd: root.path().into(),
+            launch: ClaudeLaunch { permissions: Permissions::DontAsk, ..launch(Area::Project) },
+            spawn: f.spawn.clone(),
+            sandbox: Some(faber_engine::cli::Cli { command: "C:/Tools/codex.exe".into(), prefix: vec![] }),
+        },
+        Arc::new(move |e| {
+            let _ = tx.send(e);
+        }),
+    );
+    session.send(UserTurn::text("run project tests"));
+    loop {
+        let e = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.unwrap().unwrap();
+        assert!(!matches!(e, EngineEvent::Permission { .. }));
+        if matches!(e, EngineEvent::Done { .. }) {
+            break;
+        }
+    }
+    let messages = f.wire.messages();
+    let response = messages.iter().find(|m| m["type"] == "control_response").unwrap();
+    let command = response["response"]["response"]["updatedInput"]["command"].as_str().unwrap();
+    assert!(command.contains("sandbox") && command.ends_with("'cargo' 'test'"), "{command}");
+    assert!(command.contains(":root") && command.contains("deny"));
+    assert!(f.mismatches.lock().unwrap().is_empty());
+    session.close();
 }
 
 #[test]

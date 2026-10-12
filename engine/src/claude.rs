@@ -88,6 +88,7 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     } else {
         let mut settings = json!({});
         if launch.permissions == Permissions::DontAsk {
+            args.extend(["--setting-sources".into(), "user".into()]);
             args.extend(["--permission-mode".into(), "bypassPermissions".into(), "--disallowedTools".into()]);
             args.extend(PROJECT_DENY.iter().map(|rule| (*rule).into()));
             settings["permissions"] = json!({ "blockReadsOutsideWorkingDirectories": true,
@@ -224,6 +225,7 @@ pub struct ClaudeOptions {
     pub cwd: PathBuf,
     pub launch: ClaudeLaunch,
     pub spawn: Spawner,
+    pub sandbox: Option<crate::cli::Cli>,
 }
 
 pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
@@ -261,10 +263,13 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                             for event in parse_claude_message(&msg) {
                                 if let EngineEvent::Permission { request_id, tool, input } = &event {
                                     if opts.launch.area == Area::Project && opts.launch.permissions == Permissions::DontAsk {
-                                        let response = if crate::permissions::allows(&opts.cwd, tool, input) {
-                                            json!({ "behavior": "allow", "updatedInput": input })
+                                        let resolve = |name: &str| crate::cli::Cli::find_in(name, &std::env::var("PATH").unwrap_or_default(), cfg!(windows),
+                                            &|key| std::env::var(key).ok(), &|path| std::path::Path::new(path).is_file(),
+                                            &|path| std::fs::read_to_string(path).unwrap_or_default());
+                                        let response = if let Some(updated) = crate::permissions::checked_input(&opts.cwd, tool, input, opts.sandbox.as_ref(), &resolve) {
+                                            json!({ "behavior": "allow", "updatedInput": updated })
                                         } else {
-                                            json!({ "behavior": "deny", "message": "This action is outside Faber's project policy. Do not retry through scripts." })
+                                            json!({ "behavior": "deny", "message": "This action is outside the project policy, or its native sandbox runner is unavailable. Use sandboxed project tools; never retry unsandboxed." })
                                         };
                                         let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id,
                                             "response": response } });
