@@ -129,7 +129,10 @@ Steady heavy outside use already raises the projection, and D4 says it is not an
   `usage-billed`, from `authMode` (Codex) and from `claude auth status` (a Console or API-key sign-in is reported as
   `api_key`, and then has no `subscriptionType`). Auto only routes to a vendor whose verdict is `subscription`; a
   `usage-billed` login is used only when the user picks that vendor by hand. A plan the user types in never overrides
-  this verdict and never authorizes usage-based billing.
+  this verdict and never authorizes usage-based billing. An inherited API key, auth token, cloud-provider switch or
+  custom endpoint is an independent usage-billed override; only environment variable names are inspected, never their
+  credential values. `apiKeySource` and `apiProvider` also take precedence over `subscriptionType`. A Claude turn that
+  finishes without a quota notice clears subscription confirmation after its own cost is settled.
 - **Claude Code**: `claude auth status` prints `subscriptionType` (for example `max`). It does not say 5x or 20x.
   `engine/src/account.rs` already runs this command without a shell for the sign-in check; the same run now also keeps
   `subscriptionType` and drops everything else in the output. It runs on start and about every 15 minutes while Faber is

@@ -101,3 +101,17 @@ fn a_message_that_says_nothing_about_the_account_is_empty() {
     assert!(claude_signals(&json!({ "type": "rate_limit_event", "rate_limit_info": {} })).is_empty());
     assert!(!claude_signals(&json!({ "rate_limit_info": { "isUsingOverage": false } })).is_empty());
 }
+
+#[test]
+fn claude_provider_and_environment_overrides_are_billed_per_use() {
+    use faber_engine::signals::claude_env_billed;
+    for field in [json!({"apiKeySource":"env"}), json!({"apiProvider":"bedrock"})] {
+        let mut status = json!({"loggedIn":true,"authMethod":"claude.ai","subscriptionType":"max"});
+        status.as_object_mut().unwrap().extend(field.as_object().unwrap().clone());
+        assert_eq!(claude_plan(&status.to_string()).billing, Some(Billing::UsageBilled));
+    }
+    for name in ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX"] {
+        assert!(claude_env_billed([name.into()]));
+    }
+    assert!(!claude_env_billed(["PATH".into(), "FABER_DATA_DIR".into()]));
+}

@@ -28,6 +28,7 @@ async fn paid_notices_stop_an_unapproved_subscription_turn_and_clear_permissions
                 clis: BTreeMap::from([(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] })]),
                 spawn: fake.spawn,
                 windows: false,
+                claude_env_billed: false,
                 max_warm: 3,
                 idle: Duration::from_secs(120),
                 runtime: tokio::runtime::Handle::current(),

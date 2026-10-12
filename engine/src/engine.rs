@@ -51,6 +51,8 @@ pub struct EngineOptions {
     pub clis: BTreeMap<Vendor, Cli>,
     pub spawn: Spawner,
     pub windows: bool,
+    /// Whether the shell found an environment override that bills Claude requests per use.
+    pub claude_env_billed: bool,
     /// At most this many idle Claude processes stay ready; Codex conversations share one process and do not count.
     pub max_warm: usize,
     /// An idle Claude process closes after this long; its next turn resumes the same session.
@@ -547,7 +549,10 @@ impl Core {
     }
 
     fn claude_plan_checked(&mut self, found: Option<Signals>) {
-        let Some(s) = found else { return self.ledger.claude.plan_failed() };
+        let Some(mut s) = found else { return self.ledger.claude.plan_failed() };
+        if self.opts.claude_env_billed && s.billing == Some(Billing::Subscription) {
+            s.billing = Some(Billing::UsageBilled);
+        }
         let (named, by_use) = (s.plan.is_some(), s.billing == Some(Billing::UsageBilled));
         self.apply_signals(Vendor::Claude, s);
         if !named && !by_use {

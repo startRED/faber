@@ -32,6 +32,7 @@ fn engine(dir: &Path, vendors: &[Vendor], spawn: Spawner, ask: Option<Ask>) -> (
         clis,
         spawn,
         windows: false,
+        claude_env_billed: false,
         max_warm: 8,
         idle: Duration::from_secs(120),
         runtime: tokio::runtime::Handle::current(),

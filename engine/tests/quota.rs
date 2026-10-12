@@ -29,6 +29,7 @@ fn start(dir: &Path, vendor: Vendor, spawn: Spawner) -> (Engine, UnboundedReceiv
         clis: BTreeMap::from([(vendor, Cli { command: vendor.name().into(), prefix: vec![] })]),
         spawn,
         windows: false,
+        claude_env_billed: false,
         max_warm: 3,
         idle: Duration::from_secs(120),
         runtime: tokio::runtime::Handle::current(),

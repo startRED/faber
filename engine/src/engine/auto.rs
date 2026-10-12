@@ -69,7 +69,11 @@ impl Core {
     /// The one door before a request reaches a CLI (3.4): may this vendor and family be asked for this purpose now.
     pub(super) fn allows(&self, vendor: Vendor, family: Option<&str>, purpose: Purpose, approved: bool) -> Result<(), Why> {
         let now = self.secs();
-        gate(&self.ledger.of(vendor).snap(now), family, purpose, approved, now)
+        let mut snap = self.ledger.of(vendor).snap(now);
+        if vendor == Vendor::Claude && self.opts.claude_env_billed {
+            snap.billing = Billing::UsageBilled;
+        }
+        gate(&snap, family, purpose, approved, now)
     }
 
     /// The table's pick for the router's verdict, on the quota as it is now. Profiles the gate would refuse are not in the

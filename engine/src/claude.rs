@@ -207,6 +207,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
         let mut pending: HashMap<String, Value> = HashMap::new();
         let mut closed = false;
         let mut control_id = 0u32;
+        let mut quota_seen = false;
         loop {
             tokio::select! {
                 line = lines.next_line() => {
@@ -223,11 +224,16 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                     }
                     match serde_json::from_str::<Value>(&line) {
                         Ok(msg) => {
+                            quota_seen |= msg["type"] == "rate_limit_event";
+                            let finished = msg["type"] == "result";
                             for event in parse_claude_message(&msg) {
                                 if let EngineEvent::Permission { request_id, input, .. } = &event {
                                     pending.insert(request_id.clone(), input.clone());
                                 }
                                 on_event(event);
+                            }
+                            if finished && !quota_seen {
+                                on_event(EngineEvent::Signals(crate::signals::Signals { billing: Some(crate::budget::Billing::Unknown), ..Default::default() }));
                             }
                         }
                         Err(_) => on_event(EngineEvent::Error { message: format!("Unexpected output from Claude Code: {}", line.chars().take(200).collect::<String>()), fatal: false }),
@@ -235,6 +241,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                 }
                 cmd = rx.recv(), if !closed => match cmd {
                     Some(SessionCommand::Send(turn)) => {
+                        quota_seen = false;
                         let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
                     }
                     Some(SessionCommand::Answer { request_id, allow, ack }) => {

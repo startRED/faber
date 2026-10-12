@@ -96,7 +96,11 @@ pub fn claude_plan(output: &str) -> Signals {
     let method = ["authMethod", "authMode", "loginMethod"].into_iter().find_map(|k| v[k].as_str()).unwrap_or_default().to_ascii_lowercase();
     let billing = if v["loggedIn"] == false {
         Billing::Unknown
-    } else if method.contains("api") || method.contains("console") {
+    } else if method.contains("api")
+        || method.contains("console")
+        || v["apiKeySource"].as_str().is_some_and(|s| !matches!(s, "none" | ""))
+        || v["apiProvider"].as_str().is_some_and(|s| !matches!(s, "firstParty" | "firstparty" | "anthropic" | ""))
+    {
         Billing::UsageBilled
     } else if plan.is_some() {
         Billing::Subscription
@@ -104,4 +108,17 @@ pub fn claude_plan(output: &str) -> Signals {
         Billing::Unknown
     };
     Signals { plan, billing: Some(billing), ..Signals::default() }
+}
+
+/// Presence alone is enough; credential values are never inspected or kept.
+pub fn claude_env_billed(names: impl IntoIterator<Item = std::ffi::OsString>) -> bool {
+    const OVERRIDES: [&str; 6] = [
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "CLAUDE_CODE_USE_BEDROCK",
+        "CLAUDE_CODE_USE_VERTEX",
+        "CLAUDE_CODE_USE_FOUNDRY",
+        "ANTHROPIC_BASE_URL",
+    ];
+    names.into_iter().any(|name| OVERRIDES.iter().any(|expected| name.to_string_lossy().eq_ignore_ascii_case(expected)))
 }

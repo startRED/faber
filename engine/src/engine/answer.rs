@@ -195,6 +195,7 @@ mod tests {
             clis: BTreeMap::new(),
             spawn: Arc::new(|_, _, _| Err(std::io::Error::other("no process in this test"))),
             windows: false,
+            claude_env_billed: false,
             max_warm: 1,
             idle: Duration::from_secs(60),
             runtime: tokio::runtime::Handle::current(),

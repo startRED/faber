@@ -437,6 +437,7 @@ fn main() {
                 clis: clis.clone(),
                 spawn: real_spawner(),
                 windows: cfg!(windows),
+                claude_env_billed: faber_engine::signals::claude_env_billed(std::env::vars_os().map(|(name, _)| name)),
                 max_warm: 3,
                 idle: Duration::from_secs(120),
                 runtime: tauri::async_runtime::handle().inner().clone(),
