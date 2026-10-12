@@ -17,6 +17,7 @@ import './composer.check.ts';
 import './i18n.check.ts';
 import './inbox.check.ts';
 import './models.check.ts';
+import './motion.check.ts';
 import './opening.check.ts';
 import './running.check.ts';
 import './settings.check.ts';

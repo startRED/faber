@@ -6,6 +6,7 @@ import { Asks } from './Ask.tsx';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { fromEngine, t } from './i18n.ts';
 import { prettyModel, vendorName, type Option } from './models.ts';
+import { animateList } from './motion.ts';
 
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
 
@@ -79,7 +80,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
   const streaming = () => m().status === 'streaming';
   const waiting = () => m().permissions ?? [];
   return (
-    <article class="ai" aria-label={t('answer.label')} aria-busy={streaming()}>
+    <article class="ai" aria-label={t('answer.label')} aria-busy={streaming()} ref={animateList}>
       <div class="model">
         <span class="vm" classList={{ claude: m().vendor === 'claude', codex: m().vendor === 'codex' }}>
           <VendorMark vendor={m().vendor} />

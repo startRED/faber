@@ -22,6 +22,7 @@ import { failureText, lang, t, templates, useLanguage } from './i18n.ts';
 import { createWidth } from './layout.ts';
 import { Lockup, Peek } from './Mark.tsx';
 import { modelOptions, prettyModel } from './models.ts';
+import { animateDetails, animateList, watchMotion } from './motion.ts';
 import { createOpening, upsert } from './opening.ts';
 import { Running } from './Running.tsx';
 import { createAutoOpen, openPlace, type Place, placeOfRunning, store, waitingKeys } from './running.ts';
@@ -60,6 +61,7 @@ const TYPING = 'textarea, input:not([type=checkbox], [type=radio], [type=range],
 /** `initial` is the state the page started from; `main.tsx` has already applied its look and handed the running list to
  * the store. */
 export function App(props: { initial: AppState; inbox: { take: (listener: ((event: AppEvent) => void) | undefined) => void } }) {
+  watchMotion();
   const saved = recall<Place | undefined>('faber.place', undefined);
   useLanguage(props.initial.settings.language);
   const [state, setState] = createSignal<AppState>(props.initial);
@@ -543,7 +545,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   );
 
   return (
-    <div class="app">
+    <div class="app" ref={(el) => { animateList(el); animateDetails(el); }}>
       {/* The title bar is the window's title bar: empty space drags the window, double click maximizes. */}
       <header class="top" classList={{ mac }} data-tauri-drag-region>
         <span class="brand" data-tauri-drag-region>
@@ -623,7 +625,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
             />
           }
         >
-          <div class="shell" classList={{ docked: columnOpen() && docked() }} inert={tourOpen()}>
+          <div class="shell" classList={{ docked: columnOpen() && docked() }} inert={tourOpen()} ref={animateList}>
             <aside
               class="side"
               classList={{ shown: sideOverlay() }}
@@ -631,7 +633,8 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
               aria-label={t('side.label')}
               role={sideOverlay() ? 'dialog' : undefined}
               aria-modal={sideOverlay() ? 'true' : undefined}
-              inert={trapped()}
+              inert={trapped() || (narrow() && !sideOverlay())}
+              aria-hidden={narrow() && !sideOverlay() ? 'true' : undefined}
             >
               <Sidebar
                 conversations={state().conversations}
@@ -723,7 +726,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                   </button>
                 </div>
               </div>
-              <div class="work" classList={{ under: columnOpen() && !docked() }} ref={(el) => (work = el)}>
+              <div class="work" classList={{ under: columnOpen() && !docked() }} ref={(el) => { work = el; animateList(el); }}>
                 <Show when={newChat()}>
                   {/* The effects of the look sit behind the greeting; dust keeps clear of the text and the composer. */}
                   <Ambient vendors={state().vendors} avoid={() => [...work!.querySelectorAll('.hello, .lead, .composer, .try, .resume')]} />
@@ -732,7 +735,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                   <Show
                     when={newChat()}
                     fallback={
-                      <div class="col">
+                      <div class="col" ref={animateList}>
                         <Show
                           when={current()?.messages.length ? current() : undefined}
                           fallback={<Empty vendors={state().vendors.length} area={area()} project={project()} onConnect={openSetup} />}
