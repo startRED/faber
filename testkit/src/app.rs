@@ -367,10 +367,13 @@ impl Ctx {
     }
 
     /// The second safety net of the hidden desktop: the app must have no visible window on the desktop the person is
-    /// using. If it has one, its whole job is ended at once and this fails. Only Windows has the hidden desktop.
+    /// using. If it has one, its whole job is ended at once and this fails. Only local Windows runs require isolation.
     pub fn guard_desktop(&mut self, id: usize) -> Result<(), String> {
         #[cfg(windows)]
         {
+            if !crate::desktop::hidden_required(std::env::var("GITHUB_ACTIONS").ok().as_deref()) {
+                return Ok(());
+            }
             let live = &self.live[id];
             if !live.owned.is_running() {
                 return Ok(());

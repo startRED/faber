@@ -71,10 +71,10 @@ impl Owned {
             use std::os::windows::process::CommandExt;
             // WebView2 cannot use a private desktop in the GitHub runner's service session.
             // Locally, no hidden desktop means no app; there is no fallback to the person's desktop.
-            let desktop = if env.get("GITHUB_ACTIONS").is_some_and(|v| v == "true") {
-                "default"
-            } else {
+            let desktop = if crate::desktop::hidden_required(env.get("GITHUB_ACTIONS").map(String::as_str)) {
                 crate::desktop::name().map_err(io::Error::other)?
+            } else {
+                "default"
             };
             let mut command = Command::new(helper);
             command.arg("--gate").arg("--desktop").arg(desktop).arg(program).args(args).env_clear().envs(env).current_dir(cwd);

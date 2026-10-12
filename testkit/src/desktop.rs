@@ -16,6 +16,11 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use winsafe::{CreateProcess, EnumWindows, HDESK, HPIPE, HPROCESS, SECURITY_ATTRIBUTES, STARTUPINFO, co};
 
+/// GitHub Actions needs WebView2's default desktop; every local launch requires isolation.
+pub fn hidden_required(actions: Option<&str>) -> bool {
+    actions != Some("true")
+}
+
 /// The name of this runner's hidden desktop, made on first use.
 pub fn name() -> Result<&'static str, String> {
     static NAME: OnceLock<Result<String, String>> = OnceLock::new();
@@ -158,6 +163,19 @@ pub fn probe() -> i32 {
         Err(e) => {
             eprintln!("error {e}");
             1
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_github_actions_may_launch_without_desktop_isolation() {
+        assert!(!hidden_required(Some("true")));
+        for value in [None, Some("false"), Some("1"), Some("TRUE")] {
+            assert!(hidden_required(value));
         }
     }
 }
