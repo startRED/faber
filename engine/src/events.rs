@@ -37,7 +37,8 @@ pub enum EngineEvent {
     Signals(crate::signals::Signals),
     /// What a finished turn used. `cost_total_usd` is Claude Code's own API-priced figure as it reports it: cumulative for
     /// the conversation, so the engine subtracts what it saw before (`usage::settle`); None when the result carries no
-    /// counters (an aborted turn) and on Codex, which reports no cost. `input_tokens` is the prompt of the main response,
+    /// counters (an aborted turn). On Codex it is Faber's computed API-equivalent cost of this turn, priced per request,
+    /// so the engine uses it directly. `input_tokens` is the prompt of the main response,
     /// cached part included, so a hit rate is `cache_read_tokens / input_tokens`.
     Done {
         ok: bool,

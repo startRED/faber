@@ -156,3 +156,73 @@ fn codex_cache_writes_are_per_turn_and_missing_fields_are_incomplete() {
     };
     assert!(incomplete, "an absent write counter is not a known zero");
 }
+
+fn priced_update(input: u64, cached: u64, writes: u64, output: u64, prompt: u64) -> Value {
+    let mut value = update(input, cached, output);
+    value["params"]["tokenUsage"]["total"]["cacheWriteInputTokens"] = writes.into();
+    value["params"]["tokenUsage"]["last"] = json!({"inputTokens": prompt});
+    value
+}
+
+fn priced_done(state: &mut CodexTurnState, expected: f64, partial: bool) {
+    let EngineEvent::Done { cost_total_usd, incomplete, .. } = done(parse_codex_notification(&completed("completed"), state)) else {
+        panic!("not Done")
+    };
+    assert!((cost_total_usd.unwrap() - expected).abs() < 1e-10, "{cost_total_usd:?}, expected {expected}");
+    assert_eq!(incomplete, partial);
+}
+
+#[test]
+fn codex_prices_requests_individually_and_does_not_double_charge_updates_or_turns() {
+    let mut state = CodexTurnState::new(false);
+    state.model = "gpt-6.1-sol".into();
+    parse_codex_notification(&started(), &mut state);
+    for n in 1..=3 {
+        let usage = priced_update(n * 100_000, 0, 0, n * 1_000, 100_000);
+        parse_codex_notification(&usage, &mut state);
+        parse_codex_notification(&usage, &mut state);
+    }
+    priced_done(&mut state, 0.63, false);
+    parse_codex_notification(&started(), &mut state);
+    parse_codex_notification(&priced_update(400_000, 0, 0, 4_000, 100_000), &mut state);
+    priced_done(&mut state, 0.21, false);
+}
+
+#[test]
+fn codex_long_requests_price_cached_reads_writes_and_output_at_the_long_tier() {
+    let mut state = CodexTurnState::new(false);
+    state.model = "gpt-6.1-sol".into();
+    parse_codex_notification(&started(), &mut state);
+    parse_codex_notification(&priced_update(100_000, 0, 0, 1_000, 100_000), &mut state);
+    parse_codex_notification(&priced_update(400_000, 200_000, 50_000, 2_000, 300_000), &mut state);
+    priced_done(&mut state, 0.715, false);
+}
+
+#[test]
+fn codex_missing_request_context_keeps_a_lower_bound_and_excludes_learning() {
+    let mut state = CodexTurnState::new(false);
+    state.model = "gpt-6.1-sol".into();
+    parse_codex_notification(&started(), &mut state);
+    parse_codex_notification(&update(300_000, 0, 1_000), &mut state);
+    priced_done(&mut state, 0.61, true);
+}
+
+#[test]
+fn codex_malformed_or_regressed_updates_cannot_double_charge_recovered_totals() {
+    for bad in ["missing", "regressed"] {
+        let mut state = CodexTurnState::new(false);
+        state.model = "gpt-6.1-sol".into();
+        parse_codex_notification(&started(), &mut state);
+        let usage = priced_update(100_000, 0, 0, 1_000, 100_000);
+        parse_codex_notification(&usage, &mut state);
+        let mut invalid = usage.clone();
+        if bad == "missing" {
+            invalid["params"]["tokenUsage"]["total"].as_object_mut().unwrap().remove("inputTokens");
+        } else {
+            invalid["params"]["tokenUsage"]["total"]["inputTokens"] = 0.into();
+        }
+        parse_codex_notification(&invalid, &mut state);
+        parse_codex_notification(&usage, &mut state);
+        priced_done(&mut state, 0.21, true);
+    }
+}

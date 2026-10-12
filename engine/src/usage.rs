@@ -102,16 +102,28 @@ mod tests {
 /// Sources: https://developers.openai.com/api/docs/pricing and
 /// https://platform.claude.com/docs/en/about-claude/pricing. Input includes both cache categories.
 pub fn api_price(model: &str, input: u64, output: u64, read: u64, write: u64, write_1h: u64) -> Option<f64> {
-    let (base, hit, creation, hour, answer) = match model {
+    api_price_for_prompt(model, input, output, read, write, write_1h, input)
+}
+
+/// Price a counter delta at its request's context tier; a turn may contain many short requests.
+pub fn api_price_for_prompt(model: &str, input: u64, output: u64, read: u64, write: u64, write_1h: u64, prompt: u64) -> Option<f64> {
+    let (mut base, mut hit, mut creation, mut hour, mut answer) = match model {
         m if m.starts_with("gpt-6-astra") => (10.0, 1.0, 12.5, 12.5, 50.0),
         m if m.starts_with("gpt-6.1-sol") => (2.0, 0.1, 2.5, 2.5, 10.0),
         m if m.starts_with("gpt-6-luna") => (0.1, 0.01, 0.125, 0.125, 0.5),
         m if m.starts_with("claude-opus-5-5") => (4.0, 0.2, 5.0, 8.0, 20.0),
         m if m.starts_with("claude-sonnet-5-5") => (2.0, 0.1, 2.5, 4.0, 10.0),
-        m if m.starts_with("claude-haiku-5-5") && input > 100_000 => (0.5, 0.05, 0.625, 1.0, 2.5),
+        m if m.starts_with("claude-haiku-5-5") && prompt > 100_000 => (0.5, 0.05, 0.625, 1.0, 2.5),
         m if m.starts_with("claude-haiku-5-5") => (0.1, 0.01, 0.125, 0.2, 0.5),
         _ => return None,
     };
+    if model.starts_with("gpt-6") && prompt > 272_000 {
+        base *= 2.0;
+        hit *= 2.0;
+        creation *= 2.0;
+        hour *= 2.0;
+        answer *= 1.5;
+    }
     let fresh = input.checked_sub(read.checked_add(write)?)?;
     let short = write.checked_sub(write_1h)?;
     if input == 0 && output == 0 {
@@ -138,9 +150,18 @@ pub fn fresh_price(event: &crate::events::EngineEvent, model: &str) -> (Option<f
         return (None, true);
     };
     let native = cost_total_usd.filter(|cost| cost.is_finite() && *cost >= 0.0);
-    let cost =
-        native.or_else(|| api_price(model, *input_tokens, *output_tokens, *cache_read_tokens, *cache_write_tokens, *cache_write_1h_tokens));
-    (cost, cost.is_none() || (native.is_none() && *incomplete))
+    let cost = native.or_else(|| {
+        api_price_for_prompt(
+            model,
+            *input_tokens,
+            *output_tokens,
+            *cache_read_tokens,
+            *cache_write_tokens,
+            *cache_write_1h_tokens,
+            if model.starts_with("gpt-") { 0 } else { *input_tokens },
+        )
+    });
+    (cost, cost.is_none() || ((native.is_none() || model.starts_with("gpt-")) && *incomplete))
 }
 
 #[cfg(test)]
@@ -149,7 +170,9 @@ mod price_tests {
     #[test]
     fn all_cache_kinds_are_priced_without_counting_them_twice() {
         let sol = api_price("gpt-6.1-sol", 1_000_000, 100_000, 600_000, 200_000, 0).unwrap();
-        assert!((sol - 1.96).abs() < 1e-9);
+        assert!((sol - 3.42).abs() < 1e-9);
+        let short = api_price("gpt-6.1-sol", 100_000, 10_000, 60_000, 20_000, 0).unwrap();
+        assert!((short - 0.196).abs() < 1e-9);
         let haiku = api_price("claude-haiku-5-5", 3120, 73, 535, 2583, 2583).unwrap();
         assert!((haiku - 0.00055865).abs() < 1e-9);
         assert_eq!(api_price("unknown", 100, 10, 0, 0, 0), None);

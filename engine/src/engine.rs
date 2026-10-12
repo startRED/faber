@@ -834,20 +834,32 @@ impl Core {
                 incomplete,
                 reason,
             } => {
-                // The CLI reports a total for the whole conversation; the turn costs what is new since the last total.
+                // Claude reports a conversation total; Codex has already priced this turn's individual requests.
                 let session = self.convs.get(conv).and_then(|c| c.sessions.get(&vendor)).cloned().unwrap_or_default();
                 let fresh = self.live.get(conv).is_some_and(|l| !l.resumed);
                 let before = self.convs.get(conv).and_then(|c| c.cost_base.get(&vendor));
-                let settled = usage::settle(before, &session, fresh, cost_total_usd);
+                let settled = if vendor == Vendor::Codex {
+                    usage::Settled { cost: cost_total_usd.filter(|cost| cost.is_finite() && *cost >= 0.0), base: None }
+                } else {
+                    usage::settle(before, &session, fresh, cost_total_usd)
+                };
                 if let (Some(base), Some(c)) = (settled.base, self.convs.get_mut(conv)) {
                     c.cost_base.insert(vendor, base);
                 }
                 let model = self.live.get(conv).and_then(|l| l.running.as_deref().or(l.model.as_deref())).unwrap_or_default();
                 let native = settled.cost;
                 let cost = native.or_else(|| {
-                    usage::api_price(model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cache_write_1h_tokens)
+                    usage::api_price_for_prompt(
+                        model,
+                        input_tokens,
+                        output_tokens,
+                        cache_read_tokens,
+                        cache_write_tokens,
+                        cache_write_1h_tokens,
+                        if vendor == Vendor::Codex { 0 } else { input_tokens },
+                    )
                 });
-                let missing = cost.is_none() || (native.is_none() && incomplete);
+                let missing = cost.is_none() || ((native.is_none() || vendor == Vendor::Codex) && incomplete);
                 self.note_turn(conv, cost, missing);
                 if let Some(m) = self.turn(conv) {
                     m.status = Some(if ok { Status::Done } else { Status::Stopped });
