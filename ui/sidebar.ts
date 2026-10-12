@@ -5,6 +5,11 @@ import type { CheckResult, QuotaReading, RunningItem, Vendor } from './api.ts';
 
 export type ChatGroup = 'today' | 'week' | 'earlier';
 
+const fold = (text: string) => text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+
+/** Whether a title holds what the user typed in the search box, ignoring case and accents. An empty search holds them all. */
+export const matches = (title: string, query: string) => fold(title).includes(fold(query.trim()));
+
 const startOfDay = (ms: number, back = 0) => {
   const d = new Date(ms);
   return new Date(d.getFullYear(), d.getMonth(), d.getDate() - back).getTime();

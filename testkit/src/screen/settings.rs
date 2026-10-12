@@ -118,13 +118,13 @@ fn walks_the_sections(ctx: &mut Ctx) -> Result {
     ctx.shot(&mut app, "settings-appearance-narrow")?;
     app.page.cdp.call("Emulation.clearDeviceMetricsOverride", json!({}))?;
 
-    // Connected accounts: Claude is connected, ChatGPT is not.
+    // Connected accounts: Claude is connected, Codex is not.
     let page = &mut app.page;
     open_section(page, "set.subscriptions")?;
     let (on, off) = (page.text_of("set.connected")?, page.text_of("set.notConnected")?);
     same(page.count(&css(".accounts li"))?, 2, "the accounts listed")?;
     page.wait_for("Claude to be connected", &format!("({CLAUDE_STATE}) === {}", json!(on)))?;
-    same(page.inner_text(&css(".accounts li").has_text("ChatGPT").css(".state"))?, off, "ChatGPT is not connected")?;
+    same(page.inner_text(&css(".accounts li").has_text("Codex").css(".state"))?, off, "Codex is not connected")?;
     ctx.shot(&mut app, "settings-accounts")?;
 
     // Usage limits: the 5-hour window then the 7-day one, with the shares the sidebar shows.

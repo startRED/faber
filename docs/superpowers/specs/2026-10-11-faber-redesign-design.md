@@ -1227,7 +1227,7 @@ So B3 moves both to the new model and nothing more; B5b and B8 change their layo
 - **Sala.**
   - The projector beam over the greeting is static.
   - The glow around the lens breathes every 7 s.
-  - 72 dust grains are drawn on one canvas at 24 fps. They fade out within 28 px of any text block.
+  - 72 dust grains are drawn as CSS shadows that twinkle on the compositor, with no canvas loop. They fade out within 28 px of any text block.
 - **Oficina.** The loom sits at the bottom right, and its shuttle crosses every 9 s. Paper grain is at 4.5%.
 - **Bancada.** The flow line at the top right reads "Your idea → Claude and Codex → Done, with proof", with a short
   glow every 9 s. It names only the vendors that are connected (AI-11).
@@ -2383,9 +2383,9 @@ Each item fills a gap the sources leave open. Each is marked in the text above a
     24 and 32 px.
 15. **AI-15. Content of s1 and the sidebar footer.**
     - The greeting and the sidebar footer show no user name.
-    - Four suggestions fill the composer without sending.
+    - Three suggestions fill the composer without sending.
 16. **AI-16. The Phase 1 sidebar.**
-    - No search.
+    - A search box filters the project and chat titles.
     - Projects expand.
     - Chats are grouped as Today, This week and Earlier.
     - Project tails show "{m} needs you" in amber, or a running dot.

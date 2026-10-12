@@ -496,8 +496,8 @@ fn greets_and_suggests(ctx: &mut Ctx) -> Result {
         ensure(found["past"] == false && found["page"] == true, || format!("{width}: the greeting sticks out: {found}"))?;
     }
     page.cdp.call("Emulation.clearDeviceMetricsOverride", json!({}))?;
-    // Four suggestions; one fills the composer and sends nothing.
-    same(page.count(&css(".try button"))?, 4, "suggestions")?;
+    // Three suggestions; one fills the composer and sends nothing.
+    same(page.count(&css(".try button"))?, 3, "suggestions")?;
     // The hover nudge moves the text with a transform; the row's own box and padding stay where they are.
     let first = css(".try button").has_text(&page.text_of("suggest.1")?);
     // The window has just gone back to its own size: the mouse goes where the row is now, and tries again if the layout
@@ -892,11 +892,12 @@ fn keeps_long_titles_inside(ctx: &mut Ctx) -> Result {
     page.click(&css(".prow .item"))?;
     page.wait_visible(&css(".proj-chats .item"))?;
     pause(0.3);
-    // Every row ends inside the sidebar, and its title is cut with an ellipsis before the button on its right.
+    // Every row ends inside the sidebar, and its title is cut with an ellipsis. The button on the right shows when the row is
+    // hovered or holds the focus, and the title then makes room for it, so each row takes the focus before it is measured.
     let found = page.eval(
         "(() => { const sc = document.querySelector('.side-scroll'); const edge = sc.getBoundingClientRect().right; const bad = []; \
          for (const row of document.querySelectorAll('.side .crow, .side .prow')) { \
-           const item = row.querySelector('.item'); const title = item.querySelector(':scope > span'); const button = row.querySelector('.x, .plus'); \
+           const item = row.querySelector('.item'); item.focus(); const title = item.querySelector(':scope > span'); const button = row.querySelector('.x, .plus'); \
            const r = row.getBoundingClientRect(), t = title.getBoundingClientRect(), b = button.getBoundingClientRect(); \
            if (r.right > edge + 0.5) bad.push('row ends at ' + r.right); \
            if (getComputedStyle(title).textOverflow !== 'ellipsis' || title.scrollWidth <= title.clientWidth) bad.push('no ellipsis: ' + title.textContent.slice(0, 12)); \

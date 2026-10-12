@@ -1,5 +1,5 @@
 import themes from '../../src-tauri/src/themes.json';
-import { createLoop, shouldRun } from '../../ui/Ambient.tsx';
+import { clearance, dustShadows, makeGrains } from '../../ui/Ambient.tsx';
 import type { AppState, Appearance, Look, SavedSettings } from '../../ui/api.ts';
 import { applyLook, effectiveMotion, inOrder, previewer, refreshed, saveAndApply, switchTheme, watchSystem, windowHidden } from '../../ui/appearance.ts';
 import { en } from '../../ui/locales/en.ts';
@@ -66,55 +66,16 @@ check('appearance: the system preference caps the motion level and never raises 
   equal(effectiveMotion('none', false), 'none');
 });
 
-check('appearance: the effect loop runs only at full motion, with the switch on and the window visible', () => {
-  const on = { motion: 'full', ambient: true, hidden: false } as const;
-  ok(shouldRun(on));
-  ok(!shouldRun({ ...on, hidden: true }), 'a hidden window');
-  ok(!shouldRun({ ...on, motion: 'reduced' }), 'reduced motion');
-  ok(!shouldRun({ ...on, motion: 'none' }), 'no motion');
-  ok(!shouldRun({ ...on, ambient: false }), 'the ambient switch off');
-
-  let next: FrameRequestCallback | undefined;
-  let drawn = 0;
-  let cancelled = 0;
-  const loop = createLoop(
-    () => (drawn += 1),
-    24,
-    (step) => ((next = step), 7),
-    () => ((next = undefined), (cancelled += 1)),
-  );
-  loop.run(true);
-  ok(loop.running(), 'the loop starts');
-  next?.(performance.now() + 100);
-  equal(drawn, 1);
-  loop.run(false);
-  ok(!loop.running(), 'the loop stops');
-  equal(cancelled, 1);
-  equal(next, undefined, 'no frame stays queued');
-  loop.run(false);
-  equal(cancelled, 1, 'stopping twice cancels once');
-});
-
-check('appearance: the loop holds its rate on a 60 Hz screen and goes back to counting after a stall', () => {
-  let next: FrameRequestCallback | undefined;
-  let drawn = 0;
-  const loop = createLoop(
-    () => (drawn += 1),
-    24,
-    (step) => ((next = step), 1),
-    () => undefined,
-  );
-  loop.run(true);
-  const start = performance.now();
-  // One second of frames 1000/60 ms apart; each reset of the clock to the frame it drew on would give 20, not 24.
-  for (let frame = 1; frame <= 60; frame += 1) next?.(start + (1000 / 60) * frame);
-  ok(drawn >= 23 && drawn <= 25, `${drawn} draws in a second`);
-  const before = drawn;
-  next?.(start + 5000);
-  equal(drawn, before + 1, 'a frame after a long stall draws once');
-  next?.(start + 5000 + 1000 / 60);
-  equal(drawn, before + 1, 'and the next frame, a sixtieth later, waits');
-  loop.run(false);
+check('appearance: the dust is the same at every launch and never lies behind text', () => {
+  const grains = makeGrains();
+  equal(grains.length, 72);
+  equal(JSON.stringify(makeGrains()), JSON.stringify(grains), 'a fixed seed');
+  const free = dustShadows(grains, [], 0, '#fff');
+  equal(free.length, 3, 'three twinkling layers');
+  const box = { l: -1000, t: -1000, r: 1000, b: 1000 };
+  ok(clearance([box], 0, 0) <= 0, 'a point inside a text block has no room');
+  ok(dustShadows(grains, [box], 0, '#fff').every((layer) => layer === ''), 'a block over everything leaves no grain');
+  ok(free.every((layer) => layer !== ''), 'with no text the dust is drawn');
 });
 
 check('appearance: saves run in order, and a failed one does not stop the next', async () => {

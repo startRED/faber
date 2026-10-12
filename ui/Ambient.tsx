@@ -1,60 +1,59 @@
-import { createEffect, For, onCleanup, onMount, Show } from 'solid-js';
-import type { Motion, Vendor } from './api.ts';
-import { appliedLook, motion, windowHidden } from './appearance.ts';
+import { createEffect, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
+import type { Vendor } from './api.ts';
+import { appliedLook } from './appearance.ts';
 import { t } from './i18n.ts';
 import { vendorName } from './models.ts';
 
 // The effects of the new conversation (docs/design.md, "Ambient"). Which one shows comes from the look: the tokens
 // --amb-beam, --amb-loom and --amb-flow are `none` for a theme that does not have it, and for every theme when the
-// ambient switch is off. Effects sit behind the greeting and never behind text the user reads.
-
-/** Effect loops draw only at full motion, with the ambient switch on and the window visible. */
-export const shouldRun = (state: { motion: Motion; ambient: boolean; hidden: boolean }) =>
-  state.motion === 'full' && state.ambient && !state.hidden;
-
-/** A frame loop at a fixed rate. A check passes its own `schedule` and `cancel` to step it by hand. */
-export function createLoop(
-  draw: (elapsed: number) => void,
-  fps = 24,
-  schedule: (step: FrameRequestCallback) => number = requestAnimationFrame,
-  cancel: (id: number) => void = cancelAnimationFrame,
-) {
-  const interval = 1000 / fps;
-  let id = 0;
-  let drawn = 0; // when the last frame was drawn
-  let due = 0; // when the next one is due
-  const step: FrameRequestCallback = (now) => {
-    id = schedule(step);
-    // A frame a millisecond early still counts; without that a 60 Hz screen would settle at 20 draws a second.
-    if (now < due - 1) return;
-    const elapsed = Math.min(now - drawn, 100);
-    drawn = now;
-    // The time past the due moment carries over, so the rate holds; after a long stall the count starts afresh.
-    due = now - due > interval ? now + interval : due + interval;
-    draw(elapsed);
-  };
-  return {
-    run(on: boolean) {
-      if (on && !id) {
-        drawn = performance.now();
-        due = drawn + interval;
-        id = schedule(step);
-      } else if (!on && id) {
-        cancel(id);
-        id = 0;
-      }
-    },
-    running: () => id !== 0,
-  };
-}
+// ambient switch is off. Effects sit behind the greeting and never behind text the user reads. Nothing here runs a frame
+// loop: the beam and the dust are CSS, and the dust only twinkles (opacity of three layers, on the compositor).
 
 const GRAINS = 72;
 const FADE = 28; // a grain fades to nothing within this many pixels of a text block
 const TILT = (22 * Math.PI) / 180;
 const [COS, SIN] = [Math.cos(TILT), Math.sin(TILT)];
-const [CANVAS_W, CANVAS_H] = [760, 320];
+const [DUST_W, DUST_H] = [760, 320];
 // The beam leaves the top of the greeting area, 80 px above it, 120 px in from the right edge but never past 740 px.
 const [BEAM_TOP, BEAM_RIGHT, BEAM_MAX] = [-80, 120, 740];
+
+export type Box = { l: number; t: number; r: number; b: number };
+export type Grain = { x: number; y: number; r: number; alpha: number };
+
+/** The grains of the dust, in the coordinates of the beam, from a fixed seed so the picture is the same at every launch. The
+ * beam is narrow at the lens and wide at the bottom, so the grains spread with their depth. */
+export function makeGrains(count = GRAINS): Grain[] {
+  let seed = 7;
+  const random = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  return Array.from({ length: count }, () => {
+    const y = random() * DUST_H;
+    const u = random() * 2 - 1;
+    const x = DUST_W / 2 + u * (34 + y * 0.42) * 0.92;
+    return { x, y, r: 0.5 + random() * 1.3, alpha: (0.25 + 0.55 * random()) * (1 - Math.abs(u) * 0.6) };
+  });
+}
+
+/** How clear of every text block a point is: 0 on a block, 1 at `FADE` pixels from the nearest one. */
+export function clearance(boxes: Box[], x: number, y: number): number {
+  let k = 1;
+  for (const b of boxes) k = Math.min(k, Math.hypot(Math.max(b.l - x, 0, x - b.r), Math.max(b.t - y, 0, y - b.b)) / FADE);
+  return Math.min(1, k);
+}
+
+/** The dust as `box-shadow` lists, one per twinkling layer. Every grain is a shadow of a 1 px dot; a grain within `FADE` of a
+ * text block is dimmed to nothing, so the dust never lies behind words. `originX` is where the beam starts, in the
+ * coordinates of the greeting area. */
+export function dustShadows(grains: Grain[], boxes: Box[], originX: number, color: string, layers = 3): string[] {
+  const out: string[][] = Array.from({ length: layers }, () => []);
+  grains.forEach((g, i) => {
+    const local = g.x - DUST_W / 2;
+    // Where the grain lands on the screen: the beam is turned by 22 degrees around its top centre.
+    const k = clearance(boxes, originX + local * COS - g.y * SIN, BEAM_TOP + local * SIN + g.y * COS);
+    if (k <= 0) return;
+    out[i % layers]!.push(`${g.x.toFixed(1)}px ${g.y.toFixed(1)}px 0 ${(g.r - 0.5).toFixed(2)}px rgba(${color},${(g.alpha * k).toFixed(3)})`);
+  });
+  return out.map((list) => list.join(','));
+}
 
 const THROUGH_CLAUDE = 'M40 100H86Q102 100 102 84V58Q102 46 116 46H146M206 46H226Q240 46 240 60V86Q240 100 254 100H292';
 const THROUGH_CODEX = 'M40 100H86Q102 100 102 116V142Q102 154 116 154H146M206 154H226Q240 154 240 140V114Q240 100 254 100H292';
@@ -62,64 +61,18 @@ const STRAIGHT = 'M40 100H292';
 const BOTH =
   'M40 100H86Q102 100 102 84V58Q102 46 116 46H146M102 100V142Q102 154 116 154H146M206 46H226Q240 46 240 60V140Q240 154 226 154H206M240 100H292';
 
-type Box = { l: number; t: number; r: number; b: number };
-
 /** The loom's thread rows, bottom to top, each a little fainter than the one below. */
 const ROWS = Array.from({ length: 10 }, (_, j) => ({ y: 600 - 16 * j, odd: j % 2 === 1, opacity: (0.25 + 0.75 * Math.min(1, (16 * j) / 120) * 0.7).toFixed(2) }));
 
 export function Ambient(props: { vendors: Vendor[]; avoid: () => Element[] }) {
   let layer!: HTMLDivElement;
-  let canvas!: HTMLCanvasElement;
   let boxes: Box[] = [];
   let width = 0;
   let color = '243,238,226';
-  let seed = 7;
-  const random = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-  const grains = Array.from({ length: GRAINS }, () => ({
-    y: random() * CANVAS_H,
-    u: random() * 2 - 1,
-    r: 0.5 + random() * 1.3,
-    vy: -(0.04 + random() * 0.12),
-    phase: random() * 6.28,
-    speed: 0.4 + random() * 0.8,
-  }));
-  let time = 0;
+  const grains = makeGrains();
+  const [shadows, setShadows] = createSignal<string[]>(['', '', '']);
 
-  const clearance = (x: number, y: number) => {
-    let k = 1;
-    for (const b of boxes) k = Math.min(k, Math.hypot(Math.max(b.l - x, 0, x - b.r), Math.max(b.t - y, 0, y - b.b)) / FADE);
-    return Math.min(1, k);
-  };
-
-  const paint = () => {
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
-    const originX = Math.min(width - BEAM_RIGHT, BEAM_MAX);
-    for (const g of grains) {
-      const x = CANVAS_W / 2 + g.u * (34 + g.y * 0.42) * 0.92 + Math.sin(time * 0.0004 * g.speed + g.phase) * 6;
-      const local = x - CANVAS_W / 2;
-      const k = clearance(originX + local * COS - g.y * SIN, BEAM_TOP + local * SIN + g.y * COS);
-      if (k <= 0) continue;
-      const alpha = (0.25 + 0.55 * (0.5 + 0.5 * Math.sin(time * 0.0011 * g.speed + g.phase))) * (1 - Math.abs(g.u) * 0.6) * k;
-      ctx.beginPath();
-      ctx.arc(x, g.y, g.r, 0, 6.283);
-      ctx.fillStyle = `rgba(${color},${alpha.toFixed(3)})`;
-      ctx.fill();
-    }
-  };
-
-  const loop = createLoop((elapsed) => {
-    time += elapsed;
-    for (const g of grains) {
-      g.y += g.vy * elapsed * 0.06;
-      if (g.y < -4) {
-        g.y = CANVAS_H + 4;
-        g.u = random() * 2 - 1;
-      }
-    }
-    paint();
-  });
+  const paint = () => setShadows(dustShadows(grains, boxes, Math.min(width - BEAM_RIGHT, BEAM_MAX), color));
 
   // Where the text blocks are, in the coordinates of the greeting area.
   const measure = () => {
@@ -137,18 +90,13 @@ export function Ambient(props: { vendors: Vendor[]; avoid: () => Element[] }) {
     const resize = new ResizeObserver(measure);
     if (layer.parentElement) resize.observe(layer.parentElement);
     void document.fonts.ready.then(measure);
-    onCleanup(() => {
-      resize.disconnect();
-      loop.run(false);
-    });
+    onCleanup(() => resize.disconnect());
   });
 
   createEffect(() => {
     const look = appliedLook();
     if (!look) return;
     color = look.vars.dust ?? color;
-    const shown = look.vars['amb-beam'] !== 'none';
-    loop.run(shown && shouldRun({ motion: motion(), ambient: look.effects.ambient, hidden: windowHidden() }));
     if (layer) measure();
   });
 
@@ -164,7 +112,9 @@ export function Ambient(props: { vendors: Vendor[]; avoid: () => Element[] }) {
           <i />
           <i />
         </div>
-        <canvas ref={(el) => (canvas = el)} width={CANVAS_W} height={CANVAS_H} />
+        <div class="dust" aria-hidden="true">
+          <For each={shadows()}>{(shadow) => <i style={{ 'box-shadow': shadow }} />}</For>
+        </div>
       </div>
       <div class="amb amb-glow">
         <div class="amb-beam">

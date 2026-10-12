@@ -4,7 +4,7 @@ import { Icon, VendorMark } from './Glyphs.tsx';
 import { lang, t } from './i18n.ts';
 import { vendorName } from './models.ts';
 
-const SUGGESTIONS = ['suggest.1', 'suggest.2', 'suggest.3', 'suggest.4'] as const;
+const SUGGESTIONS = ['suggest.1', 'suggest.2', 'suggest.3'] as const;
 
 /** The greeting with its last word set apart, so a look with an italic emphasis (Workshop) can draw it. */
 function splitLast(text: string): [string, string] {
@@ -12,13 +12,19 @@ function splitLast(text: string): [string, string] {
   return at < 0 ? [text, ''] : [text.slice(0, at), text.slice(at + 1)];
 }
 
+const DAY = 86_400_000;
+const startOfDay = (ms: number) => new Date(new Date(ms).toDateString()).getTime();
+
+/** "today, 14:08", "yesterday, 14:08", else the date: the words for the days come from the language itself. */
 function when(ms: number): string {
-  const day = new Date(ms).toDateString() === new Date().toDateString();
-  return new Intl.DateTimeFormat(lang(), day ? { hour: '2-digit', minute: '2-digit' } : { day: 'numeric', month: 'short' }).format(ms);
+  const days = Math.round((startOfDay(Date.now()) - startOfDay(ms)) / DAY);
+  const time = new Intl.DateTimeFormat(lang(), { hour: '2-digit', minute: '2-digit' }).format(ms);
+  if (days === 0 || days === 1) return `${new Intl.RelativeTimeFormat(lang(), { numeric: 'auto' }).format(-days, 'day')}, ${time}`;
+  return new Intl.DateTimeFormat(lang(), { day: 'numeric', month: 'short' }).format(ms);
 }
 
-/** The new conversation (s1): the greeting, the composer it was given, four suggestions that fill the composer without
- * sending anything, and the three conversations touched last. The effects of the look sit behind it (ui/Ambient.tsx). */
+/** The new conversation (s1): the greeting, the composer it was given, three suggestions that fill the composer without
+ * sending anything, and the four conversations to pick up: those that wait for the user first, then the latest. The effects of the look sit behind it (ui/Ambient.tsx). */
 export function Welcome(props: {
   recent: Summary[];
   running: RunningItem[];
@@ -28,6 +34,10 @@ export function Welcome(props: {
   children: JSX.Element;
 }) {
   const title = () => splitLast(t('empty.chatTitle'));
+  const rows = () => {
+    const needs = (c: Summary) => props.running.some((i) => i.conversationId === c.id && i.state === 'needsYou');
+    return [...props.recent.filter(needs), ...props.recent.filter((c) => !needs(c))].slice(0, 4);
+  };
   const live = (id: string) => props.running.find((i) => i.conversationId === id);
   const where = (c: Summary) => (c.area === 'chat' ? t('area.chat') : (props.projects.find((p) => p.id === c.projectId)?.name ?? t('area.projects')));
   return (
@@ -54,10 +64,10 @@ export function Welcome(props: {
           </For>
         </section>
       </div>
-      <Show when={props.recent.length > 0}>
+      <Show when={rows().length > 0}>
         <section class="resume" aria-labelledby="resume-title">
           <h2 id="resume-title">{t('s1.pickUp')}</h2>
-          <For each={props.recent}>
+          <For each={rows()}>
             {(c) => {
               const item = () => live(c.id);
               return (

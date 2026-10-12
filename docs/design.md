@@ -98,7 +98,7 @@ own inks.
   caps the user's level, and a change in the system setting changes only the level.
 - Effects appear only on the new conversation screen, never behind text the user reads, and they stop when the window
   is hidden.
-  - **Dark Room:** a static projector beam, a glow that breathes every 7 s and 72 dust grains drawn at 24 fps that fade
+  - **Dark Room:** a static projector beam, a glow that breathes every 7 s and 72 dust grains (CSS shadows that twinkle on the compositor, no canvas loop) that fade
     out near any text block.
   - **Workshop:** a loom at the bottom right whose shuttle crosses every 9 s, and paper grain.
   - **Workbench:** a flow line at the top right reading "Your idea → Claude and Codex → Done, with proof". It names only

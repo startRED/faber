@@ -47,7 +47,7 @@ const S1: &str = r#"(() => {
     .map((e) => String(e.className || e.tagName));
   const hello = document.querySelector('.hello');
   const heading = !hello || parseFloat(getComputedStyle(hello).fontSize) <= innerWidth * 0.09 + 0.5;
-  return { page: document.documentElement.scrollWidth <= innerWidth, past, collide, heading, beam: drawn('.amb-beam'), canvas: !!document.querySelector('.amb-beam canvas'), loom: drawn('.amb-loom'), flow: drawn('.amb-flow') };
+  return { page: document.documentElement.scrollWidth <= innerWidth, past, collide, heading, beam: drawn('.amb-beam'), dust: document.querySelectorAll('.amb-beam .dust i').length > 0, loom: drawn('.amb-loom'), flow: drawn('.amb-flow') };
 })()"#;
 
 /// The families the six looks draw with between them.
@@ -357,9 +357,9 @@ fn fits_every_look(ctx: &mut Ctx) -> Result {
             })?;
             let (loom_room, flow_room) = (width >= 1200, width >= 1400);
             same(
-                (seen["beam"].as_bool(), seen["canvas"].as_bool()),
+                (seen["beam"].as_bool(), seen["dust"].as_bool()),
                 (Some(beam), Some(true)),
-                &format!("{at}: the projector beam and its canvas"),
+                &format!("{at}: the projector beam and its dust"),
             )?;
             same(seen["loom"].as_bool(), Some(loom && loom_room), &format!("{at}: the loom"))?;
             same(seen["flow"].as_bool(), Some(flow && flow_room), &format!("{at}: the flow line"))?;
@@ -584,9 +584,10 @@ fn idle_memory(ctx: &mut Ctx) -> Result {
     let mut app = ctx.launch(launch)?;
     let title = app.page.named("heading", "empty.chatTitle")?;
     app.page.wait_visible(&title)?;
-    ensure(app.page.count(&css(".amb-beam canvas"))? == 1, || "the new conversation should draw the dust canvas".to_string())?;
-    // The memory below is only worth something while the dust really moves, and it stops with the window.
-    let picture = "document.querySelector('.amb-beam canvas').toDataURL()";
+    ensure(app.page.count(&css(".amb-beam .dust"))? == 1, || "the new conversation should show the dust".to_string())?;
+    // The memory below is only worth something while the dust really twinkles, and it stops with the window.
+    let states =
+        "[...document.querySelectorAll('.amb-beam .dust i')].flatMap((grain) => grain.getAnimations().map((a) => a.playState)).join()";
     let hide = |page: &mut Page, on: bool| {
         let getter = if on {
             "Object.defineProperty(document, 'hidden', { configurable: true, get: () => true })"
@@ -595,23 +596,21 @@ fn idle_memory(ctx: &mut Ctx) -> Result {
         };
         page.eval(&format!("(() => {{ {getter}; document.dispatchEvent(new Event('visibilitychange')); }})()")).map(|_| ())
     };
-    let (a, b) = (app.page.eval(picture)?, {
-        pause(0.8);
-        app.page.eval(picture)?
-    });
-    ensure(a != b, || "the dust canvas should be drawing while the window is visible".to_string())?;
+    let moving = app.page.eval(states)?;
+    ensure(moving.as_str().is_some_and(|all| all.contains("running") && !all.contains("paused")), || {
+        format!("the dust should twinkle while the window is visible, got {moving}")
+    })?;
     hide(&mut app.page, true)?;
     pause(0.4);
-    let (a, b) = (app.page.eval(picture)?, {
-        pause(0.8);
-        app.page.eval(picture)?
-    });
+    let stopped = app.page.eval(states)?;
     hide(&mut app.page, false)?;
-    ensure(a == b, || "the dust canvas should stop drawing while the window is hidden".to_string())?;
+    ensure(stopped.as_str().is_some_and(|all| all.contains("paused") && !all.contains("running")), || {
+        format!("the dust should stop while the window is hidden, got {stopped}")
+    })?;
     pause(10.0);
     let motion = app.page.eval("document.documentElement.dataset.motion")?;
     let (mb, _) = ctx.memory_mb(app.id)?;
-    ctx.notes.push(format!("idle on the new conversation with the dust canvas ({} motion): {mb:.0} MB", motion.as_str().unwrap_or("?")));
+    ctx.notes.push(format!("idle on the new conversation with the dust ({} motion): {mb:.0} MB", motion.as_str().unwrap_or("?")));
     ensure(mb <= BUDGET_MB, || format!("{mb:.0} MB is over the {BUDGET_MB} MB budget"))
 }
 

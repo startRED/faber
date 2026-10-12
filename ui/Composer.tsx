@@ -1,5 +1,6 @@
 import { createSignal, For, onCleanup, Show } from 'solid-js';
 import type { Choice, Vendor } from './api.ts';
+import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 import type { Option } from './models.ts';
 
@@ -129,7 +130,7 @@ export function Composer(props: Props) {
       </Show>
       <textarea
         aria-label={t('composer.message')}
-        rows={Math.min(10, Math.max(2, draft().text.split('\n').length))}
+        rows={Math.min(10, Math.max(1, draft().text.split('\n').length))}
         placeholder={props.placeholder}
         value={draft().text}
         onInput={(e) => {
@@ -159,14 +160,14 @@ export function Composer(props: Props) {
         }}
       />
       <div class="cbar">
-        <button type="button" class="pill" onClick={() => fileInput?.click()}>
-          {t('composer.attach')}
+        <button type="button" class="iconbtn" aria-label={t('composer.attach')} title={t('composer.attach')} onClick={() => fileInput?.click()}>
+          <Icon name="clip" />
         </button>
         <input ref={(el) => (fileInput = el)} type="file" multiple hidden onChange={(e) => e.currentTarget.files && void add(e.currentTarget.files)} />
-        <div class="r">
+        {/* The model: a chip with the rays of "let the AI choose" and a chevron, over the real select that does the work. */}
+        <label class="chip choose" data-tour="auto">
+          <Icon name="auto" small />
           <select
-            class="pill"
-            data-tour="auto"
             aria-label={t('composer.model')}
             value={selected()}
             onChange={(e) => {
@@ -182,19 +183,24 @@ export function Composer(props: Props) {
               )}
             </For>
           </select>
-          <Show
-            when={props.busy}
-            fallback={
-              <button type="submit" class="send" disabled={!canSend()} aria-label={t('composer.send')}>
-                ↑
-              </button>
-            }
-          >
-            <button type="button" class="send" onClick={() => props.onStop()} aria-label={t('composer.stop')}>
-              ■
+          <Icon name="down" small />
+        </label>
+        <Show
+          when={props.busy}
+          fallback={
+            <button type="submit" class="send" disabled={!canSend()} aria-label={t('composer.send')}>
+              <span aria-hidden="true">{t('composer.send')}</span>
+              <Icon name="up" small />
             </button>
-          </Show>
-        </div>
+          }
+        >
+          <button type="button" class="send stop" onClick={() => props.onStop()} aria-label={t('composer.stop')}>
+            <svg class="i sm" viewBox="0 0 24 24" aria-hidden="true" style={{ fill: 'currentColor', stroke: 'none' }}>
+              <rect width="12" height="12" x="6" y="6" rx="2" />
+            </svg>
+            <span aria-hidden="true">{t('composer.stop')}</span>
+          </button>
+        </Show>
       </div>
     </form>
   );

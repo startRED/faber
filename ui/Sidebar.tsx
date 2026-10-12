@@ -6,7 +6,7 @@ import { en, type Key } from './locales/en.ts';
 import { Peek } from './Mark.tsx';
 import { vendorName } from './models.ts';
 import type { Place } from './running.ts';
-import { groupChats, type Quotas, tailOf, tightest } from './sidebar.ts';
+import { groupChats, matches, type Quotas, tailOf, tightest } from './sidebar.ts';
 
 export function untilReset(resetsAt: number): string {
   const hours = (resetsAt * 1000 - Date.now()) / 3_600_000;
@@ -47,6 +47,9 @@ interface Props {
  * bottom Settings and the quota of each connected vendor. */
 export function Sidebar(props: Props) {
   const [confirming, setConfirming] = createSignal<string>();
+  // The search box filters the titles on screen; it never leaves the window and nothing is asked of the engine.
+  const [query, setQuery] = createSignal('');
+  const searching = () => query().trim() !== '';
   // The projects whose conversations show. The project the user is in starts open.
   const [open, setOpen] = createSignal<ReadonlySet<string>>(new Set(props.place.projectId ? [props.place.projectId] : []));
   const toggle = (id: string, on: boolean) =>
@@ -65,8 +68,11 @@ export function Sidebar(props: Props) {
       },
     ),
   );
-  const inProject = (p: Project) => props.conversations.filter((c) => c.area === 'project' && c.projectId === p.id);
-  const chats = () => groupChats(props.conversations.filter((c) => c.area === 'chat'), props.now);
+  const inProject = (p: Project) => props.conversations.filter((c) => c.area === 'project' && c.projectId === p.id && matches(c.title, query()));
+  // A project shows when its name or one of its conversations holds the search, and then opens on those conversations.
+  const projects = () => props.projects.filter((p) => !searching() || matches(p.name, query()) || inProject(p).length > 0);
+  const chats = () => groupChats(props.conversations.filter((c) => c.area === 'chat' && matches(c.title, query())), props.now);
+  const nothing = () => searching() && projects().length === 0 && chats().length === 0;
   // The first click asks, the second deletes.
   const remove = (id: string) => {
     if (confirming() !== id) return setConfirming(id);
@@ -103,6 +109,10 @@ export function Sidebar(props: Props) {
           <span class="count num">{props.projects.length}</span>
         </button>
       </div>
+      <label class="search">
+        <Icon name="search" small />
+        <input type="search" placeholder={t('side.search')} aria-label={t('side.search')} value={query()} onInput={(e) => setQuery(e.currentTarget.value)} />
+      </label>
       <div class="side-scroll" onMouseLeave={() => setConfirming(undefined)}>
         <section class="projects" aria-labelledby="side-projects">
           <div class="group-h">
@@ -120,7 +130,7 @@ export function Sidebar(props: Props) {
               </div>
             }
           >
-            <For each={props.projects}>
+            <For each={projects()}>
               {(p) => {
                 const tail = () => tailOf(props.running, p.id);
                 const here = () => props.place.area === 'project' && props.place.projectId === p.id;
@@ -140,12 +150,15 @@ export function Sidebar(props: Props) {
                       >
                         <span class="t">{p.name}</span>
                         <Show when={tail().running && tail().needs === 0}>
-                          <span class="run-dot" role="img" aria-label={t('side.running')} />
+                          <span class="tail run-dot" role="img" aria-label={t('side.running')} />
                         </Show>
+                        {/* Amber is a bubble and the words; in a row this narrow the words are the label and the tooltip. */}
                         <Show when={tail().needs > 0}>
-                          <span class="amber-tag">
+                          <span class="tail amber-tag" role="img" aria-label={t('run.needs', { n: tail().needs })} title={t('run.needs', { n: tail().needs })}>
                             <Icon name="ask" small />
-                            {t('run.needs', { n: tail().needs })}
+                            <span class="num" aria-hidden="true">
+                              {tail().needs}
+                            </span>
                           </span>
                         </Show>
                       </button>
@@ -153,7 +166,7 @@ export function Sidebar(props: Props) {
                         <Icon name="plus" small />
                       </button>
                     </div>
-                    <Show when={open().has(p.id)}>
+                    <Show when={open().has(p.id) || (searching() && inProject(p).length > 0)}>
                       <div class="proj-chats">
                         <For each={inProject(p)}>{(c) => <Row c={c} />}</For>
                       </div>
@@ -164,6 +177,9 @@ export function Sidebar(props: Props) {
             </For>
           </Show>
         </section>
+        <Show when={nothing()}>
+          <div class="side-empty">{t('side.noMatch')}</div>
+        </Show>
         <div class="list">
           <For each={chats()}>
             {(g) => (

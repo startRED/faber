@@ -515,7 +515,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
         onChoice={pickChoice}
         busy={busy() && !loading()}
         locked={loading()}
-        placeholder={area() === 'chat' ? t('composer.chatPlaceholder') : t('composer.projectPlaceholder')}
+        placeholder={area() === 'project' ? t('composer.projectPlaceholder') : newChat() ? t('composer.chatPlaceholder') : t('composer.replyPlaceholder')}
         onSend={(d) => void send(d)}
         onStop={() => current() && void api.interrupt(current()!.id)}
         onWarm={() => void api.warm({ conversationId: current()?.id, ...target(), choice: picked() })}
@@ -676,13 +676,11 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                     <Match when={area() === 'project'}>
                       <b>{t('crumb.project')}</b>
                     </Match>
-                    <Match when={true}>
-                      <b>{t('crumb.new')}</b>
-                    </Match>
+                    <Match when={true}>{t('crumb.new')}</Match>
                   </Switch>
                 </div>
                 <div class="right">
-                  <Show when={state().vendors.length > 0}>
+                  <Show when={state().vendors.length > 0 && !newChat()}>
                     <span class="chip" title={t('topbar.model')}>
                       <Show when={answering()} fallback={<>{options().find((o) => o.choice.vendor === picked().vendor && o.choice.model === picked().model)?.label}</>}>
                         {(m) => (
@@ -752,7 +750,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                     }
                   >
                     <Welcome
-                      recent={state().conversations.slice(0, 3)}
+                      recent={state().conversations.slice(0, 12)}
                       running={items()}
                       projects={state().projects}
                       onSuggest={(text) => fill?.(text)}
