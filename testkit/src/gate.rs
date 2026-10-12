@@ -25,10 +25,101 @@ pub fn run(args: &[String]) -> Option<i32> {
         Some("--tree-cli") => Some(tree_cli()),
         Some("--tree-child") => Some(tree_child()),
         Some("--engine-tree-host") => Some(engine_tree_host(&args[1..])),
+        Some("--guard-proof-host") => Some(guard_proof_host(&args[1..], true)),
+        Some("--cache-proof-host") => Some(guard_proof_host(&args[1..], false)),
+        Some("--eof") => {
+            use io::Read;
+            let mut input = String::new();
+            if io::stdin().read_to_string(&mut input).is_err() {
+                return Some(1);
+            }
+            println!("eof");
+            Some(0)
+        }
+        Some("--held-guard") | Some("--echo") => {
+            let mut line = String::new();
+            if io::stdin().read_line(&mut line).is_err() {
+                return Some(1);
+            }
+            print!("{line}");
+            Some(0)
+        }
         #[cfg(windows)]
         Some("--desktop-probe") => Some(crate::desktop::probe()),
         _ => None,
     }
+}
+
+fn guard_proof_host(args: &[String], spawn_probe: bool) -> i32 {
+    let [ready, release, example] = args else { return 1 };
+    let result: io::Result<()> = (|| {
+        use io::{Read, Write};
+        let binary = std::env::current_exe()?;
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
+        if spawn_probe {
+            runtime.block_on(async {
+                use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+                let mut p = faber_engine::proc::real_spawner()(
+                    binary.to_str().ok_or_else(|| io::Error::other("path"))?,
+                    &["--held-guard".into(), release.into()],
+                    &std::env::current_dir()?,
+                )?;
+                // This file must exist before the child can acknowledge; a synchronous ack wait deadlocks this proof.
+                std::fs::write(release, b"spawn returned")?;
+                p.stdin.write_all(b"echo\n").await?;
+                let mut line = String::new();
+                BufReader::new(p.stdout).read_line(&mut line).await?;
+                if line != "echo\n" {
+                    return Err(io::Error::other("guard consumed input"));
+                }
+                let p = faber_engine::proc::real_spawner()(
+                    binary.to_str().ok_or_else(|| io::Error::other("path"))?,
+                    &["--eof".into()],
+                    &std::env::current_dir()?,
+                )?;
+                drop(p.stdin);
+                let mut line = String::new();
+                tokio::time::timeout(Duration::from_secs(2), BufReader::new(p.stdout).read_line(&mut line))
+                    .await
+                    .map_err(|_| io::Error::other("native stdin did not close"))??;
+                if line != "eof\n" {
+                    return Err(io::Error::other("native EOF was not delivered"));
+                }
+                Ok::<_, io::Error>(())
+            })?;
+        }
+        let mut cmd = Command::new(example);
+        cmd.args(["--faber-process-guard", binary.to_str().ok_or_else(|| io::Error::other("path"))?, "--echo"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(crate::contain::NO_WINDOW);
+        }
+        let mut child = cmd.spawn()?;
+        let mut input = child.stdin.take().expect("piped");
+        let mut output = child.stdout.take().expect("piped");
+        input.write_all(b"G")?;
+        input.flush()?;
+        let mut ack = [0];
+        output.read_exact(&mut ack)?;
+        if ack != *b"R" {
+            let _ = child.kill();
+            return Err(io::Error::other("example omitted guard dispatch"));
+        }
+        input.write_all(b"echo\n")?;
+        input.flush()?;
+        let mut line = String::new();
+        io::BufReader::new(output).read_line(&mut line)?;
+        if line != "echo\n" || !child.wait()?.success() {
+            return Err(io::Error::other("example guard failed"));
+        }
+        std::fs::write(ready, b"guard and example passed")?;
+        Ok(())
+    })();
+    if result.is_ok() { 0 } else { 1 }
 }
 
 fn spawn_fake(mode: &str) -> io::Result<std::process::Child> {

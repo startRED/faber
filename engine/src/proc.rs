@@ -9,17 +9,19 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::process::{Child, Command};
 use tokio::time::{Duration, Instant};
 
-/// Silence starts a graceful interrupt; output can never extend the interrupt's fixed grace period.
+/// Only automatic roles arm silence; explicit interrupts always have a fixed grace period.
 #[derive(Default)]
 pub(crate) struct TurnWatch {
+    running: bool,
     silent: Option<Instant>,
     interrupt: Option<Instant>,
     awaiting_permission: bool,
 }
 
 impl TurnWatch {
-    pub fn begin(&mut self) {
-        self.silent = Some(Instant::now() + Duration::from_secs(120));
+    pub fn begin(&mut self, automated: bool) {
+        self.running = true;
+        self.silent = automated.then(|| Instant::now() + Duration::from_secs(120));
         self.awaiting_permission = false;
     }
     pub fn activity(&mut self) {
@@ -31,6 +33,7 @@ impl TurnWatch {
         self.interrupt.get_or_insert_with(|| Instant::now() + Duration::from_secs(5));
     }
     pub fn finish(&mut self) {
+        self.running = false;
         self.silent = None;
         self.interrupt = None;
         self.awaiting_permission = false;
@@ -46,7 +49,7 @@ impl TurnWatch {
         self.interrupt.is_some()
     }
     pub fn active(&self) -> bool {
-        self.silent.is_some() || self.interrupt.is_some()
+        self.running || self.interrupt.is_some()
     }
     pub fn deadline(&self) -> Option<Instant> {
         self.interrupt.or(if self.awaiting_permission { None } else { self.silent })
@@ -75,7 +78,7 @@ pub struct Process {
     #[cfg(windows)]
     inner: std::process::Child,
     #[cfg(windows)]
-    job: Option<win32job::Job>,
+    job: Arc<Mutex<Option<win32job::Job>>>,
 }
 
 impl Process {
@@ -93,7 +96,7 @@ impl Process {
     pub fn start_kill(&mut self) -> io::Result<()> {
         #[cfg(windows)]
         {
-            drop(self.job.take());
+            drop(self.job.lock().unwrap().take());
             if self.inner.try_wait()?.is_none() {
                 self.inner.kill()?;
             }
@@ -125,7 +128,7 @@ impl Process {
 #[cfg(windows)]
 impl Drop for Process {
     fn drop(&mut self) {
-        drop(self.job.take());
+        drop(self.job.lock().unwrap().take());
         let _ = self.inner.kill();
     }
 }
@@ -192,7 +195,7 @@ pub fn real_spawner() -> Spawner {
 
 #[cfg(windows)]
 fn spawn_windows(bin: &str, args: &[String], cwd: &Path) -> io::Result<Proc> {
-    use std::io::{Read, Write};
+    use std::io::Write;
     use std::os::windows::{io::AsRawHandle, process::CommandExt};
     let job = win32job::Job::create().map_err(io::Error::other)?;
     let mut limits = job.query_extended_limit_info().map_err(io::Error::other)?;
@@ -208,24 +211,44 @@ fn spawn_windows(bin: &str, args: &[String], cwd: &Path) -> io::Result<Proc> {
         .stderr(Stdio::piped())
         .creation_flags(0x0800_0000)
         .spawn()?;
-    let mut process = Process { inner: child, job: Some(job) };
-    process.job.as_ref().expect("owned job").assign_process(process.inner.as_raw_handle() as isize).map_err(io::Error::other)?;
+    let mut process = Process { inner: child, job: Arc::new(Mutex::new(Some(job))) };
+    process
+        .job
+        .lock()
+        .unwrap()
+        .as_ref()
+        .expect("owned job")
+        .assign_process(process.inner.as_raw_handle() as isize)
+        .map_err(io::Error::other)?;
     let mut stdin = process.inner.stdin.take().expect("piped stdin");
     stdin.write_all(b"G")?;
     stdin.flush()?;
-    let mut stdout = process.inner.stdout.take().expect("piped stdout");
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
+    let mut stdin = tokio::process::ChildStdin::from_std(stdin)?;
+    let mut stdout = tokio::process::ChildStdout::from_std(process.inner.stdout.take().expect("piped stdout"))?;
+    let (input, mut pending) = tokio::io::duplex(8192);
+    let (mut output, reader) = tokio::io::duplex(8192);
+    let job = process.job.clone();
+    // Await startup outside the synchronous spawner/engine lock; no CLI input can precede the guard ack.
+    tokio::spawn(async move {
         let mut ack = [0];
-        let ready =
-            stdout.read_exact(&mut ack).and_then(|()| if ack == *b"R" { Ok(stdout) } else { Err(io::Error::other("invalid guard ack")) });
-        let _ = tx.send(ready);
+        if !matches!(tokio::time::timeout(Duration::from_secs(5), stdout.read_exact(&mut ack)).await, Ok(Ok(_))) || ack != *b"R" {
+            drop(job.lock().unwrap().take());
+            return;
+        }
+        let input = async move {
+            let _ = tokio::io::copy(&mut pending, &mut stdin).await;
+            let _ = stdin.shutdown().await;
+        };
+        let output = async move {
+            let _ = tokio::io::copy(&mut stdout, &mut output).await;
+            let _ = output.shutdown().await;
+        };
+        tokio::join!(input, output);
     });
-    let stdout = rx.recv_timeout(std::time::Duration::from_secs(5)).map_err(|_| io::Error::other("guard timed out"))??;
     let stderr = process.inner.stderr.take().map(tokio::process::ChildStderr::from_std).transpose()?;
     Ok(Proc {
-        stdin: Box::new(tokio::process::ChildStdin::from_std(stdin)?),
-        stdout: Box::new(tokio::process::ChildStdout::from_std(stdout)?),
+        stdin: Box::new(input),
+        stdout: Box::new(reader),
         stderr: stderr.map(|s| Box::new(s) as Box<dyn AsyncRead + Send + Unpin>),
         child: Some(process),
     })
@@ -303,7 +326,7 @@ mod lifecycle_tests {
     #[tokio::test(start_paused = true)]
     async fn waiting_for_permission_has_no_silence_deadline_but_stop_is_still_bounded() {
         let mut watch = TurnWatch::default();
-        watch.begin();
+        watch.begin(true);
         watch.pause();
         watch.activity();
         assert!(watch.active());
@@ -311,7 +334,7 @@ mod lifecycle_tests {
         watch.interrupt();
         assert_eq!(watch.deadline(), Some(Instant::now() + Duration::from_secs(5)));
         watch.finish();
-        watch.begin();
+        watch.begin(true);
         watch.pause();
         watch.resume();
         assert_eq!(watch.deadline(), Some(Instant::now() + Duration::from_secs(120)));
@@ -321,7 +344,7 @@ mod lifecycle_tests {
     async fn output_and_repeated_interrupts_cannot_extend_the_stop_grace() {
         let mut watch = TurnWatch::default();
         assert!(!watch.active());
-        watch.begin();
+        watch.begin(true);
         assert_eq!(watch.deadline(), Some(Instant::now() + Duration::from_secs(120)));
         watch.interrupt();
         let stop = watch.deadline();

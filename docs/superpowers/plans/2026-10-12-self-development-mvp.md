@@ -150,6 +150,16 @@ Task 2 follow-up evidence (2026-10-12, `selfdev-t2`):
 - Follow-up GA: all seven required proof commands exit 0; `cargo t --all` reports 590 passed, no failures/skips.
   The Windows fake tree scenario removes four owned processes in each mode and preserves the stale-PID peer.
 
+Second review follow-up: [Opus disposition](../../research/2026-10-12-task-2-opus-review.md).
+Manual sessions have no automatic silence interrupt; role watches and explicit stops remain bounded.
+Provider pinning matches the probe, role resume IDs are validated, guard acknowledgement is asynchronous,
+the cache example dispatches guard mode, and reordered Codex completions require a matching RPC identity.
+Both role loops replay native-denial fixtures. Job proofs cover inherited members; delegated WMI/task/COM
+launches, read/network scope, hostile config, mention expansion and real resume policy remain prerequisites.
+No additional model session is authorized or executed in this round; all automated roles remain denied.
+Second-review GA: all required proofs exit 0; full run 602 passed, no failures/skips. The EOF regression was
+reproduced with a fake child and fixed through forwarding-future ownership. Warm guard 2.0 MB, warm tree 117.2 MB.
+
 ## Task 3 — Add priced live grants and the hard daily gate
 
 Files: `engine/src/usage.rs`, `engine/src/budget.rs`, `engine/src/ledger.rs`, `engine/src/signals.rs`,

@@ -316,9 +316,7 @@ mod live {
             args.extend(["--no-session-persistence".into(), "--max-budget-usd".into(), "0.03".into()]);
             args
         } else {
-            let mut args = project_codex_args(true);
-            args.extend(["-c".into(), "model_provider=\"openai\"".into()]);
-            args
+            project_codex_args(true)
         };
         let args: Vec<_> = cli.prefix.iter().cloned().chain(args).collect();
         let mut p = real_spawner()(&cli.command, &args, &repo)?;

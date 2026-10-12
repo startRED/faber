@@ -90,6 +90,9 @@ pub fn project_claude_args(launch: &ClaudeLaunch, role: crate::project::Role) ->
         launch.effort.as_deref(),
         launch.instructions.is_some() || launch.area != Area::Project,
     )?;
+    if launch.resume.as_deref().is_some_and(|id| uuid::Uuid::parse_str(id).is_err()) {
+        return Err(policy::Blocker::Invocation);
+    }
     let mut restricted = launch.clone();
     restricted.instructions = Some(policy::instructions(role).into());
     restricted.user_name = None;
@@ -305,7 +308,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                             }
                             if msg["type"] == "result" {
                                 for turn in std::mem::take(&mut queued) {
-                                    watch.begin();
+                                    watch.begin(project);
                                     let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
                                 }
                             }
@@ -316,7 +319,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                 cmd = rx.recv(), if !closed => match cmd {
                     Some(SessionCommand::Send(turn)) => {
                         if watch.stopping() { queued.push(turn); continue; }
-                        watch.begin();
+                        watch.begin(project);
                         let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
                     }
                     Some(SessionCommand::Answer { request_id, allow, ack }) => {
@@ -346,7 +349,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                         let _ = ack.send(delivery);
                     }
                     Some(SessionCommand::Interrupt) => {
-                        if watch.stopping() { continue; }
+                        if !watch.active() || watch.stopping() { continue; }
                         watch.interrupt();
                         control_id += 1;
                         let msg = json!({ "type": "control_request", "request_id": format!("faber-{control_id}"), "request": { "subtype": "interrupt" } });
@@ -386,4 +389,59 @@ fn user_message(turn: &UserTurn) -> Value {
         Value::Array(blocks)
     };
     json!({ "type": "user", "message": { "role": "user", "content": content }, "parent_tool_use_id": null, "session_id": "" })
+}
+
+#[cfg(test)]
+mod role_tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test(start_paused = true)]
+    async fn automated_loop_denies_every_fixture_tool_and_keeps_a_bounded_silence_watch() {
+        let (stdin, input) = tokio::io::duplex(65536);
+        let (mut output, stdout) = tokio::io::duplex(65536);
+        let fake = Arc::new(std::sync::Mutex::new(Some(proc::Proc {
+            stdin: Box::new(stdin),
+            stdout: Box::new(stdout),
+            stderr: None,
+            child: None,
+        })));
+        let spawn: Spawner = Arc::new(move |_, _, _| Ok(fake.lock().unwrap().take().unwrap()));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let opts = ClaudeOptions {
+            bin: "fake".into(),
+            cwd: ".".into(),
+            launch: ClaudeLaunch {
+                area: Area::Project,
+                model: None,
+                effort: None,
+                resume: None,
+                user_hooks: false,
+                instructions: None,
+                user_name: None,
+            },
+            spawn,
+        };
+        let session = start_with_policy(opts, Arc::new(move |e| drop(tx.send(e))), vec![], true);
+        let mut lines = BufReader::new(input).lines();
+        session.send(UserTurn::text("work"));
+        assert_eq!(serde_json::from_str::<Value>(&lines.next_line().await.unwrap().unwrap()).unwrap()["type"], "user");
+        let mut denied = 0;
+        for line in include_str!("../../tests/fixtures/projects/policy-escapes.jsonl").lines() {
+            let entry: Value = serde_json::from_str(line).unwrap();
+            if entry["msg"]["type"] != "control_request" {
+                continue;
+            }
+            output.write_all(format!("{}\n", entry["msg"]).as_bytes()).await.unwrap();
+            let reply: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(reply["response"]["request_id"], entry["msg"]["request_id"]);
+            assert_eq!(reply["response"]["response"]["behavior"], "deny");
+            denied += 1;
+        }
+        assert_eq!(denied, 9);
+        tokio::time::advance(std::time::Duration::from_secs(120)).await;
+        let interrupt: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+        assert_eq!(interrupt["request"]["subtype"], "interrupt");
+        assert!(matches!(rx.recv().await,Some(EngineEvent::Error { message,fatal:true }) if message == "error.cli.interruptTimeout"));
+    }
 }

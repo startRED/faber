@@ -11,6 +11,94 @@ use std::sync::Arc;
 use std::time::Duration;
 use support::{Entry, drive, fake, fixture, next_permission, text_of};
 
+#[tokio::test(start_paused = true)]
+async fn opus_1_codex_manual_turns_stay_available_after_long_silence_or_start_error() {
+    for area in [Area::Chat, Area::Project] {
+        let (spawn, mut input, mut output) = support::controlled();
+        let server =
+            CodexServer::start(CodexServerOptions { bin: "fake".into(), cwd: ".".into(), area, user_hooks: false, windows: false, spawn });
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let session = server.open(
+            CodexThread { cwd: ".".into(), model: None, effort: None, resume: None, instructions: None, user_name: None },
+            Arc::new(move |e| drop(tx.send(e))),
+        );
+        support::expect_method(&mut input, "initialize").await;
+        support::emit(&mut output, json!({"id":1,"result":{}})).await;
+        support::expect_method(&mut input, "initialized").await;
+        support::expect_method(&mut input, "thread/start").await;
+        support::emit(&mut output, json!({"id":2,"result":{"thread":{"id":"t"}}})).await;
+        assert!(matches!(rx.recv().await, Some(EngineEvent::Started { .. })));
+        session.send(UserTurn::text("long tool"));
+        let first = support::expect_method(&mut input, "turn/start").await;
+        support::emit(&mut output, json!({"id":first["id"],"result":{"turn":{"id":"one"}}})).await;
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_secs(600)).await;
+        tokio::task::yield_now().await;
+        assert!(rx.try_recv().is_err());
+        session.send(UserTurn::text("second"));
+        let second = support::expect_method(&mut input, "turn/start").await;
+        support::emit(&mut output, json!({"id":second["id"],"error":{"code":-1,"message":"rejected"}})).await;
+        assert!(matches!(rx.recv().await, Some(EngineEvent::Error { fatal: false, .. })));
+        tokio::time::advance(Duration::from_secs(600)).await;
+        tokio::task::yield_now().await;
+        assert!(rx.try_recv().is_err(), "a failed start left the watchdog armed");
+        session.send(UserTurn::text("third"));
+        support::expect_method(&mut input, "turn/start").await;
+        session.close();
+        server.retire();
+    }
+}
+
+#[tokio::test]
+async fn opus_unconfirmed_completion_before_the_start_response_is_not_lost() {
+    let mut entries = vec![];
+    let mut response = None;
+    for entry in fixture("codex", "chat") {
+        if entry.msg["method"] == "turn/started" {
+            continue;
+        }
+        if entry.msg["result"]["turn"]["id"].is_string() {
+            response = Some(entry);
+            continue;
+        }
+        let completed = entry.msg["method"] == "turn/completed";
+        if completed {
+            let mut stale = entry.msg.clone();
+            stale["params"]["turn"]["id"] = "stale".into();
+            entries.push(Entry { input: false, msg: stale });
+        }
+        entries.push(entry);
+        if completed && let Some(reply) = response.take() {
+            entries.push(reply);
+        }
+    }
+    check_chat(entries).await;
+}
+
+#[tokio::test]
+async fn excessive_unidentified_completions_fail_closed_without_accepting_a_stale_turn() {
+    let mut entries = vec![];
+    for entry in fixture("codex", "chat") {
+        if entry.msg["method"] == "turn/started" || entry.msg["result"]["turn"]["id"].is_string() {
+            continue;
+        }
+        if entry.msg["method"] == "turn/completed" {
+            for id in ["stale-a", "stale-b", "stale-c"] {
+                let mut msg = entry.msg.clone();
+                msg["params"]["turn"]["id"] = id.into();
+                entries.push(Entry { input: false, msg });
+            }
+            break;
+        }
+        entries.push(entry);
+    }
+    let (events, mismatches) =
+        run(entries, "In one sentence: why is the sky blue?", None, |e, _| matches!(e, EngineEvent::Error { fatal: true, .. })).await;
+    assert!(mismatches.is_empty());
+    assert!(!events.iter().any(|e| matches!(e, EngineEvent::Done { .. })));
+    assert!(matches!(events.last(),Some(EngineEvent::Error {message,fatal:true}) if message == "error.cli.stopUnconfirmed"));
+}
+
 #[tokio::test]
 async fn review_3_completion_without_started_uses_the_turn_start_response_identity() {
     let entries = fixture("codex", "chat").into_iter().filter(|e| e.msg["method"] != "turn/started").collect();

@@ -8,10 +8,56 @@ use serde_json::{Value, json};
 use std::time::Duration;
 
 pub fn scenarios() -> Vec<Scenario> {
-    vec![Scenario {
-        name: "projects: engine jobs end grandchildren on stop, drop and owner crash; stale PID records cannot kill a peer",
-        run: trees,
-    }]
+    vec![
+        Scenario { name: "projects: guard acknowledgement never blocks spawn", run: |ctx| guards(ctx, "--guard-proof-host") },
+        Scenario { name: "projects: cache example dispatches guard mode without a model", run: |ctx| guards(ctx, "--cache-proof-host") },
+        Scenario { name: "projects: warm CLI guard memory is measured", run: warm_memory },
+        Scenario {
+            name: "projects: engine jobs end grandchildren on stop, drop and owner crash; stale PID records cannot kill a peer",
+            run: trees,
+        },
+    ]
+}
+
+fn guards(ctx: &mut Ctx, mode: &str) -> Result {
+    let ready = ctx.sb.sandbox.join("guard-proof-ready");
+    let release = ctx.sb.sandbox.join("guard-proof-release");
+    let example = ctx.paths.fake_cli.parent().ok_or("missing debug directory")?.join("examples/cache_probe.exe");
+    let env = crate::sandbox::child_env(&std::env::vars().collect::<Vec<_>>(), &ctx.sb, &Default::default(), &ctx.paths.fake_cli);
+    let args = vec![
+        mode.into(),
+        ready.to_string_lossy().into_owned(),
+        release.to_string_lossy().into_owned(),
+        example.to_string_lossy().into_owned(),
+    ];
+    let (host, _, _) = Owned::start(&ctx.paths.fake_cli, &args, &env, &ctx.sb.sandbox, &ctx.paths.fake_cli).map_err(|e| e.to_string())?;
+    let result = eventually("guard stdin/stdout roundtrip and cache example dispatch", Duration::from_secs(10), || ready.exists());
+    host.terminate();
+    result
+}
+
+fn warm_memory(ctx: &mut Ctx) -> Result {
+    super::start_settings(ctx, "en")?;
+    std::fs::write(ctx.sb.state.join("claude.signed-in"), "true").map_err(|e| e.to_string())?;
+    let mut launch = super::claude_chat(ctx);
+    launch.recording = Some(ctx.paths.fixtures.join("setup/claude.setup.json"));
+    let mut app = ctx.launch(launch)?;
+    super::ask(&mut app.page, "In one sentence: why is the sky blue?")?;
+    let answer = app.page.named("article", "answer.label")?;
+    app.page.wait_visible(&answer.css(".actions"))?;
+    let rows = snapshot()?;
+    let records = ctx.records()?;
+    let cli = records
+        .iter()
+        .filter(|r| r.args.iter().any(|a| a == "-p"))
+        .find_map(|r| rows.iter().find(|p| p.pid == r.pid))
+        .ok_or("no warm fake CLI")?;
+    let guard = rows.iter().find(|p| p.pid == cli.parent).ok_or("no CLI guard")?;
+    let guard_mb = crate::proctree::private_mb(guard.pid)? - crate::proctree::private_mb(cli.pid)?;
+    let (total, _) = ctx.memory_mb(app.id)?;
+    ensure(guard_mb > 0.0 && total < 250.0, || format!("warm memory: guard {guard_mb:.1} MB, app tree {total:.1} MB"))?;
+    ctx.notes.push(format!("warm guard {guard_mb:.1} MB; whole app tree {total:.1} MB"));
+    Ok(())
 }
 
 fn trees(ctx: &mut Ctx) -> Result {

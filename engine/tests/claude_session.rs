@@ -11,6 +11,48 @@ fn launch(area: Area) -> ClaudeLaunch {
     ClaudeLaunch { area, model: None, effort: None, resume: None, user_hooks: false, instructions: None, user_name: None }
 }
 
+#[tokio::test(start_paused = true)]
+async fn opus_1_manual_turns_may_be_silent_for_a_long_tool() {
+    for area in [Area::Chat, Area::Project] {
+        let (spawn, mut input, _output) = support::controlled();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let session = start_claude(
+            ClaudeOptions { bin: "fake".into(), cwd: ".".into(), launch: launch(area), spawn },
+            Arc::new(move |e| drop(tx.send(e))),
+        );
+        session.send(UserTurn::text("long tool"));
+        assert_eq!(support::read_message(&mut input).await["type"], "user");
+        tokio::time::advance(Duration::from_secs(600)).await;
+        tokio::task::yield_now().await;
+        assert!(rx.try_recv().is_err(), "a manual silent turn was interrupted");
+        session.send(UserTurn::text("still available"));
+        assert_eq!(support::read_message(&mut input).await["message"]["content"], "still available");
+        session.close();
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn opus_4_interrupt_after_completion_keeps_the_warm_session() {
+    let (spawn, mut input, mut output) = support::controlled();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let session = start_claude(
+        ClaudeOptions { bin: "fake".into(), cwd: ".".into(), launch: launch(Area::Chat), spawn },
+        Arc::new(move |e| drop(tx.send(e))),
+    );
+    session.send(UserTurn::text("first"));
+    support::read_message(&mut input).await;
+    support::emit(&mut output, serde_json::json!({"type":"result","subtype":"success"})).await;
+    assert!(matches!(rx.recv().await, Some(EngineEvent::Done { .. })));
+    session.interrupt();
+    tokio::task::yield_now().await;
+    tokio::time::advance(Duration::from_secs(6)).await;
+    tokio::task::yield_now().await;
+    assert!(rx.try_recv().is_err(), "idle interrupt killed a warm session");
+    session.send(UserTurn::text("second"));
+    assert_eq!(support::read_message(&mut input).await["message"]["content"], "second");
+    session.close();
+}
+
 #[tokio::test]
 async fn review_7_claude_preserves_a_turn_sent_before_interrupt_acknowledgement() {
     let (spawn, mut input, mut output) = support::controlled();
@@ -67,25 +109,6 @@ async fn an_ignored_interrupt_ends_the_owned_pipe_without_waiting_forever() {
     let event = tokio::time::timeout(Duration::from_secs(10), rx.recv()).await.unwrap().unwrap();
     assert!(f.mismatches.lock().unwrap().is_empty());
     assert!(matches!(event, EngineEvent::Error { message, fatal: true } if message == "error.cli.interruptTimeout"));
-}
-
-#[tokio::test(start_paused = true)]
-async fn a_silent_turn_is_interrupted_then_ended_if_unacknowledged() {
-    let entries = vec![
-        Entry { input: true, msg: serde_json::json!({"type":"user", "message":{"content":"work"}}) },
-        Entry { input: true, msg: serde_json::json!({"type":"control_request", "request":{"subtype":"interrupt"}}) },
-    ];
-    let f = fake(entries);
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    let session = start_claude(
-        ClaudeOptions { bin: "fake".into(), cwd: ".".into(), launch: launch(Area::Chat), spawn: f.spawn.clone() },
-        Arc::new(move |e| drop(tx.send(e))),
-    );
-    session.send(UserTurn::text("work"));
-    let event = tokio::time::timeout(Duration::from_secs(130), rx.recv()).await.unwrap().unwrap();
-    assert!(matches!(event, EngineEvent::Error { message, fatal:true } if message == "error.cli.interruptTimeout"));
-    assert_eq!(f.wire.lines_with("control_request"), 1);
-    assert!(f.mismatches.lock().unwrap().is_empty());
 }
 
 async fn run(

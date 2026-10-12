@@ -15,6 +15,8 @@
 //! Task 6 executes the existing strict read/patch/proof envelopes, and Task 4 owns git/lease path enforcement.
 //! The hidden fake CLI tree scenario proves Windows stop/drop/crash cleanup without PID adoption. The owner-authorized
 //! opt-in experiment is in testkit/examples/project-policy-probes.rs; bounded observations never unlock admission.
+//! Owned-tree termination covers inherited job members, not WMI/scheduled-task/COM broker launches. Restrictions
+//! must exclude those command surfaces before admission; native reads, repo config and mention expansion are unproven.
 //! Evidence and remaining limits: docs/research/2026-10-12-project-policy-probes.md (six session slots consumed).
 //! Protocol reference (config overrides, thread sandbox and approval policy):
 //! https://developers.openai.com/codex/app-server . This describes requests, not installed-version enforcement.

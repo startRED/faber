@@ -95,6 +95,26 @@ async fn review_1_codex_native_approvals_are_declined_and_malformed_requests_fai
 
 const ROLES: [Role; 5] = [Role::Lead, Role::Research, Role::TestProposal, Role::Writer, Role::Reviewer];
 
+#[test]
+fn opus_2_production_and_probe_use_the_same_pinned_provider() {
+    assert!(project_codex_args(true).windows(2).any(|a| a == ["-c", "model_provider=\"openai\""]));
+}
+
+#[test]
+fn opus_3_and_9_residual_native_tools_cannot_unlock_any_role() {
+    for vendor in [Vendor::Claude, Vendor::Codex] {
+        assert!(blockers(vendor).contains(&Blocker::Restrictions));
+        assert_eq!(faber_engine::project::policy::admit(vendor), Err(Blocker::Restrictions));
+    }
+}
+
+#[test]
+fn opus_10_role_resume_rejects_flag_values_before_spawn() {
+    for id in ["--add-dir", "-x", "saved-session", "", "--help"] {
+        assert_eq!(project_claude_args(&launch(Some(id)), Role::Writer), Err(Blocker::Invocation));
+    }
+}
+
 fn launch(resume: Option<&str>) -> ClaudeLaunch {
     ClaudeLaunch {
         area: Area::Project,
@@ -125,7 +145,7 @@ fn after<'a>(args: &'a [String], flag: &str) -> &'a str {
 #[test]
 fn project_controls_are_explicit_on_launch_and_resume_without_changing_chat() {
     for role in ROLES {
-        for resume in [None, Some("saved-session")] {
+        for resume in [None, Some("5e27c797-25b6-434d-a0a2-0e0e0c32ef9e")] {
             let args = project_claude_args(&launch(resume), role).unwrap();
             assert_eq!(after(&args, "--model"), "claude-sonnet-4-6");
             assert_eq!(after(&args, "--effort"), "high");
@@ -181,7 +201,7 @@ fn project_policy_rejects_hidden_defaults_and_side_question_policy() {
 #[tokio::test]
 async fn every_automated_role_is_denied_before_spawn_even_with_explicit_controls() {
     for role in ROLES {
-        for resume in [None, Some("saved-session")] {
+        for resume in [None, Some("5e27c797-25b6-434d-a0a2-0e0e0c32ef9e")] {
             let f = fake(vec![]);
             let opts = ClaudeOptions { bin: "fake".into(), cwd: ".".into(), launch: launch(resume), spawn: f.spawn.clone() };
             assert_eq!(start_project_claude(opts, role, Arc::new(|_| {})).unwrap_err(), Blocker::Restrictions);

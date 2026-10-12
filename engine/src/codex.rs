@@ -8,7 +8,7 @@ use crate::proc::{self, Spawner};
 use crate::signals::{codex_account, codex_signals};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -46,6 +46,7 @@ pub fn codex_args(area: Area, windows: bool, user_hooks: bool) -> Vec<String> {
 /// Automatic roles omit customizations; manual Projects and Chat keep their existing launch policy.
 pub fn project_codex_args(windows: bool) -> Vec<String> {
     let mut args = codex_args(Area::Chat, windows, false);
+    args.extend(["-c".into(), "model_provider=\"openai\"".into()]);
     for feature in ["shell_tool", "multi_agent", "multi_agent_v2"] {
         args.extend(["--disable".into(), feature.into()]);
     }
@@ -246,6 +247,7 @@ enum Waiting {
 
 /// A conversation's side of the shared process.
 struct Thread {
+    early_completion: Vec<Value>,
     sink: EventSink,
     params: CodexThread,
     id: Option<String>,
@@ -400,6 +402,7 @@ async fn serve(
     // Opened before Codex finished starting, in order, so request ids stay predictable.
     let mut pending: Vec<u64> = Vec::new();
     let mut waiting: HashMap<u64, Waiting> = HashMap::new();
+    let mut confirmed = VecDeque::new();
     let mut next_id = 0u64;
     let (mut ready, mut retired, mut stopping) = (false, false, false);
 
@@ -438,7 +441,10 @@ async fn serve(
                     }
                 }
             }
-            line = lines.next_line() => {
+            line = async {
+                if let Some(msg) = confirmed.pop_front() { Ok(Some(Value::to_string(&msg))) }
+                else { lines.next_line().await }
+            } => {
                 let Ok(Some(line)) = line else {
                     if !stopping {
                         let code = proc::exit_code(&mut child).await;
@@ -482,6 +488,11 @@ async fn serve(
                             for t in keys.iter().filter_map(|k| threads.get(k)) {
                                 (t.sink)(EngineEvent::Error { message: format!("Codex {what} failed: {detail}"), fatal });
                             }
+                            if let Waiting::Other(key,"turn/start") = kind && let Some(t) = threads.get_mut(&key) {
+                                t.watch.finish();
+                                t.turn = None;
+                                t.early_completion.clear();
+                            }
                             continue;
                         }
                         match kind {
@@ -503,7 +514,7 @@ async fn serve(
                                 by_id.insert(id.clone(), key);
                                 t.id = Some(id.clone());
                                 for turn in std::mem::take(&mut t.queued) {
-                                    t.watch.begin();
+                                    t.watch.begin(role.is_some());
                                     t.state.base = t.state.total;
                                     let params = turn_params(&id, t.params.effort.as_deref(), &turn);
                                     request!("turn/start", params, Waiting::Other(key, "turn/start"));
@@ -512,6 +523,9 @@ async fn serve(
                             Waiting::Other(key, "turn/start") => {
                                 if let Some(t) = threads.get_mut(&key) {
                                     t.turn = msg["result"]["turn"]["id"].as_str().map(String::from).or(t.turn.take());
+                                    if let Some(completed) = std::mem::take(&mut t.early_completion).into_iter().find(|msg|msg["params"]["turn"]["id"].as_str() == t.turn.as_deref()) {
+                                        confirmed.push_back(completed);
+                                    }
                                 }
                             }
                             Waiting::Other(..) => {}
@@ -548,6 +562,14 @@ async fn serve(
                         match thread_id.and_then(|t| by_id.get(t)).and_then(|k| threads.get_mut(k)) {
                             Some(t) => {
                                 if method == Some("turn/completed") && params["turn"]["id"].as_str() != t.turn.as_deref() {
+                                    if t.turn.is_none() && waiting.values().any(|w| matches!(w,Waiting::Other(key,"turn/start") if Some(key) == thread_id.and_then(|id|by_id.get(id)))) {
+                                        if t.early_completion.len() < 2 { t.early_completion.push(msg); }
+                                        else {
+                                            t.blocked = true;
+                                            t.watch.finish();
+                                            (t.sink)(EngineEvent::Error { message:"error.cli.stopUnconfirmed".into(),fatal:true });
+                                        }
+                                    }
                                     continue;
                                 }
                                 t.watch.activity();
@@ -563,7 +585,7 @@ async fn serve(
                                 }
                                 if method == Some("turn/completed") && !t.blocked && !t.closing && let Some(id) = t.id.clone() {
                                     for turn in std::mem::take(&mut t.queued) {
-                                        t.watch.begin();
+                                        t.watch.begin(role.is_some());
                                         t.state.base = t.state.total;
                                         request!("turn/start", turn_params(&id, t.params.effort.as_deref(), &turn), Waiting::Other(*by_id.get(&id).expect("registered thread"), "turn/start"));
                                     }
@@ -590,7 +612,7 @@ async fn serve(
             cmd = rx.recv(), if !stopping => match cmd {
                 Some(ServerCommand::Open { key, thread, sink }) => {
                     let state = CodexTurnState::new(thread.resume.is_some());
-                    let t = Thread { sink, params: thread, id: None, turn: None, queued: vec![], state, approvals: HashMap::new(), watch: proc::TurnWatch::default(), blocked: false, closing: false };
+                    let t = Thread { sink, params: thread, id: None, turn: None, queued: vec![], state, approvals: HashMap::new(), watch: proc::TurnWatch::default(), blocked: false, closing: false, early_completion: vec![] };
                     if ready {
                         let (method, params) = match role { Some(role) => project_thread_params(&t.params, role).expect("validated role"), None => thread_params(area, &t.params) };
                         request!(method, params, Waiting::Thread(key));
@@ -606,7 +628,7 @@ async fn serve(
                         if t.watch.stopping() { t.queued.push(turn); continue; }
                         match t.id.clone() {
                             Some(id) => {
-                                t.watch.begin();
+                                t.watch.begin(role.is_some());
                                 t.state.base = t.state.total;
                                 request!("turn/start", turn_params(&id, t.params.effort.as_deref(), &turn), Waiting::Other(key, "turn/start"));
                             }
@@ -779,4 +801,72 @@ pub async fn list_codex_models(bin: &str, cwd: &Path, windows: bool, spawn: Spaw
     let models = tokio::time::timeout(timeout, ask).await.unwrap_or_default();
     proc::stop(&mut *stdin, &mut child).await;
     models
+}
+
+#[cfg(test)]
+mod role_tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test(start_paused = true)]
+    async fn role_loop_declines_every_native_request_and_disarms_a_failed_start() {
+        let (stdin, input) = tokio::io::duplex(65536);
+        let (mut output, stdout) = tokio::io::duplex(65536);
+        let fake = Arc::new(std::sync::Mutex::new(Some(proc::Proc {
+            stdin: Box::new(stdin),
+            stdout: Box::new(stdout),
+            stderr: None,
+            child: None,
+        })));
+        let spawn: Spawner = Arc::new(move |_, _, _| Ok(fake.lock().unwrap().take().unwrap()));
+        let server = CodexServer::start_with_policy(
+            CodexServerOptions { bin: "fake".into(), cwd: ".".into(), area: Area::Project, user_hooks: false, windows: false, spawn },
+            Some(crate::project::Role::Writer),
+        );
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let session = server.open(
+            CodexThread {
+                cwd: ".".into(),
+                model: Some("gpt-6-luna".into()),
+                effort: Some("low".into()),
+                resume: None,
+                instructions: None,
+                user_name: None,
+            },
+            Arc::new(move |e| drop(tx.send(e))),
+        );
+        let mut lines = BufReader::new(input).lines();
+        lines.next_line().await.unwrap().unwrap();
+        output.write_all(b"{\"id\":1,\"result\":{}}\n").await.unwrap();
+        lines.next_line().await.unwrap().unwrap();
+        lines.next_line().await.unwrap().unwrap();
+        output.write_all(b"{\"id\":2,\"result\":{\"thread\":{\"id\":\"t\"}}}\n").await.unwrap();
+        assert!(matches!(rx.recv().await, Some(EngineEvent::Started { .. })));
+        let mut denied = 0;
+        for line in include_str!("../../tests/fixtures/projects/policy-escapes.jsonl").lines() {
+            let entry: Value = serde_json::from_str(line).unwrap();
+            if entry["msg"]["type"] != "control_request" {
+                continue;
+            }
+            let request = json!({"id":entry["msg"]["request_id"],"method":"item/commandExecution/requestApproval","params":{"threadId":"t","input":entry["msg"]["request"]}});
+            output.write_all(format!("{request}\n").as_bytes()).await.unwrap();
+            let reply: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(reply["id"], request["id"]);
+            assert_eq!(reply["result"]["decision"], "decline");
+            denied += 1;
+        }
+        assert_eq!(denied, 9);
+        session.send(UserTurn::text("failed start"));
+        let start: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+        output.write_all(format!("{}\n", json!({"id":start["id"],"error":{"code":-1,"message":"rejected"}})).as_bytes()).await.unwrap();
+        assert!(matches!(rx.recv().await, Some(EngineEvent::Error { fatal: false, .. })));
+        tokio::time::advance(std::time::Duration::from_secs(130)).await;
+        tokio::task::yield_now().await;
+        assert!(rx.try_recv().is_err(), "failed start left a deadline");
+        session.send(UserTurn::text("next"));
+        let next: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+        assert_eq!(next["method"], "turn/start");
+        session.close();
+        server.retire();
+    }
 }
