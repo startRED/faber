@@ -151,12 +151,10 @@ pub fn outside(points: &[Point], spans: &[Span], now: f64) -> Outside {
             continue;
         }
         o.outside += d;
-        if b.at > now - 7200.0 {
-            o.recent += d;
-        } else {
-            outside_before += d;
-            quiet_before += hours;
-        }
+        let recent_share = ((b.at - a.at.max(now - 7200.0)) / (b.at - a.at)).clamp(0.0, 1.0);
+        o.recent += d * recent_share;
+        outside_before += d * (1.0 - recent_share);
+        quiet_before += hours * (1.0 - recent_share);
     }
     o.rate = if quiet_before > 0.0 { outside_before / quiet_before } else { 0.0 };
     o

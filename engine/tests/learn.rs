@@ -99,7 +99,7 @@ fn movement_with_no_turn_of_faber_in_it_is_outside_use() {
 fn a_burst_from_outside_is_a_jump() {
     let now = MONDAY + 2.0 * DAY;
     // No history: any three points count.
-    let burst = [at(now - 3.0 * HOUR, 10.0, 9.0), at(now - HOUR, 15.0, 9.0)];
+    let burst = [at(now - 2.0 * HOUR, 10.0, 9.0), at(now, 15.0, 9.0)];
     assert!(outside(&burst, &[], now).jumped());
     let small = [at(now - 3.0 * HOUR, 10.0, 9.0), at(now - HOUR, 12.0, 9.0)];
     assert!(!outside(&small, &[], now).jumped());
@@ -211,4 +211,14 @@ fn a_capacity_that_moves_more_than_twice_is_a_plan_change() {
     assert!(!capacity_changed(10.0, 19.0));
     assert!(!capacity_changed(10.0, 6.0));
     assert!(!capacity_changed(0.0, 6.0));
+}
+
+#[test]
+fn an_overnight_gap_contributes_only_its_overlap_with_the_last_two_hours() {
+    let now = MONDAY + 2.0 * DAY;
+    let points = [at(now - 9.0 * HOUR, 40.0, 9.0), at(now, 45.0, 9.0)];
+    let o = outside(&points, &[], now);
+    near(o.recent, 5.0 * 2.0 / 9.0, 1e-9);
+    near(o.rate, 5.0 / 9.0, 1e-9);
+    assert!(!o.jumped());
 }

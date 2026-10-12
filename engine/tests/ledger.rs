@@ -146,8 +146,8 @@ fn a_capacity_that_jumps_is_a_plan_change_the_name_did_not_announce() {
 fn outside_use_shows_in_the_snapshot_as_a_jump() {
     let mut l = VendorLedger::default();
     let now = BASE + 10.0 * HOUR;
-    l.record("five_hour", 0.10, RESET, now - 3.0 * HOUR, 0);
-    l.record("five_hour", 0.16, RESET, now - HOUR, 0);
+    l.record("five_hour", 0.10, RESET, now - 2.0 * HOUR, 0);
+    l.record("five_hour", 0.16, RESET, now, 0);
     assert!(l.snap(now).jumped);
     assert!(l.outside(now).outside > 0.0);
 }
