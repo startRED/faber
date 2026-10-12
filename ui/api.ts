@@ -118,6 +118,7 @@ export type Experience = 'beginner' | 'experienced';
 export interface Settings {
   appearance?: Appearance;
   userHooks?: boolean;
+  permissions?: 'dontAsk' | 'ask';
   language?: string;
   setup?: 'done' | 'skipped';
   experience?: Experience;

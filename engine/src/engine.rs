@@ -136,6 +136,7 @@ struct Live {
     cli: Cli,
     /// The process continues a session an earlier process began.
     resumed: bool,
+    permissions: Permissions,
 }
 
 const HISTORY_LIMIT: usize = 20_000;
@@ -599,6 +600,7 @@ impl Core {
         let settings = Settings {
             appearance: patch.appearance.or(before.appearance),
             user_hooks: patch.user_hooks.or(before.user_hooks),
+            permissions: patch.permissions.or(before.permissions),
             language: patch.language.or(before.language),
             setup: patch.setup.or(before.setup),
             experience: patch.experience.or(before.experience),
@@ -610,8 +612,8 @@ impl Core {
         if settings.user_name != before.user_name {
             self.drop_draft();
         }
-        // Idle project CLIs restart on their next turn, so a changed hooks choice applies right away.
-        if settings.user_hooks != before.user_hooks {
+        // Idle project CLIs restart on their next turn, so changed hooks or permissions apply right away.
+        if settings.user_hooks != before.user_hooks || settings.permissions != before.permissions {
             let idle: Vec<String> = self
                 .live
                 .iter()
@@ -920,8 +922,14 @@ impl Core {
     fn launch(&mut self, conv: &str, pick: &Pick) -> Result<(), String> {
         self.tick += 1;
         let cli = self.opts.clis.get(&pick.vendor).cloned();
+        let permissions = self.store.settings().permissions.unwrap_or_default();
         if let Some(l) = self.live.get_mut(conv) {
-            if l.vendor == pick.vendor && l.model == pick.model && l.effort == pick.effort && Some(&l.cli) == cli.as_ref() {
+            if l.vendor == pick.vendor
+                && l.model == pick.model
+                && l.effort == pick.effort
+                && Some(&l.cli) == cli.as_ref()
+                && (self.convs.get(conv).is_some_and(|c| c.area == Area::Chat) || l.permissions == permissions)
+            {
                 l.used = self.tick; // most recently used
                 return Ok(());
             }
@@ -953,14 +961,14 @@ impl Core {
                 ClaudeOptions {
                     bin: cli.command.clone(),
                     cwd,
-                    launch: ClaudeLaunch { area, model, effort, resume, user_hooks, instructions: None, user_name },
+                    launch: ClaudeLaunch { area, model, effort, resume, user_hooks, permissions, instructions: None, user_name },
                     spawn,
                 },
                 sink,
             ),
             Vendor::Codex => self
                 .codex_server(area, user_hooks, &cli)
-                .open(CodexThread { cwd, model, effort, resume, instructions: None, user_name }, sink),
+                .open(CodexThread { cwd, model, effort, resume, instructions: None, user_name, permissions }, sink),
         };
         self.live.insert(
             conv.to_string(),
@@ -976,6 +984,7 @@ impl Core {
                 used: self.tick,
                 cli,
                 resumed,
+                permissions,
             },
         );
         // ponytail: count-based limit on idle Claude processes; a RAM budget across all CLIs comes with parallel workers.

@@ -5,7 +5,7 @@ use faber_engine::codex::{
     thread_params,
 };
 use faber_engine::events::{Delivery, EngineEvent, Session, UserTurn};
-use faber_engine::model::Area;
+use faber_engine::model::{Area, Permissions};
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,8 +17,15 @@ async fn run(
     resume: Option<&str>,
     react: impl FnMut(&EngineEvent, &Session) -> bool,
 ) -> (Vec<EngineEvent>, Vec<String>) {
-    let thread =
-        CodexThread { cwd: ".".into(), model: None, effort: None, resume: resume.map(String::from), instructions: None, user_name: None };
+    let thread = CodexThread {
+        cwd: ".".into(),
+        model: None,
+        effort: None,
+        resume: resume.map(String::from),
+        instructions: None,
+        user_name: None,
+        permissions: Permissions::Ask,
+    };
     drive(
         entries,
         |spawn, sink| {
@@ -124,7 +131,15 @@ async fn codex_an_answer_that_fails_to_write_keeps_the_approval_and_the_retry_is
         spawn: f.spawn.clone(),
     };
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    let thread = CodexThread { cwd: ".".into(), model: None, effort: None, resume: None, instructions: None, user_name: None };
+    let thread = CodexThread {
+        cwd: ".".into(),
+        model: None,
+        effort: None,
+        resume: None,
+        instructions: None,
+        user_name: None,
+        permissions: Permissions::Ask,
+    };
     let session = CodexServer::start(opts).open(thread, Arc::new(move |e| drop(tx.send(e))));
     session.send(UserTurn::text("Create a.txt containing one. Then create b.txt containing two. Make each file in a separate step."));
     let request = next_permission(&mut rx).await;
@@ -157,7 +172,15 @@ async fn codex_an_answer_that_may_be_half_written_is_never_written_again() {
         spawn: f.spawn.clone(),
     };
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    let thread = CodexThread { cwd: ".".into(), model: None, effort: None, resume: None, instructions: None, user_name: None };
+    let thread = CodexThread {
+        cwd: ".".into(),
+        model: None,
+        effort: None,
+        resume: None,
+        instructions: None,
+        user_name: None,
+        permissions: Permissions::Ask,
+    };
     let session = CodexServer::start(opts).open(thread, Arc::new(move |e| drop(tx.send(e))));
     session.send(UserTurn::text("Create a.txt containing one. Then create b.txt containing two. Make each file in a separate step."));
     let request = next_permission(&mut rx).await;
@@ -241,10 +264,10 @@ fn codex_chat_is_lean_and_sandboxed_projects_keep_the_user_setup_without_hooks()
     assert!(!project.contains("plugins") && !project.contains("mcp_servers"));
     assert!(!codex_args(Area::Project, false, true).join(" ").contains("hooks"));
     for area in [Area::Chat, Area::Project] {
-        assert_eq!(codex_thread(area, None)["sandbox"], "workspace-write");
-        assert_eq!(codex_thread(area, None)["approvalPolicy"], "on-request");
+        assert_eq!(codex_thread(area, None, Permissions::Ask)["sandbox"], "workspace-write");
+        assert_eq!(codex_thread(area, None, Permissions::Ask)["approvalPolicy"], "on-request");
     }
-    assert!(codex_thread(Area::Chat, None).contains_key("baseInstructions"));
+    assert!(codex_thread(Area::Chat, None, Permissions::Ask).contains_key("baseInstructions"));
 }
 
 #[tokio::test]
@@ -278,8 +301,15 @@ async fn one_process_serves_two_conversations_at_once_and_keeps_their_answers_ap
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let open = |name: &'static str| {
         let tx = tx.clone();
-        let thread =
-            CodexThread { cwd: ".".into(), model: None, effort: Some("medium".into()), resume: None, instructions: None, user_name: None };
+        let thread = CodexThread {
+            cwd: ".".into(),
+            model: None,
+            effort: Some("medium".into()),
+            resume: None,
+            instructions: None,
+            user_name: None,
+            permissions: Permissions::Ask,
+        };
         server.open(thread, Arc::new(move |e| drop(tx.send((name, e)))))
     };
     let (a, b) = (open("a"), open("b"));
@@ -312,6 +342,7 @@ fn a_side_question_thread_has_its_own_instructions_reads_and_runs_nothing_and_is
         resume: None,
         instructions: Some("Route.".into()),
         user_name: None,
+        permissions: Permissions::Ask,
     };
     let (method, params) = thread_params(Area::Chat, &thread);
     assert_eq!(method, "thread/start");
@@ -324,6 +355,85 @@ fn a_side_question_thread_has_its_own_instructions_reads_and_runs_nothing_and_is
 }
 
 #[test]
+fn permissions_keep_the_workspace_sandbox_and_only_enable_project_network_without_approvals() {
+    for area in [Area::Chat, Area::Project] {
+        for permissions in [Permissions::DontAsk, Permissions::Ask] {
+            for resume in [None, Some("thread-id".into())] {
+                let t = CodexThread {
+                    cwd: "project".into(),
+                    model: Some("model".into()),
+                    effort: None,
+                    resume,
+                    instructions: None,
+                    user_name: None,
+                    permissions,
+                };
+                let (method, params) = thread_params(area, &t);
+                assert_eq!(method, if t.resume.is_some() { "thread/resume" } else { "thread/start" });
+                assert_eq!(params["sandbox"], "workspace-write");
+                assert_eq!(params["cwd"], "project");
+                assert_eq!(params["model"], "model");
+                if area == Area::Project && permissions == Permissions::DontAsk {
+                    assert_eq!(params["approvalPolicy"], "never");
+                    assert_eq!(params["config"], json!({ "sandbox_workspace_write.network_access": true }));
+                } else {
+                    assert_eq!(params["approvalPolicy"], "on-request");
+                    assert!(params.get("config").is_none());
+                }
+                assert_eq!(params.get("baseInstructions").is_some(), area == Area::Chat);
+                let (_, side) = thread_params(area, &CodexThread { instructions: Some("Route.".into()), ..t });
+                assert_eq!(side["sandbox"], "read-only");
+                assert_eq!(side["approvalPolicy"], "never");
+                assert!(side.get("config").is_none());
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_project_with_no_approvals_declines_a_residual_request_without_emitting_a_card() {
+    let entries = fixture("codex", "tools")
+        .into_iter()
+        .map(|mut e| {
+            if e.input && e.msg.get("result").is_some() && e.msg["result"].get("decision").is_some() {
+                e.msg["result"]["decision"] = "decline".into();
+            }
+            e
+        })
+        .collect();
+    let (events, mismatches) = drive(
+        entries,
+        |spawn, sink| {
+            let server = CodexServer::start(CodexServerOptions {
+                bin: "codex".into(),
+                cwd: ".".into(),
+                area: Area::Project,
+                user_hooks: false,
+                windows: false,
+                spawn,
+            });
+            server.open(
+                CodexThread {
+                    cwd: ".".into(),
+                    model: None,
+                    effort: None,
+                    resume: None,
+                    instructions: None,
+                    user_name: None,
+                    permissions: Permissions::DontAsk,
+                },
+                sink,
+            )
+        },
+        "Create a.txt containing one. Then create b.txt containing two. Make each file in a separate step.",
+        |event, _| matches!(event, EngineEvent::Done { .. }),
+    )
+    .await;
+    assert!(mismatches.is_empty(), "{mismatches:?}");
+    assert!(!events.iter().any(|e| matches!(e, EngineEvent::Permission { .. })));
+}
+
+#[test]
 fn the_name_is_a_developer_instruction_that_resume_repeats_and_a_side_question_never_gets() {
     let thread = |resume: Option<&str>, instructions: Option<&str>, name: Option<&str>| CodexThread {
         cwd: ".".into(),
@@ -332,6 +442,7 @@ fn the_name_is_a_developer_instruction_that_resume_repeats_and_a_side_question_n
         resume: resume.map(String::from),
         instructions: instructions.map(String::from),
         user_name: name.map(String::from),
+        permissions: Permissions::Ask,
     };
     let (method, start) = thread_params(Area::Project, &thread(None, None, Some("Erick")));
     assert_eq!(method, "thread/start");

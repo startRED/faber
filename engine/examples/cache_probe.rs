@@ -17,7 +17,7 @@ use faber_engine::claude::{ClaudeLaunch, ClaudeOptions, EventSink, start_claude}
 use faber_engine::cli::{Cli, find_cli};
 use faber_engine::codex::{CodexServer, CodexServerOptions, CodexThread};
 use faber_engine::events::{EngineEvent, Session, UserTurn};
-use faber_engine::model::Area;
+use faber_engine::model::{Area, Permissions};
 use faber_engine::proc::{Spawner, real_spawner};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -100,6 +100,7 @@ impl Probe {
             user_hooks: false,
             instructions: None,
             user_name: None,
+            permissions: Permissions::Ask,
         };
         let session = start_claude(ClaudeOptions { bin: cli.command.clone(), cwd: self.dir.clone(), launch, spawn: spawner(&cli) }, sink);
         (session, rx)
@@ -118,6 +119,7 @@ impl Probe {
             user_hooks: false,
             instructions: Some("Reply with the single word ok.".into()),
             user_name: None,
+            permissions: Permissions::Ask,
         };
         let session = start_claude(ClaudeOptions { bin: cli.command.clone(), cwd: self.dir.clone(), launch, spawn: spawner(&cli) }, sink);
         (session, rx)
@@ -145,6 +147,7 @@ impl Probe {
             resume,
             instructions: None,
             user_name: None,
+            permissions: Permissions::Ask,
         };
         (server.open(thread, sink), rx)
     }

@@ -1,7 +1,7 @@
 import { createEffect, createSignal, For, type JSX, Match, Show, Switch } from 'solid-js';
 import { api, type Appearance, type CheckResult, type Look, type Settings as Saved, type Vendor } from './api.ts';
 import { AppearanceSection } from './Appearance.tsx';
-import { Toggle } from './controls.tsx';
+import { Segmented, Toggle } from './controls.tsx';
 import { factory } from './draft.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { LANGUAGES, t } from './i18n.ts';
@@ -140,6 +140,16 @@ export function Settings(props: Props) {
                 <Toggle label={t('set.hooksBody')} hint={t('set.hooksHint')} checked={props.saved.userHooks === true} onChange={(on) => props.onSave({ userHooks: on })} />
               </div>
             </Row>
+            <Segmented
+              id="set-permissions"
+              label={t('set.permissions')}
+              value={props.saved.permissions ?? 'dontAsk'}
+              options={[
+                ['dontAsk', t('set.permissions.dontAsk')],
+                ['ask', t('set.permissions.ask')],
+              ]}
+              onPick={(permissions) => void props.onSave({ permissions })}
+            />
           </Match>
           <Match when={section() === 'appearance'}>
             <AppearanceSection

@@ -450,11 +450,13 @@ fn opens_a_running_conversation(ctx: &mut Ctx) -> Result {
 
 fn opens_a_project_conversation(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
+    let mut settings: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(ctx.sb.data.join("settings.json")).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?;
+    settings["permissions"] = "ask".into();
+    std::fs::write(ctx.sb.data.join("settings.json"), settings.to_string()).map_err(|e| e.to_string())?;
     // One project, so the screen can send into it.
-    let folder = ctx.sb.data.join("demo");
-    std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
-    let projects = json!([{ "id": "demo", "name": "Demo", "path": folder.to_string_lossy() }]);
-    std::fs::write(ctx.sb.data.join("projects.json"), projects.to_string()).map_err(|e| e.to_string())?;
+    seed_project(ctx, "Demo")?;
     let launch = two_writes(ctx);
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
@@ -629,7 +631,7 @@ pub(super) fn seed(ctx: &Ctx, id: &str, title: &str, project: Option<&str>, at: 
 }
 
 /// Writes `projects.json` with one project, `demo`, and its folder.
-fn seed_project(ctx: &Ctx, name: &str) -> Result {
+pub(super) fn seed_project(ctx: &Ctx, name: &str) -> Result {
     let folder = ctx.sb.data.join("demo");
     std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
     let projects = json!([{ "id": "demo", "name": name, "path": folder.to_string_lossy() }]);

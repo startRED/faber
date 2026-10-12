@@ -3,7 +3,7 @@
 
 use crate::claude::EventSink;
 use crate::events::{Delivery, EngineEvent, Session, SessionCommand, UserTurn};
-use crate::model::{Area, name_instructions};
+use crate::model::{Area, Permissions, name_instructions};
 use crate::proc::{self, Spawner};
 use crate::signals::{codex_account, codex_signals};
 use serde::Serialize;
@@ -44,14 +44,18 @@ pub fn codex_args(area: Area, windows: bool, user_hooks: bool) -> Vec<String> {
 }
 
 /// Parameters for thread/start and thread/resume. The sandbox keeps writes inside the working folder;
-/// anything beyond it comes back as an approval request.
-pub fn codex_thread(area: Area, model: Option<&str>) -> Map<String, Value> {
+/// anything beyond it asks in Ask mode and fails in Don't ask mode.
+pub fn codex_thread(area: Area, model: Option<&str>, permissions: Permissions) -> Map<String, Value> {
     let mut thread = Map::new();
     if let Some(model) = model {
         thread.insert("model".into(), model.into());
     }
     thread.insert("sandbox".into(), "workspace-write".into());
-    thread.insert("approvalPolicy".into(), "on-request".into());
+    let dont_ask = area == Area::Project && permissions == Permissions::DontAsk;
+    thread.insert("approvalPolicy".into(), if dont_ask { "never" } else { "on-request" }.into());
+    if dont_ask {
+        thread.insert("config".into(), json!({ "sandbox_workspace_write.network_access": true }));
+    }
     if area == Area::Chat {
         thread.insert("baseInstructions".into(), CHAT_INSTRUCTIONS.into());
     }
@@ -220,6 +224,7 @@ pub struct CodexThread {
     pub instructions: Option<String>,
     /// How the user wants to be called; see `ClaudeLaunch::user_name`.
     pub user_name: Option<String>,
+    pub permissions: Permissions,
 }
 
 enum ServerCommand {
@@ -258,13 +263,14 @@ fn turn_params(thread: &str, effort: Option<&str>, turn: &UserTurn) -> Value {
 }
 
 pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
-    let mut params = codex_thread(area, t.model.as_deref());
+    let mut params = codex_thread(area, t.model.as_deref(), t.permissions);
     if let Some(instructions) = &t.instructions {
         params.insert("baseInstructions".into(), instructions.clone().into());
         params.insert("sandbox".into(), "read-only".into());
         params.insert("approvalPolicy".into(), "never".into());
         // Nothing to resume later: it stays out of the user's Codex history.
         params.insert("ephemeral".into(), true.into());
+        params.remove("config");
     } else if let Some(name) = &t.user_name {
         // Developer instructions sit beside Codex's own, so a project keeps its default prompt.
         params.insert("developerInstructions".into(), name_instructions(name).into());
@@ -433,15 +439,15 @@ async fn serve(started: std::io::Result<proc::Proc>, area: Area, mut rx: Unbound
                     (Some(method), Some(id)) => {
                         let thread = params["threadId"].as_str().and_then(|t| by_id.get(t)).and_then(|k| threads.get_mut(k));
                         match (method.ends_with("requestApproval"), thread) {
-                            (true, Some(t)) => {
+                            (true, Some(t)) if area != Area::Project || t.params.permissions == Permissions::Ask => {
                                 let key = match id { Value::String(s) => s.clone(), other => other.to_string() };
                                 t.approvals.insert(key.clone(), id.clone());
                                 let tool = params["kind"].as_str().unwrap_or(method).to_string();
                                 let input = [&params["command"], &params["changes"]].into_iter().find(|v| !v.is_null()).unwrap_or(params).clone();
                                 (t.sink)(EngineEvent::Permission { request_id: key, tool, input });
                             }
-                            // The conversation is gone, so nobody can say yes.
-                            (true, None) => {
+                            // No live conversation or approvals disabled: fail closed without a card.
+                            (true, _) => {
                                 let _ = proc::write_line(&mut *stdin, &json!({ "id": id, "result": { "decision": "decline" } })).await;
                             }
                             (false, _) => {

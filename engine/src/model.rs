@@ -291,6 +291,9 @@ pub struct Settings {
     /// Projects run the user's own CLI hooks too (off by default: a hook can block or slow every turn).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_hooks: Option<bool>,
+    /// Missing in older settings means commands run without asking in Projects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<Permissions>,
     /// The language of the screen ("en", "pt-BR"...); none follows the system.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
@@ -313,6 +316,14 @@ pub struct Settings {
 pub enum Experience {
     Beginner,
     Experienced,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Permissions {
+    #[default]
+    DontAsk,
+    Ask,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

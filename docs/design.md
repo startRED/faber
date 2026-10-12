@@ -230,8 +230,17 @@ inside its own area.
 - Settings replaces the shell, as before, with a list of five sections on the left: General, Appearance, Connected
   accounts, Usage limits and Privacy. Ctrl comma opens it on General, the quota of a vendor in the sidebar opens it on
   Usage limits, and Esc or Back closes it.
-- General has the language and the switch that lets Projects run the person's own CLI hooks. A switch saves at once and
-  goes back to where it was if the save is refused.
+- General has the language, name, CLI hooks switch and Permissions choice. "Don't ask" is the default for new and
+  existing settings; "Ask before commands" preserves the previous behavior. Choices save at once and stay at the saved
+  value if the save fails. Chat keeps its restricted setup.
+- R97: Projects use bypass permissions with native deny rules for git push and destructive git commands, credential
+  directories, removals and environment files; Codex uses `never` approvals with `workspace-write` and network access.
+  Native deny rules [apply even in bypass mode](https://code.claude.com/docs/en/permission-modes#available-modes), but
+  [command patterns are not an OS sandbox](https://code.claude.com/docs/en/permissions#what-a-bash-rule-doesnt-match).
+  Git rules cover Bash and PowerShell. The conservative rules also deny `rm`, `Remove-Item` and `.env` reads inside the
+  project. Arbitrary scripts can evade native rules.
+  Residual approval requests are declined without a card. A changed choice reaches idle sessions at once and active
+  sessions on their next turn.
 - Appearance is a draft. The six looks are small live renders; the controls (accent with a hex field, background, the two
   fonts, text size, density, corners, motion) and the three effect switches change the draft, and the preview panel on
   the right wears the answer of `preview_look` with the measured contrast of text, faint text and the accent. The panel

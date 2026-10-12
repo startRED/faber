@@ -1,7 +1,7 @@
 //! Permission cards: the screen answers a question by the ids of its turn and its request, and the card goes only once
 //! the engine says the CLI has the answer.
 
-use super::{Result, Scenario, ask, ensure, start_settings};
+use super::{Result, Scenario, ask, ensure, same, start_settings};
 use crate::app::Ctx;
 use crate::page::css;
 use crate::sandbox::{CliSlot, Launch};
@@ -15,6 +15,7 @@ pub fn scenarios() -> Vec<Scenario> {
 
 fn answers_a_card(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
+    super::shell::seed_project(ctx, "Demo")?;
     let launch = Launch {
         claude: CliSlot::Fake,
         codex: CliSlot::Off,
@@ -23,6 +24,28 @@ fn answers_a_card(ctx: &mut Ctx) -> Result {
     };
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
+    let settings = page.named("button", "settings.open")?;
+    page.click(&settings)?;
+    let dont_ask = page.named("button", "set.permissions.dontAsk")?;
+    page.wait_visible(&dont_ask)?;
+    same(page.attr(&dont_ask, "aria-pressed")?, Some("true".into()), "older settings default to Don't ask")?;
+    let ask_first = page.named("button", "set.permissions.ask")?;
+    page.click(&ask_first)?;
+    page.wait_for(
+        "the permissions choice to be saved",
+        "document.querySelector('#set-permissions + .seg-ctl button[aria-pressed=true]')?.textContent === 'Ask before commands'",
+    )?;
+    page.cdp.call("Page.reload", serde_json::json!({}))?;
+    page.wait_visible(&settings)?;
+    page.click(&settings)?;
+    page.wait_visible(&ask_first)?;
+    same(page.attr(&ask_first, "aria-pressed")?, Some("true".into()), "the permissions choice survives reload")?;
+    let back = page.named("button", "set.back")?;
+    page.click(&back)?;
+    let demo = css(".prow .item").has_text("Demo");
+    page.wait_visible(&demo)?;
+    page.click(&demo)?;
+    page.wait_visible(&css(".empty h1").has_text("Demo"))?;
     // Auto would send the request to a router process first, which would replay this recording instead of the chat.
     let model = page.labelled("composer.model")?;
     page.select_option(&model, "Claude Haiku")?;

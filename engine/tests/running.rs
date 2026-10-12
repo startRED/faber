@@ -4,7 +4,7 @@ mod support;
 
 use faber_engine::cli::Cli;
 use faber_engine::engine::Ask;
-use faber_engine::model::{Area, RunState, RunningItem, Status, Vendor};
+use faber_engine::model::{Area, Permissions, RunState, RunningItem, Settings, Status, Vendor};
 use faber_engine::proc::Spawner;
 use faber_engine::router::Choice;
 use faber_engine::{AppEvent, Engine, EngineOptions, SendRequest};
@@ -184,6 +184,7 @@ async fn blocks_with_a_question_come_first_then_the_sidebar_order_with_chat_last
         Ok(replay(entries, Mismatches::default()))
     });
     let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], spawn, None);
+    engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
     let (one, two) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let first = engine.add_project(&one.path().to_string_lossy());
     let second = engine.add_project(&two.path().to_string_lossy());
@@ -379,6 +380,7 @@ async fn request_ids_that_repeat_in_two_conversations_are_two_questions() {
     // A chat and a project use two Codex processes, and each numbers its approvals from 0.
     let f = fake(fixture("codex", "tools"));
     let (engine, mut rx) = engine(dir.path(), &[Vendor::Codex], f.spawn.clone(), None);
+    engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
     let project = engine.add_project(&dir.path().to_string_lossy());
     let chat = engine.send(request(Area::Chat, None, TWO_FILES, "codex")).unwrap();
     let work = engine.send(request(Area::Project, Some(&project.id), TWO_FILES, "codex")).unwrap();

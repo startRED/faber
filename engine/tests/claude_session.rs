@@ -2,13 +2,22 @@ mod support;
 
 use faber_engine::claude::{ClaudeLaunch, ClaudeOptions, claude_args, start_claude};
 use faber_engine::events::{Delivery, EngineEvent, UserTurn};
-use faber_engine::model::Area;
+use faber_engine::model::{Area, Permissions};
 use std::sync::Arc;
 use std::time::Duration;
 use support::{Entry, drive, fake, fixture, next_permission, text_of};
 
 fn launch(area: Area) -> ClaudeLaunch {
-    ClaudeLaunch { area, model: None, effort: None, resume: None, user_hooks: false, instructions: None, user_name: None }
+    ClaudeLaunch {
+        area,
+        model: None,
+        effort: None,
+        resume: None,
+        user_hooks: false,
+        instructions: None,
+        user_name: None,
+        permissions: Permissions::Ask,
+    }
 }
 
 async fn run(
@@ -211,6 +220,115 @@ fn chat_is_lean_and_confined_to_its_workspace_projects_get_the_user_setup_withou
     assert!(!project.contains(&"--restricted".into()) && !project.contains(&"--strict-mcp-config".into()));
     assert_eq!(after(&project, "--settings"), r#"{"disableAllHooks":true}"#);
     assert!(!claude_args(&ClaudeLaunch { user_hooks: true, ..launch(Area::Project) }).contains(&"--settings".into()));
+}
+
+#[test]
+fn permissions_only_change_project_launches_and_keep_denies_with_user_hooks() {
+    for hooks in [false, true] {
+        let asking = ClaudeLaunch { user_hooks: hooks, ..launch(Area::Project) };
+        let ask = claude_args(&asking);
+        assert!(!ask.contains(&"--permission-mode".into()));
+        assert!(!ask.contains(&"--disallowedTools".into()));
+        assert!(ask.windows(2).any(|a| a == ["--permission-prompt-tool", "stdio"]));
+        let skip = claude_args(&ClaudeLaunch { permissions: Permissions::DontAsk, ..asking });
+        assert!(skip.windows(2).any(|a| a == ["--permission-mode", "bypassPermissions"]));
+        assert_eq!(skip.contains(&"--settings".into()), !hooks);
+        for rule in [
+            "Bash(git push *)",
+            "Bash(git * push *)",
+            "Bash(git reset *--hard*)",
+            "Bash(git clean *)",
+            "Bash(git checkout *-- *)",
+            "Bash(git branch *-D*)",
+            "Bash(git rebase *)",
+            "Bash(rm *)",
+            "Read(//**/.env)",
+            "Read(//**/.env.*)",
+            "Read(~/.claude/**)",
+            "Read(~/.codex/**)",
+            "Read(~/.gemini/**)",
+            "Read(~/.ssh/**)",
+            "Read(~/.aws/**)",
+        ] {
+            assert!(skip.contains(&rule.into()), "missing deny: {rule}");
+        }
+        for rule in [
+            "PowerShell(git push *)",
+            "PowerShell(git * push *)",
+            "PowerShell(git reset *--hard*)",
+            "PowerShell(git clean *)",
+            "PowerShell(git checkout *-- *)",
+            "PowerShell(git branch *-D*)",
+            "PowerShell(git rebase *)",
+            "PowerShell(Remove-Item *)",
+        ] {
+            assert!(skip.contains(&rule.into()), "missing deny: {rule}");
+        }
+    }
+    assert_eq!(claude_args(&launch(Area::Chat)), claude_args(&ClaudeLaunch { permissions: Permissions::DontAsk, ..launch(Area::Chat) }));
+    let side =
+        claude_args(&ClaudeLaunch { permissions: Permissions::DontAsk, instructions: Some("Route.".into()), ..launch(Area::Project) });
+    assert!(!side.contains(&"bypassPermissions".into()) && !side.contains(&"--disallowedTools".into()));
+}
+
+#[tokio::test]
+async fn a_project_in_bypass_mode_declines_residual_prompts_without_emitting_a_card() {
+    let entries = support::claude_two_turns("req")
+        .into_iter()
+        .take(5)
+        .map(|mut e| {
+            if e.input && e.msg["type"] == "control_response" {
+                e.msg["response"]["response"] = serde_json::json!({ "behavior": "deny", "message": "Approval is disabled in Faber." });
+            }
+            e
+        })
+        .collect();
+    let (events, mismatches) = drive(
+        entries,
+        |spawn, sink| {
+            start_claude(
+                ClaudeOptions {
+                    bin: "claude".into(),
+                    cwd: ".".into(),
+                    launch: ClaudeLaunch { permissions: Permissions::DontAsk, ..launch(Area::Project) },
+                    spawn,
+                },
+                sink,
+            )
+        },
+        "first",
+        |event, _| matches!(event, EngineEvent::Done { .. }),
+    )
+    .await;
+    assert!(mismatches.is_empty(), "{mismatches:?}");
+    assert!(!events.iter().any(|e| matches!(e, EngineEvent::Permission { .. })));
+}
+
+#[tokio::test]
+async fn an_undelivered_automatic_denial_ends_the_turn_instead_of_waiting_for_a_card() {
+    let f = fake(support::claude_two_turns("req"));
+    let wire = f.wire.clone();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let sink = std::sync::Arc::new(move |e| {
+        if matches!(e, EngineEvent::Started { .. }) {
+            wire.refuse_next(1);
+        }
+        tx.send(e).unwrap();
+    });
+    let session = start_claude(
+        ClaudeOptions {
+            bin: "claude".into(),
+            cwd: ".".into(),
+            spawn: f.spawn,
+            launch: ClaudeLaunch { permissions: Permissions::DontAsk, ..launch(Area::Project) },
+        },
+        sink,
+    );
+    session.send(UserTurn::text("first"));
+    assert!(matches!(tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.unwrap(), Some(EngineEvent::Started { .. })));
+    assert!(matches!(tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.unwrap(),
+        Some(EngineEvent::Error { message, fatal: true }) if message == "error.permission.undelivered"));
+    session.close();
 }
 
 #[test]

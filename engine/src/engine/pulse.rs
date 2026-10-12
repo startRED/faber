@@ -45,6 +45,7 @@ impl Core {
             effort: Some("low".into()),
             resume: None,
             user_hooks: false,
+            permissions: Permissions::DontAsk,
             instructions: Some("Reply with the single word ok.".into()),
             user_name: None,
         };

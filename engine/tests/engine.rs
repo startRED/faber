@@ -1,7 +1,7 @@
 mod support;
 
 use faber_engine::cli::{Cli, resolve_cli};
-use faber_engine::model::{Area, Experience, Message, Role, Settings, Setup, Status, Vendor};
+use faber_engine::model::{Area, Experience, Message, Permissions, Role, Settings, Setup, Status, Vendor};
 use faber_engine::proc::Spawner;
 use faber_engine::router::{Choice, pick_model};
 use faber_engine::{AppEvent, BranchRequest, Engine, EngineOptions, SendRequest, WarmRequest};
@@ -264,6 +264,7 @@ async fn two_permission_requests_at_once_wait_in_a_queue_and_both_get_answered()
 async fn text_blocks_around_a_tool_are_kept_apart() {
     let dir = tempfile::tempdir().unwrap();
     let (engine, mut rx) = engine(dir.path(), Vendor::Codex, fake(fixture("codex", "tools")).spawn);
+    engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
     let project = engine.add_project(&dir.path().to_string_lossy());
     let text = "Create a.txt containing one. Then create b.txt containing two. Make each file in a separate step.";
     let id = engine.send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, text, choice("codex", None)) }).unwrap();
@@ -339,6 +340,36 @@ async fn the_hooks_choice_is_saved_and_restarts_idle_project_clis_with_it() {
     engine.save_settings(Settings { appearance, ..Settings::default() }).unwrap();
     engine.shutdown();
     assert_eq!(read_json(&dir.path().join("settings.json")), serde_json::json!({ "userHooks": true, "appearance": { "base": "oficina" } }));
+}
+
+#[tokio::test]
+async fn permissions_default_without_a_migration_persist_and_restart_idle_project_sessions() {
+    let dir = tempfile::tempdir().unwrap();
+    for settings in [serde_json::json!({}), serde_json::json!({ "language": "en", "userHooks": true })] {
+        let old: Settings = serde_json::from_value(settings).unwrap();
+        assert_eq!(old.permissions.unwrap_or_default(), Permissions::DontAsk);
+    }
+    let f = fake(fixture("claude", "chat"));
+    let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let project = engine.add_project(&dir.path().to_string_lossy());
+    let warm =
+        || WarmRequest { conversation_id: None, area: Area::Project, project_id: Some(project.id.clone()), choice: choice("claude", None) };
+    let last_args = || f.args.lock().unwrap().last().cloned().unwrap();
+    engine.warm(warm());
+    assert!(last_args().contains(&"bypassPermissions".into()));
+    engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+    engine.warm(warm());
+    assert!(!last_args().contains(&"bypassPermissions".into()));
+    assert_eq!(f.args.lock().unwrap().len(), 2);
+    engine.save_settings(Settings { language: Some("de".into()), ..Settings::default() }).unwrap();
+    let saved: Settings = serde_json::from_value(read_json(&dir.path().join("settings.json"))).unwrap();
+    assert_eq!(saved.permissions, Some(Permissions::Ask));
+    engine.save_settings(Settings { permissions: Some(Permissions::DontAsk), ..Settings::default() }).unwrap();
+    engine.warm(warm());
+    assert!(last_args().contains(&"bypassPermissions".into()));
+    assert_eq!(f.args.lock().unwrap().len(), 3);
+    assert_eq!(engine.settings().language.as_deref(), Some("de"));
+    engine.shutdown();
 }
 
 #[tokio::test]

@@ -1,7 +1,7 @@
 //! Claude Code driver: one long-lived `claude -p` process per conversation, spoken to in stream-json over stdio.
 
 use crate::events::{Delivery, EngineEvent, Session, SessionCommand, UserTurn};
-use crate::model::{Area, name_instructions};
+use crate::model::{Area, Permissions, name_instructions};
 use crate::proc::{self, Spawner};
 use crate::signals::claude_signals;
 use serde_json::{Value, json};
@@ -17,6 +17,7 @@ pub struct ClaudeLaunch {
     pub effort: Option<String>,
     pub resume: Option<String>,
     pub user_hooks: bool,
+    pub permissions: Permissions,
     /// A side question (such as routing) with its own instructions: no tools, no MCP servers.
     pub instructions: Option<String>,
     /// How the user wants to be called, told to the model once, when the conversation starts (and again, unchanged, each time
@@ -27,6 +28,32 @@ pub struct ClaudeLaunch {
 // Chat stays lean (about 3k tokens of setup instead of the user's full configuration) and runs in --restricted mode
 // inside its own workspace folder: file tools cannot leave it, edits there are accepted, and any command asks first.
 const CHAT_TOOLS: &str = "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch";
+
+// Deny rules apply in bypassPermissions too; command patterns are not an OS sandbox.
+// https://code.claude.com/docs/en/permission-modes#available-modes
+const PROJECT_DENY: &[&str] = &[
+    "Bash(git push *)",
+    "Bash(git * push *)",
+    "Bash(git reset *--hard*)",
+    "Bash(git * reset *--hard*)",
+    "Bash(git clean *)",
+    "Bash(git * clean *)",
+    "Bash(git checkout *-- *)",
+    "Bash(git * checkout *-- *)",
+    "Bash(git branch *-D*)",
+    "Bash(git * branch *-D*)",
+    "Bash(git rebase *)",
+    "Bash(git * rebase *)",
+    // shortcut: native rules cannot safely distinguish outside targets; deny removals and .env inside too until a path-aware policy exists.
+    "Bash(rm *)",
+    "Read(//**/.env)",
+    "Read(//**/.env.*)",
+    "Read(~/.claude/**)",
+    "Read(~/.codex/**)",
+    "Read(~/.gemini/**)",
+    "Read(~/.ssh/**)",
+    "Read(~/.aws/**)",
+];
 
 /// Arguments for one long-lived Claude Code process that takes many turns over stdin.
 /// Projects get the user's own setup (skills, MCP servers, plugins), like a direct session; the user's hooks stay
@@ -64,9 +91,19 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
         ] {
             args.push(a.into());
         }
-    } else if !launch.user_hooks {
-        args.push("--settings".into());
-        args.push(json!({ "disableAllHooks": true }).to_string());
+    } else {
+        if launch.permissions == Permissions::DontAsk {
+            args.extend(["--permission-mode".into(), "bypassPermissions".into(), "--disallowedTools".into()]);
+            args.extend(PROJECT_DENY.iter().map(|rule| (*rule).into()));
+            args.extend(
+                PROJECT_DENY.iter().filter(|rule| rule.starts_with("Bash(git ")).map(|rule| rule.replacen("Bash(", "PowerShell(", 1)),
+            );
+            args.push("PowerShell(Remove-Item *)".into());
+        }
+        if !launch.user_hooks {
+            args.push("--settings".into());
+            args.push(json!({ "disableAllHooks": true }).to_string());
+        }
     }
     if let (None, Some(name)) = (&launch.instructions, &launch.user_name) {
         args.push("--append-system-prompt".into());
@@ -225,6 +262,17 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                         Ok(msg) => {
                             for event in parse_claude_message(&msg) {
                                 if let EngineEvent::Permission { request_id, input, .. } = &event {
+                                    // Explicit ask rules can still prompt in bypass mode; decline instead of showing a card.
+                                    if opts.launch.area == Area::Project && opts.launch.permissions == Permissions::DontAsk {
+                                        let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id,
+                                            "response": { "behavior": "deny", "message": "Approval is disabled in Faber." } } });
+                                        if proc::write_line(&mut *stdin, &msg).await.is_err() {
+                                            on_event(EngineEvent::Error { message: "error.permission.undelivered".into(), fatal: true });
+                                            proc::stop(&mut *stdin, &mut child).await;
+                                            return;
+                                        }
+                                        continue;
+                                    }
                                     pending.insert(request_id.clone(), input.clone());
                                 }
                                 on_event(event);
