@@ -27,7 +27,7 @@ It then develops the rest of Full Chat. Full Chat is not a prerequisite.
 | AGENTS.md | Original code; hidden processes; no credential access; locales; proof before coherent commits |
 
 R83's research proposes Equilibrado as the general default. R96 and this request narrow it to Seguro here.
-An explicit Equilibrado grant still permits the limited remote steps described below.
+Equilibrado is Later, outside this MVP. Its grant rules below remain binding when implemented.
 R91 supersedes the roadmap's estimate-only budget warning for this slice.
 An estimate may warn. A live spending cap must stop admission before its boundary.
 R93 does not permit overwriting R95's installed stable release.
@@ -40,13 +40,13 @@ The two slots belong to a separate local development instance.
 | Existing local git repository; one active mission per repository | Repository creation, Livre, target/main branch merge |
 | Lead, short contracts, dependency graph, decisions with authors | General catalog, all 15 powers, taste learning |
 | Worker grants, area leases, per-writer worktrees, artifacts | Swarms, peer chat, cloud workers, permanent managers |
-| Read-only research/review/test proposals; one initial writer | Unqualified parallel writers and performance promises |
+| Read-only research/review/test proposals; one initial writer | Parallel writers and performance promises |
 | Serial proof/review/fast-forward queue | Speculative merge trees, merge batches, public release automation |
-| Seguro; optional push and draft PR under Equilibrado | PR ready state, public tags, deployments, paid acceleration |
+| Seguro local changes | Equilibrado push/draft PR, PR ready state, public tags, deployments, paid acceleration |
 | Minimal Projects board and local self-update | Full Chat work and broad software specialization |
 
-Parallel writers are supported only after disjointness, containment, metering, and class qualification pass.
-They are not needed to meet the first usable date. Studio v0 launches read-only work first.
+Parallel writers are Later, outside the MVP. They require disjointness, containment, metering, and class qualification.
+Studio v0 launches read-only work first.
 In v0, test writing produces a proposed test file or patch artifact outside the source checkout.
 Only the admitted writer or integrator applies it to the repository.
 
@@ -57,27 +57,29 @@ Read-only planning alone is useful progress, but does not satisfy R96.
 
 ## 3. What exists on 2026-10-12
 
-These findings come from source reads. No runtime behavior was tested for this document.
+These findings come from source reads and the owner's branch status. No runtime behavior was tested for this revision.
+Task 1 contracts/journal are done. Driver restrictions are in review on `selfdev-t2`; git broker on `selfdev-t4`.
+Keep their accepted scope. The mission runner must close unproven containment, termination and exposure gates before spawning roles.
 Roadmap descriptions of legacy gaps are not proof of the current source state.
 
 | Existing code | Reuse | Missing for this MVP |
 |---|---|---|
-| `engine/src/model.rs`: Project, Conversation, RunningItem | Project identity and private conversations | Repo identity, grant, mission/task/lease records |
+| `engine/src/model.rs`: Project, Conversation, RunningItem | Project identity and private conversations | Connect Task 1 repo/grant/mission/task/lease records |
 | `engine/src/engine.rs`: `cwd_of`, `launch` | Session lifecycle, event emission, idle closure | Project cwd currently points at the user's checkout; no lead or worker coordinator |
-| `engine/src/store.rs` | JSON, temporary write then rename | No mission journal; conversation/project/ledger write errors are currently discarded |
-| `engine/src/usage.rs`, `claude.rs`, `codex.rs` | Cumulative cost settlement and cache counters; resumed thread deltas | Complete priced accounting, live cost events, invocation exposure bounds |
-| `budget.rs`, `ledger.rs`, `signals.rs`, `engine/auto.rs` | Billing, quota windows, pace, Auto dispatch gate | Global daily/run/worker grants; the router multiplier alone is not a hard daily stop |
+| Task 1 project contracts/journal and `engine/src/store.rs` | Frozen records, fallible atomic persistence | Runtime integration; never discard safety-ledger errors |
+| `phase-1-base` usage/ledger and CLI drivers | API-equivalent accounting, cumulative/cache settlement and resumed deltas | Mission attribution/reservations; verified invocation exposure |
+| `phase-1-base` budget/ledger/usage and Auto | Billing, quota windows, daily 1/7 line, API-equivalent cost and Auto gate | Small mission/worker cap and reservation hook into the shared allocation |
 | `claude_args` | Official stream-json driver | Projects omit explicit permission mode; no writer scope enforcement |
 | `codex_thread`, `thread_params` | `workspace-write`, read-only side requests | Existing Projects request escalation; native tool isolation needs a capability gate |
 | `engine/proc.rs`, `cli.rs` | Shell-free hidden spawn; npm shim resolution | `stop` kills only the child; add graceful completion and tree containment |
-| `src-tauri/src/main.rs` | Fixed command list, window destruction, installed updater | Local slots, headless canary entry, quiescence, independent rollback helper |
+| `src-tauri/src/main.rs` `fetch_update`, `release.yml`, `latest.json` | Existing release artifacts/signatures/platform handling and staging lifecycle | Development-channel gate, headless canary/transition, one previous-build rollback |
 | `ui/App.tsx`, `Running.tsx`, `Ask.tsx`, `controls.tsx` | Shell, project selector, decisions, theme controls | Goal/board/cost view; safe project enrollment |
-| `src-tauri/src/tray.rs`, `tray/decide.rs` | Needs-you deduplication and focused-window suppression | Fullscreen policy, original sound, two Settings switches |
+| `notify-sound` `158566b`: tray/decide/native/sound and Settings | R92 attention policy, original sound, two saved switches and delivery | Wire stable mission needs-you events; preserve existing platform limits |
 | `testkit/`, `tests/fixtures/`, `tests/ui/` | Fake CLIs, hidden desktop, audited scenarios | Project, queue, recovery, containment, and local-update scenarios |
 
-Do not repeat the already implemented per-turn settlement task from the quota plan.
-Extend it and add regression coverage where Projects needs stronger guarantees.
-There is no durable mission journal to reuse today. Add small JSON records, not a workflow database.
+Reuse Auto quota pacing from `phase-1-base`; do not add another daily ledger or price table.
+Add only mission attribution, caps and reservations, with regression coverage at that boundary.
+Reuse Task 1's durable journal and frozen contracts, not a workflow database.
 
 ## 4. Project enrollment and git authority
 
@@ -227,6 +229,9 @@ No progress for two expected task durations triggers checkpoint and diagnosis, n
 
 ## 8. Live cost, daily pace, and resources
 
+Reuse the existing Auto quota pacing on `phase-1-base` for the rules below.
+The MVP adds only mission/worker admission, reservation and attribution hooks, sharing Chat's allocation.
+
 Use disjoint token categories: uncached input U, cache read R, cache write W, output O.
 Price each at its published model rate; separate cache-write lifetimes and reasoning where required.
 Count native nested calls, lead, routing, summaries, retries, review, canary, and integration calls.
@@ -352,7 +357,10 @@ Retries do not reset counters. Failed branches remain blocked while unrelated br
 
 Use a separate development root under Faber's development data directory.
 Canonical-path checks explicitly reject `E:\Apps\Faber` and installed release data as destinations.
-Use two working slots, current and next, plus a retained immutable last-good build.
+Reuse the release updater (`fetch_update`, `release.yml`, `latest.json`) where its artifact and lifecycle handling applies.
+Do not build a second download, signature, platform or release pipeline. No public release is needed for a local change.
+Use current and staged next, retaining exactly one immutable previous build as last good.
+The existing Windows install-on-exit path launches an installer; adapt the local transition to remain headless.
 An atomic manifest names slot, commit/tree, build hash, compatible data schemas, and status.
 Never overwrite a running executable. Never promote a build from dirty unaccepted source.
 The public signed updater remains solely for the installed release channel.
@@ -419,6 +427,8 @@ Automatic Running opening keeps focus and the existing typing delay. Reduced mot
 All visible sentences, errors, reasons, shell strings, and sound/notification switches live in `ui/locales/`.
 English is the source. Hand-author all existing locales under the project's language-review rule.
 
+Reuse the R92 notifier on `notify-sound` (`158566b`); add only mission event wiring.
+Keep its existing platform limits; do not rebuild sound or Settings.
 R92: focused Faber means no notification or sound; fullscreen/game means original sound only.
 Normal background use means notification plus sound, each controlled by its own saved Settings switch.
 If foreground/fullscreen detection is uncertain, suppress the visual notification.
@@ -440,11 +450,12 @@ Only a concrete choice, missing permission, or unresolved direction/money/legal 
 | G8: real use | One bounded real Faber goal and local promotion using both vendors, within the current daily grant |
 
 Dates are a planning target, not a safety exception.
-Verify G1/G2 feasibility on 13–14 October before building the rest of the coordinator.
-Build journal/git/queue and UI against a frozen contract on 15–18 October.
-Complete local promotion and offline recovery on 18–20 October.
+On 13-14 October, finish driver/git reviews and the mission budget hook.
+Close G1/G2 feasibility before automated roles.
+On 15-17 October, build the combined mission runner and advance UI on frozen contracts.
+On 18-19 October, integrate Projects, existing notifier wiring and updater/canary/rollback.
 Use 20–22 October for the bounded real goal, canary, rollback drill, and small fixes.
-Equilibrado and qualified parallel writers can follow the Seguro usable gate; they remain in the ordered plan.
+Equilibrado and qualified parallel writers move to Later, outside the MVP. Their safety rules remain binding.
 If driver controls, calibration, or hidden containment fail, keep read-only planning available and mark R96 incomplete.
 Do not promise the target date by substituting prompt instructions or retrospective cost reports for hard controls.
 
