@@ -9,6 +9,7 @@ use super::{Artifact, Brief, Contract, Decision, Intent, Mission, Plan, Receipt,
 use crate::store::{Disk, Fault, RealDisk, read_checked, replace};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -242,5 +243,141 @@ impl Journal {
     /// The private sidecar; none yet is an empty one, a damaged one is an error (it holds leases).
     pub fn runtime(&self) -> Result<Runtime, JournalError> {
         Ok(self.get(&self.private.join("runtime.json"))?.unwrap_or_default())
+    }
+}
+
+impl Journal {
+    fn kit_path(&self, task: &str, attempt: u32) -> Result<PathBuf, JournalError> {
+        if !valid_id(task) || attempt == 0 {
+            return Err(JournalError::BadId);
+        }
+        Ok(self.records.join("kits").join(format!("{task}-{attempt}.json")))
+    }
+
+    /// Persist before dispatch; an existing selection cannot be replaced by a retry.
+    pub fn record_kit(&self, receipt: &super::kit::KitReceipt) -> Result<(), JournalError> {
+        self.same_mission(&receipt.mission)?;
+        if receipt.schema > SCHEMA {
+            return Err(JournalError::Newer);
+        }
+        if receipt.outcome.is_some() || receipt.completed_at.is_some() || receipt.attestation.is_some() {
+            return Err(JournalError::Mismatch);
+        }
+        receipt.kit.validate().map_err(|_| JournalError::Store(Fault::Corrupt))?;
+        let path = self.kit_path(&receipt.task, receipt.attempt)?;
+        if self.get::<super::kit::KitReceipt>(&path)?.is_some() {
+            return Err(JournalError::ReceiptExists);
+        }
+        self.put(&path, receipt)
+    }
+
+    pub fn kit(&self, task: &str, attempt: u32) -> Result<Option<super::kit::KitReceipt>, JournalError> {
+        let found: Option<super::kit::KitReceipt> = self.get(&self.kit_path(task, attempt)?)?;
+        if let Some(receipt) = &found {
+            self.same_mission(&receipt.mission)?;
+            if receipt.task != task || receipt.attempt != attempt {
+                return Err(JournalError::Mismatch);
+            }
+            receipt.kit.validate().map_err(|_| JournalError::Store(Fault::Corrupt))?;
+        }
+        Ok(found)
+    }
+
+    /// Record init before work. It remains evidence, never an admission grant.
+    pub fn attest_kit(&self, task: &str, attempt: u32, attestation: &super::kit::Attestation) -> Result<(), JournalError> {
+        let mut receipt = self.kit(task, attempt)?.ok_or(JournalError::NoIntent)?;
+        if receipt.attestation.is_some() || receipt.outcome.is_some() {
+            return Err(JournalError::ReceiptExists);
+        }
+        if attestation.vendor != receipt.kit.vendor || attestation.containment_proven {
+            return Err(JournalError::Mismatch);
+        }
+        receipt.attestation = Some(attestation.clone());
+        self.put(&self.kit_path(task, attempt)?, &receipt)
+    }
+
+    /// Completion can add measurements and outcomes, never change the approved selection.
+    pub fn complete_kit(&self, receipt: &super::kit::KitReceipt) -> Result<(), JournalError> {
+        let saved = self.kit(&receipt.task, receipt.attempt)?.ok_or(JournalError::NoIntent)?;
+        self.same_mission(&receipt.mission)?;
+        if saved.outcome.is_some() {
+            return Err(JournalError::ReceiptExists);
+        }
+        if receipt.schema != saved.schema
+            || receipt.kit != saved.kit
+            || receipt.selected_at != saved.selected_at
+            || receipt.completed_at.is_none_or(|at| at < saved.selected_at)
+            || receipt.outcome.is_none()
+            || receipt.attestation.as_ref().is_none_or(|a| a.vendor != receipt.kit.vendor || a.containment_proven)
+            || saved.attestation.as_ref().is_none_or(|a| receipt.attestation.as_ref() != Some(a))
+        {
+            return Err(JournalError::Mismatch);
+        }
+        let outcome = receipt.outcome.as_ref().ok_or(JournalError::Mismatch)?;
+        if outcome.kit_used.len() > 64 || !outcome.kit_used.iter().all(|id| receipt.kit.items.iter().any(|item| &item.id == id)) {
+            return Err(JournalError::Mismatch);
+        }
+        let mut completed = receipt.clone();
+        for (key, value) in saved.extra {
+            if completed.extra.get(&key).is_some_and(|v| v != &value) {
+                return Err(JournalError::Mismatch);
+            }
+            completed.extra.insert(key, value);
+        }
+        self.put(&self.kit_path(&receipt.task, receipt.attempt)?, &completed)
+    }
+
+    pub fn save_card_cache(&self, cache: &super::kit::CardCache) -> Result<(), JournalError> {
+        if cache.schema() > SCHEMA {
+            return Err(JournalError::Newer);
+        }
+        self.put(&self.records.join("cards.json"), cache)
+    }
+    pub fn card_cache(&self) -> Result<super::kit::CardCache, JournalError> {
+        Ok(self.get(&self.records.join("cards.json"))?.unwrap_or_default())
+    }
+    /// Derive versioned Beta counts from immutable completed receipts, without double-settling a replay.
+    pub fn kit_evidence(&self) -> Result<Vec<super::kit::Evidence>, JournalError> {
+        let mut counts = BTreeMap::new();
+        for receipt in self.list::<super::kit::KitReceipt>("kits")? {
+            self.same_mission(&receipt.mission)?;
+            receipt.kit.validate().map_err(|_| JournalError::Store(Fault::Corrupt))?;
+            let Some(outcome) = receipt.outcome else { continue };
+            let (Some(first), Some(blocking)) = (outcome.proof_first_try, outcome.review_blocking) else { continue };
+            for item in receipt.kit.items.iter().filter(|item| outcome.kit_used.contains(&item.id)) {
+                let entry = counts.entry((item.id.clone(), item.version.clone())).or_insert(super::kit::Evidence {
+                    id: item.id.clone(),
+                    version: item.version.clone(),
+                    kept: 0,
+                    discarded: 0,
+                });
+                if first && blocking == 0 {
+                    entry.kept += 1;
+                } else {
+                    entry.discarded += 1;
+                }
+            }
+        }
+        Ok(counts.into_values().collect())
+    }
+    fn field_brief_path(&self, need: &str) -> Result<PathBuf, JournalError> {
+        let need = super::wire::normalize_need(need).map_err(|_| JournalError::BadId)?;
+        let id = super::kit::digest(need.trim_end_matches('!').as_bytes());
+        let faber = self.records.parent().and_then(Path::parent).ok_or(JournalError::Mismatch)?;
+        Ok(faber.join("briefs").join(format!("{id}.json")))
+    }
+    pub fn save_field_brief(&self, brief: &super::kit::FieldBrief) -> Result<(), JournalError> {
+        if brief.schema > SCHEMA {
+            return Err(JournalError::Newer);
+        }
+        brief.validate().map_err(|_| JournalError::Store(Fault::Corrupt))?;
+        self.put(&self.field_brief_path(&brief.need)?, brief)
+    }
+    pub fn field_brief(&self, need: &str, now: u64, version: &str) -> Result<Option<super::kit::FieldBrief>, JournalError> {
+        let brief: Option<super::kit::FieldBrief> = self.get(&self.field_brief_path(need)?)?;
+        if let Some(value) = &brief {
+            value.validate().map_err(|_| JournalError::Store(Fault::Corrupt))?;
+        }
+        Ok(brief.filter(|b| !b.stale(now, version)))
     }
 }

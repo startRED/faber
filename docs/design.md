@@ -377,6 +377,30 @@ pass requires evidence; failure and not-run require a reason. `CompileReceipt` r
 These types publish the shared T5K/T5B/T5 contract. A worker's claimed receipt is data; only engine-verified proofs and
 the independent exact-tree review can authorize acceptance. Missing optional fields do not imply a passing bar or kit.
 
+### Automatic project kits
+
+`project/kit.rs` and its submodules implement the pure T5K contracts. Cards are written from reported inventory,
+scoped project sections and named engine proofs; kits are assembled from needs, never saved as hand-written loadouts.
+`Inventory::new` validates, hashes and indexes an immutable snapshot once per inventory change. Assembly uses that
+snapshot, origin priors, job ownership, conflicts, role budgets and safety filters. Versioned Beta outcomes only break
+ties. A blind, shuffled shortlist supports shadow comparisons; the code selection remains authoritative.
+
+Persist the selection with `Journal::record_kit` before dispatch. Compose approved, hash-checked inline bodies into
+the existing safe role prompt with `compose_role_prompt`; the role prompt remains its byte-for-byte prefix. This
+adapter changes no driver flags or policy. Record init with `attest_kit` before work, then add the outcome with
+`complete_kit`. Completion cannot replace the selection or its attestation. Receipts live in
+`.faber/missions/<id>/kits/<task>-<attempt>.json` and preserve future root fields. A failed write prevents dispatch.
+The runner must enforce T2 admission and handle mismatched/unreported init; these receipts never grant containment.
+
+G0 is empty. G1 returns at most three cited suggestions with downsides, with installation parked. G2 stores bounded,
+cited primary-source briefs in `.faber/briefs/`; G3 retains verified role controls. Only a missing required capability
+parks its dependent node. The pure start-card adapter supplies two locale keys; T9 owns their screen and translations.
+The Auto labels adapter shares the existing classification turn and preserves its model-choice table. T5 integrates
+classification, fresh pass sessions, dispatch, proofs and two-order comparisons; T5B resolves native bar proof IDs.
+
+See [the T5K proof report](research/2026-10-12-project-kits.md) for measured synthetic performance and the live G9
+evidence still required by T13. Fixture attestation is not proof of native isolation.
+
 ### Screen commands and event
 
 The commands fail with a key string, like the other shell commands, and never report a success they did not have.

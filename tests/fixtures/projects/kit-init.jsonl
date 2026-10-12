@@ -1,0 +1,7 @@
+{"vendor":"claude","init":{"type":"system","subtype":"init","model":"claude-sonnet-5-5","effort":"medium","cli_version":"fixture-1","tools":[],"skills":[],"plugins":[],"mcp_servers":[]},"expected":"matched"}
+{"vendor":"claude","init":{"type":"system","subtype":"init","tools":["Bash"],"skills":[],"plugins":[],"mcp_servers":[]},"expected":"mismatch"}
+{"vendor":"claude","init":{"type":"system","subtype":"init","tools":[],"skills":[],"plugins":[],"mcp_servers":[{"name":"required-server","status":"dead"}]},"expected":"mismatch"}
+{"vendor":"claude","init":{"type":"system","subtype":"init","tools":[]},"expected":"unreported"}
+{"vendor":"codex","init":{"tools":[],"skills":[],"plugins":[],"mcp_servers":[]},"expected":"bestEffort"}
+{"vendor":"codex","init":{},"expected":"bestEffort"}
+{"vendor":"codex","init":{"tools":["shell"],"skills":[],"plugins":[],"mcp_servers":[]},"expected":"mismatch"}
