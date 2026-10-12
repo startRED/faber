@@ -11,7 +11,7 @@ pub struct Choice {
     pub model: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Pick {
     pub vendor: Vendor,
     pub model: Option<String>,

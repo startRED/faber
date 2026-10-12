@@ -17,6 +17,69 @@ use std::time::Duration;
 use support::{Fake, fake, fixture};
 
 const WHEN: u64 = 1_791_620_000;
+
+#[tokio::test]
+async fn restarting_cancels_a_queued_wait_instead_of_freezing_or_resending_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let r = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+    r.engine.note_account_events(Vendor::Claude, vec![quota("five_hour", 600, 1.0)]);
+    let id = r.engine.send(request(None, "auto")).unwrap();
+    tokio::time::sleep(Duration::from_millis(40)).await;
+    let m = reply(&r.engine, &id, Status::Streaming).await;
+    assert!(m.wait_until.is_some());
+    drop(r);
+    let back = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+    let saved = back.engine.open(&id).unwrap();
+    assert_eq!(saved.messages.last().unwrap().status, Some(Status::Stopped));
+    back.time.store(WHEN + 601, Ordering::SeqCst);
+    back.engine.set_utc_offset(0);
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert!(back.engine.state().running.items.is_empty());
+    assert!(back.claude.args.lock().unwrap().is_empty());
+    back.engine.shutdown();
+}
+
+#[tokio::test]
+async fn restarting_keeps_explicit_quota_recovery_available_for_the_saved_reply() {
+    for legacy in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let r = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+        r.engine.note_account_events(Vendor::Claude, vec![quota("five_hour", 600, 1.0)]);
+        let mut req = request(None, "claude");
+        req.choice.model = Some("claude-haiku-5-5".into());
+        req.images = vec![faber_engine::model::Image { media_type: "image/png".into(), base64: "aW1hZ2U=".into() }];
+        req.files = vec![faber_engine::workspace::Attachment { name: "notes.txt".into(), base64: "bm90ZXM=".into() }];
+        let id = r.engine.send(req.clone()).unwrap();
+        let m = reply(&r.engine, &id, Status::Error).await;
+        assert_eq!(m.error.as_deref(), Some("error.quotaOut"));
+        let store = Store::new(dir.path());
+        let mut saved = store.get(&id).unwrap();
+        assert_eq!(saved.messages.last().unwrap().recovery.as_ref().unwrap().pick.model, req.choice.model);
+        drop(r);
+        if legacy {
+            saved.messages.last_mut().unwrap().recovery = None;
+            store.save(&saved);
+        }
+        let mut entries = fixture("claude", "chat");
+        entries[0].msg["message"]["content"] = json!([
+            {"type":"image","source":{"type":"base64","media_type":"image/png","data":"aW1hZ2U="}},
+            {"type":"text","text":format!("{}\n\nAttached files (in your working folder):\n- attachments/notes.txt",req.text)}
+        ]);
+        let back = sources(dir.path(), &[Vendor::Claude], fake(entries), fake(vec![]));
+        back.engine.open(&id).unwrap();
+        back.engine.note_account_events(Vendor::Claude, vec![quota("five_hour", 600, 1.0)]);
+        back.engine.wait_turn(&id, &m.id).unwrap();
+        assert!(back.engine.open(&id).unwrap().messages.last().unwrap().wait_until.is_some());
+        assert!(back.engine.wait_turn(&id, "another-reply").is_err());
+        back.time.store(WHEN + 601, Ordering::SeqCst);
+        back.engine.set_utc_offset(0);
+        reply(&back.engine, &id, Status::Done).await;
+        assert_eq!(back.claude.wire.lines_with("\"type\":\"user\""), 1);
+        assert!(back.claude.mismatches.lock().unwrap().is_empty());
+        assert!(store.get(&id).unwrap().messages.last().unwrap().recovery.is_none());
+        back.engine.shutdown();
+    }
+}
 struct Rig {
     engine: Engine,
     time: Arc<AtomicU64>,

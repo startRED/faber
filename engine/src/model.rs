@@ -54,6 +54,15 @@ pub struct Image {
     pub base64: String,
 }
 
+/// Dispatch intent for a quota error that still offers explicit recovery after restart. Consent is never stored here.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Recovery {
+    pub pick: crate::router::Pick,
+    pub text: String,
+    pub by_hand: bool,
+    pub retried: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolUse {
     pub id: String,
@@ -136,6 +145,8 @@ pub struct Message {
     pub wait_until: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub moved_from: Option<Vendor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery: Option<Recovery>,
 }
 
 impl Message {
@@ -166,6 +177,7 @@ impl Message {
             pace: None,
             wait_until: None,
             moved_from: None,
+            recovery: None,
         }
     }
 }

@@ -15,6 +15,14 @@ pub(super) struct Transfer {
     pub moving: bool,
 }
 
+pub(super) fn with_attachments(text: &str, area: Area, shown: &[String]) -> String {
+    if shown.is_empty() {
+        return text.into();
+    }
+    let place = if area == Area::Chat { " (in your working folder)" } else { "" };
+    format!("{text}\n\nAttached files{place}:\n{}", shown.iter().map(|p| format!("- {p}")).collect::<Vec<_>>().join("\n"))
+}
+
 pub(super) fn plan_limit(message: &str) -> bool {
     let m = message.to_ascii_lowercase();
     [
@@ -68,6 +76,58 @@ impl Engine {
 }
 
 impl Core {
+    pub(super) fn restore_recovery(&mut self, c: &mut Conversation) {
+        let Some(m) = c.messages.last() else { return };
+        if m.status != Some(Status::Error) || !matches!(m.error.as_deref(), Some("error.quotaOut" | "error.quotaWait")) {
+            return;
+        }
+        let Some(q) = c.messages.iter().rev().find(|m| m.role == Role::User) else { return };
+        let Some(vendor) = m.vendor else { return };
+        let saved = m.recovery.clone().unwrap_or_else(|| {
+            let shown = q
+                .attachments
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .map(|name| {
+                    if c.area == Area::Chat {
+                        format!("attachments/{name}")
+                    } else {
+                        self.opts.data_dir.join("attachments").join(&c.id).join(name).to_string_lossy().into_owned()
+                    }
+                })
+                .collect::<Vec<_>>();
+            // Older files have no dispatch intent: require explicit recovery and keep the default effort.
+            Recovery {
+                pick: Pick {
+                    vendor,
+                    model: m.model.clone(),
+                    effort: "medium".into(),
+                    reason: m.reason.clone().unwrap_or_else(|| "reason.chosen".into()),
+                    pace: m.pace.clone(),
+                },
+                text: with_attachments(&q.text, c.area, &shown),
+                by_hand: true,
+                retried: false,
+            }
+        });
+        self.transfers.insert(
+            c.id.clone(),
+            Transfer {
+                reply: m.id.clone(),
+                pick: saved.pick,
+                text: saved.text,
+                images: q.images.clone().unwrap_or_default(),
+                by_hand: saved.by_hand,
+                retried: saved.retried,
+                moving: false,
+            },
+        );
+        if let Some(m) = c.messages.last_mut() {
+            m.recovery = None;
+        }
+    }
+
     fn pending_turn(&self, id: &str, reply: &str) -> Result<&Transfer, String> {
         let t = self.transfers.get(id).filter(|t| t.reply == reply).ok_or("error.permission.stale")?;
         let m = self.convs.get(id).and_then(|c| c.messages.last()).filter(|m| m.id == reply).ok_or("error.permission.stale")?;

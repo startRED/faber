@@ -681,6 +681,7 @@ impl Core {
             let mut c = self.store.get(id)?;
             // Read from disk, so no CLI runs it: an answer cut off by a crash shows as stopped, not typing forever.
             c.messages.iter_mut().for_each(settle);
+            self.restore_recovery(&mut c);
             self.convs.insert(id.to_string(), c);
         }
         self.convs.get_mut(id)
@@ -688,7 +689,26 @@ impl Core {
 
     fn save(&self, id: &str) {
         if let Some(c) = self.convs.get(id) {
-            self.store.save(c);
+            if c.messages
+                .last()
+                .is_none_or(|m| !matches!(m.error.as_deref(), Some("error.quotaOut" | "error.quotaWait")) && m.recovery.is_none())
+            {
+                self.store.save(c);
+                return;
+            }
+            let mut saved = c.clone();
+            if let Some(m) = saved.messages.last_mut() {
+                m.recovery = self
+                    .transfers
+                    .get(id)
+                    .filter(|t| {
+                        t.reply == m.id
+                            && m.status == Some(Status::Error)
+                            && matches!(m.error.as_deref(), Some("error.quotaOut" | "error.quotaWait"))
+                    })
+                    .map(|t| Recovery { pick: t.pick.clone(), text: t.text.clone(), by_hand: t.by_hand, retried: t.retried });
+            }
+            self.store.save(&saved);
         }
     }
 
@@ -1281,12 +1301,7 @@ impl Core {
             .iter()
             .map(|p| if c.area == Area::Chat { format!("attachments/{}", name(p)) } else { p.to_string_lossy().into_owned() })
             .collect();
-        let text = if shown.is_empty() {
-            req.text.clone()
-        } else {
-            let place = if c.area == Area::Chat { " (in your working folder)" } else { "" };
-            format!("{}\n\nAttached files{place}:\n{}", req.text, shown.iter().map(|p| format!("- {p}")).collect::<Vec<_>>().join("\n"))
-        };
+        let text = recovery::with_attachments(&req.text, c.area, &shown);
         let mut question = Message::new(new_id(), Role::User, req.text.clone(), at);
         question.images = (!req.images.is_empty()).then(|| req.images.clone());
         question.attachments = Some(saved.iter().map(|p| name(p)).collect());
