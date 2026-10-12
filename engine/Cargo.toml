@@ -19,7 +19,12 @@ uuid = { version = "1", features = ["v4"] }
 zip = { version = "4", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
+win32job = "2"
 winreg = "0.56"
+
+[target.'cfg(unix)'.dependencies]
+# Safe directory-relative file operations; already used by the workspace's dependencies.
+rustix = { version = "1", features = ["fs"] }
 
 [dev-dependencies]
 # Reads the resident memory of the test's own process (install_memory.rs); the workspace forbids the unsafe code a counting allocator needs.

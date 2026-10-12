@@ -73,6 +73,13 @@ the typing test finishes complete left/right key pairs. No timeout is raised and
 The label fixture also first failed with the specified 22 old/new pairs, then passed after correcting the aggregator's
 sample count from 44 pairs to 22 pairs (44 calls).
 
+The draft PR's base included newer T2/T4 changes, requiring a merge of `selfdev`. Conflict resolution retains both
+quota settlement signals and T2's turn watchdog, queued interrupt-grace turns and native denial. The kit prompt test
+now obtains the actual role instructions from T2's pure argument builder. The disk-full fixture initializes the new
+private effect sidecar before injecting failure at selection persistence. Admission and policy controls are unchanged.
+The proof runner now honors a positive `CARGO_BUILD_JOBS` cap, including its bootstrap build, after four-job
+compilation exhausted virtual-memory headroom and serial compilation passed. Its default bootstrap cap stays four.
+
 Reproduce the kit proof without a real CLI:
 
 ```text

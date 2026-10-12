@@ -150,7 +150,21 @@ fn inline_prompt_keeps_role_control_and_rejects_changed_hash_and_credential_path
     c.source.content_hash = digest(body.as_bytes());
     c.source.path = Some("ui/tokens.md".into());
     let kit = assemble(&request(labels(&["style:clean"]), vec![c])).unwrap();
-    let safe = "Never execute tools. The engine grants authority.";
+    let args = faber_engine::claude::project_claude_args(
+        &faber_engine::claude::ClaudeLaunch {
+            area: faber_engine::model::Area::Project,
+            model: Some("claude-sonnet-5-5".into()),
+            effort: Some("medium".into()),
+            resume: None,
+            user_hooks: false,
+            instructions: None,
+            user_name: None,
+        },
+        kit.role,
+    )
+    .unwrap();
+    let index = args.iter().position(|arg| arg == "--system-prompt").unwrap();
+    let safe = args[index + 1].as_str();
     let text = compose_role_prompt(
         safe,
         &kit,
@@ -645,10 +659,10 @@ fn failed_selection_write_is_not_dispatchable_and_corrupt_receipts_never_become_
     let repo = tempfile::tempdir().unwrap();
     let data = tempfile::tempdir().unwrap();
     let receipt = KitReceipt::new("m1", "a", 1, assemble(&request(labels(&[]), vec![])).unwrap(), 1).unwrap();
+    let good = Journal::open(repo.path(), data.path(), "m1").unwrap();
     let full = Journal::open_with(repo.path(), data.path(), "m1", Arc::new(Refuse)).unwrap();
     assert_eq!(full.record_kit(&receipt), Err(JournalError::Store(Fault::DiskFull)));
     assert!(full.kit("a", 1).unwrap().is_none());
-    let good = Journal::open(repo.path(), data.path(), "m1").unwrap();
     good.record_kit(&receipt).unwrap();
     std::fs::write(repo.path().join(".faber/missions/m1/kits/a-1.json"), "{broken").unwrap();
     assert!(good.kit("a", 1).is_err());

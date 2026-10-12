@@ -30,8 +30,14 @@ pub fn half_cores(logical: usize) -> usize {
     (logical / 2).max(1)
 }
 
+fn capped_jobs(logical: usize, cap: Option<usize>) -> usize {
+    half_cores(logical).min(cap.filter(|cap| *cap > 0).unwrap_or(usize::MAX))
+}
+
 pub fn jobs() -> usize {
-    half_cores(std::thread::available_parallelism().map_or(1, |n| n.get()))
+    // A positive CARGO_BUILD_JOBS cap also applies to builds started by the runner.
+    let cap = std::env::var("CARGO_BUILD_JOBS").ok().and_then(|value| value.parse().ok());
+    capped_jobs(std::thread::available_parallelism().map_or(1, |n| n.get()), cap)
 }
 
 /// The suites that cover a set of changed paths (relative to the repository, `/` separators).
@@ -122,6 +128,18 @@ mod tests {
         assert_eq!(half_cores(2), 1);
         assert_eq!(half_cores(1), 1);
         assert_eq!(half_cores(0), 1);
+    }
+
+    #[test]
+    fn an_explicit_build_limit_caps_workers_without_using_more_than_half_the_cores() {
+        assert_eq!(capped_jobs(16, Some(1)), 1);
+        assert_eq!(capped_jobs(16, Some(2)), 2);
+        assert_eq!(capped_jobs(16, Some(20)), 8);
+        assert_eq!(capped_jobs(16, None), 8);
+        assert_eq!(capped_jobs(1, Some(1)), 1);
+        let config: toml::Value = include_str!("../../.cargo/config.toml").parse().unwrap();
+        assert_eq!(config["build"]["jobs"].as_integer(), Some(4));
+        assert!(!config["alias"]["t"].as_str().unwrap().split_whitespace().any(|arg| arg == "-j"));
     }
 
     #[test]

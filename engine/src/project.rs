@@ -6,7 +6,10 @@
 //! read and rewrite them during a rollback without dropping anything. A record whose schema is newer than this build's
 //! is refused rather than guessed at ([`store::Journal`]).
 
+mod files;
+pub mod git;
 pub mod kit;
+pub mod lease;
 pub mod store;
 pub mod wire;
 
@@ -616,7 +619,7 @@ impl Plan {
         for t in &self.tasks {
             let mut clean = vec![];
             for w in &t.writes {
-                clean.push(clean_path(w).ok_or_else(|| GraphError::BadPath { task: t.id.clone(), path: w.clone() })?);
+                clean.push(lease::normalized(w).map_err(|_| GraphError::BadPath { task: t.id.clone(), path: w.clone() })?);
             }
             if !clean.is_empty() && !t.kind.writes() {
                 return Err(GraphError::ReadOnlyWrites(t.id.clone()));
@@ -1160,3 +1163,5 @@ macro_rules! records {
 }
 
 records!(Mission, Plan, Contract, Decision, Brief, Lease, Artifact, Intent, Receipt, Runtime);
+
+pub mod policy;

@@ -81,6 +81,50 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     args
 }
 
+/// Candidate controls, for inspection only. Help output does not prove enforcement; use the gated constructor.
+pub fn project_claude_args(launch: &ClaudeLaunch, role: crate::project::Role) -> Result<Vec<String>, crate::project::policy::Blocker> {
+    use crate::project::policy;
+    policy::invocation(
+        crate::model::Vendor::Claude,
+        launch.model.as_deref(),
+        launch.effort.as_deref(),
+        launch.instructions.is_some() || launch.area != Area::Project,
+    )?;
+    if launch.resume.as_deref().is_some_and(|id| uuid::Uuid::parse_str(id).is_err()) {
+        return Err(policy::Blocker::Invocation);
+    }
+    let mut restricted = launch.clone();
+    restricted.instructions = Some(policy::instructions(role).into());
+    restricted.user_name = None;
+    let mut args = claude_args(&restricted);
+    // Unlike side questions, mission sessions may resume with the same fixed policy.
+    args.retain(|a| a != "--no-session-persistence");
+    for a in [
+        "--restricted",
+        "--safe-mode",
+        "--permission-mode",
+        "dontAsk",
+        "--disable-slash-commands",
+        "--disallowedTools",
+        "Bash,Write,Edit,Read,Glob,Grep,Agent,Task,WebSearch,WebFetch,Bash(git push *),Bash(git reset *),Bash(git update-ref *)",
+        "--settings",
+        "{\"disableAllHooks\":true}",
+    ] {
+        args.push(a.into());
+    }
+    Ok(args)
+}
+
+/// Automatic missions must never fall back to the legacy project session or its user's configuration.
+pub fn start_project_claude(
+    opts: ClaudeOptions,
+    role: crate::project::Role,
+    on_event: EventSink,
+) -> Result<Session, crate::project::policy::Blocker> {
+    let args = project_claude_args(&opts.launch, role)?;
+    crate::project::policy::admit(crate::model::Vendor::Claude).map(|()| start_with_policy(opts, on_event, args, true))
+}
+
 fn block_text(content: &Value) -> String {
     match content {
         Value::String(s) => s.clone(),
@@ -196,9 +240,14 @@ pub struct ClaudeOptions {
 }
 
 pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
+    let args = claude_args(&opts.launch);
+    start_with_policy(opts, on_event, args, false)
+}
+
+fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>, project: bool) -> Session {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     // The process starts right away, so a warmed-up session is already booting while the user types.
-    let started = (opts.spawn)(&opts.bin, &claude_args(&opts.launch), &opts.cwd);
+    let started = (opts.spawn)(&opts.bin, &args, &opts.cwd);
     tokio::spawn(async move {
         let mut p = match started {
             Ok(p) => p,
@@ -212,8 +261,22 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
         let mut closed = false;
         let mut control_id = 0u32;
         let mut quota_seen = false;
+        let mut watch = proc::TurnWatch::default();
+        let mut queued = vec![];
         loop {
+            let deadline = watch.deadline();
             tokio::select! {
+                () = proc::wait_deadline(deadline) => {
+                    if watch.stopping() {
+                        proc::stop(&mut *stdin, &mut child).await;
+                        on_event(EngineEvent::Error { message: "error.cli.interruptTimeout".into(), fatal: true });
+                        break;
+                    }
+                    watch.interrupt();
+                    control_id += 1;
+                    let msg = json!({ "type": "control_request", "request_id": format!("faber-{control_id}"), "request": { "subtype": "interrupt" } });
+                    let _ = proc::write_line(&mut *stdin, &msg).await;
+                }
                 line = lines.next_line() => {
                     let Ok(Some(line)) = line else {
                         if !closed {
@@ -230,14 +293,35 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                         Ok(msg) => {
                             quota_seen |= msg["type"] == "rate_limit_event";
                             let finished = msg["type"] == "result";
+                            if project {
+                                match crate::project::policy::reject_native(&mut *stdin, crate::model::Vendor::Claude, &msg).await {
+                                    Ok(true) => continue,
+                                    Err(_) => { proc::stop(&mut *stdin, &mut child).await; break; }
+                                    Ok(false) => {}
+                                }
+                            }
+                            watch.activity();
+                            if finished { watch.finish(); }
                             for event in parse_claude_message(&msg) {
                                 if let EngineEvent::Permission { request_id, input, .. } = &event {
                                     pending.insert(request_id.clone(), input.clone());
+                                    watch.pause();
                                 }
                                 on_event(event);
                             }
                             if finished && !quota_seen {
                                 on_event(EngineEvent::Signals(crate::signals::Signals { billing: Some(crate::budget::Billing::Unknown), ..Default::default() }));
+                            }
+                            if closed && !watch.active() {
+                                proc::stop(&mut *stdin, &mut child).await;
+                                break;
+                            }
+                            if finished {
+                                for turn in std::mem::take(&mut queued) {
+                                    quota_seen = false;
+                                    watch.begin(project);
+                                    let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
+                                }
                             }
                         }
                         Err(_) => on_event(EngineEvent::Error { message: format!("Unexpected output from Claude Code: {}", line.chars().take(200).collect::<String>()), fatal: false }),
@@ -245,7 +329,9 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                 }
                 cmd = rx.recv(), if !closed => match cmd {
                     Some(SessionCommand::Send(turn)) => {
+                        if watch.stopping() { queued.push(turn); continue; }
                         quota_seen = false;
+                        watch.begin(project);
                         let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
                     }
                     Some(SessionCommand::Answer { request_id, allow, ack }) => {
@@ -258,6 +344,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                                 match proc::write_line(&mut *stdin, &msg).await {
                                     Ok(()) => {
                                         pending.remove(&request_id);
+                                        if pending.is_empty() { watch.resume(); }
                                         Delivery::Delivered
                                     }
                                     Err(e) => {
@@ -274,13 +361,25 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                         let _ = ack.send(delivery);
                     }
                     Some(SessionCommand::Interrupt) => {
+                        if !watch.active() || watch.stopping() { continue; }
+                        watch.interrupt();
                         control_id += 1;
                         let msg = json!({ "type": "control_request", "request_id": format!("faber-{control_id}"), "request": { "subtype": "interrupt" } });
                         let _ = proc::write_line(&mut *stdin, &msg).await;
                     }
                     Some(SessionCommand::Close) | None => {
                         closed = true;
-                        proc::stop(&mut *stdin, &mut child).await;
+                        if watch.active() {
+                            if !watch.stopping() {
+                                watch.interrupt();
+                                control_id += 1;
+                                let msg = json!({ "type": "control_request", "request_id": format!("faber-{control_id}"), "request": { "subtype": "interrupt" } });
+                                let _ = proc::write_line(&mut *stdin, &msg).await;
+                            }
+                        } else {
+                            proc::stop(&mut *stdin, &mut child).await;
+                            break;
+                        }
                     }
                 }
             }
@@ -302,4 +401,59 @@ fn user_message(turn: &UserTurn) -> Value {
         Value::Array(blocks)
     };
     json!({ "type": "user", "message": { "role": "user", "content": content }, "parent_tool_use_id": null, "session_id": "" })
+}
+
+#[cfg(test)]
+mod role_tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test(start_paused = true)]
+    async fn automated_loop_denies_every_fixture_tool_and_keeps_a_bounded_silence_watch() {
+        let (stdin, input) = tokio::io::duplex(65536);
+        let (mut output, stdout) = tokio::io::duplex(65536);
+        let fake = Arc::new(std::sync::Mutex::new(Some(proc::Proc {
+            stdin: Box::new(stdin),
+            stdout: Box::new(stdout),
+            stderr: None,
+            child: None,
+        })));
+        let spawn: Spawner = Arc::new(move |_, _, _| Ok(fake.lock().unwrap().take().unwrap()));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let opts = ClaudeOptions {
+            bin: "fake".into(),
+            cwd: ".".into(),
+            launch: ClaudeLaunch {
+                area: Area::Project,
+                model: None,
+                effort: None,
+                resume: None,
+                user_hooks: false,
+                instructions: None,
+                user_name: None,
+            },
+            spawn,
+        };
+        let session = start_with_policy(opts, Arc::new(move |e| drop(tx.send(e))), vec![], true);
+        let mut lines = BufReader::new(input).lines();
+        session.send(UserTurn::text("work"));
+        assert_eq!(serde_json::from_str::<Value>(&lines.next_line().await.unwrap().unwrap()).unwrap()["type"], "user");
+        let mut denied = 0;
+        for line in include_str!("../../tests/fixtures/projects/policy-escapes.jsonl").lines() {
+            let entry: Value = serde_json::from_str(line).unwrap();
+            if entry["msg"]["type"] != "control_request" {
+                continue;
+            }
+            output.write_all(format!("{}\n", entry["msg"]).as_bytes()).await.unwrap();
+            let reply: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(reply["response"]["request_id"], entry["msg"]["request_id"]);
+            assert_eq!(reply["response"]["response"]["behavior"], "deny");
+            denied += 1;
+        }
+        assert_eq!(denied, 9);
+        tokio::time::advance(std::time::Duration::from_secs(120)).await;
+        let interrupt: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+        assert_eq!(interrupt["request"]["subtype"], "interrupt");
+        assert!(matches!(rx.recv().await,Some(EngineEvent::Error { message,fatal:true }) if message == "error.cli.interruptTimeout"));
+    }
 }

@@ -465,7 +465,15 @@ impl Ctx {
             }
             Err(e) => problems.push(e),
         }
-        let escaped: Vec<String> = self.live.iter().flat_map(|l| l.escaped.iter()).map(|r| format!("{}#{}", r.name, r.pid)).collect();
+        let escaped: Vec<String> = self
+            .live
+            .iter()
+            .flat_map(|l| {
+                l.escaped.iter().map(move |r| {
+                    format!("{}#{} (parent {}, born {}, root {}, recorded tree {:?})", r.name, r.pid, r.parent, r.born, l.pid, l.seen)
+                })
+            })
+            .collect();
         if !escaped.is_empty() {
             problems.push(format!("a process of the app is outside its job object, so it cannot be ended: {}", escaped.join(", ")));
         }
