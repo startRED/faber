@@ -353,6 +353,64 @@ async fn text_blocks_around_a_tool_are_kept_apart() {
 }
 
 #[tokio::test]
+async fn multi_block_answers_and_empty_terminal_blocks_preserve_text_and_tool_boundaries() {
+    for mode in 0..4 {
+        let with_tool = mode != 0;
+        let dir = tempfile::tempdir().unwrap();
+        let mut entries = fixture("codex", "chat");
+        let at =
+            entries.iter().position(|e| e.msg["method"] == "item/started" && e.msg["params"]["item"]["type"] == "agentMessage").unwrap();
+        let template = entries[at].clone();
+        entries.retain(|e| {
+            !matches!(e.msg["method"].as_str(), Some("item/agentMessage/delta"))
+                && !(matches!(e.msg["method"].as_str(), Some("item/started" | "item/completed"))
+                    && e.msg["params"]["item"]["type"] == "agentMessage")
+        });
+        let mut stream = Vec::new();
+        for (i, text) in ["🔎 Explanation.", "First result.", "Second result.", ""].into_iter().enumerate() {
+            if i == 1 && with_tool {
+                let mut tool = template.clone();
+                tool.msg["params"]["item"] = serde_json::json!({ "id": "tool", "type": "commandExecution", "command": "check" });
+                stream.push(tool.clone());
+                tool.msg["method"] = "item/completed".into();
+                tool.msg["params"]["item"]["exitCode"] = 0.into();
+                stream.push(tool);
+            }
+            if mode == 3 && i > 0 {
+                break;
+            }
+            let mut start = template.clone();
+            start.msg["params"]["item"]["id"] = format!("block-{i}").into();
+            start.msg["params"]["item"]["phase"] = if mode != 1 && i == 0 { "commentary" } else { "final_answer" }.into();
+            stream.push(start.clone());
+            start.msg["method"] = "item/agentMessage/delta".into();
+            start.msg["params"]["itemId"] = format!("block-{i}").into();
+            start.msg["params"]["delta"] = text.into();
+            stream.push(start);
+        }
+        entries.splice(at..at, stream);
+        let (engine, mut rx) = engine(dir.path(), Vendor::Codex, fake(entries).spawn);
+        let id = engine.send(ask(Area::Chat, SKY, choice("codex", None))).unwrap();
+        let reply = finished(&mut rx, |_| {}).await;
+        engine.shutdown();
+        assert_eq!(reply.text, if mode == 3 { "🔎 Explanation." } else { "🔎 Explanation.\n\nFirst result.\n\nSecond result." });
+        assert_eq!(
+            reply.text_breaks,
+            if mode == 3 {
+                None
+            } else {
+                Some(vec!["🔎 Explanation.\n\n".encode_utf16().count(), "🔎 Explanation.\n\nFirst result.\n\n".encode_utf16().count()])
+            }
+        );
+        let saved = read_json(&dir.path().join("conversations").join(format!("{id}.json")));
+        assert_eq!(
+            saved["messages"][1]["activityEnd"],
+            serde_json::json!(if mode == 1 { 0 } else { "🔎 Explanation.".encode_utf16().count() })
+        );
+    }
+}
+
+#[tokio::test]
 async fn editing_a_message_branches_into_a_new_conversation_and_leaves_the_original_as_it_was() {
     let dir = tempfile::tempdir().unwrap();
     let (engine, mut rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn);

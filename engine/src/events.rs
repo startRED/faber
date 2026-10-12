@@ -11,7 +11,9 @@ pub enum EngineEvent {
     },
     Text(String),
     /// A new block of text starts (for example after a tool ran), so it must not run into the previous one.
-    Break,
+    Break {
+        final_answer: bool,
+    },
     Thinking(String),
     Tool {
         id: String,

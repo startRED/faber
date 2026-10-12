@@ -13,7 +13,7 @@ check('thread: ten tool steps and narration fold into one activity row above the
   const final = 'The requested change is complete.\n\nAll checks passed.';
   const [message, setMessage] = createSignal<Message>({
     id: 'activity-check', role: 'assistant', at: 0, status: 'streaming', text: narration + final,
-    textBreaks: ['Checking the files.\n\n'.length, narration.length], thinking: 'Consider the simplest change.',
+    textBreaks: ['Checking the files.\n\n'.length, narration.length], activityEnd: narration.length, thinking: 'Consider the simplest change.',
     tools: Array.from({ length: 10 }, (_, i) => ({ id: String(i), name: 'Bash', input: { command: `check ${i}` }, ok: i < 9 ? true : undefined })),
   });
   const dispose = render(() => createComponent(Thread, {
@@ -34,7 +34,7 @@ check('thread: ten tool steps and narration fold into one activity row above the
     ok(group.textContent?.includes('Checking the files'));
     equal(group.querySelectorAll('.tools > span').length, 10);
     // Older conversations without recorded boundaries keep their full text.
-    setMessage({ ...message(), textBreaks: undefined });
+    setMessage({ ...message(), textBreaks: undefined, activityEnd: undefined });
     ok(root.querySelector('.ai > .md')!.textContent?.includes('Checking the files'));
   } finally {
     dispose();

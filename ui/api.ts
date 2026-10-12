@@ -28,6 +28,7 @@ export interface Message {
   text: string;
   at: number;
   textBreaks?: number[];
+  activityEnd?: number;
   images?: Image[];
   attachments?: string[];
   vendor?: Vendor;

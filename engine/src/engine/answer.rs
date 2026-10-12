@@ -232,6 +232,7 @@ mod tests {
                 session,
                 turn: turns.last().map(|t| t.0.to_string()),
                 break_pending: false,
+                answer_started: false,
                 used: 0,
                 cli: Cli { command: "claude".into(), prefix: vec![] },
                 resumed: false,

@@ -131,6 +131,7 @@ struct Live {
     /// The answer being written right now.
     turn: Option<String>,
     break_pending: bool,
+    answer_started: bool,
     used: u64,
     /// The CLI this process was started with; a replaced CLI starts a new process on the next turn.
     cli: Cli,
@@ -710,7 +711,15 @@ impl Core {
                 self.refresh_running();
                 return;
             }
-            EngineEvent::Break => {
+            EngineEvent::Break { final_answer } => {
+                if final_answer && self.live.get(conv).is_some_and(|l| !l.answer_started) {
+                    if let Some(m) = self.turn(conv) {
+                        m.activity_end = Some(m.text.encode_utf16().count());
+                    }
+                    if let Some(l) = self.live.get_mut(conv) {
+                        l.answer_started = true;
+                    }
+                }
                 let has_text = self.turn(conv).is_some_and(|m| !m.text.is_empty());
                 if let (true, Some(l)) = (has_text, self.live.get_mut(conv)) {
                     l.break_pending = true;
@@ -738,7 +747,11 @@ impl Core {
                 }
             }
             EngineEvent::Tool { id, name, input } => {
+                let final_answer = self.live.get(conv).is_some_and(|l| l.answer_started);
                 if let Some(m) = self.turn(conv) {
+                    if !final_answer {
+                        m.activity_end = Some(m.text.encode_utf16().count());
+                    }
                     m.tools.get_or_insert_default().push(ToolUse { id, name, input, ok: None, output: None });
                 }
             }
@@ -978,6 +991,8 @@ impl Core {
         }
         if let Some(l) = self.live.get_mut(id) {
             l.turn = Some(reply_id.to_string());
+            l.answer_started = false;
+            l.break_pending = false;
             l.by_hand = by_hand;
             l.approved = false;
             l.session.send(UserTurn { text, images });
@@ -1042,6 +1057,7 @@ impl Core {
                 session,
                 turn: None,
                 break_pending: false,
+                answer_started: false,
                 used: self.tick,
                 cli,
                 resumed,

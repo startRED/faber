@@ -79,9 +79,13 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
   const m = () => props.m();
   const streaming = () => m().status === 'streaming';
   const waiting = () => m().permissions ?? [];
-  const blocks = () => m().textBreaks ?? [];
-  const narration = () => blocks().map((end, i) => m().text.slice(i ? blocks()[i - 1] : 0, end - 2));
-  const finalText = () => m().text.slice(blocks().at(-1) ?? 0);
+  // Unknown legacy boundaries and tool-terminated turns keep the entire answer visible.
+  const boundary = () => {
+    const end = m().activityEnd;
+    return m().tools?.length && Number.isInteger(end) && end! > 0 && end! < m().text.length && m().text.slice(end).trim() ? end! : 0;
+  };
+  const narration = () => boundary() ? [m().text.slice(0, boundary())] : [];
+  const finalText = () => m().text.slice(boundary());
   const steps = () => narration().length + (m().tools?.length ?? 0) + (m().thinking ? 1 : 0);
   const commands = () => m().tools?.filter((tool) => /bash|command|exec|shell/i.test(tool.name)).length ?? 0;
   const latest = () => {
@@ -89,7 +93,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
     return tool && tool.ok === undefined ? toolLabel(tool) : finalText().trim().split('\n').at(-1) || (tool ? toolLabel(tool) : m().thinking);
   };
   return (
-    <article class="ai" aria-label={t('answer.label')} aria-busy={streaming()} ref={animateList}>
+    <article class="ai" aria-label={t('answer.label')} ref={animateList}>
       <div class="model">
         <span class="vm" classList={{ claude: m().vendor === 'claude', codex: m().vendor === 'codex' }}>
           <VendorMark vendor={m().vendor} />
@@ -103,7 +107,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
       </div>
       <Show when={steps()}>
         <details class="activity">
-          <summary>{t(streaming() ? 'activity.working' : 'activity.done', { steps: steps(), commands: commands() })}</summary>
+          <summary>{t(streaming() ? 'activity.working' : 'activity.done', { steps: t('activity.steps', { n: steps() }), commands: t('activity.commands', { n: commands() }) })}</summary>
           <div class="activity-body">
             <Show when={m().thinking}><div class="activity-thinking">{m().thinking}</div></Show>
             <For each={narration()}>{(text) => <div class="md" onClick={openLinks} innerHTML={html(text)} />}</For>
@@ -121,10 +125,10 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
             </div>
           </div>
         </details>
-        <Show when={streaming() && latest()}><div class="activity-latest" title={latest()}>{latest()}</div></Show>
+        <Show when={streaming() && latest()}><div class="activity-latest" role="status" aria-live="polite" aria-atomic="true" title={latest()}>{latest()}</div></Show>
       </Show>
       <Asks conversationId={props.conversationId} turnId={m().id} permissions={waiting()} />
-      <div class="md" onClick={openLinks}>
+      <div class="md" aria-busy={streaming()} onClick={openLinks}>
         <div innerHTML={html(finalText())} />
         <Show when={streaming() && !waiting().length}>
           <span class="cursor" aria-hidden="true" />
@@ -143,7 +147,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
       </Show>
       <Show when={!streaming()}>
         <div class="actions">
-          <button onClick={() => void navigator.clipboard.writeText(finalText())}>{t('answer.copy')}</button>
+          <button onClick={() => void navigator.clipboard.writeText(m().text)}>{t('answer.copy')}</button>
           <Show when={props.prompt} keyed>
             {(prompt) => (
               <select

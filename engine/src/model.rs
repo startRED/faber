@@ -86,9 +86,12 @@ pub struct Message {
     pub id: String,
     pub role: Role,
     pub text: String,
-    /// UTF-16 offsets where a new CLI text block starts, so the screen can fold narration before the final answer.
+    /// UTF-16 offsets where a new CLI text block starts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text_breaks: Option<Vec<usize>>,
+    /// Start of an explicit final answer, or end of text preceding the last tool call when the CLI has no phases.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity_end: Option<usize>,
     /// Milliseconds since the Unix epoch.
     pub at: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -146,6 +149,7 @@ impl Message {
             role,
             text,
             text_breaks: None,
+            activity_end: None,
             at,
             images: None,
             attachments: None,
