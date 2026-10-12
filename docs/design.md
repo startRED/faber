@@ -220,6 +220,9 @@ inside its own area.
 - Four hand-written suggestions per language. Clicking one fills the composer and moves focus there. It sends nothing.
 - "Pick up where you left off" lists the three most recently updated conversations.
 - The composer keeps its model picker, "AI: choose for me".
+- Auto chooses both the model and its effort. A manual model adds an adjacent low, medium or high effort choice,
+  defaulting to medium (R102). Each conversation remembers its choice. Changes apply to the next message only;
+  the composer says so, and each answer keeps the effort actually used. Both CLI drivers always receive that effort.
 - The ambient effect of the theme runs here.
 - With no AI connected, the greeting, the suggestions and the list give way to an empty state with Curioso and a button
   that opens account management. The composer stays on screen but cannot send.

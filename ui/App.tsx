@@ -69,7 +69,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   // with another conversation's project.
   const [place, setPlace] = createSignal<Place>({ area: saved?.area ?? 'chat', projectId: saved?.projectId });
   const [current, setCurrent] = createSignal<Conversation>();
-  const [choice, setChoice] = createSignal<Choice>(recall<Choice>('faber.choice', { vendor: 'auto' }));
+  const [choice, setChoice] = createSignal<Choice>({ vendor: 'auto' });
   const [quotas, setQuotas] = createSignal(seedQuotas(props.initial.quotas));
   const [clock, setClock] = createSignal(Date.now());
   const [error, setError] = createSignal<string>();
@@ -246,6 +246,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
     setLoading(false);
     setFrom(Math.max(0, (done.conversation?.messages.length ?? 0) - PAGE));
     setCurrent(done.conversation);
+    setChoice(next.id ? recall<Choice>(`faber.choice.${next.id}`, done.conversation?.choice ?? { vendor: 'auto' }) : { vendor: 'auto' });
   };
   const fresh = (next: Pick<Place, 'area' | 'projectId'>) => go({ ...next, id: undefined });
   const openSummary = (c: Summary) => {
@@ -394,7 +395,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
 
   const pickChoice = (c: Choice) => {
     setChoice(c);
-    remember('faber.choice', c);
+    if (current()) remember(`faber.choice.${current()!.id}`, c);
   };
 
   const target = () => ({ area: area(), projectId: area() === 'project' ? projectId() : undefined });
@@ -402,6 +403,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   const send = async (draft: Draft) => {
     // The place is taken once: the message, and the conversation it opens, belong to the place it was written in.
     const at = place();
+    const chosen = picked();
     setError(undefined);
     stick = true;
     try {
@@ -412,8 +414,10 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
         text: draft.text,
         images: draft.images,
         files: draft.files,
-        choice: picked(),
+        choice: chosen,
       });
+      const key = `faber.choice.${id}`;
+      remember(key, place() === at ? picked() : recall<Choice>(key, chosen));
       if (place() === at && id !== opening.id) await go({ ...at, id });
     } catch (err) {
       fail(err);
@@ -423,9 +427,12 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   const branch = async (messageId: string, text: string, picked: Choice) => {
     const c = current();
     if (!c) return;
+    const at = place();
     setError(undefined);
     try {
-      await go({ ...place(), id: await api.branch({ conversationId: c.id, messageId, text, choice: picked }) });
+      const id = await api.branch({ conversationId: c.id, messageId, text, choice: picked });
+      remember(`faber.choice.${id}`, picked);
+      await go({ ...at, id });
     } catch (err) {
       fail(err);
     }
@@ -520,6 +527,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
         choice={picked()}
         onChoice={pickChoice}
         busy={busy() && !loading()}
+        nextMessage={!!current()?.messages.length}
         locked={loading()}
         placeholder={area() === 'project' ? t('composer.projectPlaceholder') : newChat() ? t('composer.chatPlaceholder') : t('composer.replyPlaceholder')}
         onSend={(d) => void send(d)}

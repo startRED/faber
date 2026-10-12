@@ -333,6 +333,8 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .composer .chips { padding: 12px 14px 0; }
 .composer textarea::placeholder { color: var(--ink-3); }
 .cbar { display: flex; gap: 6px; align-items: center; padding: 8px 10px 10px 12px; }
+.cbar:has(.effort) { flex-wrap: wrap; }
+.effort-hint { margin: 0; padding: 0 12px 10px; font-size: calc(var(--fs-ui) - 2px); color: var(--ink-3); }
 /* The model chip: its icon and chevron are drawings, the select on top of them is the control. */
 .chip.choose { position: relative; height: 30px; gap: 6px; padding: 0 8px 0 10px; cursor: pointer; white-space: nowrap; }
 .chip.choose:hover { background: var(--s3); color: var(--ink); }

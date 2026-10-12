@@ -96,6 +96,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
           <b>{m().vendor ? vendorName(m().vendor!) : t('model.auto')}</b>
         </span>
         <span>{streaming() ? t('answer.answering') : m().vendor ? prettyModel(m().model) : ''}</span>
+        <Show when={m().effort}>{(effort) => <span>{t('effort.label')}: {t(`effort.${effort()}`)}</span>}</Show>
         <Show when={m().reason}>
           <em>· {fromEngine(m().reason)}</em>
         </Show>

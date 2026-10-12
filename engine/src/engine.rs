@@ -11,7 +11,7 @@ use crate::learn::Span;
 use crate::ledger::{Ledger, plausible};
 use crate::model::*;
 use crate::proc::Spawner;
-use crate::router::{Choice, Pick, pick_model};
+use crate::router::{Choice, Effort, Pick, pick_model};
 use crate::signals::Signals;
 use crate::store::Store;
 use crate::usage;
@@ -969,10 +969,12 @@ impl Core {
     fn start(&mut self, id: &str, reply_id: &str, pick: &Pick, text: String, images: Vec<Image>, by_hand: bool) -> Result<(), String> {
         self.gate_turn(pick, by_hand)?;
         self.launch(id, pick)?;
-        if let Some(running) = self.live.get(id).and_then(|l| l.running.clone())
-            && let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id))
-        {
-            m.model = Some(running);
+        let running = self.live.get(id).and_then(|l| l.running.clone());
+        if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id)) {
+            m.effort = Some(pick.effort.clone());
+            if let Some(running) = running {
+                m.model = Some(running);
+            }
         }
         if let Some(l) = self.live.get_mut(id) {
             l.turn = Some(reply_id.to_string());
@@ -1073,6 +1075,7 @@ impl Core {
         let c = Conversation {
             id: new_id(),
             title: String::new(),
+            choice: None,
             area,
             project_id,
             sessions: BTreeMap::new(),
@@ -1117,6 +1120,7 @@ impl Core {
         let auto = req.choice.vendor == "auto";
         let route = if auto { self.next_route(&id) } else { None };
         let c = self.convs.get_mut(&id).ok_or("error.conversationGone")?;
+        c.choice = Some(Choice { effort: (!auto).then(|| req.choice.effort.unwrap_or(Effort::Medium)), ..req.choice.clone() });
         let routing = route.is_some();
         let pick = match &route {
             Some(Some(before)) => before.clone(),
@@ -1340,7 +1344,8 @@ fn spawner(base: &Spawner, cli: &Cli) -> Spawner {
 fn same_as_before(c: &Conversation, live: Option<&Live>) -> Option<Pick> {
     let last = c.messages.iter().rev().find(|m| m.role == Role::Assistant && m.vendor.is_some())?;
     let vendor = last.vendor?;
-    let effort = live.filter(|l| l.vendor == vendor).map_or_else(|| "medium".to_string(), |l| l.effort.clone());
+    let effort =
+        live.filter(|l| l.vendor == vendor).map_or_else(|| last.effort.clone().unwrap_or_else(|| "medium".into()), |l| l.effort.clone());
     let reason = last.reason.clone().filter(|r| r != "reason.routing").unwrap_or_else(|| "reason.autoDefault".into());
     Some(Pick { vendor, model: last.model.clone(), effort, reason, pace: None })
 }

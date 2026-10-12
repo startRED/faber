@@ -202,7 +202,12 @@ fn pulse_recording() -> Vec<Entry> {
 }
 
 fn typing() -> WarmRequest {
-    WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: Choice { vendor: "auto".into(), model: None } }
+    WarmRequest {
+        conversation_id: None,
+        area: Area::Chat,
+        project_id: None,
+        choice: Choice { vendor: "auto".into(), model: None, effort: None },
+    }
 }
 
 fn silent() -> Ask {

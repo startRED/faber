@@ -80,7 +80,7 @@ fn flag(args: &[String], name: &str) -> Option<String> {
 }
 
 fn auto(text: &str) -> SendRequest {
-    let choice = Choice { vendor: "auto".into(), model: None };
+    let choice = Choice { vendor: "auto".into(), model: None, effort: None };
     SendRequest { conversation_id: None, area: Area::Chat, project_id: None, text: text.into(), images: vec![], files: vec![], choice }
 }
 
@@ -127,8 +127,12 @@ async fn a_draft_routed_while_typing_answers_without_asking_again() {
     let dir = tempfile::tempdir().unwrap();
     let calls = Calls::default();
     let (engine, mut rx) = engine(dir.path(), Vendor::Codex, fake(fixture("codex", "chat")).spawn, router("chat", "easy", calls.clone()));
-    let typing =
-        WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: Choice { vendor: "auto".into(), model: None } };
+    let typing = WarmRequest {
+        conversation_id: None,
+        area: Area::Chat,
+        project_id: None,
+        choice: Choice { vendor: "auto".into(), model: None, effort: None },
+    };
     // Most of the message: the route still holds once the last words are typed.
     engine.route_draft(typing, SKY[..30].into());
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -213,7 +217,7 @@ async fn with_only_claude_the_router_process_starts_while_the_user_types() {
         conversation_id: None,
         area: Area::Chat,
         project_id: None,
-        choice: Choice { vendor: "auto".into(), model: None },
+        choice: Choice { vendor: "auto".into(), model: None, effort: None },
     });
     assert_eq!(routers(), 1, "a cold Claude takes about 9 s, so the router starts at the first keystroke");
     engine.send(auto(SKY)).unwrap();

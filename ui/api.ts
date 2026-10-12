@@ -3,6 +3,7 @@ import { listen } from '@tauri-apps/api/event';
 
 // The shapes the engine sends (engine/src/model.rs).
 export type Vendor = 'claude' | 'codex';
+export type Effort = 'low' | 'medium' | 'high';
 export type Area = 'chat' | 'project';
 export type Status = 'streaming' | 'done' | 'stopped' | 'error';
 export interface Image {
@@ -32,6 +33,7 @@ export interface Message {
   vendor?: Vendor;
   model?: string;
   reason?: string;
+  effort?: Effort;
   thinking?: string;
   tools?: ToolUse[];
   permissions?: Permission[];
@@ -45,6 +47,7 @@ export interface Message {
 export interface Conversation {
   id: string;
   title: string;
+  choice?: Choice;
   area: Area;
   projectId?: string;
   sessions: Partial<Record<Vendor, string>>;
@@ -181,6 +184,7 @@ export interface SavedSettings {
 export interface Choice {
   vendor: Vendor | 'auto';
   model?: string;
+  effort?: Effort;
 }
 export interface Attachment {
   name: string;

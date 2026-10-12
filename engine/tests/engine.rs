@@ -3,7 +3,7 @@ mod support;
 use faber_engine::cli::{Cli, resolve_cli};
 use faber_engine::model::{Area, Experience, Message, Role, Settings, Setup, Status, Vendor};
 use faber_engine::proc::Spawner;
-use faber_engine::router::{Choice, pick_model};
+use faber_engine::router::{Choice, Effort, pick_model};
 use faber_engine::{AppEvent, BranchRequest, Engine, EngineOptions, SendRequest, WarmRequest};
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -36,7 +36,7 @@ fn engine_idle(dir: &Path, vendor: Vendor, spawn: Spawner, idle: Duration) -> (E
 }
 
 fn choice(vendor: &str, model: Option<&str>) -> Choice {
-    Choice { vendor: vendor.into(), model: model.map(String::from) }
+    Choice { vendor: vendor.into(), model: model.map(String::from), effort: None }
 }
 
 fn ask(area: Area, text: &str, choice: Choice) -> SendRequest {
@@ -67,6 +67,68 @@ async fn finished(rx: &mut UnboundedReceiver<AppEvent>, mut react: impl FnMut(&M
 
 fn read_json(path: &Path) -> serde_json::Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+#[tokio::test]
+async fn manual_effort_and_the_missing_effort_default_reach_both_drivers_and_are_saved() {
+    for vendor in Vendor::ALL {
+        for effort in [None, Some(Effort::Low), Some(Effort::Medium), Some(Effort::High)] {
+            let dir = tempfile::tempdir().unwrap();
+            let f = fake(fixture(vendor.name(), "chat"));
+            let (engine, mut rx) = engine(dir.path(), vendor, f.spawn.clone());
+            let selected = Choice { effort, ..choice(vendor.name(), Some(if vendor == Vendor::Claude { "haiku" } else { "gpt-6-luna" })) };
+            let id = engine.send(ask(Area::Chat, SKY, selected)).unwrap();
+            let reply = finished(&mut rx, |_| {}).await;
+            engine.shutdown();
+            let expected = effort.unwrap_or(Effort::Medium).name();
+            assert_eq!(reply.effort.as_deref(), Some(expected));
+            if vendor == Vendor::Claude {
+                let args = f.args.lock().unwrap();
+                let at = args[0].iter().position(|a| a == "--effort").unwrap();
+                assert_eq!(args[0][at + 1], expected);
+                let model = args[0].iter().position(|a| a == "--model").unwrap();
+                assert_eq!(args[0][model + 1], "claude-haiku-5-5");
+            } else {
+                assert_eq!(f.wire.lines_with("\"method\":\"turn/start\""), 1);
+                assert_eq!(f.wire.lines_with(&format!("\"effort\":\"{expected}\"")), 1);
+            }
+            let saved = read_json(&dir.path().join("conversations").join(format!("{id}.json")));
+            assert_eq!(saved["choice"]["effort"].as_str(), Some(expected));
+            assert_eq!(saved["messages"][1]["effort"].as_str(), Some(expected));
+            let (reopened, _) = engine_idle(dir.path(), vendor, fake(fixture(vendor.name(), "chat")).spawn, Duration::from_secs(120));
+            assert_eq!(reopened.open(&id).unwrap().choice.unwrap().effort, Some(effort.unwrap_or(Effort::Medium)));
+            reopened.shutdown();
+        }
+    }
+}
+
+#[tokio::test]
+async fn changing_effort_while_a_turn_runs_applies_only_to_the_next_message() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "chat"));
+    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let low = Choice { effort: Some(Effort::Low), ..choice("claude", Some("haiku")) };
+    let high = Choice { effort: Some(Effort::High), ..low.clone() };
+    let id = engine.send(ask(Area::Chat, SKY, low)).unwrap();
+    engine.warm(WarmRequest { conversation_id: Some(id.clone()), area: Area::Chat, project_id: None, choice: high.clone() });
+    assert_eq!(f.args.lock().unwrap().len(), 1, "typing a new effort must not replace the active turn");
+    assert_eq!(finished(&mut rx, |_| {}).await.effort.as_deref(), Some("low"));
+    engine.send(SendRequest { conversation_id: Some(id.clone()), ..ask(Area::Chat, SKY, high) }).unwrap();
+    assert_eq!(finished(&mut rx, |_| {}).await.effort.as_deref(), Some("high"));
+    engine.shutdown();
+    let c = engine.open(&id).unwrap();
+    assert_eq!(c.messages[1].effort.as_deref(), Some("low"));
+    assert_eq!(c.messages[3].effort.as_deref(), Some("high"));
+}
+
+#[test]
+fn manual_effort_accepts_only_three_levels_and_auto_ignores_a_manual_effort() {
+    for effort in ["max", "xhigh", "unknown"] {
+        assert!(serde_json::from_value::<Choice>(serde_json::json!({ "vendor": "claude", "model": "haiku", "effort": effort })).is_err());
+    }
+    let before = choice("auto", None);
+    let after = Choice { effort: Some(Effort::High), ..before.clone() };
+    assert_eq!(pick_model(&before, &Vendor::ALL, Some("gpt-6-luna")), pick_model(&after, &Vendor::ALL, Some("gpt-6-luna")));
 }
 
 #[tokio::test]

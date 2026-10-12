@@ -47,7 +47,7 @@ fn ask(vendor: &str) -> SendRequest {
         text: SKY.into(),
         images: vec![],
         files: vec![],
-        choice: Choice { vendor: vendor.into(), model: (vendor == "claude").then(|| "haiku".into()) },
+        choice: Choice { vendor: vendor.into(), model: (vendor == "claude").then(|| "haiku".into()), effort: None },
     }
 }
 

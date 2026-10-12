@@ -282,7 +282,7 @@ async fn replacing_an_active_shared_server_retires_it_as_soon_as_its_answer_fini
             text: "In one sentence: why is the sky blue?".into(),
             images: vec![],
             files: vec![],
-            choice: Choice { vendor: "codex".into(), model: None },
+            choice: Choice { vendor: "codex".into(), model: None, effort: None },
         })
         .unwrap();
     // The current-thread runtime has not polled the replay yet: the turn is in flight.
@@ -376,7 +376,7 @@ async fn c1_4_replacing_clis_updates_state_warm_and_send_without_recreating_the_
     assert!(engine.state().vendors.is_empty());
     engine.replace_clis(BTreeMap::from([(Vendor::Claude, native_cli())]));
     assert_eq!(engine.state().vendors, vec![Vendor::Claude], "C1.4: the existing engine still exposes the old CLI registry");
-    let choice = Choice { vendor: "claude".into(), model: Some("haiku".into()) };
+    let choice = Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None };
     engine.warm(WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: choice.clone() });
     assert_eq!(replay.args.lock().unwrap().len(), 1, "warm must use the new registry");
     let sent = engine.send(SendRequest {
@@ -414,7 +414,7 @@ async fn c1_4_replacing_clis_updates_state_warm_and_send_without_recreating_the_
         conversation_id: None,
         area: Area::Chat,
         project_id: None,
-        choice: Choice { vendor: "codex".into(), model: None },
+        choice: Choice { vendor: "codex".into(), model: None, effort: None },
     };
     engine.warm(warm());
     assert!(!old_dropped.load(Ordering::SeqCst));

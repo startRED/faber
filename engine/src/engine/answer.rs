@@ -465,7 +465,7 @@ mod tests {
                     text: "hello".into(),
                     images: vec![],
                     files: vec![],
-                    choice: Choice { vendor: "claude".into(), model: None },
+                    choice: Choice { vendor: "claude".into(), model: None, effort: None },
                 });
                 let _ = done.send((listed, sent));
             }
