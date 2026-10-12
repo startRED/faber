@@ -79,6 +79,15 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
   const m = () => props.m();
   const streaming = () => m().status === 'streaming';
   const waiting = () => m().permissions ?? [];
+  const blocks = () => m().textBreaks ?? [];
+  const narration = () => blocks().map((end, i) => m().text.slice(i ? blocks()[i - 1] : 0, end - 2));
+  const finalText = () => m().text.slice(blocks().at(-1) ?? 0);
+  const steps = () => narration().length + (m().tools?.length ?? 0) + (m().thinking ? 1 : 0);
+  const commands = () => m().tools?.filter((tool) => /bash|command|exec|shell/i.test(tool.name)).length ?? 0;
+  const latest = () => {
+    const tool = m().tools?.at(-1);
+    return tool && tool.ok === undefined ? toolLabel(tool) : finalText().trim().split('\n').at(-1) || (tool ? toolLabel(tool) : m().thinking);
+  };
   return (
     <article class="ai" aria-label={t('answer.label')} aria-busy={streaming()} ref={animateList}>
       <div class="model">
@@ -91,29 +100,31 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
           <em>· {fromEngine(m().reason)}</em>
         </Show>
       </div>
-      <Show when={m().thinking}>
-        <details class="thinking">
-          <summary>{t('answer.thinking')}</summary>
-          <div>{m().thinking}</div>
+      <Show when={steps()}>
+        <details class="activity">
+          <summary>{t(streaming() ? 'activity.working' : 'activity.done', { steps: steps(), commands: commands() })}</summary>
+          <div class="activity-body">
+            <Show when={m().thinking}><div class="activity-thinking">{m().thinking}</div></Show>
+            <For each={narration()}>{(text) => <div class="md" onClick={openLinks} innerHTML={html(text)} />}</For>
+            <div class="tools">
+              <For each={m().tools}>
+                {(tool) => (
+                  <span class={tool.ok === false ? 'bad' : ''} title={tool.output ?? toolLabel(tool)}>
+                    <Show when={tool.ok === true}>
+                      <Icon name="check" small />
+                    </Show>
+                    <i>{toolLabel(tool)}</i>
+                  </span>
+                )}
+              </For>
+            </div>
+          </div>
         </details>
-      </Show>
-      <Show when={m().tools?.length}>
-        <div class="tools">
-          <For each={m().tools}>
-            {(tool) => (
-              <span class={tool.ok === false ? 'bad' : ''} title={tool.output ?? toolLabel(tool)}>
-                <Show when={tool.ok === true}>
-                  <Icon name="check" small />
-                </Show>
-                <i>{toolLabel(tool)}</i>
-              </span>
-            )}
-          </For>
-        </div>
+        <Show when={streaming() && latest()}><div class="activity-latest" title={latest()}>{latest()}</div></Show>
       </Show>
       <Asks conversationId={props.conversationId} turnId={m().id} permissions={waiting()} />
       <div class="md" onClick={openLinks}>
-        <div innerHTML={html(m().text)} />
+        <div innerHTML={html(finalText())} />
         <Show when={streaming() && !waiting().length}>
           <span class="cursor" aria-hidden="true" />
         </Show>
@@ -131,7 +142,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
       </Show>
       <Show when={!streaming()}>
         <div class="actions">
-          <button onClick={() => void navigator.clipboard.writeText(m().text)}>{t('answer.copy')}</button>
+          <button onClick={() => void navigator.clipboard.writeText(finalText())}>{t('answer.copy')}</button>
           <Show when={props.prompt} keyed>
             {(prompt) => (
               <select

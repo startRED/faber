@@ -263,7 +263,10 @@ async fn two_permission_requests_at_once_wait_in_a_queue_and_both_get_answered()
 #[tokio::test]
 async fn text_blocks_around_a_tool_are_kept_apart() {
     let dir = tempfile::tempdir().unwrap();
-    let (engine, mut rx) = engine(dir.path(), Vendor::Codex, fake(fixture("codex", "tools")).spawn);
+    let mut entries = fixture("codex", "tools");
+    let first = entries.iter_mut().find(|e| e.msg["method"] == "item/agentMessage/delta").unwrap();
+    first.msg["params"]["delta"] = format!("🔎 {}", first.msg["params"]["delta"].as_str().unwrap()).into();
+    let (engine, mut rx) = engine(dir.path(), Vendor::Codex, fake(entries).spawn);
     let project = engine.add_project(&dir.path().to_string_lossy());
     let text = "Create a.txt containing one. Then create b.txt containing two. Make each file in a separate step.";
     let id = engine.send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, text, choice("codex", None)) }).unwrap();
@@ -282,6 +285,9 @@ async fn text_blocks_around_a_tool_are_kept_apart() {
     let blocks: Vec<&str> = reply.text.split("\n\n").collect();
     assert!(blocks[0].contains("a.txt"), "{}", reply.text);
     assert!(blocks.len() > 1 && !blocks[1].is_empty(), "expected two blocks in: {}", reply.text);
+    assert_eq!(reply.text_breaks.as_ref().unwrap()[0], blocks[0].encode_utf16().count() + 2);
+    let saved = read_json(&dir.path().join("conversations").join(format!("{id}.json")));
+    assert_eq!(saved["messages"][1]["textBreaks"], serde_json::json!(reply.text_breaks));
 }
 
 #[tokio::test]

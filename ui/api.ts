@@ -26,6 +26,7 @@ export interface Message {
   role: 'user' | 'assistant';
   text: string;
   at: number;
+  textBreaks?: number[];
   images?: Image[];
   attachments?: string[];
   vendor?: Vendor;

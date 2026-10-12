@@ -435,12 +435,12 @@ const THREAD: &str = r#"(() => {
   const parts = [
     ['your message', '.thread .you', 4.5, true],
     ['the model name', 'article.ai .model b', 4.5, true],
-    ['the tool line', 'article.ai .tools span', 4.5, true],
+    ['the activity row', 'article.ai .activity summary', 4.5, true],
     ['the question title', '.thread .ask b', 4.5, true],
     ['the question text', '.thread .ask pre', 4.5, true],
     ['Allow', '.thread .ask .btn.primary', 4.5, true],
     ['the other answers', '.thread .ask .btn:not(.primary)', 4.5, true],
-    ['the answer text', 'article.ai .md p', 4.5, false],
+    ['the answer text', 'article.ai > .md p', 4.5, false],
     ['the crumb', '.crumb b', 4.5, true],
   ];
   const found = [];

@@ -115,6 +115,8 @@ export const ptBR: Messages = {
   'answer.label': 'Resposta',
   'answer.answering': 'respondendo',
   'answer.thinking': 'Raciocínio',
+  'activity.working': 'Trabalhando · {steps} etapas · {commands} comandos',
+  'activity.done': 'Trabalho realizado · {steps} etapas · {commands} comandos',
   'answer.stopped': 'Interrompida.',
   'answer.copy': 'Copiar',
   'answer.redo': 'Refazer com…',

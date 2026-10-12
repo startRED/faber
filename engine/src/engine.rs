@@ -722,6 +722,7 @@ impl Core {
                 let Some(m) = self.turn(conv) else { return };
                 if pending && !delta.is_empty() {
                     m.text.push_str("\n\n");
+                    m.text_breaks.get_or_insert_default().push(m.text.encode_utf16().count());
                 }
                 m.text.push_str(&delta);
                 if pending

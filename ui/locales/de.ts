@@ -115,6 +115,8 @@ export const de: Messages = {
   'answer.label': 'Antwort',
   'answer.answering': 'antwortet',
   'answer.thinking': 'Denkprozess',
+  'activity.working': 'In Arbeit · {steps} Schritte · {commands} Befehle',
+  'activity.done': 'Bearbeitet · {steps} Schritte · {commands} Befehle',
   'answer.stopped': 'Gestoppt.',
   'answer.copy': 'Kopieren',
   'answer.redo': 'Neu mit…',

@@ -278,6 +278,12 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 .tools span svg { flex: none; color: var(--accent-text); }
 .tools span i { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-style: normal; }
 .tools span.bad { color: var(--ink-3); text-decoration: line-through; }
+.activity { border-radius: var(--r-sm); background: var(--s1); color: var(--ink-2); font-size: calc(var(--fs-ui) - 1px); }
+.activity summary { cursor: pointer; padding: 10px 12px; border-radius: inherit; transition: background-color var(--dur-fast) var(--ease); }
+.activity summary:hover { background: var(--s2); }
+.activity-body { display: grid; gap: 12px; padding: 0 12px 12px; }
+.activity-thinking { white-space: pre-wrap; color: var(--ink-3); }
+.activity-latest { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: calc(var(--fs-ui) - 1px); }
 /* A question waiting for the user is the one place the amber meaning appears in a conversation. */
 .ask { display: grid; gap: 8px; padding: 12px 14px; border-radius: var(--r-md); background: linear-gradient(180deg, var(--amber-soft), transparent 120%), var(--card-bg); box-shadow: inset 0 0 0 1px var(--amber-line), var(--amber-light); animation: arrive var(--dur-arrive) var(--ease) both; }
 .ask b { color: var(--amber-ink); font-weight: 600; font-size: calc(var(--fs-ui) - 0.5px); }

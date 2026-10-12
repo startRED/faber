@@ -1,10 +1,46 @@
-import { createComponent } from 'solid-js';
+import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
 import { Composer } from '../../ui/Composer.tsx';
 import { Thread } from '../../ui/Thread.tsx';
 import type { Message } from '../../ui/api.ts';
-import { check, ok } from './check.ts';
+import { check, equal, ok } from './check.ts';
+
+check('thread: ten tool steps and narration fold into one activity row above the final answer', async () => {
+  const root = document.createElement('div');
+  document.body.append(root);
+  const narration = 'Checking the files.\n\nRunning the checks.\n\n';
+  const final = 'The requested change is complete.\n\nAll checks passed.';
+  const [message, setMessage] = createSignal<Message>({
+    id: 'activity-check', role: 'assistant', at: 0, status: 'streaming', text: narration + final,
+    textBreaks: ['Checking the files.\n\n'.length, narration.length], thinking: 'Consider the simplest change.',
+    tools: Array.from({ length: 10 }, (_, i) => ({ id: String(i), name: 'Bash', input: { command: `check ${i}` }, ok: i < 9 ? true : undefined })),
+  });
+  const dispose = render(() => createComponent(Thread, {
+    get messages() { return [message()]; }, from: 0, conversationId: 'activity-check', options: [], onBranch: () => {},
+  }), root);
+  try {
+    const group = root.querySelector<HTMLDetailsElement>('.activity')!;
+    equal(root.querySelectorAll('.activity').length, 1);
+    equal(group.open, false);
+    ok(root.querySelector('.activity-latest')!.textContent?.includes('check 9'), 'latest running command remains visible');
+    setMessage({ ...message(), status: 'done' });
+    equal(root.querySelectorAll('.activity').length, 1);
+    equal(group.open, false, 'completion stays collapsed');
+    equal(root.querySelector('.activity-latest'), null);
+    ok(root.querySelector('.ai > .md')!.textContent?.includes(final.split('\n')[0]!));
+    ok(!root.querySelector('.ai > .md')!.textContent?.includes('Checking the files'), 'narration is kept out of the final answer');
+    group.open = true;
+    ok(group.textContent?.includes('Checking the files'));
+    equal(group.querySelectorAll('.tools > span').length, 10);
+    // Older conversations without recorded boundaries keep their full text.
+    setMessage({ ...message(), textBreaks: undefined });
+    ok(root.querySelector('.ai > .md')!.textContent?.includes('Checking the files'));
+  } finally {
+    dispose();
+    root.remove();
+  }
+});
 
 check('thread: the last answer and its actions leave at least 48px above either composer height', async () => {
   for (const [width, height] of [[1440, 900], [1000, 700]]) {

@@ -115,6 +115,8 @@ export const es: Messages = {
   'answer.label': 'Respuesta',
   'answer.answering': 'respondiendo',
   'answer.thinking': 'Razonamiento',
+  'activity.working': 'En curso · {steps} pasos · {commands} comandos',
+  'activity.done': 'Trabajo realizado · {steps} pasos · {commands} comandos',
   'answer.stopped': 'Detenida.',
   'answer.copy': 'Copiar',
   'answer.redo': 'Rehacer con…',

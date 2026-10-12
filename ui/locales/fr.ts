@@ -115,6 +115,8 @@ export const fr: Messages = {
   'answer.label': 'Réponse',
   'answer.answering': 'répond',
   'answer.thinking': 'Réflexion',
+  'activity.working': 'En cours · {steps} étapes · {commands} commandes',
+  'activity.done': 'Travail effectué · {steps} étapes · {commands} commandes',
   'answer.stopped': 'Interrompue.',
   'answer.copy': 'Copier',
   'answer.redo': 'Refaire avec…',

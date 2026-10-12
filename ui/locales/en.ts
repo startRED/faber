@@ -116,6 +116,8 @@ export const en = {
   'answer.label': 'Answer',
   'answer.answering': 'answering',
   'answer.thinking': 'Thinking',
+  'activity.working': 'Working · {steps} steps · {commands} commands',
+  'activity.done': 'Worked · {steps} steps · {commands} commands',
   'answer.stopped': 'Stopped.',
   'answer.copy': 'Copy',
   'answer.redo': 'Redo with…',
