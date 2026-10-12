@@ -1123,6 +1123,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "uuid",
+ "win32job",
  "winreg",
  "zip",
 ]
@@ -1139,6 +1140,7 @@ dependencies = [
  "sha2",
  "sysinfo",
  "tempfile",
+ "tokio",
  "toml 0.8.2",
  "tungstenite",
  "win32job",

@@ -79,6 +79,27 @@ pub fn ensure_fake_cli(paths: &Paths, jobs: usize) -> Result<(), String> {
     let mut command = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
     command.current_dir(&paths.root).args(["build", "--quiet", "-j", &jobs.to_string(), "--package", "faber-testkit", "--bin", "fake-cli"]);
     run("build of the fake CLI", command)?;
+    #[cfg(windows)]
+    {
+        let mut example = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
+        // This guard-only host needs no PDB; MSVC hit LNK1318 LIMIT while generating it.
+        example.current_dir(&paths.root).args([
+            "rustc",
+            "--quiet",
+            "-j",
+            &jobs.to_string(),
+            "--package",
+            "faber-engine",
+            "--example",
+            "cache_probe",
+            "--",
+            "-C",
+            "debuginfo=0",
+            "-C",
+            "link-arg=/DEBUG:NONE",
+        ]);
+        run("build of the cache example guard host", example)?;
+    }
     if paths.fake_cli.exists() { Ok(()) } else { Err(format!("the fake CLI is not at {}", paths.fake_cli.display())) }
 }
 

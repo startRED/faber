@@ -74,6 +74,10 @@ start now; disjoint T5K/T5B modules may overlap after the shared schema freeze. 
 Ready nodes start within grants, daily pace, RAM and review capacity. Shipped missions keep one source writer.
 Reuse phase-1-base, notify-sound and ux-polish; do not rebuild them. T14/T15 remain Later.
 
+Task 2 implementation and both reviews are integrated. Role containment and exposure qualification remain blocked;
+see [policy probes](../../research/2026-10-12-project-policy-probes.md) and
+[second-review disposition](../../research/2026-10-12-task-2-opus-review.md). Existing manual launch defaults remain intact.
+
 ## Task 3 — Connect mission grants to existing Auto pacing
 
 Files: new `engine/src/project/budget.rs`, `engine/tests/project_budget.rs`;

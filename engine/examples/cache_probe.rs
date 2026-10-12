@@ -180,8 +180,15 @@ async fn wait(label: &str, d: Duration) {
     tokio::time::sleep(d).await;
 }
 
+fn main() {
+    if let Some(code) = faber_engine::proc::guard_mode() {
+        std::process::exit(code);
+    }
+    run();
+}
+
 #[tokio::main]
-async fn main() {
+async fn run() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let scenario = args.first().map(String::as_str).unwrap_or("help");
     let number = |default: u64| args.get(1).and_then(|a| a.parse::<u64>().ok()).unwrap_or(default);

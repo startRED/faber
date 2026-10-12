@@ -38,6 +38,8 @@ pub fn all() -> Vec<Scenario> {
         .chain(first_run::scenarios());
     #[cfg(windows)]
     let all = all.chain(containment::scenarios());
+    #[cfg(windows)]
+    let all = all.chain(project_drivers::scenarios());
     all.collect()
 }
 
@@ -224,3 +226,6 @@ mod tests {
         assert!(names.len() == count, "{count} scenarios, {} different names", names.len());
     }
 }
+
+#[cfg(windows)]
+pub mod project_drivers;
