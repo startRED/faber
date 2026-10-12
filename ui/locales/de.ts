@@ -328,6 +328,8 @@ export const de: Messages = {
   'tour.running.title': 'Die laufende Arbeit',
   'tour.running.body': 'Jedes Gespräch, das gerade arbeitet, steht in der Liste, im Chat und in den Projekten. Bernstein markiert die, die dich brauchen.',
   "error.billingUnknown": "Auto muss bestätigen, dass dieser Zugang ein Abonnement nutzt.",
+  "error.permission.stale": "Diese Anfrage wartet nicht mehr auf deine Antwort.",
+  "error.permission.undelivered": "Deine Antwort konnte die KI nicht erreichen. Versuche es erneut.",
   "error.billedPerUse": "Auto nutzt keine Zugänge mit verbrauchsabhängiger Abrechnung. Wähle dieses Konto ausdrücklich aus, um es zu nutzen.",
   "error.quotaOut": "Für diese Anfrage ist kein enthaltenes Kontingent verfügbar.",
   "error.quotaWait": "Das enthaltene Kontingent kehrt {when} zurück. Deine Nachricht bleibt gespeichert.",

@@ -328,6 +328,8 @@ export const fr: Messages = {
   'tour.running.title': 'Ce qui est en cours',
   'tour.running.body': 'Chaque conversation qui travaille apparaît dans la liste, dans Chat comme dans Projets. L’ambre marque celles qui ont besoin de vous.',
   "error.billingUnknown": "Auto doit confirmer que cette connexion utilise un abonnement.",
+  "error.permission.stale": "Cette demande n’attend plus votre réponse.",
+  "error.permission.undelivered": "Votre réponse n’a pas pu parvenir à l’IA. Réessayez.",
   "error.billedPerUse": "Auto ne choisit pas les connexions facturées à l’utilisation. Sélectionnez ce compte pour l’utiliser.",
   "error.quotaOut": "Aucun quota inclus n’est disponible pour cette demande.",
   "error.quotaWait": "Le quota inclus revient {when}. Votre message est conservé.",

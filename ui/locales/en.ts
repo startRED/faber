@@ -329,6 +329,8 @@ export const en = {
   'tour.running.title': 'The running list',
   'tour.running.body': 'Every conversation that is working shows in the running list, in Chat and in Projects. Amber marks the ones that need you.',
   "error.billingUnknown": "Auto needs confirmation that this sign-in uses a subscription.",
+  "error.permission.stale": "This request is no longer waiting for your answer.",
+  "error.permission.undelivered": "Your answer could not reach the AI. Try again.",
   "error.billedPerUse": "Auto does not use sign-ins billed per use. Choose this account explicitly to use it.",
   "error.quotaOut": "No included quota is available for this request.",
   "error.quotaWait": "Included quota returns {when}. Your message is kept.",

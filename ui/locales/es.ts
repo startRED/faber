@@ -328,6 +328,8 @@ export const es: Messages = {
   'tour.running.title': 'Lo que está en marcha',
   'tour.running.body': 'Cada conversación que trabaja aparece en la lista, en Chat y en Proyectos. El ámbar marca las que te necesitan.',
   "error.billingUnknown": "Auto necesita confirmar que este acceso utiliza una suscripción.",
+  "error.permission.stale": "Esta solicitud ya no espera tu respuesta.",
+  "error.permission.undelivered": "Tu respuesta no pudo llegar a la IA. Inténtalo de nuevo.",
   "error.billedPerUse": "Auto no utiliza accesos que cobran por uso. Elige esta cuenta expresamente para utilizarla.",
   "error.quotaOut": "No hay cuota incluida disponible para esta solicitud.",
   "error.quotaWait": "La cuota incluida vuelve {when}. Tu mensaje queda guardado.",

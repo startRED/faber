@@ -328,6 +328,8 @@ export const ptBR: Messages = {
   'tour.running.title': 'O que está rodando',
   'tour.running.body': 'Toda conversa que está trabalhando aparece na lista, no Chat e nos Projetos. O âmbar marca as que precisam de você.',
   "error.billingUnknown": "O Automático precisa confirmar que este login usa uma assinatura.",
+  "error.permission.stale": "Esta solicitação não está mais aguardando sua resposta.",
+  "error.permission.undelivered": "Sua resposta não conseguiu chegar à IA. Tente novamente.",
   "error.billedPerUse": "O Automático não usa logins cobrados por uso. Escolha esta conta para usá-la.",
   "error.quotaOut": "Não há cota da assinatura disponível para este pedido.",
   "error.quotaWait": "A cota incluída volta {when}. Sua mensagem foi guardada.",
