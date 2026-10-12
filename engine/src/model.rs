@@ -291,6 +291,11 @@ pub struct Settings {
     /// Projects run the user's own CLI hooks too (off by default: a hook can block or slow every turn).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_hooks: Option<bool>,
+    /// Attention notifications and their chime are both on unless explicitly disabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notifications: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notification_sound: Option<bool>,
     /// The language of the screen ("en", "pt-BR"...); none follows the system.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,

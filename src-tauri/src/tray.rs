@@ -4,16 +4,20 @@
 
 mod badge;
 mod decide;
+#[cfg(windows)]
+mod native;
+mod sound;
 
 use badge::{glyph, tray_png, tray_side, with_badge};
 pub(crate) use decide::ShellTexts;
-use decide::{Counts, Shown, Watch, notice_text, tooltip};
+use decide::{Counts, Shown, Watch, delivery, notice_text, tooltip};
 use faber_engine::model::RunningItem;
 use std::sync::Mutex;
 use tauri::image::Image;
 use tauri::menu::{IsMenuItem, Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, Wry};
+#[cfg(not(target_os = "linux"))]
 use tauri_plugin_notification::NotificationExt;
 
 #[derive(Default)]
@@ -91,6 +95,10 @@ fn show_counts(app: &AppHandle, s: &State, side: u32) {
 
 pub(crate) fn create(app: &tauri::App) -> tauri::Result<()> {
     let handle = app.handle();
+    #[cfg(not(windows))]
+    if let Err(e) = sound::prepare(&handle.state::<crate::Faber>().data_dir) {
+        eprintln!("faber: the attention chime could not be prepared ({e})");
+    }
     let tray = handle.state::<Tray>();
     let mut s = lock(&tray);
     let open = MenuItem::with_id(app, "open", &s.texts.open, true, None::<&str>)?;
@@ -140,6 +148,11 @@ pub(crate) fn set_texts(app: &AppHandle, texts: ShellTexts) -> Result<(), String
 /// A new running list from the engine. Lists can arrive out of order (each runs on its own thread), so the newest
 /// revision wins.
 pub(crate) fn on_running(app: &AppHandle, revision: u64, items: &[RunningItem]) {
+    let faber = app.state::<crate::Faber>();
+    if faber.hidden {
+        return;
+    }
+    let settings = faber.engine.settings();
     let tray = app.state::<Tray>();
     let mut s = lock(&tray);
     if s.icon.is_none() {
@@ -154,11 +167,47 @@ pub(crate) fn on_running(app: &AppHandle, revision: u64, items: &[RunningItem]) 
         show_counts(app, &s, side);
     }
     for title in &update.notices {
+        // Recheck focus at delivery, in case the user returned while the tray picture was updating.
+        let focused = crate::main_window(app).is_some_and(|w| w.is_focused().unwrap_or(false));
+        #[cfg(windows)]
+        let can_toast = native::can_toast();
+        // ponytail: macOS/Linux do not detect full-screen yet; add native detection when it is requested.
+        #[cfg(not(windows))]
+        let can_toast = true;
+        let send = delivery(focused, can_toast, &settings);
+        if send.sound {
+            #[cfg(windows)]
+            if let Err(e) = native::play() {
+                eprintln!("faber: the attention chime could not play ({e})");
+            }
+            #[cfg(not(windows))]
+            {
+                let dir = faber.data_dir.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    if let Err(e) = sound::play(&dir) {
+                        eprintln!("faber: the attention chime could not play ({e})");
+                    }
+                });
+            }
+        }
+        if !send.toast {
+            continue;
+        }
         // Faber does not rely on the user clicking a notification, which each system handles in its own way.
         // ponytail: tauri-plugin-notification 2.6 sends in the background and drops the system's answer, so `show` fails
         // only when the notification cannot be built; a refused or unavailable service leaves no line here. Replace the
         // plugin by notify-rust (already in Cargo.lock) if hand checks show a silent failure.
-        if let Err(e) = app.notification().builder().title(notice_text(&s.texts, title)).show() {
+        #[cfg(not(target_os = "linux"))]
+        let result = app.notification().builder().title(notice_text(&s.texts, title)).show().map_err(|e| e.to_string());
+        // The Linux plugin cannot pass SuppressSound; keep desktop sounds off so the sound switch also means silence.
+        #[cfg(target_os = "linux")]
+        let result = notify_rust::Notification::new()
+            .summary(&notice_text(&s.texts, title))
+            .hint(notify_rust::Hint::SuppressSound(true))
+            .show()
+            .map(|_| ())
+            .map_err(|e| e.to_string());
+        if let Err(e) = result {
             eprintln!("faber: the notification could not be sent ({e})");
         }
     }

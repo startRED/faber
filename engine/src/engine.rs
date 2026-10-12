@@ -405,6 +405,8 @@ impl Core {
         let settings = Settings {
             appearance: patch.appearance.or(before.appearance),
             user_hooks: patch.user_hooks.or(before.user_hooks),
+            notifications: patch.notifications.or(before.notifications),
+            notification_sound: patch.notification_sound.or(before.notification_sound),
             language: patch.language.or(before.language),
             setup: patch.setup.or(before.setup),
             experience: patch.experience.or(before.experience),

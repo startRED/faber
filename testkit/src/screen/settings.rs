@@ -89,10 +89,14 @@ fn walks_the_sections(ctx: &mut Ctx) -> Result {
     page.wait_for("the quota to show", "document.querySelector('.usage .share')?.textContent === '47%'")?;
     open_settings(page)?;
 
-    // General: the language and the one switch.
+    // General: the language, hooks and both notification switches.
     let language = page.labelled("set.language")?;
     page.wait_visible(&language)?;
-    same(page.count(&role_any("switch"))?, 1, "switches on General")?;
+    same(page.count(&role_any("switch"))?, 3, "switches on General")?;
+    for key in ["set.notifyMe", "set.playSound"] {
+        let toggle = page.named("switch", key)?;
+        same(page.is_checked(&toggle)?, true, "notifications default on")?;
+    }
     ctx.shot(&mut app, "settings-general")?;
 
     // Appearance: the six looks are drawn before the picture is taken.

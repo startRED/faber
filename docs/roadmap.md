@@ -280,6 +280,14 @@ Reviewing and Done.
 **Tray.** The tray icon shows a number. A notification appears only when an agent needs the user, never each time
 something finishes.
 
+- **Attention notifications (R92, owner).** One per question, approval or blocked request, and none while Faber is
+  focused. Notifications and their original short chime default on, with separate switches in Settings.
+- On Windows, `SHQueryUserNotificationState` selects sound only for a busy full-screen app, an exclusive Direct3D
+  game or presentation mode. Otherwise Faber sends a toast and the chime. A failed state query also suppresses the
+  toast. Delivery never opens, flashes or focuses a window.
+- macOS and Linux send a toast and the chime; full-screen detection comes later. Sound uses Windows' `PlaySound`,
+  macOS' `afplay`, or Linux's `paplay` with `aplay` as a fallback. These players come from the system, never the bundle.
+
 ## Visual answers
 
 Answers can contain visual pieces, such as checklists, charts and forms. Faber calls them "Visual answers", in both Chat

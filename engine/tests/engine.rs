@@ -364,6 +364,28 @@ async fn the_first_run_choices_survive_a_patch_that_does_not_mention_them() {
 }
 
 #[tokio::test]
+async fn notification_switches_survive_unrelated_patches_and_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "chat"));
+    let (app, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    assert_eq!((app.settings().notifications, app.settings().notification_sound), (None, None));
+    app.save_settings(Settings { notifications: Some(false), ..Settings::default() }).unwrap();
+    app.save_settings(Settings { notification_sound: Some(false), ..Settings::default() }).unwrap();
+    app.save_settings(Settings { language: Some("en".into()), ..Settings::default() }).unwrap();
+    assert_eq!((app.settings().notifications, app.settings().notification_sound), (Some(false), Some(false)));
+    app.save_settings(Settings { notifications: Some(true), ..Settings::default() }).unwrap();
+    app.shutdown();
+    let (reopened, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    assert_eq!((reopened.settings().notifications, reopened.settings().notification_sound), (Some(true), Some(false)));
+    reopened.save_settings(Settings { notification_sound: Some(true), ..Settings::default() }).unwrap();
+    reopened.shutdown();
+    assert_eq!(
+        read_json(&dir.path().join("settings.json")),
+        serde_json::json!({ "notifications": true, "notificationSound": true, "language": "en" })
+    );
+}
+
+#[tokio::test]
 async fn a_settings_write_that_fails_keeps_the_saved_settings_and_changes_nothing_live() {
     let dir = tempfile::tempdir().unwrap();
     let f = fake(fixture("claude", "chat"));
@@ -372,6 +394,8 @@ async fn a_settings_write_that_fails_keeps_the_saved_settings_and_changes_nothin
     let saved = Settings {
         appearance: serde_json::json!({ "base": "oficina" }).as_object().cloned(),
         user_hooks: Some(false),
+        notifications: Some(true),
+        notification_sound: Some(true),
         language: Some("pt-BR".into()),
         ..Settings::default()
     };
@@ -386,7 +410,13 @@ async fn a_settings_write_that_fails_keeps_the_saved_settings_and_changes_nothin
     // A directory where the temp file goes makes the write fail while settings.json stays valid.
     let tmp = dir.path().join("settings.json.tmp");
     std::fs::create_dir(&tmp).unwrap();
-    let patch = Settings { user_hooks: Some(true), language: Some("de".into()), ..Settings::default() };
+    let patch = Settings {
+        user_hooks: Some(true),
+        language: Some("de".into()),
+        notifications: Some(false),
+        notification_sound: Some(false),
+        ..Settings::default()
+    };
     assert_eq!(engine.save_settings(patch.clone()).unwrap_err(), "error.settings.saveFailed");
     assert_eq!(std::fs::read(&file).unwrap(), bytes);
     assert_eq!(engine.state().settings, saved);

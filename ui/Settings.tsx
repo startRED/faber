@@ -140,6 +140,12 @@ export function Settings(props: Props) {
                 <Toggle label={t('set.hooksBody')} hint={t('set.hooksHint')} checked={props.saved.userHooks === true} onChange={(on) => props.onSave({ userHooks: on })} />
               </div>
             </Row>
+            <Row label={t('set.notifications')}>
+              <div class="toggles">
+                <Toggle label={t('set.notifyMe')} hint={t('set.notifyHint')} checked={props.saved.notifications !== false} onChange={(on) => props.onSave({ notifications: on })} />
+                <Toggle label={t('set.playSound')} checked={props.saved.notificationSound !== false} onChange={(on) => props.onSave({ notificationSound: on })} />
+              </div>
+            </Row>
           </Match>
           <Match when={section() === 'appearance'}>
             <AppearanceSection

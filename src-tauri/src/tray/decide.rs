@@ -1,7 +1,7 @@
 //! What the tray says and when it notifies: plain functions of the running list, the window's focus and the words the
 //! screen sent. Nothing here touches Tauri, so all of it is tested without a tray.
 
-use faber_engine::model::{RunState, RunningItem};
+use faber_engine::model::{RunState, RunningItem, Settings};
 use serde::Deserialize;
 use std::collections::HashSet;
 
@@ -80,6 +80,23 @@ pub(super) fn tooltip(texts: &ShellTexts, c: Counts) -> String {
 /// alone repeat (Codex numbers them from 0 in each server).
 type Question = (String, String, String);
 
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct Delivery {
+    pub(super) toast: bool,
+    pub(super) sound: bool,
+}
+
+/// A failed Windows state query also avoids a toast: an exclusive game must never lose focus.
+#[cfg(any(windows, test))]
+pub(super) fn toast_allowed(state: Option<i32>) -> bool {
+    !matches!(state, None | Some(2..=4)) // QUNS_BUSY, QUNS_RUNNING_D3D_FULL_SCREEN, QUNS_PRESENTATION_MODE.
+}
+
+pub(super) fn delivery(focused: bool, can_toast: bool, settings: &Settings) -> Delivery {
+    let notify = !focused && settings.notifications != Some(false);
+    Delivery { toast: notify && can_toast, sound: notify && settings.notification_sound != Some(false) }
+}
+
 /// What the tray remembers between lists, to ignore old ones and to notify once per question.
 #[derive(Default)]
 pub(super) struct Watch {
@@ -139,6 +156,43 @@ mod tests {
     use super::*;
     use faber_engine::model::{Area, Permission};
     use serde_json::json;
+
+    #[test]
+    fn focused_full_screen_and_normal_delivery_respect_both_switches() {
+        // (focused, toast allowed, sound enabled, expected toast, expected sound).
+        for (focused, can_toast, sound, toast, chime) in [
+            (true, false, false, false, false),
+            (true, false, true, false, false),
+            (true, true, false, false, false),
+            (true, true, true, false, false),
+            (false, false, false, false, false),
+            (false, false, true, false, true),
+            (false, true, false, true, false),
+            (false, true, true, true, true),
+        ] {
+            let mut settings = Settings { notification_sound: Some(sound), ..Settings::default() };
+            for notifications in [None, Some(true)] {
+                settings.notifications = notifications;
+                assert_eq!(delivery(focused, can_toast, &settings), Delivery { toast, sound: chime });
+            }
+            settings.notifications = Some(false);
+            assert_eq!(delivery(focused, can_toast, &settings), Delivery { toast: false, sound: false });
+        }
+        let legacy: Settings = serde_json::from_value(json!({ "language": "en" })).unwrap();
+        assert_eq!(delivery(false, true, &legacy), Delivery { toast: true, sound: true });
+        assert_eq!(delivery(false, false, &legacy), Delivery { toast: false, sound: true });
+        assert_eq!(delivery(true, true, &legacy), Delivery { toast: false, sound: false });
+    }
+
+    #[test]
+    fn windows_full_screen_busy_and_presentation_states_never_allow_toasts() {
+        for state in [None, Some(2), Some(3), Some(4)] {
+            assert!(!toast_allowed(state), "{state:?}");
+        }
+        for state in [1, 5, 6, 7] {
+            assert!(toast_allowed(Some(state)), "{state}");
+        }
+    }
 
     fn item(conversation: &str, turn: &str, title: &str, requests: &[&str]) -> RunningItem {
         RunningItem {

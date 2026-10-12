@@ -118,6 +118,8 @@ export type Experience = 'beginner' | 'experienced';
 export interface Settings {
   appearance?: Appearance;
   userHooks?: boolean;
+  notifications?: boolean;
+  notificationSound?: boolean;
   language?: string;
   setup?: 'done' | 'skipped';
   experience?: Experience;
