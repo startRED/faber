@@ -67,6 +67,12 @@ export function Running(props: {
                     {(item) => (
                       <li class="ri" classList={{ need: item.state === 'needsYou' }}>
                         <div class="rhead">
+                          <Show when={item.state === 'needsYou'}>
+                            <span class="ask-label">
+                              <Icon name="ask" small />
+                              {words(item)}
+                            </span>
+                          </Show>
                           <span class="vm" classList={{ claude: item.vendor === 'claude', codex: item.vendor === 'codex' }}>
                             <VendorMark vendor={item.vendor} />
                             <Show when={item.vendor}>{(v) => <b>{vendorName(v())}</b>}</Show>
@@ -74,12 +80,6 @@ export function Running(props: {
                               <span class="verb">{words(item)}</span>
                             </Show>
                           </span>
-                          <Show when={item.state === 'needsYou'}>
-                            <span class="ask-label">
-                              <Icon name="ask" small />
-                              {words(item)}
-                            </span>
-                          </Show>
                           <span class="time num">{since(item)}</span>
                         </div>
                         <button class="name" onClick={() => props.onOpen(item)}>
@@ -97,7 +97,10 @@ export function Running(props: {
           </For>
         </Show>
       </div>
-      <div class="rc-foot">{t('run.foot')}</div>
+      <div class="rc-foot">
+        <Icon name="panel" />
+        <span>{t('run.foot')}</span>
+      </div>
     </aside>
   );
 }

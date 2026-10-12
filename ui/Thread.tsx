@@ -3,8 +3,9 @@ import { marked } from 'marked';
 import { createResource, createSignal, For, Index, Show, type Accessor } from 'solid-js';
 import { api, type Choice, type Message, type ToolUse } from './api.ts';
 import { Asks } from './Ask.tsx';
+import { Icon, VendorMark } from './Glyphs.tsx';
 import { fromEngine, t } from './i18n.ts';
-import { prettyModel, type Option } from './models.ts';
+import { prettyModel, vendorName, type Option } from './models.ts';
 
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
 
@@ -14,7 +15,12 @@ function size(bytes: number): string {
 }
 
 // Model output is untrusted: rendered as Markdown, then stripped of anything that could run.
-const html = (text: string) => DOMPurify.sanitize(marked.parse(text, { async: false, gfm: true }));
+// The last two words of a plain heading go in `em`, which the look draws in its quieter tone.
+const quiet = (h3: string, text: string) => {
+  const words = text.split(' ');
+  return words.length < 3 ? h3 : `<h3>${words.slice(0, -2).join(' ')} <em>${words.slice(-2).join(' ')}</em></h3>`;
+};
+const html = (text: string) => DOMPurify.sanitize(marked.parse(text, { async: false, gfm: true })).replace(/<h3>([^<]*)<\/h3>/g, quiet);
 
 // Links in answers open in the user's browser, never inside Faber.
 function openLinks(e: MouseEvent) {
@@ -75,7 +81,11 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
   return (
     <article class="ai" aria-label={t('answer.label')} aria-busy={streaming()}>
       <div class="model">
-        <b>{m().reason === 'reason.routing' ? t('model.auto') : prettyModel(m().model)}</b>
+        <span class="vm" classList={{ claude: m().vendor === 'claude', codex: m().vendor === 'codex' }}>
+          <VendorMark vendor={m().vendor} />
+          <b>{m().vendor ? vendorName(m().vendor!) : t('model.auto')}</b>
+        </span>
+        <span>{streaming() ? t('answer.answering') : m().vendor ? prettyModel(m().model) : ''}</span>
         <Show when={m().reason}>
           <em>· {fromEngine(m().reason)}</em>
         </Show>
@@ -91,7 +101,10 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
           <For each={m().tools}>
             {(tool) => (
               <span class={tool.ok === false ? 'bad' : ''} title={tool.output ?? toolLabel(tool)}>
-                {toolLabel(tool)}
+                <Show when={tool.ok !== false}>
+                  <Icon name="check" small />
+                </Show>
+                <i>{toolLabel(tool)}</i>
               </span>
             )}
           </For>
@@ -153,13 +166,28 @@ function Mine(props: { m: Accessor<Message>; onBranch: OnBranch }) {
     <Show
       when={editing() !== undefined}
       fallback={
-        <div class="you">
-          <For each={props.m().images}>{(img) => <img alt={t('mine.image')} src={`data:${img.mediaType};base64,${img.base64}`} />}</For>
-          <For each={props.m().attachments}>{(name) => <span class="chip attached">{name}</span>}</For>
-          {props.m().text}
-          <button class="edit" onClick={() => setEditing(props.m().text)} aria-label={t('mine.editLabel')}>
-            {t('mine.edit')}
-          </button>
+        <div class="mine">
+          <Show when={props.m().attachments?.length}>
+            <div class="attach">
+              <For each={props.m().attachments}>
+                {(name) => (
+                  <span class="afile">
+                    <span class="fi">
+                      <Icon name="sheet" />
+                    </span>
+                    <span>{name}</span>
+                  </span>
+                )}
+              </For>
+            </div>
+          </Show>
+          <div class="you">
+            <For each={props.m().images}>{(img) => <img alt={t('mine.image')} src={`data:${img.mediaType};base64,${img.base64}`} />}</For>
+            {props.m().text}
+            <button class="edit" onClick={() => setEditing(props.m().text)} aria-label={t('mine.editLabel')}>
+              {t('mine.edit')}
+            </button>
+          </div>
         </div>
       }
     >

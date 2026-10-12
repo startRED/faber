@@ -113,6 +113,7 @@ export const en = {
   'ask.deny': 'Deny',
   'ask.moreWaiting': { one: '1 more waiting', other: '{n} more waiting' },
   'answer.label': 'Answer',
+  'answer.answering': 'answering',
   'answer.thinking': 'Thinking',
   'answer.stopped': 'Stopped.',
   'answer.copy': 'Copy',

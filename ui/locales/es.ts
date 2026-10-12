@@ -112,6 +112,7 @@ export const es: Messages = {
   'ask.deny': 'Denegar',
   'ask.moreWaiting': { one: '1 más en espera', other: '{n} más en espera' },
   'answer.label': 'Respuesta',
+  'answer.answering': 'answering',
   'answer.thinking': 'Razonamiento',
   'answer.stopped': 'Detenida.',
   'answer.copy': 'Copiar',

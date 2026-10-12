@@ -112,6 +112,7 @@ export const fr: Messages = {
   'ask.deny': 'Refuser',
   'ask.moreWaiting': { one: '1 autre en attente', other: '{n} autres en attente' },
   'answer.label': 'Réponse',
+  'answer.answering': 'answering',
   'answer.thinking': 'Réflexion',
   'answer.stopped': 'Interrompue.',
   'answer.copy': 'Copier',

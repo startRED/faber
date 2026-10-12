@@ -112,6 +112,7 @@ export const de: Messages = {
   'ask.deny': 'Ablehnen',
   'ask.moreWaiting': { one: '1 weitere wartet', other: '{n} weitere warten' },
   'answer.label': 'Antwort',
+  'answer.answering': 'answering',
   'answer.thinking': 'Denkprozess',
   'answer.stopped': 'Gestoppt.',
   'answer.copy': 'Kopieren',

@@ -112,6 +112,7 @@ export const ptBR: Messages = {
   'ask.deny': 'Negar',
   'ask.moreWaiting': { one: 'mais 1 esperando', other: 'mais {n} esperando' },
   'answer.label': 'Resposta',
+  'answer.answering': 'respondendo',
   'answer.thinking': 'Raciocínio',
   'answer.stopped': 'Interrompida.',
   'answer.copy': 'Copiar',
