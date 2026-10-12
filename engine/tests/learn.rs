@@ -87,7 +87,7 @@ fn movement_with_no_turn_of_faber_in_it_is_outside_use() {
         at(now - 16.0 * HOUR, 25.0, 9.0),
         at(now - 14.0 * HOUR, 25.5, 9.0),
     ];
-    let turn = Span { start: now - 17.0 * HOUR, end: now - 16.5 * HOUR, model: "m".into(), cost: Some(1.0) };
+    let turn = Span { incomplete: false, start: now - 17.0 * HOUR, end: now - 16.5 * HOUR, model: "m".into(), cost: Some(1.0) };
     let o = outside(&points, &[turn], now);
     near(o.outside, 6.0, 1e-9); // the first gap; the second has a turn in it; the third moved less than two points
     near(o.observed, 15.5, 1e-9);
@@ -122,7 +122,7 @@ fn quiet_week() -> Vec<Point> {
 #[test]
 fn a_clean_run_of_turns_on_one_model_is_a_stretch() {
     let points = quiet_week();
-    let spans = [Span { start: MONDAY + 2.1 * HOUR, end: MONDAY + 2.5 * HOUR, model: "a".into(), cost: Some(0.5) }];
+    let spans = [Span { incomplete: false, start: MONDAY + 2.0 * HOUR, end: MONDAY + 3.0 * HOUR, model: "a".into(), cost: Some(0.5) }];
     // The 5 points between 02:00 and 03:00 for 0.5 of cost: 10 points per cost unit. The neighbours (5 points each) have
     // no Faber turn in them, so use from elsewhere may hide in the stretch and nothing is accepted.
     assert_eq!(stretches(&points, &spans), vec![]);
@@ -130,7 +130,7 @@ fn a_clean_run_of_turns_on_one_model_is_a_stretch() {
     // Make the neighbours quiet: less than two points moved on either side.
     points[2].used = points[1].used + 0.005;
     points[4].used = points[3].used + 0.005;
-    let spans = [Span { start: MONDAY + 2.1 * HOUR, end: MONDAY + 2.5 * HOUR, model: "a".into(), cost: Some(0.5) }];
+    let spans = [Span { incomplete: false, start: MONDAY + 2.0 * HOUR, end: MONDAY + 3.0 * HOUR, model: "a".into(), cost: Some(0.5) }];
     let found = stretches(&points, &spans);
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].model, "a");
@@ -142,7 +142,13 @@ fn parallel_turns_other_models_unknown_costs_and_small_moves_are_not_stretches()
     let mut points = quiet_week();
     points[2].used = points[1].used + 0.005;
     points[4].used = points[3].used + 0.005;
-    let span = |s: f64, e: f64, model: &str, cost| Span { start: MONDAY + s * HOUR, end: MONDAY + e * HOUR, model: model.into(), cost };
+    let span = |s: f64, e: f64, model: &str, cost| Span {
+        incomplete: false,
+        start: MONDAY + s * HOUR,
+        end: MONDAY + e * HOUR,
+        model: model.into(),
+        cost,
+    };
     let overlapping = [span(2.1, 2.6, "a", Some(0.5)), span(2.4, 2.9, "a", Some(0.5))];
     assert_eq!(stretches(&points, &overlapping), vec![]);
     let two_models = [span(2.1, 2.3, "a", Some(0.5)), span(2.4, 2.9, "b", Some(0.5))];
@@ -234,4 +240,42 @@ fn models_qualifying_later_do_not_fake_a_plan_change() {
     assert!(capacity_changed(old.capacity.unwrap(), new.capacity.unwrap()));
     assert!(!same_models_changed(&old, &new));
     assert!(same_models_changed(&old, &weights(&run("haiku", &[150.0; 8]))));
+}
+
+#[test]
+fn foreign_account_drops_do_not_teach_weights_or_become_faber_spend() {
+    use faber_engine::ledger::VendorLedger;
+    use faber_engine::usage::api_price;
+    let start = MONDAY;
+    let reset = start + 5.0 * HOUR;
+    let points: Vec<Point> =
+        (0..=8).map(|i| Point { at: start + i as f64 * 60.0, used: 0.01 + i as f64 * 0.03, resets_at: reset }).collect();
+    let measured = api_price("gpt-6.1-sol", 100_000, 10_000, 0, 0, 0).unwrap();
+    let mut spans: Vec<Span> = points
+        .windows(2)
+        .map(|p| Span { start: p[0].at, end: p[1].at, model: "gpt-6.1-sol".into(), cost: Some(measured), incomplete: false })
+        .collect();
+    let honest = stretches(&points, &spans);
+    assert_eq!(honest.len(), 8);
+    let capacity = weights(&honest).capacity;
+    let mut changed = points.clone();
+    let last = *changed.last().unwrap();
+    changed.push(Point { at: last.at + 60.0, used: last.used + 0.09, resets_at: reset });
+    let own = api_price("gpt-6.1-sol", 50_000, 0, 0, 0, 0).unwrap();
+    spans.push(Span { start: last.at, end: last.at + 60.0, model: "gpt-6.1-sol".into(), cost: Some(own), incomplete: false });
+    assert_eq!(weights(&stretches(&changed, &spans)).capacity, capacity, "the large shared-account drop is not calibration data");
+    let foreign = outside(&changed, &spans, last.at + 60.0);
+    assert!(foreign.foreign && foreign.outside >= 7.9, "{foreign:?}");
+    let mut ledger = VendorLedger::default();
+    for span in &spans {
+        ledger.spend(span.cost, span.incomplete, span.end, 0);
+    }
+    let day = (last.at / DAY).floor() as i64;
+    near(ledger.own_spend[&day], 8.0 * measured + own, 1e-9);
+    let before = ledger.own_spend.clone();
+    let mut idle = points;
+    idle.push(Point { at: last.at + HOUR, used: last.used + 0.06, resets_at: reset });
+    let idle_use = outside(&idle, &spans[..8], last.at + HOUR);
+    assert!(idle_use.foreign && idle_use.outside >= 5.9);
+    assert_eq!(ledger.own_spend, before, "account readings never write own USD");
 }

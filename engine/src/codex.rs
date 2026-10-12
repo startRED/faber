@@ -63,6 +63,7 @@ pub fn codex_thread(area: Area, model: Option<&str>) -> Map<String, Value> {
 pub struct Totals {
     pub input: u64,
     pub cached: u64,
+    pub written: Option<u64>,
     pub output: u64,
 }
 
@@ -71,6 +72,7 @@ impl Totals {
         Totals {
             input: self.input.saturating_sub(base.input),
             cached: self.cached.saturating_sub(base.cached),
+            written: self.written.zip(base.written).and_then(|(now, before)| now.checked_sub(before)),
             output: self.output.saturating_sub(base.output),
         }
     }
@@ -91,7 +93,7 @@ pub struct CodexTurnState {
 impl CodexTurnState {
     /// A thread that starts empty has used nothing yet; a resumed one learns its total from the update that comes first.
     pub fn new(resumed: bool) -> Self {
-        CodexTurnState { total: (!resumed).then(Totals::default), ..Default::default() }
+        CodexTurnState { total: (!resumed).then(|| Totals { written: Some(0), ..Totals::default() }), ..Default::default() }
     }
 }
 
@@ -156,7 +158,12 @@ pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<
         "thread/tokenUsage/updated" => {
             let t = &p["tokenUsage"]["total"];
             let g = |k: &str| t[k].as_u64().unwrap_or(0);
-            state.total = Some(Totals { input: g("inputTokens"), cached: g("cachedInputTokens"), output: g("outputTokens") });
+            state.total = Some(Totals {
+                input: g("inputTokens"),
+                cached: g("cachedInputTokens"),
+                written: t["cacheWriteInputTokens"].as_u64(),
+                output: g("outputTokens"),
+            });
             vec![]
         }
         "account/rateLimits/updated" => [&p["rateLimits"]["primary"], &p["rateLimits"]["secondary"]]
@@ -184,9 +191,9 @@ pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<
                 input_tokens: u.input,
                 output_tokens: u.output,
                 cache_read_tokens: u.cached,
-                cache_write_tokens: 0,
+                cache_write_tokens: u.written.unwrap_or(0),
                 cache_write_1h_tokens: 0,
-                incomplete: used.is_none(),
+                incomplete: used.is_none() || u.written.is_none(),
             }]
         }
         "error" => {

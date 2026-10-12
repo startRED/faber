@@ -238,6 +238,7 @@ mod tests {
                 resumed: false,
                 by_hand: true,
                 approved: false,
+                started: 0.0,
             };
             c.live.insert(id.clone(), live);
             c.refresh_running();

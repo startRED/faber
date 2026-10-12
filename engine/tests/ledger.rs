@@ -30,7 +30,7 @@ fn the_history_is_bounded() {
     }
     assert_eq!(l.history["five_hour"].len(), 200);
     for i in 0..1000 {
-        l.span(Span { start: i as f64, end: i as f64 + 1.0, model: "a".into(), cost: None });
+        l.span(Span { incomplete: false, start: i as f64, end: i as f64 + 1.0, model: "a".into(), cost: None });
     }
     assert_eq!(l.spans.len(), 200);
 }
@@ -119,7 +119,7 @@ fn block(l: &mut VendorLedger, k: usize, points: f64, cost: f64) {
     let used = 0.05 + points * k as f64 / 100.0;
     l.record("five_hour", used, RESET, t, 0);
     l.record("five_hour", used, RESET, t + HOUR, 0);
-    l.span(Span { start: t + 1.2 * HOUR, end: t + 1.5 * HOUR, model: "a".into(), cost: Some(cost) });
+    l.span(Span { incomplete: false, start: t + HOUR, end: t + 2.0 * HOUR, model: "a".into(), cost: Some(cost) });
     l.record("five_hour", used + points / 100.0, RESET, t + 2.0 * HOUR, 0);
 }
 
@@ -133,10 +133,10 @@ fn a_capacity_that_jumps_is_a_plan_change_the_name_did_not_announce() {
     assert!(!l.learn_weights(now));
     near(l.weights.capacity.unwrap(), 6.0);
     for k in 8..28 {
-        block(&mut l, k, 3.0, 0.125);
+        block(&mut l, k, 3.0, 2.0);
     }
     let later = BASE + 100.0 * HOUR;
-    assert!(l.learn_weights(later), "24 points per cost unit against 6");
+    assert!(l.learn_weights(later), "1.5 points per dollar against 6: an explained plan upgrade");
     assert_eq!(l.weights.capacity, None);
     assert_eq!(l.since, later);
     assert!(l.relearning(later + HOUR));
@@ -191,6 +191,7 @@ fn a_full_ledger_stays_small() {
         }
         for i in 0..500 {
             v.span(Span {
+                incomplete: false,
                 start: 1_791_000_000.123 + i as f64,
                 end: 1_791_000_030.456 + i as f64,
                 model: "claude-sonnet-5-5".into(),

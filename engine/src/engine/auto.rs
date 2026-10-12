@@ -44,6 +44,8 @@ pub(super) struct Spare {
     answer: oneshot::Receiver<Option<String>>,
     id: u64,
     vendor: Vendor,
+    asked: Arc<Mutex<Option<f64>>>,
+    model_name: &'static str,
 }
 
 /// A draft's route still holds for the sent text when the text only grew a little past it.
@@ -186,8 +188,18 @@ impl Core {
             tokio::spawn(async move { drop(tx.send(answer.await)) });
             return (Some(rx), None);
         }
-        let Some(Spare { session, answer, .. }) = self.spare.take().or_else(|| self.open_router()) else { return (None, None) };
+        let Some(Spare { session, answer, asked, vendor, model_name, .. }) = self.spare.take().or_else(|| self.open_router()) else {
+            return (None, None);
+        };
+        *asked.lock().unwrap_or_else(|e| e.into_inner()) = Some(self.secs());
         session.send(UserTurn::text(prompt));
+        let me = self.me.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(ASK_LIMIT).await;
+            if let (Some(at), Some(core)) = (asked.lock().unwrap_or_else(|e| e.into_inner()).take(), me.upgrade()) {
+                core.lock().unwrap_or_else(|e| e.into_inner()).note_span(vendor, at, model_name, None, true);
+            }
+        });
         (Some(answer), Some(Arc::new(Mutex::new(Some(session)))))
     }
 
@@ -203,11 +215,17 @@ impl Core {
         let text = Arc::new(Mutex::new(String::new()));
         let tx = Arc::new(Mutex::new(Some(tx)));
         let me = self.me.clone();
+        let asked = Arc::new(Mutex::new(None));
+        let ran = asked.clone();
         let stop = Stop::default();
         let closer = stop.clone();
         let sink: EventSink = Arc::new(move |e| match e {
             EngineEvent::Text(t) => text.lock().unwrap_or_else(|e| e.into_inner()).push_str(&t),
-            EngineEvent::Done { .. } | EngineEvent::Error { .. } => {
+            e @ (EngineEvent::Done { .. } | EngineEvent::Error { .. }) => {
+                if let (Some(start), Some(core)) = (ran.lock().unwrap_or_else(|e| e.into_inner()).take(), me.upgrade()) {
+                    let (cost, incomplete) = usage::fresh_price(&e, model);
+                    core.lock().unwrap_or_else(|e| e.into_inner()).note_span(vendor, start, model, cost, incomplete);
+                }
                 if let Some(tx) = tx.lock().unwrap_or_else(|e| e.into_inner()).take() {
                     let _ = tx.send(Some(std::mem::take(&mut *text.lock().unwrap_or_else(|e| e.into_inner()))));
                 }
@@ -217,13 +235,14 @@ impl Core {
                 if let Some(core) = me.upgrade() {
                     let mut c = core.lock().unwrap_or_else(|e| e.into_inner());
                     c.note_account_event(vendor, e);
-                    if c.allows(vendor, None, Purpose::Router, false).is_err() {
+                    if c.allows(vendor, family_of(model), Purpose::Router, false).is_err() {
                         stop_router(Some(closer.clone()));
                     }
                 }
             }
             _ => {}
         });
+        let model_name = model;
         let (cwd, instructions) = (self.opts.data_dir.clone(), Some(INSTRUCTIONS.to_string()));
         let (model, effort) = (Some(model.to_string()), Some(effort.to_string()));
         let session = match vendor {
@@ -250,7 +269,7 @@ impl Core {
         };
         *stop.lock().unwrap_or_else(|e| e.into_inner()) = Some(session.clone());
         self.next_sid += 1;
-        Some(Spare { session, answer, id: self.next_sid, vendor })
+        Some(Spare { session, answer, id: self.next_sid, vendor, asked, model_name })
     }
 
     /// Starts a routed first message once its route is known, or the everyday default when the route is late.

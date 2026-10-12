@@ -47,7 +47,7 @@ pub enum EngineEvent {
         output_tokens: u64,
         cache_read_tokens: u64,
         cache_write_tokens: u64,
-        /// The part of the cache written with the 1-hour lifetime (0 on Codex, which bills no write).
+        /// The part of the cache written with the 1-hour lifetime (0 on Codex, which reports one cache-write kind).
         cache_write_1h_tokens: u64,
         /// True when the token numbers cover only part of the turn: Claude's sub-model work is not in `usage`, and a Codex
         /// turn with no usage update to measure from reports none.

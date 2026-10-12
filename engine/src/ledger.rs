@@ -38,6 +38,9 @@ pub struct VendorLedger {
     pub readings: BTreeMap<String, Reading>,
     pub history: BTreeMap<String, Vec<Point>>,
     pub spans: Vec<Span>,
+    /// Own API-equivalent USD per local day, independent of account percentages.
+    pub own_spend: BTreeMap<i64, f64>,
+    pub unmetered: BTreeMap<i64, u32>,
     pub learned: Learned,
     pub weights: Weights,
     pub stretches: Vec<Stretch>,
@@ -48,7 +51,7 @@ pub struct VendorLedger {
     pub since: f64,
     pub relearn_until: f64,
     pub stretches_since: usize,
-    // What follows is about the moment, not the week: never written to disk.
+    // Billing and live reach are rechecked; paid-fallback evidence and own metering survive a restart.
     #[serde(skip)]
     pub billing: Billing,
     #[serde(skip)]
@@ -101,6 +104,7 @@ impl Ledger {
 
 impl VendorLedger {
     fn sanitize(&mut self) {
+        self.own_spend.retain(|_, cost| cost.is_finite() && *cost >= 0.0);
         self.readings.retain(|_, r| plausible(r.used, r.resets_at) && r.read_at.is_finite());
         for list in self.history.values_mut() {
             list.retain(|p| plausible(p.used, p.resets_at) && p.at.is_finite());
@@ -145,6 +149,7 @@ impl VendorLedger {
 
     /// A reading of a window. Readings that make no sense (not a number, below 0 or far above 1) are dropped.
     pub fn record(&mut self, window: &str, used: f64, resets_at: f64, now: f64, offset: i64) {
+        self.own_spend.retain(|_, cost| cost.is_finite() && *cost >= 0.0);
         self.readings.retain(|_, r| r.resets_at > now);
         if !plausible(used, resets_at) || resets_at <= now {
             return;
@@ -287,6 +292,26 @@ impl VendorLedger {
             jumped: self.outside(now).jumped(),
             relearning: self.relearning(now),
             plan_ok: self.plan_ok(now),
+        }
+    }
+}
+
+impl VendorLedger {
+    pub fn spend(&mut self, cost: Option<f64>, incomplete: bool, now: f64, offset: i64) {
+        let day = ((now + offset as f64) / 86_400.0).floor() as i64;
+        if let Some(cost) = cost.filter(|c| c.is_finite() && *c >= 0.0) {
+            *self.own_spend.entry(day).or_default() += cost;
+        }
+        if incomplete || cost.is_none() {
+            *self.unmetered.entry(day).or_default() += 1;
+        }
+        self.own_spend.retain(|d, _| *d >= day - 30);
+        self.unmetered.retain(|d, _| *d >= day - 30);
+        while self.own_spend.len() > 31 {
+            self.own_spend.pop_first();
+        }
+        while self.unmetered.len() > 31 {
+            self.unmetered.pop_first();
         }
     }
 }

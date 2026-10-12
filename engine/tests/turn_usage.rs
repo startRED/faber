@@ -57,7 +57,7 @@ fn an_aborted_result_has_no_counters() {
 }
 
 fn update(input: u64, cached: u64, output: u64) -> Value {
-    json!({"method": "thread/tokenUsage/updated", "params": {"tokenUsage": {"total": {"inputTokens": input, "cachedInputTokens": cached, "outputTokens": output}}}})
+    json!({"method": "thread/tokenUsage/updated", "params": {"tokenUsage": {"total": {"inputTokens": input, "cachedInputTokens": cached, "cacheWriteInputTokens": 0, "outputTokens": output}}}})
 }
 
 fn started() -> Value {
@@ -126,4 +126,33 @@ fn an_interrupted_turn_reports_what_arrived_and_the_next_one_does_not_pay_for_it
         panic!("not a Done")
     };
     assert_eq!((input_tokens, cache_read_tokens, output_tokens), (800, 900, 4));
+}
+
+#[test]
+fn codex_cache_writes_are_per_turn_and_missing_fields_are_incomplete() {
+    let mut state = CodexTurnState::new(false);
+    parse_codex_notification(&started(), &mut state);
+    let mut first = update(1000, 400, 10);
+    first["params"]["tokenUsage"]["total"]["cacheWriteInputTokens"] = 200.into();
+    parse_codex_notification(&first, &mut state);
+    let EngineEvent::Done { cache_write_tokens, incomplete, .. } = done(parse_codex_notification(&completed("completed"), &mut state))
+    else {
+        panic!("not Done")
+    };
+    assert_eq!((cache_write_tokens, incomplete), (200, false));
+    parse_codex_notification(&started(), &mut state);
+    let mut next = update(1500, 600, 20);
+    next["params"]["tokenUsage"]["total"]["cacheWriteInputTokens"] = 300.into();
+    parse_codex_notification(&next, &mut state);
+    let EngineEvent::Done { cache_write_tokens, .. } = done(parse_codex_notification(&completed("completed"), &mut state)) else {
+        panic!("not Done")
+    };
+    assert_eq!(cache_write_tokens, 100);
+    parse_codex_notification(&started(), &mut state);
+    next["params"]["tokenUsage"]["total"].as_object_mut().unwrap().remove("cacheWriteInputTokens");
+    parse_codex_notification(&next, &mut state);
+    let EngineEvent::Done { incomplete, .. } = done(parse_codex_notification(&completed("completed"), &mut state)) else {
+        panic!("not Done")
+    };
+    assert!(incomplete, "an absent write counter is not a known zero");
 }

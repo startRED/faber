@@ -34,6 +34,24 @@ what the week looks like from here.
 | D12 (R87) | The plan is detected automatically (`claude auth status` for Claude Code; `account/read` and `account/updated` for Codex). The user is asked only if detection fails. Codex keeps using the subscription login, not an API key. (The research recommends an API key until OpenAI confirms in writing that a third-party app may use the ChatGPT login; that stays open for Erick, and nothing in this design depends on it.) | AI, Erick delegated |
 | D13 (R88) | On a weekly plan the daily budget is 100% / 7 = 14.28% of the week per day, and Auto paces against that line for both vendors (Claude 20x `seven_day`, Codex 20x 10080-minute window), so each weekly quota lasts all 7 days. The line is the expected-use curve of section 1: uniform (1/7 a day) until the learned shape has data, then the learned shape. Section 3.1 prices a vendor against it: the safe pivot depends on time left, pricing pressure begins below the daily line, and the multiplier keeps increasing above it so a vendor far ahead is left for the other. The idea comes from per-day quota management in TL-ADE; no code is reused. | Erick, via coordinator |
 
+## R90: shared accounts and own spend (Erick, 2026-10-12)
+
+The owner's father shares both accounts. Account percentage movement is never Faber's own spend. The ledger meters
+Faber's requests in API-equivalent USD per turn, including cache reads and writes. Claude's native API-rated cumulative
+cost is differenced by session; it includes its sub-model work and cache lifetimes. Codex's reported token deltas are
+priced at the published standard API rates. Missing counters are incomplete, never fabricated zeroes. User turns,
+router questions, quota pulses and hand-over summaries all count. Estimates, monetary caps and the board use only
+this own-spend ledger; account credit balances and account percentage changes cannot write own USD.
+
+The whole account stays on R88's approximately 14.28% per day line. Use by someone else shrinks the account room
+available to Faber. The hourly shape still describes the whole account; it does not attribute money to Faber.
+Own-cost weights and plan size accept only non-overlapping, fully metered stretches covered by Faber's turns, with
+at most 120 seconds of uncovered time. A drop during idle time, or more than twice the previously explained movement
+plus one point of reading resolution, is foreign use and excluded. Foreign changes never trigger a capacity reset.
+
+Prices checked on 2026-10-12: [Claude API pricing](https://platform.claude.com/docs/en/about-claude/pricing) and
+[OpenAI API pricing](https://developers.openai.com/api/docs/pricing). These are API-equivalent values, not subscription invoices.
+
 ## 1. What Auto knows about each subscription
 
 Inputs, per vendor and per window (the CLIs already send them; nothing reads credential files):
@@ -482,7 +500,7 @@ the recordings in `tests/fixtures/` already shows these facts and defects:
   reads 3,185 tokens and writes 74. (The recording keeps no clock, so the gap is unknown; the measurement below fixes
   that.)
 - Codex's `inputTokens` **includes** `cachedInputTokens` (14,254 against 6,912 on a first turn; 14,290 against 14,080 on
-  the second, a 98.5% hit). `cacheWriteInputTokens` is always 0, as Codex bills no write.
+  the second, a 98.5% hit). `cacheWriteInputTokens` is 0 in these recordings. The driver must preserve reported write deltas; the current API publishes a write price, so missing fields cannot be treated as known zeroes (R90).
 - Codex `last` is the latest model call, `total` is the thread so far; a turn with tools makes several calls, so the
   per-turn usage is the difference of `total` across the turn, not `last`. After a `thread/resume` Codex sends one
   `tokenUsage/updated` **before** the new `turn/started`, carrying the thread so far (in `codex/resume.jsonl`: total

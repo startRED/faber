@@ -404,3 +404,18 @@ async fn an_environment_override_cannot_be_overruled_by_a_subscription_signal() 
     assert!(r.claude.args.lock().unwrap().is_empty());
     r.engine.shutdown();
 }
+
+#[tokio::test]
+async fn a_week_spent_faster_than_one_seventh_a_day_is_priced_up_on_either_vendor() {
+    // One day of seven gone and a fifth of the week used (14.3% a day would be 14.3%): the vendor is left for the other.
+    for (spent, other) in [(Vendor::Claude, Vendor::Codex), (Vendor::Codex, Vendor::Claude)] {
+        let dir = tempfile::tempdir().unwrap();
+        let r = both(dir.path(), verdicts(vec![("code", "medium")]));
+        r.engine.note_account_events(spent, vec![plan("max"), quota("seven_day", 0.2, 6 * DAY)]);
+        r.engine.note_account_events(other, vec![plan("pro"), quota("seven_day", 0.1, 6 * DAY)]);
+        let id = r.engine.send(auto(CODE)).unwrap();
+        let (reply, _) = r.went(&id, 0).await;
+        assert_eq!(reply.vendor, Some(other), "{spent:?} is ahead of the daily line");
+        r.engine.shutdown();
+    }
+}

@@ -140,6 +140,7 @@ struct Live {
     resumed: bool,
     by_hand: bool,
     approved: bool,
+    started: f64,
 }
 
 const HISTORY_LIMIT: usize = 20_000;
@@ -519,6 +520,7 @@ impl Core {
             self.ledger.of_mut(vendor).reach = Reach::Out(None);
         }
         for id in stopped {
+            self.note_turn(&id, None, true);
             if let Some(l) = self.live.remove(&id) {
                 l.session.close();
             }
@@ -543,9 +545,24 @@ impl Core {
 
     /// A request Faber made itself (an answer, a router question, a pulse): the learning has to know when it ran, so that use
     /// it did not cause can be told from use it did.
-    fn note_span(&mut self, vendor: Vendor, start: f64, model: &str, cost: Option<f64>) {
-        let end = self.secs();
-        self.ledger.of_mut(vendor).span(Span { start, end, model: model.to_string(), cost });
+    fn note_span(&mut self, vendor: Vendor, start: f64, model: &str, cost: Option<f64>, incomplete: bool) {
+        let now = self.secs();
+        let v = self.ledger.of(vendor);
+        let end =
+            v.primary(now).and_then(|name| v.readings.get(name)).map(|r| r.read_at).filter(|at| *at >= start && *at <= now).unwrap_or(now);
+        self.ledger.of_mut(vendor).spend(cost, incomplete, now, self.utc_offset);
+        self.ledger.of_mut(vendor).span(Span { start, end, model: model.to_string(), cost, incomplete });
+        self.ledger.of_mut(vendor).learn_weights(now);
+        self.save_ledger(true);
+    }
+
+    fn note_turn(&mut self, conv: &str, cost: Option<f64>, incomplete: bool) {
+        let Some(l) = self.live.get(conv).filter(|l| l.started > 0.0) else { return };
+        let (vendor, start, model) = (l.vendor, l.started, l.running.clone().or_else(|| l.model.clone()).unwrap_or_default());
+        self.note_span(vendor, start, &model, cost, incomplete);
+        if let Some(l) = self.live.get_mut(conv) {
+            l.started = 0.0;
+        }
     }
 
     fn claude_plan_checked(&mut self, found: Option<Signals>) {
@@ -783,9 +800,16 @@ impl Core {
                 if let (Some(base), Some(c)) = (settled.base, self.convs.get_mut(conv)) {
                     c.cost_base.insert(vendor, base);
                 }
+                let model = self.live.get(conv).and_then(|l| l.running.as_deref().or(l.model.as_deref())).unwrap_or_default();
+                let native = settled.cost;
+                let cost = native.or_else(|| {
+                    usage::api_price(model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cache_write_1h_tokens)
+                });
+                let missing = cost.is_none() || (native.is_none() && incomplete);
+                self.note_turn(conv, cost, missing);
                 if let Some(m) = self.turn(conv) {
                     m.status = Some(if ok { Status::Done } else { Status::Stopped });
-                    m.cost_usd = settled.cost;
+                    m.cost_usd = cost;
                     m.input_tokens = Some(input_tokens);
                     m.output_tokens = Some(output_tokens);
                     m.cache_read_tokens = Some(cache_read_tokens);
@@ -805,6 +829,7 @@ impl Core {
                     }
                 }
                 if fatal {
+                    self.note_turn(conv, None, true);
                     self.live.remove(conv);
                     return self.finish(conv, turn_id);
                 }
@@ -978,7 +1003,9 @@ impl Core {
         {
             m.model = Some(running);
         }
+        let started = self.secs();
         if let Some(l) = self.live.get_mut(id) {
+            l.started = started;
             l.turn = Some(reply_id.to_string());
             l.by_hand = by_hand;
             l.approved = false;
@@ -1049,6 +1076,7 @@ impl Core {
                 resumed,
                 by_hand: false,
                 approved: false,
+                started: 0.0,
             },
         );
         // ponytail: count-based limit on idle Claude processes; a RAM budget across all CLIs comes with parallel workers.

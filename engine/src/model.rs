@@ -119,7 +119,7 @@ pub struct Message {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_tokens: Option<u64>,
     /// Prompt tokens of the main response read from the CLI's cache, and written to it (the part with the 1-hour lifetime
-    /// separately). Claude Code only; Codex bills no write.
+    /// separately). Codex reports one cache-write kind and no separate one-hour counter.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_read_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
