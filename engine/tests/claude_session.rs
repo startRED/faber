@@ -8,7 +8,7 @@ use std::time::Duration;
 use support::{Entry, drive, fake, fixture, next_permission, text_of};
 
 fn launch(area: Area) -> ClaudeLaunch {
-    ClaudeLaunch { area, model: None, effort: None, resume: None, user_hooks: false, instructions: None }
+    ClaudeLaunch { area, model: None, effort: None, resume: None, user_hooks: false, instructions: None, user_name: None }
 }
 
 async fn run(
@@ -221,4 +221,21 @@ fn a_side_question_gets_its_own_instructions_no_tools_and_no_saved_session() {
     assert_eq!(after(&args, "--tools"), "");
     assert!(args.contains(&"--strict-mcp-config".into()) && !args.contains(&"--settings".into()));
     assert!(args.contains(&"--no-session-persistence".into()), "it stays out of the user's Claude history");
+}
+
+#[test]
+fn the_name_is_appended_to_the_default_prompt_of_a_conversation_but_never_to_a_side_question() {
+    let after = |args: &[String], flag: &str| args[args.iter().position(|a| a == flag).unwrap() + 1].clone();
+    let named = |l: ClaudeLaunch| ClaudeLaunch { user_name: Some("Erick".into()), ..l };
+    for area in [Area::Chat, Area::Project] {
+        let args = claude_args(&named(launch(area)));
+        assert!(after(&args, "--append-system-prompt").contains("called Erick."));
+        assert!(!args.contains(&"--system-prompt".into()), "the default prompt stays");
+        assert_eq!(args, claude_args(&named(launch(area))), "the same launch gives the same arguments");
+        assert!(!claude_args(&launch(area)).contains(&"--append-system-prompt".into()));
+    }
+    let resumed = claude_args(&named(ClaudeLaunch { resume: Some("abc".into()), ..launch(Area::Chat) }));
+    assert_eq!(after(&resumed, "--append-system-prompt"), after(&claude_args(&named(launch(Area::Chat))), "--append-system-prompt"));
+    let side = claude_args(&named(ClaudeLaunch { instructions: Some("Route.".into()), ..launch(Area::Project) }));
+    assert!(!side.contains(&"--append-system-prompt".into()));
 }

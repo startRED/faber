@@ -94,10 +94,18 @@ export function sizeOf(appearance: Appearance): SizeChoice | undefined {
 }
 
 /** What Continue on step 2 saves, in one call. `tutorialDone` is left out when it is already true, so an install that
- * finished the tutorial is not taught again; no answer to the question leaves `experience` out, and counts as a beginner. */
-export function continuePatch(appearance: Appearance, experience: Experience | undefined, tutorialDone: boolean | undefined): Settings {
+ * finished the tutorial is not taught again; no answer to the question leaves `experience` out, and counts as a beginner.
+ * `name` is how the person asked to be called; empty leaves it out. */
+export function continuePatch(
+  appearance: Appearance,
+  experience: Experience | undefined,
+  tutorialDone: boolean | undefined,
+  name?: string,
+): Settings {
   const patch: Settings = { appearance };
   if (experience) patch.experience = experience;
+  // The name is optional: a field left empty is a skip, and nothing is saved for it.
+  if (name?.trim()) patch.userName = name;
   if (tutorialDone !== true) patch.tutorialDone = false;
   return patch;
 }

@@ -105,7 +105,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   // The tutorial ended in this window, whether or not the save of `tutorialDone` worked.
   const [tourEnded, setTourEnded] = createSignal(false);
   // The choices of step 2 while the person is back at step 1, so going back and forward loses nothing.
-  const [kept, setKept] = createSignal<{ appearance: Appearance; experience?: Experience }>();
+  const [kept, setKept] = createSignal<{ appearance: Appearance; experience?: Experience; name: string }>();
   const [from, setFrom] = createSignal(0);
   // True from the moment the user picks a conversation until its snapshot is in: the screen still shows the old
   // conversation then, so nothing may be sent or warmed for either.
@@ -578,13 +578,14 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
             <LookStep
               initial={kept()?.appearance ?? state().settings.appearance}
               experience={kept()?.experience ?? state().settings.experience}
-              onBack={(appearance, experience) => {
-                setKept({ appearance, experience });
+              userName={kept()?.name ?? state().settings.userName}
+              onBack={(appearance, experience, name) => {
+                setKept({ appearance, experience, name });
                 setStep('accounts');
               }}
               onError={(err) => setSaveError(failureText(err))}
-              onContinue={async (appearance, experience) => {
-                const saved = await saveSettings(continuePatch(appearance, experience, state().settings.tutorialDone));
+              onContinue={async (appearance, experience, name) => {
+                const saved = await saveSettings(continuePatch(appearance, experience, state().settings.tutorialDone, name));
                 if (saved) {
                   // The first conversation is a new one, whatever place was remembered from an older version.
                   setStep(undefined);
@@ -751,6 +752,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                   >
                     <Welcome
                       recent={state().conversations}
+                      name={state().settings.userName}
                       running={items()}
                       projects={state().projects}
                       onSuggest={(text) => fill?.(text)}

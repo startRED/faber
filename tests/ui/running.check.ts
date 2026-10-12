@@ -1,6 +1,7 @@
 import type { QuotaReading, RunningItem } from '../../ui/api.ts';
 import { widthClass } from '../../ui/layout.ts';
 import { answerOutcome, askKey, blocksOf, createAutoOpen, createRunningStore, elapsed, newest, openPlace, pickUp, placeOfRunning, QUIET_MS, waitingKeys } from '../../ui/running.ts';
+import { greetingParts } from '../../ui/greeting.ts';
 import { groupChats, seedQuotas, showsChats, tailOf, tightest, withQuota } from '../../ui/sidebar.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
@@ -162,4 +163,11 @@ check('new conversation: a conversation that waits is offered however old it is'
   deepEqual(pickUp(all, []).map((c) => c.id), ['c0', 'c1', 'c2', 'c3']);
   deepEqual(pickUp(all, [item({ conversationId: 'c25' })]).map((c) => c.id), ['c0', 'c1', 'c2', 'c3'], 'working is not waiting');
   deepEqual(pickUp(all.slice(0, 2), waiting), [{ id: 'c0' }, { id: 'c1' }]);
+});
+
+check('new conversation: the greeting sets the name apart, and without one the last word', () => {
+  deepEqual(greetingParts('Por onde começamos, Erick?', 'Erick'), ['Por onde começamos,', 'Erick?']);
+  deepEqual(greetingParts('Par où commençons-nous, Léa ?', 'Léa'), ['Par où commençons-nous,', 'Léa ?']);
+  deepEqual(greetingParts('Por onde começamos?'), ['Por onde', 'começamos?']);
+  deepEqual(greetingParts('Hello'), ['Hello', '']);
 });

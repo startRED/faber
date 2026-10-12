@@ -471,3 +471,120 @@ fn cli_lookup_follows_npm_cmd_shims_on_windows_to_the_real_program() {
     assert_eq!(resolve_cli("missing", path, true, &has, &read), None);
     assert_eq!(resolve_cli("claude", "/usr/bin", false, &|p| p == "/usr/bin/claude", &read), cli("/usr/bin/claude", &[]));
 }
+
+/// The text a Claude start put after `--append-system-prompt`, if it did.
+fn appended(args: &[String]) -> Option<&String> {
+    args.iter().position(|a| a == "--append-system-prompt").map(|i| &args[i + 1])
+}
+
+fn named(name: &str) -> Settings {
+    Settings { user_name: Some(name.into()), ..Settings::default() }
+}
+
+#[tokio::test]
+async fn the_name_goes_to_claude_when_a_conversation_starts_and_a_rename_never_reaches_one_under_way() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "chat"));
+    let (engine, mut rx) = engine_idle(dir.path(), Vendor::Claude, f.spawn.clone(), Duration::from_millis(50));
+    // Cleaned as it is saved: control characters out, the ends trimmed.
+    assert_eq!(engine.save_settings(named("  Er\u{7}ick\n ")).unwrap().user_name.as_deref(), Some("Erick"));
+    let id = engine.send(ask(Area::Chat, SKY, choice("claude", Some("haiku")))).unwrap();
+    finished(&mut rx, |_| {}).await;
+    engine.save_settings(named("Maria")).unwrap();
+    // The first process closes while idle; the next message starts a new one that resumes the same session.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    engine
+        .send(SendRequest { conversation_id: Some(id.clone()), ..ask(Area::Chat, "And at sunset?", choice("claude", Some("haiku"))) })
+        .unwrap();
+    let again = engine.send(ask(Area::Chat, SKY, choice("claude", Some("haiku")))).unwrap();
+    engine.shutdown();
+    let args = f.args.lock().unwrap().clone();
+    assert_eq!(args.len(), 3);
+    let first = appended(&args[0]).expect("the name is passed at start");
+    assert!(first.contains("called Erick."), "{first}");
+    assert!(args[1].contains(&"--resume".to_string()));
+    assert_eq!(appended(&args[1]), Some(first), "the same instructions on resume, whatever Settings says by then");
+    assert!(appended(&args[2]).is_some_and(|text| text.contains("called Maria.")), "a new conversation takes the new name");
+    assert_eq!(read_json(&dir.path().join("conversations").join(format!("{id}.json")))["userName"], "Erick");
+    assert_ne!(again, id);
+}
+
+#[tokio::test]
+async fn without_a_name_nothing_is_added_and_clearing_it_stops_it_for_new_conversations() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "chat"));
+    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let plain = engine.send(ask(Area::Chat, SKY, choice("claude", Some("haiku")))).unwrap();
+    finished(&mut rx, |_| {}).await;
+    engine.save_settings(named("Erick")).unwrap();
+    engine.send(ask(Area::Chat, SKY, choice("claude", Some("haiku")))).unwrap();
+    finished(&mut rx, |_| {}).await;
+    // A text with nothing left after cleaning clears the name.
+    assert_eq!(engine.save_settings(named(" \t ")).unwrap().user_name, None);
+    engine.send(ask(Area::Chat, SKY, choice("claude", Some("haiku")))).unwrap();
+    finished(&mut rx, |_| {}).await;
+    engine.shutdown();
+    let args = f.args.lock().unwrap().clone();
+    assert_eq!(args.len(), 3);
+    assert_eq!((appended(&args[0]), appended(&args[2])), (None, None));
+    assert!(appended(&args[1]).is_some());
+    assert!(read_json(&dir.path().join("conversations").join(format!("{plain}.json"))).get("userName").is_none());
+    assert!(!std::fs::read_to_string(dir.path().join("settings.json")).unwrap().contains("userName"));
+}
+
+#[tokio::test]
+async fn a_rename_while_a_blank_conversation_is_warm_starts_it_again_with_the_new_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "chat"));
+    let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    engine.save_settings(named("Erick")).unwrap();
+    let warm = || WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: choice("claude", Some("haiku")) };
+    engine.warm(warm());
+    engine.save_settings(named("Maria")).unwrap();
+    engine.warm(warm());
+    engine.shutdown();
+    let args = f.args.lock().unwrap().clone();
+    assert_eq!(args.len(), 2, "the blank conversation was thrown away with its CLI");
+    assert!(appended(&args[0]).is_some_and(|text| text.contains("called Erick.")));
+    assert!(appended(&args[1]).is_some_and(|text| text.contains("called Maria.")));
+}
+
+#[tokio::test]
+async fn the_name_goes_to_codex_as_developer_instructions_and_resume_repeats_the_ones_it_began_with() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("codex", "chat"));
+    let (first, mut rx) = engine(dir.path(), Vendor::Codex, f.spawn.clone());
+    first.save_settings(named("Erick")).unwrap();
+    let id = first.send(ask(Area::Chat, SKY, choice("codex", None))).unwrap();
+    finished(&mut rx, |_| {}).await;
+    first.shutdown();
+    assert_eq!(f.wire.lines_with("\"developerInstructions\":\"The user would like to be called Erick."), 1);
+
+    // The app opens again, the name was changed in between, and the conversation resumes the recorded thread.
+    let file = dir.path().join("conversations").join(format!("{id}.json"));
+    let mut saved = read_json(&file);
+    saved["sessions"]["codex"] = "01a1251a-252b-7031-bcb9-dd0b0adfc7ce".into();
+    std::fs::write(&file, saved.to_string()).unwrap();
+    let g = fake(fixture("codex", "resume"));
+    let (second, mut rx) = engine(dir.path(), Vendor::Codex, g.spawn.clone());
+    second.save_settings(named("Maria")).unwrap();
+    let text = "What single word did you reply with last time? Answer with only that word.";
+    second.send(SendRequest { conversation_id: Some(id), ..ask(Area::Chat, text, choice("codex", None)) }).unwrap();
+    finished(&mut rx, |_| {}).await;
+    second.shutdown();
+    assert_eq!(g.wire.lines_with("thread/resume"), 1);
+    assert_eq!(g.wire.lines_with("called Erick."), 1, "resume repeats the name the conversation began with");
+    assert_eq!(g.wire.lines_with("called Maria."), 0);
+}
+
+#[tokio::test]
+async fn without_a_name_codex_gets_no_developer_instructions() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("codex", "chat"));
+    let (engine, mut rx) = engine(dir.path(), Vendor::Codex, f.spawn.clone());
+    engine.send(ask(Area::Chat, SKY, choice("codex", None))).unwrap();
+    finished(&mut rx, |_| {}).await;
+    engine.shutdown();
+    assert_eq!(f.wire.lines_with("thread/start"), 1);
+    assert_eq!(f.wire.lines_with("developerInstructions"), 0);
+}

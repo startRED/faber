@@ -406,8 +406,13 @@ impl Core {
             setup: patch.setup.or(before.setup),
             experience: patch.experience.or(before.experience),
             tutorial_done: patch.tutorial_done.or(before.tutorial_done),
+            user_name: patch.user_name.map_or(before.user_name.clone(), |name| clean_name(&name)),
         };
         self.store.save_settings(&settings).map_err(|_| "error.settings.saveFailed".to_string())?;
+        // The blank conversation being typed was started with the old name; the next one starts with the new one.
+        if settings.user_name != before.user_name {
+            self.drop_draft();
+        }
         // Idle project CLIs restart on their next turn, so a changed hooks choice applies right away.
         if settings.user_hooks != before.user_hooks {
             let idle: Vec<String> = self
@@ -722,20 +727,22 @@ impl Core {
         let user_hooks = self.store.settings().user_hooks == Some(true);
         let resume = c.sessions.get(&pick.vendor).cloned();
         let area = c.area;
+        // The conversation's own name, fixed when it began: a rename in Settings never reaches a conversation under way.
+        let user_name = c.user_name.clone();
         let (model, effort) = (pick.model.clone(), Some(pick.effort.clone()));
         let session = match pick.vendor {
             Vendor::Claude => start_claude(
                 ClaudeOptions {
                     bin: cli.command.clone(),
                     cwd,
-                    launch: ClaudeLaunch { area, model, effort, resume, user_hooks, instructions: None },
+                    launch: ClaudeLaunch { area, model, effort, resume, user_hooks, instructions: None, user_name },
                     spawn,
                 },
                 sink,
             ),
-            Vendor::Codex => {
-                self.codex_server(area, user_hooks, &cli).open(CodexThread { cwd, model, effort, resume, instructions: None }, sink)
-            }
+            Vendor::Codex => self
+                .codex_server(area, user_hooks, &cli)
+                .open(CodexThread { cwd, model, effort, resume, instructions: None, user_name }, sink),
         };
         self.live.insert(
             conv.to_string(),
@@ -783,6 +790,7 @@ impl Core {
             sessions: BTreeMap::new(),
             allow_always: None,
             branch_of: None,
+            user_name: self.store.settings().user_name.and_then(|name| clean_name(&name)),
             created_at: at,
             updated_at: at,
             messages: vec![],
@@ -947,6 +955,17 @@ impl Core {
         let _ = self.launch(&id, &pick);
     }
 
+    /// Throws away the blank conversation being typed, with the CLI that was started for it.
+    fn drop_draft(&mut self) {
+        if let Some(old) = self.draft.take() {
+            if let Some(l) = self.live.remove(&old) {
+                l.session.close();
+            }
+            self.convs.remove(&old);
+            let _ = std::fs::remove_dir_all(self.workspace_of(&old));
+        }
+    }
+
     /// The conversation a warm-up or a draft route is for: the open one, or the new one being typed.
     fn draft_for(&mut self, req: &WarmRequest) -> String {
         let existing = req.conversation_id.as_deref().and_then(|id| self.load(id).map(|c| c.id.clone()));
@@ -959,13 +978,7 @@ impl Core {
                     .and_then(|d| self.convs.get(d))
                     .is_some_and(|c| c.area == req.area && c.project_id == req.project_id);
                 if !same {
-                    if let Some(old) = self.draft.take() {
-                        if let Some(l) = self.live.remove(&old) {
-                            l.session.close();
-                        }
-                        self.convs.remove(&old);
-                        let _ = std::fs::remove_dir_all(self.workspace_of(&old));
-                    }
+                    self.drop_draft();
                     self.draft = Some(self.blank(req.area, req.project_id.clone()));
                 }
                 self.draft.clone().expect("draft set above")

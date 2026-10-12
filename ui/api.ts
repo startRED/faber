@@ -123,6 +123,9 @@ export interface Settings {
   experience?: Experience;
   /** False once the first run asked for the tutorial; true once it ended or was skipped. */
   tutorialDone?: boolean;
+  /** How the person asked to be called (at most 40 characters); the engine keeps it trimmed and none when cleared. A save with
+   * an empty text clears it. */
+  userName?: string;
 }
 export interface ModelInfo {
   id: string;

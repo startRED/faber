@@ -116,6 +116,25 @@ export function Settings(props: Props) {
                 <For each={LANGUAGES}>{(l) => <option value={l.code}>{l.name}</option>}</For>
               </select>
             </Row>
+            <Row label={t('set.name')}>
+              {/* Saved when the field is left or Enter is pressed; the engine keeps it trimmed, and empty clears it. */}
+              <input
+                class="name-in"
+                type="text"
+                maxLength={40}
+                autocomplete="off"
+                aria-label={t('set.name')}
+                aria-describedby="set-name-hint"
+                value={props.saved.userName ?? ''}
+                onChange={async (e) => {
+                  const field = e.currentTarget;
+                  if (field.value !== (props.saved.userName ?? '') && !(await props.onSave({ userName: field.value }))) field.value = props.saved.userName ?? '';
+                }}
+              />
+              <p class="hint" id="set-name-hint">
+                {t('set.nameHint')}
+              </p>
+            </Row>
             <Row label={t('set.hooks')}>
               <div class="toggles">
                 <Toggle label={t('set.hooksBody')} hint={t('set.hooksHint')} checked={props.saved.userHooks === true} onChange={(on) => props.onSave({ userHooks: on })} />

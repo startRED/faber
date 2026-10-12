@@ -1,17 +1,12 @@
 import { For, type JSX, Show } from 'solid-js';
 import type { Project, RunningItem, Summary } from './api.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
+import { greetingParts } from './greeting.ts';
 import { lang, t } from './i18n.ts';
 import { vendorName } from './models.ts';
 import { pickUp } from './running.ts';
 
 const SUGGESTIONS = ['suggest.1', 'suggest.2', 'suggest.3'] as const;
-
-/** The greeting with its last word set apart, so a look with an italic emphasis (Workshop) can draw it. */
-function splitLast(text: string): [string, string] {
-  const at = text.lastIndexOf(' ');
-  return at < 0 ? [text, ''] : [text.slice(0, at), text.slice(at + 1)];
-}
 
 const DAY = 86_400_000;
 const startOfDay = (ms: number) => new Date(new Date(ms).toDateString()).getTime();
@@ -27,6 +22,8 @@ function when(ms: number): string {
 /** The new conversation (s1): the greeting, the composer it was given, three suggestions that fill the composer without
  * sending anything, and the four conversations to pick up: those that wait for the user first, then the latest. The effects of the look sit behind it (ui/Ambient.tsx). */
 export function Welcome(props: {
+  /** How the person asked to be called, if they did. */
+  name?: string;
   recent: Summary[];
   running: RunningItem[];
   projects: Project[];
@@ -34,7 +31,7 @@ export function Welcome(props: {
   onOpen: (conversation: Summary) => void;
   children: JSX.Element;
 }) {
-  const title = () => splitLast(t('empty.chatTitle'));
+  const title = () => (props.name ? greetingParts(t('empty.chatTitleNamed', { name: props.name }), props.name) : greetingParts(t('empty.chatTitle')));
   const rows = () => pickUp(props.recent, props.running);
   const live = (id: string) => props.running.find((i) => i.conversationId === id);
   const where = (c: Summary) => (c.area === 'chat' ? t('area.chat') : (props.projects.find((p) => p.id === c.projectId)?.name ?? t('area.projects')));

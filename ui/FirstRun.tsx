@@ -152,14 +152,17 @@ export function LookStep(props: {
   /** The saved appearance, none for a first run. */
   initial?: Appearance;
   experience?: Experience;
+  /** The name typed so far, or the one already saved. */
+  userName?: string;
   /** Going back keeps the choices made so far, for when the person comes forward again. */
-  onBack: (appearance: Appearance, experience: Experience | undefined) => void;
+  onBack: (appearance: Appearance, experience: Experience | undefined, name: string) => void;
   /** Saves everything. Resolves to false when the save failed, and the step stays open. */
-  onContinue: (appearance: Appearance, experience: Experience | undefined) => Promise<boolean>;
+  onContinue: (appearance: Appearance, experience: Experience | undefined, name: string) => Promise<boolean>;
   onError: (err: unknown) => void;
 }) {
   const [draft, setDraft] = createSignal<Appearance>(props.initial ?? { base: themes.default });
   const [experience, setExperience] = createSignal<Experience | undefined>(props.experience);
+  const [name, setName] = createSignal(props.userName ?? '');
   const [busy, setBusy] = createSignal(false);
   // Every choice goes to the look engine at once, and only the answer to the newest request is applied to the page.
   const preview = previewer(api.previewLook, (look) => applyLook(look), props.onError);
@@ -177,7 +180,7 @@ export function LookStep(props: {
     // The saved look is applied when the save answers, so no preview may land after it.
     preview.cancel();
     try {
-      await props.onContinue(draft(), experience());
+      await props.onContinue(draft(), experience(), name());
     } finally {
       setBusy(false);
     }
@@ -273,10 +276,28 @@ export function LookStep(props: {
             </For>
           </div>
         </div>
+        <div class="ctl">
+          <label class="lbl" for="fr-name">
+            {t('first.name.title')}
+          </label>
+          <input
+            id="fr-name"
+            class="name-in"
+            type="text"
+            maxLength={40}
+            autocomplete="off"
+            aria-describedby="fr-name-hint"
+            value={name()}
+            onInput={(e) => setName(e.currentTarget.value)}
+          />
+          <p class="hint" id="fr-name-hint">
+            {t('first.name.hint')}
+          </p>
+        </div>
       </div>
       <div class="first-foot">
         <p>{t('first.foot')}</p>
-        <button type="button" class="btn ghost" disabled={busy()} onClick={() => props.onBack(draft(), experience())}>
+        <button type="button" class="btn ghost" disabled={busy()} onClick={() => props.onBack(draft(), experience(), name())}>
           <Icon name="left" small />
           {t('first.back')}
         </button>

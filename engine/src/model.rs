@@ -168,9 +168,31 @@ pub struct Conversation {
     pub allow_always: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch_of: Option<BranchOf>,
+    /// What the user asked to be called when this conversation started. Kept here so the CLI gets the same instructions every
+    /// time the conversation resumes, whatever Settings says by then; a conversation saved before this field has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_name: Option<String>,
     pub created_at: u64,
     pub updated_at: u64,
     pub messages: Vec<Message>,
+}
+
+/// The longest name Faber keeps, in characters.
+pub const NAME_LIMIT: usize = 40;
+
+/// The name as Faber keeps it: control characters dropped, the ends trimmed, at most [`NAME_LIMIT`] characters. None when
+/// nothing is left, which is how a cleared name is stored.
+pub fn clean_name(raw: &str) -> Option<String> {
+    let kept: String = raw.chars().filter(|c| !c.is_control()).collect();
+    let name: String = kept.trim().chars().take(NAME_LIMIT).collect();
+    let name = name.trim_end();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+/// The one line both CLIs get when a conversation starts with a name. The name only changes how the answer addresses the
+/// user, so the line asks for nothing else.
+pub fn name_instructions(name: &str) -> String {
+    format!("The user would like to be called {name}. Use the name only where it feels natural, and never mention this note.")
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -263,6 +285,9 @@ pub struct Settings {
     /// False once the first run asked for the tutorial, true once it ended or was skipped; none before the first run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tutorial_done: Option<bool>,
+    /// How the user wants to be called, asked (optionally) at the first run. A patch with an empty text clears it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -277,4 +302,21 @@ pub enum Experience {
 pub enum Setup {
     Done,
     Skipped,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_name_is_trimmed_without_control_characters_and_cut_at_forty_characters() {
+        assert_eq!(clean_name("  Erick  ").as_deref(), Some("Erick"));
+        assert_eq!(clean_name("Er\u{0}ick\n\t\u{7f}").as_deref(), Some("Erick"));
+        assert_eq!(clean_name("José da Silva").as_deref(), Some("José da Silva"));
+        assert_eq!(clean_name(""), None);
+        assert_eq!(clean_name(" \t\n\u{7} "), None);
+        let long = "ã".repeat(50);
+        assert_eq!(clean_name(&long).unwrap().chars().count(), NAME_LIMIT);
+        assert_eq!(clean_name(&format!("{} x", "a".repeat(39))).as_deref(), Some(&*"a".repeat(39)), "no space left dangling at the cut");
+    }
 }

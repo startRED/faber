@@ -3,7 +3,7 @@
 
 use crate::claude::EventSink;
 use crate::events::{Delivery, EngineEvent, Session, SessionCommand, UserTurn};
-use crate::model::Area;
+use crate::model::{Area, name_instructions};
 use crate::proc::{self, Spawner};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
@@ -173,6 +173,8 @@ pub struct CodexThread {
     pub resume: Option<String>,
     /// A side question (such as routing) with its own instructions: it reads nothing and runs nothing.
     pub instructions: Option<String>,
+    /// How the user wants to be called; see `ClaudeLaunch::user_name`.
+    pub user_name: Option<String>,
 }
 
 enum ServerCommand {
@@ -218,6 +220,9 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
         params.insert("approvalPolicy".into(), "never".into());
         // Nothing to resume later: it stays out of the user's Codex history.
         params.insert("ephemeral".into(), true.into());
+    } else if let Some(name) = &t.user_name {
+        // Developer instructions sit beside Codex's own, so a project keeps its default prompt.
+        params.insert("developerInstructions".into(), name_instructions(name).into());
     }
     params.insert("cwd".into(), t.cwd.to_string_lossy().into_owned().into());
     let method = match &t.resume {

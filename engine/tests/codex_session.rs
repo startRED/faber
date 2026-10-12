@@ -17,7 +17,8 @@ async fn run(
     resume: Option<&str>,
     react: impl FnMut(&EngineEvent, &Session) -> bool,
 ) -> (Vec<EngineEvent>, Vec<String>) {
-    let thread = CodexThread { cwd: ".".into(), model: None, effort: None, resume: resume.map(String::from), instructions: None };
+    let thread =
+        CodexThread { cwd: ".".into(), model: None, effort: None, resume: resume.map(String::from), instructions: None, user_name: None };
     drive(
         entries,
         |spawn, sink| {
@@ -123,7 +124,7 @@ async fn codex_an_answer_that_fails_to_write_keeps_the_approval_and_the_retry_is
         spawn: f.spawn.clone(),
     };
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    let thread = CodexThread { cwd: ".".into(), model: None, effort: None, resume: None, instructions: None };
+    let thread = CodexThread { cwd: ".".into(), model: None, effort: None, resume: None, instructions: None, user_name: None };
     let session = CodexServer::start(opts).open(thread, Arc::new(move |e| drop(tx.send(e))));
     session.send(UserTurn::text("Create a.txt containing one. Then create b.txt containing two. Make each file in a separate step."));
     let request = next_permission(&mut rx).await;
@@ -156,7 +157,7 @@ async fn codex_an_answer_that_may_be_half_written_is_never_written_again() {
         spawn: f.spawn.clone(),
     };
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    let thread = CodexThread { cwd: ".".into(), model: None, effort: None, resume: None, instructions: None };
+    let thread = CodexThread { cwd: ".".into(), model: None, effort: None, resume: None, instructions: None, user_name: None };
     let session = CodexServer::start(opts).open(thread, Arc::new(move |e| drop(tx.send(e))));
     session.send(UserTurn::text("Create a.txt containing one. Then create b.txt containing two. Make each file in a separate step."));
     let request = next_permission(&mut rx).await;
@@ -277,7 +278,8 @@ async fn one_process_serves_two_conversations_at_once_and_keeps_their_answers_ap
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let open = |name: &'static str| {
         let tx = tx.clone();
-        let thread = CodexThread { cwd: ".".into(), model: None, effort: Some("medium".into()), resume: None, instructions: None };
+        let thread =
+            CodexThread { cwd: ".".into(), model: None, effort: Some("medium".into()), resume: None, instructions: None, user_name: None };
         server.open(thread, Arc::new(move |e| drop(tx.send((name, e)))))
     };
     let (a, b) = (open("a"), open("b"));
@@ -303,8 +305,14 @@ async fn one_process_serves_two_conversations_at_once_and_keeps_their_answers_ap
 
 #[test]
 fn a_side_question_thread_has_its_own_instructions_reads_and_runs_nothing_and_is_not_saved() {
-    let thread =
-        CodexThread { cwd: ".".into(), model: Some("gpt-6-luna".into()), effort: None, resume: None, instructions: Some("Route.".into()) };
+    let thread = CodexThread {
+        cwd: ".".into(),
+        model: Some("gpt-6-luna".into()),
+        effort: None,
+        resume: None,
+        instructions: Some("Route.".into()),
+        user_name: None,
+    };
     let (method, params) = thread_params(Area::Chat, &thread);
     assert_eq!(method, "thread/start");
     assert_eq!(
@@ -313,4 +321,29 @@ fn a_side_question_thread_has_its_own_instructions_reads_and_runs_nothing_and_is
     );
     assert_eq!(params["model"], "gpt-6-luna");
     assert_eq!(params["ephemeral"], true, "it stays out of the user's Codex history");
+}
+
+#[test]
+fn the_name_is_a_developer_instruction_that_resume_repeats_and_a_side_question_never_gets() {
+    let thread = |resume: Option<&str>, instructions: Option<&str>, name: Option<&str>| CodexThread {
+        cwd: ".".into(),
+        model: None,
+        effort: None,
+        resume: resume.map(String::from),
+        instructions: instructions.map(String::from),
+        user_name: name.map(String::from),
+    };
+    let (method, start) = thread_params(Area::Project, &thread(None, None, Some("Erick")));
+    assert_eq!(method, "thread/start");
+    assert!(start["developerInstructions"].as_str().unwrap().contains("called Erick."));
+    assert!(start.get("baseInstructions").is_none(), "a project keeps Codex's own prompt");
+    let (method, resume) = thread_params(Area::Project, &thread(Some("t1"), None, Some("Erick")));
+    assert_eq!((method, &resume["developerInstructions"]), ("thread/resume", &start["developerInstructions"]));
+    let (_, chat) = thread_params(Area::Chat, &thread(None, None, Some("Erick")));
+    assert!(chat["baseInstructions"].as_str().unwrap().starts_with("You are a helpful"));
+    assert_eq!(chat["developerInstructions"], start["developerInstructions"]);
+    let (_, none) = thread_params(Area::Chat, &thread(None, None, None));
+    assert!(none.get("developerInstructions").is_none());
+    let (_, side) = thread_params(Area::Chat, &thread(None, Some("Route."), Some("Erick")));
+    assert!(side.get("developerInstructions").is_none());
 }

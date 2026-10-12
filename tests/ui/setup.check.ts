@@ -146,6 +146,12 @@ check('setup first run: normal text size clears the field, and the other two siz
   equal(sizeOf({ base: 'sala', textSize: 14.5 }), undefined, 'a size set in Settings is none of the three');
 });
 
+check('setup first run: the optional name is saved only when something was typed', () => {
+  const look = { base: 'sala' } as const;
+  deepEqual(continuePatch(look, undefined, undefined, 'Erick'), { appearance: look, tutorialDone: false, userName: 'Erick' });
+  for (const empty of [undefined, '', '   ']) equal('userName' in continuePatch(look, undefined, undefined, empty), false, `"${empty}" is a skip`);
+});
+
 check('setup first run: Continue sends the choices in one patch, and leaves tutorialDone out when it is already true', () => {
   const look = { base: 'oficina', textSize: 16 };
   deepEqual(continuePatch(look, 'experienced', undefined), { appearance: look, experience: 'experienced', tutorialDone: false });

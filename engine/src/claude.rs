@@ -1,7 +1,7 @@
 //! Claude Code driver: one long-lived `claude -p` process per conversation, spoken to in stream-json over stdio.
 
 use crate::events::{Delivery, EngineEvent, Session, SessionCommand, UserTurn};
-use crate::model::Area;
+use crate::model::{Area, name_instructions};
 use crate::proc::{self, Spawner};
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -18,6 +18,9 @@ pub struct ClaudeLaunch {
     pub user_hooks: bool,
     /// A side question (such as routing) with its own instructions: no tools, no MCP servers.
     pub instructions: Option<String>,
+    /// How the user wants to be called, told to the model once, when the conversation starts (and again, unchanged, each time
+    /// it resumes). Ignored for a side question, which has instructions of its own.
+    pub user_name: Option<String>,
 }
 
 // Chat stays lean (about 3k tokens of setup instead of the user's full configuration) and runs in --restricted mode
@@ -63,6 +66,10 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     } else if !launch.user_hooks {
         args.push("--settings".into());
         args.push(json!({ "disableAllHooks": true }).to_string());
+    }
+    if let (None, Some(name)) = (&launch.instructions, &launch.user_name) {
+        args.push("--append-system-prompt".into());
+        args.push(name_instructions(name));
     }
     for (flag, value) in [("--model", &launch.model), ("--effort", &launch.effort), ("--resume", &launch.resume)] {
         if let Some(v) = value {
