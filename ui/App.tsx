@@ -671,14 +671,14 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                     <Match when={place().id}>
                       {area() === 'chat' ? t('area.chat') : t('crumb.project')}
                       <span class="sep" aria-hidden="true">
-                        â€º
+                        ›
                       </span>
                       <b>{title() ?? ''}</b>
                     </Match>
                     <Match when={area() === 'project' && project()}>
                       {t('crumb.project')}
                       <span class="sep" aria-hidden="true">
-                        â€º
+                        ›
                       </span>
                       <b>{project()?.name}</b>
                     </Match>
