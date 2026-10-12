@@ -233,14 +233,16 @@ inside its own area.
 - General has the language, name, CLI hooks switch and Permissions choice. "Don't ask" is the default for new and
   existing settings; "Ask before commands" preserves the previous behavior. Choices save at once and stay at the saved
   value if the save fails. Chat keeps its restricted setup.
-- R97: Projects use bypass permissions with native deny rules for git push and destructive git commands, credential
-  directories, removals and environment files; Codex uses `never` approvals with `workspace-write` and network access.
+- R97: Projects use bypass permissions with native deny rules for `.git` edits, credential directories and key files;
+  Codex uses `never` approvals with `workspace-write` and sandbox network access disabled.
   Native deny rules [apply even in bypass mode](https://code.claude.com/docs/en/permission-modes#available-modes), but
   [command patterns are not an OS sandbox](https://code.claude.com/docs/en/permissions#what-a-bash-rule-doesnt-match).
-  Git rules cover Bash and PowerShell. The conservative rules also deny `rm`, `Remove-Item` and `.env` reads inside the
-  project. Arbitrary scripts can evade native rules.
-  Residual approval requests are declined without a card. A changed choice reaches idle sessions at once and active
-  sessions on their next turn.
+  Explicit ask rules [still prompt in bypass mode](https://code.claude.com/docs/en/permission-modes#actions-no-mode-auto-approves)
+  and reach Faber's automatic policy over stdio. It gates file reads/writes, read-only git and literal local deletions, resolving junctions and refusing
+  external or `.git` writes. Unsupported shell syntax and arbitrary programs are declined without a card. Secret reads
+  are denied while environment templates and internal `.env` creation work. Git transports and GitHub authentication
+  are disabled in child commands. The project screen discloses the mode; tightening it stops current project turns.
+  This is not OS isolation; see the verified findings and limits in [the R97 security review](security-r97-review.md).
 - Appearance is a draft. The six looks are small live renders; the controls (accent with a hex field, background, the two
   fonts, text size, density, corners, motion) and the three effect switches change the draft, and the preview panel on
   the right wears the answer of `preview_look` with the measured contrast of text, faint text and the accent. The panel

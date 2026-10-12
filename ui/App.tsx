@@ -729,6 +729,9 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                     when={newChat()}
                     fallback={
                       <div class="col">
+                        <Show when={area() === 'project' && project()}>
+                          <p class="hint" role="status">{t(state().settings.permissions === 'ask' ? 'project.permissionsAsk' : 'project.permissionsDontAsk')}</p>
+                        </Show>
                         <Show
                           when={current()?.messages.length ? current() : undefined}
                           fallback={<Empty vendors={state().vendors.length} area={area()} project={project()} onConnect={openSetup} />}

@@ -24,6 +24,11 @@ fn answers_a_card(ctx: &mut Ctx) -> Result {
     };
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
+    let demo = css(".prow .item").has_text("Demo");
+    page.wait_visible(&demo)?;
+    page.click(&demo)?;
+    let notice = page.text_of("project.permissionsDontAsk")?;
+    page.wait_visible(&css("[role=status]").has_text(&notice))?;
     let settings = page.named("button", "settings.open")?;
     page.click(&settings)?;
     let dont_ask = page.named("button", "set.permissions.dontAsk")?;
@@ -42,9 +47,9 @@ fn answers_a_card(ctx: &mut Ctx) -> Result {
     same(page.attr(&ask_first, "aria-pressed")?, Some("true".into()), "the permissions choice survives reload")?;
     let back = page.named("button", "set.back")?;
     page.click(&back)?;
-    let demo = css(".prow .item").has_text("Demo");
-    page.wait_visible(&demo)?;
-    page.click(&demo)?;
+    // Reload returns to the project already opened; the new mode is disclosed before the first turn.
+    let notice = page.text_of("project.permissionsAsk")?;
+    page.wait_visible(&css("[role=status]").has_text(&notice))?;
     page.wait_visible(&css(".empty h1").has_text("Demo"))?;
     // Auto would send the request to a router process first, which would replay this recording instead of the chat.
     let model = page.labelled("composer.model")?;

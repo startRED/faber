@@ -14,6 +14,11 @@ import { ptBR } from '../../ui/locales/pt-BR.ts';
 import { accountLine, seedQuotas, usageRows } from '../../ui/sidebar.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
+check('permissions scope H1/L3: Settings names Projects and the default is disclosed on the project screen', () => {
+  ok(en['set.permissions'].includes('Projects'));
+  ok('project.permissionsDontAsk' in en);
+});
+
 const look = (over: Partial<Look> = {}): Look => ({
   vars: {},
   scheme: 'dark',
