@@ -27,7 +27,7 @@ impl Signals {
 /// extra-usage switch is "possible" unless the CLI says it is rejected or off.
 pub fn claude_signals(msg: &Value) -> Signals {
     let info = &msg["rate_limit_info"];
-    let wide = info["rateLimitType"].as_str().is_some_and(vendor_wide);
+    let wide = info["rateLimitType"].as_str().is_none_or(vendor_wide);
     let status = info["status"].as_str().unwrap_or_default();
     let reach = (wide && !status.is_empty())
         .then(|| if status.starts_with("allowed") { Reach::Clear } else { Reach::Out(info["resetsAt"].as_f64()) });
