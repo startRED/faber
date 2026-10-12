@@ -142,6 +142,17 @@ impl ScopedFile {
         self.checked()?.map(|mut file| super::lease::hash_reader(&mut file)).transpose()
     }
 
+    /// Claim a leaf before inspecting it for deletion; a producer may safely reuse the original name.
+    pub(crate) fn claim(&self, expected_hash: &str) -> Result<Self, LeaseError> {
+        let target = Self::new(&self.path.with_file_name(format!(".faber-patch-{}.tmp", uuid::Uuid::new_v4())), false)?;
+        self.rename(&target)?;
+        // Keep a raced artifact under its claimed name for inspection; never return unproven bytes for deletion.
+        if target.hash()?.as_deref() != Some(expected_hash) {
+            return Err(LeaseError::Hash);
+        }
+        Ok(target)
+    }
+
     pub(crate) fn write(&self, bytes: &[u8], permissions: Option<Permissions>) -> Result<(), LeaseError> {
         let temp = format!(".faber-patch-{}.tmp", uuid::Uuid::new_v4());
         #[cfg(windows)]
@@ -230,6 +241,34 @@ mod tests {
         assert!(matches!(ScopedFile::new(&area.path().join("file/child"), true), Err(LeaseError::Path)));
         std::fs::create_dir(area.path().join("folder")).unwrap();
         assert!(matches!(ScopedFile::new(&area.path().join("folder"), false).unwrap().read(), Err(LeaseError::Path)));
+    }
+
+    #[test]
+    fn verified_cleanup_cannot_delete_a_new_file_reusing_the_staging_name() {
+        let area = tempdir();
+        let path = area.path().join("stale-build");
+        std::fs::write(&path, b"old build").unwrap();
+        let file = ScopedFile::new(&path, false).unwrap();
+        assert_eq!(file.hash().unwrap().unwrap(), super::super::lease::hash(b"old build"));
+        let claimed = file.claim(&super::super::lease::hash(b"old build")).unwrap();
+        std::fs::write(&path, b"new build").unwrap();
+        assert_eq!(claimed.hash().unwrap().unwrap(), super::super::lease::hash(b"old build"));
+        claimed.delete().unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"new build");
+    }
+
+    #[test]
+    fn claimed_cleanup_rechecks_a_leaf_replaced_after_the_inventory_hash() {
+        let area = tempdir();
+        let path = area.path().join("stale-build");
+        std::fs::write(&path, b"old build").unwrap();
+        let file = ScopedFile::new(&path, false).unwrap();
+        let inventory_hash = file.hash().unwrap().unwrap();
+        std::fs::write(&path, b"new build").unwrap();
+        assert!(matches!(file.claim(&inventory_hash), Err(LeaseError::Hash)));
+        let remaining: Vec<_> = std::fs::read_dir(area.path()).unwrap().map(|entry| entry.unwrap().path()).collect();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(std::fs::read(&remaining[0]).unwrap(), b"new build");
     }
 
     #[cfg(unix)]

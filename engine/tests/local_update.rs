@@ -2,8 +2,8 @@
 //! probation deadlines, atomic manifest state, disk ownership (AS-6), and rollback.
 
 use faber_engine::project::update::{
-    CanaryVerdict, ExactTree, LastGoodRecord, RollbackAction, RollbackReason, Slot, SlotLayout, UpdateError, UpdateManager, UpdateManifest,
-    UpdateState, is_forbidden_root,
+    CanaryVerdict, ExactTree, LastGoodRecord, RollbackAction, RollbackReason, Slot, SlotLayout, SwapCheck, UpdateError, UpdateManager,
+    UpdateManifest, UpdateState, is_forbidden_root,
 };
 use faber_engine::project::{GitMode, Grant, RepoIdentity, SCHEMA};
 use faber_engine::store::{Disk, Fault};
@@ -17,8 +17,14 @@ fn tempdir() -> tempfile::TempDir {
     tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap()
 }
 
+// Synthetic states and corrupt records are test fixtures, never a public updater write path.
+fn seed(mgr: &UpdateManager, manifest: &UpdateManifest) {
+    fs::write(mgr.layout().manifest_path(), serde_json::to_vec(manifest).unwrap()).unwrap();
+    assert_eq!(mgr.manifest().unwrap().as_ref(), Some(manifest));
+}
+
 fn slot_layout(root: &Path) -> Result<SlotLayout, UpdateError> {
-    SlotLayout::new(root, &root.parent().unwrap_or(root).join("installed-data"))
+    SlotLayout::new(root, &root.parent().unwrap_or(root).join("installed-data"), &root.parent().unwrap_or(root).join("installed-release"))
 }
 
 fn valid_tree(hash: &str) -> ExactTree {
@@ -70,7 +76,13 @@ fn sample_repo(root: &Path) -> RepoIdentity {
 
 fn swap(mgr: &UpdateManager, now: u64) -> Result<Slot, UpdateError> {
     let repo = sample_repo(mgr.layout().dev_root().parent().unwrap());
-    mgr.begin_swap(&sample_grant(&repo.common_dir, true), &repo, 1, now)
+    mgr.begin_swap(
+        &sample_grant(&repo.common_dir, true),
+        &repo,
+        1,
+        SwapCheck { payload: &payload(), active_window: false, active_operations: false },
+        now,
+    )
 }
 
 #[test]
@@ -143,7 +155,7 @@ fn crash_safe_atomic_manifest_round_trip_and_newer_schema_refusal() {
 
     let mut manifest = UpdateManifest::initial(Slot::A, 1000);
     manifest.extra.insert("customField".into(), serde_json::json!("preserved-value"));
-    mgr.save_manifest(&manifest).unwrap();
+    seed(&mgr, &manifest);
 
     let read_back = mgr.manifest().unwrap().expect("manifest exists");
     assert_eq!(read_back.active_slot, Slot::A);
@@ -198,13 +210,12 @@ fn disk_full_failure_preserves_previous_manifest() {
     let mgr = UpdateManager::with_disk(layout.clone(), disk.clone()).unwrap();
 
     let initial = UpdateManifest::initial(Slot::A, 500);
-    mgr.save_manifest(&initial).unwrap();
+    seed(&mgr, &initial);
 
     // Now make writes fail
     disk.fail_write.store(true, Ordering::SeqCst);
-    let mut updated = initial.clone();
-    updated.active_slot = Slot::B;
-    let err = mgr.save_manifest(&updated).unwrap_err();
+    let repo = sample_repo(dir.path());
+    let err = mgr.prepare_next(valid_tree("next"), &sample_grant(&repo.common_dir, true), &repo, 1, &[], 600).unwrap_err();
     assert_eq!(err, UpdateError::Store(Fault::DiskFull));
 
     // Previous file remains untouched
@@ -300,7 +311,7 @@ fn probation_requires_health_ack_within_30_seconds() {
     let initial_tree = valid_tree(&"0".repeat(64));
     let mut init_manifest = UpdateManifest::initial(Slot::A, 500);
     init_manifest.last_good = Some(LastGoodRecord::new(Slot::A, initial_tree, 400, 500));
-    mgr.save_manifest(&init_manifest).unwrap();
+    seed(&mgr, &init_manifest);
 
     mgr.prepare_next(tree.clone(), &grant, &repo, 1, &[], 1000).unwrap();
     mgr.record_canary_verdict(passed(1010), &payload(), 1010).unwrap();
@@ -341,7 +352,7 @@ fn rollback_decision_restores_last_good_and_quarantines_failed_build() {
     // Setup initial state with Slot A as last_good
     let mut manifest = UpdateManifest::initial(Slot::A, 500);
     manifest.last_good = Some(LastGoodRecord::new(Slot::A, valid_tree(&"0".repeat(64)), 400, 500));
-    mgr.save_manifest(&manifest).unwrap();
+    seed(&mgr, &manifest);
 
     mgr.prepare_next(tree, &grant, &repo, 1, &[], 1000).unwrap();
     mgr.record_canary_verdict(passed(1010), &payload(), 1010).unwrap();
@@ -372,7 +383,7 @@ fn anti_restart_loop_guard_prevents_infinite_rollback() {
     let mut manifest = UpdateManifest::initial(Slot::A, 500);
     manifest.last_good = Some(LastGoodRecord::new(Slot::A, valid_tree(&"0".repeat(64)), 400, 500));
     manifest.rollback_count = 1;
-    mgr.save_manifest(&manifest).unwrap();
+    seed(&mgr, &manifest);
 
     // Triggering another rollback without an intervening healthy promotion must be rejected
     let action = mgr.trigger_rollback(RollbackReason::ProbationCrash, 600).unwrap();
@@ -430,9 +441,7 @@ fn disk_space_ownership_as6_retains_current_next_last_good_and_quarantine() {
 fn probation_manager(root: &Path) -> UpdateManager {
     let mgr = UpdateManager::new(slot_layout(&root.join("dev")).unwrap()).unwrap();
     let repo = sample_repo(root);
-    let mut initial = UpdateManifest::initial(Slot::A, 500);
-    initial.last_good = Some(LastGoodRecord::new(Slot::A, valid_tree(&"0".repeat(64)), 400, 500));
-    mgr.save_manifest(&initial).unwrap();
+    mgr.adopt_baseline(Slot::A, valid_tree(&"0".repeat(64)), "0".repeat(64).as_bytes(), 500).unwrap();
     mgr.prepare_next(valid_tree(&"a".repeat(64)), &sample_grant(&repo.common_dir, true), &repo, 1, &[], 1000).unwrap();
     mgr.record_canary_verdict(passed(1010), &payload(), 1010).unwrap();
     mgr.enter_quiescence(false, false).unwrap();
@@ -475,7 +484,7 @@ fn ready_cannot_swap_without_quiescence() {
     m.staged_tree = Some(valid_tree(&"b".repeat(64)));
     m.candidate_evidence = Some(pass_for(valid_tree(&"b".repeat(64)), 1010));
     m.state = UpdateState::Ready { slot: Slot::A, tree: valid_tree(&"b".repeat(64)), canary_receipt: "canary-1".into() };
-    mgr.save_manifest(&m).unwrap();
+    seed(&mgr, &m);
     assert!(matches!(swap(&mgr, 1400), Err(UpdateError::InvalidState(_))));
     assert_eq!(mgr.manifest().unwrap(), Some(m));
 }
@@ -595,7 +604,7 @@ fn empty_canary_receipt_cannot_make_a_candidate_ready() {
     let mut m = mgr.manifest().unwrap().unwrap();
     m.active_slot = Slot::A;
     m.state = UpdateState::PreparingNext { slot: Slot::B, tree: valid_tree(&"a".repeat(64)) };
-    mgr.save_manifest(&m).unwrap();
+    seed(&mgr, &m);
     assert!(mgr.record_canary_verdict(empty_pass(), &payload(), 1100).is_err());
 }
 
@@ -607,7 +616,7 @@ fn swap_requires_a_proven_previous_build() {
     m.active_slot = Slot::A;
     m.last_good = None;
     m.state = UpdateState::Quiescent;
-    mgr.save_manifest(&m).unwrap();
+    seed(&mgr, &m);
     assert!(swap(&mgr, 1100).is_err());
 }
 
@@ -618,7 +627,7 @@ fn interrupted_swap_quarantines_next_instead_of_current() {
     let mut m = mgr.manifest().unwrap().unwrap();
     m.active_slot = Slot::A;
     m.state = UpdateState::Swapping { from_slot: Slot::A, to_slot: Slot::B, tree: valid_tree(&"a".repeat(64)) };
-    mgr.save_manifest(&m).unwrap();
+    seed(&mgr, &m);
     assert_eq!(
         mgr.trigger_rollback(RollbackReason::StartupCorrupt, 1040).unwrap(),
         RollbackAction::RollbackToLastGood { target_slot: Slot::A, quarantine_slot: Slot::B }
@@ -644,7 +653,7 @@ fn linked_root_staging_and_manifest_are_refused() {
     assert!(mgr.layout().clean_stale_builds(&[]).is_err());
     assert_eq!(fs::read(&evidence).unwrap(), b"keep");
     symlink(&evidence, mgr.layout().dev_root().join("manifest.json.tmp")).unwrap();
-    assert!(mgr.save_manifest(&UpdateManifest::initial(Slot::A, 1)).is_err());
+    assert!(mgr.adopt_baseline(Slot::A, valid_tree("baseline"), b"baseline", 1).is_err());
     assert_eq!(fs::read(&evidence).unwrap(), b"keep");
 }
 
@@ -701,7 +710,7 @@ fn open_request_cancels_quiescence_and_requires_a_new_gate() {
     let mut manifest = mgr.manifest().unwrap().unwrap();
     manifest.active_slot = Slot::A;
     manifest.state = UpdateState::Quiescent;
-    mgr.save_manifest(&manifest).unwrap();
+    seed(&mgr, &manifest);
     mgr.cancel_quiescence().unwrap();
     assert!(swap(&mgr, 1100).is_err());
     assert!(mgr.enter_quiescence(false, false).is_err());
@@ -718,7 +727,7 @@ fn recovery_after_pending_swap_and_after_probation_restores_once() {
             let mut manifest = mgr.manifest().unwrap().unwrap();
             manifest.active_slot = Slot::A;
             manifest.state = UpdateState::Swapping { from_slot: Slot::A, to_slot: Slot::B, tree: valid_tree(&"a".repeat(64)) };
-            mgr.save_manifest(&manifest).unwrap();
+            seed(&mgr, &manifest);
         }
         let restarted = UpdateManager::new(mgr.layout().clone()).unwrap();
         assert_eq!(
@@ -742,14 +751,21 @@ fn a_distinct_candidate_after_rollback_has_its_own_single_restore() {
     mgr.prepare_next(candidate.clone(), &sample_grant(&repo.common_dir, true), &repo, 1, &[], 1100).unwrap();
     mgr.record_canary_verdict(pass_for(candidate, 1110), "b".repeat(64).as_bytes(), 1110).unwrap();
     mgr.enter_quiescence(false, false).unwrap();
-    swap(&mgr, 1120).unwrap();
+    mgr.begin_swap(
+        &sample_grant(&repo.common_dir, true),
+        &repo,
+        1,
+        SwapCheck { payload: "b".repeat(64).as_bytes(), active_window: false, active_operations: false },
+        1120,
+    )
+    .unwrap();
     mgr.begin_probation(1130).unwrap();
     assert_eq!(
         mgr.trigger_rollback(RollbackReason::FirstOperationFailed, 1140).unwrap(),
         RollbackAction::RollbackToLastGood { target_slot: Slot::A, quarantine_slot: Slot::B }
     );
     let restored = mgr.manifest().unwrap().unwrap();
-    assert_eq!(restored.rejected_trees.len(), 2);
+    assert_eq!(restored.rejected_build_hashes.len(), 2);
     assert_eq!(mgr.trigger_rollback(RollbackReason::ProbationCrash, 1141).unwrap(), RollbackAction::CannotRollbackLoopPrevented);
     assert_eq!(mgr.manifest().unwrap(), Some(restored));
 }
@@ -761,7 +777,7 @@ fn probation_deadline_overflow_does_not_change_the_selected_slot() {
     let mut manifest = mgr.manifest().unwrap().unwrap();
     manifest.active_slot = Slot::A;
     manifest.state = UpdateState::Swapping { from_slot: Slot::A, to_slot: Slot::B, tree: valid_tree(&"a".repeat(64)) };
-    mgr.save_manifest(&manifest).unwrap();
+    seed(&mgr, &manifest);
     assert!(mgr.begin_probation(u64::MAX - 299).is_err());
     assert_eq!(mgr.manifest().unwrap(), Some(manifest));
 }
@@ -803,7 +819,7 @@ fn all_transition_write_boundaries_preserve_the_previous_manifest() {
                 }
                 _ => {}
             }
-            mgr.save_manifest(&manifest).unwrap();
+            seed(&mgr, &manifest);
             let before = fs::read(mgr.layout().manifest_path()).unwrap();
             let disk = Arc::new(FaultyDisk { fail_write: AtomicBool::new(!rename), fail_rename: AtomicBool::new(rename) });
             let faulty = UpdateManager::with_disk(mgr.layout().clone(), disk).unwrap();
@@ -848,7 +864,7 @@ fn additive_manifest_records_survive_an_old_reader_and_health_rollback() {
     let mut manifest = mgr.manifest().unwrap().unwrap();
     manifest.extra.insert("consumedGrant".into(), serde_json::json!({ "revision": 9, "spent": 42 }));
     manifest.last_good.as_mut().unwrap().extra.insert("extension".into(), serde_json::json!("keep"));
-    mgr.save_manifest(&manifest).unwrap();
+    seed(&mgr, &manifest);
     mgr.acknowledge_health(1050).unwrap();
     mgr.complete_first_operation(1060).unwrap();
     let current = mgr.manifest().unwrap().unwrap();
@@ -860,20 +876,22 @@ fn additive_manifest_records_survive_an_old_reader_and_health_rollback() {
     assert_eq!(restored.extra, manifest.extra);
     assert_eq!(restored.last_good, manifest.last_good);
     assert_eq!(restored.current_good, manifest.last_good);
+    assert_eq!(restored.rejected_build_hashes, vec![valid_tree(&"a".repeat(64)).build_hash]);
+    let old: OldManifest = serde_json::from_slice(&fs::read(mgr.layout().manifest_path()).unwrap()).unwrap();
+    fs::write(mgr.layout().manifest_path(), serde_json::to_vec(&old).unwrap()).unwrap();
+    assert_eq!(mgr.manifest().unwrap(), Some(restored));
 }
 
 #[test]
-fn manifest_larger_than_broker_text_limit_round_trips_and_oversize_write_preserves_old_data() {
+fn manifest_larger_than_broker_text_limit_round_trips_through_a_transition() {
     let dir = tempdir();
     let mgr = probation_manager(dir.path());
     let mut manifest = mgr.manifest().unwrap().unwrap();
     manifest.extra.insert("extension".into(), serde_json::json!("x".repeat(16 * 1024)));
-    mgr.save_manifest(&manifest).unwrap();
+    seed(&mgr, &manifest);
     assert_eq!(mgr.manifest().unwrap(), Some(manifest.clone()));
-    let before = fs::read(mgr.layout().manifest_path()).unwrap();
-    manifest.extra.insert("extension".into(), serde_json::json!("x".repeat(1024 * 1024)));
-    assert!(mgr.save_manifest(&manifest).is_err());
-    assert_eq!(fs::read(mgr.layout().manifest_path()).unwrap(), before);
+    mgr.acknowledge_health(1050).unwrap();
+    assert_eq!(mgr.manifest().unwrap().unwrap().extra, manifest.extra);
 }
 
 #[test]
@@ -883,7 +901,7 @@ fn manifest_temp_hardlink_never_truncates_an_outside_file() {
     let outside = dir.path().join("outside");
     fs::write(&outside, b"keep outside bytes").unwrap();
     fs::hard_link(&outside, mgr.layout().dev_root().join("manifest.json.tmp")).unwrap();
-    mgr.save_manifest(&UpdateManifest::initial(Slot::A, 1)).unwrap();
+    mgr.adopt_baseline(Slot::A, valid_tree("baseline"), b"baseline", 1).unwrap();
     assert_eq!(fs::read(&outside).unwrap(), b"keep outside bytes");
 }
 
@@ -905,7 +923,7 @@ fn swap_rechecks_current_grant_trust_revision_revocation_and_repo() {
         let mut manifest = mgr.manifest().unwrap().unwrap();
         manifest.active_slot = Slot::A;
         manifest.state = UpdateState::Quiescent;
-        mgr.save_manifest(&manifest).unwrap();
+        seed(&mgr, &manifest);
         let repo = sample_repo(dir.path());
         let mut grant = sample_grant(&repo.common_dir, true);
         let expected = match mutation {
@@ -927,7 +945,10 @@ fn swap_rechecks_current_grant_trust_revision_revocation_and_repo() {
             }
             _ => unreachable!(),
         };
-        assert_eq!(mgr.begin_swap(&grant, &repo, 1, 1100), Err(UpdateError::Grant(expected)));
+        assert_eq!(
+            mgr.begin_swap(&grant, &repo, 1, SwapCheck { payload: &payload(), active_window: false, active_operations: false }, 1100),
+            Err(UpdateError::Grant(expected))
+        );
         assert_eq!(mgr.manifest().unwrap(), Some(manifest));
     }
 }
@@ -963,9 +984,9 @@ fn development_layout_rejects_configured_installed_data_and_overlapping_roots() 
     let dir = tempdir();
     let installed = dir.path().join("installed-data");
     for development in [installed.clone(), installed.join("development"), dir.path().to_path_buf()] {
-        assert!(SlotLayout::new(&development, &installed).is_err());
+        assert!(SlotLayout::new(&development, &installed, &dir.path().join("installed-release")).is_err());
     }
-    assert!(SlotLayout::new(&dir.path().join("development"), &installed).is_ok());
+    assert!(SlotLayout::new(&dir.path().join("development"), &installed, &dir.path().join("installed-release")).is_ok());
 }
 
 #[cfg(windows)]
@@ -974,8 +995,260 @@ fn installed_data_overlap_cannot_be_hidden_by_a_verbatim_path_prefix() {
     let dir = tempdir();
     let installed = dir.path().join("installed-data");
     let ordinary = std::path::PathBuf::from(installed.to_string_lossy().trim_start_matches(r"\\?\"));
-    assert!(SlotLayout::new(&installed, &ordinary).is_err());
-    assert!(SlotLayout::new(&ordinary, &installed).is_err());
+    assert!(SlotLayout::new(&installed, &ordinary, &dir.path().join("installed-release")).is_err());
+    assert!(SlotLayout::new(&ordinary, &installed, &dir.path().join("installed-release")).is_err());
+}
+
+#[test]
+fn clock_step_back_cannot_block_a_safety_rollback() {
+    for recovery in [false, true] {
+        let dir = tempdir();
+        let mgr = probation_manager(dir.path());
+        let action = if recovery {
+            mgr.recover_transition(900).unwrap().unwrap()
+        } else {
+            mgr.trigger_rollback(RollbackReason::ProbationCrash, 900).unwrap()
+        };
+        assert_eq!(action, RollbackAction::RollbackToLastGood { target_slot: Slot::A, quarantine_slot: Slot::B });
+        let restored = mgr.manifest().unwrap().unwrap();
+        assert_eq!(restored.active_slot, Slot::A);
+        assert_eq!(restored.updated_at, 1030);
+    }
+}
+
+#[test]
+fn clock_step_back_during_probation_restores_previous_instead_of_waiting() {
+    let dir = tempdir();
+    let mgr = probation_manager(dir.path());
+    assert!(mgr.finish_probation(900).is_err());
+    assert_eq!(mgr.manifest().unwrap().unwrap().active_slot, Slot::A);
+}
+
+#[test]
+fn bounded_first_operation_does_not_wait_for_a_user_and_restart_reconciles_probation() {
+    let dir = tempdir();
+    let mgr = probation_manager(dir.path());
+    mgr.acknowledge_health(1050).unwrap();
+    mgr.complete_first_operation(1051).unwrap();
+    mgr.finish_probation(1330).unwrap();
+    assert_eq!(mgr.recover_transition(1400).unwrap(), None);
+    assert_eq!(mgr.manifest().unwrap().unwrap().state, UpdateState::Healthy);
+    let interrupted = tempdir();
+    let mgr = probation_manager(interrupted.path());
+    mgr.acknowledge_health(1050).unwrap();
+    assert!(mgr.complete_first_operation(1331).is_err());
+    assert!(mgr.finish_probation(1331).is_err());
+    assert_eq!(mgr.manifest().unwrap().unwrap().active_slot, Slot::A);
+}
+
+#[test]
+fn rejected_history_stops_admission_before_it_can_exhaust_rollback_storage() {
+    let dir = tempdir();
+    let mgr = UpdateManager::new(slot_layout(&dir.path().join("dev")).unwrap()).unwrap();
+    let repo = sample_repo(dir.path());
+    let grant = sample_grant(&repo.common_dir, true);
+    let mut stopped = false;
+    for i in 0..130 {
+        let now = 1000 + i * 2;
+        if mgr.prepare_next(valid_tree(&format!("failed-{i}")), &grant, &repo, 1, &[], now).is_err() {
+            stopped = true;
+            break;
+        }
+        mgr.record_canary_verdict(CanaryVerdict::Fail { at: now + 1, reason: "canary".into() }, b"", now + 1).unwrap();
+    }
+    assert!(stopped, "history must be bounded without forgetting rejected builds");
+    assert!(fs::metadata(mgr.layout().manifest_path()).unwrap().len() < 128 * 1024);
+}
+
+#[test]
+fn rejection_identifies_a_build_and_does_not_ban_a_different_rebuild_of_the_same_source() {
+    let dir = tempdir();
+    let mgr = probation_manager(dir.path());
+    mgr.trigger_rollback(RollbackReason::ProbationCrash, 1040).unwrap();
+    let repo = sample_repo(dir.path());
+    let mut rebuilt = valid_tree("different executable");
+    rebuilt.tree_oid = valid_tree(&"a".repeat(64)).tree_oid;
+    assert_eq!(mgr.prepare_next(rebuilt, &sample_grant(&repo.common_dir, true), &repo, 1, &[], 1100).unwrap(), Slot::B);
+}
+
+#[test]
+fn swap_cannot_substitute_another_fully_authorized_repository() {
+    let dir = tempdir();
+    let mgr = probation_manager(dir.path());
+    let mut manifest = mgr.manifest().unwrap().unwrap();
+    manifest.active_slot = Slot::A;
+    manifest.state = UpdateState::Quiescent;
+    seed(&mgr, &manifest);
+    let other = sample_repo(&dir.path().join("other"));
+    assert!(
+        mgr.begin_swap(
+            &sample_grant(&other.common_dir, true),
+            &other,
+            1,
+            SwapCheck { payload: &payload(), active_window: false, active_operations: false },
+            1100
+        )
+        .is_err()
+    );
+    assert_eq!(mgr.manifest().unwrap(), Some(manifest));
+}
+
+#[test]
+fn atomic_manifest_orphans_are_owned_but_require_explicit_obsolete_inventory() {
+    let dir = tempdir();
+    let layout = slot_layout(&dir.path().join("dev")).unwrap();
+    layout.init_dirs().unwrap();
+    let orphan = layout.dev_root().join(format!(".faber-patch-{}.tmp", uuid::Uuid::new_v4()));
+    let unrelated = layout.dev_root().join(".faber-patch-owner.tmp");
+    fs::write(&orphan, b"partial manifest").unwrap();
+    fs::write(&unrelated, b"owner").unwrap();
+    assert!(layout.is_owned_path(&orphan));
+    assert!(!layout.is_owned_path(&unrelated));
+    assert!(layout.clean_stale_builds(&[]).unwrap().is_empty());
+    assert!(orphan.exists());
+    assert_eq!(
+        layout.clean_stale_builds(&[(orphan.clone(), ExactTree::compute_build_hash(b"partial manifest"))]).unwrap(),
+        vec![orphan.clone()]
+    );
+    assert!(!orphan.exists());
+    assert_eq!(fs::read(&unrelated).unwrap(), b"owner");
+}
+
+#[test]
+fn uppercase_struct_literal_cannot_bypass_rejected_build_admission() {
+    let dir = tempdir();
+    let mgr = probation_manager(dir.path());
+    mgr.trigger_rollback(RollbackReason::ProbationCrash, 1040).unwrap();
+    let repo = sample_repo(dir.path());
+    let before = mgr.manifest().unwrap();
+    let mut tree = valid_tree(&"a".repeat(64));
+    tree.commit_oid = tree.commit_oid.to_ascii_uppercase();
+    tree.tree_oid = tree.tree_oid.to_ascii_uppercase();
+    tree.build_hash = tree.build_hash.to_ascii_uppercase();
+    assert!(mgr.prepare_next(tree, &sample_grant(&repo.common_dir, true), &repo, 1, &[], 1100).is_err());
+    assert_eq!(mgr.manifest().unwrap(), before);
+}
+
+#[test]
+fn newer_exact_tree_schema_is_refused_at_admission_and_nested_reload() {
+    let dir = tempdir();
+    let mgr = probation_manager(dir.path());
+    let before = fs::read(mgr.layout().manifest_path()).unwrap();
+    let repo = sample_repo(dir.path());
+    let mut tree = valid_tree("newer");
+    tree.schema_version = SCHEMA + 1;
+    assert_eq!(mgr.prepare_next(tree.clone(), &sample_grant(&repo.common_dir, true), &repo, 1, &[], 1100), Err(UpdateError::Newer));
+    assert_eq!(fs::read(mgr.layout().manifest_path()).unwrap(), before);
+    for location in 0..5 {
+        let mut manifest: UpdateManifest = serde_json::from_slice(&before).unwrap();
+        match location {
+            0 => manifest.last_good.as_mut().unwrap().tree.schema_version = SCHEMA + 1,
+            1 => manifest.staged_tree.as_mut().unwrap().schema_version = SCHEMA + 1,
+            2 => manifest.rejected_trees.push(tree.clone()),
+            3 => {
+                if let UpdateState::Probation { tree, .. } = &mut manifest.state {
+                    tree.schema_version = SCHEMA + 1
+                }
+            }
+            4 => {
+                if let Some(CanaryVerdict::Pass { tree, .. }) = &mut manifest.candidate_evidence {
+                    tree.schema_version = SCHEMA + 1
+                }
+            }
+            _ => unreachable!(),
+        }
+        fs::write(mgr.layout().manifest_path(), serde_json::to_vec(&manifest).unwrap()).unwrap();
+        assert_eq!(mgr.manifest(), Err(UpdateError::Newer), "nested location {location}");
+    }
+}
+
+#[test]
+fn baseline_adoption_verifies_payload_and_never_overwrites_existing_state() {
+    let dir = tempdir();
+    let mgr = UpdateManager::new(slot_layout(&dir.path().join("dev")).unwrap()).unwrap();
+    let tree = valid_tree("running healthy build");
+    assert!(mgr.adopt_baseline(Slot::A, tree.clone(), b"wrong bytes", 500).is_err());
+    assert_eq!(mgr.manifest().unwrap(), None);
+    mgr.adopt_baseline(Slot::A, tree.clone(), b"running healthy build", 500).unwrap();
+    let baseline = mgr.manifest().unwrap().unwrap();
+    assert_eq!(baseline.last_good.as_ref().unwrap().tree, tree);
+    assert_eq!(baseline.current_good, baseline.last_good);
+    assert!(mgr.adopt_baseline(Slot::B, valid_tree("other"), b"other", 501).is_err());
+    assert_eq!(mgr.manifest().unwrap(), Some(baseline));
+}
+
+#[test]
+fn configured_installed_release_is_excluded_even_outside_apps_faber() {
+    let dir = tempdir();
+    let release = dir.path().join("custom-install");
+    let data = dir.path().join("installed-data");
+    for development in [release.clone(), release.join("dev"), dir.path().to_path_buf()] {
+        assert!(SlotLayout::new(&development, &data, &release).is_err());
+    }
+    assert!(SlotLayout::new(&dir.path().join("development"), &data, &release).is_ok());
+    assert!(SlotLayout::new(&dir.path().join("development"), &data, Path::new(r"E:\Apps\Faber")).is_ok());
+}
+
+#[test]
+fn swap_requires_fresh_window_process_and_payload_observations() {
+    for mutation in 0..3 {
+        let dir = tempdir();
+        let mgr = probation_manager(dir.path());
+        let mut manifest = mgr.manifest().unwrap().unwrap();
+        manifest.active_slot = Slot::A;
+        manifest.state = UpdateState::Quiescent;
+        seed(&mgr, &manifest);
+        let repo = sample_repo(dir.path());
+        let bytes = if mutation == 2 { b"changed after canary".to_vec() } else { payload() };
+        let check = SwapCheck { payload: &bytes, active_window: mutation == 0, active_operations: mutation == 1 };
+        assert!(mgr.begin_swap(&sample_grant(&repo.common_dir, true), &repo, 1, check, 1100).is_err(), "mutation {mutation}");
+        assert_eq!(mgr.manifest().unwrap(), Some(manifest));
+    }
+}
+
+#[test]
+fn swap_reserves_space_for_rollback_before_selecting_the_candidate() {
+    let dir = tempdir();
+    let mgr = probation_manager(dir.path());
+    let mut manifest = mgr.manifest().unwrap().unwrap();
+    manifest.active_slot = Slot::A;
+    manifest.state = UpdateState::Quiescent;
+    manifest.last_good.as_mut().unwrap().extra.insert("extension".into(), serde_json::json!("x".repeat(64 * 1024)));
+    manifest.extra.insert("extension".into(), serde_json::json!("x".repeat(945 * 1024)));
+    seed(&mgr, &manifest);
+    assert!(fs::metadata(mgr.layout().manifest_path()).unwrap().len() < 1024 * 1024);
+    assert!(swap(&mgr, 1100).is_err());
+    assert_eq!(mgr.manifest().unwrap(), Some(manifest));
+}
+
+#[test]
+fn cleanup_error_reports_the_files_already_removed() {
+    let dir = tempdir();
+    let layout = slot_layout(&dir.path().join("dev")).unwrap();
+    layout.init_dirs().unwrap();
+    let old = layout.staging_dir().join("old");
+    let changed = layout.staging_dir().join("changed");
+    fs::write(&old, b"old").unwrap();
+    fs::write(&changed, b"new").unwrap();
+    let error = layout
+        .clean_stale_builds(&[
+            (old.clone(), ExactTree::compute_build_hash(b"old")),
+            (changed.clone(), ExactTree::compute_build_hash(b"old")),
+        ])
+        .unwrap_err();
+    assert!(matches!(error, UpdateError::Cleanup { cleaned, .. } if cleaned == vec![old.clone()]));
+    assert!(!old.exists());
+    assert_eq!(fs::read(changed).unwrap(), b"new");
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_case_variant_overlap_is_conservatively_refused() {
+    let dir = tempdir();
+    let installed = dir.path().join("installed-data");
+    let release = dir.path().join("release");
+    assert!(SlotLayout::new(&dir.path().join("INSTALLED-DATA/dev"), &installed, &release).is_err());
+    assert!(SlotLayout::new(&dir.path().join("RELEASE/dev"), &installed, &release).is_err());
 }
 
 #[test]

@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 const MAX_MANIFEST: u64 = 1024 * 1024;
+const MAX_REJECTIONS: usize = 128;
 
 /// Whether `path` resolves to a forbidden destination such as installed release `E:\Apps\Faber`
 /// or any root/alias of it.
@@ -78,6 +79,7 @@ pub enum UpdateError {
     NoLastGood,
     RollbackLoop,
     CanaryFailed(String),
+    Cleanup { cleaned: Vec<PathBuf>, error: Box<UpdateError> },
 }
 
 impl UpdateError {
@@ -94,6 +96,7 @@ impl UpdateError {
             Self::NoLastGood => "error.update.noLastGood",
             Self::RollbackLoop => "error.update.rollbackLoop",
             Self::CanaryFailed(_) => "error.update.canaryFailed",
+            Self::Cleanup { error, .. } => error.key(),
         }
     }
 }
@@ -108,6 +111,7 @@ impl From<LeaseError> for UpdateError {
     fn from(error: LeaseError) -> Self {
         match error {
             LeaseError::Store(fault) => Self::Store(fault),
+            LeaseError::Hash => Self::InvalidState("claimed obsolete artifact changed"),
             _ => Self::ForbiddenPath("invalid development path".into()),
         }
     }
@@ -160,9 +164,12 @@ impl ExactTree {
     }
 
     fn validate(&self) -> Result<(), UpdateError> {
-        Self::new(&self.commit_oid, &self.tree_oid, &self.build_hash, self.schema_version)?;
+        let normalized = Self::new(&self.commit_oid, &self.tree_oid, &self.build_hash, self.schema_version)?;
         if self.schema_version > SCHEMA {
             return Err(UpdateError::Newer);
+        }
+        if self.commit_oid != normalized.commit_oid || self.tree_oid != normalized.tree_oid || self.build_hash != normalized.build_hash {
+            return Err(UpdateError::InvalidTree("noncanonical hash spelling".into()));
         }
         Ok(())
     }
@@ -262,6 +269,10 @@ pub struct UpdateManifest {
     pub current_good: Option<LastGoodRecord>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rejected_trees: Vec<ExactTree>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rejected_build_hashes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub candidate_repo: Option<String>,
     #[serde(default)]
     pub first_operation_completed: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -283,6 +294,8 @@ impl UpdateManifest {
             last_good: None,
             current_good: None,
             rejected_trees: vec![],
+            rejected_build_hashes: vec![],
+            candidate_repo: None,
             first_operation_completed: false,
             candidate_evidence: None,
             rollback_count: 0,
@@ -306,6 +319,13 @@ impl UpdateManifest {
         }
         for tree in self.staged_tree.iter().chain(self.rejected_trees.iter()) {
             tree.validate()?;
+        }
+        if self
+            .rejected_build_hashes
+            .iter()
+            .any(|hash| hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+        {
+            return Err(UpdateError::InvalidTree("invalid rejected build hash".into()));
         }
         let pending = match &self.state {
             UpdateState::PreparingNext { slot, tree }
@@ -397,13 +417,19 @@ pub struct SlotLayout {
 }
 
 impl SlotLayout {
-    pub fn new(dev_root: &Path, installed_data: &Path) -> Result<Self, UpdateError> {
+    pub fn new(dev_root: &Path, installed_data: &Path, installed_release: &Path) -> Result<Self, UpdateError> {
         if is_forbidden_root(dev_root) || is_forbidden_root(installed_data) {
             return Err(UpdateError::ForbiddenPath(dev_root.to_string_lossy().into()));
         }
         let dev_root = real_path(dev_root)?;
         let installed_data = real_path(installed_data)?;
-        for path in [&dev_root, &installed_data] {
+        // A literal protected release is an exclusion, never a path to inspect (including E:\Apps\Faber).
+        let installed_release =
+            if is_forbidden_root(installed_release) { installed_release.to_path_buf() } else { real_path(installed_release)? };
+        for path in [&dev_root, &installed_data, &installed_release] {
+            if path == &installed_release && is_forbidden_root(path) {
+                continue;
+            }
             if is_forbidden_root(path) {
                 return Err(UpdateError::ForbiddenPath(path.to_string_lossy().into()));
             }
@@ -421,15 +447,18 @@ impl SlotLayout {
                 return Err(UpdateError::ForbiddenPath(path.to_string_lossy().into()));
             }
         }
-        #[cfg(windows)]
-        let (development, installed) = (
-            PathBuf::from(dev_root.to_string_lossy().trim_start_matches(r"\\?\").to_lowercase()),
-            PathBuf::from(installed_data.to_string_lossy().trim_start_matches(r"\\?\").to_lowercase()),
-        );
-        #[cfg(not(windows))]
-        let (development, installed) = (dev_root.clone(), installed_data);
-        if development.starts_with(&installed) || installed.starts_with(&development) {
-            return Err(UpdateError::ForbiddenPath(dev_root.to_string_lossy().into()));
+        for installed in [&installed_data, &installed_release] {
+            // Conservatively exclude case aliases on macOS even when this particular volume is case-sensitive.
+            #[cfg(any(windows, target_os = "macos"))]
+            let (development, installed) = (
+                PathBuf::from(dev_root.to_string_lossy().trim_start_matches(r"\\?\").to_lowercase()),
+                PathBuf::from(installed.to_string_lossy().trim_start_matches(r"\\?\").to_lowercase()),
+            );
+            #[cfg(not(any(windows, target_os = "macos")))]
+            let development = &dev_root;
+            if development.starts_with(&installed) || installed.starts_with(&development) {
+                return Err(UpdateError::ForbiddenPath(dev_root.to_string_lossy().into()));
+            }
         }
         Ok(SlotLayout { dev_root })
     }
@@ -473,6 +502,17 @@ impl SlotLayout {
         [self.slot_dir(Slot::A), self.slot_dir(Slot::B), self.staging_dir(), self.quarantine_dir()].iter().any(|dir| path.starts_with(dir))
             || path == self.manifest_path()
             || path == self.dev_root.join("manifest.json.tmp")
+            || self.is_manifest_temp(path)
+    }
+
+    fn is_manifest_temp(&self, path: &Path) -> bool {
+        path.parent() == Some(self.dev_root())
+            && path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .and_then(|name| name.strip_prefix(".faber-patch-"))
+                .and_then(|name| name.strip_suffix(".tmp"))
+                .is_some_and(|id| uuid::Uuid::parse_str(id).is_ok())
     }
 
     pub fn clean_stale_builds(&self, obsolete: &[(PathBuf, String)]) -> Result<Vec<PathBuf>, UpdateError> {
@@ -481,23 +521,47 @@ impl SlotLayout {
         real_path(&staging)?;
         // Slots and unlisted artifacts may still be in use; only the caller's obsolete inventory authorizes cleanup.
         for (path, expected_hash) in obsolete {
-            if !self.is_owned_path(path) || !path.starts_with(&staging) || path == &staging {
-                return Err(UpdateError::ForbiddenPath(path.to_string_lossy().into()));
-            }
-            let file = ScopedFile::new(path, false)?;
-            if let Some(found_hash) = file.hash()? {
-                if found_hash != *expected_hash {
-                    return Err(UpdateError::InvalidState("obsolete artifact changed"));
+            let result = (|| -> Result<bool, UpdateError> {
+                if !self.is_owned_path(path) || (!path.starts_with(&staging) && !self.is_manifest_temp(path)) || path == &staging {
+                    return Err(UpdateError::ForbiddenPath(path.to_string_lossy().into()));
                 }
-                file.delete()?;
-                cleaned.push(path.clone());
+                let file = ScopedFile::new(path, false)?;
+                if let Some(found_hash) = file.hash()? {
+                    if found_hash != *expected_hash {
+                        return Err(UpdateError::InvalidState("obsolete artifact changed"));
+                    }
+                    let claimed = file.claim(expected_hash)?;
+                    claimed.delete()?;
+                    return Ok(true);
+                }
+                Ok(false)
+            })();
+            match result {
+                Ok(true) => cleaned.push(path.clone()),
+                Ok(false) => {}
+                Err(error) if cleaned.is_empty() => return Err(error),
+                Err(error) => return Err(UpdateError::Cleanup { cleaned, error: Box::new(error) }),
             }
         }
         Ok(cleaned)
     }
 }
 
+/// Fresh observations supplied by the settled-process adapter immediately before the swap.
+pub struct SwapCheck<'a> {
+    pub payload: &'a [u8],
+    pub active_window: bool,
+    pub active_operations: bool,
+}
+
 /// Manages slots, transitions, manifests, and rollback decisions.
+/// Manifest writes cannot bypass the public transition API.
+/// ```compile_fail
+/// use faber_engine::project::update::{UpdateManager, UpdateManifest};
+/// fn bypass(manager: &UpdateManager, fabricated: &UpdateManifest) {
+///     manager.save_manifest(fabricated).unwrap();
+/// }
+/// ```
 pub struct UpdateManager {
     layout: SlotLayout,
     disk: Option<Arc<dyn Disk>>,
@@ -527,7 +591,7 @@ impl UpdateManager {
         Ok(Some(manifest))
     }
 
-    pub fn save_manifest(&self, manifest: &UpdateManifest) -> Result<(), UpdateError> {
+    fn save_manifest(&self, manifest: &UpdateManifest) -> Result<(), UpdateError> {
         manifest.validate()?;
         real_path(&self.layout.manifest_path())?;
         real_path(&self.layout.dev_root.join("manifest.json.tmp"))?;
@@ -540,6 +604,19 @@ impl UpdateManager {
             None => ScopedFile::new(&self.layout.manifest_path(), false)?.write(json.as_bytes(), None)?,
         }
         Ok(())
+    }
+
+    /// Register the running, healthy development build once; the adapter supplies its verified payload.
+    pub fn adopt_baseline(&self, slot: Slot, tree: ExactTree, payload: &[u8], now: u64) -> Result<(), UpdateError> {
+        tree.validate()?;
+        if !tree.matches_payload(payload) || self.manifest()?.is_some() {
+            return Err(UpdateError::InvalidState("unverified or already registered baseline"));
+        }
+        let mut manifest = UpdateManifest::initial(slot, now);
+        let good = LastGoodRecord::new(slot, tree, now, now);
+        manifest.last_good = Some(good.clone());
+        manifest.current_good = Some(good);
+        self.save_manifest(&manifest)
     }
 
     pub fn prepare_next(
@@ -566,9 +643,13 @@ impl UpdateManager {
         }
 
         if now < manifest.updated_at
-            || manifest.rejected_trees.iter().any(|bad| bad.build_hash == tree.build_hash || bad.tree_oid == tree.tree_oid)
+            || manifest.rejected_trees.iter().any(|bad| bad.build_hash == tree.build_hash)
+            || manifest.rejected_build_hashes.contains(&tree.build_hash)
         {
             return Err(UpdateError::InvalidState("stale time or quarantined candidate"));
+        }
+        if manifest.rejected_trees.len() + manifest.rejected_build_hashes.len() >= MAX_REJECTIONS {
+            return Err(UpdateError::InvalidState("rejected build history full"));
         }
         if let Some(good) = &manifest.current_good {
             if good.slot != manifest.active_slot {
@@ -581,6 +662,7 @@ impl UpdateManager {
         }
 
         manifest.staged_tree = Some(tree.clone());
+        manifest.candidate_repo = Some(repo.common_dir.clone());
         manifest.candidate_evidence = None;
         manifest.first_operation_completed = false;
         // A distinct accepted candidate starts a new transition; rejected identities remain durable.
@@ -617,8 +699,9 @@ impl UpdateManager {
                 manifest.candidate_evidence = Some(evidence);
             }
             CanaryVerdict::Fail { reason, at } => {
-                manifest.rejected_trees.push(tree);
+                manifest.rejected_build_hashes.push(tree.build_hash);
                 manifest.staged_tree = None;
+                manifest.candidate_repo = None;
                 manifest.candidate_evidence = None;
                 manifest.state = UpdateState::Quarantined { slot, reason, at };
             }
@@ -650,8 +733,21 @@ impl UpdateManager {
         }
     }
 
-    pub fn begin_swap(&self, grant: &Grant, repo: &RepoIdentity, revision: u64, now: u64) -> Result<Slot, UpdateError> {
+    pub fn begin_swap(
+        &self,
+        grant: &Grant,
+        repo: &RepoIdentity,
+        revision: u64,
+        check: SwapCheck<'_>,
+        now: u64,
+    ) -> Result<Slot, UpdateError> {
         grant.allows(repo, revision, Effect::SelfUpdate).map_err(UpdateError::Grant)?;
+        if check.active_window {
+            return Err(UpdateError::ActiveWindow);
+        }
+        if check.active_operations {
+            return Err(UpdateError::ActiveOperations);
+        }
         let mut manifest = self.manifest()?.ok_or(UpdateError::InvalidState("no manifest initialized"))?;
         let (target_slot, tree) = match &manifest.state {
             UpdateState::Quiescent => {
@@ -665,6 +761,12 @@ impl UpdateManager {
         if now < manifest.updated_at {
             return Err(UpdateError::InvalidState("stale transition time"));
         }
+        if manifest.candidate_repo.as_ref() != Some(&repo.common_dir) {
+            return Err(UpdateError::Grant("reason.grant.otherRepo"));
+        }
+        if !tree.matches_payload(check.payload) {
+            return Err(UpdateError::InvalidState("candidate payload changed before swap"));
+        }
         if manifest.last_good.as_ref().is_none_or(|good| good.slot != manifest.active_slot) {
             return Err(UpdateError::NoLastGood);
         }
@@ -675,6 +777,12 @@ impl UpdateManager {
         let from_slot = manifest.active_slot;
         manifest.state = UpdateState::Swapping { from_slot, to_slot: target_slot, tree };
         manifest.updated_at = now;
+        // Reserve space for the worst bounded rollback before a candidate can become active.
+        let mut rollback = manifest.clone();
+        Self::restore(&mut rollback, RollbackReason::Custom("\0".repeat(1024)), u64::MAX);
+        if serde_json::to_vec_pretty(&rollback).expect("plain data serializes").len() as u64 > MAX_MANIFEST {
+            return Err(UpdateError::InvalidState("insufficient rollback manifest headroom"));
+        }
         self.save_manifest(&manifest)?;
         Ok(target_slot)
     }
@@ -734,6 +842,11 @@ impl UpdateManager {
             _ => return Err(UpdateError::InvalidState("not in probation state")),
         };
 
+        if now < manifest.updated_at {
+            self.trigger_rollback(RollbackReason::StartupCorrupt, now)?;
+            return Err(UpdateError::InvalidState("probation clock moved backwards"));
+        }
+
         if now < deadline {
             return Err(UpdateError::InvalidState("probation not complete"));
         }
@@ -748,6 +861,7 @@ impl UpdateManager {
         }
         manifest.current_good = Some(LastGoodRecord::new(slot, tree, promoted_at, now));
         manifest.staged_tree = None;
+        manifest.candidate_repo = None;
         manifest.candidate_evidence = None;
         manifest.rollback_count = 0;
         manifest.state = UpdateState::Healthy;
@@ -780,35 +894,51 @@ impl UpdateManager {
         if action == RollbackAction::CannotRollbackLoopPrevented {
             return Ok(action);
         }
-        if !matches!(manifest.state, UpdateState::Swapping { .. } | UpdateState::Probation { .. }) || now < manifest.updated_at {
-            return Err(UpdateError::InvalidState("no pending transition or stale rollback time"));
+        if !matches!(manifest.state, UpdateState::Swapping { .. } | UpdateState::Probation { .. }) {
+            return Err(UpdateError::InvalidState("no pending transition"));
         }
+        Self::restore(&mut manifest, reason, now);
+        self.save_manifest(&manifest)?;
+        Ok(action)
+    }
+
+    fn restore(manifest: &mut UpdateManifest, mut reason: RollbackReason, now: u64) {
+        let now = now.max(manifest.updated_at);
+        if let RollbackReason::Custom(text) = &mut reason {
+            // Bound diagnostics so an arbitrary message cannot consume the reserved safety write.
+            let mut end = text.len().min(1024);
+            while !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            text.truncate(end);
+        }
+        let action = Self::evaluate_rollback(manifest, &reason);
         let candidate = match &manifest.state {
             UpdateState::Swapping { tree, .. } | UpdateState::Probation { tree, .. } => tree.clone(),
             _ => unreachable!(),
         };
-        manifest.rejected_trees.push(candidate);
+        if !manifest.rejected_build_hashes.contains(&candidate.build_hash) {
+            manifest.rejected_build_hashes.push(candidate.build_hash);
+        }
         manifest.staged_tree = None;
+        manifest.candidate_repo = None;
         manifest.candidate_evidence = None;
         manifest.first_operation_completed = false;
         match action {
             RollbackAction::RollbackToLastGood { target_slot, quarantine_slot } => {
                 manifest.active_slot = target_slot;
                 manifest.current_good = manifest.last_good.clone();
-                manifest.rollback_count += 1;
+                manifest.rollback_count = 1;
                 manifest.state = UpdateState::RolledBack { restored_slot: target_slot, quarantined_slot: quarantine_slot, reason, at: now };
                 manifest.updated_at = now;
-                self.save_manifest(&manifest)?;
             }
             RollbackAction::CannotRollbackLoopPrevented => unreachable!(),
             RollbackAction::CannotRollbackNoLastGood => {
                 manifest.state =
                     UpdateState::Quarantined { slot: manifest.active_slot, reason: "no last good build available".into(), at: now };
                 manifest.updated_at = now;
-                self.save_manifest(&manifest)?;
             }
         }
-        Ok(action)
     }
 
     pub fn complete_first_operation(&self, now: u64) -> Result<(), UpdateError> {
@@ -843,5 +973,24 @@ impl UpdateManager {
         } else {
             Ok(None)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn oversize_private_write_preserves_previous_manifest() {
+        let area = tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let layout = SlotLayout::new(&area.path().join("dev"), &area.path().join("installed-data"), &area.path().join("release")).unwrap();
+        let manager = UpdateManager::new(layout).unwrap();
+        let mut manifest = UpdateManifest::initial(Slot::A, 1);
+        manifest.extra.insert("extension".into(), serde_json::json!("x".repeat(16 * 1024)));
+        manager.save_manifest(&manifest).unwrap();
+        let before = std::fs::read(manager.layout.manifest_path()).unwrap();
+        manifest.extra.insert("extension".into(), serde_json::json!("x".repeat(1024 * 1024)));
+        assert!(manager.save_manifest(&manifest).is_err());
+        assert_eq!(std::fs::read(manager.layout.manifest_path()).unwrap(), before);
     }
 }

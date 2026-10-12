@@ -15,7 +15,10 @@ use std::time::Duration;
 
 pub fn scenarios() -> Vec<Scenario> {
     vec![
-        Scenario { name: "projects git: detached work, CAS, hooks, filters, junctions and dirty owner preservation", run: local_git },
+        Scenario {
+            name: "projects git and T11: detached work, CAS, hooks, filters, junction ownership and dirty owner preservation",
+            run: local_git,
+        },
         Scenario { name: "projects git review 2 and 6: deletions commit with real git", run: deletion },
         Scenario { name: "projects git review 5 and opus H3: stage races refused, commits use the verified tree", run: race },
         Scenario { name: "projects git opus M3 and L4: candidate junction swap cannot redirect broker IO", run: path_race },
@@ -278,8 +281,23 @@ pub fn probe(sandbox: &Path) -> Result {
         aliased.generation = 0;
         aliased.extra.clear();
         let denied = broker.leases().acquire(aliased);
-        std::fs::remove_dir(&link).map_err(|e| e.to_string())?;
         ensure(denied == Err(LeaseError::Path), || "junction alias was admitted".into())?;
+        use faber_engine::project::update::{SlotLayout, UpdateManager};
+        let installed_data = sandbox.join("installed-data");
+        let installed_release = sandbox.join("installed-release");
+        ensure(SlotLayout::new(&link, &installed_data, &installed_release).is_err(), || "T11 accepted a junction root".into())?;
+        let layout = SlotLayout::new(&sandbox.join("development"), &installed_data, &installed_release).map_err(|e| format!("{e:?}"))?;
+        layout.init_dirs().map_err(|e| format!("{e:?}"))?;
+        std::fs::remove_dir(layout.staging_dir()).map_err(|e| e.to_string())?;
+        std::fs::rename(&link, layout.staging_dir()).map_err(|e| e.to_string())?;
+        let outside = repo.join("src/a.rs");
+        let before = std::fs::read(&outside).map_err(|e| e.to_string())?;
+        let aliased = layout.staging_dir().join("a.rs");
+        ensure(!layout.is_owned_path(&aliased), || "T11 owns a junction target".into())?;
+        ensure(layout.clean_stale_builds(&[(aliased, hash(&before))]).is_err(), || "T11 cleaned a junction target".into())?;
+        ensure(UpdateManager::new(layout.clone()).is_err(), || "T11 initialized through a junction".into())?;
+        ensure(std::fs::read(&outside).map_err(|e| e.to_string())? == before, || "T11 changed junction target bytes".into())?;
+        std::fs::remove_dir(layout.staging_dir()).map_err(|e| e.to_string())?;
     }
     ensure(git(program, &repo, &["rev-parse", "HEAD"])? == base, || "the owner's ref moved".into())?;
     ensure(git(program, &repo, &["status", "--porcelain=v1", "-uall"])? == status, || "the owner's status changed".into())?;
