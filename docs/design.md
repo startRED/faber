@@ -297,6 +297,18 @@ of the app. `FABER_HIDDEN=1` keeps the window offscreen with its own browser pro
   runs in WebView2, which exposes Chromium's DevTools port (`FABER_CDP_PORT`); the macOS and Linux webviews have no such
   port, so those systems skip this suite and run every other check.
 
+**The window never reaches the person's desktop (Windows).** `FABER_HIDDEN=1` alone is not enough: an offscreen window can
+still become visible and take focus, which matters to someone playing full screen. So the runner (`testkit/src/desktop.rs`)
+makes a separate Windows desktop once per run (`CreateDesktopW`, named `faber-test-<pid>-...`), which no monitor shows and
+no input reaches, and every app launch starts on it (`STARTUPINFO.lpDesktop`, through the gate helper, still inside its
+job object and with no console window). The app's window and its WebView2 processes inherit that desktop, so they cannot
+be seen or steal focus; the DevTools port is a TCP port and does not care which desktop the page lives on. Two safety
+nets: if the desktop cannot be made or assigned, nothing is launched and the run fails (there is no fallback to the
+normal desktop); and after launch, and at every audit point, the runner lists the visible top-level windows on the
+desktop in use and, if one belongs to the app's job, ends the job at once and fails. The scenario `hidden desktop:
+...` proves the mechanism without Faber: a helper started like the app lists the windows of its own desktop, and none of
+them is a window of the desktop in use.
+
 Every launch is sandboxed: a temporary home, an empty `PATH`, no provider variables, a dead proxy and no real CLI (a fake
 CLI replays the recordings in `tests/fixtures/`). Each scenario is audited afterwards for leaked processes, writes outside
 the sandbox and a changed environment. The checks and the hooks that report them exist only in the test build

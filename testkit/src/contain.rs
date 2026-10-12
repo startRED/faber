@@ -7,6 +7,8 @@
 //!   only then tells it to start the app. The app, and everything it starts, is in the job from its first moment on.
 //!   (Starting the app suspended and resuming it would need unsafe code, which the workspace forbids.) Ending the job
 //!   ends all of them; closing the last handle to the job, which is what happens when the runner dies, does the same.
+//!   The app also starts on the hidden desktop the runner made (see `desktop`), so it can never show a window to the
+//!   person using the PC.
 //! - macOS and Linux: the app is started directly and ended through the `Child` the runner keeps.
 //!   ponytail: no process group is signalled (a group cannot prove who is in it) and nothing is adopted by id, so a
 //!   program the app started and left running outlives it; the audit reports it and fails the scenario. Containing
@@ -66,8 +68,10 @@ impl Owned {
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
+            // No hidden desktop, no app: it would open its window where the person is working.
+            let desktop = crate::desktop::name().map_err(io::Error::other)?;
             let mut command = Command::new(helper);
-            command.arg("--gate").arg(program).args(args).env_clear().envs(env).current_dir(cwd);
+            command.arg("--gate").arg("--desktop").arg(desktop).arg(program).args(args).env_clear().envs(env).current_dir(cwd);
             command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).creation_flags(NO_WINDOW);
             let mut helper = command.spawn()?;
             let gate = helper.stdin.take();

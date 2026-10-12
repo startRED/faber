@@ -297,6 +297,7 @@ impl Ctx {
         let id = self.spawn(launch)?;
         let deadline = Instant::now() + STARTUP;
         let mut page = loop {
+            self.guard_desktop(id)?;
             if let Some(status) = self.exited(id) {
                 return Err(format!("the app exited before its window opened ({status}). stderr: {}", self.stderr(id)));
             }
@@ -308,6 +309,7 @@ impl Ctx {
         };
         page.wait_for_within("the screen to render", "!!document.querySelector('.app')", STARTUP)
             .map_err(|e| format!("{e}. stderr: {}", self.stderr(id)))?;
+        self.guard_desktop(id)?;
         self.record(id)?;
         Ok(Opened { id, pid: self.live[id].pid, page })
     }
@@ -325,10 +327,11 @@ impl Ctx {
     /// looked at: once it has ended its id may belong to another program, and nothing about that program is ours. On
     /// Windows the app's job is asked too, and anything of the tree that it does not hold is noted as escaped.
     pub fn record(&mut self, id: usize) -> Result<(), String> {
-        let live = &mut self.live[id];
-        if !live.owned.is_running() {
+        if !self.live[id].owned.is_running() {
             return Ok(());
         }
+        self.guard_desktop(id)?;
+        let live = &mut self.live[id];
         let first = snapshot()?;
         let members = live.owned.members();
         if let Some(members) = &members {
@@ -342,6 +345,31 @@ impl Ctx {
         let mut fresh = live_tree(&first, live.pid);
         fresh.retain(|row| !same_process(row, &live.seen));
         live.seen.extend(fresh);
+        Ok(())
+    }
+
+    /// The second safety net of the hidden desktop: the app must have no visible window on the desktop the person is
+    /// using. If it has one, its whole job is ended at once and this fails. Only Windows has the hidden desktop.
+    pub fn guard_desktop(&mut self, id: usize) -> Result<(), String> {
+        #[cfg(windows)]
+        {
+            let live = &self.live[id];
+            if !live.owned.is_running() {
+                return Ok(());
+            }
+            let mut pids = live.owned.members().unwrap_or_default();
+            pids.push(live.pid);
+            let shown = crate::desktop::visible_windows_of(&pids)?;
+            if !shown.is_empty() {
+                live.owned.terminate();
+                return Err(format!(
+                    "the app has {} visible window(s) on the desktop in use ({shown:?}), so it was ended: the hidden desktop is not working",
+                    shown.len()
+                ));
+            }
+        }
+        #[cfg(not(windows))]
+        let _ = id;
         Ok(())
     }
 

@@ -4,6 +4,8 @@ pub mod app;
 pub mod cdp;
 pub mod checks;
 pub mod contain;
+#[cfg(windows)]
+pub mod desktop;
 pub mod fake;
 pub mod gate;
 pub mod page;
