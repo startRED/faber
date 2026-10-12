@@ -802,7 +802,7 @@ fn keys_until_the_question(page: &mut Page, chords: &[&str]) -> Result<std::time
         pause(0.3);
         if page.is_visible(&card)? {
             after += 1;
-            if after >= 4 {
+            if after >= 4 && turn % chords.len() == chords.len() - 1 {
                 return Ok(last);
             }
         }
@@ -817,6 +817,7 @@ fn waits_for_every_key(ctx: &mut Ctx) -> Result {
     let page = &mut app.page;
     let model = page.labelled("composer.model")?;
     page.select_option(&model, "Claude Haiku")?;
+    delay_open(page, 800)?;
     ask(page, TWO_WRITES)?;
     // The conversation opens and its composer is drawn; a few words go in, and the caret goes to 3 and comes back.
     page.wait_for(
@@ -827,6 +828,9 @@ fn waits_for_every_key(ctx: &mut Ctx) -> Result {
     page.fill(&composer, "hello")?;
     page.press("ArrowLeft")?;
     page.press("ArrowLeft")?;
+    let initial = page.eval_on(&composer, "return { text: el.value, at: el.selectionStart, end: el.selectionEnd };")?;
+    same(initial["text"].as_str(), Some("hello"), "the draft before the snapshot arrives")?;
+    same((initial["at"].as_u64(), initial["end"].as_u64()), (Some(3), Some(3)), "the initial caret")?;
     // Only arrow keys from here on: they move the caret and change no text, so no `input` event comes. The question
     // arrives meanwhile, and the column must keep out of the way for as long as the keys come.
     let last = keys_until_the_question(page, &["ArrowLeft", "ArrowRight"])?;

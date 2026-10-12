@@ -546,7 +546,8 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   // The model the open conversation is answering with now, else the one the next message will go to.
   const answering = () => current()?.messages.findLast((m) => m.role === 'assistant' && m.vendor);
 
-  const composer = () => (
+  // The same conversation's draft survives moving between the greeting and the dock.
+  const composer = createMemo(() => (
     <Show when={composerKey()} keyed>
       <Composer
         vendors={state().vendors}
@@ -570,7 +571,13 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
         onClearRestored={(f) => (clearRestored = f)}
       />
     </Show>
-  );
+  ));
+  createEffect(on(newChat, () => {
+    const focused = lastFocus?.deref();
+    queueMicrotask(() => {
+      if (focused?.matches('.composer textarea') && focused.isConnected && document.activeElement === document.body) focused.focus();
+    });
+  }, { defer: true }));
 
   const runningColumn = () => (
     <Running
