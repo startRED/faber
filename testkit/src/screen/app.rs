@@ -606,6 +606,11 @@ fn idle_memory_with(ctx: &mut Ctx, reduce: bool) -> Result {
     let mut app = ctx.launch(launch)?;
     // A machine that turns animations off (a CI runner does) must not change what this scenario is about.
     system_motion(&mut app.page, reduce)?;
+    let motion = if reduce { "reduced" } else { "full" };
+    app.page.wait_for(
+        "the emulated motion preference to reach the screen",
+        &format!("document.documentElement.dataset.motion === '{motion}'"),
+    )?;
     let title = app.page.named("heading", "empty.chatTitle")?;
     app.page.wait_visible(&title)?;
     ensure(app.page.count(&css(".amb-beam .dust"))? == 1, || "the new conversation should show the dust".to_string())?;
@@ -613,13 +618,13 @@ fn idle_memory_with(ctx: &mut Ctx, reduce: bool) -> Result {
     let states =
         "[...document.querySelectorAll('.amb-beam .dust i')].flatMap((grain) => grain.getAnimations().map((a) => a.playState)).join()";
     let hide = |page: &mut Page, on: bool| {
-        let getter = if on {
-            "Object.defineProperty(document, 'hidden', { configurable: true, get: () => true })"
-        } else {
-            "Reflect.deleteProperty(document, 'hidden')"
-        };
-        page.eval(&format!("(() => {{ {getter}; document.dispatchEvent(new Event('visibilitychange')); }})()")).map(|_| ())
+        page.eval(&format!(
+            "(() => {{ Object.defineProperty(document, 'hidden', {{ configurable: true, get: () => {on} }}); document.dispatchEvent(new Event('visibilitychange')); }})()"
+        ))
+        .map(|_| ())
     };
+    // The native test window stays hidden; this scenario exercises both page visibility states explicitly.
+    hide(&mut app.page, false)?;
     let moving = app.page.eval(states)?;
     if reduce {
         // Reduced motion keeps the dust on the page, still: no grain moves.
