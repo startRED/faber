@@ -30,14 +30,14 @@ pub fn half_cores(logical: usize) -> usize {
     (logical / 2).max(1)
 }
 
-fn capped_jobs(logical: usize, cap: Option<usize>) -> usize {
-    half_cores(logical).min(cap.filter(|cap| *cap > 0).unwrap_or(usize::MAX))
+pub fn jobs() -> usize {
+    capped_jobs(std::thread::available_parallelism().map_or(1, |n| n.get()), std::env::var("CARGO_BUILD_JOBS").ok().as_deref())
 }
 
-pub fn jobs() -> usize {
-    // A positive CARGO_BUILD_JOBS cap also applies to builds started by the runner.
-    let cap = std::env::var("CARGO_BUILD_JOBS").ok().and_then(|value| value.parse().ok());
-    capped_jobs(std::thread::available_parallelism().map_or(1, |n| n.get()), cap)
+fn capped_jobs(logical: usize, cargo_jobs: Option<&str>) -> usize {
+    let default = half_cores(logical);
+    // The runner passes -j explicitly, so it must carry the user's positive Cargo limit into its child builds.
+    cargo_jobs.and_then(|value| value.parse::<usize>().ok()).filter(|limit| *limit > 0).map_or(default, |limit| default.min(limit))
 }
 
 /// The suites that cover a set of changed paths (relative to the repository, `/` separators).
@@ -131,15 +131,23 @@ mod tests {
     }
 
     #[test]
-    fn an_explicit_build_limit_caps_workers_without_using_more_than_half_the_cores() {
-        assert_eq!(capped_jobs(16, Some(1)), 1);
-        assert_eq!(capped_jobs(16, Some(2)), 2);
-        assert_eq!(capped_jobs(16, Some(20)), 8);
-        assert_eq!(capped_jobs(16, None), 8);
-        assert_eq!(capped_jobs(1, Some(1)), 1);
+    fn the_bootstrap_keeps_a_default_limit_without_overriding_the_environment() {
         let config: toml::Value = include_str!("../../.cargo/config.toml").parse().unwrap();
         assert_eq!(config["build"]["jobs"].as_integer(), Some(4));
         assert!(!config["alias"]["t"].as_str().unwrap().split_whitespace().any(|arg| arg == "-j"));
+    }
+
+    #[test]
+    fn the_runner_respects_a_positive_cargo_build_limit() {
+        assert_eq!(capped_jobs(16, Some("4")), 4);
+        assert_eq!(capped_jobs(16, Some("2")), 2);
+        assert_eq!(capped_jobs(2, Some("4")), 1);
+        for value in [None, Some("0"), Some("invalid"), Some("-2")] {
+            assert_eq!(capped_jobs(16, value), 8);
+        }
+        let default = half_cores(std::thread::available_parallelism().map_or(1, |n| n.get()));
+        let limit = std::env::var("CARGO_BUILD_JOBS").ok().and_then(|value| value.parse::<usize>().ok()).filter(|limit| *limit > 0);
+        assert_eq!(jobs(), limit.map_or(default, |limit| default.min(limit)));
     }
 
     #[test]
