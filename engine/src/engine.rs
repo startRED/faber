@@ -1,10 +1,13 @@
 //! The engine: conversations, live CLI sessions, permissions, branches and attachments.
 
 use crate::account::{self, AccountStatus};
+use crate::budget::Billing;
 use crate::claude::{ClaudeLaunch, ClaudeOptions, EventSink, start_claude};
 use crate::cli::Cli;
+use crate::codex::read_codex_limits;
 use crate::codex::{CodexServer, CodexServerOptions, CodexThread};
 use crate::events::{EngineEvent, Session, UserTurn};
+use crate::learn::Span;
 use crate::ledger::{Ledger, plausible};
 use crate::model::*;
 use crate::proc::Spawner;
@@ -24,6 +27,7 @@ use uuid::Uuid;
 
 mod answer;
 mod auto;
+mod pulse;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
@@ -214,6 +218,8 @@ struct Core {
     /// What Faber remembers about each vendor's quota (`budget.json`).
     ledger: Ledger,
     ledger_saved: f64,
+    /// When the last quota pulse started.
+    last_pulse: f64,
     /// The PC's offset from UTC in seconds, as the screen reports it.
     utc_offset: i64,
     clock: Option<Clock>,
@@ -254,6 +260,7 @@ impl Engine {
                 spare: None,
                 ledger,
                 ledger_saved: 0.0,
+                last_pulse: 0.0,
                 utc_offset: 0,
                 clock: None,
             })
@@ -280,6 +287,50 @@ impl Engine {
             // Which remembered readings are still current depends on the clock.
             for (key, reading) in remembered(&c.ledger, c.secs()) {
                 c.quotas.entry(key).or_insert(reading);
+            }
+        })
+    }
+    /// Asks each connected CLI who is signed in and on which plan, and keeps the answers in the ledger: Claude Code through its
+    /// status command, Codex through a short-lived server (which also refreshes its quota readings). A check that fails or
+    /// times out refreshes nothing, and three in a row make Settings ask the user which plan they have.
+    pub async fn check_plans(&self, timeout: Duration) {
+        type Job = (Vendor, Cli, Spawner, PathBuf, bool);
+        let jobs: Vec<Job> = self.with(|c| {
+            c.opts.clis.iter().map(|(v, cli)| (*v, cli.clone(), c.opts.spawn.clone(), c.opts.data_dir.clone(), c.opts.windows)).collect()
+        });
+        for (vendor, cli, spawn, cwd, windows) in jobs {
+            match vendor {
+                Vendor::Claude => {
+                    let found = account::claude_account(&cli, &spawn, &cwd, timeout).await;
+                    self.with(|c| c.claude_plan_checked(found));
+                }
+                Vendor::Codex => {
+                    let events = read_codex_limits(&cli.command, &cwd, windows, spawner(&spawn, &cli), timeout).await;
+                    self.with(|c| c.codex_plan_checked(events));
+                }
+            }
+        }
+    }
+    /// Checks the plans now and every quarter of an hour while Faber runs. The shell starts it once.
+    pub fn watch_accounts(&self) {
+        let (me, runtime) = (self.with(|c| c.me.clone()), self.runtime.clone());
+        let handle = runtime.clone();
+        runtime.spawn(async move {
+            loop {
+                let Some(core) = me.upgrade() else { return };
+                Engine { core, runtime: handle.clone() }.check_plans(Duration::from_secs(20)).await;
+                tokio::time::sleep(Duration::from_secs(15 * 60)).await;
+            }
+        });
+    }
+    /// The plan the user named when it could not be detected. It never overrides how the login is billed, and a later
+    /// detection that disagrees removes it.
+    pub fn answer_plan(&self, vendor: Vendor, plan: &str) {
+        let plan: String = plan.trim().to_ascii_lowercase().chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_').take(40).collect();
+        self.with(|c| {
+            if !plan.is_empty() {
+                c.ledger.of_mut(vendor).typed_plan = Some(plan);
+                c.save_ledger(true);
             }
         })
     }
@@ -436,6 +487,32 @@ impl Core {
         }
         if s.plan.is_some() {
             v.plan_detected(s.plan, now);
+        }
+    }
+
+    /// A request Faber made itself (an answer, a router question, a pulse): the learning has to know when it ran, so that use
+    /// it did not cause can be told from use it did.
+    fn note_span(&mut self, vendor: Vendor, start: f64, model: &str, cost: Option<f64>) {
+        let end = self.secs();
+        self.ledger.of_mut(vendor).span(Span { start, end, model: model.to_string(), cost });
+    }
+
+    fn claude_plan_checked(&mut self, found: Option<Signals>) {
+        let Some(s) = found else { return self.ledger.claude.plan_failed() };
+        let (named, by_use) = (s.plan.is_some(), s.billing == Some(Billing::UsageBilled));
+        self.apply_signals(Vendor::Claude, s);
+        if !named && !by_use {
+            self.ledger.claude.plan_missing();
+        }
+    }
+
+    fn codex_plan_checked(&mut self, events: Vec<EngineEvent>) {
+        if events.is_empty() {
+            return self.ledger.codex.plan_failed();
+        }
+        events.into_iter().for_each(|e| self.note_account_event(Vendor::Codex, e));
+        if self.ledger.codex.plan.is_none() && self.ledger.codex.billing != Billing::UsageBilled {
+            self.ledger.codex.plan_missing();
         }
     }
 

@@ -9,6 +9,7 @@
 use crate::cli::Cli;
 use crate::model::Vendor;
 use crate::proc::Spawner;
+use crate::signals::{Signals, claude_plan};
 use serde::Serialize;
 use std::path::Path;
 use std::time::Duration;
@@ -40,22 +41,44 @@ pub fn status_args(vendor: Vendor) -> &'static [&'static str] {
 // Bound transient output, including diagnostics, before discarding it after the verdict.
 const OUTPUT_LIMIT: u64 = 64 * 1024;
 
-/// Runs the status command without a shell. Its output is read into memory only to reach a verdict, then dropped;
-/// a CLI that fails to start or does not answer within `timeout` is `Unknown`, and is killed when the check ends.
-pub async fn check(vendor: Vendor, cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> AccountStatus {
+/// What a status command printed and how it ended.
+struct Ran {
+    out: String,
+    err: String,
+    code: Option<i32>,
+}
+
+/// Runs the status command without a shell, with its output bounded. None when the CLI fails to start, does not answer within
+/// `timeout` (it is killed when the run ends) or prints more than the bound.
+async fn run(vendor: Vendor, cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> Option<Ran> {
     let args: Vec<String> = cli.prefix.iter().cloned().chain(status_args(vendor).iter().map(|a| a.to_string())).collect();
-    let Ok(p) = spawn(&cli.command, &args, cwd) else { return AccountStatus::Unknown };
+    let p = spawn(&cli.command, &args, cwd).ok()?;
     drop(p.stdin); // nothing to type: a CLI waiting for input sees end of input instead
     let mut child = p.child;
     let run = async {
-        let (Some(out), Some(err)) = tokio::join!(read_all(Some(p.stdout)), read_all(p.stderr)) else { return AccountStatus::Unknown };
+        let (Some(out), Some(err)) = tokio::join!(read_all(Some(p.stdout)), read_all(p.stderr)) else { return None };
         let code = match &mut child {
             Some(c) => c.wait().await.ok().and_then(|s| s.code()),
             None => None,
         };
-        if vendor == Vendor::Claude { verdict(vendor, &out, code) } else { verdict(vendor, &format!("{out}\n{err}"), code) }
+        Some(Ran { out, err, code })
     };
-    tokio::time::timeout(timeout, run).await.unwrap_or(AccountStatus::Unknown)
+    tokio::time::timeout(timeout, run).await.ok().flatten()
+}
+
+/// Runs the status command. Its output is read into memory only to reach a verdict, then dropped; a CLI that fails to start or
+/// does not answer within `timeout` is `Unknown`, and is killed when the check ends.
+pub async fn check(vendor: Vendor, cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> AccountStatus {
+    let Some(Ran { out, err, code }) = run(vendor, cli, spawn, cwd, timeout).await else { return AccountStatus::Unknown };
+    if vendor == Vendor::Claude { verdict(vendor, &out, code) } else { verdict(vendor, &format!("{out}\n{err}"), code) }
+}
+
+/// What `claude auth status` says about the plan and how the login is billed; nothing else of its output is kept (the email
+/// and organisation in it are dropped unread). None when the command failed, timed out or returned invalid status data.
+pub async fn claude_account(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> Option<Signals> {
+    let ran = run(Vendor::Claude, cli, spawn, cwd, timeout).await?;
+    serde_json::from_str::<serde_json::Value>(&ran.out).ok()?["loggedIn"].as_bool()?;
+    Some(claude_plan(&ran.out))
 }
 
 async fn read_all(stream: Option<Box<dyn AsyncRead + Send + Unpin>>) -> Option<String> {

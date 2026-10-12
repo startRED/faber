@@ -4434,6 +4434,8 @@ git commit -m "feat(engine): the engine keeps the ledger"
 
 ### Task 6: Plan detection and the quota pulse
 
+R89: pulses require confirmed subscription billing; naming a plan is insufficient. A successful signed-out status clears billing to unknown. Tests pin both cases.
+
 Know the plan without asking, and refresh Claude's readings when they are old.
 
 **Files:**
@@ -4451,7 +4453,7 @@ Know the plan without asking, and refresh Claude's readings when they are old.
 ```diff
 --- a/engine/tests/plan.rs
 +++ b/engine/tests/plan.rs
-@@ -0,0 +1,265 @@
+@@ -0,0 +1,302 @@
 +//! Plan detection, the billing verdict and the quota pulse. No real CLI runs: status commands and the pulse are replayed.
 +
 +mod support;
@@ -4678,6 +4680,10 @@ Know the plan without asking, and refresh Claude's readings when they are old.
 +    let dir = tempfile::tempdir().unwrap();
 +    let f = fake(pulse_recording());
 +    let (engine, _, time) = start(dir.path(), f.spawn.clone(), Some(silent()));
++    engine.note_account_events(
++        Vendor::Claude,
++        vec![EngineEvent::Signals(Signals { billing: Some(Billing::Subscription), ..Signals::default() })],
++    );
 +    engine.route_draft(typing(), "Plan a trip".into());
 +    assert!(settle_for(&engine, "five_hour").await, "the pulse brought a reading");
 +    let args = f.args.lock().unwrap().clone();
@@ -4709,12 +4715,45 @@ Know the plan without asking, and refresh Claude's readings when they are old.
 +    let (engine, _, time) = start(dir.path(), f.spawn.clone(), Some(silent()));
 +    // Nearly out, and the CLI may switch to paid use by itself: the pulse must not be the request that does it.
 +    let quota = EngineEvent::Quota { window: "five_hour".into(), used: 0.95, resets_at: (WHEN + 3600) as f64 };
-+    let paid = EngineEvent::Signals(Signals { paid_fallback: Some(true), ..Signals::default() });
++    let paid = EngineEvent::Signals(Signals { paid_fallback: Some(true), billing: Some(Billing::Subscription), ..Signals::default() });
 +    engine.note_account_events(Vendor::Claude, vec![quota, paid]);
 +    time.store(WHEN + 21 * 60, Ordering::SeqCst);
 +    engine.route_draft(typing(), "Plan a trip".into());
 +    tokio::time::sleep(Duration::from_millis(100)).await;
 +    assert!(f.args.lock().unwrap().is_empty(), "denied: a window above 90% with paid use possible");
++    engine.shutdown();
++}
++
++#[tokio::test]
++async fn a_typed_plan_never_allows_a_pulse_with_unknown_billing() {
++    let dir = tempfile::tempdir().unwrap();
++    let f = fake(pulse_recording());
++    let (engine, _, _) = start(dir.path(), f.spawn.clone(), Some(silent()));
++    engine.answer_plan(Vendor::Claude, "max");
++    engine.route_draft(typing(), "Plan a trip".into());
++    tokio::time::sleep(Duration::from_millis(100)).await;
++    assert_eq!(engine.ledger().claude.billing, Billing::Unknown);
++    assert!(f.args.lock().unwrap().is_empty());
++    engine.shutdown();
++}
++
++#[tokio::test]
++async fn signing_out_clears_a_previously_confirmed_subscription() {
++    let dir = tempfile::tempdir().unwrap();
++    let (connected, _) = status(Some(r#"{"loggedIn":true,"subscriptionType":"max"}"#));
++    let (disconnected, _) = status(Some(r#"{"loggedIn":false}"#));
++    let calls = Arc::new(AtomicU64::new(0));
++    let spawn: Spawner =
++        Arc::new(
++            move |bin, args, cwd| {
++                if calls.fetch_add(1, Ordering::SeqCst) == 0 { connected(bin, args, cwd) } else { disconnected(bin, args, cwd) }
++            },
++        );
++    let (engine, _, _) = start(dir.path(), spawn, None);
++    engine.check_plans(FIVE).await;
++    assert_eq!(engine.ledger().claude.billing, Billing::Subscription);
++    engine.check_plans(FIVE).await;
++    assert_eq!(engine.ledger().claude.billing, Billing::Unknown);
 +    engine.shutdown();
 +}
 ```
@@ -4783,11 +4822,11 @@ Expected: compile errors or failures naming the missing items.
 +}
 +
 +/// What `claude auth status` says about the plan and how the login is billed; nothing else of its output is kept (the email
-+/// and organisation in it are dropped unread). None when the command failed, timed out or reports no sign-in.
++/// and organisation in it are dropped unread). None when the command failed, timed out or returned invalid status data.
 +pub async fn claude_account(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> Option<Signals> {
 +    let ran = run(Vendor::Claude, cli, spawn, cwd, timeout).await?;
-+    let signed_in = serde_json::from_str::<serde_json::Value>(&ran.out).ok()?["loggedIn"].as_bool()?;
-+    signed_in.then(|| claude_plan(&ran.out))
++    serde_json::from_str::<serde_json::Value>(&ran.out).ok()?["loggedIn"].as_bool()?;
++    Some(claude_plan(&ran.out))
  }
  
  async fn read_all(stream: Option<Box<dyn AsyncRead + Send + Unpin>>) -> Option<String> {

@@ -33,7 +33,7 @@ pub(super) struct Draft {
     only: Option<Vendor>,
 }
 
-type Stop = Arc<Mutex<Option<Session>>>;
+pub(super) type Stop = Arc<Mutex<Option<Session>>>;
 
 /// A router session started ahead of its question.
 pub(super) struct Spare {
@@ -69,6 +69,8 @@ impl Core {
         if req.choice.vendor != "auto" || text.is_empty() {
             return;
         }
+        // The first keystroke in Auto is the moment to ask Claude Code for a fresh reading, if the one held is old.
+        self.pulse_if_due();
         let id = self.draft_for(&req);
         let Some(route) = self.next_route(&id) else { return };
         let only = route.map(|p| p.vendor);
@@ -284,7 +286,7 @@ impl Core {
     }
 }
 
-fn stop_router(stop: Option<Stop>) {
+pub(super) fn stop_router(stop: Option<Stop>) {
     if let Some(session) = stop.and_then(|s| s.lock().unwrap_or_else(|e| e.into_inner()).take()) {
         session.close();
     }
