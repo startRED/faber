@@ -8,6 +8,11 @@ use std::path::Path;
 const BASE: &str = "1111111111111111111111111111111111111111";
 const NEXT: &str = "2222222222222222222222222222222222222222";
 
+fn tempdir() -> tempfile::TempDir {
+    // Broker enrollment uses real roots, not the system's possible temp-directory alias.
+    tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap()
+}
+
 #[derive(Default)]
 struct Fake {
     replies: VecDeque<Result<Output, GitError>>,
@@ -43,7 +48,7 @@ fn grant(repo: &Repository) -> Grant {
 
 #[test]
 fn enrollment_uses_the_canonical_common_directory_and_a_commit() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempdir();
     let repo = repository(dir.path());
     let mut fake =
         Fake::replies(&["false\n", &repo.identity.root, &repo.identity.common_dir, BASE, "Test\n", "test@example.invalid\n", ""]);
@@ -60,7 +65,7 @@ fn enrollment_uses_the_canonical_common_directory_and_a_commit() {
 
 #[test]
 fn enrollment_rejects_non_git_bare_missing_base_and_injected_revisions() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempdir();
     let mut fake = Fake::default();
     for bad in ["--help", "HEAD;touch x", "HEAD\n", "a:b", "../HEAD", "HEAD^{tree}"] {
         assert_eq!(enroll(&mut fake, dir.path(), bad), Err(GitError::Ref));
@@ -77,9 +82,9 @@ fn enrollment_rejects_non_git_bare_missing_base_and_injected_revisions() {
 
 #[test]
 fn effects_require_a_current_grant_and_cas_only_the_own_branch() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempdir();
     let repo = repository(dir.path());
-    let data = tempfile::tempdir().unwrap();
+    let data = tempdir();
     let journal = Journal::open(dir.path(), data.path(), "m1").unwrap();
     let mut g = grant(&repo);
     let fake = Fake::replies(&["", "", "", ""]);
@@ -103,10 +108,10 @@ fn effects_require_a_current_grant_and_cas_only_the_own_branch() {
 
 #[test]
 fn stale_heads_and_unknown_delivery_preserve_evidence() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempdir();
     let repo = repository(dir.path());
     let g = grant(&repo);
-    let data = tempfile::tempdir().unwrap();
+    let data = tempdir();
     let journal = Journal::open(dir.path(), data.path(), "m1").unwrap();
     let mut fake = Fake::replies(&["", "", ""]);
     fake.replies.push_back(Ok(Output { success: false, stdout: vec![] }));
@@ -126,10 +131,10 @@ fn review_7_null_oids_are_rejected_before_any_git_effect() {
     for width in [40, 64] {
         assert!(!valid_oid(&"0".repeat(width)));
     }
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempdir();
     let repo = repository(dir.path());
     let g = grant(&repo);
-    let data = tempfile::tempdir().unwrap();
+    let data = tempdir();
     let journal = Journal::open(dir.path(), data.path(), "m1").unwrap();
     let mut broker = Broker::open(repo, journal, "m1", 3, Fake::replies(&["", "", "", ""])).unwrap();
     broker.create_branch(|| Ok(Some(g.clone())), "create").unwrap();
@@ -156,8 +161,8 @@ fn opus_l1_revocation_after_staging_blocks_commit_dispatch() {
     use faber_engine::project::Lease;
     use faber_engine::project::lease::hash;
     use faber_engine::project::wire::{FileOp, WriteOp};
-    let dir = tempfile::tempdir().unwrap();
-    let data = tempfile::tempdir().unwrap();
+    let dir = tempdir();
+    let data = tempdir();
     let repo = repository(dir.path());
     let g = grant(&repo);
     let live = std::sync::Arc::new(std::sync::Mutex::new(g.clone()));

@@ -177,9 +177,14 @@ impl ScopedFile {
 mod tests {
     use super::*;
 
+    fn tempdir() -> tempfile::TempDir {
+        // Match enrolled broker roots; macOS's ambient /var temp path is a system symlink.
+        tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap()
+    }
+
     #[test]
     fn ancestor_swap_cannot_redirect_a_scoped_read_or_write() {
-        let area = tempfile::tempdir().unwrap();
+        let area = tempdir();
         let candidate = area.path().join("candidate");
         let outside = area.path().join("outside");
         std::fs::create_dir(&candidate).unwrap();
@@ -203,10 +208,23 @@ mod tests {
 
     #[test]
     fn existing_file_ancestors_and_directory_targets_are_refused() {
-        let area = tempfile::tempdir().unwrap();
+        let area = tempdir();
         std::fs::write(area.path().join("file"), "bytes").unwrap();
         assert!(matches!(ScopedFile::new(&area.path().join("file/child"), true), Err(LeaseError::Path)));
         std::fs::create_dir(area.path().join("folder")).unwrap();
         assert!(matches!(ScopedFile::new(&area.path().join("folder"), false).unwrap().read(), Err(LeaseError::Path)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn uncanonical_ancestor_aliases_are_still_refused() {
+        let area = tempdir();
+        let real = area.path().join("real");
+        let alias = area.path().join("alias");
+        std::fs::create_dir(&real).unwrap();
+        std::fs::write(real.join("a"), "bytes").unwrap();
+        std::os::unix::fs::symlink(&real, &alias).unwrap();
+        assert!(matches!(ScopedFile::new(&alias.join("a"), false), Err(LeaseError::Path)));
+        assert_eq!(ScopedFile::new(&real.join("a"), false).unwrap().read().unwrap().unwrap().0, b"bytes");
     }
 }

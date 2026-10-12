@@ -105,13 +105,13 @@ fn git_output(program: &str, root: &Path, args: &[&str]) -> Result<std::process:
             "-c",
             "filter.include.process=",
             "-c",
-            "hook.post-checkout.enabled=false",
+            "hook.fixture-post-checkout.enabled=false",
             "-c",
-            "hook.pre-commit.enabled=false",
+            "hook.fixture-pre-commit.enabled=false",
             "-c",
-            "hook.post-commit.enabled=false",
+            "hook.fixture-post-commit.enabled=false",
             "-c",
-            "hook.reference-transaction.enabled=false",
+            "hook.fixture-reference-transaction.enabled=false",
             "-c",
             "hook.included.enabled=false",
             "-c",
@@ -188,8 +188,10 @@ pub fn probe(sandbox: &Path) -> Result {
     git(program, &repo, &["config", "extensions.worktreeConfig", "true"])?;
     // git 2.54 config hooks are independent of core.hooksPath.
     for event in ["post-checkout", "pre-commit", "post-commit", "reference-transaction"] {
-        git(program, &repo, &["config", &format!("hook.{event}.event"), event])?;
-        git(program, &repo, &["config", &format!("hook.{event}.command"), "exit 99"])?;
+        // git 2.55 forbids friendly names that collide with event names, even for disabled hooks.
+        let name = format!("fixture-{event}");
+        git(program, &repo, &["config", &format!("hook.{name}.event"), event])?;
+        git(program, &repo, &["config", &format!("hook.{name}.command"), "exit 99"])?;
     }
     let included = repo.join(".git/extra-config");
     let mut file = std::fs::OpenOptions::new().append(true).open(included).map_err(|e| e.to_string())?;

@@ -11,6 +11,11 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
+fn tempdir() -> tempfile::TempDir {
+    // The private sidecar and enrolled repository both start at canonical roots.
+    tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap()
+}
+
 struct Setup {
     owner: tempfile::TempDir,
     data: tempfile::TempDir,
@@ -18,8 +23,8 @@ struct Setup {
 }
 impl Setup {
     fn new() -> Self {
-        let owner = tempfile::tempdir().unwrap();
-        let data = tempfile::tempdir().unwrap();
+        let owner = tempdir();
+        let data = tempdir();
         fs::create_dir(owner.path().join(".git")).unwrap();
         let repo = RepoIdentity::new(
             &owner.path().join(".git").canonicalize().unwrap().to_string_lossy(),
@@ -201,7 +206,7 @@ fn dropping_a_coordinator_cannot_transfer_a_live_mission_to_another_private_fold
     let s = Setup::new();
     let leases = s.open().unwrap();
     drop(leases);
-    let elsewhere = tempfile::tempdir().unwrap();
+    let elsewhere = tempdir();
     let journal = Journal::open(elsewhere.path(), elsewhere.path(), "m1").unwrap();
     assert!(matches!(Leases::open(s.repo.clone(), journal, "m1"), Err(LeaseError::Owned)));
     let journal = Journal::open(s.data.path(), s.data.path(), "m2").unwrap();
@@ -480,7 +485,7 @@ fn opus_h2_moved_repository_can_be_closed_without_reusing_old_source_authority()
     let process = ProcessId { pid: 42, started_at: 9 };
     leases.attach_process(&lease, process).unwrap();
     drop(leases);
-    let moved = tempfile::tempdir().unwrap();
+    let moved = tempdir();
     let root = moved.path().join("moved");
     fs::rename(s.owner.path(), &root).unwrap();
     let repo =
