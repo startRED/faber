@@ -590,7 +590,7 @@ impl Plan {
         for t in &self.tasks {
             let mut clean = vec![];
             for w in &t.writes {
-                clean.push(clean_path(w).ok_or_else(|| GraphError::BadPath { task: t.id.clone(), path: w.clone() })?);
+                clean.push(lease::normalized(w).map_err(|_| GraphError::BadPath { task: t.id.clone(), path: w.clone() })?);
             }
             if !clean.is_empty() && !t.kind.writes() {
                 return Err(GraphError::ReadOnlyWrites(t.id.clone()));

@@ -46,7 +46,7 @@ impl From<JournalError> for GitError {
 }
 
 pub fn valid_oid(oid: &str) -> bool {
-    [40, 64].contains(&oid.len()) && oid.bytes().all(|b| b.is_ascii_hexdigit())
+    [40, 64].contains(&oid.len()) && oid.bytes().all(|b| b.is_ascii_hexdigit()) && oid.bytes().any(|b| b != b'0')
 }
 fn valid_ref(reference: &str) -> bool {
     !reference.is_empty()
@@ -283,6 +283,7 @@ impl<E: Executor> Broker<E> {
         kind: IntentKind,
         calls: &[Invocation],
         expected: &[(&str, &str)],
+        commit_lease: Option<&Lease>,
     ) -> Result<Output, GitError> {
         self.authority(grant, kind.effect().ok_or(GitError::Command)?)?;
         if !self.journal().pending()?.is_empty() {
@@ -293,6 +294,7 @@ impl<E: Executor> Broker<E> {
         self.journal().record_intent(&intent)?;
         let mut output = Output { success: true, stdout: vec![] };
         for call in calls {
+            self.authority(grant, kind.effect().ok_or(GitError::Command)?)?;
             // Missing delivery acknowledgment stays pending. Recovery must reconcile it rather than repeat it.
             output = self.executor.execute(call)?;
             if !output.success {
@@ -305,6 +307,12 @@ impl<E: Executor> Broker<E> {
                 return Err(GitError::Process);
             }
             intent.expected.insert("head".into(), head);
+            let root = &calls.last().ok_or(GitError::Process)?.cwd;
+            let actual_tree = text(self.executor.execute(&Invocation::new(root, &["rev-parse", "HEAD^{tree}"]))?, GitError::Process)?;
+            if intent.expected.get("tree") != Some(&actual_tree) {
+                return Err(LeaseError::Quarantined.into());
+            }
+            self.leases.audit(commit_lease.ok_or(LeaseError::Stale)?)?;
         }
         let mut receipt = Receipt::new(id, if output.success { Outcome::Done } else { Outcome::Failed }, now());
         receipt.evidence = intent.expected;
@@ -325,7 +333,7 @@ impl<E: Executor> Broker<E> {
         let base = self.repository.base.clone();
         let zero = "0".repeat(base.len());
         let call = Invocation::new(Path::new(&self.repository.identity.root), &["update-ref", &branch, &base, &zero]);
-        self.effect(grant, id, IntentKind::FastForward, &[call], &[("ref", &branch), ("old", &zero), ("new", &base)])?;
+        self.effect(grant, id, IntentKind::FastForward, &[call], &[("ref", &branch), ("old", &zero), ("new", &base)], None)?;
         self.leases.record_branch(&branch)?;
         Ok(())
     }
@@ -351,7 +359,7 @@ impl<E: Executor> Broker<E> {
             raw.strip_prefix("\\\\?\\").unwrap_or(raw).into()
         };
         let call = Invocation::new(Path::new(&self.repository.identity.root), &["worktree", "add", "--detach", "--", &path, &base]);
-        if let Err(e) = self.effect(grant, id, IntentKind::Worktree, &[call], &[("path", &path), ("base", &base)]) {
+        if let Err(e) = self.effect(grant, id, IntentKind::Worktree, &[call], &[("path", &path), ("base", &base)], None) {
             self.leases.quarantine(lease)?;
             return Err(e);
         }
@@ -384,7 +392,7 @@ impl<E: Executor> Broker<E> {
             return Err(GitError::Base);
         }
         let call = Invocation::new(root, &["update-ref", &branch, new, old]);
-        self.effect(grant, id, IntentKind::FastForward, &[call], &[("ref", &branch), ("old", old), ("new", new)])?;
+        self.effect(grant, id, IntentKind::FastForward, &[call], &[("ref", &branch), ("old", old), ("new", new)], None)?;
         Ok(())
     }
     /// Task 7 supplies accepted paths after its proof/review gates. Git never stages the entire directory.
@@ -417,13 +425,37 @@ impl<E: Executor> Broker<E> {
         let mut stage = Invocation::new(&root, &["add", "--"]);
         stage.args.extend(accepted.clone());
         let mut call = Invocation::new(&root, &["commit", "--only", "--no-gpg-sign", "-m", message, "--"]);
-        call.args.extend(accepted);
+        call.args.extend(accepted.clone());
         call.author = Some(author);
         let read_head = Invocation::new(&root, &["rev-parse", "HEAD"]);
-        let output = match self.effect(grant, id, IntentKind::Commit, &[stage, call, read_head], &[("parent", &head)]) {
+        let result = (|| {
+            // Staging is a disposable worktree effect; the commit's durable intent pins the verified index tree.
+            let stage_id = format!("stage-{}", uuid::Uuid::new_v4());
+            self.effect(grant, &stage_id, IntentKind::Worktree, &[stage], &[("phase", "stage"), ("commit", id), ("parent", &head)], None)?;
+            self.leases.audit(lease)?;
+            let diff = self.executor.execute(&Invocation::new(&root, &["diff", "--quiet", "--no-ext-diff", "--no-textconv", "--"]))?;
+            if !diff.success {
+                return Err(LeaseError::Quarantined.into());
+            }
+            let paths =
+                text(self.executor.execute(&Invocation::new(&root, &["diff", "--cached", "--name-only", "-z", "--"]))?, GitError::Command)?;
+            let mut paths: Vec<String> = paths.split('\0').filter(|p| !p.is_empty()).map(String::from).collect();
+            paths.sort();
+            if paths != accepted {
+                return Err(LeaseError::Quarantined.into());
+            }
+            let tree = text(self.executor.execute(&Invocation::new(&root, &["write-tree"]))?, GitError::Process)?;
+            if !valid_oid(&tree) {
+                return Err(GitError::Process);
+            }
+            self.effect(grant, id, IntentKind::Commit, &[call, read_head], &[("parent", &head), ("tree", &tree)], Some(lease))
+        })();
+        let output = match result {
             Ok(output) => output,
             Err(e) => {
-                self.leases.quarantine(lease)?;
+                if self.leases.index(lease).is_ok() {
+                    self.leases.quarantine(lease)?;
+                }
                 return Err(e);
             }
         };

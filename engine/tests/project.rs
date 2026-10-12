@@ -406,7 +406,7 @@ fn an_intent_is_recorded_once_and_its_receipt_lands_once() {
     assert_eq!(journal.record_intent(&intent("i1")), Err(JournalError::IntentExists), "a replayed effect is refused");
     journal.record_receipt(&Receipt::new("i1", Outcome::Unknown, 2)).unwrap();
     assert_eq!(journal.record_receipt(&Receipt::new("i1", Outcome::Done, 3)), Err(JournalError::ReceiptExists));
-    assert!(journal.pending().unwrap().is_empty());
+    assert_eq!(journal.pending().unwrap(), vec![intent("i1")], "an unknown outcome still requires reconciliation");
 }
 
 #[test]

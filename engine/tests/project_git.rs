@@ -1,5 +1,5 @@
 //! Git arguments and durable effects with a scripted executor; no processes or real repositories.
-use faber_engine::project::git::{Broker, Executor, GitError, Invocation, Output, Repository, enroll};
+use faber_engine::project::git::{Broker, Executor, GitError, Invocation, Output, Repository, enroll, valid_oid};
 use faber_engine::project::store::Journal;
 use faber_engine::project::{Author, GitMode, Grant, RepoIdentity};
 use std::collections::VecDeque;
@@ -80,7 +80,7 @@ fn effects_require_a_current_grant_and_cas_only_the_own_branch() {
     let dir = tempfile::tempdir().unwrap();
     let repo = repository(dir.path());
     let data = tempfile::tempdir().unwrap();
-    let journal = Journal::open(data.path(), data.path(), "m1").unwrap();
+    let journal = Journal::open(dir.path(), data.path(), "m1").unwrap();
     let mut g = grant(&repo);
     let fake = Fake::replies(&["", "", "", ""]);
     let mut broker = Broker::open(repo, journal, "m1", 3, fake).unwrap();
@@ -107,7 +107,7 @@ fn stale_heads_and_unknown_delivery_preserve_evidence() {
     let repo = repository(dir.path());
     let g = grant(&repo);
     let data = tempfile::tempdir().unwrap();
-    let journal = Journal::open(data.path(), data.path(), "m1").unwrap();
+    let journal = Journal::open(dir.path(), data.path(), "m1").unwrap();
     let mut fake = Fake::replies(&["", "", ""]);
     fake.replies.push_back(Ok(Output { success: false, stdout: vec![] }));
     fake.replies.push_back(Ok(Output { success: true, stdout: vec![] }));
@@ -119,4 +119,20 @@ fn stale_heads_and_unknown_delivery_preserve_evidence() {
     assert_eq!(broker.fast_forward(Some(&g), "uncertain", BASE, NEXT), Err(GitError::Process));
     assert!(broker.fast_forward(Some(&g), "uncertain", BASE, NEXT).is_err());
     assert_eq!(broker.executor().calls.len(), 7, "uncertain effects must not repeat");
+}
+
+#[test]
+fn review_7_null_oids_are_rejected_before_any_git_effect() {
+    for width in [40, 64] {
+        assert!(!valid_oid(&"0".repeat(width)));
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let repo = repository(dir.path());
+    let g = grant(&repo);
+    let data = tempfile::tempdir().unwrap();
+    let journal = Journal::open(dir.path(), data.path(), "m1").unwrap();
+    let mut broker = Broker::open(repo, journal, "m1", 3, Fake::replies(&["", "", "", ""])).unwrap();
+    broker.create_branch(Some(&g), "create").unwrap();
+    assert_eq!(broker.fast_forward(Some(&g), "delete", BASE, &"0".repeat(40)), Err(GitError::Ref));
+    assert_eq!(broker.executor().calls.len(), 1);
 }

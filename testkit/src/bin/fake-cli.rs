@@ -6,9 +6,15 @@ use std::io;
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let [mode, sandbox] = args.as_slice()
-        && mode == "--project-git"
+        && matches!(mode.as_str(), "--project-git" | "--project-git-delete" | "--project-git-race")
     {
-        match faber_testkit::screen::projects::probe(std::path::Path::new(sandbox)) {
+        let sandbox = std::path::Path::new(sandbox);
+        let result = match mode.as_str() {
+            "--project-git-delete" => faber_testkit::screen::projects::probe_deletion(sandbox),
+            "--project-git-race" => faber_testkit::screen::projects::probe_race(sandbox),
+            _ => faber_testkit::screen::projects::probe(sandbox),
+        };
+        match result {
             Ok(()) => std::process::exit(0),
             Err(error) => {
                 eprintln!("project git: {error}");

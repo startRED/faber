@@ -3,10 +3,10 @@ use super::{Result, Scenario, ensure, eventually};
 use crate::app::Ctx;
 use crate::contain::Owned;
 use crate::sandbox::{Launch, child_env};
-use faber_engine::project::git::{Broker, Executor, GitError, Invocation, Output, Process, enroll};
+use faber_engine::project::git::{Broker, Executor, GitError, Invocation, Output, Process, Repository, enroll};
 use faber_engine::project::lease::{LeaseError, hash};
 use faber_engine::project::store::Journal;
-use faber_engine::project::wire::{FileOp, WriteOp};
+use faber_engine::project::wire::{DeleteOp, FileOp, WriteOp};
 use faber_engine::project::{GitMode, Grant, Lease};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -14,9 +14,22 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 pub fn scenarios() -> Vec<Scenario> {
-    vec![Scenario { name: "projects git: detached work, CAS, hooks, filters, junctions and dirty owner preservation", run: local_git }]
+    vec![
+        Scenario { name: "projects git: detached work, CAS, hooks, filters, junctions and dirty owner preservation", run: local_git },
+        Scenario { name: "projects git review 2 and 6: deletions commit with real git", run: deletion },
+        Scenario { name: "projects git review 5: edits during staging and commit never receive acceptance", run: race },
+    ]
 }
 fn local_git(ctx: &mut Ctx) -> Result {
+    run_probe(ctx, "--project-git")
+}
+fn deletion(ctx: &mut Ctx) -> Result {
+    run_probe(ctx, "--project-git-delete")
+}
+fn race(ctx: &mut Ctx) -> Result {
+    run_probe(ctx, "--project-git-race")
+}
+fn run_probe(ctx: &mut Ctx, mode: &str) -> Result {
     let git = faber_engine::cli::find_cli("git").ok_or("git is not installed")?;
     ensure(git.prefix.is_empty(), || "git must be a native executable".into())?;
     let parent: Vec<_> = std::env::vars().collect();
@@ -30,7 +43,7 @@ fn local_git(ctx: &mut Ctx) -> Result {
     env.remove("GITHUB_ACTIONS");
     std::fs::copy(ctx.paths.fixtures.join("projects/git-junction.ps1"), ctx.sb.sandbox.join("git-junction.ps1"))
         .map_err(|e| e.to_string())?;
-    let args = vec!["--project-git".into(), ctx.sb.sandbox.to_string_lossy().into()];
+    let args = vec![mode.into(), ctx.sb.sandbox.to_string_lossy().into()];
     let (owned, _, stderr) =
         Owned::start(&ctx.paths.fake_cli, &args, &env, &ctx.sb.sandbox, &ctx.paths.fake_cli).map_err(|e| e.to_string())?;
     let (sender, receiver) = std::sync::mpsc::channel();
@@ -46,11 +59,19 @@ fn local_git(ctx: &mut Ctx) -> Result {
     waited?;
     let errors = receiver.recv_timeout(Duration::from_secs(10)).map_err(|_| "git probe diagnostic pipe did not close")?;
     ensure(ctx.sb.sandbox.join("project-git.ok").is_file(), || errors)?;
+    if let Ok(evidence) = std::fs::read_to_string(ctx.sb.sandbox.join("deletion-result.json")) {
+        ctx.notes.push(evidence);
+    }
     ctx.notes.push("temporary repos only; no remote; owner index, ref and dirty files unchanged".into());
     Ok(())
 }
 
 fn git(program: &str, root: &Path, args: &[&str]) -> Result<String> {
+    let output = git_output(program, root, args)?;
+    ensure(output.status.success(), || format!("fixture git {args:?}: {}", String::from_utf8_lossy(&output.stderr)))?;
+    Ok(String::from_utf8_lossy(&output.stdout).trim().into())
+}
+fn git_output(program: &str, root: &Path, args: &[&str]) -> Result<std::process::Output> {
     let mut command = Command::new(program);
     command
         .current_dir(root)
@@ -88,9 +109,7 @@ fn git(program: &str, root: &Path, args: &[&str]) -> Result<String> {
         use std::os::windows::process::CommandExt;
         command.creation_flags(crate::contain::NO_WINDOW);
     }
-    let output = command.output().map_err(|e| e.to_string())?;
-    ensure(output.status.success(), || format!("fixture git {args:?}: {}", String::from_utf8_lossy(&output.stderr)))?;
-    Ok(String::from_utf8_lossy(&output.stdout).trim().into())
+    command.output().map_err(|e| e.to_string())
 }
 fn check<T>(result: std::result::Result<T, GitError>) -> Result<T> {
     result.map_err(|e| e.key().into())
@@ -155,7 +174,7 @@ pub fn probe(sandbox: &Path) -> Result {
     grant.author = enrolled.author.clone();
     let request = Lease::new(&enrolled.identity.common_dir, "m1", "writer", 1, vec!["src".into()], &base, &"a".repeat(64), 0);
     let records = sandbox.join("records");
-    let journal = Journal::open(&records, &records, "m1").map_err(|e| e.key())?;
+    let journal = Journal::open(&repo, &records, "m1").map_err(|e| e.key())?;
     let mut broker = check(Broker::open(enrolled.clone(), journal, "m1", 3, process))?;
     check(broker.create_branch(Some(&grant), "branch"))?;
     let lease = broker.leases().acquire(request).map_err(|e| e.key())?;
@@ -233,5 +252,107 @@ pub fn probe(sandbox: &Path) -> Result {
         ensure(std::fs::read_to_string(repo.join(name)).map_err(|e| e.to_string())? == bytes, || format!("owner file {name} changed"))?;
     }
     drop(broker);
+    std::fs::write(sandbox.join("project-git.ok"), "ok").map_err(|e| e.to_string())
+}
+
+fn review_repository(sandbox: &Path) -> Result<(PathBuf, Repository, String)> {
+    let repo = sandbox.join("repo");
+    std::fs::create_dir_all(repo.join("src")).map_err(|e| e.to_string())?;
+    let program = faber_engine::cli::find_cli("git").ok_or("missing git")?.command;
+    git(&program, &repo, &["init", "--initial-branch=owner"])?;
+    git(&program, &repo, &["config", "user.name", "Fixture"])?;
+    git(&program, &repo, &["config", "user.email", "fixture@example.invalid"])?;
+    std::fs::write(repo.join("src/a.rs"), "base").map_err(|e| e.to_string())?;
+    std::fs::write(repo.join("src/delete.rs"), "delete me").map_err(|e| e.to_string())?;
+    git(&program, &repo, &["add", "--", "src/a.rs", "src/delete.rs"])?;
+    git(&program, &repo, &["commit", "--no-gpg-sign", "-m", "fixture base"])?;
+    let repository = check(enroll(&mut check(Process::find())?, &repo, "HEAD"))?;
+    Ok((repo, repository, program))
+}
+fn review_writer<E: Executor>(sandbox: &Path, repository: Repository, executor: E) -> Result<(Broker<E>, Grant, Lease, PathBuf)> {
+    let mut grant = Grant::new(&repository.identity.common_dir, GitMode::Seguro, 3, 1);
+    grant.author = repository.author.clone();
+    let lease = Lease::new(&repository.identity.common_dir, "m1", "writer", 1, vec!["src".into()], &repository.base, &"a".repeat(64), 0);
+    let records = sandbox.join("records");
+    let journal = Journal::open(Path::new(&repository.identity.root), &records, "m1").map_err(|e| e.key())?;
+    let mut broker = check(Broker::open(repository, journal, "m1", 3, executor))?;
+    let lease = broker.leases().acquire(lease).map_err(|e| e.key())?;
+    let root = check(broker.worktree(Some(&grant), &lease, "worktree"))?;
+    Ok((broker, grant, lease, root))
+}
+pub fn probe_deletion(sandbox: &Path) -> Result {
+    let (repo, repository, program) = review_repository(sandbox)?;
+    let raw_root = sandbox.join("raw-deletion");
+    git(&program, &repo, &["worktree", "add", "--detach", "--", raw_root.to_str().ok_or("bad path")?, &repository.base])?;
+    std::fs::remove_file(raw_root.join("src/delete.rs")).map_err(|e| e.to_string())?;
+    git(&program, &raw_root, &["add", "--", "src/delete.rs"])?;
+    let raw = git_output(&program, &raw_root, &["commit", "--only", "--no-gpg-sign", "-m", "raw deletion", "--", "src/delete.rs"])?;
+    let evidence = serde_json::json!({"git": git(&program, &repo, &["--version"])?, "exit": raw.status.code(), "stderr": String::from_utf8_lossy(&raw.stderr)}).to_string();
+    std::fs::write(sandbox.join("deletion-result.json"), &evidence).map_err(|e| e.to_string())?;
+    let (mut broker, grant, lease, root) = review_writer(sandbox, repository, Traced(check(Process::find())?))?;
+    broker
+        .leases()
+        .patch(&lease, Some(&grant), 3, &FileOp::Delete(DeleteOp { path: "src/delete.rs".into(), expect: hash(b"delete me") }))
+        .map_err(|e| e.key())?;
+    let commit = broker
+        .commit(Some(&grant), &lease, "delete", "fix: delete fixture file", &["src/delete.rs".into()])
+        .map_err(|e| format!("broker deletion: {}; real git: {evidence}", e.key()))?;
+    ensure(!git(&program, &root, &["ls-tree", "--name-only", &commit, "--", "src/delete.rs"])?.contains("src/delete.rs"), || {
+        "deleted file was committed".into()
+    })?;
+    std::fs::write(sandbox.join("project-git.ok"), "ok").map_err(|e| e.to_string())
+}
+struct EditDuringGit {
+    inner: Process,
+    during: &'static str,
+}
+impl Executor for EditDuringGit {
+    fn execute(&mut self, call: &Invocation) -> std::result::Result<Output, GitError> {
+        let editing = call.args.iter().any(|arg| arg == if self.during == "index" { "add" } else { self.during });
+        if editing && self.during == "commit" {
+            std::fs::write(call.cwd.join("src/a.rs"), "unreviewed").map_err(|_| GitError::Process)?;
+        }
+        let out = self.inner.execute(call)?;
+        if editing && self.during == "index" {
+            std::fs::write(call.cwd.join("src/a.rs"), "unreviewed").map_err(|_| GitError::Process)?;
+            self.inner.execute(call)?;
+        }
+        if editing {
+            std::fs::write(
+                call.cwd.join("src/a.rs"),
+                if self.during == "commit" || self.during == "index" { "approved" } else { "unreviewed" },
+            )
+            .map_err(|_| GitError::Process)?;
+        }
+        Ok(out)
+    }
+}
+pub fn probe_race(sandbox: &Path) -> Result {
+    let mut failures = vec![];
+    for during in ["add", "index", "commit"] {
+        let area = sandbox.join(during);
+        let (_, repository, _) = review_repository(&area)?;
+        let (mut broker, grant, lease, _) = review_writer(&area, repository, EditDuringGit { inner: check(Process::find())?, during })?;
+        broker
+            .leases()
+            .patch(
+                &lease,
+                Some(&grant),
+                3,
+                &FileOp::Write(WriteOp { path: "src/a.rs".into(), expect: Some(hash(b"base")), content: "approved".into() }),
+            )
+            .map_err(|e| e.key())?;
+        let result = broker.commit(Some(&grant), &lease, "race", "fix: approved fixture", &["src/a.rs".into()]);
+        if result != Err(GitError::Lease(LeaseError::Quarantined)) {
+            failures.push(format!("edit during {during} was accepted: {result:?}"));
+        }
+        if during == "commit" {
+            let pending = broker.journal().pending().map_err(|e| e.key())?;
+            ensure(pending.len() == 1 && pending[0].id == "race" && pending[0].expected.contains_key("tree"), || {
+                "unverified commit lost its pinned pending intent".into()
+            })?;
+        }
+    }
+    ensure(failures.is_empty(), || failures.join("; "))?;
     std::fs::write(sandbox.join("project-git.ok"), "ok").map_err(|e| e.to_string())
 }

@@ -5,7 +5,7 @@
 //! Every write is an atomic replacement that returns its fault, and every read tells a missing record from a damaged or
 //! newer one. Nothing here falls back to empty data: a mission that cannot be read or saved stops taking effects.
 
-use super::{Artifact, Brief, Contract, Decision, Intent, Mission, Plan, Receipt, Record, Runtime, SCHEMA, valid_id};
+use super::{Artifact, Brief, Contract, Decision, Intent, Mission, Outcome, Plan, Receipt, Record, Runtime, SCHEMA, valid_id};
 use crate::store::{Disk, Fault, RealDisk, read_checked, replace};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -228,9 +228,14 @@ impl Journal {
         self.put(&path, &entry)
     }
 
-    /// Intents with no receipt, oldest first: effects recovery must reconcile before anything resumes.
+    /// Intents with no receipt or an uncertain outcome: recovery must reconcile before anything resumes.
     pub fn pending(&self) -> Result<Vec<Intent>, JournalError> {
-        let mut open: Vec<Intent> = self.list::<Entry>("receipts")?.into_iter().filter(|e| e.receipt.is_none()).map(|e| e.intent).collect();
+        let mut open: Vec<Intent> = self
+            .list::<Entry>("receipts")?
+            .into_iter()
+            .filter(|e| e.receipt.as_ref().is_none_or(|r| r.outcome == Outcome::Unknown))
+            .map(|e| e.intent)
+            .collect();
         open.sort_by(|a, b| (a.at, &a.id).cmp(&(b.at, &b.id)));
         Ok(open)
     }

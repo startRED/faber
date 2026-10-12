@@ -114,7 +114,7 @@ pub fn real_path(path: &Path) -> Result<PathBuf, LeaseError> {
     Ok(path.to_path_buf())
 }
 
-fn normalized(raw: &str) -> Result<String, LeaseError> {
+pub(crate) fn normalized(raw: &str) -> Result<String, LeaseError> {
     let clean = clean_path(raw).ok_or(LeaseError::Path)?;
     for part in clean.split('/').filter(|p| !p.is_empty()) {
         let lower = part.to_lowercase();
@@ -218,7 +218,7 @@ impl Leases {
         }
         let private = real_path(journal.private())?.canonicalize().map_err(|_| Fault::Read)?;
         let records = real_path(journal.records())?.canonicalize().map_err(|_| Fault::Read)?;
-        if private.starts_with(&root) || records.starts_with(&root) {
+        if private.starts_with(&root) || (records.starts_with(&root) && records != root.join(".faber/missions").join(mission)) {
             return Err(LeaseError::Path);
         }
         let lock_path = real_path(&common.join("faber-project.lock"))?;
@@ -260,6 +260,23 @@ impl Leases {
                 scoped_path(&root, path)?;
             }
         }
+        if records.starts_with(&root) {
+            let info = real_path(&common.join("info"))?;
+            fs::create_dir_all(&info).map_err(|e| Fault::of_write(&e))?;
+            let exclude = real_path(&info.join("exclude"))?;
+            let contents = match fs::read(&exclude) {
+                Ok(bytes) => bytes,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => vec![],
+                Err(_) => return Err(Fault::Read.into()),
+            };
+            if !contents.split(|b| *b == b'\n').any(|line| line.strip_suffix(b"\r").unwrap_or(line) == b"/.faber/") {
+                // Append only: concurrent edits to the owner's existing patterns must not be overwritten.
+                let addition =
+                    if contents.is_empty() || contents.ends_with(b"\n") { b"/.faber/\n".as_slice() } else { b"\n/.faber/\n".as_slice() };
+                let mut file = OpenOptions::new().create(true).append(true).open(exclude).map_err(|e| Fault::of_write(&e))?;
+                file.write_all(addition).and_then(|()| file.sync_all()).map_err(|e| Fault::of_write(&e))?;
+            }
+        }
         Ok(Self { repo, mission: mission.into(), journal, runtime, lock, blocked: false })
     }
 
@@ -290,6 +307,13 @@ impl Leases {
         Ok(())
     }
     pub(crate) fn index(&self, lease: &Lease) -> Result<usize, LeaseError> {
+        let index = self.matching(lease)?;
+        if self.runtime.leases[index].state != LeaseState::Held {
+            return Err(LeaseError::Stale);
+        }
+        Ok(index)
+    }
+    fn matching(&self, lease: &Lease) -> Result<usize, LeaseError> {
         if self.blocked {
             return Err(LeaseError::Quarantined);
         }
@@ -305,7 +329,6 @@ impl Leases {
                     && l.base == lease.base
                     && l.contract_digest == lease.contract_digest
                     && l.paths == lease.paths
-                    && l.state == LeaseState::Held
             })
             .ok_or(LeaseError::Stale)
     }
@@ -377,6 +400,25 @@ impl Leases {
         }
         let mut runtime = self.runtime.clone();
         runtime.leases[index].state = LeaseState::Released;
+        self.persist(runtime)
+    }
+    /// Explicit recovery of a failed attempt. Its files and quarantine remain; no source authority is restored.
+    pub fn archive(&mut self, lease: &Lease, proof: Termination) -> Result<(), LeaseError> {
+        let index = self.matching(lease)?;
+        let held = &self.runtime.leases[index];
+        if held.state != LeaseState::Quarantined {
+            return Err(LeaseError::Stale);
+        }
+        if !proof.tree_dead || !proof.cost_settled || proof.process != held.process || !self.journal.pending()?.is_empty() {
+            return Err(LeaseError::Live);
+        }
+        let mut runtime = self.runtime.clone();
+        runtime.leases[index].extra.insert(
+            "retirement".into(),
+            serde_json::json!({
+                "generation": lease.generation, "process": proof.process, "treeDead": true, "costSettled": true
+            }),
+        );
         self.persist(runtime)
     }
     pub fn bind(&mut self, lease: &Lease, worktree: &Path) -> Result<(), LeaseError> {
@@ -549,7 +591,20 @@ impl Leases {
     }
     /// Explicit mission completion, after reconciliation. No worktree, artifact, branch or lease record is deleted.
     pub fn finish(self) -> Result<(), LeaseError> {
-        if self.blocked || self.runtime.leases.iter().any(|l| l.state != LeaseState::Released) || !self.journal.pending()?.is_empty() {
+        if self.blocked
+            || self.runtime.leases.iter().any(|l| {
+                let retirement = l.extra.get("retirement");
+                l.state != LeaseState::Released
+                    && !(l.state == LeaseState::Quarantined
+                        && retirement.is_some_and(|r| {
+                            r["generation"].as_u64() == Some(l.generation)
+                                && r["process"] == serde_json::json!(l.process)
+                                && r["treeDead"] == true
+                                && r["costSettled"] == true
+                        }))
+            })
+            || !self.journal.pending()?.is_empty()
+        {
             return Err(LeaseError::Live);
         }
         self.lock.set_len(0).and_then(|()| self.lock.sync_all()).map_err(|e| Fault::of_write(&e))?;
