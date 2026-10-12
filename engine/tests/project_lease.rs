@@ -1,5 +1,5 @@
 //! Exclusive leases and file requests on temporary directories; never spawn git or a worker.
-use faber_engine::project::lease::{Closure, LeaseError, Leases, Termination, hash};
+use faber_engine::project::lease::{Closure, LeaseError, Leases, Termination, hash, real_path};
 use faber_engine::project::store::Journal;
 use faber_engine::project::wire::{DeleteOp, FileOp, RenameOp, WriteOp};
 use faber_engine::project::{DecidedBy, Decision, DecisionKind, GraphError, Intent, IntentKind, Outcome, Plan, Receipt, Task, TaskKind};
@@ -573,6 +573,15 @@ fn opus_l3_invalid_file_ancestors_are_refused_without_quarantine() {
     let write = FileOp::Write(WriteOp { path: "src/a.rs/b.rs".into(), expect: None, content: "invalid".into() });
     assert_eq!(leases.patch(&lease, Some(&s.grant()), 3, &write), Err(LeaseError::Path));
     assert_eq!(leases.read(&lease, "src/a.rs").unwrap().0, b"before");
+}
+
+#[test]
+fn path_validation_refuses_existing_file_ancestors_on_every_os() {
+    let dir = tempdir();
+    let file = dir.path().join("file");
+    fs::write(&file, "bytes").unwrap();
+    assert_eq!(real_path(&file.join("child")), Err(LeaseError::Path));
+    assert_eq!(real_path(&file), Ok(file), "a regular final file is still a valid path");
 }
 
 #[test]

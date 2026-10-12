@@ -140,7 +140,7 @@ pub fn real_path(path: &Path) -> Result<PathBuf, LeaseError> {
             continue;
         }
         match fs::symlink_metadata(&part) {
-            Ok(meta) if reparse(&meta) => return Err(LeaseError::Path),
+            Ok(meta) if reparse(&meta) || (part != path && !meta.is_dir()) => return Err(LeaseError::Path),
             Ok(_) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(_) => return Err(LeaseError::Store(Fault::Read)),
