@@ -142,7 +142,7 @@ pub fn windows() -> Result<Vec<(usize, u32, bool)>, String> {
         true
     })
     // A desktop with no window at all makes EnumWindows return FALSE with no error code: that is an empty list.
-    .or_else(|e| if e == co::ERROR::SUCCESS { Ok(()) } else { Err(format!("cannot list the windows: {e}")) })?;
+    .or_else(|e| if e == co::ERROR::SUCCESS || format!("{e}").contains("[203]") { Ok(()) } else { Err(format!("cannot list the windows: {e}")) })?;
     Ok(found)
 }
 
