@@ -1,6 +1,6 @@
 # Self-development MVP implementation plan
 
-Date: 2026-10-12. Status: proposed; implementation has not started under this request.
+Date: 2026-10-12. Status: shortened plan; Task 1 is done, Tasks 2 and 4 are in review.
 Spec: [Self-development MVP](../specs/2026-10-12-self-development-mvp-design.md).
 Goal: Faber completes a proven local change to Faber and promotes its next development build by 2026-10-20 to 22.
 R96 moves this slice ahead of Full Chat. The rest of Chat, catalog, powers, Livre, and public release automation wait.
@@ -14,7 +14,8 @@ Use existing Rust/tokio/serde, CLI drivers, Solid components, and testkit. No ge
 All code, comments, documents, and commits are English. All screen text is in the existing five locale files.
 Hand-author locale entries under AGENTS.md; do not use machine translation.
 Use only original code. Official CLIs run unmodified. Never inspect provider credential stores.
-No visible windows/consoles, production checkout mutation, public release, or installed-release update during verification.
+No visible windows/consoles, production checkout mutation, public release, or installed-release update during
+verification.
 All real git/process integration runs belong to audited hidden scenarios, never unit tests.
 Real-CLI capability/calibration/canary runs are separate explicit probes within a granted cost/daily allowance.
 They are not `cargo t`, do not run automatically in CI, and do not gain paid-credit permission from this plan.
@@ -53,31 +54,31 @@ Cross-vendor review gates every accepted source change; the writer never reviews
 
 ## Dependencies and parallel areas (R91)
 
+Nine tasks replace fifteen. Six need implementation; two still need review. Keep the original IDs for branch and review
+references.
+Task 1 is done. Task 2 is in review on `selfdev-t2`; Task 4 is in review on `selfdev-t4`.
+Their scope below stays unchanged. An in-review dependency is not done.
+Task 5 absorbs Tasks 6, 7 and 8. Task 11 absorbs Task 12. Tasks 14 and 15 move to Later.
+Reuse accepted work from `phase-1-base` and `notify-sound`; do not rebuild it.
+
 | Task | Required tasks | Owned area | May be developed in parallel with |
 |---|---|---|---|
-| 1. Frozen contracts and journal | None | Project schemas, persistence, documentation | None until the contract is accepted |
-| 2. Driver policy and lifecycle gate | 1 | Drivers, events, process lifecycle | 4 after shared schema freeze |
-| 3. Live cost and daily grants | 2 | Metering, usage/budget/ledger, admission | 4; UI mock work after contract freeze |
-| 4. Git broker and worktree leases | 1 | New project git/lease modules | 2/3 |
-| 5. Lead and task dispatch | 2, 3, 4 | New mission runtime and engine hooks | 9 on contract mocks; 11 pure updater state |
-| 6. Worker packet execution | 5 | Worker orchestration and artifacts | 9; 11 pure updater state |
-| 7. Proof runner and merge queue | 6 | Project proof/integration modules | 9; 11 pure updater state |
-| 8. Stop and recovery integration | 7 | Runtime recovery/shared engine hooks | 10 once shared UI schema is frozen |
-| 9. Projects screen | 1; 8 before final integration | UI board/API/locales, shell command adapter | 3–8 against accepted mocks; never edit their engine areas |
-| 10. R92 notifications | 9 | Tray policy/sound, Settings | 11 after shell-main changes have one owner |
-| 11. Local slots and rollback helper | 1; 8/9 before integration | Local-update state/helper, startup adapter | 5–7 pure module work; 10 disjoint files only |
-| 12. Headless next-build canary | 7, 8, 11 | Canary/run entry, update integration | None for shared startup wiring |
-| 13. Real Seguro acceptance | 3, 8, 9, 10, 12 | Acceptance fixtures/report and targeted fixes | Read-only review/research on independent nodes |
-| 14. Equilibrado | 4, 7, 13 | Remote broker and enrollment extension | 15 if paths/contracts are disjoint |
-| 15. Qualified parallel writers | 3, 4, 6, 7, 13 | Writer admission/qualification | 14 under explicit area leases |
+| 1. Frozen contracts and journal (done) | None | Project schemas, persistence, documentation | Contract is frozen |
+| 2. Driver policy and lifecycle gate (in review) | 1 | Drivers, events, process lifecycle | 4 after shared schema freeze |
+| 3. Mission budget hook | 1; accepted Auto quota pacing from phase-1-base | Project admission/settlement adapter | 2/4; 9 on contract mocks |
+| 4. Git broker and worktree leases (in review) | 1 | Project git/lease modules | 2/3 |
+| 5. Mission runner, queue and recovery | 2, 3, 4 | Runtime, workers, proof/integration, recovery | 9 on contract mocks; 11 pure update state |
+| 9. Projects screen | 1; 5 before final integration | UI board/API/locales, shell command adapter | 3/5 on mocks; 11 disjoint pure state |
+| 10. Mission notification wiring | 1; accepted notify-sound 158566b; 5/9 before integration | Mission needs-you adapter | 11 with one owner for shell wiring |
+| 11. Self-update and canary | 1; 5/9 before integration | Existing updater adapter, rollback, canary | 5/9 pure state; 10 disjoint files |
+| 13. Real Seguro acceptance | 3, 5, 9, 10, 11 | Acceptance report and targeted fixes | Read-only work on independent nodes |
 
-Task numbers define the recommended landing order. The dependency column defines when work can start.
-Task 9's first dependency allows tests, UI mock work, and component implementation before engine completion.
-Task 11's first dependency allows pure state-machine/helper work; startup wiring waits for 8/9.
-Ready nodes start immediately within live grants, daily pace, RAM, and review capacity. Do not wait for a whole wave.
-Only disjoint writer areas may overlap; shared `engine.rs`, `main.rs`, API, locale registries, and manifests have one owner.
-Workers without source leases may research, review, and propose tests while a writer implements.
-Tasks 14/15 are included optional extensions after the first usable Seguro gate, not prerequisites for the date.
+Task numbers suggest landing order. Start any task whose dependencies are done (R91).
+Tasks 9/10 can use accepted contract mocks now. Task 11 can develop pure update state now.
+Their final integration waits for the listed runtime dependencies.
+Ready nodes start within live grants, daily pace, RAM, and review capacity. Never wait for a whole wave.
+Only disjoint writer areas may overlap. Shared engine, shell, API, locale registries, and manifests have one owner.
+MVP automated missions use read-only fan-out and one source writer. Parallel writer qualification is Later.
 
 ## Task 1 — Freeze the minimum contracts and durable journal
 
@@ -160,28 +161,24 @@ reproduced with a fake child and fixed through forwarding-future ownership. Warm
 - [ ] If restrictions or spend bounds cannot be proved, record the blocker and stop automated-role rollout.
 - [ ] Run GA, cross-vendor review, commit `feat: constrain project CLI execution`.
 
-## Task 3 — Add priced live grants and the hard daily gate
+## Task 3 — Connect mission grants to existing Auto pacing
 
-Files: `engine/src/usage.rs`, `engine/src/budget.rs`, `engine/src/ledger.rs`, `engine/src/signals.rs`,
-`engine/src/engine/auto.rs`, `engine/src/engine/pulse.rs`;
-new `engine/src/project/budget.rs`, `engine/src/project/prices.json`, `engine/tests/project_budget.rs`;
-`engine/tests/turn_usage.rs`, `engine/tests/pacing.rs`, new usage/daily fixtures in `tests/fixtures/projects/`.
+Files: new `engine/src/project/budget.rs`, `engine/tests/project_budget.rs`;
+existing Auto/usage/ledger hooks only where mission attribution needs them.
+Reuse `phase-1-base` budget/ledger/usage, the daily 1/7 line, and API-equivalent accounting.
+Do not add another price table, quota meter, daily clock, or settlement ledger.
 
-Tests first: uncached/read/write/output priced once; Claude cumulative/nested calls; Codex resume/tool totals;
-late/missing counters reserve exposure; aborted turn does not reset spend; duplicate updates settle once;
-simultaneous grants do not overbook; lead/reviewer/pulse/canary cost counts; cap shrinks under outside use;
-day/reset/clock anomalies and stale billing fail closed; restart never grants a second daily allowance;
-paid fallback/unknown price denied; safe stop occurs before all admitted exposure can exhaust the cap.
-Focused proof: `cargo test -p faber-engine --test project_budget` and `cargo test -p faber-engine --test turn_usage`.
+Tests first: concurrent mission reservations cannot overbook the shared allowance;
+lead/worker/reviewer/repair/canary usage settles once; late/unknown cost stays reserved across stop/restart;
+outside use or a smaller cap closes admission; missing rates/calibration/billing never grants free work.
+Focused proof: `cargo test -p faber-engine --test project_budget` plus existing pacing/usage regressions.
 
-- [ ] Extend existing settlement; do not rebuild quota-plan Task 1.
-- [ ] Add dated published-rate accounting and complete/partial cost events with stable turn/invocation identities.
-- [ ] Keep account points separate; implement reset-aligned daily room and conservative calibration evidence.
-- [ ] Allocate daily/mission/worker grants and review/canary reserves; make estimates advisory only.
-- [ ] Wrap all dispatch/continuations and live updates; unknown inflight cost stays reserved after stop/restart.
-- [ ] Apply the same global allocation to overlapping Chat and Projects usage; no independent free budget.
-- [ ] With missing calibration use a bounded already-granted read-only setup task, or park; never an uncapped probe.
-- [ ] Run G, cross-vendor review, commit `feat: enforce live project spending grants`.
+- [ ] Add only mission/worker attribution, live caps, and review/canary reservations to the existing gate.
+- [ ] Check every dispatch and continuation; settle stable invocation IDs through the existing usage path.
+- [ ] Share the allocation with Chat. Estimates remain advisory; unknown exposure remains reserved.
+- [ ] Reuse reset/staleness/paid-fallback rules. Missing evidence parks work or permits only bounded already-granted
+  setup.
+- [ ] Run G, cross-vendor review, commit `feat: connect mission spending grants`.
 
 ## Task 4 — Add the shell-free git broker and exclusive leases
 
@@ -204,74 +201,45 @@ Focused proof: `cargo test -p faber-engine --test project_git` and `cargo test -
 - [ ] Preserve worktrees/artifacts on conflict, dirty state, unknown termination, or failed cleanup.
 - [ ] Run GA, cross-vendor review, commit `feat: isolate local project git work`.
 
-## Task 5 — Add the lead and event-driven ready dispatch
+## Task 5 — Run missions through briefs, proofs, queue and recovery
 
-Files: new `engine/src/project/lead.rs`, `engine/src/project/run.rs`, `engine/tests/project_run.rs`;
-`engine/src/engine.rs` and `engine/src/engine/auto.rs` hooks; lead JSON fixtures in `tests/fixtures/projects/`.
+This is the first task that spawns automated roles. It includes former Tasks 5–8.
+Files: new `engine/src/project/{lead,run,worker,proof,queue}.rs`;
+`engine/tests/project_{run,worker,queue,recovery}.rs`; narrow engine/Auto hooks;
+existing project store/budget; `testkit/src/{gate,contain,plan}.rs`, `screen/projects.rs`;
+lead/worker/reviewer/recovery fixtures in `tests/fixtures/projects/`.
 
-Tests first: malformed/cyclic lead plan denied; contract-ready engine/UI/test branches dispatch without wave waits;
-critical path prioritized under one available slot; each of the four brakes explains waiting;
-owner decision parks only descendants; mode switch never auto-approves money/legal actions;
-contract revision invalidates exact dependents; failure leaves independent ready nodes running.
-Focused proof: `cargo test -p faber-engine --test project_run`.
+Tests first: malformed/cyclic plans, stale contracts/packets and oversized requests fail closed;
+all eligible ready nodes start without waves; four resource brakes explain waits; decisions park only dependents;
+leases/path/hash checks reject escapes; workers cannot spawn peers, mutate tests read-only, or enlarge grants;
+exact composed-tree proof precedes fresh other-vendor review; repairs repeat both; missing review blocks landing;
+stale head/tree/grant refuses CAS; conflicts preserve artifacts; clean candidates select changed tests;
+stop/crash at every intent/receipt boundary preserves work, unknown spend and live leases without duplicate effects.
+Focused proof: the four project test targets above, then audited hidden project scenarios.
 
-- [ ] Give the lead a fresh bounded session and short repo/rule map, then validate its structured plan.
-- [ ] Keep normal/autonomous and git modes distinct; persist authored decisions and plan amendments.
-- [ ] Recompute readiness after state/capacity changes; no polling fleet or arbitrary batch barriers.
-- [ ] Schedule using existing Auto through the stronger Projects admission gate.
-- [ ] Run G, cross-vendor review, commit `feat: dispatch ready project tasks`.
-
-## Task 6 — Execute short worker briefs and artifact handbacks
-
-Files: new `engine/src/project/worker.rs`, `engine/tests/project_worker.rs`;
-`engine/src/project/run.rs` narrow hooks; `tests/fixtures/projects/worker-*.jsonl`;
-`engine/tests/support/mod.rs` only under one fixture-owner lease.
-
-Tests first: one worktree per writer; readonly test proposal cannot mutate tests; broker path/hash/lease checks;
-worker cannot spawn peers or enlarge its grant; unrelated context is absent; related repair preserves failures;
-cap/interrupt returns artifact and unfinished checks; oversize/stale packet denied; retries cannot reset totals.
-Focused proof: `cargo test -p faber-engine --test project_worker`.
-
-- [ ] Dispatch a written brief with fixed contract, scope, source references, proof IDs and cost grant.
-- [ ] Implement bounded file-request/patch/proof/result envelopes between official CLI turns.
-- [ ] Keep transcripts and session IDs private; send the lead summary plus artifact references.
-- [ ] Start v0 with read-only fan-out and one source writer; reserve review capacity before writing.
-- [ ] Run G, cross-vendor review, commit `feat: run scoped project workers`.
-
-## Task 7 — Run contained proofs and the serial merge queue
-
-Files: new `engine/src/project/proof.rs`, `engine/src/project/queue.rs`, `engine/tests/project_queue.rs`;
-`testkit/src/gate.rs`, `contain.rs`, `screen/projects.rs`, `testkit/src/plan.rs` as needed;
-`engine/src/project/run.rs` adapter; queue/reviewer fixtures in `tests/fixtures/projects/`.
-
-Tests first: exact composed-tree commands before review; missing/failed proof prevents commit;
-other vendor mandatory; stale head/tree/grant invalidates landing; changed repair reruns both gates;
-conflicts preserve artifacts; clean candidate still selects changed tests; no double commit after uncertain receipt;
-candidate script cannot read credentials, write owner files, spawn visible UI, or bypass outbound containment.
-Focused proof: `cargo test -p faber-engine --test project_queue`, then project hidden scenarios.
-
-- [ ] Resolve Faber's complete proof set into executable/argv definitions; reject arbitrary command text.
-- [ ] Extend the existing audited runner with actual proof write/network containment, not only dead proxies.
-- [ ] Compose one candidate at current own-branch head; keep one heavy proof active.
-- [ ] Request fresh other-vendor review of exact tree and connected code; route repairs to one owner.
-- [ ] Engine commits only after proof/review; fast-forward/CAS own branch; retain intent and receipt.
-- [ ] Run GA, cross-vendor review, commit `feat: accept changes through a serial merge queue`.
-
-## Task 8 — Prove mission stop, crash, and effect recovery
-
-Files: `engine/src/project/run.rs`, `project/store.rs`, `project/queue.rs`, `project/budget.rs`;
-new `engine/tests/project_recovery.rs`; `engine/src/engine.rs` lifecycle hooks;
-`testkit/src/screen/projects.rs`, crash/ambiguous-effect fixtures.
-
-Tests first: pause during turn/proof/review/ref update; admission closes immediately; no late quota timer dispatch;
-crash before and after each intent/receipt; orphan descendants handled; PID reuse rejected;
-unknown cost/commit/push parked rather than repeated; no premature lease release; round-trip state stays compatible.
-Focused proof: `cargo test -p faber-engine --test project_recovery`.
-
-- [ ] Reconcile processes, common-dir locks, worktree state, grants, refs and receipts before resume.
-- [ ] Preserve useful artifacts, blocker reasons and next actions; scope failure does not cancel the mission.
-- [ ] Ensure failed durable writes stop effects and stop itself does not mark tasks done.
-- [ ] Run GA, cross-vendor review, commit `feat: recover interrupted project missions`.
+- [ ] First close Task 2's unproven containment, owned-tree termination and invocation-exposure proofs. Test
+  native/MCP/hook/subagent/metadata escapes, PID reuse, shared servers, outbound/write denial and hidden candidate
+  scripts. Record bounded official-CLI capability/calibration evidence. No automated role starts until these pass;
+  unsafe controls block rollout.
+- [ ] Give the lead a fresh bounded context and validate its plan. Persist authored decisions and amendments; keep
+  autonomous mode separate from git mode. Defaults never approve money/legal effects.
+- [ ] Recompute readiness on completion, grant, decision or lease changes. Use existing Auto with Projects admission,
+  critical-path priority and aging; no polling fleet or wave barrier.
+- [ ] Send short briefs with contract, scope, base, references, proof IDs, grant and stop condition. Use bounded
+  read/patch/proof/result envelopes; keep transcripts/session IDs private and return summary plus artifact references.
+- [ ] Start read-only fan-out and one source writer, each writer in its leased worktree. Reserve reviewer capacity
+  first; keep retry/repair/diagnostic totals within the same caps.
+- [ ] Resolve named proofs to executable/argv. Use actual audited write/network containment; candidate scripts cannot
+  access credentials, owner files or the visible desktop. No implicit installs.
+- [ ] Compose at the current own-branch head. Run one heavy proof at a time, then fresh other-vendor review of that
+  exact tree and connected code. One repair owner repeats proof/review after changes.
+- [ ] Commit only proven accepted paths, then CAS/fast-forward the own branch. Persist intent and receipt; stale heads
+  recompose. Never substitute writer claims for proof.
+- [ ] Stop closes admission and quota timers, checkpoints and interrupts, then kills only owned descendants after grace.
+  Cancel promotion; release no lease/reserve before termination and settlement are known.
+- [ ] Reconcile processes, locks, worktrees, refs, grants and receipts before resume. Park uncertain effects instead of
+  replaying; durable-write failures halt effects. Unfinished work never becomes done; independent branches continue.
+- [ ] Run GA, cross-vendor review, commit `feat: run recoverable project missions`.
 
 ## Task 9 — Add the minimal Projects screen and fixed shell commands
 
@@ -291,60 +259,62 @@ Focused proof: `cargo t --suite ui --filter projects` and `cargo t --suite scree
 - [ ] Add typed commands for enrollment/grant, mission start/state/mode, stop/resume and decision answer.
 - [ ] Replace unsafe direct project sends for MVP missions; workers never use the old owner-checkout cwd path.
 - [ ] Keep diff/proof/technical details behind a click and use lists at narrow widths.
-- [ ] Integrate against Tasks 5–8, run GA, cross-vendor review, commit `feat: show self-development projects`.
+- [ ] Integrate against Task 5, run GA, cross-vendor review, commit `feat: show self-development projects`.
 
-## Task 10 — Complete R92 needs-you notifications
+## Task 10 — Wire mission decisions into the R92 notifier
 
-Files: `src-tauri/src/tray.rs`, `tray/decide.rs`; new `src-tauri/src/notify.rs`, `src-tauri/tests/notify.rs`;
-`engine/src/model.rs`/settings merge under shared-schema owner; `ui/Settings.tsx`, `api.ts`, all five locales;
-first-party sound asset under `src-tauri/`; `tests/ui/settings.check.ts`, hidden notification scenarios.
+Reuse `notify-sound`, commit `158566b`. Its sound, foreground policy, delivery and Settings switches already exist.
+Files: mission event/needs-you adapter and existing `src-tauri/src/tray.rs` watcher;
+project fixtures and hidden notification scenarios; locales only for new mission decision text.
 
-Tests first: focused window emits nothing; fullscreen/game emits sound only; background emits both;
-independent switches; unknown foreground suppresses popup; restart deduplicates same decision;
-completion/automatic wait/promotion produces no notice; any notification never calls show/focus.
-Focused proof: `cargo test -p faber --test notify` and `cargo t --suite ui --filter settings`.
+Tests first: stable mission decision deduplicates across restart; focused means silence;
+fullscreen/game means sound only; background respects both switches; uncertain detection suppresses popup;
+completion, proof, commit, quota wait and promotion emit nothing; never show/focus a window.
+Focused proof: existing tray tests and hidden mission notification scenarios.
 
-- [ ] Extend existing needs-you watcher; keep stable decision identity across restarts.
-- [ ] Add original sound, foreground/fullscreen policy and fallible native delivery.
-- [ ] Keep notification strings in locales, including startup fallback text; remove reached hard-coded English fallback.
-- [ ] Run GA, cross-vendor review, commit `feat: notify only for project decisions`.
+- [ ] Map only concrete choices, missing permission and unresolved direction/money/legal blockers to existing needs-you
+  events.
+- [ ] Keep stable decision identity through reload and reuse existing locale/delivery paths. No new sound or Settings
+  work.
+- [ ] Run GA, cross-vendor review, commit `feat: wire mission decision notifications`.
 
-## Task 11 — Add local build slots and an independent rollback helper
+## Task 11 — Reuse the updater for local self-update and rollback
 
-Files: new `engine/src/project/update.rs`, `engine/tests/local_update.rs`;
-new `src-tauri/src/local_update.rs`, `src-tauri/src/bin/faber-local.rs`, `src-tauri/tests/local_update.rs`;
-`src-tauri/src/main.rs`, `src-tauri/Cargo.toml`; hidden update scenarios; minimal update status in Projects/locales.
+This includes former Task 12. Reuse `src-tauri/src/main.rs` `fetch_update`, `.github/workflows/release.yml`
+and `latest.json` for existing artifact/signature/platform handling. Do not rebuild the release updater.
+Reuse its safe staging/lifecycle pieces for the explicit development channel; public release publication stays out.
+The current Windows install-on-exit path launches an installer. It cannot serve a no-window local swap unchanged.
+Add only the local exact-tree/canary gate, headless transition and one previous-build rollback it lacks.
 
-Tests first: slot paths reject installed release/aliases; wrong tree/hash cannot promote; old/new state round trips;
-window exists or task/proof/git effect active blocks swap; open request cancels quiescence;
-crash before/after manifest replacement, missing 30-second acknowledgment, five-minute early failure;
-rollback once to last good, quarantine bad next, and no installer/window/console/public updater calls.
-Focused proof: `cargo test -p faber-engine --test local_update` and `cargo test -p faber --test local_update`.
+Files: small project update state and shell updater/startup adapter; first-party rollback helper only where independent
+restart is required;
+`engine/tests/local_update.rs`, `src-tauri/tests/local_update.rs`, `testkit/src/screen/local_update.rs`;
+`tests/fixtures/projects/canary/`; minimal Projects update status/locales.
 
-- [ ] Implement pure slot/health/transition state first in parallel with the coordinator after Task 1.
-- [ ] Add trusted local helper that can monitor and restart without the replaced app alive.
-- [ ] Use separate dev root/data, additive compatible state, retained last good and atomic manifest.
-- [ ] Add explicit development channel selection; release-mode local builds never enter the public installed updater path.
-- [ ] Wire headless startup and self-update trust after recovery/UI integration; never touch `E:\Apps\Faber`.
-- [ ] Run GA, cross-vendor review, commit `feat: stage and roll back local development builds`.
+Tests first: canonical paths/aliases reject installed release; only accepted exact trees/hashes promote;
+old/new data round trips; active window/turn/proof/git effect blocks swap; open request cancels quiescence;
+headless next fixes the tiny failing test through writer/proof/other-vendor/landing without recursive updates;
+crash at transition boundaries, absent 30-second health acknowledgment or five-minute probation failure restores
+previous once;
+rollback/resume never resets spend, loses data, loops restarts, opens UI/console, or invokes the public installer.
+Focused proof: both local_update targets and `cargo t --suite screen --filter local_update`.
 
-## Task 12 — Build next and run the headless self-development canary
-
-Files: `engine/src/project/update.rs`, `project/proof.rs`; `src-tauri/src/local_update.rs`, `main.rs`;
-new `testkit/src/screen/local_update.rs` and registration;
-new `tests/fixtures/projects/canary/` miniature repo source and fake transcripts;
-`engine/tests/local_update.rs`, `src-tauri/tests/local_update.rs`.
-
-Tests first: accepted tree only; proofs fail before build/canary promotion; exact executable/assets hash retained;
-next fixes tiny failing test through lead/writer/proof/other-vendor/landing; no recursive self-update;
-canary cost exhausts allowance into a saved wait; old data still usable after failed canary and rollback.
-Focused proof: local_update unit targets and `cargo t --suite screen --filter local_update`.
-
-- [ ] Queue only accepted self-changes; coalesce obsolete next builds, never skip latest-tree validation.
-- [ ] Build next without an installer into its inactive slot through contained named commands.
-- [ ] Run offline fake-CLI canary in GA; add separately budgeted real-CLI canary entry.
-- [ ] Require successful real canary before live local promotion; preserve ready build while quota/reviewer is unavailable.
-- [ ] Run GA, cross-vendor review, commit `feat: canary the next self-development build`.
+- [ ] Use separate development root/data and explicit channel; never infer it only from debug mode or touch
+  `E:\Apps\Faber`.
+- [ ] Stage the latest accepted exact tree as next through contained build commands. Coalesce obsolete builds; retain
+  hashes and proof receipts. Never overwrite a running executable.
+- [ ] Run the frozen tiny-repo fake-CLI canary in GA and a separately granted real-CLI canary before live promotion.
+  Reserve today's cost; unavailable quota/review leaves next ready and waiting.
+- [ ] Require self-update trust, green proof/canary and rollback-compatible saved data. Additive fields or versioned
+  sidecars only; no destructive migrations.
+- [ ] At no-window quiescence, flush state and settle processes. Record an atomic transition and retain current as the
+  one immutable previous build. Reuse updater pieces; no parallel download/signing/release pipeline.
+- [ ] An independent trusted helper restarts next headlessly, reconciles interrupted transitions, and monitors health
+  for 30 seconds plus five-minute probation. Early failure rolls back once and quarantines next; helper changes apply
+  only to future transitions.
+- [ ] Resume saved work only after health. A user open request during swap waits for health; only that request opens a
+  window.
+- [ ] Run GA, cross-vendor review, commit `feat: gate local self-update with canary and rollback`.
 
 ## Task 13 — Prove the usable Seguro loop and close the date gate
 
@@ -353,7 +323,8 @@ Files: project/recovery/update tests and fixtures touched by discovered defects;
 `docs/roadmap.md` status/legacy-gap rows only after evidence, not before.
 
 Tests first: scripted small Faber goal has a red acceptance check, local landing, persisted report and promoted build;
-forced early crash restores last good; post-rollback Resume consumes existing grants once; original checkout/stable install hashes unchanged.
+forced early crash restores last good; post-rollback Resume consumes existing grants once; original checkout/stable
+install hashes unchanged.
 Add the smallest failing regression for each real defect before fixing it. Do not expand product scope.
 Focused proof: project/recovery/local-update targets and their hidden scenarios; final GA.
 
@@ -364,52 +335,28 @@ Focused proof: project/recovery/local-update targets and their hidden scenarios;
 - [ ] Mark spec G1–G8 passed only with evidence; missing controls keep R96 incomplete.
 - [ ] Run GA, cross-vendor review, commit `test: prove the self-development MVP`.
 
-## Task 14 — Add Equilibrado push and draft PR under the project grant
+## Later — outside the MVP
 
-This task follows usable Seguro. It does not delay the local target date.
-Files: `engine/src/project/git.rs`, `project/queue.rs`, new `engine/tests/project_remote.rs`;
-enrollment UI/API/locales, scripted git/gh remote fixtures, hidden project scenarios.
-
-Tests first: Seguro never runs remote effects; explicit Equilibrado grant/remote/account match;
-secret flagged before push; non-forced own-ref only; diverged/protected ref blocks;
-unknown push/PR result reconciles without duplicate; grant revoked before dispatch blocks; no ready/merge/release action.
-Focused proof: `cargo test -p faber-engine --test project_remote`.
-
-- [ ] Add shell-free git/gh argv and idempotent intent/receipt reconciliation.
-- [ ] Push exact proven own branch and create/reuse one draft PR; preserve local success on remote failure.
-- [ ] Test against fake remote services, never the maintainer's real GitHub in automated tests.
-- [ ] Run GA, cross-vendor review, commit `feat: publish granted project drafts`.
-
-## Task 15 — Admit qualified parallel writers on disjoint areas
-
-This task follows Studio v0 and evidence collection. It does not delay the local target date.
-Files: `engine/src/project/run.rs`, `lease.rs`, `budget.rs`, `worker.rs`; new `engine/tests/project_parallel.rs`;
-parallel/stale-contract fixtures; Projects reason/measurement display; measured paired report in `docs/research/`.
-
-Tests first: qualified disjoint writers start immediately; unqualified classes stay serial;
-parent/case/rename/shared schema collision orders writers; contract revisions stop affected branches;
-review backlog/RAM/inflight exposure narrows width; high prediction error/rework makes only that class serial.
-Focused proof: `cargo test -p faber-engine --test project_parallel`.
-
-- [ ] Use the Studio measurement gate; require live cap/containment and low-error class evidence first.
-- [ ] Compare identical compact serial/concurrent backlog with fixed versions, acceptance and rates.
-- [ ] Include all attempts, coordination and review; insufficient confidence leaves qualification off.
-- [ ] Keep equality of item-sum cost as target; no +10% spending permission or fixed speed promise.
-- [ ] Run GA, cross-vendor review, commit `feat: admit proven parallel project writers`.
+- Former Task 14: Equilibrado. Exact granted own-ref non-forced push and one draft PR; secret scan, intent/receipt
+  reconciliation, no target merge or release. Seguro always denies remote effects.
+- Former Task 15: qualified parallel writers. Disjoint leases plus measured Studio containment/cost/RAM/review gates;
+  paired equal-acceptance evidence includes failed spend and coordination. Insufficient evidence keeps writers serial;
+  10% comparison tolerance grants no extra spending.
 
 ## Calendar and stop condition
 
 | Window | Intended result |
 |---|---|
-| 12 October | Spec and plan only; no implementation under the current request |
-| 13–14 October | Tasks 1–3 feasibility; start Task 4 once schema accepted; expose capability/calibration blockers early |
-| 15–17 October | Tasks 4–8; Task 9 on contract mocks and Task 11 pure state can already advance |
-| 18–19 October | Integrate Tasks 9–12, complete R92, recovery, compatibility and hidden rollback proofs |
-| 20–22 October | Task 13 bounded real goal/canary, rollback drill, necessary fixes; Faber can begin Full Chat work |
-| After usable gate | Task 14 remote drafts; Task 15 only as evidence qualifies writer classes |
+| 12 October | Task 1 done; Tasks 2/4 in review; shortened docs only under this request |
+| 13-14 October | Finish reviews; small Task 3 hook; Task 5 first closes containment/termination/exposure feasibility; Tasks 9/10 mocks and 11 pure state start when ready |
+| 15-17 October | Task 5 mission runner, queue and recovery; Task 9 board advances against contracts |
+| 18-19 October | Integrate Tasks 9/10/11; prove notification wiring, exact-tree canary, compatibility and hidden rollback |
+| 20-22 October | Task 13 real Seguro goal, canary, promotion, rollback/resume drill and necessary fixes; begin Full Chat only after acceptance |
+| After usable gate | Later list only; neither remote drafts nor parallel writer qualification is in the MVP |
 
-The critical chain is contracts, driver feasibility, live grants, workers, queue, recovery, update canary, real acceptance.
-Do not add the catalog, a generic tool server, a design overhaul, or release automation to that chain.
-If hard spending or role containment is unprovable, stop automated execution and retain read-only planning.
-If proofs or canary fail, retain current and the unfinished task. A date never overrides the gate.
-The final implementation report must distinguish source tests, hidden integration proof, real-CLI evidence, and checks not run.
+The critical chain is accepted drivers/git, mission grants, recoverable runner, self-update canary, real acceptance.
+R91 applies throughout. Dates never hold an eligible ready task behind a batch.
+Do not add catalog, a generic tool server, design overhaul, or public release automation.
+If spending or containment cannot be proved, stop automated execution and retain read-only planning.
+If proofs or canary fail, retain current and unfinished work. A date never overrides a gate.
+The final report distinguishes source tests, hidden integration proof, real-CLI evidence, and checks not run.
