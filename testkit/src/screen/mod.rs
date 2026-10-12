@@ -6,6 +6,8 @@ pub mod app;
 pub mod containment;
 pub mod first_run;
 pub mod permissions;
+#[cfg(windows)]
+pub mod projects;
 pub mod settings;
 pub mod setup;
 pub mod shell;
@@ -35,7 +37,7 @@ pub fn all() -> Vec<Scenario> {
         .chain(setup::scenarios())
         .chain(first_run::scenarios());
     #[cfg(windows)]
-    let all = all.chain(containment::scenarios());
+    let all = all.chain(containment::scenarios()).chain(projects::scenarios());
     all.collect()
 }
 

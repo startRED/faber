@@ -97,6 +97,8 @@ pub fn project_claude_args(launch: &ClaudeLaunch, role: crate::project::Role) ->
     // Unlike side questions, mission sessions may resume with the same fixed policy.
     args.retain(|a| a != "--no-session-persistence");
     for a in [
+        "--restricted",
+        "--safe-mode",
         "--permission-mode",
         "dontAsk",
         "--disable-slash-commands",
@@ -116,11 +118,8 @@ pub fn start_project_claude(
     role: crate::project::Role,
     on_event: EventSink,
 ) -> Result<Session, crate::project::policy::Blocker> {
-    project_claude_args(&opts.launch, role)?;
-    crate::project::policy::admit(crate::model::Vendor::Claude)?;
-    // Admission stays closed until this launch uses a verified owned-tree spawner and capability handshake.
-    let _ = on_event;
-    Err(crate::project::policy::Blocker::ProcessTree)
+    let args = project_claude_args(&opts.launch, role)?;
+    crate::project::policy::admit(crate::model::Vendor::Claude).map(|()| start_with_policy(opts, on_event, args, true))
 }
 
 fn block_text(content: &Value) -> String {
@@ -234,9 +233,14 @@ pub struct ClaudeOptions {
 }
 
 pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
+    let args = claude_args(&opts.launch);
+    start_with_policy(opts, on_event, args, false)
+}
+
+fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>, project: bool) -> Session {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     // The process starts right away, so a warmed-up session is already booting while the user types.
-    let started = (opts.spawn)(&opts.bin, &claude_args(&opts.launch), &opts.cwd);
+    let started = (opts.spawn)(&opts.bin, &args, &opts.cwd);
     tokio::spawn(async move {
         let mut p = match started {
             Ok(p) => p,
@@ -250,6 +254,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
         let mut closed = false;
         let mut control_id = 0u32;
         let mut watch = proc::TurnWatch::default();
+        let mut queued = vec![];
         loop {
             let deadline = watch.deadline();
             tokio::select! {
@@ -278,6 +283,13 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                     }
                     match serde_json::from_str::<Value>(&line) {
                         Ok(msg) => {
+                            if project {
+                                match crate::project::policy::reject_native(&mut *stdin, crate::model::Vendor::Claude, &msg).await {
+                                    Ok(true) => continue,
+                                    Err(_) => { proc::stop(&mut *stdin, &mut child).await; break; }
+                                    Ok(false) => {}
+                                }
+                            }
                             watch.activity();
                             if msg["type"] == "result" { watch.finish(); }
                             for event in parse_claude_message(&msg) {
@@ -291,13 +303,19 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                                 proc::stop(&mut *stdin, &mut child).await;
                                 break;
                             }
+                            if msg["type"] == "result" {
+                                for turn in std::mem::take(&mut queued) {
+                                    watch.begin();
+                                    let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
+                                }
+                            }
                         }
                         Err(_) => on_event(EngineEvent::Error { message: format!("Unexpected output from Claude Code: {}", line.chars().take(200).collect::<String>()), fatal: false }),
                     }
                 }
                 cmd = rx.recv(), if !closed => match cmd {
                     Some(SessionCommand::Send(turn)) => {
-                        if watch.stopping() { continue; }
+                        if watch.stopping() { queued.push(turn); continue; }
                         watch.begin();
                         let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
                     }

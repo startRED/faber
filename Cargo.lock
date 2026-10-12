@@ -1121,6 +1121,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "uuid",
+ "win32job",
  "winreg",
  "zip",
 ]
@@ -1131,11 +1132,13 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "ctrlc",
+ "faber-engine",
  "serde",
  "serde_json",
  "sha2",
  "sysinfo",
  "tempfile",
+ "tokio",
  "toml 0.8.2",
  "tungstenite",
  "win32job",

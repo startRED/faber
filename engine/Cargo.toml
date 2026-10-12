@@ -19,6 +19,7 @@ uuid = { version = "1", features = ["v4"] }
 zip = { version = "4", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
+win32job = "2"
 winreg = "0.56"
 
 [dev-dependencies]

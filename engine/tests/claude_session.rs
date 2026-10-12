@@ -11,6 +11,22 @@ fn launch(area: Area) -> ClaudeLaunch {
     ClaudeLaunch { area, model: None, effort: None, resume: None, user_hooks: false, instructions: None, user_name: None }
 }
 
+#[tokio::test]
+async fn review_7_claude_preserves_a_turn_sent_before_interrupt_acknowledgement() {
+    let (spawn, mut input, mut output) = support::controlled();
+    let session = start_claude(ClaudeOptions { bin: "fake".into(), cwd: ".".into(), launch: launch(Area::Chat), spawn }, Arc::new(|_| {}));
+    session.send(UserTurn::text("first"));
+    let first = support::read_message(&mut input).await;
+    assert_eq!(first["type"], "user");
+    session.interrupt();
+    assert_eq!(support::read_message(&mut input).await["request"]["subtype"], "interrupt");
+    session.send(UserTurn::text("second"));
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    support::emit(&mut output, serde_json::json!({"type":"result", "subtype":"interrupted", "is_error":true})).await;
+    assert_eq!(support::read_message(&mut input).await["message"]["content"], "second");
+    session.close();
+}
+
 #[tokio::test(start_paused = true)]
 async fn waiting_for_a_person_is_not_cli_silence() {
     let f = fake(fixture("claude", "tools"));

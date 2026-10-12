@@ -43,6 +43,15 @@ pub fn codex_args(area: Area, windows: bool, user_hooks: bool) -> Vec<String> {
     args
 }
 
+/// Automatic roles omit customizations; manual Projects and Chat keep their existing launch policy.
+pub fn project_codex_args(windows: bool) -> Vec<String> {
+    let mut args = codex_args(Area::Chat, windows, false);
+    for feature in ["shell_tool", "multi_agent", "multi_agent_v2"] {
+        args.extend(["--disable".into(), feature.into()]);
+    }
+    args
+}
+
 /// Parameters for thread/start and thread/resume. The sandbox keeps writes inside the working folder;
 /// anything beyond it comes back as an approval request.
 pub fn codex_thread(area: Area, model: Option<&str>) -> Map<String, Value> {
@@ -294,7 +303,9 @@ pub fn project_thread_params(
     params["approvalPolicy"] = "never".into();
     params["sandbox"] = if role == crate::project::Role::Writer { "workspace-write" } else { "read-only" }.into();
     params["baseInstructions"] = policy::instructions(role).into();
-    params["config"] = json!({"model_reasoning_effort": t.effort});
+    params["config"] = json!({"model_reasoning_effort": t.effort, "web_search":"disabled", "sandbox_workspace_write": {
+        "network_access":false, "exclude_tmpdir_env_var":true, "exclude_slash_tmp":true
+    }});
     params.as_object_mut().expect("thread parameters").remove("developerInstructions");
     Ok((method, params))
 }
@@ -319,15 +330,23 @@ impl CodexServer {
             return Err(crate::project::policy::Blocker::Invocation);
         }
         project_thread_params(&thread, role)?;
-        crate::project::policy::admit(crate::model::Vendor::Codex)?;
-        let _ = sink;
-        Err(crate::project::policy::Blocker::ProcessTree)
+        crate::project::policy::admit(crate::model::Vendor::Codex).map(|()| {
+            let server = Self::start_with_policy(opts, Some(role));
+            let session = server.open(thread, sink);
+            server.retire();
+            session
+        })
     }
     /// The process starts right away, so a warmed-up conversation is already booting while the user types.
     pub fn start(opts: CodexServerOptions) -> CodexServer {
+        Self::start_with_policy(opts, None)
+    }
+
+    fn start_with_policy(opts: CodexServerOptions, role: Option<crate::project::Role>) -> CodexServer {
         let (tx, rx) = unbounded_channel();
-        let started = (opts.spawn)(&opts.bin, &codex_args(opts.area, opts.windows, opts.user_hooks), &opts.cwd);
-        tokio::spawn(serve(started, opts.area, rx));
+        let args = if role.is_some() { project_codex_args(opts.windows) } else { codex_args(opts.area, opts.windows, opts.user_hooks) };
+        let started = (opts.spawn)(&opts.bin, &args, &opts.cwd);
+        tokio::spawn(serve(started, opts.area, rx, role));
         CodexServer { tx, next: Arc::new(AtomicU64::new(1)) }
     }
 
@@ -353,7 +372,12 @@ impl CodexServer {
     }
 }
 
-async fn serve(started: std::io::Result<proc::Proc>, area: Area, mut rx: UnboundedReceiver<ServerCommand>) {
+async fn serve(
+    started: std::io::Result<proc::Proc>,
+    area: Area,
+    mut rx: UnboundedReceiver<ServerCommand>,
+    role: Option<crate::project::Role>,
+) {
     let mut p = match started {
         Ok(p) => p,
         Err(err) => {
@@ -437,6 +461,13 @@ async fn serve(started: std::io::Result<proc::Proc>, area: Area, mut rx: Unbound
                 };
                 let method = msg["method"].as_str();
                 let params = &msg["params"];
+                if role.is_some() {
+                    match crate::project::policy::reject_native(&mut *stdin, crate::model::Vendor::Codex, &msg).await {
+                        Ok(true) => continue,
+                        Err(_) => { proc::stop(&mut *stdin, &mut child).await; break; }
+                        Ok(false) => {}
+                    }
+                }
                 match (method, msg.get("id")) {
                     // An answer to one of Faber's requests.
                     (None, Some(id)) => {
@@ -459,7 +490,7 @@ async fn serve(started: std::io::Result<proc::Proc>, area: Area, mut rx: Unbound
                                 ready = true;
                                 for key in std::mem::take(&mut pending) {
                                     let Some(t) = threads.get(&key) else { continue };
-                                    let (method, params) = thread_params(area, &t.params);
+                                    let (method, params) = match role { Some(role) => project_thread_params(&t.params, role).expect("validated role"), None => thread_params(area, &t.params) };
                                     request!(method, params, Waiting::Thread(key));
                                 }
                             }
@@ -473,8 +504,14 @@ async fn serve(started: std::io::Result<proc::Proc>, area: Area, mut rx: Unbound
                                 t.id = Some(id.clone());
                                 for turn in std::mem::take(&mut t.queued) {
                                     t.watch.begin();
+                                    t.state.base = t.state.total;
                                     let params = turn_params(&id, t.params.effort.as_deref(), &turn);
                                     request!("turn/start", params, Waiting::Other(key, "turn/start"));
+                                }
+                            }
+                            Waiting::Other(key, "turn/start") => {
+                                if let Some(t) = threads.get_mut(&key) {
+                                    t.turn = msg["result"]["turn"]["id"].as_str().map(String::from).or(t.turn.take());
                                 }
                             }
                             Waiting::Other(..) => {}
@@ -524,6 +561,13 @@ async fn serve(started: std::io::Result<proc::Proc>, area: Area, mut rx: Unbound
                                 for event in parse_codex_notification(&msg, &mut t.state) {
                                     if !t.blocked { (t.sink)(event); }
                                 }
+                                if method == Some("turn/completed") && !t.blocked && !t.closing && let Some(id) = t.id.clone() {
+                                    for turn in std::mem::take(&mut t.queued) {
+                                        t.watch.begin();
+                                        t.state.base = t.state.total;
+                                        request!("turn/start", turn_params(&id, t.params.effort.as_deref(), &turn), Waiting::Other(*by_id.get(&id).expect("registered thread"), "turn/start"));
+                                    }
+                                }
                             }
                             // Account-wide news, such as quota: one conversation passes it on.
                             None if thread_id.is_none() => {
@@ -548,7 +592,7 @@ async fn serve(started: std::io::Result<proc::Proc>, area: Area, mut rx: Unbound
                     let state = CodexTurnState::new(thread.resume.is_some());
                     let t = Thread { sink, params: thread, id: None, turn: None, queued: vec![], state, approvals: HashMap::new(), watch: proc::TurnWatch::default(), blocked: false, closing: false };
                     if ready {
-                        let (method, params) = thread_params(area, &t.params);
+                        let (method, params) = match role { Some(role) => project_thread_params(&t.params, role).expect("validated role"), None => thread_params(area, &t.params) };
                         request!(method, params, Waiting::Thread(key));
                     } else {
                         pending.push(key);
@@ -558,10 +602,12 @@ async fn serve(started: std::io::Result<proc::Proc>, area: Area, mut rx: Unbound
                 Some(ServerCommand::Session(key, cmd)) => match cmd {
                     SessionCommand::Send(turn) => {
                         let Some(t) = threads.get_mut(&key) else { continue };
-                        if t.blocked || t.closing || t.watch.stopping() { continue; }
+                        if t.blocked || t.closing { continue; }
+                        if t.watch.stopping() { t.queued.push(turn); continue; }
                         match t.id.clone() {
                             Some(id) => {
                                 t.watch.begin();
+                                t.state.base = t.state.total;
                                 request!("turn/start", turn_params(&id, t.params.effort.as_deref(), &turn), Waiting::Other(key, "turn/start"));
                             }
                             None => t.queued.push(turn),

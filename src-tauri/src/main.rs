@@ -369,6 +369,9 @@ fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Resul
 }
 
 fn main() {
+    if let Some(code) = faber_engine::proc::guard_mode() {
+        std::process::exit(code);
+    }
     let hidden = std::env::var("FABER_HIDDEN").is_ok_and(|v| v == "1");
     let mut builder = tauri::Builder::default();
     // A second launch brings the open window forward. Runs with their own data folder (tests) stay separate.

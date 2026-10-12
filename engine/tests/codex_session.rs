@@ -11,6 +11,48 @@ use std::sync::Arc;
 use std::time::Duration;
 use support::{Entry, drive, fake, fixture, next_permission, text_of};
 
+#[tokio::test]
+async fn review_3_completion_without_started_uses_the_turn_start_response_identity() {
+    let entries = fixture("codex", "chat").into_iter().filter(|e| e.msg["method"] != "turn/started").collect();
+    check_chat(entries).await;
+}
+
+#[tokio::test]
+async fn review_7_codex_preserves_a_turn_sent_before_interrupt_acknowledgement() {
+    let (spawn, mut input, mut output) = support::controlled();
+    let server = CodexServer::start(CodexServerOptions {
+        bin: "fake".into(),
+        cwd: ".".into(),
+        area: Area::Chat,
+        user_hooks: false,
+        windows: false,
+        spawn,
+    });
+    let session = server.open(
+        CodexThread { cwd: ".".into(), model: None, effort: None, resume: None, instructions: None, user_name: None },
+        Arc::new(|_| {}),
+    );
+    support::expect_method(&mut input, "initialize").await;
+    support::emit(&mut output, json!({"id":1,"result":{}})).await;
+    support::expect_method(&mut input, "initialized").await;
+    support::expect_method(&mut input, "thread/start").await;
+    support::emit(&mut output, json!({"id":2,"result":{"thread":{"id":"t","model":"test"}}})).await;
+    session.send(UserTurn::text("first"));
+    support::expect_method(&mut input, "turn/start").await;
+    support::emit(&mut output, json!({"method":"turn/started","params":{"threadId":"t","turn":{"id":"one"}}})).await;
+    tokio::task::yield_now().await;
+    session.interrupt();
+    support::expect_method(&mut input, "turn/interrupt").await;
+    session.send(UserTurn::text("second"));
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    support::emit(&mut output, json!({"method":"turn/completed","params":{"threadId":"t","turn":{"id":"one","status":"interrupted"}}}))
+        .await;
+    let next = support::expect_method(&mut input, "turn/start").await;
+    assert_eq!(next["params"]["input"][0]["text"], "second");
+    session.close();
+    server.retire();
+}
+
 #[tokio::test(start_paused = true)]
 async fn an_ignored_interrupt_quarantines_only_that_thread_and_preserves_a_running_peer() {
     let f = fake(fixture("projects", "policy-shared-stop"));

@@ -22,10 +22,93 @@ pub fn run(args: &[String]) -> Option<i32> {
         Some("--gate") => Some(gate(&args[1..])),
         Some("--family") => Some(family()),
         Some("--idle") => Some(idle()),
+        Some("--tree-cli") => Some(tree_cli()),
+        Some("--tree-child") => Some(tree_child()),
+        Some("--engine-tree-host") => Some(engine_tree_host(&args[1..])),
         #[cfg(windows)]
         Some("--desktop-probe") => Some(crate::desktop::probe()),
         _ => None,
     }
+}
+
+fn spawn_fake(mode: &str) -> io::Result<std::process::Child> {
+    let mut cmd = Command::new(std::env::current_exe()?);
+    cmd.arg(mode).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(crate::contain::NO_WINDOW);
+    }
+    cmd.spawn()
+}
+
+fn tree_cli() -> i32 {
+    let Ok(_child) = spawn_fake("--tree-child") else { return 1 };
+    println!("ready");
+    let _ = io::stdout().flush();
+    idle()
+}
+
+fn tree_child() -> i32 {
+    let Ok(_grandchild) = spawn_fake("--idle") else { return 1 };
+    idle()
+}
+
+fn engine_tree_host(args: &[String]) -> i32 {
+    let [ready, control] = args else { return 1 };
+    let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+        Ok(r) => r,
+        Err(_) => return 1,
+    };
+    let result: io::Result<()> = runtime.block_on(async {
+        use tokio::io::{AsyncBufReadExt, BufReader};
+        let binary = std::env::current_exe()?.to_string_lossy().into_owned();
+        let cwd = std::env::current_dir()?;
+        let spawn = faber_engine::proc::real_spawner();
+        let mut p = spawn(&binary, &["--tree-cli".into()], &cwd)?;
+        let root = p.child.as_ref().and_then(|p| p.id()).ok_or_else(|| io::Error::other("no root"))?;
+        let mut line = String::new();
+        BufReader::new(p.stdout).read_line(&mut line).await?;
+        std::fs::write(ready, serde_json::json!({"root":root}).to_string())?;
+        let action = wait_control(control, "action").await?;
+        if action == "drop" {
+            drop(p.child.take());
+        } else if let Some(child) = p.child.as_mut() {
+            child.start_kill()?;
+            child.wait().await?;
+        }
+        if action == "stop" {
+            let peer = spawn(&binary, &["--idle".into()], &cwd)?;
+            let peer_id = peer.child.as_ref().and_then(|p| p.id()).unwrap_or(0);
+            std::fs::write(ready, serde_json::json!({"root":root,"peer":peer_id}).to_string())?;
+            wait_control(control, "stop-again").await?;
+            if let Some(child) = p.child.as_mut() {
+                child.start_kill()?;
+            }
+            std::fs::write(ready, serde_json::json!({"root":root,"peer":peer_id,"stoppedAgain":true}).to_string())?;
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            drop(peer);
+        } else {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        }
+        Ok(())
+    });
+    if result.is_ok() { 0 } else { 1 }
+}
+
+async fn wait_control(path: &str, wanted: &str) -> io::Result<String> {
+    for _ in 0..400 {
+        if let Some(action) = std::fs::read(path)
+            .ok()
+            .and_then(|v| serde_json::from_slice::<serde_json::Value>(&v).ok())
+            .and_then(|v| v["action"].as_str().map(String::from))
+            && (wanted == "action" || action == wanted)
+        {
+            return Ok(action);
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    Err(io::Error::other("control timeout"))
 }
 
 fn idle() -> i32 {

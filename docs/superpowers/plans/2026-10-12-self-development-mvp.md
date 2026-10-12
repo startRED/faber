@@ -121,6 +121,35 @@ Focused proof: `cargo test -p faber-engine --test project_policy` plus both driv
 - [ ] If restrictions or spend bounds cannot be proved, record the blocker and stop automated-role rollout.
 - [ ] Run GA, cross-vendor review, commit `feat: constrain project CLI execution`.
 
+Task 2 follow-up evidence (2026-10-12, `selfdev-t2`):
+
+- Baseline implementation: `11c798c`. All automated roles still fail admission before spawning; Chat/manual
+  Projects launch defaults are preserved. Cross-vendor review findings, corrections, controls and raw bounded
+  evidence are in [the research report](../../research/2026-10-12-project-policy-probes.md) and its JSON sibling.
+- Review regressions cover completion without `turn/started`, sends during interrupt grace, customization
+  switches, installed Claude flags, all nine fake-wire escape requests, and unconditional admission denial.
+  The review's no-Codex-shell-switch claim and proposed `on-request` containment fix are false.
+- Windows tree blocker is closed: assign the trusted host guard to a kill-on-close job before the CLI can start.
+  Hidden fake tests require the guard/CLI/child/grandchild to disappear on stop, ownership drop and host crash;
+  stale creation-time/PID records cannot kill a live peer. PID reuse is simulated deterministically, not forced.
+  Non-Windows retains its existing child path and tree blocker.
+- R103 owner authorization granted a separate six-slot subscription experiment, not unattended admission.
+  The hidden opt-in example consumed all six slots (fourteen one-escape prompts); slot 4 failed before a prompt
+  and was not retried. Claude 2.1.296/haiku low exposed no tools and left all six artifacts unchanged.
+  Codex 0.162.1/gpt-6-luna low initially wrote outside via implicit TEMP roots; disable shell/subagent features,
+  implicit TEMP roots and network. Its tightened final session left all six tested artifacts unchanged.
+- Model-reported EPERM accompanies failed native-code items; independently checked artifacts are the evidence.
+  An absent unapproved MCP tool is not hostile-config containment proof. Linked common git metadata, read scope,
+  configured customizations and resumed policy remain unproved. Never unlock from these bounded observations.
+- Exposure remains blocked: cumulative usage was recorded, but no hard input/output/nested-call bound or real
+  interrupt-latency sample exists. All successful turns completed before the probe deadline; elapsed turn time
+  is not stop latency. No guessed token price, daily headroom or safe stop margin is introduced (Task 3 owns grants).
+- Spec issue: section 5 requires restrictions even for automated read-only roles, while section 13's read-only
+  fallback is ambiguous. Keep saved/local planning available; deny unverified automated CLI roles.
+- Shared file inventory and review disposition are in the research report. Git broker/lease files were untouched.
+- Follow-up GA: all seven required proof commands exit 0; `cargo t --all` reports 590 passed, no failures/skips.
+  The Windows fake tree scenario removes four owned processes in each mode and preserves the stale-PID peer.
+
 ## Task 3 — Add priced live grants and the hard daily gate
 
 Files: `engine/src/usage.rs`, `engine/src/budget.rs`, `engine/src/ledger.rs`, `engine/src/signals.rs`,
