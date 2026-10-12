@@ -33,13 +33,23 @@ pub enum EngineEvent {
         used: f64,
         resets_at: f64,
     },
-    /// `cost_usd` is the CLI's own API-priced figure when it reports one (Claude Code does, Codex does not).
+    /// What a finished turn used. `cost_total_usd` is Claude Code's own API-priced figure as it reports it: cumulative for
+    /// the conversation, so the engine subtracts what it saw before (`usage::settle`); None when the result carries no
+    /// counters (an aborted turn) and on Codex, which reports no cost. `input_tokens` is the prompt of the main response,
+    /// cached part included, so a hit rate is `cache_read_tokens / input_tokens`.
     Done {
         ok: bool,
         reason: String,
-        cost_usd: Option<f64>,
+        cost_total_usd: Option<f64>,
         input_tokens: u64,
         output_tokens: u64,
+        cache_read_tokens: u64,
+        cache_write_tokens: u64,
+        /// The part of the cache written with the 1-hour lifetime (0 on Codex, which bills no write).
+        cache_write_1h_tokens: u64,
+        /// True when the token numbers cover only part of the turn: Claude's sub-model work is not in `usage`, and a Codex
+        /// turn with no usage update to measure from reports none.
+        incomplete: bool,
     },
     /// `fatal`: the CLI process is gone and the next turn needs a new one.
     Error {

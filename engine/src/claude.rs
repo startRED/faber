@@ -142,21 +142,48 @@ pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
                     .collect()
             })
             .unwrap_or_default(),
-        "result" => {
-            let u = &msg["usage"];
-            let n = |k: &str| u[k].as_u64().unwrap_or(0);
-            vec![EngineEvent::Done {
-                ok: msg["subtype"] == "success" && msg["is_error"] != true,
-                reason: msg["terminal_reason"].as_str().or(msg["subtype"].as_str()).unwrap_or_default().into(),
-                cost_usd: Some(msg["total_cost_usd"].as_f64().unwrap_or(0.0)),
-                input_tokens: n("input_tokens") + n("cache_creation_input_tokens") + n("cache_read_input_tokens"),
-                output_tokens: n("output_tokens"),
-            }]
-        }
+        "result" => result_events(msg),
         _ => vec![],
     }
 }
 
+/// A finished turn. `usage` describes the main response only, while `modelUsage` adds the sub-model work of the same turn
+/// (web fetches and the like), so a turn whose `modelUsage` prompt is larger is marked incomplete; its cost stays valid.
+fn result_events(msg: &Value) -> Vec<EngineEvent> {
+    let u = &msg["usage"];
+    let n = |k: &str| u[k].as_u64().unwrap_or(0);
+    let (fresh, read, write) = (n("input_tokens"), n("cache_read_input_tokens"), n("cache_creation_input_tokens"));
+    let prompt = fresh + read + write;
+    // `usage` describes the main response only; `modelUsage` adds the sub-model work of the same turn.
+    let whole_turn: u64 = msg["modelUsage"]
+        .as_object()
+        .map(|models| {
+            models
+                .values()
+                .map(|m| {
+                    ["inputTokens", "cacheReadInputTokens", "cacheCreationInputTokens"]
+                        .iter()
+                        .map(|k| m[*k].as_u64().unwrap_or(0))
+                        .sum::<u64>()
+                })
+                .sum()
+        })
+        .unwrap_or(0);
+    // An aborted turn reports a total of 0 and an empty usage: no counters, which is not a cost of 0.
+    let total = msg["total_cost_usd"].as_f64();
+    let counters = total.is_some_and(|t| t > 0.0) || prompt + n("output_tokens") > 0;
+    vec![EngineEvent::Done {
+        ok: msg["subtype"] == "success" && msg["is_error"] != true,
+        reason: msg["terminal_reason"].as_str().or(msg["subtype"].as_str()).unwrap_or_default().into(),
+        cost_total_usd: total.filter(|_| counters),
+        input_tokens: prompt,
+        output_tokens: n("output_tokens"),
+        cache_read_tokens: read,
+        cache_write_tokens: write,
+        cache_write_1h_tokens: u["cache_creation"]["ephemeral_1h_input_tokens"].as_u64().unwrap_or(0),
+        incomplete: whole_turn > prompt,
+    }]
+}
 fn items(v: &Value) -> impl Iterator<Item = &Value> {
     v.as_array().into_iter().flatten()
 }

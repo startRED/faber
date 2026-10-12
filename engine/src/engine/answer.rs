@@ -234,6 +234,7 @@ mod tests {
                 break_pending: false,
                 used: 0,
                 cli: Cli { command: "claude".into(), prefix: vec![] },
+                resumed: false,
             };
             c.live.insert(id.clone(), live);
             c.refresh_running();
@@ -554,7 +555,17 @@ mod tests {
         let id = seed(&engine, s.session.clone(), &[("t1", &[("0", "Write")])]);
         let call = waiting_call(&engine, &s, &id, true).await;
 
-        let done = EngineEvent::Done { ok: true, reason: String::new(), cost_usd: None, input_tokens: 0, output_tokens: 0 };
+        let done = EngineEvent::Done {
+            ok: true,
+            reason: String::new(),
+            cost_total_usd: None,
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            cache_write_1h_tokens: 0,
+            incomplete: false,
+        };
         engine.with(|c| c.handle(&id, 1, done));
         s.held.lock().unwrap().pop().unwrap().send(Delivery::Delivered).unwrap();
 

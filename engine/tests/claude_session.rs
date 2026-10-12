@@ -46,7 +46,7 @@ async fn check_chat(entries: Vec<Entry>) {
     assert_eq!(text_of(&events), expected);
     assert!(events.iter().any(|e| matches!(e, EngineEvent::Quota { window, used, .. } if window == "five_hour" && *used == 0.07)));
     match events.last() {
-        Some(EngineEvent::Done { ok: true, cost_usd: Some(cost), output_tokens: 73, .. }) => assert!(*cost > 0.0),
+        Some(EngineEvent::Done { ok: true, cost_total_usd: Some(cost), output_tokens: 73, .. }) => assert!(*cost > 0.0),
         other => panic!("unexpected end: {other:?}"),
     }
 }

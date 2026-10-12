@@ -57,13 +57,41 @@ pub fn codex_thread(area: Area, model: Option<&str>) -> Map<String, Value> {
     thread
 }
 
-/// What parsing remembers across notifications: the latest usage, which Codex sends before turn/completed,
-/// and which messages already streamed, so a message that arrives whole is still shown.
+/// The thread's token counts, as `thread/tokenUsage/updated` reports them in `total`.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct Totals {
+    pub input: u64,
+    pub cached: u64,
+    pub output: u64,
+}
+
+impl Totals {
+    fn since(self, base: Totals) -> Totals {
+        Totals {
+            input: self.input.saturating_sub(base.input),
+            cached: self.cached.saturating_sub(base.cached),
+            output: self.output.saturating_sub(base.output),
+        }
+    }
+}
+
+/// What parsing remembers across notifications: the thread's usage so far and its value when the turn started, and which
+/// messages already streamed, so a message that arrives whole is still shown.
 #[derive(Debug, Default)]
 pub struct CodexTurnState {
-    pub input: u64,
-    pub output: u64,
     pub streamed: HashSet<String>,
+    /// The thread's usage so far, as the latest update said. None until one arrives (a resumed thread gets one before its
+    /// first turn).
+    pub total: Option<Totals>,
+    /// `total` when the current turn started.
+    pub base: Option<Totals>,
+}
+
+impl CodexTurnState {
+    /// A thread that starts empty has used nothing yet; a resumed one learns its total from the update that comes first.
+    pub fn new(resumed: bool) -> Self {
+        CodexTurnState { total: (!resumed).then(Totals::default), ..Default::default() }
+    }
 }
 
 const NOT_TOOLS: [&str; 3] = ["userMessage", "agentMessage", "reasoning"];
@@ -120,9 +148,14 @@ pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<
             let text = item["aggregatedOutput"].as_str().or(item["status"].as_str()).unwrap_or_default().into();
             vec![EngineEvent::ToolResult { id, ok, text }]
         }
+        "turn/started" => {
+            state.base = state.total;
+            vec![]
+        }
         "thread/tokenUsage/updated" => {
-            state.input = p["tokenUsage"]["last"]["inputTokens"].as_u64().unwrap_or(0);
-            state.output = p["tokenUsage"]["last"]["outputTokens"].as_u64().unwrap_or(0);
+            let t = &p["tokenUsage"]["total"];
+            let g = |k: &str| t[k].as_u64().unwrap_or(0);
+            state.total = Some(Totals { input: g("inputTokens"), cached: g("cachedInputTokens"), output: g("outputTokens") });
             vec![]
         }
         "account/rateLimits/updated" => [&p["rateLimits"]["primary"], &p["rateLimits"]["secondary"]]
@@ -136,12 +169,20 @@ pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<
             .collect(),
         "turn/completed" => {
             let status = s(&p["turn"]["status"]);
+            // The turn's usage is the thread's total now minus its total when the turn started. With no start to
+            // measure from, the turn reports no usage (and says so) rather than the whole thread.
+            let used = state.total.zip(state.base).map(|(total, base)| total.since(base));
+            let u = used.unwrap_or_default();
             vec![EngineEvent::Done {
                 ok: status == "completed",
                 reason: status,
-                cost_usd: None,
-                input_tokens: state.input,
-                output_tokens: state.output,
+                cost_total_usd: None,
+                input_tokens: u.input,
+                output_tokens: u.output,
+                cache_read_tokens: u.cached,
+                cache_write_tokens: 0,
+                cache_write_1h_tokens: 0,
+                incomplete: used.is_none(),
             }]
         }
         "error" => {
@@ -431,7 +472,8 @@ async fn serve(started: std::io::Result<proc::Proc>, area: Area, mut rx: Unbound
             }
             cmd = rx.recv(), if !stopping => match cmd {
                 Some(ServerCommand::Open { key, thread, sink }) => {
-                    let t = Thread { sink, params: thread, id: None, turn: None, queued: vec![], state: CodexTurnState::default(), approvals: HashMap::new() };
+                    let state = CodexTurnState::new(thread.resume.is_some());
+                    let t = Thread { sink, params: thread, id: None, turn: None, queued: vec![], state, approvals: HashMap::new() };
                     if ready {
                         let (method, params) = thread_params(area, &t.params);
                         request!(method, params, Waiting::Thread(key));

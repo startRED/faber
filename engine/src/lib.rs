@@ -13,6 +13,7 @@ pub mod proc;
 pub mod route;
 pub mod router;
 pub mod store;
+pub mod usage;
 pub mod workspace;
 
 pub use account::AccountStatus;

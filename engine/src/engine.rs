@@ -9,6 +9,7 @@ use crate::model::*;
 use crate::proc::Spawner;
 use crate::router::{Choice, Pick, pick_model};
 use crate::store::Store;
+use crate::usage;
 use crate::workspace::{Attachment, inside_folder, new_files, save_files};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -124,6 +125,8 @@ struct Live {
     used: u64,
     /// The CLI this process was started with; a replaced CLI starts a new process on the next turn.
     cli: Cli,
+    /// The process continues a session an earlier process began.
+    resumed: bool,
 }
 
 const HISTORY_LIMIT: usize = 20_000;
@@ -516,12 +519,34 @@ impl Core {
                 self.quotas.insert((vendor, window.clone()), reading);
                 return (self.emit)(AppEvent::Quota { vendor, window, used, resets_at });
             }
-            EngineEvent::Done { ok, cost_usd, input_tokens, output_tokens, .. } => {
+            EngineEvent::Done {
+                ok,
+                cost_total_usd,
+                input_tokens,
+                output_tokens,
+                cache_read_tokens,
+                cache_write_tokens,
+                cache_write_1h_tokens,
+                incomplete,
+                ..
+            } => {
+                // The CLI reports a total for the whole conversation; the turn costs what is new since the last total.
+                let session = self.convs.get(conv).and_then(|c| c.sessions.get(&vendor)).cloned().unwrap_or_default();
+                let fresh = self.live.get(conv).is_some_and(|l| !l.resumed);
+                let before = self.convs.get(conv).and_then(|c| c.cost_base.get(&vendor));
+                let settled = usage::settle(before, &session, fresh, cost_total_usd);
+                if let (Some(base), Some(c)) = (settled.base, self.convs.get_mut(conv)) {
+                    c.cost_base.insert(vendor, base);
+                }
                 if let Some(m) = self.turn(conv) {
                     m.status = Some(if ok { Status::Done } else { Status::Stopped });
-                    m.cost_usd = cost_usd;
+                    m.cost_usd = settled.cost;
                     m.input_tokens = Some(input_tokens);
                     m.output_tokens = Some(output_tokens);
+                    m.cache_read_tokens = Some(cache_read_tokens);
+                    m.cache_write_tokens = Some(cache_write_tokens);
+                    m.cache_write_1h_tokens = Some(cache_write_1h_tokens);
+                    m.incomplete = incomplete.then_some(true);
                     m.permissions = None;
                 }
                 return self.finish(conv, turn_id);
@@ -726,6 +751,7 @@ impl Core {
         });
         let user_hooks = self.store.settings().user_hooks == Some(true);
         let resume = c.sessions.get(&pick.vendor).cloned();
+        let resumed = resume.is_some();
         let area = c.area;
         // The conversation's own name, fixed when it began: a rename in Settings never reaches a conversation under way.
         let user_name = c.user_name.clone();
@@ -757,6 +783,7 @@ impl Core {
                 break_pending: false,
                 used: self.tick,
                 cli,
+                resumed,
             },
         );
         // ponytail: count-based limit on idle Claude processes; a RAM budget across all CLIs comes with parallel workers.
@@ -788,6 +815,7 @@ impl Core {
             area,
             project_id,
             sessions: BTreeMap::new(),
+            cost_base: BTreeMap::new(),
             allow_always: None,
             branch_of: None,
             user_name: self.store.settings().user_name.and_then(|name| clean_name(&name)),

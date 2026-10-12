@@ -588,3 +588,55 @@ async fn without_a_name_codex_gets_no_developer_instructions() {
     assert_eq!(f.wire.lines_with("thread/start"), 1);
     assert_eq!(f.wire.lines_with("developerInstructions"), 0);
 }
+
+#[tokio::test]
+async fn a_resumed_turn_costs_only_itself_and_the_conversation_remembers_the_new_total() {
+    let dir = tempfile::tempdir().unwrap();
+    let (first, mut rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn);
+    let id = first.send(ask(Area::Chat, SKY, choice("claude", Some("haiku")))).unwrap();
+    let reply = finished(&mut rx, |_| {}).await;
+    first.shutdown();
+    let file = dir.path().join("conversations").join(format!("{id}.json"));
+    let mut saved = read_json(&file);
+    // A new CLI session starts from nothing: the turn costs its whole total, and that total is the base from now on.
+    assert_eq!(saved["costBase"]["claude"]["session"], "c5b9834c-dfc7-4086-beed-2212be93b722");
+    let total = saved["costBase"]["claude"]["total"].as_f64().unwrap();
+    assert!((reply.cost_usd.unwrap() - total).abs() < 1e-9, "{:?} against {total}", reply.cost_usd);
+    assert!(reply.cache_read_tokens.is_some() && reply.cache_write_tokens.is_some());
+
+    // The resume recording continues another session, which reports 0.00023211 in all, of which 0.00018326 came from the
+    // process before it.
+    let session = "3ee0bd99-72d2-4c5b-8420-a9f85ee53981";
+    saved["sessions"]["claude"] = session.into();
+    saved["costBase"]["claude"] = serde_json::json!({ "session": session, "total": 0.00018326 });
+    std::fs::write(&file, saved.to_string()).unwrap();
+    let (second, mut rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "resume")).spawn);
+    let text = "What single word did you reply with last time? Answer with only that word.";
+    second.send(SendRequest { conversation_id: Some(id), ..ask(Area::Chat, text, choice("claude", Some("haiku"))) }).unwrap();
+    let reply = finished(&mut rx, |_| {}).await;
+    second.shutdown();
+    assert!((reply.cost_usd.unwrap() - 0.00004885).abs() < 1e-9, "{:?}", reply.cost_usd);
+    let saved = read_json(&file);
+    assert!((saved["costBase"]["claude"]["total"].as_f64().unwrap() - 0.00023211).abs() < 1e-9);
+}
+
+#[tokio::test]
+async fn a_conversation_saved_before_the_cost_base_existed_still_opens() {
+    let dir = tempfile::tempdir().unwrap();
+    let (first, mut rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn);
+    let id = first.send(ask(Area::Chat, SKY, choice("claude", Some("haiku")))).unwrap();
+    finished(&mut rx, |_| {}).await;
+    first.shutdown();
+    let file = dir.path().join("conversations").join(format!("{id}.json"));
+    let mut saved = read_json(&file);
+    saved.as_object_mut().unwrap().remove("costBase");
+    for message in saved["messages"].as_array_mut().unwrap() {
+        for key in ["cacheReadTokens", "cacheWriteTokens", "cacheWrite1hTokens", "incomplete"] {
+            message.as_object_mut().unwrap().remove(key);
+        }
+    }
+    std::fs::write(&file, saved.to_string()).unwrap();
+    let (second, _rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "resume")).spawn);
+    assert_eq!(second.open(&id).unwrap().messages.len(), 2);
+    second.shutdown();
+}

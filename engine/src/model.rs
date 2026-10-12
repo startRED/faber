@@ -118,6 +118,17 @@ pub struct Message {
     pub input_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_tokens: Option<u64>,
+    /// Prompt tokens of the main response read from the CLI's cache, and written to it (the part with the 1-hour lifetime
+    /// separately). Claude Code only; Codex bills no write.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_read_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_1h_tokens: Option<u64>,
+    /// True when the token numbers cover only part of the turn (sub-model work, or no usage was seen).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub incomplete: Option<bool>,
 }
 
 impl Message {
@@ -141,6 +152,10 @@ impl Message {
             cost_usd: None,
             input_tokens: None,
             output_tokens: None,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            cache_write_1h_tokens: None,
+            incomplete: None,
         }
     }
 }
@@ -163,6 +178,9 @@ pub struct Conversation {
     /// One CLI session per vendor, so switching models keeps each vendor's own history and cache.
     #[serde(default)]
     pub sessions: BTreeMap<Vendor, String>,
+    /// The cumulative cost each CLI session last reported, so a turn costs the difference (`usage::settle`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub cost_base: BTreeMap<Vendor, crate::usage::CostBase>,
     /// Tools the user chose to always allow in this conversation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allow_always: Option<Vec<String>>,
