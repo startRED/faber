@@ -10,6 +10,7 @@ mod files;
 pub mod git;
 pub mod lease;
 pub mod store;
+pub mod update;
 pub mod wire;
 
 use crate::model::Vendor;
@@ -1122,6 +1123,19 @@ macro_rules! records {
     )*};
 }
 
-records!(Mission, Plan, Contract, Decision, Brief, Lease, Artifact, Intent, Receipt, Runtime);
+records!(
+    Mission,
+    Plan,
+    Contract,
+    Decision,
+    Brief,
+    Lease,
+    Artifact,
+    Intent,
+    Receipt,
+    Runtime,
+    update::UpdateManifest,
+    update::LastGoodRecord
+);
 
 pub mod policy;
