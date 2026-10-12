@@ -1,4 +1,4 @@
-import { createSignal, For, onCleanup, Show } from 'solid-js';
+import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from 'solid-js';
 import type { Choice, Vendor } from './api.ts';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
@@ -72,6 +72,35 @@ export function Composer(props: Props) {
   onCleanup(() => clearTimeout(pause));
   let fileInput: HTMLInputElement | undefined;
   let field: HTMLTextAreaElement | undefined;
+  const resize = () => {
+    if (!field?.isConnected) return;
+    const previous = field.getBoundingClientRect().height;
+    const style = getComputedStyle(field);
+    // Restore the rendered height before enabling the transition, so measurement never paints a collapse.
+    field.style.transition = 'none';
+    field.style.height = '0px';
+    const height = Math.min(parseFloat(style.maxHeight), Math.max(parseFloat(style.minHeight), draft().text ? field.scrollHeight : 0));
+    field.style.height = `${previous}px`;
+    field.getBoundingClientRect();
+    field.style.removeProperty('transition');
+    field.style.height = `${height}px`;
+  };
+  createEffect(on(() => draft().text, () => queueMicrotask(resize), { defer: true }));
+  onMount(() => {
+    let width = 0;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry.contentRect.width === width) return;
+      const first = width === 0;
+      width = entry.contentRect.width;
+      if (!first) resize();
+    });
+    observer.observe(field!);
+    window.addEventListener('resize', resize);
+    onCleanup(() => {
+      observer.disconnect();
+      window.removeEventListener('resize', resize);
+    });
+  });
   const selected = () => Math.max(0, props.options.findIndex((o) => o.choice.vendor === props.choice.vendor && o.choice.model === props.choice.model));
   const hasContent = () => draft().text.trim() !== '' || draft().images.length > 0 || draft().files.length > 0;
   const canSend = () => !props.busy && !props.locked && hasContent() && props.vendors.length > 0;
@@ -130,7 +159,7 @@ export function Composer(props: Props) {
       </Show>
       <textarea
         aria-label={t('composer.message')}
-        rows={Math.min(10, Math.max(1, draft().text.split('\n').length))}
+        rows={1}
         placeholder={props.placeholder}
         value={draft().text}
         onInput={(e) => {

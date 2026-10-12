@@ -13,6 +13,7 @@ import { runAll, type Result } from './check.ts';
 import { crash, report } from './crash.ts';
 import './appearance.check.ts';
 import './check.check.ts';
+import './composer.check.ts';
 import './i18n.check.ts';
 import './inbox.check.ts';
 import './models.check.ts';

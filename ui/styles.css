@@ -311,8 +311,8 @@ select.pill option { background: var(--s2); color: var(--ink); }
 /* Composer */
 .composer { position: relative; z-index: 1; width: min(calc(100% - 48px), 660px); margin: 0 auto calc(18px * var(--dens)); display: grid; background: var(--card-bg); border-radius: var(--r-lg); box-shadow: var(--lift-shadow), var(--focus-light); transition: box-shadow var(--dur-ui) var(--ease); }
 .composer:focus-within { box-shadow: inset 0 0 0 1px var(--accent-line), var(--lift-shadow), var(--focus-light); }
-.composer textarea { resize: none; border: 0; outline: none; background: none; min-height: 60px; max-height: 240px; font-size: var(--fs-read); line-height: 1.5; padding: 16px 18px 4px; }
-.dock .composer textarea { min-height: 40px; padding: 13px 16px 0; }
+.composer textarea { resize: none; border: 0; outline: none; background: none; height: 60px; min-height: 60px; max-height: 40vh; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line-3) transparent; font-size: var(--fs-read); line-height: 1.5; padding: 16px 18px 4px; transition: height var(--dur-ui) var(--ease); }
+.dock .composer textarea { height: 40px; min-height: 40px; padding: 13px 16px 0; }
 .composer .chips { padding: 12px 14px 0; }
 .composer textarea::placeholder { color: var(--ink-3); }
 .cbar { display: flex; gap: 6px; align-items: center; padding: 8px 10px 10px 12px; }
@@ -589,6 +589,7 @@ html[data-motion='full'] .amb-glow .beam { animation: glow 7s var(--ease-io) inf
 /* Reduced keeps only short fades: every duration is capped at 120 ms and the switch thumb stops travelling. */
 [data-motion='reduced'] * { --dur-fast: 120ms; --dur-ui: 120ms; --dur-move: 120ms; --dur-arrive: 120ms; }
 :is([data-motion='reduced'], [data-motion='none']) .sw2::after { transition: background var(--dur-fast); }
+:is([data-motion='reduced'], [data-motion='none']) .composer textarea { transition: none; }
 [data-motion='reduced'] :is(.ask, .toast, .ri.need, .coach) { animation: fade 120ms ease-out both; }
 @keyframes fade { from { opacity: 0; } }
 :is([data-motion='reduced'], [data-motion='none']) .btn:active { transform: none; }
@@ -598,6 +599,7 @@ html[data-motion='full'] .amb-glow .beam { animation: glow 7s var(--ease-io) inf
 html.hidden-win .amb * { animation-play-state: paused !important; }
 /* The system preference is honoured even before the script runs. */
 @media (prefers-reduced-motion: reduce) {
+  .composer textarea { transition: none; }
   :root { --arrive-y: 0px; }
   * { --dur-fast: 120ms; --dur-ui: 120ms; --dur-move: 120ms; --dur-arrive: 120ms; }
   .sw2::after { transition: background var(--dur-fast); }
