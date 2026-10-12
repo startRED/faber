@@ -4,6 +4,38 @@ use faber_engine::project::kit::*;
 use faber_engine::project::wire::{Facets, Fresh, Labels, Risk, Verb};
 use serde_json::json;
 
+#[test]
+fn review_card_writer_and_wire_stay_strict() {
+    let source = card("craft", "ui:component", "ui.craft", Origin::User).source;
+    let mut reply = json!({"verbs":["build"],"serves":["ui:component"],"job":"ui.craft","exclusive":true,
+        "stage":"during","conflicts":[],"examples":["Build a screen"],"blindText":"Component craft",
+        "purposes":[],"passFocus":[],"priorLiftPp":4,
+        "requirements":{"os":[],"apps":[],"gpuGb":0}});
+    write_card(&source, &reply.to_string()).unwrap();
+    reply["requirements"]["futureWriterField"] = json!(true);
+    assert!(write_card(&source, &reply.to_string()).is_err());
+    reply["requirements"].as_object_mut().unwrap().remove("futureWriterField");
+    reply["futureWriterField"] = json!(true);
+    assert!(write_card(&source, &reply.to_string()).is_err());
+    let mut raw = serde_json::to_value(labels(&[])).unwrap();
+    raw["futureWire"] = json!(true);
+    assert!(serde_json::from_value::<Labels>(raw).is_err());
+    let mut raw = serde_json::to_value(Facets::default()).unwrap();
+    raw["futureWire"] = json!(true);
+    assert!(serde_json::from_value::<Facets>(raw).is_err());
+}
+
+#[test]
+fn durable_labels_keep_the_original_wire_shape_when_extensions_are_empty() {
+    let empty = labels(&[]);
+    let mut stated = labels(&["ui:component"]);
+    stated.facets.purpose = "personal".into();
+    for wire in [empty, stated] {
+        let durable = KitLabels::from(wire.clone());
+        assert_eq!(serde_json::to_value(&durable).unwrap(), serde_json::to_value(&wire).unwrap());
+    }
+}
+
 fn labels(needs: &[&str]) -> Labels {
     Labels {
         verb: Verb::Build,
@@ -29,6 +61,7 @@ fn card(id: &str, need: &str, job: &str, origin: Origin) -> Card {
         runs_code: false,
         sends_data: SendsData::None,
         path: Some(format!("tools/{id}.md")),
+        extra: Default::default(),
     };
     write_card(
         &source,
@@ -308,9 +341,11 @@ fn field_briefs_are_cited_bounded_cached_by_hash_and_invalidated_by_version_or_a
             version: "1".into(),
             fetched_at: 10,
             sha256: "0".repeat(64),
+            extra: Default::default(),
         }],
         sha256: digest(text.as_bytes()),
         fetched_at: 10,
+        extra: Default::default(),
     };
     b.validate().unwrap();
     assert!(!b.stale(11, "1"));
@@ -406,6 +441,7 @@ fn kit_selection_precedes_dispatch_and_completion_cannot_rewrite_frozen_content(
         user: "unknown".into(),
         tokens: None,
         cost_micros: None,
+        extra: Default::default(),
     });
     receipt.completed_at = Some(2);
     assert_eq!(journal.complete_kit(&receipt), Err(JournalError::Mismatch));
@@ -687,6 +723,7 @@ fn beta_outcomes_are_versioned_immutable_and_derived_once_per_completed_receipt(
         user: "kept".into(),
         tokens: Some(50),
         cost_micros: Some(1),
+        extra: Default::default(),
     });
     receipt.completed_at = Some(2);
     journal.attest_kit("a", 1, receipt.attestation.as_ref().unwrap()).unwrap();
@@ -735,9 +772,80 @@ fn persisted_kits_reject_model_aliases_and_keep_unknown_receipt_fields() {
         user: "unknown".into(),
         tokens: None,
         cost_micros: None,
+        extra: Default::default(),
     });
     receipt.completed_at = Some(2);
     receipt.extra.clear();
     journal.complete_kit(&receipt).unwrap();
     assert_eq!(journal.kit("a", 1).unwrap().unwrap().extra["futureReceipt"], json!({"pinned":true}));
+}
+#[test]
+fn review_field_brief_additions_survive_rollback_and_newer_is_not_corrupt() {
+    use faber_engine::project::store::{Journal, JournalError};
+    let repo = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let journal = Journal::open(repo.path(), data.path(), "m1").unwrap();
+    let pages = fetch_primary_pages(&[("https://example.org/docs".into(), "1".into())], 10, &|_| Ok(b"fixture".to_vec())).unwrap();
+    let brief = written_brief("framework:fixture", "1", "See https://example.org/docs", 10, &pages, 10).unwrap();
+    journal.save_field_brief(&brief).unwrap();
+    let path = repo.path().join(".faber/briefs").join(format!("{}.json", digest(b"framework:fixture")));
+    let mut raw = serde_json::to_value(&brief).unwrap();
+    raw["futureBrief"] = json!({"note":"additive"});
+    raw["sources"][0]["futureSource"] = json!(true);
+    std::fs::write(&path, raw.to_string()).unwrap();
+    let read = journal.field_brief("framework:fixture", 11, "1").unwrap().unwrap();
+    journal.save_field_brief(&read).unwrap();
+    assert_eq!(serde_json::from_slice::<serde_json::Value>(&std::fs::read(&path).unwrap()).unwrap(), raw);
+    raw["schema"] = json!(2);
+    std::fs::write(&path, raw.to_string()).unwrap();
+    assert_eq!(journal.field_brief("framework:fixture", 11, "1"), Err(JournalError::Newer));
+}
+
+#[test]
+fn review_nested_card_additions_roundtrip() {
+    use faber_engine::project::store::Journal;
+    let repo = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let journal = Journal::open(repo.path(), data.path(), "m1").unwrap();
+    let mut cache = CardCache::default();
+    cache.insert(card("craft", "ui:component", "ui.craft", Origin::User)).unwrap();
+    journal.save_card_cache(&cache).unwrap();
+    let mut raw = serde_json::to_value(&cache).unwrap();
+    let c = raw["cards"].as_object_mut().unwrap().values_mut().next().unwrap();
+    for pointer in ["", "/source", "/requirements"] {
+        c.pointer_mut(pointer).unwrap()["futureCard"] = json!({"value":7});
+    }
+    std::fs::write(journal.records().join("cards.json"), raw.to_string()).unwrap();
+    let read = journal.card_cache().unwrap();
+    journal.save_card_cache(&read).unwrap();
+    assert_eq!(serde_json::to_value(&read).unwrap(), raw);
+}
+
+#[test]
+fn review_nested_kit_additions_roundtrip_without_relaxing_wire() {
+    use faber_engine::project::store::Journal;
+    let repo = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let journal = Journal::open(repo.path(), data.path(), "m1").unwrap();
+    let mut l = labels(&["ui:component"]);
+    l.facets.purpose = "personal".into();
+    let kit = assemble(&request(
+        l,
+        vec![card("craft", "ui:component", "ui.craft", Origin::User), card("process", "ui:component", "process.plan", Origin::User)],
+    ))
+    .unwrap();
+    let receipt = KitReceipt::new("m1", "a", 1, kit, 1).unwrap();
+    journal.record_kit(&receipt).unwrap();
+    let mut raw = serde_json::to_value(&receipt).unwrap();
+    raw["attestation"] = serde_json::to_value(attest(Vendor::Codex, &receipt.kit, &json!({})).unwrap()).unwrap();
+    raw["outcome"] =
+        json!({"proofFirstTry":true,"repairs":0,"reviewBlocking":0,"kitUsed":["craft"],"user":"kept","tokens":10,"costMicros":1});
+    raw["shadow"] = json!({"ids":["craft"],"valid":true,"disagrees":false,"elapsedMs":1});
+    raw["completedAt"] = json!(2);
+    for pointer in ["/kit", "/kit/items/0", "/kit/dropped/0", "/kit/labels", "/kit/labels/facets", "/attestation", "/outcome", "/shadow"] {
+        raw.pointer_mut(pointer).unwrap()["futureMetadata"] = json!({"value":7});
+        std::fs::write(journal.records().join("kits/a-1.json"), raw.to_string()).unwrap();
+        let read = journal.kit("a", 1).unwrap().unwrap();
+        assert_eq!(serde_json::to_value(read).unwrap(), raw, "{pointer}");
+    }
 }

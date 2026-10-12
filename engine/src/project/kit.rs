@@ -69,7 +69,7 @@ pub enum DeliveryMode {
     ReviewLens,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct KitItem {
     pub id: String,
     pub version: String,
@@ -80,17 +80,83 @@ pub struct KitItem {
     pub resident_tokens: u32,
     pub job: String,
     pub source_path: Option<String>,
+    #[serde(flatten)]
+    pub extra: Extra,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Dropped {
     pub id: String,
     pub reason: String,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
+// Durable copies retain additive data; the dispatch wire continues to deny unknown fields.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct KitFacets {
+    pub purpose: String,
+    pub audience: String,
+    pub deliverable: String,
+    pub stage: String,
+    pub region: String,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+impl KitFacets {
+    fn is_empty(&self) -> bool {
+        self == &Self::default()
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KitLabels {
+    pub verb: Verb,
+    pub needs: Vec<String>,
+    pub risk: wire::Risk,
+    pub fresh: Fresh,
+    #[serde(default, skip_serializing_if = "KitFacets::is_empty")]
+    pub facets: KitFacets,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+impl From<Labels> for KitLabels {
+    fn from(labels: Labels) -> Self {
+        let Labels { verb, needs, risk, fresh, facets } = labels;
+        let wire::Facets { purpose, audience, deliverable, stage, region } = facets;
+        Self {
+            verb,
+            needs,
+            risk,
+            fresh,
+            facets: KitFacets { purpose, audience, deliverable, stage, region, extra: Extra::new() },
+            extra: Extra::new(),
+        }
+    }
+}
+impl KitLabels {
+    fn validate(&self) -> Result<(), WireError> {
+        Labels {
+            verb: self.verb,
+            needs: self.needs.clone(),
+            risk: self.risk,
+            fresh: self.fresh,
+            facets: wire::Facets {
+                purpose: self.facets.purpose.clone(),
+                audience: self.facets.audience.clone(),
+                deliverable: self.facets.deliverable.clone(),
+                stage: self.facets.stage.clone(),
+                region: self.facets.region.clone(),
+            },
+        }
+        .validate()
+    }
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Kit {
-    pub labels: Labels,
+    pub labels: KitLabels,
     pub needs: Vec<String>,
     pub items: Vec<KitItem>,
     pub proofs: Vec<String>,
@@ -106,6 +172,8 @@ pub struct Kit {
     pub token_cap: u32,
     pub over_budget_pin: bool,
     pub assemble_micros: u64,
+    #[serde(flatten)]
+    pub extra: Extra,
 }
 impl Kit {
     pub fn validate(&self) -> Result<(), WireError> {
@@ -294,12 +362,12 @@ pub fn assemble(input: &Assembly) -> Result<Kit, WireError> {
             None
         };
         if let Some(reason) = blocked {
-            dropped.push(Dropped { id: c.source.id.clone(), reason: reason.into() });
+            dropped.push(Dropped { id: c.source.id.clone(), reason: reason.into(), extra: Extra::new() });
             continue;
         }
         let u = utility(c, &needs);
         if !u.is_finite() || u <= 0.0 && pin != Some(&PinChoice::Always) {
-            dropped.push(Dropped { id: c.source.id.clone(), reason: "reason.kit.utility".into() });
+            dropped.push(Dropped { id: c.source.id.clone(), reason: "reason.kit.utility".into(), extra: Extra::new() });
             continue;
         }
         let document = &documents[index];
@@ -346,7 +414,7 @@ pub fn assemble(input: &Assembly) -> Result<Kit, WireError> {
             None
         };
         if let Some(reason) = reason {
-            dropped.push(Dropped { id: c.source.id.clone(), reason: reason.into() });
+            dropped.push(Dropped { id: c.source.id.clone(), reason: reason.into(), extra: Extra::new() });
             continue;
         }
         resident = resident.checked_add(cost(c)).ok_or(WireError::TooBig)?;
@@ -392,12 +460,13 @@ pub fn assemble(input: &Assembly) -> Result<Kit, WireError> {
             resident_tokens: cost(c),
             job: c.job.clone(),
             source_path: c.source.path.clone(),
+            extra: Extra::new(),
         });
     }
     let gaps = needs.keys().filter(|n| !selected.iter().any(|c| c.serves.iter().any(|s| strength(s, n) > 0.0))).cloned().collect();
     let inventory_hash = input.inventory.digest.clone();
     Ok(Kit {
-        labels: input.labels.clone(),
+        labels: input.labels.clone().into(),
         needs: needs.into_keys().collect(),
         items,
         proofs: proofs.into_iter().collect(),
@@ -413,19 +482,22 @@ pub fn assemble(input: &Assembly) -> Result<Kit, WireError> {
         token_cap: cap,
         over_budget_pin,
         assemble_micros: start.elapsed().as_micros() as u64,
+        extra: Extra::new(),
     })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Shadow {
     pub ids: Vec<String>,
     pub valid: bool,
     pub disagrees: bool,
     pub elapsed_ms: u64,
+    #[serde(flatten)]
+    pub extra: Extra,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct KitOutcome {
     pub proof_first_try: Option<bool>,
     pub repairs: Option<u32>,
@@ -434,6 +506,8 @@ pub struct KitOutcome {
     pub user: String,
     pub tokens: Option<u64>,
     pub cost_micros: Option<u64>,
+    #[serde(flatten)]
+    pub extra: Extra,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

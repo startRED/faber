@@ -12,7 +12,7 @@ rule, [tool-selection section 17.1 and its status note](../superpowers/specs/202
 
 The first implementation commit publishes wire schema **2** once, including kits, labels/facets, bar sheet,
 check/compile receipts, pings, verbatim requirements/checks/quotes and assumptions/unconfirmed. Durable journal schema
-stays **1**: old T1 records remain readable; unknown durable root fields survive; unknown wire/nested fields fail.
+stays **1**: old T1 records remain readable; additive durable root and nested metadata survive; unknown wire fields fail.
 Role authority is unchanged. T5B and T5 consume these types rather than introducing competing wire revisions.
 
 `engine/src/project/kit.rs` exports the assembler and the `inventory`, `request`, `delivery`, `picker`, `passes`,
@@ -88,6 +88,37 @@ cargo test -p faber-engine --test project_kit -- --nocapture
 
 Use the maintainer's Rust paths, the isolated `sd-t5k` target and `line-tables-only` dev/test debug settings.
 All seven AGENTS proofs plus `cargo t --all` are the commit gates. Hidden screen tests use testkit's fake CLI sandbox.
+
+## Cross-vendor review and recovery
+
+The three claims in the owner's `review-sd-t5k.md` were tested against the merged implementation before edits:
+
+- Finding 1 is real for additive brief/source fields: the round-trip test failed with `Store(Corrupt)`. Both durable
+  types now preserve `Extra`. The separate newer-schema claim is false for a recognized record: `Journal::get`
+  already returns `Newer` before semantic validation. The regression checks this with schema 2 and additive fields;
+  the brief validator still refuses incompatible schemas.
+- Finding 2 is real for nested cache/receipt data: independent card-cache and kit tests failed with `Store(Corrupt)`.
+  Cards, source metadata, requirements, kits/items/drops, attestation, outcomes and shadow data now preserve `Extra`.
+  Durable kit labels/facets retain extension data through their own copies of the closed wire fields. They preserve
+  the original JSON shape without extensions and use the wire's existing semantic validation. Wire v2 still has
+  `deny_unknown_fields`, including labels/facets; card-writer replies and their requirements remain strict.
+- Finding 3 is false: even `repo = ""` or `"."` gains `.faber/missions/<id>` in `Journal::open`, so both parents exist.
+  A pure path regression passed before edits. No production path code changed.
+
+The pending T2/T4 merge and the subsequent fetch/merge of selfdev's T11 were committed only after all seven AGENTS
+proofs and `cargo t --all` passed: 774 tests for the first integration and 835 for the second, zero failures/not-run/skips.
+The T2 policy and T4 git/lease/scoped-file implementations match the merged selfdev base. A reproduced permission-test
+failure came from two rendered copies of its question; scoping the answer to the article passed without timeout changes.
+Cargo bootstrap and runner builds respect a positive `CARGO_BUILD_JOBS` override; the latest gates ran with four jobs
+and line-tables-only debug data, without disk or paging failures.
+
+The read-only process baseline contained 78 console hosts, including terminal/tool hosts and four hosts whose live
+parents were sd-t3's test binaries. During our tests the count returned to 77 and 70 baseline identities remained;
+our active fixture hosts appeared and disappeared. Four full screen rounds passed strict process/job audits, including
+the previously failing first-run scenario and stop/drop/crash descendant checks. No persistent sd-t5k console leak was
+reproduced. The earlier conhost identity had already exited, so its original cause remains unproven. Audit diagnostics
+now include parent, creation time, root and recorded tree; no host exclusion, PID adoption or foreign-process cleanup
+was added.
 
 ## Measurements and integration still required
 

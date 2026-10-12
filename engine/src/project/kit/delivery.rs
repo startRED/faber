@@ -94,7 +94,7 @@ pub enum AttestationStatus {
     Unreported,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Attestation {
     pub vendor: Vendor,
     pub status: AttestationStatus,
@@ -109,6 +109,8 @@ pub struct Attestation {
     pub reported_model: Option<String>,
     pub reported_effort: Option<String>,
     pub reported_cli_version: Option<String>,
+    #[serde(flatten)]
+    pub extra: Extra,
 }
 fn names(raw: &Value, field: &str) -> Result<Option<Vec<String>>, WireError> {
     let Some(value) = raw.get(field) else {
@@ -180,5 +182,6 @@ pub fn attest(vendor: Vendor, _kit: &Kit, init: &Value) -> Result<Attestation, W
         reported_model: init["model"].as_str().map(str::to_string),
         reported_effort: init["effort"].as_str().map(str::to_string),
         reported_cli_version: init["cli_version"].as_str().map(str::to_string),
+        extra: Extra::new(),
     })
 }

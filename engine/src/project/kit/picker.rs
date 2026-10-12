@@ -86,5 +86,5 @@ pub fn validate_shadow(input: &Assembly, code: &Kit, list: &Shortlist, reply: &s
         valid = checked.items.len() == ids.len() && !checked.gaps.iter().any(|n| n.ends_with('!'));
     }
     let proposed: BTreeSet<_> = ids.iter().cloned().collect();
-    Ok(Shadow { ids, valid, disagrees: proposed != chosen, elapsed_ms })
+    Ok(Shadow { ids, valid, disagrees: proposed != chosen, elapsed_ms, extra: Extra::new() })
 }

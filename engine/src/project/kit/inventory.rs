@@ -36,11 +36,13 @@ pub enum SendsData {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Requirements {
     pub os: Vec<String>,
     pub apps: Vec<String>,
     pub gpu_gb: u32,
+    #[serde(flatten)]
+    pub extra: Extra,
 }
 #[derive(Debug, Clone, Default)]
 pub struct Machine {
@@ -50,7 +52,7 @@ pub struct Machine {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct ReportedTool {
     pub id: String,
     pub version: String,
@@ -65,10 +67,12 @@ pub struct ReportedTool {
     pub runs_code: bool,
     pub sends_data: SendsData,
     pub path: Option<String>,
+    #[serde(flatten)]
+    pub extra: Extra,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Card {
     pub source: ReportedTool,
     pub verbs: Vec<Verb>,
@@ -83,6 +87,8 @@ pub struct Card {
     pub pass_focus: Vec<String>,
     pub prior_lift_pp: f64,
     pub requirements: Requirements,
+    #[serde(flatten)]
+    pub extra: Extra,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -98,8 +104,20 @@ struct WrittenCard {
     purposes: Vec<String>,
     pass_focus: Vec<String>,
     prior_lift_pp: f64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "written_requirements")]
     requirements: Requirements,
+}
+
+fn written_requirements<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Requirements, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Written {
+        os: Vec<String>,
+        apps: Vec<String>,
+        gpu_gb: u32,
+    }
+    let Written { os, apps, gpu_gb } = Written::deserialize(deserializer)?;
+    Ok(Requirements { os, apps, gpu_gb, extra: Extra::new() })
 }
 
 /// One bounded card-writing request per content hash/version; no execution or model call here.
@@ -228,6 +246,7 @@ pub fn write_card(source: &ReportedTool, reply: &str) -> Result<Card, WireError>
         pass_focus: c.pass_focus,
         prior_lift_pp,
         requirements: c.requirements,
+        extra: Extra::new(),
     };
     card.validate()?;
     Ok(card)
@@ -370,6 +389,7 @@ pub fn reported_inventory(init: &serde_json::Value) -> Result<Vec<ReportedTool>,
                 runs_code: form != Form::Skill,
                 sends_data: SendsData::ProjectContent,
                 path: None,
+                extra: Extra::new(),
             });
         }
     }
@@ -499,6 +519,7 @@ pub fn project_inventory(files: &[SourceFile], proofs: &[String]) -> Result<Vec<
                 runs_code: false,
                 sends_data: SendsData::None,
                 path: Some(file.path.clone()),
+                extra: Extra::new(),
             });
         }
     }
@@ -519,6 +540,7 @@ pub fn project_inventory(files: &[SourceFile], proofs: &[String]) -> Result<Vec<
             runs_code: true,
             sends_data: SendsData::PublicIdentifiers,
             path: None,
+            extra: Extra::new(),
         });
     }
     Ok(tools)

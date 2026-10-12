@@ -389,7 +389,9 @@ Persist the selection with `Journal::record_kit` before dispatch. Compose approv
 the existing safe role prompt with `compose_role_prompt`; the role prompt remains its byte-for-byte prefix. This
 adapter changes no driver flags or policy. Record init with `attest_kit` before work, then add the outcome with
 `complete_kit`. Completion cannot replace the selection or its attestation. Receipts live in
-`.faber/missions/<id>/kits/<task>-<attempt>.json` and preserve future root fields. A failed write prevents dispatch.
+`.faber/missions/<id>/kits/<task>-<attempt>.json` and preserve additive root and nested metadata. Card caches and cited
+field briefs do the same; a newer durable schema is refused as newer. Dispatch and card-writer replies retain their
+strict schemas. A failed write prevents dispatch.
 The runner must enforce T2 admission and handle mismatched/unreported init; these receipts never grant containment.
 
 G0 is empty. G1 returns at most three cited suggestions with downsides, with installation parked. G2 stores bounded,

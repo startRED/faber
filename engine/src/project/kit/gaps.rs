@@ -51,7 +51,10 @@ pub fn fetch_primary_pages(sources: &[(String, String)], at: u64, fetch: &crate:
         }
         let hash = digest(&bytes);
         let text = String::from_utf8(bytes).map_err(|_| WireError::Malformed)?;
-        pages.push(SourcePage { source: PrimarySource { url: url.clone(), version: version.clone(), fetched_at: at, sha256: hash }, text });
+        pages.push(SourcePage {
+            source: PrimarySource { url: url.clone(), version: version.clone(), fetched_at: at, sha256: hash, extra: Extra::new() },
+            text,
+        });
     }
     Ok(pages)
 }
@@ -80,6 +83,7 @@ pub fn written_brief(need: &str, version: &str, text: &str, tokens: u32, pages: 
         sources: pages.iter().map(|p| p.source.clone()).collect(),
         sha256: digest(text.as_bytes()),
         fetched_at: at,
+        extra: Extra::new(),
     };
     brief.validate()?;
     if !brief.sources.iter().all(|s| text.contains(&s.url)) {
@@ -88,15 +92,17 @@ pub fn written_brief(need: &str, version: &str, text: &str, tokens: u32, pages: 
     Ok(brief)
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct PrimarySource {
     pub url: String,
     pub version: String,
     pub fetched_at: u64,
     pub sha256: String,
+    #[serde(flatten)]
+    pub extra: Extra,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct FieldBrief {
     pub schema: u32,
     pub need: String,
@@ -106,6 +112,8 @@ pub struct FieldBrief {
     pub sources: Vec<PrimarySource>,
     pub sha256: String,
     pub fetched_at: u64,
+    #[serde(flatten)]
+    pub extra: Extra,
 }
 impl Record for FieldBrief {
     fn schema(&self) -> u32 {

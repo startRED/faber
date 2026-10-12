@@ -449,3 +449,23 @@ impl Journal {
         Ok(brief.filter(|b| !b.stale(now, version)))
     }
 }
+#[cfg(test)]
+mod kit_path_tests {
+    use super::*;
+    #[test]
+    fn review_shallow_repo_still_has_two_parents_above_mission_records() {
+        for repo in ["", ".", "repo"] {
+            let repo = Path::new(repo);
+            let journal = Journal {
+                mission: "m1".into(),
+                records: repo.join(".faber").join("missions").join("m1"),
+                private: PathBuf::new(),
+                disk: Arc::new(RealDisk),
+            };
+            assert_eq!(
+                journal.field_brief_path("framework:fixture").unwrap(),
+                repo.join(".faber").join("briefs").join(format!("{}.json", super::super::kit::digest(b"framework:fixture")))
+            );
+        }
+    }
+}
