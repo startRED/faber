@@ -37,7 +37,7 @@ fn containment(ctx: &mut Ctx) -> Result {
 
 fn check(ctx: &Ctx, helper: &std::path::Path, stranger: &mut std::process::Child) -> Result {
     let env: BTreeMap<String, String> = std::env::vars().collect();
-    let (owned, _) = Owned::start(helper, &["--family".to_string()], &env, &ctx.sb.sandbox, helper).map_err(|e| e.to_string())?;
+    let (owned, _, _) = Owned::start(helper, &["--family".to_string()], &env, &ctx.sb.sandbox, helper).map_err(|e| e.to_string())?;
     // The app starts two programs. The tree is looked at first and the job asked after, so everything the tree holds was
     // already in the job when it was asked. Windows also starts a console host for a console program; the system makes
     // it, so it is not the job's to hold.
@@ -69,8 +69,10 @@ fn hidden_desktop(ctx: &mut Ctx) -> Result {
     let helper = ctx.paths.fake_cli.clone();
     let mine: Vec<usize> = desktop::windows()?.into_iter().map(|(handle, ..)| handle).collect();
     ensure(!mine.is_empty(), || "the runner's own desktop lists no windows, so there is nothing to compare with".to_string())?;
-    let env: BTreeMap<String, String> = std::env::vars().collect();
-    let (owned, stderr) =
+    let mut env: BTreeMap<String, String> = std::env::vars().collect();
+    // This probe has no webview or window, so CI can still prove the local desktop isolation.
+    env.remove("GITHUB_ACTIONS");
+    let (owned, _, stderr) =
         Owned::start(&helper, &["--desktop-probe".to_string()], &env, &ctx.sb.sandbox, &helper).map_err(|e| e.to_string())?;
     let (sender, receiver) = std::sync::mpsc::channel();
     std::thread::spawn(move || {

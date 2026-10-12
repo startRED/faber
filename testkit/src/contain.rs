@@ -7,8 +7,8 @@
 //!   only then tells it to start the app. The app, and everything it starts, is in the job from its first moment on.
 //!   (Starting the app suspended and resuming it would need unsafe code, which the workspace forbids.) Ending the job
 //!   ends all of them; closing the last handle to the job, which is what happens when the runner dies, does the same.
-//!   The app also starts on the hidden desktop the runner made (see `desktop`), so it can never show a window to the
-//!   person using the PC.
+//!   Locally the app also starts on the hidden desktop the runner made (see `desktop`), so it can never show a window
+//!   to the person using the PC. GitHub Actions uses the default desktop because WebView2 needs it there.
 //! - macOS and Linux: the app is started directly and ended through the `Child` the runner keeps.
 //!   ponytail: no process group is signalled (a group cannot prove who is in it) and nothing is adopted by id, so a
 //!   program the app started and left running outlives it; the audit reports it and fails the scenario. Containing
@@ -20,7 +20,7 @@
 use std::collections::BTreeMap;
 use std::io;
 use std::path::Path;
-use std::process::{Child, ChildStderr, Command, Stdio};
+use std::process::{Child, ChildStderr, ChildStdout, Command, Stdio};
 use std::sync::{Mutex, MutexGuard};
 
 #[cfg(windows)]
@@ -45,7 +45,7 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl Owned {
-    /// Starts the program with exactly this environment and working folder, no input and no output, and its error stream
+    /// Starts the program with exactly this environment and working folder, no input, and diagnostic streams
     /// piped back. It starts inside its containment; if it cannot be contained it is ended and this fails. `helper` is
     /// the fake helper binary, which the Windows containment needs.
     pub fn start(
@@ -54,22 +54,28 @@ impl Owned {
         env: &BTreeMap<String, String>,
         cwd: &Path,
         helper: &Path,
-    ) -> io::Result<(Owned, Option<ChildStderr>)> {
+    ) -> io::Result<(Owned, Option<ChildStdout>, Option<ChildStderr>)> {
         #[cfg(not(windows))]
         {
             let _ = helper;
             let mut command = Command::new(program);
-            command.args(args).env_clear().envs(env).current_dir(cwd).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+            command.args(args).env_clear().envs(env).current_dir(cwd).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
             let mut child = command.spawn()?;
+            let stdout = child.stdout.take();
             let stderr = child.stderr.take();
             let pid = child.id();
-            Ok((Owned { child: Mutex::new(child), pid }, stderr))
+            Ok((Owned { child: Mutex::new(child), pid }, stdout, stderr))
         }
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
-            // No hidden desktop, no app: it would open its window where the person is working.
-            let desktop = crate::desktop::name().map_err(io::Error::other)?;
+            // WebView2 cannot use a private desktop in the GitHub runner's service session.
+            // Locally, no hidden desktop means no app; there is no fallback to the person's desktop.
+            let desktop = if env.get("GITHUB_ACTIONS").is_some_and(|v| v == "true") {
+                "default"
+            } else {
+                crate::desktop::name().map_err(io::Error::other)?
+            };
             let mut command = Command::new(helper);
             command.arg("--gate").arg("--desktop").arg(desktop).arg(program).args(args).env_clear().envs(env).current_dir(cwd);
             command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).creation_flags(NO_WINDOW);
@@ -106,7 +112,7 @@ impl Owned {
                 return Err(io::Error::other(format!("the app did not start: {}", line.trim())));
             };
             let owned = Owned { child: Mutex::new(helper), pid, gate: Mutex::new(Some(gate)), job: Mutex::new(Some(job)) };
-            Ok((owned, stderr))
+            Ok((owned, None, stderr))
         }
     }
 

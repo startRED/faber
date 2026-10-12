@@ -14,7 +14,13 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// How long the hidden app gets to open its window (or to write its checks report).
-pub const STARTUP: Duration = Duration::from_secs(30);
+pub fn startup() -> Duration {
+    startup_timeout(std::env::var("GITHUB_ACTIONS").ok().as_deref())
+}
+
+fn startup_timeout(actions: Option<&str>) -> Duration {
+    Duration::from_secs(if actions == Some("true") { 90 } else { 30 })
+}
 
 /// Where everything the runner needs lives.
 #[derive(Debug, Clone)]
@@ -169,6 +175,27 @@ struct Live {
     /// Processes of the app's tree that the job did not hold when they were looked at.
     escaped: Vec<ProcRow>,
     stderr: Arc<Mutex<String>>,
+    stdout: Arc<Mutex<String>>,
+}
+
+fn capture(pipe: Option<impl Read + Send + 'static>) -> Arc<Mutex<String>> {
+    let output = Arc::new(Mutex::new(String::new()));
+    if let Some(mut pipe) = pipe {
+        let sink = output.clone();
+        std::thread::spawn(move || {
+            let mut chunk = [0u8; 4096];
+            while let Ok(n) = pipe.read(&mut chunk) {
+                if n == 0 {
+                    break;
+                }
+                let mut text = sink.lock().unwrap_or_else(|e| e.into_inner());
+                if text.len() < 64_000 {
+                    text.push_str(&String::from_utf8_lossy(&chunk[..n]));
+                }
+            }
+        });
+    }
+    output
 }
 
 /// A launched app that a scenario drives: which one it is, and its page.
@@ -263,28 +290,13 @@ impl Ctx {
             launch.setup_source = self.server.as_ref().map(|s| s.origin.clone());
         }
         let env = child_env(&env_pairs(), &self.sb, &launch, &self.paths.fake_cli);
-        let (owned, pipe) = Owned::start(&self.paths.app, &[], &env, &self.sb.sandbox, &self.paths.fake_cli)
+        let (owned, stdout, stderr) = Owned::start(&self.paths.app, &[], &env, &self.sb.sandbox, &self.paths.fake_cli)
             .map_err(|e| format!("cannot start {}: {e}", self.paths.app.display()))?;
         let owned = Arc::new(owned);
         registry().owned.push(owned.clone());
-        let stderr = Arc::new(Mutex::new(String::new()));
-        if let Some(mut pipe) = pipe {
-            let sink = stderr.clone();
-            std::thread::spawn(move || {
-                let mut chunk = [0u8; 4096];
-                while let Ok(n) = pipe.read(&mut chunk) {
-                    if n == 0 {
-                        break;
-                    }
-                    let mut text = sink.lock().unwrap_or_else(|e| e.into_inner());
-                    if text.len() < 64_000 {
-                        text.push_str(&String::from_utf8_lossy(&chunk[..n]));
-                    }
-                }
-            });
-        }
+        let (stdout, stderr) = (capture(stdout), capture(stderr));
         let pid = owned.pid();
-        self.live.push(Live { owned, pid, port: launch.cdp_port, seen: Vec::new(), escaped: Vec::new(), stderr });
+        self.live.push(Live { owned, pid, port: launch.cdp_port, seen: Vec::new(), escaped: Vec::new(), stderr, stdout });
         let id = self.live.len() - 1;
         self.record(id)?;
         Ok(id)
@@ -295,7 +307,8 @@ impl Ctx {
         let port = free_port()?;
         launch.cdp_port = Some(port);
         let id = self.spawn(launch)?;
-        let deadline = Instant::now() + STARTUP;
+        let timeout = startup();
+        let deadline = Instant::now() + timeout;
         let mut page = loop {
             self.guard_desktop(id)?;
             if let Some(status) = self.exited(id) {
@@ -307,7 +320,7 @@ impl Ctx {
                 Err(_) => {}
             }
         };
-        page.wait_for_within("the screen to render", "!!document.querySelector('.app')", STARTUP)
+        page.wait_for_within("the screen to render", "!!document.querySelector('.app')", timeout)
             .map_err(|e| format!("{e}. stderr: {}", self.stderr(id)))?;
         self.guard_desktop(id)?;
         self.record(id)?;
@@ -321,6 +334,11 @@ impl Ctx {
 
     pub fn stderr(&self, id: usize) -> String {
         self.live[id].stderr.lock().unwrap_or_else(|e| e.into_inner()).trim().to_string()
+    }
+
+    pub fn output(&self, id: usize) -> String {
+        let stdout = self.live[id].stdout.lock().unwrap_or_else(|e| e.into_inner()).trim().to_string();
+        format!("stdout: {stdout}\nstderr: {}", self.stderr(id))
     }
 
     /// Adds the app's processes alive right now to the ones recorded, so they can be audited. Only a running app is
@@ -577,6 +595,26 @@ impl Drop for Ctx {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn only_github_actions_gets_a_longer_startup_timeout() {
+        assert_eq!(startup_timeout(Some("true")), Duration::from_secs(90));
+        for value in [None, Some("false"), Some("1"), Some("TRUE")] {
+            assert_eq!(startup_timeout(value), Duration::from_secs(30));
+        }
+    }
+
+    #[test]
+    fn diagnostic_capture_keeps_bounded_output() {
+        let output = capture(Some(std::io::Cursor::new(vec![b'x'; 70_000])));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while output.lock().unwrap().len() < 64_000 && Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+        let text = output.lock().unwrap();
+        assert!((64_000..68_096).contains(&text.len()));
+        assert!(text.bytes().all(|b| b == b'x'));
+    }
 
     fn row(pid: u32, parent: u32, born: u64) -> ProcRow {
         ProcRow { pid, parent, name: format!("p{pid}"), born }

@@ -106,6 +106,13 @@ impl Sandbox {
         for dir in [&sb.data, &sb.state, &sb.path_dir, &sb.tmp, &sb.release, &sb.canary].into_iter().chain(&appdata) {
             std::fs::create_dir_all(dir)?;
         }
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let runtime = sb.tmp.join("runtime");
+            std::fs::create_dir(&runtime)?;
+            std::fs::set_permissions(runtime, std::fs::Permissions::from_mode(0o700))?;
+        }
         std::fs::write(sb.canary.join("untouched.txt"), "No installation or login may write here.")?;
         Ok(Sandbox { canary_before: snapshot(&sb.canary, None), ..sb })
     }
@@ -222,6 +229,8 @@ pub fn child_env(parent: &[(String, String)], sb: &Sandbox, launch: &Launch, fak
     if cfg!(target_os = "linux") {
         // WebKitGTK under xvfb has no usable dmabuf renderer; without this the test build's window stays blank.
         set("WEBKIT_DISABLE_DMABUF_RENDERER", "1".into());
+        set("WEBKIT_DISABLE_COMPOSITING_MODE", "1".into());
+        set("XDG_RUNTIME_DIR", path(&sb.tmp.join("runtime")));
     }
     set("CODEX_HOME", path(&sb.profile.join("fake-home")));
     set("WEBVIEW2_USER_DATA_FOLDER", path(&sb.webview));
@@ -355,6 +364,15 @@ mod tests {
             assert!(!env.contains_key("TMPDIR") && !env.contains_key("XDG_CONFIG_HOME"), "those only exist on macOS and Linux");
         }
         assert_eq!(env["PATH"], sb.path_dir.to_string_lossy());
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(env["TMPDIR"], sb.tmp.to_string_lossy());
+            assert_eq!(env["XDG_RUNTIME_DIR"], sb.tmp.join("runtime").to_string_lossy());
+            assert_eq!(std::fs::metadata(&env["XDG_RUNTIME_DIR"]).unwrap().permissions().mode() & 0o777, 0o700);
+            assert_eq!(env["WEBKIT_DISABLE_DMABUF_RENDERER"], "1");
+            assert_eq!(env["WEBKIT_DISABLE_COMPOSITING_MODE"], "1");
+        }
         assert_eq!(std::fs::read_dir(&sb.path_dir).unwrap().count(), 0, "the PATH folder must be empty, so no real CLI is on it");
         assert_eq!((env["SystemRoot"].as_str(), env["DISPLAY"].as_str()), (r"C:\Windows", ":99"));
         assert_eq!((env["FABER_HIDDEN"].as_str(), env["FABER_CDP_PORT"].as_str()), ("1", "9333"));

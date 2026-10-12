@@ -40,8 +40,8 @@ jobs:
         if: runner.os != 'Linux'
         run: cargo t --all
       - uses: actions/upload-artifact@v4
-        if: always() && runner.os == 'Windows'
+        if: always()
         with:
-          name: screenshots
+          name: screenshots-${{ runner.os }}
           path: target/faber-test/shots/
           if-no-files-found: ignore

@@ -2,7 +2,7 @@
 //! its window loads, writes the result to the file named by `FABER_CHECKS_OUT` and exits. No DevTools port is involved,
 //! so this works on every system.
 
-use crate::app::{Ctx, Paths, STARTUP};
+use crate::app::{Ctx, Paths, startup};
 use crate::plan::Suite;
 use crate::report::Outcome;
 use crate::sandbox::{CliSlot, Launch};
@@ -60,8 +60,9 @@ pub fn run(paths: &Paths, filter: Option<&str>) -> Vec<Outcome> {
     let out = ctx.sb.sandbox.join("checks.json");
     // The `ui` suite never lets the engine look for a CLI: it cannot redirect `/usr/local/bin` on macOS or Linux.
     let launch = Launch { claude: CliSlot::Off, codex: CliSlot::Off, checks_out: Some(out.clone()), ..Launch::default() };
-    let result = ctx.spawn(launch).and_then(|id| {
-        let deadline = Instant::now() + STARTUP;
+    let mut result = ctx.spawn(launch).and_then(|id| {
+        let timeout = startup();
+        let deadline = Instant::now() + timeout;
         loop {
             if let Some(text) = read_report(&out) {
                 return parse_report(&text);
@@ -70,15 +71,21 @@ pub fn run(paths: &Paths, filter: Option<&str>) -> Vec<Outcome> {
                 // It may have written the report just before it exited.
                 return match read_report(&out) {
                     Some(text) => parse_report(&text),
-                    None => Err(format!("the app exited without a checks report ({status}). stderr: {}", ctx.stderr(id))),
+                    None => Err(format!("the app exited without a checks report ({status}). {}", ctx.output(id))),
                 };
             }
             if Instant::now() >= deadline {
-                return Err(format!("no checks report after {} s. stderr: {}", STARTUP.as_secs(), ctx.stderr(id)));
+                return Err(format!("no checks report after {} s. {}", timeout.as_secs(), ctx.output(id)));
             }
             std::thread::sleep(Duration::from_millis(100));
         }
     });
+    if let Err(message) = &result {
+        let log = paths.shots.join("ui-launch.log");
+        if let Err(e) = std::fs::create_dir_all(&paths.shots).and_then(|()| std::fs::write(&log, message)) {
+            result = Err(format!("{message}\ncannot write {}: {e}", log.display()));
+        }
+    }
     let audit = ctx.finish();
     let mut outcomes = match result {
         Ok(checks) if checks.is_empty() => vec![Outcome::fail(Suite::Ui, "report", None, "the page reported no checks")],
