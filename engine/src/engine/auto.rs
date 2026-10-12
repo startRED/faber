@@ -2,7 +2,8 @@
 //! moment it is sent. Once a message needed more than an easy model, the conversation stays with it.
 
 use super::*;
-use crate::route::{INSTRUCTIONS, ROUTER, Routed, candidates, priced, question, read};
+use crate::budget::{Purpose, Shape, Snap, Why, family_of, gate};
+use crate::route::{Asked, Factor, INSTRUCTIONS, Profile, ROUTER, Routed, asked, candidates, choose_paced, question};
 use tokio::sync::oneshot;
 
 /// How long a sent message may wait for its route before the everyday default answers: a timeout, not a target (Erick,
@@ -16,8 +17,10 @@ const ASK_LIMIT: Duration = ROUTE_BUDGET;
 /// A route for a request, ready or on its way.
 pub(super) struct Guess {
     request: String,
-    result: Option<Option<Routed>>,
-    waiters: Vec<oneshot::Sender<Option<Routed>>>,
+    /// What the small model said about the request (kind, level, confidence). The table runs when the message is sent, on the
+    /// quota of that moment, so only this is kept.
+    result: Option<Option<Asked>>,
+    waiters: Vec<oneshot::Sender<Option<Asked>>>,
     /// The new conversation whose answering CLI starts as soon as the route is known.
     warm: Option<String>,
     /// A conversation under way is routed inside its own subscription, where the CLI keeps the history.
@@ -37,10 +40,12 @@ pub(super) type Stop = Arc<Mutex<Option<Session>>>;
 
 /// A router session started ahead of its question.
 pub(super) struct Spare {
-    session: Session,
-    answer: oneshot::Receiver<Option<String>>,
+    pub(super) session: Session,
+    pub(super) answer: oneshot::Receiver<Option<String>>,
     id: u64,
-    vendor: Vendor,
+    pub(super) vendor: Vendor,
+    pub(super) asked: Arc<Mutex<Option<f64>>>,
+    pub(super) model_name: &'static str,
 }
 
 /// A draft's route still holds for the sent text when the text only grew a little past it.
@@ -63,6 +68,38 @@ impl Core {
         (before.reason.starts_with("reason.route.") && before.reason.ends_with(".easy")).then_some(Some(before))
     }
 
+    /// The one door before a request reaches a CLI (3.4): may this vendor and family be asked for this purpose now.
+    pub(super) fn allows(&self, vendor: Vendor, family: Option<&str>, purpose: Purpose, approved: bool) -> Result<(), Why> {
+        let now = self.secs();
+        let mut snap = self.ledger.of(vendor).snap(now);
+        if vendor == Vendor::Claude && self.opts.claude_env_billed {
+            snap.billing = Billing::UsageBilled;
+        }
+        gate(&snap, family, purpose, approved, now)
+    }
+
+    /// The table's pick for the router's verdict, on the quota as it is now. Profiles the gate would refuse are not in the
+    /// pool; with every multiplier and weight at 1 the pick is exactly the table without quota (`choose`).
+    pub(super) fn table(&self, verdict: &Asked, only: Option<Vendor>) -> Option<Routed> {
+        let now = self.secs();
+        let vendors: Vec<Vendor> = self.vendors().into_iter().filter(|v| only.is_none_or(|o| o == *v)).collect();
+        let usable: Vec<Profile> = candidates(&vendors, &self.codex_models)
+            .into_iter()
+            .filter(|p| self.allows(p.vendor, family_of(p.model), Purpose::UserTurn { by_hand: false }, false).is_ok())
+            .collect();
+        let known: BTreeMap<Vendor, (Snap, Shape)> =
+            vendors.iter().map(|v| (*v, (self.ledger.of(*v).snap(now), self.ledger.of(*v).shape()))).collect();
+        let factor = |p: &Profile| {
+            let (snap, shape) = &known[&p.vendor];
+            Factor {
+                m: snap.profile_m(family_of(p.model), shape, self.utc_offset, now),
+                w: self.ledger.of(p.vendor).weights.w.get(p.model).copied().unwrap_or(1.0),
+                step_ok: snap.step_ok(now),
+            }
+        };
+        choose_paced(verdict.kind, verdict.difficulty, verdict.confidence, &usable, &factor)
+    }
+
     /// While the user types in Auto.
     pub(super) fn route_draft(&mut self, req: WarmRequest, text: String) {
         let text = text.trim().to_string();
@@ -82,10 +119,10 @@ impl Core {
     }
 
     /// The route for a sent message: the draft's while it still holds, or a new one.
-    pub(super) fn route_for(&mut self, request: &str, attached: usize, only: Option<Vendor>) -> oneshot::Receiver<Option<Routed>> {
+    pub(super) fn route_for(&mut self, request: &str, attached: usize, only: Option<Vendor>) -> oneshot::Receiver<Option<Asked>> {
         let (tx, rx) = oneshot::channel();
         match self.guess.as_mut().filter(|g| attached == 0 && g.only == only && covers(&g.request, request)) {
-            Some(Guess { result: Some(routed), .. }) => drop(tx.send(routed.clone())),
+            Some(Guess { result: Some(routed), .. }) => drop(tx.send(*routed)),
             Some(g) => g.waiters.push(tx),
             None => {
                 self.start_guess(request.trim().to_string(), attached, None, only);
@@ -98,14 +135,16 @@ impl Core {
     }
 
     /// The router answered (or gave up): the waiting message starts, and a routed draft gets its CLI ready.
-    fn guessed(&mut self, request: &str, only: Option<Vendor>, routed: Option<Routed>) {
+    fn guessed(&mut self, request: &str, only: Option<Vendor>, verdict: Option<Asked>) {
         let Some(g) = self.guess.as_mut().filter(|g| g.request == request && g.only == only && g.result.is_none()) else { return };
-        g.result = Some(routed.clone());
+        g.result = Some(verdict);
         let (waiters, warm) = (std::mem::take(&mut g.waiters), g.warm.take());
         for waiter in waiters {
-            let _ = waiter.send(routed.clone());
+            let _ = waiter.send(verdict);
         }
-        if let (Some(r), Some(id)) = (&routed, warm)
+        // A new conversation's CLI gets ready for the pick of this moment; the pick at dispatch may differ, and then the
+        // process started here is replaced.
+        if let (Some(r), Some(id)) = (verdict.and_then(|v| self.table(&v, only)), warm)
             && self.convs.get(&id).is_some_and(|c| c.messages.is_empty())
         {
             let _ = self.launch(&id, &r.pick());
@@ -118,9 +157,8 @@ impl Core {
     }
 
     fn start_guess(&mut self, request: String, attached: usize, warm: Option<String>, only: Option<Vendor>) {
-        let used = |vendor: Vendor| self.quotas.iter().filter(|((v, _), _)| *v == vendor).map(|(_, q)| q.used).fold(0.0, f64::max);
         let vendors: Vec<Vendor> = self.vendors().into_iter().filter(|v| only.is_none_or(|o| o == *v)).collect();
-        let cands = priced(&candidates(&vendors, &self.codex_models), &used);
+        let cands = candidates(&vendors, &self.codex_models);
         // One candidate needs no router: the everyday default answers.
         let (answer, stop) = if cands.len() > 1 { self.ask_router(question(&request, attached)) } else { (None, None) };
         if let Some(old) = self.guess.replace(Guess { request: request.clone(), result: None, waiters: vec![], warm, only, stop }) {
@@ -129,7 +167,7 @@ impl Core {
         let me = self.me.clone();
         tokio::spawn(async move {
             let routed = match answer {
-                Some(rx) => tokio::time::timeout(ASK_LIMIT, rx).await.ok().and_then(|r| r.ok()).flatten().and_then(|a| read(&a, &cands)),
+                Some(rx) => tokio::time::timeout(ASK_LIMIT, rx).await.ok().and_then(|r| r.ok()).flatten().and_then(|a| asked(&a)),
                 None => None,
             };
             if let Some(core) = me.upgrade() {
@@ -150,37 +188,76 @@ impl Core {
             tokio::spawn(async move { drop(tx.send(answer.await)) });
             return (Some(rx), None);
         }
-        let Some(Spare { session, answer, .. }) = self.spare.take().or_else(|| self.open_router()) else { return (None, None) };
+        let Some(Spare { session, answer, asked, vendor, model_name, .. }) = self.spare.take().or_else(|| self.open_router()) else {
+            return (None, None);
+        };
+        *asked.lock().unwrap_or_else(|e| e.into_inner()) = Some(self.secs());
         session.send(UserTurn::text(prompt));
+        let me = self.me.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(ASK_LIMIT).await;
+            if let (Some(at), Some(core)) = (asked.lock().unwrap_or_else(|e| e.into_inner()).take(), me.upgrade()) {
+                core.lock().unwrap_or_else(|e| e.into_inner()).note_span(vendor, at, model_name, None, true);
+            }
+        });
         (Some(answer), Some(Arc::new(Mutex::new(Some(session)))))
     }
 
     /// A router session waiting for its question: a thread on the running Codex process, or a Claude process of its own.
     fn open_router(&mut self) -> Option<Spare> {
         let router = ROUTER.into_iter().find(|(vendor, model, _)| {
-            self.opts.clis.contains_key(vendor) && (*vendor != Vendor::Codex || self.codex_models.iter().any(|m| m == model))
+            self.opts.clis.contains_key(vendor)
+                && (*vendor != Vendor::Codex || self.codex_models.iter().any(|m| m == model))
+                && self.allows(*vendor, family_of(model), Purpose::Router, false).is_ok()
         });
-        let ((vendor, model, effort), cli) = router.and_then(|r| Some((r, self.opts.clis.get(&r.0)?.clone())))?;
+        let (vendor, model, effort) = router?;
+        self.open_aux(vendor, model, effort, INSTRUCTIONS, Purpose::Router)
+    }
+
+    pub(super) fn open_aux(
+        &mut self,
+        vendor: Vendor,
+        model: &'static str,
+        effort: &str,
+        instructions: &str,
+        purpose: Purpose,
+    ) -> Option<Spare> {
+        self.allows(vendor, family_of(model), purpose, false).ok()?;
+        let cli = self.opts.clis.get(&vendor)?.clone();
         let (tx, answer) = oneshot::channel();
         let text = Arc::new(Mutex::new(String::new()));
         let tx = Arc::new(Mutex::new(Some(tx)));
         let me = self.me.clone();
+        let asked = Arc::new(Mutex::new(None));
+        let ran = asked.clone();
+        let stop = Stop::default();
+        let closer = stop.clone();
         let sink: EventSink = Arc::new(move |e| match e {
             EngineEvent::Text(t) => text.lock().unwrap_or_else(|e| e.into_inner()).push_str(&t),
-            EngineEvent::Done { .. } | EngineEvent::Error { .. } => {
+            e @ (EngineEvent::Done { .. } | EngineEvent::Error { .. }) => {
+                if let (Some(start), Some(core)) = (ran.lock().unwrap_or_else(|e| e.into_inner()).take(), me.upgrade()) {
+                    let (cost, incomplete) = usage::fresh_price(&e, model);
+                    core.lock().unwrap_or_else(|e| e.into_inner()).note_span(vendor, start, model, cost, incomplete);
+                }
+                let ok = matches!(e, EngineEvent::Done { ok: true, .. });
                 if let Some(tx) = tx.lock().unwrap_or_else(|e| e.into_inner()).take() {
-                    let _ = tx.send(Some(std::mem::take(&mut *text.lock().unwrap_or_else(|e| e.into_inner()))));
+                    let _ = tx.send(ok.then(|| std::mem::take(&mut *text.lock().unwrap_or_else(|e| e.into_inner()))));
                 }
             }
             // The router's process sees account-wide news too (Codex hands it to one thread): the ledger must not miss it.
             e @ (EngineEvent::Quota { .. } | EngineEvent::Signals(_)) => {
                 if let Some(core) = me.upgrade() {
-                    core.lock().unwrap_or_else(|e| e.into_inner()).note_account_event(vendor, e);
+                    let mut c = core.lock().unwrap_or_else(|e| e.into_inner());
+                    c.note_account_event(vendor, e);
+                    if c.allows(vendor, family_of(model), purpose, false).is_err() {
+                        stop_router(Some(closer.clone()));
+                    }
                 }
             }
             _ => {}
         });
-        let (cwd, instructions) = (self.opts.data_dir.clone(), Some(INSTRUCTIONS.to_string()));
+        let model_name = model;
+        let (cwd, instructions) = (self.opts.data_dir.clone(), Some(instructions.to_string()));
         let (model, effort) = (Some(model.to_string()), Some(effort.to_string()));
         let session = match vendor {
             Vendor::Codex => self
@@ -204,8 +281,9 @@ impl Core {
                 sink,
             ),
         };
+        *stop.lock().unwrap_or_else(|e| e.into_inner()) = Some(session.clone());
         self.next_sid += 1;
-        Some(Spare { session, answer, id: self.next_sid, vendor })
+        Some(Spare { session, answer, id: self.next_sid, vendor, asked, model_name })
     }
 
     /// Starts a routed first message once its route is known, or the everyday default when the route is late.
@@ -236,9 +314,10 @@ impl Core {
             m.vendor = Some(pick.vendor);
             m.model = pick.model.clone();
             m.reason = Some(pick.reason.clone());
+            m.pace = pick.pace.clone();
         }
         self.save(id);
-        if let Err(error) = self.start(id, reply_id, &pick, text, images) {
+        if let Err(error) = self.dispatch(id, reply_id, &pick, text, images, false) {
             self.fail_reply(id, reply_id, error);
         }
     }
@@ -249,6 +328,9 @@ impl Core {
             return;
         };
         m.status = Some(Status::Stopped);
+        m.wait_until = None;
+        m.permissions = None;
+        self.transfers.remove(id);
         let reply_id = m.id.clone();
         self.save(id);
         self.push(id, Some(&reply_id), true);

@@ -36,8 +36,11 @@ pub struct Span {
     pub start: f64,
     pub end: f64,
     pub model: String,
-    /// What the span cost in the vendor's own unit (US dollars for Claude, credits for Codex); None when not known.
+    /// What the span cost in the vendor's own unit (API-equivalent US dollars on either vendor); None when not known.
     pub cost: Option<f64>,
+    /// Missing counters exclude a span from calibration, while its known API cost is retained.
+    #[serde(default)]
+    pub incomplete: bool,
 }
 
 /// Movement in points between two readings of one window, when they say something: the same reset, a gap of at most 12
@@ -106,6 +109,8 @@ impl Learned {
 pub struct Outside {
     /// Points moved in gaps with no Faber turn in them (gaps under two points ignored): a lower bound.
     pub outside: f64,
+    /// A quota change that own measured turns could not explain; never added to own USD spend.
+    pub foreign: bool,
     /// Points moved in all the gaps that said something.
     pub observed: f64,
     /// Hours of the gaps with no Faber turn in them.
@@ -131,6 +136,7 @@ impl Outside {
 
 pub fn outside(points: &[Point], spans: &[Span], now: f64) -> Outside {
     let mut o = Outside::default();
+    let calibrated = weights(&stretches(points, spans));
     let (mut quiet_before, mut outside_before) = (0.0, 0.0);
     for pair in points.windows(2) {
         let (a, b) = (&pair[0], &pair[1]);
@@ -139,9 +145,29 @@ pub fn outside(points: &[Point], spans: &[Span], now: f64) -> Outside {
         }
         let Some(d) = movement(a, b) else { continue };
         o.observed += d;
-        if spans.iter().any(|s| overlaps(s, a.at, b.at)) {
+        let inside: Vec<&Span> = spans.iter().filter(|s| overlaps(s, a.at, b.at)).collect();
+        let expected: Option<f64> = inside
+            .iter()
+            .map(|s| {
+                if s.incomplete {
+                    return None;
+                }
+                Some(s.cost? * calibrated.raw.get(&s.model)?)
+            })
+            .sum();
+        let d = if inside.is_empty() {
+            o.foreign |= d > 0.0;
+            d
+        } else if let Some(expected) = expected {
+            if d <= 2.0 * expected + 1.0 {
+                continue;
+            }
+            (d - expected).max(0.0)
+        } else {
+            let covered: f64 = inside.iter().map(|s| (s.end.min(b.at) - s.start.max(a.at)).max(0.0)).sum();
+            o.foreign |= d >= OUTSIDE_MIN && b.at - a.at > covered + 120.0;
             continue;
-        }
+        };
         let hours = (b.at - a.at) / 3600.0;
         o.quiet_hours += hours;
         if d < OUTSIDE_MIN {
@@ -150,13 +176,12 @@ pub fn outside(points: &[Point], spans: &[Span], now: f64) -> Outside {
             }
             continue;
         }
+        o.foreign = true;
         o.outside += d;
-        if b.at > now - 7200.0 {
-            o.recent += d;
-        } else {
-            outside_before += d;
-            quiet_before += hours;
-        }
+        let recent_share = ((b.at - a.at.max(now - 7200.0)) / (b.at - a.at)).clamp(0.0, 1.0);
+        o.recent += d * recent_share;
+        outside_before += d * (1.0 - recent_share);
+        quiet_before += hours * (1.0 - recent_share);
     }
     o.rate = if quiet_before > 0.0 { outside_before / quiet_before } else { 0.0 };
     o
@@ -184,6 +209,10 @@ pub fn stretches(points: &[Point], spans: &[Span]) -> Vec<Stretch> {
         }
         let inside: Vec<&Span> = spans.iter().filter(|s| overlaps(s, a.at, b.at)).collect();
         let Some(first) = inside.first() else { continue };
+        let covered: f64 = inside.iter().map(|s| (s.end.min(b.at) - s.start.max(a.at)).max(0.0)).sum();
+        if b.at - a.at > covered + 120.0 || inside.iter().any(|s| s.incomplete) {
+            continue;
+        }
         let one_model = inside.iter().all(|s| s.model == first.model);
         let apart = inside.iter().enumerate().all(|(j, s)| inside.iter().skip(j + 1).all(|t| s.end <= t.start || t.end <= s.start));
         let cost: Option<f64> = inside.iter().map(|s| s.cost).sum();
@@ -192,6 +221,10 @@ pub fn stretches(points: &[Point], spans: &[Span]) -> Vec<Stretch> {
         if let (true, true, Some(cost), false, false) = (one_model, apart, cost, before, after)
             && cost > 0.0
         {
+            let prior: Vec<f64> = found.iter().filter(|s: &&Stretch| s.model == first.model).map(|s| s.ppd).collect();
+            if prior.len() >= 3 && d > 2.0 * quartile(&sorted(prior)) * cost + 1.0 {
+                continue;
+            }
             found.push(Stretch { model: first.model.clone(), ppd: d / cost });
         }
     }
@@ -201,6 +234,9 @@ pub fn stretches(points: &[Point], spans: &[Span]) -> Vec<Stretch> {
 /// What the stretches say about a vendor's models.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Weights {
+    /// Unnormalised points per API-equivalent dollar, compared only for shared models.
+    #[serde(default)]
+    pub raw: BTreeMap<String, f64>,
     /// The weight of each model in its vendor's quota: raw points per cost over the vendor's median, 0.5 to 2. A model
     /// with too few stretches, or an unreliable estimate, has no entry and counts as 1.
     pub w: BTreeMap<String, f64>,
@@ -246,11 +282,17 @@ pub fn weights(stretches: &[Stretch]) -> Weights {
         return Weights::default();
     }
     let capacity = median(&sorted(raw.values().copied().collect()));
-    let w = raw.into_iter().map(|(m, r)| (m, (r / capacity).clamp(0.5, 2.0))).collect();
-    Weights { w, capacity: Some(capacity) }
+    let w = raw.iter().map(|(m, r)| (m.clone(), (r / capacity).clamp(0.5, 2.0))).collect();
+    Weights { raw, w, capacity: Some(capacity) }
 }
 
 /// Whether a vendor's capacity moved enough to be a different plan.
 pub fn capacity_changed(old: f64, new: f64) -> bool {
     old > 0.0 && new > 0.0 && (new / old > CAPACITY_JUMP || old / new > CAPACITY_JUMP)
+}
+
+/// Compare like with like: new models qualifying do not imply a different plan.
+pub fn same_models_changed(old: &Weights, new: &Weights) -> bool {
+    let ratios: Vec<f64> = old.raw.iter().filter_map(|(model, before)| new.raw.get(model).map(|after| after / before)).collect();
+    !ratios.is_empty() && capacity_changed(1.0, median(&sorted(ratios)))
 }
