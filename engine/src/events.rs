@@ -3,6 +3,34 @@
 use crate::model::Image;
 use serde_json::Value;
 
+/// Startup advertisements are information, never authority to admit an automated role.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Capabilities {
+    pub names: Vec<String>,
+}
+
+impl Capabilities {
+    pub fn from_init(msg: &Value) -> Option<Self> {
+        if msg["type"] != "system" || msg["subtype"] != "init" {
+            return None;
+        }
+        let names = msg["capabilities"].as_array()?.iter().map(|v| v.as_str().map(String::from)).collect::<Option<Vec<_>>>()?;
+        Some(Self { names })
+    }
+}
+
+/// Project event adapters use fixed keys; Chat keeps its existing result strings.
+pub fn terminal_reason(raw: &str) -> &'static str {
+    match raw {
+        "success" | "completed" | "end_turn" => "reason.complete",
+        "interrupted" | "cancelled" => "reason.interrupted",
+        "error_max_turns" | "max_turns" => "reason.turnLimit",
+        "error_max_budget_usd" | "max_budget_usd" => "reason.budget",
+        "error_during_execution" | "failed" => "reason.failed",
+        _ => "reason.unknown",
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum EngineEvent {
     Started {

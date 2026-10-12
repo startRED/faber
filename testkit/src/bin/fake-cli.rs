@@ -4,6 +4,9 @@ use faber_testkit::fake::{Env, run};
 use std::io;
 
 fn main() {
+    if let Some(code) = faber_testkit::gate::guard_mode() {
+        std::process::exit(code);
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let [mode, sandbox] = args.as_slice()
         && matches!(

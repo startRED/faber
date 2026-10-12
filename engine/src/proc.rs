@@ -5,14 +5,168 @@ use std::path::Path;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+#[cfg(not(windows))]
 use tokio::process::{Child, Command};
+use tokio::time::{Duration, Instant};
+
+/// Only automatic roles arm silence; explicit interrupts always have a fixed grace period.
+#[derive(Default)]
+pub(crate) struct TurnWatch {
+    running: bool,
+    silent: Option<Instant>,
+    interrupt: Option<Instant>,
+    awaiting_permission: bool,
+}
+
+impl TurnWatch {
+    pub fn begin(&mut self, automated: bool) {
+        self.running = true;
+        self.silent = automated.then(|| Instant::now() + Duration::from_secs(120));
+        self.awaiting_permission = false;
+    }
+    pub fn activity(&mut self) {
+        if self.silent.is_some() {
+            self.silent = Some(Instant::now() + Duration::from_secs(120));
+        }
+    }
+    pub fn interrupt(&mut self) {
+        self.interrupt.get_or_insert_with(|| Instant::now() + Duration::from_secs(5));
+    }
+    pub fn finish(&mut self) {
+        self.running = false;
+        self.silent = None;
+        self.interrupt = None;
+        self.awaiting_permission = false;
+    }
+    pub fn pause(&mut self) {
+        self.awaiting_permission = true;
+    }
+    pub fn resume(&mut self) {
+        self.awaiting_permission = false;
+        self.activity();
+    }
+    pub fn stopping(&self) -> bool {
+        self.interrupt.is_some()
+    }
+    pub fn active(&self) -> bool {
+        self.running || self.interrupt.is_some()
+    }
+    pub fn deadline(&self) -> Option<Instant> {
+        self.interrupt.or(if self.awaiting_permission { None } else { self.silent })
+    }
+}
+
+pub(crate) async fn wait_deadline(deadline: Option<Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(deadline).await,
+        None => std::future::pending().await,
+    }
+}
 
 pub struct Proc {
     pub stdin: Box<dyn AsyncWrite + Send + Unpin>,
     pub stdout: Box<dyn AsyncRead + Send + Unpin>,
     pub stderr: Option<Box<dyn AsyncRead + Send + Unpin>>,
     /// The real process, if there is one; a replayed recording has none.
-    pub child: Option<Child>,
+    pub child: Option<Process>,
+}
+
+/// Owned handles only. Windows owns a non-inheritable kill-on-close job; no descendant is ever adopted by PID.
+pub struct Process {
+    #[cfg(not(windows))]
+    inner: Child,
+    #[cfg(windows)]
+    inner: std::process::Child,
+    #[cfg(windows)]
+    job: Arc<Mutex<Option<win32job::Job>>>,
+}
+
+impl Process {
+    pub fn id(&self) -> Option<u32> {
+        #[cfg(windows)]
+        {
+            Some(self.inner.id())
+        }
+        #[cfg(not(windows))]
+        {
+            self.inner.id()
+        }
+    }
+
+    pub fn start_kill(&mut self) -> io::Result<()> {
+        #[cfg(windows)]
+        {
+            drop(self.job.lock().unwrap().take());
+            if self.inner.try_wait()?.is_none() {
+                self.inner.kill()?;
+            }
+            Ok(())
+        }
+        #[cfg(not(windows))]
+        {
+            self.inner.start_kill()
+        }
+    }
+
+    pub async fn wait(&mut self) -> io::Result<std::process::ExitStatus> {
+        #[cfg(windows)]
+        {
+            loop {
+                if let Some(status) = self.inner.try_wait()? {
+                    return Ok(status);
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            self.inner.wait().await
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for Process {
+    fn drop(&mut self) {
+        drop(self.job.lock().unwrap().take());
+        let _ = self.inner.kill();
+    }
+}
+
+/// Each executable embedding the engine dispatches this before starting its UI/runtime. The trusted guard waits
+/// for the parent to assign its job, acknowledges one byte, then launches the unmodified CLI with inherited pipes.
+pub fn guard_mode() -> Option<i32> {
+    #[cfg(windows)]
+    {
+        let args: Vec<_> = std::env::args_os().skip(1).collect();
+        if args.first().is_some_and(|s| s == "--faber-process-guard") {
+            return Some(guard(&args[1..]).unwrap_or(1));
+        }
+    }
+    None
+}
+
+#[cfg(windows)]
+fn guard(args: &[std::ffi::OsString]) -> io::Result<i32> {
+    use std::io::{Read, Write};
+    use std::os::windows::process::CommandExt;
+    let (binary, args) = args.split_first().ok_or_else(|| io::Error::other("missing guarded program"))?;
+    let mut go = [0];
+    io::stdin().read_exact(&mut go)?;
+    if go != *b"G" {
+        return Err(io::Error::other("guard not admitted"));
+    }
+    // The parent writes no CLI input until this ack, so stdin's buffer cannot swallow a protocol message.
+    io::stdout().write_all(b"R")?;
+    io::stdout().flush()?;
+    let status = std::process::Command::new(binary)
+        .args(args)
+        .creation_flags(0x0800_0000)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()?;
+    Ok(status.code().unwrap_or(1))
 }
 
 pub type Spawner = Arc<dyn Fn(&str, &[String], &Path) -> io::Result<Proc> + Send + Sync>;
@@ -20,17 +174,83 @@ pub type Spawner = Arc<dyn Fn(&str, &[String], &Path) -> io::Result<Proc> + Send
 /// Starts a real process with piped stdio, no shell and, on Windows, no console window.
 pub fn real_spawner() -> Spawner {
     Arc::new(|bin, args, cwd| {
-        let mut cmd = Command::new(bin);
-        cmd.args(args).current_dir(cwd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
         #[cfg(windows)]
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-        let mut child = cmd.spawn()?;
-        Ok(Proc {
-            stdin: Box::new(child.stdin.take().expect("piped stdin")),
-            stdout: Box::new(child.stdout.take().expect("piped stdout")),
-            stderr: child.stderr.take().map(|s| Box::new(s) as Box<dyn AsyncRead + Send + Unpin>),
-            child: Some(child),
-        })
+        {
+            spawn_windows(bin, args, cwd)
+        }
+        #[cfg(not(windows))]
+        {
+            let mut cmd = Command::new(bin);
+            cmd.args(args).current_dir(cwd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
+            let mut child = cmd.spawn()?;
+            Ok(Proc {
+                stdin: Box::new(child.stdin.take().expect("piped stdin")),
+                stdout: Box::new(child.stdout.take().expect("piped stdout")),
+                stderr: child.stderr.take().map(|s| Box::new(s) as Box<dyn AsyncRead + Send + Unpin>),
+                child: Some(Process { inner: child }),
+            })
+        }
+    })
+}
+
+#[cfg(windows)]
+fn spawn_windows(bin: &str, args: &[String], cwd: &Path) -> io::Result<Proc> {
+    use std::io::Write;
+    use std::os::windows::{io::AsRawHandle, process::CommandExt};
+    let job = win32job::Job::create().map_err(io::Error::other)?;
+    let mut limits = job.query_extended_limit_info().map_err(io::Error::other)?;
+    limits.limit_kill_on_job_close();
+    job.set_extended_limit_info(&limits).map_err(io::Error::other)?;
+    let child = std::process::Command::new(std::env::current_exe()?)
+        .arg("--faber-process-guard")
+        .arg(bin)
+        .args(args)
+        .current_dir(cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .creation_flags(0x0800_0000)
+        .spawn()?;
+    let mut process = Process { inner: child, job: Arc::new(Mutex::new(Some(job))) };
+    process
+        .job
+        .lock()
+        .unwrap()
+        .as_ref()
+        .expect("owned job")
+        .assign_process(process.inner.as_raw_handle() as isize)
+        .map_err(io::Error::other)?;
+    let mut stdin = process.inner.stdin.take().expect("piped stdin");
+    stdin.write_all(b"G")?;
+    stdin.flush()?;
+    let mut stdin = tokio::process::ChildStdin::from_std(stdin)?;
+    let mut stdout = tokio::process::ChildStdout::from_std(process.inner.stdout.take().expect("piped stdout"))?;
+    let (input, mut pending) = tokio::io::duplex(8192);
+    let (mut output, reader) = tokio::io::duplex(8192);
+    let job = process.job.clone();
+    // Await startup outside the synchronous spawner/engine lock; no CLI input can precede the guard ack.
+    tokio::spawn(async move {
+        let mut ack = [0];
+        if !matches!(tokio::time::timeout(Duration::from_secs(5), stdout.read_exact(&mut ack)).await, Ok(Ok(_))) || ack != *b"R" {
+            drop(job.lock().unwrap().take());
+            return;
+        }
+        let input = async move {
+            let _ = tokio::io::copy(&mut pending, &mut stdin).await;
+            let _ = stdin.shutdown().await;
+        };
+        let output = async move {
+            let _ = tokio::io::copy(&mut stdout, &mut output).await;
+            let _ = output.shutdown().await;
+        };
+        tokio::join!(input, output);
+    });
+    let stderr = process.inner.stderr.take().map(tokio::process::ChildStderr::from_std).transpose()?;
+    Ok(Proc {
+        stdin: Box::new(input),
+        stdout: Box::new(reader),
+        stderr: stderr.map(|s| Box::new(s) as Box<dyn AsyncRead + Send + Unpin>),
+        child: Some(process),
     })
 }
 
@@ -81,20 +301,59 @@ pub(crate) async fn write_line(stdin: &mut (dyn AsyncWrite + Send + Unpin), msg:
     stdin.flush().await.map_err(|_| WriteError { torn: true })
 }
 
-/// Ends a process: closes its input, then kills it. Returns its exit code when it had one.
-pub(crate) async fn stop(stdin: &mut (dyn AsyncWrite + Send + Unpin), child: &mut Option<Child>) {
-    let _ = stdin.shutdown().await;
+/// Ends the owned job on Windows and the held child elsewhere. It never accepts a PID or a process snapshot.
+pub(crate) async fn stop(stdin: &mut (dyn AsyncWrite + Send + Unpin), child: &mut Option<Process>) {
+    let _ = tokio::time::timeout(Duration::from_secs(1), stdin.shutdown()).await;
     if let Some(child) = child {
         let _ = child.start_kill();
     }
 }
 
-pub(crate) async fn exit_code(child: &mut Option<Child>) -> String {
+pub(crate) async fn exit_code(child: &mut Option<Process>) -> String {
     match child {
         Some(child) => match child.wait().await {
             Ok(status) => status.code().map_or("unknown".into(), |c| c.to_string()),
             Err(_) => "unknown".into(),
         },
         None => "0".into(),
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn waiting_for_permission_has_no_silence_deadline_but_stop_is_still_bounded() {
+        let mut watch = TurnWatch::default();
+        watch.begin(true);
+        watch.pause();
+        watch.activity();
+        assert!(watch.active());
+        assert_eq!(watch.deadline(), None);
+        watch.interrupt();
+        assert_eq!(watch.deadline(), Some(Instant::now() + Duration::from_secs(5)));
+        watch.finish();
+        watch.begin(true);
+        watch.pause();
+        watch.resume();
+        assert_eq!(watch.deadline(), Some(Instant::now() + Duration::from_secs(120)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn output_and_repeated_interrupts_cannot_extend_the_stop_grace() {
+        let mut watch = TurnWatch::default();
+        assert!(!watch.active());
+        watch.begin(true);
+        assert_eq!(watch.deadline(), Some(Instant::now() + Duration::from_secs(120)));
+        watch.interrupt();
+        let stop = watch.deadline();
+        tokio::time::advance(Duration::from_secs(4)).await;
+        watch.activity();
+        watch.interrupt();
+        assert_eq!(watch.deadline(), stop);
+        watch.finish();
+        assert!(!watch.stopping());
+        assert_eq!(watch.deadline(), None);
     }
 }

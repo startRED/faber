@@ -112,6 +112,45 @@ interrupted result acknowledged; ignored interrupt kills owned descendants; reus
 Scripted unit tests use fake `Proc`; real process/metadata escapes run only in hidden testkit scenarios.
 Focused proof: `cargo test -p faber-engine --test project_policy` plus both driver session test targets.
 
+Task 2 follow-up evidence (2026-10-12, `selfdev-t2`):
+
+- Baseline implementation: `11c798c`. All automated roles still fail admission before spawning; Chat/manual
+  Projects launch defaults are preserved. Cross-vendor review findings, corrections, controls and raw bounded
+  evidence are in [the research report](../../research/2026-10-12-project-policy-probes.md) and its JSON sibling.
+- Review regressions cover completion without `turn/started`, sends during interrupt grace, customization
+  switches, installed Claude flags, all nine fake-wire escape requests, and unconditional admission denial.
+  The review's no-Codex-shell-switch claim and proposed `on-request` containment fix are false.
+- Windows tree blocker is closed: assign the trusted host guard to a kill-on-close job before the CLI can start.
+  Hidden fake tests require the guard/CLI/child/grandchild to disappear on stop, ownership drop and host crash;
+  stale creation-time/PID records cannot kill a live peer. PID reuse is simulated deterministically, not forced.
+  Non-Windows retains its existing child path and tree blocker.
+- R103 owner authorization granted a separate six-slot subscription experiment, not unattended admission.
+  The hidden opt-in example consumed all six slots (fourteen one-escape prompts); slot 4 failed before a prompt
+  and was not retried. Claude 2.1.296/haiku low exposed no tools and left all six artifacts unchanged.
+  Codex 0.162.1/gpt-6-luna low initially wrote outside via implicit TEMP roots; disable shell/subagent features,
+  implicit TEMP roots and network. Its tightened final session left all six tested artifacts unchanged.
+- Model-reported EPERM accompanies failed native-code items; independently checked artifacts are the evidence.
+  An absent unapproved MCP tool is not hostile-config containment proof. Linked common git metadata, read scope,
+  configured customizations and resumed policy remain unproved. Never unlock from these bounded observations.
+- Exposure remains blocked: cumulative usage was recorded, but no hard input/output/nested-call bound or real
+  interrupt-latency sample exists. All successful turns completed before the probe deadline; elapsed turn time
+  is not stop latency. No guessed token price, daily headroom or safe stop margin is introduced (Task 3 owns grants).
+- Spec issue: section 5 requires restrictions even for automated read-only roles, while section 13's read-only
+  fallback is ambiguous. Keep saved/local planning available; deny unverified automated CLI roles.
+- Shared file inventory and review disposition are in the research report. Git broker/lease files were untouched.
+- Follow-up GA: all seven required proof commands exit 0; `cargo t --all` reports 590 passed, no failures/skips.
+  The Windows fake tree scenario removes four owned processes in each mode and preserves the stale-PID peer.
+
+Second review follow-up: [Opus disposition](../../research/2026-10-12-task-2-opus-review.md).
+Manual sessions have no automatic silence interrupt; role watches and explicit stops remain bounded.
+Provider pinning matches the probe, role resume IDs are validated, guard acknowledgement is asynchronous,
+the cache example dispatches guard mode, and reordered Codex completions require a matching RPC identity.
+Both role loops replay native-denial fixtures. Job proofs cover inherited members; delegated WMI/task/COM
+launches, read/network scope, hostile config, mention expansion and real resume policy remain prerequisites.
+No additional model session is authorized or executed in this round; all automated roles remain denied.
+Second-review GA: all required proofs exit 0; full run 602 passed, no failures/skips. The EOF regression was
+reproduced with a fake child and fixed through forwarding-future ownership. Warm guard 2.0 MB, warm tree 117.2 MB.
+
 - [ ] Add role policy distinct from existing side-question `instructions`, which currently disables needed worker behavior.
 - [ ] Keep official CLIs unchanged; configure per-session native-tool restrictions without global config edits.
 - [ ] Use structured engine `read`/`patch`/`proof` requests; no general shell parser or new MCP server.

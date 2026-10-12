@@ -20,6 +20,29 @@ pub struct Entry {
     pub msg: Value,
 }
 
+pub fn controlled() -> (Spawner, BufReader<tokio::io::DuplexStream>, tokio::io::DuplexStream) {
+    let (stdin, input) = tokio::io::duplex(65536);
+    let (output, stdout) = tokio::io::duplex(65536);
+    let process = Arc::new(Mutex::new(Some(Proc { stdin: Box::new(stdin), stdout: Box::new(stdout), stderr: None, child: None })));
+    (Arc::new(move |_, _, _| Ok(process.lock().unwrap().take().unwrap())), BufReader::new(input), output)
+}
+
+pub async fn read_message(input: &mut BufReader<tokio::io::DuplexStream>) -> Value {
+    let mut line = String::new();
+    tokio::time::timeout(Duration::from_secs(1), input.read_line(&mut line)).await.expect("no message on fake wire").unwrap();
+    serde_json::from_str(&line).unwrap()
+}
+
+pub async fn expect_method(input: &mut BufReader<tokio::io::DuplexStream>, method: &str) -> Value {
+    let msg = read_message(input).await;
+    assert_eq!(msg["method"], method);
+    msg
+}
+
+pub async fn emit(output: &mut tokio::io::DuplexStream, msg: Value) {
+    output.write_all(format!("{msg}\n").as_bytes()).await.unwrap();
+}
+
 pub fn fixture(vendor: &str, name: &str) -> Vec<Entry> {
     let path = format!("{}/../tests/fixtures/{vendor}/{name}.jsonl", env!("CARGO_MANIFEST_DIR"));
     std::fs::read_to_string(&path)
