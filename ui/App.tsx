@@ -731,7 +731,15 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                   {/* The effects of the look sit behind the greeting; dust keeps clear of the text and the composer. */}
                   <Ambient vendors={state().vendors} avoid={() => [...work!.querySelectorAll('.hello, .lead, .composer, .try, .resume')]} />
                 </Show>
-                <div class="thread" classList={{ welcome: newChat() }} ref={(el) => (thread = el)} onScroll={(e) => onScroll(e.currentTarget)} inert={trapped()}>
+                <div class="thread" classList={{ welcome: newChat() }} ref={(el) => {
+                  thread = el;
+                  onMount(() => {
+                    // Keep the tail visible as the composer grows, without pulling a reader back down.
+                    const observer = new ResizeObserver(() => { if (stick) el.scrollTop = el.scrollHeight; });
+                    observer.observe(el);
+                    onCleanup(() => observer.disconnect());
+                  });
+                }} onScroll={(e) => onScroll(e.currentTarget)} inert={trapped()}>
                   <Show
                     when={newChat()}
                     fallback={

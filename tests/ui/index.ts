@@ -24,6 +24,7 @@ import './running.check.ts';
 import './settings.check.ts';
 import './setup.check.ts';
 import './styles.check.ts';
+import './thread.check.ts';
 import './tutorial.check.ts';
 
 type Vars = Record<string, string | number>;

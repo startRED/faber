@@ -3,7 +3,7 @@
    a theme, a preset and a theme file are only different values for the same names. */
 
 * { box-sizing: border-box; }
-:root { --dur-exit: 180ms; }
+:root { --dur-exit: 180ms; --thread-tail: 64px; }
 html, body, #root { height: 100%; margin: 0; }
 body { background: var(--frame); color: var(--ink); font-family: var(--font-ui); font-stretch: var(--ui-stretch); font-size: var(--fs-ui); line-height: 1.45; overflow: hidden; }
 ::selection { background: var(--selection); color: var(--ink); }
@@ -124,7 +124,7 @@ input, textarea { caret-color: var(--accent); }
 .topbar .right { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
 .topbar .chip { height: 30px; flex: none; }
 .work { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; min-height: 0; min-width: 0; }
-.thread { position: relative; z-index: 1; grid-column: 1; grid-row: 1; overflow-y: auto; overflow-x: hidden; padding: calc(22px * var(--dens)) 24px 8px; }
+.thread { position: relative; z-index: 1; grid-column: 1; grid-row: 1; overflow-y: auto; overflow-x: hidden; padding: calc(22px * var(--dens)) 24px var(--thread-tail); }
 .dock { position: relative; z-index: 1; grid-column: 1; grid-row: 2; }
 .col { width: min(100%, 660px); margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(18px * var(--dens)); }
 .empty { display: grid; justify-items: start; gap: 16px; padding-top: 14vh; }
