@@ -19,6 +19,8 @@ coordinating session:
 | E6 | The automatic install path must be made safe, not refused |
 | E7 | Answer to Q1: tools Faber installs live in Faber's own store, apart from the CLI configuration, with a per-tool "also use outside Faber" switch |
 | E8 | Answer to Q2: background tool tests are approved. No pile-up; light tests on scaled-down prototypes (a sample, a mini app, one screen, a short clip), never a full rebuild; they may run at any time, spread out; keep the shared-account pause and "never the daily grant" unless there is a strong reason |
+| E17 | Tools follow the purpose of the request, not only its technical type: "build an app" and "build an app to sell" get different kits. Purpose, audience, deliverable and stage are first-class facets. An AI should choose the tools; the most accurate method is to be proven, kept per task family. Cover every kind of work with a task-family taxonomy for cold start (priors and facets, never a hand-written kit; E3 binds) |
+| E18 | Overlapping tools need not be either/or: they may run together or in separate passes (a base pass, then polish passes with their own focus), each polish pass kept only if it beats the version before it. Erick names ponytail, caveman, Taste-Skill and Impeccable as good tools for cold-start priors |
 
 Erick's answers E10 to E14 in the companion spec bind this spec too: the self-development MVP carries the complete
 software bar (section 17.1); result quality is measured against the plain CLIs on probes, and against the real TL-ADE
@@ -28,7 +30,7 @@ code written from memory in an unfamiliar stack, a missing tool-gap loop and Jav
 matches the TL-ADE's pinned, hashed, role-scoped skills (section 8).
 
 Feature names follow AGENTS.md: no vendor names. The names used here are **Kit**, **Loadout**, **Tool card**,
-**Field brief**, **Kit receipt**, **Tool store** and **Probe lane**.
+**Field brief**, **Kit receipt**, **Tool store**, **Probe lane**, **Picker** and **Pass**.
 
 ## 1. The failure this fixes
 
@@ -100,16 +102,35 @@ Numbers come from abstracts and search snippets; nobody re-ran them. Treat them 
   measurement agrees: a small model classifying blind plus a fixed table got 81 of 88 picks right; letting a model
   choose among anonymous profiles got 76 of 88, spent more and was slower (roadmap, "Auto: a blind router").
 - **Reusable workflows from past runs help.** Agent Workflow Memory (2409.07429): +51% relative on WebArena.
+- **Retrieval alone is weak; a judging step on a shortlist helps.** ToolRet (2503.01763, 43k tools): average nDCG@10
+  of BM25 22.3, the best dense embedder 33.8, the best cross-encoder reranker 35.5; with task instructions in the query
+  36.5, 42.7 and 47.5. Rich, structured queries help every retriever (BM25 +14). RAG-MCP's 43.1% against 13.6% is a
+  shortlist then a model pick.
+- **Shortlist size matters.** "How Many Tools Should an LLM Agent See?" (2605.24660, registries of 20 to 3,251
+  tools): adaptive shortlists covered 90.3% of needed tools against 90.8% for a fixed 50; with Claude Sonnet 4.6,
+  adaptive lists reached 93.1% against 87.1% for a fixed 5.
+- **Names, wording and order sway models.** MPMA (2505.11154): a manipulated tool name or description won up to 100%
+  of selections; a subtler variant 22% to 92% by model. BiasBusters (2510.00307): models fixate on one provider or on
+  earlier-listed tools; filtering to a relevant subset and then sampling uniformly reduces this. No study measured
+  selection with brand names hidden (UNVERIFIED either way).
+- **No head-to-head exists.** No paper found compares, on the same tasks, a model picking from the full list, a model
+  labelling needs for code to pick, and a shortlist picked by a model. Faber's offline test (section 6.3) decides.
 
-The design follows from these: **a model describes the need, never the tool; code picks the tools; outcomes, not
-descriptions, rank them.** That is the Auto router's lesson applied to tools.
+The design follows from these: **a model describes the need and may choose only among a short, shuffled list of tool
+cards that Faber wrote, with brand names hidden; code builds the list and validates the choice; outcomes, not
+descriptions, rank tools over time.** That is the Auto router's lesson applied to tools, with a judging step where
+combinations matter.
 
 ## 3. The mechanism in one page
 
 ```text
 request or plan step
   │  labels (verb, needs, risk, freshness)   ← small model at request time, the lead at plan time; never tool names
+  │  facets (purpose, audience, deliverable, stage, region)  ← same call; saved per project
   │  fingerprint (stack facts from files)    ← deterministic rules, no model
+  ▼
+Picker (section 6.2): code shortlists cards by facets and examples → a small model picks the combination and the
+passes from blind cards → code validates (jobs, conflicts, budget, risk, pins); fallback: the code pick
   ▼
 Loadout assembler (engine code, milliseconds)
   ├─ inventory: user's own tools (as the CLIs report them), Tool store, project cards, engine checks, field briefs
@@ -132,8 +153,10 @@ evidence per (verb, need, stack, vendor, model) cell → ranks the next pick; Pr
 
 Three rules hold everywhere:
 
-1. **Needs, not names (TS-1).** No model ever names a tool for selection. Models label needs; the engine matches tools.
-   This keeps vendor bias out (a model tends to favour its own vendor's tools) and makes description stuffing useless.
+1. **Needs, not names (TS-1, revised for E17).** No model names a tool from memory. Models label needs; code builds a
+   shortlist; a model may then choose only among those cards, shown under opaque ids, with Faber's own capability
+   text, no brand or author names, in shuffled order; code validates. This keeps vendor and position bias down and
+   makes description stuffing useless, because the model never sees a tool author's words.
 2. **Tools change only at session boundaries (TS-2).** A session keeps its kit from start to end (roadmap rule 3).
    A new need starts a new session with a written hand-off, or waits until the cache is lost anyway (model move-up,
    resume after the cache lifetime, compaction). Re-kitting is free then.
@@ -161,14 +184,18 @@ each plan node. Labels never contain tool names.
 
 - `verb` is closed, 10 values (TS-4): `research`, `plan`, `design`, `build`, `fix`, `verify`, `review`, `write`,
   `produce` (images, audio, video, 3D, other assets), `operate` (drive apps or the PC).
-- `needs` are `family:value`. Families are closed, 13 values: `lang`, `framework`, `platform`, `service`, `data`,
-  `artifact`, `media`, `domain`, `op`, `verify`, `style`, `app`, `ui`. Values are open text, normalized by an alias
+- `needs` are `family:value`. Families are closed, 18 values: `lang`, `framework`, `platform`, `service`, `data`,
+  `artifact`, `media`, `domain`, `op`, `verify`, `style`, `app`, `ui`, plus `growth` (positioning, landing, SEO,
+  analytics, email, launch), `commerce` (pricing, payments, subscriptions, tax and invoices, store listings), `legal`
+  (terms, privacy, consumer, licenses, compliance), `security` (auth, hardening, secrets, supply chain) and `infra`
+  (deploy, CI, cloud, containers, monitoring). Values are open text, normalized by an alias
   table that ships as data (`tmodloader`, `tModLoader`, `tml` → `tmodloader`). A trailing `!` marks a need the step cannot do
   without. At most 8 needs per step.
 - `risk` (`low`, `medium`, `high`) limits which tools may load (section 12).
 - `fresh` (`stable`, `recent`, `unknown`) says whether the model's own knowledge is likely stale: a library version newer
   than the model, a niche platform. It decides whether a field brief is worth writing (section 10).
 - `kind` and `difficulty` are exactly today's route.rs fields. The router stays blind: it still sees only the request.
+- Facets (section 4.5) travel with the labels: `purpose`, `audience`, `deliverable`, `stage`, `region`.
 
 ### 4.2 Fingerprint
 
@@ -195,6 +222,10 @@ One card per tool version. Catalog cards ship in the signed manifest; other card
   "verbs": ["design", "build", "review"],
   "serves": ["ui:visual-design", "ui:critique", "style:*"],
   "job": "ui.craft",
+  "families": ["design", "frontend"],
+  "purposes": ["*"],
+  "pass_focus": ["base", "ux", "ui", "anti-slop"],
+  "blind_text": "Critiques and polishes interface craft; finds generic generated-look patterns; 59 detector rules",
   "exclusive": true,
   "conflicts": ["frontend-design"],
   "stage": "during",
@@ -216,6 +247,10 @@ One card per tool version. Catalog cards ship in the signed manifest; other card
   (checks and review lenses). Section 7 uses it for order.
 - `examples` are 5 to 10 example requests. Matching uses them, not the tool's own description (Tool2Vec, section 2.3).
   Requests that later used the tool well are added locally, so the index learns from use.
+- `families` and `purposes` are facets for the shortlist: a growth or commerce card lists `sell`, `client` and
+  similar purposes, so a personal-use request never gets it unless a need asks for it. `pass_focus` says which passes
+  the tool serves (section 7.1). `blind_text` is the card writer's capability summary with no brand or author name; it
+  is the only text the picker model sees.
 - `prior_lift_pp`: the cold-start guess of how many percentage points the tool adds to "accepted on the first try".
   Section 15 replaces it with evidence.
 
@@ -248,12 +283,79 @@ One card per tool version. Catalog cards ship in the signed manifest; other card
 The receipt is written before dispatch and completed after proof, review and the user's reaction. In the
 self-development MVP it lives at `.faber/missions/<id>/kits/<task>-<attempt>.json`, next to the other mission records.
 
+### 4.5 Purpose, audience, deliverable and stage (Erick's direction E17)
+
+Facets come from the same labelling call, are saved per project (like the TL-ADE's saved answers), and are asked only
+when unclear and when the answer changes the kit or the pieces (it counts against the 3-question cap). Away, Faber uses
+the saved project facts, else "personal or unknown", and the end report lists "what selling would add".
+
+| Facet | Values (open text, normalized by an alias table) |
+| :--- | :--- |
+| `purpose` | sell, personal use, client work, internal team, open source, learning, research, portfolio, prototype, event or jam |
+| `audience` | self, family and friends, a team, a client, the public, businesses, developers, players, students, children, regulated professions |
+| `deliverable` | web, mobile or desktop app, SaaS, site, game or mod, library or CLI, API, extension, bot, automation, data or model, document or deck, image, video, audio, 3D, brand, campaign, course, report, hardware build |
+| `stage` | idea, validate, prototype, build, launch, grow, maintain, migrate or rescue |
+| `region` | where it runs or sells (from the request and the user's locale): drives legal, tax, payments and language |
+
+Purpose adds need families as priors (data in the manifest, TS-22). They are needs, never tools:
+
+| Purpose | Needs it adds | Pieces and checks it adds (generated pipelines spec) |
+| :--- | :--- | :--- |
+| sell | `growth:positioning`, `growth:landing`, `growth:seo`, `growth:analytics`, `growth:email`, `growth:launch`, `commerce:pricing`, `commerce:payments`, `commerce:tax-invoice`, `legal:terms-privacy`, `legal:consumer`, `infra:monitoring`, `security:hardening` | landing and pricing pages, legal pages, a store listing; money, public, commercial and other-people's-data risk groups |
+| personal use | none of the above | no launch, money or growth pieces; core quality only (tests, review, the user's own taste) |
+| client work | `artifact:handover`, `artifact:manual`, `infra:handover` | handover package; client-owned accounts; the client's brand |
+| internal team | `security:auth`, `security:audit-log`, `infra:deploy` | roles and sign-in; internal docs |
+| open source | `legal:oss-license`, `artifact:contributing`, `artifact:changelog`, `infra:ci` | license, contribution guide, release notes |
+| learning | `domain:teaching` | explanations and exercises; smaller steps |
+| prototype | none | polish passes off; speed over finish |
+
+**Example.** "A habit tracker for me" (like Erick's personal Skin Sniper): stack needs from the fingerprint, minimal
+code, tests and review; nothing about pricing, SEO, analytics or legal; launch checks off. "A habit tracker to sell":
+the same core, plus landing, pricing, subscriptions with every billing state tested, terms and privacy for the user's
+region, SEO, privacy-respecting analytics, onboarding email and a store listing, each picked per step from the cards
+that serve those needs, with the money, public and commercial risk groups on.
+
+### 4.6 Task families: the cold-start taxonomy
+
+Families are facets and priors for the picker and the gold set (section 6.3). Each family lists typical needs; no
+family is a kit (E1, E3).
+
+| Family | Covers |
+| :--- | :--- |
+| Software: web | frontend, backend and APIs, full stack, SaaS |
+| Software: platforms | mobile, desktop, CLI and libraries, browser extensions, bots, embedded and IoT |
+| Games | game code, mods, game design, playtesting |
+| Design | product and UX design, UI design, design systems, prototyping |
+| Brand | identity, logo, voice |
+| Assets for software | sprites and tiles, icons, illustrations, UI imagery, sound effects and music, 3D models, store screenshots |
+| Data and ML | analysis, spreadsheets, dashboards, pipelines, training and evaluation, LLM apps and agents |
+| Infra and DevOps | CI and CD, cloud, containers, infrastructure as code, monitoring, cost |
+| Security | secure review, auth, secrets, supply chain, testing one's own app |
+| Quality | tests, accessibility, performance, localization |
+| Docs | technical and API docs, tutorials, internal knowledge |
+| Media | video, motion, audio and podcast, voice, music, photo, image generation, 3D and rendering |
+| Writing | copy, scripts, articles, social posts, translation |
+| Marketing and growth | positioning, landing pages, SEO, ads, email, social, analytics, launch, community |
+| Commerce | pricing, payments and billing, tax and invoices, store listings, e-commerce, support |
+| Legal and compliance | terms and privacy, data protection, licenses, accessibility law, contracts |
+| Research | market, technical, academic, competitive, fact checking |
+| Learning | tutoring, courses, exercises |
+| Office | documents, slides, spreadsheets, PDFs, forms |
+| PC and operations | files, apps, browser tasks, upkeep |
+| Personal life | purchases, travel, events |
+| Making | 3D printing, electronics, CAD |
+| Product and project | specs, roadmaps, issue triage, release notes |
+
+Cold-start coverage target: before Phase 3, every family has at least 2 vetted cards or engine checks, or a recorded
+reason to rely on field briefs; and at least 8 gold tasks in the picker test.
+
 ## 5. Who decides, and when
 
 | Moment | Who | What happens | Extra model calls |
 | :--- | :--- | :--- | :--- |
 | First message of a conversation | Auto classifier (small model, blind) | Adds `verb` and `needs` to today's `kind`/`difficulty`; the assembler builds the request kit for the lead or Chat session | none (same call, about 60 more output tokens) |
 | Plan | The lead | Each plan node carries labels; the assembler builds a draft loadout per node; gaps start resolving now, in parallel | none (labels are part of the plan output, about 40 tokens per node) |
+| Plan, after labels | Picker (section 6.2), where the family's winner is a model pick | One small-model call for the whole plan picks every node's combination and passes from blind shortlists; code validates | one call, about 1,500 input tokens per node, batched |
 | Start card | The user, if present | The card shows the plan, time, quota and any tool gaps with their choice (section 11) | none |
 | Step dispatch | Engine | Re-runs the assembler (milliseconds): the inventory may have grown since planning | none |
 | During a step | Worker | Cannot change its kit. If it needs something, it says so in its result packet (`needs: ["media:audio-loudness"]`); the engine re-labels and the next attempt or step gets a new session | none |
@@ -310,6 +412,47 @@ One function picks the whole worker loadout (TS-10). It does not replace the Aut
   model without it (posterior probability at least 0.9), that kit may lower the difficulty bar one step for that cell.
   Not at cold start; only from evidence (Phase 3).
 
+### 6.2 The picker (E17)
+
+The chosen method (TS-23) combines the code pick above with a judging step where combinations matter:
+
+1. **Query from labels.** The labels and facets, not the raw request, form the query (ToolRet: structured queries raise
+   every retriever).
+2. **Shortlist by code.** Steps 2 and 3 above, plus facet filters (`families`, `purposes`, `pass_focus`). Adaptive
+   size: up to 3 cards per job and need, at most 24 in all (the shortlist study above).
+3. **Blind model pick.** One small model (the Auto router's cheap rung) sees the step, the facets, and each shortlisted
+   card as an opaque id with its `blind_text`, examples, evidence (lift, observations, kept passes), conflicts and
+   token cost, in shuffled order. It returns the combination, the pass plan (section 7.1) and one reason per pick. It
+   never sees brand names, authors or the tool's own description.
+4. **Code validates.** Steps 4 to 8 above: exclusive jobs, same-session conflicts, budget, requirements, risk and user
+   pins. An invalid or late answer (over 3 s) falls back to the code pick; the receipt records both.
+5. **Per family.** The manifest keeps the winning method per task family from the test below (`picker: code` or
+   `picker: blind-model`). Where the code pick ties, it stays: no call, no latency.
+
+Why: RAG-MCP's shortlist-then-pick tripled accuracy over a full list; retrieval alone stays weak (ToolRet); wording,
+names and order sway models (MPMA, BiasBusters), so the model sees only Faber's blind cards in shuffled order; and
+Faber's router measured labels plus a table above free model choice (81 of 88 against 76 of 88), so the code pick
+remains the fallback and the default where evidence is dense.
+
+### 6.3 Picker accuracy test (offline, decides per family)
+
+- **Gold set.** About 230 tasks: the 23 task families × 10, each in paired facet variants (sell against personal use,
+  prototype against launch), including the 60 Faber steps and the 40 benchmark requests.
+- **Inventories** of 40, 150, 500 and 1,500 cards built from real cards plus distractors, including stuffed and
+  brand-heavy decoys.
+- **Gold kits.** Two strong models from different vendors each mark, from the family's relevant cards, the required,
+  useful and harmful tools and the pass order; agreement becomes gold, disagreement is reviewed by the maintainer on a
+  sample. Later, outcomes from probes and receipts refine the gold (gold v2).
+- **Arms.** (a) a model picks from the full list (40, 150 and 500 only); (b) labels and code (section 6); (c) a
+  shortlist and a model pick with brand names shown; (d) Faber's picker (section 6.2).
+- **Metrics.** Recall of required tools; harmful or conflicting picks; set F1; pass-order accuracy; purpose
+  sensitivity (paired variants differ where gold differs); vendor bias (same-vendor share, brand shown against hidden);
+  position stability across two shuffles; decoy pick rate; latency p50 and p90; cost per plan.
+- **Decision rule per family.** Highest required recall with harmful picks at most 2%, p90 at most 3 s and at most
+  US$0.003 per plan. A model arm replaces the code pick only if it beats it by at least 5 points of set F1, with a
+  bootstrap 95% interval above zero. Re-run on every catalog release.
+- **Cost:** at most US$5, inside the companion spec's US$25 envelope (Erick's E14).
+
 ## 7. Order: across a step and across a mission
 
 **Within a step:** `before` reads (field briefs, design system, product map, the relevant AGENTS.md sections) →
@@ -322,6 +465,37 @@ cross-vendor reviewer. Cheap before expensive, deterministic before judgement, t
   node that feeds every node needing it, so it is paid once.
 - `after` cards with `form: check` are added to `proof.define` automatically (section 16.1, N2). The lead may add proofs;
   it cannot remove a mandatory one.
+
+### 7.1 Passes: overlapping tools in sequence (Erick's direction E18)
+
+Tools that overlap need not be either/or (TS-24).
+
+- **A pass is a step** with its own kit in a fresh session. Two tools that conflict in one session (for example two
+  `ui.style` skills) may run in different passes. A card's `conflicts` means "not in the same session".
+- **Base pass first:** direction, design system, structure (for code: the working change). **Polish passes** follow,
+  each with one focus: UX, UI, anti-slop, distinctiveness; for code: simplify, then review lenses; for copy: tighten,
+  voice; for assets: cleanup, consistency.
+- **The picker chooses combination and order:** together, A then B, or B then A (for example Taste-Skill for the base
+  direction, then Impeccable for UX and anti-slop; or both in the base pass when they do not share a job). Code
+  enumerates the valid plans; the picker or the evidence picks one.
+- **Keep only what beats the version before.** Deterministic gates run first (the Impeccable detector where it has a
+  callable command, axe, lint, type check, tests); then a blind judge from the other vendor compares the new and the
+  previous version in both orders. The earlier version wins ties ("better than the original or it does not stay").
+- **Stop** when a pass is not kept, or after 3 polish passes per piece, or when the remaining budget is low.
+- **Learning.** Evidence cells add the ordered tool tuple per family and job: kept rate and judge wins. The Probe lane
+  tests orders on XS and S probes (one screen, one function, one paragraph).
+
+### 7.2 Cold-start priors Erick named (E18)
+
+| Tool | Job and use | Priors |
+| :--- | :--- | :--- |
+| ponytail | `code.minimal`: during `build` and `fix`, and the focus of a "simplify" polish pass | lift prior +3 pp for writers |
+| caveman | `output.terse`: worker result packets, hand-offs, reviewer finding lists and internal logs, the TL-ADE lesson "short outputs as a contract" | never in text a person reads: chat answers, reports, docs, commit messages, screen text |
+| Taste-Skill | `ui.style`: base design direction when the project has no design system of its own | conflicts with other `ui.style` cards in one session; may precede Impeccable |
+| Impeccable | `ui.craft` and polish passes (UX, UI, anti-slop); its detector as a gate | after Taste-Skill, or alone |
+
+**Change from R33 for Erick:** catalog-v1 said "caveman out"; this proposes caveman back in, for internal hand-offs
+only.
 
 ## 8. Enforcing a kit in each CLI
 
@@ -656,6 +830,8 @@ the same daily and weekly caps, at most US$0.20 per pair because each also compi
 | Attestation | 100% of sessions attested; every mismatch logged with a reason key | receipts |
 | Probe pair | ≤ US$0.10 and ≤ 5 min per pair; one at a time; ≤ 12 a day; ≤ 2% of a weekly window per week | own-cost ledger tag `kit.probe`; probe receipts |
 | Probe transfer | agreement with full-size outcomes ≥ 85% per job before `w` rises to 0.8 | calibration log per job (section 15.3) |
+| Picker | required-tool recall ≥ 90% and harmful picks ≤ 2% on the gold set; p90 ≤ 3 s; ≤ US$0.003 per plan | section 6.3 test; receipts |
+| Passes | a kept polish pass wins its blind comparison; ≤ 3 polish passes per piece; pass cost ≤ 30% of the piece's cost | pass receipts; own-cost ledger tag `kit.pass` |
 
 ## 16. Neighbouring plan parts
 
@@ -704,6 +880,9 @@ Automatic from day one (E1), smaller in scope (TS-21):
 | Fingerprint | About 40 rules as data; Faber's repo yields Rust, Tauri, SolidJS, TypeScript |
 | Cards | Auto-written for: the user's installed skills and MCP servers as the CLIs report them; project cards (AGENTS.md sections, `docs/design.md`, tokens, roadmap rules for driving the CLIs); the AGENTS.md proof set as checks. No catalog yet |
 | Assembler | Section 6, steps 1 to 8, with priors only; online Beta counts recorded, used only to break ties |
+| Picker | The code pick decides; the blind model pick (section 6.2) runs in shadow and logs disagreements, until the section 6.3 test chooses per family |
+| Facets | `purpose`, `audience`, `deliverable`, `stage` labelled and saved; Faber's own project facts recorded once |
+| Passes | UI changes: a base pass and up to 2 polish passes with the keep rule; code: an optional "simplify" pass |
 | Delivery | Inline on both CLIs. Native on Claude Code (generated kit plugin plus `skillOverrides`) only if the day-1 probe proves: only kit skills visible, no hooks or MCP from it, deny rules beat a skill's `allowed-tools` |
 | Attestation | Claude Code `system/init` compared with the loadout; Codex best effort, logged |
 | Gaps | G0 is empty (no catalog); G2 field briefs and G3 floor work. G1 runs and reports candidates; installs wait for Phase 3 and appear in the report as "suggested, not installed" with their downside |
@@ -800,7 +979,8 @@ field brief instead of trusting an unknown package. Rejected as traps:
 
 ## 21. Questions for Erick
 
-Both earlier questions are answered (E7, E8). No open question remains in this document.
+Both earlier questions are answered (E7, E8). One item to confirm: caveman back in the catalog for internal hand-offs
+only, a change from R33 (section 7.2). Default if unanswered: yes, as proposed.
 
 ## 22. AI decisions in this document
 
@@ -829,6 +1009,10 @@ All are AI proposals, not reviewed, except where a row names Erick's decision.
 | TS-19 | Probe lane within Erick's decision E8: XS/S prototype probes, one pair at a time, ≤ 12 a day, room under the pace line only (≤ 2% of a weekly window per week), real work preempts, shared-account pause, transfer rules of section 15.3 |
 | TS-20 | Kit sheet in briefs; `kit_used` and `needs` in result packets |
 | TS-21 | MVP scope of section 17.1 and gate G9; the software-bar check programs as engine-native cards follow Erick's E10 |
+| TS-22 | Within E17: facets `purpose`, `audience`, `deliverable`, `stage`, `region`; the purpose-to-needs table; 18 need families; the task-family taxonomy of section 4.6 |
+| TS-23 | Within E17: the picker of section 6.2 (labels as query, code shortlist, blind shuffled model pick, code validation, code fallback), kept per family by the section 6.3 test |
+| TS-24 | Within E18: passes of section 7.1 with the keep-if-better rule, a cap of 3 polish passes, ordered-tuple evidence |
+| TS-25 | Within E18: the cold-start priors of section 7.2; caveman only for internal hand-offs (a change from R33 for Erick to confirm) |
 
 ## 23. Sources
 

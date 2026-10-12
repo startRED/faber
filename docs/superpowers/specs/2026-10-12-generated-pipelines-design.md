@@ -152,7 +152,8 @@ Proposed wording changes to five powers are in section 16. They sharpen the powe
     {"id": "title", "type": "video-title", "lives_in": "YouTube home feed at phone width", "pairs_with": ["thumb"]},
     {"id": "thumb", "type": "thumbnail", "lives_in": "YouTube home feed, about 168 px wide on phones"}
   ],
-  "audience": "people with an old PC who want it faster for little money",
+  "purpose": "sell", "audience": "people with an old PC who want it faster for little money",
+  "stage": "build", "region": "BR",
   "facts": ["channel name", "the video's promise", "parts and prices shown"],
   "risk": {"public": true, "others_data": false, "money": false, "minors": false, "regulated": false,
            "commercial": true, "irreversible": ["publish"]},
@@ -163,6 +164,9 @@ Proposed wording changes to five powers are in section 16. They sharpen the powe
 }
 ```
 
+- `purpose`, `audience`, `stage` and `region` are the Kits facets (Kits spec, section 4.5, Erick's E17). Purpose adds
+  pieces and switches risk groups: "to sell" adds landing, pricing and legal pages and switches on money, public and
+  commercial checks; "personal use" adds none.
 - `type` is normalized by an alias table (`yt thumbnail`, `miniatura` → `thumbnail`) shipped as data, like Kits labels.
 - `risk` generalizes the Software line's questions (three in the map, four fields in its code: who uses it, does it
   hold other people's data, where it runs) to every domain: public, other people's data, money, minors, regulated field (health, law, finance),
@@ -258,7 +262,7 @@ mark reads at 16 px and in one colour") with `judgement` or `evidence` ground, n
 
 ### 6.3 Caching and learning
 
-- **Bar library (GP-8).** Entries keyed by piece type, context and risk answers. Scope: project
+- **Bar library (GP-8).** Entries keyed by piece type, context, purpose and risk answers. Scope: project
   (`.faber/bars/<type>.json`), then global after the same entry wins in 3 or more projects (the existing rule R51),
   then the manifest when the maintainer's benchmark confirms it.
 - **Seeds.** The TL-ADE lines' checks become library entries with `ground: owner` (Erick's map). The map's 26 lines
@@ -308,6 +312,7 @@ orders (GP-9).
 | A piece may be changed later | deliver its editable source with it (layers, scenes, stems, project file), and keep the losing drafts |
 | An irreversible or outside effect (publish, buy, send, release) | `gate` with a safe default: stays a draft or on staging |
 | The user must act (record, sign in) | `gate` of type user action; only dependent steps wait |
+| A piece can be polished (UI, code, copy, assets) | passes (Kits spec, section 7.1): a base pass, then polish passes with one focus each; each kept only if it passes its gates and beats the previous version in a blind both-orders comparison (the earlier version wins ties); stop when a pass is not kept or after 3 |
 | Every piece | a final cross-vendor `judge`; `taste-capture` after delivery |
 
 **Back-chaining.** Each check needs evidence; each evidence needs a producing step; each step needs inputs. The
@@ -559,8 +564,9 @@ Each request has two hidden variants written by the other vendor and rotated, so
   that, Faber asks Erick first. Spend is tagged `bench.*` in the own-cost ledger and runs under the pace rules, never on
   the daily grant, paused while someone else uses the shared account. The Kits Probe lane is a product feature under
   its own per-user quota caps (E8) and is not counted here (AI reading of E14).
-- **First allocation:** the head-to-head at most US$20 (section 14.8); a plan-parity sample of 8 requests about US$3;
-  result and seeded-defect probes about US$2 (at most US$0.20 per pair).
+- **First allocation:** the head-to-head at most US$16 (section 14.8); the Kits picker accuracy test at most US$5
+  (Kits spec, section 6.3); a plan-parity sample of 8 requests about US$3; result and seeded-defect probes about US$1
+  (at most US$0.20 per pair).
 - **Later spend:** plan parity on all 40 requests (about US$20) and the first public version gate (plan parity on all
   40 plus at least 3 decisive probe pairs per request, up to about US$24) exceed what remains. Erick (2026-10-12, E16):
   US$25 is the hard ceiling only until the Claude weekly reset on Tuesday 2026-10-13; these larger tests run after
@@ -704,9 +710,9 @@ A small real comparison on software tasks, inside the envelope of section 14.4 (
   program confirms); rounds (writer and review loops, from each system's journal); wall time from request to delivery;
   quota (official readings before and after, plus API-equivalent tokens); operator touches (every stop that needs a
   person beyond the answer sheet, extra approvals, manual recovery); and the judges' preference.
-- **Budget:** each run capped at US$2.00, and a capped run counts as not delivered. Expected about US$1.00 for a TL-ADE
-  run and US$0.60 for a Faber run, so about US$16 plus about US$1.50 of judging; the head-to-head stops at US$20 and
-  reports what ran.
+- **Budget:** each run capped at US$1.60, and a capped run counts as not delivered. Expected about US$0.90 for a
+  TL-ADE run and US$0.55 for a Faber run, so about US$14.50 plus about US$1.50 of judging; the head-to-head stops at
+  US$16 and reports what ran.
 - **Targets (wide margin, E13):** escaped defects at most half of the TL-ADE's total, and no task where Faber ships a
   defect the TL-ADE caught; operator touches at most half; median wall time at most half; quota at most 70%; the judges
   prefer Faber or tie on at least 8 of 10. A tie is reported as a tie (likely on a plain bug fix in TypeScript).
@@ -858,7 +864,8 @@ All are AI proposals, not reviewed, except where a row names Erick's decision.
 | GP-19 | Within E12: the fixed-line limits of section 14.6 with their answers and measures; Faber claims only a tie where a line is already excellent |
 | GP-20 | Within E12: change kinds in the software bar; subscription-money and device risk groups; seeded-defect probes |
 | GP-21 | Within E13: the feature scorecard of section 14.7 and the proposed MVP additions |
-| GP-22 | Within E14: the head-to-head of section 14.8 (10 tasks, planted defects, blind judges, five metrics, at most US$20) |
+| GP-22 | Within E14: the head-to-head of section 14.8 (10 tasks, planted defects, blind judges, five metrics, at most US$16) |
+| GP-23 | Within E17 and E18 (Kits spec): purpose in the sheet and the bar library key; polish passes as a move trigger |
 
 ## 20. Sources
 
