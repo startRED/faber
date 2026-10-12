@@ -440,13 +440,13 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .stepper .done { color: var(--ink-2); }
 .stepper .done svg { color: var(--accent-text); }
 .stepper .cur { color: var(--ink); font-weight: 600; }
-.firstrun { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 28px clamp(24px, 5vw, 64px) 40px; }
+.firstrun { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 28px clamp(24px, 5vw, 64px) 0; }
 .fr-col { flex: none; width: min(100%, 720px); margin-top: clamp(0px, 6vh, 56px); }
 .fr-title { margin-top: 22px; font-size: min(var(--fs-h1), 9vw); overflow-wrap: anywhere; outline: none; }
 .fr-col .peek { margin-top: 4px; }
 .fr-col .fr-title { margin-top: 18px; }
 .firstrun .sub { margin: 10px 0 0; max-width: 72ch; text-wrap: pretty; color: var(--ink-2); font-size: var(--fs-lead); line-height: 1.5; }
-.first-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; margin-top: auto; padding-top: 28px; }
+.first-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; margin-top: auto; padding: 16px 0 24px; position: sticky; bottom: 0; background: var(--bg); }
 .first-foot p { margin: 0 auto 0 0; color: var(--ink-3); font-size: calc(var(--fs-ui) - 1px); }
 .btn.ghost { box-shadow: none; }
 .btn.big { height: 40px; padding: 0 22px; font-size: calc(var(--fs-ui) + 0.5px); }
@@ -606,4 +606,10 @@ html.hidden-win .amb * { animation-play-state: paused !important; }
   .loom-shuttle, .flow-trace { opacity: 0; }
   .ask, .toast, .ri.need, .coach { animation: fade 120ms ease-out both; }
   .btn:active { transform: none; }
+}
+/* A short window: smaller pictures and tighter gaps, so the first settings, the name field and the buttons fit without scrolling. */
+@media (max-height: 940px) {
+  .mini { height: 184px; }
+  .themes { margin-top: 16px; }
+  .first-ctl { margin-top: 16px; padding-top: 14px; }
 }

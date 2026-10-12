@@ -63,6 +63,7 @@ pub fn scenarios() -> Vec<Scenario> {
         Scenario { name: "a chat streams an answer with the model and the reason, and lands in the sidebar", run: streams_an_answer },
         Scenario { name: "editing a message sends it as a branch and keeps the original conversation", run: edits_as_a_branch },
         Scenario { name: "deleting a conversation asks once, then removes it", run: deletes_after_asking },
+        Scenario { name: "the sidebar footer shows the name the person gave, above the accounts", run: shows_the_name },
         Scenario { name: "with no AI installed, the app says what to do", run: says_what_to_do },
         Scenario {
             name: "the title bar shows the lockup in ink, and Curioso peeks only into the empty states of a project",
@@ -84,6 +85,18 @@ pub fn scenarios() -> Vec<Scenario> {
         Scenario { name: "after the six looks were applied in turn, Faber stays within its memory budget", run: memory_after_every_look },
         Scenario { name: "a conversation with a thousand messages opens quickly and stays within the budget", run: thousand_messages },
     ]
+}
+
+fn shows_the_name(ctx: &mut Ctx) -> Result {
+    ctx.write_settings(
+        &json!({ "language": "en", "setup": "done", "appearance": { "base": "sala" }, "tutorialDone": true, "userName": "Erick" }),
+    )?;
+    let launch = claude_chat(ctx);
+    let mut app = ctx.launch(launch)?;
+    let page = &mut app.page;
+    page.wait_visible(&css(".side-foot .who"))?;
+    same(page.inner_text(&css(".side-foot .who"))?, "Erick".to_string(), "the name in the footer")?;
+    ctx.shot(&mut app, "sidebar-name")
 }
 
 fn opens_empty(ctx: &mut Ctx) -> Result {

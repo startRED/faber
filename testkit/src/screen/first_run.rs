@@ -80,6 +80,16 @@ fn size(page: &mut Page, width: u32, height: u32) -> Result {
     page.wait_for("the window to follow", &format!("window.innerWidth === {width}"))
 }
 
+/// The primary button of the footer must be inside the window, whatever the step holds: at 1440x900 and at the smallest window.
+fn button_in_view(page: &mut Page) -> Result {
+    for (width, height) in [(1440, 900), (720, 480)] {
+        size(page, width, height)?;
+        let seen = page.eval("(() => { const r = document.querySelector('.first-foot .btn.primary').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth; })()")?;
+        same(seen, json!(true), &format!("the primary button inside a {width}x{height} window"))?;
+    }
+    size(page, 1440, 900)
+}
+
 /// A screenshot taken once the screen has stopped moving: cards fade in and the ring travels for about half a second.
 fn shot(ctx: &Ctx, app: &mut Opened, name: &str) -> Result {
     pause(0.7);
@@ -154,6 +164,7 @@ fn step_one(ctx: &mut Ctx) -> Result {
     same(current_step(page)?, page.text_of("first.step.accounts")?, "the step that is on")?;
     same(page.count(&css(".shell"))?, 0, "the first run has no sidebar or shell")?;
     same(page.eval("document.activeElement && document.activeElement.id")?.as_str(), Some("setup-heading"), "focus starts on the heading")?;
+    button_in_view(page)?;
     shot(ctx, &mut app, "b7-step1")?;
     let page = &mut app.page;
     // Esc and the shell's shortcuts do nothing here: the buttons are the only way on.
@@ -196,6 +207,9 @@ fn step_two(ctx: &mut Ctx) -> Result {
         "[...document.querySelectorAll('.tcard .mini')].map((m) => m.dataset.base).join() === 'sala,oficina,bancada'",
     )?;
     shot(ctx, &mut app, "b7-step2-sala")?;
+    let page = &mut app.page;
+    button_in_view(page)?;
+    shot(ctx, &mut app, "first-run-fit")?;
     let page = &mut app.page;
 
     // Esc does nothing on this step either.

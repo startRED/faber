@@ -45,3 +45,17 @@ check('thread: a numbered list keeps the number it starts at', () => {
     ok(!getComputedStyle(root.querySelector('ol')!).counterReset.includes('step'));
   });
 });
+
+check('first run: the primary button stays inside the stage at 1440x900 and at the minimum window, however tall the step is', () => {
+  for (const [w, h] of [[1440, 900], [720, 480]] as const) {
+    // The stage is the window minus the 52px stepper row; a step far taller than it must scroll under a footer that stays.
+    onPage(
+      `<div style="position:fixed;left:0;top:0;width:${w}px;height:${h}px;display:grid"><div class="fr-stage"><div class="fr-top"></div><div class="firstrun"><div style="height:2000px"></div><div class="first-foot"><button class="btn primary big">Continue</button></div></div></div></div>`,
+      (root) => {
+        const frame = root.firstElementChild!.getBoundingClientRect();
+        const button = root.querySelector('.btn.primary')!.getBoundingClientRect();
+        ok(button.top >= frame.top && button.bottom <= frame.bottom, `${w}x${h}: the button is at ${button.top}-${button.bottom}, the window at ${frame.top}-${frame.bottom}`);
+      },
+    );
+  }
+});
