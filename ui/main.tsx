@@ -8,7 +8,10 @@ import { createInbox } from './inbox.ts';
 import { store } from './running.ts';
 
 // Only a test build (`vite build --mode test`) carries the screen's checks; a production build drops this line.
-if (import.meta.env.MODE === 'test') await import('../tests/ui/index.ts');
+if (import.meta.env.MODE === 'test') {
+  await import('../tests/ui/crash.ts');
+  await import('../tests/ui/index.ts');
+}
 
 // Events are listened for first, and only then is the snapshot asked for. The running list carries a revision and the
 // store keeps the highest one, so a change that lands between the two is never lost and an old snapshot never overwrites

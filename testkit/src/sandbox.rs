@@ -219,6 +219,10 @@ pub fn child_env(parent: &[(String, String)], sb: &Sandbox, launch: &Launch, fak
         set(name, path(&sb.tmp));
     }
     set("PATH", path(&sb.path_dir));
+    if cfg!(target_os = "linux") {
+        // WebKitGTK under xvfb has no usable dmabuf renderer; without this the test build's window stays blank.
+        set("WEBKIT_DISABLE_DMABUF_RENDERER", "1".into());
+    }
     set("CODEX_HOME", path(&sb.profile.join("fake-home")));
     set("WEBVIEW2_USER_DATA_FOLDER", path(&sb.webview));
     set("FABER_HIDDEN", "1".into());

@@ -7,10 +7,10 @@
 //   the checks run at load and their result goes to the shell's `report_checks` command, which writes it to that file and
 //   ends the app. No DevTools port is involved.
 
-import { invoke } from '@tauri-apps/api/core';
 import { LANGUAGES, t } from '../../ui/i18n.ts';
 import type { Key } from '../../ui/locales/en.ts';
 import { runAll, type Result } from './check.ts';
+import { crash, report } from './crash.ts';
 import './appearance.check.ts';
 import './check.check.ts';
 import './i18n.check.ts';
@@ -49,5 +49,5 @@ window.__faberChecks = runAll;
 window.__faberText = textFor;
 
 if (new URLSearchParams(location.search).has('checks')) {
-  void runAll().then((results) => invoke('report_checks', { json: JSON.stringify(results) }));
+  runAll().then(report, (error: unknown) => crash(String(error)));
 }
