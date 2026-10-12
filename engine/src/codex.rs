@@ -54,7 +54,7 @@ pub fn codex_thread(area: Area, model: Option<&str>, permissions: Permissions) -
     let dont_ask = area == Area::Project && permissions == Permissions::DontAsk;
     thread.insert("approvalPolicy".into(), if dont_ask { "never" } else { "on-request" }.into());
     if dont_ask {
-        thread.insert("config".into(), json!({ "sandbox_workspace_write.network_access": true }));
+        thread.insert("config".into(), json!({ "sandbox_workspace_write.network_access": false }));
     }
     if area == Area::Chat {
         thread.insert("baseInstructions".into(), CHAT_INSTRUCTIONS.into());
@@ -274,6 +274,10 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
     } else if let Some(name) = &t.user_name {
         // Developer instructions sit beside Codex's own, so a project keeps its default prompt.
         params.insert("developerInstructions".into(), name_instructions(name).into());
+    }
+    if area == Area::Project && t.permissions == Permissions::DontAsk && t.instructions.is_none() {
+        params.get_mut("config").unwrap()["shell_environment_policy.set"] = crate::permissions::child_env(&t.cwd);
+        params.get_mut("config").unwrap()["shell_environment_policy.ignore_default_excludes"] = false.into();
     }
     params.insert("cwd".into(), t.cwd.to_string_lossy().into_owned().into());
     let method = match &t.resume {

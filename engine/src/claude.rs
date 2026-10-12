@@ -32,27 +32,21 @@ const CHAT_TOOLS: &str = "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch";
 // Deny rules apply in bypassPermissions too; command patterns are not an OS sandbox.
 // https://code.claude.com/docs/en/permission-modes#available-modes
 const PROJECT_DENY: &[&str] = &[
-    "Bash(git push *)",
-    "Bash(git * push *)",
-    "Bash(git reset *--hard*)",
-    "Bash(git * reset *--hard*)",
-    "Bash(git clean *)",
-    "Bash(git * clean *)",
-    "Bash(git checkout *-- *)",
-    "Bash(git * checkout *-- *)",
-    "Bash(git branch *-D*)",
-    "Bash(git * branch *-D*)",
-    "Bash(git rebase *)",
-    "Bash(git * rebase *)",
-    // shortcut: native rules cannot safely distinguish outside targets; deny removals and .env inside too until a path-aware policy exists.
-    "Bash(rm *)",
-    "Read(//**/.env)",
-    "Read(//**/.env.*)",
+    "Edit(//**/.git/**)",
     "Read(~/.claude/**)",
     "Read(~/.codex/**)",
     "Read(~/.gemini/**)",
     "Read(~/.ssh/**)",
     "Read(~/.aws/**)",
+    "Read(~/.claude.json)",
+    "Read(~/.git-credentials)",
+    "Read(~/.npmrc)",
+    "Read(~/.config/gh/**)",
+    "Read(~/AppData/Roaming/GitHub CLI/**)",
+    "Read(~/.docker/**)",
+    "Read(~/.azure/**)",
+    "Read(~/.kube/**)",
+    "Read(//**/*updater.key*)",
 ];
 
 /// Arguments for one long-lived Claude Code process that takes many turns over stdin.
@@ -92,17 +86,21 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
             args.push(a.into());
         }
     } else {
+        let mut settings = json!({});
         if launch.permissions == Permissions::DontAsk {
             args.extend(["--permission-mode".into(), "bypassPermissions".into(), "--disallowedTools".into()]);
             args.extend(PROJECT_DENY.iter().map(|rule| (*rule).into()));
-            args.extend(
-                PROJECT_DENY.iter().filter(|rule| rule.starts_with("Bash(git ")).map(|rule| rule.replacen("Bash(", "PowerShell(", 1)),
-            );
-            args.push("PowerShell(Remove-Item *)".into());
+            settings["permissions"] = json!({ "blockReadsOutsideWorkingDirectories": true,
+                "ask": ["Read(//**)", "Edit(//**)", "Bash", "PowerShell", "*"] });
+            settings["sandbox"] = json!({ "autoAllowBashIfSandboxed": false });
+            settings["env"] = crate::permissions::child_env(std::path::Path::new("."));
         }
         if !launch.user_hooks {
+            settings["disableAllHooks"] = true.into();
+        }
+        if settings.as_object().is_some_and(|s| !s.is_empty()) {
             args.push("--settings".into());
-            args.push(json!({ "disableAllHooks": true }).to_string());
+            args.push(settings.to_string());
         }
     }
     if let (None, Some(name)) = (&launch.instructions, &launch.user_name) {
@@ -261,11 +259,15 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                     match serde_json::from_str::<Value>(&line) {
                         Ok(msg) => {
                             for event in parse_claude_message(&msg) {
-                                if let EngineEvent::Permission { request_id, input, .. } = &event {
-                                    // Explicit ask rules can still prompt in bypass mode; decline instead of showing a card.
+                                if let EngineEvent::Permission { request_id, tool, input } = &event {
                                     if opts.launch.area == Area::Project && opts.launch.permissions == Permissions::DontAsk {
+                                        let response = if crate::permissions::allows(&opts.cwd, tool, input) {
+                                            json!({ "behavior": "allow", "updatedInput": input })
+                                        } else {
+                                            json!({ "behavior": "deny", "message": "This action is outside Faber's project policy. Do not retry through scripts." })
+                                        };
                                         let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id,
-                                            "response": { "behavior": "deny", "message": "Approval is disabled in Faber." } } });
+                                            "response": response } });
                                         if proc::write_line(&mut *stdin, &msg).await.is_err() {
                                             on_event(EngineEvent::Error { message: "error.permission.undelivered".into(), fatal: true });
                                             proc::stop(&mut *stdin, &mut child).await;

@@ -140,6 +140,10 @@ impl Wire {
         String::from_utf8_lossy(&self.written.lock().unwrap()).lines().filter(|l| l.contains(needle)).count()
     }
 
+    pub fn messages(&self) -> Vec<Value> {
+        String::from_utf8_lossy(&self.written.lock().unwrap()).lines().map(|line| serde_json::from_str(line).unwrap()).collect()
+    }
+
     fn wrap(&self, p: Proc) -> Proc {
         Proc { stdin: Box::new(Tap { inner: p.stdin, wire: self.clone() }), ..p }
     }

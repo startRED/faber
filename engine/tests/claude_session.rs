@@ -232,38 +232,10 @@ fn permissions_only_change_project_launches_and_keep_denies_with_user_hooks() {
         assert!(ask.windows(2).any(|a| a == ["--permission-prompt-tool", "stdio"]));
         let skip = claude_args(&ClaudeLaunch { permissions: Permissions::DontAsk, ..asking });
         assert!(skip.windows(2).any(|a| a == ["--permission-mode", "bypassPermissions"]));
-        assert_eq!(skip.contains(&"--settings".into()), !hooks);
-        for rule in [
-            "Bash(git push *)",
-            "Bash(git * push *)",
-            "Bash(git reset *--hard*)",
-            "Bash(git clean *)",
-            "Bash(git checkout *-- *)",
-            "Bash(git branch *-D*)",
-            "Bash(git rebase *)",
-            "Bash(rm *)",
-            "Read(//**/.env)",
-            "Read(//**/.env.*)",
-            "Read(~/.claude/**)",
-            "Read(~/.codex/**)",
-            "Read(~/.gemini/**)",
-            "Read(~/.ssh/**)",
-            "Read(~/.aws/**)",
-        ] {
-            assert!(skip.contains(&rule.into()), "missing deny: {rule}");
-        }
-        for rule in [
-            "PowerShell(git push *)",
-            "PowerShell(git * push *)",
-            "PowerShell(git reset *--hard*)",
-            "PowerShell(git clean *)",
-            "PowerShell(git checkout *-- *)",
-            "PowerShell(git branch *-D*)",
-            "PowerShell(git rebase *)",
-            "PowerShell(Remove-Item *)",
-        ] {
-            assert!(skip.contains(&rule.into()), "missing deny: {rule}");
-        }
+        let config: serde_json::Value = serde_json::from_str(&skip[skip.iter().position(|a| a == "--settings").unwrap() + 1]).unwrap();
+        assert_eq!(config["disableAllHooks"].as_bool(), (!hooks).then_some(true));
+        assert_eq!(config["permissions"]["blockReadsOutsideWorkingDirectories"], true);
+        assert!(skip.contains(&"Edit(//**/.git/**)".into()));
     }
     assert_eq!(claude_args(&launch(Area::Chat)), claude_args(&ClaudeLaunch { permissions: Permissions::DontAsk, ..launch(Area::Chat) }));
     let side =
@@ -277,6 +249,9 @@ async fn a_project_in_bypass_mode_declines_residual_prompts_without_emitting_a_c
         .into_iter()
         .take(5)
         .map(|mut e| {
+            if !e.input && e.msg["type"] == "control_request" {
+                e.msg["request"]["tool_name"] = "AskUserQuestion".into();
+            }
             if e.input && e.msg["type"] == "control_response" {
                 e.msg["response"]["response"] = serde_json::json!({ "behavior": "deny", "message": "Approval is disabled in Faber." });
             }
@@ -305,7 +280,7 @@ async fn a_project_in_bypass_mode_declines_residual_prompts_without_emitting_a_c
 }
 
 #[tokio::test]
-async fn an_undelivered_automatic_denial_ends_the_turn_instead_of_waiting_for_a_card() {
+async fn an_undelivered_automatic_permission_response_ends_the_turn_instead_of_waiting_for_a_card() {
     let f = fake(support::claude_two_turns("req"));
     let wire = f.wire.clone();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -328,6 +303,48 @@ async fn an_undelivered_automatic_denial_ends_the_turn_instead_of_waiting_for_a_
     assert!(matches!(tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.unwrap(), Some(EngineEvent::Started { .. })));
     assert!(matches!(tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.unwrap(),
         Some(EngineEvent::Error { message, fatal: true }) if message == "error.permission.undelivered"));
+    session.close();
+}
+
+#[tokio::test]
+async fn l2_project_file_and_command_decisions_reach_stdio_without_permission_cards() {
+    let root = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "project-policy"));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let session = start_claude(
+        ClaudeOptions {
+            bin: "claude".into(),
+            cwd: root.path().into(),
+            launch: ClaudeLaunch { permissions: Permissions::DontAsk, ..launch(Area::Project) },
+            spawn: f.spawn.clone(),
+        },
+        Arc::new(move |e| {
+            let _ = tx.send(e);
+        }),
+    );
+    session.send(UserTurn::text("check policy"));
+    loop {
+        let e = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.unwrap().unwrap();
+        assert!(!matches!(e, EngineEvent::Permission { .. }));
+        if matches!(e, EngineEvent::Done { .. }) {
+            break;
+        }
+    }
+    let responses: Vec<_> = f
+        .wire
+        .messages()
+        .into_iter()
+        .filter(|m| m["type"] == "control_response")
+        .map(|m| {
+            (m["response"]["request_id"].as_str().unwrap().to_owned(), m["response"]["response"]["behavior"].as_str().unwrap().to_owned())
+        })
+        .collect();
+    assert_eq!(
+        responses,
+        [("write", "allow"), ("outside", "deny"), ("git", "deny"), ("delete", "allow"), ("question", "deny")]
+            .map(|(id, behavior)| (id.to_owned(), behavior.to_owned()))
+    );
+    assert!(f.mismatches.lock().unwrap().is_empty());
     session.close();
 }
 

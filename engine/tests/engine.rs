@@ -373,6 +373,33 @@ async fn permissions_default_without_a_migration_persist_and_restart_idle_projec
 }
 
 #[tokio::test]
+async fn m5_tightening_permissions_stops_running_projects_and_leaves_chat_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let entries = vec![
+        Entry { input: true, msg: serde_json::json!({ "type": "user", "message": { "content": "wait" } }) },
+        Entry { input: false, msg: serde_json::json!({ "type": "system", "subtype": "init", "session_id": "active", "model": "haiku" }) },
+        Entry { input: true, msg: serde_json::json!({ "type": "control_request", "request": { "subtype": "interrupt" } }) },
+    ];
+    let f = fake(entries);
+    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let project = engine.add_project(&dir.path().to_string_lossy());
+    let work = engine.send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, "wait", choice("claude", None)) }).unwrap();
+    let chat = engine.send(ask(Area::Chat, "wait", choice("claude", None))).unwrap();
+    engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+    assert_eq!(engine.open(&work).unwrap().messages.last().unwrap().status, Some(Status::Stopped));
+    assert_eq!(engine.open(&chat).unwrap().messages.last().unwrap().status, Some(Status::Streaming));
+    let _ = finished(&mut rx, |_| {}).await;
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while f.wire.lines_with("interrupt") == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    engine.shutdown();
+}
+
+#[tokio::test]
 async fn the_first_run_choices_survive_a_patch_that_does_not_mention_them() {
     let dir = tempfile::tempdir().unwrap();
     let f = fake(fixture("claude", "chat"));

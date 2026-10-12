@@ -355,7 +355,7 @@ fn a_side_question_thread_has_its_own_instructions_reads_and_runs_nothing_and_is
 }
 
 #[test]
-fn permissions_keep_the_workspace_sandbox_and_only_enable_project_network_without_approvals() {
+fn permissions_keep_the_workspace_sandbox_and_disable_project_network_without_approvals() {
     for area in [Area::Chat, Area::Project] {
         for permissions in [Permissions::DontAsk, Permissions::Ask] {
             for resume in [None, Some("thread-id".into())] {
@@ -375,7 +375,7 @@ fn permissions_keep_the_workspace_sandbox_and_only_enable_project_network_withou
                 assert_eq!(params["model"], "model");
                 if area == Area::Project && permissions == Permissions::DontAsk {
                     assert_eq!(params["approvalPolicy"], "never");
-                    assert_eq!(params["config"], json!({ "sandbox_workspace_write.network_access": true }));
+                    assert_eq!(params["config"]["sandbox_workspace_write.network_access"], false);
                 } else {
                     assert_eq!(params["approvalPolicy"], "on-request");
                     assert!(params.get("config").is_none());
@@ -387,6 +387,49 @@ fn permissions_keep_the_workspace_sandbox_and_only_enable_project_network_withou
                 assert!(side.get("config").is_none());
             }
         }
+    }
+}
+
+#[tokio::test]
+async fn l2_serialized_start_and_resume_carry_the_no_approval_offline_policy() {
+    for resume in [false, true] {
+        let f = fake(fixture("codex", if resume { "resume" } else { "chat" }));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let server = CodexServer::start(CodexServerOptions {
+            bin: "codex".into(),
+            cwd: ".".into(),
+            area: Area::Project,
+            user_hooks: false,
+            windows: false,
+            spawn: f.spawn.clone(),
+        });
+        let session = server.open(
+            CodexThread {
+                cwd: ".".into(),
+                model: None,
+                effort: None,
+                resume: resume.then(|| "thread-id".into()),
+                instructions: None,
+                user_name: None,
+                permissions: Permissions::DontAsk,
+            },
+            Arc::new(move |e| {
+                let _ = tx.send(e);
+            }),
+        );
+        loop {
+            let e = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.unwrap().unwrap();
+            if matches!(e, EngineEvent::Started { .. }) {
+                break;
+            }
+        }
+        let messages = f.wire.messages();
+        let message = messages.iter().find(|m| m["method"] == if resume { "thread/resume" } else { "thread/start" }).unwrap();
+        assert_eq!(message["params"]["approvalPolicy"], "never");
+        assert_eq!(message["params"]["sandbox"], "workspace-write");
+        assert_eq!(message["params"]["config"]["sandbox_workspace_write.network_access"], false);
+        assert_eq!(message["params"]["config"]["shell_environment_policy.set"]["GIT_ALLOW_PROTOCOL"], "");
+        session.close();
     }
 }
 

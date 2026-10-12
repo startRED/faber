@@ -608,6 +608,26 @@ impl Core {
             user_name: patch.user_name.map_or(before.user_name.clone(), |name| clean_name(&name)),
         };
         self.store.save_settings(&settings).map_err(|_| "error.settings.saveFailed".to_string())?;
+        if before.permissions.unwrap_or_default() == Permissions::DontAsk && settings.permissions == Some(Permissions::Ask) {
+            let active: Vec<String> = self
+                .live
+                .iter()
+                .filter(|(id, live)| live.turn.is_some() && self.convs.get(*id).is_some_and(|c| c.area == Area::Project))
+                .map(|(id, _)| id.clone())
+                .collect();
+            for id in active {
+                if let Some(live) = self.live.remove(&id) {
+                    live.session.interrupt();
+                    live.session.close();
+                    if let Some(message) =
+                        live.turn.as_ref().and_then(|turn| self.convs.get_mut(&id)?.messages.iter_mut().find(|m| &m.id == turn))
+                    {
+                        settle(message);
+                    }
+                    self.finish(&id, live.turn);
+                }
+            }
+        }
         // The blank conversation being typed was started with the old name; the next one starts with the new one.
         if settings.user_name != before.user_name {
             self.drop_draft();
