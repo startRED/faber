@@ -48,6 +48,18 @@ fn the_codex_sign_in_mode_decides_the_billing() {
     assert_eq!(codex_account(&chatgpt), Signals { plan: Some("pro".into()), billing: Some(Billing::Subscription), ..Signals::default() });
     let key = json!({"params": {"authMode": "apikey"}});
     assert_eq!(codex_account(&key).billing, Some(Billing::UsageBilled));
+    let cloud = json!({"params": {"authMode": "amazonBedrock"}});
+    assert_eq!(codex_account(&cloud).billing, Some(Billing::UsageBilled), "any way in but ChatGPT is billed by use");
+    let metered = json!({"params": {"authMode": "chatgpt", "planType": "self_serve_business_usage_based"}});
+    assert_eq!(codex_account(&metered).billing, Some(Billing::UsageBilled), "a plan billed by use is not a subscription");
+    assert_eq!(codex_account(&json!({"params": {}})).billing, Some(Billing::Unknown), "a missing mode clears the verdict");
+    let limits = json!({"params": {"rateLimits": {"planType": "enterprise_cbp_usage_based"}}});
+    assert_eq!(codex_signals(&limits).billing, Some(Billing::UsageBilled));
+    assert_eq!(
+        codex_signals(&json!({"params": {"rateLimits": {"planType": "pro"}}})).billing,
+        None,
+        "a limit update never proves a subscription"
+    );
 }
 
 #[test]
@@ -57,5 +69,29 @@ fn claude_auth_status_gives_the_plan_and_drops_the_rest() {
     let key = claude_plan(r#"{"loggedIn": true, "authMethod": "api_key"}"#);
     assert_eq!((key.plan, key.billing), (None, Some(Billing::UsageBilled)));
     assert_eq!(claude_plan("not json"), Signals::default());
-    assert_eq!(claude_plan(r#"{"loggedIn": true}"#), Signals::default(), "the field is missing: ask the user");
+    assert_eq!(claude_plan(r#"{"loggedIn": true}"#).billing, Some(Billing::Unknown), "a missing field does not prove a subscription");
+}
+
+#[test]
+fn an_unrecognised_or_signed_out_account_does_not_prove_subscription_billing() {
+    assert_eq!(codex_account(&json!({"params": {"authMode": "chatgpt-unrecognised"}})).billing, Some(Billing::Unknown));
+    assert_eq!(codex_account(&json!({"params": {"authMode": null}})).billing, Some(Billing::Unknown));
+    assert_eq!(claude_plan(r#"{"loggedIn":false,"subscriptionType":"max"}"#).billing, Some(Billing::Unknown));
+    assert_eq!(claude_plan(r#"{"loggedIn":true,"authMethod":"api_key","subscriptionType":"max"}"#).billing, Some(Billing::UsageBilled));
+}
+
+#[test]
+fn absent_credit_and_limit_fields_do_not_clear_previous_guards() {
+    let signals = codex_signals(&json!({"params":{"rateLimits":{"primary":{"usedPercent":50}}}}));
+    assert_eq!(signals.paid_fallback, None);
+    assert_eq!(signals.reach, None);
+    let partial = codex_signals(&json!({"params":{"rateLimits":{"credits":{"hasCredits":false}}}}));
+    assert_eq!(partial.paid_fallback, None);
+}
+
+#[test]
+fn a_message_that_says_nothing_about_the_account_is_empty() {
+    assert!(Signals::default().is_empty());
+    assert!(claude_signals(&json!({ "type": "rate_limit_event", "rate_limit_info": {} })).is_empty());
+    assert!(!claude_signals(&json!({ "rate_limit_info": { "isUsingOverage": false } })).is_empty());
 }

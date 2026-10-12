@@ -15,6 +15,13 @@ pub struct Signals {
     pub billing: Option<Billing>,
 }
 
+impl Signals {
+    /// True when the message said nothing about the account, so there is nothing to pass on.
+    pub fn is_empty(&self) -> bool {
+        *self == Signals::default()
+    }
+}
+
 /// Claude Code's `rate_limit_event`. A status other than `allowed` counts only when it is about a vendor-wide window; the
 /// extra-usage switch is "possible" unless the CLI says it is rejected or off.
 pub fn claude_signals(msg: &Value) -> Signals {
@@ -36,35 +43,60 @@ pub fn codex_signals(msg: &Value) -> Signals {
     let r = &msg["params"]["rateLimits"];
     let reset = [&r["primary"]["resetsAt"], &r["secondary"]["resetsAt"]].into_iter().filter_map(Value::as_f64).reduce(f64::max);
     let reached = !r["rateLimitReachedType"].is_null() || r["spendControlReached"] == true;
+    let reach = if reached {
+        Some(Reach::Out(reset))
+    } else {
+        (r.get("rateLimitReachedType").is_some() && r.get("spendControlReached").is_some()).then_some(Reach::Clear)
+    };
+    let paid_fallback = match (r["credits"]["hasCredits"].as_bool(), r["credits"]["unlimited"].as_bool()) {
+        (Some(true), _) | (_, Some(true)) => Some(true),
+        (Some(false), Some(false)) => Some(false),
+        _ => None,
+    };
     Signals {
-        reach: Some(if reached { Reach::Out(reset) } else { Reach::Clear }),
-        paid_fallback: Some(r["credits"]["hasCredits"] == true || r["credits"]["unlimited"] == true),
+        reach,
+        paid_fallback,
         plan: r["planType"].as_str().map(String::from),
+        billing: r["planType"].as_str().filter(|p| usage_plan(p)).map(|_| Billing::UsageBilled),
         ..Signals::default()
     }
 }
 
+/// Plan names that bill by use rather than by subscription (Codex lists some as `..._usage_based`).
+fn usage_plan(plan: &str) -> bool {
+    plan.to_ascii_lowercase().contains("usage_based")
+}
+
 /// Codex's `account/updated`: how the account signs in and its plan. The mode names are not credentials; nothing else in
-/// the message is kept.
+/// the message is kept. Only a ChatGPT sign-in on a plan that is not billed by use counts as a subscription: any other
+/// way in is kept out of Auto unless its subscription billing is confirmed.
 pub fn codex_account(msg: &Value) -> Signals {
     let p = &msg["params"];
-    let billing =
-        p["authMode"].as_str().map(|m| if m.to_ascii_lowercase().contains("api") { Billing::UsageBilled } else { Billing::Subscription });
-    Signals { plan: p["planType"].as_str().map(String::from), billing, ..Signals::default() }
+    let plan = p["planType"].as_str();
+    let by_use = plan.is_some_and(usage_plan);
+    let billing = match p["authMode"].as_str().map(str::to_ascii_lowercase).as_deref() {
+        _ if by_use => Billing::UsageBilled,
+        Some("chatgpt" | "chatgptauthtokens") => Billing::Subscription,
+        Some("apikey" | "api_key" | "amazonbedrock" | "googlevertexai") => Billing::UsageBilled,
+        _ => Billing::Unknown,
+    };
+    Signals { plan: plan.map(String::from), billing: Some(billing), ..Signals::default() }
 }
 
 /// What `claude auth status` printed, reduced to the plan and the billing: everything else in the output is dropped
 /// unread.
 pub fn claude_plan(output: &str) -> Signals {
-    let v: Value = serde_json::from_str(output).unwrap_or(Value::Null);
-    let plan = v["subscriptionType"].as_str().filter(|s| !s.is_empty()).map(String::from);
+    let Ok(v) = serde_json::from_str::<Value>(output) else { return Signals::default() };
+    let plan = v["subscriptionType"].as_str().filter(|s| !s.is_empty() && v["loggedIn"] != false).map(String::from);
     let method = ["authMethod", "authMode", "loginMethod"].into_iter().find_map(|k| v[k].as_str()).unwrap_or_default().to_ascii_lowercase();
-    let billing = if plan.is_some() {
-        Some(Billing::Subscription)
+    let billing = if v["loggedIn"] == false {
+        Billing::Unknown
     } else if method.contains("api") || method.contains("console") {
-        Some(Billing::UsageBilled)
+        Billing::UsageBilled
+    } else if plan.is_some() {
+        Billing::Subscription
     } else {
-        None
+        Billing::Unknown
     };
-    Signals { plan, billing, ..Signals::default() }
+    Signals { plan, billing: Some(billing), ..Signals::default() }
 }

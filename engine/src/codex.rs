@@ -5,6 +5,7 @@ use crate::claude::EventSink;
 use crate::events::{Delivery, EngineEvent, Session, SessionCommand, UserTurn};
 use crate::model::{Area, name_instructions};
 use crate::proc::{self, Spawner};
+use crate::signals::{codex_account, codex_signals};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
@@ -160,13 +161,16 @@ pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<
         }
         "account/rateLimits/updated" => [&p["rateLimits"]["primary"], &p["rateLimits"]["secondary"]]
             .into_iter()
-            .filter(|w| w.is_object())
-            .map(|w| EngineEvent::Quota {
-                window: window_name(w["windowDurationMins"].as_i64().unwrap_or(0)),
-                used: w["usedPercent"].as_f64().unwrap_or(0.0) / 100.0,
-                resets_at: w["resetsAt"].as_f64().unwrap_or(0.0),
+            .filter_map(|w| {
+                Some(EngineEvent::Quota {
+                    window: window_name(w["windowDurationMins"].as_i64()?),
+                    used: w["usedPercent"].as_f64()? / 100.0,
+                    resets_at: w["resetsAt"].as_f64()?,
+                })
             })
+            .chain(Some(codex_signals(msg)).filter(|s| !s.is_empty()).map(EngineEvent::Signals))
             .collect(),
+        "account/updated" => Some(codex_account(msg)).filter(|s| !s.is_empty()).map(EngineEvent::Signals).into_iter().collect(),
         "turn/completed" => {
             let status = s(&p["turn"]["status"]);
             // The turn's usage is the thread's total now minus its total when the turn started. With no start to
@@ -547,6 +551,58 @@ async fn serve(started: std::io::Result<proc::Proc>, area: Area, mut rx: Unbound
             }
         }
     }
+}
+
+/// Asks a short-lived `codex app-server` for the account's quota windows and plan, so the first reading does not wait for a
+/// turn. The answers are dressed as the notifications the server sends later and go through the same parser; the rest of
+/// them (the account's email and other details) is dropped unread. Gives no events on any failure.
+pub async fn read_codex_limits(bin: &str, cwd: &Path, windows: bool, spawn: Spawner, timeout: Duration) -> Vec<EngineEvent> {
+    let Ok(p) = spawn(bin, &codex_args(Area::Chat, windows, false), cwd) else { return vec![] };
+    let mut stdin = p.stdin;
+    let mut child = p.child;
+    let mut lines = BufReader::new(p.stdout).lines();
+    let ask = async {
+        let init = json!({ "id": 1, "method": "initialize", "params": { "clientInfo": { "name": "faber", "title": "Faber", "version": "0.0.0" } } });
+        let _ = proc::write_line(&mut *stdin, &init).await;
+        let mut events = vec![];
+        let mut answered = 0;
+        while let Ok(Some(line)) = lines.next_line().await {
+            let Ok(msg) = serde_json::from_str::<Value>(&line) else { continue };
+            if !msg["error"].is_null() {
+                return vec![];
+            }
+            match msg["id"].as_i64() {
+                Some(1) => {
+                    let _ = proc::write_line(&mut *stdin, &json!({ "method": "initialized" })).await;
+                    let _ = proc::write_line(&mut *stdin, &json!({ "id": 2, "method": "account/rateLimits/read" })).await;
+                    let _ =
+                        proc::write_line(&mut *stdin, &json!({ "id": 3, "method": "account/read", "params": { "refreshToken": false } }))
+                            .await;
+                }
+                Some(2) => {
+                    let note = json!({ "method": "account/rateLimits/updated", "params": { "rateLimits": msg["result"]["rateLimits"] } });
+                    events.extend(parse_codex_notification(&note, &mut CodexTurnState::default()));
+                    answered += 1;
+                }
+                Some(3) => {
+                    let account = &msg["result"]["account"];
+                    // `chatgpt`, `apiKey`, ...: the same mode names `account/updated` uses, in lower case.
+                    let mode = account["type"].as_str().map(str::to_ascii_lowercase);
+                    let note = json!({ "method": "account/updated", "params": { "authMode": mode, "planType": account["planType"] } });
+                    events.extend(parse_codex_notification(&note, &mut CodexTurnState::default()));
+                    answered += 1;
+                }
+                _ => {}
+            }
+            if answered == 2 {
+                break;
+            }
+        }
+        events
+    };
+    let events = tokio::time::timeout(timeout, ask).await.unwrap_or_default();
+    proc::stop(&mut *stdin, &mut child).await;
+    events
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

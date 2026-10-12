@@ -3,6 +3,7 @@
 use crate::events::{Delivery, EngineEvent, Session, SessionCommand, UserTurn};
 use crate::model::{Area, name_instructions};
 use crate::proc::{self, Spawner};
+use crate::signals::claude_signals;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -129,19 +130,12 @@ pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
             tool: s(&msg["request"]["tool_name"]),
             input: msg["request"]["input"].clone(),
         }],
-        "rate_limit_event" => msg["rate_limit_info"]["unifiedWindows"]
-            .as_object()
-            .map(|windows| {
-                windows
-                    .iter()
-                    .map(|(window, w)| EngineEvent::Quota {
-                        window: window.clone(),
-                        used: w["utilization"].as_f64().unwrap_or(0.0),
-                        resets_at: w["resetsAt"].as_f64().unwrap_or(0.0),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default(),
+        "rate_limit_event" => {
+            let windows = msg["rate_limit_info"]["unifiedWindows"].as_object().into_iter().flatten().filter_map(|(window, w)| {
+                Some(EngineEvent::Quota { window: window.clone(), used: w["utilization"].as_f64()?, resets_at: w["resetsAt"].as_f64()? })
+            });
+            windows.chain(Some(claude_signals(msg)).filter(|s| !s.is_empty()).map(EngineEvent::Signals)).collect()
+        }
         "result" => result_events(msg),
         _ => vec![],
     }

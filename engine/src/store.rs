@@ -1,6 +1,7 @@
 //! Plain JSON files in the app's data folder: readable by people and by any future tool.
 //! Writes go to a temp file first, so a crash never leaves a half-written conversation.
 
+use crate::ledger::Ledger;
 use crate::model::{Conversation, Project, Settings, Summary};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -12,12 +13,16 @@ pub struct Store {
     conversations: PathBuf,
     projects: PathBuf,
     settings: PathBuf,
+    budget: PathBuf,
 }
 
 /// Writes through a temp file. On failure the temp file is removed and the error returned; the old file stays as it was.
 fn write<T: Serialize>(path: &Path, value: &T) -> io::Result<()> {
+    write_text(path, &serde_json::to_string_pretty(value).expect("plain data always serializes"))
+}
+
+fn write_text(path: &Path, json: &str) -> io::Result<()> {
     let tmp = path.with_extension("json.tmp");
-    let json = serde_json::to_string_pretty(value).expect("plain data always serializes");
     fs::write(&tmp, json).and_then(|()| fs::rename(&tmp, path)).inspect_err(|_| drop(fs::remove_file(&tmp)))
 }
 
@@ -29,7 +34,12 @@ impl Store {
     pub fn new(data_dir: &Path) -> Self {
         let conversations = data_dir.join("conversations");
         let _ = fs::create_dir_all(&conversations);
-        Store { conversations, projects: data_dir.join("projects.json"), settings: data_dir.join("settings.json") }
+        Store {
+            conversations,
+            projects: data_dir.join("projects.json"),
+            settings: data_dir.join("settings.json"),
+            budget: data_dir.join("budget.json"),
+        }
     }
 
     fn file(&self, id: &str) -> PathBuf {
@@ -81,6 +91,19 @@ impl Store {
 
     pub fn save_settings(&self, settings: &Settings) -> io::Result<()> {
         write(&self.settings, settings)
+    }
+
+    /// What Faber remembers about each vendor's quota. A missing, damaged or unreadable file is an empty ledger: it only
+    /// holds what was learned, and learning starts again.
+    pub fn ledger(&self) -> Ledger {
+        let mut ledger: Ledger = read(&self.budget).unwrap_or_default();
+        ledger.sanitize();
+        ledger
+    }
+
+    /// Compact on purpose: it is rewritten often and a person never has to read it.
+    pub fn save_ledger(&self, ledger: &Ledger) {
+        let _ = write_text(&self.budget, &serde_json::to_string(ledger).expect("plain data always serializes"));
     }
 }
 

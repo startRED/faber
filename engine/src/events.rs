@@ -33,6 +33,8 @@ pub enum EngineEvent {
         used: f64,
         resets_at: f64,
     },
+    /// What the CLI said about the account besides window readings: whether it can answer, paid fallback, plan, billing.
+    Signals(crate::signals::Signals),
     /// What a finished turn used. `cost_total_usd` is Claude Code's own API-priced figure as it reports it: cumulative for
     /// the conversation, so the engine subtracts what it saw before (`usage::settle`); None when the result carries no
     /// counters (an aborted turn) and on Codex, which reports no cost. `input_tokens` is the prompt of the main response,

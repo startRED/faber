@@ -162,11 +162,18 @@ impl Core {
         let (tx, answer) = oneshot::channel();
         let text = Arc::new(Mutex::new(String::new()));
         let tx = Arc::new(Mutex::new(Some(tx)));
+        let me = self.me.clone();
         let sink: EventSink = Arc::new(move |e| match e {
             EngineEvent::Text(t) => text.lock().unwrap_or_else(|e| e.into_inner()).push_str(&t),
             EngineEvent::Done { .. } | EngineEvent::Error { .. } => {
                 if let Some(tx) = tx.lock().unwrap_or_else(|e| e.into_inner()).take() {
                     let _ = tx.send(Some(std::mem::take(&mut *text.lock().unwrap_or_else(|e| e.into_inner()))));
+                }
+            }
+            // The router's process sees account-wide news too (Codex hands it to one thread): the ledger must not miss it.
+            e @ (EngineEvent::Quota { .. } | EngineEvent::Signals(_)) => {
+                if let Some(core) = me.upgrade() {
+                    core.lock().unwrap_or_else(|e| e.into_inner()).note_account_event(vendor, e);
                 }
             }
             _ => {}

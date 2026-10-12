@@ -21,4 +21,4 @@ pub mod usage;
 pub mod workspace;
 
 pub use account::AccountStatus;
-pub use engine::{AppEvent, AppState, BranchRequest, Engine, EngineOptions, SendRequest, TerminalCommand, WarmRequest};
+pub use engine::{AppEvent, AppState, BranchRequest, Clock, Engine, EngineOptions, SendRequest, TerminalCommand, WarmRequest};

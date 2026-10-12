@@ -5,9 +5,11 @@ use crate::claude::{ClaudeLaunch, ClaudeOptions, EventSink, start_claude};
 use crate::cli::Cli;
 use crate::codex::{CodexServer, CodexServerOptions, CodexThread};
 use crate::events::{EngineEvent, Session, UserTurn};
+use crate::ledger::{Ledger, plausible};
 use crate::model::*;
 use crate::proc::Spawner;
 use crate::router::{Choice, Pick, pick_model};
+use crate::signals::Signals;
 use crate::store::Store;
 use crate::usage;
 use crate::workspace::{Attachment, inside_folder, new_files, save_files};
@@ -33,6 +35,9 @@ pub enum AppEvent {
 }
 
 pub type Emit = Arc<dyn Fn(AppEvent) + Send + Sync>;
+
+/// The time in Unix seconds. Tests replace it to place quota readings in time.
+pub type Clock = Arc<dyn Fn() -> f64 + Send + Sync>;
 
 /// Answers a routing question in place of the CLIs; tests use it so no real model is called.
 pub type Ask = Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = Option<String>> + Send>> + Send + Sync>;
@@ -147,6 +152,25 @@ fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
 }
 
+fn unix_secs() -> f64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64())
+}
+
+/// How often the quota ledger is written while readings keep coming.
+const LEDGER_EVERY: f64 = 30.0;
+
+/// The readings the ledger remembers that have not reset yet, so Settings has numbers before the first answer.
+fn remembered(ledger: &Ledger, now: f64) -> HashMap<(Vendor, String), QuotaReading> {
+    Vendor::ALL
+        .into_iter()
+        .flat_map(|vendor| {
+            ledger.of(vendor).readings.iter().filter(move |(_, r)| r.resets_at > now).map(move |(window, r)| {
+                ((vendor, window.clone()), QuotaReading { vendor, window: window.clone(), used: r.used, resets_at: r.resets_at })
+            })
+        })
+        .collect()
+}
+
 fn new_id() -> String {
     Uuid::new_v4().to_string()
 }
@@ -187,6 +211,12 @@ struct Core {
     guess: Option<auto::Guess>,
     next_draft: Option<auto::Draft>,
     spare: Option<auto::Spare>,
+    /// What Faber remembers about each vendor's quota (`budget.json`).
+    ledger: Ledger,
+    ledger_saved: f64,
+    /// The PC's offset from UTC in seconds, as the screen reports it.
+    utc_offset: i64,
+    clock: Option<Clock>,
 }
 
 /// A handle to the engine; clones share the same engine.
@@ -199,6 +229,8 @@ pub struct Engine {
 impl Engine {
     pub fn new(opts: EngineOptions, emit: Emit) -> Engine {
         let store = Store::new(&opts.data_dir);
+        let ledger = store.ledger();
+        let quotas = remembered(&ledger, unix_secs());
         let runtime = opts.runtime.clone();
         let core = Arc::new_cyclic(|me| {
             Mutex::new(Core {
@@ -215,11 +247,15 @@ impl Engine {
                 codex: HashMap::new(),
                 codex_recommended: None,
                 codex_models: vec![],
-                quotas: HashMap::new(),
+                quotas,
                 running: Running::default(),
                 guess: None,
                 next_draft: None,
                 spare: None,
+                ledger,
+                ledger_saved: 0.0,
+                utc_offset: 0,
+                clock: None,
             })
         });
         Engine { core, runtime }
@@ -232,6 +268,29 @@ impl Engine {
 
     pub fn vendors(&self) -> Vec<Vendor> {
         self.with(|c| c.vendors())
+    }
+    /// The PC's offset from UTC in seconds (east is positive). The engine has no time zone database, so the screen says.
+    pub fn set_utc_offset(&self, secs: i64) {
+        self.with(|c| c.utc_offset = secs.clamp(-14 * 3600, 14 * 3600))
+    }
+    /// Replaces the clock; the quota arithmetic reads the time through it.
+    pub fn set_time_source(&self, clock: Clock) {
+        self.with(|c| {
+            c.clock = Some(clock);
+            // Which remembered readings are still current depends on the clock.
+            for (key, reading) in remembered(&c.ledger, c.secs()) {
+                c.quotas.entry(key).or_insert(reading);
+            }
+        })
+    }
+    /// A copy of what the engine remembers about each vendor's quota, for Settings and for tests.
+    pub fn ledger(&self) -> Ledger {
+        self.with(|c| c.ledger.clone())
+    }
+    /// Quota readings and account facts that came from outside a conversation, such as a short-lived CLI process asked
+    /// for them. Anything else in `events` is ignored.
+    pub fn note_account_events(&self, vendor: Vendor, events: Vec<EngineEvent>) {
+        self.with(|c| events.into_iter().for_each(|e| c.note_account_event(vendor, e)))
     }
     pub fn set_codex_models(&self, models: Vec<String>, recommended: Option<String>) {
         self.with(|c| {
@@ -325,11 +384,69 @@ impl Engine {
                 server.retire();
             }
             c.close_spare();
+            c.save_ledger(true);
         })
     }
 }
 
 impl Core {
+    /// The time in Unix seconds.
+    fn secs(&self) -> f64 {
+        self.clock.as_ref().map_or_else(unix_secs, |clock| clock())
+    }
+
+    /// Writes the ledger, but at most every half minute unless `force`: readings come with every answer.
+    fn save_ledger(&mut self, force: bool) {
+        let now = self.secs();
+        if force || !(0.0..LEDGER_EVERY).contains(&(now - self.ledger_saved)) {
+            self.store.save_ledger(&self.ledger);
+            self.ledger_saved = now;
+        }
+    }
+
+    /// A reading of one quota window: kept for the screen, remembered by the ledger, and told to the screen.
+    fn note_quota(&mut self, vendor: Vendor, window: &str, used: f64, resets_at: f64) {
+        // A reading that cannot be real (a CLI that changed its format) is shown nowhere and learned from by no one.
+        if !plausible(used, resets_at) {
+            return;
+        }
+        let now = self.secs();
+        let reading = QuotaReading { vendor, window: window.to_string(), used, resets_at };
+        self.quotas.insert((vendor, window.to_string()), reading);
+        self.ledger.of_mut(vendor).record(window, used, resets_at, now, self.utc_offset);
+        self.save_ledger(false);
+        (self.emit)(AppEvent::Quota { vendor, window: window.to_string(), used, resets_at });
+    }
+
+    /// What a CLI said about the account: merged into what the ledger knows, field by field.
+    fn apply_signals(&mut self, vendor: Vendor, s: Signals) {
+        let now = self.secs();
+        let v = self.ledger.of_mut(vendor);
+        if let Some(reach) = s.reach {
+            v.reach = reach;
+        }
+        if let Some(on) = s.overage_active {
+            v.overage_active = on;
+        }
+        if let Some(possible) = s.paid_fallback {
+            v.paid_fallback = possible;
+        }
+        if let Some(billing) = s.billing {
+            v.billing = billing;
+        }
+        if s.plan.is_some() {
+            v.plan_detected(s.plan, now);
+        }
+    }
+
+    fn note_account_event(&mut self, vendor: Vendor, event: EngineEvent) {
+        match event {
+            EngineEvent::Quota { window, used, resets_at } => self.note_quota(vendor, &window, used, resets_at),
+            EngineEvent::Signals(s) => self.apply_signals(vendor, s),
+            _ => {}
+        }
+    }
+
     fn vendors(&self) -> Vec<Vendor> {
         self.opts.clis.keys().copied().collect()
     }
@@ -514,11 +631,8 @@ impl Core {
                 }
                 return self.push(conv, turn_id.as_deref(), true);
             }
-            EngineEvent::Quota { window, used, resets_at } => {
-                let reading = QuotaReading { vendor, window: window.clone(), used, resets_at };
-                self.quotas.insert((vendor, window.clone()), reading);
-                return (self.emit)(AppEvent::Quota { vendor, window, used, resets_at });
-            }
+            EngineEvent::Quota { window, used, resets_at } => return self.note_quota(vendor, &window, used, resets_at),
+            EngineEvent::Signals(s) => return self.apply_signals(vendor, s),
             EngineEvent::Done {
                 ok,
                 cost_total_usd,
@@ -584,6 +698,7 @@ impl Core {
         }
         c.updated_at = now();
         self.save(conv);
+        self.save_ledger(false);
         self.push(conv, turn_id.as_deref(), true);
         self.list_changed();
         if self.live.get(conv).is_some_and(|l| self.opts.clis.get(&l.vendor) != Some(&l.cli))
