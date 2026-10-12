@@ -31,12 +31,25 @@ pub struct Reading {
     pub read_at: f64,
 }
 
+/// A quota reading with the existing own-spend counters at that instant. Their deltas survive local offset changes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DailySample {
+    pub reading: Point,
+    pub own_spend: BTreeMap<i64, f64>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
+}
+
 /// What is kept for one vendor.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct VendorLedger {
     pub readings: BTreeMap<String, Reading>,
     pub history: BTreeMap<String, Vec<Point>>,
+    /// Evidence at or just before a reset-relative day boundary; a missing baseline grants no automated work.
+    pub day_baselines: BTreeMap<String, DailySample>,
+    /// Last weekly sample, so a reading just before a boundary is evidence rather than an invented empty day.
+    pub daily_samples: BTreeMap<String, DailySample>,
     pub spans: Vec<Span>,
     /// Own API-equivalent USD per local day, independent of account percentages.
     pub own_spend: BTreeMap<i64, f64>,
@@ -164,18 +177,52 @@ impl VendorLedger {
         let (now, resets_at, used) = (now.round(), resets_at.round(), (used * 1000.0).round() / 1000.0);
         self.readings.insert(window.to_string(), Reading { used, resets_at, read_at: now });
         let point = Point { at: now, used, resets_at };
-        let primary = self.primary(now).map(String::from);
-        self.history.retain(|name, _| Some(name) == primary.as_ref());
-        if primary.as_deref() != Some(window) {
-            return;
+        if vendor_wide(window)
+            && window_secs(window) == Some(7.0 * 86_400.0)
+            && let Some(start) = crate::budget::daily_start(resets_at, now)
+        {
+            let sample = DailySample { reading: point, own_spend: self.own_spend.clone(), extra: BTreeMap::new() };
+            let prior = self.daily_samples.insert(window.into(), sample.clone());
+            if now == start {
+                let saved = self.day_baselines.entry(window.into()).or_insert(sample.clone());
+                if saved.reading.at == start && saved.reading.resets_at == resets_at {
+                    saved.reading.used = saved.reading.used.min(used);
+                } else {
+                    *saved = sample;
+                }
+            } else if let Some(prior) = prior
+                && prior.reading.resets_at == resets_at
+                && prior.reading.at <= start
+                && (0.0..=crate::budget::STALE_SECS).contains(&(start - prior.reading.at))
+            {
+                self.day_baselines.insert(window.into(), prior);
+            }
         }
+        let primary = self.primary(now).map(String::from);
+        self.history.retain(|name, _| self.readings.contains_key(name));
+        self.day_baselines.retain(|name, _| self.readings.contains_key(name));
+        self.daily_samples.retain(|name, _| self.readings.contains_key(name));
         let list = self.history.entry(window.to_string()).or_default();
         let previous = list.last().copied();
         list.push(point);
         if list.len() > KEEP_POINTS {
             list.drain(..list.len() - KEEP_POINTS);
         }
-        if let Some(previous) = previous
+        while self.history.values().map(Vec::len).sum::<usize>() > KEEP_POINTS {
+            let oldest = self
+                .history
+                .iter()
+                .filter_map(|(name, list)| list.first().map(|p| (name.clone(), p.at)))
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|(name, _)| name);
+            if let Some(name) = oldest
+                && let Some(list) = self.history.get_mut(&name)
+            {
+                list.remove(0);
+            }
+        }
+        if primary.as_deref() == Some(window)
+            && let Some(previous) = previous
             && previous.at >= self.since
         {
             self.learned.add(&previous, &point, offset);

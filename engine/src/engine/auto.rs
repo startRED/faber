@@ -70,6 +70,14 @@ impl Core {
 
     /// The one door before a request reaches a CLI (3.4): may this vendor and family be asked for this purpose now.
     pub(super) fn allows(&self, vendor: Vendor, family: Option<&str>, purpose: Purpose, approved: bool) -> Result<(), Why> {
+        self.quota_allows(vendor, family, purpose, approved)?;
+        if purpose != Purpose::PlanCheck && !crate::project::budget::allows_unbounded(&self.ledger, vendor) {
+            return Err(Why::Window);
+        }
+        Ok(())
+    }
+
+    fn quota_allows(&self, vendor: Vendor, family: Option<&str>, purpose: Purpose, approved: bool) -> Result<(), Why> {
         let now = self.secs();
         let mut snap = self.ledger.of(vendor).snap(now);
         if vendor == Vendor::Claude && self.opts.claude_env_billed {
@@ -81,11 +89,28 @@ impl Core {
     /// The table's pick for the router's verdict, on the quota as it is now. Profiles the gate would refuse are not in the
     /// pool; with every multiplier and weight at 1 the pick is exactly the table without quota (`choose`).
     pub(super) fn table(&self, verdict: &Asked, only: Option<Vendor>) -> Option<Routed> {
+        self.table_for(verdict, only, false, |_| true)
+    }
+
+    pub(super) fn table_for(
+        &self,
+        verdict: &Asked,
+        only: Option<Vendor>,
+        mission: bool,
+        eligible: impl Fn(&Profile) -> bool,
+    ) -> Option<Routed> {
         let now = self.secs();
         let vendors: Vec<Vendor> = self.vendors().into_iter().filter(|v| only.is_none_or(|o| o == *v)).collect();
         let usable: Vec<Profile> = candidates(&vendors, &self.codex_models)
             .into_iter()
-            .filter(|p| self.allows(p.vendor, family_of(p.model), Purpose::UserTurn { by_hand: false }, false).is_ok())
+            .filter(|p| {
+                let allowed = if mission {
+                    self.quota_allows(p.vendor, family_of(p.model), Purpose::UserTurn { by_hand: false }, false)
+                } else {
+                    self.allows(p.vendor, family_of(p.model), Purpose::UserTurn { by_hand: false }, false)
+                };
+                allowed.is_ok() && eligible(p)
+            })
             .collect();
         let known: BTreeMap<Vendor, (Snap, Shape)> =
             vendors.iter().map(|v| (*v, (self.ledger.of(*v).snap(now), self.ledger.of(*v).shape()))).collect();
@@ -191,6 +216,10 @@ impl Core {
         let Some(Spare { session, answer, asked, vendor, model_name, .. }) = self.spare.take().or_else(|| self.open_router()) else {
             return (None, None);
         };
+        if self.allows(vendor, family_of(model_name), Purpose::Router, false).is_err() || self.begin_unbounded(vendor).is_err() {
+            session.close();
+            return (None, None);
+        }
         *asked.lock().unwrap_or_else(|e| e.into_inner()) = Some(self.secs());
         session.send(UserTurn::text(prompt));
         let me = self.me.clone();

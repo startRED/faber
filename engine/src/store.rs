@@ -190,9 +190,17 @@ impl Store {
 
     /// Reads `budget.json`; a damaged file is copied aside once, as evidence, before the error is returned.
     fn read_ledger(&self) -> Result<Ledger, Fault> {
-        match read_checked::<Ledger>(&self.budget) {
-            Ok(found) => {
-                let mut ledger = found.unwrap_or_default();
+        let checked = read_checked::<Ledger>(&self.budget).and_then(|found| {
+            let ledger = found.unwrap_or_default();
+            if crate::project::budget::Budget::load(&ledger).is_err()
+                || crate::model::Vendor::ALL.iter().any(|v| ledger.of(*v).own_spend.values().any(|cost| !cost.is_finite() || *cost < 0.0))
+            {
+                return Err(Fault::Corrupt);
+            }
+            Ok(ledger)
+        });
+        match checked {
+            Ok(mut ledger) => {
                 ledger.sanitize();
                 Ok(ledger)
             }

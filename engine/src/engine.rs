@@ -27,6 +27,7 @@ use uuid::Uuid;
 
 mod answer;
 mod auto;
+mod project_budget;
 mod pulse;
 mod recovery;
 mod usage_view;
@@ -228,6 +229,8 @@ struct Core {
     /// What Faber remembers about each vendor's quota (`budget.json`).
     ledger: Ledger,
     ledger_saved: f64,
+    /// Safety changes cannot admit work after a failed ledger save.
+    ledger_failed: bool,
     /// When the last quota pulse started.
     last_pulse: f64,
     /// The PC's offset from UTC in seconds, as the screen reports it.
@@ -274,6 +277,7 @@ impl Engine {
                 spare: None,
                 ledger,
                 ledger_saved: 0.0,
+                ledger_failed: false,
                 last_pulse: 0.0,
                 utc_offset: 0,
                 offset_known: false,
@@ -502,8 +506,11 @@ impl Core {
     /// tried again with the next reading.
     fn save_ledger(&mut self, force: bool) {
         let now = self.secs();
-        if (force || !(0.0..LEDGER_EVERY).contains(&(now - self.ledger_saved))) && self.store.save_ledger(&self.ledger).is_ok() {
-            self.ledger_saved = now;
+        if force || !(0.0..LEDGER_EVERY).contains(&(now - self.ledger_saved)) {
+            self.ledger_failed = self.store.save_ledger(&self.ledger).is_err();
+            if !self.ledger_failed {
+                self.ledger_saved = now;
+            }
         }
     }
 
@@ -610,6 +617,10 @@ impl Core {
         self.ledger.of_mut(vendor).spend(cost, incomplete, now, self.utc_offset);
         self.ledger.of_mut(vendor).span(Span { start, end, model: model.to_string(), cost, incomplete });
         self.ledger.of_mut(vendor).learn_weights(now);
+        if crate::project::budget::finish_unbounded(&mut self.ledger, vendor, cost.is_some() && !incomplete).is_err() {
+            self.ledger_failed = true;
+            return;
+        }
         self.save_ledger(true);
         self.emit_usage();
     }
@@ -1152,6 +1163,7 @@ impl Core {
             m.model = Some(running);
         }
         let started = self.secs();
+        self.begin_unbounded(pick.vendor)?;
         if let Some(l) = self.live.get_mut(id) {
             l.started = started;
             l.turn = Some(reply_id.to_string());
