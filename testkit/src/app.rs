@@ -326,8 +326,13 @@ impl Ctx {
                 Err(_) => {}
             }
         };
-        page.wait_for_within("the screen to render", "!!document.querySelector('.app')", timeout)
-            .map_err(|e| format!("{e}. stderr: {}", self.stderr(id)))?;
+        page.cdp.wait_loaded(deadline).map_err(|e| format!("{e}. stderr: {}", self.stderr(id)))?;
+        page.wait_for_within(
+            "the screen to render",
+            "!!document.querySelector('.app')",
+            deadline.saturating_duration_since(Instant::now()),
+        )
+        .map_err(|e| format!("{e}. stderr: {}", self.stderr(id)))?;
         self.guard_desktop(id)?;
         self.record(id)?;
         Ok(Opened { id, pid: self.live[id].pid, page })
