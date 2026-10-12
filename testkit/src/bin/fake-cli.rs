@@ -5,6 +5,28 @@ use std::io;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if let [mode, sandbox] = args.as_slice()
+        && matches!(
+            mode.as_str(),
+            "--project-git" | "--project-git-delete" | "--project-git-race" | "--project-path-race" | "--project-git-clean"
+        )
+    {
+        let sandbox = std::path::Path::new(sandbox);
+        let result = match mode.as_str() {
+            "--project-git-delete" => faber_testkit::screen::projects::probe_deletion(sandbox),
+            "--project-git-race" => faber_testkit::screen::projects::probe_race(sandbox),
+            "--project-path-race" => faber_testkit::screen::projects::probe_path_race(sandbox),
+            "--project-git-clean" => faber_testkit::screen::projects::probe_cleanup(sandbox),
+            _ => faber_testkit::screen::projects::probe(sandbox),
+        };
+        match result {
+            Ok(()) => std::process::exit(0),
+            Err(error) => {
+                eprintln!("project git: {error}");
+                std::process::exit(1);
+            }
+        }
+    }
     if let Some(code) = faber_testkit::gate::run(&args) {
         std::process::exit(code);
     }
