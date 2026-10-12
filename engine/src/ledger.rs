@@ -55,8 +55,8 @@ pub struct VendorLedger {
     pub reach: Reach,
     #[serde(skip)]
     pub overage_active: bool,
-    #[serde(skip)]
-    pub paid_fallback: bool,
+    /// None means paid fallback is still possible until the CLI explicitly rules it out.
+    pub paid_fallback: Option<bool>,
     #[serde(skip)]
     pub credit_balance: Option<f64>,
     /// When a plan check last succeeded, and how many failed in a row since.
@@ -278,7 +278,7 @@ impl VendorLedger {
             billing: self.billing,
             reach: self.reach,
             overage_active: self.overage_active,
-            paid_fallback: self.paid_fallback,
+            paid_fallback: self.paid_fallback.unwrap_or(true),
             jumped: self.outside(now).jumped(),
             relearning: self.relearning(now),
             plan_ok: self.plan_ok(now),

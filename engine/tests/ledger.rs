@@ -221,3 +221,20 @@ fn a_ledger_read_from_a_damaged_file_cannot_hurt() {
     assert_eq!((v.weights.w["a"], v.weights.w["b"], v.weights.capacity), (2.0, 0.5, None));
     v.shape();
 }
+
+#[test]
+fn paid_fallback_survives_a_restart_and_missing_evidence_stays_conservative() {
+    use faber_engine::budget::{Billing, Purpose, Why, gate};
+    for flag in [Some(true), None] {
+        let mut ledger = VendorLedger { paid_fallback: flag, ..VendorLedger::default() };
+        ledger.record("seven_day", 0.95, RESET, BASE, 0);
+        let mut restored: VendorLedger = serde_json::from_str(&serde_json::to_string(&ledger).unwrap()).unwrap();
+        restored.billing = Billing::Subscription;
+        assert_eq!(restored.paid_fallback, flag);
+        assert_eq!(gate(&restored.snap(BASE), None, Purpose::Pulse, false, BASE), Err(Why::Paid));
+    }
+    let mut legacy: VendorLedger = serde_json::from_str("{}").unwrap();
+    legacy.billing = Billing::Subscription;
+    legacy.record("seven_day", 0.95, RESET, BASE, 0);
+    assert_eq!(gate(&legacy.snap(BASE), None, Purpose::Router, false, BASE), Err(Why::Paid));
+}

@@ -109,7 +109,7 @@ fn rig(dir: &Path, vendors: &[Vendor], ask: Ask) -> Rig {
     for vendor in vendors {
         engine.note_account_events(
             *vendor,
-            vec![EngineEvent::Signals(Signals { billing: Some(Billing::Subscription), ..Signals::default() })],
+            vec![EngineEvent::Signals(Signals { billing: Some(Billing::Subscription), paid_fallback: Some(false), ..Signals::default() })],
         );
     }
     Rig { engine, rx, time, claude, codex }
@@ -147,7 +147,12 @@ fn quota(window: &str, used: f64, resets_in: u64) -> EngineEvent {
 }
 
 fn plan(plan: &str) -> EngineEvent {
-    EngineEvent::Signals(Signals { plan: Some(plan.into()), billing: Some(Billing::Subscription), ..Signals::default() })
+    EngineEvent::Signals(Signals {
+        plan: Some(plan.into()),
+        billing: Some(Billing::Subscription),
+        paid_fallback: Some(false),
+        ..Signals::default()
+    })
 }
 
 fn billed_by_use() -> EngineEvent {

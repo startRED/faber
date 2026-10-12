@@ -487,7 +487,7 @@ impl Core {
             v.overage_active = on;
         }
         if let Some(possible) = s.paid_fallback {
-            v.paid_fallback = possible;
+            v.paid_fallback = Some(possible);
         }
         if let Some(billing) = s.billing {
             v.billing = billing;
@@ -500,7 +500,7 @@ impl Core {
 
     fn stop_unapproved_paid(&mut self, vendor: Vendor, spent: bool) {
         let v = self.ledger.of(vendor);
-        let paid = spent || v.overage_active || (v.paid_fallback && v.snap(self.secs()).exhausted(self.secs()));
+        let paid = spent || v.overage_active || (v.paid_fallback.unwrap_or(true) && v.snap(self.secs()).exhausted(self.secs()));
         let unknown = v.billing == Billing::Unknown;
         let billed = v.billing == Billing::UsageBilled;
         let stopped: Vec<String> = self

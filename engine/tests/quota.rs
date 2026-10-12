@@ -73,7 +73,7 @@ async fn a_claude_reading_reaches_the_ledger_is_saved_and_is_still_there_after_a
     assert_eq!(claude.readings["five_hour"].used, 0.07);
     assert_eq!(claude.readings["seven_day"].resets_at, 1_791_878_400.0);
     assert_eq!(claude.reach, Reach::Clear);
-    assert!(!claude.paid_fallback, "the recording says extra usage is rejected");
+    assert_eq!(claude.paid_fallback, Some(false), "the recording says extra usage is rejected");
     assert!(!claude.overage_active);
     engine.shutdown();
 
@@ -98,7 +98,7 @@ async fn a_codex_session_tells_the_ledger_the_plan_and_that_it_is_a_subscription
     assert_eq!(codex.billing, Billing::Subscription);
     assert_eq!(codex.readings["seven_day"].used, 0.47);
     assert!(codex.plan_ok(WHEN), "a plan seen a moment ago");
-    assert!(!codex.paid_fallback, "no credits");
+    assert_eq!(codex.paid_fallback, Some(false), "no credits");
     engine.shutdown();
 }
 
