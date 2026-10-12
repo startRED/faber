@@ -27,6 +27,7 @@ fn engine_idle(dir: &Path, vendor: Vendor, spawn: Spawner, idle: Duration) -> (E
         clis,
         spawn,
         windows: false,
+        claude_env_billed: false,
         max_warm: 3,
         idle,
         runtime: tokio::runtime::Handle::current(),

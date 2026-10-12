@@ -24,12 +24,28 @@ fn engine(dir: &Path, vendor: Vendor, spawn: Spawner, ask: Ask) -> (Engine, Unbo
         clis,
         spawn,
         windows: false,
+        claude_env_billed: false,
         max_warm: 3,
         idle: Duration::from_secs(120),
         runtime: tokio::runtime::Handle::current(),
         ask: Some(ask),
     };
     let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
+    for vendor in engine.vendors() {
+        engine.note_account_events(
+            vendor,
+            vec![faber_engine::events::EngineEvent::Signals(faber_engine::signals::Signals {
+                billing: Some(faber_engine::budget::Billing::Subscription),
+                ..Default::default()
+            })],
+        );
+    }
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
+    engine.note_account_events(
+        Vendor::Claude,
+        vec![faber_engine::events::EngineEvent::Quota { window: "five_hour".into(), used: 0.0, resets_at: now + 18_000.0 }],
+    );
+
     engine.set_codex_models(vec!["gpt-6.1-sol".into(), "gpt-6-luna".into()], Some("gpt-6.1-sol".into()));
     (engine, rx)
 }
@@ -172,12 +188,28 @@ async fn with_only_claude_the_router_process_starts_while_the_user_types() {
         clis,
         spawn: f.spawn.clone(),
         windows: false,
+        claude_env_billed: false,
         max_warm: 3,
         idle: Duration::from_secs(120),
         runtime: tokio::runtime::Handle::current(),
         ask: None,
     };
     let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
+    for vendor in engine.vendors() {
+        engine.note_account_events(
+            vendor,
+            vec![faber_engine::events::EngineEvent::Signals(faber_engine::signals::Signals {
+                billing: Some(faber_engine::budget::Billing::Subscription),
+                ..Default::default()
+            })],
+        );
+    }
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
+    engine.note_account_events(
+        Vendor::Claude,
+        vec![faber_engine::events::EngineEvent::Quota { window: "five_hour".into(), used: 0.0, resets_at: now + 18_000.0 }],
+    );
+
     let routers = || f.args.lock().unwrap().iter().filter(|a| a.contains(&"--system-prompt".to_string())).count();
     engine.warm(WarmRequest {
         conversation_id: None,

@@ -22,6 +22,15 @@
 - One commit per task, made once its tests pass.
 - **R89 (Erick, 2026-10-12):** the spec wins. Auto denies `Billing::Unknown`; only a confirmed subscription can receive an automatic request. Missing quota readings are allowed only after billing is confirmed. A hand-picked user turn and a quota-free plan check keep their documented exceptions.
 
+- **R90 (Erick, 2026-10-12):** accounts are shared. Own spend is API-equivalent USD from Faber's metered turns, including
+  every reported cache kind; never derive it from account percentages or credit balances. Apply R90 in Task 9's one
+  commit to the spec, this plan and the ledger wiring. The account profile still forecasts the whole account (R88);
+  own-cost weights and plan size exclude foreign or incomplete stretches.
+- Review corrections already proved: paid fallback is unknown until explicitly ruled out and survives restart;
+  dead windows are ignored and pruned; Codex recovery uses only blocking resets; overnight jumps use proportional
+  overlap with the last two hours; `m = 25 x p` above the daily line (maximum plausible `p` is 15); capacity comparisons
+  use models common to both samples. The historical prototype diffs below yield to these corrections.
+
 ## Review Focus
 
 1. A message waiting for quota when the app closes or the user presses stop: it must not send itself later, and the text must not be lost (pinned in Task 10).
@@ -2943,6 +2952,8 @@ git commit -m "feat(engine): signals, learning and the ledger (pure)"
 
 ### Task 5: The engine keeps the ledger
 
+R89: an authoritative account update with a missing or unrecognised mode clears any earlier subscription verdict to `Billing::Unknown`. A successful status response with no billing evidence also clears it; a plan name typed by the user never confirms billing. Integration tests pin this reset. Partial quota or credit messages retain the earlier guards, missing counters do not become zero, and failed account reads return no replacement evidence.
+
 Quota readings and account signals reach the ledger, are saved at most every 30 s and survive a restart.
 
 **Files:**
@@ -2966,7 +2977,7 @@ Quota readings and account signals reach the ledger, are saved at most every 30 
 ```diff
 --- a/engine/tests/quota.rs
 +++ b/engine/tests/quota.rs
-@@ -0,0 +1,198 @@
+@@ -0,0 +1,241 @@
 +mod support;
 +
 +use faber_engine::budget::{Billing, Reach};
@@ -3165,128 +3176,63 @@ Quota readings and account signals reach the ledger, are saved at most every 30 
 +    let events = read_codex_limits("codex", ".".as_ref(), false, f.spawn.clone(), Duration::from_millis(50)).await;
 +    assert!(events.is_empty());
 +}
++
++#[tokio::test]
++async fn an_account_update_with_no_billing_clears_an_earlier_subscription_verdict() {
++    let dir = tempfile::tempdir().unwrap();
++    let (engine, _rx) = start(dir.path(), Vendor::Codex, fake(fixture("codex", "chat")).spawn);
++    let mut state = faber_engine::codex::CodexTurnState::default();
++    for mode in [json!("chatgpt"), serde_json::Value::Null] {
++        let events =
++            faber_engine::codex::parse_codex_notification(&json!({"method":"account/updated","params":{"authMode":mode}}), &mut state);
++        engine.note_account_events(Vendor::Codex, events);
++        assert_eq!(engine.ledger().codex.billing, if mode.is_null() { Billing::Unknown } else { Billing::Subscription });
++    }
++}
++
++#[test]
++fn incomplete_window_payloads_do_not_fabricate_an_empty_quota() {
++    let claude = faber_engine::claude::parse_claude_message(
++        &json!({"type":"rate_limit_event","rate_limit_info":{"unifiedWindows":{"five_hour":{"resetsAt":1791627000}}}}),
++    );
++    let codex = faber_engine::codex::parse_codex_notification(
++        &json!({"method":"account/rateLimits/updated","params":{"rateLimits":{"primary":{"windowDurationMins":300,"resetsAt":1791627000}}}}),
++        &mut faber_engine::codex::CodexTurnState::default(),
++    );
++    for events in [claude, codex] {
++        assert!(!events.iter().any(|e| matches!(e, EngineEvent::Quota { .. })));
++    }
++}
++
++#[tokio::test]
++async fn an_account_read_error_returns_no_replacement_evidence() {
++    let entries = vec![
++        Entry { input: true, msg: json!({"id":1,"method":"initialize"}) },
++        Entry { input: false, msg: json!({"id":1,"result":{}}) },
++        Entry { input: true, msg: json!({"method":"initialized"}) },
++        Entry { input: true, msg: json!({"id":2,"method":"account/rateLimits/read"}) },
++        Entry { input: true, msg: json!({"id":3,"method":"account/read"}) },
++        Entry { input: false, msg: json!({"id":2,"error":{"code":-1,"message":"unavailable"}}) },
++        Entry { input: false, msg: json!({"id":3,"result":{"account":{"type":"chatgpt","planType":"pro"}}}) },
++    ];
++    let f = fake(entries);
++    let dir = tempfile::tempdir().unwrap();
++    assert!(read_codex_limits("codex", dir.path(), false, f.spawn, Duration::from_secs(1)).await.is_empty());
++}
 ```
 
 ```diff
 --- a/engine/tests/signals.rs
 +++ b/engine/tests/signals.rs
-@@ -1,61 +1,80 @@
--use faber_engine::budget::{Billing, Reach};
--use faber_engine::signals::{Signals, claude_plan, claude_signals, codex_account, codex_signals};
--use serde_json::json;
--
--#[test]
--fn a_claude_event_with_room_clears_and_says_extra_usage_is_off() {
--    // The shape of tests/fixtures/claude/chat.jsonl.
--    let msg = json!({"type": "rate_limit_event", "rate_limit_info": {"status": "allowed", "resetsAt": 1791627000, "rateLimitType": "five_hour",
--        "overageStatus": "rejected", "overageDisabledReason": "org_level_disabled", "isUsingOverage": false}});
--    assert_eq!(
--        claude_signals(&msg),
--        Signals { reach: Some(Reach::Clear), overage_active: Some(false), paid_fallback: Some(false), ..Signals::default() }
--    );
--}
--
--#[test]
--fn a_claude_event_that_blocks_a_vendor_wide_window_is_out_until_its_reset() {
--    let msg = json!({"rate_limit_info": {"status": "rejected", "resetsAt": 1791878400, "rateLimitType": "seven_day", "overageStatus": "allowed", "isUsingOverage": true}});
--    let s = claude_signals(&msg);
--    assert_eq!(s.reach, Some(Reach::Out(Some(1791878400.0))));
--    assert_eq!((s.overage_active, s.paid_fallback), (Some(true), Some(true)));
--}
--
--#[test]
--fn a_family_window_status_does_not_block_the_vendor() {
--    let msg = json!({"rate_limit_info": {"status": "rejected", "resetsAt": 1, "rateLimitType": "seven_day_opus"}});
--    assert_eq!(claude_signals(&msg).reach, None);
--}
--
--#[test]
--fn a_codex_rate_limit_update_gives_plan_credits_and_reach() {
--    // The shape of tests/fixtures/codex/chat.jsonl.
--    let msg = json!({"method": "account/rateLimits/updated", "params": {"rateLimits": {"primary": {"usedPercent": 47, "windowDurationMins": 10080, "resetsAt": 1791967370},
--        "secondary": null, "credits": {"hasCredits": false, "unlimited": false, "balance": "0"}, "spendControlReached": null, "planType": "pro", "rateLimitReachedType": null}}});
--    assert_eq!(
--        codex_signals(&msg),
--        Signals { reach: Some(Reach::Clear), paid_fallback: Some(false), plan: Some("pro".into()), ..Signals::default() }
--    );
--    let out = json!({"params": {"rateLimits": {"primary": {"resetsAt": 100}, "secondary": {"resetsAt": 900}, "rateLimitReachedType": "primary", "credits": {"hasCredits": true}}}});
--    let s = codex_signals(&out);
--    assert_eq!(s.reach, Some(Reach::Out(Some(900.0))));
--    assert_eq!(s.paid_fallback, Some(true));
--}
--
--#[test]
--fn the_codex_sign_in_mode_decides_the_billing() {
--    let chatgpt = json!({"method": "account/updated", "params": {"authMode": "chatgpt", "planType": "pro"}});
--    assert_eq!(codex_account(&chatgpt), Signals { plan: Some("pro".into()), billing: Some(Billing::Subscription), ..Signals::default() });
--    let key = json!({"params": {"authMode": "apikey"}});
--    assert_eq!(codex_account(&key).billing, Some(Billing::UsageBilled));
--}
--
--#[test]
--fn claude_auth_status_gives_the_plan_and_drops_the_rest() {
--    let s = claude_plan(r#"{"loggedIn": true, "email": "someone@example.com", "subscriptionType": "max"}"#);
--    assert_eq!(s, Signals { plan: Some("max".into()), billing: Some(Billing::Subscription), ..Signals::default() });
--    let key = claude_plan(r#"{"loggedIn": true, "authMethod": "api_key"}"#);
--    assert_eq!((key.plan, key.billing), (None, Some(Billing::UsageBilled)));
--    assert_eq!(claude_plan("not json"), Signals::default());
--    assert_eq!(claude_plan(r#"{"loggedIn": true}"#), Signals::default(), "the field is missing: ask the user");
--}
-+use faber_engine::budget::{Billing, Reach};
-+use faber_engine::signals::{Signals, claude_plan, claude_signals, codex_account, codex_signals};
-+use serde_json::json;
-+
-+#[test]
-+fn a_claude_event_with_room_clears_and_says_extra_usage_is_off() {
-+    // The shape of tests/fixtures/claude/chat.jsonl.
-+    let msg = json!({"type": "rate_limit_event", "rate_limit_info": {"status": "allowed", "resetsAt": 1791627000, "rateLimitType": "five_hour",
-+        "overageStatus": "rejected", "overageDisabledReason": "org_level_disabled", "isUsingOverage": false}});
-+    assert_eq!(
-+        claude_signals(&msg),
-+        Signals { reach: Some(Reach::Clear), overage_active: Some(false), paid_fallback: Some(false), ..Signals::default() }
-+    );
-+}
-+
-+#[test]
-+fn a_claude_event_that_blocks_a_vendor_wide_window_is_out_until_its_reset() {
-+    let msg = json!({"rate_limit_info": {"status": "rejected", "resetsAt": 1791878400, "rateLimitType": "seven_day", "overageStatus": "allowed", "isUsingOverage": true}});
-+    let s = claude_signals(&msg);
-+    assert_eq!(s.reach, Some(Reach::Out(Some(1791878400.0))));
-+    assert_eq!((s.overage_active, s.paid_fallback), (Some(true), Some(true)));
-+}
-+
-+#[test]
-+fn a_family_window_status_does_not_block_the_vendor() {
-+    let msg = json!({"rate_limit_info": {"status": "rejected", "resetsAt": 1, "rateLimitType": "seven_day_opus"}});
-+    assert_eq!(claude_signals(&msg).reach, None);
-+}
-+
-+#[test]
-+fn a_codex_rate_limit_update_gives_plan_credits_and_reach() {
-+    // The shape of tests/fixtures/codex/chat.jsonl.
-+    let msg = json!({"method": "account/rateLimits/updated", "params": {"rateLimits": {"primary": {"usedPercent": 47, "windowDurationMins": 10080, "resetsAt": 1791967370},
-+        "secondary": null, "credits": {"hasCredits": false, "unlimited": false, "balance": "0"}, "spendControlReached": null, "planType": "pro", "rateLimitReachedType": null}}});
-+    assert_eq!(
-+        codex_signals(&msg),
-+        Signals { reach: Some(Reach::Clear), paid_fallback: Some(false), plan: Some("pro".into()), ..Signals::default() }
-+    );
-+    let out = json!({"params": {"rateLimits": {"primary": {"resetsAt": 100}, "secondary": {"resetsAt": 900}, "rateLimitReachedType": "primary", "credits": {"hasCredits": true}}}});
-+    let s = codex_signals(&out);
-+    assert_eq!(s.reach, Some(Reach::Out(Some(900.0))));
-+    assert_eq!(s.paid_fallback, Some(true));
-+}
-+
-+#[test]
-+fn the_codex_sign_in_mode_decides_the_billing() {
-+    let chatgpt = json!({"method": "account/updated", "params": {"authMode": "chatgpt", "planType": "pro"}});
-+    assert_eq!(codex_account(&chatgpt), Signals { plan: Some("pro".into()), billing: Some(Billing::Subscription), ..Signals::default() });
-+    let key = json!({"params": {"authMode": "apikey"}});
-+    assert_eq!(codex_account(&key).billing, Some(Billing::UsageBilled));
+@@ -48,6 +48,18 @@
+     assert_eq!(codex_account(&chatgpt), Signals { plan: Some("pro".into()), billing: Some(Billing::Subscription), ..Signals::default() });
+     let key = json!({"params": {"authMode": "apikey"}});
+     assert_eq!(codex_account(&key).billing, Some(Billing::UsageBilled));
 +    let cloud = json!({"params": {"authMode": "amazonBedrock"}});
 +    assert_eq!(codex_account(&cloud).billing, Some(Billing::UsageBilled), "any way in but ChatGPT is billed by use");
 +    let metered = json!({"params": {"authMode": "chatgpt", "planType": "self_serve_business_usage_based"}});
 +    assert_eq!(codex_account(&metered).billing, Some(Billing::UsageBilled), "a plan billed by use is not a subscription");
-+    assert_eq!(codex_account(&json!({"params": {}})).billing, None, "no mode, no verdict");
++    assert_eq!(codex_account(&json!({"params": {}})).billing, Some(Billing::Unknown), "a missing mode clears the verdict");
 +    let limits = json!({"params": {"rateLimits": {"planType": "enterprise_cbp_usage_based"}}});
 +    assert_eq!(codex_signals(&limits).billing, Some(Billing::UsageBilled));
 +    assert_eq!(
@@ -3294,16 +3240,32 @@ Quota readings and account signals reach the ledger, are saved at most every 30 
 +        None,
 +        "a limit update never proves a subscription"
 +    );
+ }
+ 
+ #[test]
+@@ -57,5 +69,29 @@
+     let key = claude_plan(r#"{"loggedIn": true, "authMethod": "api_key"}"#);
+     assert_eq!((key.plan, key.billing), (None, Some(Billing::UsageBilled)));
+     assert_eq!(claude_plan("not json"), Signals::default());
+-    assert_eq!(claude_plan(r#"{"loggedIn": true}"#), Signals::default(), "the field is missing: ask the user");
++    assert_eq!(claude_plan(r#"{"loggedIn": true}"#).billing, Some(Billing::Unknown), "a missing field does not prove a subscription");
+ }
++
++#[test]
++fn an_unrecognised_or_signed_out_account_does_not_prove_subscription_billing() {
++    assert_eq!(codex_account(&json!({"params": {"authMode": "chatgpt-unrecognised"}})).billing, Some(Billing::Unknown));
++    assert_eq!(codex_account(&json!({"params": {"authMode": null}})).billing, Some(Billing::Unknown));
++    assert_eq!(claude_plan(r#"{"loggedIn":false,"subscriptionType":"max"}"#).billing, Some(Billing::Unknown));
++    assert_eq!(claude_plan(r#"{"loggedIn":true,"authMethod":"api_key","subscriptionType":"max"}"#).billing, Some(Billing::UsageBilled));
 +}
 +
 +#[test]
-+fn claude_auth_status_gives_the_plan_and_drops_the_rest() {
-+    let s = claude_plan(r#"{"loggedIn": true, "email": "someone@example.com", "subscriptionType": "max"}"#);
-+    assert_eq!(s, Signals { plan: Some("max".into()), billing: Some(Billing::Subscription), ..Signals::default() });
-+    let key = claude_plan(r#"{"loggedIn": true, "authMethod": "api_key"}"#);
-+    assert_eq!((key.plan, key.billing), (None, Some(Billing::UsageBilled)));
-+    assert_eq!(claude_plan("not json"), Signals::default());
-+    assert_eq!(claude_plan(r#"{"loggedIn": true}"#), Signals::default(), "the field is missing: ask the user");
++fn absent_credit_and_limit_fields_do_not_clear_previous_guards() {
++    let signals = codex_signals(&json!({"params":{"rateLimits":{"primary":{"usedPercent":50}}}}));
++    assert_eq!(signals.paid_fallback, None);
++    assert_eq!(signals.reach, None);
++    let partial = codex_signals(&json!({"params":{"rateLimits":{"credits":{"hasCredits":false}}}}));
++    assert_eq!(partial.paid_fallback, None);
 +}
 +
 +#[test]
@@ -3334,7 +3296,7 @@ Expected: compile errors or failures naming the missing items.
  use serde_json::{Value, json};
  use std::collections::HashMap;
  use std::path::PathBuf;
-@@ -129,19 +130,15 @@
+@@ -129,19 +130,12 @@
              tool: s(&msg["request"]["tool_name"]),
              input: msg["request"]["input"].clone(),
          }],
@@ -3352,12 +3314,9 @@ Expected: compile errors or failures naming the missing items.
 -            })
 -            .unwrap_or_default(),
 +        "rate_limit_event" => {
-+            let windows =
-+                msg["rate_limit_info"]["unifiedWindows"].as_object().into_iter().flatten().map(|(window, w)| EngineEvent::Quota {
-+                    window: window.clone(),
-+                    used: w["utilization"].as_f64().unwrap_or(0.0),
-+                    resets_at: w["resetsAt"].as_f64().unwrap_or(0.0),
-+                });
++            let windows = msg["rate_limit_info"]["unifiedWindows"].as_object().into_iter().flatten().filter_map(|(window, w)| {
++                Some(EngineEvent::Quota { window: window.clone(), used: w["utilization"].as_f64()?, resets_at: w["resetsAt"].as_f64()? })
++            });
 +            windows.chain(Some(claude_signals(msg)).filter(|s| !s.is_empty()).map(EngineEvent::Signals)).collect()
 +        }
          "result" => result_events(msg),
@@ -3370,1156 +3329,40 @@ Expected: compile errors or failures naming the missing items.
 ```diff
 --- a/engine/src/codex.rs
 +++ b/engine/src/codex.rs
-@@ -1,597 +1,649 @@
--//! Codex driver: one shared `codex app-server` process, spoken to over JSON-RPC on stdio, with each conversation as a
--//! thread in it.
--
--use crate::claude::EventSink;
--use crate::events::{Delivery, EngineEvent, Session, SessionCommand, UserTurn};
--use crate::model::{Area, name_instructions};
--use crate::proc::{self, Spawner};
--use serde::Serialize;
--use serde_json::{Map, Value, json};
--use std::collections::{HashMap, HashSet};
--use std::path::{Path, PathBuf};
--use std::sync::Arc;
--use std::sync::atomic::{AtomicU64, Ordering};
--use std::time::Duration;
--use tokio::io::{AsyncBufReadExt, BufReader};
--use tokio::sync::mpsc::error::SendError;
--use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
--
--const CHAT_INSTRUCTIONS: &str = "You are a helpful, precise assistant in a chat app. Answer in the language of the user. \
--Use Markdown when it helps. Your working folder is a private workspace for this conversation: run code and create files \
--there when it helps, and mention the files you create.";
--
--/// Arguments for `codex app-server`. Projects keep the user's own setup, like a direct session, except hooks.
--/// Chat stays lean (no plugins, apps, MCP servers or AGENTS.md) and works inside its own workspace folder.
--/// On Windows the elevated sandbox fails to start commands in Codex 0.161 ("apply deny-read ACLs"),
--/// so Faber uses the unelevated one.
--pub fn codex_args(area: Area, windows: bool, user_hooks: bool) -> Vec<String> {
--    let mut args = vec!["app-server".to_string()];
--    let mut push = |a: &[&str]| args.extend(a.iter().map(|s| s.to_string()));
--    if !user_hooks {
--        push(&["--disable", "hooks"]);
--    }
--    if windows {
--        push(&["-c", "windows.sandbox=\"unelevated\""]);
--    }
--    if area == Area::Chat {
--        for feature in ["apps", "plugins", "computer_use", "browser_use"] {
--            push(&["--disable", feature]);
--        }
--        push(&["-c", "mcp_servers={}", "-c", "project_doc_max_bytes=0"]);
--    }
--    args
--}
--
--/// Parameters for thread/start and thread/resume. The sandbox keeps writes inside the working folder;
--/// anything beyond it comes back as an approval request.
--pub fn codex_thread(area: Area, model: Option<&str>) -> Map<String, Value> {
--    let mut thread = Map::new();
--    if let Some(model) = model {
--        thread.insert("model".into(), model.into());
--    }
--    thread.insert("sandbox".into(), "workspace-write".into());
--    thread.insert("approvalPolicy".into(), "on-request".into());
--    if area == Area::Chat {
--        thread.insert("baseInstructions".into(), CHAT_INSTRUCTIONS.into());
--    }
--    thread
--}
--
--/// The thread's token counts, as `thread/tokenUsage/updated` reports them in `total`.
--#[derive(Debug, Default, Clone, Copy, PartialEq)]
--pub struct Totals {
--    pub input: u64,
--    pub cached: u64,
--    pub output: u64,
--}
--
--impl Totals {
--    fn since(self, base: Totals) -> Totals {
--        Totals {
--            input: self.input.saturating_sub(base.input),
--            cached: self.cached.saturating_sub(base.cached),
--            output: self.output.saturating_sub(base.output),
--        }
--    }
--}
--
--/// What parsing remembers across notifications: the thread's usage so far and its value when the turn started, and which
--/// messages already streamed, so a message that arrives whole is still shown.
--#[derive(Debug, Default)]
--pub struct CodexTurnState {
--    pub streamed: HashSet<String>,
--    /// The thread's usage so far, as the latest update said. None until one arrives (a resumed thread gets one before its
--    /// first turn).
--    pub total: Option<Totals>,
--    /// `total` when the current turn started.
--    pub base: Option<Totals>,
--}
--
--impl CodexTurnState {
--    /// A thread that starts empty has used nothing yet; a resumed one learns its total from the update that comes first.
--    pub fn new(resumed: bool) -> Self {
--        CodexTurnState { total: (!resumed).then(Totals::default), ..Default::default() }
--    }
--}
--
--const NOT_TOOLS: [&str; 3] = ["userMessage", "agentMessage", "reasoning"];
--
--// Codex reports a limit window by its length; Faber names the ones it knows.
--fn window_name(mins: i64) -> String {
--    match mins {
--        300 => "five_hour".into(),
--        10080 => "seven_day".into(),
--        _ => format!("{mins}_minutes"),
--    }
--}
--
--fn s(v: &Value) -> String {
--    v.as_str().unwrap_or_default().to_string()
--}
--
--/// Turns one `codex app-server` notification into engine events.
--pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<EngineEvent> {
--    let p = &msg["params"];
--    match msg["method"].as_str().unwrap_or_default() {
--        "item/agentMessage/delta" => {
--            state.streamed.insert(s(&p["itemId"]));
--            match p["delta"].as_str() {
--                Some(delta) => vec![EngineEvent::Text(delta.into())],
--                None => vec![EngineEvent::Error { message: "Codex sent a message delta without text.".into(), fatal: false }],
--            }
--        }
--        "item/reasoning/summaryTextDelta" => vec![EngineEvent::Thinking(s(&p["delta"]))],
--        "item/started" => {
--            let item = &p["item"];
--            let kind = item["type"].as_str().unwrap_or_default();
--            if kind == "agentMessage" {
--                return vec![EngineEvent::Break];
--            }
--            if NOT_TOOLS.contains(&kind) {
--                return vec![];
--            }
--            let input = [&item["command"], &item["query"], &item["changes"]].into_iter().find(|v| !v.is_null()).unwrap_or(item).clone();
--            vec![EngineEvent::Tool { id: s(&item["id"]), name: kind.into(), input }]
--        }
--        "item/completed" => {
--            let item = &p["item"];
--            let kind = item["type"].as_str().unwrap_or_default();
--            let id = s(&item["id"]);
--            if kind == "agentMessage" {
--                let text = s(&item["text"]);
--                return if !text.is_empty() && !state.streamed.contains(&id) { vec![EngineEvent::Text(text)] } else { vec![] };
--            }
--            if NOT_TOOLS.contains(&kind) {
--                return vec![];
--            }
--            let ok = item["status"] == "completed" && (item["exitCode"].is_null() || item["exitCode"] == 0);
--            let text = item["aggregatedOutput"].as_str().or(item["status"].as_str()).unwrap_or_default().into();
--            vec![EngineEvent::ToolResult { id, ok, text }]
--        }
--        "turn/started" => {
--            state.base = state.total;
--            vec![]
--        }
--        "thread/tokenUsage/updated" => {
--            let t = &p["tokenUsage"]["total"];
--            let g = |k: &str| t[k].as_u64().unwrap_or(0);
--            state.total = Some(Totals { input: g("inputTokens"), cached: g("cachedInputTokens"), output: g("outputTokens") });
--            vec![]
--        }
--        "account/rateLimits/updated" => [&p["rateLimits"]["primary"], &p["rateLimits"]["secondary"]]
--            .into_iter()
+@@ -5,6 +5,7 @@
+ use crate::events::{Delivery, EngineEvent, Session, SessionCommand, UserTurn};
+ use crate::model::{Area, name_instructions};
+ use crate::proc::{self, Spawner};
++use crate::signals::{codex_account, codex_signals};
+ use serde::Serialize;
+ use serde_json::{Map, Value, json};
+ use std::collections::{HashMap, HashSet};
+@@ -160,13 +161,16 @@
+         }
+         "account/rateLimits/updated" => [&p["rateLimits"]["primary"], &p["rateLimits"]["secondary"]]
+             .into_iter()
 -            .filter(|w| w.is_object())
 -            .map(|w| EngineEvent::Quota {
 -                window: window_name(w["windowDurationMins"].as_i64().unwrap_or(0)),
 -                used: w["usedPercent"].as_f64().unwrap_or(0.0) / 100.0,
 -                resets_at: w["resetsAt"].as_f64().unwrap_or(0.0),
--            })
--            .collect(),
--        "turn/completed" => {
--            let status = s(&p["turn"]["status"]);
--            // The turn's usage is the thread's total now minus its total when the turn started. With no start to
--            // measure from, the turn reports no usage (and says so) rather than the whole thread.
--            let used = state.total.zip(state.base).map(|(total, base)| total.since(base));
--            let u = used.unwrap_or_default();
--            vec![EngineEvent::Done {
--                ok: status == "completed",
--                reason: status,
--                cost_total_usd: None,
--                input_tokens: u.input,
--                output_tokens: u.output,
--                cache_read_tokens: u.cached,
--                cache_write_tokens: 0,
--                cache_write_1h_tokens: 0,
--                incomplete: used.is_none(),
--            }]
--        }
--        "error" => {
--            let message = p["error"]["message"].as_str().map(String::from).unwrap_or_else(|| p.to_string().chars().take(300).collect());
--            vec![EngineEvent::Error { message, fatal: false }]
--        }
--        _ => vec![],
--    }
--}
--
--/// What needs a process of its own: Chat and Projects start `codex app-server` with different flags.
--#[derive(Clone)]
--pub struct CodexServerOptions {
--    pub bin: String,
--    /// Where the process itself runs; each thread works in its own folder.
--    pub cwd: PathBuf,
--    pub area: Area,
--    pub user_hooks: bool,
--    pub windows: bool,
--    pub spawn: Spawner,
--}
--
--/// One conversation inside the shared process.
--#[derive(Debug, Clone)]
--pub struct CodexThread {
--    pub cwd: PathBuf,
--    pub model: Option<String>,
--    pub effort: Option<String>,
--    pub resume: Option<String>,
--    /// A side question (such as routing) with its own instructions: it reads nothing and runs nothing.
--    pub instructions: Option<String>,
--    /// How the user wants to be called; see `ClaudeLaunch::user_name`.
--    pub user_name: Option<String>,
--}
--
--enum ServerCommand {
--    Open { key: u64, thread: CodexThread, sink: EventSink },
--    Session(u64, SessionCommand),
--    Retire,
--}
--
--// What an answer from Codex is for.
--enum Waiting {
--    Initialize,
--    Thread(u64),
--    Other(u64, &'static str),
--}
--
--/// A conversation's side of the shared process.
--struct Thread {
--    sink: EventSink,
--    params: CodexThread,
--    id: Option<String>,
--    turn: Option<String>,
--    queued: Vec<UserTurn>,
--    state: CodexTurnState,
--    approvals: HashMap<String, Value>,
--}
--
--fn turn_params(thread: &str, effort: Option<&str>, turn: &UserTurn) -> Value {
--    let mut input: Vec<Value> =
--        turn.images.iter().map(|i| json!({ "type": "image", "url": format!("data:{};base64,{}", i.media_type, i.base64) })).collect();
--    input.push(json!({ "type": "text", "text": turn.text, "text_elements": [] }));
--    let mut params = json!({ "threadId": thread, "input": input });
--    if let Some(effort) = effort {
--        params["effort"] = effort.into();
--    }
--    params
--}
--
--pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
--    let mut params = codex_thread(area, t.model.as_deref());
--    if let Some(instructions) = &t.instructions {
--        params.insert("baseInstructions".into(), instructions.clone().into());
--        params.insert("sandbox".into(), "read-only".into());
--        params.insert("approvalPolicy".into(), "never".into());
--        // Nothing to resume later: it stays out of the user's Codex history.
--        params.insert("ephemeral".into(), true.into());
--    } else if let Some(name) = &t.user_name {
--        // Developer instructions sit beside Codex's own, so a project keeps its default prompt.
--        params.insert("developerInstructions".into(), name_instructions(name).into());
--    }
--    params.insert("cwd".into(), t.cwd.to_string_lossy().into_owned().into());
--    let method = match &t.resume {
--        Some(id) => {
--            params.insert("threadId".into(), id.clone().into());
--            "thread/resume"
--        }
--        None => "thread/start",
--    };
--    (method, Value::Object(params))
--}
--
--/// One `codex app-server` serves every conversation with the same settings, each as a thread of its own, so open
--/// conversations cost one process instead of one each (measured: about 50 MB for three threads).
--#[derive(Clone)]
--pub struct CodexServer {
--    tx: UnboundedSender<ServerCommand>,
--    next: Arc<AtomicU64>,
--}
--
--impl CodexServer {
--    /// The process starts right away, so a warmed-up conversation is already booting while the user types.
--    pub fn start(opts: CodexServerOptions) -> CodexServer {
--        let (tx, rx) = unbounded_channel();
--        let started = (opts.spawn)(&opts.bin, &codex_args(opts.area, opts.windows, opts.user_hooks), &opts.cwd);
--        tokio::spawn(serve(started, opts.area, rx));
--        CodexServer { tx, next: Arc::new(AtomicU64::new(1)) }
--    }
--
--    /// False once the process has stopped; the engine then starts a new one.
--    pub fn is_alive(&self) -> bool {
--        !self.tx.is_closed()
--    }
--
--    /// Opens a conversation as a thread. The session behaves as if it had the process to itself.
--    pub fn open(&self, thread: CodexThread, sink: EventSink) -> Session {
--        let key = self.next.fetch_add(1, Ordering::Relaxed);
--        if let Err(SendError(ServerCommand::Open { sink, .. })) = self.tx.send(ServerCommand::Open { key, thread, sink }) {
--            sink(EngineEvent::Error { message: "Codex stopped.".into(), fatal: true });
--        }
--        // Straight into the server's queue, so commands from all conversations keep the order they were given in.
--        let server = self.tx.clone();
--        Session::from_fn(move |cmd| drop(server.send(ServerCommand::Session(key, cmd))))
--    }
--
--    /// Stops the process once its last conversation closes; new conversations go to a server with the new settings.
--    pub fn retire(&self) {
--        let _ = self.tx.send(ServerCommand::Retire);
--    }
--}
--
--async fn serve(started: std::io::Result<proc::Proc>, area: Area, mut rx: UnboundedReceiver<ServerCommand>) {
--    let mut p = match started {
--        Ok(p) => p,
--        Err(err) => {
--            // Every conversation already waiting hears why; the next one starts a fresh process.
--            rx.close();
--            while let Some(cmd) = rx.recv().await {
--                if let ServerCommand::Open { sink, .. } = cmd {
--                    sink(EngineEvent::Error { message: format!("Codex could not start: {err}"), fatal: true });
--                }
--            }
--            return;
--        }
--    };
--    let tail = proc::stderr_tail(p.stderr.take());
--    let mut lines = BufReader::new(p.stdout).lines();
--    let mut stdin = p.stdin;
--    let mut child = p.child;
--    let mut threads: HashMap<u64, Thread> = HashMap::new();
--    let mut by_id: HashMap<String, u64> = HashMap::new();
--    // Opened before Codex finished starting, in order, so request ids stay predictable.
--    let mut pending: Vec<u64> = Vec::new();
--    let mut waiting: HashMap<u64, Waiting> = HashMap::new();
--    let mut next_id = 0u64;
--    let (mut ready, mut retired, mut stopping) = (false, false, false);
--
--    macro_rules! request {
--        ($method:expr, $params:expr, $kind:expr) => {{
--            next_id += 1;
--            waiting.insert(next_id, $kind);
--            let _ = proc::write_line(&mut *stdin, &json!({ "id": next_id, "method": $method, "params": $params })).await;
--        }};
--    }
--    macro_rules! stop {
--        () => {{
--            stopping = true;
--            proc::stop(&mut *stdin, &mut child).await;
--        }};
--    }
--
--    let init = json!({ "clientInfo": { "name": "faber", "title": "Faber", "version": "0.0.0" }, "capabilities": { "experimentalApi": false, "requestAttestation": false } });
--    request!("initialize", init, Waiting::Initialize);
--
--    loop {
--        tokio::select! {
--            line = lines.next_line() => {
--                let Ok(Some(line)) = line else {
--                    if !stopping {
--                        let code = proc::exit_code(&mut child).await;
--                        let message = format!("Codex stopped (exit {code}). {}", tail.lock().unwrap()).trim().to_string();
--                        for t in threads.values() {
--                            (t.sink)(EngineEvent::Error { message: message.clone(), fatal: true });
--                        }
--                    }
--                    break;
--                };
--                if line.trim().is_empty() {
--                    continue;
--                }
--                let Ok(msg) = serde_json::from_str::<Value>(&line) else {
--                    let message = format!("Unexpected output from Codex: {}", line.chars().take(200).collect::<String>());
--                    for t in threads.values() {
--                        (t.sink)(EngineEvent::Error { message: message.clone(), fatal: false });
--                    }
--                    continue;
--                };
--                let method = msg["method"].as_str();
--                let params = &msg["params"];
--                match (method, msg.get("id")) {
--                    // An answer to one of Faber's requests.
--                    (None, Some(id)) => {
--                        let Some(kind) = id.as_u64().and_then(|id| waiting.remove(&id)) else { continue };
--                        if let Some(error) = msg.get("error") {
--                            let detail = error["message"].as_str().map(String::from).unwrap_or_else(|| error.to_string());
--                            let (keys, what, fatal): (Vec<u64>, &str, bool) = match kind {
--                                Waiting::Initialize => (threads.keys().copied().collect(), "initialize", true),
--                                Waiting::Thread(key) => (vec![key], "thread", true),
--                                Waiting::Other(key, m) => (vec![key], m, false),
--                            };
--                            for t in keys.iter().filter_map(|k| threads.get(k)) {
--                                (t.sink)(EngineEvent::Error { message: format!("Codex {what} failed: {detail}"), fatal });
--                            }
--                            continue;
--                        }
--                        match kind {
--                            Waiting::Initialize => {
--                                let _ = proc::write_line(&mut *stdin, &json!({ "method": "initialized" })).await;
--                                ready = true;
--                                for key in std::mem::take(&mut pending) {
--                                    let Some(t) = threads.get(&key) else { continue };
--                                    let (method, params) = thread_params(area, &t.params);
--                                    request!(method, params, Waiting::Thread(key));
--                                }
--                            }
--                            Waiting::Thread(key) => {
--                                let Some(t) = threads.get_mut(&key) else { continue };
--                                let thread = &msg["result"]["thread"];
--                                let id = s(&thread["id"]);
--                                let shown = thread["model"].as_str().map(String::from).or_else(|| t.params.model.clone()).unwrap_or_else(|| "codex".into());
--                                (t.sink)(EngineEvent::Started { session_id: id.clone(), model: shown });
--                                by_id.insert(id.clone(), key);
--                                t.id = Some(id.clone());
--                                for turn in std::mem::take(&mut t.queued) {
--                                    let params = turn_params(&id, t.params.effort.as_deref(), &turn);
--                                    request!("turn/start", params, Waiting::Other(key, "turn/start"));
--                                }
--                            }
--                            Waiting::Other(..) => {}
--                        }
--                    }
--                    // A request from Codex: approvals reach the user; anything else is declined politely.
--                    (Some(method), Some(id)) => {
--                        let thread = params["threadId"].as_str().and_then(|t| by_id.get(t)).and_then(|k| threads.get_mut(k));
--                        match (method.ends_with("requestApproval"), thread) {
--                            (true, Some(t)) => {
--                                let key = match id { Value::String(s) => s.clone(), other => other.to_string() };
--                                t.approvals.insert(key.clone(), id.clone());
--                                let tool = params["kind"].as_str().unwrap_or(method).to_string();
--                                let input = [&params["command"], &params["changes"]].into_iter().find(|v| !v.is_null()).unwrap_or(params).clone();
--                                (t.sink)(EngineEvent::Permission { request_id: key, tool, input });
--                            }
--                            // The conversation is gone, so nobody can say yes.
--                            (true, None) => {
--                                let _ = proc::write_line(&mut *stdin, &json!({ "id": id, "result": { "decision": "decline" } })).await;
--                            }
--                            (false, _) => {
--                                let error = json!({ "id": id, "error": { "code": -32601, "message": format!("Faber does not handle {method} yet") } });
--                                let _ = proc::write_line(&mut *stdin, &error).await;
--                            }
--                        }
--                    }
--                    _ => {
--                        let thread_id = params["threadId"].as_str().or_else(|| params["thread"]["id"].as_str());
--                        match thread_id.and_then(|t| by_id.get(t)).and_then(|k| threads.get_mut(k)) {
--                            Some(t) => {
--                                if method == Some("turn/started") {
--                                    t.turn = params["turn"]["id"].as_str().map(String::from);
--                                }
--                                for event in parse_codex_notification(&msg, &mut t.state) {
--                                    (t.sink)(event);
--                                }
--                            }
--                            // Account-wide news, such as quota: one conversation passes it on.
--                            None if thread_id.is_none() => {
--                                if let Some(t) = threads.values().next() {
--                                    for event in parse_codex_notification(&msg, &mut CodexTurnState::default()) {
--                                        (t.sink)(event);
--                                    }
--                                }
--                            }
--                            None => {}
--                        }
--                    }
--                }
--            }
--            cmd = rx.recv(), if !stopping => match cmd {
--                Some(ServerCommand::Open { key, thread, sink }) => {
--                    let state = CodexTurnState::new(thread.resume.is_some());
--                    let t = Thread { sink, params: thread, id: None, turn: None, queued: vec![], state, approvals: HashMap::new() };
--                    if ready {
--                        let (method, params) = thread_params(area, &t.params);
--                        request!(method, params, Waiting::Thread(key));
--                    } else {
--                        pending.push(key);
--                    }
--                    threads.insert(key, t);
--                }
--                Some(ServerCommand::Session(key, cmd)) => match cmd {
--                    SessionCommand::Send(turn) => {
--                        let Some(t) = threads.get_mut(&key) else { continue };
--                        match t.id.clone() {
--                            Some(id) => request!("turn/start", turn_params(&id, t.params.effort.as_deref(), &turn), Waiting::Other(key, "turn/start")),
--                            None => t.queued.push(turn),
--                        }
--                    }
--                    SessionCommand::Answer { request_id, allow, ack } => {
--                        // The approval stays pending until the write worked, so a failed write can be answered again.
--                        let delivery = match threads.get(&key).and_then(|t| t.approvals.get(&request_id)).cloned() {
--                            None => Delivery::Unknown,
--                            Some(id) => {
--                                let decision = if allow { "accept" } else { "decline" };
--                                match proc::write_line(&mut *stdin, &json!({ "id": id, "result": { "decision": decision } })).await {
--                                    Ok(()) => {
--                                        if let Some(t) = threads.get_mut(&key) {
--                                            t.approvals.remove(&request_id);
--                                        }
--                                        Delivery::Delivered
--                                    }
--                                    Err(e) => {
--                                        // A half-written or unflushed line cannot be sent again: end the process, and the
--                                        // end of its output tells the engine.
--                                        if e.torn {
--                                            proc::stop(&mut *stdin, &mut child).await;
--                                        }
--                                        Delivery::WriteFailed
--                                    }
--                                }
--                            }
--                        };
--                        let _ = ack.send(delivery);
--                    }
--                    SessionCommand::Interrupt => {
--                        if let Some((thread, turn)) = threads.get(&key).and_then(|t| Some((t.id.clone()?, t.turn.clone()?))) {
--                            request!("turn/interrupt", json!({ "threadId": thread, "turnId": turn }), Waiting::Other(key, "turn/interrupt"));
--                        }
--                    }
--                    // The thread stays loaded in Codex (cheap); Faber stops listening, and stops any work in flight.
--                    SessionCommand::Close => {
--                        pending.retain(|k| *k != key);
--                        if let Some(t) = threads.remove(&key)
--                            && let Some(id) = &t.id
--                        {
--                            by_id.remove(id);
--                            if let Some(turn) = &t.turn {
--                                request!("turn/interrupt", json!({ "threadId": id, "turnId": turn }), Waiting::Other(key, "turn/interrupt"));
--                            }
--                        }
--                        if retired && threads.is_empty() {
--                            stop!();
--                        }
--                    }
--                },
--                Some(ServerCommand::Retire) => {
--                    retired = true;
--                    if threads.is_empty() {
--                        stop!();
--                    }
--                }
--                None => stop!(),
--            }
--        }
--    }
--}
--
--#[derive(Debug, Clone, PartialEq, Serialize)]
--#[serde(rename_all = "camelCase")]
--pub struct ModelInfo {
--    pub id: String,
--    pub label: String,
--    #[serde(skip_serializing_if = "Option::is_none")]
--    pub description: Option<String>,
--    pub is_default: bool,
--}
--
--/// Asks a short-lived `codex app-server` which models this account can use, so the picker shows the real list.
--/// Gives an empty list on any failure: the picker then offers just the account's default.
--pub async fn list_codex_models(bin: &str, cwd: &Path, windows: bool, spawn: Spawner, timeout: Duration) -> Vec<ModelInfo> {
--    let Ok(p) = spawn(bin, &codex_args(Area::Chat, windows, false), cwd) else { return vec![] };
--    let mut stdin = p.stdin;
--    let mut child = p.child;
--    let mut lines = BufReader::new(p.stdout).lines();
--    let ask = async {
--        let init = json!({ "id": 1, "method": "initialize", "params": { "clientInfo": { "name": "faber", "title": "Faber", "version": "0.0.0" } } });
--        let _ = proc::write_line(&mut *stdin, &init).await;
--        while let Ok(Some(line)) = lines.next_line().await {
--            let Ok(msg) = serde_json::from_str::<Value>(&line) else { continue };
--            if msg["id"] == 1 {
--                let _ = proc::write_line(&mut *stdin, &json!({ "method": "initialized" })).await;
--                let _ = proc::write_line(&mut *stdin, &json!({ "id": 2, "method": "model/list", "params": {} })).await;
--            } else if msg["id"] == 2 {
--                return msg["result"]["data"]
--                    .as_array()
--                    .into_iter()
--                    .flatten()
--                    .filter(|m| m["hidden"] != true)
--                    .map(|m| ModelInfo {
--                        id: s(&m["id"]),
--                        label: m["displayName"].as_str().map(String::from).unwrap_or_else(|| s(&m["id"])),
--                        description: m["description"].as_str().map(String::from),
--                        is_default: m["isDefault"] == true,
--                    })
--                    .collect();
--            }
--        }
--        vec![]
--    };
--    let models = tokio::time::timeout(timeout, ask).await.unwrap_or_default();
--    proc::stop(&mut *stdin, &mut child).await;
--    models
--}
-+//! Codex driver: one shared `codex app-server` process, spoken to over JSON-RPC on stdio, with each conversation as a
-+//! thread in it.
-+
-+use crate::claude::EventSink;
-+use crate::events::{Delivery, EngineEvent, Session, SessionCommand, UserTurn};
-+use crate::model::{Area, name_instructions};
-+use crate::proc::{self, Spawner};
-+use crate::signals::{codex_account, codex_signals};
-+use serde::Serialize;
-+use serde_json::{Map, Value, json};
-+use std::collections::{HashMap, HashSet};
-+use std::path::{Path, PathBuf};
-+use std::sync::Arc;
-+use std::sync::atomic::{AtomicU64, Ordering};
-+use std::time::Duration;
-+use tokio::io::{AsyncBufReadExt, BufReader};
-+use tokio::sync::mpsc::error::SendError;
-+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
-+
-+const CHAT_INSTRUCTIONS: &str = "You are a helpful, precise assistant in a chat app. Answer in the language of the user. \
-+Use Markdown when it helps. Your working folder is a private workspace for this conversation: run code and create files \
-+there when it helps, and mention the files you create.";
-+
-+/// Arguments for `codex app-server`. Projects keep the user's own setup, like a direct session, except hooks.
-+/// Chat stays lean (no plugins, apps, MCP servers or AGENTS.md) and works inside its own workspace folder.
-+/// On Windows the elevated sandbox fails to start commands in Codex 0.161 ("apply deny-read ACLs"),
-+/// so Faber uses the unelevated one.
-+pub fn codex_args(area: Area, windows: bool, user_hooks: bool) -> Vec<String> {
-+    let mut args = vec!["app-server".to_string()];
-+    let mut push = |a: &[&str]| args.extend(a.iter().map(|s| s.to_string()));
-+    if !user_hooks {
-+        push(&["--disable", "hooks"]);
-+    }
-+    if windows {
-+        push(&["-c", "windows.sandbox=\"unelevated\""]);
-+    }
-+    if area == Area::Chat {
-+        for feature in ["apps", "plugins", "computer_use", "browser_use"] {
-+            push(&["--disable", feature]);
-+        }
-+        push(&["-c", "mcp_servers={}", "-c", "project_doc_max_bytes=0"]);
-+    }
-+    args
-+}
-+
-+/// Parameters for thread/start and thread/resume. The sandbox keeps writes inside the working folder;
-+/// anything beyond it comes back as an approval request.
-+pub fn codex_thread(area: Area, model: Option<&str>) -> Map<String, Value> {
-+    let mut thread = Map::new();
-+    if let Some(model) = model {
-+        thread.insert("model".into(), model.into());
-+    }
-+    thread.insert("sandbox".into(), "workspace-write".into());
-+    thread.insert("approvalPolicy".into(), "on-request".into());
-+    if area == Area::Chat {
-+        thread.insert("baseInstructions".into(), CHAT_INSTRUCTIONS.into());
-+    }
-+    thread
-+}
-+
-+/// The thread's token counts, as `thread/tokenUsage/updated` reports them in `total`.
-+#[derive(Debug, Default, Clone, Copy, PartialEq)]
-+pub struct Totals {
-+    pub input: u64,
-+    pub cached: u64,
-+    pub output: u64,
-+}
-+
-+impl Totals {
-+    fn since(self, base: Totals) -> Totals {
-+        Totals {
-+            input: self.input.saturating_sub(base.input),
-+            cached: self.cached.saturating_sub(base.cached),
-+            output: self.output.saturating_sub(base.output),
-+        }
-+    }
-+}
-+
-+/// What parsing remembers across notifications: the thread's usage so far and its value when the turn started, and which
-+/// messages already streamed, so a message that arrives whole is still shown.
-+#[derive(Debug, Default)]
-+pub struct CodexTurnState {
-+    pub streamed: HashSet<String>,
-+    /// The thread's usage so far, as the latest update said. None until one arrives (a resumed thread gets one before its
-+    /// first turn).
-+    pub total: Option<Totals>,
-+    /// `total` when the current turn started.
-+    pub base: Option<Totals>,
-+}
-+
-+impl CodexTurnState {
-+    /// A thread that starts empty has used nothing yet; a resumed one learns its total from the update that comes first.
-+    pub fn new(resumed: bool) -> Self {
-+        CodexTurnState { total: (!resumed).then(Totals::default), ..Default::default() }
-+    }
-+}
-+
-+const NOT_TOOLS: [&str; 3] = ["userMessage", "agentMessage", "reasoning"];
-+
-+// Codex reports a limit window by its length; Faber names the ones it knows.
-+fn window_name(mins: i64) -> String {
-+    match mins {
-+        300 => "five_hour".into(),
-+        10080 => "seven_day".into(),
-+        _ => format!("{mins}_minutes"),
-+    }
-+}
-+
-+fn s(v: &Value) -> String {
-+    v.as_str().unwrap_or_default().to_string()
-+}
-+
-+/// Turns one `codex app-server` notification into engine events.
-+pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<EngineEvent> {
-+    let p = &msg["params"];
-+    match msg["method"].as_str().unwrap_or_default() {
-+        "item/agentMessage/delta" => {
-+            state.streamed.insert(s(&p["itemId"]));
-+            match p["delta"].as_str() {
-+                Some(delta) => vec![EngineEvent::Text(delta.into())],
-+                None => vec![EngineEvent::Error { message: "Codex sent a message delta without text.".into(), fatal: false }],
-+            }
-+        }
-+        "item/reasoning/summaryTextDelta" => vec![EngineEvent::Thinking(s(&p["delta"]))],
-+        "item/started" => {
-+            let item = &p["item"];
-+            let kind = item["type"].as_str().unwrap_or_default();
-+            if kind == "agentMessage" {
-+                return vec![EngineEvent::Break];
-+            }
-+            if NOT_TOOLS.contains(&kind) {
-+                return vec![];
-+            }
-+            let input = [&item["command"], &item["query"], &item["changes"]].into_iter().find(|v| !v.is_null()).unwrap_or(item).clone();
-+            vec![EngineEvent::Tool { id: s(&item["id"]), name: kind.into(), input }]
-+        }
-+        "item/completed" => {
-+            let item = &p["item"];
-+            let kind = item["type"].as_str().unwrap_or_default();
-+            let id = s(&item["id"]);
-+            if kind == "agentMessage" {
-+                let text = s(&item["text"]);
-+                return if !text.is_empty() && !state.streamed.contains(&id) { vec![EngineEvent::Text(text)] } else { vec![] };
-+            }
-+            if NOT_TOOLS.contains(&kind) {
-+                return vec![];
-+            }
-+            let ok = item["status"] == "completed" && (item["exitCode"].is_null() || item["exitCode"] == 0);
-+            let text = item["aggregatedOutput"].as_str().or(item["status"].as_str()).unwrap_or_default().into();
-+            vec![EngineEvent::ToolResult { id, ok, text }]
-+        }
-+        "turn/started" => {
-+            state.base = state.total;
-+            vec![]
-+        }
-+        "thread/tokenUsage/updated" => {
-+            let t = &p["tokenUsage"]["total"];
-+            let g = |k: &str| t[k].as_u64().unwrap_or(0);
-+            state.total = Some(Totals { input: g("inputTokens"), cached: g("cachedInputTokens"), output: g("outputTokens") });
-+            vec![]
-+        }
-+        "account/rateLimits/updated" => [&p["rateLimits"]["primary"], &p["rateLimits"]["secondary"]]
-+            .into_iter()
-+            .filter(|w| w.is_object())
-+            .map(|w| EngineEvent::Quota {
-+                window: window_name(w["windowDurationMins"].as_i64().unwrap_or(0)),
-+                used: w["usedPercent"].as_f64().unwrap_or(0.0) / 100.0,
-+                resets_at: w["resetsAt"].as_f64().unwrap_or(0.0),
-+            })
++            .filter_map(|w| {
++                Some(EngineEvent::Quota {
++                    window: window_name(w["windowDurationMins"].as_i64()?),
++                    used: w["usedPercent"].as_f64()? / 100.0,
++                    resets_at: w["resetsAt"].as_f64()?,
++                })
+             })
 +            .chain(Some(codex_signals(msg)).filter(|s| !s.is_empty()).map(EngineEvent::Signals))
-+            .collect(),
+             .collect(),
 +        "account/updated" => Some(codex_account(msg)).filter(|s| !s.is_empty()).map(EngineEvent::Signals).into_iter().collect(),
-+        "turn/completed" => {
-+            let status = s(&p["turn"]["status"]);
-+            // The turn's usage is the thread's total now minus its total when the turn started. With no start to
-+            // measure from, the turn reports no usage (and says so) rather than the whole thread.
-+            let used = state.total.zip(state.base).map(|(total, base)| total.since(base));
-+            let u = used.unwrap_or_default();
-+            vec![EngineEvent::Done {
-+                ok: status == "completed",
-+                reason: status,
-+                cost_total_usd: None,
-+                input_tokens: u.input,
-+                output_tokens: u.output,
-+                cache_read_tokens: u.cached,
-+                cache_write_tokens: 0,
-+                cache_write_1h_tokens: 0,
-+                incomplete: used.is_none(),
-+            }]
-+        }
-+        "error" => {
-+            let message = p["error"]["message"].as_str().map(String::from).unwrap_or_else(|| p.to_string().chars().take(300).collect());
-+            vec![EngineEvent::Error { message, fatal: false }]
-+        }
-+        _ => vec![],
-+    }
-+}
-+
-+/// What needs a process of its own: Chat and Projects start `codex app-server` with different flags.
-+#[derive(Clone)]
-+pub struct CodexServerOptions {
-+    pub bin: String,
-+    /// Where the process itself runs; each thread works in its own folder.
-+    pub cwd: PathBuf,
-+    pub area: Area,
-+    pub user_hooks: bool,
-+    pub windows: bool,
-+    pub spawn: Spawner,
-+}
-+
-+/// One conversation inside the shared process.
-+#[derive(Debug, Clone)]
-+pub struct CodexThread {
-+    pub cwd: PathBuf,
-+    pub model: Option<String>,
-+    pub effort: Option<String>,
-+    pub resume: Option<String>,
-+    /// A side question (such as routing) with its own instructions: it reads nothing and runs nothing.
-+    pub instructions: Option<String>,
-+    /// How the user wants to be called; see `ClaudeLaunch::user_name`.
-+    pub user_name: Option<String>,
-+}
-+
-+enum ServerCommand {
-+    Open { key: u64, thread: CodexThread, sink: EventSink },
-+    Session(u64, SessionCommand),
-+    Retire,
-+}
-+
-+// What an answer from Codex is for.
-+enum Waiting {
-+    Initialize,
-+    Thread(u64),
-+    Other(u64, &'static str),
-+}
-+
-+/// A conversation's side of the shared process.
-+struct Thread {
-+    sink: EventSink,
-+    params: CodexThread,
-+    id: Option<String>,
-+    turn: Option<String>,
-+    queued: Vec<UserTurn>,
-+    state: CodexTurnState,
-+    approvals: HashMap<String, Value>,
-+}
-+
-+fn turn_params(thread: &str, effort: Option<&str>, turn: &UserTurn) -> Value {
-+    let mut input: Vec<Value> =
-+        turn.images.iter().map(|i| json!({ "type": "image", "url": format!("data:{};base64,{}", i.media_type, i.base64) })).collect();
-+    input.push(json!({ "type": "text", "text": turn.text, "text_elements": [] }));
-+    let mut params = json!({ "threadId": thread, "input": input });
-+    if let Some(effort) = effort {
-+        params["effort"] = effort.into();
-+    }
-+    params
-+}
-+
-+pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
-+    let mut params = codex_thread(area, t.model.as_deref());
-+    if let Some(instructions) = &t.instructions {
-+        params.insert("baseInstructions".into(), instructions.clone().into());
-+        params.insert("sandbox".into(), "read-only".into());
-+        params.insert("approvalPolicy".into(), "never".into());
-+        // Nothing to resume later: it stays out of the user's Codex history.
-+        params.insert("ephemeral".into(), true.into());
-+    } else if let Some(name) = &t.user_name {
-+        // Developer instructions sit beside Codex's own, so a project keeps its default prompt.
-+        params.insert("developerInstructions".into(), name_instructions(name).into());
-+    }
-+    params.insert("cwd".into(), t.cwd.to_string_lossy().into_owned().into());
-+    let method = match &t.resume {
-+        Some(id) => {
-+            params.insert("threadId".into(), id.clone().into());
-+            "thread/resume"
-+        }
-+        None => "thread/start",
-+    };
-+    (method, Value::Object(params))
-+}
-+
-+/// One `codex app-server` serves every conversation with the same settings, each as a thread of its own, so open
-+/// conversations cost one process instead of one each (measured: about 50 MB for three threads).
-+#[derive(Clone)]
-+pub struct CodexServer {
-+    tx: UnboundedSender<ServerCommand>,
-+    next: Arc<AtomicU64>,
-+}
-+
-+impl CodexServer {
-+    /// The process starts right away, so a warmed-up conversation is already booting while the user types.
-+    pub fn start(opts: CodexServerOptions) -> CodexServer {
-+        let (tx, rx) = unbounded_channel();
-+        let started = (opts.spawn)(&opts.bin, &codex_args(opts.area, opts.windows, opts.user_hooks), &opts.cwd);
-+        tokio::spawn(serve(started, opts.area, rx));
-+        CodexServer { tx, next: Arc::new(AtomicU64::new(1)) }
-+    }
-+
-+    /// False once the process has stopped; the engine then starts a new one.
-+    pub fn is_alive(&self) -> bool {
-+        !self.tx.is_closed()
-+    }
-+
-+    /// Opens a conversation as a thread. The session behaves as if it had the process to itself.
-+    pub fn open(&self, thread: CodexThread, sink: EventSink) -> Session {
-+        let key = self.next.fetch_add(1, Ordering::Relaxed);
-+        if let Err(SendError(ServerCommand::Open { sink, .. })) = self.tx.send(ServerCommand::Open { key, thread, sink }) {
-+            sink(EngineEvent::Error { message: "Codex stopped.".into(), fatal: true });
-+        }
-+        // Straight into the server's queue, so commands from all conversations keep the order they were given in.
-+        let server = self.tx.clone();
-+        Session::from_fn(move |cmd| drop(server.send(ServerCommand::Session(key, cmd))))
-+    }
-+
-+    /// Stops the process once its last conversation closes; new conversations go to a server with the new settings.
-+    pub fn retire(&self) {
-+        let _ = self.tx.send(ServerCommand::Retire);
-+    }
-+}
-+
-+async fn serve(started: std::io::Result<proc::Proc>, area: Area, mut rx: UnboundedReceiver<ServerCommand>) {
-+    let mut p = match started {
-+        Ok(p) => p,
-+        Err(err) => {
-+            // Every conversation already waiting hears why; the next one starts a fresh process.
-+            rx.close();
-+            while let Some(cmd) = rx.recv().await {
-+                if let ServerCommand::Open { sink, .. } = cmd {
-+                    sink(EngineEvent::Error { message: format!("Codex could not start: {err}"), fatal: true });
-+                }
-+            }
-+            return;
-+        }
-+    };
-+    let tail = proc::stderr_tail(p.stderr.take());
-+    let mut lines = BufReader::new(p.stdout).lines();
-+    let mut stdin = p.stdin;
-+    let mut child = p.child;
-+    let mut threads: HashMap<u64, Thread> = HashMap::new();
-+    let mut by_id: HashMap<String, u64> = HashMap::new();
-+    // Opened before Codex finished starting, in order, so request ids stay predictable.
-+    let mut pending: Vec<u64> = Vec::new();
-+    let mut waiting: HashMap<u64, Waiting> = HashMap::new();
-+    let mut next_id = 0u64;
-+    let (mut ready, mut retired, mut stopping) = (false, false, false);
-+
-+    macro_rules! request {
-+        ($method:expr, $params:expr, $kind:expr) => {{
-+            next_id += 1;
-+            waiting.insert(next_id, $kind);
-+            let _ = proc::write_line(&mut *stdin, &json!({ "id": next_id, "method": $method, "params": $params })).await;
-+        }};
-+    }
-+    macro_rules! stop {
-+        () => {{
-+            stopping = true;
-+            proc::stop(&mut *stdin, &mut child).await;
-+        }};
-+    }
-+
-+    let init = json!({ "clientInfo": { "name": "faber", "title": "Faber", "version": "0.0.0" }, "capabilities": { "experimentalApi": false, "requestAttestation": false } });
-+    request!("initialize", init, Waiting::Initialize);
-+
-+    loop {
-+        tokio::select! {
-+            line = lines.next_line() => {
-+                let Ok(Some(line)) = line else {
-+                    if !stopping {
-+                        let code = proc::exit_code(&mut child).await;
-+                        let message = format!("Codex stopped (exit {code}). {}", tail.lock().unwrap()).trim().to_string();
-+                        for t in threads.values() {
-+                            (t.sink)(EngineEvent::Error { message: message.clone(), fatal: true });
-+                        }
-+                    }
-+                    break;
-+                };
-+                if line.trim().is_empty() {
-+                    continue;
-+                }
-+                let Ok(msg) = serde_json::from_str::<Value>(&line) else {
-+                    let message = format!("Unexpected output from Codex: {}", line.chars().take(200).collect::<String>());
-+                    for t in threads.values() {
-+                        (t.sink)(EngineEvent::Error { message: message.clone(), fatal: false });
-+                    }
-+                    continue;
-+                };
-+                let method = msg["method"].as_str();
-+                let params = &msg["params"];
-+                match (method, msg.get("id")) {
-+                    // An answer to one of Faber's requests.
-+                    (None, Some(id)) => {
-+                        let Some(kind) = id.as_u64().and_then(|id| waiting.remove(&id)) else { continue };
-+                        if let Some(error) = msg.get("error") {
-+                            let detail = error["message"].as_str().map(String::from).unwrap_or_else(|| error.to_string());
-+                            let (keys, what, fatal): (Vec<u64>, &str, bool) = match kind {
-+                                Waiting::Initialize => (threads.keys().copied().collect(), "initialize", true),
-+                                Waiting::Thread(key) => (vec![key], "thread", true),
-+                                Waiting::Other(key, m) => (vec![key], m, false),
-+                            };
-+                            for t in keys.iter().filter_map(|k| threads.get(k)) {
-+                                (t.sink)(EngineEvent::Error { message: format!("Codex {what} failed: {detail}"), fatal });
-+                            }
-+                            continue;
-+                        }
-+                        match kind {
-+                            Waiting::Initialize => {
-+                                let _ = proc::write_line(&mut *stdin, &json!({ "method": "initialized" })).await;
-+                                ready = true;
-+                                for key in std::mem::take(&mut pending) {
-+                                    let Some(t) = threads.get(&key) else { continue };
-+                                    let (method, params) = thread_params(area, &t.params);
-+                                    request!(method, params, Waiting::Thread(key));
-+                                }
-+                            }
-+                            Waiting::Thread(key) => {
-+                                let Some(t) = threads.get_mut(&key) else { continue };
-+                                let thread = &msg["result"]["thread"];
-+                                let id = s(&thread["id"]);
-+                                let shown = thread["model"].as_str().map(String::from).or_else(|| t.params.model.clone()).unwrap_or_else(|| "codex".into());
-+                                (t.sink)(EngineEvent::Started { session_id: id.clone(), model: shown });
-+                                by_id.insert(id.clone(), key);
-+                                t.id = Some(id.clone());
-+                                for turn in std::mem::take(&mut t.queued) {
-+                                    let params = turn_params(&id, t.params.effort.as_deref(), &turn);
-+                                    request!("turn/start", params, Waiting::Other(key, "turn/start"));
-+                                }
-+                            }
-+                            Waiting::Other(..) => {}
-+                        }
-+                    }
-+                    // A request from Codex: approvals reach the user; anything else is declined politely.
-+                    (Some(method), Some(id)) => {
-+                        let thread = params["threadId"].as_str().and_then(|t| by_id.get(t)).and_then(|k| threads.get_mut(k));
-+                        match (method.ends_with("requestApproval"), thread) {
-+                            (true, Some(t)) => {
-+                                let key = match id { Value::String(s) => s.clone(), other => other.to_string() };
-+                                t.approvals.insert(key.clone(), id.clone());
-+                                let tool = params["kind"].as_str().unwrap_or(method).to_string();
-+                                let input = [&params["command"], &params["changes"]].into_iter().find(|v| !v.is_null()).unwrap_or(params).clone();
-+                                (t.sink)(EngineEvent::Permission { request_id: key, tool, input });
-+                            }
-+                            // The conversation is gone, so nobody can say yes.
-+                            (true, None) => {
-+                                let _ = proc::write_line(&mut *stdin, &json!({ "id": id, "result": { "decision": "decline" } })).await;
-+                            }
-+                            (false, _) => {
-+                                let error = json!({ "id": id, "error": { "code": -32601, "message": format!("Faber does not handle {method} yet") } });
-+                                let _ = proc::write_line(&mut *stdin, &error).await;
-+                            }
-+                        }
-+                    }
-+                    _ => {
-+                        let thread_id = params["threadId"].as_str().or_else(|| params["thread"]["id"].as_str());
-+                        match thread_id.and_then(|t| by_id.get(t)).and_then(|k| threads.get_mut(k)) {
-+                            Some(t) => {
-+                                if method == Some("turn/started") {
-+                                    t.turn = params["turn"]["id"].as_str().map(String::from);
-+                                }
-+                                for event in parse_codex_notification(&msg, &mut t.state) {
-+                                    (t.sink)(event);
-+                                }
-+                            }
-+                            // Account-wide news, such as quota: one conversation passes it on.
-+                            None if thread_id.is_none() => {
-+                                if let Some(t) = threads.values().next() {
-+                                    for event in parse_codex_notification(&msg, &mut CodexTurnState::default()) {
-+                                        (t.sink)(event);
-+                                    }
-+                                }
-+                            }
-+                            None => {}
-+                        }
-+                    }
-+                }
-+            }
-+            cmd = rx.recv(), if !stopping => match cmd {
-+                Some(ServerCommand::Open { key, thread, sink }) => {
-+                    let state = CodexTurnState::new(thread.resume.is_some());
-+                    let t = Thread { sink, params: thread, id: None, turn: None, queued: vec![], state, approvals: HashMap::new() };
-+                    if ready {
-+                        let (method, params) = thread_params(area, &t.params);
-+                        request!(method, params, Waiting::Thread(key));
-+                    } else {
-+                        pending.push(key);
-+                    }
-+                    threads.insert(key, t);
-+                }
-+                Some(ServerCommand::Session(key, cmd)) => match cmd {
-+                    SessionCommand::Send(turn) => {
-+                        let Some(t) = threads.get_mut(&key) else { continue };
-+                        match t.id.clone() {
-+                            Some(id) => request!("turn/start", turn_params(&id, t.params.effort.as_deref(), &turn), Waiting::Other(key, "turn/start")),
-+                            None => t.queued.push(turn),
-+                        }
-+                    }
-+                    SessionCommand::Answer { request_id, allow, ack } => {
-+                        // The approval stays pending until the write worked, so a failed write can be answered again.
-+                        let delivery = match threads.get(&key).and_then(|t| t.approvals.get(&request_id)).cloned() {
-+                            None => Delivery::Unknown,
-+                            Some(id) => {
-+                                let decision = if allow { "accept" } else { "decline" };
-+                                match proc::write_line(&mut *stdin, &json!({ "id": id, "result": { "decision": decision } })).await {
-+                                    Ok(()) => {
-+                                        if let Some(t) = threads.get_mut(&key) {
-+                                            t.approvals.remove(&request_id);
-+                                        }
-+                                        Delivery::Delivered
-+                                    }
-+                                    Err(e) => {
-+                                        // A half-written or unflushed line cannot be sent again: end the process, and the
-+                                        // end of its output tells the engine.
-+                                        if e.torn {
-+                                            proc::stop(&mut *stdin, &mut child).await;
-+                                        }
-+                                        Delivery::WriteFailed
-+                                    }
-+                                }
-+                            }
-+                        };
-+                        let _ = ack.send(delivery);
-+                    }
-+                    SessionCommand::Interrupt => {
-+                        if let Some((thread, turn)) = threads.get(&key).and_then(|t| Some((t.id.clone()?, t.turn.clone()?))) {
-+                            request!("turn/interrupt", json!({ "threadId": thread, "turnId": turn }), Waiting::Other(key, "turn/interrupt"));
-+                        }
-+                    }
-+                    // The thread stays loaded in Codex (cheap); Faber stops listening, and stops any work in flight.
-+                    SessionCommand::Close => {
-+                        pending.retain(|k| *k != key);
-+                        if let Some(t) = threads.remove(&key)
-+                            && let Some(id) = &t.id
-+                        {
-+                            by_id.remove(id);
-+                            if let Some(turn) = &t.turn {
-+                                request!("turn/interrupt", json!({ "threadId": id, "turnId": turn }), Waiting::Other(key, "turn/interrupt"));
-+                            }
-+                        }
-+                        if retired && threads.is_empty() {
-+                            stop!();
-+                        }
-+                    }
-+                },
-+                Some(ServerCommand::Retire) => {
-+                    retired = true;
-+                    if threads.is_empty() {
-+                        stop!();
-+                    }
-+                }
-+                None => stop!(),
-+            }
-+        }
-+    }
+         "turn/completed" => {
+             let status = s(&p["turn"]["status"]);
+             // The turn's usage is the thread's total now minus its total when the turn started. With no start to
+@@ -547,6 +551,58 @@
+             }
+         }
+     }
 +}
 +
 +/// Asks a short-lived `codex app-server` for the account's quota windows and plan, so the first reading does not wait for a
@@ -4537,6 +3380,9 @@ Expected: compile errors or failures naming the missing items.
 +        let mut answered = 0;
 +        while let Ok(Some(line)) = lines.next_line().await {
 +            let Ok(msg) = serde_json::from_str::<Value>(&line) else { continue };
++            if !msg["error"].is_null() {
++                return vec![];
++            }
 +            match msg["id"].as_i64() {
 +                Some(1) => {
 +                    let _ = proc::write_line(&mut *stdin, &json!({ "method": "initialized" })).await;
@@ -4569,54 +3415,9 @@ Expected: compile errors or failures naming the missing items.
 +    let events = tokio::time::timeout(timeout, ask).await.unwrap_or_default();
 +    proc::stop(&mut *stdin, &mut child).await;
 +    events
-+}
-+
-+#[derive(Debug, Clone, PartialEq, Serialize)]
-+#[serde(rename_all = "camelCase")]
-+pub struct ModelInfo {
-+    pub id: String,
-+    pub label: String,
-+    #[serde(skip_serializing_if = "Option::is_none")]
-+    pub description: Option<String>,
-+    pub is_default: bool,
-+}
-+
-+/// Asks a short-lived `codex app-server` which models this account can use, so the picker shows the real list.
-+/// Gives an empty list on any failure: the picker then offers just the account's default.
-+pub async fn list_codex_models(bin: &str, cwd: &Path, windows: bool, spawn: Spawner, timeout: Duration) -> Vec<ModelInfo> {
-+    let Ok(p) = spawn(bin, &codex_args(Area::Chat, windows, false), cwd) else { return vec![] };
-+    let mut stdin = p.stdin;
-+    let mut child = p.child;
-+    let mut lines = BufReader::new(p.stdout).lines();
-+    let ask = async {
-+        let init = json!({ "id": 1, "method": "initialize", "params": { "clientInfo": { "name": "faber", "title": "Faber", "version": "0.0.0" } } });
-+        let _ = proc::write_line(&mut *stdin, &init).await;
-+        while let Ok(Some(line)) = lines.next_line().await {
-+            let Ok(msg) = serde_json::from_str::<Value>(&line) else { continue };
-+            if msg["id"] == 1 {
-+                let _ = proc::write_line(&mut *stdin, &json!({ "method": "initialized" })).await;
-+                let _ = proc::write_line(&mut *stdin, &json!({ "id": 2, "method": "model/list", "params": {} })).await;
-+            } else if msg["id"] == 2 {
-+                return msg["result"]["data"]
-+                    .as_array()
-+                    .into_iter()
-+                    .flatten()
-+                    .filter(|m| m["hidden"] != true)
-+                    .map(|m| ModelInfo {
-+                        id: s(&m["id"]),
-+                        label: m["displayName"].as_str().map(String::from).unwrap_or_else(|| s(&m["id"])),
-+                        description: m["description"].as_str().map(String::from),
-+                        is_default: m["isDefault"] == true,
-+                    })
-+                    .collect();
-+            }
-+        }
-+        vec![]
-+    };
-+    let models = tokio::time::timeout(timeout, ask).await.unwrap_or_default();
-+    proc::stop(&mut *stdin, &mut child).await;
-+    models
-+}
+ }
+ 
+ #[derive(Debug, Clone, PartialEq, Serialize)]
 ```
 
 `engine/src/engine.rs`
@@ -5471,23 +4272,39 @@ Expected: compile errors or failures naming the missing items.
 ```diff
 --- a/engine/src/signals.rs
 +++ b/engine/src/signals.rs
-@@ -15,6 +15,13 @@
+@@ -13,6 +13,13 @@
+     pub paid_fallback: Option<bool>,
+     pub plan: Option<String>,
      pub billing: Option<Billing>,
- }
- 
++}
++
 +impl Signals {
 +    /// True when the message said nothing about the account, so there is nothing to pass on.
 +    pub fn is_empty(&self) -> bool {
 +        *self == Signals::default()
 +    }
-+}
-+
+ }
+ 
  /// Claude Code's `rate_limit_event`. A status other than `allowed` counts only when it is about a vendor-wide window; the
- /// extra-usage switch is "possible" unless the CLI says it is rejected or off.
- pub fn claude_signals(msg: &Value) -> Signals {
-@@ -40,17 +47,29 @@
-         reach: Some(if reached { Reach::Out(reset) } else { Reach::Clear }),
-         paid_fallback: Some(r["credits"]["hasCredits"] == true || r["credits"]["unlimited"] == true),
+@@ -36,35 +43,60 @@
+     let r = &msg["params"]["rateLimits"];
+     let reset = [&r["primary"]["resetsAt"], &r["secondary"]["resetsAt"]].into_iter().filter_map(Value::as_f64).reduce(f64::max);
+     let reached = !r["rateLimitReachedType"].is_null() || r["spendControlReached"] == true;
++    let reach = if reached {
++        Some(Reach::Out(reset))
++    } else {
++        (r.get("rateLimitReachedType").is_some() && r.get("spendControlReached").is_some()).then_some(Reach::Clear)
++    };
++    let paid_fallback = match (r["credits"]["hasCredits"].as_bool(), r["credits"]["unlimited"].as_bool()) {
++        (Some(true), _) | (_, Some(true)) => Some(true),
++        (Some(false), Some(false)) => Some(false),
++        _ => None,
++    };
+     Signals {
+-        reach: Some(if reached { Reach::Out(reset) } else { Reach::Clear }),
+-        paid_fallback: Some(r["credits"]["hasCredits"] == true || r["credits"]["unlimited"] == true),
++        reach,
++        paid_fallback,
          plan: r["planType"].as_str().map(String::from),
 +        billing: r["planType"].as_str().filter(|p| usage_plan(p)).map(|_| Billing::UsageBilled),
          ..Signals::default()
@@ -5502,7 +4319,7 @@ Expected: compile errors or failures naming the missing items.
  /// Codex's `account/updated`: how the account signs in and its plan. The mode names are not credentials; nothing else in
 -/// the message is kept.
 +/// the message is kept. Only a ChatGPT sign-in on a plan that is not billed by use counts as a subscription: any other
-+/// way in (an API key, a cloud provider) is billed by use, and Auto never routes to it.
++/// way in is kept out of Auto unless its subscription billing is confirmed.
  pub fn codex_account(msg: &Value) -> Signals {
      let p = &msg["params"];
 -    let billing =
@@ -5510,15 +4327,39 @@ Expected: compile errors or failures naming the missing items.
 -    Signals { plan: p["planType"].as_str().map(String::from), billing, ..Signals::default() }
 +    let plan = p["planType"].as_str();
 +    let by_use = plan.is_some_and(usage_plan);
-+    let billing = match p["authMode"].as_str() {
-+        Some(mode) if !mode.to_ascii_lowercase().contains("chatgpt") => Some(Billing::UsageBilled),
-+        Some(_) => Some(if by_use { Billing::UsageBilled } else { Billing::Subscription }),
-+        None => by_use.then_some(Billing::UsageBilled),
++    let billing = match p["authMode"].as_str().map(str::to_ascii_lowercase).as_deref() {
++        _ if by_use => Billing::UsageBilled,
++        Some("chatgpt" | "chatgptauthtokens") => Billing::Subscription,
++        Some("apikey" | "api_key" | "amazonbedrock" | "googlevertexai") => Billing::UsageBilled,
++        _ => Billing::Unknown,
 +    };
-+    Signals { plan: plan.map(String::from), billing, ..Signals::default() }
++    Signals { plan: plan.map(String::from), billing: Some(billing), ..Signals::default() }
  }
  
  /// What `claude auth status` printed, reduced to the plan and the billing: everything else in the output is dropped
+ /// unread.
+ pub fn claude_plan(output: &str) -> Signals {
+-    let v: Value = serde_json::from_str(output).unwrap_or(Value::Null);
+-    let plan = v["subscriptionType"].as_str().filter(|s| !s.is_empty()).map(String::from);
++    let Ok(v) = serde_json::from_str::<Value>(output) else { return Signals::default() };
++    let plan = v["subscriptionType"].as_str().filter(|s| !s.is_empty() && v["loggedIn"] != false).map(String::from);
+     let method = ["authMethod", "authMode", "loginMethod"].into_iter().find_map(|k| v[k].as_str()).unwrap_or_default().to_ascii_lowercase();
+-    let billing = if plan.is_some() {
+-        Some(Billing::Subscription)
++    let billing = if v["loggedIn"] == false {
++        Billing::Unknown
+     } else if method.contains("api") || method.contains("console") {
+-        Some(Billing::UsageBilled)
++        Billing::UsageBilled
++    } else if plan.is_some() {
++        Billing::Subscription
+     } else {
+-        None
++        Billing::Unknown
+     };
+-    Signals { plan, billing, ..Signals::default() }
++    Signals { plan, billing: Some(billing), ..Signals::default() }
+ }
 ```
 
 `engine/src/store.rs`
@@ -5602,6 +4443,8 @@ git commit -m "feat(engine): the engine keeps the ledger"
 
 ### Task 6: Plan detection and the quota pulse
 
+R89: pulses require confirmed subscription billing; naming a plan is insufficient. A successful signed-out status clears billing to unknown. Tests pin both cases.
+
 Know the plan without asking, and refresh Claude's readings when they are old.
 
 **Files:**
@@ -5619,7 +4462,7 @@ Know the plan without asking, and refresh Claude's readings when they are old.
 ```diff
 --- a/engine/tests/plan.rs
 +++ b/engine/tests/plan.rs
-@@ -0,0 +1,265 @@
+@@ -0,0 +1,302 @@
 +//! Plan detection, the billing verdict and the quota pulse. No real CLI runs: status commands and the pulse are replayed.
 +
 +mod support;
@@ -5846,6 +4689,10 @@ Know the plan without asking, and refresh Claude's readings when they are old.
 +    let dir = tempfile::tempdir().unwrap();
 +    let f = fake(pulse_recording());
 +    let (engine, _, time) = start(dir.path(), f.spawn.clone(), Some(silent()));
++    engine.note_account_events(
++        Vendor::Claude,
++        vec![EngineEvent::Signals(Signals { billing: Some(Billing::Subscription), ..Signals::default() })],
++    );
 +    engine.route_draft(typing(), "Plan a trip".into());
 +    assert!(settle_for(&engine, "five_hour").await, "the pulse brought a reading");
 +    let args = f.args.lock().unwrap().clone();
@@ -5877,12 +4724,45 @@ Know the plan without asking, and refresh Claude's readings when they are old.
 +    let (engine, _, time) = start(dir.path(), f.spawn.clone(), Some(silent()));
 +    // Nearly out, and the CLI may switch to paid use by itself: the pulse must not be the request that does it.
 +    let quota = EngineEvent::Quota { window: "five_hour".into(), used: 0.95, resets_at: (WHEN + 3600) as f64 };
-+    let paid = EngineEvent::Signals(Signals { paid_fallback: Some(true), ..Signals::default() });
++    let paid = EngineEvent::Signals(Signals { paid_fallback: Some(true), billing: Some(Billing::Subscription), ..Signals::default() });
 +    engine.note_account_events(Vendor::Claude, vec![quota, paid]);
 +    time.store(WHEN + 21 * 60, Ordering::SeqCst);
 +    engine.route_draft(typing(), "Plan a trip".into());
 +    tokio::time::sleep(Duration::from_millis(100)).await;
 +    assert!(f.args.lock().unwrap().is_empty(), "denied: a window above 90% with paid use possible");
++    engine.shutdown();
++}
++
++#[tokio::test]
++async fn a_typed_plan_never_allows_a_pulse_with_unknown_billing() {
++    let dir = tempfile::tempdir().unwrap();
++    let f = fake(pulse_recording());
++    let (engine, _, _) = start(dir.path(), f.spawn.clone(), Some(silent()));
++    engine.answer_plan(Vendor::Claude, "max");
++    engine.route_draft(typing(), "Plan a trip".into());
++    tokio::time::sleep(Duration::from_millis(100)).await;
++    assert_eq!(engine.ledger().claude.billing, Billing::Unknown);
++    assert!(f.args.lock().unwrap().is_empty());
++    engine.shutdown();
++}
++
++#[tokio::test]
++async fn signing_out_clears_a_previously_confirmed_subscription() {
++    let dir = tempfile::tempdir().unwrap();
++    let (connected, _) = status(Some(r#"{"loggedIn":true,"subscriptionType":"max"}"#));
++    let (disconnected, _) = status(Some(r#"{"loggedIn":false}"#));
++    let calls = Arc::new(AtomicU64::new(0));
++    let spawn: Spawner =
++        Arc::new(
++            move |bin, args, cwd| {
++                if calls.fetch_add(1, Ordering::SeqCst) == 0 { connected(bin, args, cwd) } else { disconnected(bin, args, cwd) }
++            },
++        );
++    let (engine, _, _) = start(dir.path(), spawn, None);
++    engine.check_plans(FIVE).await;
++    assert_eq!(engine.ledger().claude.billing, Billing::Subscription);
++    engine.check_plans(FIVE).await;
++    assert_eq!(engine.ledger().claude.billing, Billing::Unknown);
 +    engine.shutdown();
 +}
 ```
@@ -5951,11 +4831,11 @@ Expected: compile errors or failures naming the missing items.
 +}
 +
 +/// What `claude auth status` says about the plan and how the login is billed; nothing else of its output is kept (the email
-+/// and organisation in it are dropped unread). None when the command failed, timed out or reports no sign-in.
++/// and organisation in it are dropped unread). None when the command failed, timed out or returned invalid status data.
 +pub async fn claude_account(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> Option<Signals> {
 +    let ran = run(Vendor::Claude, cli, spawn, cwd, timeout).await?;
-+    let signed_in = serde_json::from_str::<serde_json::Value>(&ran.out).ok()?["loggedIn"].as_bool()?;
-+    signed_in.then(|| claude_plan(&ran.out))
++    serde_json::from_str::<serde_json::Value>(&ran.out).ok()?["loggedIn"].as_bool()?;
++    Some(claude_plan(&ran.out))
  }
  
  async fn read_all(stream: Option<Box<dyn AsyncRead + Send + Unpin>>) -> Option<String> {
@@ -6204,6 +5084,9 @@ git commit -m "feat(engine): plan detection and the quota pulse"
 ```
 
 ### Task 8: The pacing table and dispatch through the gate
+
+Owner integration note (R89): wire `watch_accounts` in the shell and the screen's local clock offset in this commit, before Auto starts requiring confirmed billing. Replay account checks through the fake CLI; never call a real CLI in proofs. Admission is rechecked at dispatch; live work stops on unapproved overage, credit decreases or loss of confirmed subscription billing. Pulses close within 60 seconds. `engine/src/route.rs` changes only for this task's pacing table.
+
 
 Auto prices on the quota of the moment of sending, never of the moment of typing, and nothing reaches a CLI without the gate.
 
@@ -7540,367 +6423,36 @@ git add engine
 git commit -m "feat(engine): the pacing table and dispatch through the gate"
 ```
 
-### Task 9: Learning wired to real turns
+### Task 9: Own metering and learning from explained turns (R90)
 
-The weights and the outside-use estimate learn from what Faber really did.
+Reuse the verified Task 9 wiring where it matches R90. This task includes the shared-account correction in one commit.
 
-**Files:**
-- `engine/src/engine.rs`
-- `engine/src/engine/answer.rs`
-- `engine/src/engine/auto.rs`
-- `engine/tests/learning.rs`
-- `engine/tests/pacing.rs`
+**Files:** `engine/src/{engine,usage,codex,events,learn,ledger,model}.rs`, `engine/src/engine/{auto,pulse,answer}.rs`,
+`engine/tests/{learning,pacing,learn,ledger,turn_usage}.rs`, and this plan and its spec.
 
 **Interfaces:**
-- Consumes: Tasks 4, 8. Produces: `Core::note_turn`, `Live.started`, a span for every user turn and every router question, `learn_weights` after each user turn with a forced save when the capacity jumps.
+- `Live.started` and `Core::note_turn` identify the request that actually ran. Every user turn, router question and pulse
+  leaves a bounded span; summaries use the same metering in Task 10. Idle warmed sessions spend nothing.
+- Claude's own API-rated total is settled per session. Codex deltas include `cacheWriteInputTokens`; the initial total
+  of a new thread is zero, while a resumed thread requires a real baseline. Missing counters remain incomplete.
+- `usage::api_price` prices uncached input, cache reads, cache writes, one-hour writes and output without double counting.
+  `usage::fresh_price` handles one-request auxiliary sessions. API prices are documented in the code and spec.
+- `VendorLedger.own_spend` records own USD per local day, separately from account percentages. Per-turn spans keep cost
+  and completeness; bounded daily totals survive trimming the span history. Partial measurements cannot teach weights.
+- The learning span ends at the quota reading reported before Done, so the prior turn's cost cannot enter the next interval.
+- Only one-model, non-overlapping, fully metered intervals covered by own turns (120 seconds tolerance) calibrate weights.
+  Idle drops and drops more than twice the earlier explained movement plus one point are foreign and excluded.
+- The hourly shape describes the whole account (R88); monetary spend never comes from that shape or account percentages.
 
-- [ ] **Step 1: Add the tests (they fail or do not compile yet)**
+**Tests and proofs:**
+1. Reuse `learning.rs`: a user turn keeps its own model, time and USD; eight measured turns calibrate; a router question
+   keeps its own cost, with no pulse when the reading is fresh. Add the cross-vendor 1/7 daily-line routing test.
+2. Add R90 regression: establish eight clean metered stretches, then inject an idle account drop and a much larger drop
+   during a cheap own turn. Both are foreign, neither changes weights/capacity, and own USD remains the sum of metered turns.
+3. Price cache reads and both write lifetimes; parse Codex write deltas and preserve missing-counter completeness.
+4. Run all seven proof commands, then explicitly stage the task's paths, commit and run plain `git push`.
 
-```diff
---- a/engine/tests/learning.rs
-+++ b/engine/tests/learning.rs
-@@ -0,0 +1,156 @@
-+//! What the engine hands to the learning: the span of every request Faber makes, and the weights learned from them.
-+
-+mod support;
-+
-+use faber_engine::budget::Billing;
-+use faber_engine::cli::Cli;
-+use faber_engine::engine::Ask;
-+use faber_engine::events::EngineEvent;
-+use faber_engine::model::{Area, Message, Role, Status, Vendor};
-+use faber_engine::proc::Spawner;
-+use faber_engine::route::question;
-+use faber_engine::router::Choice;
-+use faber_engine::signals::Signals;
-+use faber_engine::{AppEvent, Engine, EngineOptions, SendRequest, WarmRequest};
-+use serde_json::json;
-+use std::collections::BTreeMap;
-+use std::path::Path;
-+use std::sync::Arc;
-+use std::sync::atomic::{AtomicU64, Ordering};
-+use std::time::Duration;
-+use support::{Entry, fake, fixture};
-+use tokio::sync::mpsc::UnboundedReceiver;
-+
-+const SKY: &str = "In one sentence: why is the sky blue?";
-+/// The recorded five-hour window resets at this time.
-+const RESETS: u64 = 1_791_627_000;
-+const START: u64 = 1_791_620_000;
-+
-+/// A clock that moves one second every time it is read, from a base the test sets: a turn then takes time, as it does.
-+struct Ticking {
-+    base: AtomicU64,
-+    ticks: AtomicU64,
-+}
-+
-+fn start(dir: &Path, spawn: Spawner, ask: Option<Ask>) -> (Engine, UnboundedReceiver<AppEvent>, Arc<Ticking>) {
-+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-+    let opts = EngineOptions {
-+        data_dir: dir.into(),
-+        clis: BTreeMap::from([(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] })]),
-+        spawn,
-+        windows: false,
-+        max_warm: 3,
-+        idle: Duration::from_secs(120),
-+        runtime: tokio::runtime::Handle::current(),
-+        ask,
-+    };
-+    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
-+    let clock = Arc::new(Ticking { base: AtomicU64::new(START), ticks: AtomicU64::new(0) });
-+    let c = clock.clone();
-+    engine.set_time_source(Arc::new(move || (c.base.load(Ordering::SeqCst) + c.ticks.fetch_add(1, Ordering::SeqCst)) as f64));
-+    (engine, rx, clock)
-+}
-+
-+fn by_hand() -> SendRequest {
-+    SendRequest {
-+        conversation_id: None,
-+        area: Area::Chat,
-+        project_id: None,
-+        text: SKY.into(),
-+        images: vec![],
-+        files: vec![],
-+        choice: Choice { vendor: "claude".into(), model: Some("haiku".into()) },
-+    }
-+}
-+
-+async fn finished(rx: &mut UnboundedReceiver<AppEvent>) -> Message {
-+    loop {
-+        let e = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.expect("no finished answer in time").expect("engine gone");
-+        if let AppEvent::Message { message, .. } = e
-+            && message.role == Role::Assistant
-+            && message.status != Some(Status::Streaming)
-+        {
-+            return *message;
-+        }
-+    }
-+}
-+
-+fn reading(used: f64) -> EngineEvent {
-+    EngineEvent::Quota { window: "five_hour".into(), used, resets_at: RESETS as f64 }
-+}
-+
-+#[tokio::test]
-+async fn a_user_turn_leaves_its_span_with_the_model_and_the_cost() {
-+    let dir = tempfile::tempdir().unwrap();
-+    let (engine, mut rx, _) = start(dir.path(), fake(fixture("claude", "chat")).spawn, None);
-+    engine.send(by_hand()).unwrap();
-+    let reply = finished(&mut rx).await;
-+    let spans = engine.ledger().claude.spans;
-+    assert_eq!(spans.len(), 1);
-+    assert_eq!(spans[0].model, "claude-haiku-5-5");
-+    // The ledger keeps a millionth of a dollar.
-+    let (kept, shown) = (spans[0].cost.unwrap(), reply.cost_usd.unwrap());
-+    assert!((kept - shown).abs() < 1e-6, "the cost of the turn, not the running total: {kept} vs {shown}");
-+    assert!(spans[0].cost.is_some_and(|c| c > 0.0));
-+    assert!(spans[0].start >= START as f64 && spans[0].end > spans[0].start, "{spans:?}");
-+    engine.shutdown();
-+}
-+
-+#[tokio::test]
-+async fn eight_measured_turns_teach_the_weights_and_the_stretches_are_kept() {
-+    let dir = tempfile::tempdir().unwrap();
-+    let (engine, mut rx, clock) = start(dir.path(), fake(fixture("claude", "chat")).spawn, None);
-+    for i in 0..8 {
-+        clock.base.store(START + i * 600, Ordering::SeqCst);
-+        clock.ticks.store(0, Ordering::SeqCst);
-+        // Three points below what the recording will report, so each turn moves the window by three points.
-+        engine.note_account_events(Vendor::Claude, vec![reading(0.04)]);
-+        engine.send(by_hand()).unwrap();
-+        finished(&mut rx).await;
-+    }
-+    let claude = engine.ledger().claude;
-+    assert_eq!(claude.spans.len(), 8);
-+    assert_eq!(claude.stretches.len(), 8);
-+    assert_eq!(claude.stretches_since, 8);
-+    assert!(claude.weights.capacity.is_some_and(|c| c > 0.0), "{:?}", claude.weights);
-+    assert!(claude.weights.w.contains_key("claude-haiku-5-5"));
-+    engine.shutdown();
-+    let saved: faber_engine::ledger::Ledger =
-+        serde_json::from_str(&std::fs::read_to_string(dir.path().join("budget.json")).unwrap()).unwrap();
-+    assert_eq!(saved.claude.stretches.len(), 8, "what was learned survives a restart");
-+}
-+
-+#[tokio::test]
-+async fn a_router_question_is_a_span_too_and_has_no_cost() {
-+    let dir = tempfile::tempdir().unwrap();
-+    // The router's session is the Claude chat recording, with the question it will be asked as the recorded input.
-+    let text = "Plan a trip to Lisbon";
-+    let entries: Vec<Entry> = fixture("claude", "chat")
-+        .into_iter()
-+        .map(|mut e| {
-+            if e.input {
-+                e.msg["message"]["content"] = json!(question(text, 0));
-+            }
-+            e
-+        })
-+        .collect();
-+    let f = fake(entries);
-+    let (engine, _rx, _) = start(dir.path(), f.spawn.clone(), None);
-+    // A fresh reading and a seen plan, so that no pulse is due and the gate lets the router ask.
-+    let plan = EngineEvent::Signals(Signals { plan: Some("max".into()), billing: Some(Billing::Subscription), ..Signals::default() });
-+    engine.note_account_events(Vendor::Claude, vec![reading(0.05), plan]);
-+    let typing =
-+        WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: Choice { vendor: "auto".into(), model: None } };
-+    engine.route_draft(typing, text.into());
-+    for _ in 0..100 {
-+        if !engine.ledger().claude.spans.is_empty() {
-+            break;
-+        }
-+        tokio::time::sleep(Duration::from_millis(30)).await;
-+    }
-+    let spans = engine.ledger().claude.spans;
-+    assert_eq!(spans.len(), 1, "one question, one span");
-+    assert_eq!(spans[0].cost, None);
-+    assert_eq!(f.args.lock().unwrap().len(), 1, "no pulse: the reading was fresh");
-+    engine.shutdown();
-+}
-```
-
-```diff
---- a/engine/tests/pacing.rs
-+++ b/engine/tests/pacing.rs
-@@ -354,3 +354,18 @@
-     assert_eq!(again.engine.open(&id).unwrap().messages[1].pace, None);
-     again.engine.shutdown();
- }
-+
-+#[tokio::test]
-+async fn a_week_spent_faster_than_one_seventh_a_day_is_priced_up_on_either_vendor() {
-+    // One day of seven gone and a fifth of the week used (14.3% a day would be 14.3%): the vendor is left for the other.
-+    for (spent, other) in [(Vendor::Claude, Vendor::Codex), (Vendor::Codex, Vendor::Claude)] {
-+        let dir = tempfile::tempdir().unwrap();
-+        let r = both(dir.path(), verdicts(vec![("code", "medium")]));
-+        r.engine.note_account_events(spent, vec![plan("max"), quota("seven_day", 0.2, 6 * DAY)]);
-+        r.engine.note_account_events(other, vec![plan("pro"), quota("seven_day", 0.1, 6 * DAY)]);
-+        let id = r.engine.send(auto(CODE)).unwrap();
-+        let (reply, _) = r.went(&id, 0).await;
-+        assert_eq!(reply.vendor, Some(other), "{spent:?} is ahead of the daily line");
-+        r.engine.shutdown();
-+    }
-+}
-```
-
-- [ ] **Step 2: Run the new tests and see them fail**
-
-Run: `cargo test -p faber-engine` (the named test files)
-Expected: compile errors or failures naming the missing items.
-
-- [ ] **Step 3: Implement**
-
-`engine/src/engine.rs`
-
-```diff
---- a/engine/src/engine.rs
-+++ b/engine/src/engine.rs
-@@ -136,6 +136,8 @@
-     cli: Cli,
-     /// The process continues a session an earlier process began.
-     resumed: bool,
-+    /// When the turn being answered was handed to the CLI (Unix seconds); the learning needs the span it ran in.
-+    started: f64,
- }
- 
- const HISTORY_LIMIT: usize = 20_000;
-@@ -497,6 +499,22 @@
-         self.ledger.of_mut(vendor).span(Span { start, end, model: model.to_string(), cost });
-     }
- 
-+    /// A user turn ended: its span goes to the learning, and the weights are learned again from the stretches so far. A
-+    /// capacity that moved by more than a factor of two is a plan change the name did not announce; the ledger restarts
-+    /// its learning and the file is written at once.
-+    fn note_turn(&mut self, conv: &str, cost: Option<f64>) {
-+        let Some(l) = self.live.get(conv).filter(|l| l.started > 0.0) else { return };
-+        let (vendor, start, model) = (l.vendor, l.started, l.running.clone().or_else(|| l.model.clone()).unwrap_or_default());
-+        self.note_span(vendor, start, &model, cost);
-+        let now = self.secs();
-+        if self.ledger.of_mut(vendor).learn_weights(now) {
-+            self.save_ledger(true);
-+        }
-+        if let Some(l) = self.live.get_mut(conv) {
-+            l.started = 0.0;
-+        }
-+    }
-+
-     fn claude_plan_checked(&mut self, found: Option<Signals>) {
-         let Some(s) = found else { return self.ledger.claude.plan_failed() };
-         let (named, by_use) = (s.plan.is_some(), s.billing == Some(Billing::UsageBilled));
-@@ -729,6 +747,7 @@
-                 if let (Some(base), Some(c)) = (settled.base, self.convs.get_mut(conv)) {
-                     c.cost_base.insert(vendor, base);
-                 }
-+                self.note_turn(conv, settled.cost);
-                 if let Some(m) = self.turn(conv) {
-                     m.status = Some(if ok { Status::Done } else { Status::Stopped });
-                     m.cost_usd = settled.cost;
-@@ -751,6 +770,7 @@
-                     }
-                 }
-                 if fatal {
-+                    self.note_turn(conv, None);
-                     self.live.remove(conv);
-                     return self.finish(conv, turn_id);
-                 }
-@@ -924,8 +944,10 @@
-         {
-             m.model = Some(running);
-         }
-+        let now = self.secs();
-         if let Some(l) = self.live.get_mut(id) {
-             l.turn = Some(reply_id.to_string());
-+            l.started = now;
-             l.session.send(UserTurn { text, images });
-         }
-         self.push(id, Some(reply_id), true);
-@@ -991,6 +1013,7 @@
-                 used: self.tick,
-                 cli,
-                 resumed,
-+                started: 0.0,
-             },
-         );
-         // ponytail: count-based limit on idle Claude processes; a RAM budget across all CLIs comes with parallel workers.
-```
-
-`engine/src/engine/answer.rs`
-
-```diff
---- a/engine/src/engine/answer.rs
-+++ b/engine/src/engine/answer.rs
-@@ -235,6 +235,7 @@
-                 used: 0,
-                 cli: Cli { command: "claude".into(), prefix: vec![] },
-                 resumed: false,
-+                started: 0.0,
-             };
-             c.live.insert(id.clone(), live);
-             c.refresh_running();
-```
-
-`engine/src/engine/auto.rs`
-
-```diff
---- a/engine/src/engine/auto.rs
-+++ b/engine/src/engine/auto.rs
-@@ -44,6 +44,8 @@
-     answer: oneshot::Receiver<Option<String>>,
-     id: u64,
-     vendor: Vendor,
-+    /// When the question was sent (Unix seconds); set by `ask_router`. An idle router session uses no quota.
-+    asked: Arc<Mutex<Option<f64>>>,
- }
- 
- /// A draft's route still holds for the sent text when the text only grew a little past it.
-@@ -182,7 +184,8 @@
-             tokio::spawn(async move { drop(tx.send(answer.await)) });
-             return (Some(rx), None);
-         }
--        let Some(Spare { session, answer, .. }) = self.spare.take().or_else(|| self.open_router()) else { return (None, None) };
-+        let Some(Spare { session, answer, asked, .. }) = self.spare.take().or_else(|| self.open_router()) else { return (None, None) };
-+        *asked.lock().unwrap_or_else(|e| e.into_inner()) = Some(self.secs());
-         session.send(UserTurn::text(prompt));
-         (Some(answer), Some(Arc::new(Mutex::new(Some(session)))))
-     }
-@@ -199,9 +202,16 @@
-         let text = Arc::new(Mutex::new(String::new()));
-         let tx = Arc::new(Mutex::new(Some(tx)));
-         let me = self.me.clone();
-+        let asked: Arc<Mutex<Option<f64>>> = Arc::default();
-+        let when = asked.clone();
-         let sink: EventSink = Arc::new(move |e| match e {
-             EngineEvent::Text(t) => text.lock().unwrap_or_else(|e| e.into_inner()).push_str(&t),
-             EngineEvent::Done { .. } | EngineEvent::Error { .. } => {
-+                // The question used the vendor's quota: the learning must not count that as use from outside.
-+                let start = when.lock().unwrap_or_else(|e| e.into_inner()).take();
-+                if let (Some(start), Some(core)) = (start, me.upgrade()) {
-+                    core.lock().unwrap_or_else(|e| e.into_inner()).note_span(vendor, start, model, None);
-+                }
-                 if let Some(tx) = tx.lock().unwrap_or_else(|e| e.into_inner()).take() {
-                     let _ = tx.send(Some(std::mem::take(&mut *text.lock().unwrap_or_else(|e| e.into_inner()))));
-                 }
-@@ -239,7 +249,7 @@
-             ),
-         };
-         self.next_sid += 1;
--        Some(Spare { session, answer, id: self.next_sid, vendor })
-+        Some(Spare { session, answer, id: self.next_sid, vendor, asked })
-     }
- 
-     /// Starts a routed first message once its route is known, or the everyday default when the route is late.
-```
-
-- [ ] **Step 4: Run the engine suite, clippy and fmt**
-
-Run: `cargo test -p faber-engine && cargo clippy -p faber-engine --all-targets -- -D warnings && cargo fmt --all --check`
-Expected: all pass.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add engine
-git commit -m "feat(engine): learning wired to real turns"
-```
+Commit: `feat(engine): meter own spend and learn only from explained turns`.
 
 ### Task 10: Move or wait when a vendor cannot answer
 
@@ -8088,7 +6640,7 @@ It draws a user week from a seed, runs it with pacing off and on, and asserts on
 
 - [ ] **Step 2: Run it**
 
-Run: `cargo test -p faber-engine --test simulation` then `cargo test -p faber-engine --test simulation -- --ignored`
+Run: `cargo test -p faber-engine --test simulation` then `cargo test --release -p faber-engine --test simulation -- --ignored --nocapture`
 Expected: both pass.
 
 - [ ] **Step 3: Document**
@@ -8115,3 +6667,31 @@ git commit -m "test(engine): simulate a month of pacing and document it"
 - **Review Focus:** items 1-5 map to Task 10 tests, Task 8 tests (`a_login_billed_by_use...`, `a_clock_set_backwards...`, `a_reading_that_may_be_wrong...`), Task 5 `a_budget_file_that_is_damaged_old_or_odd...`, Task 4 sanitize, and Task 5 `a_reading_that_cannot_be_real...`.
 
 Plan complete and saved to `docs/superpowers/plans/2026-10-11-auto-quota-pacing.md`. Please review the plan. Does it capture what you want?
+
+
+## Execution record (2026-10-12)
+
+Tasks 8 through 11 are implemented and pushed, including all confirmed findings of the independent review. Task 7 was folded
+into Task 8. Account watching and local-clock wiring moved into Task 8 so R89 could not leave Auto unusable before
+billing confirmation. The actual shell command list lives in `src-tauri/src/main.rs`. Task 9 (`5e09d23`) applied R90 to
+this plan, the spec and the own-spend ledger in one commit. Follow-up `734fdb0` prices Codex's individual requests at the
+published context tier and preserves valid baselines through malformed/repeated updates; `d47ba93` flags small idle
+foreign use without treating it as Faber money. The historical prototype diffs yield to these corrections.
+
+Task 10's four described test bodies were written and extended with family, consent, resumption and shutdown cases.
+Task 11's `approve_credits`, `move_turn` and `wait_turn` commands bind the conversation, reply and vendor rather than a
+vendor-wide approval. Typing a plan cannot make unknown billing eligible. Quota failures preserve drafts and attachments;
+resumption clears only their matching restored draft and preserves newer edits.
+
+Task 12 adds the original Faber prototype simulation, the immediate-stop/latest-reading/baseline corrections to the
+manual cache probe, and documentation in `docs/design.md`. The smoke now includes seed 12, an unpaced-exhaustion case,
+so it asserts strictly fewer exhausted hours instead of a tie on the original first four seeds. All 200 monthly seeds
+ran in release mode: exhausted hours 0.135 versus 0.900, exhausted seeds 2.0% versus 14.5%, unused larger quota 2.5%,
+quality 81.42 versus 80.58, dropped tasks 0.597% (off: 0.151%). No pacing constants were tuned. The three probe tests
+use fake event streams and never call a real CLI.
+
+The owner's explicit protected-path rule overrides Task 12's proposed edit to `docs/roadmap.md`; its existing changes
+were preserved and left unstaged. Real cache measurements and the real pulse memory peak remain owner-run checks, not
+fabricated results. Native-speaker locale review remains required before release. The complete 42-key list and review
+disposition are in `docs/superpowers/auto-quota-pacing-report.md`. Every implementation/fix commit used all seven proofs
+and plain `git push`; screen and shell work used `cargo t --all`, on the hidden Windows desktop.

@@ -25,13 +25,13 @@ pub const SPARE_M: f64 = 0.6;
 
 /// The price multiplier of one window: `p` is the share expected to be used at the reset, `left` the share of the
 /// window still ahead. `p` of 0.7 is the pivot with a full window left (price 1); a window projected far under the pivot
-/// is cheap, one projected over it is dear, and one projected to run out is at the ceiling.
+/// is cheap, one projected over it is dear, and one on the daily line costs 25, with a gradient above the line.
 pub fn m_of(p: f64, left: f64) -> f64 {
     if p.is_nan() {
         return 1.0;
     }
     if p >= 1.0 {
-        return M_MAX;
+        return M_MAX * p.min(15.0);
     }
     let margin = MARGIN * left.clamp(0.0, 1.0).sqrt();
     (margin / (1.0 - p.max(0.0))).powi(2).clamp(M_MIN, M_MAX)
@@ -191,7 +191,7 @@ impl Snap {
         let ok = self.discount_ok();
         self.windows
             .iter()
-            .filter(|(n, _)| vendor_wide(n))
+            .filter(|(n, w)| vendor_wide(n) && w.live(now))
             .map(|(_, w)| window_m(w, now, shape, offset, ok))
             .reduce(f64::max)
             .unwrap_or(1.0)
@@ -203,7 +203,7 @@ impl Snap {
         let own = self
             .windows
             .iter()
-            .filter(|(n, _)| !vendor_wide(n) && family.is_some() && family_of(n) == family)
+            .filter(|(n, w)| w.live(now) && !vendor_wide(n) && family.is_some() && family_of(n) == family)
             .map(|(_, w)| window_m(w, now, shape, offset, ok))
             .reduce(f64::max);
         self.vendor_m(shape, offset, now).max(own.unwrap_or(0.0))
@@ -243,7 +243,21 @@ impl Snap {
     /// When the vendor can answer again, as Unix seconds: the latest reset among everything that blocks it. None when a
     /// block has no reset time (it then counts as longer than any wait). Meaningful only when `exhausted`.
     pub fn recovery(&self, now: f64) -> Option<f64> {
-        let mut latest = self.wide(now).filter(|w| w.used >= OUT).map(|w| w.resets_at).reduce(f64::max);
+        self.recovery_for(None, now)
+    }
+
+    /// A pinned family also waits for its own blocking window; another family's earlier reset cannot admit it.
+    pub fn recovery_for(&self, family: Option<&str>, now: f64) -> Option<f64> {
+        let mut latest = self
+            .wide(now)
+            .filter(|w| w.used > ADMIT_LIMIT || (self.paid_fallback && w.used > STEP_LIMIT))
+            .map(|w| w.resets_at)
+            .reduce(f64::max);
+        for (name, w) in &self.windows {
+            if family.is_some() && !vendor_wide(name) && family_of(name) == family && w.live(now) && w.used >= OUT {
+                latest = Some(latest.map_or(w.resets_at, |at| at.max(w.resets_at)));
+            }
+        }
         match self.reach {
             Reach::Out(Some(until)) if until > now => latest = Some(latest.map_or(until, |a| a.max(until))),
             Reach::Out(None) => return None,

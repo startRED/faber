@@ -3,6 +3,7 @@
 use crate::events::{Delivery, EngineEvent, Session, SessionCommand, UserTurn};
 use crate::model::{Area, name_instructions};
 use crate::proc::{self, Spawner};
+use crate::signals::claude_signals;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -129,19 +130,12 @@ pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
             tool: s(&msg["request"]["tool_name"]),
             input: msg["request"]["input"].clone(),
         }],
-        "rate_limit_event" => msg["rate_limit_info"]["unifiedWindows"]
-            .as_object()
-            .map(|windows| {
-                windows
-                    .iter()
-                    .map(|(window, w)| EngineEvent::Quota {
-                        window: window.clone(),
-                        used: w["utilization"].as_f64().unwrap_or(0.0),
-                        resets_at: w["resetsAt"].as_f64().unwrap_or(0.0),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default(),
+        "rate_limit_event" => {
+            let windows = msg["rate_limit_info"]["unifiedWindows"].as_object().into_iter().flatten().filter_map(|(window, w)| {
+                Some(EngineEvent::Quota { window: window.clone(), used: w["utilization"].as_f64()?, resets_at: w["resetsAt"].as_f64()? })
+            });
+            windows.chain(Some(claude_signals(msg)).filter(|s| !s.is_empty()).map(EngineEvent::Signals)).collect()
+        }
         "result" => result_events(msg),
         _ => vec![],
     }
@@ -174,7 +168,11 @@ fn result_events(msg: &Value) -> Vec<EngineEvent> {
     let counters = total.is_some_and(|t| t > 0.0) || prompt + n("output_tokens") > 0;
     vec![EngineEvent::Done {
         ok: msg["subtype"] == "success" && msg["is_error"] != true,
-        reason: msg["terminal_reason"].as_str().or(msg["subtype"].as_str()).unwrap_or_default().into(),
+        reason: msg["errors"]
+            .as_array()
+            .filter(|errors| !errors.is_empty())
+            .map(|errors| errors.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" "))
+            .unwrap_or_else(|| msg["terminal_reason"].as_str().or(msg["subtype"].as_str()).unwrap_or_default().into()),
         cost_total_usd: total.filter(|_| counters),
         input_tokens: prompt,
         output_tokens: n("output_tokens"),
@@ -213,6 +211,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
         let mut pending: HashMap<String, Value> = HashMap::new();
         let mut closed = false;
         let mut control_id = 0u32;
+        let mut quota_seen = false;
         loop {
             tokio::select! {
                 line = lines.next_line() => {
@@ -229,11 +228,16 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                     }
                     match serde_json::from_str::<Value>(&line) {
                         Ok(msg) => {
+                            quota_seen |= msg["type"] == "rate_limit_event";
+                            let finished = msg["type"] == "result";
                             for event in parse_claude_message(&msg) {
                                 if let EngineEvent::Permission { request_id, input, .. } = &event {
                                     pending.insert(request_id.clone(), input.clone());
                                 }
                                 on_event(event);
+                            }
+                            if finished && !quota_seen {
+                                on_event(EngineEvent::Signals(crate::signals::Signals { billing: Some(crate::budget::Billing::Unknown), ..Default::default() }));
                             }
                         }
                         Err(_) => on_event(EngineEvent::Error { message: format!("Unexpected output from Claude Code: {}", line.chars().take(200).collect::<String>()), fatal: false }),
@@ -241,6 +245,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                 }
                 cmd = rx.recv(), if !closed => match cmd {
                     Some(SessionCommand::Send(turn)) => {
+                        quota_seen = false;
                         let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
                     }
                     Some(SessionCommand::Answer { request_id, allow, ack }) => {

@@ -34,11 +34,12 @@ pub struct Dispatch {
     models: Option<PathBuf>,
     replay: Replay,
     selected: bool,
+    connected: bool,
 }
 
 impl Dispatch {
-    pub fn new(entries: Vec<Entry>, models: Option<PathBuf>, wait_for_first_request: bool) -> Dispatch {
-        Dispatch { replay: Replay::new(entries.clone()), entries, models, selected: !wait_for_first_request }
+    pub fn new(entries: Vec<Entry>, models: Option<PathBuf>, wait_for_first_request: bool, connected: bool) -> Dispatch {
+        Dispatch { replay: Replay::new(entries.clone()), entries, models, selected: !wait_for_first_request, connected }
     }
 
     pub fn mismatches(&self) -> &[String] {
@@ -46,10 +47,24 @@ impl Dispatch {
     }
 
     pub fn feed(&mut self, line: &str) -> io::Result<Vec<String>> {
+        let request: Value = serde_json::from_str(line).map_err(|e| io::Error::other(format!("not JSON ({e}): {line}")))?;
+        if matches!(request["method"].as_str(), Some("account/read" | "account/rateLimits/read")) {
+            let result = if request["method"] == "account/read" {
+                json!({ "account": if self.connected { json!({ "type": "chatgpt", "planType": "pro" }) } else { Value::Null } })
+            } else {
+                let limits = self
+                    .entries
+                    .iter()
+                    .find(|e| !e.input && e.msg["method"] == "account/rateLimits/updated")
+                    .map(|e| e.msg["params"]["rateLimits"].clone())
+                    .unwrap_or(Value::Null);
+                json!({ "rateLimits": if self.connected { limits } else { Value::Null } })
+            };
+            return Ok(vec![json!({ "id": request["id"], "result": result }).to_string()]);
+        }
         if self.selected {
             return self.replay.feed(line);
         }
-        let request: Value = serde_json::from_str(line).map_err(|e| io::Error::other(format!("not JSON ({e}): {line}")))?;
         match request["method"].as_str() {
             Some("initialize") => {
                 let result = json!({ "userAgent": "faber-setup-replay", "platformFamily": "windows", "platformOs": "windows" });
@@ -73,7 +88,11 @@ impl Dispatch {
 
 pub fn run(env: &Env, args: &[String], stdin: &mut dyn BufRead, stdout: &mut dyn Write, stderr: &mut dyn Write) -> io::Result<i32> {
     if !env.recording.to_string_lossy().ends_with(".setup.json") {
-        return session(Dispatch::new(load(&env.recording)?, None, false), false, stdin, stdout, stderr);
+        if args.iter().map(String::as_str).eq(["auth", "status"]) {
+            writeln!(stdout, "{}", json!({ "loggedIn": true, "subscriptionType": "max", "authMethod": "claude.ai" }))?;
+            return Ok(0);
+        }
+        return session(Dispatch::new(load(&env.recording)?, None, false, true), false, stdin, stdout, stderr);
     }
     let setup: Setup = serde_json::from_str(&std::fs::read_to_string(&env.recording)?).map_err(io::Error::other)?;
     let state = env.state_dir.as_deref().ok_or_else(|| io::Error::other("Setup replay requires an isolated FABER_FAKE_STATE_DIR"))?;
@@ -112,7 +131,11 @@ fn setup_run(
     if is(status) {
         let connected = marker.exists();
         if claude {
-            writeln!(stdout, "{}", json!({ "loggedIn": connected }))?;
+            writeln!(
+                stdout,
+                "{}",
+                json!({ "loggedIn": connected, "subscriptionType": if connected { Some("max") } else { None }, "authMethod": "claude.ai" })
+            )?;
         } else {
             writeln!(stderr, "{}", if connected { "Logged in using ChatGPT" } else { "Not logged in" })?;
         }
@@ -125,7 +148,7 @@ fn setup_run(
     }
     let dir = env.recording.parent().unwrap_or(Path::new("."));
     let models = setup.models.as_ref().map(|m| dir.join(m));
-    session(Dispatch::new(load(&dir.join(&setup.chat))?, models, !claude), true, stdin, stdout, stderr)
+    session(Dispatch::new(load(&dir.join(&setup.chat))?, models, !claude, marker.exists()), true, stdin, stdout, stderr)
 }
 
 /// Replays until stdin ends. A setup run exits 1 on a difference; a plain run only reports it on stderr.
@@ -227,11 +250,11 @@ mod tests {
         let (code, out, _) = go(&["--version"]);
         assert_eq!((code.unwrap(), out.trim()), (0, "2.1.296"));
         let (code, out, _) = go(&["auth", "status"]);
-        assert_eq!((code.unwrap(), out.trim()), (1, r#"{"loggedIn":false}"#));
+        assert_eq!((code.unwrap(), out.trim()), (1, r#"{"authMethod":"claude.ai","loggedIn":false,"subscriptionType":null}"#));
         let (code, out, _) = go(&["auth", "login"]);
         assert_eq!((code.unwrap(), out.trim()), (0, "Fake sign-in complete"));
         let (code, out, _) = go(&["auth", "status"]);
-        assert_eq!((code.unwrap(), out.trim()), (0, r#"{"loggedIn":true}"#));
+        assert_eq!((code.unwrap(), out.trim()), (0, r#"{"authMethod":"claude.ai","loggedIn":true,"subscriptionType":"max"}"#));
         let log = records(state.path());
         let started: Vec<&Value> = log.iter().filter(|r| r["exited"].is_null()).collect();
         assert_eq!(started.len(), 4);

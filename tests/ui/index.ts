@@ -19,6 +19,7 @@ import './models.check.ts';
 import './opening.check.ts';
 import './running.check.ts';
 import './settings.check.ts';
+import './pace.check.ts';
 import './setup.check.ts';
 import './styles.check.ts';
 import './tutorial.check.ts';

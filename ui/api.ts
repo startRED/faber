@@ -40,6 +40,13 @@ export interface Message {
   costUsd?: number;
   inputTokens?: number;
   outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  cacheWrite1hTokens?: number;
+  incomplete?: boolean;
+  pace?: { kind: 'step' | 'low'; vendor: Vendor };
+  waitUntil?: number;
+  movedFrom?: Vendor;
 }
 export interface Conversation {
   id: string;
@@ -151,6 +158,7 @@ export interface RunningItem {
   /** The `at` of the turn's reply message, in milliseconds. */
   since: number;
   permissions: Permission[];
+  waitUntil?: number;
 }
 /** The running list in the engine's order, with a revision that grows by one with every list the engine sends. */
 export interface RunningList {
@@ -164,6 +172,13 @@ export interface QuotaReading {
   used: number;
   resetsAt: number;
 }
+export interface WindowUsage { name: string; used: number; elapsed: number; expected: number; resetsAt: number }
+export interface VendorUsage {
+  vendor: Vendor; plan?: string | null; state: 'ok' | 'spare' | 'low' | 'out' | 'unknown';
+  learning: boolean; relearning: boolean; outsideShare?: number | null; foreignUse: boolean;
+  overageOn: boolean; billedPerUse: boolean; billingUnknown: boolean; askForPlan: boolean; paidPossible: boolean;
+  ownSpendUsd: number; unmetered: number; windows: WindowUsage[];
+}
 export interface AppState {
   conversations: Summary[];
   projects: Project[];
@@ -173,6 +188,7 @@ export interface AppState {
   models: ModelInfo[];
   running: RunningList;
   quotas: QuotaReading[];
+  usage?: VendorUsage[];
   version: string;
 }
 export interface SavedSettings {
@@ -205,6 +221,7 @@ export type AppEvent =
   | { type: 'message'; conversationId: string; message: Message }
   | ({ type: 'quota' } & QuotaReading)
   | ({ type: 'running' } & RunningList)
+  | { type: 'usage'; vendors: VendorUsage[] }
   | { type: 'list' }
   | SetupProgressEvent;
 
@@ -258,6 +275,11 @@ export const api = {
   openTerminal: (id: string) => invoke<boolean>('open_terminal', { id }),
   openLink: (url: string) => invoke<void>('open_link', { url }),
   setShellTexts: (texts: ShellTexts) => invoke<void>('set_shell_texts', { texts }),
+  answerPlan: (vendor: Vendor, plan: string) => invoke<void>('answer_plan', { vendor, plan }),
+  approveCredits: (id: string, turnId: string, vendor: Vendor) => invoke<void>('approve_credits', { id, turnId, vendor }),
+  moveTurn: (id: string, turnId: string) => invoke<void>('move_turn', { id, turnId }),
+  waitTurn: (id: string, turnId: string) => invoke<void>('wait_turn', { id, turnId }),
+  setClock: (utcOffset: number) => invoke<void>('set_clock', { utcOffset }),
   setupCheck: (vendor: Vendor) => invoke<CheckResult>('setup_check', { vendor }),
   setupInstall: (vendor: Vendor) => invoke<void>('setup_install', { vendor }),
   setupSignIn: (vendor: Vendor) => invoke<void>('setup_sign_in', { vendor }),

@@ -28,6 +28,8 @@ interface Props {
   onPause: (text: string) => void;
   /** Hands the screen a function that puts text in the box and focuses it, without sending (the suggestions of the new
    * conversation use it). */
+  onRestore?: (restore: (draft: Draft) => boolean) => void;
+  onClearRestored?: (clear: (draft: Draft) => boolean) => void;
   onReady?: (fill: (text: string) => void) => void;
 }
 
@@ -97,6 +99,15 @@ export function Composer(props: Props) {
     warm();
     field?.focus();
     field?.setSelectionRange(text.length, text.length);
+  });
+  props.onRestore?.((saved) => {
+    if (hasContent() || props.locked) return false;
+    setDraft(saved); setNames(saved.files.map((f) => f.name)); warmed = false;
+    field?.focus(); return true;
+  });
+  props.onClearRestored?.((saved) => {
+    if (draft() !== saved) return false;
+    setDraft(EMPTY); setNames([]); warmed = false; return true;
   });
   const add = async (list: Iterable<File>) => {
     const result = await attach(list, draft());

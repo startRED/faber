@@ -8,6 +8,7 @@ pub mod cli;
 pub mod codex;
 pub mod engine;
 pub mod events;
+pub mod handover;
 pub mod install;
 pub mod learn;
 pub mod ledger;
@@ -21,4 +22,4 @@ pub mod usage;
 pub mod workspace;
 
 pub use account::AccountStatus;
-pub use engine::{AppEvent, AppState, BranchRequest, Engine, EngineOptions, SendRequest, TerminalCommand, WarmRequest};
+pub use engine::{AppEvent, AppState, BranchRequest, Clock, Engine, EngineOptions, SendRequest, TerminalCommand, WarmRequest};

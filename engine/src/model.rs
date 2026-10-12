@@ -54,6 +54,15 @@ pub struct Image {
     pub base64: String,
 }
 
+/// Dispatch intent for a quota error that still offers explicit recovery after restart. Consent is never stored here.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Recovery {
+    pub pick: crate::router::Pick,
+    pub text: String,
+    pub by_hand: bool,
+    pub retried: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolUse {
     pub id: String,
@@ -119,7 +128,7 @@ pub struct Message {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_tokens: Option<u64>,
     /// Prompt tokens of the main response read from the CLI's cache, and written to it (the part with the 1-hour lifetime
-    /// separately). Claude Code only; Codex bills no write.
+    /// separately). Codex reports one cache-write kind and no separate one-hour counter.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_read_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -129,6 +138,15 @@ pub struct Message {
     /// True when the token numbers cover only part of the turn (sub-model work, or no usage was seen).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub incomplete: Option<bool>,
+    /// Why the quota changed the model Auto chose, when it did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pace: Option<PaceNote>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_until: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moved_from: Option<Vendor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery: Option<Recovery>,
 }
 
 impl Message {
@@ -156,6 +174,10 @@ impl Message {
             cache_write_tokens: None,
             cache_write_1h_tokens: None,
             incomplete: None,
+            pace: None,
+            wait_until: None,
+            moved_from: None,
+            recovery: None,
         }
     }
 }
@@ -261,6 +283,8 @@ pub struct RunningItem {
     pub since: u64,
     /// The questions the user has not answered yet.
     pub permissions: Vec<Permission>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wait_until: Option<f64>,
 }
 
 /// The running list as the engine last sent it. The revision grows by one with every list the engine emits, so a
@@ -280,6 +304,14 @@ pub struct QuotaReading {
     pub used: f64,
     /// Seconds since the Unix epoch, as the CLI reports it; 0 when it did not say.
     pub resets_at: f64,
+}
+
+/// Why the quota changed the pick of Auto, shown under the model name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaceNote {
+    /// `step` (one rung up, bought with quota that would expire) or `low` (moved away from a vendor that is running low).
+    pub kind: String,
+    pub vendor: Vendor,
 }
 
 /// The user's choices, in one plain file. Appearance belongs to the screen, so the engine only keeps it.

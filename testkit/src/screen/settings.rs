@@ -167,10 +167,8 @@ fn opens_at_usage(ctx: &mut Ctx) -> Result {
     let shares = "[...document.querySelectorAll('.usage-v .urow .share')].map((e) => e.textContent).join(' ')";
     same(page.eval(shares)?.as_str(), Some("7% 47%"), "the figures at the usage limits")?;
     // A screen that loads again asks the engine and shows the same readings.
-    page.eval("location.reload()")?;
-    eventually("the quota after a reload", Duration::from_secs(25), || {
-        page.eval("document.querySelector('.usage .share')?.textContent === '47%'").is_ok_and(|v| v == true)
-    })?;
+    page.reload()?;
+    page.wait_for("the quota after a reload", "document.querySelector('.usage .share')?.textContent === '47%'")?;
     open_settings(page)?;
     open_section(page, "set.usage")?;
     page.wait_for("the same figures", &format!("({shares}) === '7% 47%'"))

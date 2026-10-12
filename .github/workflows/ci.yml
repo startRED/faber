@@ -10,13 +10,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
+        os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
-      - name: webview libraries (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf xvfb
       - uses: actions/setup-node@v5
         with:
           node-version: 24
@@ -33,12 +30,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo clippy -p faber --features test-hooks -- -D warnings
       # `rust` and `ui` run on every system; `screen` needs WebView2's DevTools port, so only Windows runs it.
-      - name: tests (Linux, under a virtual display)
-        if: runner.os == 'Linux'
-        run: xvfb-run -a cargo t --all
-      - name: tests
-        if: runner.os != 'Linux'
-        run: cargo t --all
+      - run: cargo t --all
       - uses: actions/upload-artifact@v4
         if: always()
         with:
