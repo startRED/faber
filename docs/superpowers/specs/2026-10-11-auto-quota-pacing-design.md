@@ -32,7 +32,7 @@ what the week looks like from here.
 | D10 | Spare quota only buys quality on tasks that matter (code, math and research of medium or high difficulty). Easy chat stays on the fast model. | Erick |
 | D11 (R86) | Faber never spends paid extra credits or usage-based billing without asking. When quota runs out it moves to the other vendor or waits, and it uses paid credits only if the user approves at that moment, for that one message. | Erick |
 | D12 (R87) | The plan is detected automatically (`claude auth status` for Claude Code; `account/read` and `account/updated` for Codex). The user is asked only if detection fails. Codex keeps using the subscription login, not an API key. (The research recommends an API key until OpenAI confirms in writing that a third-party app may use the ChatGPT login; that stays open for Erick, and nothing in this design depends on it.) | AI, Erick delegated |
-| D13 (R88) | On a weekly plan the daily budget is 100% / 7 = 14.28% of the week per day, and Auto paces against that line for both vendors (Claude 20x `seven_day`, Codex 20x 10080-minute window), so each weekly quota lasts all 7 days. The line is the expected-use curve of section 1: uniform (1/7 a day) until the learned shape has data, then the learned shape. Section 3.1 prices a vendor against it: use under the line is cheaper, use at 70% of it is normal, use above it is dearer, and a vendor far ahead of it is left for the other. The idea comes from per-day quota management in TL-ADE; no code is reused. | Erick, via coordinator |
+| D13 (R88) | On a weekly plan the daily budget is 100% / 7 = 14.28% of the week per day, and Auto paces against that line for both vendors (Claude 20x `seven_day`, Codex 20x 10080-minute window), so each weekly quota lasts all 7 days. The line is the expected-use curve of section 1: uniform (1/7 a day) until the learned shape has data, then the learned shape. Section 3.1 prices a vendor against it: the safe pivot depends on time left, pricing pressure begins below the daily line, and the multiplier keeps increasing above it so a vendor far ahead is left for the other. The idea comes from per-day quota management in TL-ADE; no code is reused. | Erick, via coordinator |
 
 ## 1. What Auto knows about each subscription
 
@@ -176,7 +176,7 @@ recordings and the profile numbers; what changed, and why:
 For each window with a live reading: `elapsed` is the profile-weighted share of the window already passed, `left = 1 -
 elapsed`, `p = used / max(elapsed, 0.10)`, `margin = 0.3 x sqrt(left)`, and
 
-`m = clamp((margin / (1 - p))², 0.1, 25)`, and `m = 25` when `p >= 1`.
+`m = clamp((margin / (1 - p))², 0.1, 25)`, and `m = 25 x p` when `p >= 1` (bounded by the maximum plausible projection, 15).
 
 The **vendor's `m`** is the highest over its vendor-wide windows. A **profile's `m`** is the highest of its vendor's `m`
 and the `m` of its own family window, if there is one; so a full Opus window prices Opus up and leaves Sonnet and Haiku
@@ -187,7 +187,7 @@ gives 0.14, 0.94 or more gives 25. With one day of 7 left (`margin` 0.113): `p` 
 rate; with no history any 3 points count), while the plan is relearned or not known (section 2), or while the vendor's
 verdict is not `subscription`. A vendor with no live reading has `m = 1`.
 
-**The daily line (D13).** `elapsed` is the uniform share (day 1 of 7 = 1/7 = 14.28%) until the learned shape has data, so with nothing learned a vendor that has used more than 14.28% of its week per day elapsed is priced up, and one that has used less than 70% of that is discounted. The same formula runs for both vendors; there is no separate daily counter, and engine test `a_week_spent_faster_than_one_seventh_a_day_is_priced_up_on_either_vendor` pins it.
+**The daily line (D13).** `elapsed` is the uniform share (day 1 of 7 = 1/7 = 14.28%) until the learned shape has data, so 14.28% of the account per day is the reference line. Pricing pressure begins below that line at `p > 1 - 0.3 x sqrt(left)`; the line itself costs 25, and a vendor at twice its rate costs 50. A discount requires a projection below that safe pivot. Shared-account use always contributes to the projection. The same formula runs for both vendors; there is no separate daily counter, and engine test `a_week_spent_faster_than_one_seventh_a_day_is_priced_up_on_either_vendor` pins it.
 
 ### 3.2 The choice
 

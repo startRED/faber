@@ -25,13 +25,13 @@ pub const SPARE_M: f64 = 0.6;
 
 /// The price multiplier of one window: `p` is the share expected to be used at the reset, `left` the share of the
 /// window still ahead. `p` of 0.7 is the pivot with a full window left (price 1); a window projected far under the pivot
-/// is cheap, one projected over it is dear, and one projected to run out is at the ceiling.
+/// is cheap, one projected over it is dear, and one on the daily line costs 25, with a gradient above the line.
 pub fn m_of(p: f64, left: f64) -> f64 {
     if p.is_nan() {
         return 1.0;
     }
     if p >= 1.0 {
-        return M_MAX;
+        return M_MAX * p.min(15.0);
     }
     let margin = MARGIN * left.clamp(0.0, 1.0).sqrt();
     (margin / (1.0 - p.max(0.0))).powi(2).clamp(M_MIN, M_MAX)
