@@ -1,5 +1,8 @@
 # Kits: how Faber picks tools for every agent and every step
 
+> **Status 2026-10-12: partly superseded by the [rework design](2026-10-12-faber-rework-design.md).** Superseded: §5's last paragraph (the lead's kit, now the persona and hot shelf), §7.2's caveman row (narrowed to the note field), §16.1 N4 (recipes become routes), §19 (now rework §3.3), §21, and §9's 30-day cleanup for recommended tools.
+> Still hold: everything else, including §17.1 and gate G9 (E1); §6 now takes a matching route's step kit as its strongest prior, §8 gains the rework's Codex skill-root correction, and §15's probes now decide through the rework's held-out gate.
+
 Date: 2026-10-12. Status: design proposal. Nothing here is implemented, and this document authorizes no build.
 It reworks how tools reach agents, and the plan parts that this touches. It does not edit `docs/roadmap.md`; section 13
 proposes the exact text changes. Companion spec: [generated pipelines](2026-10-12-generated-pipelines-design.md)

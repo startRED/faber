@@ -1,5 +1,8 @@
 # Generated pipelines: a plan compiled from each request
 
+> **Status 2026-10-12: partly superseded by the [rework design](2026-10-12-faber-rework-design.md).** Superseded: §6.3's "plans are cached too" (recipes become routes that seed every compile), §3's start from nothing (a new shape now gets the rework's tutorial level), and §16 (roadmap text, to redo with the rework's §12 list).
+> Still hold: everything else, including the §3 rules, §8, §14 (benchmark) and §15.1 with the complete software bar and gate G10 (E10).
+
 Date: 2026-10-12. Status: design proposal. Nothing here is implemented, and this document authorizes no build.
 Companion spec: [Kits](2026-10-12-tool-selection-rework-design.md) gives each step its tools, model and effort; this
 spec decides the steps, the checks and the proofs. One compiler uses both. Input:
