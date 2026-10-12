@@ -14,12 +14,15 @@ use std::time::Duration;
 
 #[tokio::test]
 async fn paid_notices_stop_an_unapproved_subscription_turn_and_clear_permissions() {
-    for notice in [
+    for (index, notice) in [
         Signals { overage_active: Some(true), ..Signals::default() },
         Signals { billing: Some(Billing::UsageBilled), ..Signals::default() },
         Signals { billing: Some(Billing::Unknown), ..Signals::default() },
         Signals { credit_balance: Some(9.0), ..Signals::default() },
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let dir = tempfile::tempdir().unwrap();
         let fake = support::fake(support::claude_two_turns("guard"));
         let engine = Engine::new(
@@ -60,7 +63,7 @@ async fn paid_notices_stop_an_unapproved_subscription_turn_and_clear_permissions
         assert!(engine.open(&id).unwrap().messages.last().unwrap().permissions.is_some());
         engine.note_account_events(Vendor::Claude, vec![EngineEvent::Signals(notice)]);
         let reply = engine.open(&id).unwrap().messages.pop().unwrap();
-        assert_eq!(reply.status, Some(Status::Stopped));
+        assert_eq!(reply.status, Some(if matches!(index, 0 | 3) { Status::Error } else { Status::Stopped }));
         assert!(reply.permissions.is_none());
         assert!(engine.state().running.items.is_empty());
         engine.shutdown();

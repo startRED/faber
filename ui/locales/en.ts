@@ -331,6 +331,11 @@ export const en = {
   "error.billingUnknown": "Auto needs confirmation that this sign-in uses a subscription.",
   "error.billedPerUse": "Auto does not use sign-ins billed per use. Choose this account explicitly to use it.",
   "error.quotaOut": "No included quota is available for this request.",
+  "error.quotaWait": "Included quota returns {when}. Your message is kept.",
+  "error.moveFailed": "Could not move this conversation. Nothing was sent twice; your message is kept.",
+  "reason.waiting": "Waiting for included quota until {when}.",
+  "reason.moved.full": "{from} has no quota. Continued on {to} with the previous messages.",
+  "reason.moved.summary": "{from} has no quota. Continued on {to} with a summary of the previous messages.",
 } as const;
 
 export type Key = keyof typeof en;

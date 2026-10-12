@@ -40,12 +40,12 @@ pub(super) type Stop = Arc<Mutex<Option<Session>>>;
 
 /// A router session started ahead of its question.
 pub(super) struct Spare {
-    session: Session,
-    answer: oneshot::Receiver<Option<String>>,
+    pub(super) session: Session,
+    pub(super) answer: oneshot::Receiver<Option<String>>,
     id: u64,
-    vendor: Vendor,
-    asked: Arc<Mutex<Option<f64>>>,
-    model_name: &'static str,
+    pub(super) vendor: Vendor,
+    pub(super) asked: Arc<Mutex<Option<f64>>>,
+    pub(super) model_name: &'static str,
 }
 
 /// A draft's route still holds for the sent text when the text only grew a little past it.
@@ -210,7 +210,20 @@ impl Core {
                 && (*vendor != Vendor::Codex || self.codex_models.iter().any(|m| m == model))
                 && self.allows(*vendor, family_of(model), Purpose::Router, false).is_ok()
         });
-        let ((vendor, model, effort), cli) = router.and_then(|r| Some((r, self.opts.clis.get(&r.0)?.clone())))?;
+        let (vendor, model, effort) = router?;
+        self.open_aux(vendor, model, effort, INSTRUCTIONS, Purpose::Router)
+    }
+
+    pub(super) fn open_aux(
+        &mut self,
+        vendor: Vendor,
+        model: &'static str,
+        effort: &str,
+        instructions: &str,
+        purpose: Purpose,
+    ) -> Option<Spare> {
+        self.allows(vendor, family_of(model), purpose, false).ok()?;
+        let cli = self.opts.clis.get(&vendor)?.clone();
         let (tx, answer) = oneshot::channel();
         let text = Arc::new(Mutex::new(String::new()));
         let tx = Arc::new(Mutex::new(Some(tx)));
@@ -226,8 +239,9 @@ impl Core {
                     let (cost, incomplete) = usage::fresh_price(&e, model);
                     core.lock().unwrap_or_else(|e| e.into_inner()).note_span(vendor, start, model, cost, incomplete);
                 }
+                let ok = matches!(e, EngineEvent::Done { ok: true, .. });
                 if let Some(tx) = tx.lock().unwrap_or_else(|e| e.into_inner()).take() {
-                    let _ = tx.send(Some(std::mem::take(&mut *text.lock().unwrap_or_else(|e| e.into_inner()))));
+                    let _ = tx.send(ok.then(|| std::mem::take(&mut *text.lock().unwrap_or_else(|e| e.into_inner()))));
                 }
             }
             // The router's process sees account-wide news too (Codex hands it to one thread): the ledger must not miss it.
@@ -235,7 +249,7 @@ impl Core {
                 if let Some(core) = me.upgrade() {
                     let mut c = core.lock().unwrap_or_else(|e| e.into_inner());
                     c.note_account_event(vendor, e);
-                    if c.allows(vendor, family_of(model), Purpose::Router, false).is_err() {
+                    if c.allows(vendor, family_of(model), purpose, false).is_err() {
                         stop_router(Some(closer.clone()));
                     }
                 }
@@ -243,7 +257,7 @@ impl Core {
             _ => {}
         });
         let model_name = model;
-        let (cwd, instructions) = (self.opts.data_dir.clone(), Some(INSTRUCTIONS.to_string()));
+        let (cwd, instructions) = (self.opts.data_dir.clone(), Some(instructions.to_string()));
         let (model, effort) = (Some(model.to_string()), Some(effort.to_string()));
         let session = match vendor {
             Vendor::Codex => self
@@ -303,7 +317,7 @@ impl Core {
             m.pace = pick.pace.clone();
         }
         self.save(id);
-        if let Err(error) = self.start(id, reply_id, &pick, text, images, false) {
+        if let Err(error) = self.dispatch(id, reply_id, &pick, text, images, false) {
             self.fail_reply(id, reply_id, error);
         }
     }
@@ -314,6 +328,9 @@ impl Core {
             return;
         };
         m.status = Some(Status::Stopped);
+        m.wait_until = None;
+        m.permissions = None;
+        self.transfers.remove(id);
         let reply_id = m.id.clone();
         self.save(id);
         self.push(id, Some(&reply_id), true);

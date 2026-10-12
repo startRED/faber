@@ -132,6 +132,10 @@ pub struct Message {
     /// Why the quota changed the model Auto chose, when it did.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pace: Option<PaceNote>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_until: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moved_from: Option<Vendor>,
 }
 
 impl Message {
@@ -160,6 +164,8 @@ impl Message {
             cache_write_1h_tokens: None,
             incomplete: None,
             pace: None,
+            wait_until: None,
+            moved_from: None,
         }
     }
 }

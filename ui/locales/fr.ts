@@ -330,4 +330,9 @@ export const fr: Messages = {
   "error.billingUnknown": "Auto doit confirmer que cette connexion utilise un abonnement.",
   "error.billedPerUse": "Auto ne choisit pas les connexions facturées à l’utilisation. Sélectionnez ce compte pour l’utiliser.",
   "error.quotaOut": "Aucun quota inclus n’est disponible pour cette demande.",
+  "error.quotaWait": "Le quota inclus revient {when}. Votre message est conservé.",
+  "error.moveFailed": "Impossible de transférer la conversation. Rien n’a été envoyé deux fois ; votre message est conservé.",
+  "reason.waiting": "En attente du quota inclus jusqu’à {when}.",
+  "reason.moved.full": "{from} n’a plus de quota. La conversation continue sur {to} avec les messages précédents.",
+  "reason.moved.summary": "{from} n’a plus de quota. La conversation continue sur {to} avec un résumé des messages précédents.",
 };

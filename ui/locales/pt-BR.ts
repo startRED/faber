@@ -330,4 +330,9 @@ export const ptBR: Messages = {
   "error.billingUnknown": "O Automático precisa confirmar que este login usa uma assinatura.",
   "error.billedPerUse": "O Automático não usa logins cobrados por uso. Escolha esta conta para usá-la.",
   "error.quotaOut": "Não há cota da assinatura disponível para este pedido.",
+  "error.quotaWait": "A cota incluída volta {when}. Sua mensagem foi guardada.",
+  "error.moveFailed": "Não foi possível mudar esta conversa. Nada foi enviado duas vezes; sua mensagem foi guardada.",
+  "reason.waiting": "Esperando a cota incluída até {when}.",
+  "reason.moved.full": "{from} está sem cota. A conversa continuou no {to} com as mensagens anteriores.",
+  "reason.moved.summary": "{from} está sem cota. A conversa continuou no {to} com um resumo das mensagens anteriores.",
 };

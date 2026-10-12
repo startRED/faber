@@ -28,6 +28,7 @@ use uuid::Uuid;
 mod answer;
 mod auto;
 mod pulse;
+mod recovery;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
@@ -228,6 +229,8 @@ struct Core {
     /// The PC's offset from UTC in seconds, as the screen reports it.
     utc_offset: i64,
     clock: Option<Clock>,
+    transfers: HashMap<String, recovery::Transfer>,
+    credit: Option<(String, String, Vendor)>,
 }
 
 /// A handle to the engine; clones share the same engine.
@@ -268,6 +271,8 @@ impl Engine {
                 last_pulse: 0.0,
                 utc_offset: 0,
                 clock: None,
+                transfers: HashMap::new(),
+                credit: None,
             })
         });
         Engine { core, runtime }
@@ -283,7 +288,10 @@ impl Engine {
     }
     /// The PC's offset from UTC in seconds (east is positive). The engine has no time zone database, so the screen says.
     pub fn set_utc_offset(&self, secs: i64) {
-        self.with(|c| c.utc_offset = secs.clamp(-14 * 3600, 14 * 3600))
+        self.with(|c| {
+            c.utc_offset = secs.clamp(-14 * 3600, 14 * 3600);
+            c.wake_waiting();
+        })
     }
     /// Replaces the clock; the quota arithmetic reads the time through it.
     pub fn set_time_source(&self, clock: Clock) {
@@ -433,6 +441,16 @@ impl Engine {
     }
     pub fn shutdown(&self) {
         self.with(|c| {
+            let active: Vec<_> = c.live.keys().cloned().collect();
+            for id in active {
+                c.note_turn(&id, None, true);
+            }
+            let ids: Vec<_> = c.convs.keys().cloned().collect();
+            for id in ids {
+                c.stop_waiting(&id);
+            }
+            c.transfers.clear();
+            c.credit = None;
             for (_, l) in c.live.drain() {
                 l.session.close();
             }
@@ -523,6 +541,14 @@ impl Core {
             self.note_turn(&id, None, true);
             if let Some(l) = self.live.remove(&id) {
                 l.session.close();
+            }
+            if paid && !unknown && !billed && self.transfers.get(&id).is_some_and(|t| !t.by_hand) {
+                if let Err(error) = self.recover(&id, false)
+                    && let Some(reply) = self.transfers.get(&id).map(|t| t.reply.clone())
+                {
+                    self.fail_reply(&id, &reply, error);
+                }
+                continue;
             }
             if let Some(m) = self.convs.get_mut(&id).and_then(|c| c.messages.last_mut()) {
                 m.status = Some(Status::Stopped);
@@ -790,7 +816,7 @@ impl Core {
                 cache_write_tokens,
                 cache_write_1h_tokens,
                 incomplete,
-                ..
+                reason,
             } => {
                 // The CLI reports a total for the whole conversation; the turn costs what is new since the last total.
                 let session = self.convs.get(conv).and_then(|c| c.sessions.get(&vendor)).cloned().unwrap_or_default();
@@ -809,18 +835,38 @@ impl Core {
                 self.note_turn(conv, cost, missing);
                 if let Some(m) = self.turn(conv) {
                     m.status = Some(if ok { Status::Done } else { Status::Stopped });
-                    m.cost_usd = cost;
+                    m.cost_usd = cost.map(|cost| m.cost_usd.unwrap_or(0.0) + cost).or(m.cost_usd);
                     m.input_tokens = Some(input_tokens);
                     m.output_tokens = Some(output_tokens);
                     m.cache_read_tokens = Some(cache_read_tokens);
                     m.cache_write_tokens = Some(cache_write_tokens);
                     m.cache_write_1h_tokens = Some(cache_write_1h_tokens);
-                    m.incomplete = incomplete.then_some(true);
+                    m.incomplete = (incomplete || m.incomplete.unwrap_or(false)).then_some(true);
                     m.permissions = None;
+                }
+                if !ok && self.transfers.get(conv).is_some_and(|t| t.moving) {
+                    if let Some(reply) = turn_id {
+                        self.move_failed(conv, &reply);
+                    }
+                    return;
+                }
+                if !ok && recovery::plan_limit(&reason) {
+                    self.ledger.of_mut(vendor).reach = Reach::Out(None);
+                    self.save_ledger(true);
+                    if let Some(l) = self.live.remove(conv) {
+                        l.session.close();
+                    }
+                    if let Err(e) = self.recover(conv, false)
+                        && let Some(reply) = turn_id
+                    {
+                        self.fail_reply(conv, &reply, e);
+                    }
+                    return;
                 }
                 return self.finish(conv, turn_id);
             }
             EngineEvent::Error { message, fatal } => {
+                let limited = fatal && recovery::plan_limit(&message);
                 if let Some(m) = self.turn(conv) {
                     m.error = Some(message);
                     if fatal {
@@ -830,7 +876,25 @@ impl Core {
                 }
                 if fatal {
                     self.note_turn(conv, None, true);
-                    self.live.remove(conv);
+                    if let Some(l) = self.live.remove(conv) {
+                        l.session.close();
+                    }
+                    if self.transfers.get(conv).is_some_and(|t| t.moving) {
+                        if let Some(reply) = turn_id {
+                            self.move_failed(conv, &reply);
+                        }
+                        return;
+                    }
+                    if limited {
+                        self.ledger.of_mut(vendor).reach = Reach::Out(None);
+                        self.save_ledger(true);
+                        if let Err(e) = self.recover(conv, false)
+                            && let Some(reply) = turn_id
+                        {
+                            self.fail_reply(conv, &reply, e);
+                        }
+                        return;
+                    }
                     return self.finish(conv, turn_id);
                 }
             }
@@ -839,6 +903,7 @@ impl Core {
     }
 
     fn finish(&mut self, conv: &str, turn_id: Option<String>) {
+        self.transfers.remove(conv);
         if let Some(l) = self.live.get_mut(conv) {
             l.turn = None;
         }
@@ -983,8 +1048,11 @@ impl Core {
     /// The gate before a user turn (3.4): the everyday default and the profile of an existing conversation are checked here
     /// too, not only what the table picked. A vendor the user picked by hand is allowed even when it is billed by use.
     fn gate_turn(&self, pick: &Pick, by_hand: bool) -> Result<(), String> {
+        self.gate_turn_approved(pick, by_hand, false)
+    }
+    fn gate_turn_approved(&self, pick: &Pick, by_hand: bool, approved: bool) -> Result<(), String> {
         let family = pick.model.as_deref().and_then(family_of);
-        self.allows(pick.vendor, family, Purpose::UserTurn { by_hand }, false).map_err(|why| {
+        self.allows(pick.vendor, family, Purpose::UserTurn { by_hand }, approved).map_err(|why| {
             match why {
                 Why::Billing if self.ledger.of(pick.vendor).billing == Billing::Unknown => "error.billingUnknown",
                 Why::Billing => "error.billedPerUse",
@@ -996,8 +1064,18 @@ impl Core {
 
     /// Hands a turn to the conversation's CLI, starting the CLI if needed.
     fn start(&mut self, id: &str, reply_id: &str, pick: &Pick, text: String, images: Vec<Image>, by_hand: bool) -> Result<(), String> {
-        self.gate_turn(pick, by_hand)?;
+        let approved = self.credit.as_ref().is_some_and(|(c, r, v)| c == id && r == reply_id && *v == pick.vendor);
+        self.gate_turn_approved(pick, by_hand, approved)?;
         self.launch(id, pick)?;
+        self.credit = None;
+        if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.last_mut()) {
+            m.vendor = Some(pick.vendor);
+            m.model = pick.model.clone();
+            m.wait_until = None;
+            m.error = None;
+            m.status = Some(Status::Streaming);
+            m.permissions = None;
+        }
         if let Some(running) = self.live.get(id).and_then(|l| l.running.clone())
             && let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id))
         {
@@ -1008,7 +1086,8 @@ impl Core {
             l.started = started;
             l.turn = Some(reply_id.to_string());
             l.by_hand = by_hand;
-            l.approved = false;
+            l.approved = approved;
+            l.break_pending |= self.convs.get(id).and_then(|c| c.messages.last()).is_some_and(|m| !m.text.is_empty());
             l.session.send(UserTurn { text, images });
         }
         self.push(id, Some(reply_id), true);
@@ -1125,7 +1204,8 @@ impl Core {
         let fallback = pick_model(&req.choice, &self.vendors(), self.codex_recommended.as_deref()).ok_or("error.noSubscription")?;
         let existing = req.conversation_id.as_deref().and_then(|id| self.load(id).map(|c| c.id.clone()));
         if let Some(id) = &existing
-            && self.live.get(id).is_some_and(|l| l.turn.is_some())
+            && (self.live.get(id).is_some_and(|l| l.turn.is_some())
+                || self.convs.get(id).and_then(|c| c.messages.last()).is_some_and(|m| m.status == Some(Status::Streaming)))
         {
             return Err("error.busy".into());
         }
@@ -1196,6 +1276,18 @@ impl Core {
         self.list_changed();
         // An open conversation only grows through these events, so the question goes out as well as the answer.
         self.emit_message(&id, &question_id);
+        self.transfers.insert(
+            id.clone(),
+            recovery::Transfer {
+                reply: reply_id.clone(),
+                pick: pick.clone(),
+                text: text.clone(),
+                images: req.images.clone(),
+                by_hand: !auto,
+                retried: false,
+                moving: false,
+            },
+        );
         let text = if joining_late { with_history(&history, &text) } else { text };
         if let Some(before) = route {
             let only = before.as_ref().map(|p| p.vendor);
@@ -1214,7 +1306,7 @@ impl Core {
             });
             return Ok(id);
         }
-        if let Err(error) = self.start(&id, &reply_id, &pick, text, req.images, !auto) {
+        if let Err(error) = self.dispatch(&id, &reply_id, &pick, text, req.images, !auto) {
             // The reply never got a CLI: it ends with the error instead of staying in the running list for good.
             self.fail_reply(&id, &reply_id, error.clone());
             return Err(error);

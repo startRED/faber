@@ -168,7 +168,11 @@ fn result_events(msg: &Value) -> Vec<EngineEvent> {
     let counters = total.is_some_and(|t| t > 0.0) || prompt + n("output_tokens") > 0;
     vec![EngineEvent::Done {
         ok: msg["subtype"] == "success" && msg["is_error"] != true,
-        reason: msg["terminal_reason"].as_str().or(msg["subtype"].as_str()).unwrap_or_default().into(),
+        reason: msg["errors"]
+            .as_array()
+            .filter(|errors| !errors.is_empty())
+            .map(|errors| errors.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" "))
+            .unwrap_or_else(|| msg["terminal_reason"].as_str().or(msg["subtype"].as_str()).unwrap_or_default().into()),
         cost_total_usd: total.filter(|_| counters),
         input_tokens: prompt,
         output_tokens: n("output_tokens"),

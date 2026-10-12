@@ -330,4 +330,9 @@ export const de: Messages = {
   "error.billingUnknown": "Auto muss bestätigen, dass dieser Zugang ein Abonnement nutzt.",
   "error.billedPerUse": "Auto nutzt keine Zugänge mit verbrauchsabhängiger Abrechnung. Wähle dieses Konto ausdrücklich aus, um es zu nutzen.",
   "error.quotaOut": "Für diese Anfrage ist kein enthaltenes Kontingent verfügbar.",
+  "error.quotaWait": "Das enthaltene Kontingent kehrt {when} zurück. Deine Nachricht bleibt gespeichert.",
+  "error.moveFailed": "Die Unterhaltung konnte nicht wechseln. Nichts wurde zweimal gesendet; deine Nachricht bleibt gespeichert.",
+  "reason.waiting": "Warten auf das enthaltene Kontingent bis {when}.",
+  "reason.moved.full": "{from} hat kein Kontingent mehr. Weiter bei {to} mit den bisherigen Nachrichten.",
+  "reason.moved.summary": "{from} hat kein Kontingent mehr. Weiter bei {to} mit einer Zusammenfassung der bisherigen Nachrichten.",
 };

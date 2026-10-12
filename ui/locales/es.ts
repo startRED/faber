@@ -330,4 +330,9 @@ export const es: Messages = {
   "error.billingUnknown": "Auto necesita confirmar que este acceso utiliza una suscripción.",
   "error.billedPerUse": "Auto no utiliza accesos que cobran por uso. Elige esta cuenta expresamente para utilizarla.",
   "error.quotaOut": "No hay cuota incluida disponible para esta solicitud.",
+  "error.quotaWait": "La cuota incluida vuelve {when}. Tu mensaje queda guardado.",
+  "error.moveFailed": "No se pudo trasladar la conversación. Nada se envió dos veces; tu mensaje queda guardado.",
+  "reason.waiting": "Esperando la cuota incluida hasta {when}.",
+  "reason.moved.full": "{from} no tiene cuota. La conversación siguió en {to} con los mensajes anteriores.",
+  "reason.moved.summary": "{from} no tiene cuota. La conversación siguió en {to} con un resumen de los mensajes anteriores.",
 };

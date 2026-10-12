@@ -186,7 +186,7 @@ pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<
             let u = used.unwrap_or_default();
             vec![EngineEvent::Done {
                 ok: status == "completed",
-                reason: status,
+                reason: p["turn"]["error"]["message"].as_str().map(String::from).unwrap_or(status),
                 cost_total_usd: None,
                 input_tokens: u.input,
                 output_tokens: u.output,
