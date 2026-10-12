@@ -131,9 +131,11 @@ impl VendorLedger {
 
     /// The window the week's shape and the weights are learned from: the shortest vendor-wide one, which moves the most
     /// points per unit of use. Only its readings are kept as a history.
-    pub fn primary(&self) -> Option<&str> {
+    pub fn primary(&self, now: f64) -> Option<&str> {
         self.readings
-            .keys()
+            .iter()
+            .filter(|(_, r)| r.resets_at > now)
+            .map(|(n, _)| n)
             .filter(|n| vendor_wide(n))
             .filter_map(|n| Some((window_secs(n)?, n.as_str())))
             .min_by(|a, b| a.0.total_cmp(&b.0))
@@ -142,14 +144,15 @@ impl VendorLedger {
 
     /// A reading of a window. Readings that make no sense (not a number, below 0 or far above 1) are dropped.
     pub fn record(&mut self, window: &str, used: f64, resets_at: f64, now: f64, offset: i64) {
-        if !plausible(used, resets_at) {
+        self.readings.retain(|_, r| r.resets_at > now);
+        if !plausible(used, resets_at) || resets_at <= now {
             return;
         }
         // Whole seconds and hundredths are all a reading holds; the file stays small.
         let (now, resets_at, used) = (now.round(), resets_at.round(), (used * 1000.0).round() / 1000.0);
         self.readings.insert(window.to_string(), Reading { used, resets_at, read_at: now });
         let point = Point { at: now, used, resets_at };
-        let primary = self.primary().map(String::from);
+        let primary = self.primary(now).map(String::from);
         self.history.retain(|name, _| Some(name) == primary.as_ref());
         if primary.as_deref() != Some(window) {
             return;
@@ -186,13 +189,13 @@ impl VendorLedger {
 
     /// Use from outside Faber over the last week, from the primary window.
     pub fn outside(&self, now: f64) -> Outside {
-        self.primary().map(|w| outside(&self.recent(w), &self.recent_spans(), now)).unwrap_or_default()
+        self.primary(now).map(|w| outside(&self.recent(w), &self.recent_spans(), now)).unwrap_or_default()
     }
 
     /// Learns the weights again from the stretches in the history. Returns true when the vendor's capacity moved by more
     /// than a factor of two, which is a plan change the name did not announce.
     pub fn learn_weights(&mut self, now: f64) -> bool {
-        let Some(window) = self.primary().map(String::from) else { return false };
+        let Some(window) = self.primary(now).map(String::from) else { return false };
         let found = stretches(&self.recent(&window), &self.recent_spans());
         self.stretches = found.iter().rev().take(KEEP_STRETCHES).rev().cloned().collect();
         self.stretches_since = found.len();
@@ -266,6 +269,7 @@ impl VendorLedger {
         let windows = self
             .readings
             .iter()
+            .filter(|(_, r)| r.resets_at > now)
             .map(|(name, r)| {
                 (
                     name.clone(),

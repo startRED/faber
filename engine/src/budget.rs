@@ -191,7 +191,7 @@ impl Snap {
         let ok = self.discount_ok();
         self.windows
             .iter()
-            .filter(|(n, _)| vendor_wide(n))
+            .filter(|(n, w)| vendor_wide(n) && w.live(now))
             .map(|(_, w)| window_m(w, now, shape, offset, ok))
             .reduce(f64::max)
             .unwrap_or(1.0)
@@ -203,7 +203,7 @@ impl Snap {
         let own = self
             .windows
             .iter()
-            .filter(|(n, _)| !vendor_wide(n) && family.is_some() && family_of(n) == family)
+            .filter(|(n, w)| w.live(now) && !vendor_wide(n) && family.is_some() && family_of(n) == family)
             .map(|(_, w)| window_m(w, now, shape, offset, ok))
             .reduce(f64::max);
         self.vendor_m(shape, offset, now).max(own.unwrap_or(0.0))

@@ -39,12 +39,12 @@ fn the_history_is_bounded() {
 fn the_shortest_vendor_wide_window_is_the_one_learned_from() {
     let mut l = VendorLedger::default();
     l.record("seven_day", 0.4, RESET, BASE, 0);
-    assert_eq!(l.primary(), Some("seven_day"));
+    assert_eq!(l.primary(BASE), Some("seven_day"));
     l.record("five_hour", 0.1, RESET, BASE, 0);
     l.record("seven_day_opus", 0.1, RESET, BASE, 0);
-    assert_eq!(l.primary(), Some("five_hour"));
+    assert_eq!(l.primary(BASE), Some("five_hour"));
     l.record("5_minutes", 0.1, RESET, BASE, 0);
-    assert_eq!(l.primary(), Some("5_minutes"));
+    assert_eq!(l.primary(BASE), Some("5_minutes"));
 }
 
 #[test]
@@ -237,4 +237,15 @@ fn paid_fallback_survives_a_restart_and_missing_evidence_stays_conservative() {
     legacy.billing = Billing::Subscription;
     legacy.record("seven_day", 0.95, RESET, BASE, 0);
     assert_eq!(gate(&legacy.snap(BASE), None, Purpose::Router, false, BASE), Err(Why::Paid));
+}
+
+#[test]
+fn expired_readings_leave_the_live_primary_and_are_pruned_on_refresh() {
+    let mut l = VendorLedger::default();
+    l.record("five_hour", 1.0, BASE + HOUR, BASE, 0);
+    l.record("seven_day", 0.05, RESET, BASE, 0);
+    assert_eq!(l.primary(BASE + 2.0 * HOUR), Some("seven_day"));
+    assert_eq!(l.snap(BASE + 2.0 * HOUR).windows.len(), 1);
+    l.record("seven_day", 0.06, RESET, BASE + 2.0 * HOUR, 0);
+    assert!(!l.readings.contains_key("five_hour"));
 }

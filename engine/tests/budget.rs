@@ -284,3 +284,14 @@ fn a_one_message_approval_lifts_the_quota_rules() {
     assert_eq!(gate(&out, None, TURN, false, NOW), Err(Why::Exhausted));
     assert_eq!(gate(&out, None, TURN, true, NOW), Ok(()));
 }
+
+#[test]
+fn expired_vendor_and_family_windows_do_not_mask_spare_live_quota() {
+    let live = snap(vec![seven(0.05, DAY)]);
+    let mut mixed = live.clone();
+    mixed.windows.push(five(1.0, -HOUR));
+    mixed.windows.push(("seven_day_opus".into(), window(1.0, -HOUR, 7.0 * DAY)));
+    near(m(&mixed), m(&live), 1e-9);
+    near(mixed.profile_m(Some("opus"), &Shape::uniform(), 0, NOW), m(&live), 1e-9);
+    assert!(m(&mixed) < 1.0);
+}
