@@ -86,6 +86,39 @@ struct Rig {
     claude: Fake,
     codex: Fake,
 }
+
+#[tokio::test]
+async fn restarted_recovery_never_uses_a_billing_exception_for_a_scheduled_resend() {
+    for legacy in [false, true] {
+        for billing in [Billing::Unknown, Billing::UsageBilled] {
+            let dir = tempfile::tempdir().unwrap();
+            let r = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+            r.engine.note_account_events(Vendor::Claude, vec![quota("five_hour", 7 * 3600, 1.0)]);
+            let id = r.engine.send(request(None, "auto")).unwrap();
+            let m = reply(&r.engine, &id, Status::Error).await;
+            assert_eq!(m.error.as_deref(), Some("error.quotaWait"));
+            drop(r);
+            if legacy {
+                let store = Store::new(dir.path());
+                let mut saved = store.get(&id).unwrap();
+                saved.messages.last_mut().unwrap().recovery = None;
+                store.save(&saved);
+            }
+            let back = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+            back.engine.open(&id).unwrap();
+            back.engine.note_account_events(Vendor::Claude, vec![quota("five_hour", 600, 1.0)]);
+            back.engine.wait_turn(&id, &m.id).unwrap();
+            back.engine
+                .note_account_events(Vendor::Claude, vec![EngineEvent::Signals(Signals { billing: Some(billing), ..Signals::default() })]);
+            back.time.store(WHEN + 601, Ordering::SeqCst);
+            back.engine.set_utc_offset(0);
+            tokio::time::sleep(Duration::from_millis(40)).await;
+            assert!(back.claude.args.lock().unwrap().is_empty(), "no scheduled resend on {billing:?}, legacy={legacy}");
+            assert_eq!(back.engine.open(&id).unwrap().messages.last().unwrap().status, Some(Status::Error));
+            back.engine.shutdown();
+        }
+    }
+}
 fn rig(dir: &Path, vendors: &[Vendor], codex: Fake) -> Rig {
     sources(dir, vendors, fake(fixture("claude", "chat")), codex)
 }

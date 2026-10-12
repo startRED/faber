@@ -356,9 +356,10 @@ impl Core {
             return;
         }
         // Pick only when the original vendor remains blocked; no move for balance.
-        if self.gate_turn(&t.pick, t.by_hand).is_ok() {
+        // A scheduled resend is automatic even when the original model was picked by hand.
+        if self.gate_turn(&t.pick, false).is_ok() {
             let text = self.continuation(id, &t);
-            if let Err(e) = self.start(id, reply, &t.pick, text, t.images, t.by_hand) {
+            if let Err(e) = self.start(id, reply, &t.pick, text, t.images, false) {
                 self.fail_reply(id, reply, e);
             }
         } else if let Err(e) = self.recover(id, false) {
