@@ -6,6 +6,7 @@ import { t } from './i18n.ts';
 import { Peek } from './Mark.tsx';
 import { vendorName } from './models.ts';
 import { animateList } from './motion.ts';
+import { untilReset } from './Sidebar.tsx';
 import { blocksOf, elapsed } from './running.ts';
 
 /** The running column: what runs now, one block per project and one for Chat, in the order the engine sent. A question
@@ -25,7 +26,7 @@ export function Running(props: {
   onCleanup(() => clearInterval(tick));
   const blocks = () => blocksOf(props.items);
   const nameOf = (key: string) => (key === 'chat' ? t('area.chat') : (props.projects.find((p) => p.id === key)?.name ?? t('area.projects')));
-  const words = (item: RunningItem) => (item.state === 'needsYou' ? t('run.needsYou') : item.vendor ? t('run.working') : t('run.routing'));
+  const words = (item: RunningItem) => (item.waitUntil ? t('run.waiting', { when: untilReset(item.waitUntil) }) : item.state === 'needsYou' ? t('run.needsYou') : item.vendor ? t('run.working') : t('run.routing'));
   const since = (item: RunningItem) => {
     const e = elapsed(item.since, now());
     return t(e.key, { n: e.n });

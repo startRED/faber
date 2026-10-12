@@ -1,0 +1,453 @@
+mod support;
+
+use faber_engine::budget::{Billing, Reach};
+use faber_engine::cli::Cli;
+use faber_engine::events::EngineEvent;
+use faber_engine::model::{Area, Conversation, Message, Role, Status, Vendor};
+use faber_engine::router::{Choice, Effort};
+use faber_engine::signals::Signals;
+use faber_engine::store::Store;
+use faber_engine::{Engine, EngineOptions, SendRequest};
+use serde_json::json;
+use std::collections::BTreeMap;
+use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
+use support::{Fake, fake, fixture};
+
+const WHEN: u64 = 1_791_620_000;
+
+#[tokio::test]
+async fn restarting_cancels_a_queued_wait_instead_of_freezing_or_resending_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let r = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+    r.engine.note_account_events(Vendor::Claude, vec![quota("five_hour", 600, 1.0)]);
+    let id = r.engine.send(request(None, "auto")).unwrap();
+    tokio::time::sleep(Duration::from_millis(40)).await;
+    let m = reply(&r.engine, &id, Status::Streaming).await;
+    assert!(m.wait_until.is_some());
+    drop(r);
+    let back = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+    let saved = back.engine.open(&id).unwrap();
+    assert_eq!(saved.messages.last().unwrap().status, Some(Status::Stopped));
+    back.time.store(WHEN + 601, Ordering::SeqCst);
+    back.engine.set_utc_offset(0);
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert!(back.engine.state().running.items.is_empty());
+    assert!(back.claude.args.lock().unwrap().is_empty());
+    back.engine.shutdown();
+}
+
+#[tokio::test]
+async fn restarting_keeps_explicit_quota_recovery_available_for_the_saved_reply() {
+    for effort in [None, Some(Effort::High)] {
+        for legacy in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let r = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+            r.engine.note_account_events(Vendor::Claude, vec![quota("five_hour", 600, 1.0)]);
+            let mut req = request(None, "claude");
+            req.choice.model = Some("claude-haiku-5-5".into());
+            req.choice.effort = effort;
+            req.images = vec![faber_engine::model::Image { media_type: "image/png".into(), base64: "aW1hZ2U=".into() }];
+            req.files = vec![faber_engine::workspace::Attachment { name: "notes.txt".into(), base64: "bm90ZXM=".into() }];
+            let id = r.engine.send(req.clone()).unwrap();
+            let m = reply(&r.engine, &id, Status::Error).await;
+            assert_eq!(m.error.as_deref(), Some("error.quotaOut"));
+            let store = Store::new(dir.path());
+            let mut saved = store.get(&id).unwrap();
+            assert_eq!(saved.messages.last().unwrap().recovery.as_ref().unwrap().pick.model, req.choice.model);
+            drop(r);
+            if legacy {
+                saved.messages.last_mut().unwrap().recovery = None;
+                saved.messages.last_mut().unwrap().effort = effort.map(|e| e.name().into());
+                store.save(&saved);
+            }
+            let mut entries = fixture("claude", "chat");
+            entries[0].msg["message"]["content"] = json!([
+                {"type":"image","source":{"type":"base64","media_type":"image/png","data":"aW1hZ2U="}},
+                {"type":"text","text":format!("{}\n\nAttached files (in your working folder):\n- attachments/notes.txt",req.text)}
+            ]);
+            let back = sources(dir.path(), &[Vendor::Claude], fake(entries), fake(vec![]));
+            back.engine.open(&id).unwrap();
+            back.engine.note_account_events(Vendor::Claude, vec![quota("five_hour", 600, 1.0)]);
+            back.engine.wait_turn(&id, &m.id).unwrap();
+            assert!(back.engine.open(&id).unwrap().messages.last().unwrap().wait_until.is_some());
+            assert!(back.engine.wait_turn(&id, "another-reply").is_err());
+            back.time.store(WHEN + 601, Ordering::SeqCst);
+            back.engine.set_utc_offset(0);
+            reply(&back.engine, &id, Status::Done).await;
+            let expected = effort.unwrap_or(Effort::Medium).name();
+            let args = back.claude.args.lock().unwrap().clone();
+            let at = args[0].iter().position(|a| a == "--effort").unwrap();
+            assert_eq!(args[0][at + 1], expected, "legacy={legacy}");
+            assert_eq!(store.get(&id).unwrap().messages.last().unwrap().effort.as_deref(), Some(expected));
+            assert_eq!(back.claude.wire.lines_with("\"type\":\"user\""), 1);
+            assert!(back.claude.mismatches.lock().unwrap().is_empty());
+            assert!(store.get(&id).unwrap().messages.last().unwrap().recovery.is_none());
+            back.engine.shutdown();
+        }
+    }
+}
+struct Rig {
+    engine: Engine,
+    time: Arc<AtomicU64>,
+    claude: Fake,
+    codex: Fake,
+}
+
+#[tokio::test]
+async fn restarted_recovery_never_uses_a_billing_exception_for_a_scheduled_resend() {
+    for legacy in [false, true] {
+        for billing in [Billing::Unknown, Billing::UsageBilled] {
+            let dir = tempfile::tempdir().unwrap();
+            let r = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+            r.engine.note_account_events(Vendor::Claude, vec![quota("seven_day", 7 * 3600, 1.0)]);
+            let id = r.engine.send(request(None, "auto")).unwrap();
+            let m = reply(&r.engine, &id, Status::Error).await;
+            assert_eq!(m.error.as_deref(), Some("error.quotaWait"));
+            drop(r);
+            if legacy {
+                let store = Store::new(dir.path());
+                let mut saved = store.get(&id).unwrap();
+                saved.messages.last_mut().unwrap().recovery = None;
+                store.save(&saved);
+            }
+            let back = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+            back.engine.open(&id).unwrap();
+            back.time.store(WHEN + 7 * 3600 - 600, Ordering::SeqCst);
+            back.engine.note_account_events(Vendor::Claude, vec![quota("seven_day", 7 * 3600, 1.0)]);
+            back.engine.wait_turn(&id, &m.id).unwrap();
+            back.engine
+                .note_account_events(Vendor::Claude, vec![EngineEvent::Signals(Signals { billing: Some(billing), ..Signals::default() })]);
+            back.time.store(WHEN + 7 * 3600 + 1, Ordering::SeqCst);
+            back.engine.set_utc_offset(0);
+            tokio::time::sleep(Duration::from_millis(40)).await;
+            assert!(back.claude.args.lock().unwrap().is_empty(), "no scheduled resend on {billing:?}, legacy={legacy}");
+            assert_eq!(back.engine.open(&id).unwrap().messages.last().unwrap().status, Some(Status::Error));
+            back.engine.shutdown();
+        }
+    }
+}
+fn rig(dir: &Path, vendors: &[Vendor], codex: Fake) -> Rig {
+    sources(dir, vendors, fake(fixture("claude", "chat")), codex)
+}
+fn sources(dir: &Path, vendors: &[Vendor], claude: Fake, codex: Fake) -> Rig {
+    let (c, x) = (claude.spawn.clone(), codex.spawn.clone());
+    let engine = Engine::new(
+        EngineOptions {
+            data_dir: dir.into(),
+            clis: vendors.iter().map(|v| (*v, Cli { command: v.name().into(), prefix: vec![] })).collect(),
+            spawn: Arc::new(move |bin, args, cwd| if bin == "claude" { c(bin, args, cwd) } else { x(bin, args, cwd) }),
+            windows: false,
+            claude_env_billed: false,
+            max_warm: 3,
+            idle: Duration::from_secs(120),
+            runtime: tokio::runtime::Handle::current(),
+            ask: Some(Arc::new(|_| Box::pin(async { Some(r#"{"kind":"chat","difficulty":"easy","confidence":0.95}"#.into()) }))),
+        },
+        Arc::new(|_| {}),
+    );
+    let time = Arc::new(AtomicU64::new(WHEN));
+    let clock = time.clone();
+    engine.set_time_source(Arc::new(move || clock.load(Ordering::SeqCst) as f64));
+    engine.set_codex_models(vec!["gpt-6.1-sol".into(), "gpt-6-luna".into()], Some("gpt-6.1-sol".into()));
+    for v in vendors {
+        engine.note_account_events(
+            *v,
+            vec![EngineEvent::Signals(Signals { billing: Some(Billing::Subscription), paid_fallback: Some(false), ..Signals::default() })],
+        );
+    }
+    Rig { engine, time, claude, codex }
+}
+
+#[tokio::test]
+async fn a_partial_plan_limit_continues_once_and_the_chat_stays_on_the_new_vendor() {
+    use faber_engine::handover::{self, Partial};
+    use support::Entry;
+    for (narration, tool) in [("", true), ("Checking 🛠️.\n\n", true), ("", false)] {
+        let dir = tempfile::tempdir().unwrap();
+        let before = seed(dir.path(), false);
+        let output = "x".repeat(500);
+        let mut claude_entries = vec![
+            fixture("claude", "chat")[0].clone(),
+            Entry { input: false, msg: json!({"type":"system","subtype":"init","session_id":"old-session","model":"claude-opus-5-5"}) },
+            Entry {
+                input: false,
+                msg: json!({"type":"assistant","message":{"content":[{"type":"tool_use","id":"write","name":"Write","input":{"file_path":"done.txt"}}]}}),
+            },
+            Entry {
+                input: false,
+                msg: json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"write","content":output}]}}),
+            },
+            Entry {
+                input: false,
+                msg: json!({"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Half done"}}}),
+            },
+            Entry {
+                input: false,
+                msg: json!({"type":"rate_limit_event","rate_limit_info":{"status":"allowed","rateLimitType":"seven_day","overageStatus":"off"}}),
+            },
+            Entry {
+                input: false,
+                msg: json!({"type":"result","subtype":"error_during_execution","is_error":true,"errors":["usage limit reached"],"total_cost_usd":0.02,"usage":{"input_tokens":100,"output_tokens":20}}),
+            },
+        ];
+        if !tool {
+            claude_entries.drain(2..4);
+        }
+        if !narration.is_empty() {
+            claude_entries.insert(2, Entry { input: false, msg: json!({"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":narration}}}) });
+        }
+        let claude = fake(claude_entries);
+        let partial = Partial {
+            text: format!("{narration}Half done"),
+            tools: if tool { vec![("Write".into(), format!("{}...", "x".repeat(197)))] } else { vec![] },
+        };
+        let prompt = handover::with_full(&handover::transcript(&before.messages), &request(None, "auto").text, &partial);
+        let mut entries = fixture("codex", "chat");
+        for e in &mut entries {
+            if e.input && e.msg["method"] == "turn/start" {
+                e.msg["params"]["input"][0]["text"] = json!(prompt);
+            }
+        }
+        if !narration.is_empty() || !tool {
+            let at = entries
+                .iter()
+                .position(|e| e.msg["method"] == "item/started" && e.msg["params"]["item"]["type"] == "agentMessage")
+                .unwrap();
+            entries.insert(at, Entry { input: false, msg: json!({"method":"item/started","params":{"item":{"type":"commandExecution","id":"resume-tool","command":"check"}}}) });
+        }
+        let r = sources(dir.path(), &Vendor::ALL, claude, fake(entries));
+        let id = r.engine.send(request(Some(&before.id), "auto")).unwrap();
+        let m = reply(&r.engine, &id, Status::Done).await;
+        assert_eq!(m.vendor, Some(Vendor::Codex));
+        assert_eq!(m.reason.as_deref(), Some("reason.moved.full"));
+        assert_eq!(m.moved_from, Some(Vendor::Claude));
+        assert!(m.text.starts_with(&partial.text));
+        assert_eq!(
+            m.activity_end,
+            tool.then(|| narration.encode_utf16().count()),
+            "the already-visible partial answer must remain outside activity"
+        );
+        let ledger = r.engine.ledger();
+        let own: f64 = ledger.claude.own_spend.values().chain(ledger.codex.own_spend.values()).sum();
+        assert!((m.cost_usd.unwrap() - own).abs() < 1e-9, "both vendors' own turn costs are kept");
+        assert_eq!(m.tools.unwrap().len(), usize::from(tool) + usize::from(!narration.is_empty() || !tool));
+        assert_eq!(r.codex.wire.lines_with("Continue from there."), 1);
+        assert_eq!(r.claude.wire.lines_with("\"type\":\"user\""), 1);
+        assert!(r.codex.mismatches.lock().unwrap().is_empty());
+        r.engine
+            .note_account_events(Vendor::Claude, vec![EngineEvent::Signals(Signals { reach: Some(Reach::Clear), ..Signals::default() })]);
+        r.engine.send(request(Some(&id), "auto")).unwrap();
+        assert_eq!(r.engine.open(&id).unwrap().messages.last().unwrap().vendor, Some(Vendor::Codex));
+        assert_eq!(r.claude.wire.lines_with("\"type\":\"user\""), 1);
+        r.engine.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn a_family_limit_resumes_on_another_family_of_the_same_vendor() {
+    let dir = tempfile::tempdir().unwrap();
+    let before = seed(dir.path(), false);
+    let r = rig(dir.path(), &Vendor::ALL, fake(vec![]));
+    r.engine.note_account_events(Vendor::Claude, vec![quota("seven_day_opus", 172800, 1.0)]);
+    let id = r.engine.send(request(Some(&before.id), "auto")).unwrap();
+    let m = reply(&r.engine, &id, Status::Done).await;
+    assert_eq!(m.vendor, Some(Vendor::Claude));
+    let args = r.claude.args.lock().unwrap().clone();
+    assert_eq!(args.len(), 1);
+    assert!(args[0].iter().any(|a| a == "--resume"));
+    assert!(args[0].iter().any(|a| a == "old-session"));
+    assert!(!args[0].iter().any(|a| a.contains("opus")));
+    assert!(r.codex.args.lock().unwrap().is_empty());
+    r.engine.shutdown();
+}
+
+#[tokio::test]
+async fn an_explicit_wait_uses_the_pinned_familys_reset() {
+    let dir = tempfile::tempdir().unwrap();
+    let r = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+    r.engine.note_account_events(Vendor::Claude, vec![quota("seven_day_opus", 600, 1.0)]);
+    let req =
+        SendRequest { choice: Choice { vendor: "claude".into(), model: Some("opus".into()), effort: None }, ..request(None, "claude") };
+    let id = r.engine.send(req).unwrap();
+    let m = reply(&r.engine, &id, Status::Error).await;
+    assert_eq!(m.error.as_deref(), Some("error.quotaOut"));
+    r.engine.wait_turn(&id, &m.id).unwrap();
+    assert_eq!(r.engine.open(&id).unwrap().messages.last().unwrap().wait_until, Some((WHEN + 600) as f64));
+    assert!(r.claude.args.lock().unwrap().is_empty());
+    r.engine.shutdown();
+}
+fn request(id: Option<&str>, vendor: &str) -> SendRequest {
+    SendRequest {
+        conversation_id: id.map(String::from),
+        area: Area::Chat,
+        project_id: None,
+        text: "In one sentence: why is the sky blue?".into(),
+        images: vec![],
+        files: vec![],
+        choice: Choice { vendor: vendor.into(), model: None, effort: None },
+    }
+}
+fn quota(window: &str, after: u64, used: f64) -> EngineEvent {
+    EngineEvent::Quota { window: window.into(), used, resets_at: (WHEN + after) as f64 }
+}
+async fn reply(engine: &Engine, id: &str, status: Status) -> Message {
+    for _ in 0..200 {
+        if let Some(m) = engine.open(id).and_then(|c| c.messages.last().cloned()).filter(|m| m.status == Some(status)) {
+            return m;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("reply never became {status:?}: {:?}", engine.open(id));
+}
+#[tokio::test]
+async fn a_message_for_a_vendor_that_resets_soon_waits_and_sends_itself() {
+    let dir = tempfile::tempdir().unwrap();
+    let r = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+    r.engine.note_account_events(Vendor::Claude, vec![quota("five_hour", 600, 1.0)]);
+    let id = r.engine.send(request(None, "auto")).unwrap();
+    tokio::time::sleep(Duration::from_millis(40)).await;
+    let m = reply(&r.engine, &id, Status::Streaming).await;
+    assert_eq!(m.reason.as_deref(), Some("reason.waiting"));
+    assert_eq!(m.wait_until, Some((WHEN + 600) as f64));
+    assert!(r.claude.args.lock().unwrap().is_empty());
+    assert_eq!(r.engine.send(request(Some(&id), "auto")).unwrap_err(), "error.busy");
+    r.time.store(WHEN + 601, Ordering::SeqCst);
+    r.engine.set_utc_offset(0);
+    reply(&r.engine, &id, Status::Done).await;
+    assert_eq!(r.claude.wire.lines_with("\"type\":\"user\""), 1);
+    r.engine.set_utc_offset(0);
+    assert_eq!(r.claude.wire.lines_with("\"type\":\"user\""), 1);
+    r.engine.shutdown();
+}
+#[tokio::test]
+async fn a_wait_longer_than_six_hours_is_refused_and_the_original_text_is_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let r = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+    r.engine.note_account_events(Vendor::Claude, vec![quota("seven_day", 172800, 1.0)]);
+    let id = r.engine.send(request(None, "auto")).unwrap();
+    let m = reply(&r.engine, &id, Status::Error).await;
+    assert_eq!(m.error.as_deref(), Some("error.quotaWait"));
+    assert_eq!(r.engine.open(&id).unwrap().messages[0].text, request(None, "auto").text);
+    assert!(r.claude.args.lock().unwrap().is_empty());
+    r.engine.shutdown();
+}
+#[tokio::test]
+async fn closing_the_app_or_stopping_cancels_a_waiting_message() {
+    for closing in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let r = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+        r.engine.note_account_events(Vendor::Claude, vec![quota("five_hour", 600, 1.0)]);
+        let id = r.engine.send(request(None, "auto")).unwrap();
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        if closing {
+            r.engine.shutdown();
+        } else {
+            r.engine.interrupt(&id);
+        }
+        assert_eq!(r.engine.open(&id).unwrap().messages.last().unwrap().status, Some(Status::Stopped));
+        r.time.store(WHEN + 601, Ordering::SeqCst);
+        r.engine.set_utc_offset(0);
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert!(r.claude.args.lock().unwrap().is_empty());
+        let reopened = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+        assert_eq!(reopened.engine.open(&id).unwrap().messages.last().unwrap().status, Some(Status::Stopped));
+        assert_eq!(reopened.engine.open(&id).unwrap().messages[0].text, request(None, "auto").text);
+        assert!(reopened.claude.args.lock().unwrap().is_empty());
+        r.engine.shutdown();
+        reopened.engine.shutdown();
+    }
+}
+fn seed(dir: &Path, long: bool) -> Conversation {
+    let mut answer = Message::new("answer".into(), Role::Assistant, "Earlier answer".into(), 2);
+    answer.status = Some(Status::Done);
+    answer.vendor = Some(Vendor::Claude);
+    answer.model = Some("claude-opus-5-5".into());
+    answer.reason = Some("reason.route.chat.hard".into());
+    let c = Conversation {
+        choice: None,
+        id: "seeded".into(),
+        title: "Existing chat".into(),
+        area: Area::Chat,
+        project_id: None,
+        sessions: BTreeMap::from([(Vendor::Claude, "old-session".into())]),
+        cost_base: BTreeMap::new(),
+        allow_always: None,
+        branch_of: None,
+        user_name: None,
+        created_at: 1,
+        updated_at: 2,
+        messages: vec![
+            Message::new("first".into(), Role::User, if long { "x".repeat(30_000) } else { "Original question".into() }, 1),
+            answer,
+        ],
+    };
+    Store::new(dir).save(&c);
+    c
+}
+#[tokio::test]
+async fn a_failed_hand_over_ends_with_move_failed_and_keeps_the_conversation() {
+    let dir = tempfile::tempdir().unwrap();
+    let before = seed(dir.path(), true);
+    let mut entries = fixture("codex", "chat");
+    let at = entries.iter().position(|e| e.input && e.msg["method"] == "turn/start").unwrap();
+    let faber_engine::handover::Plan::Summarise(prompt) = faber_engine::handover::plan(&before.messages) else { panic!("long chat") };
+    entries[at].msg["params"]["input"][0]["text"] = json!(prompt);
+    entries.truncate(at + 1);
+    entries.push(support::Entry { input: false, msg: json!({"id":3,"error":{"code":-1,"message":"summary unavailable"}}) });
+    let r = rig(dir.path(), &Vendor::ALL, fake(entries));
+    r.engine.note_account_events(Vendor::Claude, vec![quota("seven_day", 172800, 1.0)]);
+    let id = r.engine.send(request(Some(&before.id), "auto")).unwrap();
+    let m = reply(&r.engine, &id, Status::Error).await;
+    assert_eq!(m.error.as_deref(), Some("error.moveFailed"));
+    let after = Store::new(dir.path()).get(&id).unwrap();
+    assert_eq!(&after.messages[..2], &before.messages[..]);
+    assert_eq!(after.messages.last().unwrap().vendor, Some(Vendor::Claude));
+    assert_eq!(r.codex.wire.lines_with("\"method\":\"turn/start\""), 1, "only the summary was asked");
+    r.engine.shutdown();
+}
+#[tokio::test]
+async fn recovery_uses_the_latest_block_and_never_queues_unknown_billing() {
+    let dir = tempfile::tempdir().unwrap();
+    let r = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+    r.engine.note_account_events(Vendor::Claude, vec![quota("five_hour", 600, 1.0), quota("seven_day", 172800, 0.985)]);
+    let id = r.engine.send(request(None, "auto")).unwrap();
+    assert_eq!(reply(&r.engine, &id, Status::Error).await.error.as_deref(), Some("error.quotaWait"));
+    r.engine
+        .note_account_events(Vendor::Claude, vec![EngineEvent::Signals(Signals { billing: Some(Billing::Unknown), ..Signals::default() })]);
+    let id = r.engine.send(request(None, "auto")).unwrap();
+    assert_eq!(reply(&r.engine, &id, Status::Error).await.error.as_deref(), Some("error.billingUnknown"));
+    assert!(r.claude.args.lock().unwrap().is_empty());
+    r.engine.shutdown();
+}
+#[tokio::test]
+async fn paid_consent_is_bound_to_one_reply_and_is_consumed() {
+    let dir = tempfile::tempdir().unwrap();
+    let r = rig(dir.path(), &[Vendor::Claude], fake(vec![]));
+    r.engine.note_account_events(
+        Vendor::Claude,
+        vec![
+            quota("five_hour", 600, 1.0),
+            EngineEvent::Signals(Signals {
+                paid_fallback: Some(true),
+                reach: Some(Reach::Out(Some((WHEN + 600) as f64))),
+                ..Signals::default()
+            }),
+        ],
+    );
+    let id = r.engine.send(request(None, "auto")).unwrap();
+    tokio::time::sleep(Duration::from_millis(40)).await;
+    let m = r.engine.open(&id).unwrap().messages.last().unwrap().clone();
+    assert!(r.engine.approve_credits(&id, "wrong", Vendor::Claude).is_err());
+    assert!(r.engine.approve_credits(&id, &m.id, Vendor::Codex).is_err());
+    r.engine.approve_credits(&id, &m.id, Vendor::Claude).unwrap();
+    reply(&r.engine, &id, Status::Done).await;
+    assert!(r.engine.approve_credits(&id, &m.id, Vendor::Claude).is_err());
+    r.engine.note_account_events(Vendor::Claude, vec![quota("five_hour", 600, 1.0)]);
+    r.engine.send(request(Some(&id), "auto")).unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(r.claude.wire.lines_with("\"type\":\"user\""), 1, "the next turn got no approval");
+    r.engine.shutdown();
+}

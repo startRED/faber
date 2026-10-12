@@ -83,6 +83,7 @@ fn engine(dir: &Path, clis: BTreeMap<Vendor, Cli>, spawn: Spawner) -> (Engine, U
         clis,
         spawn,
         windows: true,
+        claude_env_billed: false,
         max_warm: 3,
         idle: Duration::from_secs(120),
         runtime: tokio::runtime::Handle::current(),

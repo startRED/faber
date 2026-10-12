@@ -25,6 +25,7 @@ import './review-answer.check.ts';
 import './review-motion.check.ts';
 import './running.check.ts';
 import './settings.check.ts';
+import './pace.check.ts';
 import './setup.check.ts';
 import './styles.check.ts';
 import './thread.check.ts';

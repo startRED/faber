@@ -115,6 +115,16 @@ impl Page {
         self.cdp.eval(expression)
     }
 
+    pub fn reload(&mut self) -> Result<(), String> {
+        let deadline = Instant::now() + DEFAULT_WAIT;
+        self.cdp.reload(deadline)?;
+        self.wait_for_within(
+            "the reloaded screen to render",
+            "!!document.querySelector('.app')",
+            deadline.saturating_duration_since(Instant::now()),
+        )
+    }
+
     pub fn wait_for(&mut self, what: &str, expression: &str) -> Result<(), String> {
         self.cdp.wait_for(what, expression, DEFAULT_WAIT)
     }

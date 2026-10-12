@@ -27,7 +27,7 @@ impl Signals {
 /// extra-usage switch is "possible" unless the CLI says it is rejected or off.
 pub fn claude_signals(msg: &Value) -> Signals {
     let info = &msg["rate_limit_info"];
-    let wide = info["rateLimitType"].as_str().is_some_and(vendor_wide);
+    let wide = info["rateLimitType"].as_str().is_none_or(vendor_wide);
     let status = info["status"].as_str().unwrap_or_default();
     let reach = (wide && !status.is_empty())
         .then(|| if status.starts_with("allowed") { Reach::Clear } else { Reach::Out(info["resetsAt"].as_f64()) });
@@ -42,7 +42,12 @@ pub fn claude_signals(msg: &Value) -> Signals {
 /// Codex's `account/rateLimits/updated`: the plan, credits, and whether a limit was reached.
 pub fn codex_signals(msg: &Value) -> Signals {
     let r = &msg["params"]["rateLimits"];
-    let reset = [&r["primary"]["resetsAt"], &r["secondary"]["resetsAt"]].into_iter().filter_map(Value::as_f64).reduce(f64::max);
+    let named = r["rateLimitReachedType"].as_str();
+    let reset = ["primary", "secondary"]
+        .into_iter()
+        .filter(|name| named == Some(*name) || r[*name]["usedPercent"].as_f64().is_some_and(|used| used >= 100.0))
+        .filter_map(|name| r[name]["resetsAt"].as_f64())
+        .reduce(f64::max);
     let reached = !r["rateLimitReachedType"].is_null() || r["spendControlReached"] == true;
     let reach = if reached {
         Some(Reach::Out(reset))
@@ -96,7 +101,11 @@ pub fn claude_plan(output: &str) -> Signals {
     let method = ["authMethod", "authMode", "loginMethod"].into_iter().find_map(|k| v[k].as_str()).unwrap_or_default().to_ascii_lowercase();
     let billing = if v["loggedIn"] == false {
         Billing::Unknown
-    } else if method.contains("api") || method.contains("console") {
+    } else if method.contains("api")
+        || method.contains("console")
+        || v["apiKeySource"].as_str().is_some_and(|s| !matches!(s, "none" | ""))
+        || v["apiProvider"].as_str().is_some_and(|s| !matches!(s, "firstParty" | "firstparty" | "anthropic" | ""))
+    {
         Billing::UsageBilled
     } else if plan.is_some() {
         Billing::Subscription
@@ -104,4 +113,17 @@ pub fn claude_plan(output: &str) -> Signals {
         Billing::Unknown
     };
     Signals { plan, billing: Some(billing), ..Signals::default() }
+}
+
+/// Presence alone is enough; credential values are never inspected or kept.
+pub fn claude_env_billed(names: impl IntoIterator<Item = std::ffi::OsString>) -> bool {
+    const OVERRIDES: [&str; 6] = [
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "CLAUDE_CODE_USE_BEDROCK",
+        "CLAUDE_CODE_USE_VERTEX",
+        "CLAUDE_CODE_USE_FOUNDRY",
+        "ANTHROPIC_BASE_URL",
+    ];
+    names.into_iter().any(|name| OVERRIDES.iter().any(|expected| name.to_string_lossy().eq_ignore_ascii_case(expected)))
 }

@@ -61,6 +61,7 @@ fn start(dir: &Path, spawn: Spawner, ask: Option<Ask>) -> (Engine, UnboundedRece
         clis: BTreeMap::from([(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] })]),
         spawn,
         windows: false,
+        claude_env_billed: false,
         max_warm: 3,
         idle: Duration::from_secs(120),
         runtime: tokio::runtime::Handle::current(),
@@ -88,7 +89,11 @@ async fn the_plan_comes_from_the_status_command_and_nothing_else_of_it_is_kept()
     engine.shutdown();
     let saved = std::fs::read_to_string(dir.path().join("budget.json")).unwrap();
     assert!(!saved.contains("someone@example.com") && !saved.contains("Acme"));
-    assert!(events.try_recv().is_err(), "a status check says nothing to the screen");
+    while let Ok(event) = events.try_recv() {
+        assert!(matches!(event, AppEvent::Usage { .. }), "only the sanitized usage view reaches the screen");
+        let shown = format!("{event:?}");
+        assert!(!shown.contains("someone@example.com") && !shown.contains("Acme"));
+    }
 }
 
 #[tokio::test]
@@ -176,6 +181,7 @@ async fn watching_the_accounts_checks_at_once() {
     let dir = tempfile::tempdir().unwrap();
     let (spawn, calls) = status(Some(r#"{"loggedIn":true,"subscriptionType":"max"}"#));
     let (engine, _, _) = start(dir.path(), spawn, None);
+    engine.set_utc_offset(0);
     engine.watch_accounts();
     for _ in 0..50 {
         if engine.ledger().claude.plan.is_some() {
@@ -185,6 +191,50 @@ async fn watching_the_accounts_checks_at_once() {
     }
     assert_eq!(engine.ledger().claude.plan.as_deref(), Some("max"));
     assert_eq!(calls.lock().unwrap().len(), 1, "once now, then every quarter of an hour");
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn startup_account_readings_wait_for_the_local_offset_and_do_not_spend() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ledger = faber_engine::ledger::Ledger::default();
+    ledger.codex.record("five_hour", 0.10, (WHEN + 7000) as f64, (WHEN - 60) as f64, -10800);
+    faber_engine::store::Store::new(dir.path()).save_ledger(&ledger);
+    let f = fake(vec![
+        Entry { input: true, msg: json!({"id":1,"method":"initialize"}) },
+        Entry { input: false, msg: json!({"id":1,"result":{}}) },
+        Entry { input: true, msg: json!({"method":"initialized"}) },
+        Entry { input: true, msg: json!({"id":2,"method":"account/rateLimits/read"}) },
+        Entry { input: true, msg: json!({"id":3,"method":"account/read","params":{"refreshToken":false}}) },
+        Entry { input: false, msg: json!({"id":3,"result":{"account":{"type":"chatgpt","planType":"plus"}}}) },
+        Entry {
+            input: false,
+            msg: json!({"id":2,"result":{"rateLimits":{"primary":{"usedPercent":13,"windowDurationMins":300,"resetsAt":WHEN + 7000}}}}),
+        },
+    ]);
+    let (engine, _, _) = start(dir.path(), f.spawn.clone(), None);
+    engine.replace_clis(BTreeMap::from([(Vendor::Codex, Cli { command: "codex".into(), prefix: vec![] })]));
+    engine.watch_accounts();
+    tokio::time::sleep(Duration::from_millis(80)).await;
+    let before_clock = f.args.lock().unwrap().len();
+    assert!(engine.ledger().codex.own_spend.is_empty());
+    engine.set_utc_offset(-10800);
+    for _ in 0..50 {
+        if engine.ledger().codex.readings["five_hour"].used == 0.13 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let account = engine.ledger().codex;
+    let local_bin = faber_engine::budget::bin((WHEN - 60) as f64, -10800);
+    assert_eq!(account.learned.mass[local_bin], 3.0, "the startup drop belongs to the local weekday and hour");
+    assert_eq!(before_clock, 0, "the watcher waits until the screen supplies the offset");
+    assert!(account.own_spend.is_empty() && account.spans.is_empty(), "a free account check never meters a turn");
+    assert_eq!(f.wire.lines_with("turn/start"), 0);
+    assert!(f.mismatches.lock().unwrap().is_empty());
+    engine.set_utc_offset(-10800);
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert_eq!(f.args.lock().unwrap().len(), 1, "clock updates do not duplicate the watcher");
     engine.shutdown();
 }
 

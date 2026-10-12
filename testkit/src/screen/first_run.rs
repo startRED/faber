@@ -670,7 +670,7 @@ fn no_tutorial_over_a_restored_chat(ctx: &mut Ctx) -> Result {
         "Page.addScriptToEvaluateOnNewDocument",
         json!({ "source": "(() => { const real = window.fetch.bind(window); window.fetch = (url, init) => String(url).endsWith('/open') ? new Promise((r) => setTimeout(r, 8000)).then(() => real(url, init)) : real(url, init); })()" }),
     )?;
-    page.eval("location.reload()")?;
+    page.reload()?;
     page.wait_for("the page to start over with the hold in place", "String(window.fetch).includes('setTimeout')")?;
     // The check of the account takes a moment; the tutorial must not start while the conversation is still on its way.
     for _ in 0..25 {

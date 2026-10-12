@@ -1,5 +1,5 @@
 import { createEffect, createSignal, For, type JSX, Match, Show, Switch } from 'solid-js';
-import { api, type Appearance, type CheckResult, type Look, type Settings as Saved, type Vendor } from './api.ts';
+import { api, type Appearance, type CheckResult, type Look, type Settings as Saved, type Vendor, type VendorUsage } from './api.ts';
 import { AppearanceSection } from './Appearance.tsx';
 import { Toggle } from './controls.tsx';
 import { factory } from './draft.ts';
@@ -8,6 +8,7 @@ import { LANGUAGES, t } from './i18n.ts';
 import { vendorName } from './models.ts';
 import { animateList } from './motion.ts';
 import { accountLine, type Quotas, usageRows } from './sidebar.ts';
+import { PlanName } from './QuotaCard.tsx';
 import { untilReset, windowName } from './Sidebar.tsx';
 
 const SECTIONS = [
@@ -36,6 +37,7 @@ interface Props {
   /** The vendors that are connected. */
   vendors: Vendor[];
   quotas: Quotas;
+  usage?: VendorUsage[];
   /** The time now in milliseconds, which the screen moves on every minute: an old reading stops counting. */
   now: number;
   /** The section Settings opens at. */
@@ -141,6 +143,12 @@ export function Settings(props: Props) {
                 <Toggle label={t('set.hooksBody')} hint={t('set.hooksHint')} checked={props.saved.userHooks === true} onChange={(on) => props.onSave({ userHooks: on })} />
               </div>
             </Row>
+            <Row label={t('set.notifications')}>
+              <div class="toggles">
+                <Toggle label={t('set.notifyMe')} hint={t('set.notifyHint')} checked={props.saved.notifications !== false} onChange={(on) => props.onSave({ notifications: on })} />
+                <Toggle label={t('set.playSound')} hint={t('set.soundHint')} checked={props.saved.notificationSound !== false} onChange={(on) => props.onSave({ notificationSound: on })} />
+              </div>
+            </Row>
           </Match>
           <Match when={section() === 'appearance'}>
             <AppearanceSection
@@ -184,14 +192,30 @@ export function Settings(props: Props) {
                       <VendorMark vendor={v} />
                       {vendorName(v)}
                     </h3>
+                    <Show when={props.usage?.find((u) => u.vendor === v)}>{(u) => <>
+                      <PlanName u={u()} />
+                      <p class="usage-state">{t(`usage.state.${u().state}`)}</p>
+                      <p>{t('usage.ownSpend', { cost: u().ownSpendUsd.toFixed(4) })}</p>
+                      <p class="hint">{t('usage.shared')}</p>
+                      <Show when={u().unmetered}><p class="note">{t('usage.meterIncomplete', { n: u().unmetered })}</p></Show>
+                      <Show when={u().relearning}><p class="note">{t('usage.relearning')}</p></Show>
+                      <Show when={u().learning && !u().relearning}><p class="note">{t('usage.learning')}</p></Show>
+                      <Show when={u().foreignUse}><p class="note">{t('usage.foreign')}</p></Show>
+                      <Show when={u().outsideShare != null}><p class="note">{t('usage.outside', { share: `${Math.round((u().outsideShare ?? 0) * 100)}%` })}</p></Show>
+                      <Show when={u().overageOn}><p class="note">{t('usage.overageOn')}</p></Show>
+                      <Show when={u().billedPerUse}><p class="note">{t('usage.billedPerUse')}</p></Show>
+                      <Show when={u().billingUnknown}><p class="note">{t('usage.authNeeded')}</p><button class="btn secondary" onClick={() => props.onOpenSetup({ section: section(), draft: draft() })}>{t('set.openSetup')}</button></Show>
+                    </>}</Show>
                     <For each={usageRows(props.quotas, v, props.now)}>
                       {(row) => (
                         <div class="urow">
                           <span class="uname">{row.window ? t('quota.window', { window: windowName(row.window) }) : t('usage.noReading')}</span>
                           <span class="share num">{row.used === undefined ? t('quota.unknown') : `${Math.round(row.used * 100)}%`}</span>
                           <span class="meter" aria-hidden="true">
-                            <i style={{ width: `${Math.round((row.used ?? 0) * 100)}%` }} />
+                            <Show when={props.usage?.find((u) => u.vendor === v)?.windows.find((w) => w.name === row.window)}>{(w) => <b class="expected" style={{ left: `${Math.round(w().expected * 100)}%` }} />}</Show>
+                            <i style={{ width: `${Math.round(Math.min(1, Math.max(0, row.used ?? 0)) * 100)}%` }} />
                           </span>
+                          <Show when={props.usage?.find((u) => u.vendor === v)?.windows.find((w) => w.name === row.window)}>{(w) => <span class="pace-projection">{t('usage.expect', { elapsed: `${Math.round(w().elapsed * 100)}%`, share: `${Math.round(w().used / Math.max(w().elapsed, 0.1) * 100)}%` })}</span>}</Show>
                           <span class="note">{row.used !== undefined && row.resetsAt ? t('usage.resets', { when: untilReset(row.resetsAt) }) : ''}</span>
                         </div>
                       )}

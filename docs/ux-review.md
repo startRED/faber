@@ -43,3 +43,14 @@ on the sixty-toggle fixture, 8.5–12.5 ms column frame p95, and 4.3–12.6 ms i
 Engine files changed for answer boundaries: `engine/src/events.rs`, `engine/src/claude.rs`, `engine/src/codex.rs`,
 `engine/src/model.rs`, `engine/src/engine.rs`, `engine/src/engine/answer.rs` and `engine/tests/engine.rs`.
 No dependency was added. Real account sessions and spoken screen-reader output are outside these isolated checks.
+
+Integration with `phase-1-base` retains quota pacing, notifications, every locale key from both parents in all five
+languages, and R102 effort selection. Regression replays require same-model quota recovery to preserve saved manual
+effort after restart and resumed turns to keep already-visible partial answers outside the activity group, including
+zero, non-BMP UTF-16 and unknown legacy boundaries. The combined UI check renders pacing, effort and grouped activity
+together while keeping the final answer prominent.
+The shared screen send helper clicks the textarea to establish native input focus before its single Enter; it never
+retries a send. This follows a post-merge timeout with an unchanged draft before the quota scenario reached reload.
+Ten instrumented focused runs did not reproduce that intermittent timeout; no product-state failure was found.
+The merged tree passed all seven gates and `cargo t --all`: 655 checks, no failures or skips. Across local merge runs,
+the sixty-toggle fixture's highest peak was 236.6 MB against the 250 MB limit; the final full run peaked at 219.3 MB.

@@ -660,3 +660,13 @@ html.hidden-win .amb * { animation-play-state: paused !important; }
   .themes { margin-top: 16px; }
   .first-ctl { margin-top: 16px; padding-top: 14px; }
 }
+
+.pace, .pace-projection, .waiting-label { color: var(--ink-2); font-size: .85em; }
+.quota-card { padding: 12px; border: 1px solid var(--line); margin: 12px 0; }
+.quota-card .btn { margin: 4px; }
+.plan-form { display: flex; gap: 8px; align-items: end; }
+.plan-form label { display: grid; gap: 4px; }
+.urow .meter { position: relative; overflow: visible; }
+.urow .expected { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--ink); }
+.pace-projection { grid-column: 1 / -1; }
+.waiting-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -87,6 +87,10 @@ fn verdicts(list: Vec<(&'static str, &'static str)>) -> Ask {
 }
 
 fn rig(dir: &Path, vendors: &[Vendor], ask: Ask) -> Rig {
+    rig_env(dir, vendors, ask, false)
+}
+
+fn rig_env(dir: &Path, vendors: &[Vendor], ask: Ask, claude_env_billed: bool) -> Rig {
     let (claude, codex) = (fake(fixture("claude", "chat")), fake(fixture("codex", "chat")));
     let (c, x) = (claude.spawn.clone(), codex.spawn.clone());
     let spawn: Spawner = Arc::new(move |bin, args, cwd| if bin == "claude" { c(bin, args, cwd) } else { x(bin, args, cwd) });
@@ -96,6 +100,7 @@ fn rig(dir: &Path, vendors: &[Vendor], ask: Ask) -> Rig {
         clis: vendors.iter().map(|v| (*v, Cli { command: v.name().into(), prefix: vec![] })).collect(),
         spawn,
         windows: false,
+        claude_env_billed,
         max_warm: 3,
         idle: Duration::from_secs(120),
         runtime: tokio::runtime::Handle::current(),
@@ -109,7 +114,7 @@ fn rig(dir: &Path, vendors: &[Vendor], ask: Ask) -> Rig {
     for vendor in vendors {
         engine.note_account_events(
             *vendor,
-            vec![EngineEvent::Signals(Signals { billing: Some(Billing::Subscription), ..Signals::default() })],
+            vec![EngineEvent::Signals(Signals { billing: Some(Billing::Subscription), paid_fallback: Some(false), ..Signals::default() })],
         );
     }
     Rig { engine, rx, time, claude, codex }
@@ -147,7 +152,12 @@ fn quota(window: &str, used: f64, resets_in: u64) -> EngineEvent {
 }
 
 fn plan(plan: &str) -> EngineEvent {
-    EngineEvent::Signals(Signals { plan: Some(plan.into()), billing: Some(Billing::Subscription), ..Signals::default() })
+    EngineEvent::Signals(Signals {
+        plan: Some(plan.into()),
+        billing: Some(Billing::Subscription),
+        paid_fallback: Some(false),
+        ..Signals::default()
+    })
 }
 
 fn billed_by_use() -> EngineEvent {
@@ -377,4 +387,35 @@ async fn a_conversation_file_from_before_pace_existed_opens() {
     let again = both(dir.path(), verdicts(vec![("code", "medium")]));
     assert_eq!(again.engine.open(&id).unwrap().messages[1].pace, None);
     again.engine.shutdown();
+}
+
+#[tokio::test]
+async fn an_environment_override_cannot_be_overruled_by_a_subscription_signal() {
+    let dir = tempfile::tempdir().unwrap();
+    let r = rig_env(dir.path(), &[Vendor::Claude], verdicts(vec![("chat", "easy")]), true);
+    let id = r.engine.send(auto(SKY)).unwrap();
+    for _ in 0..100 {
+        if r.engine.open(&id).unwrap().messages.last().unwrap().status == Some(Status::Error) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(r.engine.open(&id).unwrap().messages.last().unwrap().error.as_deref(), Some("error.billedPerUse"));
+    assert!(r.claude.args.lock().unwrap().is_empty());
+    r.engine.shutdown();
+}
+
+#[tokio::test]
+async fn a_week_spent_faster_than_one_seventh_a_day_is_priced_up_on_either_vendor() {
+    // One day of seven gone and a fifth of the week used (14.3% a day would be 14.3%): the vendor is left for the other.
+    for (spent, other) in [(Vendor::Claude, Vendor::Codex), (Vendor::Codex, Vendor::Claude)] {
+        let dir = tempfile::tempdir().unwrap();
+        let r = both(dir.path(), verdicts(vec![("code", "medium")]));
+        r.engine.note_account_events(spent, vec![plan("max"), quota("seven_day", 0.2, 6 * DAY)]);
+        r.engine.note_account_events(other, vec![plan("pro"), quota("seven_day", 0.1, 6 * DAY)]);
+        let id = r.engine.send(auto(CODE)).unwrap();
+        let (reply, _) = r.went(&id, 0).await;
+        assert_eq!(reply.vendor, Some(other), "{spent:?} is ahead of the daily line");
+        r.engine.shutdown();
+    }
 }

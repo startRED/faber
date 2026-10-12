@@ -54,6 +54,15 @@ pub struct Image {
     pub base64: String,
 }
 
+/// Dispatch intent for a quota error that still offers explicit recovery after restart. Consent is never stored here.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Recovery {
+    pub pick: crate::router::Pick,
+    pub text: String,
+    pub by_hand: bool,
+    pub retried: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolUse {
     pub id: String,
@@ -127,7 +136,7 @@ pub struct Message {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_tokens: Option<u64>,
     /// Prompt tokens of the main response read from the CLI's cache, and written to it (the part with the 1-hour lifetime
-    /// separately). Claude Code only; Codex bills no write.
+    /// separately). Codex reports one cache-write kind and no separate one-hour counter.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_read_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -140,6 +149,12 @@ pub struct Message {
     /// Why the quota changed the model Auto chose, when it did.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pace: Option<PaceNote>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_until: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moved_from: Option<Vendor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery: Option<Recovery>,
 }
 
 impl Message {
@@ -171,6 +186,9 @@ impl Message {
             cache_write_1h_tokens: None,
             incomplete: None,
             pace: None,
+            wait_until: None,
+            moved_from: None,
+            recovery: None,
         }
     }
 }
@@ -279,6 +297,8 @@ pub struct RunningItem {
     pub since: u64,
     /// The questions the user has not answered yet.
     pub permissions: Vec<Permission>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wait_until: Option<f64>,
 }
 
 /// The running list as the engine last sent it. The revision grows by one with every list the engine emits, so a
@@ -317,6 +337,11 @@ pub struct Settings {
     /// Projects run the user's own CLI hooks too (off by default: a hook can block or slow every turn).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_hooks: Option<bool>,
+    /// Attention notifications and their chime are both on unless explicitly disabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notifications: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notification_sound: Option<bool>,
     /// The language of the screen ("en", "pt-BR"...); none follows the system.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
