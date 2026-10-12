@@ -1114,6 +1114,7 @@ dependencies = [
  "base64 0.22.1",
  "flate2",
  "reqwest",
+ "rustix",
  "serde",
  "serde_json",
  "sha2",
@@ -1132,6 +1133,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "ctrlc",
+ "faber-engine",
  "serde",
  "serde_json",
  "sha2",

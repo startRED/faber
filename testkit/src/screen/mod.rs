@@ -6,6 +6,7 @@ pub mod app;
 pub mod containment;
 pub mod first_run;
 pub mod permissions;
+pub mod projects;
 pub mod settings;
 pub mod setup;
 pub mod shell;
@@ -30,6 +31,7 @@ pub fn all() -> Vec<Scenario> {
     let all = app::scenarios()
         .into_iter()
         .chain(permissions::scenarios())
+        .chain(projects::scenarios())
         .chain(shell::scenarios())
         .chain(settings::scenarios())
         .chain(setup::scenarios())
