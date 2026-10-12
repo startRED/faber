@@ -244,6 +244,9 @@ struct Thread {
     queued: Vec<UserTurn>,
     state: CodexTurnState,
     approvals: HashMap<String, Value>,
+    watch: proc::TurnWatch,
+    blocked: bool,
+    closing: bool,
 }
 
 fn turn_params(thread: &str, effort: Option<&str>, turn: &UserTurn) -> Value {
@@ -280,6 +283,22 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
     (method, Value::Object(params))
 }
 
+/// Candidate controls, not a claim that native command/read tools are disabled by a sandbox.
+pub fn project_thread_params(
+    t: &CodexThread,
+    role: crate::project::Role,
+) -> Result<(&'static str, Value), crate::project::policy::Blocker> {
+    use crate::project::policy;
+    policy::invocation(crate::model::Vendor::Codex, t.model.as_deref(), t.effort.as_deref(), t.instructions.is_some())?;
+    let (method, mut params) = thread_params(Area::Project, t);
+    params["approvalPolicy"] = "never".into();
+    params["sandbox"] = if role == crate::project::Role::Writer { "workspace-write" } else { "read-only" }.into();
+    params["baseInstructions"] = policy::instructions(role).into();
+    params["config"] = json!({"model_reasoning_effort": t.effort});
+    params.as_object_mut().expect("thread parameters").remove("developerInstructions");
+    Ok((method, params))
+}
+
 /// One `codex app-server` serves every conversation with the same settings, each as a thread of its own, so open
 /// conversations cost one process instead of one each (measured: about 50 MB for three threads).
 #[derive(Clone)]
@@ -289,6 +308,21 @@ pub struct CodexServer {
 }
 
 impl CodexServer {
+    /// Dedicated role entry point: deny before starting a server, never share an automatic role with Chat threads.
+    pub fn start_project(
+        opts: CodexServerOptions,
+        thread: CodexThread,
+        role: crate::project::Role,
+        sink: EventSink,
+    ) -> Result<Session, crate::project::policy::Blocker> {
+        if opts.area != Area::Project {
+            return Err(crate::project::policy::Blocker::Invocation);
+        }
+        project_thread_params(&thread, role)?;
+        crate::project::policy::admit(crate::model::Vendor::Codex)?;
+        let _ = sink;
+        Err(crate::project::policy::Blocker::ProcessTree)
+    }
     /// The process starts right away, so a warmed-up conversation is already booting while the user types.
     pub fn start(opts: CodexServerOptions) -> CodexServer {
         let (tx, rx) = unbounded_channel();
@@ -363,7 +397,23 @@ async fn serve(started: std::io::Result<proc::Proc>, area: Area, mut rx: Unbound
     request!("initialize", init, Waiting::Initialize);
 
     loop {
+        let deadline = threads.values().filter_map(|t| t.watch.deadline()).min();
         tokio::select! {
+            () = proc::wait_deadline(deadline) => {
+                let expired: Vec<u64> = threads.iter().filter(|(_, t)| t.watch.deadline().is_some_and(|d| d <= tokio::time::Instant::now())).map(|(&k, _)| k).collect();
+                for key in expired {
+                    let Some(t) = threads.get_mut(&key) else { continue };
+                    if t.watch.stopping() || t.turn.is_none() {
+                        // A shared process cannot be killed for one task. Retain its identity until completion/recovery.
+                        t.blocked = true;
+                        t.watch.finish();
+                        (t.sink)(EngineEvent::Error { message: "error.cli.stopUnconfirmed".into(), fatal: true });
+                    } else if let Some((thread, turn)) = t.id.clone().zip(t.turn.clone()) {
+                        t.watch.interrupt();
+                        request!("turn/interrupt", json!({ "threadId": thread, "turnId": turn }), Waiting::Other(key, "turn/interrupt"));
+                    }
+                }
+            }
             line = lines.next_line() => {
                 let Ok(Some(line)) = line else {
                     if !stopping {
@@ -422,6 +472,7 @@ async fn serve(started: std::io::Result<proc::Proc>, area: Area, mut rx: Unbound
                                 by_id.insert(id.clone(), key);
                                 t.id = Some(id.clone());
                                 for turn in std::mem::take(&mut t.queued) {
+                                    t.watch.begin();
                                     let params = turn_params(&id, t.params.effort.as_deref(), &turn);
                                     request!("turn/start", params, Waiting::Other(key, "turn/start"));
                                 }
@@ -434,8 +485,13 @@ async fn serve(started: std::io::Result<proc::Proc>, area: Area, mut rx: Unbound
                         let thread = params["threadId"].as_str().and_then(|t| by_id.get(t)).and_then(|k| threads.get_mut(k));
                         match (method.ends_with("requestApproval"), thread) {
                             (true, Some(t)) => {
+                                if t.blocked || t.closing {
+                                    let _ = proc::write_line(&mut *stdin, &json!({ "id": id, "result": { "decision": "decline" } })).await;
+                                    continue;
+                                }
                                 let key = match id { Value::String(s) => s.clone(), other => other.to_string() };
                                 t.approvals.insert(key.clone(), id.clone());
+                                t.watch.pause();
                                 let tool = params["kind"].as_str().unwrap_or(method).to_string();
                                 let input = [&params["command"], &params["changes"]].into_iter().find(|v| !v.is_null()).unwrap_or(params).clone();
                                 (t.sink)(EngineEvent::Permission { request_id: key, tool, input });
@@ -454,11 +510,19 @@ async fn serve(started: std::io::Result<proc::Proc>, area: Area, mut rx: Unbound
                         let thread_id = params["threadId"].as_str().or_else(|| params["thread"]["id"].as_str());
                         match thread_id.and_then(|t| by_id.get(t)).and_then(|k| threads.get_mut(k)) {
                             Some(t) => {
+                                if method == Some("turn/completed") && params["turn"]["id"].as_str() != t.turn.as_deref() {
+                                    continue;
+                                }
+                                t.watch.activity();
                                 if method == Some("turn/started") {
                                     t.turn = params["turn"]["id"].as_str().map(String::from);
                                 }
+                                if method == Some("turn/completed") {
+                                    t.turn = None;
+                                    t.watch.finish();
+                                }
                                 for event in parse_codex_notification(&msg, &mut t.state) {
-                                    (t.sink)(event);
+                                    if !t.blocked { (t.sink)(event); }
                                 }
                             }
                             // Account-wide news, such as quota: one conversation passes it on.
@@ -471,13 +535,18 @@ async fn serve(started: std::io::Result<proc::Proc>, area: Area, mut rx: Unbound
                             }
                             None => {}
                         }
+                        let closed: Vec<u64> = threads.iter().filter(|(_, t)| t.closing && t.turn.is_none() && !t.watch.active()).map(|(&k, _)| k).collect();
+                        for key in closed {
+                            if let Some(t) = threads.remove(&key) && let Some(id) = t.id { by_id.remove(&id); }
+                        }
+                        if retired && threads.is_empty() { stop!(); }
                     }
                 }
             }
             cmd = rx.recv(), if !stopping => match cmd {
                 Some(ServerCommand::Open { key, thread, sink }) => {
                     let state = CodexTurnState::new(thread.resume.is_some());
-                    let t = Thread { sink, params: thread, id: None, turn: None, queued: vec![], state, approvals: HashMap::new() };
+                    let t = Thread { sink, params: thread, id: None, turn: None, queued: vec![], state, approvals: HashMap::new(), watch: proc::TurnWatch::default(), blocked: false, closing: false };
                     if ready {
                         let (method, params) = thread_params(area, &t.params);
                         request!(method, params, Waiting::Thread(key));
@@ -489,8 +558,12 @@ async fn serve(started: std::io::Result<proc::Proc>, area: Area, mut rx: Unbound
                 Some(ServerCommand::Session(key, cmd)) => match cmd {
                     SessionCommand::Send(turn) => {
                         let Some(t) = threads.get_mut(&key) else { continue };
+                        if t.blocked || t.closing || t.watch.stopping() { continue; }
                         match t.id.clone() {
-                            Some(id) => request!("turn/start", turn_params(&id, t.params.effort.as_deref(), &turn), Waiting::Other(key, "turn/start")),
+                            Some(id) => {
+                                t.watch.begin();
+                                request!("turn/start", turn_params(&id, t.params.effort.as_deref(), &turn), Waiting::Other(key, "turn/start"));
+                            }
                             None => t.queued.push(turn),
                         }
                     }
@@ -498,12 +571,13 @@ async fn serve(started: std::io::Result<proc::Proc>, area: Area, mut rx: Unbound
                         // The approval stays pending until the write worked, so a failed write can be answered again.
                         let delivery = match threads.get(&key).and_then(|t| t.approvals.get(&request_id)).cloned() {
                             None => Delivery::Unknown,
-                            Some(id) => {
+                            Some(id) if threads.get(&key).is_some_and(|t| !t.blocked && !t.closing) => {
                                 let decision = if allow { "accept" } else { "decline" };
                                 match proc::write_line(&mut *stdin, &json!({ "id": id, "result": { "decision": decision } })).await {
                                     Ok(()) => {
                                         if let Some(t) = threads.get_mut(&key) {
                                             t.approvals.remove(&request_id);
+                                            if t.approvals.is_empty() { t.watch.resume(); }
                                         }
                                         Delivery::Delivered
                                     }
@@ -517,23 +591,32 @@ async fn serve(started: std::io::Result<proc::Proc>, area: Area, mut rx: Unbound
                                     }
                                 }
                             }
+                            Some(_) => Delivery::Unknown,
                         };
                         let _ = ack.send(delivery);
                     }
                     SessionCommand::Interrupt => {
-                        if let Some((thread, turn)) = threads.get(&key).and_then(|t| Some((t.id.clone()?, t.turn.clone()?))) {
+                        if let Some(t) = threads.get_mut(&key)
+                            && !t.blocked && !t.watch.stopping()
+                            && let Some((thread, turn)) = t.id.clone().zip(t.turn.clone()) {
+                            t.watch.interrupt();
                             request!("turn/interrupt", json!({ "threadId": thread, "turnId": turn }), Waiting::Other(key, "turn/interrupt"));
                         }
                     }
-                    // The thread stays loaded in Codex (cheap); Faber stops listening, and stops any work in flight.
+                    // Keep an active thread until completion acknowledges the stop; its peers keep running.
                     SessionCommand::Close => {
                         pending.retain(|k| *k != key);
-                        if let Some(t) = threads.remove(&key)
-                            && let Some(id) = &t.id
-                        {
-                            by_id.remove(id);
-                            if let Some(turn) = &t.turn {
-                                request!("turn/interrupt", json!({ "threadId": id, "turnId": turn }), Waiting::Other(key, "turn/interrupt"));
+                        if let Some(t) = threads.get_mut(&key) {
+                            if t.watch.active() || t.turn.is_some() {
+                                t.closing = true;
+                                if !t.blocked && !t.watch.stopping() {
+                                    t.watch.interrupt();
+                                    if let Some((id, turn)) = t.id.clone().zip(t.turn.clone()) {
+                                        request!("turn/interrupt", json!({ "threadId": id, "turnId": turn }), Waiting::Other(key, "turn/interrupt"));
+                                    }
+                                }
+                            } else if let Some(t) = threads.remove(&key) && let Some(id) = t.id {
+                                by_id.remove(&id);
                             }
                         }
                         if retired && threads.is_empty() {

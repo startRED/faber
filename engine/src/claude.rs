@@ -81,6 +81,48 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     args
 }
 
+/// Candidate controls, for inspection only. Help output does not prove enforcement; use the gated constructor.
+pub fn project_claude_args(launch: &ClaudeLaunch, role: crate::project::Role) -> Result<Vec<String>, crate::project::policy::Blocker> {
+    use crate::project::policy;
+    policy::invocation(
+        crate::model::Vendor::Claude,
+        launch.model.as_deref(),
+        launch.effort.as_deref(),
+        launch.instructions.is_some() || launch.area != Area::Project,
+    )?;
+    let mut restricted = launch.clone();
+    restricted.instructions = Some(policy::instructions(role).into());
+    restricted.user_name = None;
+    let mut args = claude_args(&restricted);
+    // Unlike side questions, mission sessions may resume with the same fixed policy.
+    args.retain(|a| a != "--no-session-persistence");
+    for a in [
+        "--permission-mode",
+        "dontAsk",
+        "--disable-slash-commands",
+        "--disallowedTools",
+        "Bash,Write,Edit,Read,Glob,Grep,Agent,Task,WebSearch,WebFetch,Bash(git push *),Bash(git reset *),Bash(git update-ref *)",
+        "--settings",
+        "{\"disableAllHooks\":true}",
+    ] {
+        args.push(a.into());
+    }
+    Ok(args)
+}
+
+/// Automatic missions must never fall back to the legacy project session or its user's configuration.
+pub fn start_project_claude(
+    opts: ClaudeOptions,
+    role: crate::project::Role,
+    on_event: EventSink,
+) -> Result<Session, crate::project::policy::Blocker> {
+    project_claude_args(&opts.launch, role)?;
+    crate::project::policy::admit(crate::model::Vendor::Claude)?;
+    // Admission stays closed until this launch uses a verified owned-tree spawner and capability handshake.
+    let _ = on_event;
+    Err(crate::project::policy::Blocker::ProcessTree)
+}
+
 fn block_text(content: &Value) -> String {
     match content {
         Value::String(s) => s.clone(),
@@ -207,8 +249,21 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
         let mut pending: HashMap<String, Value> = HashMap::new();
         let mut closed = false;
         let mut control_id = 0u32;
+        let mut watch = proc::TurnWatch::default();
         loop {
+            let deadline = watch.deadline();
             tokio::select! {
+                () = proc::wait_deadline(deadline) => {
+                    if watch.stopping() {
+                        proc::stop(&mut *stdin, &mut child).await;
+                        on_event(EngineEvent::Error { message: "error.cli.interruptTimeout".into(), fatal: true });
+                        break;
+                    }
+                    watch.interrupt();
+                    control_id += 1;
+                    let msg = json!({ "type": "control_request", "request_id": format!("faber-{control_id}"), "request": { "subtype": "interrupt" } });
+                    let _ = proc::write_line(&mut *stdin, &msg).await;
+                }
                 line = lines.next_line() => {
                     let Ok(Some(line)) = line else {
                         if !closed {
@@ -223,11 +278,18 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                     }
                     match serde_json::from_str::<Value>(&line) {
                         Ok(msg) => {
+                            watch.activity();
+                            if msg["type"] == "result" { watch.finish(); }
                             for event in parse_claude_message(&msg) {
                                 if let EngineEvent::Permission { request_id, input, .. } = &event {
                                     pending.insert(request_id.clone(), input.clone());
+                                    watch.pause();
                                 }
                                 on_event(event);
+                            }
+                            if closed && !watch.active() {
+                                proc::stop(&mut *stdin, &mut child).await;
+                                break;
                             }
                         }
                         Err(_) => on_event(EngineEvent::Error { message: format!("Unexpected output from Claude Code: {}", line.chars().take(200).collect::<String>()), fatal: false }),
@@ -235,6 +297,8 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                 }
                 cmd = rx.recv(), if !closed => match cmd {
                     Some(SessionCommand::Send(turn)) => {
+                        if watch.stopping() { continue; }
+                        watch.begin();
                         let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
                     }
                     Some(SessionCommand::Answer { request_id, allow, ack }) => {
@@ -247,6 +311,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                                 match proc::write_line(&mut *stdin, &msg).await {
                                     Ok(()) => {
                                         pending.remove(&request_id);
+                                        if pending.is_empty() { watch.resume(); }
                                         Delivery::Delivered
                                     }
                                     Err(e) => {
@@ -263,13 +328,25 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                         let _ = ack.send(delivery);
                     }
                     Some(SessionCommand::Interrupt) => {
+                        if watch.stopping() { continue; }
+                        watch.interrupt();
                         control_id += 1;
                         let msg = json!({ "type": "control_request", "request_id": format!("faber-{control_id}"), "request": { "subtype": "interrupt" } });
                         let _ = proc::write_line(&mut *stdin, &msg).await;
                     }
                     Some(SessionCommand::Close) | None => {
                         closed = true;
-                        proc::stop(&mut *stdin, &mut child).await;
+                        if watch.active() {
+                            if !watch.stopping() {
+                                watch.interrupt();
+                                control_id += 1;
+                                let msg = json!({ "type": "control_request", "request_id": format!("faber-{control_id}"), "request": { "subtype": "interrupt" } });
+                                let _ = proc::write_line(&mut *stdin, &msg).await;
+                            }
+                        } else {
+                            proc::stop(&mut *stdin, &mut child).await;
+                            break;
+                        }
                     }
                 }
             }

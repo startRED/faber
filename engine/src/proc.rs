@@ -6,6 +6,58 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::process::{Child, Command};
+use tokio::time::{Duration, Instant};
+
+/// Silence starts a graceful interrupt; output can never extend the interrupt's fixed grace period.
+#[derive(Default)]
+pub(crate) struct TurnWatch {
+    silent: Option<Instant>,
+    interrupt: Option<Instant>,
+    awaiting_permission: bool,
+}
+
+impl TurnWatch {
+    pub fn begin(&mut self) {
+        self.silent = Some(Instant::now() + Duration::from_secs(120));
+        self.awaiting_permission = false;
+    }
+    pub fn activity(&mut self) {
+        if self.silent.is_some() {
+            self.silent = Some(Instant::now() + Duration::from_secs(120));
+        }
+    }
+    pub fn interrupt(&mut self) {
+        self.interrupt.get_or_insert_with(|| Instant::now() + Duration::from_secs(5));
+    }
+    pub fn finish(&mut self) {
+        self.silent = None;
+        self.interrupt = None;
+        self.awaiting_permission = false;
+    }
+    pub fn pause(&mut self) {
+        self.awaiting_permission = true;
+    }
+    pub fn resume(&mut self) {
+        self.awaiting_permission = false;
+        self.activity();
+    }
+    pub fn stopping(&self) -> bool {
+        self.interrupt.is_some()
+    }
+    pub fn active(&self) -> bool {
+        self.silent.is_some() || self.interrupt.is_some()
+    }
+    pub fn deadline(&self) -> Option<Instant> {
+        self.interrupt.or(if self.awaiting_permission { None } else { self.silent })
+    }
+}
+
+pub(crate) async fn wait_deadline(deadline: Option<Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(deadline).await,
+        None => std::future::pending().await,
+    }
+}
 
 pub struct Proc {
     pub stdin: Box<dyn AsyncWrite + Send + Unpin>,
@@ -81,9 +133,9 @@ pub(crate) async fn write_line(stdin: &mut (dyn AsyncWrite + Send + Unpin), msg:
     stdin.flush().await.map_err(|_| WriteError { torn: true })
 }
 
-/// Ends a process: closes its input, then kills it. Returns its exit code when it had one.
+/// Ends only the held child, never a looked-up PID. This is not proof that descendants died (Projects stays blocked).
 pub(crate) async fn stop(stdin: &mut (dyn AsyncWrite + Send + Unpin), child: &mut Option<Child>) {
-    let _ = stdin.shutdown().await;
+    let _ = tokio::time::timeout(Duration::from_secs(1), stdin.shutdown()).await;
     if let Some(child) = child {
         let _ = child.start_kill();
     }
@@ -96,5 +148,44 @@ pub(crate) async fn exit_code(child: &mut Option<Child>) -> String {
             Err(_) => "unknown".into(),
         },
         None => "0".into(),
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn waiting_for_permission_has_no_silence_deadline_but_stop_is_still_bounded() {
+        let mut watch = TurnWatch::default();
+        watch.begin();
+        watch.pause();
+        watch.activity();
+        assert!(watch.active());
+        assert_eq!(watch.deadline(), None);
+        watch.interrupt();
+        assert_eq!(watch.deadline(), Some(Instant::now() + Duration::from_secs(5)));
+        watch.finish();
+        watch.begin();
+        watch.pause();
+        watch.resume();
+        assert_eq!(watch.deadline(), Some(Instant::now() + Duration::from_secs(120)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn output_and_repeated_interrupts_cannot_extend_the_stop_grace() {
+        let mut watch = TurnWatch::default();
+        assert!(!watch.active());
+        watch.begin();
+        assert_eq!(watch.deadline(), Some(Instant::now() + Duration::from_secs(120)));
+        watch.interrupt();
+        let stop = watch.deadline();
+        tokio::time::advance(Duration::from_secs(4)).await;
+        watch.activity();
+        watch.interrupt();
+        assert_eq!(watch.deadline(), stop);
+        watch.finish();
+        assert!(!watch.stopping());
+        assert_eq!(watch.deadline(), None);
     }
 }

@@ -11,6 +11,52 @@ use std::sync::Arc;
 use std::time::Duration;
 use support::{Entry, drive, fake, fixture, next_permission, text_of};
 
+#[tokio::test(start_paused = true)]
+async fn an_ignored_interrupt_quarantines_only_that_thread_and_preserves_a_running_peer() {
+    let f = fake(fixture("projects", "policy-shared-stop"));
+    let opts = CodexServerOptions {
+        bin: "fake".into(),
+        cwd: ".".into(),
+        area: Area::Chat,
+        user_hooks: false,
+        windows: false,
+        spawn: f.spawn.clone(),
+    };
+    let server = CodexServer::start(opts);
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let open = |name: &'static str| {
+        let tx = tx.clone();
+        server.open(
+            CodexThread { cwd: ".".into(), model: None, effort: None, resume: None, instructions: None, user_name: None },
+            Arc::new(move |e| drop(tx.send((name, e)))),
+        )
+    };
+    let (a, b) = (open("a"), open("b"));
+    a.send(UserTurn::text("a"));
+    b.send(UserTurn::text("b"));
+    loop {
+        let event = tokio::time::timeout(Duration::from_secs(3), rx.recv())
+            .await
+            .unwrap_or_else(|_| panic!("stalled: {:?}", f.mismatches.lock().unwrap()));
+        if let Some(("b", EngineEvent::Permission { .. })) = event {
+            break;
+        }
+    }
+    a.interrupt();
+    let (name, event) = tokio::time::timeout(Duration::from_secs(10), rx.recv()).await.unwrap().unwrap();
+    assert_eq!(name, "a");
+    assert!(matches!(event, EngineEvent::Error { message, fatal:true } if message == "error.cli.stopUnconfirmed"));
+    assert!(server.is_alive(), "a thread's timeout must not kill the shared server");
+    a.send(UserTurn::text("must not dispatch"));
+    assert_eq!(b.answer("approval-b", true).await, Ok(Delivery::Delivered));
+    assert!(matches!(rx.recv().await, Some(("b", EngineEvent::Done { ok: true, .. }))));
+    assert_eq!(f.wire.lines_with("turn/start"), 2, "the quarantined thread dispatched nothing");
+    assert!(f.mismatches.lock().unwrap().is_empty(), "{:?}", f.mismatches.lock().unwrap());
+    a.close();
+    b.close();
+    server.retire();
+}
+
 async fn run(
     entries: Vec<Entry>,
     first: &str,
