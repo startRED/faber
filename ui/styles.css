@@ -102,6 +102,7 @@ input, textarea { caret-color: var(--accent); }
 .vendor:hover { background: var(--s2); color: var(--ink); }
 .vendor .share { margin-left: 2px; color: var(--ink-2); }
 .usage .note { padding: 4px 6px; }
+.who { padding: 4px 10px 0; color: var(--ink); font-size: var(--fs-ui); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .version { padding: 0 10px; font-size: calc(var(--fs-ui) - 2px); color: var(--ink-3); }
 .scrim { display: none; }
 

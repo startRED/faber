@@ -1,4 +1,4 @@
-import { createSignal, For, onCleanup, onMount, Show } from 'solid-js';
+import { createSignal, For, onCleanup, onMount } from 'solid-js';
 import themes from '../src-tauri/src/themes.json';
 import { api, type Appearance, type Look, type Motion } from './api.ts';
 import { previewer, switchTheme } from './appearance.ts';

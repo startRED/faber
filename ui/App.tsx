@@ -634,6 +634,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                 projects={state().projects}
                 vendors={state().vendors}
                 version={state().version}
+                userName={state().settings.userName}
                 place={place()}
                 running={items()}
                 quotas={quotas()}

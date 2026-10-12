@@ -24,6 +24,8 @@ interface Props {
   projects: Project[];
   vendors: Vendor[];
   version: string;
+  /** The name the person gave, shown above the connected accounts. */
+  userName?: string;
   place: Place;
   running: RunningItem[];
   quotas: Quotas;
@@ -199,6 +201,9 @@ export function Sidebar(props: Props) {
           <Icon name="sliders" />
           <span>{t('settings.open')}</span>
         </button>
+        <Show when={props.userName}>
+          <div class="who">{props.userName}</div>
+        </Show>
         <div class="usage" role="group" aria-label={t('quota.label')}>
           <For each={props.vendors}>
             {(v) => {
