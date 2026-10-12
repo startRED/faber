@@ -163,44 +163,61 @@ fn natural_motion(ctx: &mut Ctx) -> Result {
 
 fn layout_motion(ctx: &mut Ctx) -> Result {
     let mut app = large_thread(ctx)?;
-    let measured = app.page.eval(r#"new Promise(resolve => {
+    for view in ["fold", "disclosure", "composer", "welcome"] {
+        if view == "welcome" {
+            app.page.press("Control+n")?;
+            app.page.wait_visible(&css(".thread.welcome"))?;
+            pause(0.3);
+        }
+        app.page.eval(&format!("window.__reviewLayoutView = '{view}'"))?;
+        let measured = app.page.eval(r#"new Promise(resolve => {
+      const view = window.__reviewLayoutView;
+      const welcome = document.querySelector('.thread.welcome');
       const fold = document.createElement('div'); fold.className = 'fold';
       fold.innerHTML = '<div class="fold-inner"><div style="height:240px">Project rows</div></div>';
-      document.querySelector('.projects').append(fold);
       const details = document.createElement('details'); details.className = 'activity';
-      details.innerHTML = '<summary>Measured work</summary><div class="activity-body">' + '<p>Work step</p>'.repeat(200) + '</div>';
-      document.querySelector('.col').append(details);
+      details.innerHTML = '<summary>Measured work</summary><div class="activity-body"><div class="md">' + '<p>Work step</p>'.repeat(200) + '</div></div>';
       const field = document.querySelector('.composer textarea');
       const original = field.style.height;
-      const welcome = document.createElement('div'); welcome.className = 'thread welcome';
-      welcome.style.cssText = 'position:fixed;left:0;top:100px;width:900px;height:300px;pointer-events:none';
-      welcome.innerHTML = '<div class="welcome-grid">' + '<p>Greeting and resume card</p>'.repeat(10) + '</div>';
-      document.querySelector('.main').append(welcome);
+      if (view === 'fold') document.querySelector('.projects').append(fold);
+      if (view === 'disclosure') {
+        const answer = document.querySelector('.col > article.ai:last-child');
+        answer.insertBefore(details, answer.querySelector(':scope > .md'));
+        details.querySelector('summary').scrollIntoView();
+      }
       getComputedStyle(fold).gridTemplateRows;
       // Measure size transitions after fixture insertion and its separate arrival motion have settled.
       setTimeout(() => {
-      const intervals = [], costs = []; let previous;
+      const intervals = [], costs = []; let previous, animated = 0;
+      const elements = [view === 'fold' ? fold : view === 'disclosure' ? details : view === 'composer' ? field : welcome];
       const start = performance.now();
-      fold.classList.add('open'); details.querySelector('summary').click(); field.style.height = '200px'; welcome.style.paddingRight = '352px';
+      if (welcome) welcome.style.paddingRight = '352px';
+      else if (view === 'fold') fold.classList.add('open');
+      else if (view === 'disclosure') details.querySelector('summary').click();
+      else field.style.height = '200px';
       const frame = now => {
         if (previous !== undefined) intervals.push(now - previous); previous = now;
         const begin = performance.now();
-        for (const el of [fold, details, field, welcome]) el.getBoundingClientRect();
+        for (const el of elements) el.getBoundingClientRect();
         costs.push(performance.now() - begin);
+        animated = Math.max(animated, elements.filter(el => el.getAnimations().length > 0).length);
         if (now - start < 280) requestAnimationFrame(frame);
-        else { fold.remove(); details.remove(); welcome.remove(); field.style.height = original;
+        else { fold.remove(); details.remove(); if (welcome) welcome.style.removeProperty('padding-right'); field.style.height = original;
           intervals.sort((a,b) => a-b); costs.sort((a,b) => a-b);
-          resolve({frames: intervals.length, p95: intervals[Math.floor(intervals.length*.95)], layout: costs[Math.floor(costs.length*.95)]}); }
+          resolve({frames: intervals.length, animated, expected: elements.length, p95: intervals[Math.floor(intervals.length*.95)], layout: costs[Math.floor(costs.length*.95)]}); }
       };
       requestAnimationFrame(frame);
       }, 300);
     })"#)?;
-    ctx.notes.push(format!(
-        "layout motion: {} frames, p95 interval {} ms, p95 layout read {} ms",
-        measured["frames"], measured["p95"], measured["layout"]
-    ));
-    ensure(measured["frames"].as_u64().unwrap_or(0) >= 12, || format!("not enough frames: {measured}"))?;
-    ensure(measured["p95"].as_f64().unwrap_or(f64::MAX) < 25.0 && measured["layout"].as_f64().unwrap_or(f64::MAX) < 8.0, || {
-        format!("layout animations exceed the frame budget: {measured}")
-    })
+        ctx.notes.push(format!(
+            "{view} layout motion: {} frames, p95 interval {} ms, p95 layout read {} ms",
+            measured["frames"], measured["p95"], measured["layout"]
+        ));
+        ensure(measured["animated"] == measured["expected"], || format!("the size transitions did not run: {measured}"))?;
+        ensure(measured["frames"].as_u64().unwrap_or(0) >= 12, || format!("not enough frames: {measured}"))?;
+        ensure(measured["p95"].as_f64().unwrap_or(f64::MAX) < 25.0 && measured["layout"].as_f64().unwrap_or(f64::MAX) < 8.0, || {
+            format!("layout animations exceed the frame budget: {measured}")
+        })?;
+    }
+    Ok(())
 }

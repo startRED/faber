@@ -49,12 +49,13 @@ check('effort: only a manual model shows low, medium and high; medium is the def
   }
 });
 
-check('effort: conversation choices restore independently, including a pending choice, and a new chat starts in Auto', async () => {
+check('effort: choices restore independently; review 8: successful deletion removes only that conversation choice', async () => {
   const language = lang();
   const keys = ['faber.place', 'faber.choice.effort-one', 'faber.choice.effort-two'];
   const stored = keys.map((key) => localStorage.getItem(key));
   const originalOpen = api.open;
   const originalClock = api.setClock;
+  const originalRemove = api.remove;
   const conversations: Conversation[] = ['effort-one', 'effort-two'].map((id) => ({
     id, title: id, area: 'chat', sessions: {}, createdAt: 0, updatedAt: 0,
     choice: id === 'effort-one' ? { vendor: 'claude', model: 'haiku', effort: 'high' } : { vendor: 'auto' },
@@ -100,9 +101,34 @@ check('effort: conversation choices restore independently, including a pending c
         root.remove();
       }
     }
+    localStorage.setItem('faber.place', JSON.stringify({ area: 'chat', id: 'effort-one' }));
+    localStorage.setItem('faber.choice.effort-two', JSON.stringify({ vendor: 'auto' }));
+    let complete!: () => void;
+    api.remove = () => new Promise<void>((resolve) => { complete = resolve; });
+    const root = document.createElement('div');
+    root.style.cssText = 'position:fixed;inset:0';
+    root.dataset.motion = 'none';
+    document.body.append(root);
+    const dispose = render(() => createComponent(App, { initial, inbox: { take: () => {} } }), root);
+    try {
+      await settle();
+      const button = root.querySelector<HTMLButtonElement>('.crow .x')!;
+      button.click();
+      button.click();
+      await settle();
+      ok(localStorage.getItem('faber.choice.effort-one'), 'a pending deletion keeps the saved choice');
+      complete();
+      await settle();
+      equal(localStorage.getItem('faber.choice.effort-one'), null, 'review 8: successful deletion removes its saved choice');
+      ok(localStorage.getItem('faber.choice.effort-two'), 'another conversation keeps its choice');
+    } finally {
+      dispose();
+      root.remove();
+    }
   } finally {
     api.open = originalOpen;
     api.setClock = originalClock;
+    api.remove = originalRemove;
     useLanguage(language);
     keys.forEach((key, i) => { if (stored[i] === null) localStorage.removeItem(key); else localStorage.setItem(key, stored[i]!); });
   }

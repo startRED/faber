@@ -473,6 +473,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   };
   const remove = async (id: string) => {
     await api.remove(id);
+    try { localStorage.removeItem(`faber.choice.${id}`); } catch { /* Storage can be unavailable. */ }
     if (opening.id === id) void fresh(place());
   };
 

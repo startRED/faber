@@ -167,6 +167,8 @@ fn opens_at_usage(ctx: &mut Ctx) -> Result {
     eventually("the quota after a reload", Duration::from_secs(25), || {
         page.eval("document.querySelector('.usage .share')?.textContent === '47%'").is_ok_and(|v| v == true)
     })?;
+    // DOM readiness can precede the new document's native pointer hit-test frame.
+    page.eval("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")?;
     open_settings(page)?;
     open_section(page, "set.usage")?;
     page.wait_for("the same figures", &format!("({shares}) === '7% 47%'"))

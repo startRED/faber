@@ -9,10 +9,10 @@ Reproductions run in Faber's hidden Windows test build; no real CLI, account fil
 | 2 | Real. A large thread with 8,855 elements reached 602 MB during repeated column toggles. The whole-stage clone is removed; offscreen messages and markdown blocks use native content visibility. The repeated-toggle screen check measures total process-tree memory, bounds remaining exit copies, and checks cleanup. A native keyboard check reproduced clipped action/link focus rings at paint-containment edges; inset outlines preserve them. |
 | 3 | False. Real keyboard collapse keeps focus on the section header; searching keeps focus in search. The reported focused-child collapse cannot be triggered by those keyboard paths. `review 3` covers both. |
 | 4 | False for the reported caret/scroll regression. `review 4/13` types through an active height transition, then edits in a capped scrolled textarea; caret and scroll remain stable. |
-| 5 | False as a blanket prohibition. A hidden screen probe measures simultaneous fold, welcome padding, composer and disclosure size transitions: frame p95 about 17 ms and geometry reads below 2 ms on the large-thread fixture. These short measured size transitions remain. |
+| 5 | False as a blanket jank claim. A hidden screen probe measures each fold, composer and disclosure size transition on the large thread, then welcome padding on the actual new-conversation view. It requires every transition to run, frame p95 below 25 ms and geometry reads below 8 ms. These short measured size transitions remain. The visible disclosure uses its actual position above the final answer and its answer-article containment; greeting and thread are tested separately because they are mutually exclusive app views. |
 | 6 | Real. `review 6` failed on missing `role=status`. The current activity is now a polite atomic live region; only the answer text has `aria-busy`. |
 | 7 | Real. `review 7` copied only “All done.” instead of the explanation and code. Copy now writes the complete original message. |
-| 8 | Real. Successful conversation deletion retained its saved model/effort choice. The deletion check also requires retaining it while deletion is pending and preserving another conversation's choice. |
+| 8 | Real. Successful conversation deletion retained its saved model/effort choice; the reproduction failed on the orphaned key. It is now removed only after successful engine deletion. The check also requires retaining it while deletion is pending and preserving another conversation's choice. |
 | 9 | False. Motion preference and viewport guards run before copying; preference changes cancel animations and clean up. `review 9` verifies resize, reduced and disabled motion leave no ghosts. |
 | 10 | False for the claimed leak and scroll thrashing. The original message listeners were bounded and removed on disposal; ancestor scrolling does not dispatch to descendant articles. The check verifies repeated mount/disposal and resize/scroll reads. Redundant article observers were removed to keep offscreen rendering cheap for finding 2. |
 | 11 | Real. A link could acquire focus during the disclosure's closing animation and become hidden at completion. The reproduction failed before the fix; closing now returns that focus to its summary. |
@@ -30,6 +30,15 @@ at least 120 ms of intermediate widths, unchanged visible glyph widths and 8.4 m
 The running column no longer blurs during travel; its and the main stage's expensive shadow/rounded clipping return
 at rest. Retained size transitions measured 16.6 ms p95 frame intervals and 0.1 ms p95 geometry reads after the test
 fixture's separate arrival settled. All seven required proofs passed before the motion commit: 593 checks, no failures or skips.
+
+After the disk-space interruption, proofs use `CARGO_PROFILE_DEV_DEBUG=line-tables-only` and
+`CARGO_PROFILE_TEST_DEBUG=line-tables-only`. Screen checks now wait for the new document's pointer hit-test frame after
+reload and for the answer body to render before reading `innerText`; all original content assertions remain.
+The corrected size probe measures each size transition separately: 4.3–8.4 ms p95 frame intervals and at most 1.1 ms
+p95 geometry reads in the focused run. The earlier combined fixture stacked greeting and thread and placed activity
+below the answer, so it did not represent the app's views or disclosure position.
+The final recovery run passed all seven required proofs: 593 checks, no failures or skips. It measured 228.8 MB peak
+on the sixty-toggle fixture, 8.5–12.5 ms column frame p95, and 4.3–12.6 ms isolated size-transition frame p95.
 
 Engine files changed for answer boundaries: `engine/src/events.rs`, `engine/src/claude.rs`, `engine/src/codex.rs`,
 `engine/src/model.rs`, `engine/src/engine.rs`, `engine/src/engine/answer.rs` and `engine/tests/engine.rs`.

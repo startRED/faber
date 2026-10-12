@@ -183,6 +183,7 @@ fn streams_an_answer(ctx: &mut Ctx) -> Result {
     ask(page, QUESTION)?;
     let answer = page.named("article", "answer.label")?;
     page.wait_visible(&answer.clone().css(".actions"))?;
+    page.wait_for("the completed answer text to render", "(() => { const answer = document.querySelector('article.ai'); return answer?.checkVisibility({ contentVisibilityAuto: true }) && answer.querySelector('.md')?.innerText.trim().length > 0; })()")?;
     let text = page.inner_text(&answer)?;
     ensure(text.contains("Rayleigh"), || format!("the answer should explain the sky: {text}"))?;
     ensure(text.contains("Haiku 5.5"), || format!("the answer should name its model: {text}"))?;
