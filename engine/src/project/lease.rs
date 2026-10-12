@@ -98,10 +98,14 @@ pub fn hash(bytes: &[u8]) -> String {
 }
 fn file_hash(path: &Path) -> Result<String, LeaseError> {
     let mut file = File::open(path).map_err(|_| Fault::Read)?;
+    hash_reader(&mut file)
+}
+
+pub(crate) fn hash_reader(reader: &mut impl Read) -> Result<String, LeaseError> {
     let mut digest = Sha256::new();
     let mut buffer = [0; 65536];
     loop {
-        let read = file.read(&mut buffer).map_err(|_| Fault::Read)?;
+        let read = reader.read(&mut buffer).map_err(|_| Fault::Read)?;
         if read == 0 {
             break;
         }

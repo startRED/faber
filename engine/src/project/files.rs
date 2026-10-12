@@ -100,7 +100,7 @@ impl ScopedFile {
         }
     }
 
-    pub(crate) fn read(&self) -> Result<Option<(Vec<u8>, Permissions)>, LeaseError> {
+    fn checked(&self) -> Result<Option<File>, LeaseError> {
         let file = match self.open() {
             Ok(file) => file,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -114,15 +114,32 @@ impl ScopedFile {
                 return Err(LeaseError::Path);
             }
         }
-        if !metadata.is_file() || metadata.len() > super::wire::MAX_TEXT as u64 {
+        if !metadata.is_file() {
+            return Err(LeaseError::Path);
+        }
+        Ok(Some(file))
+    }
+
+    pub(crate) fn read(&self) -> Result<Option<(Vec<u8>, Permissions)>, LeaseError> {
+        self.read_limited(super::wire::MAX_TEXT as u64)
+    }
+
+    pub(crate) fn read_limited(&self, limit: u64) -> Result<Option<(Vec<u8>, Permissions)>, LeaseError> {
+        let Some(file) = self.checked()? else { return Ok(None) };
+        let metadata = file.metadata().map_err(|_| Fault::Read)?;
+        if metadata.len() > limit {
             return Err(LeaseError::Path);
         }
         let mut bytes = vec![];
-        file.take(super::wire::MAX_TEXT as u64 + 1).read_to_end(&mut bytes).map_err(|_| Fault::Read)?;
-        if bytes.len() > super::wire::MAX_TEXT {
+        file.take(limit.saturating_add(1)).read_to_end(&mut bytes).map_err(|_| Fault::Read)?;
+        if bytes.len() as u64 > limit {
             return Err(LeaseError::Path);
         }
         Ok(Some((bytes, metadata.permissions())))
+    }
+
+    pub(crate) fn hash(&self) -> Result<Option<String>, LeaseError> {
+        self.checked()?.map(|mut file| super::lease::hash_reader(&mut file)).transpose()
     }
 
     pub(crate) fn write(&self, bytes: &[u8], permissions: Option<Permissions>) -> Result<(), LeaseError> {
