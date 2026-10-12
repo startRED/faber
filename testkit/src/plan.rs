@@ -25,13 +25,15 @@ impl Suite {
     }
 }
 
-/// Half the logical cores, never fewer than one, so the PC stays usable while the tests run.
-pub fn half_cores(logical: usize) -> usize {
-    (logical / 2).max(1)
+/// Half the logical cores, bounded by a positive Cargo job limit, never fewer than one.
+pub fn job_count(logical: usize, cargo_limit: Option<&str>) -> usize {
+    let half = (logical / 2).max(1);
+    let limit = cargo_limit.and_then(|value| value.parse::<usize>().ok()).filter(|n| *n > 0);
+    half.min(limit.unwrap_or(half))
 }
 
 pub fn jobs() -> usize {
-    half_cores(std::thread::available_parallelism().map_or(1, |n| n.get()))
+    job_count(std::thread::available_parallelism().map_or(1, |n| n.get()), std::env::var("CARGO_BUILD_JOBS").ok().as_deref())
 }
 
 /// The suites that cover a set of changed paths (relative to the repository, `/` separators).
@@ -117,11 +119,16 @@ mod tests {
 
     #[test]
     fn half_the_cores_and_never_fewer_than_one() {
-        assert_eq!(half_cores(16), 8);
-        assert_eq!(half_cores(5), 2);
-        assert_eq!(half_cores(2), 1);
-        assert_eq!(half_cores(1), 1);
-        assert_eq!(half_cores(0), 1);
+        assert_eq!(job_count(16, None), 8);
+        assert_eq!(job_count(5, None), 2);
+        assert_eq!(job_count(2, None), 1);
+        assert_eq!(job_count(1, None), 1);
+        assert_eq!(job_count(0, None), 1);
+        assert_eq!(job_count(16, Some("4")), 4);
+        assert_eq!(job_count(16, Some("1")), 1);
+        assert_eq!(job_count(2, Some("4")), 1);
+        assert_eq!(job_count(16, Some("0")), 8);
+        assert_eq!(job_count(16, Some("invalid")), 8);
     }
 
     #[test]

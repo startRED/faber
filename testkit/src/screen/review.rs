@@ -13,7 +13,7 @@ pub fn scenarios() -> Vec<Scenario> {
     ]
 }
 
-fn large_thread(ctx: &mut Ctx) -> Result<Opened> {
+fn large_thread(ctx: &mut Ctx, software_rendering: bool) -> Result<Opened> {
     start_settings(ctx, "en")?;
     let id = "5f1c0000-0000-4000-8000-000000000002";
     let block = "A **complete answer** with explanatory prose, a list and code.\n\n- First result\n- Second result\n\n```js\nconst result = 42;\nconsole.log(result);\n```\n\n";
@@ -32,7 +32,9 @@ fn large_thread(ctx: &mut Ctx) -> Result<Opened> {
         .to_string(),
     )
     .map_err(|e| e.to_string())?;
-    let mut app = ctx.launch(claude_chat(ctx))?;
+    let mut launch = claude_chat(ctx);
+    launch.software_rendering = software_rendering;
+    let mut app = ctx.launch(launch)?;
     // Hosted desktops can be narrower than the docked-column breakpoint.
     app.page
         .cdp
@@ -51,7 +53,7 @@ fn large_thread(ctx: &mut Ctx) -> Result<Opened> {
 }
 
 fn peak_memory(ctx: &mut Ctx) -> Result {
-    let mut app = large_thread(ctx)?;
+    let mut app = large_thread(ctx, false)?;
     let (before, _) = ctx.memory_mb(app.id)?;
     app.page.eval(
         r#"(() => {
@@ -89,7 +91,7 @@ fn peak_memory(ctx: &mut Ctx) -> Result {
 }
 
 fn focus_ring(ctx: &mut Ctx) -> Result {
-    let mut app = large_thread(ctx)?;
+    let mut app = large_thread(ctx, false)?;
     app.page.press("Tab")?;
     let measured = app.page.eval(r#"(() => {
       const article = document.querySelector('.col > article.ai:last-child');
@@ -111,7 +113,7 @@ fn focus_ring(ctx: &mut Ctx) -> Result {
 }
 
 fn natural_motion(ctx: &mut Ctx) -> Result {
-    let mut app = large_thread(ctx)?;
+    let mut app = large_thread(ctx, false)?;
     app.page.eval(
         "document.querySelector('.run-btn').getAttribute('aria-expanded') === 'true' && document.querySelector('.run-btn').click()",
     )?;
@@ -166,7 +168,7 @@ fn natural_motion(ctx: &mut Ctx) -> Result {
 }
 
 fn layout_motion(ctx: &mut Ctx) -> Result {
-    let mut app = large_thread(ctx)?;
+    let mut app = large_thread(ctx, true)?;
     for view in ["fold", "disclosure", "composer", "welcome"] {
         if view == "welcome" {
             app.page.press("Control+n")?;
@@ -220,7 +222,7 @@ fn layout_motion(ctx: &mut Ctx) -> Result {
       for (let i = 0; i < 5; i++) await measure(true, i);
       fold.remove(); details.remove(); if (welcome) welcome.style.removeProperty('padding-right'); field.style.height = original;
       const p95 = values => [...values].sort((a,b) => a-b)[Math.floor(values.length*.95)];
-      resolve({frames: intervals.length, animated: Math.min(...animated), expected: elements.length,
+      resolve({view, frames: intervals.length, animated: Math.min(...animated), expected: elements.length,
         p95: p95(intervals), layout: p95(costs), idle: p95(idle), worst: Math.max(...intervals), idleWorst: Math.max(...idle)});
       }, 300);
     })"#)?;

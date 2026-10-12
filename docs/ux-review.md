@@ -64,3 +64,17 @@ Size-motion checks aggregate five fixed transitions and an equal idle baseline. 
 geometry-read p95 budgets, require all five transitions to run, and report worst intervals rather than retrying outliers.
 After these corrections all seven proofs and the separate `cargo t --all` passed, each with 655 checks and no failures
 or skips. The corrected tree peaked at 227.2 MB across the complete runs; the final full run measured 216.8 MB.
+
+The subsequent Windows CI failure was real welcome-view raster work, not a frame-count indexing error. A hidden
+software-rendering replay reproduced 26.2 ms motion p95 with 0.8 ms geometry reads; pausing the ambient animations
+restored fast cadence. Eightfold main-thread CPU throttling with hardware rendering did not reproduce it.
+The glow now fades its composed outer layer after masking and blur, with opacity promotion only in full motion.
+This preserves the picture while avoiding per-frame beam rasterization; hidden-window and reduced-motion rules still
+stop it. The same software replay measured 18.1 ms motion p95 and 0.6 ms geometry reads after the change.
+The layout benchmark now requests software rendering through an isolated test-only launch switch, so a fast local GPU
+cannot hide this regression. Its 60-frame minimum and 25/8 ms budgets, five cycles and timeouts are unchanged.
+Local validation also exposed that the runner's explicit job count overrode `CARGO_BUILD_JOBS=4`. It now caps its
+half-core policy at a positive Cargo job limit; checks cover the cap, one core, and absent or invalid limits.
+After cache repair and the job cap, all seven proofs and the separate `cargo t --all` passed with 655 checks, no
+failures or skips. The final software welcome probe measured 15.9 ms motion p95 and 0.5 ms geometry reads.
+Across glow-fix validation the highest measured thread stress peak was 215.6 MB; the final full run peaked at 201.6 MB.
