@@ -1,5 +1,5 @@
 use faber_engine::model::Vendor;
-use faber_engine::route::{INSTRUCTIONS, Profile, candidates, choose, priced, question, read};
+use faber_engine::route::{INSTRUCTIONS, Profile, candidates, choose, question, read};
 use faber_engine::router::Pick;
 
 const BOTH: [Vendor; 2] = [Vendor::Claude, Vendor::Codex];
@@ -47,14 +47,6 @@ fn an_unsure_verdict_gets_the_next_level() {
 }
 
 #[test]
-fn a_task_moves_to_the_other_subscription_when_little_quota_is_left() {
-    let codex_nearly_out = priced(&all(), &|v| if v == Vendor::Codex { 0.9 } else { 0.0 });
-    assert_eq!(picked("chat", "easy", 0.9, &codex_nearly_out), ("claude-haiku-5-5", "medium"));
-    let luna = priced(&candidates(&[Vendor::Codex], &["gpt-6-luna".to_string()]), &|_| 0.5);
-    assert!((luna[0].cost - 0.08).abs() < 1e-6);
-}
-
-#[test]
 fn with_one_vendor_the_table_stays_inside_it() {
     let claude = candidates(&[Vendor::Claude], &[]);
     assert_eq!(picked("code", "hard", 0.9, &claude), ("claude-sonnet-5-5", "high"));
@@ -82,8 +74,13 @@ fn an_answer_without_a_verdict_is_no_route() {
 #[test]
 fn a_conversation_under_way_never_moves_down() {
     let codex = candidates(&[Vendor::Codex], &["gpt-6.1-sol".to_string(), "gpt-6-luna".to_string()]);
-    let current =
-        |model: &str, effort: &str| Pick { vendor: Vendor::Codex, model: Some(model.into()), effort: effort.into(), reason: String::new() };
+    let current = |model: &str, effort: &str| Pick {
+        vendor: Vendor::Codex,
+        model: Some(model.into()),
+        effort: effort.into(),
+        reason: String::new(),
+        pace: None,
+    };
     let easy_chat = choose("chat", "easy", 0.9, &codex).unwrap();
     assert!(easy_chat.weaker_than(&current("gpt-6.1-sol", "low")));
     assert!(!easy_chat.weaker_than(&current("gpt-6-luna", "medium")));

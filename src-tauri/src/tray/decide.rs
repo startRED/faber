@@ -1,7 +1,7 @@
 //! What the tray says and when it notifies: plain functions of the running list, the window's focus and the words the
 //! screen sent. Nothing here touches Tauri, so all of it is tested without a tray.
 
-use faber_engine::model::{RunState, RunningItem};
+use faber_engine::model::{RunState, RunningItem, Settings};
 use serde::Deserialize;
 use std::collections::HashSet;
 
@@ -80,6 +80,58 @@ pub(super) fn tooltip(texts: &ShellTexts, c: Counts) -> String {
 /// alone repeat (Codex numbers them from 0 in each server).
 type Question = (String, String, String);
 
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct Delivery {
+    pub(super) toast: bool,
+    pub(super) sound: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Attention {
+    Normal,
+    #[cfg(any(windows, test))]
+    SoundOnly,
+    Silent,
+}
+
+/// Windows enum values are pinned below against shellapi.h. Unknown states never permit a toast.
+#[cfg(any(windows, test))]
+pub(super) fn windows_attention(state: Option<i32>, full_screen: bool) -> Attention {
+    match state {
+        Some(1 | 6) => Attention::Silent, // QUNS_NOT_PRESENT, QUNS_QUIET_TIME (initial login/upgrade, not DND).
+        Some(5) if !full_screen => Attention::Normal, // QUNS_ACCEPTS_NOTIFICATIONS.
+        _ => Attention::SoundOnly,
+    }
+}
+
+#[cfg(any(windows, test))]
+#[derive(Clone, Copy, Default)]
+#[repr(C)]
+pub(super) struct Rect {
+    pub(super) left: i32,
+    pub(super) top: i32,
+    pub(super) right: i32,
+    pub(super) bottom: i32,
+}
+
+#[cfg(any(windows, test))]
+pub(super) fn covers_monitor(window: Rect, monitor: Rect) -> bool {
+    monitor.left < monitor.right
+        && monitor.top < monitor.bottom
+        && window.left <= monitor.left
+        && window.top <= monitor.top
+        && window.right >= monitor.right
+        && window.bottom >= monitor.bottom
+}
+
+pub(super) fn delivery(focused: bool, attention: Attention, settings: &Settings) -> Delivery {
+    let active = !focused && attention != Attention::Silent;
+    Delivery {
+        toast: active && attention == Attention::Normal && settings.notifications != Some(false),
+        sound: active && settings.notification_sound != Some(false),
+    }
+}
+
 /// What the tray remembers between lists, to ignore old ones and to notify once per question.
 #[derive(Default)]
 pub(super) struct Watch {
@@ -140,6 +192,101 @@ mod tests {
     use faber_engine::model::{Area, Permission};
     use serde_json::json;
 
+    #[test]
+    fn a_store_app_does_not_allow_a_toast() {
+        assert_eq!(windows_attention(Some(7), false), Attention::SoundOnly);
+    }
+
+    #[test]
+    fn locked_and_quiet_states_are_silent() {
+        for state in [1, 6] {
+            assert_eq!(
+                delivery(false, windows_attention(Some(state), false), &Settings::default()),
+                Delivery { toast: false, sound: false }
+            );
+        }
+    }
+
+    #[test]
+    fn sound_only_alerts_work_with_notifications_disabled() {
+        let settings = Settings { notifications: Some(false), ..Settings::default() };
+        assert_eq!(delivery(false, Attention::SoundOnly, &settings), Delivery { toast: false, sound: true });
+    }
+
+    #[test]
+    fn focused_full_screen_and_normal_delivery_respect_both_switches() {
+        // (attention, toast switch, sound switch, expected toast, expected chime).
+        use Attention::{Normal, Silent, SoundOnly};
+        for (attention, notifications, notification_sound, toast, chime) in [
+            (Normal, true, true, true, true),
+            (Normal, true, false, true, false),
+            (Normal, false, true, false, true),
+            (Normal, false, false, false, false),
+            (SoundOnly, true, true, false, true),
+            (SoundOnly, true, false, false, false),
+            (SoundOnly, false, true, false, true),
+            (SoundOnly, false, false, false, false),
+            (Silent, true, true, false, false),
+            (Silent, true, false, false, false),
+            (Silent, false, true, false, false),
+            (Silent, false, false, false, false),
+        ] {
+            let settings =
+                Settings { notifications: Some(notifications), notification_sound: Some(notification_sound), ..Settings::default() };
+            assert_eq!(delivery(false, attention, &settings), Delivery { toast, sound: chime });
+            assert_eq!(delivery(true, attention, &settings), Delivery { toast: false, sound: false });
+        }
+        let legacy: Settings = serde_json::from_value(json!({ "language": "en" })).unwrap();
+        assert_eq!(delivery(false, Normal, &legacy), Delivery { toast: true, sound: true });
+        assert_eq!(delivery(false, SoundOnly, &legacy), Delivery { toast: false, sound: true });
+        assert_eq!(delivery(true, Normal, &legacy), Delivery { toast: false, sound: false });
+    }
+
+    #[test]
+    fn windows_enum_values_allow_only_accepts_notifications_and_respect_quiet_time() {
+        use Attention::{Normal, Silent, SoundOnly};
+        for (state, expected) in [(1, Silent), (2, SoundOnly), (3, SoundOnly), (4, SoundOnly), (5, Normal), (6, Silent), (7, SoundOnly)] {
+            assert_eq!(windows_attention(Some(state), false), expected, "shellapi.h state {state}");
+        }
+        for state in [None, Some(0), Some(-1), Some(8)] {
+            assert_eq!(windows_attention(state, false), SoundOnly, "failed or unknown query {state:?}");
+        }
+        assert_eq!(windows_attention(Some(5), true), SoundOnly, "foreground borderless full screen overrides normal");
+        assert_eq!(windows_attention(Some(1), true), Silent, "full screen does not override locking");
+        assert_eq!(windows_attention(Some(6), true), Silent, "full screen does not override quiet time");
+    }
+
+    #[test]
+    fn full_screen_geometry_uses_the_whole_monitor_and_handles_negative_origins() {
+        let monitor = Rect { left: -2560, top: -1440, right: 0, bottom: 0 };
+        assert!(covers_monitor(monitor, monitor), "borderless on another monitor");
+        assert!(covers_monitor(Rect { left: -2568, top: -1448, right: 8, bottom: 8 }, monitor), "invisible resize borders");
+        assert!(!covers_monitor(Rect { bottom: -48, ..monitor }, monitor), "maximized with a visible taskbar");
+        assert!(!covers_monitor(Rect { left: -2559, ..monitor }, monitor), "one edge falls short");
+        assert!(!covers_monitor(Rect { left: 0, top: 0, right: 2560, bottom: 1440 }, monitor), "same size on the wrong monitor");
+        assert!(!covers_monitor(Rect::default(), monitor));
+        assert!(!covers_monitor(monitor, Rect::default()), "invalid monitor bounds");
+    }
+
+    #[test]
+    fn a_question_tool_notifies_once_but_finished_work_never_notifies() {
+        let mut watch = Watch::default();
+        let events = faber_engine::claude::parse_claude_message(&json!({
+            "type": "control_request", "request_id": "ask-1",
+            "request": { "subtype": "can_use_tool", "tool_name": "AskUserQuestion", "input": { "questions": [] } }
+        }));
+        let [faber_engine::events::EngineEvent::Permission { request_id, tool, input }] = events.as_slice() else {
+            panic!("a user question must reach permissions")
+        };
+        let mut asking = item("a", "t1", "Choose a direction", &[]);
+        asking.state = RunState::NeedsYou;
+        asking.permissions = vec![Permission { request_id: request_id.clone(), tool: tool.clone(), input: input.clone() }];
+        assert_eq!(watch.take(1, &[asking.clone()], false).unwrap().notices, ["Choose a direction"]);
+        assert!(watch.take(2, &[asking], false).unwrap().notices.is_empty());
+        assert!(watch.take(3, &[item("a", "t1", "Working", &[])], false).unwrap().notices.is_empty());
+        assert!(watch.take(4, &[], false).unwrap().notices.is_empty(), "finishing work is not an attention request");
+    }
+
     fn item(conversation: &str, turn: &str, title: &str, requests: &[&str]) -> RunningItem {
         RunningItem {
             conversation_id: conversation.into(),
@@ -151,6 +298,7 @@ mod tests {
             model: None,
             state: if requests.is_empty() { RunState::Working } else { RunState::NeedsYou },
             since: 0,
+            wait_until: None,
             permissions: requests.iter().map(|r| Permission { request_id: (*r).into(), tool: "Write".into(), input: json!({}) }).collect(),
         }
     }
