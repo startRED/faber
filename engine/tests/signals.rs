@@ -1,0 +1,61 @@
+use faber_engine::budget::{Billing, Reach};
+use faber_engine::signals::{Signals, claude_plan, claude_signals, codex_account, codex_signals};
+use serde_json::json;
+
+#[test]
+fn a_claude_event_with_room_clears_and_says_extra_usage_is_off() {
+    // The shape of tests/fixtures/claude/chat.jsonl.
+    let msg = json!({"type": "rate_limit_event", "rate_limit_info": {"status": "allowed", "resetsAt": 1791627000, "rateLimitType": "five_hour",
+        "overageStatus": "rejected", "overageDisabledReason": "org_level_disabled", "isUsingOverage": false}});
+    assert_eq!(
+        claude_signals(&msg),
+        Signals { reach: Some(Reach::Clear), overage_active: Some(false), paid_fallback: Some(false), ..Signals::default() }
+    );
+}
+
+#[test]
+fn a_claude_event_that_blocks_a_vendor_wide_window_is_out_until_its_reset() {
+    let msg = json!({"rate_limit_info": {"status": "rejected", "resetsAt": 1791878400, "rateLimitType": "seven_day", "overageStatus": "allowed", "isUsingOverage": true}});
+    let s = claude_signals(&msg);
+    assert_eq!(s.reach, Some(Reach::Out(Some(1791878400.0))));
+    assert_eq!((s.overage_active, s.paid_fallback), (Some(true), Some(true)));
+}
+
+#[test]
+fn a_family_window_status_does_not_block_the_vendor() {
+    let msg = json!({"rate_limit_info": {"status": "rejected", "resetsAt": 1, "rateLimitType": "seven_day_opus"}});
+    assert_eq!(claude_signals(&msg).reach, None);
+}
+
+#[test]
+fn a_codex_rate_limit_update_gives_plan_credits_and_reach() {
+    // The shape of tests/fixtures/codex/chat.jsonl.
+    let msg = json!({"method": "account/rateLimits/updated", "params": {"rateLimits": {"primary": {"usedPercent": 47, "windowDurationMins": 10080, "resetsAt": 1791967370},
+        "secondary": null, "credits": {"hasCredits": false, "unlimited": false, "balance": "0"}, "spendControlReached": null, "planType": "pro", "rateLimitReachedType": null}}});
+    assert_eq!(
+        codex_signals(&msg),
+        Signals { reach: Some(Reach::Clear), paid_fallback: Some(false), plan: Some("pro".into()), ..Signals::default() }
+    );
+    let out = json!({"params": {"rateLimits": {"primary": {"resetsAt": 100}, "secondary": {"resetsAt": 900}, "rateLimitReachedType": "primary", "credits": {"hasCredits": true}}}});
+    let s = codex_signals(&out);
+    assert_eq!(s.reach, Some(Reach::Out(Some(900.0))));
+    assert_eq!(s.paid_fallback, Some(true));
+}
+
+#[test]
+fn the_codex_sign_in_mode_decides_the_billing() {
+    let chatgpt = json!({"method": "account/updated", "params": {"authMode": "chatgpt", "planType": "pro"}});
+    assert_eq!(codex_account(&chatgpt), Signals { plan: Some("pro".into()), billing: Some(Billing::Subscription), ..Signals::default() });
+    let key = json!({"params": {"authMode": "apikey"}});
+    assert_eq!(codex_account(&key).billing, Some(Billing::UsageBilled));
+}
+
+#[test]
+fn claude_auth_status_gives_the_plan_and_drops_the_rest() {
+    let s = claude_plan(r#"{"loggedIn": true, "email": "someone@example.com", "subscriptionType": "max"}"#);
+    assert_eq!(s, Signals { plan: Some("max".into()), billing: Some(Billing::Subscription), ..Signals::default() });
+    let key = claude_plan(r#"{"loggedIn": true, "authMethod": "api_key"}"#);
+    assert_eq!((key.plan, key.billing), (None, Some(Billing::UsageBilled)));
+    assert_eq!(claude_plan("not json"), Signals::default());
+    assert_eq!(claude_plan(r#"{"loggedIn": true}"#), Signals::default(), "the field is missing: ask the user");
+}

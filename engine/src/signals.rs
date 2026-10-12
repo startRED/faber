@@ -1,0 +1,70 @@
+//! What a CLI says about the account besides window readings, reduced to the few facts the router needs. Everything else in
+//! those messages is dropped unread.
+
+use crate::budget::{Billing, Reach, vendor_wide};
+use serde_json::Value;
+
+/// What a CLI said about the account besides window readings. Each field is `Some` only when the message says something about
+/// it; the engine merges them into what it knows.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Signals {
+    pub reach: Option<Reach>,
+    pub overage_active: Option<bool>,
+    pub paid_fallback: Option<bool>,
+    pub plan: Option<String>,
+    pub billing: Option<Billing>,
+}
+
+/// Claude Code's `rate_limit_event`. A status other than `allowed` counts only when it is about a vendor-wide window; the
+/// extra-usage switch is "possible" unless the CLI says it is rejected or off.
+pub fn claude_signals(msg: &Value) -> Signals {
+    let info = &msg["rate_limit_info"];
+    let wide = info["rateLimitType"].as_str().is_some_and(vendor_wide);
+    let status = info["status"].as_str().unwrap_or_default();
+    let reach = (wide && !status.is_empty())
+        .then(|| if status.starts_with("allowed") { Reach::Clear } else { Reach::Out(info["resetsAt"].as_f64()) });
+    Signals {
+        reach,
+        overage_active: info["isUsingOverage"].as_bool(),
+        paid_fallback: info["overageStatus"].as_str().map(|s| !matches!(s, "rejected" | "disabled" | "off" | "none")),
+        ..Signals::default()
+    }
+}
+
+/// Codex's `account/rateLimits/updated`: the plan, credits, and whether a limit was reached.
+pub fn codex_signals(msg: &Value) -> Signals {
+    let r = &msg["params"]["rateLimits"];
+    let reset = [&r["primary"]["resetsAt"], &r["secondary"]["resetsAt"]].into_iter().filter_map(Value::as_f64).reduce(f64::max);
+    let reached = !r["rateLimitReachedType"].is_null() || r["spendControlReached"] == true;
+    Signals {
+        reach: Some(if reached { Reach::Out(reset) } else { Reach::Clear }),
+        paid_fallback: Some(r["credits"]["hasCredits"] == true || r["credits"]["unlimited"] == true),
+        plan: r["planType"].as_str().map(String::from),
+        ..Signals::default()
+    }
+}
+
+/// Codex's `account/updated`: how the account signs in and its plan. The mode names are not credentials; nothing else in
+/// the message is kept.
+pub fn codex_account(msg: &Value) -> Signals {
+    let p = &msg["params"];
+    let billing =
+        p["authMode"].as_str().map(|m| if m.to_ascii_lowercase().contains("api") { Billing::UsageBilled } else { Billing::Subscription });
+    Signals { plan: p["planType"].as_str().map(String::from), billing, ..Signals::default() }
+}
+
+/// What `claude auth status` printed, reduced to the plan and the billing: everything else in the output is dropped
+/// unread.
+pub fn claude_plan(output: &str) -> Signals {
+    let v: Value = serde_json::from_str(output).unwrap_or(Value::Null);
+    let plan = v["subscriptionType"].as_str().filter(|s| !s.is_empty()).map(String::from);
+    let method = ["authMethod", "authMode", "loginMethod"].into_iter().find_map(|k| v[k].as_str()).unwrap_or_default().to_ascii_lowercase();
+    let billing = if plan.is_some() {
+        Some(Billing::Subscription)
+    } else if method.contains("api") || method.contains("console") {
+        Some(Billing::UsageBilled)
+    } else {
+        None
+    };
+    Signals { plan, billing, ..Signals::default() }
+}
