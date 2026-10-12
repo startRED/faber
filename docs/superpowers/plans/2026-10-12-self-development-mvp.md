@@ -111,16 +111,6 @@ interrupted result acknowledged; ignored interrupt kills owned descendants; reus
 Scripted unit tests use fake `Proc`; real process/metadata escapes run only in hidden testkit scenarios.
 Focused proof: `cargo test -p faber-engine --test project_policy` plus both driver session test targets.
 
-- [ ] Add role policy distinct from existing side-question `instructions`, which currently disables needed worker behavior.
-- [ ] Keep official CLIs unchanged; configure per-session native-tool restrictions without global config edits.
-- [ ] Use structured engine `read`/`patch`/`proof` requests; no general shell parser or new MCP server.
-- [ ] Add explicit Claude git deny rules; Codex `workspace-write` for writers, read-only for analysis, no escalation.
-- [ ] Handle capability/terminal-reason keys, graceful stop acknowledgment, tree termination and silence timeout.
-- [ ] Establish an enforceable invocation exposure bound or verified live usage plus safe stop margin, including nested calls.
-- [ ] Run separate bounded official-capability probes and record exact versions/controls/latency; no credentials or paid fallback.
-- [ ] If restrictions or spend bounds cannot be proved, record the blocker and stop automated-role rollout.
-- [ ] Run GA, cross-vendor review, commit `feat: constrain project CLI execution`.
-
 Task 2 follow-up evidence (2026-10-12, `selfdev-t2`):
 
 - Baseline implementation: `11c798c`. All automated roles still fail admission before spawning; Chat/manual
@@ -159,6 +149,16 @@ launches, read/network scope, hostile config, mention expansion and real resume 
 No additional model session is authorized or executed in this round; all automated roles remain denied.
 Second-review GA: all required proofs exit 0; full run 602 passed, no failures/skips. The EOF regression was
 reproduced with a fake child and fixed through forwarding-future ownership. Warm guard 2.0 MB, warm tree 117.2 MB.
+
+- [ ] Add role policy distinct from existing side-question `instructions`, which currently disables needed worker behavior.
+- [ ] Keep official CLIs unchanged; configure per-session native-tool restrictions without global config edits.
+- [ ] Use structured engine `read`/`patch`/`proof` requests; no general shell parser or new MCP server.
+- [ ] Add explicit Claude git deny rules; Codex `workspace-write` for writers, read-only for analysis, no escalation.
+- [ ] Handle capability/terminal-reason keys, graceful stop acknowledgment, tree termination and silence timeout.
+- [ ] Establish an enforceable invocation exposure bound or verified live usage plus safe stop margin, including nested calls.
+- [ ] Run separate bounded official-capability probes and record exact versions/controls/latency; no credentials or paid fallback.
+- [ ] If restrictions or spend bounds cannot be proved, record the blocker and stop automated-role rollout.
+- [ ] Run GA, cross-vendor review, commit `feat: constrain project CLI execution`.
 
 ## Task 3 — Add priced live grants and the hard daily gate
 
