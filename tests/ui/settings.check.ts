@@ -135,6 +135,7 @@ check('settings: the new sections are written in every language, and the file hi
     'set.notifyMe',
     'set.notifyHint',
     'set.playSound',
+    'set.soundHint',
     'set.usage',
     'set.privacy',
     'set.accountsHint',

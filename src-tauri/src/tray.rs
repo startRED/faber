@@ -170,11 +170,11 @@ pub(crate) fn on_running(app: &AppHandle, revision: u64, items: &[RunningItem]) 
         // Recheck focus at delivery, in case the user returned while the tray picture was updating.
         let focused = crate::main_window(app).is_some_and(|w| w.is_focused().unwrap_or(false));
         #[cfg(windows)]
-        let can_toast = native::can_toast();
-        // ponytail: macOS/Linux do not detect full-screen yet; add native detection when it is requested.
+        let attention = native::attention();
+        // shortcut: no global macOS/Linux full-screen probe; add native detection when those backends are implemented (R92).
         #[cfg(not(windows))]
-        let can_toast = true;
-        let send = delivery(focused, can_toast, &settings);
+        let attention = decide::Attention::Normal;
+        let send = delivery(focused, attention, &settings);
         if send.sound {
             #[cfg(windows)]
             if let Err(e) = native::play() {
@@ -198,6 +198,7 @@ pub(crate) fn on_running(app: &AppHandle, revision: u64, items: &[RunningItem]) 
         // only when the notification cannot be built; a refused or unavailable service leaves no line here. Replace the
         // plugin by notify-rust (already in Cargo.lock) if hand checks show a silent failure.
         #[cfg(not(target_os = "linux"))]
+        // With no sound name, these backends use WinRT audio silent=true and macOS sound=None.
         let result = app.notification().builder().title(notice_text(&s.texts, title)).show().map_err(|e| e.to_string());
         // The Linux plugin cannot pass SuppressSound; keep desktop sounds off so the sound switch also means silence.
         #[cfg(target_os = "linux")]

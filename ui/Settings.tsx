@@ -143,7 +143,7 @@ export function Settings(props: Props) {
             <Row label={t('set.notifications')}>
               <div class="toggles">
                 <Toggle label={t('set.notifyMe')} hint={t('set.notifyHint')} checked={props.saved.notifications !== false} onChange={(on) => props.onSave({ notifications: on })} />
-                <Toggle label={t('set.playSound')} checked={props.saved.notificationSound !== false} onChange={(on) => props.onSave({ notificationSound: on })} />
+                <Toggle label={t('set.playSound')} hint={t('set.soundHint')} checked={props.saved.notificationSound !== false} onChange={(on) => props.onSave({ notificationSound: on })} />
               </div>
             </Row>
           </Match>

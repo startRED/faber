@@ -281,12 +281,16 @@ Reviewing and Done.
 something finishes.
 
 - **Attention notifications (R92, owner).** One per question, approval or blocked request, and none while Faber is
-  focused. Notifications and their original short chime default on, with separate switches in Settings.
+  focused. Toasts and their original short chime default on, with independent switches in Settings: turning off
+  "Notify me" leaves the sound choice alone.
 - On Windows, `SHQueryUserNotificationState` selects sound only for a busy full-screen app, an exclusive Direct3D
-  game or presentation mode. Otherwise Faber sends a toast and the chime. A failed state query also suppresses the
-  toast. Delivery never opens, flashes or focuses a window.
+  game, presentation mode or a Store app. Only the accepts-notifications state permits a toast, and a foreground
+  window covering its whole monitor suppresses that toast too (including borderless games, excluding Faber's windows).
+  Locked/screensaver and initial-login/upgrade quiet-time states stay silent; quiet time is not Focus Assist/DND.
+  Failed or unknown state queries also suppress the toast. Delivery never opens, flashes or focuses a window.
 - macOS and Linux send a toast and the chime; full-screen detection comes later. Sound uses Windows' `PlaySound`,
   macOS' `afplay`, or Linux's `paplay` with `aplay` as a fallback. These players come from the system, never the bundle.
+- The [notification review](notifications-review.md) records the verified findings and the detection limits.
 
 ## Visual answers
 
