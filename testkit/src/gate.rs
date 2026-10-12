@@ -22,10 +22,184 @@ pub fn run(args: &[String]) -> Option<i32> {
         Some("--gate") => Some(gate(&args[1..])),
         Some("--family") => Some(family()),
         Some("--idle") => Some(idle()),
+        Some("--tree-cli") => Some(tree_cli()),
+        Some("--tree-child") => Some(tree_child()),
+        Some("--engine-tree-host") => Some(engine_tree_host(&args[1..])),
+        Some("--guard-proof-host") => Some(guard_proof_host(&args[1..], true)),
+        Some("--cache-proof-host") => Some(guard_proof_host(&args[1..], false)),
+        Some("--eof") => {
+            use io::Read;
+            let mut input = String::new();
+            if io::stdin().read_to_string(&mut input).is_err() {
+                return Some(1);
+            }
+            println!("eof");
+            Some(0)
+        }
+        Some("--held-guard") | Some("--echo") => {
+            let mut line = String::new();
+            if io::stdin().read_line(&mut line).is_err() {
+                return Some(1);
+            }
+            print!("{line}");
+            Some(0)
+        }
         #[cfg(windows)]
         Some("--desktop-probe") => Some(crate::desktop::probe()),
         _ => None,
     }
+}
+
+fn guard_proof_host(args: &[String], spawn_probe: bool) -> i32 {
+    let [ready, release, example] = args else { return 1 };
+    let result: io::Result<()> = (|| {
+        use io::{Read, Write};
+        let binary = std::env::current_exe()?;
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
+        if spawn_probe {
+            runtime.block_on(async {
+                use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+                let mut p = faber_engine::proc::real_spawner()(
+                    binary.to_str().ok_or_else(|| io::Error::other("path"))?,
+                    &["--held-guard".into(), release.into()],
+                    &std::env::current_dir()?,
+                )?;
+                // This file must exist before the child can acknowledge; a synchronous ack wait deadlocks this proof.
+                std::fs::write(release, b"spawn returned")?;
+                p.stdin.write_all(b"echo\n").await?;
+                let mut line = String::new();
+                BufReader::new(p.stdout).read_line(&mut line).await?;
+                if line != "echo\n" {
+                    return Err(io::Error::other("guard consumed input"));
+                }
+                let p = faber_engine::proc::real_spawner()(
+                    binary.to_str().ok_or_else(|| io::Error::other("path"))?,
+                    &["--eof".into()],
+                    &std::env::current_dir()?,
+                )?;
+                drop(p.stdin);
+                let mut line = String::new();
+                tokio::time::timeout(Duration::from_secs(2), BufReader::new(p.stdout).read_line(&mut line))
+                    .await
+                    .map_err(|_| io::Error::other("native stdin did not close"))??;
+                if line != "eof\n" {
+                    return Err(io::Error::other("native EOF was not delivered"));
+                }
+                Ok::<_, io::Error>(())
+            })?;
+        }
+        let mut cmd = Command::new(example);
+        cmd.args(["--faber-process-guard", binary.to_str().ok_or_else(|| io::Error::other("path"))?, "--echo"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(crate::contain::NO_WINDOW);
+        }
+        let mut child = cmd.spawn()?;
+        let mut input = child.stdin.take().expect("piped");
+        let mut output = child.stdout.take().expect("piped");
+        input.write_all(b"G")?;
+        input.flush()?;
+        let mut ack = [0];
+        output.read_exact(&mut ack)?;
+        if ack != *b"R" {
+            let _ = child.kill();
+            return Err(io::Error::other("example omitted guard dispatch"));
+        }
+        input.write_all(b"echo\n")?;
+        input.flush()?;
+        let mut line = String::new();
+        io::BufReader::new(output).read_line(&mut line)?;
+        if line != "echo\n" || !child.wait()?.success() {
+            return Err(io::Error::other("example guard failed"));
+        }
+        std::fs::write(ready, b"guard and example passed")?;
+        Ok(())
+    })();
+    if result.is_ok() { 0 } else { 1 }
+}
+
+fn spawn_fake(mode: &str) -> io::Result<std::process::Child> {
+    let mut cmd = Command::new(std::env::current_exe()?);
+    cmd.arg(mode).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(crate::contain::NO_WINDOW);
+    }
+    cmd.spawn()
+}
+
+fn tree_cli() -> i32 {
+    let Ok(_child) = spawn_fake("--tree-child") else { return 1 };
+    println!("ready");
+    let _ = io::stdout().flush();
+    idle()
+}
+
+fn tree_child() -> i32 {
+    let Ok(_grandchild) = spawn_fake("--idle") else { return 1 };
+    idle()
+}
+
+fn engine_tree_host(args: &[String]) -> i32 {
+    let [ready, control] = args else { return 1 };
+    let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+        Ok(r) => r,
+        Err(_) => return 1,
+    };
+    let result: io::Result<()> = runtime.block_on(async {
+        use tokio::io::{AsyncBufReadExt, BufReader};
+        let binary = std::env::current_exe()?.to_string_lossy().into_owned();
+        let cwd = std::env::current_dir()?;
+        let spawn = faber_engine::proc::real_spawner();
+        let mut p = spawn(&binary, &["--tree-cli".into()], &cwd)?;
+        let root = p.child.as_ref().and_then(|p| p.id()).ok_or_else(|| io::Error::other("no root"))?;
+        let mut line = String::new();
+        BufReader::new(p.stdout).read_line(&mut line).await?;
+        std::fs::write(ready, serde_json::json!({"root":root}).to_string())?;
+        let action = wait_control(control, "action").await?;
+        if action == "drop" {
+            drop(p.child.take());
+        } else if let Some(child) = p.child.as_mut() {
+            child.start_kill()?;
+            child.wait().await?;
+        }
+        if action == "stop" {
+            let peer = spawn(&binary, &["--idle".into()], &cwd)?;
+            let peer_id = peer.child.as_ref().and_then(|p| p.id()).unwrap_or(0);
+            std::fs::write(ready, serde_json::json!({"root":root,"peer":peer_id}).to_string())?;
+            wait_control(control, "stop-again").await?;
+            if let Some(child) = p.child.as_mut() {
+                child.start_kill()?;
+            }
+            std::fs::write(ready, serde_json::json!({"root":root,"peer":peer_id,"stoppedAgain":true}).to_string())?;
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            drop(peer);
+        } else {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        }
+        Ok(())
+    });
+    if result.is_ok() { 0 } else { 1 }
+}
+
+async fn wait_control(path: &str, wanted: &str) -> io::Result<String> {
+    for _ in 0..400 {
+        if let Some(action) = std::fs::read(path)
+            .ok()
+            .and_then(|v| serde_json::from_slice::<serde_json::Value>(&v).ok())
+            .and_then(|v| v["action"].as_str().map(String::from))
+            && (wanted == "action" || action == wanted)
+        {
+            return Ok(action);
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    Err(io::Error::other("control timeout"))
 }
 
 fn idle() -> i32 {
@@ -140,4 +314,20 @@ fn gate(args: &[String]) -> i32 {
             None => std::thread::sleep(Duration::from_millis(50)),
         }
     }
+}
+
+/// Fake-host admission delay only; the production guard remains in the engine.
+pub fn guard_mode() -> Option<i32> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|a| a == "--faber-process-guard")
+        && let Some(i) = args.iter().position(|a| a == "--held-guard")
+    {
+        for _ in 0..200 {
+            if std::path::Path::new(&args[i + 1]).exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+    }
+    faber_engine::proc::guard_mode()
 }
