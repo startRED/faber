@@ -315,3 +315,19 @@ fn gate(args: &[String]) -> i32 {
         }
     }
 }
+
+/// Fake-host admission delay only; the production guard remains in the engine.
+pub fn guard_mode() -> Option<i32> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|a| a == "--faber-process-guard")
+        && let Some(i) = args.iter().position(|a| a == "--held-guard")
+    {
+        for _ in 0..200 {
+            if std::path::Path::new(&args[i + 1]).exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+    }
+    faber_engine::proc::guard_mode()
+}

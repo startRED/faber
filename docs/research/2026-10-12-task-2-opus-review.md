@@ -66,11 +66,11 @@ passes all four scenarios: acknowledgement/EOF 815 ms, cache dispatch 618 ms, wa
 app tree **120.0 MB**, stop/drop/crash each remove four inherited processes in 2.3 seconds for the complete scenario.
 
 Shared files touched this round: `engine/src/claude.rs`, `engine/src/codex.rs`, `engine/src/proc.rs`,
-`engine/examples/cache_probe.rs`, `engine/tests/claude_session.rs`, `engine/tests/codex_session.rs`,
+`engine/src/project.rs`, `engine/examples/cache_probe.rs`, `engine/tests/claude_session.rs`, `engine/tests/codex_session.rs`,
 `testkit/src/bin/fake-cli.rs`, `testkit/src/gate.rs`, `testkit/src/testbuild.rs`,
-`docs/superpowers/plans/2026-10-12-self-development-mvp.md`.
+`testkit/src/screen/mod.rs`, `docs/superpowers/plans/2026-10-12-self-development-mvp.md`.
 Task-owned files: `engine/src/project/policy.rs`, `engine/tests/project_policy.rs`,
-`testkit/src/screen/projects.rs`, `testkit/examples/project-policy-probes.rs`, and this report.
+`testkit/src/screen/project_drivers.rs` (renamed from `projects.rs`), `testkit/examples/project-policy-probes.rs`, and this report.
 No edits to the git broker/lease implementation or other worktrees/branches.
 
 ## Final local proofs
@@ -83,3 +83,10 @@ checks pass after the tested EOF fix. The three opt-in runner unit tests also pa
 Final hidden measurements: guard **2.0 MB**, whole warm tree **117.2 MB**; acknowledgement/EOF 856 ms,
 cache entry 729 ms; stop/drop/crash four inherited processes each, complete tree scenario 2.6 seconds.
 PR #3 CI must separately pass Windows and macOS for the pushed head; no reruns substitute for repairs.
+
+The base advanced during review. PR metadata initially retained the older base; an idempotent base refresh
+revealed Task 4's shared registrations and its separately added `screen/projects.rs`. Task 2 driver scenarios
+now use `project_drivers.rs`, with separate registration. Move policy registration and the fake guard hook
+away from Task 4's insertion points. A staged three-way preview has no conflict markers; no branch/index merge
+or rebase was performed, and git/lease implementation files were never edited. Preserve the accepted base plan
+text together with Task 2 evidence. These integration repairs require the same full proof set before commit.

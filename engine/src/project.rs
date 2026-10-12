@@ -6,7 +6,6 @@
 //! read and rewrite them during a rollback without dropping anything. A record whose schema is newer than this build's
 //! is refused rather than guessed at ([`store::Journal`]).
 
-pub mod policy;
 pub mod store;
 pub mod wire;
 
@@ -1121,3 +1120,5 @@ macro_rules! records {
 }
 
 records!(Mission, Plan, Contract, Decision, Brief, Lease, Artifact, Intent, Receipt, Runtime);
+
+pub mod policy;

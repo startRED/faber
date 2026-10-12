@@ -1,4 +1,4 @@
-//! Real process proofs use the fake CLI on the runner's hidden desktop, never a provider session.
+//! Driver process proofs use the fake CLI on the runner's hidden desktop, never a provider session.
 
 use super::{Result, Scenario, ensure, eventually};
 use crate::app::Ctx;
