@@ -294,6 +294,7 @@ export const fr: Messages = {
   'first.mini.title': 'Le site est presque à moitié fait.',
   'first.mini.claude': 'Claude',
   'first.mini.codex': 'Codex',
+  'first.mini.input': 'Write here',
   'first.size.small': 'Petit texte',
   'first.size.normal': 'Texte normal',
   'first.size.large': 'Grand texte',

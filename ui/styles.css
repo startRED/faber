@@ -419,14 +419,14 @@ select.pill option { background: var(--s2); color: var(--ink); }
 /* The first run: a stage with no sidebar, a stepper on top and the step below it (ui/FirstRun.tsx, ui/Setup.tsx). */
 .fr-stage { display: grid; grid-template-rows: 52px minmax(0, 1fr); margin: 0 var(--stage-inset) var(--stage-inset); border-radius: var(--r-stage); background: var(--bg); box-shadow: var(--stage-shadow); min-height: 0; min-width: 0; overflow: hidden; }
 .fr-stage.plain { grid-template-rows: minmax(0, 1fr); }
-.fr-top { display: flex; align-items: center; padding: 0 clamp(24px, 5vw, 64px); border-bottom: 1px solid var(--line); }
+.fr-top { display: flex; align-items: center; padding: 0 28px; border-bottom: 1px solid var(--line); }
 .stepper { display: flex; align-items: center; gap: 10px; margin: 0; padding: 0; list-style: none; font-size: calc(var(--fs-ui) - 1px); color: var(--ink-3); }
 .stepper li { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .stepper li + li::before { content: ''; width: 24px; height: 1px; margin-right: 4px; background: var(--line-3); }
 .stepper .done { color: var(--ink-2); }
 .stepper .done svg { color: var(--accent-text); }
 .stepper .cur { color: var(--ink); font-weight: 600; }
-.firstrun { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 28px clamp(24px, 5vw, 64px) 32px; }
+.firstrun { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 28px clamp(24px, 5vw, 64px) 40px; }
 .fr-col { flex: none; width: min(100%, 720px); margin-top: clamp(0px, 6vh, 56px); }
 .fr-title { margin-top: 22px; font-size: min(var(--fs-h1), 9vw); overflow-wrap: anywhere; outline: none; }
 .fr-col .peek { margin-top: 4px; }
@@ -469,7 +469,7 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .tcard[aria-pressed='true'] .radio::after { content: ''; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
 .tcard .txt { display: grid; gap: 2px; min-width: 0; }
 .tcard .nm { display: flex; align-items: center; gap: 8px; font-size: calc(var(--fs-ui) + 1px); font-weight: 600; color: var(--ink); }
-.tcard .nm small { font-size: calc(var(--fs-ui) - 2px); font-weight: 500; color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--line-2); border-radius: var(--r-xs); padding: 0 6px; }
+.tcard .nm small { display: inline-flex; align-items: center; height: 24px; font-size: calc(var(--fs-ui) - 1.5px); font-weight: 500; color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--line-2); border-radius: var(--r-xs); padding: 0 9px; }
 .tcard .ds { font-size: calc(var(--fs-ui) - 1px); color: var(--ink-2); line-height: 1.4; }
 .mini { display: grid; grid-template-columns: 62px minmax(0, 1fr); width: 100%; height: 214px; position: relative; overflow: hidden; border-radius: var(--r-md); background: var(--frame); box-shadow: 0 0 0 1px var(--line-2); color: var(--ink); font-family: var(--font-ui); font-stretch: var(--ui-stretch); font-size: var(--fs-ui); line-height: 1.45; text-align: left; }
 .m-side { display: flex; flex-direction: column; gap: 8px; padding: 12px 10px; }

@@ -118,7 +118,7 @@ export function Mini(props: { base?: string; look?: Look }) {
           </span>
         </span>
         <span class="m-foot">
-          <span class="m-in">{t('composer.chatPlaceholder')}</span>
+          <span class="m-in">{t('first.mini.input')}</span>
           <span class="m-btn">{t('composer.send')}</span>
         </span>
       </span>
