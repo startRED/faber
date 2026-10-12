@@ -283,7 +283,6 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
 
   onMount(() => {
     if (saved?.id && props.initial.conversations.some((c) => c.id === saved.id)) void go({ ...saved, area: saved.area ?? 'chat' });
-    void api.setClock(-new Date().getTimezoneOffset() * 60);
     const stopFollowing = watchSystem();
     // The restored conversation is already opening (`go` above), so what the inbox held since the page started is kept for
     // its snapshot and nothing is lost between the two.

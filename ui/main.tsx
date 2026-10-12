@@ -22,6 +22,7 @@ await api.on((e) => {
   if (e.type === 'running') store.offer({ revision: e.revision, items: e.items });
   else inbox.push(e);
 });
+await api.setClock(-new Date().getTimezoneOffset() * 60);
 const state = await api.state();
 store.offer(state.running);
 

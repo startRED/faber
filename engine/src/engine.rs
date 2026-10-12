@@ -232,6 +232,8 @@ struct Core {
     last_pulse: f64,
     /// The PC's offset from UTC in seconds, as the screen reports it.
     utc_offset: i64,
+    offset_known: bool,
+    watch_requested: bool,
     clock: Option<Clock>,
     transfers: HashMap<String, recovery::Transfer>,
     credit: Option<(String, String, Vendor)>,
@@ -274,6 +276,8 @@ impl Engine {
                 ledger_saved: 0.0,
                 last_pulse: 0.0,
                 utc_offset: 0,
+                offset_known: false,
+                watch_requested: false,
                 clock: None,
                 transfers: HashMap::new(),
                 credit: None,
@@ -292,11 +296,17 @@ impl Engine {
     }
     /// The PC's offset from UTC in seconds (east is positive). The engine has no time zone database, so the screen says.
     pub fn set_utc_offset(&self, secs: i64) {
-        self.with(|c| {
+        let start_watching = self.with(|c| {
+            let start = !c.offset_known && c.watch_requested;
             c.utc_offset = secs.clamp(-14 * 3600, 14 * 3600);
+            c.offset_known = true;
             c.wake_waiting();
             c.emit_usage();
-        })
+            start
+        });
+        if start_watching {
+            self.watch_accounts();
+        }
     }
     /// Replaces the clock; the quota arithmetic reads the time through it.
     pub fn set_time_source(&self, clock: Clock) {
@@ -335,9 +345,15 @@ impl Engine {
             }
         }
     }
-    /// Checks the plans now and every quarter of an hour while Faber runs. The shell starts it once.
+    /// Checks the plans once the screen supplies its local offset, then every quarter of an hour. The shell starts it once.
     pub fn watch_accounts(&self) {
-        let (me, runtime) = (self.with(|c| c.me.clone()), self.runtime.clone());
+        let Some(me) = self.with(|c| {
+            c.watch_requested = true;
+            c.offset_known.then(|| c.me.clone())
+        }) else {
+            return;
+        };
+        let runtime = self.runtime.clone();
         let handle = runtime.clone();
         runtime.spawn(async move {
             loop {
