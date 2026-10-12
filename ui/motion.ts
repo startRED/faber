@@ -120,6 +120,7 @@ export function animateList(root: HTMLElement, subtree = false): void {
     });
     let before = new Map(children().map((el) => [el, el.getBoundingClientRect()]));
     const capture = () => { if (!animations.size) before = new Map(children().map((el) => [el, el.getBoundingClientRect()])); };
+    const resize = () => { viewWidth = innerWidth; viewHeight = innerHeight; capture(); };
     const update = () => {
       const items = children();
       // Viewport reflow must never animate content from a position outside the new window.
@@ -232,7 +233,7 @@ export function animateList(root: HTMLElement, subtree = false): void {
     if (root.matches('.rc-body, .s-main, .tour')) { before.clear(); update(); }
     root.addEventListener('scroll', capture, true);
     root.addEventListener('transitionend', capture);
-    window.addEventListener('resize', capture);
+    window.addEventListener('resize', resize);
     onCleanup(() => {
       observer.disconnect();
       sideObserver?.disconnect();
@@ -240,7 +241,7 @@ export function animateList(root: HTMLElement, subtree = false): void {
       delete root.dataset.motionList;
       root.removeEventListener('scroll', capture, true);
       root.removeEventListener('transitionend', capture);
-      window.removeEventListener('resize', capture);
+      window.removeEventListener('resize', resize);
       for (const animation of animations.values()) animation.cancel();
       for (const ghost of ghosts) removeExit(ghost);
     });

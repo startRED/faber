@@ -33,8 +33,12 @@ fn large_thread(ctx: &mut Ctx) -> Result<Opened> {
     )
     .map_err(|e| e.to_string())?;
     let mut app = ctx.launch(claude_chat(ctx))?;
+    // Hosted desktops can be narrower than the docked-column breakpoint.
+    app.page
+        .cdp
+        .call("Emulation.setDeviceMetricsOverride", json!({ "width": 1440, "height": 900, "deviceScaleFactor": 1, "mobile": false }))?;
     system_motion(&mut app.page, false)?;
-    app.page.wait_for("motion preference", "document.documentElement.dataset.motion === 'full'")?;
+    app.page.wait_for("docked viewport with full motion", "innerWidth === 1440 && innerHeight === 900 && document.documentElement.dataset.motion === 'full' && !document.documentElement.classList.contains('resizing')")?;
     app.page.click(&css(".list .item").has_text("Review stress"))?;
     app.page.wait_visible(&css("article.ai").last())?;
     pause(0.4);
@@ -187,34 +191,46 @@ fn layout_motion(ctx: &mut Ctx) -> Result {
       }
       getComputedStyle(fold).gridTemplateRows;
       // Measure size transitions after fixture insertion and its separate arrival motion have settled.
-      setTimeout(() => {
-      const intervals = [], costs = []; let previous, animated = 0;
+      setTimeout(async () => {
+      const intervals = [], idle = [], costs = [], animated = [];
       const elements = [view === 'fold' ? fold : view === 'disclosure' ? details : view === 'composer' ? field : welcome];
-      const start = performance.now();
-      if (welcome) welcome.style.paddingRight = '352px';
-      else if (view === 'fold') fold.classList.add('open');
-      else if (view === 'disclosure') details.querySelector('summary').click();
-      else field.style.height = '200px';
-      const frame = now => {
-        if (previous !== undefined) intervals.push(now - previous); previous = now;
+      const measure = (active, cycle) => new Promise(done => {
+        let previous = performance.now(), running = 0;
+        const start = previous;
+        if (active) {
+          if (welcome) welcome.style.paddingRight = cycle % 2 === 0 ? '352px' : '0px';
+          else if (view === 'fold') fold.classList.toggle('open');
+          else if (view === 'disclosure') details.querySelector('summary').click();
+          else field.style.height = cycle % 2 === 0 ? '200px' : original;
+        }
+        const frame = now => {
+        const stamp = performance.now();
+        (active ? intervals : idle).push(stamp - previous); previous = stamp;
         const begin = performance.now();
         for (const el of elements) el.getBoundingClientRect();
-        costs.push(performance.now() - begin);
-        animated = Math.max(animated, elements.filter(el => el.getAnimations().length > 0).length);
+        if (active) costs.push(performance.now() - begin);
+        running = Math.max(running, elements.filter(el => el.getAnimations().length > 0).length);
         if (now - start < 280) requestAnimationFrame(frame);
-        else { fold.remove(); details.remove(); if (welcome) welcome.style.removeProperty('padding-right'); field.style.height = original;
-          intervals.sort((a,b) => a-b); costs.sort((a,b) => a-b);
-          resolve({frames: intervals.length, animated, expected: elements.length, p95: intervals[Math.floor(intervals.length*.95)], layout: costs[Math.floor(costs.length*.95)]}); }
-      };
-      requestAnimationFrame(frame);
+        else { if (active) animated.push(running); done(); }
+        };
+        requestAnimationFrame(frame);
+      });
+      // Five fixed cycles give p95 enough samples at 60 Hz; an idle baseline exposes host stalls.
+      for (let i = 0; i < 5; i++) await measure(false, i);
+      for (let i = 0; i < 5; i++) await measure(true, i);
+      fold.remove(); details.remove(); if (welcome) welcome.style.removeProperty('padding-right'); field.style.height = original;
+      const p95 = values => [...values].sort((a,b) => a-b)[Math.floor(values.length*.95)];
+      resolve({frames: intervals.length, animated: Math.min(...animated), expected: elements.length,
+        p95: p95(intervals), layout: p95(costs), idle: p95(idle), worst: Math.max(...intervals), idleWorst: Math.max(...idle)});
       }, 300);
     })"#)?;
         ctx.notes.push(format!(
-            "{view} layout motion: {} frames, p95 interval {} ms, p95 layout read {} ms",
-            measured["frames"], measured["p95"], measured["layout"]
+            "{view} layout motion: {} frames, p95 {} ms, layout {} ms, idle p95 {} ms; worst active/idle {}/{} ms",
+            measured["frames"], measured["p95"], measured["layout"], measured["idle"], measured["worst"], measured["idleWorst"]
         ));
         ensure(measured["animated"] == measured["expected"], || format!("the size transitions did not run: {measured}"))?;
-        ensure(measured["frames"].as_u64().unwrap_or(0) >= 12, || format!("not enough frames: {measured}"))?;
+        ensure(measured["frames"].as_u64().unwrap_or(0) >= 60, || format!("not enough frames: {measured}"))?;
+        ensure(measured["idle"].as_f64().unwrap_or(f64::MAX) < 25.0, || format!("the idle host missed the frame budget: {measured}"))?;
         ensure(measured["p95"].as_f64().unwrap_or(f64::MAX) < 25.0 && measured["layout"].as_f64().unwrap_or(f64::MAX) < 8.0, || {
             format!("layout animations exceed the frame budget: {measured}")
         })?;

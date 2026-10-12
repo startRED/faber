@@ -37,37 +37,48 @@ check('motion: panel content staggers within 300ms and reduced motion disables a
   }
 });
 
-check('motion: removing a row animates its inert exit and the surviving row, then releases both', async () => {
-  const root = document.createElement('div');
-  root.style.cssText = 'position:fixed;left:10px;top:10px;width:240px;display:grid';
-  root.dataset.motion = 'full';
-  for (const [key, value] of Object.entries(themes.css.base)) root.style.setProperty(`--${key}`, value);
-  root.innerHTML = '<div style="height:40px">first</div><div style="height:40px">second</div>';
-  document.body.append(root);
-  const dispose = render(() => { animateList(root); return [...root.children] as HTMLElement[]; }, root);
-  const settle = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+check('motion: removing a row has inert exits with full motion and stays instant with reduced motion', async () => {
+  const preference = Object.getOwnPropertyDescriptor(MediaQueryList.prototype, 'matches')!;
   try {
-    await settle(20);
-    const row = root.lastElementChild as HTMLElement;
-    const y = row.getBoundingClientRect().y;
-    root.firstElementChild!.remove();
-    await settle(20);
-    const ghost = document.querySelector<HTMLElement>('.motion-exit');
-    ok(ghost?.inert, 'the exit copy cannot receive clicks or focus');
-    equal(ghost.getAttribute('aria-hidden'), 'true');
-    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      ok(row.getAnimations().length > 0, 'the surviving row has a FLIP animation');
-      ok(row.getBoundingClientRect().y > 10 && row.getBoundingClientRect().y <= y, 'the row moves through intermediate positions');
+    for (const reduced of [false, true]) {
+      Object.defineProperty(MediaQueryList.prototype, 'matches', { ...preference, get(this: MediaQueryList) {
+        return this.media === '(prefers-reduced-motion: reduce)' ? reduced : preference.get!.call(this);
+      } });
+      const root = document.createElement('div');
+      root.style.cssText = 'position:fixed;left:10px;top:10px;width:240px;display:grid';
+      root.dataset.motion = 'full';
+      for (const [key, value] of Object.entries(themes.css.base)) root.style.setProperty(`--${key}`, value);
+      root.innerHTML = '<div style="height:40px">first</div><div style="height:40px">second</div>';
+      document.body.append(root);
+      const dispose = render(() => { animateList(root); return [...root.children] as HTMLElement[]; }, root);
+      const settle = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+      try {
+        await settle(20);
+        const row = root.lastElementChild as HTMLElement;
+        const y = row.getBoundingClientRect().y;
+        root.firstElementChild!.remove();
+        await settle(20);
+        const ghost = document.querySelector<HTMLElement>('.motion-exit');
+        if (reduced) equal(ghost, null, 'reduced motion makes no exit copy');
+        else {
+          ok(ghost?.inert, 'the exit copy cannot receive clicks or focus');
+          equal(ghost.getAttribute('aria-hidden'), 'true');
+          ok(row.getAnimations().length > 0, 'the surviving row has a FLIP animation');
+          ok(row.getBoundingClientRect().y > 10 && row.getBoundingClientRect().y <= y, 'the row moves through intermediate positions');
+          const copy = ghost.shadowRoot!.querySelector<HTMLElement>('.motion-exit')!;
+          await Promise.all([...row.getAnimations(), ...copy.getAnimations()].map((animation) => animation.finished));
+          await settle(0);
+          equal(document.querySelector('.motion-exit'), null, 'the copy is removed after exit');
+        }
+        equal(row.getAnimations().length, 0);
+        equal(row.getBoundingClientRect().y, 10);
+      } finally {
+        dispose();
+        root.remove();
+      }
     }
-    const copy = ghost.shadowRoot!.querySelector<HTMLElement>('.motion-exit')!;
-    await Promise.all([...row.getAnimations(), ...copy.getAnimations()].map((animation) => animation.finished));
-    await settle(0);
-    equal(document.querySelector('.motion-exit'), null, 'the copy is removed after exit');
-    equal(row.getAnimations().length, 0);
-    equal(row.getBoundingClientRect().y, 10);
   } finally {
-    dispose();
-    root.remove();
+    Object.defineProperty(MediaQueryList.prototype, 'matches', preference);
   }
 });
 

@@ -54,3 +54,13 @@ retries a send. This follows a post-merge timeout with an unchanged draft before
 Ten instrumented focused runs did not reproduce that intermittent timeout; no product-state failure was found.
 The merged tree passed all seven gates and `cargo t --all`: 655 checks, no failures or skips. Across local merge runs,
 the sixty-toggle fixture's highest peak was 236.6 MB against the 250 MB limit; the final full run peaked at 219.3 MB.
+
+The first integration CI run exposed motion checks that depended on the runner's system preference and desktop width.
+The row-removal check now verifies both full and reduced motion explicitly, and the tutorial checks both ring modes.
+The column fixture uses a 1440x900 viewport: the hosted desktop was below the 1100px docking breakpoint and exercised
+an overlay instead. This also reproduced a real first-toggle regression after resize: the list observer retained old
+viewport dimensions. Its resize listener now updates them before capturing positions, preserving the next animation.
+Size-motion checks aggregate five fixed transitions and an equal idle baseline. They keep the 25 ms frame and 8 ms
+geometry-read p95 budgets, require all five transitions to run, and report worst intervals rather than retrying outliers.
+After these corrections all seven proofs and the separate `cargo t --all` passed, each with 655 checks and no failures
+or skips. The corrected tree peaked at 227.2 MB across the complete runs; the final full run measured 216.8 MB.
