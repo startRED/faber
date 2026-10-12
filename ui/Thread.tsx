@@ -101,7 +101,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
           <For each={m().tools}>
             {(tool) => (
               <span class={tool.ok === false ? 'bad' : ''} title={tool.output ?? toolLabel(tool)}>
-                <Show when={tool.ok !== false}>
+                <Show when={tool.ok === true}>
                   <Icon name="check" small />
                 </Show>
                 <i>{toolLabel(tool)}</i>

@@ -1,6 +1,6 @@
 //! The app scenarios: what a person sees and does in a chat, in settings, and how much memory the app uses.
 
-use super::{Result, Scenario, ask, claude_chat, ensure, eventually, no_cli, pass_look, pause, same, start_settings};
+use super::{Result, Scenario, ask, claude_chat, ensure, eventually, no_cli, pass_look, pause, same, start_settings, system_motion};
 use crate::app::Ctx;
 use crate::page::{Page, css, role, role_any};
 use serde_json::json;
@@ -80,6 +80,7 @@ pub fn scenarios() -> Vec<Scenario> {
             run: recovers_old_appearance,
         },
         Scenario { name: "with no CLI running, Faber stays within its memory budget", run: idle_memory },
+        Scenario { name: "with reduced motion on, the dust stays off and Faber stays within its memory budget", run: idle_memory_reduced },
         Scenario { name: "after the six looks were applied in turn, Faber stays within its memory budget", run: memory_after_every_look },
         Scenario { name: "a conversation with a thousand messages opens quickly and stays within the budget", run: thousand_messages },
     ]
@@ -579,9 +580,19 @@ fn recovers_old_appearance(ctx: &mut Ctx) -> Result {
 }
 
 fn idle_memory(ctx: &mut Ctx) -> Result {
+    idle_memory_with(ctx, false)
+}
+
+fn idle_memory_reduced(ctx: &mut Ctx) -> Result {
+    idle_memory_with(ctx, true)
+}
+
+fn idle_memory_with(ctx: &mut Ctx, reduce: bool) -> Result {
     start_settings(ctx, "en")?;
     let launch = claude_chat(ctx);
     let mut app = ctx.launch(launch)?;
+    // A machine that turns animations off (a CI runner does) must not change what this scenario is about.
+    system_motion(&mut app.page, reduce)?;
     let title = app.page.named("heading", "empty.chatTitle")?;
     app.page.wait_visible(&title)?;
     ensure(app.page.count(&css(".amb-beam .dust"))? == 1, || "the new conversation should show the dust".to_string())?;
@@ -597,6 +608,14 @@ fn idle_memory(ctx: &mut Ctx) -> Result {
         page.eval(&format!("(() => {{ {getter}; document.dispatchEvent(new Event('visibilitychange')); }})()")).map(|_| ())
     };
     let moving = app.page.eval(states)?;
+    if reduce {
+        // Reduced motion keeps the dust on the page, still: no grain moves.
+        ensure(moving.as_str() == Some(""), || format!("the dust should not move under reduced motion, got {moving}"))?;
+        pause(10.0);
+        let (mb, _) = ctx.memory_mb(app.id)?;
+        ctx.notes.push(format!("idle on the new conversation with the dust (reduced motion): {mb:.0} MB"));
+        return ensure(mb <= BUDGET_MB, || format!("{mb:.0} MB is over the {BUDGET_MB} MB budget"));
+    }
     ensure(moving.as_str().is_some_and(|all| all.contains("running") && !all.contains("paused")), || {
         format!("the dust should twinkle while the window is visible, got {moving}")
     })?;

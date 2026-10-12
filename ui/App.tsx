@@ -750,7 +750,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                     }
                   >
                     <Welcome
-                      recent={state().conversations.slice(0, 12)}
+                      recent={state().conversations}
                       running={items()}
                       projects={state().projects}
                       onSuggest={(text) => fill?.(text)}

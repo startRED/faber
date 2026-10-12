@@ -1,7 +1,7 @@
 import type { QuotaReading, RunningItem } from '../../ui/api.ts';
 import { widthClass } from '../../ui/layout.ts';
-import { answerOutcome, askKey, blocksOf, createAutoOpen, createRunningStore, elapsed, newest, openPlace, placeOfRunning, QUIET_MS, waitingKeys } from '../../ui/running.ts';
-import { groupChats, seedQuotas, tailOf, tightest, withQuota } from '../../ui/sidebar.ts';
+import { answerOutcome, askKey, blocksOf, createAutoOpen, createRunningStore, elapsed, newest, openPlace, pickUp, placeOfRunning, QUIET_MS, waitingKeys } from '../../ui/running.ts';
+import { groupChats, seedQuotas, showsChats, tailOf, tightest, withQuota } from '../../ui/sidebar.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
 const item = (over: Partial<RunningItem> = {}): RunningItem => ({
@@ -146,4 +146,20 @@ check('sidebar: a project row says how many questions wait and whether anything 
   deepEqual(tailOf(items, 'p1'), { needs: 1, running: true });
   deepEqual(tailOf(items, 'p2'), { needs: 0, running: false });
   ok(!tailOf([], 'p1').running);
+});
+
+check('sidebar: a project shows its conversations when it is opened or when the search found some in it', () => {
+  ok(showsChats(true, false, 0), 'opened by the user');
+  ok(showsChats(false, true, 2), 'opened by a search that found conversations in it');
+  ok(!showsChats(false, true, 0), 'a search with nothing in it opens nothing');
+  ok(!showsChats(false, false, 3), 'a closed project stays closed while nobody searches');
+});
+
+check('new conversation: a conversation that waits is offered however old it is', () => {
+  const all = Array.from({ length: 30 }, (_, n) => ({ id: `c${n}` }));
+  const waiting = [item({ conversationId: 'c25', state: 'needsYou' })];
+  deepEqual(pickUp(all, waiting).map((c) => c.id), ['c25', 'c0', 'c1', 'c2'], 'the waiting one first, then the latest');
+  deepEqual(pickUp(all, []).map((c) => c.id), ['c0', 'c1', 'c2', 'c3']);
+  deepEqual(pickUp(all, [item({ conversationId: 'c25' })]).map((c) => c.id), ['c0', 'c1', 'c2', 'c3'], 'working is not waiting');
+  deepEqual(pickUp(all.slice(0, 2), waiting), [{ id: 'c0' }, { id: 'c1' }]);
 });

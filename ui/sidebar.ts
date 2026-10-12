@@ -25,6 +25,10 @@ export function groupChats<T extends { updatedAt: number }>(chats: T[], now: num
   return (['today', 'week', 'earlier'] as const).filter((g) => groups[g].length > 0).map((g) => ({ group: g, chats: groups[g] }));
 }
 
+/** Whether a project shows its conversations: the user opened it, or the search found some in it. The sidebar draws the list
+ * and sets `aria-expanded` from this one answer, so a screen reader never hears a different one. */
+export const showsChats = (opened: boolean, searching: boolean, found: number) => opened || (searching && found > 0);
+
 /** The latest reading of each window, by vendor and window name. */
 export type Quotas = Record<string, QuotaReading>;
 

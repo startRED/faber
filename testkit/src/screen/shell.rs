@@ -1,7 +1,7 @@
 //! The shell of the screen: the layout at each width, the running column and when it opens, the new conversation with
 //! its greeting, and the quota in the sidebar's footer.
 
-use super::{Result, Scenario, ask, claude_chat, ensure, eventually, no_cli, pause, same, start_settings};
+use super::{Result, Scenario, ask, claude_chat, ensure, eventually, no_cli, pause, same, start_settings, system_motion};
 use crate::app::Ctx;
 use crate::page::{Page, css};
 use crate::sandbox::{CliSlot, Launch};
@@ -51,6 +51,14 @@ pub fn scenarios() -> Vec<Scenario> {
             run: waits_for_every_key,
         },
         Scenario { name: "a column opened and closed while it waits for the typing stays closed", run: dismissal_sticks },
+        Scenario {
+            name: "with reduced motion on, a column opened and closed while it waits for the typing stays closed",
+            run: dismissal_sticks_reduced,
+        },
+        Scenario {
+            name: "in a window too narrow to dock it, a column closed with Esc while it waits for the typing stays closed",
+            run: dismissal_sticks_narrow,
+        },
         Scenario { name: "long titles stay inside the sidebar, cut before the delete button", run: keeps_long_titles_inside },
     ]
 }
@@ -845,10 +853,27 @@ fn waits_for_every_key(ctx: &mut Ctx) -> Result {
 }
 
 fn dismissal_sticks(ctx: &mut Ctx) -> Result {
+    dismissal(ctx, false, 1440)
+}
+
+fn dismissal_sticks_reduced(ctx: &mut Ctx) -> Result {
+    dismissal(ctx, true, 1440)
+}
+
+fn dismissal_sticks_narrow(ctx: &mut Ctx) -> Result {
+    dismissal(ctx, false, 1000)
+}
+
+/// The column the user opens and closes again before it would have opened itself. Below 1100 px it is a dialog over the
+/// stage and the run button behind it is inert, so Esc closes it there; the window is sized here because a CI runner's
+/// screen may open it narrower than a desk does.
+fn dismissal(ctx: &mut Ctx, reduce: bool, width: u32) -> Result {
     start_settings(ctx, "en")?;
     let launch = two_writes(ctx);
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
+    system_motion(page, reduce)?;
+    set_size(page, width, 900)?;
     let model = page.labelled("composer.model")?;
     page.select_option(&model, "Claude Haiku")?;
     ask(page, TWO_WRITES)?;
@@ -870,9 +895,16 @@ fn dismissal_sticks(ctx: &mut Ctx) -> Result {
     }
     page.wait_visible(&card)?;
     ensure(!page.is_visible(&css(".runcol"))?, || "the column opened before the user did".to_string())?;
+    // One more key starts the 1.5 s wait afresh, so a slow moment of the machine between the last key and the click cannot
+    // let the column open by itself first.
+    page.press("ArrowLeft")?;
     run_button(page)?;
     page.wait_visible(&css(".runcol"))?;
-    run_button(page)?;
+    if width >= 1100 {
+        run_button(page)?;
+    } else {
+        page.press("Escape")?;
+    }
     page.wait_gone(&css(".runcol"))?;
     // The wait ends here; the question is the same one the user has just seen, so the column does not come back.
     pause(3.0);

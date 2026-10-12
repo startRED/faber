@@ -39,6 +39,13 @@ export function blocksOf(items: RunningItem[]): Block[] {
   return [...blocks.values()];
 }
 
+/** The conversations the new-conversation screen offers to pick up: those that wait for the user first, then the latest, at
+ * most `limit`. `recent` is every conversation, newest first: it is ordered whole, so a waiting one is found however old it is. */
+export function pickUp<T extends { id: string }>(recent: T[], items: RunningItem[], limit = 4): T[] {
+  const needs = (c: T) => items.some((i) => i.conversationId === c.id && i.state === 'needsYou');
+  return [...recent.filter(needs), ...recent.filter((c) => !needs(c))].slice(0, limit);
+}
+
 /** A question is named by its conversation, its turn and its request together: a request id alone repeats (Codex counts
  * from 0 in every server). */
 export const askKey = (item: Pick<RunningItem, 'conversationId' | 'turnId'>, requestId: string) => `${item.conversationId}:${item.turnId}:${requestId}`;

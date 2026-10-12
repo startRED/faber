@@ -3,6 +3,7 @@ import type { Project, RunningItem, Summary } from './api.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { lang, t } from './i18n.ts';
 import { vendorName } from './models.ts';
+import { pickUp } from './running.ts';
 
 const SUGGESTIONS = ['suggest.1', 'suggest.2', 'suggest.3'] as const;
 
@@ -34,10 +35,7 @@ export function Welcome(props: {
   children: JSX.Element;
 }) {
   const title = () => splitLast(t('empty.chatTitle'));
-  const rows = () => {
-    const needs = (c: Summary) => props.running.some((i) => i.conversationId === c.id && i.state === 'needsYou');
-    return [...props.recent.filter(needs), ...props.recent.filter((c) => !needs(c))].slice(0, 4);
-  };
+  const rows = () => pickUp(props.recent, props.running);
   const live = (id: string) => props.running.find((i) => i.conversationId === id);
   const where = (c: Summary) => (c.area === 'chat' ? t('area.chat') : (props.projects.find((p) => p.id === c.projectId)?.name ?? t('area.projects')));
   return (

@@ -160,6 +160,16 @@ pub fn ask(page: &mut Page, question: &str) -> Result {
     Err("Enter was pressed three times and the message did not go".to_string())
 }
 
+/// Makes the page report the system's motion preference, whatever the machine says: `true` is "reduce motion" (the Windows
+/// setting that is off on a CI runner), `false` is "no preference". Scenarios that look at animations set it, so they mean
+/// the same thing on every machine.
+pub fn system_motion(page: &mut Page, reduce: bool) -> Result {
+    let value = if reduce { "reduce" } else { "no-preference" };
+    page.cdp
+        .call("Emulation.setEmulatedMedia", serde_json::json!({ "features": [{ "name": "prefers-reduced-motion", "value": value }] }))
+        .map(|_| ())
+}
+
 pub fn pause(seconds: f64) {
     std::thread::sleep(Duration::from_secs_f64(seconds));
 }

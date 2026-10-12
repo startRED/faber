@@ -70,12 +70,20 @@ check('appearance: the dust is the same at every launch and never lies behind te
   const grains = makeGrains();
   equal(grains.length, 72);
   equal(JSON.stringify(makeGrains()), JSON.stringify(grains), 'a fixed seed');
-  const free = dustShadows(grains, [], 0, '#fff');
+  // The colour is the look's `dust` token: three channels, as the stylesheet writes them inside rgba().
+  const free = dustShadows(grains, [], 0, '255,255,255');
   equal(free.length, 3, 'three twinkling layers');
   const box = { l: -1000, t: -1000, r: 1000, b: 1000 };
   ok(clearance([box], 0, 0) <= 0, 'a point inside a text block has no room');
-  ok(dustShadows(grains, [box], 0, '#fff').every((layer) => layer === ''), 'a block over everything leaves no grain');
+  ok(dustShadows(grains, [box], 0, '255,255,255').every((layer) => layer === ''), 'a block over everything leaves no grain');
   ok(free.every((layer) => layer !== ''), 'with no text the dust is drawn');
+  // The browser must take what was generated: a shadow it refuses is dropped and nothing is drawn.
+  const dot = document.createElement('i');
+  for (const layer of free) {
+    ok(CSS.supports('box-shadow', layer), 'the browser accepts the shadows');
+    dot.style.boxShadow = layer;
+    ok(dot.style.boxShadow !== '', 'the shadows survive being set on an element');
+  }
 });
 
 check('appearance: saves run in order, and a failed one does not stop the next', async () => {
