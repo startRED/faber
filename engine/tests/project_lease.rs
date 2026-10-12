@@ -1,9 +1,9 @@
 //! Exclusive leases and file requests on temporary directories; never spawn git or a worker.
-use faber_engine::project::lease::{LeaseError, Leases, Termination, hash};
+use faber_engine::project::lease::{Closure, LeaseError, Leases, Termination, hash};
 use faber_engine::project::store::Journal;
 use faber_engine::project::wire::{DeleteOp, FileOp, RenameOp, WriteOp};
+use faber_engine::project::{DecidedBy, Decision, DecisionKind, GraphError, Intent, IntentKind, Outcome, Plan, Receipt, Task, TaskKind};
 use faber_engine::project::{GitMode, Grant, Lease, ProcessId, RepoIdentity};
-use faber_engine::project::{GraphError, Intent, IntentKind, Outcome, Plan, Receipt, Task, TaskKind};
 use faber_engine::store::{Disk, Fault, RealDisk};
 use std::fs;
 use std::sync::{
@@ -71,6 +71,7 @@ fn release_requires_exact_dead_tree_and_settled_cost_never_a_timeout() {
     let mut leases = s.open().unwrap();
     let lease = leases.acquire(s.request(&["src"])).unwrap();
     let process = ProcessId { pid: 42, started_at: 9 };
+    leases.prepare_launch(&lease, "launch", 3, 1).unwrap();
     leases.attach_process(&lease, process).unwrap();
     for proof in [
         Termination { process: Some(process), tree_dead: false, cost_settled: true },
@@ -246,6 +247,7 @@ fn review_1_a_crashed_mission_can_be_recovered_without_transferring_live_ownersh
     let mut leases = s.open().unwrap();
     let lease = leases.acquire(s.request(&["src"])).unwrap();
     let process = ProcessId { pid: 42, started_at: 9 };
+    leases.prepare_launch(&lease, "launch", 3, 1).unwrap();
     leases.attach_process(&lease, process).unwrap();
     drop(leases);
     let other = || Leases::open(s.repo.clone(), Journal::open(s.data.path(), s.data.path(), "m2").unwrap(), "m2");
@@ -290,6 +292,7 @@ fn review_4_a_dead_settled_quarantined_attempt_can_be_archived_without_losing_it
     let root = s.candidate();
     leases.bind(&lease, &root).unwrap();
     let process = ProcessId { pid: 42, started_at: 9 };
+    leases.prepare_launch(&lease, "launch", 3, 1).unwrap();
     leases.attach_process(&lease, process).unwrap();
     fs::write(root.join("src/a.rs"), "manual artifact").unwrap();
     assert_eq!(leases.audit(&lease), Err(LeaseError::Quarantined));
@@ -355,4 +358,244 @@ fn review_4_failed_retirement_persistence_keeps_the_attempt_and_repository_quara
         Err(LeaseError::Owned)
     ));
     assert_eq!(fs::read_to_string(root.join("src/a.rs")).unwrap(), "manual artifact");
+}
+
+#[test]
+fn opus_h2_failed_initialization_does_not_publish_an_owner() {
+    let s = Setup::new();
+    let disk = Arc::new(FailingDisk(AtomicBool::new(false)));
+    let journal = Journal::open_with(s.owner.path(), s.data.path(), "m1", disk.clone()).unwrap();
+    disk.0.store(true, Ordering::SeqCst);
+    assert!(Leases::open(s.repo.clone(), journal, "m1").is_err());
+    Leases::open(s.repo.clone(), Journal::open(s.owner.path(), s.data.path(), "m2").unwrap(), "m2").unwrap().finish().unwrap();
+}
+
+#[test]
+fn opus_m1_missing_or_damaged_private_ledger_is_never_empty_and_public_receipts_are_untrusted() {
+    let s = Setup::new();
+    let leases = s.open().unwrap();
+    let journal = leases.journal();
+    journal.record_intent(&Intent::new("pending", "m1", IntentKind::Commit, 3, 1)).unwrap();
+    let public = journal.records().join("receipts/pending.json");
+    let mut forged: serde_json::Value = serde_json::from_slice(&fs::read(&public).unwrap()).unwrap();
+    forged["receipt"] = serde_json::to_value(Receipt::new("pending", Outcome::Done, 2)).unwrap();
+    fs::write(&public, forged.to_string()).unwrap();
+    assert_eq!(journal.pending().unwrap().len(), 1);
+    fs::remove_file(journal.private().join("effects.json")).unwrap();
+    assert!(journal.pending().is_err());
+    assert!(journal.record_intent(&Intent::new("pending", "m1", IntentKind::Commit, 3, 1)).is_err());
+    assert!(leases.finish().is_err());
+}
+
+#[test]
+fn opus_h3_unknown_receipts_have_an_explicit_resolution() {
+    let s = Setup::new();
+    let leases = s.open().unwrap();
+    let journal = leases.journal();
+    journal.record_intent(&Intent::new("uncertain", "m1", IntentKind::Commit, 3, 1)).unwrap();
+    journal.record_receipt(&Receipt::new("uncertain", Outcome::Unknown, 2)).unwrap();
+    let mut receipt = Receipt::new("uncertain", Outcome::Failed, 3);
+    receipt.evidence.insert("inspection".into(), "unapproved private commit retained, never landed".into());
+    let mut decision = Decision::new("resolve", "lead", "Close the inspected effect?", DecisionKind::Technical);
+    decision.answer(DecidedBy::Ai, "close", 3).unwrap();
+    assert!(journal.reconcile(&receipt, &decision).is_err());
+    decision.answered_by = Some(DecidedBy::Person);
+    journal.reconcile(&receipt, &decision).unwrap();
+    assert!(journal.reconcile(&receipt, &decision).is_err(), "a final outcome cannot be changed again");
+    let ledger = fs::read_to_string(journal.private().join("effects.json")).unwrap();
+    assert!(ledger.contains("unknown") && ledger.contains("reconciliation"));
+    assert!(journal.pending().unwrap().is_empty());
+    leases.finish().unwrap();
+}
+
+#[test]
+fn opus_m1_removing_public_records_cannot_erase_or_forge_effects() {
+    let s = Setup::new();
+    let leases = s.open().unwrap();
+    let intent = Intent::new("uncertain", "m1", IntentKind::Commit, 3, 1);
+    leases.journal().record_intent(&intent).unwrap();
+    fs::remove_dir_all(s.owner.path().join(".faber")).unwrap();
+    assert_eq!(leases.journal().pending().unwrap(), vec![intent.clone()]);
+    assert!(leases.journal().record_intent(&intent).is_err());
+    assert_eq!(leases.finish(), Err(LeaseError::Live));
+}
+
+#[test]
+fn opus_m2_a_held_repository_lock_cannot_be_deleted() {
+    let s = Setup::new();
+    let leases = s.open().unwrap();
+    #[cfg(windows)]
+    assert!(fs::remove_file(s.owner.path().join(".git/faber-project.lock")).is_err());
+    assert!(matches!(s.open(), Err(LeaseError::Owned)));
+    leases.finish().unwrap();
+}
+
+fn closure(dead: bool) -> Closure {
+    let mut decision = Decision::new("close", "lead", "Close this abandoned mission and reserve unknown cost?", DecisionKind::Money);
+    decision.answer(DecidedBy::Person, "close and reserve", 4).unwrap();
+    Closure { decision, processes: vec![], tree_dead: dead, cost_settled: false, reserve_unknown_cost: true }
+}
+
+#[test]
+fn opus_h2_explicit_closure_preserves_unknown_effects_cost_and_artifacts() {
+    let s = Setup::new();
+    let mut leases = s.open().unwrap();
+    let lease = leases.acquire(s.request(&["src"])).unwrap();
+    let root = s.candidate();
+    leases.bind(&lease, &root).unwrap();
+    leases.journal().record_intent(&Intent::new("pending", "m1", IntentKind::Commit, 3, 1)).unwrap();
+    let journal = Journal::open(s.owner.path(), s.data.path(), "m1").unwrap();
+    assert!(matches!(Leases::close_abandoned(&s.repo, &journal, "m1", closure(true)), Err(LeaseError::Owned)));
+    drop(leases);
+    assert_eq!(Leases::close_abandoned(&s.repo, &journal, "m1", closure(false)), Err(LeaseError::Live));
+    Leases::close_abandoned(&s.repo, &journal, "m1", closure(true)).unwrap();
+    assert!(journal.private().join("closure.json").is_file());
+    assert!(fs::read_to_string(journal.private().join("closure.json")).unwrap().contains("\"unknownCostReserved\": true"));
+    assert_eq!(journal.pending().unwrap().len(), 1);
+    assert!(journal.record_intent(&Intent::new("again", "m1", IntentKind::Commit, 3, 2)).is_err());
+    assert_eq!(fs::read(root.join("src/a.rs")).unwrap(), b"before");
+    assert!(matches!(s.open(), Err(LeaseError::Stale)));
+    Leases::open(s.repo.clone(), Journal::open(s.owner.path(), s.data.path(), "m2").unwrap(), "m2").unwrap().finish().unwrap();
+}
+
+#[test]
+fn opus_h2_missing_runtime_requires_explicit_closure_never_empty_recovery() {
+    let s = Setup::new();
+    let mut leases = s.open().unwrap();
+    leases.acquire(s.request(&["src"])).unwrap();
+    drop(leases);
+    fs::remove_file(s.data.path().join("missions/m1/runtime.json")).unwrap();
+    assert!(s.open().is_err());
+    let journal = Journal::open(s.owner.path(), s.data.path(), "m1").unwrap();
+    Leases::close_abandoned(&s.repo, &journal, "m1", closure(true)).unwrap();
+    Leases::open(s.repo.clone(), Journal::open(s.owner.path(), s.data.path(), "m2").unwrap(), "m2").unwrap().finish().unwrap();
+}
+
+#[test]
+fn opus_h2_moved_repository_can_be_closed_without_reusing_old_source_authority() {
+    let s = Setup::new();
+    let mut leases = s.open().unwrap();
+    let lease = leases.acquire(s.request(&["src"])).unwrap();
+    leases.prepare_launch(&lease, "launch", 3, 1).unwrap();
+    let process = ProcessId { pid: 42, started_at: 9 };
+    leases.attach_process(&lease, process).unwrap();
+    drop(leases);
+    let moved = tempfile::tempdir().unwrap();
+    let root = moved.path().join("moved");
+    fs::rename(s.owner.path(), &root).unwrap();
+    let repo =
+        RepoIdentity::new(&root.join(".git").canonicalize().unwrap().to_string_lossy(), &root.canonicalize().unwrap().to_string_lossy());
+    let journal = Journal::open(&root, s.data.path(), "m1").unwrap();
+    assert!(Leases::open(repo.clone(), Journal::open(&root, s.data.path(), "m1").unwrap(), "m1").is_err());
+    assert_eq!(Leases::close_abandoned(&repo, &journal, "m1", closure(true)), Err(LeaseError::Live));
+    let mut proof = closure(true);
+    proof.processes = vec![process];
+    Leases::close_abandoned(&repo, &journal, "m1", proof).unwrap();
+    Leases::open(repo, Journal::open(&root, s.data.path(), "m2").unwrap(), "m2").unwrap().finish().unwrap();
+    assert_eq!(journal.runtime().unwrap().leases[0].repo, s.repo.common_dir, "history keeps the original identity");
+}
+
+#[test]
+fn opus_h2_failed_closure_persistence_keeps_repository_ownership() {
+    let s = Setup::new();
+    let leases = s.open().unwrap();
+    drop(leases);
+    let disk = Arc::new(FailingDisk(AtomicBool::new(true)));
+    let journal = Journal::open_with(s.owner.path(), s.data.path(), "m1", disk).unwrap();
+    assert!(Leases::close_abandoned(&s.repo, &journal, "m1", closure(true)).is_err());
+    assert!(matches!(
+        Leases::open(s.repo.clone(), Journal::open(s.owner.path(), s.data.path(), "m2").unwrap(), "m2"),
+        Err(LeaseError::Owned)
+    ));
+}
+
+#[test]
+fn opus_h2_interrupted_owner_write_has_an_explicit_close_path_only_without_authority() {
+    let s = Setup::new();
+    drop(s.open().unwrap());
+    fs::write(s.owner.path().join(".git/faber-project.lock"), "m1\n").unwrap();
+    let journal = Journal::open(s.owner.path(), s.data.path(), "m1").unwrap();
+    assert!(s.open().is_err());
+    Leases::close_abandoned(&s.repo, &journal, "m1", closure(true)).unwrap();
+    Leases::open(s.repo.clone(), Journal::open(s.owner.path(), s.data.path(), "m2").unwrap(), "m2").unwrap().finish().unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn opus_m2_unlink_cannot_admit_another_live_coordinator_or_leave_old_effect_authority() {
+    let s = Setup::new();
+    let mut leases = s.open().unwrap();
+    fs::remove_file(s.owner.path().join(".git/faber-project.lock")).unwrap();
+    assert!(matches!(s.open(), Err(LeaseError::Owned)));
+    assert_eq!(leases.acquire(s.request(&["src"])), Err(LeaseError::Owned));
+}
+
+#[test]
+fn opus_l2_process_identity_cannot_be_attached_without_a_durable_launch_intent() {
+    let s = Setup::new();
+    let mut leases = s.open().unwrap();
+    let lease = leases.acquire(s.request(&["src"])).unwrap();
+    let process = ProcessId { pid: 42, started_at: 9 };
+    assert_eq!(leases.attach_process(&lease, process), Err(LeaseError::Live));
+    leases.prepare_launch(&lease, "launch", 3, 1).unwrap();
+    drop(leases);
+    let mut recovered = s.open().unwrap();
+    assert_eq!(recovered.release(&lease, Termination { process: None, tree_dead: true, cost_settled: true }), Err(LeaseError::Live));
+    recovered.attach_process(&lease, process).unwrap();
+    recovered.release(&lease, Termination { process: Some(process), tree_dead: true, cost_settled: true }).unwrap();
+    recovered.finish().unwrap();
+}
+
+#[test]
+fn opus_l2_an_unresolved_launch_cannot_use_a_no_process_termination() {
+    let s = Setup::new();
+    let mut leases = s.open().unwrap();
+    let lease = leases.acquire(s.request(&["src"])).unwrap();
+    let mut launch = Intent::new("launch", "m1", IntentKind::Dispatch, 3, 1);
+    launch.task = Some(lease.task.clone());
+    launch.expected.insert("generation".into(), lease.generation.to_string());
+    leases.journal().record_intent(&launch).unwrap();
+    assert_eq!(leases.release(&lease, Termination { process: None, tree_dead: true, cost_settled: true }), Err(LeaseError::Live));
+}
+
+#[test]
+fn opus_l3_invalid_file_ancestors_are_refused_without_quarantine() {
+    let s = Setup::new();
+    let mut leases = s.open().unwrap();
+    let lease = leases.acquire(s.request(&["src"])).unwrap();
+    let root = s.candidate();
+    leases.bind(&lease, &root).unwrap();
+    let write = FileOp::Write(WriteOp { path: "src/a.rs/b.rs".into(), expect: None, content: "invalid".into() });
+    assert_eq!(leases.patch(&lease, Some(&s.grant()), 3, &write), Err(LeaseError::Path));
+    assert_eq!(leases.read(&lease, "src/a.rs").unwrap().0, b"before");
+}
+
+#[test]
+fn opus_m3_broker_io_is_refused_while_a_worker_or_unacknowledged_launch_may_be_alive() {
+    let s = Setup::new();
+    let mut leases = s.open().unwrap();
+    let lease = leases.acquire(s.request(&["src"])).unwrap();
+    let root = s.candidate();
+    leases.bind(&lease, &root).unwrap();
+    let op = FileOp::Write(WriteOp { path: "src/a.rs".into(), expect: Some(hash(b"before")), content: "approved".into() });
+    leases.prepare_launch(&lease, "launch", 3, 1).unwrap();
+    assert_eq!(leases.read(&lease, "src/a.rs"), Err(LeaseError::Live));
+    assert_eq!(leases.patch(&lease, Some(&s.grant()), 3, &op), Err(LeaseError::Live));
+    let process = ProcessId { pid: 42, started_at: 9 };
+    leases.attach_process(&lease, process).unwrap();
+    assert_eq!(leases.read(&lease, "src/a.rs"), Err(LeaseError::Live));
+    assert_eq!(leases.patch(&lease, Some(&s.grant()), 3, &op), Err(LeaseError::Live));
+    assert_eq!(
+        leases.settle_process(&lease, Termination { process: Some(process), tree_dead: false, cost_settled: true }),
+        Err(LeaseError::Live)
+    );
+    assert_eq!(
+        leases.settle_process(&lease, Termination { process: Some(process), tree_dead: true, cost_settled: false }),
+        Err(LeaseError::Live)
+    );
+    leases.settle_process(&lease, Termination { process: Some(process), tree_dead: true, cost_settled: true }).unwrap();
+    assert_eq!(leases.read(&lease, "src/a.rs").unwrap().0, b"before");
+    leases.patch(&lease, Some(&s.grant()), 3, &op).unwrap();
+    assert_eq!(leases.read(&lease, "src/a.rs").unwrap().0, b"approved");
+    assert_eq!(leases.journal().runtime().unwrap().leases[0].process, Some(process));
 }

@@ -1,11 +1,12 @@
 //! The mission journal. Plain records live in the repository's `.faber/missions/<id>/` folder, where people and other
 //! tools can read them: `mission.json`, `plan.json`, and one file per contract, brief, decision, artifact and intent.
-//! CLI sessions and leases, which name processes, live in Faber's data folder (`missions/<id>/runtime.json`).
+//! CLI sessions and leases live in Faber's data folder (`missions/<id>/runtime.json`). The authoritative effect ledger
+//! lives beside them (`effects.json`); repository receipts are readable copies and cannot release safety authority.
 //!
 //! Every write is an atomic replacement that returns its fault, and every read tells a missing record from a damaged or
 //! newer one. Nothing here falls back to empty data: a mission that cannot be read or saved stops taking effects.
 
-use super::{Artifact, Brief, Contract, Decision, Intent, Mission, Outcome, Plan, Receipt, Record, Runtime, SCHEMA, valid_id};
+use super::{Artifact, Brief, Contract, DecidedBy, Decision, Intent, Mission, Outcome, Plan, Receipt, Record, Runtime, SCHEMA, valid_id};
 use crate::store::{Disk, Fault, RealDisk, read_checked, replace};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -66,6 +67,16 @@ impl Record for Entry {
     }
 }
 
+#[derive(Default, Serialize, Deserialize)]
+struct Effects {
+    entries: Vec<Entry>,
+}
+impl Record for Effects {
+    fn schema(&self) -> u32 {
+        self.entries.iter().map(Record::schema).max().unwrap_or(SCHEMA)
+    }
+}
+
 pub struct Journal {
     mission: String,
     records: PathBuf,
@@ -87,10 +98,15 @@ impl Journal {
         }
         let records = repo.join(".faber").join("missions").join(mission);
         let private = data_dir.join("missions").join(mission);
+        let fresh = !private.exists();
         for dir in [&records, &private] {
             fs::create_dir_all(dir).map_err(|e| Fault::of_write(&e))?;
         }
-        Ok(Journal { mission: mission.into(), records, private, disk })
+        let journal = Journal { mission: mission.into(), records, private, disk };
+        if fresh {
+            journal.put(&journal.private.join("effects.json"), &Effects::default())?;
+        }
+        Ok(journal)
     }
 
     pub fn records(&self) -> &Path {
@@ -210,28 +226,75 @@ impl Journal {
     /// Records that an effect is about to happen. Refused when the intent is already there: it may have happened.
     pub fn record_intent(&self, intent: &Intent) -> Result<(), JournalError> {
         self.same_mission(&intent.mission)?;
-        let path = self.named("receipts", &intent.id)?;
-        if self.get::<Entry>(&path)?.is_some() {
+        self.named("receipts", &intent.id)?;
+        if self.private.join("closure.json").exists() {
+            return Err(JournalError::Mismatch);
+        }
+        let mut effects = self.effects()?;
+        if effects.entries.iter().any(|e| e.intent.id == intent.id) {
             return Err(JournalError::IntentExists);
         }
-        self.put(&path, &Entry { intent: intent.clone(), receipt: None, extra: Default::default() })
+        let entry = Entry { intent: intent.clone(), receipt: None, extra: Default::default() };
+        effects.entries.push(entry.clone());
+        self.put(&self.private.join("effects.json"), &effects)?;
+        self.put(&self.named("receipts", &intent.id)?, &entry)
     }
 
     /// Records how an intended effect ended, once.
     pub fn record_receipt(&self, receipt: &Receipt) -> Result<(), JournalError> {
-        let path = self.named("receipts", &receipt.intent)?;
-        let mut entry: Entry = self.get(&path)?.ok_or(JournalError::NoIntent)?;
-        if entry.receipt.is_some() {
+        self.save_receipt(receipt, None)
+    }
+
+    /// Only trusted person input may resolve an ambiguous outcome; the prior receipt and decision remain in the ledger.
+    pub fn reconcile(&self, receipt: &Receipt, decision: &Decision) -> Result<(), JournalError> {
+        if decision.answered_by != Some(DecidedBy::Person)
+            || decision.answer.as_ref().is_none_or(|s| s.trim().is_empty())
+            || decision.answered_at.is_none()
+            || receipt.outcome == Outcome::Unknown
+            || receipt.evidence.is_empty()
+        {
+            return Err(JournalError::Mismatch);
+        }
+        self.save_receipt(receipt, Some(decision))
+    }
+
+    fn save_receipt(&self, receipt: &Receipt, decision: Option<&Decision>) -> Result<(), JournalError> {
+        self.named("receipts", &receipt.intent)?;
+        let mut effects = self.effects()?;
+        let entry = effects.entries.iter_mut().find(|e| e.intent.id == receipt.intent).ok_or(JournalError::NoIntent)?;
+        if entry.receipt.is_some() && (decision.is_none() || entry.receipt.as_ref().is_some_and(|r| r.outcome != Outcome::Unknown)) {
             return Err(JournalError::ReceiptExists);
         }
+        if let Some(decision) = decision {
+            entry.extra.insert("reconciliation".into(), serde_json::json!({"decision": decision, "previous": entry.receipt}));
+        }
         entry.receipt = Some(receipt.clone());
-        self.put(&path, &entry)
+        let entry = entry.clone();
+        self.put(&self.private.join("effects.json"), &effects)?;
+        self.put(&self.named("receipts", &receipt.intent)?, &entry)
+    }
+
+    fn effects(&self) -> Result<Effects, JournalError> {
+        match self.get(&self.private.join("effects.json"))? {
+            Some(effects) => Ok(effects),
+            None => Err(Fault::Corrupt.into()),
+        }
+    }
+
+    pub(crate) fn initialize_effects(&self) -> Result<(), JournalError> {
+        let effects = self.effects()?;
+        self.put(&self.private.join("effects.json"), &effects)
+    }
+
+    pub(crate) fn close(&self, evidence: &serde_json::Value) -> Result<(), JournalError> {
+        self.put(&self.private.join("closure.json"), evidence)
     }
 
     /// Intents with no receipt or an uncertain outcome: recovery must reconcile before anything resumes.
     pub fn pending(&self) -> Result<Vec<Intent>, JournalError> {
         let mut open: Vec<Intent> = self
-            .list::<Entry>("receipts")?
+            .effects()?
+            .entries
             .into_iter()
             .filter(|e| e.receipt.as_ref().is_none_or(|r| r.outcome == Outcome::Unknown))
             .map(|e| e.intent)

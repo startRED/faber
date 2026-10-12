@@ -1,7 +1,10 @@
 //! Durable, exclusive writer leases. Neither elapsed time nor dropping a coordinator releases a writer's authority.
+use super::files::ScopedFile;
 use super::store::{Journal, JournalError};
 use super::wire::FileOp;
-use super::{Effect, Grant, Lease, LeaseState, ProcessId, RepoIdentity, Runtime, SCHEMA, clean_path, overlaps, valid_id};
+use super::{
+    DecidedBy, Decision, Effect, Grant, Lease, LeaseState, ProcessId, RepoIdentity, Runtime, SCHEMA, clean_path, overlaps, valid_id,
+};
 use crate::store::{Fault, RealDisk, replace};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -56,6 +59,38 @@ pub struct Termination {
     pub process: Option<ProcessId>,
     pub tree_dead: bool,
     pub cost_settled: bool,
+}
+
+/// Trusted containment proof for every process owned on this repository, including unknown launches, plus a person decision.
+pub struct Closure {
+    pub decision: Decision,
+    pub processes: Vec<ProcessId>,
+    pub tree_dead: bool,
+    pub cost_settled: bool,
+    pub reserve_unknown_cost: bool,
+}
+
+fn coordinator_lock(common: &Path) -> Result<(File, Option<File>), LeaseError> {
+    // POSIX permits unlinking a locked file. Lock the stable common directory as well, so unlink cannot admit a peer.
+    #[cfg(unix)]
+    let directory = {
+        let directory = File::open(common).map_err(|_| Fault::Read)?;
+        directory.try_lock().map_err(|_| LeaseError::Owned)?;
+        Some(directory)
+    };
+    #[cfg(not(unix))]
+    let directory = None;
+    let path = real_path(&common.join("faber-project.lock"))?;
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.share_mode(3).custom_flags(0x0020_0000);
+    }
+    let lock = options.open(path).map_err(|e| Fault::of_write(&e))?;
+    lock.try_lock().map_err(|_| LeaseError::Owned)?;
+    Ok((lock, directory))
 }
 
 pub fn hash(bytes: &[u8]) -> String {
@@ -203,6 +238,7 @@ pub struct Leases {
     journal: Journal,
     runtime: Runtime,
     lock: File,
+    _directory_lock: Option<File>,
     blocked: bool,
 }
 
@@ -221,10 +257,7 @@ impl Leases {
         if private.starts_with(&root) || (records.starts_with(&root) && records != root.join(".faber/missions").join(mission)) {
             return Err(LeaseError::Path);
         }
-        let lock_path = real_path(&common.join("faber-project.lock"))?;
-        let mut lock =
-            OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&lock_path).map_err(|e| Fault::of_write(&e))?;
-        lock.try_lock().map_err(|_| LeaseError::Owned)?;
+        let (mut lock, directory_lock) = coordinator_lock(&common)?;
         let owner = format!("{mission}\n{}", journal.private().canonicalize().map_err(|_| Fault::Read)?.display());
         let mut saved = String::new();
         lock.read_to_string(&mut saved).map_err(|_| Fault::Read)?;
@@ -234,15 +267,17 @@ impl Leases {
         if !saved.is_empty() && !journal.private().join("runtime.json").is_file() {
             return Err(Fault::Corrupt.into());
         }
-        if saved.is_empty() {
-            lock.write_all(owner.as_bytes()).and_then(|()| lock.sync_all()).map_err(|e| Fault::of_write(&e))?;
+        if journal.private().join("closure.json").exists() {
+            return Err(LeaseError::Stale);
         }
         let runtime = journal.runtime()?;
         if runtime.schema != SCHEMA {
             return Err(Fault::Corrupt.into());
         }
         if saved.is_empty() {
+            journal.initialize_effects()?;
             journal.save_runtime(&runtime)?;
+            lock.write_all(owner.as_bytes()).and_then(|()| lock.sync_all()).map_err(|e| Fault::of_write(&e))?;
         }
         let mut generations = BTreeSet::new();
         for lease in &runtime.leases {
@@ -257,7 +292,7 @@ impl Leases {
                 return Err(Fault::Corrupt.into());
             }
             for path in &lease.paths {
-                scoped_path(&root, path)?;
+                normalized(path)?;
             }
         }
         if records.starts_with(&root) {
@@ -277,7 +312,52 @@ impl Leases {
                 file.write_all(addition).and_then(|()| file.sync_all()).map_err(|e| Fault::of_write(&e))?;
             }
         }
-        Ok(Self { repo, mission: mission.into(), journal, runtime, lock, blocked: false })
+        Ok(Self { repo, mission: mission.into(), journal, runtime, lock, _directory_lock: directory_lock, blocked: false })
+    }
+
+    /// Close without re-enrolling or reopening damaged/moved source paths. Never deletes artifacts or frees unknown spend.
+    pub fn close_abandoned(repo: &RepoIdentity, journal: &Journal, mission: &str, proof: Closure) -> Result<(), LeaseError> {
+        if !valid_id(mission)
+            || proof.decision.answered_by != Some(DecidedBy::Person)
+            || proof.decision.answer.as_ref().is_none_or(|s| s.trim().is_empty())
+            || proof.decision.answered_at.is_none()
+            || !proof.tree_dead
+            || (!proof.cost_settled && !proof.reserve_unknown_cost)
+        {
+            return Err(LeaseError::Live);
+        }
+        let common = real_path(Path::new(&repo.common_dir))?.canonicalize().map_err(|_| Fault::Read)?;
+        let private = real_path(journal.private())?.canonicalize().map_err(|_| Fault::Read)?;
+        let (mut lock, _directory_lock) = coordinator_lock(&common)?;
+        let mut saved = String::new();
+        lock.read_to_string(&mut saved).map_err(|_| Fault::Read)?;
+        let owner = format!("{mission}\n{}", private.display());
+        let raw = match fs::read(private.join("runtime.json")) {
+            Ok(bytes) => bytes,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => vec![],
+            Err(_) => return Err(Fault::Read.into()),
+        };
+        // An interrupted first owner write can contain a prefix, but only an initialized, authority-free mission may close it.
+        if saved != owner
+            && !(!saved.is_empty()
+                && owner.starts_with(&saved)
+                && serde_json::from_slice::<Runtime>(&raw).is_ok_and(|r| r.leases.is_empty())
+                && journal.pending()?.is_empty())
+        {
+            return Err(LeaseError::Owned);
+        }
+        if let Ok(runtime) = serde_json::from_slice::<Runtime>(&raw)
+            && runtime.leases.iter().filter_map(|l| l.process).any(|p| !proof.processes.contains(&p))
+        {
+            return Err(LeaseError::Live);
+        }
+        journal.close(&serde_json::json!({
+            "schema": SCHEMA, "mission": mission, "owner": saved, "decision": proof.decision,
+            "processes": proof.processes, "treeDead": true, "costSettled": proof.cost_settled,
+            "unknownCostReserved": proof.reserve_unknown_cost, "runtimeDigest": hash(&raw)
+        }))?;
+        lock.set_len(0).and_then(|()| lock.sync_all()).map_err(|e| Fault::of_write(&e))?;
+        Ok(())
     }
 
     pub fn journal(&self) -> &Journal {
@@ -296,6 +376,7 @@ impl Leases {
     }
 
     fn persist(&mut self, runtime: Runtime) -> Result<(), LeaseError> {
+        self.verify_lock()?;
         if self.blocked {
             return Err(LeaseError::Quarantined);
         }
@@ -314,6 +395,7 @@ impl Leases {
         Ok(index)
     }
     fn matching(&self, lease: &Lease) -> Result<usize, LeaseError> {
+        self.verify_lock()?;
         if self.blocked {
             return Err(LeaseError::Quarantined);
         }
@@ -333,6 +415,7 @@ impl Leases {
             .ok_or(LeaseError::Stale)
     }
     pub fn acquire(&mut self, mut lease: Lease) -> Result<Lease, LeaseError> {
+        self.verify_lock()?;
         if self.blocked {
             return Err(LeaseError::Quarantined);
         }
@@ -386,13 +469,35 @@ impl Leases {
         if process.pid == 0 || process.started_at == 0 || self.runtime.leases[index].process.is_some() {
             return Err(LeaseError::Live);
         }
+        let launch = self
+            .journal
+            .pending()?
+            .into_iter()
+            .find(|i| {
+                i.kind == super::IntentKind::Dispatch
+                    && i.task.as_deref() == Some(&lease.task)
+                    && i.expected.get("generation") == Some(&lease.generation.to_string())
+            })
+            .ok_or(LeaseError::Live)?;
         let mut runtime = self.runtime.clone();
         runtime.leases[index].process = Some(process);
-        self.persist(runtime)
+        self.persist(runtime)?;
+        let mut receipt = super::Receipt::new(&launch.id, super::Outcome::Done, launch.at);
+        receipt.evidence.insert("pid".into(), process.pid.to_string());
+        receipt.evidence.insert("startedAt".into(), process.started_at.to_string());
+        if let Err(e) = self.journal.record_receipt(&receipt) {
+            self.blocked = true;
+            return Err(e.into());
+        }
+        Ok(())
     }
     pub fn release(&mut self, lease: &Lease, proof: Termination) -> Result<(), LeaseError> {
         let index = self.index(lease)?;
-        if !proof.tree_dead || !proof.cost_settled || proof.process != self.runtime.leases[index].process {
+        if !proof.tree_dead
+            || !proof.cost_settled
+            || proof.process != self.runtime.leases[index].process
+            || self.unresolved_launch(lease)?
+        {
             return Err(LeaseError::Live);
         }
         if self.runtime.leases[index].extra.contains_key("gitRoot") {
@@ -420,6 +525,71 @@ impl Leases {
             }),
         );
         self.persist(runtime)
+    }
+
+    fn unresolved_launch(&self, lease: &Lease) -> Result<bool, LeaseError> {
+        Ok(self.journal.pending()?.iter().any(|i| i.kind == super::IntentKind::Dispatch && i.task.as_deref() == Some(&lease.task)))
+    }
+
+    /// Keep the process identity for release/recovery, but permit broker IO after the containment and cost proofs land.
+    pub fn settle_process(&mut self, lease: &Lease, proof: Termination) -> Result<(), LeaseError> {
+        let index = self.index(lease)?;
+        let process = self.runtime.leases[index].process;
+        if process.is_none() || proof.process != process || !proof.tree_dead || !proof.cost_settled || self.unresolved_launch(lease)? {
+            return Err(LeaseError::Live);
+        }
+        let mut runtime = self.runtime.clone();
+        runtime.leases[index]
+            .extra
+            .insert("termination".into(), serde_json::json!({"process": process, "treeDead": true, "costSettled": true}));
+        self.persist(runtime)
+    }
+
+    pub(crate) fn idle(&self, lease: &Lease) -> Result<(), LeaseError> {
+        let held = &self.runtime.leases[self.index(lease)?];
+        if self.unresolved_launch(lease)?
+            || held.process.is_some_and(|p| {
+                held.extra.get("termination").is_none_or(|proof| {
+                    proof["process"] != serde_json::json!(p) || proof["treeDead"] != true || proof["costSettled"] != true
+                })
+            })
+        {
+            return Err(LeaseError::Live);
+        }
+        Ok(())
+    }
+
+    /// Must be durably called before spawning any worker; attach_process completes the identity after spawn.
+    pub fn prepare_launch(&mut self, lease: &Lease, id: &str, revision: u64, at: u64) -> Result<(), LeaseError> {
+        let index = self.index(lease)?;
+        if self.runtime.leases[index].process.is_some() || !self.journal.pending()?.is_empty() {
+            return Err(LeaseError::Live);
+        }
+        let mut intent = super::Intent::new(id, &self.mission, super::IntentKind::Dispatch, revision, at);
+        intent.task = Some(lease.task.clone());
+        intent.expected.insert("generation".into(), lease.generation.to_string());
+        self.journal.record_intent(&intent)?;
+        Ok(())
+    }
+
+    pub(crate) fn verify_lock(&self) -> Result<(), LeaseError> {
+        let path = real_path(&Path::new(&self.repo.common_dir).join("faber-project.lock"))?;
+        let current = fs::metadata(path).map_err(|_| LeaseError::Owned)?;
+        let held = self.lock.metadata().map_err(|_| Fault::Read)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if (current.dev(), current.ino()) != (held.dev(), held.ino()) {
+                return Err(LeaseError::Owned);
+            }
+        }
+        #[cfg(not(unix))]
+        let _ = (current, held); // Windows denies replacement while this handle is held.
+        Ok(())
+    }
+    /// Stop admission after a safety-ledger failure; recovery requires reopening the same mission.
+    pub fn halt(&mut self) {
+        self.blocked = true;
     }
     pub fn bind(&mut self, lease: &Lease, worktree: &Path) -> Result<(), LeaseError> {
         let index = self.index(lease)?;
@@ -458,13 +628,11 @@ impl Leases {
         self.persist(runtime)
     }
     pub fn read(&mut self, lease: &Lease, path: &str) -> Result<(Vec<u8>, String), LeaseError> {
+        self.idle(lease)?;
         self.audit(lease)?;
         self.check(lease, path)?;
-        let source = scoped_path(&self.worktree(lease)?, path)?;
-        if fs::metadata(&source).map_err(|_| Fault::Read)?.len() > super::wire::MAX_TEXT as u64 {
-            return Err(LeaseError::Path);
-        }
-        let bytes = fs::read(&source).map_err(|_| Fault::Read)?;
+        let source = ScopedFile::new(&scoped_path(&self.worktree(lease)?, path)?, false)?;
+        let (bytes, _) = source.read()?.ok_or(Fault::Read)?;
         let digest = hash(&bytes);
         Ok((bytes, digest))
     }
@@ -494,6 +662,7 @@ impl Leases {
             .ok_or(LeaseError::Authority("reason.grant.none"))?
             .allows(&self.repo, revision, Effect::Worktree)
             .map_err(LeaseError::Authority)?;
+        self.idle(lease)?;
         self.audit(lease)?;
         let root = self.worktree(lease)?;
         let (path, expect) = match op {
@@ -502,22 +671,20 @@ impl Leases {
             FileOp::Delete(d) => (d.path.as_str(), Some(d.expect.as_str())),
         };
         self.check(lease, path)?;
-        let source = scoped_path(&root, path)?;
-        if fs::metadata(&source).is_ok_and(|m| m.len() > super::wire::MAX_TEXT as u64) {
-            return Err(LeaseError::Path);
-        }
-        let old = match fs::read(&source) {
-            Ok(bytes) => Some(bytes),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-            Err(_) => return Err(Fault::Read.into()),
-        };
+        let source_path = scoped_path(&root, path)?;
+        let source = ScopedFile::new(&source_path, matches!(op, FileOp::Write(_)))?;
+        let previous = source.read()?;
+        let permissions = previous.as_ref().map(|(_, permissions)| permissions.clone());
+        let old = previous.map(|(bytes, _)| bytes);
         if old.as_ref().map(|b| hash(b)).as_deref() != expect {
             return Err(LeaseError::Hash);
         }
         let target = if let FileOp::Rename(r) = op {
             self.check(lease, &r.to)?;
             let target = scoped_path(&root, &r.to)?;
-            if target.exists() || source.to_string_lossy().to_lowercase() == target.to_string_lossy().to_lowercase() {
+            let target_path = target;
+            let target = ScopedFile::new(&target_path, true)?;
+            if target.read()?.is_some() || source_path.to_string_lossy().to_lowercase() == target_path.to_string_lossy().to_lowercase() {
                 return Err(LeaseError::Hash);
             }
             Some(target)
@@ -525,8 +692,7 @@ impl Leases {
             None
         };
         if let FileOp::Write(w) = op
-            && (w.content.len() > super::wire::MAX_TEXT
-                || source.with_file_name(format!("{}.tmp", source.file_name().unwrap_or_default().to_string_lossy())).exists())
+            && w.content.len() > super::wire::MAX_TEXT
         {
             return Err(LeaseError::Path);
         }
@@ -543,21 +709,12 @@ impl Leases {
         runtime.leases[index].state = LeaseState::Quarantined;
         self.persist(runtime)?;
         let result = match op {
-            FileOp::Write(w) => {
-                let permissions = fs::metadata(&source).ok().map(|meta| meta.permissions());
-                fs::create_dir_all(source.parent().ok_or(LeaseError::Path)?).map_err(|e| Fault::of_write(&e))?;
-                replace(&RealDisk, &source, w.content.as_bytes())?;
-                if let Some(permissions) = permissions {
-                    fs::set_permissions(&source, permissions).map_err(|e| Fault::of_write(&e))?;
-                }
-                Ok(())
-            }
+            FileOp::Write(w) => source.write(w.content.as_bytes(), permissions),
             FileOp::Rename(_) => {
                 let target = target.ok_or(LeaseError::Path)?;
-                fs::create_dir_all(target.parent().ok_or(LeaseError::Path)?).map_err(|e| Fault::of_write(&e))?;
-                fs::rename(&source, target).map_err(|e| Fault::of_write(&e))
+                source.rename(&target)
             }
-            FileOp::Delete(_) => fs::remove_file(&source).map_err(|e| Fault::of_write(&e)),
+            FileOp::Delete(_) => source.delete(),
         };
         result?;
         let files = snapshot(&root)?;
@@ -591,6 +748,7 @@ impl Leases {
     }
     /// Explicit mission completion, after reconciliation. No worktree, artifact, branch or lease record is deleted.
     pub fn finish(self) -> Result<(), LeaseError> {
+        self.verify_lock()?;
         if self.blocked
             || self.runtime.leases.iter().any(|l| {
                 let retirement = l.extra.get("retirement");

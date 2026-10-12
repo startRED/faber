@@ -1113,6 +1113,7 @@ dependencies = [
  "base64 0.22.1",
  "flate2",
  "reqwest",
+ "rustix",
  "serde",
  "serde_json",
  "sha2",
