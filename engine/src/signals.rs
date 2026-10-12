@@ -42,7 +42,12 @@ pub fn claude_signals(msg: &Value) -> Signals {
 /// Codex's `account/rateLimits/updated`: the plan, credits, and whether a limit was reached.
 pub fn codex_signals(msg: &Value) -> Signals {
     let r = &msg["params"]["rateLimits"];
-    let reset = [&r["primary"]["resetsAt"], &r["secondary"]["resetsAt"]].into_iter().filter_map(Value::as_f64).reduce(f64::max);
+    let named = r["rateLimitReachedType"].as_str();
+    let reset = ["primary", "secondary"]
+        .into_iter()
+        .filter(|name| named == Some(*name) || r[*name]["usedPercent"].as_f64().is_some_and(|used| used >= 100.0))
+        .filter_map(|name| r[name]["resetsAt"].as_f64())
+        .reduce(f64::max);
     let reached = !r["rateLimitReachedType"].is_null() || r["spendControlReached"] == true;
     let reach = if reached {
         Some(Reach::Out(reset))

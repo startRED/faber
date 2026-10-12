@@ -44,7 +44,7 @@ fn a_codex_rate_limit_update_gives_plan_credits_and_reach() {
     );
     let out = json!({"params": {"rateLimits": {"primary": {"resetsAt": 100}, "secondary": {"resetsAt": 900}, "rateLimitReachedType": "primary", "credits": {"hasCredits": true}}}});
     let s = codex_signals(&out);
-    assert_eq!(s.reach, Some(Reach::Out(Some(900.0))));
+    assert_eq!(s.reach, Some(Reach::Out(Some(100.0))));
     assert_eq!(s.paid_fallback, Some(true));
 }
 
@@ -114,4 +114,17 @@ fn claude_provider_and_environment_overrides_are_billed_per_use() {
         assert!(claude_env_billed([name.into()]));
     }
     assert!(!claude_env_billed(["PATH".into(), "FABER_DATA_DIR".into()]));
+}
+
+#[test]
+fn a_codex_reached_limit_uses_only_blocking_windows_and_unknown_means_no_reset() {
+    let limits = |kind, primary, secondary| {
+        json!({"params":{"rateLimits":{
+            "primary":{"usedPercent":primary,"resetsAt":100}, "secondary":{"usedPercent":secondary,"resetsAt":900},
+            "rateLimitReachedType":kind
+        }}})
+    };
+    assert_eq!(codex_signals(&limits("primary", 100, 30)).reach, Some(Reach::Out(Some(100.0))));
+    assert_eq!(codex_signals(&limits("primary", 100, 100)).reach, Some(Reach::Out(Some(900.0))));
+    assert_eq!(codex_signals(&limits("unrecognised", 10, 30)).reach, Some(Reach::Out(None)));
 }
