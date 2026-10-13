@@ -978,15 +978,18 @@ async fn the_queue_has_a_limit() {
     engine.shutdown();
 }
 
+const COUNT: &str = "Count from 1 to 30, one number per line, each followed by a five-word comment.";
+const STEER: &str = "stop at 10";
+
 #[tokio::test]
 async fn codex_takes_a_message_into_the_running_turn_and_the_answer_continues_below_it() {
     let dir = tempfile::tempdir().unwrap();
     let f = fake(fixture("codex", "steer"));
     let (engine, _rx) = engine(dir.path(), Vendor::Codex, f.spawn.clone());
-    let id = engine.send(ask(Area::Chat, "Count to ten slowly", choice("codex", Some("gpt-6-luna")))).unwrap();
-    until(&engine, &id, |c| c.messages.last().is_some_and(|m| m.text.contains("One, two"))).await;
+    let id = engine.send(ask(Area::Chat, COUNT, choice("codex", Some("gpt-6-luna")))).unwrap();
+    until(&engine, &id, |c| c.messages.last().is_some_and(|m| !m.text.is_empty())).await;
 
-    say(&engine, &id, "codex", "Stop counting and say pong").unwrap();
+    say(&engine, &id, "codex", STEER).unwrap();
     // Until Codex says it took the message in, it is a pending bubble that cannot be taken back.
     let c = engine.open(&id).unwrap();
     assert_eq!(c.queued.len(), 1);
@@ -997,8 +1000,9 @@ async fn codex_takes_a_message_into_the_running_turn_and_the_answer_continues_be
     let c = until(&engine, &id, |c| settled(c, 4)).await;
     engine.shutdown();
     assert_eq!(f.mismatches.lock().unwrap().clone(), Vec::<String>::new());
-    assert_eq!(texts(&c), ["Count to ten slowly", "Stop counting and say pong"]);
-    assert_eq!((c.messages[1].text.as_str(), c.messages[3].text.as_str()), ("One, two...", "pong"));
+    assert_eq!(texts(&c), [COUNT, STEER]);
+    assert!(c.messages[1].text.starts_with("1 #"), "{:?}", c.messages[1].text);
+    assert!(c.messages[3].text.contains("Counting starts") && c.messages[3].text.ends_with("as you asked."));
     assert_eq!((c.messages[1].status, c.messages[3].status), (Some(Status::Done), Some(Status::Done)));
     assert!(c.queued.is_empty());
     assert_eq!(f.wire.lines_with("turn/steer"), 1);
@@ -1011,19 +1015,19 @@ async fn a_steer_codex_refuses_is_sent_again_as_the_next_turn_exactly_once() {
         let dir = tempfile::tempdir().unwrap();
         let f = fake(fixture("codex", name));
         let (engine, _rx) = engine(dir.path(), Vendor::Codex, f.spawn.clone());
-        let id = engine.send(ask(Area::Chat, "Count to ten slowly", choice("codex", Some("gpt-6-luna")))).unwrap();
-        until(&engine, &id, |c| c.messages.last().is_some_and(|m| m.text.contains("One, two"))).await;
-        say(&engine, &id, "codex", "Stop counting and say pong").unwrap();
+        let id = engine.send(ask(Area::Chat, COUNT, choice("codex", Some("gpt-6-luna")))).unwrap();
+        until(&engine, &id, |c| c.messages.last().is_some_and(|m| !m.text.is_empty())).await;
+        say(&engine, &id, "codex", STEER).unwrap();
 
         until(&engine, &id, |c| settled(c, 4)).await;
         tokio::time::sleep(Duration::from_millis(100)).await;
         let c = engine.open(&id).unwrap();
         engine.shutdown();
         assert_eq!(f.mismatches.lock().unwrap().clone(), Vec::<String>::new(), "{name}");
-        assert_eq!(texts(&c), ["Count to ten slowly", "Stop counting and say pong"], "{name}");
-        assert_eq!(c.messages[3].text, "pong", "{name}");
+        assert_eq!(texts(&c), [COUNT, STEER], "{name}");
+        assert_eq!(c.messages[3].text, "Stopping at 10.", "{name}");
         assert!(c.queued.is_empty(), "{name}");
-        assert_eq!(f.wire.lines_with("Stop counting and say pong"), 2, "{name}: once to steer, once as the turn it became");
+        assert_eq!(f.wire.lines_with(STEER), 2, "{name}: once to steer, once as the turn it became");
         assert_eq!(f.wire.lines_with("turn/start"), 2, "{name}");
     }
 }
@@ -1033,9 +1037,9 @@ async fn the_result_of_a_tool_that_ran_across_a_steer_lands_on_the_tool_not_on_t
     let dir = tempfile::tempdir().unwrap();
     let f = fake(fixture("codex", "steer-tool"));
     let (engine, _rx) = engine(dir.path(), Vendor::Codex, f.spawn.clone());
-    let id = engine.send(ask(Area::Chat, "Count to ten slowly", choice("codex", Some("gpt-6-luna")))).unwrap();
+    let id = engine.send(ask(Area::Chat, COUNT, choice("codex", Some("gpt-6-luna")))).unwrap();
     until(&engine, &id, |c| c.messages.last().is_some_and(|m| m.tools.as_ref().is_some_and(|t| !t.is_empty()))).await;
-    say(&engine, &id, "codex", "Stop counting and say pong").unwrap();
+    say(&engine, &id, "codex", STEER).unwrap();
 
     let c = until(&engine, &id, |c| settled(c, 4)).await;
     engine.shutdown();
