@@ -577,7 +577,7 @@ export const fr: Messages = {
   "reason.remote.ghLoggedOut": "La CLI GitHub n'est pas connectée. Lancez gh auth login, puis réessayez.",
   "reason.remote.target": "La branche, le dépôt distant ou le texte à publier n'est pas valide.",
   "reason.remote.pending": "Une étape de publication précédente n'est pas encore réglée. Faber vérifie le dépôt distant avant d'envoyer autre chose.",
-  "reason.remote.config": "Les réglages Git propres à ce dépôt exécuteraient une commande ou détourneraient la connexion. Rien n'a été envoyé.",
+  "reason.remote.config": "Ce dépôt contient des réglages Git que Faber n'autorise pas pour un envoi (seuls ceux de base du dépôt distant, de la branche et de l'auteur sont admis). Rien n'a été envoyé.",
   "reason.remote.url": "Le dépôt distant ne pointe plus là où vous l'avez autorisé. Rien n'a été envoyé.",
   "reason.remote.secret": "Un secret possible a été trouvé dans ce qui allait être envoyé. Rien n'a été envoyé.",
   "reason.remote.unreachable": "Le dépôt distant est injoignable. Votre travail reste local.",

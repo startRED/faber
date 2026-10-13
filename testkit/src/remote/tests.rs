@@ -7,8 +7,8 @@
 use super::{Delivery, FakePr, FakeRemote};
 use faber_engine::project::remote::{
     Account, Call, Ci, CiState, Ledger, Lost, MergeCard, Open, OwnerYes, PrSpec, PrState, Process, RemoteError, Reply, Runner, Step,
-    Target, Tool, blocking_key, ci, lost_on_timeout, merge, merge_card, open_pr, preflight, private_dir, publish, push, read_capped,
-    reconcile, reply_code,
+    Target, Tool, allowed_key, ci, lost_on_timeout, merge, merge_card, open_pr, preflight, private_dir, private_path, publish, push,
+    read_capped, reconcile, reply_code,
 };
 use faber_engine::project::{DecidedBy, Decision, GitMode, Grant, Outcome, RepoIdentity};
 use std::collections::BTreeMap;
@@ -319,6 +319,10 @@ fn a_push_sends_the_exact_proven_commit_to_the_granted_url_without_force() {
         "i18n.logOutputEncoding=UTF-8",
         "diff.renames=false",
         "color.ui=never",
+        // A signature shown by log runs the program the repository names for it.
+        "log.showSignature=false",
+        // A bare repository in the working folder would be adopted as the repository.
+        "safe.bareRepository=explicit",
     ] {
         let git = fake.calls.iter().filter(|c| c.tool == Tool::Git);
         assert!(git.into_iter().all(|c| c.args.iter().any(|a| a.starts_with(option))), "every git call carries {option}");
@@ -528,13 +532,61 @@ fn config_that_cannot_be_read_or_understood_blocks_the_push() {
     assert!(ledger.entries.is_empty() && fake.pushes().is_empty());
 }
 
+/// What the repository itself may carry, with the reason each key is harmless to a push. Anything else is refused.
+const ALLOWED: [&str; 24] = [
+    "core.repositoryformatversion",
+    "core.filemode",
+    "core.bare",
+    "core.logallrefupdates",
+    "core.symlinks",
+    "core.ignorecase",
+    "core.precomposeunicode",
+    "core.longpaths",
+    "core.autocrlf",
+    "extensions.worktreeconfig",
+    "extensions.objectformat",
+    "remote.origin.url",
+    "remote.origin.fetch",
+    "remote.my.remote.url",
+    "remote.Origin.fetch",
+    "branch.main.remote",
+    "branch.main.merge",
+    "branch.faber/m1.merge",
+    "branch.a.b.remote",
+    "branch.main.vscode-merge-base",
+    "user.name",
+    "user.email",
+    "USER.Email",
+    "Core.Bare",
+];
+
 #[test]
-fn which_config_keys_run_commands_or_reroute() {
-    for blocked in [
+fn only_listed_config_keys_may_come_from_the_repository() {
+    for allowed in ALLOWED {
+        assert!(allowed_key(allowed), "{allowed}");
+    }
+    for refused in [
+        // Third time a blocklist missed a key that runs a command: everything not listed above is refused.
+        "log.showSignature",
+        "gpg.program",
+        "gpg.ssh.program",
+        "gpg.x509.program",
+        "gpg.format",
+        "include.path",
+        "includeIf.gitdir:/x/.path",
+        "includeif.onbranch:main.path",
         "core.sshCommand",
         "core.gitProxy",
         "core.askPass",
         "core.alternateRefsCommand",
+        "core.worktree",
+        "core.hooksPath",
+        "core.fsmonitor",
+        "core.pager",
+        "core.editor",
+        "core.attributesFile",
+        "core.excludesFile",
+        "core.fileMode.x",
         "credential.helper",
         "credential.https://github.com.username",
         "http.proxy",
@@ -543,25 +595,104 @@ fn which_config_keys_run_commands_or_reroute() {
         "hook.pre-push.command",
         "ssh.variant",
         "protocol.allow",
+        "safe.bareRepository",
         "remote.origin.proxy",
         "remote.origin.receivepack",
         "remote.origin.uploadpack",
         "remote.origin.vcs",
         "remote.origin.mirror",
+        "remote.origin.pushurl",
+        "remote.origin.promisor",
+        "remote.origin.partialclonefilter",
+        "remote.pushdefault",
+        "remote.url",
+        "remote.origin",
+        // The section decides what a name means: the same last word in another section is another setting.
+        "foo.origin.url",
+        "foo.origin.fetch",
+        "url.https://x/.url",
+        "foo.main.merge",
+        "foo.main.remote",
+        "credential.https://x.remote",
+        "branch.main.pushremote",
+        "branch.autosetupmerge",
+        "branch.main",
+        "extensions.partialclone",
+        "extensions.preciousObjects",
+        "user.signingkey",
+        "diff.external",
+        "diff.tool",
+        "filter.x.clean",
+        "alias.push",
+        "push.default",
+        "push.pushOption",
+        "uploadpack.packObjectsHook",
+        "transfer.fsckObjects",
+        "fetch.recurseSubmodules",
+        "i18n.logOutputEncoding",
+        "log.diffMerges",
+        "log.showRoot",
+        "",
+        "core",
+        ".",
     ] {
-        assert!(blocking_key(blocked), "{blocked}");
+        assert!(!allowed_key(refused), "{refused}");
     }
-    for harmless in [
-        "core.bare",
-        "core.filemode",
-        "remote.origin.url",
-        "remote.origin.fetch",
-        "branch.main.remote",
-        "user.name",
-        "core.autocrlf",
-        "remote.proxy",
-    ] {
-        assert!(!blocking_key(harmless), "{harmless}");
+}
+
+#[test]
+fn the_listed_keys_pass_in_every_scope_and_any_other_blocks_the_push() {
+    for scope in ["local", "worktree", "command"] {
+        for allowed in ALLOWED {
+            let mut ledger = Mem::new(GitMode::Equilibrado);
+            let mut fake = scoped(scope, allowed);
+            push(&mut fake, &mut ledger, &target()).unwrap_or_else(|e| panic!("{scope} {allowed}: {}", e.key()));
+        }
+    }
+    for scope in ["local", "worktree", "command"] {
+        for refused in [
+            "log.showSignature",
+            "gpg.program",
+            "include.path",
+            "includeIf.gitdir:/x/.path",
+            "core.sshcommand",
+            "core.hooksPath",
+            "core.worktree",
+            "credential.helper",
+            "http.proxy",
+            "url.https://evil/.insteadof",
+            "remote.origin.uploadpack",
+            "remote.origin.pushurl",
+            "remote.origin.promisor",
+            "extensions.partialclone",
+            "branch.main.pushremote",
+            "something.never.heard.of",
+        ] {
+            // Faber's own pins are listed by git as command scope, so those two pass there; see the next test.
+            if scope == "command" && ["log.showSignature", "core.hooksPath"].contains(&refused) {
+                continue;
+            }
+            let mut ledger = Mem::new(GitMode::Equilibrado);
+            let mut fake = scoped(scope, refused);
+            assert_eq!(key(push(&mut fake, &mut ledger, &target())), "reason.remote.config", "{scope} {refused}");
+            assert!(fake.pushes().is_empty() && ledger.entries.is_empty());
+        }
+    }
+}
+
+#[test]
+fn only_the_command_line_pins_may_show_up_as_command_scope() {
+    // Faber's own `-c` options are what git lists in that scope; they are allowed there and nowhere else.
+    for pin in
+        ["core.hookspath", "core.pager", "core.fsmonitor", "log.showsignature", "log.showRoot", "safe.bareRepository", "diff.external"]
+    {
+        let mut ledger = Mem::new(GitMode::Equilibrado);
+        let mut fake = scoped("command", pin);
+        push(&mut fake, &mut ledger, &target()).unwrap_or_else(|e| panic!("command {pin}: {}", e.key()));
+        for scope in ["local", "worktree"] {
+            let mut fake = scoped(scope, pin);
+            assert_eq!(key(push(&mut fake, &mut Mem::new(GitMode::Equilibrado), &target())), "reason.remote.config", "{scope} {pin}");
+        }
     }
 }
 
@@ -1434,9 +1565,20 @@ fn the_real_process_is_shell_free_hidden_and_never_prompts() {
     {
         assert_eq!(envs.get(name), Some(&Some(value.to_string())), "{name}");
     }
-    for name in ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"] {
+    for name in [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_NAMESPACE",
+        "GIT_PREFIX",
+    ] {
         assert_eq!(envs.get(name), Some(&None), "{name} must be removed");
     }
+    // A partial clone's promisor remote is chosen by the repository: git must not fetch from it on its own.
+    assert_eq!(envs.get("GIT_NO_LAZY_FETCH"), Some(&Some("1".to_string())));
     // git looks at the folder it runs in and never above it.
     assert_eq!(envs.get("GIT_CEILING_DIRECTORIES"), Some(&Some(PathBuf::from("/work").to_string_lossy().into_owned())));
     // The person's own credential setup is neither replaced nor cleared.
@@ -1453,18 +1595,46 @@ fn the_real_process_is_shell_free_hidden_and_never_prompts() {
 // Review round 2: what the scan prints, where reads run, and what a killed call may be settled as
 
 #[test]
-fn repository_config_cannot_blind_the_scan() {
-    // Each of these keys, set in the repository, would make git print less than was asked for. The scan pins them on
-    // its own command line, which beats the repository.
+fn config_cannot_blind_the_scan_from_any_scope() {
+    // Each of these keys would make git print less than was asked for. The repository may not carry them at all, and
+    // the person's own global and system config is overridden by the scan's command line.
     for blinder in ["log.diffMerges", "log.showRoot", "i18n.logOutputEncoding"] {
         for scope in ["local", "worktree"] {
             let mut ledger = Mem::new(GitMode::Equilibrado);
             let mut fake = scoped(scope, blinder);
-            fake.outgoing = "+-----BEGIN PRIVATE KEY-----\n".into();
+            fake.outgoing = "+-----BEGIN PRIVATE KEY-----
+"
+            .into();
+            assert_eq!(key(push(&mut fake, &mut ledger, &target())), "reason.remote.config", "{scope} {blinder}");
+            assert!(fake.pushes().is_empty() && ledger.entries.is_empty());
+        }
+        for scope in ["global", "system"] {
+            let mut ledger = Mem::new(GitMode::Equilibrado);
+            let mut fake = scoped(scope, blinder);
+            fake.outgoing = "+-----BEGIN PRIVATE KEY-----
+"
+            .into();
             assert_eq!(key(push(&mut fake, &mut ledger, &target())), "reason.remote.secret", "{scope} {blinder}");
             assert!(fake.pushes().is_empty() && ledger.entries.is_empty());
         }
     }
+}
+
+#[test]
+fn the_scan_never_asks_git_to_check_signatures() {
+    // `log.showSignature` in the person's own config would run their gpg for every commit of the scan.
+    let mut fake = FakeRemote::default();
+    push(&mut fake, &mut Mem::new(GitMode::Equilibrado), &target()).unwrap();
+    let scan = fake.calls.iter().find(|c| has(c, "log")).unwrap();
+    assert!(has(scan, "--no-show-signature"));
+    assert!(has(scan, "log.showSignature=false"));
+    // The fake prints the patch only when the scan said so on its own command line.
+    let mut ledger = Mem::new(GitMode::Equilibrado);
+    let mut fake = scoped("global", "log.showsignature");
+    fake.outgoing = "+-----BEGIN PRIVATE KEY-----
+"
+    .into();
+    assert_eq!(key(push(&mut fake, &mut ledger, &target())), "reason.remote.secret");
 }
 
 #[test]
@@ -1500,6 +1670,61 @@ fn only_a_private_folder_outside_every_repository_can_be_the_neutral_one() {
     // The shared temp folder and a relative path never qualify.
     assert!(!private_dir(&std::env::temp_dir()));
     assert!(!private_dir(Path::new("relative/folder")));
+}
+
+#[test]
+fn a_bare_repository_layout_cannot_be_the_neutral_folder() {
+    let top = tempfile::tempdir().unwrap();
+    let dir = top.path().join("faber").join("remote");
+    let outside = std::env::temp_dir().ancestors().all(|folder| folder.join(".git").symlink_metadata().is_err());
+    assert_eq!(private_dir(&dir), outside);
+    // HEAD, objects and refs together are what git takes for a bare repository, in the folder git is started in.
+    std::fs::write(
+        dir.join("HEAD"),
+        "ref: refs/heads/main
+",
+    )
+    .unwrap();
+    assert_eq!(private_dir(&dir), outside, "a lone HEAD is just a file");
+    std::fs::create_dir(dir.join("objects")).unwrap();
+    assert_eq!(private_dir(&dir), outside, "no refs yet");
+    std::fs::create_dir(dir.join("refs")).unwrap();
+    assert!(!private_dir(&dir));
+    // Without HEAD it is not a repository, whatever else is there.
+    std::fs::remove_file(dir.join("HEAD")).unwrap();
+    assert_eq!(private_dir(&dir), outside, "objects and refs without HEAD");
+}
+
+#[test]
+fn a_link_as_the_neutral_folder_cannot_lead_out_of_the_private_place() {
+    let top = tempfile::tempdir().unwrap();
+    let repo = top.path().join("checkout");
+    std::fs::create_dir_all(repo.join(".git")).unwrap();
+    std::fs::create_dir(repo.join("inside")).unwrap();
+    let plain = top.path().join("plain");
+    std::fs::create_dir(&plain).unwrap();
+    for (name, target) in [("into-a-repository", repo.join("inside")), ("to-a-plain-folder", plain.clone())] {
+        let link = top.path().join("faber").join(name);
+        std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+        #[cfg(unix)]
+        let linked = std::os::unix::fs::symlink(&target, &link).is_ok();
+        #[cfg(windows)]
+        let linked = std::os::windows::fs::symlink_dir(&target, &link).is_ok();
+        // Making a link takes a privilege on some machines; the real-git scenario makes a junction, which does not.
+        if linked {
+            assert!(!private_dir(&link), "{name}");
+            assert_eq!(private_path(&link), None, "{name}");
+        }
+    }
+    // A plain folder is used as its real path, so git's ceiling is compared with where git really runs.
+    let real = top.path().join("faber").join("real");
+    let got = private_path(&real);
+    let outside = std::env::temp_dir().ancestors().all(|folder| folder.join(".git").symlink_metadata().is_err());
+    assert_eq!(got.is_some(), outside);
+    if let Some(got) = got {
+        assert_eq!(std::fs::canonicalize(&got).unwrap(), std::fs::canonicalize(&real).unwrap());
+        assert!(!got.to_string_lossy().starts_with(r"\\?\"), "git takes no verbatim prefix");
+    }
 }
 
 #[test]

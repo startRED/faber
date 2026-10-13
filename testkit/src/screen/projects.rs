@@ -49,6 +49,11 @@ pub(super) fn run_probe(ctx: &mut Ctx, mode: &str) -> Result {
     if let Some(system) = std::env::var_os("SystemRoot") {
         path.push(PathBuf::from(system).join("System32"));
     }
+    if mode == "--remote-git" {
+        // The marker programs of that probe are shell scripts, which git finds a shell for through the PATH only.
+        let shell = Path::new(&git.command).ancestors().map(|folder| folder.join("usr/bin")).find(|bin| bin.join("sh.exe").is_file());
+        path.extend(shell);
+    }
     env.insert("PATH".into(), std::env::join_paths(path).map_err(|e| e.to_string())?.to_string_lossy().into());
     // Require the hidden desktop even if this probe is invoked in CI; it uses no webview.
     env.remove("GITHUB_ACTIONS");
@@ -125,7 +130,7 @@ pub fn screen_fixture(sandbox: &Path) -> Result {
     std::fs::write(sandbox.join("project-git.ok"), "ok").map_err(|e| e.to_string())
 }
 
-fn git(program: &str, root: &Path, args: &[&str]) -> Result<String> {
+pub(super) fn git(program: &str, root: &Path, args: &[&str]) -> Result<String> {
     let output = git_output(program, root, args)?;
     ensure(output.status.success(), || format!("fixture git {args:?}: {}", String::from_utf8_lossy(&output.stderr)))?;
     Ok(String::from_utf8_lossy(&output.stdout).trim().into())

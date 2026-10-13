@@ -577,7 +577,7 @@ export const de: Messages = {
   "reason.remote.ghLoggedOut": "Die GitHub-CLI ist nicht angemeldet. Führe gh auth login aus und versuche es erneut.",
   "reason.remote.target": "Der Branch, das Remote oder der zu veröffentlichende Text ist ungültig.",
   "reason.remote.pending": "Ein früherer Veröffentlichungsschritt ist noch nicht geklärt. Faber prüft das Remote, bevor etwas anderes gesendet wird.",
-  "reason.remote.config": "Die eigenen Git-Einstellungen dieses Repositorys würden einen Befehl ausführen oder die Verbindung umleiten. Es wurde nichts gesendet.",
+  "reason.remote.config": "Dieses Repository enthält Git-Einstellungen, die Faber für einen Push nicht zulässt (erlaubt sind nur die Grundlagen zu Remote, Branch und Autor). Es wurde nichts gesendet.",
   "reason.remote.url": "Das Remote zeigt nicht mehr dorthin, wo du es freigegeben hast. Es wurde nichts gesendet.",
   "reason.remote.secret": "In dem, was gesendet werden sollte, wurde ein mögliches Geheimnis gefunden. Es wurde nichts gesendet.",
   "reason.remote.unreachable": "Das Remote war nicht erreichbar. Deine Arbeit bleibt lokal.",

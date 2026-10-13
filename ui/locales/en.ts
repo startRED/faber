@@ -485,7 +485,7 @@ export const en = {
   "reason.remote.ghLoggedOut": "The GitHub CLI is not signed in. Run gh auth login, then try again.",
   "reason.remote.target": "The branch, remote or text to publish is not valid.",
   "reason.remote.pending": "An earlier publish step is not settled yet. Faber checks the remote before sending anything else.",
-  "reason.remote.config": "This repository's own Git settings would run a command or redirect the connection. Nothing was sent.",
+  "reason.remote.config": "This repository has Git settings that Faber does not allow for a push (only the basics of the remote, the branch and the author are). Nothing was sent.",
   "reason.remote.url": "The remote no longer points where you granted. Nothing was sent.",
   "reason.remote.secret": "A possible secret was found in what would be sent. Nothing was sent.",
   "reason.remote.unreachable": "The remote could not be reached. Your work stays local.",

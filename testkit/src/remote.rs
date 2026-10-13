@@ -257,6 +257,7 @@ impl FakeRemote {
                     "--encoding=UTF-8",
                     "--no-color",
                     "--no-renames",
+                    "--no-show-signature",
                     "--ignore-missing",
                     "--format=%B",
                 ]
@@ -266,7 +267,7 @@ impl FakeRemote {
                 // Repository config that changes what log prints blinds a scan that does not pin it on its own command line.
                 let blind = self.config.iter().any(|(_, key)| {
                     let key = key.to_lowercase();
-                    ["log.diffmerges", "log.showroot", "i18n.logoutputencoding"].contains(&key.as_str())
+                    ["log.diffmerges", "log.showroot", "i18n.logoutputencoding", "log.showsignature"].contains(&key.as_str())
                         && !self.pins.iter().any(|pin| pin.starts_with(&format!("{key}=")))
                 });
                 ok(if thorough && exact && !blind { self.outgoing.clone() } else { "(nothing to see)\n".to_string() })

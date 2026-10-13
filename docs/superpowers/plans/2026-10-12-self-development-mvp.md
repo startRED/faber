@@ -281,10 +281,24 @@ nothing read from them is trusted):
   own config cannot redirect them. That folder is Faber's own, created by the shell next to its other data, never the
   shared temp folder: `Process` refuses to run a neutral call if the folder or any parent holds a `.git`. Only the push
   needs the checkout, and it goes to the granted URL, not to the remote name.
-- Config guard before the push: `git config --list --show-scope --name-only`. A key that runs a command or reroutes a
-  connection (credential, http, url rewrites, hooks, ssh, protocol, `core.sshCommand`, `remote.*.proxy` ...) in the
-  local, worktree or command scope blocks the push; the system and global scopes are the person's own. The remote name
-  must also resolve to exactly the granted URL (`remote get-url --push --all`, one line, equal).
+- Config guard before the push, an allowlist (a blocklist of bad keys was missed three times): `git config --list --show-scope
+  --name-only`. In the local, worktree and command scopes only these keys may appear: the `core.*` basics `git init` and the
+  platforms write (`repositoryformatversion`, `filemode`, `bare`, `logallrefupdates`, `symlinks`, `ignorecase`,
+  `precomposeunicode`, `longpaths`, `autocrlf`), `extensions.worktreeConfig` and `extensions.objectFormat` (the layout git
+  must understand to open the repository), `remote.<name>.url` and `.fetch`, `branch.<name>.remote`, `.merge` and
+  `.vscode-merge-base`, and `user.name` and `user.email`. Anything else blocks the push, so does an unparsable line: that
+  includes every `include` and `includeIf` (`--list` follows them and judges what they bring, and the include key itself is
+  not listed), `gpg.*`, `credential.*`, `url.*`, `core.hooksPath`, `core.worktree`, `remote.*.pushurl` and the promisor
+  keys. In the command scope Faber's own pins are also listed. The system and global scopes are the person's own. The
+  remote name must also resolve to exactly the granted URL (`remote get-url --push --all`, one line, equal).
+  The pins stay as the second layer: hooks off (`core.hooksPath` to the null device, and the push uses `--no-verify`),
+  `log.showSignature=false` with `--no-show-signature`, `safe.bareRepository=explicit`, and `GIT_NO_LAZY_FETCH=1` so a
+  partial clone's promisor remote is never contacted by a scan. The neutral folder is used as its real path; it is refused
+  if it is a link, has a bare repository's layout, or the real path or any parent holds a `.git`.
+  A hidden scenario (`remote git` in `testkit/src/screen/remote_git.rs`) runs these same calls with real git: a forged
+  `gpgsig` commit with `log.showSignature` and `gpg.program`, includes, worktree config, hooks in `.git/hooks` and at
+  `core.hooksPath`, a partial clone, a bare layout and a junction as the neutral folder. Each case has a control that
+  proves the attack works without the guard on that git.
 - `preflight(url)`: `gh auth status`, the account login, and `gh repo view <url>`, all outside the checkout, give
   `Account { login, repo }` for the start card. gh must act as the account the grant names (`remote_account`); a grant
   without one acts as none (`reason.grant.noAccount`).

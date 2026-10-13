@@ -577,7 +577,7 @@ export const ptBR: Messages = {
   "reason.remote.ghLoggedOut": "O GitHub CLI não está com login feito. Rode gh auth login e tente de novo.",
   "reason.remote.target": "A branch, o remoto ou o texto para publicar não é válido.",
   "reason.remote.pending": "Uma etapa anterior da publicação ainda não foi resolvida. O Faber confere o remoto antes de enviar qualquer outra coisa.",
-  "reason.remote.config": "As configurações do Git deste repositório rodariam um comando ou desviariam a conexão. Nada foi enviado.",
+  "reason.remote.config": "Este repositório tem configurações do Git que o Faber não permite num envio (só valem o básico do remoto, da branch e do autor). Nada foi enviado.",
   "reason.remote.url": "O remoto não aponta mais para onde você autorizou. Nada foi enviado.",
   "reason.remote.secret": "Foi encontrado um possível segredo no que seria enviado. Nada foi enviado.",
   "reason.remote.unreachable": "Não foi possível alcançar o remoto. Seu trabalho fica só no computador.",

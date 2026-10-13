@@ -272,7 +272,7 @@ fn settled(ledger: &mut impl Ledger) -> Result<(), RemoteError> {
 
 /// Every option that changes what git prints, or what it runs, is set here on the command line, which beats the
 /// repository's own config: a worker can write that config, and a scan that trusts it can be made blind.
-const GIT_OPTIONS: [&str; 14] = [
+const GIT_OPTIONS: [&str; 16] = [
     "core.pager=",
     "core.fsmonitor=false",
     "diff.external=",
@@ -287,9 +287,15 @@ const GIT_OPTIONS: [&str; 14] = [
     "i18n.logOutputEncoding=UTF-8",
     "diff.renames=false",
     "color.ui=never",
+    // A signature shown by log runs the program the config names for it.
+    "log.showSignature=false",
+    // A bare repository in the working folder would be adopted as the repository.
+    "safe.bareRepository=explicit",
 ];
 
-fn git(cwd: &Path, args: &[&str]) -> Call {
+/// A git call with every safety option of this module on its command line. Public so the real-git scenario runs the
+/// very same calls.
+pub fn git(cwd: &Path, args: &[&str]) -> Call {
     let null = if cfg!(windows) { "NUL" } else { "/dev/null" };
     // Replacement refs would show the scan other objects than the ones the push packs.
     let mut all = vec!["--no-replace-objects".to_string(), "-c".to_string(), format!("core.hooksPath={null}")];
@@ -366,22 +372,53 @@ pub fn preflight(runner: &mut impl Runner, url: &str) -> Result<Account, RemoteE
 
 // Repository config
 
-/// Config keys that run a command or reroute a connection. Only the person's own scopes may set them.
-pub fn blocking_key(key: &str) -> bool {
+/// The only keys the repository (or its worktree) may carry. A worker can write that config, and every key outside
+/// this list is either unneeded by a push or can run a command, reroute the connection or change what the scan sees;
+/// a list of the bad keys was missed three times, so this is the list of the good ones. Case is ignored, as git does.
+pub fn allowed_key(key: &str) -> bool {
     let key = key.to_ascii_lowercase();
     let parts: Vec<&str> = key.split('.').collect();
     let (first, last) = (parts[0], parts[parts.len() - 1]);
-    match first {
-        "credential" | "http" | "url" | "hook" | "ssh" | "protocol" => true,
-        "core" => matches!(last, "sshcommand" | "gitproxy" | "askpass" | "alternaterefscommand"),
-        "remote" => parts.len() >= 3 && matches!(last, "proxy" | "receivepack" | "uploadpack" | "vcs" | "mirror"),
+    match parts.len() {
+        0..=1 => false,
+        2 => matches!(
+            key.as_str(),
+            // What `git init` writes, and the platform switches it adds: they only describe the checkout.
+            "core.repositoryformatversion"
+                | "core.filemode"
+                | "core.bare"
+                | "core.logallrefupdates"
+                | "core.symlinks"
+                | "core.ignorecase"
+                | "core.precomposeunicode"
+                | "core.longpaths"
+                // Line endings of a checkout; the scan and the push read objects as they are.
+                | "core.autocrlf"
+                // The layout the repository needs git to understand to open it at all.
+                | "extensions.worktreeconfig"
+                | "extensions.objectformat"
+                // Who the commits are by.
+                | "user.name"
+                | "user.email"
+        ),
+        // The remote's address and refspec; the push goes to the granted URL itself, and `pin_url` checks the name.
+        _ if first == "remote" => matches!(last, "url" | "fetch"),
+        // Which remote and branch the own branch follows; `vscode-merge-base` is an editor's note about it.
+        _ if first == "branch" => matches!(last, "remote" | "merge" | "vscode-merge-base"),
         _ => false,
     }
 }
 
-/// Nothing the repository, its worktree or the command line configured may run a command or reroute the connection.
+/// Keys Faber itself sets on the command line, which git lists as `command` scope.
+fn pinned_key(key: &str) -> bool {
+    key.eq_ignore_ascii_case("core.hookspath")
+        || GIT_OPTIONS.iter().any(|option| option.split('=').next().is_some_and(|name| name.eq_ignore_ascii_case(key)))
+}
+
+/// Nothing but [`allowed_key`] may come from the repository, its worktree or the command line. That covers includes
+/// too: `--list` follows them and reports each key under the including scope, and `include.path` is not listed.
 /// System and global scopes are the person's own: their credential helper and URL rewrites are what they want.
-fn guard_config(runner: &mut impl Runner, t: &Target) -> Result<(), RemoteError> {
+pub fn guard_config(runner: &mut impl Runner, t: &Target) -> Result<(), RemoteError> {
     let reply = ask(runner, &git(&t.cwd, &["config", "--list", "--show-scope", "--name-only"]))?;
     if reply.code != 0 {
         return Err(RemoteError::Command);
@@ -390,7 +427,8 @@ fn guard_config(runner: &mut impl Runner, t: &Target) -> Result<(), RemoteError>
         let Some((scope, key)) = line.split_once('\t') else { return Err(RemoteError::Config) };
         match scope {
             "system" | "global" => {}
-            "local" | "worktree" | "command" if !blocking_key(key) => {}
+            "local" | "worktree" if allowed_key(key) => {}
+            "command" if allowed_key(key) || pinned_key(key) => {}
             _ => return Err(RemoteError::Config),
         }
     }
@@ -446,6 +484,19 @@ const EXCLUDE_CAP: usize = 200;
 /// Everything that would leave, as patches: commits the live remote does not have, in full. Binary files are read as
 /// text, merge commits are shown against every parent, and commit messages are included. Fails closed on any error.
 fn scan_outgoing(runner: &mut impl Runner, t: &Target, live: &Live) -> Result<(), RemoteError> {
+    let reply = ask(runner, &scan_call(&t.cwd, &t.head, &live.oids))?;
+    match reply.code {
+        0 => {}
+        OVER => return Err(RemoteError::Oversized),
+        _ => return Err(RemoteError::Command),
+    }
+    // A secret in UTF-16 has a zero byte between its letters.
+    let squeezed = reply.stdout.replace('\0', "");
+    scan_secrets(&reply.stdout).and_then(|()| scan_secrets(&squeezed)).map_err(|_| RemoteError::Secret)
+}
+
+/// The call that prints everything leaving: public so the real-git scenario runs the very same one.
+pub fn scan_call(cwd: &Path, head: &str, live: &[String]) -> Call {
     let mut args = vec![
         "log",
         "--ignore-missing",
@@ -457,20 +508,18 @@ fn scan_outgoing(runner: &mut impl Runner, t: &Target, live: &Live) -> Result<()
         "--no-renames",
         "--no-ext-diff",
         "--no-textconv",
+        "--no-show-signature",
         "--format=%B",
-        &t.head,
+        head,
         "--not",
     ];
-    args.extend(live.oids.iter().take(EXCLUDE_CAP).map(String::as_str));
-    let reply = ask(runner, &git(&t.cwd, &args))?;
-    match reply.code {
-        0 => {}
-        OVER => return Err(RemoteError::Oversized),
-        _ => return Err(RemoteError::Command),
-    }
-    // A secret in UTF-16 has a zero byte between its letters.
-    let squeezed = reply.stdout.replace('\0', "");
-    scan_secrets(&reply.stdout).and_then(|()| scan_secrets(&squeezed)).map_err(|_| RemoteError::Secret)
+    args.extend(live.iter().take(EXCLUDE_CAP).map(String::as_str));
+    git(cwd, &args)
+}
+
+/// The push itself: the exact commit to the own branch of the URL, never forced, never through a hook.
+pub fn push_call(cwd: &Path, url: &str, head: &str, full_ref: &str) -> Call {
+    git(cwd, &["push", "--no-verify", "--porcelain", url, &format!("{head}:{full_ref}")])
 }
 
 /// The exit code a reply gets when its output went past the cap.
@@ -526,8 +575,7 @@ pub fn push(runner: &mut impl Runner, ledger: &mut impl Ledger, t: &Target) -> R
         ledger.receipt(&id, Outcome::Failed, expected, Some(e.key()))?;
         return Err(e);
     }
-    let spec = format!("{}:{full}", t.head);
-    let sent = runner.run(&git(&t.cwd, &["push", "--no-verify", "--porcelain", &t.url, &spec]));
+    let sent = runner.run(&push_call(&t.cwd, &t.url, &t.head, &full));
     let pushed = || Pushed { head: t.head.clone(), already: false };
     match sent {
         Ok(reply) if reply.code == 0 => {
@@ -1120,6 +1168,8 @@ impl Process {
             command.env("GIT_CEILING_DIRECTORIES", parent);
         }
         command
+            // A partial clone's promisor remote is the repository's choice: git may not fetch from it on its own.
+            .env("GIT_NO_LAZY_FETCH", "1")
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("GCM_INTERACTIVE", "never")
             .env("SSH_ASKPASS_REQUIRE", "never")
@@ -1139,13 +1189,32 @@ impl Process {
 /// The code of a call that was refused before it started.
 const REFUSED: i32 = 126;
 
-/// Whether `dir` can be the neutral folder: absolute, not the shared temp folder, made if missing, and neither it nor
-/// any parent holds a `.git` (a folder, a file or a dangling link), so git finds no repository and no config there.
+/// The real path of the neutral folder, if it can be one: absolute, not the shared temp folder, made if missing, not a
+/// link (a symlink or junction would put git somewhere else than the ceiling it is given), not a bare repository's
+/// layout, and neither it nor any parent holds a `.git` (a folder, a file or a dangling link), so git finds no
+/// repository and no config there. Git runs in the returned path.
+pub fn private_path(dir: &Path) -> Option<PathBuf> {
+    if !dir.is_absolute() || std::fs::create_dir_all(dir).is_err() || dir.symlink_metadata().ok()?.file_type().is_symlink() {
+        return None;
+    }
+    let real = plain(std::fs::canonicalize(dir).ok()?);
+    let shared = std::fs::canonicalize(std::env::temp_dir()).map(plain).unwrap_or_else(|_| std::env::temp_dir());
+    let bare = real.join("HEAD").is_file() && real.join("objects").is_dir() && real.join("refs").is_dir();
+    let free = real.ancestors().all(|folder| folder.join(".git").symlink_metadata().is_err());
+    (real != shared && !bare && free).then_some(real)
+}
+
+/// Windows spells a canonical path with a `\\?\` prefix, which git and the ceiling comparison do not take.
+fn plain(path: PathBuf) -> PathBuf {
+    let text = path.to_string_lossy();
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) if !rest.starts_with(r"UNC\") => PathBuf::from(rest),
+        _ => path,
+    }
+}
+
 pub fn private_dir(dir: &Path) -> bool {
-    dir.is_absolute()
-        && dir != std::env::temp_dir()
-        && std::fs::create_dir_all(dir).is_ok()
-        && dir.ancestors().all(|folder| folder.join(".git").symlink_metadata().is_err())
+    private_path(dir).is_some()
 }
 
 /// What a call that had to be killed reports: killed and proven gone only if the whole tree was confined.
@@ -1163,10 +1232,15 @@ impl Runner for Process {
         if program.as_os_str().is_empty() {
             return Err(Lost::Missing);
         }
-        // A repository planted in or above the neutral folder would answer reads with its own config.
-        if call.cwd == self.neutral && !private_dir(&self.neutral) {
-            return Ok(Reply { code: REFUSED, stdout: String::new() });
-        }
+        // A repository planted in or above the neutral folder, or a link out of it, would answer reads with its own config.
+        let neutral;
+        let call = if call.cwd == self.neutral {
+            let Some(cwd) = private_path(&self.neutral) else { return Ok(Reply { code: REFUSED, stdout: String::new() }) };
+            neutral = Call { cwd, ..call.clone() };
+            &neutral
+        } else {
+            call
+        };
         let mut child = self.command(call).spawn().map_err(|_| Lost::Missing)?;
         #[cfg(windows)]
         let job = confine(&child);
