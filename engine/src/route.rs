@@ -56,8 +56,12 @@ explanations, advice), image (making or editing pictures), other.
 difficulty: easy (a quick answer any competent person gets right), medium (needs care, several steps or some \
 expertise), hard (expert work where a subtle mistake is costly: proofs, multi-file changes, concurrency, architecture, \
 legal, medical or financial analysis).
+check: machine (a test, exit code, schema or number the work can recount proves it), glance (the person sees at once \
+whether it is right), blind (the person cannot easily tell a wrong answer from a right one: facts, advice, analysis, \
+subtle code).
 Reply with one line of JSON only: \
-{\"kind\":\"chat|writing|code|math|research|image|other\",\"difficulty\":\"easy|medium|hard\",\"confidence\":<0..1>}";
+{\"kind\":\"chat|writing|code|math|research|image|other\",\"difficulty\":\"easy|medium|hard\",\"check\":\"machine|glance|blind\",\
+\"confidence\":<0..1>}";
 
 /// The profiles this user can run: a connected CLI and, for Codex, a model the account lists.
 pub fn candidates(available: &[Vendor], codex_models: &[String]) -> Vec<Profile> {
