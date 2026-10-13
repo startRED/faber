@@ -223,7 +223,11 @@ export function animateList(root: HTMLElement, subtree = false): void {
       const jumped = children().some((el) => {
         const previous = before.get(el);
         const rect = el.getBoundingClientRect();
-        return previous && (Math.abs(previous.x - rect.x) > 48 || Math.abs(previous.y - rect.y) > 48);
+        // Compare layout coordinates, excluding the translation of an active FLIP.
+        const transform = animations.has(el) ? getComputedStyle(el).transform : 'none';
+        const offset = transform === 'none' ? undefined : new DOMMatrix(transform);
+        return previous && (Math.abs(previous.x - (rect.x - (offset?.m41 ?? 0))) > 48
+          || Math.abs(previous.y - (rect.y - (offset?.m42 ?? 0))) > 48);
       });
       if (jumped) update();
       else if (!animations.size) capture();

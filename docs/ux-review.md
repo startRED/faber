@@ -78,3 +78,15 @@ half-core policy at a positive Cargo job limit; checks cover the cap, one core, 
 After cache repair and the job cap, all seven proofs and the separate `cargo t --all` passed with 655 checks, no
 failures or skips. The final software welcome probe measured 15.9 ms motion p95 and 0.5 ms geometry reads.
 Across glow-fix validation the highest measured thread stress peak was 215.6 MB; the final full run peaked at 201.6 MB.
+
+Windows CI still exceeded the welcome-view active frame budget after the glow fix (26.8 ms p95), despite a healthy
+17.5 ms idle baseline. A separate regression reproduced a welcome-grid observer cancelling a running FLIP on the
+next container resize, even when neither child had changed its layout position: its comparison included the current
+animation translation. The observer now removes tracked FLIP translation before detecting a layout jump, keeping
+the existing animation alive while still retargeting genuine layout changes. The check fails before the fix and
+passes after it, including an interrupted real breakpoint reversal. No frame budget, retry or timeout was changed.
+The focused software-rendering replay passed with 17.1 ms welcome motion p95 and 0.6 ms geometry reads; hosted CI
+must validate the remaining active-frame cost on its slower machine.
+After the interrupted run was restarted, all seven proofs and the separate `cargo t --all` passed: 179 affected
+checks and 656 complete checks, with no failures or skips. The full replay measured 21.1 ms welcome motion p95;
+the highest post-reboot thread stress peak was 214.8 MB (223 MB after cycling all six looks), below 250 MB.
