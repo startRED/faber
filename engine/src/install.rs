@@ -733,14 +733,18 @@ async fn get(url: &str, loopback: Option<&str>, idle: Duration) -> io::Result<re
 
 /// Network fetch of a metadata document: at most `METADATA_LIMIT` bytes, held in memory.
 pub async fn default_fetch(url: &str, loopback: Option<&str>) -> io::Result<Vec<u8>> {
-    let mut res = get(url, loopback, IDLE_TIMEOUT).await?;
-    let too_big = || io::Error::other(format!("The document is larger than {METADATA_LIMIT} bytes: {url}"));
-    if res.content_length().is_some_and(|n| n > METADATA_LIMIT as u64) {
+    metadata_body(get(url, loopback, IDLE_TIMEOUT).await?, METADATA_LIMIT, url).await
+}
+
+/// Shared bounded response reader; callers own destination policy and deadlines.
+pub(crate) async fn metadata_body(mut res: reqwest::Response, limit: usize, url: &str) -> io::Result<Vec<u8>> {
+    let too_big = || io::Error::other(format!("The document is larger than {limit} bytes: {url}"));
+    if res.content_length().is_some_and(|n| n > limit as u64) {
         return Err(too_big());
     }
     let mut body = Vec::new();
     while let Some(chunk) = res.chunk().await.map_err(io::Error::other)? {
-        if body.len() + chunk.len() > METADATA_LIMIT {
+        if body.len() + chunk.len() > limit {
             return Err(too_big());
         }
         body.extend_from_slice(&chunk);

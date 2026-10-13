@@ -72,12 +72,57 @@ impl Record for Entry {
 struct Effects {
     entries: Vec<Entry>,
 }
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CachedProof {
+    schema: u32,
+    task: String,
+    candidate: super::proof::CheckCandidate,
+    outcome: super::wire::CheckOutcome,
+    #[serde(flatten)]
+    extra: super::Extra,
+}
+impl Record for CachedProof {
+    fn schema(&self) -> u32 {
+        self.schema
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SheetRecord {
+    schema: u32,
+    mission: String,
+    sheet: super::wire::DeliverableSheet,
+    #[serde(flatten)]
+    extra: super::Extra,
+}
+impl Record for SheetRecord {
+    fn schema(&self) -> u32 {
+        self.schema
+    }
+}
+
+fn verify_artifacts<'a>(root: &Path, artifacts: impl IntoIterator<Item = &'a super::wire::ArtifactRef>) -> Result<(), JournalError> {
+    for art in artifacts {
+        art.validate().map_err(|_| JournalError::Mismatch)?;
+        super::kit::delivery::scoped_path(&art.path).map_err(|_| JournalError::Mismatch)?;
+        let path = super::lease::normalized(&art.path).map_err(|_| JournalError::Mismatch)?;
+        let file = super::files::ScopedFile::new(&root.join(path), false).map_err(|_| JournalError::Mismatch)?;
+        if file.hash().map_err(|_| JournalError::Mismatch)?.as_deref() != Some(&art.sha256) {
+            return Err(JournalError::Mismatch);
+        }
+    }
+    Ok(())
+}
 impl Record for Effects {
     fn schema(&self) -> u32 {
         self.entries.iter().map(Record::schema).max().unwrap_or(SCHEMA)
     }
 }
 
+#[derive(Clone)]
 pub struct Journal {
     mission: String,
     records: PathBuf,
@@ -177,11 +222,21 @@ impl Journal {
 
     pub fn save_plan(&self, plan: &Plan) -> Result<(), JournalError> {
         self.same_mission(&plan.mission)?;
+        plan.validate().map_err(|_| JournalError::Store(Fault::Corrupt))?;
         self.put(&self.records.join("plan.json"), plan)
     }
 
     pub fn plan(&self) -> Result<Option<Plan>, JournalError> {
-        self.get(&self.records.join("plan.json"))
+        let plan: Option<Plan> = self.get(&self.records.join("plan.json"))?;
+        if let Some(plan) = &plan {
+            self.same_mission(&plan.mission)?;
+            // Read legacy software metadata verbatim; current acceptance validates it separately.
+            let mut graph = plan.clone();
+            graph.sheet = None;
+            graph.bar.clear();
+            graph.validate().map_err(|_| JournalError::Store(Fault::Corrupt))?;
+        }
+        Ok(plan)
     }
 
     pub fn save_contract(&self, contract: &Contract) -> Result<(), JournalError> {
@@ -447,6 +502,240 @@ impl Journal {
             value.validate().map_err(|_| JournalError::Store(Fault::Corrupt))?;
         }
         Ok(brief.filter(|b| !b.stale(now, version)))
+    }
+
+    pub fn save_sheet(&self, sheet: &super::wire::DeliverableSheet) -> Result<(), JournalError> {
+        sheet.validate().map_err(|_| JournalError::Store(Fault::Corrupt))?;
+        let path = self.records.join("sheet-record.json");
+        let previous: Option<SheetRecord> = self.get(&path)?;
+        if let Some(previous) = &previous {
+            self.same_mission(&previous.mission)?;
+        }
+        let record = SheetRecord {
+            schema: SCHEMA,
+            mission: self.mission.clone(),
+            sheet: sheet.clone(),
+            extra: previous.map(|r| r.extra).unwrap_or_default(),
+        };
+        self.put(&path, &record)?;
+        // Keep the pre-versioning display file readable by last-good builds.
+        self.put(&self.records.join("sheet.json"), sheet)
+    }
+
+    pub fn sheet(&self) -> Result<Option<super::wire::DeliverableSheet>, JournalError> {
+        if let Some(record) = self.get::<SheetRecord>(&self.records.join("sheet-record.json"))? {
+            self.same_mission(&record.mission)?;
+            record.sheet.validate().map_err(|_| JournalError::Store(Fault::Corrupt))?;
+            return Ok(Some(record.sheet));
+        }
+        // Legacy display data is readable; compilation validates it before acceptance.
+        self.get(&self.records.join("sheet.json"))
+    }
+
+    pub fn save_facts(&self, sheet: &super::wire::FactSheet) -> Result<(), JournalError> {
+        self.same_mission(&sheet.mission)?;
+        if sheet.schema > SCHEMA {
+            return Err(JournalError::Newer);
+        }
+        for fact in &sheet.facts {
+            fact.validate().map_err(|_| JournalError::Store(Fault::Corrupt))?;
+        }
+        self.put(&self.records.join("facts.json"), sheet)
+    }
+
+    pub fn facts(&self) -> Result<Option<super::wire::FactSheet>, JournalError> {
+        let found: Option<super::wire::FactSheet> = self.get(&self.records.join("facts.json"))?;
+        if let Some(sheet) = &found {
+            self.same_mission(&sheet.mission)?;
+            for fact in &sheet.facts {
+                fact.validate().map_err(|_| JournalError::Store(Fault::Corrupt))?;
+            }
+        }
+        Ok(found)
+    }
+
+    pub fn save_compile_receipt(&self, receipt: &super::wire::CompileReceipt) -> Result<(), JournalError> {
+        self.same_mission(&receipt.mission)?;
+        if receipt.schema > SCHEMA {
+            return Err(JournalError::Newer);
+        }
+        super::proof::validate_compile_receipt(receipt, &receipt.candidate).map_err(|_| JournalError::Store(Fault::Corrupt))?;
+        let path = self.named("compiles", &format!("rev-{}", receipt.plan_revision))?;
+        if self.get::<super::wire::CompileReceipt>(&path)?.is_some()
+            || self
+                .get::<super::wire::CompileReceipt>(&self.private.join("compiles").join(format!("rev-{}.json", receipt.plan_revision)))?
+                .is_some()
+        {
+            return Err(JournalError::ReceiptExists);
+        }
+        self.put(&self.private.join("compiles").join(format!("rev-{}.json", receipt.plan_revision)), receipt)?;
+        self.put(&path, receipt)
+    }
+
+    pub fn compile_receipt(&self, plan_revision: u64) -> Result<Option<super::wire::CompileReceipt>, JournalError> {
+        let found: Option<super::wire::CompileReceipt> = self.get(&self.named("compiles", &format!("rev-{plan_revision}"))?)?;
+        if let Some(receipt) = &found {
+            self.same_mission(&receipt.mission)?;
+            if receipt.plan_revision != plan_revision {
+                return Err(JournalError::Mismatch);
+            }
+            // A legacy display copy is not acceptance evidence; private records are validated at the gate.
+        }
+        Ok(found)
+    }
+
+    pub fn save_check_receipt(&self, receipt: &super::wire::CheckReceipt) -> Result<(), JournalError> {
+        if !valid_id(&receipt.id) || !valid_id(&receipt.task) {
+            return Err(JournalError::BadId);
+        }
+        if receipt.schema > SCHEMA {
+            return Err(JournalError::Newer);
+        }
+        super::proof::validate_check_receipt(receipt, &receipt.candidate).map_err(|_| JournalError::Store(Fault::Corrupt))?;
+        let path = self.named("checks", &receipt.id)?;
+        if self.get::<super::wire::CheckReceipt>(&path)?.is_some()
+            || self.get::<super::wire::CheckReceipt>(&self.private.join("checks").join(format!("{}.json", receipt.id)))?.is_some()
+        {
+            return Err(JournalError::ReceiptExists);
+        }
+        self.put(&self.private.join("checks").join(format!("{}.json", receipt.id)), receipt)?;
+        self.put(&path, receipt)
+    }
+
+    pub fn check_receipt(&self, id: &str) -> Result<Option<super::wire::CheckReceipt>, JournalError> {
+        let found: Option<super::wire::CheckReceipt> = self.get(&self.named("checks", id)?)?;
+        if let Some(receipt) = &found
+            && receipt.id != id
+        {
+            return Err(JournalError::Mismatch);
+        }
+        Ok(found)
+    }
+
+    /// Save both source intent and outcome before returning evidence to the planner.
+    pub fn record_source(&self, receipt: &super::proof::native::SourceReceipt) -> Result<(), JournalError> {
+        receipt.validate().map_err(|_| JournalError::Store(Fault::Corrupt))?;
+        let path = self.named("sources", &receipt.id)?;
+        if self.get::<super::proof::native::SourceReceipt>(&path)?.is_some() {
+            return Err(JournalError::ReceiptExists);
+        }
+        self.put(&path, receipt)
+    }
+
+    pub fn record_compilation(&self, plan: &Plan, receipt: &super::wire::CompileReceipt) -> Result<(), JournalError> {
+        self.same_mission(&plan.mission)?;
+        if receipt.mission != plan.mission
+            || receipt.plan_revision != plan.revision
+            || plan.compile_receipt.as_deref() != Some(&receipt.id)
+            || receipt.extra.get("planSha256").and_then(serde_json::Value::as_str) != Some(&super::lead::plan_digest(plan))
+        {
+            return Err(JournalError::Mismatch);
+        }
+        plan.validate().map_err(|_| JournalError::Store(Fault::Corrupt))?;
+        let sheet = plan.sheet.as_ref().ok_or(JournalError::Mismatch)?;
+        self.save_compile_receipt(receipt)?;
+        self.save_sheet(sheet)?;
+        self.save_facts(&super::lead::faber_facts(&plan.mission, sheet))?;
+        self.save_plan(plan)
+    }
+
+    /// Public receipts are display copies. Only private engine records authorize acceptance.
+    pub fn verify_acceptance(&self, root: &Path, candidate: &str) -> Result<(), JournalError> {
+        let plan = self.plan()?.ok_or(JournalError::Mismatch)?;
+        plan.validate().map_err(|_| JournalError::Mismatch)?;
+        let compile: super::wire::CompileReceipt =
+            self.get(&self.private.join("compiles").join(format!("rev-{}.json", plan.revision)))?.ok_or(JournalError::Mismatch)?;
+        super::proof::validate_compile_receipt(&compile, candidate).map_err(|_| JournalError::Mismatch)?;
+        if plan.compile_receipt.as_deref() != Some(&compile.id)
+            || compile.mission != self.mission
+            || compile.extra.get("planSha256").and_then(serde_json::Value::as_str) != Some(&super::lead::plan_digest(&plan))
+        {
+            return Err(JournalError::Mismatch);
+        }
+        let mut receipts = Vec::new();
+        for id in &compile.check_receipts {
+            if !valid_id(id) {
+                return Err(JournalError::BadId);
+            }
+            let receipt: super::wire::CheckReceipt =
+                self.get(&self.private.join("checks").join(format!("{id}.json")))?.ok_or(JournalError::Mismatch)?;
+            if receipt.id != *id {
+                return Err(JournalError::Mismatch);
+            }
+            for art in receipt.artifacts.iter().chain(receipt.checks.iter().flat_map(|c| &c.evidence)) {
+                verify_artifacts(root, std::iter::once(art))?;
+            }
+            receipts.push(receipt);
+        }
+        super::proof::validate_acceptance(&plan.bar, &receipts, candidate).map_err(|_| JournalError::Mismatch)
+    }
+
+    pub fn cache_check(
+        &self,
+        root: &Path,
+        task: &str,
+        candidate: &super::proof::CheckCandidate,
+        outcome: &super::wire::CheckOutcome,
+    ) -> Result<(), JournalError> {
+        let mut candidate = candidate.clone();
+        candidate.capture_environment();
+        if !valid_id(task) || outcome.id != candidate.check_id {
+            return Err(JournalError::Mismatch);
+        }
+        outcome.validate().map_err(|_| JournalError::Mismatch)?;
+        verify_artifacts(root, &outcome.evidence)?;
+        let inputs = candidate
+            .inputs
+            .iter()
+            .map(|input| serde_json::from_str::<super::wire::ArtifactRef>(input).map_err(|_| JournalError::Mismatch))
+            .collect::<Result<Vec<_>, _>>()?;
+        if inputs.is_empty() {
+            return Err(JournalError::Mismatch);
+        }
+        verify_artifacts(root, &inputs)?;
+        let digest = super::proof::compute_check_digest(&candidate);
+        let path = self.private.join("cache").join(task).join(format!("{digest}.json"));
+        let extra = self.get::<CachedProof>(&path)?.map(|r| r.extra).unwrap_or_default();
+        let record = CachedProof { schema: SCHEMA, task: task.into(), candidate: candidate.clone(), outcome: outcome.clone(), extra };
+        self.put(&path, &record)?;
+        if !outcome.is_pass() {
+            return Err(JournalError::Mismatch);
+        }
+        Ok(())
+    }
+
+    pub fn reuse_check(
+        &self,
+        root: &Path,
+        task: &str,
+        candidate: &super::proof::CheckCandidate,
+    ) -> Result<Option<super::wire::CheckOutcome>, JournalError> {
+        let mut candidate = candidate.clone();
+        candidate.capture_environment();
+        if !valid_id(task) {
+            return Err(JournalError::BadId);
+        }
+        let inputs = candidate
+            .inputs
+            .iter()
+            .map(|input| serde_json::from_str::<super::wire::ArtifactRef>(input).map_err(|_| JournalError::Mismatch))
+            .collect::<Result<Vec<_>, _>>()?;
+        if inputs.is_empty() || verify_artifacts(root, &inputs).is_err() {
+            return Ok(None);
+        }
+        let digest = super::proof::compute_check_digest(&candidate);
+        let Some(record): Option<CachedProof> = self.get(&self.private.join("cache").join(task).join(format!("{digest}.json")))? else {
+            return Ok(None);
+        };
+        if record.task != task || record.candidate != candidate || record.outcome.id != candidate.check_id {
+            return Err(JournalError::Mismatch);
+        }
+        record.outcome.validate().map_err(|_| JournalError::Mismatch)?;
+        if !record.outcome.is_pass() {
+            return Ok(None);
+        }
+        verify_artifacts(root, &record.outcome.evidence)?;
+        Ok(Some(record.outcome))
     }
 }
 #[cfg(test)]
