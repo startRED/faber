@@ -37,6 +37,23 @@ pub fn settle(base: Option<&CostBase>, session: &str, fresh: bool, total: Option
     Settled { cost, base: Some(CostBase { session: session.to_string(), total }) }
 }
 
+/// The part of a turn's prompt that came from the CLI's cache; None when the turn had no prompt.
+pub fn cache_share(input: u64, read: u64) -> Option<f64> {
+    (input > 0).then(|| read as f64 / input as f64)
+}
+
+/// Below this share of the prompt read from cache, something is probably breaking the prefix (Anthropic's guidance: agent
+/// loops read a median 84%; under about 80% a change of model, effort or tools mid-session is the usual suspect).
+const CACHE_HEALTHY: f64 = 0.8;
+/// A smaller prompt is too small for the share to mean anything.
+const CACHE_MIN_INPUT: u64 = 2048;
+
+/// True when a turn's cache use is worth a line in the local cache-health log: not the first turn of a fresh process (its
+/// cache is empty by definition), a prompt big enough to judge, and a share under the healthy mark.
+pub fn worth_logging(input: u64, read: u64, cold: bool) -> bool {
+    !cold && input >= CACHE_MIN_INPUT && cache_share(input, read).is_some_and(|share| share < CACHE_HEALTHY)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -177,5 +194,28 @@ mod price_tests {
         assert!((haiku - 0.00055865).abs() < 1e-9);
         assert_eq!(api_price("unknown", 100, 10, 0, 0, 0), None);
         assert_eq!(api_price("gpt-6.1-sol", 100, 10, 101, 0, 0), None);
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    #[test]
+    fn the_cache_share_is_the_part_of_the_prompt_read_from_cache() {
+        assert_eq!(cache_share(0, 0), None);
+        assert_eq!(cache_share(10_000, 8_400), Some(0.84));
+        assert_eq!(cache_share(4, 0), Some(0.0));
+    }
+
+    #[test]
+    fn only_a_warm_turn_with_a_big_prompt_and_a_low_share_is_logged() {
+        assert!(worth_logging(10_000, 5_000, false));
+        assert!(!worth_logging(10_000, 8_000, false), "80% is healthy");
+        assert!(worth_logging(10_000, 7_999, false));
+        assert!(!worth_logging(10_000, 0, true), "the first turn of a fresh process has no cache to read");
+        assert!(!worth_logging(2_047, 0, false), "a small prompt says nothing");
+        assert!(worth_logging(2_048, 0, false));
+        assert!(!worth_logging(0, 0, false));
     }
 }

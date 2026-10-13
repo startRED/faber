@@ -148,6 +148,8 @@ struct Live {
     by_hand: bool,
     approved: bool,
     started: f64,
+    /// A turn has finished on this process, so the next one finds the CLI's cache warm.
+    served: bool,
 }
 
 const HISTORY_LIMIT: usize = 20_000;
@@ -891,6 +893,7 @@ impl Core {
                 let session = self.convs.get(conv).and_then(|c| c.sessions.get(&vendor)).cloned().unwrap_or_default();
                 let area = self.convs.get(conv).map_or(Area::Chat, |c| c.area);
                 let fresh = self.live.get(conv).is_some_and(|l| !l.resumed);
+                let first = self.live.get_mut(conv).is_some_and(|l| !std::mem::replace(&mut l.served, true));
                 let before = self.convs.get(conv).and_then(|c| c.cost_base.get(&vendor));
                 let settled = if vendor == Vendor::Codex {
                     usage::Settled { cost: cost_total_usd.filter(|cost| cost.is_finite() && *cost >= 0.0), base: None }
@@ -913,6 +916,18 @@ impl Core {
                         if vendor == Vendor::Codex { 0 } else { input_tokens },
                     )
                 });
+                // A first turn after a resume starts from whatever the CLI's cache still holds, which is what an idle close or a
+                // change of effort costs; it is logged (resumed) where a fresh process's first turn, always cold, is not.
+                let resumed = first && self.live.get(conv).is_some_and(|l| l.resumed);
+                if usage::worth_logging(input_tokens, cache_read_tokens, first && !resumed) {
+                    let effort = self.live.get(conv).map(|l| l.effort.as_str());
+                    self.store.log_cache_health(&serde_json::json!({
+                        "at": now(), "conv": conv, "vendor": vendor.name(), "model": model, "effort": effort, "input": input_tokens,
+                        "read": cache_read_tokens, "written": cache_write_tokens, "written1h": cache_write_1h_tokens,
+                        "share": usage::cache_share(input_tokens, cache_read_tokens).map(|s| (s * 1000.0).round() / 1000.0),
+                        "resumed": resumed,
+                    }));
+                }
                 let missing = cost.is_none() || ((native.is_none() || vendor == Vendor::Codex) && incomplete);
                 self.note_turn(conv, cost, missing);
                 if let Some(m) = self.turn(conv) {
@@ -1251,6 +1266,7 @@ impl Core {
                 by_hand: false,
                 approved: false,
                 started: 0.0,
+                served: false,
             },
         );
         // ponytail: count-based limit on idle Claude processes; a RAM budget across all CLIs comes with parallel workers.

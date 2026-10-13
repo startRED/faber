@@ -14,6 +14,7 @@ pub struct Store {
     projects: PathBuf,
     settings: PathBuf,
     budget: PathBuf,
+    cache_health: PathBuf,
 }
 
 /// Writes through a temp file. On failure the temp file is removed and the error returned; the old file stays as it was.
@@ -39,6 +40,7 @@ impl Store {
             projects: data_dir.join("projects.json"),
             settings: data_dir.join("settings.json"),
             budget: data_dir.join("budget.json"),
+            cache_health: data_dir.join("cache-health.jsonl"),
         }
     }
 
@@ -104,6 +106,29 @@ impl Store {
     /// Compact on purpose: it is rewritten often and a person never has to read it.
     pub fn save_ledger(&self, ledger: &Ledger) {
         let _ = write_text(&self.budget, &serde_json::to_string(ledger).expect("plain data always serializes"));
+    }
+}
+
+// ponytail: size cap, rotate if it ever matters.
+const CACHE_HEALTH_MAX: u64 = 1_000_000;
+
+impl Store {
+    /// Adds one line to the local cache-health log. Nothing reads it back and nothing sends it anywhere; it stops growing
+    /// at 1 MB and a failed write is ignored, so it can never break a turn.
+    pub fn log_cache_health(&self, line: &serde_json::Value) {
+        use std::io::Write;
+        if fs::metadata(&self.cache_health).is_ok_and(|m| m.len() >= CACHE_HEALTH_MAX) {
+            return;
+        }
+        let _ = fs::OpenOptions::new().create(true).append(true).open(&self.cache_health).and_then(|mut f| {
+            f.write_all(
+                format!(
+                    "{line}
+"
+                )
+                .as_bytes(),
+            )
+        });
     }
 }
 
