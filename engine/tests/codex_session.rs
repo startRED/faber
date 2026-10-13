@@ -506,3 +506,99 @@ fn the_name_is_a_developer_instruction_that_resume_repeats_and_a_side_question_n
     let (_, side) = thread_params(Area::Chat, &thread(None, Some("Route."), Some("Erick")));
     assert!(side.get("developerInstructions").is_none());
 }
+
+const COUNT: &str = "Count from 1 to 30, one number per line, each followed by a five-word comment.";
+const STEER: &str = "stop at 10";
+
+/// Sends a steer when the first words of the answer arrive and runs the session to the end of the turn.
+async fn steer_after_first_words(fixture_name: &str, until: fn(&EngineEvent) -> bool) -> (Vec<EngineEvent>, Vec<String>) {
+    let mut steered = false;
+    run(fixture("codex", fixture_name), COUNT, None, |e, s| {
+        if matches!(e, EngineEvent::Text(_)) && !steered {
+            steered = true;
+            s.steer(UserTurn::text(STEER), "faber-probe-1");
+        }
+        until(e)
+    })
+    .await
+}
+
+#[tokio::test]
+async fn a_steered_message_reaches_the_turn_and_the_driver_says_when_codex_took_it_in() {
+    let (events, mismatches) = steer_after_first_words("steer", |e| matches!(e, EngineEvent::Done { .. })).await;
+    assert_eq!(mismatches, Vec::<String>::new());
+    // Live capture (codex-cli 0.162.1): Codex echoes the client id on the steered user message, between the answer it
+    // cut short and the new answer, which it begins with a new agent message item.
+    let injected: Vec<_> = events.iter().enumerate().filter(|(_, e)| matches!(e, EngineEvent::Injected { .. })).collect();
+    assert_eq!(injected.len(), 1);
+    assert_eq!(injected[0].1, &EngineEvent::Injected { tag: Some("faber-probe-1".into()) });
+    let before = text_of(&events[..injected[0].0]);
+    let after = text_of(&events[injected[0].0..]);
+    assert!(before.starts_with("1 #"), "{before:?}");
+    assert!(after.contains("Counting starts") && after.trim_end().ends_with("as you asked."), "{after:?}");
+    assert!(!events.iter().any(|e| matches!(e, EngineEvent::SteerFailed { .. } | EngineEvent::Error { .. })));
+}
+
+#[tokio::test]
+async fn a_steer_codex_refuses_is_reported_as_not_delivered_and_is_no_error() {
+    for name in ["steer-rejected", "steer-late"] {
+        let (events, mismatches) = steer_after_first_words(name, |e| matches!(e, EngineEvent::SteerFailed { .. })).await;
+        assert_eq!(mismatches, Vec::<String>::new(), "{name}");
+        assert!(events.contains(&EngineEvent::SteerFailed { tag: "faber-probe-1".into() }), "{name}: {events:?}");
+        assert!(!events.iter().any(|e| matches!(e, EngineEvent::Injected { .. } | EngineEvent::Error { .. })), "{name}");
+    }
+}
+
+#[tokio::test]
+async fn a_steer_before_the_turn_has_an_id_is_not_delivered() {
+    // The thread exists but no turn/started came yet, so there is nothing to name in expectedTurnId.
+    let entries: Vec<Entry> = fixture("codex", "steer").into_iter().take(8).collect();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let f = fake(entries);
+    let thread = CodexThread {
+        cwd: ".".into(),
+        model: None,
+        effort: None,
+        resume: None,
+        instructions: None,
+        user_name: None,
+        permissions: Permissions::Ask,
+    };
+    let opts = CodexServerOptions {
+        bin: "codex".into(),
+        cwd: ".".into(),
+        area: Area::Chat,
+        user_hooks: false,
+        windows: false,
+        spawn: f.spawn.clone(),
+    };
+    let session = CodexServer::start(opts).open(thread, Arc::new(move |e| drop(tx.send(e))));
+    session.steer(UserTurn::text("early"), "q9");
+    let seen = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if let Some(EngineEvent::SteerFailed { tag }) = rx.recv().await {
+                return tag;
+            }
+        }
+    })
+    .await
+    .expect("the driver never said the steer was dropped");
+    assert_eq!(seen, "q9");
+    session.close();
+}
+
+#[test]
+fn only_a_user_message_after_the_first_of_a_turn_counts_as_taken_in() {
+    let started = |client: serde_json::Value| json!({ "method": "item/started", "params": { "item": { "type": "userMessage", "id": "u", "clientId": client, "content": [] } } });
+    let mut state = CodexTurnState::default();
+    assert!(parse_codex_notification(&started(json!(null)), &mut state).is_empty(), "the turn's own prompt");
+    let again = parse_codex_notification(&started(json!(null)), &mut state);
+    assert_eq!(again, vec![EngineEvent::Injected { tag: None }]);
+    // Our own tag, echoed back, is enough even if the first message was not seen.
+    let mut fresh = CodexTurnState::default();
+    let tagged = parse_codex_notification(&started(json!("faber-probe-1")), &mut fresh);
+    assert_eq!(tagged, vec![EngineEvent::Injected { tag: Some("faber-probe-1".into()) }]);
+    // A new turn starts counting again.
+    parse_codex_notification(&json!({ "method": "turn/started", "params": { "turn": { "id": "t2" } } }), &mut state);
+    assert!(parse_codex_notification(&started(json!(null)), &mut state).is_empty());
+}

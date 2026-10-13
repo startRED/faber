@@ -171,6 +171,17 @@ async fn remove(faber: State<'_, Faber>, id: String) -> Res<()> {
 }
 
 #[tauri::command]
+async fn remove_queued(faber: State<'_, Faber>, id: String, turn_id: String) -> Res<()> {
+    faber.engine.remove_queued(&id, &turn_id);
+    Ok(())
+}
+
+#[tauri::command]
+async fn send_queued(faber: State<'_, Faber>, id: String, turn_id: String) -> Res<()> {
+    faber.engine.send_queued(&id, &turn_id)
+}
+
+#[tauri::command]
 async fn remove_project(faber: State<'_, Faber>, id: String) -> Res<()> {
     faber.engine.remove_project(&id);
     Ok(())
@@ -423,6 +434,14 @@ fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Resul
         if hidden && std::env::var("FABER_SOFTWARE_RENDERING").as_deref() == Ok("1") {
             args.push_str(" --disable-gpu");
         }
+        // The sentinel measures frames. A window on a desktop no monitor shows may be counted as hidden, and the engine then
+        // slows or stops animation frames; these switches ask it not to. The sentinel's clock check proves they held.
+        #[cfg(feature = "test-hooks")]
+        if hidden {
+            args.push_str(
+                " --disable-renderer-backgrounding --disable-backgrounding-occluded-windows --disable-background-timer-throttling",
+            );
+        }
         builder = builder.additional_browser_args(&args);
     }
     builder.build()
@@ -461,6 +480,8 @@ fn main() {
             answer,
             rename,
             remove,
+            remove_queued,
+            send_queued,
             remove_project,
             preview_look,
             save_settings,

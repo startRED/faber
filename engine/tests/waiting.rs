@@ -313,7 +313,11 @@ async fn a_message_for_a_vendor_that_resets_soon_waits_and_sends_itself() {
     assert_eq!(m.reason.as_deref(), Some("reason.waiting"));
     assert_eq!(m.wait_until, Some((WHEN + 600) as f64));
     assert!(r.claude.args.lock().unwrap().is_empty());
-    assert_eq!(r.engine.send(request(Some(&id), "auto")).unwrap_err(), "error.busy");
+    assert!(r.engine.send(request(Some(&id), "auto")).is_ok());
+    assert_eq!(r.engine.open(&id).unwrap().queued.len(), 1);
+    let queued_id = r.engine.open(&id).unwrap().queued[0].id.clone();
+    r.engine.remove_queued(&id, &queued_id);
+    assert!(r.engine.open(&id).unwrap().queued.is_empty());
     r.time.store(WHEN + 601, Ordering::SeqCst);
     r.engine.set_utc_offset(0);
     reply(&r.engine, &id, Status::Done).await;
@@ -380,6 +384,7 @@ fn seed(dir: &Path, long: bool) -> Conversation {
         user_name: None,
         created_at: 1,
         updated_at: 2,
+        queued: vec![],
         messages: vec![
             Message::new("first".into(), Role::User, if long { "x".repeat(30_000) } else { "Original question".into() }, 1),
             answer,

@@ -17,7 +17,7 @@ function describe(tool: string, input: unknown): { title: string; note?: string;
 
 /** One question the CLI waits on. The conversation, the turn and the request name it, so an answer can only reach the
  * question it was given for. The same question can be on screen twice (in the thread and in the running column). */
-function Card(props: { conversationId: string; turnId: string; permission: Permission }) {
+function Card(props: { conversationId: string; turnId: string; permission: Permission; surface?: string }) {
   const [dropped, setDropped] = createSignal(false);
   const [sending, setSending] = createSignal(false);
   const [problem, setProblem] = createSignal<string>();
@@ -39,7 +39,7 @@ function Card(props: { conversationId: string; turnId: string; permission: Permi
   };
   return (
     <Show when={!dropped()}>
-      <div class="ask" role="alertdialog" aria-label={t('ask.label')}>
+      <div class="ask" data-surface={props.surface} role="alertdialog" aria-label={t('ask.label')}>
         <b>{d().title}</b>
         <Show when={d().note}>
           <span class="note">{d().note}</span>
@@ -68,13 +68,13 @@ function Card(props: { conversationId: string; turnId: string; permission: Permi
 
 /** The first waiting question as a card, and a note for the others. `turnId` is the id of the message that holds the
  * question (in the thread) or of the running item's turn (in the column): the same id. */
-export function Asks(props: { conversationId: string; turnId: string; permissions: Permission[] }) {
+export function Asks(props: { conversationId: string; turnId: string; permissions: Permission[]; surface?: string }) {
   // The card is kept while the same question stays first, however often the list is rebuilt around it.
   const first = createMemo(() => props.permissions[0], undefined, { equals: (a, b) => a?.requestId === b?.requestId });
   return (
     <>
       <Show when={first()} keyed>
-        {(p) => <Card conversationId={props.conversationId} turnId={props.turnId} permission={p} />}
+        {(p) => <Card conversationId={props.conversationId} turnId={props.turnId} permission={p} surface={props.surface} />}
       </Show>
       <Show when={props.permissions.length > 1}>
         <div class="note">{t('ask.moreWaiting', { n: props.permissions.length - 1 })}</div>

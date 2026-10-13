@@ -98,6 +98,11 @@ expansion. A literal-tilde root test reproduced the failure before the fix. Host
 use relative operands under their trusted root; outside directories, traversal, junctions and `.git`
 remain refused by the same file policy. Duplicate-name handling is covered by the regression too.
 
+The subsequent base refresh adds queued/steered Chat messages and the UX sentinel. Queued uploads
+use the same working root and host attachment checks as ordinary messages; a refused credential
+upload never enters the queue. The permission-card sentinel reproduced a missing-card timeout under
+the new default and now explicitly selects Ask before commands before measuring its animation.
+
 ## Boundary and limits
 
 This is a host tool policy, not OS isolation. File decisions use canonical paths and refuse protected targets. Shell

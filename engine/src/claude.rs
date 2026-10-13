@@ -306,6 +306,10 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                         quota_seen = false;
                         let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
                     }
+                    // A line written mid-turn is folded into a turn that uses tools (one result for both) and becomes a turn of
+                    // its own after a plain reply (see tests/fixtures/claude/queued*.jsonl). Faber cannot tell which ahead of
+                    // time, so it holds the message itself and never steers this CLI; if asked anyway, it was not delivered.
+                    Some(SessionCommand::Steer { tag, .. }) => on_event(EngineEvent::SteerFailed { tag }),
                     Some(SessionCommand::Answer { request_id, allow, ack }) => {
                         // The request stays pending until the write worked, so a failed write can be answered again.
                         let delivery = match pending.get(&request_id) {
