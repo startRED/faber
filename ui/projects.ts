@@ -24,6 +24,14 @@ export function saveGoal(projectId: string, goal: string): void {
   }
 }
 
+export function recallMission(projectId: string): string | undefined {
+  try { return localStorage.getItem('faber.project.mission.' + projectId) ?? undefined; } catch { return undefined; }
+}
+
+export function saveMission(projectId: string, missionId: string): void {
+  try { localStorage.setItem('faber.project.mission.' + projectId, missionId); } catch { /* The journal remains durable. */ }
+}
+
 /** Formats own cost in millionths of an API-equivalent dollar.
  * None/null/undefined is unknown, NEVER zero. */
 export function formatCost(ownMicros: number | null | undefined): { isUnknown: boolean; display: string } {
@@ -36,7 +44,7 @@ export function formatCost(ownMicros: number | null | undefined): { isUnknown: b
 
 /** Formats the live cap in millionths of an API-equivalent dollar. */
 export function formatCap(capMicros: number | null | undefined): string {
-  if (capMicros === null || capMicros === undefined) return '$2.00';
+  if (capMicros === null || capMicros === undefined) return 'projects.cost.unknown';
   return `$${(capMicros / 1_000_000).toFixed(2)}`;
 }
 

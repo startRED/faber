@@ -453,22 +453,39 @@ impl Engine {
     pub fn add_project(&self, path: &str) -> Project {
         self.with(|c| c.add_project(path))
     }
-    pub fn project(&self, id: &str) -> Option<Project> {
-        self.with(|c| c.store.projects().into_iter().find(|p| p.id == id))
-    }
-    pub fn update_project(&self, project: &Project) -> Result<(), &'static str> {
+    pub fn project(&self, id: &str) -> Result<Project, String> {
         self.with(|c| {
-            let mut projects = c.store.projects();
+            c.store
+                .projects_checked()
+                .map_err(|e| e.key().to_string())?
+                .into_iter()
+                .find(|p| p.id == id)
+                .ok_or_else(|| "error.project.notFound".into())
+        })
+    }
+
+    pub fn projects_checked(&self) -> Result<Vec<Project>, String> {
+        self.with(|c| c.store.projects_checked().map_err(|e| e.key().to_string()))
+    }
+    pub fn update_project(&self, before: &Project, project: &Project) -> Result<(), String> {
+        self.with(|c| {
+            let mut projects = c.store.projects_checked().map_err(|e| e.key().to_string())?;
             if let Some(pos) = projects.iter().position(|p| p.id == project.id) {
+                if &projects[pos] != before {
+                    return Err("reason.grant.stale".into());
+                }
+                if before == project {
+                    return Ok(());
+                }
                 projects[pos] = project.clone();
                 if c.store.save_projects(&projects).is_ok() {
                     c.list_changed();
                     Ok(())
                 } else {
-                    Err("error.store.write")
+                    Err("error.store.write".into())
                 }
             } else {
-                Err("error.project.notFound")
+                Err("error.project.notFound".into())
             }
         })
     }

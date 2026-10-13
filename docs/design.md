@@ -439,6 +439,24 @@ The commands fail with a key string, like the other shell commands, and never re
 The `mission` event carries the same view whenever it changes. Its `revision` grows with every view and the screen
 ignores an older one. Cost is in millionths of an API-equivalent dollar; `null` is unknown, never zero.
 
+Implementation status on `selfdev-t9`: the screen and fixed command adapter can display durable mission snapshots,
+but the approved T5 runner is not in this branch. Start and Resume return `reason.mission.runnerUnavailable`; an old
+`running` journal is displayed as blocked. Direct project send, warm, draft routing and branching are refused at the
+shell boundary, including quota/paid-credit recovery, while saved conversations remain readable. Equilibrado
+publication stays deferred (R103).
+
+The board restores the selected mission, rejects other mission identities and older revisions, and keeps task evidence
+behind a keyboard-reachable disclosure. `TaskView.detail` is an optional additive field containing scope, required
+proof IDs and durable artifacts; absence never means verified. Build slots without a T11 snapshot remain visibly
+unknown. The cap, measured spend, daily room and reading time come from the existing admission ledger, with unknown
+values preserved. The start card reuses the composer's height measurement and the 64 px tail token. Stages narrower
+than 760 px use one scrolling list. Mission notification receipts use the existing atomic store and R92 policy;
+hidden test builds inspect that policy without submitting OS notifications or playing audio.
+
+New non-English keys are English draft fallbacks marked `Native speaker must translate (needs native review)`.
+They require native review and are not accepted translations. These implementation limits do not release T9/T10's
+live-runner integration gate.
+
 ```json
 {"missionId": "m1", "revision": 7, "state": "running", "mode": "normal", "gitMode": "seguro",
  "goal": "Fix the failing normalization test", "plan": "One writer fixes clean_path; the other vendor reviews.",

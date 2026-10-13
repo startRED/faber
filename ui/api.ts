@@ -80,7 +80,7 @@ export interface Project {
 
 export type GitMode = 'seguro' | 'equilibrado';
 export type RunMode = 'normal' | 'autonomous';
-export type MissionState = 'draft' | 'running' | 'paused' | 'blocked' | 'done' | 'failed';
+export type MissionState = 'planning' | 'running' | 'paused' | 'blocked' | 'done';
 export type TaskState = 'ready' | 'running' | 'review' | 'done' | 'blocked';
 export type DecisionKind = 'direction' | 'taste' | 'money' | 'legal' | 'technical';
 
@@ -120,6 +120,13 @@ export interface TaskView {
   reason?: string;
   builder?: Vendor;
   reviewer?: Vendor;
+  detail?: { scope: string[]; proofs: string[]; artifacts: ArtifactView[] };
+}
+
+export interface ArtifactView {
+  id: string; summary: string; changed: string[]; files: string[]; tree?: string;
+  commands: { proof: string; argv: string[]; exit?: number; log?: string }[];
+  notRun: string[]; assumptions: string[]; risks: string[];
 }
 
 export interface CostView {
@@ -385,11 +392,11 @@ export const api = {
   projectRevoke: (projectId: string) => invoke<void>('project_revoke', { projectId }),
   missionStart: (projectId: string, goal: string) => invoke<string>('mission_start', { projectId, goal }),
   missionState: (missionId: string) => invoke<MissionView>('mission_state', { missionId }),
-  missionMode: (missionId: string, mode: RunMode) => invoke<void>('mission_mode', { missionId, mode }),
-  missionStop: (missionId: string) => invoke<void>('mission_stop', { missionId }),
-  missionResume: (missionId: string) => invoke<void>('mission_resume', { missionId }),
+  missionMode: (missionId: string, mode: RunMode) => invoke<MissionView>('mission_mode', { missionId, mode }),
+  missionStop: (missionId: string) => invoke<MissionView>('mission_stop', { missionId }),
+  missionResume: (missionId: string) => invoke<MissionView>('mission_resume', { missionId }),
   missionAnswer: (missionId: string, decisionId: string, answer: string) =>
-    invoke<void>('mission_answer', { missionId, decisionId, answer }),
+    invoke<MissionView>('mission_answer', { missionId, decisionId, answer }),
   onMission: (listener: (view: MissionView) => void) => listen<MissionView>('mission', (e) => listener(e.payload)),
   on: (listener: (event: AppEvent) => void) => listen<AppEvent>('faber:event', (e) => listener(e.payload)),
 };

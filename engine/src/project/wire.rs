@@ -625,6 +625,16 @@ pub struct TaskView {
     pub reason: Option<String>,
     pub builder: Option<Vendor>,
     pub reviewer: Option<Vendor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<TaskDetail>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskDetail {
+    pub scope: Vec<String>,
+    pub proofs: Vec<String>,
+    pub artifacts: Vec<super::Artifact>,
 }
 
 /// Own cost against the live cap, in millionths of an API-equivalent dollar. None is unknown, never zero.

@@ -224,6 +224,10 @@ impl Journal {
         self.get(&self.named("artifacts", id)?)
     }
 
+    pub fn artifacts(&self) -> Result<Vec<Artifact>, JournalError> {
+        self.list("artifacts")
+    }
+
     /// Records that an effect is about to happen. Refused when the intent is already there: it may have happened.
     pub fn record_intent(&self, intent: &Intent) -> Result<(), JournalError> {
         self.same_mission(&intent.mission)?;

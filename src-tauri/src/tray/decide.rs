@@ -5,7 +5,7 @@ use faber_engine::model::{RunState, RunningItem, Settings};
 use faber_engine::project::wire::MissionView;
 use faber_engine::project::{DecisionKind, MissionState};
 use serde::Deserialize;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// A text in two forms, as the screen sends it: `one` for a count of 1 and `other` for any other count. That is what
 /// `Intl.PluralRules` picks in all five languages for counts of 1 and more.
@@ -68,7 +68,7 @@ fn counts(items: &[RunningItem]) -> Counts {
 /// "Faber" when nothing runs. Otherwise the count, and the words "needs you" next to it when something does: amber
 /// never stands for a number alone [tokens].
 pub(super) fn tooltip(texts: &ShellTexts, c: Counts) -> String {
-    if c.running == 0 {
+    if c.running == 0 && c.needs_you == 0 {
         return "Faber".into();
     }
     let mut text = fill(texts.running.pick(c.running), "n", &c.running.to_string());
@@ -82,6 +82,14 @@ pub(super) fn tooltip(texts: &ShellTexts, c: Counts) -> String {
 /// alone repeat (Codex numbers them from 0 in each server).
 type Question = (String, String, String);
 
+pub(super) fn decode_seen(bytes: &[u8]) -> Result<HashSet<(String, String)>, &'static str> {
+    let seen: HashSet<(String, String)> = serde_json::from_slice(bytes).map_err(|_| "error.store.corrupt")?;
+    if seen.iter().any(|(mission, decision)| !faber_engine::project::valid_id(mission) || !faber_engine::project::valid_id(decision)) {
+        return Err("error.store.corrupt");
+    }
+    Ok(seen)
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct Delivery {
     pub(super) toast: bool,
@@ -91,13 +99,13 @@ pub(super) struct Delivery {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Attention {
     Normal,
-    #[cfg(any(windows, test))]
+    #[cfg(any(windows, test, feature = "test-hooks"))]
     SoundOnly,
     Silent,
 }
 
 /// Windows enum values are pinned below against shellapi.h. Unknown states never permit a toast.
-#[cfg(any(windows, test))]
+#[cfg(any(windows, test, feature = "test-hooks"))]
 pub(super) fn windows_attention(state: Option<i32>, full_screen: bool) -> Attention {
     match state {
         Some(1 | 6) => Attention::Silent, // QUNS_NOT_PRESENT, QUNS_QUIET_TIME (initial login/upgrade, not DND).
@@ -144,7 +152,7 @@ pub(super) struct Watch {
     /// Every mission decision seen, across reloads/restarts: (mission_id, decision_id).
     seen_decisions: HashSet<(String, String)>,
     last_running_counts: Counts,
-    last_mission_counts: Counts,
+    missions: HashMap<String, (u64, Counts)>,
 }
 
 /// What a list changes: the numbers to show, and the title of the conversation of each question to notify.
@@ -180,17 +188,16 @@ impl Watch {
             }
         }
         self.last_running_counts = counts(items);
-        let combined_counts = Counts {
-            running: self.last_running_counts.running + self.last_mission_counts.running,
-            needs_you: self.last_running_counts.needs_you + self.last_mission_counts.needs_you,
-        };
-        Some(Update { counts: combined_counts, notices })
+        Some(Update { counts: self.combined_counts(), notices })
     }
 
     /// Evaluates a mission view: concrete choices and direction/taste/money/legal blockers become needs-you items
     /// and notify when not focused. Completion, commits, proofs, quota waits, promotions and technical decisions emit nothing.
     /// Stable decision identity deduplicates across reloads and restarts.
     pub(super) fn take_mission(&mut self, view: &MissionView, window_focused: bool) -> Option<Update> {
+        if self.missions.get(&view.mission_id).is_some_and(|(revision, _)| view.revision <= *revision) {
+            return None;
+        }
         let mut notices = Vec::new();
         let mut mission_needs = 0;
         for d in &view.decisions {
@@ -198,23 +205,20 @@ impl Watch {
                 mission_needs += 1;
                 let key = (view.mission_id.clone(), d.id.clone());
                 if self.seen_decisions.insert(key) && !window_focused {
-                    let title = if view.goal.is_empty() { "Mission".to_string() } else { view.goal.clone() };
-                    notices.push(title);
+                    notices.push(view.goal.clone());
                 }
             }
         }
-        if matches!(view.state, MissionState::Blocked | MissionState::Paused)
-            && view.reason.as_ref().is_some_and(|r| r.starts_with("reason.grant."))
-        {
-            mission_needs += 1;
-        }
-        self.last_mission_counts =
-            Counts { running: if matches!(view.state, MissionState::Running) { 1 } else { 0 }, needs_you: mission_needs };
-        let combined_counts = Counts {
-            running: self.last_running_counts.running + self.last_mission_counts.running,
-            needs_you: self.last_running_counts.needs_you + self.last_mission_counts.needs_you,
-        };
-        Some(Update { counts: combined_counts, notices })
+        let counts = Counts { running: usize::from(matches!(view.state, MissionState::Running)), needs_you: mission_needs };
+        self.missions.insert(view.mission_id.clone(), (view.revision, counts));
+        Some(Update { counts: self.combined_counts(), notices })
+    }
+
+    fn combined_counts(&self) -> Counts {
+        self.missions.values().fold(self.last_running_counts, |sum, (_, c)| Counts {
+            running: sum.running + c.running,
+            needs_you: sum.needs_you + c.needs_you,
+        })
     }
 }
 
@@ -240,6 +244,64 @@ mod tests {
     use super::*;
     use faber_engine::model::{Area, Permission};
     use serde_json::json;
+
+    #[test]
+    fn mission_deduplication_reloads_real_serialized_state_and_refuses_corruption() {
+        let mut watch = Watch::default();
+        let mut view: MissionView = serde_json::from_str(faber_engine::project::wire::MISSION_EXAMPLE).unwrap();
+        view.decisions.push(faber_engine::project::wire::DecisionView {
+            id: "choice".into(),
+            question: "Direction?".into(),
+            kind: DecisionKind::Direction,
+            options: vec![],
+            default: None,
+            task: None,
+        });
+        assert_eq!(watch.take_mission(&view, false).unwrap().notices.len(), 1);
+        let bytes = serde_json::to_vec(watch.seen_decisions()).unwrap();
+        let mut restarted = Watch::with_seen_decisions(decode_seen(&bytes).unwrap());
+        assert!(restarted.take_mission(&view, false).unwrap().notices.is_empty());
+        assert_eq!(decode_seen(b"["), Err("error.store.corrupt"));
+        assert!(decode_seen(br#"[["../mission", "choice"]]"#).is_err());
+    }
+
+    #[test]
+    fn mission_updates_ignore_stale_views_and_aggregate_all_missions() {
+        let mut watch = Watch::default();
+        let mut a: MissionView = serde_json::from_str(faber_engine::project::wire::MISSION_EXAMPLE).unwrap();
+        a.decisions = vec![faber_engine::project::wire::DecisionView {
+            id: "choice".into(),
+            question: "Direction?".into(),
+            kind: DecisionKind::Direction,
+            options: vec![],
+            default: None,
+            task: None,
+        }];
+        assert_eq!(watch.take_mission(&a, false).unwrap().counts.needs_you, 1);
+        let mut b = a.clone();
+        b.mission_id = "m2".into();
+        assert_eq!(watch.take_mission(&b, false).unwrap().counts.needs_you, 2);
+        a.revision -= 1;
+        a.decisions[0].id = "old-choice".into();
+        assert!(watch.take_mission(&a, false).is_none(), "stale views do not notify");
+    }
+
+    #[test]
+    fn a_paused_mission_choice_keeps_words_in_the_tooltip() {
+        let mut watch = Watch::default();
+        let mut view: MissionView = serde_json::from_str(faber_engine::project::wire::MISSION_EXAMPLE).unwrap();
+        view.state = MissionState::Paused;
+        view.decisions = vec![faber_engine::project::wire::DecisionView {
+            id: "choice".into(),
+            question: "Direction?".into(),
+            kind: DecisionKind::Direction,
+            options: vec![],
+            default: None,
+            task: None,
+        }];
+        let counts = watch.take_mission(&view, false).unwrap().counts;
+        assert!(tooltip(&ShellTexts::default(), counts).contains("needs you"));
+    }
 
     #[test]
     fn a_store_app_does_not_allow_a_toast() {
@@ -526,7 +588,9 @@ mod tests {
         assert_eq!(update.notices, ["Refactor parser"]);
         assert_eq!(update.counts.needs_you, 2);
         // A second view with the same decisions notifies nothing:
-        let update2 = w.take_mission(&view, false).unwrap();
+        let mut next = view.clone();
+        next.revision += 1;
+        let update2 = w.take_mission(&next, false).unwrap();
         assert!(update2.notices.is_empty());
     }
 
@@ -552,17 +616,19 @@ mod tests {
         assert!(update.notices.is_empty(), "focused means silence");
         assert_eq!(update.counts.needs_you, 1, "badge still counts needs-you");
         // Coming back while unfocused later does not notify because it was seen while focused:
-        let update2 = w.take_mission(&view, false).unwrap();
+        let mut next = view.clone();
+        next.revision += 1;
+        let update2 = w.take_mission(&next, false).unwrap();
         assert!(update2.notices.is_empty(), "seen while focused never notifies later");
     }
 
     #[test]
     fn completion_proof_commit_quota_wait_and_promotion_emit_nothing() {
         let mut w = Watch::default();
-        for state in ["done", "running", "planning"] {
+        for (index, state) in ["done", "running", "planning"].into_iter().enumerate() {
             let view: MissionView = serde_json::from_value(json!({
                 "missionId": "m1",
-                "revision": 2,
+                "revision": index + 2,
                 "state": state,
                 "mode": "normal",
                 "gitMode": "seguro",

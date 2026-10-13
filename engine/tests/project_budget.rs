@@ -13,6 +13,36 @@ const RESET: f64 = 7.0 * DAY;
 const NOW: f64 = 2.0 * DAY + 3600.0;
 const MODEL: &str = "gpt-6.1-sol";
 
+#[test]
+fn mission_screen_cost_reads_the_live_cap_and_never_calls_unsettled_exposure_measured_spend() {
+    let mut b = Budget::default();
+    let unknown = b.cost_view("m1");
+    assert_eq!(unknown.cap_micros, None);
+    assert_eq!(unknown.own_micros, None);
+    b.grants.insert("m1".into(), grant(700_000));
+    b.invocations.insert(
+        "i1".into(),
+        faber_engine::project::budget::Reservation {
+            request: request("i1", "m1", "w1", Kind::Worker, 50_000),
+            started_at: NOW,
+            base: None,
+            rates: "date".into(),
+            paid_micros: 12_345,
+            settled: true,
+            terminated: true,
+            extra: Extra::new(),
+        },
+    );
+    let measured = b.cost_view("m1");
+    assert_eq!(measured.cap_micros, Some(700_000));
+    assert_eq!(measured.own_micros, Some(12_345));
+    assert!(measured.complete);
+    b.invocations.get_mut("i1").unwrap().settled = false;
+    let pending = b.cost_view("m1");
+    assert_eq!(pending.own_micros, None);
+    assert!(!pending.complete);
+}
+
 fn ledger() -> Ledger {
     let mut l = Ledger::default();
     for (vendor, model) in [(Vendor::Codex, MODEL), (Vendor::Claude, "claude-sonnet-5-5")] {

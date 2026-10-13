@@ -7,6 +7,7 @@ pub mod containment;
 pub mod first_run;
 pub mod permissions;
 pub mod projects;
+pub mod projects_ui;
 pub mod review;
 pub mod settings;
 pub mod setup;
@@ -33,6 +34,7 @@ pub fn all() -> Vec<Scenario> {
         .into_iter()
         .chain(permissions::scenarios())
         .chain(projects::scenarios())
+        .chain(projects_ui::scenarios())
         .chain(shell::scenarios())
         .chain(review::scenarios())
         .chain(settings::scenarios())

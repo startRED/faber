@@ -1,4 +1,5 @@
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from 'solid-js';
+import { createStore, reconcile } from 'solid-js/store';
 import {
   api,
   errorText,
@@ -14,8 +15,10 @@ import {
   type Vendor,
 } from './api.ts';
 import { Segmented, Toggle } from './controls.tsx';
+import { resizeComposer } from './composer-size.ts';
+import { Peek } from './Mark.tsx';
 import { Icon } from './Glyphs.tsx';
-import { t } from './i18n.ts';
+import { fromEngine, lang, t } from './i18n.ts';
 import { animateList } from './motion.ts';
 import {
   formatCap,
@@ -23,7 +26,9 @@ import {
   formatPercent,
   isHumanDecision,
   recallGoal,
+  recallMission,
   saveGoal,
+  saveMission,
   taskReceiptStatus,
   taskStateKey,
   type PresenceChoice,
@@ -39,7 +44,12 @@ const TASK_STATES: TaskState[] = ['ready', 'running', 'review', 'done', 'blocked
 
 export function Projects(props: Props) {
   const [enroll, setEnroll] = createSignal<EnrollView>();
-  const [mission, setMission] = createSignal<MissionView>();
+  const [missionData, setMissionData] = createStore<{ view?: MissionView }>({});
+  const mission = () => missionData.view;
+  const setMission = (view?: MissionView) => {
+    if (view) setMissionData('view', reconcile(view));
+    else setMissionData('view', undefined);
+  };
   const [goal, setGoal] = createSignal<string>('');
   const [presence, setPresence] = createSignal<PresenceChoice>('continueWithout');
   const [gitMode, setGitMode] = createSignal<GitMode>('seguro');
@@ -47,25 +57,18 @@ export function Projects(props: Props) {
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<string>();
   const [customAnswers, setCustomAnswers] = createSignal<Record<string, string>>({});
+  const customAnswer = (id: string) => Object.hasOwn(customAnswers(), id) ? customAnswers()[id] : '';
+  let generation = 0;
+  let selectedMission: string | undefined;
+  const accept = (view: MissionView, token = generation) => {
+    if (token !== generation || view.missionId !== selectedMission) return;
+    const current = mission();
+    if (!current || view.revision > current.revision) setMission(view);
+  };
 
   let field: HTMLTextAreaElement | undefined;
 
-  // Auto-resize composer textarea
-  const resize = () => {
-    if (!field?.isConnected) return;
-    const previous = field.getBoundingClientRect().height;
-    const style = getComputedStyle(field);
-    field.style.transition = 'none';
-    field.style.height = '0px';
-    const minH = parseFloat(style.minHeight) || 60;
-    const maxH = parseFloat(style.maxHeight) || (typeof innerHeight !== 'undefined' ? innerHeight * 0.4 : 300);
-    const scrollH = field.scrollHeight;
-    const height = Math.min(maxH, Math.max(minH, goal() ? scrollH : minH));
-    field.style.height = `${previous}px`;
-    field.getBoundingClientRect(); // force reflow
-    field.style.removeProperty('transition');
-    field.style.height = `${height}px`;
-  };
+  const resize = () => resizeComposer(field, goal());
 
   createEffect(on(goal, () => queueMicrotask(resize), { defer: true }));
 
@@ -86,22 +89,27 @@ export function Projects(props: Props) {
 
     // Listen for mission events
     const unlisten = api.onMission((view) => {
-      const cur = mission();
-      // Ignore stale mission events with older revision
-      if (!cur || view.missionId !== cur.missionId || view.revision >= cur.revision) {
-        setMission(view);
-      }
-    });
+      accept(view);
+    }).catch((err) => { setError(errorText(err)); return () => {}; });
     onCleanup(() => {
-      void unlisten.then((fn) => fn());
+      void unlisten.then((fn) => fn(), () => {});
     });
   });
 
   // When project changes, restore saved goal and enroll
+  const projectIdentity = createMemo(() => props.project?.id);
   createEffect(
     on(
-      () => props.project?.id,
+      projectIdentity,
       async (id) => {
+        const token = ++generation;
+        selectedMission = undefined;
+        setEnroll(undefined);
+        setMission(undefined);
+        setCustomAnswers({});
+        setError(undefined);
+        setGitMode('seguro');
+        setSelfUpdate(false);
         if (!id) {
           setEnroll(undefined);
           setMission(undefined);
@@ -109,18 +117,22 @@ export function Projects(props: Props) {
           return;
         }
         setGoal(recallGoal(id));
+        selectedMission = recallMission(id);
         setError(undefined);
         setBusy(true);
         try {
           const enrolled = await api.projectEnroll(id);
+          if (token !== generation) return;
           setEnroll(enrolled);
           setGitMode(enrolled.mode);
           setSelfUpdate(enrolled.selfUpdate);
+          if (selectedMission) accept(await api.missionState(selectedMission), token);
         } catch (err) {
+          if (token !== generation) return;
           setError(errorText(err));
           // Goal text is NOT lost on failed enrollment
         } finally {
-          setBusy(false);
+          if (token === generation) setBusy(false);
         }
       },
     ),
@@ -134,74 +146,89 @@ export function Projects(props: Props) {
   };
 
   const startMission = async () => {
-    if (!props.project || !goal().trim() || busy()) return;
+    if (!props.project || !goal().trim() || busy() || !enroll()) return;
+    const projectId = props.project.id;
+    const text = goal().trim();
+    const token = generation;
     setError(undefined);
     setBusy(true);
     try {
-      const rev = enroll()?.revision ?? 1;
-      await api.projectGrant(props.project.id, gitMode(), selfUpdate(), rev);
-      const missionId = await api.missionStart(props.project.id, goal().trim());
+      const rev = enroll()!.revision;
+      await api.projectGrant(projectId, gitMode(), selfUpdate(), rev);
+      if (token !== generation) return;
+      const missionId = await api.missionStart(projectId, text);
+      if (token !== generation) return;
+      selectedMission = missionId;
+      saveMission(projectId, missionId);
       const view = await api.missionState(missionId);
-      setMission(view);
+      accept(view, token);
     } catch (err) {
+      if (token !== generation) return;
       setError(errorText(err));
+      // Refresh the grant revision before a retry; do not clear the person's goal.
+      try { const next = await api.projectEnroll(projectId); if (token === generation) setEnroll(next); } catch {}
       // Goal text is preserved on failed start
     } finally {
-      setBusy(false);
+      if (token === generation) setBusy(false);
     }
   };
 
   const stopMission = async () => {
     const m = mission();
-    if (!m) return;
+    if (!m || busy()) return;
+    const token = generation;
+    setBusy(true); setError(undefined);
     try {
-      await api.missionStop(m.missionId);
-      const updated = await api.missionState(m.missionId);
-      setMission(updated);
+      const updated = await api.missionStop(m.missionId);
+      accept(updated, token);
     } catch (err) {
-      setError(errorText(err));
-    }
+      if (token === generation) setError(errorText(err));
+    } finally { if (token === generation) setBusy(false); }
   };
 
   const resumeMission = async () => {
     const m = mission();
-    if (!m) return;
+    if (!m || busy()) return;
+    const token = generation;
+    setBusy(true); setError(undefined);
     try {
-      await api.missionResume(m.missionId);
-      const updated = await api.missionState(m.missionId);
-      setMission(updated);
+      const updated = await api.missionResume(m.missionId);
+      accept(updated, token);
     } catch (err) {
-      setError(errorText(err));
-    }
+      if (token === generation) setError(errorText(err));
+    } finally { if (token === generation) setBusy(false); }
   };
 
   const toggleRunMode = async (mode: RunMode) => {
     const m = mission();
-    if (!m) return;
+    if (!m || busy()) return;
+    const token = generation;
+    setBusy(true); setError(undefined);
     try {
-      await api.missionMode(m.missionId, mode);
-      const updated = await api.missionState(m.missionId);
-      setMission(updated);
+      const updated = await api.missionMode(m.missionId, mode);
+      accept(updated, token);
     } catch (err) {
-      setError(errorText(err));
-    }
+      if (token === generation) setError(errorText(err));
+    } finally { if (token === generation) setBusy(false); }
   };
 
   const answerDecision = async (decisionId: string, answer: string) => {
     const m = mission();
-    if (!m) return;
+    if (!m || busy()) return;
+    const token = generation;
+    setBusy(true); setError(undefined);
     try {
-      await api.missionAnswer(m.missionId, decisionId, answer);
-      const updated = await api.missionState(m.missionId);
-      setMission(updated);
+      const updated = await api.missionAnswer(m.missionId, decisionId, answer);
+      if (token !== generation) return;
+      accept(updated, token);
       setCustomAnswers((prev) => {
         const next = { ...prev };
         delete next[decisionId];
         return next;
       });
     } catch (err) {
-      setError(errorText(err));
-    }
+      if (token === generation) setError(errorText(err));
+    } finally { if (token === generation) setBusy(false); }
   };
 
   const humanDecisions = createMemo(() => {
@@ -214,20 +241,23 @@ export function Projects(props: Props) {
     const m = mission();
     return formatCost(m?.cost.ownMicros);
   });
+  const build = (): BuildView => mission()?.build ?? { waiting: 'reason.build.unavailable' };
 
   return (
     <div class="projects-stage" ref={(el) => animateList(el)}>
       <Show
         when={props.project}
         fallback={
-          <div class="projects-empty">
-            <p>{t('projects.empty.selectProject')}</p>
+          <div class="empty projects-empty">
+            <Peek />
+            <h1 class="display">{t('empty.openProjectTitle')}</h1>
+            <p>{t('empty.openProjectBody')}</p>
           </div>
         }
       >
         <Show when={error()}>
           <div class="note err" role="alert">
-            {t(error() as any)}
+            {fromEngine(error())}
           </div>
         </Show>
 
@@ -237,6 +267,7 @@ export function Projects(props: Props) {
             /* Start Card */
             <div class="start-card" data-testid="start-card">
               <header class="p-header">
+                <Peek />
                 <h2>{props.project?.name}</h2>
                 <div class="p-meta">
                   <span>
@@ -287,7 +318,6 @@ export function Projects(props: Props) {
                   value={gitMode()}
                   options={[
                     ['seguro', t('projects.gitMode.seguro')],
-                    ['equilibrado', t('projects.gitMode.equilibrado')],
                   ]}
                   onPick={(val) => setGitMode(val)}
                 />
@@ -309,7 +339,7 @@ export function Projects(props: Props) {
               </div>
 
               {/* Goal composer */}
-              <div class="composer-container" style={{ "margin-top": "64px" }}>
+              <div class="composer-container">
                 <form
                   class="composer"
                   onSubmit={(e) => {
@@ -338,7 +368,7 @@ export function Projects(props: Props) {
                     <button
                       type="submit"
                       class="btn primary"
-                      disabled={!goal().trim() || busy()}
+                      disabled={!goal().trim() || busy() || !enroll()}
                       aria-label={t('projects.action.start')}
                     >
                       {t('projects.action.start')}
@@ -357,13 +387,13 @@ export function Projects(props: Props) {
                 <div class="m-title-row">
                   <h2 class="m-goal">{m().goal}</h2>
                   <span class="badge" classList={{ [m().state]: true }}>
-                    {m().state}
+                    {fromEngine(`projects.state.${m().state}`)}
                   </span>
                 </div>
                 <div class="m-controls">
                   <Segmented<RunMode>
                     id="run-mode"
-                    label=""
+                    label={t('projects.mode.label')}
                     value={m().mode}
                     options={[
                       ['normal', t('projects.mode.normal')],
@@ -372,24 +402,25 @@ export function Projects(props: Props) {
                     onPick={(mode) => void toggleRunMode(mode)}
                   />
                   <Show when={m().state === 'running'}>
-                    <button type="button" class="btn" onClick={() => void stopMission()}>
+                    <button type="button" class="btn" disabled={busy()} onClick={() => void stopMission()}>
                       {t('projects.action.stop')}
                     </button>
                   </Show>
                   <Show when={m().state === 'paused' || m().state === 'blocked'}>
-                    <button type="button" class="btn primary" onClick={() => void resumeMission()}>
+                    <button type="button" class="btn primary" disabled={busy()} onClick={() => void resumeMission()}>
                       {t('projects.action.resume')}
                     </button>
                   </Show>
                 </div>
                 <Show when={m().reason}>
                   <div class="note" role="status">
-                    {t(m().reason as any)}
+                    {fromEngine(m().reason ?? undefined)}
                   </div>
                 </Show>
               </header>
 
               {/* Amber Needs-You Decisions (R77, R92) */}
+              <Show when={m().plan}><p class="note">{m().plan}</p></Show>
               <Show when={humanDecisions().length > 0}>
                 <section class="needs-you" role="region" aria-label={t('projects.needsYou')}>
                   <div class="ny-header">
@@ -399,7 +430,7 @@ export function Projects(props: Props) {
                   </div>
                   <For each={humanDecisions()}>
                     {(dec: DecisionView) => (
-                      <div class="ask ny-card" role="alertdialog">
+                      <div class="ask ny-card" role="alertdialog" aria-label={dec.question}>
                         <div class="ny-question">
                           <span class="chip">{t(`decision.kind.${dec.kind}` as any)}</span>
                           <b>{dec.question}</b>
@@ -410,6 +441,7 @@ export function Projects(props: Props) {
                               <button
                                 type="button"
                                 class="btn"
+                                disabled={busy()}
                                 classList={{ primary: dec.default === opt }}
                                 onClick={() => void answerDecision(dec.id, opt)}
                               >
@@ -424,16 +456,17 @@ export function Projects(props: Props) {
                         <div class="ny-custom">
                           <input
                             type="text"
+                            aria-label={t('projects.decision.customPlaceholder')}
                             placeholder={t('projects.decision.customPlaceholder')}
-                            value={customAnswers()[dec.id] ?? ''}
+                            value={customAnswer(dec.id)}
                             onInput={(e) => {
                               const val = e.currentTarget.value;
                               setCustomAnswers((prev) => ({ ...prev, [dec.id]: val }));
                             }}
                             onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
+                              if (e.key === 'Enter' && !e.isComposing) {
                                 e.preventDefault();
-                                const ans = (customAnswers()[dec.id] ?? '').trim();
+                                const ans = customAnswer(dec.id).trim();
                                 if (ans) void answerDecision(dec.id, ans);
                               }
                             }}
@@ -441,9 +474,9 @@ export function Projects(props: Props) {
                           <button
                             type="button"
                             class="btn"
-                            disabled={!(customAnswers()[dec.id] ?? '').trim()}
+                            disabled={busy() || !customAnswer(dec.id).trim()}
                             onClick={() => {
-                              const ans = (customAnswers()[dec.id] ?? '').trim();
+                              const ans = customAnswer(dec.id).trim();
                               if (ans) void answerDecision(dec.id, ans);
                             }}
                           >
@@ -471,7 +504,8 @@ export function Projects(props: Props) {
                           <div class="task-list">
                             <For each={stateTasks()}>
                               {(task: TaskView) => {
-                                const receipt = taskReceiptStatus(task);
+                                const receipt = () => taskReceiptStatus(task);
+                                const [detailsOpen, setDetailsOpen] = createSignal(false);
                                 return (
                                   <div class="task-card">
                                     <div class="tc-top">
@@ -490,16 +524,31 @@ export function Projects(props: Props) {
                                       </Show>
                                     </div>
                                     <Show when={task.reason}>
-                                      <div class="note">{t(task.reason as any)}</div>
+                                      <div class="note">{fromEngine(task.reason)}</div>
                                     </Show>
                                     <div class="tc-footer">
                                       <span
                                         class="receipt-badge"
-                                        classList={{ unverified: receipt.isUnverified }}
+                                        classList={{ unverified: receipt().isUnverified }}
                                       >
-                                        {t(receipt.textKey as any)}
+                                        {fromEngine(receipt().textKey)}
                                       </span>
                                     </div>
+                                    <details onToggle={(e) => setDetailsOpen(e.currentTarget.open)}>
+                                      <summary aria-label={`${t('projects.details')}: ${task.title}`}>{t('projects.details')}</summary>
+                                      <Show when={detailsOpen() && task.detail}>
+                                        {(detail) => <>
+                                          <p>{t('projects.details.scope')}: {detail().scope.join(', ')}</p>
+                                          <p>{t('projects.details.proofs')}: {detail().proofs.join(', ')}</p>
+                                          <Show when={detail().artifacts.length > 0} fallback={<p>{t('projects.details.noEvidence')}</p>}>
+                                            <For each={detail().artifacts}>{(artifact) => <div>
+                                              <p>{artifact.summary}</p>
+                                              <pre>{JSON.stringify(artifact, null, 2)}</pre>
+                                            </div>}</For>
+                                          </Show>
+                                        </>}
+                                      </Show>
+                                    </details>
                                   </div>
                                 );
                               }}
@@ -521,7 +570,7 @@ export function Projects(props: Props) {
                       {costDisplay().isUnknown ? t('projects.cost.unknown') : costDisplay().display}
                     </span>
                     <span class="cost-cap">
-                      {t('projects.cost.cap')}: {formatCap(m().cost.capMicros)}
+                      {t('projects.cost.cap')}: {m().cost.capMicros == null ? t('projects.cost.unknown') : formatCap(m().cost.capMicros)}
                     </span>
                   </div>
                 </div>
@@ -533,36 +582,37 @@ export function Projects(props: Props) {
                       {(p) => (
                         <div class="pace-item">
                           <span class="chip">{p.vendor}</span>
-                          <span class="pace-window">{p.window}</span>
+                          <span class="pace-window">{fromEngine(`quota.${p.window}`)}</span>
                           <span class="pace-stat">
                             {formatPercent(p.used)} {t('projects.pace.used')}
                           </span>
                           <span class="pace-stat">
                             {formatPercent(p.room)} {t('projects.pace.room')}
                           </span>
+                          <span class="note">{t('projects.pace.freshness', { when: p.readAt == null ? t('projects.cost.unknown') : new Date(p.readAt * 1000).toLocaleString(lang()) })}</span>
                         </div>
                       )}
                     </For>
                   </div>
                 </div>
 
-                <Show when={m().build}>
+                <Show when={build()}>
                   {(b: () => BuildView) => (
                     <div class="build-card">
                       <h3>{t('projects.build.title')}</h3>
                       <div class="build-slots">
                         <div>
-                          <b>{t('projects.build.current')}:</b> {b().current ?? '—'}
+                          <b>{t('projects.build.current')}:</b> {b().current ?? t('projects.value.missing')}
                         </div>
                         <div>
-                          <b>{t('projects.build.next')}:</b> {b().next ?? '—'}
+                          <b>{t('projects.build.next')}:</b> {b().next ?? t('projects.value.missing')}
                         </div>
                         <div>
-                          <b>{t('projects.build.lastGood')}:</b> {b().lastGood ?? '—'}
+                          <b>{t('projects.build.lastGood')}:</b> {b().lastGood ?? t('projects.value.missing')}
                         </div>
                         <Show when={b().waiting}>
                           <div class="note">
-                            <b>{t('projects.build.waiting')}:</b> {t(b().waiting as any)}
+                            <b>{t('projects.build.waiting')}:</b> {fromEngine(b().waiting ?? undefined)}
                           </div>
                         </Show>
                       </div>

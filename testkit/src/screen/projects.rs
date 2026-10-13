@@ -40,7 +40,7 @@ fn path_race(ctx: &mut Ctx) -> Result {
 fn cleanup(ctx: &mut Ctx) -> Result {
     run_probe(ctx, "--project-git-clean")
 }
-fn run_probe(ctx: &mut Ctx, mode: &str) -> Result {
+pub(super) fn run_probe(ctx: &mut Ctx, mode: &str) -> Result {
     let git = faber_engine::cli::find_cli("git").ok_or("git is not installed")?;
     ensure(git.prefix.is_empty(), || "git must be a native executable".into())?;
     let parent: Vec<_> = std::env::vars().collect();
@@ -75,6 +75,54 @@ fn run_probe(ctx: &mut Ctx, mode: &str) -> Result {
     }
     ctx.notes.push("temporary repos only; no remote; owner index, ref and dirty files unchanged".into());
     Ok(())
+}
+
+/// Seed only a temporary repository, on the same hidden desktop as the existing git probes.
+pub fn screen_fixture(sandbox: &Path) -> Result {
+    use faber_engine::model::Project;
+    use faber_engine::project::{Decision, DecisionKind, Mission, MissionState, Plan, RepoIdentity, Task, TaskKind, TaskState};
+    let cli = faber_engine::cli::find_cli("git").ok_or("git is unavailable")?;
+    let repo = sandbox.join("repo");
+    std::fs::create_dir_all(&repo).map_err(|e| e.to_string())?;
+    git(&cli.command, &repo, &["init", "--initial-branch=owner"])?;
+    git(&cli.command, &repo, &["config", "user.name", "Fixture"])?;
+    git(&cli.command, &repo, &["config", "user.email", "fixture@example.invalid"])?;
+    std::fs::write(repo.join("fixture"), "original").map_err(|e| e.to_string())?;
+    git(&cli.command, &repo, &["add", "--", "fixture"])?;
+    git(&cli.command, &repo, &["commit", "--no-gpg-sign", "-m", "fixture"])?;
+    let base = git(&cli.command, &repo, &["rev-parse", "HEAD"])?;
+    let mut process = Process::find().map_err(|e| e.key().to_string())?;
+    let enrolled = enroll(&mut process, &repo, "HEAD").map_err(|e| e.key().to_string())?;
+    let mut project = Project::new("demo".into(), "Demo".into(), repo.to_string_lossy().into());
+    project.repo = Some(RepoIdentity::new(&enrolled.identity.common_dir, &project.path));
+    let mut grant = Grant::new(&enrolled.identity.common_dir, GitMode::Seguro, 1, 100);
+    grant.author = enrolled.author;
+    project.grant = Some(grant);
+    let data = sandbox.join("data");
+    std::fs::write(data.join("projects.json"), serde_json::to_vec(&vec![project.clone()]).unwrap()).map_err(|e| e.to_string())?;
+    let journal = Journal::open(&repo, &data, "screen_mission").map_err(|e| e.key().to_string())?;
+    let mut mission = Mission::new("screen_mission", "demo", &enrolled.identity.common_dir, "A measured project goal", &base, 1, 100);
+    mission.state = MissionState::Paused;
+    journal.save_mission(&mission).map_err(|e| e.key().to_string())?;
+    let tasks = (0..200)
+        .map(|i| {
+            let mut t =
+                Task::new(&format!("task{i}"), &format!("Task {i}: a long requirement that must remain readable"), TaskKind::Writer);
+            t.state = [TaskState::Ready, TaskState::Running, TaskState::Review, TaskState::Done, TaskState::Blocked][i % 5];
+            t.writes = vec!["ui/Projects.tsx".into()];
+            if i > 0 {
+                t.requires.push(format!("task{}", i - 1));
+            }
+            t.proofs = vec!["screen".into()];
+            t
+        })
+        .collect();
+    journal.save_plan(&Plan::new("screen_mission", 1, tasks)).map_err(|e| e.key().to_string())?;
+    let mut d = Decision::new("choice", "task0", "Pick a direction", DecisionKind::Direction);
+    d.options = vec!["Keep".into(), "Change".into()];
+    d.default = Some("Keep".into());
+    journal.save_decision(&d).map_err(|e| e.key().to_string())?;
+    std::fs::write(sandbox.join("project-git.ok"), "ok").map_err(|e| e.to_string())
 }
 
 fn git(program: &str, root: &Path, args: &[&str]) -> Result<String> {

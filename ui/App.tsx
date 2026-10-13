@@ -734,14 +734,14 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                     <Match when={place().id}>
                       {area() === 'chat' ? t('area.chat') : t('crumb.project')}
                       <span class="sep" aria-hidden="true">
-                        ›
+                        {t('crumb.separator')}
                       </span>
                       <b>{title() ?? ''}</b>
                     </Match>
                     <Match when={area() === 'project' && project()}>
                       {t('crumb.project')}
                       <span class="sep" aria-hidden="true">
-                        ›
+                        {t('crumb.separator')}
                       </span>
                       <b>{project()?.name}</b>
                     </Match>
@@ -752,7 +752,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                   </Switch>
                 </div>
                 <div class="right">
-                  <Show when={state().vendors.length > 0 && !newChat()}>
+                  <Show when={state().vendors.length > 0 && !newChat() && area() !== 'project'}>
                     <span class="chip" title={t('topbar.model')}>
                       <Show when={answering()} fallback={<>{options().find((o) => o.choice.vendor === picked().vendor && o.choice.model === picked().model)?.label}</>}>
                         {(m) => (
@@ -858,7 +858,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                           </Show>
                         </Show>
                       </div>
-                      <Show when={!newChat() && !needsProject()}>
+                      <Show when={!newChat() && !needsProject() && area() !== 'project'}>
                         <div class="dock" inert={trapped()}>
                           {composer()}
                         </div>

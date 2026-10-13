@@ -4,6 +4,43 @@ use crate::project::budget::{self, Budget, Change, Invocation, Status};
 use crate::route::{Asked, Routed};
 
 impl Engine {
+    /// The board reads the same durable cost and daily line as admission; absent measurements stay unknown.
+    pub fn mission_readings(&self, mission: &str) -> Result<(crate::project::wire::CostView, Vec<crate::project::wire::PaceView>), String> {
+        self.with(|c| {
+            c.store.ledger_checked().map_err(|e| e.key().to_string())?;
+            let b = Budget::load(&c.ledger).map_err(str::to_string)?;
+            let now = c.secs();
+            let pace = Vendor::ALL
+                .into_iter()
+                .flat_map(|vendor| {
+                    let v = c.ledger.of(vendor);
+                    v.readings
+                        .iter()
+                        .filter(|(_, r)| r.resets_at > now)
+                        .map(move |(name, r)| {
+                            let room = v.day_baselines.get(name).and_then(|base| {
+                                let start = crate::budget::daily_start(r.resets_at, now)?;
+                                (base.reading.resets_at == r.resets_at
+                                    && base.reading.at <= start
+                                    && start - base.reading.at <= crate::budget::STALE_SECS)
+                                    .then(|| crate::budget::daily_room(base.reading.used, r.used, r.resets_at, now))
+                                    .flatten()
+                            });
+                            crate::project::wire::PaceView {
+                                vendor,
+                                window: name.clone(),
+                                used: Some(r.used),
+                                room,
+                                read_at: Some(r.read_at),
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect();
+            Ok((b.cost_view(mission), pace))
+        })
+    }
+
     /// Persist admission before T5 dispatches; reports remain admissible while paused or out of quota.
     pub fn mission_budget(&self, change: Change) -> Result<Status, String> {
         self.with(|c| {
