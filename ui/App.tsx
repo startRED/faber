@@ -611,7 +611,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
         <div class="toast" role="alert">
           <span>{saveError()}</span>
           <button type="button" aria-label={t('toast.dismiss')} onClick={() => setSaveError(undefined)}>
-            Ã—
+            ×
           </button>
         </div>
       </Show>
@@ -680,9 +680,16 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
             />
           }
         >
-          <div class="shell" classList={{ docked: columnOpen() && docked() }} inert={tourOpen()} ref={animateList}>
+          <div
+            class="shell"
+            data-screen={`${area() === 'chat' ? 'chat' : 'project'}.${newChat() ? 'new' : 'thread'}`}
+            classList={{ docked: columnOpen() && docked() }}
+            inert={tourOpen()}
+            ref={animateList}
+          >
             <aside
               class="side"
+              data-surface="sidebar"
               classList={{ shown: sideOverlay() }}
               ref={(el) => (sideEl = el)}
               aria-label={t('side.label')}

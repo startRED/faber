@@ -35,7 +35,7 @@ export function Stepper(props: { at: 1 | 2 }) {
 /** The window of the first run. `step` is the stepper's place; the cards that only reconnect an account have none. */
 export function Stage(props: { step?: 1 | 2; labelledby: string; children: JSX.Element }) {
   return (
-    <div class="fr-stage" classList={{ plain: !props.step }} role="dialog" aria-modal="true" aria-labelledby={props.labelledby}>
+    <div class="fr-stage" data-screen={props.step === 1 ? 'first.accounts' : props.step === 2 ? 'first.look' : 'setup'} classList={{ plain: !props.step }} role="dialog" aria-modal="true" aria-labelledby={props.labelledby}>
       <Show when={props.step}>
         {(at) => (
           <div class="fr-top">

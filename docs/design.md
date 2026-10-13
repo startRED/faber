@@ -341,6 +341,31 @@ that bypasses the switches is not seen. The audit sees only requests that reach 
 Known limit: the loopback-only rule is not enforced. Test processes get dead proxy variables and the switches above, but
 nothing stops a program from opening its own connection; blocking outbound traffic for test processes is deferred.
 
+### UX sentinel
+
+The sentinel (`testkit/src/sentinel.rs`, `testkit/src/probe.js`, `testkit/src/screen/sentinel.rs`) judges what a person
+would see, not what the page says. It is a set of screen scenarios, so it runs hidden, sandboxed and audited like the
+rest. The design is in `docs/superpowers/specs/2026-10-12-ux-sentinel-design.md`; this is slice S0.
+
+- **Probe and rules.** The probe is injected over the DevTools port. It only measures: box, opacity and presence of every
+  `data-surface` element on each frame (exit copies in shadow roots included), and every animation that starts. The
+  rules are pure functions on those numbers, unit tested with synthetic samples. Each rule has a planted twin: a
+  defect that must be found, injected into the page of the sandbox (never into the repository). A scenario fails if
+  its twin is not found.
+- **Clock and slow motion.** Before a motion scenario, a 1 s transition on a hidden element must give at least 45 frames
+  with a median under 20 ms and a `transitionend` (three tries). Then `Animation.setPlaybackRate(0.25)` makes every
+  animation 4 times slower, so a panel that jumps is seen as one frame. The test build starts with three browser switches
+  that stop the engine from slowing frames on a window no monitor shows.
+- **Scenarios.** Panels move through frames and reduced motion moves nothing (M1, M6). A permission card arrives
+  through frames (M1, dialogs). The composer grows and shrinks and the end of the thread stays clear (I1 to I5, L4,
+  L5; the cap is measured against the window height, 40vh). No text is garbled in five languages, and a title with `› « » ß ç ã` survives the engine's file (T1; the static scan in
+  `tests/ui/mojibake.check.ts` covers every locale and source string).
+- **Findings and the gate.** A finding is the hash of kind, screen, surface and element. Only critical and high
+  findings whose hash is not in `tests/ux/baseline.json` fail a run; medium ones are written down and become tasks. The
+  file is a ratchet: it lists what is known, and a fix removes its line. Findings go to
+  `target/faber-test/ux/<scenario>.json` and raw frame traces to `target/faber-test/ux/traces/`. Nothing records the
+  person's screen.
+
 
 ## Auto quota pacing
 
