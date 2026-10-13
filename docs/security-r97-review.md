@@ -193,6 +193,12 @@ Native sandbox support remains mandatory. The earlier malicious-CLI/auth-helper 
 apply; unattended plugins/hooks are now disabled. One owned probe directory remains under ignored `target` after
 automatic approval review rejected its cleanup as `blocked by policy`.
 
+CI follow-up: macOS found a Windows-only mutable binding in the manual probe helper; its mutation now lives
+inside the Windows branch. Windows CI correctly refused four tests' chosen working folders under AppData temp.
+A synthetic AppData/TMP tree reproduced `r107_chat_folder_choice_is_canonical_persisted_and_fixed_before_the_first_message`
+failing before the fixture fix. Those four tests now choose owned folders under ignored `target/test-workspaces`;
+the forbidden-folder policy is unchanged. The complete engine suite passes with the synthetic AppData/TMP environment.
+
 Additional primary evidence: [installed config override order](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server/src/config_manager.rs),
 [installed table merging](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/config/src/merge.rs),
 [installed filesystem grammar](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/core/src/config/permissions.rs),

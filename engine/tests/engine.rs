@@ -41,6 +41,15 @@ fn choice(vendor: &str, model: Option<&str>) -> Choice {
     Choice { vendor: vendor.into(), model: model.map(String::from), effort: None }
 }
 
+fn project_folder() -> tempfile::TempDir {
+    // System temp can be under AppData, which is intentionally refused as a chosen working folder.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/test-workspaces");
+    std::fs::create_dir_all(&root).unwrap();
+    let folder = tempfile::tempdir_in(root).unwrap();
+    assert!(faber_engine::permissions::unattended_root(folder.path()).is_some());
+    folder
+}
+
 fn ask(area: Area, text: &str, choice: Choice) -> SendRequest {
     SendRequest { conversation_id: None, area, project_id: None, text: text.into(), images: vec![], files: vec![], choice }
 }
@@ -162,7 +171,7 @@ async fn r106_orphaned_chat_scratch_is_cleaned_but_saved_conversations_are_kept(
 #[tokio::test]
 async fn r107_chat_folder_choice_is_canonical_persisted_and_fixed_before_the_first_message() {
     let data = tempfile::tempdir().unwrap();
-    let folder = tempfile::tempdir().unwrap();
+    let folder = project_folder();
     let f = fake(fixture("claude", "chat"));
     let cwd = Arc::new(std::sync::Mutex::new(Vec::new()));
     let seen = cwd.clone();
@@ -653,7 +662,7 @@ async fn the_hooks_choice_is_saved_and_restarts_idle_project_clis_with_it() {
 
 #[tokio::test]
 async fn permissions_default_without_a_migration_persist_and_restart_idle_project_sessions() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = project_folder();
     for settings in [serde_json::json!({}), serde_json::json!({ "language": "en", "userHooks": true })] {
         let old: Settings = serde_json::from_value(settings).unwrap();
         assert_eq!(old.permissions.unwrap_or_default(), Permissions::DontAsk);
@@ -683,7 +692,7 @@ async fn permissions_default_without_a_migration_persist_and_restart_idle_projec
 
 #[tokio::test]
 async fn r107_tightening_permissions_stops_chat_and_projects() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = project_folder();
     let entries = vec![
         Entry { input: true, msg: serde_json::json!({ "type": "user", "message": { "content": "wait" } }) },
         Entry { input: false, msg: serde_json::json!({ "type": "system", "subtype": "init", "session_id": "active", "model": "haiku" }) },
@@ -1184,7 +1193,7 @@ async fn a_queued_message_that_cannot_be_dispatched_stays_queued() {
 #[tokio::test]
 async fn files_sent_while_a_turn_runs_are_saved_at_once_and_shown_without_the_note_to_the_model() {
     let dir = tempfile::tempdir().unwrap();
-    let chosen = tempfile::tempdir().unwrap();
+    let chosen = project_folder();
     let note = "second\n\nAttached files (in your working folder):\n- attachments/notes.txt";
     let f = fake(claude_turns(&[("first", true), (note, true)]));
     let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());

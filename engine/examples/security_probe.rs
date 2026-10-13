@@ -14,12 +14,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 fn hidden(bin: &str) -> Command {
-    let mut command = Command::new(bin);
+    let command = Command::new(bin);
     #[cfg(windows)]
-    {
+    let command = {
         use std::os::windows::process::CommandExt;
+        let mut command = command;
         command.creation_flags(0x0800_0000);
-    }
+        command
+    };
     command
 }
 
