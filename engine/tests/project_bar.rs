@@ -1096,7 +1096,7 @@ fn secret_scanner_detects_keys_and_tokens() {
 }
 
 #[test]
-fn spdx_license_checker_flags_copyleft_for_commercial() {
+fn spdx_license_checker_never_infers_compatibility_from_noncommercial_use() {
     let permissive = &["MIT", "Apache-2.0", "BSD-3-Clause", "FSL-1.1-ALv2"];
     assert!(check_spdx_licenses(permissive, true).is_ok());
 
@@ -1105,8 +1105,8 @@ fn spdx_license_checker_flags_copyleft_for_commercial() {
     assert!(flagged.contains(&"GPL-3.0".to_string()));
     assert!(flagged.contains(&"AGPL-3.0".to_string()));
 
-    // Non-commercial mode allows copyleft:
-    assert!(check_spdx_licenses(copyleft, false).is_ok());
+    // Purpose alone cannot establish compatibility with this repository's license.
+    assert!(check_spdx_licenses(copyleft, false).is_err());
 }
 
 #[test]
@@ -1114,60 +1114,26 @@ fn registry_checker_flags_typo_squatting() {
     let popular = &["serde", "tokio", "react", "solid-js", "tauri"];
 
     // Exact match passes
-    assert!(check_dependency_registry("serde", popular).is_ok());
-    assert!(check_dependency_registry("tokio", popular).is_ok());
+    assert!(check_package_name("serde", popular).is_ok());
+    assert!(check_package_name("tokio", popular).is_ok());
 
     // Near typo distance 1 or 2 is flagged
-    assert!(check_dependency_registry("serdde", popular).is_err());
-    assert!(check_dependency_registry("tokiio", popular).is_err());
-    assert!(check_dependency_registry("taurii", popular).is_err());
+    assert!(check_package_name("serdde", popular).is_err());
+    assert!(check_package_name("tokiio", popular).is_err());
+    assert!(check_package_name("taurii", popular).is_err());
 
     // Distinct package name passes
-    assert!(check_dependency_registry("completely-different-crate", popular).is_ok());
+    assert!(check_package_name("completely-different-crate", popular).is_ok());
 }
 
 #[test]
-fn osv_advisory_checker_matches_known_advisories_offline() {
-    let fixture_content = r#"[
-        {
-            "package": "vulnerable-crate",
-            "vulnerable_versions": ["0.1.0", "0.1.1"],
-            "id": "RUSTSEC-2026-0001",
-            "summary": "Buffer overflow in vulnerable-crate"
-        }
-    ]"#;
-
-    let db: Vec<OsvAdvisory> = serde_json::from_str(fixture_content).unwrap();
-
-    let safe_packages = &[("vulnerable-crate", "0.2.0"), ("safe-crate", "1.0.0")];
-    let matches_safe = check_osv_advisories(safe_packages, &db);
-    assert!(matches_safe.is_empty());
-
-    let vuln_packages = &[("vulnerable-crate", "0.1.1"), ("safe-crate", "1.0.0")];
-    let matches_vuln = check_osv_advisories(vuln_packages, &db);
-    assert_eq!(matches_vuln.len(), 1);
-    assert_eq!(matches_vuln[0].id, "RUSTSEC-2026-0001");
-}
-
-#[test]
-fn osv_advisory_fixtures_are_valid_and_detect_known_advisories() {
-    let cargo_fixture = std::fs::read_to_string("tests/fixtures/projects/advisories-cargo.json")
-        .or_else(|_| std::fs::read_to_string("../tests/fixtures/projects/advisories-cargo.json"))
-        .expect("cargo advisory fixture must exist");
-    let cargo_db: Vec<OsvAdvisory> = serde_json::from_str(&cargo_fixture).unwrap();
-    assert!(!cargo_db.is_empty());
-
-    let matches = check_osv_advisories(&[("hyper", "0.14.0")], &cargo_db);
-    assert_eq!(matches.len(), 1);
-    assert_eq!(matches[0].id, "RUSTSEC-2024-0002");
-
-    let npm_fixture = std::fs::read_to_string("tests/fixtures/projects/advisories-npm.json")
-        .or_else(|_| std::fs::read_to_string("../tests/fixtures/projects/advisories-npm.json"))
-        .expect("npm advisory fixture must exist");
-    let npm_db: Vec<OsvAdvisory> = serde_json::from_str(&npm_fixture).unwrap();
-    assert!(!npm_db.is_empty());
-
-    let matches_npm = check_osv_advisories(&[("lodash", "4.17.15")], &npm_db);
-    assert_eq!(matches_npm.len(), 1);
-    assert_eq!(matches_npm[0].id, "GHSA-jf85-cpcp-j695");
+fn osv_fixtures_record_advisories_and_never_make_offline_clear() {
+    use faber_engine::project::proof::native::*;
+    let package = PublicPackage { ecosystem: Ecosystem::Cargo, name: "example-crate".into(), version: "0.1.0".into() };
+    let cargo = include_bytes!("../../tests/fixtures/projects/advisories-cargo.json");
+    assert_eq!(parse_osv_response(&package, cargo).unwrap(), AdvisoryStatus::Vulnerable(vec!["TEST-CARGO-0001".into()]));
+    let package = PublicPackage { ecosystem: Ecosystem::Npm, name: "example-package".into(), version: "0.1.0".into() };
+    let npm = include_bytes!("../../tests/fixtures/projects/advisories-npm.json");
+    assert_eq!(parse_osv_response(&package, npm).unwrap(), AdvisoryStatus::Vulnerable(vec!["TEST-NPM-0001".into()]));
+    assert!(parse_osv_response(&package, include_bytes!("../../tests/fixtures/projects/advisories-offline.json")).is_err());
 }

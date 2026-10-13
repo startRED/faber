@@ -1,4 +1,6 @@
 //! Check receipts, partial reruns, content addressing, and first-party native checks.
+pub mod native;
+pub mod screen;
 use super::wire::{CheckOutcome, CheckReceipt, CheckResult, CompileReceipt};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -14,6 +16,43 @@ pub struct CheckCandidate {
     pub toolchain: String,
     pub dependencies: Vec<String>,
     pub environment: Vec<String>,
+}
+
+impl CheckCandidate {
+    pub fn capture_environment(&mut self) {
+        self.environment.retain(|v| !v.starts_with("runtime."));
+        self.environment.push(format!("runtime.platform={}/{}", std::env::consts::OS, std::env::consts::ARCH));
+        for name in [
+            "CI",
+            "GITHUB_ACTIONS",
+            "LANG",
+            "LC_ALL",
+            "TZ",
+            "RUSTFLAGS",
+            "CARGO_ENCODED_RUSTFLAGS",
+            "CARGO_PROFILE_DEV_DEBUG",
+            "CARGO_PROFILE_TEST_DEBUG",
+        ] {
+            let digest = std::env::var_os(name).map(|v| super::lease::hash(v.as_encoded_bytes()));
+            self.environment.push(format!("runtime.{name}={digest:?}"));
+        }
+    }
+    /// Capture file contents through the broker's link-safe IO, never hash path names alone.
+    pub fn capture_inputs(&mut self, root: &std::path::Path, paths: &[String]) -> Result<(), ProofError> {
+        if paths.is_empty() || paths.len() > super::wire::MAX_PATHS {
+            return Err(ProofError::MalformedArtifact);
+        }
+        let mut inputs = BTreeMap::new();
+        for path in paths {
+            super::kit::delivery::scoped_path(path).map_err(|_| ProofError::MalformedArtifact)?;
+            let path = super::lease::normalized(path).map_err(|_| ProofError::MalformedArtifact)?;
+            let file = super::files::ScopedFile::new(&root.join(&path), false).map_err(|_| ProofError::MalformedArtifact)?;
+            let hash = file.hash().map_err(|_| ProofError::MalformedArtifact)?.ok_or(ProofError::MalformedArtifact)?;
+            inputs.insert(path, hash);
+        }
+        self.inputs = inputs.into_iter().map(|(path, hash)| serde_json::json!({"path":path,"sha256":hash}).to_string()).collect();
+        Ok(())
+    }
 }
 
 /// Computes the content-addressed digest of a check execution candidate.
@@ -112,8 +151,7 @@ pub fn validate_check_receipt(receipt: &CheckReceipt, expected_candidate: &str) 
         || receipt.checks.len() > super::MAX_TASKS * super::wire::MAX_PATHS
         || receipt.model.trim().is_empty()
         || receipt.effort.trim().is_empty()
-        || receipt.candidate.len() != 64
-        || !receipt.candidate.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        || !super::git::valid_oid(&receipt.candidate)
     {
         return Err(ProofError::MissingCheck);
     }
@@ -152,8 +190,7 @@ pub fn validate_compile_receipt(receipt: &CompileReceipt, expected_candidate: &s
         || !super::valid_id(&receipt.mission)
         || receipt.phases.len() != expected.len()
         || receipt.plan_revision == 0
-        || receipt.candidate.len() != 64
-        || !receipt.candidate.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        || !super::git::valid_oid(&receipt.candidate)
     {
         return Err(ProofError::MissingPhases);
     }
@@ -197,9 +234,57 @@ pub fn validate_acceptance(bar: &[super::wire::BarCheck], receipts: &[CheckRecei
             return Err(ProofError::DuplicateCheck);
         }
         let outcome = outcomes.get(&required.id).ok_or(ProofError::MissingCheck)?;
+        if required.from == "library:software@2:not-applicable" {
+            if outcome.result != CheckResult::NotRun
+                || outcome.reason.as_deref() != Some("reason.proof.notApplicable")
+                || outcome.evidence.is_empty()
+            {
+                return Err(ProofError::CheckFailed);
+            }
+            continue;
+        }
         if (required.mandatory || required.severity == super::wire::Severity::Blocking) && !outcome.is_pass() {
             return Err(ProofError::CheckFailed);
         }
+    }
+    Ok(())
+}
+
+#[derive(Clone)]
+pub struct RefactorEvidence {
+    pub captured_at: u64,
+    pub code_started_at: u64,
+    pub golden_base: BTreeMap<String, String>,
+    pub golden_after: BTreeMap<String, String>,
+    pub api_base: Vec<u8>,
+    pub api_after: Vec<u8>,
+    pub schema_base: Vec<u8>,
+    pub schema_after: Vec<u8>,
+    pub benchmark_base: Vec<u64>,
+    pub benchmark_after: Vec<u64>,
+}
+
+pub fn validate_refactor(evidence: &RefactorEvidence) -> Result<(), ProofError> {
+    if evidence.captured_at >= evidence.code_started_at
+        || evidence.golden_base.is_empty()
+        || evidence.golden_base != evidence.golden_after
+        || evidence.api_base.is_empty()
+        || evidence.schema_base.is_empty()
+        || evidence.api_base != evidence.api_after
+        || evidence.schema_base != evidence.schema_after
+        || !(3..=10000).contains(&evidence.benchmark_base.len())
+        || !(3..=10000).contains(&evidence.benchmark_after.len())
+        || evidence.benchmark_base.iter().chain(&evidence.benchmark_after).any(|v| *v == 0)
+    {
+        return Err(ProofError::CheckFailed);
+    }
+    let mut base = evidence.benchmark_base.clone();
+    let mut after = evidence.benchmark_after.clone();
+    base.sort_unstable();
+    after.sort_unstable();
+    let noise = base[base.len() - 1] - base[0];
+    if after[after.len() / 2] > base[base.len() / 2].saturating_add(noise) {
+        return Err(ProofError::CheckFailed);
     }
     Ok(())
 }
@@ -234,6 +319,13 @@ pub fn scan_secrets(content: &str) -> Result<(), Vec<SecretViolation>> {
                 violations.push(SecretViolation { pattern: "github_pat".into(), snippet: "[redacted]".into() });
             }
         }
+        for (prefix, length) in [("ASIA", 20), ("github_pat_", 40), ("gho_", 36), ("ghs_", 36), ("sk-proj-", 32), ("glpat-", 26)] {
+            if line.match_indices(prefix).any(|(at, _)| {
+                line.as_bytes().get(at..at + length).is_some_and(|s| s.iter().all(|b| b.is_ascii_alphanumeric() || b"_-".contains(b)))
+            }) {
+                violations.push(SecretViolation { pattern: "token".into(), snippet: "[redacted]".into() });
+            }
+        }
     }
 
     if violations.is_empty() { Ok(()) } else { Err(violations) }
@@ -241,20 +333,7 @@ pub fn scan_secrets(content: &str) -> Result<(), Vec<SecretViolation>> {
 
 /// Verifies dependency licenses against allowed SPDX list.
 pub fn check_spdx_licenses(licenses: &[&str], is_commercial: bool) -> Result<(), Vec<String>> {
-    const ALLOWED_PERMISSIVE: &[&str] =
-        &["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "CC0-1.0", "0BSD", "FSL-1.1-ALv2", "Zlib"];
-    const COPYLEFT: &[&str] = &["GPL-2.0", "GPL-3.0", "AGPL-3.0", "LGPL-2.1", "LGPL-3.0", "SSPL-1.0"];
-
-    let mut flagged = vec![];
-    for &lic in licenses {
-        if is_commercial {
-            if COPYLEFT.contains(&lic) || !ALLOWED_PERMISSIVE.contains(&lic) {
-                flagged.push(lic.to_string());
-            }
-        } else if !ALLOWED_PERMISSIVE.contains(&lic) && !COPYLEFT.contains(&lic) {
-            flagged.push(lic.to_string());
-        }
-    }
+    let flagged: Vec<_> = licenses.iter().filter(|lic| !native::license_allowed(lic, is_commercial)).map(|lic| lic.to_string()).collect();
 
     if flagged.is_empty() { Ok(()) } else { Err(flagged) }
 }
@@ -287,7 +366,10 @@ fn levenshtein(a: &str, b: &str) -> usize {
 }
 
 /// Detects typo-squatting by computing Levenshtein distance to known popular packages.
-pub fn check_dependency_registry(package: &str, popular: &[&str]) -> Result<(), RegistryIssue> {
+pub fn check_package_name(package: &str, popular: &[&str]) -> Result<(), RegistryIssue> {
+    if package.is_empty() || package.len() > 214 || popular.len() > 2048 || popular.iter().any(|p| p.len() > 214) {
+        return Err(RegistryIssue::NotFound("invalid-public-name".into()));
+    }
     if popular.contains(&package) {
         return Ok(());
     }
@@ -300,38 +382,4 @@ pub fn check_dependency_registry(package: &str, popular: &[&str]) -> Result<(), 
     }
 
     Ok(())
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct OsvAdvisory {
-    pub package: String,
-    pub vulnerable_versions: Vec<String>,
-    pub id: String,
-    pub summary: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OsvMatch {
-    pub id: String,
-    pub package: String,
-    pub version: String,
-    pub summary: String,
-}
-
-/// Offline advisory matching against public OSV vulnerability database fixtures.
-pub fn check_osv_advisories(packages: &[(&str, &str)], db: &[OsvAdvisory]) -> Vec<OsvMatch> {
-    let mut matches = vec![];
-    for &(pkg, ver) in packages {
-        for adv in db {
-            if adv.package == pkg && adv.vulnerable_versions.iter().any(|v| v == ver) {
-                matches.push(OsvMatch {
-                    id: adv.id.clone(),
-                    package: pkg.to_string(),
-                    version: ver.to_string(),
-                    summary: adv.summary.clone(),
-                });
-            }
-        }
-    }
-    matches
 }

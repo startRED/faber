@@ -29,6 +29,20 @@ fn one_additive_wire_revision_keeps_the_durable_journal_version() {
 }
 
 #[test]
+fn named_bar_proofs_use_the_published_dotted_ids() {
+    let value = packet(json!({"proof":{"ids":["proof.cargo-fmt","proof.osv-scan"]}}));
+    assert!(Envelope::parse(&value.to_string(), &expect(), Role::Writer).is_ok());
+}
+
+#[test]
+fn credential_directories_are_forbidden_even_inside_a_worktree() {
+    for path in [".codex/auth.json", "nested/.claude/session.json", ".gemini/oauth.json"] {
+        let value = packet(json!({"read":{"paths":[path]}}));
+        assert_eq!(Envelope::parse(&value.to_string(), &expect(), Role::Research), Err(WireError::Path));
+    }
+}
+
+#[test]
 fn labels_and_bar_sheet_round_trip_without_turning_requirements_into_dependencies() {
     let mut value = packet(json!({"plan": {"summary": "s", "acceptance": "a", "tasks": [{"id": "a", "title": "A", "kind": "writer",
         "labels": {"verb": "build", "needs": ["ui:component!"], "risk": "low", "fresh": "stable"},

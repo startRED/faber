@@ -10,6 +10,7 @@ pub mod bar;
 mod files;
 pub mod git;
 pub mod kit;
+pub mod lead;
 pub mod lease;
 pub mod proof;
 pub mod store;
@@ -642,6 +643,9 @@ impl Plan {
         if let Some(sheet) = &self.sheet {
             sheet.validate().map_err(|_| GraphError::SoftwareBar("sheet".into()))?;
             bar::verify_mandatory_checks(sheet, &self.bar).map_err(|e| GraphError::SoftwareBar(e.key().into()))?;
+            for piece in &sheet.pieces {
+                bar::filter_and_validate_bar(&piece.id, &self.bar).map_err(|e| GraphError::SoftwareBar(e.key().into()))?;
+            }
             let pieces = sheet.pieces.iter().map(|p| p.id.clone()).collect::<Vec<_>>();
             bar::validate_compiler_graph(&self.tasks, &self.bar, &pieces).map_err(|e| GraphError::SoftwareBar(e.key().into()))?;
         } else if !self.bar.is_empty() {

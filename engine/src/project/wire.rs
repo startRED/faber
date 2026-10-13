@@ -317,6 +317,7 @@ fn texts(list: &[String]) -> Result<(), WireError> {
 
 /// A path a worker may name: inside the worktree and not the worktree itself.
 fn path(p: &str) -> Result<(), WireError> {
+    super::kit::delivery::scoped_path(p)?;
     match clean_path(p) {
         Some(clean) if !clean.is_empty() => Ok(()),
         _ => Err(WireError::Path),
@@ -432,7 +433,7 @@ impl Action {
                     }
                 })
             }
-            Action::Proof(p) => ids(&p.ids),
+            Action::Proof(p) => check_ids(&p.ids),
             Action::Decision(a) => {
                 text(&a.question)?;
                 texts(&a.options)?;

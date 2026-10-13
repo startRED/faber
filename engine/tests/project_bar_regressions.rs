@@ -98,6 +98,7 @@ fn cache_does_not_reuse_malformed_passes() {
     let mut cache = CheckCache::default();
     let mut pass = outcome();
     pass.evidence[0].sha256 = "z".repeat(64);
+    assert!(!pass.is_pass(), "malformed evidence is not a verified pass");
     let digest = compute_check_digest(&candidate());
     cache.record(&digest, &pass);
     assert!(cache.get(&digest).is_none());
@@ -161,7 +162,7 @@ fn repository_ground_requires_a_heading_and_cannot_leave_root() {
 
 #[test]
 fn secret_scanner_handles_unicode_and_never_echoes_a_secret() {
-    let content = "AKIAééééééééé token ghp_1234567890123456789012345678901234567890";
+    let content = "AKIAaaaaaaaaaaaaaaaé token ghp_1234567890123456789012345678901234567890";
     let found = scan_secrets(content).unwrap_err();
     assert!(found.iter().all(|v| !v.snippet.contains("ghp_")));
 }
@@ -197,6 +198,31 @@ fn receipt_rejects_empty_duplicate_and_malformed_outcomes() {
         }
         assert!(validate_check_receipt(&bad, &valid.candidate).is_err(), "mutation {mutation}");
     }
+}
+
+#[test]
+fn receipt_accepts_the_exact_git_sha1_tree_as_well_as_sha256_candidates() {
+    let mut receipt = receipt();
+    receipt.candidate = "c".repeat(40);
+    assert!(validate_check_receipt(&receipt, &receipt.candidate).is_ok());
+}
+
+#[test]
+fn conditional_rules_are_retained_and_excluded_only_with_recorded_applicability() {
+    let sheet = sheet();
+    let bar = software_bar(&sheet);
+    let mut check = bar.iter().find(|c| c.id == "kind.refactor-golden").unwrap().clone();
+    assert!(!check.mandatory);
+    let removed = bar.iter().filter(|c| c.id != check.id).cloned().collect::<Vec<_>>();
+    assert!(verify_mandatory_checks(&sheet, &removed).is_err());
+    check.owner = "change".into();
+    let mut receipt = receipt();
+    receipt.checks[0].id = check.id.clone();
+    receipt.checks[0].result = CheckResult::NotRun;
+    receipt.checks[0].reason = Some("reason.proof.notApplicable".into());
+    assert!(validate_acceptance(&[check.clone()], std::slice::from_ref(&receipt), &receipt.candidate).is_ok());
+    receipt.checks[0].reason = Some("reason.proof.offline".into());
+    assert!(validate_acceptance(&[check], std::slice::from_ref(&receipt), &receipt.candidate).is_err());
 }
 
 #[test]
@@ -298,4 +324,138 @@ fn compile_receipt_rejects_missing_phase_bad_tag_and_overlapping_time() {
     assert!(journal.save_compile_receipt(&good).is_err());
     std::fs::write(journal.records().join("compiles/rev-1.json"), "{}").unwrap();
     assert!(journal.compile_receipt(1).is_err());
+}
+
+#[test]
+fn every_piece_receives_locked_requirements_with_all_its_paths() {
+    let mut sheet = sheet();
+    sheet.pieces[0].change_kind = None;
+    let mut another = sheet.pieces[0].clone();
+    another.id = "other".into();
+    another.paths = vec!["engine/src/model.rs".into(), "engine/src/events.rs".into()];
+    sheet.pieces.push(another);
+    let bar = software_bar(&sheet);
+    assert!(bar.iter().any(|c| c.piece == "other" && c.attribute == "rust.fmt" && c.paths.len() == 2));
+    assert_eq!(bar.iter().map(|c| &c.id).collect::<std::collections::BTreeSet<_>>().len(), bar.len());
+    for id in ["software.callers-map", "desktop.real-width-drafts", "screen.coherence-widths", "any.token-latency"] {
+        let original = bar.iter().find(|c| c.id == id).unwrap();
+        let removed = bar.iter().filter(|c| c.id != original.id).cloned().collect::<Vec<_>>();
+        assert!(verify_mandatory_checks(&sheet, &removed).is_err(), "{id}");
+    }
+}
+
+#[test]
+fn baseline_bar_respects_judge_caps_with_screen_context() {
+    let mut sheet = sheet();
+    let mut screen = sheet.pieces[0].clone();
+    screen.id = "screen".into();
+    screen.kind = "screen".into();
+    screen.paths = vec!["ui/App.tsx".into()];
+    sheet.pieces.push(screen);
+    let bar = software_bar(&sheet);
+    for piece in &sheet.pieces {
+        assert!(filter_and_validate_bar(&piece.id, &bar).is_ok(), "{}", piece.id);
+    }
+}
+
+#[test]
+fn moves_keep_ask_measure_guard_and_safe_gate() {
+    let mut sheet = sheet();
+    sheet.questions.push(SheetQuestion {
+        text: "Keep layout?".into(),
+        options: vec!["keep".into(), "change".into()],
+        default: "keep".into(),
+        changes: vec!["bar:screen.coherence-widths".into()],
+    });
+    let moves = plan_moves_for_piece(&sheet.pieces[0], &sheet);
+    for expected in [MoveKind::Ask, MoveKind::Measure, MoveKind::Guard, MoveKind::Judge, MoveKind::Gate] {
+        assert!(moves.contains(&expected), "{expected:?}");
+    }
+    assert!(moves.iter().position(|m| *m == MoveKind::Measure) < moves.iter().position(|m| *m == MoveKind::Judge));
+}
+
+#[test]
+fn repair_ownership_does_not_match_sibling_prefixes_or_readers() {
+    let mut reader = Task::new("reader", "Read", TaskKind::Research);
+    reader.paths = vec!["ui".into()];
+    let mut writer = Task::new("writer", "Write", TaskKind::Writer);
+    writer.writes = vec!["ui/App.tsx".into()];
+    assert_eq!(failing_path_lease_holder("ui/App.tsx", &[reader, writer.clone()]), Some("writer".into()));
+    assert_eq!(failing_path_lease_holder("ui/App.tsx.bak", &[writer]), None);
+}
+
+#[test]
+fn drafters_do_not_merge_different_pieces_by_attribute() {
+    let a = software_bar(&sheet()).into_iter().find(|c| c.id == "rust.fmt").unwrap();
+    let mut b = a.clone();
+    b.id = "other.fmt".into();
+    b.piece = "other".into();
+    assert_eq!(merge_drafters(&[a], &[b]).len(), 2);
+}
+
+#[test]
+fn official_grounds_cannot_name_unapproved_hosts_or_credentials() {
+    let root = tempdir().unwrap();
+    for reference in ["https://evil.example/docs", "http://www.w3.org/TR/WCAG22/", "https://secret@www.w3.org/TR/WCAG22/"] {
+        assert!(validate_ground(root.path(), &Ground { kind: GroundKind::Standard, reference: reference.into() }).is_err());
+    }
+}
+
+#[test]
+fn ground_cannot_read_a_credential_directory_even_inside_the_repo() {
+    let root = tempdir().unwrap();
+    // A synthetic document in a temporary directory; never a real credential home.
+    std::fs::create_dir(root.path().join(".codex")).unwrap();
+    std::fs::write(root.path().join(".codex/fixture.md"), "# Synthetic fixture\n").unwrap();
+    assert!(
+        validate_ground(root.path(), &Ground { kind: GroundKind::Repository, reference: ".codex/fixture.md#synthetic-fixture".into() })
+            .is_err()
+    );
+}
+
+#[test]
+fn grounds_do_not_treat_fenced_or_indented_code_as_document_headings() {
+    let root = tempdir().unwrap();
+    std::fs::write(root.path().join("design.md"), "```rust\n# Fake heading\n```\n    # Indented code\n#No space\n## Real heading\n")
+        .unwrap();
+    for heading in ["fake-heading", "indented-code", "no-space"] {
+        assert!(validate_ground(root.path(), &Ground { kind: GroundKind::Repository, reference: format!("design.md#{heading}") }).is_err());
+    }
+    assert!(validate_ground(root.path(), &Ground { kind: GroundKind::Repository, reference: "design.md#real-heading".into() }).is_ok());
+}
+
+#[test]
+fn fast_path_checks_existing_attribute_and_actual_risk_delta() {
+    let before = sheet();
+    let mut after = before.clone();
+    let bar = software_bar(&after);
+    let candidate = FastPathCandidate {
+        changed_piece: "change".into(),
+        changed_attribute_or_fact: "rust.fmt".into(),
+        is_reversible: true,
+        risk_switched_on: false,
+    };
+    assert!(candidate.qualifies_for(&before, &after, &bar));
+    after.risk.money = Some(true);
+    assert!(!candidate.qualifies_for(&before, &after, &bar), "a caller cannot lie about a newly enabled risk");
+    let mut candidate = candidate;
+    candidate.changed_attribute_or_fact = "rust.fmt,screen.layout".into();
+    assert!(!candidate.qualifies_for(&before, &before, &bar));
+}
+
+#[test]
+fn failed_spend_path_goes_to_held_writer_and_failed_screen_to_drafts() {
+    let sheet = sheet();
+    let bar = software_bar(&sheet);
+    let spend = bar.iter().find(|c| c.id == "desktop.spend-paths").unwrap();
+    let mut lease = faber_engine::project::Lease::new("repo", "mission", "writer", 1, vec!["engine/src".into()], "base", "contract", 1);
+    lease.generation = 1;
+    assert_eq!(
+        failed_check_target(spend, "engine/src/project.rs", "mission", &[lease.clone()]).unwrap(),
+        RepairTarget::Owner { task: "writer".into(), generation: 1 }
+    );
+    lease.state = faber_engine::project::LeaseState::Released;
+    assert!(failed_check_target(spend, "engine/src/project.rs", "mission", &[lease]).is_err());
+    let screen = bar.iter().find(|c| c.id == "screen.coherence-widths").unwrap();
+    assert_eq!(failed_check_target(screen, "ui/App.tsx", "mission", &[]).unwrap(), RepairTarget::Drafts(screen.piece.clone()));
 }

@@ -33,6 +33,98 @@ impl BarError {
 
 /// Generates the Complete Software Bar (B1 to B10) per section 15.1 of generated pipelines design.
 pub fn software_bar(sheet: &DeliverableSheet) -> Vec<BarCheck> {
+    let mut checks = software_bar_for_first_context(sheet);
+    // Measured geometry is prepared by programs; the screen and keyboard ghost
+    // judgments cover the complete accessibility and four-persona reports.
+    for check in &mut checks {
+        check.mandatory = true;
+        if matches!(
+            check.id.as_str(),
+            "a11y.contrast"
+                | "a11y.target-size"
+                | "a11y.reduced-motion"
+                | "a11y.text-size"
+                | "desktop.ghost-hurried"
+                | "desktop.ghost-novice"
+                | "desktop.ghost-distracted"
+        ) {
+            check.kind = CheckKind::Program;
+        }
+        if let Some(piece) = sheet.pieces.iter().find(|p| p.id == check.piece) {
+            check.paths = piece.paths.clone();
+        }
+    }
+    let templates = checks.clone();
+    for piece in &sheet.pieces {
+        if checks.iter().any(|c| c.piece == piece.id) {
+            continue;
+        }
+        let representative = sheet.pieces.iter().find(|p| p.kind == piece.kind);
+        for template in templates.iter().filter(|c| {
+            representative.is_some_and(|p| c.piece == p.id)
+                || piece.kind == "doc" && (c.id.starts_with("any.") || c.id == "software.other-vendor-review")
+        }) {
+            let mut check = template.clone();
+            check.id = format!("{}.{}", piece.id, check.id);
+            check.piece = piece.id.clone();
+            check.owner = piece.id.clone();
+            check.paths = piece.paths.clone();
+            checks.push(check);
+        }
+    }
+    for piece in sheet.pieces.iter().filter(|p| p.kind == "change") {
+        for (suffix, description, proof, pass) in [
+            (
+                "kind.refactor-api-schema",
+                "Refactor: public API and saved schema diff is empty by program",
+                "proof.refactor-compat",
+                "public API and schema manifests match the base",
+            ),
+            (
+                "kind.refactor-benchmark",
+                "Refactor: benchmark medians remain within measured baseline noise",
+                "proof.refactor-bench",
+                "measured benchmark comparison passes",
+            ),
+        ] {
+            let first = sheet.pieces.iter().find(|p| p.kind == "change").is_some_and(|p| p.id == piece.id);
+            checks.push(BarCheck {
+                id: if first { suffix.into() } else { format!("{}.{}", piece.id, suffix) },
+                piece: piece.id.clone(),
+                attribute: suffix.into(),
+                check: description.into(),
+                kind: CheckKind::Program,
+                severity: Severity::Blocking,
+                ground: Ground { kind: GroundKind::Owner, reference: "generated-pipelines §15.1.1".into() },
+                proof: proof.into(),
+                owner: piece.id.clone(),
+                paths: piece.paths.clone(),
+                pass: pass.into(),
+                evidence: "base and candidate measurement artifacts".into(),
+                also: vec![],
+                from: "library:software@2".into(),
+                mandatory: true,
+            });
+        }
+    }
+    for check in &mut checks {
+        let kind = sheet.pieces.iter().find(|p| p.id == check.piece).and_then(|p| p.change_kind);
+        let required_kind = match check.attribute.as_str() {
+            "kind.feature-test-first" => Some(super::wire::ChangeKind::Feature),
+            "kind.bugfix-reproduce" | "any.root-cause-regression" => Some(super::wire::ChangeKind::BugFix),
+            "kind.refactor-golden" | "kind.refactor-api-schema" | "kind.refactor-benchmark" => Some(super::wire::ChangeKind::Refactor),
+            "kind.upgrade-changelog" => Some(super::wire::ChangeKind::DependencyUpgrade),
+            _ => None,
+        };
+        if kind.is_some() && required_kind.is_some() && kind != required_kind {
+            check.mandatory = false;
+            check.from = "library:software@2:not-applicable".into();
+        }
+    }
+    checks
+}
+
+fn software_bar_for_first_context(sheet: &DeliverableSheet) -> Vec<BarCheck> {
     let mut checks = vec![];
     let default_piece = sheet.pieces.first().map(|p| p.id.clone()).unwrap_or_else(|| "software".into());
     let default_path = sheet.pieces.first().and_then(|p| p.paths.first().cloned()).unwrap_or_else(|| "engine/src/project.rs".into());
@@ -83,7 +175,7 @@ pub fn software_bar(sheet: &DeliverableSheet) -> Vec<BarCheck> {
             pass: pass.into(),
             evidence: "output artifact".into(),
             also: vec![],
-            from: "library:software@1".into(),
+            from: "library:software@2".into(),
             mandatory,
         });
     };
@@ -191,7 +283,7 @@ pub fn software_bar(sheet: &DeliverableSheet) -> Vec<BarCheck> {
         "software.ui-screen-check",
         &screen_piece,
         "software.ui-screen",
-        "Screen check when UI changed (real app, screenshots, keyboard, theme)",
+        "Screen check when UI changed (real app, screenshots, keyboard, theme and full accessibility measurements)",
         CheckKind::ProgramJudge,
         Severity::Blocking,
         GroundKind::Owner,
@@ -319,14 +411,14 @@ pub fn software_bar(sheet: &DeliverableSheet) -> Vec<BarCheck> {
         "desktop.ghost-keyboard",
         &screen_piece,
         "desktop.ghost-keyboard",
-        "Keyboard-only ghost user test",
+        "Keyboard-only ghost plus other-vendor judgment of all four hidden-app persona traces",
         CheckKind::ProgramJudge,
         Severity::Major,
         GroundKind::Owner,
         "docs/design.md",
         "proof.ghost-keyboard",
         &screen_paths,
-        "keyboard flow complete",
+        "keyboard flow and all four persona judgments pass",
         false,
     );
     add(
@@ -1061,7 +1153,7 @@ pub fn verify_mandatory_checks(sheet: &DeliverableSheet, proposed_bar: &[BarChec
     }
 
     for check in &full_bar {
-        if check.mandatory {
+        {
             let proposed =
                 proposed_bar.iter().find(|c| c.id == check.id).ok_or_else(|| BarError::MissingMandatoryCheck(check.id.clone()))?;
             let mut expected = check.clone();
@@ -1085,6 +1177,7 @@ pub fn validate_ground(repo_root: &Path, ground: &Ground) -> Result<(), BarError
                 .filter(|(_, h)| !h.trim().is_empty())
                 .ok_or_else(|| BarError::InvalidGround(ground.reference.clone()))?;
             let scoped = super::lease::normalized(file_part).map_err(|_| BarError::InvalidGround(ground.reference.clone()))?;
+            super::kit::delivery::scoped_path(file_part).map_err(|_| BarError::InvalidGround(ground.reference.clone()))?;
             if scoped.is_empty() {
                 return Err(BarError::InvalidGround(ground.reference.clone()));
             }
@@ -1096,19 +1189,17 @@ pub fn validate_ground(repo_root: &Path, ground: &Ground) -> Result<(), BarError
             }
 
             if !heading_part.is_empty() {
-                let content =
-                    std::fs::read_to_string(&file_path).map_err(|e| BarError::InvalidGround(format!("failed reading file: {e}")))?;
+                let file =
+                    super::files::ScopedFile::new(&file_path, false).map_err(|_| BarError::InvalidGround(ground.reference.clone()))?;
+                let bytes = file
+                    .read_limited(super::wire::MAX_FILE as u64)
+                    .map_err(|_| BarError::InvalidGround(ground.reference.clone()))?
+                    .ok_or_else(|| BarError::InvalidGround(ground.reference.clone()))?
+                    .0;
+                let content = String::from_utf8(bytes).map_err(|_| BarError::InvalidGround(ground.reference.clone()))?;
 
                 let target_slug = slugify(heading_part);
-                let found = content.lines().any(|line| {
-                    let trimmed = line.trim();
-                    if trimmed.starts_with('#') {
-                        let header_text = trimmed.trim_start_matches('#').trim();
-                        slugify(header_text) == target_slug
-                    } else {
-                        false
-                    }
-                });
+                let found = markdown_heading_exists(&content, &target_slug);
 
                 if !found {
                     return Err(BarError::InvalidGround(format!("heading '#{}' not found in '{}'", heading_part, file_part)));
@@ -1116,14 +1207,9 @@ pub fn validate_ground(repo_root: &Path, ground: &Ground) -> Result<(), BarError
             }
             Ok(())
         }
-        GroundKind::Standard | GroundKind::Documentation => {
-            let r = ground.reference.trim();
-            if (r.starts_with("https://") || r.starts_with("http://")) && r.contains('.') && !r.contains(' ') {
-                Ok(())
-            } else {
-                Err(BarError::InvalidGround(format!("invalid official URL: '{}'", ground.reference)))
-            }
-        }
+        GroundKind::Standard | GroundKind::Documentation => super::proof::native::validate_source_url(&ground.reference)
+            .map(|_| ())
+            .map_err(|_| BarError::InvalidGround(ground.reference.clone())),
         GroundKind::Owner | GroundKind::Evidence | GroundKind::Judgement => {
             if ground.reference.trim().is_empty() {
                 Err(BarError::InvalidGround("empty ground reference".into()))
@@ -1132,6 +1218,37 @@ pub fn validate_ground(repo_root: &Path, ground: &Ground) -> Result<(), BarError
             }
         }
     }
+}
+
+fn markdown_heading_exists(content: &str, target: &str) -> bool {
+    let mut fence = None;
+    for line in content.lines() {
+        let indent = line.bytes().take_while(|b| *b == b' ').count();
+        if indent > 3 || line.starts_with('\t') {
+            continue;
+        }
+        let line = line.trim();
+        let first = line.as_bytes().first().copied();
+        let run = line.bytes().take_while(|b| Some(*b) == first).count();
+        if let Some((marker, length)) = fence {
+            if first == Some(marker) && run >= length && line[run..].trim().is_empty() {
+                fence = None;
+            }
+            continue;
+        }
+        if matches!(first, Some(b'`' | b'~')) && run >= 3 {
+            fence = Some((first.unwrap_or_default(), run));
+            continue;
+        }
+        if first == Some(b'#')
+            && (1..=6).contains(&run)
+            && line[run..].starts_with(char::is_whitespace)
+            && slugify(line[run..].trim().trim_end_matches('#').trim()) == target
+        {
+            return true;
+        }
+    }
+    false
 }
 
 fn slugify(text: &str) -> String {
@@ -1187,7 +1304,7 @@ pub fn merge_drafters(a: &[BarCheck], b: &[BarCheck]) -> Vec<BarCheck> {
         let mut merged = check_a.clone();
         merged.attribute = merged.attribute.to_ascii_lowercase();
 
-        if let Some(matching_b) = b.iter().find(|cb| cb.attribute.to_ascii_lowercase() == merged.attribute) {
+        if let Some(matching_b) = b.iter().find(|cb| cb.piece == merged.piece && cb.attribute.to_ascii_lowercase() == merged.attribute) {
             merged.from = "agreed".into();
             if merged.also.is_empty() && matching_b.ground != merged.ground {
                 merged.also.push(matching_b.ground.clone());
@@ -1198,7 +1315,7 @@ pub fn merge_drafters(a: &[BarCheck], b: &[BarCheck]) -> Vec<BarCheck> {
 
     for check_b in b {
         let norm_b = check_b.attribute.to_ascii_lowercase();
-        if !out.iter().any(|c| c.attribute == norm_b) {
+        if !out.iter().any(|c| c.piece == check_b.piece && c.attribute == norm_b) {
             let mut item = check_b.clone();
             item.attribute = norm_b;
             out.push(item);
@@ -1217,7 +1334,7 @@ pub fn apply_critic(bar: &[BarCheck], additions: &[BarCheck]) -> Result<Vec<BarC
     let mut out = bar.to_vec();
     for addition in additions {
         let norm = addition.attribute.to_ascii_lowercase();
-        if let Some(existing) = out.iter_mut().find(|c| c.attribute == norm) {
+        if let Some(existing) = out.iter_mut().find(|c| c.piece == addition.piece && c.attribute == norm) {
             if existing.mandatory && existing != addition {
                 return Err(BarError::Malformed(existing.id.clone()));
             }
@@ -1270,6 +1387,10 @@ pub fn all_ghost_personas() -> &'static [GhostPersona] {
 /// Triggers moves per section 7 / 15.1 of generated pipelines design.
 pub fn plan_moves_for_piece(piece: &Piece, sheet: &DeliverableSheet) -> Vec<MoveKind> {
     let mut moves = vec![];
+    if !sheet.questions.is_empty() {
+        moves.push(MoveKind::Ask);
+    }
+    moves.push(MoveKind::Guard);
 
     if piece.kind == "screen" {
         moves.push(MoveKind::Reuse);
@@ -1297,6 +1418,8 @@ pub fn plan_moves_for_piece(piece: &Piece, sheet: &DeliverableSheet) -> Vec<Move
         moves.push(MoveKind::Judge);
     }
 
+    moves.retain(|m| *m != MoveKind::Measure && *m != MoveKind::Judge && *m != MoveKind::Gate);
+    moves.extend([MoveKind::Measure, MoveKind::Judge, MoveKind::Gate]);
     moves
 }
 
@@ -1319,6 +1442,20 @@ pub struct FastPathCandidate {
 impl FastPathCandidate {
     pub fn qualifies(&self) -> bool {
         self.is_reversible && !self.risk_switched_on && !self.changed_piece.is_empty() && !self.changed_attribute_or_fact.is_empty()
+    }
+    pub fn qualifies_for(&self, before: &DeliverableSheet, after: &DeliverableSheet, bar: &[BarCheck]) -> bool {
+        self.qualifies()
+            && before.risk == after.risk
+            && before.risk.public.is_some()
+            && before.risk.others_data.is_some()
+            && before.risk.money.is_some()
+            && before.risk.minors.is_some()
+            && before.risk.regulated.is_some()
+            && before.risk.commercial.is_some()
+            && before.pieces.iter().any(|p| p.id == self.changed_piece)
+            && after.pieces.iter().any(|p| p.id == self.changed_piece)
+            && (bar.iter().any(|c| c.piece == self.changed_piece && c.attribute == self.changed_attribute_or_fact)
+                || before.facts.iter().any(|f| f.id == self.changed_attribute_or_fact))
     }
 }
 
@@ -1515,13 +1652,48 @@ pub fn order_kill_early(tasks: &[super::Task], bar: &[BarCheck]) -> Result<Vec<s
 
 /// Identifies which task/lease owns repair for a failed path.
 pub fn failing_path_lease_holder(failed_path: &str, tasks: &[super::Task]) -> Option<String> {
-    for task in tasks {
-        if task.writes.iter().any(|w| w == failed_path || failed_path.starts_with(w)) {
-            return Some(task.id.clone());
-        }
-        if task.paths.iter().any(|p| p == failed_path || failed_path.starts_with(p)) {
-            return Some(task.id.clone());
-        }
+    let failed_path = super::lease::normalized(failed_path).ok()?;
+    let owners = tasks
+        .iter()
+        .filter(|t| t.kind.writes() && t.writes.iter().any(|w| super::lease::normalized(w).is_ok_and(|w| contains_path(&w, &failed_path))))
+        .collect::<Vec<_>>();
+    if owners.len() == 1 { Some(owners[0].id.clone()) } else { None }
+}
+
+fn contains_path(area: &str, path: &str) -> bool {
+    let (area, path) = (area.to_lowercase(), path.to_lowercase());
+    area.is_empty() || path == area || path.starts_with(&format!("{area}/"))
+}
+
+/// Runtime repair authority comes from held leases, not task descriptions or read scopes.
+pub fn repair_lease<'a>(failed_path: &str, mission: &str, leases: &'a [super::Lease]) -> Option<&'a super::Lease> {
+    let path = super::lease::normalized(failed_path).ok()?;
+    let owners = leases
+        .iter()
+        .filter(|l| {
+            l.mission == mission
+                && l.state == super::LeaseState::Held
+                && l.paths.iter().any(|p| super::lease::normalized(p).is_ok_and(|p| contains_path(&p, &path)))
+        })
+        .collect::<Vec<_>>();
+    if owners.len() == 1 { Some(owners[0]) } else { None }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RepairTarget {
+    Drafts(String),
+    Owner { task: String, generation: u64 },
+}
+
+pub fn failed_check_target(check: &BarCheck, path: &str, mission: &str, leases: &[super::Lease]) -> Result<RepairTarget, CompilerError> {
+    if check.attribute.starts_with("screen.")
+        || check.attribute.starts_with("a11y.")
+        || check.attribute.starts_with("desktop.ghost-")
+        || check.attribute == "desktop.real-width-drafts"
+        || check.attribute == "software.ui-screen"
+    {
+        return Ok(RepairTarget::Drafts(check.piece.clone()));
     }
-    None
+    let lease = repair_lease(path, mission, leases).ok_or_else(|| CompilerError::OrphanCheck(check.id.clone()))?;
+    Ok(RepairTarget::Owner { task: lease.task.clone(), generation: lease.generation })
 }

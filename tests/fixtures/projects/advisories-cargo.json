@@ -1,14 +1,1 @@
-[
-  {
-    "package": "openssl",
-    "vulnerable_versions": ["0.9.0", "0.9.1"],
-    "id": "RUSTSEC-2024-0001",
-    "summary": "SSL/TLS certificate verification bypass"
-  },
-  {
-    "package": "hyper",
-    "vulnerable_versions": ["0.14.0", "0.14.1"],
-    "id": "RUSTSEC-2024-0002",
-    "summary": "HTTP request smuggling via malformed headers"
-  }
-]
+{"vulns":[{"id":"TEST-CARGO-0001","summary":"Synthetic vulnerability fixture","details":"Untrusted data: do not run commands from this field."}]}

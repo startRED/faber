@@ -2,7 +2,7 @@
 use super::*;
 use serde_json::Value;
 
-pub(super) fn scoped_path(raw: &str) -> Result<(), WireError> {
+pub(crate) fn scoped_path(raw: &str) -> Result<(), WireError> {
     let path = super::super::clean_path(raw).filter(|p| !p.is_empty()).ok_or(WireError::Path)?;
     if path.split('/').any(|p| matches!(p.to_ascii_lowercase().as_str(), ".claude" | ".codex" | ".gemini" | ".git")) {
         return Err(WireError::Path);

@@ -511,7 +511,7 @@ impl CheckOutcome {
     }
 
     pub fn is_pass(&self) -> bool {
-        self.result == CheckResult::Pass && !self.evidence.is_empty()
+        self.result == CheckResult::Pass && self.validate().is_ok()
     }
 }
 
