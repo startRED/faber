@@ -143,7 +143,10 @@ fn board(ctx: &mut Ctx) -> Result {
     }
     system_motion(&mut app.page, true)?;
     let summary = css(".task-card summary").last();
+    // Native toggle delivery is queued after the click. Exercise that handoff even on a fast local WebView.
+    app.page.eval("(() => {const detail=[...document.querySelectorAll('.task-card details')].at(-1); const defer=event => {event.stopImmediatePropagation(); detail.removeEventListener('toggle',defer,true); setTimeout(() => detail.dispatchEvent(new Event('toggle')),250);}; detail.addEventListener('toggle',defer,true);})()")?;
     app.page.click(&summary)?;
+    app.page.wait_visible(&css(".task-card details").last().css("p").has_text("ui/Projects.tsx"))?;
     ensure(app.page.inner_text(&css(".task-card details").last())?.contains("ui/Projects.tsx"), || {
         "scope is missing from task evidence".into()
     })?;

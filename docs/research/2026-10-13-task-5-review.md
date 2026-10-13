@@ -52,3 +52,9 @@ remain identical to the target branch. Both finite-arrival and post-hover pointe
 One duplicate answer_started fixture initializer introduced by the merge was removed after the compiler rejected it.
 All seven proof equivalents pass on the integration, including cargo t and cargo t --all: 1,110 passed in each run,
 zero failed, not run or skipped. No real model session or paid credits were used.
+
+Windows CI on the integration exposed a Projects evidence assertion racing the queued native toggle event.
+Controlled event delivery reproduced the exact missing-scope failure locally before the correction.
+The scenario now waits for the rendered scope paragraph with the existing deadline after one pointer click,
+then checks the original evidence assertion. The controlled regression passes with this readiness check
+and fails without it; no retry or timeout increase is involved.
