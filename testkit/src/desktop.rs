@@ -137,6 +137,7 @@ fn quote(word: &str) -> String {
 /// Every top-level window the calling thread's desktop has: (handle, owner process, visible).
 pub fn windows() -> Result<Vec<(usize, u32, bool)>, String> {
     let mut found = Vec::new();
+    winsafe::SetLastError(co::ERROR::SUCCESS);
     EnumWindows(|hwnd| {
         found.push((hwnd.ptr() as usize, hwnd.GetWindowThreadProcessId().1, hwnd.IsWindowVisible()));
         true
@@ -149,6 +150,19 @@ pub fn windows() -> Result<Vec<(usize, u32, bool)>, String> {
 /// The visible top-level windows on this thread's desktop that belong to one of `pids`, as handles.
 pub fn visible_windows_of(pids: &[u32]) -> Result<Vec<usize>, String> {
     Ok(windows()?.into_iter().filter(|(_, pid, visible)| *visible && pids.contains(pid)).map(|(h, ..)| h).collect())
+}
+
+/// Top-level windows on the interactive "Default" desktop. Used to check isolation when the
+/// runner process was started from a headless or non-interactive environment.
+pub fn interactive_windows() -> Result<Vec<(usize, u32, bool)>, String> {
+    std::thread::spawn(|| {
+        let desk = HDESK::OpenDesktop("Default", None, false, co::DESKTOP_RIGHTS::GENERIC_ALL)
+            .map_err(|e| format!("cannot open Default desktop: {e}"))?;
+        desk.SetThreadDesktop().map_err(|e| format!("cannot set thread desktop: {e}"))?;
+        windows()
+    })
+    .join()
+    .map_err(|_| "thread panicked".to_string())?
 }
 
 /// What the probe says: how many windows its own desktop shows, and which. Written by `fake-cli --desktop-probe`, which

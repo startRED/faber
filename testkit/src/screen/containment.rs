@@ -67,7 +67,12 @@ fn check(ctx: &Ctx, helper: &std::path::Path, stranger: &mut std::process::Child
 /// of them.
 fn hidden_desktop(ctx: &mut Ctx) -> Result {
     let helper = ctx.paths.fake_cli.clone();
-    let mine: Vec<usize> = desktop::windows()?.into_iter().map(|(handle, ..)| handle).collect();
+    let mut mine: Vec<usize> = desktop::windows()?.into_iter().map(|(handle, ..)| handle).collect();
+    if mine.is_empty()
+        && let Ok(interactive) = desktop::interactive_windows()
+    {
+        mine = interactive.into_iter().map(|(handle, ..)| handle).collect();
+    }
     ensure(!mine.is_empty(), || "the runner's own desktop lists no windows, so there is nothing to compare with".to_string())?;
     let mut env: BTreeMap<String, String> = std::env::vars().collect();
     // This probe has no webview or window, so CI can still prove the local desktop isolation.

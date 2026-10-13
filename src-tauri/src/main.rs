@@ -6,11 +6,21 @@
 #[cfg(all(feature = "test-hooks", not(debug_assertions)))]
 compile_error!("the `test-hooks` feature is for debug test builds only; it must not be enabled in a release build");
 
+mod autostart;
+mod awake;
 mod look;
 mod setup;
 mod terminal;
 mod tray;
 
+#[cfg(not(windows))]
+use autostart::NoopAutostart;
+#[cfg(windows)]
+use autostart::WindowsAutostart;
+use autostart::{AutostartKeeper, FakeAutostart, is_autostart_arg};
+#[cfg(windows)]
+use awake::WindowsPower;
+use awake::{CountedAwake, NoopPower, PowerKeepAwake};
 use base64::Engine as _;
 use faber_engine::cli::Cli;
 use faber_engine::codex::{ModelInfo, list_codex_models, read_codex_limits};
@@ -20,7 +30,7 @@ use faber_engine::{AppEvent, AppState, BranchRequest, Engine, EngineOptions, Sen
 use look::{Failure, Look, ThemeFile};
 use serde::Serialize;
 use serde_json::{Map, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -38,6 +48,8 @@ pub(crate) struct Faber {
     pub(crate) update: Mutex<Option<(Update, Vec<u8>)>>,
     pub(crate) data_dir: PathBuf,
     pub(crate) hidden: bool,
+    pub(crate) awake: Arc<Mutex<CountedAwake>>,
+    pub(crate) autostart: Arc<dyn AutostartKeeper>,
 }
 
 type Res<T> = Result<T, String>;
@@ -175,6 +187,16 @@ async fn preview_look(appearance: Map<String, Value>) -> Result<Look, Failure> {
 async fn save_settings(faber: State<'_, Faber>, mut patch: Settings) -> Result<SavedSettings, Failure> {
     if let Some(map) = &patch.appearance {
         patch.appearance = Some(look::validated(map)?.0.to_map());
+    }
+    if let Some(keep_awake) = patch.keep_awake {
+        lock(&faber.awake).set_enabled(keep_awake);
+    }
+    if let Some(autostart) = patch.autostart {
+        if autostart {
+            let _ = faber.autostart.register();
+        } else {
+            let _ = faber.autostart.unregister();
+        }
     }
     let mut settings = faber.engine.save_settings(patch)?;
     settings.appearance = look::usable(settings.appearance.take());
@@ -448,14 +470,44 @@ fn main() {
             app.manage(tray::Tray::default());
             let clis = detect_clis();
             let handle = app.handle().clone();
+            let is_test = hidden || std::env::var_os("FABER_DATA_DIR").is_some();
+            let power: Box<dyn PowerKeepAwake> = if is_test {
+                Box::new(NoopPower)
+            } else {
+                #[cfg(windows)]
+                {
+                    Box::new(WindowsPower)
+                }
+                #[cfg(not(windows))]
+                {
+                    Box::new(NoopPower)
+                }
+            };
+            let autostart_keeper: Arc<dyn AutostartKeeper> = if is_test {
+                Arc::new(FakeAutostart::new(false))
+            } else {
+                #[cfg(windows)]
+                {
+                    Arc::new(WindowsAutostart::new())
+                }
+                #[cfg(not(windows))]
+                {
+                    Arc::new(NoopAutostart)
+                }
+            };
+            let keep_awake = faber_engine::store::Store::new(&data_dir).settings().keep_awake.unwrap_or(true);
+            let awake = Arc::new(Mutex::new(CountedAwake::new(power, keep_awake)));
+            let awake_for_emit = awake.clone();
             let emit = Arc::new(move |e: AppEvent| {
                 // The engine calls this with its lock held, and the tray waits for the main thread, which can be waiting
                 // for that lock. So the tray works on its own thread; it keeps the newest list, whatever the order.
-                if let AppEvent::Running { revision, items } = &e
-                    && !hidden
-                {
-                    let (app, revision, items) = (handle.clone(), *revision, items.clone());
-                    tauri::async_runtime::spawn_blocking(move || tray::on_running(&app, revision, &items));
+                if let AppEvent::Running { revision, items } = &e {
+                    let active_turns: HashSet<String> = items.iter().map(|i| i.turn_id.clone()).collect();
+                    lock(&awake_for_emit).sync_runs(active_turns);
+                    if !hidden {
+                        let (app, revision, items) = (handle.clone(), *revision, items.clone());
+                        tauri::async_runtime::spawn_blocking(move || tray::on_running(&app, revision, &items));
+                    }
                 }
                 let _ = handle.emit("faber:event", e);
             });
@@ -476,12 +528,17 @@ fn main() {
                 update: Mutex::default(),
                 data_dir: data_dir.clone(),
                 hidden,
+                awake,
+                autostart: autostart_keeper,
             });
             app.state::<Faber>().engine.watch_accounts();
             if let Some(codex) = clis.get(&Vendor::Codex) {
                 load_models(app.handle(), codex.clone(), data_dir.clone());
             }
-            create_window(app.handle(), hidden, &data_dir)?;
+            let autostart_launch = is_autostart_arg(std::env::args());
+            if !autostart_launch || hidden {
+                create_window(app.handle(), hidden, &data_dir)?;
+            }
             if !hidden {
                 tray::create(app)?;
             }
@@ -504,6 +561,7 @@ fn main() {
             if let RunEvent::Exit = event {
                 terminal::terminate_hidden();
                 let faber = app.state::<Faber>();
+                lock(&faber.awake).shutdown();
                 faber.engine.shutdown();
                 // On Windows this starts the installer, which replaces Faber and needs it closed.
                 if let Some((update, bytes)) = lock(&faber.update).take() {

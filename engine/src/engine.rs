@@ -756,6 +756,8 @@ impl Core {
             experience: patch.experience.or(before.experience),
             tutorial_done: patch.tutorial_done.or(before.tutorial_done),
             user_name: patch.user_name.map_or(before.user_name.clone(), |name| clean_name(&name)),
+            keep_awake: patch.keep_awake.or(before.keep_awake),
+            autostart: patch.autostart.or(before.autostart),
         };
         self.store.save_settings(&settings).map_err(|_| "error.settings.saveFailed".to_string())?;
         // The blank conversation being typed was started with the old name; the next one starts with the new one.

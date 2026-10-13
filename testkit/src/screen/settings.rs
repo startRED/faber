@@ -89,14 +89,16 @@ fn walks_the_sections(ctx: &mut Ctx) -> Result {
     page.wait_for("the quota to show", "document.querySelector('.usage .share')?.textContent === '47%'")?;
     open_settings(page)?;
 
-    // General: the language, hooks and both notification switches.
+    // General: the language, hooks, both notification switches, keep-awake and autostart.
     let language = page.labelled("set.language")?;
     page.wait_visible(&language)?;
-    same(page.count(&role_any("switch"))?, 3, "switches on General")?;
-    for key in ["set.notifyMe", "set.playSound"] {
+    same(page.count(&role_any("switch"))?, 5, "switches on General")?;
+    for key in ["set.notifyMe", "set.playSound", "set.keepAwake"] {
         let toggle = page.named("switch", key)?;
-        same(page.is_checked(&toggle)?, true, "notifications default on")?;
+        same(page.is_checked(&toggle)?, true, "defaults on")?;
     }
+    let autostart = page.named("switch", "set.autostart")?;
+    same(page.is_checked(&autostart)?, false, "autostart defaults off")?;
     ctx.shot(&mut app, "settings-general")?;
 
     // Appearance: the six looks are drawn before the picture is taken.
