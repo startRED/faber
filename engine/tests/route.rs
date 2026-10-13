@@ -119,7 +119,11 @@ fn a_blind_verdict_never_picks_a_cheaper_profile_and_a_machine_one_changes_nothi
                 let blind = choose(kind, level, "blind", confidence, &all).unwrap();
                 assert!(blind.profile.cost >= glance.profile.cost, "{kind} {level} {confidence}");
                 assert!((blind.profile.iq, blind.profile.agent) >= (glance.profile.iq, glance.profile.agent), "{kind} {level}");
-                assert_eq!(choose(kind, level, "machine", confidence, &all).unwrap(), glance, "{kind} {level} {confidence}");
+                assert_eq!(
+                    choose(kind, level, "machine", confidence, &all).unwrap().profile,
+                    glance.profile,
+                    "{kind} {level} {confidence}"
+                );
                 // The reason key keeps the router's own word.
                 assert_eq!(blind.pick().reason, glance.pick().reason);
             }

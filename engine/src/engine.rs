@@ -726,7 +726,13 @@ impl Core {
                             && m.status == Some(Status::Error)
                             && matches!(m.error.as_deref(), Some("error.quotaOut" | "error.quotaWait"))
                     })
-                    .map(|t| Recovery { pick: t.pick.clone(), text: t.text.clone(), by_hand: t.by_hand, retried: t.retried });
+                    .map(|t| Recovery {
+                        pick: t.pick.clone(),
+                        text: t.text.clone(),
+                        by_hand: t.by_hand,
+                        retried: t.retried,
+                        check: t.check.into(),
+                    });
             }
             self.store.save(&saved);
         }
@@ -1394,6 +1400,7 @@ impl Core {
                 by_hand: !auto,
                 retried: false,
                 moving: false,
+                check: "glance",
             },
         );
         let text = if joining_late { with_history(&history, &text) } else { text };

@@ -309,6 +309,9 @@ impl Core {
         {
             stop_router(g.stop.take());
         }
+        if let (Some(r), Some(t)) = (&routed, self.transfers.get_mut(id)) {
+            t.check = r.check;
+        }
         let pick = routed.map(|r| r.pick()).unwrap_or(fallback);
         if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id)) {
             m.vendor = Some(pick.vendor);

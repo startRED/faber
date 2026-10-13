@@ -89,6 +89,8 @@ pub struct Routed {
     pub profile: Profile,
     pub kind: &'static str,
     pub difficulty: &'static str,
+    /// The verdict's `check`, kept so a quota recovery re-picks with the same quality floor.
+    pub check: &'static str,
     pub confidence: f64,
     /// What the table compared for the pick: cost x weight x quota factor. Kept for tests and logs.
     pub price: f64,
@@ -266,7 +268,7 @@ pub fn choose(
             (p, p.cost as f64)
         }
     };
-    Some(Routed { profile, kind, difficulty, confidence, price, pace: None })
+    Some(Routed { profile, kind, difficulty, check, confidence, price, pace: None })
 }
 
 /// The table with the quota in it. Every candidate that clears the task's own bar is in the pool at `cost x w x f`, where
@@ -295,5 +297,5 @@ pub fn choose_paced(
     } else {
         None
     };
-    Some(Routed { profile, kind, difficulty, confidence, price, pace })
+    Some(Routed { profile, kind, difficulty, check, confidence, price, pace })
 }

@@ -54,6 +54,10 @@ pub struct Image {
     pub base64: String,
 }
 
+fn glance() -> String {
+    "glance".into()
+}
+
 /// Dispatch intent for a quota error that still offers explicit recovery after restart. Consent is never stored here.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Recovery {
@@ -61,6 +65,9 @@ pub struct Recovery {
     pub text: String,
     pub by_hand: bool,
     pub retried: bool,
+    /// The router's `check` for the request; files from before it was kept read as `glance`.
+    #[serde(default = "glance")]
+    pub check: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
