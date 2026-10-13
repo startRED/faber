@@ -8,9 +8,9 @@ use faber_engine::{AppEvent, BranchRequest, Engine, EngineOptions, SendRequest, 
 use serde_json::json;
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use support::{Entry, fake, fixture};
+use support::{Entry, Mismatches, fake, fixture, replay};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 const SKY: &str = "In one sentence: why is the sky blue?";
@@ -1051,6 +1051,60 @@ async fn the_result_of_a_tool_that_ran_across_a_steer_lands_on_the_tool_not_on_t
     let tool = &c.messages[1].tools.as_ref().unwrap()[0];
     assert_eq!((tool.ok, tool.output.as_deref()), (Some(true), Some("done")), "the earlier reply's tool got its result");
     assert!(c.messages[3].tools.as_ref().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_plan_limit_after_a_steer_stops_the_steered_reply_and_leaves_the_first_one_done() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("codex", "steer-limit"));
+    let (engine, _rx) = engine(dir.path(), Vendor::Codex, f.spawn.clone());
+    let id = engine.send(ask(Area::Chat, COUNT, choice("codex", Some("gpt-6-luna")))).unwrap();
+    until(&engine, &id, |c| c.messages.last().is_some_and(|m| !m.text.is_empty())).await;
+    say(&engine, &id, "codex", STEER).unwrap();
+
+    // The limit hits after Codex took the message in, so the answer that is cut off is the second one: recovery has to
+    // follow the steer, or it fails the first reply and sends its text again.
+    let c = until(&engine, &id, |c| c.messages.len() == 4 && c.messages[3].status == Some(Status::Error)).await;
+    // Closing the session after the limit interrupts the turn; the recording has no such line, and nothing else is off.
+    assert!(f.mismatches.lock().unwrap().iter().all(|m| m.contains("turn/interrupt")), "{:?}", f.mismatches.lock().unwrap());
+    assert_eq!(c.messages[3].error.as_deref(), Some("error.quotaOut"));
+    assert_eq!(
+        (c.messages[1].status, c.messages[1].error.as_deref()),
+        (Some(Status::Done), None),
+        "the first reply is not the one that failed"
+    );
+    assert!(engine.wait_turn(&id, &c.messages[1].id).is_err(), "the first reply has nothing to recover");
+    engine.wait_turn(&id, &c.messages[3].id).unwrap();
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn a_message_waiting_for_the_turn_to_end_runs_on_the_cli_reconnected_in_the_meantime() {
+    let dir = tempfile::tempdir().unwrap();
+    // One recording per process: the first CLI answers "first", whatever starts after it must be asked "second".
+    let scripts = Arc::new(Mutex::new(vec![claude_turns(&[("second", true)]), claude_turns(&[("first", true)])]));
+    let started: Arc<Mutex<Vec<String>>> = Arc::default();
+    let mismatches: Mismatches = Arc::default();
+    let spawn: Spawner = {
+        let (scripts, started, mismatches) = (scripts.clone(), started.clone(), mismatches.clone());
+        Arc::new(move |bin, _args, _cwd| {
+            started.lock().unwrap().push(bin.to_string());
+            Ok(replay(scripts.lock().unwrap().pop().expect("no third process was expected"), mismatches.clone()))
+        })
+    };
+    let (engine, _rx) = engine(dir.path(), Vendor::Claude, spawn);
+    let id = engine.send(ask(Area::Chat, "first", choice("claude", Some("haiku")))).unwrap();
+    say(&engine, &id, "claude", "second").unwrap();
+    // The person reconnects the CLI in Settings while the first turn runs and a message waits behind it.
+    engine.replace_clis(BTreeMap::from([(Vendor::Claude, Cli { command: "claude-new".into(), prefix: vec![] })]));
+
+    let c = until(&engine, &id, |c| settled(c, 4)).await;
+    engine.shutdown();
+    assert_eq!(texts(&c), ["first", "second"]);
+    assert!(c.queued.is_empty());
+    assert!(c.messages.iter().all(|m| m.status == Some(Status::Done) || m.role == Role::User), "{:?}", c.messages);
+    assert_eq!(*started.lock().unwrap(), ["claude", "claude-new"], "the waiting message started on the new CLI, not under the old one");
+    assert_eq!(mismatches.lock().unwrap().clone(), Vec::<String>::new());
 }
 
 #[tokio::test]

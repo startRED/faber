@@ -1,11 +1,12 @@
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
+import { App } from '../../ui/App.tsx';
 import { Composer } from '../../ui/Composer.tsx';
 import { Thread } from '../../ui/Thread.tsx';
-import { api, type Message, type QueuedTurn } from '../../ui/api.ts';
-import { t } from '../../ui/i18n.ts';
-import { check, equal, ok } from './check.ts';
+import { api, type AppEvent, type AppState, type Conversation, type Message, type QueuedTurn } from '../../ui/api.ts';
+import { failureText, t } from '../../ui/i18n.ts';
+import { check, deepEqual, equal, ok } from './check.ts';
 
 check('steer: composer stays usable while busy and sends mid-turn draft', async () => {
   const root = document.createElement('div');
@@ -134,5 +135,90 @@ check('steer: a message already handed to the running answer cannot be removed',
   } finally {
     dispose();
     root.remove();
+  }
+});
+
+check('steer: a rejected Remove or Send now reaches onError instead of vanishing', async () => {
+  const root = document.createElement('div');
+  document.body.append(root);
+  const before = { remove: api.removeQueued, send: api.sendQueued };
+  const refusal = new Error('error.noSubscription');
+  api.removeQueued = async () => { throw refusal; };
+  api.sendQueued = async () => { throw refusal; };
+  const errors: unknown[] = [];
+  const message: Message = { id: 'm1', role: 'assistant', text: 'Done', at: 0, status: 'done', vendor: 'codex' };
+  const queued: QueuedTurn[] = [{ id: 'q1', at: 1, text: 'Waiting', choice: { vendor: 'codex' } }];
+  const dispose = render(() => createComponent(Thread, {
+    conversationId: 'conv-test', messages: [message], queued, busy: false, from: 0, options: [], onBranch: () => {},
+    onError: (err: unknown) => { errors.push(err); },
+  }), root);
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+  try {
+    await settle();
+    const bubble = root.querySelector('.mine.queued')!;
+    bubble.querySelector<HTMLButtonElement>('button[aria-label="' + t('queue.removeLabel') + '"]')!.click();
+    await settle();
+    deepEqual(errors, [refusal], 'a refused Remove is reported');
+    bubble.querySelector<HTMLButtonElement>('button[aria-label="' + t('queue.sendNowLabel') + '"]')!.click();
+    await settle();
+    deepEqual(errors, [refusal, refusal], 'a refused Send now is reported');
+  } finally {
+    Object.assign(api, { removeQueued: before.remove, sendQueued: before.send });
+    dispose();
+    root.remove();
+  }
+});
+
+check('steer: the screen shows why Remove failed, and a message written during an answer is never put back in the box', async () => {
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+  const host = document.createElement('div');
+  document.body.append(host);
+  const before = { open: api.open, send: api.send, state: api.state, warm: api.warm, routeDraft: api.routeDraft, setClock: api.setClock, setShellTexts: api.setShellTexts, removeQueued: api.removeQueued };
+  const storage = localStorage.getItem('faber.place');
+  const answer: Message = { id: 'answer', role: 'assistant', text: 'Counting', at: 1, status: 'streaming', vendor: 'codex' };
+  const c: Conversation = {
+    id: 'steer-app', title: 'Test', area: 'chat', createdAt: 1, updatedAt: 1, sessions: {},
+    messages: [{ id: 'question', role: 'user', text: 'Count', at: 0 }, answer],
+    queued: [{ id: 'q1', at: 2, text: 'Already waiting', choice: { vendor: 'codex' } }],
+  };
+  const initial = { conversations: [{ id: c.id, title: c.title, area: c.area, updatedAt: 1 }], projects: [], vendors: ['codex'],
+    settings: { setup: 'done', tutorialDone: true, language: 'en', appearance: { base: 'sala' } }, running: { revision: 0, items: [] }, quotas: [], usage: [], models: [], version: 'test',
+    look: { vars: {}, scheme: 'dark', motion: 'none', checks: [], notices: [], effects: { ambient: false, texture: false, glow: false },
+      appearance: { base: 'sala', ground: 'sala', accent: '#ffffff', textFont: 'archivo', headingFont: 'narrow', textSize: 14, density: 1, corners: 1, motion: 'none', effects: { ambient: false, texture: false, glow: false } } }
+  } as AppState;
+  const sent: string[] = [];
+  api.open = async () => c;
+  api.send = async (request) => { sent.push(request.text); return c.id; };
+  api.state = async () => initial;
+  api.warm = async () => {}; api.routeDraft = async () => {};
+  api.setClock = async () => {}; api.setShellTexts = async () => {};
+  api.removeQueued = async () => { throw new Error('error.noSubscription'); };
+  localStorage.setItem('faber.place', JSON.stringify({ area: 'chat', id: c.id }));
+  let hear!: (event: AppEvent) => void;
+  const dispose = render(() => createComponent(App, { initial, inbox: { take: (listener?: (event: AppEvent) => void) => { if (listener) hear = listener; } } }), host);
+  try {
+    await settle();
+    host.querySelector<HTMLButtonElement>('button[aria-label="' + t('queue.removeLabel') + '"]')!.click();
+    await settle();
+    ok(host.textContent!.includes(failureText(new Error('error.noSubscription'))), 'a refused Remove shows its reason on screen');
+
+    const field = host.querySelector<HTMLTextAreaElement>('.composer textarea')!;
+    field.value = 'Stop at ten';
+    field.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    host.querySelector('form.composer')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    deepEqual(sent, ['Stop at ten']);
+    equal(field.value, '', 'the message left the box');
+
+    // The answer it was written during ends with a plan limit. The message is queued or in the turn, so it is the engine's:
+    // putting it back in the box would send it twice.
+    hear({ type: 'message', conversationId: c.id, message: { ...answer, status: 'error', error: 'error.quotaOut' } });
+    await settle();
+    equal(field.value, '', 'a message already queued or steered is not put back in the box');
+  } finally {
+    dispose();
+    host.remove();
+    Object.assign(api, before);
+    if (storage === null) localStorage.removeItem('faber.place'); else localStorage.setItem('faber.place', storage);
   }
 });
