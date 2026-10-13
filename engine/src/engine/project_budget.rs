@@ -202,6 +202,7 @@ mod tests {
                     by_hand: true,
                     approved: false,
                     started: NOW,
+                    steering: vec![],
                 },
             );
             c.remove(&id);

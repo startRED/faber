@@ -69,6 +69,14 @@ function play(el: HTMLElement, frames: Keyframe[], exit = false, delay = 0): Ani
   return animation;
 }
 
+/**
+ * A box that grew by `by` px at its top edge is already laid out at its new size; this draws it at the old size and
+ * reveals it upward. Clipping costs no layout, unlike animating the height. Only in full motion.
+ */
+export function reveal(el: HTMLElement, by: number): Animation | undefined {
+  return play(el, [{ clipPath: `inset(${by}px -80px -80px -80px)` }, { clipPath: 'inset(0 -80px -80px -80px)' }]);
+}
+
 /** Stop in-flight travel too when the person changes their motion preference. */
 export function watchMotion(): void {
   onMount(() => {
