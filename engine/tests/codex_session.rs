@@ -334,7 +334,7 @@ async fn one_process_serves_two_conversations_at_once_and_keeps_their_answers_ap
 }
 
 #[test]
-fn a_side_question_thread_has_its_own_instructions_reads_and_runs_nothing_and_is_not_saved() {
+fn a_side_question_thread_has_its_own_instructions_restricted_reads_no_writes_and_is_not_saved() {
     let thread = CodexThread {
         cwd: ".".into(),
         model: Some("gpt-6-luna".into()),
@@ -346,10 +346,7 @@ fn a_side_question_thread_has_its_own_instructions_reads_and_runs_nothing_and_is
     };
     let (method, params) = thread_params(Area::Chat, &thread);
     assert_eq!(method, "thread/start");
-    assert_eq!(
-        (&params["baseInstructions"], &params["sandbox"], &params["approvalPolicy"]),
-        (&"Route.".into(), &"read-only".into(), &"never".into())
-    );
+    assert_eq!((&params["baseInstructions"], &params["approvalPolicy"]), (&"Route.".into(), &"never".into()));
     assert_eq!(params["model"], "gpt-6-luna");
     assert_eq!(params["ephemeral"], true, "it stays out of the user's Codex history");
 }
@@ -383,9 +380,10 @@ fn permissions_keep_the_workspace_sandbox_and_disable_project_network_without_ap
                 }
                 assert_eq!(params.get("baseInstructions").is_some(), area == Area::Chat);
                 let (_, side) = thread_params(area, &CodexThread { instructions: Some("Route.".into()), ..t });
-                assert_eq!(side["sandbox"], "read-only");
+                assert!(side.get("sandbox").is_none());
                 assert_eq!(side["approvalPolicy"], "never");
-                assert!(side.get("config").is_none());
+                let id = side["config"]["default_permissions"].as_str().unwrap();
+                assert_eq!(side["config"][format!("permissions.{id}")]["filesystem"][":workspace_roots"]["."], "read");
             }
         }
     }

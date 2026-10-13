@@ -55,7 +55,7 @@ pub fn codex_thread(area: Area, model: Option<&str>, permissions: Permissions) -
     thread.insert("approvalPolicy".into(), if dont_ask { "never" } else { "on-request" }.into());
     if dont_ask {
         thread.remove("sandbox");
-        thread.insert("config".into(), crate::permissions::sandbox_config(Path::new(".")).into());
+        thread.insert("config".into(), crate::permissions::sandbox_config(Path::new("."), true).into());
     }
     if area == Area::Chat {
         thread.insert("baseInstructions".into(), CHAT_INSTRUCTIONS.into());
@@ -320,11 +320,13 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
     let mut params = codex_thread(area, t.model.as_deref(), t.permissions);
     if let Some(instructions) = &t.instructions {
         params.insert("baseInstructions".into(), instructions.clone().into());
-        params.insert("sandbox".into(), "read-only".into());
+        // Legacy read-only still permits disk-wide reads. Internal questions keep the same credential/network
+        // boundary as user turns, with their existing working folder read-only and no workspace writes.
+        params.remove("sandbox");
+        params.insert("config".into(), crate::permissions::sandbox_config(&t.cwd, false).into());
         params.insert("approvalPolicy".into(), "never".into());
         // Nothing to resume later: it stays out of the user's Codex history.
         params.insert("ephemeral".into(), true.into());
-        params.remove("config");
     } else if let Some(name) = &t.user_name {
         // Developer instructions sit beside Codex's own, so a project keeps its default prompt.
         params.insert("developerInstructions".into(), name_instructions(name).into());

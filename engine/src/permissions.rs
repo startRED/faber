@@ -4,14 +4,14 @@ use serde_json::{Map, Value, json};
 use std::path::{Component, Path, PathBuf};
 
 /// A fresh name prevents a project's lower-priority settings from adding grants to the host profile.
-pub fn sandbox_config(root: &Path) -> Map<String, Value> {
+pub fn sandbox_config(root: &Path, writable: bool) -> Map<String, Value> {
     let id = format!("faber-{}", uuid::Uuid::new_v4().simple());
     let profile = json!({ "extends": ":workspace", "filesystem": {
         ":root": "deny", ":minimal": "read", ":tmpdir": "deny", ":slash_tmp": "deny", "glob_scan_max_depth": 3,
         "~/.claude": "deny", "~/.codex": "deny", "~/.gemini": "deny", "~/.ssh": "deny", "~/.aws": "deny",
         "~/.claude.json": "deny", "~/.git-credentials": "deny", "~/.npmrc": "deny", "~/.config/gh": "deny",
         "~/AppData/Roaming/GitHub CLI": "deny", "~/.docker": "deny", "~/.azure": "deny", "~/.kube": "deny",
-        ":workspace_roots": { ".": "write", ".git": "read", "**/.git": "read", "**/.git/**": "read", ".mcp.json": "read",
+        ":workspace_roots": { ".": if writable { "write" } else { "read" }, ".git": "read", "**/.git": "read", "**/.git/**": "read", ".mcp.json": "read",
             ".claude": "deny", ".codex": "deny", ".gemini": "deny", ".ssh": "deny", ".aws": "deny",
             "**/*updater.key*": "deny", "**/.claude.json": "deny", "**/.git-credentials": "deny", "**/.npmrc": "deny",
             "**/hosts.yml": "deny", "**/credentials.toml": "deny", ".env": "deny", ".env.local": "deny",
@@ -146,7 +146,7 @@ pub fn checked_input(
     let root = root.canonicalize().ok()?;
     let root_text = root.to_string_lossy().replace("\\\\?\\", "");
     let mut command = vec![cli.command.clone()];
-    for (key, value) in sandbox_config(Path::new(&root_text)) {
+    for (key, value) in sandbox_config(Path::new(&root_text), true) {
         command.extend(["-c".into(), format!("{key}={}", inline(&value))]);
     }
     command.extend(["sandbox".into(), "--include-managed-config".into(), "-C".into(), root_text, "--".into()]);
@@ -348,6 +348,17 @@ fn words(command: &str) -> Option<Vec<String>> {
 }
 
 fn git(root: &Path, args: &[String]) -> bool {
+    let Some(root) = working_root(root) else { return false };
+    // Validate user operands relative to the canonical root. A trusted Windows root can contain an 8.3
+    // spelling (RUNNER~1), or a literal tilde, without making a relative operand a shell expansion.
+    let checked = |path: &Path| {
+        let value = match path.strip_prefix(&root) {
+            Ok(relative) if relative.as_os_str().is_empty() => ".".into(),
+            Ok(relative) => relative.to_string_lossy().into_owned(),
+            Err(_) => path.to_string_lossy().replace("\\\\?\\", ""),
+        };
+        target(&root, &value, false, false)
+    };
     let mut at = 0;
     let mut cwd = root.to_path_buf();
     while let Some(arg) = args.get(at) {
@@ -356,7 +367,7 @@ fn git(root: &Path, args: &[String]) -> bool {
             "-C" => {
                 let Some(dir) = args.get(at + 1) else { return false };
                 let path = if Path::new(dir).is_absolute() { PathBuf::from(dir) } else { cwd.join(dir) };
-                let Some(path) = target(root, &path.to_string_lossy().replace("\\\\?\\", ""), false, false) else { return false };
+                let Some(path) = checked(&path) else { return false };
                 cwd = path;
                 at += 2;
             }
@@ -426,7 +437,7 @@ fn git(root: &Path, args: &[String]) -> bool {
             // A second diff operand outside the worktree implicitly enables --no-index in Git.
             if !arg.starts_with('-') {
                 let path = if Path::new(arg).is_absolute() { PathBuf::from(arg) } else { cwd.join(arg) };
-                if target(root, &path.to_string_lossy().replace("\\\\?\\", ""), false, false).is_none() {
+                if checked(&path).is_none() {
                     return false;
                 }
             }
@@ -626,6 +637,19 @@ mod tests {
             "Bash",
             &json!({ "command": "git -C src diff --no-ext-diff --no-textconv escape/private.txt README.md" })
         ));
+    }
+
+    #[test]
+    fn git_relative_arguments_work_when_the_trusted_root_contains_a_tilde() {
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("working~1");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("README.md"), "synthetic project").unwrap();
+        for command in ["git -C . log --grep push -n 5", "git diff --no-ext-diff --no-textconv HEAD README.md"] {
+            assert!(allows(&root, "Bash", &json!({ "command": command })), "{command}");
+        }
+        assert!(!allows(&root, "Bash", &json!({ "command": "git -C ~/outside status" })));
+        assert!(!allows(&root, "Bash", &json!({ "command": "git log -- ../outside" })));
     }
 
     #[test]

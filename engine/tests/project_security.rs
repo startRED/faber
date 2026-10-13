@@ -161,3 +161,34 @@ fn m6_sandbox_failures_are_intended_and_writable_roots_must_not_expand_into_user
         )
     );
 }
+
+#[test]
+fn r107_internal_questions_restrict_reads_and_never_grant_workspace_writes() {
+    for area in [Area::Chat, Area::Project] {
+        for permissions in [Permissions::Ask, Permissions::DontAsk] {
+            let (_, params) = thread_params(
+                area,
+                &CodexThread {
+                    cwd: "private-question".into(),
+                    model: None,
+                    effort: None,
+                    resume: None,
+                    instructions: Some("Classify this request without tools.".into()),
+                    user_name: None,
+                    permissions,
+                },
+            );
+            assert_eq!(params["approvalPolicy"], "never");
+            assert_eq!(params["ephemeral"], true);
+            assert!(params.get("sandbox").is_none(), "legacy read-only permits disk-wide reads");
+            let config = &params["config"];
+            let id = config["default_permissions"].as_str().expect("restricted internal-question profile");
+            let profile = &config[format!("permissions.{id}")];
+            assert_eq!(profile["filesystem"][":root"], "deny");
+            assert_eq!(profile["network"]["enabled"], false);
+            let roots = profile["filesystem"][":workspace_roots"].as_object().unwrap();
+            assert_eq!(roots["."], "read");
+            assert!(!roots.values().any(|permission| permission == "write"));
+        }
+    }
+}

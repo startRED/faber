@@ -82,6 +82,17 @@ with an error instead of claiming nonexistent attachments. Tests use fake stdio,
 no actual secret is read.
 Shared profile/argv and serialized start/resume tests exercise both areas, while Ask and side-question tests remain.
 
+The merged internal Codex question path also retained legacy `read-only`, which permits reads outside its working
+folder even with approvals disabled. A new parameter regression failed before this fix. Internal questions now use
+the same profile factory with their existing helper folder read-only: root deny, minimal runtime reads, credential
+denies, network off, never approvals and ephemeral sessions. There are no workspace write grants or legacy sandbox
+parameters that could override the restricted reads. Normal Ask turns retain their previous parameters.
+
+Windows CI exposed two Git-policy regressions when a trusted temporary root uses an 8.3 spelling with `~`.
+A literal-tilde working-root test reproduced the same denial locally. Git now validates relative operands against
+the canonical root rather than treating its trusted prefix as shell syntax. User-supplied expansion/traversal and
+network paths remain rejected, with the existing external-read and `-C` directory tests retained.
+
 ## Boundary and limits
 
 This is a host tool policy, not OS isolation. File decisions use canonical paths and refuse protected targets. Shell
