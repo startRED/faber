@@ -249,6 +249,13 @@ fn own_today(ledger: &Ledger, vendor: Vendor, week: &str, start: f64, now: f64) 
 }
 
 impl Budget {
+    pub fn cost_view(&self, mission: &str) -> super::wire::CostView {
+        let receipts: Vec<_> = self.invocations.values().filter(|r| r.request.mission == mission).collect();
+        let complete = !receipts.is_empty() && receipts.iter().all(|r| r.settled && r.terminated);
+        let own_micros = complete.then(|| receipts.iter().try_fold(0u64, |sum, r| sum.checked_add(r.paid_micros))).flatten();
+        super::wire::CostView { own_micros, cap_micros: self.grants.get(mission).map(|g| g.cap_micros), complete: own_micros.is_some() }
+    }
+
     pub fn load(ledger: &Ledger) -> Result<Self, &'static str> {
         let Some(value) = ledger.extra.get(KEY) else { return Ok(Self::default()) };
         let b: Self = serde_json::from_value(value.clone()).map_err(|_| "error.store.corrupt")?;

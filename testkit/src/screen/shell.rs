@@ -30,7 +30,7 @@ pub fn scenarios() -> Vec<Scenario> {
             run: overlays_the_stage,
         },
         Scenario { name: "a click on a running conversation opens it", run: opens_a_running_conversation },
-        Scenario { name: "a click on a running row of a project opens the project's conversation", run: opens_a_project_conversation },
+        Scenario { name: "Projects preserves legacy history without an owner-checkout composer", run: opens_a_project_conversation },
         Scenario {
             name: "the new conversation greets, suggests without sending, and offers the last conversations",
             run: greets_and_suggests,
@@ -455,35 +455,20 @@ fn opens_a_project_conversation(ctx: &mut Ctx) -> Result {
     std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
     let projects = json!([{ "id": "demo", "name": "Demo", "path": folder.to_string_lossy() }]);
     std::fs::write(ctx.sb.data.join("projects.json"), projects.to_string()).map_err(|e| e.to_string())?;
-    let launch = two_writes(ctx);
-    let mut app = ctx.launch(launch)?;
+    let conversations = ctx.sb.data.join("conversations");
+    std::fs::create_dir_all(&conversations).map_err(|e| e.to_string())?;
+    let saved = json!({"id":"legacy", "title":"Legacy history", "area":"project", "projectId":"demo",
+        "sessions":{}, "createdAt":1, "updatedAt":1,
+        "messages":[{"id":"answer", "role":"assistant", "text":"An old project answer", "at":1, "status":"done"}]});
+    std::fs::write(conversations.join("legacy.json"), saved.to_string()).map_err(|e| e.to_string())?;
+    let mut app = ctx.launch(claude_chat(ctx))?;
     let page = &mut app.page;
-    let demo = css(".prow .item").has_text("Demo");
-    page.wait_visible(&demo)?;
-    page.click(&demo)?;
-    page.wait_visible(&css(".empty h1").has_text("Demo"))?;
-    ask_two_writes(page)?;
-    page.wait_visible(&css(".runcol .ask").has_text("a.txt"))?;
-    // The project is folded; a click on the running row opens its conversation, and the project opens with it.
-    page.click(&demo)?;
-    page.wait_gone(&css(".proj-chats"))?;
-    // From Chat, a click on the row brings the project, the area and the conversation together.
-    let chat = page.named("button", "area.chat")?.exact();
-    page.click(&chat)?;
-    let greeting = page.named("heading", "empty.chatTitle")?;
-    page.wait_visible(&greeting)?;
-    page.click(&css(".runcol .ri .name"))?;
-    page.wait_visible(&css("article .ask").has_text("a.txt"))?;
-    let projects = page.text_of("crumb.project")?;
-    let crumb = page.inner_text(&css(".crumb"))?;
-    ensure(crumb.starts_with(&projects), || format!("the crumb should start with {projects:?}: {crumb:?}"))?;
-    let pressed = "document.querySelector('.areas .area[aria-pressed=\"true\"]')?.textContent.includes('Projects')";
-    same(page.eval(pressed)?.as_bool(), Some(true), "the area")?;
-    same(page.count(&css(".proj-chats .item[aria-current=true]"))?, 1, "the conversation marked in its project, which opened with it")?;
-    same(page.attr(&demo, "aria-current")?, Some("location".to_string()), "the project the conversation is in")?;
-    let composer = page.labelled("composer.message")?;
-    let placeholder = page.attr(&composer, "placeholder")?;
-    same(placeholder, Some(page.text_of("composer.projectPlaceholder")?), "the composer points at the project")
+    page.click(&css(".prow .item").has_text("Demo"))?;
+    page.wait_visible(&css(".start-card h2").has_text("Demo"))?;
+    page.click(&css(".proj-chats .item").has_text("Legacy history"))?;
+    page.wait_visible(&css("article").has_text("An old project answer"))?;
+    same(page.count(&css(".work .composer"))?, 0, "legacy history has no direct project composer")?;
+    ensure(ctx.records()?.is_empty(), || "opening legacy history started a CLI".into())
 }
 
 fn greets_and_suggests(ctx: &mut Ctx) -> Result {
@@ -669,16 +654,15 @@ fn waits_for_the_conversation(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
     seed_project(ctx, "Demo")?;
     seed(ctx, "5f1c0000-0000-4000-8000-0000000000a1", "Alpha", None, 1_790_000_000_000)?;
-    seed(ctx, "5f1c0000-0000-4000-8000-0000000000b1", "Beta", Some("demo"), 1_790_000_100_000)?;
+    seed(ctx, "5f1c0000-0000-4000-8000-0000000000b1", "Beta", None, 1_790_000_100_000)?;
     let launch = claude_chat(ctx);
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
-    page.click(&css(".prow .item").has_text("Demo"))?;
     page.click(&css(".list .item").has_text("Alpha"))?;
     page.wait_visible(&css("article").has_text("Alpha: the answer"))?;
-    // Beta, of the project, takes 2.5 s to arrive. The screen still shows Alpha, so nothing may go out for either.
+    // Beta takes 2.5 s to arrive. The screen still shows Alpha, so nothing may go out for either.
     delay_open(page, 2500)?;
-    page.click(&css(".proj-chats .item").has_text("Beta"))?;
+    page.click(&css(".list .item").has_text("Beta"))?;
     same(page.eval("window.__slowed")?.as_u64(), Some(1), "the open of Beta was held back by the test")?;
     page.wait_for("the crumb to name Beta", "document.querySelector('.crumb b')?.textContent === 'Beta'")?;
     ensure(page.is_visible(&css("article").has_text("Alpha: the answer"))?, || {

@@ -29,6 +29,20 @@ fn one_additive_wire_revision_keeps_the_durable_journal_version() {
 }
 
 #[test]
+fn named_bar_proofs_use_the_published_dotted_ids() {
+    let value = packet(json!({"proof":{"ids":["proof.cargo-fmt","proof.osv-scan"]}}));
+    assert!(Envelope::parse(&value.to_string(), &expect(), Role::Writer).is_ok());
+}
+
+#[test]
+fn credential_directories_are_forbidden_even_inside_a_worktree() {
+    for path in [".codex/auth.json", "nested/.claude/session.json", ".gemini/oauth.json"] {
+        let value = packet(json!({"read":{"paths":[path]}}));
+        assert_eq!(Envelope::parse(&value.to_string(), &expect(), Role::Research), Err(WireError::Path));
+    }
+}
+
+#[test]
 fn labels_and_bar_sheet_round_trip_without_turning_requirements_into_dependencies() {
     let mut value = packet(json!({"plan": {"summary": "s", "acceptance": "a", "tasks": [{"id": "a", "title": "A", "kind": "writer",
         "labels": {"verb": "build", "needs": ["ui:component!"], "risk": "low", "fresh": "stable"},
@@ -39,12 +53,28 @@ fn labels_and_bar_sheet_round_trip_without_turning_requirements_into_dependencie
         "bar": [{"id": "C1", "piece": "screen", "attribute": "keyboard", "check": "Keep keyboard focus", "kind": "program", "severity": "blocking",
             "ground": {"kind": "owner", "reference": "R1"}, "proof": "screen", "owner": "a", "paths": ["ui/App.tsx"]}]}}));
     value["ping"] = json!("Order");
+    let incomplete = value.clone();
+    assert!(Envelope::parse(&incomplete.to_string(), &expect(), Role::Lead).is_err());
+    let sheet: wire::DeliverableSheet = serde_json::from_value(value["action"]["plan"]["sheet"].clone()).unwrap();
+    let mut bar = faber_engine::project::bar::software_bar(&sheet);
+    let mut tasks = Vec::new();
+    for (i, check) in bar.iter_mut().enumerate() {
+        let id = if i == 0 { "a".to_string() } else { format!("proof-{i}") };
+        check.owner = id.clone();
+        let mut task = value["action"]["plan"]["tasks"][0].clone();
+        task["id"] = json!(id);
+        task["checks"] = json!([check.id]);
+        task["proofs"] = json!([check.proof]);
+        tasks.push(task);
+    }
+    value["action"]["plan"]["tasks"] = json!(tasks);
+    value["action"]["plan"]["bar"] = json!(bar);
     let env = Envelope::parse(&value.to_string(), &expect(), Role::Lead).unwrap();
     if let wire::Action::Plan(plan) = env.action {
         let task = plan.tasks[0].to_task();
         assert!(task.requires.is_empty());
         assert_eq!(serde_json::to_value(task).unwrap()["labels"]["needs"][0], "ui:component!");
-        assert_eq!(serde_json::to_value(plan).unwrap()["bar"][0]["check"], "Keep keyboard focus");
+        assert!(!plan.bar.is_empty());
     } else {
         panic!("not a plan")
     }

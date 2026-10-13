@@ -77,6 +77,103 @@ export interface Project {
   name: string;
   path: string;
 }
+
+export type GitMode = 'seguro' | 'equilibrado';
+export type RunMode = 'normal' | 'autonomous';
+export type MissionState = 'planning' | 'running' | 'paused' | 'blocked' | 'done';
+export type TaskState = 'ready' | 'running' | 'review' | 'done' | 'blocked';
+export type DecisionKind = 'direction' | 'taste' | 'money' | 'legal' | 'technical';
+
+export interface Author {
+  name: string;
+  email: string;
+}
+
+export interface Grant {
+  repo: string;
+  mode: GitMode;
+  revision: number;
+  grantedAt: number;
+  revokedAt?: number;
+  author?: Author;
+  selfUpdate: boolean;
+  remote?: string;
+  remoteAccount?: string;
+}
+
+export interface EnrollView {
+  projectId: string;
+  repo: string;
+  base: string;
+  author?: Author;
+  mode: GitMode;
+  revision: number;
+  selfUpdate: boolean;
+  remote?: string;
+  remoteAccount?: string;
+}
+
+export interface TaskView {
+  id: string;
+  title: string;
+  state: TaskState;
+  reason?: string;
+  builder?: Vendor;
+  reviewer?: Vendor;
+  detail?: { scope: string[]; proofs: string[]; artifacts: ArtifactView[] };
+}
+
+export interface ArtifactView {
+  id: string; summary: string; changed: string[]; files: string[]; tree?: string;
+  commands: { proof: string; argv: string[]; exit?: number; log?: string }[];
+  notRun: string[]; assumptions: string[]; risks: string[];
+}
+
+export interface CostView {
+  ownMicros?: number | null;
+  capMicros?: number | null;
+  complete: boolean;
+}
+
+export interface PaceView {
+  vendor: Vendor;
+  window: string;
+  used?: number | null;
+  room?: number | null;
+  readAt?: number | null;
+}
+
+export interface DecisionView {
+  id: string;
+  question: string;
+  kind: DecisionKind;
+  options: string[];
+  default?: string | null;
+  task?: string | null;
+}
+
+export interface BuildView {
+  current?: string | null;
+  next?: string | null;
+  lastGood?: string | null;
+  waiting?: string | null;
+}
+
+export interface MissionView {
+  missionId: string;
+  revision: number;
+  state: MissionState;
+  mode: RunMode;
+  gitMode: GitMode;
+  goal: string;
+  plan?: string | null;
+  tasks: TaskView[];
+  cost: CostView;
+  pace: PaceView[];
+  decisions: DecisionView[];
+  build?: BuildView | null;
+  reason?: string | null;
+}
 // The shapes the look engine sends and takes (src-tauri/src/look.rs). The screen never computes a colour.
 export type Motion = 'full' | 'reduced' | 'none';
 export interface Effects {
@@ -289,6 +386,18 @@ export const api = {
   setupCheck: (vendor: Vendor) => invoke<CheckResult>('setup_check', { vendor }),
   setupInstall: (vendor: Vendor) => invoke<void>('setup_install', { vendor }),
   setupSignIn: (vendor: Vendor) => invoke<void>('setup_sign_in', { vendor }),
+  projectEnroll: (projectId: string) => invoke<EnrollView>('project_enroll', { projectId }),
+  projectGrant: (projectId: string, mode: GitMode, selfUpdate: boolean, revision: number) =>
+    invoke<Grant>('project_grant', { projectId, mode, selfUpdate, revision }),
+  projectRevoke: (projectId: string) => invoke<void>('project_revoke', { projectId }),
+  missionStart: (projectId: string, goal: string) => invoke<string>('mission_start', { projectId, goal }),
+  missionState: (missionId: string) => invoke<MissionView>('mission_state', { missionId }),
+  missionMode: (missionId: string, mode: RunMode) => invoke<MissionView>('mission_mode', { missionId, mode }),
+  missionStop: (missionId: string) => invoke<MissionView>('mission_stop', { missionId }),
+  missionResume: (missionId: string) => invoke<MissionView>('mission_resume', { missionId }),
+  missionAnswer: (missionId: string, decisionId: string, answer: string) =>
+    invoke<MissionView>('mission_answer', { missionId, decisionId, answer }),
+  onMission: (listener: (view: MissionView) => void) => listen<MissionView>('mission', (e) => listener(e.payload)),
   on: (listener: (event: AppEvent) => void) => listen<AppEvent>('faber:event', (e) => listener(e.payload)),
 };
 

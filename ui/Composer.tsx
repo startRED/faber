@@ -3,6 +3,7 @@ import type { Choice, Effort, Vendor } from './api.ts';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 import type { Option } from './models.ts';
+import { resizeComposer } from './composer-size.ts';
 
 export interface Draft {
   text: string;
@@ -75,19 +76,7 @@ export function Composer(props: Props) {
   onCleanup(() => clearTimeout(pause));
   let fileInput: HTMLInputElement | undefined;
   let field: HTMLTextAreaElement | undefined;
-  const resize = () => {
-    if (!field?.isConnected) return;
-    const previous = field.getBoundingClientRect().height;
-    const style = getComputedStyle(field);
-    // Restore the rendered height before enabling the transition, so measurement never paints a collapse.
-    field.style.transition = 'none';
-    field.style.height = '0px';
-    const height = Math.min(parseFloat(style.maxHeight), Math.max(parseFloat(style.minHeight), draft().text ? field.scrollHeight : 0));
-    field.style.height = `${previous}px`;
-    field.getBoundingClientRect();
-    field.style.removeProperty('transition');
-    field.style.height = `${height}px`;
-  };
+  const resize = () => resizeComposer(field, draft().text);
   createEffect(on(() => draft().text, () => queueMicrotask(resize), { defer: true }));
   onMount(() => {
     let width = 0;

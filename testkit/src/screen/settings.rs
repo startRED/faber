@@ -185,7 +185,10 @@ fn clicks_rendered_target(ctx: &mut Ctx) -> Result {
     let page = &mut app.page;
     page.eval("(() => { const b = document.createElement('button'); b.id = 'layout-target'; b.style.cssText = 'position:fixed;left:300px;top:300px;width:80px;height:40px;z-index:9999'; b.onclick = () => window.__targetClicks = (window.__targetClicks ?? 0) + 1; b.scrollIntoView = () => requestAnimationFrame(() => { b.style.left = '600px'; }); document.body.append(b); window.__targetClicks = 0; })()")?;
     page.click(&css("#layout-target"))?;
-    same(page.eval("window.__targetClicks")?.as_u64(), Some(1), "exactly one click reaches the target after its layout changes")
+    same(page.eval("window.__targetClicks")?.as_u64(), Some(1), "exactly one click reaches the target after its layout changes")?;
+    page.eval("(() => { const b=document.querySelector('#layout-target'); b.style.left='300px'; b.scrollIntoView=()=>{}; b.onpointerenter=()=>{if(!window.__hoverMoved){window.__hoverMoved=true;b.style.left='600px'}}; window.__targetClicks=0; })()")?;
+    page.click(&css("#layout-target"))?;
+    same(page.eval("window.__targetClicks")?.as_u64(), Some(1), "one click reaches the target after pointer entry changes its layout")
 }
 
 fn look_is_a_draft(ctx: &mut Ctx) -> Result {

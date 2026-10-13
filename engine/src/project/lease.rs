@@ -167,6 +167,9 @@ pub fn real_path(path: &Path) -> Result<PathBuf, LeaseError> {
 
 pub(crate) fn normalized(raw: &str) -> Result<String, LeaseError> {
     let clean = clean_path(raw).ok_or(LeaseError::Path)?;
+    if !clean.is_empty() {
+        super::kit::delivery::scoped_path(&clean).map_err(|_| LeaseError::Path)?;
+    }
     for part in clean.split('/').filter(|p| !p.is_empty()) {
         let lower = part.to_lowercase();
         let stem = lower.split('.').next().unwrap_or_default();

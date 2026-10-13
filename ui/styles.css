@@ -673,3 +673,64 @@ html.hidden-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 .urow .expected { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--ink); }
 .pace-projection { grid-column: 1 / -1; }
 .waiting-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Projects board and start card */
+.projects-stage { display: flex; flex-direction: column; height: 100%; overflow-y: auto; padding: 24px; gap: 20px; }
+.projects-empty { display: grid; place-items: center; height: 100%; color: var(--ink-3); font-size: var(--fs-read); }
+.start-card { max-width: 800px; margin: 0 auto; width: 100%; display: flex; flex-direction: column; gap: 20px; }
+.start-card .composer-container { margin-top: calc(var(--thread-tail) - 20px); }
+.projects-stage { min-width: 0; flex: 1; container-type: inline-size; }
+.projects-stage .p-meta > span, .m-goal, .tc-title, .ny-question { min-width: 0; overflow-wrap: anywhere; }
+.projects-stage .m-controls, .projects-stage .ny-header, .projects-stage .pace-item { flex-wrap: wrap; }
+.projects-stage .ny-custom input { min-width: 0; }
+.projects-stage .p-header .peek { margin-bottom: 12px; color: var(--ink-3); }
+.projects-stage .note, .projects-stage .p-meta, .projects-stage .task-col-header, .projects-stage .cost-cap,
+.projects-stage .cost-card h3, .projects-stage .pace-card h3, .projects-stage .build-card h3,
+.projects-stage .pace-item, .projects-stage .build-slots { font-size: max(13px, calc(var(--fs-ui) - 1px)); }
+.p-header h2 { margin: 0 0 8px; font-size: var(--fs-h2); color: var(--ink); }
+.p-meta { display: flex; flex-wrap: wrap; gap: 16px; font-size: calc(var(--fs-ui) - 1px); color: var(--ink-2); }
+.ctl-section { display: flex; flex-direction: column; gap: 8px; padding: 14px; background: var(--card-bg); border-radius: var(--r-md); box-shadow: inset 0 0 0 1px var(--line-2); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0; }
+.mission-board { display: flex; flex-direction: column; gap: 24px; width: 100%; }
+.m-header { display: flex; flex-direction: column; gap: 12px; padding: 16px 20px; background: var(--card-bg); border-radius: var(--r-md); box-shadow: inset 0 0 0 1px var(--line-2); }
+.m-title-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.m-goal { margin: 0; font-size: var(--fs-h2); color: var(--ink); }
+.badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: var(--r-pill); font-size: max(13px, calc(var(--fs-ui) - 2px)); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; box-shadow: inset 0 0 0 1px var(--line-2); }
+.badge.running { background: var(--accent-soft); color: var(--accent-text); }
+.badge.paused { background: var(--s2); color: var(--ink-2); }
+.badge.blocked { background: var(--s2); color: var(--ink-2); }
+.badge.done { background: var(--accent-soft); color: var(--accent-text); }
+.m-controls { display: flex; align-items: center; gap: 12px; }
+.needs-you { display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: var(--r-md); background: linear-gradient(180deg, var(--amber-soft), transparent 150%), var(--card-bg); box-shadow: inset 0 0 0 1px var(--amber-line), var(--amber-light); }
+.ny-header { display: flex; align-items: center; gap: 8px; color: var(--amber-ink); }
+.ny-card { display: flex; flex-direction: column; gap: 10px; padding: 12px; background: var(--card-bg); border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--amber-line); }
+.ny-question { display: flex; align-items: center; gap: 8px; }
+.ny-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.ny-custom { display: flex; gap: 8px; align-items: center; }
+.ny-custom input { flex: 1; height: 32px; padding: 0 10px; background: var(--bg); border: 1px solid var(--line-2); border-radius: var(--r-sm); color: var(--ink); }
+.task-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+.task-col { display: flex; flex-direction: column; gap: 10px; padding: 12px; background: var(--s1); border-radius: var(--r-md); box-shadow: inset 0 0 0 1px var(--line-2); }
+.task-col-header { display: flex; align-items: center; justify-content: space-between; font-size: calc(var(--fs-ui) - 1px); color: var(--ink-2); }
+.task-count { font-size: max(13px, calc(var(--fs-ui) - 2px)); background: var(--s2); padding: 1px 6px; border-radius: var(--r-pill); }
+.task-list { display: flex; flex-direction: column; gap: 8px; }
+.task-card { display: flex; flex-direction: column; gap: 6px; padding: 10px; background: var(--card-bg); border-radius: var(--r-sm); box-shadow: var(--lift-shadow), inset 0 0 0 1px var(--line-2); }
+.tc-title { font-size: calc(var(--fs-ui) - 0.5px); font-weight: 500; color: var(--ink); }
+.tc-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+.tc-footer { display: flex; align-items: center; margin-top: 4px; }
+.receipt-badge { font-size: max(13px, calc(var(--fs-ui) - 2.5px)); padding: 2px 6px; border-radius: var(--r-xs); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-2); }
+.task-card pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
+.task-card summary { min-height: 24px; cursor: pointer; }
+.cost-pace-panel { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+.cost-card, .pace-card, .build-card { display: flex; flex-direction: column; gap: 8px; padding: 14px; background: var(--card-bg); border-radius: var(--r-md); box-shadow: inset 0 0 0 1px var(--line-2); }
+.cost-card h3, .pace-card h3, .build-card h3 { margin: 0; font-size: calc(var(--fs-ui) - 1px); color: var(--ink-2); }
+.cost-reading { display: flex; align-items: baseline; gap: 12px; }
+.cost-value { font-size: calc(var(--fs-h2) * 0.8); font-weight: 600; color: var(--ink); }
+.cost-cap { font-size: calc(var(--fs-ui) - 1px); color: var(--ink-3); }
+.pace-list { display: flex; flex-direction: column; gap: 6px; }
+.pace-item { display: flex; align-items: center; gap: 8px; font-size: calc(var(--fs-ui) - 1px); }
+.pace-stat { color: var(--ink-2); margin-left: auto; }
+.build-slots { display: flex; flex-direction: column; gap: 4px; font-size: calc(var(--fs-ui) - 1px); }
+@container (max-width: 760px) {
+  .task-columns, .cost-pace-panel { grid-template-columns: minmax(0, 1fr); }
+}
+

@@ -17,11 +17,13 @@ fn main() {
                 | "--project-git-race"
                 | "--project-path-race"
                 | "--project-git-clean"
+                | "--project-screen-fixture"
         )
     {
         let sandbox = std::path::Path::new(sandbox);
         let result = match mode.as_str() {
             "--project-mission" => faber_testkit::screen::projects::probe_mission(sandbox),
+            "--project-screen-fixture" => faber_testkit::screen::projects::screen_fixture(sandbox),
             "--project-git-delete" => faber_testkit::screen::projects::probe_deletion(sandbox),
             "--project-git-race" => faber_testkit::screen::projects::probe_race(sandbox),
             "--project-path-race" => faber_testkit::screen::projects::probe_path_race(sandbox),

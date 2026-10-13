@@ -23,6 +23,7 @@ import { createWidth } from './layout.ts';
 import { Lockup, Peek } from './Mark.tsx';
 import { modelOptions, prettyModel } from './models.ts';
 import { animateDetails, animateList, watchMotion } from './motion.ts';
+import { Projects } from './Projects.tsx';
 import { createOpening, upsert } from './opening.ts';
 import { Running } from './Running.tsx';
 import { createAutoOpen, openPlace, type Place, placeOfRunning, store, waitingKeys } from './running.ts';
@@ -733,14 +734,14 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                     <Match when={place().id}>
                       {area() === 'chat' ? t('area.chat') : t('crumb.project')}
                       <span class="sep" aria-hidden="true">
-                        ›
+                        {t('crumb.separator')}
                       </span>
                       <b>{title() ?? ''}</b>
                     </Match>
                     <Match when={area() === 'project' && project()}>
                       {t('crumb.project')}
                       <span class="sep" aria-hidden="true">
-                        ›
+                        {t('crumb.separator')}
                       </span>
                       <b>{project()?.name}</b>
                     </Match>
@@ -751,7 +752,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                   </Switch>
                 </div>
                 <div class="right">
-                  <Show when={state().vendors.length > 0 && !newChat()}>
+                  <Show when={state().vendors.length > 0 && !newChat() && area() !== 'project'}>
                     <span class="chip" title={t('topbar.model')}>
                       <Show when={answering()} fallback={<>{options().find((o) => o.choice.vendor === picked().vendor && o.choice.model === picked().model)?.label}</>}>
                         {(m) => (
@@ -789,74 +790,83 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                 </div>
               </div>
               <div class="work" classList={{ under: columnOpen() && !docked() }} ref={(el) => { work = el; animateList(el); }}>
-                <Show when={newChat()}>
-                  {/* The effects of the look sit behind the greeting; dust keeps clear of the text and the composer. */}
-                  <Ambient vendors={state().vendors} avoid={() => [...work!.querySelectorAll('.hello, .lead, .composer, .try, .resume')]} />
-                </Show>
-                <div class="thread" classList={{ welcome: newChat() }} ref={(el) => {
-                  thread = el;
-                  onMount(() => {
-                    // Keep the tail visible as the composer grows, without pulling a reader back down.
-                    const observer = new ResizeObserver(() => { if (stick) el.scrollTop = el.scrollHeight; });
-                    observer.observe(el);
-                    onCleanup(() => observer.disconnect());
-                  });
-                }} onScroll={(e) => onScroll(e.currentTarget)} inert={trapped()}>
-                  <Show
-                    when={newChat()}
-                    fallback={
-                      <div class="col" ref={(el) => {
-                        animateList(el);
+                <Show
+                  when={area() === 'project' && !place().id}
+                  fallback={
+                    <>
+                      <Show when={newChat()}>
+                        {/* The effects of the look sit behind the greeting; dust keeps clear of the text and the composer. */}
+                        <Ambient vendors={state().vendors} avoid={() => [...work!.querySelectorAll('.hello, .lead, .composer, .try, .resume')]} />
+                      </Show>
+                      <div class="thread" classList={{ welcome: newChat() }} ref={(el) => {
+                        thread = el;
                         onMount(() => {
-                          const observer = new ResizeObserver(() => { if (thread && stick) thread.scrollTop = thread.scrollHeight; });
+                          // Keep the tail visible as the composer grows, without pulling a reader back down.
+                          const observer = new ResizeObserver(() => { if (stick) el.scrollTop = el.scrollHeight; });
                           observer.observe(el);
                           onCleanup(() => observer.disconnect());
                         });
-                      }}>
+                      }} onScroll={(e) => onScroll(e.currentTarget)} inert={trapped()}>
                         <Show
-                          when={current()?.messages.length ? current() : undefined}
-                          fallback={<Empty vendors={state().vendors.length} area={area()} project={project()} onConnect={openSetup} />}
+                          when={newChat()}
+                          fallback={
+                            <div class="col" ref={(el) => {
+                              animateList(el);
+                              onMount(() => {
+                                const observer = new ResizeObserver(() => { if (thread && stick) thread.scrollTop = thread.scrollHeight; });
+                                observer.observe(el);
+                                onCleanup(() => observer.disconnect());
+                              });
+                            }}>
+                              <Show
+                                when={current()?.messages.length ? current() : undefined}
+                                fallback={<Empty vendors={state().vendors.length} area={area()} project={project()} onConnect={openSetup} />}
+                              >
+                                {(c) => (
+                                  <Thread
+                                    messages={c().messages}
+                                    usage={state().usage ?? []}
+                                    from={from()}
+                                    conversationId={c().id}
+                                    options={options()}
+                                    onBranch={(messageId, text, chosen) => void branch(messageId, text, chosen ?? picked())}
+                                  />
+                                )}
+                              </Show>
+                              <Show when={error()}>
+                                <div class="note err" role="alert">
+                                  {error()}
+                                </div>
+                              </Show>
+                            </div>
+                          }
                         >
-                          {(c) => (
-                            <Thread
-                              messages={c().messages}
-                              usage={state().usage ?? []}
-                              from={from()}
-                              conversationId={c().id}
-                              options={options()}
-                              onBranch={(messageId, text, chosen) => void branch(messageId, text, chosen ?? picked())}
-                            />
-                          )}
-                        </Show>
-                        <Show when={error()}>
-                          <div class="note err" role="alert">
-                            {error()}
-                          </div>
+                          <Welcome
+                            recent={state().conversations}
+                            name={state().settings.userName}
+                            running={items()}
+                            projects={state().projects}
+                            onSuggest={(text) => fill?.(text)}
+                            onOpen={openSummary}
+                          >
+                            {composer()}
+                          </Welcome>
+                          <Show when={error()}>
+                            <div class="note err" role="alert">
+                              {error()}
+                            </div>
+                          </Show>
                         </Show>
                       </div>
-                    }
-                  >
-                    <Welcome
-                      recent={state().conversations}
-                      name={state().settings.userName}
-                      running={items()}
-                      projects={state().projects}
-                      onSuggest={(text) => fill?.(text)}
-                      onOpen={openSummary}
-                    >
-                      {composer()}
-                    </Welcome>
-                    <Show when={error()}>
-                      <div class="note err" role="alert">
-                        {error()}
-                      </div>
-                    </Show>
-                  </Show>
-                </div>
-                <Show when={!newChat() && !needsProject()}>
-                  <div class="dock" inert={trapped()}>
-                    {composer()}
-                  </div>
+                      <Show when={!newChat() && !needsProject() && area() !== 'project'}>
+                        <div class="dock" inert={trapped()}>
+                          {composer()}
+                        </div>
+                      </Show>
+                    </>
+                  }
+                >
+                  <Projects project={project()} vendors={state().vendors} now={clock()} />
                 </Show>
                 <Show when={columnOpen() && !docked()}>{runningColumn()}</Show>
               </div>

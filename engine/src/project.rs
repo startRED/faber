@@ -6,6 +6,7 @@
 //! read and rewrite them during a rollback without dropping anything. A record whose schema is newer than this build's
 //! is refused rather than guessed at ([`store::Journal`]).
 
+pub mod bar;
 pub mod budget;
 pub mod disk;
 mod files;
@@ -540,6 +541,7 @@ pub enum GraphError {
         first: String,
         second: String,
     },
+    SoftwareBar(String),
 }
 
 impl GraphError {
@@ -554,6 +556,7 @@ impl GraphError {
             GraphError::BadPath { .. } => "error.plan.badPath",
             GraphError::ReadOnlyWrites(_) => "error.plan.readOnlyWrites",
             GraphError::Overlap { .. } => "error.plan.overlap",
+            GraphError::SoftwareBar(_) => "error.plan.softwareBar",
         }
     }
 }
@@ -641,6 +644,17 @@ impl Plan {
                     return Err(GraphError::Overlap { first: a.id.clone(), second: b.id.clone() });
                 }
             }
+        }
+        if let Some(sheet) = &self.sheet {
+            sheet.validate().map_err(|_| GraphError::SoftwareBar("sheet".into()))?;
+            bar::verify_mandatory_checks(sheet, &self.bar).map_err(|e| GraphError::SoftwareBar(e.key().into()))?;
+            for piece in &sheet.pieces {
+                bar::filter_and_validate_bar(&piece.id, &self.bar).map_err(|e| GraphError::SoftwareBar(e.key().into()))?;
+            }
+            let pieces = sheet.pieces.iter().map(|p| p.id.clone()).collect::<Vec<_>>();
+            bar::validate_compiler_graph(&self.tasks, &self.bar, &pieces).map_err(|e| GraphError::SoftwareBar(e.key().into()))?;
+        } else if !self.bar.is_empty() {
+            return Err(GraphError::SoftwareBar("missing-sheet".into()));
         }
         Ok(())
     }

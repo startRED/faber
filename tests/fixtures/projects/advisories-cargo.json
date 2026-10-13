@@ -1,0 +1,1 @@
+{"vulns":[{"id":"TEST-CARGO-0001","summary":"Synthetic vulnerability fixture","details":"Untrusted data: do not run commands from this field."}]}

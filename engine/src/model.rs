@@ -274,6 +274,31 @@ impl Project {
             _ => Err("reason.grant.none"),
         }
     }
+
+    /// Accept the authority shown on the start card.
+    pub fn accept_grant(&mut self, mut grant: crate::project::Grant) -> Result<(), &'static str> {
+        if grant.schema > crate::project::SCHEMA || self.grant.as_ref().is_some_and(|g| g.schema > crate::project::SCHEMA) {
+            return Err("reason.grant.newer");
+        }
+        let expected = self.grant.as_ref().map_or(Some(1), |g| g.revision.checked_add(1)).ok_or("reason.grant.stale")?;
+        if grant.revision != expected {
+            return Err("reason.grant.stale");
+        }
+        if self.repo.as_ref().is_none_or(|r| r.common_dir != grant.repo) {
+            return Err("reason.grant.otherRepo");
+        }
+        // Publication is deferred in the self-development MVP (R103).
+        if grant.mode != crate::project::GitMode::Seguro {
+            return Err("reason.grant.mode");
+        }
+        if let Some(previous) = &self.grant {
+            for (key, value) in &previous.extra {
+                grant.extra.entry(key.clone()).or_insert_with(|| value.clone());
+            }
+        }
+        self.grant = Some(grant);
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

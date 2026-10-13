@@ -45,3 +45,10 @@ Local verification: native lint/typecheck/build executables (no shell children),
 Thirteen individual mutation replays failed their target regressions with the fix removed and without compiler errors.
 Additional red/green regressions cover private session metadata, T1 artifact decoding/id bounds, obsolete patch backups,
 and known archived process identities. CI is checked on the pushed commit; this document does not qualify live gates.
+
+PR synchronization required merging `origin/selfdev` at 974637b, which already contains accepted T5B and T9.
+The merge appends T5 helpers to the shared lead/proof modules; bar.rs, native/screen proof executors and T5B tests
+remain identical to the target branch. Both finite-arrival and post-hover pointer checks remain before one click.
+One duplicate answer_started fixture initializer introduced by the merge was removed after the compiler rejected it.
+All seven proof equivalents pass on the integration, including cargo t and cargo t --all: 1,110 passed in each run,
+zero failed, not run or skipped. No real model session or paid credits were used.
