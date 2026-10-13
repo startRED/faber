@@ -17,6 +17,7 @@ use crate::signals::Signals;
 use crate::store::Store;
 use crate::usage;
 use crate::workspace::{Attachment, inside_folder, new_files, save_files};
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
@@ -1452,14 +1453,32 @@ impl Core {
         if source.area == Area::Chat && from.is_dir() {
             copy_dir(&from, &to);
         }
+        // The resend carries what the selected message carried: its images and attached files. A chat workspace copy already
+        // holds the files, so they are taken out of it and saved again under the same names by the send.
+        let picked = &source.messages[at];
+        let images = picked.images.clone().unwrap_or_default();
+        let kept =
+            if source.area == Area::Chat { from.join("attachments") } else { self.opts.data_dir.join("attachments").join(&source.id) };
+        let files: Vec<Attachment> = picked
+            .attachments
+            .iter()
+            .flatten()
+            .filter_map(|name| {
+                let bytes = std::fs::read(kept.join(name)).ok()?;
+                if source.area == Area::Chat {
+                    let _ = std::fs::remove_file(to.join("attachments").join(name));
+                }
+                Some(Attachment { name: name.clone(), base64: base64::engine::general_purpose::STANDARD.encode(bytes) })
+            })
+            .collect();
         self.save(&id);
         self.send(SendRequest {
             conversation_id: Some(id),
             area: source.area,
             project_id: source.project_id,
             text: req.text,
-            images: vec![],
-            files: vec![],
+            images,
+            files,
             choice: req.choice,
         })
     }

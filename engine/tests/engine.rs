@@ -797,3 +797,46 @@ async fn a_conversation_saved_before_the_cost_base_existed_still_opens() {
     assert_eq!(second.open(&id).unwrap().messages.len(), 2);
     second.shutdown();
 }
+
+#[tokio::test]
+async fn a_branched_resend_sends_the_images_and_files_of_the_selected_message_again() {
+    use faber_engine::model::Image;
+    use faber_engine::workspace::Attachment;
+    for area in [Area::Chat, Area::Project] {
+        let dir = tempfile::tempdir().unwrap();
+        let f = fake(fixture("claude", "chat"));
+        let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+        let pick = || choice("claude", Some("haiku"));
+        let project = (area == Area::Project).then(|| {
+            let folder = dir.path().join("work");
+            std::fs::create_dir_all(&folder).unwrap();
+            engine.add_project(&folder.to_string_lossy()).id
+        });
+        let mut req = SendRequest { project_id: project, ..ask(area, SKY, pick()) };
+        req.images = vec![Image { media_type: "image/png".into(), base64: "aW1hZ2U=".into() }];
+        req.files = vec![Attachment { name: "notes.txt".into(), base64: "bm90ZXM=".into() }];
+        let id = engine.send(req).unwrap();
+        let first = engine.open(&id).unwrap().messages[0].clone();
+        assert_eq!(first.attachments.as_deref(), Some(&["notes.txt".to_string()][..]));
+        let branch_id = engine
+            .branch(BranchRequest {
+                conversation_id: id.clone(),
+                message_id: first.id.clone(),
+                text: "Again, please.".into(),
+                choice: pick(),
+            })
+            .unwrap();
+        let sent = engine.open(&branch_id).unwrap().messages[0].clone();
+        assert_eq!(sent.images, first.images, "{area:?}: the image goes with the resend");
+        assert_eq!(sent.attachments, first.attachments, "{area:?}: the file keeps its name");
+        for _ in 0..100 {
+            if f.wire.lines_with("aW1hZ2U=") == 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(f.wire.lines_with("aW1hZ2U="), 2, "{area:?}: both turns dispatched the image");
+        assert_eq!(f.wire.lines_with("notes.txt"), 2, "{area:?}: both turns name the attached file");
+        engine.shutdown();
+    }
+}
