@@ -277,8 +277,10 @@ nothing read from them is trusted):
   Everything is validated before any process runs. The pushed ref is `<head oid>:refs/heads/<branch>`, so only the proven
   commit leaves, never a branch that moved since.
 - Reads of the remote never run inside the repository: `ls-remote`, `gh pr list/view/create/merge` and the gh login run
-  in a neutral folder against the granted URL and `--repo` itself, so the repository's own config cannot redirect them.
-  Only the push needs the checkout, and it goes to the granted URL, not to the remote name.
+  in the runner's neutral folder (`Runner::neutral()`) against the granted URL and `--repo` itself, so the repository's
+  own config cannot redirect them. That folder is Faber's own, created by the shell next to its other data, never the
+  shared temp folder: `Process` refuses to run a neutral call if the folder or any parent holds a `.git`. Only the push
+  needs the checkout, and it goes to the granted URL, not to the remote name.
 - Config guard before the push: `git config --list --show-scope --name-only`. A key that runs a command or reroutes a
   connection (credential, http, url rewrites, hooks, ssh, protocol, `core.sshCommand`, `remote.*.proxy` ...) in the
   local, worktree or command scope blocks the push; the system and global scopes are the person's own. The remote name
@@ -289,11 +291,17 @@ nothing read from them is trusted):
 - `push`: grant, no open remote intent, config guard, URL pin, live `ls-remote` of heads and tags, secret scan of
   everything that would leave, ancestor check (diverged blocks), intent, grant re-check, push without force or hooks.
   The scan excludes the commits the live remote advertises (never local tracking refs, which are forgeable) and reads
-  every blob as text (`--text`), merge commits against every parent (`-m`), commit messages, and a copy with zero bytes
-  removed (UTF-16). Any scan failure, or output over the cap, blocks the push.
+  every blob as text (`--text`), merge commits against every parent (`--diff-merges=separate`), commit messages, and a
+  copy with zero bytes removed (UTF-16). Every option that changes what git prints (`log.showRoot`, `log.diffMerges`,
+  `i18n.logOutputEncoding`, `--encoding`, colour, replacement refs) is set on the command line, which beats the
+  repository's config. Any scan failure, or output over the cap, blocks the push.
 - A call that gave no clean answer: an exit the tool reported is settled at once by reading the live remote. A call that
-  was killed or timed out (`Lost::Interrupted`) is recorded `Unknown` at once and not read at all: a helper it started
-  may still land. `reconcile` settles it later by reading, and nothing is ever run again.
+  was killed or timed out is recorded `Unknown` at once and not read at all: a helper it started may still land.
+  `Lost::Killed` means the whole tree is proven gone (Windows job object set up); `Lost::Interrupted` means it is not
+  (no confinement, any other platform, a reader that never ended). The receipt records `tree = gone | unproven`.
+  `reconcile` settles by reading, and nothing is ever run again: finding the effect is `Done` in every case, but
+  finding nothing is `Failed` only when the tree is `gone`; otherwise it stays `Unknown` for a later read or the
+  person. An intent with no receipt (a crash) has no such proof either.
 - `open_pr`: only PRs of this repository (`!isCrossRepository`) whose branch is the own branch count; a fork's PR of the
   same name is ignored. An existing PR of the own branch in any state is reused (refused if aimed at another base).
   Otherwise verify the remote head, intent, `gh pr create --draft`, then always read the list back and accept only a PR of
@@ -333,7 +341,9 @@ Seam for the runner (after Task 5 merges, because it edits the runner and the jo
    `card.decision_id()` is turned into `OwnerYes::from_decision`. The runner builds the card from the live PR and
    passes the same `Target` (full head and base) to `merge`, which checks them against the card.
 4. At recovery call `remote::reconcile` for open remote intents before dispatching anything.
-5. Show the account from `preflight(url)` and the `repo` on the Equilibrado start card, and store the account in the
+5. Create the neutral folder (for example `<faber data>/remote-cwd`) and build the runner with
+   `Process::find(neutral)`.
+6. Show the account from `preflight(url)` and the `repo` on the Equilibrado start card, and store the account in the
    grant (`remote_account`): without it every remote effect is refused.
 
 - [ ] Write the failing tests and the fake, see them fail for the right reason.

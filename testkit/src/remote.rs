@@ -10,6 +10,7 @@
 
 use faber_engine::project::remote::{Call, Lost, Reply, Runner, Tool};
 use serde_json::{Value, json};
+use std::path::PathBuf;
 
 /// How one effect ends as the caller sees it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,20 +24,25 @@ pub enum Delivery {
     LostAfter,
     /// The tool had to be killed before it said anything, and the remote saw nothing.
     TimedOutBefore,
-    /// The tool had to be killed, and the remote took it anyway.
+    /// The tool had to be killed, and the remote took it anyway. Everything it started is proven gone.
     TimedOutAfter,
+    /// No answer, and what the tool started cannot be proven gone; the remote saw nothing so far.
+    HungBefore,
+    /// No answer, and what the tool started cannot be proven gone; the remote took it.
+    HungAfter,
 }
 
 impl Delivery {
     fn lands(self) -> bool {
-        matches!(self, Delivery::Ok | Delivery::LostAfter | Delivery::TimedOutAfter)
+        matches!(self, Delivery::Ok | Delivery::LostAfter | Delivery::TimedOutAfter | Delivery::HungAfter)
     }
     fn answer(self) -> Result<Reply, Lost> {
         match self {
             Delivery::Ok => ok(""),
             Delivery::Rejected => fail(1),
             Delivery::LostBefore | Delivery::LostAfter => fail(128),
-            Delivery::TimedOutBefore | Delivery::TimedOutAfter => Err(Lost::Interrupted),
+            Delivery::TimedOutBefore | Delivery::TimedOutAfter => Err(Lost::Killed),
+            Delivery::HungBefore | Delivery::HungAfter => Err(Lost::Interrupted),
         }
     }
 }
@@ -90,6 +96,8 @@ pub struct FakeRemote {
     pub prs: Vec<FakePr>,
     /// `pr list --head` returns every PR, as a loose gh match would, so the engine has to filter by branch itself.
     pub loose_head: bool,
+    /// The `-c key=value` options (keys lowercased) of the call being answered: they beat the repository's config.
+    pins: Vec<String>,
 }
 
 impl Default for FakeRemote {
@@ -120,6 +128,7 @@ impl Default for FakeRemote {
             down_after_effect: false,
             prs: vec![],
             loose_head: false,
+            pins: vec![],
         }
     }
 }
@@ -131,6 +140,7 @@ fn plain(args: &[String]) -> Vec<&str> {
     while let Some(arg) = it.next() {
         if arg == "-c" {
             it.next();
+        } else if arg == "--no-replace-objects" {
         } else {
             out.push(arg.as_str());
         }
@@ -157,6 +167,8 @@ fn fail(code: i32) -> Result<Reply, Lost> {
 impl FakeRemote {
     /// The push URL the tests grant.
     pub const URL: &'static str = "https://example.invalid/owner/repo.git";
+    /// The folder the fake reports as the neutral one: Faber's own, never the shared temp folder.
+    pub const NEUTRAL: &'static str = "/faber/remote-cwd";
 
     pub fn pr_json(pr: &FakePr, remote: &FakeRemote) -> Value {
         json!({
@@ -239,9 +251,25 @@ impl FakeRemote {
                 let (head, mut excluded) = (&rest[..split], rest.get(split + 1..).unwrap_or(&[]).to_vec());
                 excluded.sort_unstable();
                 let wanted = self.advertised();
-                let thorough = ["--text", "-m", "--no-renames", "--ignore-missing", "--format=%B"].iter().all(|f| head.contains(f));
+                let thorough = [
+                    "--text",
+                    "--diff-merges=separate",
+                    "--encoding=UTF-8",
+                    "--no-color",
+                    "--no-renames",
+                    "--ignore-missing",
+                    "--format=%B",
+                ]
+                .iter()
+                .all(|f| head.contains(f));
                 let exact = excluded == wanted.iter().map(String::as_str).collect::<Vec<_>>();
-                ok(if thorough && exact { self.outgoing.clone() } else { "(nothing to see)\n".to_string() })
+                // Repository config that changes what log prints blinds a scan that does not pin it on its own command line.
+                let blind = self.config.iter().any(|(_, key)| {
+                    let key = key.to_lowercase();
+                    ["log.diffmerges", "log.showroot", "i18n.logoutputencoding"].contains(&key.as_str())
+                        && !self.pins.iter().any(|pin| pin.starts_with(&format!("{key}=")))
+                });
+                ok(if thorough && exact && !blind { self.outgoing.clone() } else { "(nothing to see)\n".to_string() })
             }
             ["ls-remote", "--heads", "--tags", _url] => {
                 if let Some(down) = self.read() {
@@ -358,8 +386,13 @@ impl FakeRemote {
 }
 
 impl Runner for FakeRemote {
+    fn neutral(&self) -> PathBuf {
+        PathBuf::from(Self::NEUTRAL)
+    }
+
     fn run(&mut self, call: &Call) -> Result<Reply, Lost> {
         self.calls.push(call.clone());
+        self.pins = call.args.windows(2).filter(|w| w[0] == "-c").map(|w| w[1].to_lowercase()).collect();
         let args = plain(&call.args).into_iter().map(str::to_string).collect::<Vec<_>>();
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         match call.tool {

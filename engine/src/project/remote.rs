@@ -49,13 +49,20 @@ pub struct Reply {
 pub enum Lost {
     /// The tool is not installed: nothing ran.
     Missing,
-    /// It was started and had to be killed (a timeout): it may or may not have taken effect, and nothing it started
-    /// can be assumed gone. A tool that exits with an error is an answer, not this.
+    /// It was started and gave no answer (a timeout, or output that never ended): it may or may not have taken effect,
+    /// and nothing it started can be assumed gone, so it may still land. A tool that exits with an error is an
+    /// answer, not this.
     Interrupted,
+    /// It was killed, and everything it started is proven gone: it cannot take effect any more.
+    Killed,
 }
 
 pub trait Runner {
     fn run(&mut self, call: &Call) -> Result<Reply, Lost>;
+
+    /// A folder of Faber's own where calls that must not see any repository run: empty, private, and under no
+    /// repository. Never a shared folder such as the temp folder, which anything can turn into a repository.
+    fn neutral(&self) -> PathBuf;
 }
 
 // What the journal keeps
@@ -73,6 +80,9 @@ pub struct Open {
     pub id: String,
     pub step: Step,
     pub expected: BTreeMap<String, String>,
+    /// What the `Unknown` receipt recorded (empty when the receipt was never written). `tree` says whether everything
+    /// the call started was proven gone.
+    pub evidence: BTreeMap<String, String>,
 }
 
 /// The seam to the mission journal. `receipt` records how a live effect ended, once. `settle` is the only way out of
@@ -251,7 +261,8 @@ fn account_ok(ledger: &mut impl Ledger, login: &str) -> Result<(), RemoteError> 
 }
 
 fn acting(runner: &mut impl Runner, ledger: &mut impl Ledger) -> Result<(), RemoteError> {
-    let login = login(runner, &neutral_dir())?;
+    let cwd = runner.neutral();
+    let login = login(runner, &cwd)?;
     account_ok(ledger, &login)
 }
 
@@ -259,7 +270,9 @@ fn settled(ledger: &mut impl Ledger) -> Result<(), RemoteError> {
     if ledger.open()?.is_empty() { Ok(()) } else { Err(RemoteError::Pending) }
 }
 
-const GIT_OPTIONS: [&str; 9] = [
+/// Every option that changes what git prints, or what it runs, is set here on the command line, which beats the
+/// repository's own config: a worker can write that config, and a scan that trusts it can be made blind.
+const GIT_OPTIONS: [&str; 14] = [
     "core.pager=",
     "core.fsmonitor=false",
     "diff.external=",
@@ -269,11 +282,17 @@ const GIT_OPTIONS: [&str; 9] = [
     "push.followTags=false",
     "push.gpgSign=false",
     "core.attributesFile=",
+    "log.showRoot=true",
+    "log.diffMerges=separate",
+    "i18n.logOutputEncoding=UTF-8",
+    "diff.renames=false",
+    "color.ui=never",
 ];
 
 fn git(cwd: &Path, args: &[&str]) -> Call {
     let null = if cfg!(windows) { "NUL" } else { "/dev/null" };
-    let mut all = vec!["-c".to_string(), format!("core.hooksPath={null}")];
+    // Replacement refs would show the scan other objects than the ones the push packs.
+    let mut all = vec!["--no-replace-objects".to_string(), "-c".to_string(), format!("core.hooksPath={null}")];
     for option in GIT_OPTIONS {
         all.extend(["-c".into(), option.into()]);
     }
@@ -285,9 +304,12 @@ fn gh(cwd: &Path, args: &[&str]) -> Call {
     Call { tool: Tool::Gh, cwd: cwd.into(), args: args.iter().map(|s| (*s).to_string()).collect() }
 }
 
-/// Where calls that must not see the repository run: not a repository, so none of its config, refs or attributes apply.
-fn neutral_dir() -> PathBuf {
-    std::env::temp_dir()
+/// A receipt of an effect that may have landed. `gone` says everything the call started is proven dead, which is the
+/// only case where a later read that finds nothing may settle it as failed.
+fn unknown(expected: &BTreeMap<String, String>, gone: bool) -> BTreeMap<String, String> {
+    let mut evidence = expected.clone();
+    evidence.insert("tree".into(), if gone { "gone" } else { "unproven" }.into());
+    evidence
 }
 
 fn missing(tool: Tool) -> RemoteError {
@@ -301,7 +323,7 @@ fn missing(tool: Tool) -> RemoteError {
 fn ask(runner: &mut impl Runner, call: &Call) -> Result<Reply, RemoteError> {
     runner.run(call).map_err(|lost| match lost {
         Lost::Missing => missing(call.tool),
-        Lost::Interrupted => RemoteError::Unreachable,
+        Lost::Interrupted | Lost::Killed => RemoteError::Unreachable,
     })
 }
 
@@ -329,7 +351,7 @@ pub fn preflight(runner: &mut impl Runner, url: &str) -> Result<Account, RemoteE
     if !url_shape(url) {
         return Err(RemoteError::Target);
     }
-    let cwd = neutral_dir();
+    let cwd = runner.neutral();
     if ask(runner, &gh(&cwd, &["auth", "status"]))?.code != 0 {
         return Err(RemoteError::GhLoggedOut);
     }
@@ -351,7 +373,7 @@ pub fn blocking_key(key: &str) -> bool {
     let (first, last) = (parts[0], parts[parts.len() - 1]);
     match first {
         "credential" | "http" | "url" | "hook" | "ssh" | "protocol" => true,
-        "core" => matches!(last, "sshcommand" | "gitproxy" | "askpass"),
+        "core" => matches!(last, "sshcommand" | "gitproxy" | "askpass" | "alternaterefscommand"),
         "remote" => parts.len() >= 3 && matches!(last, "proxy" | "receivepack" | "uploadpack" | "vcs" | "mirror"),
         _ => false,
     }
@@ -392,7 +414,8 @@ struct Live {
 }
 
 fn live(runner: &mut impl Runner, t: &Target) -> Result<Live, RemoteError> {
-    let reply = ask(runner, &git(&neutral_dir(), &["ls-remote", "--heads", "--tags", &t.url]))?;
+    let cwd = runner.neutral();
+    let reply = ask(runner, &git(&cwd, &["ls-remote", "--heads", "--tags", &t.url]))?;
     if reply.code != 0 {
         return Err(RemoteError::Unreachable);
     }
@@ -428,7 +451,9 @@ fn scan_outgoing(runner: &mut impl Runner, t: &Target, live: &Live) -> Result<()
         "--ignore-missing",
         "-p",
         "--text",
-        "-m",
+        "--diff-merges=separate",
+        "--encoding=UTF-8",
+        "--no-color",
         "--no-renames",
         "--no-ext-diff",
         "--no-textconv",
@@ -513,9 +538,10 @@ pub fn push(runner: &mut impl Runner, ledger: &mut impl Ledger, t: &Target) -> R
             ledger.receipt(&id, Outcome::Failed, expected, Some(RemoteError::GitMissing.key()))?;
             Err(RemoteError::GitMissing)
         }
-        // Killed: what it started may still be running or may land later. Not read now; `reconcile` settles it.
-        Err(Lost::Interrupted) => {
-            ledger.receipt(&id, Outcome::Unknown, expected, Some(RemoteError::Maybe.key()))?;
+        // Killed: what it started may still be running or may land later. Not read now; `reconcile` settles it, and
+        // only a tree proven gone may ever settle as failed.
+        Err(lost) => {
+            ledger.receipt(&id, Outcome::Unknown, unknown(&expected, lost == Lost::Killed), Some(RemoteError::Maybe.key()))?;
             Err(RemoteError::Maybe)
         }
         Ok(_) => match probe_push(runner, t, &expected) {
@@ -528,7 +554,7 @@ pub fn push(runner: &mut impl Runner, ledger: &mut impl Ledger, t: &Target) -> R
                 Err(RemoteError::Rejected)
             }
             Seen::Unsure => {
-                ledger.receipt(&id, Outcome::Unknown, expected, Some(RemoteError::Maybe.key()))?;
+                ledger.receipt(&id, Outcome::Unknown, unknown(&expected, true), Some(RemoteError::Maybe.key()))?;
                 Err(RemoteError::Maybe)
             }
         },
@@ -608,8 +634,8 @@ fn json(reply: &Reply) -> Result<Value, RemoteError> {
 /// Every PR (any state) that comes from the own branch of this very repository. gh filters by branch name alone, so a
 /// fork's PR of the same name is dropped here.
 fn list_prs(runner: &mut impl Runner, t: &Target) -> Result<Vec<Pr>, RemoteError> {
-    let call =
-        gh(&neutral_dir(), &["pr", "list", "--repo", &t.repo, "--head", &t.branch, "--state", "all", "--limit", "20", "--json", PR_FIELDS]);
+    let cwd = runner.neutral();
+    let call = gh(&cwd, &["pr", "list", "--repo", &t.repo, "--head", &t.branch, "--state", "all", "--limit", "20", "--json", PR_FIELDS]);
     let reply = ask(runner, &call)?;
     let all: Vec<Pr> = json(&reply)?.as_array().ok_or(RemoteError::Command)?.iter().map(parse_pr).collect::<Result<_, _>>()?;
     Ok(all.into_iter().filter(|pr| !pr.cross && pr.branch == t.branch).collect())
@@ -662,16 +688,17 @@ pub fn open_pr(runner: &mut impl Runner, ledger: &mut impl Ledger, t: &Target, s
         return Err(e);
     }
     let (title, body) = (format!("--title={}", spec.title), format!("--body={}", spec.body));
-    let created = runner
-        .run(&gh(&neutral_dir(), &["pr", "create", "--draft", "--repo", &t.repo, "--head", &t.branch, "--base", &t.base, &title, &body]));
+    let cwd = runner.neutral();
+    let created =
+        runner.run(&gh(&cwd, &["pr", "create", "--draft", "--repo", &t.repo, "--head", &t.branch, "--base", &t.base, &title, &body]));
     let clean = matches!(&created, Ok(reply) if reply.code == 0);
     match created {
         Err(Lost::Missing) => {
             ledger.receipt(&id, Outcome::Failed, expected, Some(RemoteError::GhMissing.key()))?;
             return Err(RemoteError::GhMissing);
         }
-        Err(Lost::Interrupted) => {
-            ledger.receipt(&id, Outcome::Unknown, expected, Some(RemoteError::Maybe.key()))?;
+        Err(lost) => {
+            ledger.receipt(&id, Outcome::Unknown, unknown(&expected, lost == Lost::Killed), Some(RemoteError::Maybe.key()))?;
             return Err(RemoteError::Maybe);
         }
         Ok(_) => {}
@@ -688,7 +715,7 @@ pub fn open_pr(runner: &mut impl Runner, ledger: &mut impl Ledger, t: &Target, s
             Err(RemoteError::PrFailed)
         }
         Seen::No | Seen::Unsure => {
-            ledger.receipt(&id, Outcome::Unknown, expected, Some(RemoteError::Maybe.key()))?;
+            ledger.receipt(&id, Outcome::Unknown, unknown(&expected, true), Some(RemoteError::Maybe.key()))?;
             Err(RemoteError::Maybe)
         }
     }
@@ -756,7 +783,8 @@ fn summarize(checks: &[Value], head: &str) -> Ci {
 /// The live PR, which must be the mission's own branch of this repository, and its checks.
 fn view_pr(runner: &mut impl Runner, t: &Target, number: u64) -> Result<(Pr, Ci), RemoteError> {
     let number = number.to_string();
-    let reply = ask(runner, &gh(&neutral_dir(), &["pr", "view", &number, "--repo", &t.repo, "--json", PR_VIEW_FIELDS]))?;
+    let cwd = runner.neutral();
+    let reply = ask(runner, &gh(&cwd, &["pr", "view", &number, "--repo", &t.repo, "--json", PR_VIEW_FIELDS]))?;
     let value = json(&reply)?;
     let pr = parse_pr(&value)?;
     if pr.cross || pr.branch != t.branch {
@@ -896,12 +924,13 @@ pub fn merge(
         ledger.receipt(&id, Outcome::Failed, expected, Some(e.key()))?;
         return Err(e);
     }
+    let cwd = runner.neutral();
     let mut last = Ok(Reply { code: 0, stdout: String::new() });
     if pr.draft {
-        last = runner.run(&gh(&neutral_dir(), &["pr", "ready", &number, "--repo", &t.repo]));
+        last = runner.run(&gh(&cwd, &["pr", "ready", &number, "--repo", &t.repo]));
     }
     if matches!(&last, Ok(r) if r.code == 0) {
-        last = runner.run(&gh(&neutral_dir(), &["pr", "merge", &number, "--repo", &t.repo, "--merge", "--match-head-commit", &card.head]));
+        last = runner.run(&gh(&cwd, &["pr", "merge", &number, "--repo", &t.repo, "--merge", "--match-head-commit", &card.head]));
     }
     match last {
         Ok(r) if r.code == 0 => {
@@ -912,8 +941,8 @@ pub fn merge(
             ledger.receipt(&id, Outcome::Failed, expected, Some(RemoteError::GhMissing.key()))?;
             Err(RemoteError::GhMissing)
         }
-        Err(Lost::Interrupted) => {
-            ledger.receipt(&id, Outcome::Unknown, expected, Some(RemoteError::Maybe.key()))?;
+        Err(lost) => {
+            ledger.receipt(&id, Outcome::Unknown, unknown(&expected, lost == Lost::Killed), Some(RemoteError::Maybe.key()))?;
             Err(RemoteError::Maybe)
         }
         Ok(_) => match probe_merge(runner, t, card.pr) {
@@ -926,7 +955,7 @@ pub fn merge(
                 Err(RemoteError::MergeFailed)
             }
             Seen::Unsure => {
-                ledger.receipt(&id, Outcome::Unknown, expected, Some(RemoteError::Maybe.key()))?;
+                ledger.receipt(&id, Outcome::Unknown, unknown(&expected, true), Some(RemoteError::Maybe.key()))?;
                 Err(RemoteError::Maybe)
             }
         },
@@ -959,11 +988,13 @@ pub fn reconcile(runner: &mut impl Runner, ledger: &mut impl Ledger, t: &Target)
                 ledger.settle(&open.id, Outcome::Done, found)?;
                 Some(Outcome::Done)
             }
-            Seen::No => {
+            // Nothing there yet is only "failed" if nothing the call started can still land it; otherwise it stays open
+            // for a later read, which can still find it done.
+            Seen::No if open.evidence.get("tree").map(String::as_str) == Some("gone") => {
                 ledger.settle(&open.id, Outcome::Failed, open.expected.clone())?;
                 Some(Outcome::Failed)
             }
-            Seen::Unsure => None,
+            Seen::No | Seen::Unsure => None,
         };
         out.push((open.id, outcome));
     }
@@ -1000,6 +1031,8 @@ pub fn publish(runner: &mut impl Runner, ledger: &mut impl Ledger, t: &Target, s
 pub struct Process {
     git: PathBuf,
     gh: PathBuf,
+    /// Where reads run: Faber's own folder, see [`Runner::neutral`].
+    neutral: PathBuf,
 }
 
 const OUTPUT_CAP: usize = 16 << 20;
@@ -1062,12 +1095,12 @@ fn confine(child: &std::process::Child) -> Option<win32job::Job> {
 
 impl Process {
     /// A missing tool is not an error here: its calls answer [`Lost::Missing`].
-    pub fn find() -> Process {
-        Process { git: native("git"), gh: native("gh") }
+    pub fn find(neutral: PathBuf) -> Process {
+        Process { git: native("git"), gh: native("gh"), neutral }
     }
 
-    pub fn at(git: PathBuf, gh: PathBuf) -> Process {
-        Process { git, gh }
+    pub fn at(git: PathBuf, gh: PathBuf, neutral: PathBuf) -> Process {
+        Process { git, gh, neutral }
     }
 
     /// The command for one call. The environment is the person's own, so their credential helper and gh login work,
@@ -1103,16 +1136,44 @@ impl Process {
     }
 }
 
+/// The code of a call that was refused before it started.
+const REFUSED: i32 = 126;
+
+/// Whether `dir` can be the neutral folder: absolute, not the shared temp folder, made if missing, and neither it nor
+/// any parent holds a `.git` (a folder, a file or a dangling link), so git finds no repository and no config there.
+pub fn private_dir(dir: &Path) -> bool {
+    dir.is_absolute()
+        && dir != std::env::temp_dir()
+        && std::fs::create_dir_all(dir).is_ok()
+        && dir.ancestors().all(|folder| folder.join(".git").symlink_metadata().is_err())
+}
+
+/// What a call that had to be killed reports: killed and proven gone only if the whole tree was confined.
+pub fn lost_on_timeout(confined: bool) -> Lost {
+    if confined { Lost::Killed } else { Lost::Interrupted }
+}
+
 impl Runner for Process {
+    fn neutral(&self) -> PathBuf {
+        self.neutral.clone()
+    }
+
     fn run(&mut self, call: &Call) -> Result<Reply, Lost> {
         let program = if call.tool == Tool::Git { &self.git } else { &self.gh };
         if program.as_os_str().is_empty() {
             return Err(Lost::Missing);
         }
+        // A repository planted in or above the neutral folder would answer reads with its own config.
+        if call.cwd == self.neutral && !private_dir(&self.neutral) {
+            return Ok(Reply { code: REFUSED, stdout: String::new() });
+        }
         let mut child = self.command(call).spawn().map_err(|_| Lost::Missing)?;
         #[cfg(windows)]
         let job = confine(&child);
-        let Some(mut stdout) = child.stdout.take() else { return Err(Lost::Interrupted) };
+        let Some(mut stdout) = child.stdout.take() else {
+            let _ = child.kill();
+            return Err(Lost::Interrupted);
+        };
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let _ = tx.send(read_capped(&mut stdout, OUTPUT_CAP));
@@ -1123,11 +1184,17 @@ impl Runner for Process {
                 Ok(Some(status)) => break status,
                 Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
                 _ => {
+                    // ponytail: only Windows confines the tree (a job object). Elsewhere a killed call stays
+                    // unproven; process groups would prove it.
+                    #[cfg(windows)]
+                    let confined = job.is_some();
+                    #[cfg(not(windows))]
+                    let confined = false;
                     #[cfg(windows)]
                     drop(job);
                     let _ = child.kill();
                     let _ = child.wait();
-                    return Err(Lost::Interrupted);
+                    return Err(lost_on_timeout(confined));
                 }
             }
         };

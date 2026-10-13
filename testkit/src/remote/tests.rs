@@ -7,11 +7,12 @@
 use super::{Delivery, FakePr, FakeRemote};
 use faber_engine::project::remote::{
     Account, Call, Ci, CiState, Ledger, Lost, MergeCard, Open, OwnerYes, PrSpec, PrState, Process, RemoteError, Reply, Runner, Step,
-    Target, Tool, blocking_key, ci, merge, merge_card, open_pr, preflight, publish, push, read_capped, reconcile, reply_code,
+    Target, Tool, blocking_key, ci, lost_on_timeout, merge, merge_card, open_pr, preflight, private_dir, publish, push, read_capped,
+    reconcile, reply_code,
 };
 use faber_engine::project::{DecidedBy, Decision, GitMode, Grant, Outcome, RepoIdentity};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const OLD: &str = "1111111111111111111111111111111111111111";
 const HEAD: &str = "2222222222222222222222222222222222222222";
@@ -71,7 +72,12 @@ impl Ledger for Mem {
             .entries
             .iter()
             .filter(|e| e.receipt.as_ref().is_none_or(|r| r.0 == Outcome::Unknown))
-            .map(|e| Open { id: e.id.clone(), step: e.step, expected: e.expected.clone() })
+            .map(|e| Open {
+                id: e.id.clone(),
+                step: e.step,
+                expected: e.expected.clone(),
+                evidence: e.receipt.as_ref().map(|r| r.1.clone()).unwrap_or_default(),
+            })
             .collect())
     }
     fn intent(&mut self, id: &str, step: Step, expected: BTreeMap<String, String>) -> Result<(), RemoteError> {
@@ -143,6 +149,9 @@ impl<F: FnMut(&Call, &mut FakeRemote, Result<Reply, Lost>) -> Result<Reply, Lost
     fn run(&mut self, call: &Call) -> Result<Reply, Lost> {
         let reply = self.fake.run(call);
         (self.change)(call, &mut self.fake, reply)
+    }
+    fn neutral(&self) -> PathBuf {
+        self.fake.neutral()
     }
 }
 
@@ -290,6 +299,8 @@ fn a_push_sends_the_exact_proven_commit_to_the_granted_url_without_force() {
     assert_eq!(ledger.outcomes(), [(Step::Push, Some(Outcome::Done))]);
     assert_eq!(ledger.entries[0].expected["new"], HEAD);
     // Every git call runs with hooks and the pager off, and never through a shell.
+    // Replacement refs would show the scan other objects than the ones the push packs.
+    assert!(fake.calls.iter().filter(|c| c.tool == Tool::Git).all(|c| has(c, "--no-replace-objects")));
     let null = if cfg!(windows) { "NUL" } else { "/dev/null" };
     assert!(fake.calls.iter().filter(|c| c.tool == Tool::Git).all(|c| c.args.contains(&format!("core.hooksPath={null}"))));
     for option in [
@@ -303,6 +314,11 @@ fn a_push_sends_the_exact_proven_commit_to_the_granted_url_without_force() {
         "push.followTags=false",
         "push.gpgSign=false",
         "core.attributesFile=",
+        "log.showRoot=true",
+        "log.diffMerges=separate",
+        "i18n.logOutputEncoding=UTF-8",
+        "diff.renames=false",
+        "color.ui=never",
     ] {
         let git = fake.calls.iter().filter(|c| c.tool == Tool::Git);
         assert!(git.into_iter().all(|c| c.args.iter().any(|a| a.starts_with(option))), "every git call carries {option}");
@@ -394,7 +410,18 @@ fn binary_files_merge_commits_and_messages_are_scanned_as_text() {
     let mut fake = FakeRemote { outgoing: "+-----BEGIN PRIVATE KEY-----\n".into(), ..FakeRemote::default() };
     assert_eq!(key(push(&mut fake, &mut ledger, &target())), "reason.remote.secret");
     let args = &fake.git_calls("log")[0].args;
-    for wanted in ["--text", "-m", "--no-renames", "--ignore-missing", "--no-ext-diff", "--no-textconv", "--format=%B", "-p"] {
+    for wanted in [
+        "--text",
+        "--diff-merges=separate",
+        "--encoding=UTF-8",
+        "--no-color",
+        "--no-renames",
+        "--ignore-missing",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--format=%B",
+        "-p",
+    ] {
         assert!(args.iter().any(|a| a == wanted), "the scan must pass {wanted}");
     }
     // The ignored-missing flag must come before the revisions, or git stops at the first unknown one.
@@ -493,6 +520,9 @@ fn config_that_cannot_be_read_or_understood_blocks_the_push() {
         fn run(&mut self, _: &Call) -> Result<faber_engine::project::remote::Reply, faber_engine::project::remote::Lost> {
             Ok(faber_engine::project::remote::Reply { code: 0, stdout: "local core.bare\nunparsable\n".into() })
         }
+        fn neutral(&self) -> PathBuf {
+            PathBuf::from(FakeRemote::NEUTRAL)
+        }
     }
     assert_eq!(key(push(&mut NoTab, &mut ledger, &target())), "reason.remote.config");
     assert!(ledger.entries.is_empty() && fake.pushes().is_empty());
@@ -504,6 +534,7 @@ fn which_config_keys_run_commands_or_reroute() {
         "core.sshCommand",
         "core.gitProxy",
         "core.askPass",
+        "core.alternateRefsCommand",
         "credential.helper",
         "credential.https://github.com.username",
         "http.proxy",
@@ -653,8 +684,14 @@ fn network_reads_never_run_inside_the_repository() {
     for call in fake.calls.iter().filter(|c| c.tool == Tool::Gh && has(c, "pr")) {
         assert!(call.args.windows(2).any(|w| w == ["--repo", "owner/repo"]), "{:?}", call.args);
     }
+    // Not in the repository, and not in a shared folder either: anything can turn the temp folder into a repository.
+    let own = PathBuf::from(FakeRemote::NEUTRAL);
+    assert!(!own.starts_with(std::env::temp_dir()));
+    for call in fake.calls.iter().filter(|c| c.tool == Tool::Gh) {
+        assert_eq!(call.cwd, own, "{:?}", call.args);
+    }
     for call in fake.git_calls("ls-remote") {
-        assert_ne!(call.cwd, target().cwd);
+        assert_eq!(call.cwd, own);
         assert!(call.args.contains(&FakeRemote::URL.to_string()), "reads go to the granted URL, not to a remote name");
     }
     let config_at = fake.calls.iter().position(|c| c.args.iter().any(|a| a == "config")).unwrap();
@@ -889,6 +926,9 @@ fn a_clean_create_whose_pr_cannot_be_found_is_unknown_not_done() {
             }
             reply
         }
+        fn neutral(&self) -> PathBuf {
+            self.0.neutral()
+        }
     }
     let mut ledger = Mem::new(GitMode::Equilibrado);
     let mut fake = Mismatch(pushed(Some(HEAD)));
@@ -967,6 +1007,9 @@ fn gh_missing_at_create_time_fails_the_receipt() {
                 return Err(faber_engine::project::remote::Lost::Missing);
             }
             self.0.run(call)
+        }
+        fn neutral(&self) -> PathBuf {
+            self.0.neutral()
         }
     }
     let mut ledger = Mem::new(GitMode::Equilibrado);
@@ -1379,7 +1422,7 @@ fn reconciliation_reads_only_and_only_under_a_valid_grant() {
 
 #[test]
 fn the_real_process_is_shell_free_hidden_and_never_prompts() {
-    let process = Process::at("C:/tools/git.exe".into(), "C:/tools/gh.exe".into());
+    let process = Process::at("C:/tools/git.exe".into(), "C:/tools/gh.exe".into(), "C:/faber/remote".into());
     let call = Call { tool: Tool::Gh, cwd: PathBuf::from("/work/repo"), args: vec!["pr".into(), "view".into(), "7".into()] };
     let command = process.command(&call);
     assert_eq!(command.get_program(), "C:/tools/gh.exe");
@@ -1405,4 +1448,150 @@ fn the_real_process_is_shell_free_hidden_and_never_prompts() {
     );
     let git = process.command(&Call { tool: Tool::Git, cwd: PathBuf::from("/work/repo"), args: vec!["status".into()] });
     assert_eq!(git.get_program(), "C:/tools/git.exe");
+}
+
+// Review round 2: what the scan prints, where reads run, and what a killed call may be settled as
+
+#[test]
+fn repository_config_cannot_blind_the_scan() {
+    // Each of these keys, set in the repository, would make git print less than was asked for. The scan pins them on
+    // its own command line, which beats the repository.
+    for blinder in ["log.diffMerges", "log.showRoot", "i18n.logOutputEncoding"] {
+        for scope in ["local", "worktree"] {
+            let mut ledger = Mem::new(GitMode::Equilibrado);
+            let mut fake = scoped(scope, blinder);
+            fake.outgoing = "+-----BEGIN PRIVATE KEY-----\n".into();
+            assert_eq!(key(push(&mut fake, &mut ledger, &target())), "reason.remote.secret", "{scope} {blinder}");
+            assert!(fake.pushes().is_empty() && ledger.entries.is_empty());
+        }
+    }
+}
+
+#[test]
+fn only_a_private_folder_outside_every_repository_can_be_the_neutral_one() {
+    let base = tempfile::tempdir().unwrap();
+    let outside = std::env::temp_dir().ancestors().all(|folder| folder.join(".git").symlink_metadata().is_err());
+    // The folder is made when it is missing, and is fine when nothing above it is a repository.
+    let fresh = base.path().join("faber").join("remote");
+    assert_eq!(private_dir(&fresh), outside);
+    assert!(fresh.is_dir());
+    // A repository in the folder, or in any folder above it, spoils it: its config would answer the reads.
+    for planted in ["dir", "file"] {
+        let top = tempfile::tempdir().unwrap();
+        let git = top.path().join(".git");
+        if planted == "dir" {
+            std::fs::create_dir(&git).unwrap()
+        } else {
+            std::fs::write(&git, "gitdir: elsewhere").unwrap()
+        }
+        assert!(!private_dir(&top.path().join("a").join("b")), "{planted} above");
+        assert!(!private_dir(top.path()), "{planted} in it");
+    }
+    // A link called .git that points nowhere is still a .git to the next tool that resolves it.
+    let top = tempfile::tempdir().unwrap();
+    let missing = top.path().join("nowhere");
+    #[cfg(unix)]
+    let linked = std::os::unix::fs::symlink(&missing, top.path().join(".git")).is_ok();
+    #[cfg(windows)]
+    let linked = std::os::windows::fs::symlink_dir(&missing, top.path().join(".git")).is_ok();
+    if linked {
+        assert!(!private_dir(&top.path().join("work")), "a dangling .git link above");
+    }
+    // The shared temp folder and a relative path never qualify.
+    assert!(!private_dir(&std::env::temp_dir()));
+    assert!(!private_dir(Path::new("relative/folder")));
+}
+
+#[test]
+fn the_real_process_refuses_to_read_from_a_folder_a_repository_reaches() {
+    let top = tempfile::tempdir().unwrap();
+    std::fs::create_dir(top.path().join(".git")).unwrap();
+    let neutral = top.path().join("remote");
+    let (git, gh) = if cfg!(windows) { ("C:\\none\\git.exe", "C:\\none\\gh.exe") } else { ("/none/git", "/none/gh") };
+    let mut process = Process::at(git.into(), gh.into(), neutral.clone());
+    assert_eq!(process.neutral(), neutral);
+    // The tools do not exist, so a call that was not refused would come back as "missing" instead.
+    let call = Call { tool: Tool::Git, cwd: neutral, args: vec!["ls-remote".into()] };
+    assert_eq!(process.run(&call), Ok(Reply { code: 126, stdout: String::new() }));
+    let elsewhere = Call { tool: Tool::Git, cwd: top.path().to_path_buf(), args: vec!["status".into()] };
+    assert_eq!(process.run(&elsewhere), Err(Lost::Missing), "only the neutral folder is guarded");
+}
+
+#[test]
+fn a_timeout_proves_the_tree_gone_only_if_it_was_confined() {
+    assert_eq!(lost_on_timeout(true), Lost::Killed);
+    assert_eq!(lost_on_timeout(false), Lost::Interrupted);
+}
+
+#[test]
+fn a_killed_call_that_may_still_land_is_never_settled_as_failed() {
+    // Push: nothing there at the first reads, then the helper that outlived the kill lands it.
+    let mut ledger = Mem::new(GitMode::Equilibrado);
+    let mut fake = FakeRemote { push: Delivery::HungBefore, ..FakeRemote::default() };
+    assert_eq!(key(push(&mut fake, &mut ledger, &target())), "reason.remote.maybe");
+    assert_eq!(ledger.entries[0].receipt.as_ref().unwrap().1["tree"], "unproven");
+    for _ in 0..2 {
+        let id = ledger.entries[0].id.clone();
+        assert_eq!(reconcile(&mut fake, &mut ledger, &target()).unwrap(), [(id, None)]);
+        assert_eq!(ledger.outcomes(), [(Step::Push, Some(Outcome::Unknown))]);
+    }
+    fake.remote_head = Some(HEAD.into());
+    reconcile(&mut fake, &mut ledger, &target()).unwrap();
+    assert_eq!(ledger.outcomes(), [(Step::Push, Some(Outcome::Done))]);
+    assert_eq!(fake.pushes().len(), 1);
+
+    // The same call killed with its tree proven gone can only have failed.
+    let mut ledger = Mem::new(GitMode::Equilibrado);
+    let mut fake = FakeRemote { push: Delivery::TimedOutBefore, ..FakeRemote::default() };
+    push(&mut fake, &mut ledger, &target()).unwrap_err();
+    assert_eq!(ledger.entries[0].receipt.as_ref().unwrap().1["tree"], "gone");
+    reconcile(&mut fake, &mut ledger, &target()).unwrap();
+    assert_eq!(ledger.outcomes(), [(Step::Push, Some(Outcome::Failed))]);
+
+    // A PR create that may still land.
+    let mut ledger = Mem::new(GitMode::Equilibrado);
+    let mut fake = FakeRemote { create: Delivery::HungBefore, ..pushed(Some(HEAD)) };
+    assert_eq!(key(open_pr(&mut fake, &mut ledger, &target(), &spec())), "reason.remote.maybe");
+    reconcile(&mut fake, &mut ledger, &target()).unwrap();
+    assert_eq!(ledger.outcomes(), [(Step::Pr, Some(Outcome::Unknown))]);
+    fake.prs.push(pr(HEAD));
+    reconcile(&mut fake, &mut ledger, &target()).unwrap();
+    assert_eq!(ledger.outcomes(), [(Step::Pr, Some(Outcome::Done))]);
+    assert_eq!(fake.gh_calls("create").len(), 1);
+
+    // A merge that may still land.
+    let mut ledger = Mem::new(GitMode::Equilibrado);
+    let mut fake = ready_pr(vec![]);
+    let (card, yes) = card_and_yes(&mut fake, &mut ledger);
+    fake.merge = Delivery::HungBefore;
+    assert_eq!(key(merge(&mut fake, &mut ledger, &target(), &card, Some(&yes))), "reason.remote.maybe");
+    reconcile(&mut fake, &mut ledger, &target()).unwrap();
+    assert_eq!(ledger.outcomes(), [(Step::Merge, Some(Outcome::Unknown))]);
+    fake.prs[0].state = "MERGED".into();
+    reconcile(&mut fake, &mut ledger, &target()).unwrap();
+    assert_eq!(ledger.outcomes(), [(Step::Merge, Some(Outcome::Done))]);
+}
+
+#[test]
+fn a_hung_call_that_did_land_is_found_done_and_a_clean_exit_is_proven_gone() {
+    let mut ledger = Mem::new(GitMode::Equilibrado);
+    let mut fake = FakeRemote { push: Delivery::HungAfter, ..FakeRemote::default() };
+    push(&mut fake, &mut ledger, &target()).unwrap_err();
+    reconcile(&mut fake, &mut ledger, &target()).unwrap();
+    assert_eq!(ledger.outcomes(), [(Step::Push, Some(Outcome::Done))]);
+    // A tool that exited with an error and whose result could not be read afterwards ended: its tree is gone.
+    let mut ledger = Mem::new(GitMode::Equilibrado);
+    let mut fake = FakeRemote { push: Delivery::LostBefore, down_after_effect: true, ..FakeRemote::default() };
+    push(&mut fake, &mut ledger, &target()).unwrap_err();
+    assert_eq!(ledger.entries[0].receipt.as_ref().unwrap().1["tree"], "gone");
+}
+
+#[test]
+fn an_intent_with_no_receipt_is_settled_only_by_finding_it_done() {
+    // A crash leaves no proof about what the call started: nothing found is not "failed".
+    let mut ledger = Mem::new(GitMode::Equilibrado);
+    ledger.intent("push-222222222222-1", Step::Push, BTreeMap::from([("new".to_string(), HEAD.to_string())])).unwrap();
+    let mut fake = pushed(Some(OLD));
+    assert_eq!(reconcile(&mut fake, &mut ledger, &target()).unwrap(), [("push-222222222222-1".to_string(), None)]);
+    assert!(ledger.entries[0].receipt.is_none());
 }
