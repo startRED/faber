@@ -11,6 +11,7 @@ pub mod gate;
 pub mod page;
 pub mod plan;
 pub mod proctree;
+pub mod remote;
 pub mod replay;
 pub mod report;
 pub mod runner;

@@ -249,10 +249,145 @@ Focused proof: project/recovery/local-update targets and their hidden scenarios;
 - [ ] Record software/map parity, bounded plain-CLI probes, G1-G10 and AS-1..9 only with evidence; missing controls keep R96 incomplete.
 - [ ] Run GA, cross-vendor review, commit `test: prove the self-development MVP`.
 
+## Task 14 — Equilibrado remote: push, draft PR, CI status, merge card
+
+R108 slice 1, moved out of "Later". Equilibrado only; Seguro keeps denying every remote effect, reads included.
+Rules come from the design (git modes, queue step 8, section 10): exact own-branch non-forced push, one draft PR, secret
+scan first, intent then receipt, a third "maybe done" state settled by reading live remote state, never a retry.
+R108 adds reading the PR's check results and a merge card. Merging needs the owner's explicit yes, given for one exact
+card: the repository, the PR number, the full head SHA and the base branch. A yes for any other card, or the same card
+with another head or base, does not count, and the card is checked again against the live PR right before the merge.
+
+Files (all new, so Task 5 does not conflict): `engine/src/project/remote.rs` (one `pub mod remote;` line appended at the
+end of `project.rs`, where Task 5 does not edit), `testkit/src/remote.rs` (stateful fake git + gh, `pub mod` line in
+`testkit/src/lib.rs`), `testkit/src/remote/tests.rs` (unit tests of the testkit library: an integration test there would make `cargo test`
+rebuild the running `faber-test` binary), the `reason.remote.*` keys in the five `ui/locales/*.ts`.
+
+Design (as hardened by two independent security reviews; a worker can write the repository's config, refs and files, so
+nothing read from them is trusted):
+- `Runner` runs one `Call { tool: Git | Gh, cwd, args }` and returns `Reply { code, stdout }` or `Lost::Missing`
+  (not installed, nothing ran) or `Lost::Interrupted` (started, no answer, or killed). `Process` is the real one:
+  shell-free, the person's own environment, git credential helper and gh login used as they are, hidden window, no
+  prompts, repository-redirecting variables removed, a 180 s timeout that ends the whole process tree (a Windows job
+  object), and output capped at 16 MiB: more than that is a failure, never a partial success. Faber reads no token and
+  no credential file; stderr is never read.
+- `Ledger` is the seam to the mission journal: current grant, `intent`, `receipt`, `settle` (replaces `Unknown` with
+  an engine-read Done or Failed), `open` (remote intents without a settled receipt).
+- `Target { cwd, identity, revision, repo (owner/name), remote, url, branch (faber/...), head (full oid), base, attempt }`.
+  Everything is validated before any process runs. The pushed ref is `<head oid>:refs/heads/<branch>`, so only the proven
+  commit leaves, never a branch that moved since.
+- Reads of the remote never run inside the repository: `ls-remote`, `gh pr list/view/create/merge` and the gh login run
+  in the runner's neutral folder (`Runner::neutral()`) against the granted URL and `--repo` itself, so the repository's
+  own config cannot redirect them. That folder is Faber's own, created by the shell next to its other data, never the
+  shared temp folder: `Process` refuses to run a neutral call if the folder or any parent holds a `.git`. Only the push
+  needs the checkout, and it goes to the granted URL, not to the remote name.
+- Config guard before the push, an allowlist (a blocklist of bad keys was missed three times): `git config --list --show-scope
+  --name-only`. In the local and worktree scopes only these keys may appear: the `core.*` basics `git init` and the
+  platforms write (`repositoryformatversion`, `filemode`, `bare`, `logallrefupdates`, `symlinks`, `ignorecase`,
+  `precomposeunicode`, `longpaths`, `autocrlf`), `extensions.worktreeConfig` and `extensions.objectFormat` (the layout git
+  must understand to open the repository), `remote.<granted remote>.url` and `.fetch`, `branch.<any branch>.remote`,
+  `.merge` and `.vscode-merge-base`, and `user.name` and `user.email`. Section and variable names are compared without
+  case, a subsection exactly, as git does: `[remote "Origin"]` is another remote than `origin`, so a second remote is
+  refused with its own reason (`reason.remote.otherRemote`). The branch keys are allowed for every branch because a clone
+  keeps one pair per tracked branch and a mission worktree reads that shared config; they cannot change where or what is
+  pushed, since every network call names the granted URL and an explicit refspec, and `pushRemote`, `rebase` and every
+  other branch key stay refused. Their values are read in one `git config --show-scope -z --get-regexp '^branch[.]'`
+  and must be inert: `remote` is the granted remote or `.`, `merge` is a `refs/heads/...` name, and no value holds a
+  control character. Anything else blocks the push, so does an unparsable line: that includes every `include`
+  and `includeIf` (`--list` follows them and judges what they bring, and the include key itself is not listed), `gpg.*`,
+  `credential.*`, `url.*`, `core.hooksPath`, `core.worktree`, `remote.*.pushurl` and the promisor keys. The command scope
+  may hold only Faber's own pins: the environment's `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>`,
+  `GIT_CONFIG_VALUE_<n>` and `GIT_CONFIG` are removed from every call, the network reads in the neutral folder included.
+  `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` are left alone on purpose: they are the person's own way to place the files
+  the global and system scopes already trust, and only the person can set them for Faber's process. The remote name
+  must also resolve to exactly the granted URL (`remote get-url --push --all`, one line, equal).
+  Repository layout: `info/grafts`, `shallow`, `objects/info/alternates` and `objects/info/http-alternates` change what
+  `git log` walks or where objects are read from, and `--no-replace-objects` does not undo grafts. One
+  `rev-parse --path-format=absolute --git-path ...` asks git where it would read each (a linked worktree resolves to the
+  common dir), and the push is refused (`reason.remote.layout`) if any exists, even as a dangling link.
+  `GIT_GRAFT_FILE` and `GIT_SHALLOW_FILE` are removed from the environment so those default places are the ones read.
+  Protocols: `protocol.allow=never` is pinned on every git call, and `git_net` turns on the one transport the granted URL
+  needs (`protocol.https.allow=always`, or `ssh`) for `ls-remote` and the push. `GIT_ALLOW_PROTOCOL`, which beats every
+  `protocol.*.allow`, is set in the child's environment to the same single transport (`none` for a call with no URL, so
+  `file://` and `ext::` are refused even where the environment allows them; gh gets `https:ssh`).
+  The pins stay as the second layer: hooks off (`core.hooksPath` to the null device, and the push uses `--no-verify`),
+  `log.showSignature=false` with `--no-show-signature`, `safe.bareRepository=explicit`, and `GIT_NO_LAZY_FETCH=1` so a
+  partial clone's promisor remote is never contacted by a scan. The neutral folder is used as its real path; it is refused
+  if it is a link, has a bare repository's layout, or the real path or any parent holds a `.git`.
+  A hidden scenario (`remote git` in `testkit/src/screen/remote_git.rs`) runs these same calls with real git, in an
+  environment that allows every transport and injects config of its own: a forged `gpgsig` commit with `log.showSignature`
+  and `gpg.program`, includes, worktree config, other and differently cased remotes, hooks in `.git/hooks` and at
+  `core.hooksPath`, an `ext::` push and a `file://` read, injected `GIT_CONFIG_*`, grafts (also from a linked worktree),
+  a shallow clone, a shared clone and `http-alternates`, a partial clone, a bare layout and a junction as the neutral
+  folder. Each case has a control that proves the attack works without the guard on that git.
+- `preflight(url)`: `gh auth status`, the account login, and `gh repo view <url>`, all outside the checkout, give
+  `Account { login, repo }` for the start card. gh must act as the account the grant names (`remote_account`); a grant
+  without one acts as none (`reason.grant.noAccount`).
+- `push`: grant, no open remote intent, config guard, URL pin, live `ls-remote` of heads and tags, secret scan of
+  everything that would leave, ancestor check (diverged blocks), intent, grant re-check, push without force or hooks.
+  The scan excludes the commits the live remote advertises (never local tracking refs, which are forgeable) and reads
+  every blob as text (`--text`), merge commits against every parent (`--diff-merges=separate`), commit messages, and a
+  copy with zero bytes removed (UTF-16). Every option that changes what git prints (`log.showRoot`, `log.diffMerges`,
+  `i18n.logOutputEncoding`, `--encoding`, colour, replacement refs) is set on the command line, which beats the
+  repository's config. Any scan failure, or output over the cap, blocks the push.
+- A call that gave no clean answer: an exit the tool reported is settled at once by reading the live remote. A call that
+  was killed or timed out is recorded `Unknown` at once and not read at all: a helper it started may still land.
+  `Lost::Killed` means the whole tree is proven gone (Windows job object set up); `Lost::Interrupted` means it is not
+  (no confinement, any other platform, a reader that never ended). The receipt records `tree = gone | unproven`.
+  `reconcile` settles by reading, and nothing is ever run again: finding the effect is `Done` in every case, but
+  finding nothing is `Failed` only when the tree is `gone`; otherwise it stays `Unknown` for a later read or the
+  person. An intent with no receipt (a crash) has no such proof either.
+- `open_pr`: only PRs of this repository (`!isCrossRepository`) whose branch is the own branch count; a fork's PR of the
+  same name is ignored. An existing PR of the own branch in any state is reused (refused if aimed at another base).
+  Otherwise verify the remote head, intent, `gh pr create --draft`, then always read the list back and accept only a PR of
+  the proven head and base, so `Done` carries the PR number.
+- `ci`: `gh pr view --json statusCheckRollup,...` into `Ci { Pending | Passing | Failing | None, failed names }`; a PR
+  that is not ours is `reason.remote.foreign`, and a head that is not the proven head is `reason.remote.headMoved`.
+- `merge_card` builds `MergeCard { repo, pr, head, base, ci }` and the decision id `merge-<pr>-<sha256 of the whole
+  binding>`, so two heads that share a prefix are two cards. `OwnerYes` can only be made from a Decision that a Person
+  answered "yes", under that id, carrying that exact binding. `merge` refuses without it, in Seguro, when the card is not
+  the target's repository, head and base, when the live PR moved (head, base, closed, fork), when checks are pending or
+  failing, or when gh acts as another account; it runs `gh pr ready` if needed and `gh pr merge --merge
+  --match-head-commit <head>`, never deleting the branch, with the same intent/receipt/settle rule.
+- `reconcile` after a crash reads the live state of every open remote intent and settles it, under the same grant; it
+  never re-runs one.
+
+Tests first (`testkit/src/remote/tests.rs`, scripted fake, no process, no network). Every safety guard has a test that
+fails when the guard is removed: the pull request lists the mutations that were run to prove it. Covered: Seguro denies
+every effect and read; a revocation between intent and effect stops it; gh missing and logged out return keys with no
+intent; the push goes to the URL with the exact oid; already-pushed sends nothing; divergence blocks; the scan reads
+binaries, merges, messages and zero-spread text, excludes the live heads only, and fails closed; repository config in
+the local, worktree and command scopes blocks; extra push URLs block; malformed targets never reach a process; reads
+never run in the repository; lost-after, lost-before, killed and unreadable deliveries for push, create and merge;
+fork, wrong-base and wrong-account PRs; CI states; the merge card binding by full head, base, number and repository;
+merge refused without a person's yes, in every mismatch, and with failing CI; no force, admin or branch deletion in any
+recorded call; `Process` builds shell-free argv with the expected environment (no spawn).
+
+Focused proof: `cargo test -p faber-testkit remote::tests`, then the full set.
+
+Seam for the runner (after Task 5 merges, because it edits the runner and the journal):
+1. After the local fast-forward and proof, call `remote::publish(&mut Process::find()?, &mut ledger, &target, &pr)`
+   (`preflight`, `push`, `open_pr`), show the result as a separate remote receipt, never as "Done".
+2. Implement `Ledger` for the mission journal: `intent`/`receipt` over `record_intent`/`record_receipt`, `settle` over a new
+   journal method that lets engine-read evidence replace `Unknown` (today only a Person decision can, in `Journal::reconcile`),
+   `open` over `pending()` filtered to Push/DraftPr/Merge.
+3. Add `IntentKind::Merge` and `Effect::Merge` (`Step::Merge` and the PR reads map to `DraftPr` until then) and a merge
+   card in the board (`MergeCard::decision()`, question key `decision.remote.merge`); the Person's answer on
+   `card.decision_id()` is turned into `OwnerYes::from_decision`. The runner builds the card from the live PR and
+   passes the same `Target` (full head and base) to `merge`, which checks them against the card.
+4. At recovery call `remote::reconcile` for open remote intents before dispatching anything.
+5. Create the neutral folder (for example `<faber data>/remote-cwd`) and build the runner with
+   `Process::find(neutral)`.
+6. Show the account from `preflight(url)` and the `repo` on the Equilibrado start card, and store the account in the
+   grant (`remote_account`): without it every remote effect is refused.
+
+- [ ] Write the failing tests and the fake, see them fail for the right reason.
+- [ ] Implement `remote.rs`, locale keys (en source, four by hand), see them pass.
+- [ ] Run the proof set and `cargo t --all`, commit `feat: add the Equilibrado remote module`.
+- [ ] Push `selfdev-remote`, open a draft PR into `selfdev`, wait for CI.
+
 ## Later — outside the MVP
 
-- Former Task 14: Equilibrado. Exact granted own-ref non-forced push and one draft PR; secret scan, intent/receipt
-  reconciliation, no target merge or release. Seguro always denies remote effects.
 - Former Task 15: qualified parallel writers. Disjoint leases plus measured Studio containment/cost/RAM/review gates;
   paired equal-acceptance evidence includes failed spend and coordination. Insufficient evidence keeps writers serial;
   10% comparison tolerance grants no extra spending.
