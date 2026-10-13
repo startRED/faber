@@ -248,8 +248,27 @@ inside its own area.
 - Settings replaces the shell, as before, with a list of five sections on the left: General, Appearance, Connected
   accounts, Usage limits and Privacy. Ctrl comma opens it on General, the quota of a vendor in the sidebar opens it on
   Usage limits, and Esc or Back closes it.
-- General has the language and the switch that lets Projects run the person's own CLI hooks. A switch saves at once and
-  goes back to where it was if the save is refused.
+- General has the language, name, CLI hooks switch and Permissions choice. "Don't ask" is the default for new and
+  existing settings; "Ask before commands" preserves the previous behavior. Choices save at once and stay at the saved
+  value if the save fails. R107 applies the same default and protections to Chat. Chat uses its chosen canonical folder
+  (fixed before the first message), or private per-conversation scratch; deletion/draft cleanup never removes a chosen
+  folder. General explains the rule and offers the folder choice.
+- R97/R107: Chat and Projects use bypass permissions with native deny rules for `.git` edits, credential directories and key files;
+  Codex uses `never` approvals with a workspace-only permission profile and sandbox network access disabled.
+  Native deny rules [apply even in bypass mode](https://code.claude.com/docs/en/permission-modes#available-modes), but
+  [command patterns are not an OS sandbox](https://code.claude.com/docs/en/permissions#what-a-bash-rule-doesnt-match).
+  Explicit ask rules [still prompt in bypass mode](https://code.claude.com/docs/en/permission-modes#actions-no-mode-auto-approves)
+  and reach Faber's automatic policy over stdio. It gates file reads/writes, read-only git and literal local deletions, resolving junctions and refusing
+  external or `.git` writes. Build/test tools and project entrypoints run through the installed native Codex sandbox
+  with the same profile, never through an unsandboxed fallback. Native Windows requires MXC support. Unsupported shell
+  syntax and arbitrary programs are declined without a card. Secret reads
+  are denied while environment templates and internal `.env` creation work. Git transports and GitHub authentication
+  are disabled in child commands. Both areas disclose the mode; tightening it stops current turns.
+  Don't ask loads only user settings to keep project env/hooks out of the host launcher. Chat also uses safe mode,
+  strict MCP configuration and its fixed tool list; Ask Chat retains restricted mode. Read-only shell commands and
+  deletions use the sandbox too; file tools retain their canonical path checks, including network-link guards.
+  Host file decisions, CLI startup customizations and external integrations are separate from command isolation;
+  see the verified findings and limits in [the R97 security review](security-r97-review.md).
 - Appearance is a draft. The six looks are small live renders; the controls (accent with a hex field, background, the two
   fonts, text size, density, corners, motion) and the three effect switches change the draft, and the preview panel on
   the right wears the answer of `preview_look` with the measured contrast of text, faint text and the accent. The panel

@@ -23,7 +23,7 @@ impl Vendor {
     }
 }
 
-/// Chat never touches the user's files; a project works inside a folder the user opened.
+/// Chat uses a chosen folder or a private scratch folder; a project uses the folder the user opened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Area {
@@ -231,9 +231,15 @@ pub struct Conversation {
     pub area: Area,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
+    /// Chat's canonical folder, chosen before its first message. None uses Faber-owned scratch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_folder: Option<String>,
     /// One CLI session per vendor, so switching models keeps each vendor's own history and cache.
     #[serde(default)]
     pub sessions: BTreeMap<Vendor, String>,
+    /// Older sessions restart once with visible history to receive the host command tool.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub command_gate: bool,
     /// The cumulative cost each CLI session last reported, so a turn costs the difference (`usage::settle`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub cost_base: BTreeMap<Vendor, crate::usage::CostBase>,
@@ -359,6 +365,9 @@ pub struct Settings {
     /// Projects run the user's own CLI hooks too (off by default: a hook can block or slow every turn).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_hooks: Option<bool>,
+    /// Missing in older settings means commands run without asking in Chat and Projects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<Permissions>,
     /// Attention notifications and their chime are both on unless explicitly disabled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notifications: Option<bool>,
@@ -392,6 +401,14 @@ pub struct Settings {
 pub enum Experience {
     Beginner,
     Experienced,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Permissions {
+    #[default]
+    DontAsk,
+    Ask,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

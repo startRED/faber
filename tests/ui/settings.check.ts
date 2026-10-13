@@ -15,6 +15,24 @@ import { accountLine, seedQuotas, usageRows } from '../../ui/sidebar.ts';
 import { Settings } from '../../ui/Settings.tsx';
 import { check, deepEqual, equal, ok } from './check.ts';
 
+check('R107: Settings names Chat and Projects and discloses the shared default', () => {
+  ok(en['set.permissions'].includes('Chat'));
+  ok(en['set.permissions'].includes('Projects'));
+  ok('project.permissionsDontAsk' in en);
+  ok(en['set.chatFolderHint'].includes('first message'));
+  ok(en['set.chatFolderHint'].includes('private folder'));
+  ok(en['set.chatFolderHint'].includes('delete the conversation'));
+});
+
+check('review3: Settings discloses sandbox dependencies, integration limits and forbidden folders', () => {
+  const hint = en['project.permissionsDontAsk'];
+  ok(hint.includes('Codex CLI'));
+  ok(hint.includes('integrations'));
+  for (const folder of ['home', 'drive', 'Windows', 'Program Files', 'AppData']) ok(hint.includes(folder), folder);
+  ok(hint.includes('Ask before commands'));
+  ok('error.workingFolder' in en);
+});
+
 const look = (over: Partial<Look> = {}): Look => ({
   vars: {},
   scheme: 'dark',

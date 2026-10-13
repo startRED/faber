@@ -1,7 +1,7 @@
 //! Claude Code driver: one long-lived `claude -p` process per conversation, spoken to in stream-json over stdio.
 
 use crate::events::{Delivery, EngineEvent, Session, SessionCommand, UserTurn};
-use crate::model::{Area, name_instructions};
+use crate::model::{Area, Permissions, name_instructions};
 use crate::proc::{self, Spawner};
 use crate::signals::claude_signals;
 use serde_json::{Value, json};
@@ -17,6 +17,7 @@ pub struct ClaudeLaunch {
     pub effort: Option<String>,
     pub resume: Option<String>,
     pub user_hooks: bool,
+    pub permissions: Permissions,
     /// A side question (such as routing) with its own instructions: no tools, no MCP servers.
     pub instructions: Option<String>,
     /// How the user wants to be called, told to the model once, when the conversation starts (and again, unchanged, each time
@@ -24,13 +25,32 @@ pub struct ClaudeLaunch {
     pub user_name: Option<String>,
 }
 
-// Chat stays lean (about 3k tokens of setup instead of the user's full configuration) and runs in --restricted mode
-// inside its own workspace folder: file tools cannot leave it, edits there are accepted, and any command asks first.
+// Chat stays lean, with a fixed tool list and no startup customizations or MCP servers. Both areas share the
+// unattended host policy; Ask mode retains Chat's restricted setup.
 const CHAT_TOOLS: &str = "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch";
 
+// Deny rules apply in bypassPermissions too; command patterns are not an OS sandbox.
+// https://code.claude.com/docs/en/permission-modes#available-modes
+const TOOL_DENY: &[&str] = &[
+    "Edit(//**/.git/**)",
+    "Read(~/.claude/**)",
+    "Read(~/.codex/**)",
+    "Read(~/.gemini/**)",
+    "Read(~/.ssh/**)",
+    "Read(~/.aws/**)",
+    "Read(~/.claude.json)",
+    "Read(~/.git-credentials)",
+    "Read(~/.npmrc)",
+    "Read(~/.config/gh/**)",
+    "Read(~/AppData/Roaming/GitHub CLI/**)",
+    "Read(~/.docker/**)",
+    "Read(~/.azure/**)",
+    "Read(~/.kube/**)",
+    "Read(//**/*updater.key*)",
+];
+
 /// Arguments for one long-lived Claude Code process that takes many turns over stdin.
-/// Projects get the user's own setup (skills, MCP servers, plugins), like a direct session; the user's hooks stay
-/// off unless they turn them on, because hooks can rewrite answers. Permission prompts come back to Faber over stdio.
+/// Ask preserves Projects' setup. Don't ask disables startup integrations and routes tools to the shared policy.
 pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     let mut args: Vec<String> = [
         "-p",
@@ -50,23 +70,43 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
         for a in ["--system-prompt", instructions, "--tools", "", "--strict-mcp-config", "--no-session-persistence"] {
             args.push(a.into());
         }
-    } else if launch.area == Area::Chat {
-        // Searching and reading pages never asks, like claude.ai.
-        for a in [
-            "--restricted",
-            "--strict-mcp-config",
-            "--tools",
-            CHAT_TOOLS,
-            "--permission-mode",
-            "acceptEdits",
-            "--allowedTools",
-            "WebSearch,WebFetch",
-        ] {
-            args.push(a.into());
+    } else {
+        let mut settings = json!({});
+        if launch.area == Area::Chat {
+            args.extend(["--strict-mcp-config".into(), "--tools".into(), CHAT_TOOLS.into()]);
+            if launch.permissions == Permissions::Ask {
+                args.extend([
+                    "--restricted".into(),
+                    "--permission-mode".into(),
+                    "acceptEdits".into(),
+                    "--allowedTools".into(),
+                    "WebSearch,WebFetch".into(),
+                ]);
+            } else {
+                args.push("--safe-mode".into());
+            }
         }
-    } else if !launch.user_hooks {
-        args.push("--settings".into());
-        args.push(json!({ "disableAllHooks": true }).to_string());
+        if launch.permissions == Permissions::DontAsk {
+            if launch.area == Area::Project {
+                args.extend(["--safe-mode".into(), "--strict-mcp-config".into()]);
+            }
+            // Restricted mode refuses bypassPermissions. Chat disables customizations with safe mode and
+            // keeps its lean tools/MCP setup, with the same host policy and sandbox as Projects.
+            args.extend(["--setting-sources".into(), "user".into()]);
+            args.extend(["--permission-mode".into(), "bypassPermissions".into(), "--disallowedTools".into()]);
+            args.extend(TOOL_DENY.iter().map(|rule| (*rule).into()));
+            settings["permissions"] = json!({ "blockReadsOutsideWorkingDirectories": true,
+                "ask": ["Read(//**)", "Edit(//**)", "Bash", "PowerShell", "*"] });
+            settings["sandbox"] = json!({ "autoAllowBashIfSandboxed": false });
+            settings["env"] = crate::permissions::child_env(std::path::Path::new("."));
+        }
+        if launch.permissions == Permissions::DontAsk || (launch.area == Area::Project && !launch.user_hooks) {
+            settings["disableAllHooks"] = true.into();
+        }
+        if settings.as_object().is_some_and(|s| !s.is_empty()) {
+            args.push("--settings".into());
+            args.push(settings.to_string());
+        }
     }
     if let (None, Some(name)) = (&launch.instructions, &launch.user_name) {
         args.push("--append-system-prompt".into());
@@ -193,6 +233,7 @@ pub struct ClaudeOptions {
     pub cwd: PathBuf,
     pub launch: ClaudeLaunch,
     pub spawn: Spawner,
+    pub sandbox: Option<crate::cli::Cli>,
 }
 
 pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
@@ -231,7 +272,25 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                             quota_seen |= msg["type"] == "rate_limit_event";
                             let finished = msg["type"] == "result";
                             for event in parse_claude_message(&msg) {
-                                if let EngineEvent::Permission { request_id, input, .. } = &event {
+                                if let EngineEvent::Permission { request_id, tool, input } = &event {
+                                    if opts.launch.permissions == Permissions::DontAsk {
+                                        let resolve = |name: &str| crate::cli::Cli::find_in(name, &std::env::var("PATH").unwrap_or_default(), cfg!(windows),
+                                            &|key| std::env::var(key).ok(), &|path| std::path::Path::new(path).is_file(),
+                                            &|path| std::fs::read_to_string(path).unwrap_or_default());
+                                        let response = if let Some(updated) = crate::permissions::checked_input(&opts.cwd, tool, input, opts.sandbox.as_ref(), &resolve) {
+                                            json!({ "behavior": "allow", "updatedInput": updated })
+                                        } else {
+                                            json!({ "behavior": "deny", "message": "This action is outside the working-folder policy, or its native sandbox runner is unavailable. Use sandboxed tools; never retry unsandboxed." })
+                                        };
+                                        let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id,
+                                            "response": response } });
+                                        if proc::write_line(&mut *stdin, &msg).await.is_err() {
+                                            on_event(EngineEvent::Error { message: "error.permission.undelivered".into(), fatal: true });
+                                            proc::stop(&mut *stdin, &mut child).await;
+                                            return;
+                                        }
+                                        continue;
+                                    }
                                     pending.insert(request_id.clone(), input.clone());
                                 }
                                 on_event(event);

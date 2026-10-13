@@ -1,7 +1,7 @@
 mod support;
 
 use faber_engine::cli::{Cli, resolve_cli};
-use faber_engine::model::{Area, Experience, Message, Role, Settings, Setup, Status, Vendor};
+use faber_engine::model::{Area, Experience, Message, Permissions, Role, Settings, Setup, Status, Vendor};
 use faber_engine::proc::Spawner;
 use faber_engine::router::{Choice, Effort, pick_model};
 use faber_engine::{AppEvent, BranchRequest, Engine, EngineOptions, SendRequest, WarmRequest};
@@ -41,8 +41,67 @@ fn choice(vendor: &str, model: Option<&str>) -> Choice {
     Choice { vendor: vendor.into(), model: model.map(String::from), effort: None }
 }
 
+fn project_folder() -> tempfile::TempDir {
+    // System temp can be under AppData, which is intentionally refused as a chosen working folder.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/test-workspaces");
+    std::fs::create_dir_all(&root).unwrap();
+    let folder = tempfile::tempdir_in(root).unwrap();
+    assert!(faber_engine::permissions::unattended_root(folder.path()).is_some());
+    folder
+}
+
 fn ask(area: Area, text: &str, choice: Choice) -> SendRequest {
     SendRequest { conversation_id: None, area, project_id: None, text: text.into(), images: vec![], files: vec![], choice }
+}
+
+#[tokio::test]
+async fn review3_legacy_sessions_restart_with_history_and_gated_sessions_resume() {
+    let dir = tempfile::tempdir().unwrap();
+    let (first, mut rx) = engine(dir.path(), Vendor::Codex, fake(fixture("codex", "chat")).spawn);
+    let id = first.send(ask(Area::Chat, SKY, choice("codex", None))).unwrap();
+    finished(&mut rx, |_| {}).await;
+    let saved = first.open(&id).unwrap();
+    assert!(saved.command_gate && saved.sessions.contains_key(&Vendor::Codex));
+    first.shutdown();
+    let (gated, _) = engine(dir.path(), Vendor::Codex, fake(vec![]).spawn);
+    assert_eq!(gated.open(&id).unwrap().sessions, saved.sessions);
+    gated.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+    assert!(!gated.open(&id).unwrap().sessions.contains_key(&Vendor::Codex));
+    gated.shutdown();
+    let path = dir.path().join("conversations").join(format!("{id}.json"));
+    let mut legacy = serde_json::to_value(&saved).unwrap();
+    legacy.as_object_mut().unwrap().remove("commandGate");
+    std::fs::write(path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+    let (old, _) = engine(dir.path(), Vendor::Codex, fake(vec![]).spawn);
+    old.save_settings(Settings { permissions: Some(Permissions::DontAsk), ..Settings::default() }).unwrap();
+    let c = old.open(&id).unwrap();
+    assert!(!c.sessions.contains_key(&Vendor::Codex));
+    assert_eq!(c.messages, saved.messages, "visible history is preserved for the new thread");
+    old.shutdown();
+}
+
+#[tokio::test]
+async fn review3_sensitive_chat_roots_are_refused_only_without_prompts() {
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, _) = engine(dir.path(), Vendor::Claude, fake(vec![]).spawn);
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap();
+    assert_eq!(engine.chat_folder(None, Some(Path::new(&home))).unwrap_err(), "error.workingFolder");
+    engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+    assert!(engine.chat_folder(None, Some(Path::new(&home))).is_ok());
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn review3_existing_sensitive_projects_cannot_start_without_prompts() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(vec![]);
+    let (engine, _) = engine(dir.path(), Vendor::Claude, f.spawn);
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap();
+    let project = engine.add_project(&Path::new(&home).to_string_lossy());
+    let request = SendRequest { project_id: Some(project.id), ..ask(Area::Project, "hello", choice("claude", Some("haiku"))) };
+    assert_eq!(engine.send(request).unwrap_err(), "error.workingFolder");
+    assert!(f.args.lock().unwrap().is_empty(), "no CLI may start in a refused folder");
+    engine.shutdown();
 }
 
 /// Answers the way the screen does, in the background: the engine confirms an answer only once the CLI has it, and
@@ -69,6 +128,129 @@ async fn finished(rx: &mut UnboundedReceiver<AppEvent>, mut react: impl FnMut(&M
 
 fn read_json(path: &Path) -> serde_json::Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+#[tokio::test]
+async fn r107_a_saved_chat_folder_is_used_and_is_never_deleted_with_the_conversation() {
+    let data = tempfile::tempdir().unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let (first, mut rx) = engine(data.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn);
+    let id = first.send(ask(Area::Chat, SKY, choice("claude", None))).unwrap();
+    finished(&mut rx, |_| {}).await;
+    first.shutdown();
+    let record = data.path().join("conversations").join(format!("{id}.json"));
+    let mut saved = read_json(&record);
+    saved["workingFolder"] = folder.path().to_string_lossy().into_owned().into();
+    std::fs::write(&record, serde_json::to_vec(&saved).unwrap()).unwrap();
+    std::fs::write(folder.path().join("output.txt"), "visible output").unwrap();
+    let (reopened, _) = engine(data.path(), Vendor::Claude, fake(vec![]).spawn);
+    assert_eq!(reopened.workspace_file(&id, "output.txt"), Some(folder.path().join("output.txt")));
+    reopened.remove(&id);
+    assert!(folder.path().join("output.txt").is_file());
+    assert!(!data.path().join("chat").join(id).exists());
+    reopened.shutdown();
+}
+
+#[tokio::test]
+async fn r106_orphaned_chat_scratch_is_cleaned_but_saved_conversations_are_kept() {
+    let data = tempfile::tempdir().unwrap();
+    let orphan = data.path().join("chat/11111111-1111-4111-8111-111111111111");
+    std::fs::create_dir_all(&orphan).unwrap();
+    std::fs::write(orphan.join("temporary.txt"), "orphan").unwrap();
+    let retained = data.path().join("chat/22222222-2222-4222-8222-222222222222");
+    std::fs::create_dir_all(&retained).unwrap();
+    std::fs::create_dir_all(data.path().join("conversations")).unwrap();
+    // Even an unreadable record is retained: cleanup must not discard a person's files on a parse failure.
+    std::fs::write(data.path().join("conversations/22222222-2222-4222-8222-222222222222.json"), "{}").unwrap();
+    let (engine, _) = engine(data.path(), Vendor::Claude, fake(vec![]).spawn);
+    assert!(!orphan.exists());
+    assert!(retained.exists());
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn r107_chat_folder_choice_is_canonical_persisted_and_fixed_before_the_first_message() {
+    let data = tempfile::tempdir().unwrap();
+    let folder = project_folder();
+    let f = fake(fixture("claude", "chat"));
+    let cwd = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = cwd.clone();
+    let spawn = f.spawn.clone();
+    let (engine, mut rx) = engine(
+        data.path(),
+        Vendor::Claude,
+        Arc::new(move |bin, args, dir| {
+            seen.lock().unwrap().push(dir.to_path_buf());
+            spawn(bin, args, dir)
+        }),
+    );
+    let c = engine.chat_folder(None, Some(&folder.path().join("."))).unwrap();
+    let canonical = faber_engine::permissions::working_root(folder.path()).unwrap();
+    assert_eq!(c.working_folder.as_deref(), canonical.to_str());
+    assert_eq!(engine.open(&c.id).unwrap().working_folder, c.working_folder);
+    engine.send(SendRequest { conversation_id: Some(c.id.clone()), ..ask(Area::Chat, SKY, choice("claude", None)) }).unwrap();
+    finished(&mut rx, |_| {}).await;
+    assert_eq!(*cwd.lock().unwrap(), [canonical]);
+    assert!(f.args.lock().unwrap()[0].contains(&"bypassPermissions".into()));
+    assert_eq!(engine.chat_folder(Some(&c.id), None).unwrap_err(), "error.chatFolderLocked");
+    let branch = engine
+        .branch(BranchRequest {
+            conversation_id: c.id.clone(),
+            message_id: engine.open(&c.id).unwrap().messages[0].id.clone(),
+            text: SKY.into(),
+            choice: choice("claude", None),
+        })
+        .unwrap();
+    finished(&mut rx, |_| {}).await;
+    assert_eq!(engine.open(&branch).unwrap().working_folder, c.working_folder);
+    engine.remove(&c.id);
+    engine.remove(&branch);
+    assert!(folder.path().is_dir());
+    assert!(engine.chat_folder(None, Some(&folder.path().join("missing"))).is_err());
+    #[cfg(windows)]
+    assert!(engine.chat_folder(None, Some(Path::new("//unresolved.example/share"))).is_err());
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn r107_private_chat_files_survive_turns_and_are_cleaned_with_the_conversation() {
+    let data = tempfile::tempdir().unwrap();
+    let spawn = fake(fixture("claude", "chat")).spawn;
+    let (engine, mut rx) = engine(
+        data.path(),
+        Vendor::Claude,
+        Arc::new(move |bin, args, dir| {
+            std::fs::write(dir.join(".faber/tmp/temporary.txt"), "temporary").unwrap();
+            std::fs::write(dir.join("answer.txt"), "visible").unwrap();
+            spawn(bin, args, dir)
+        }),
+    );
+    let id = engine.send(ask(Area::Chat, SKY, choice("claude", None))).unwrap();
+    let message = finished(&mut rx, |_| {}).await;
+    let scratch = data.path().join("chat").join(&id);
+    assert!(scratch.join("answer.txt").is_file());
+    assert!(!scratch.join(".faber/tmp").exists());
+    assert_eq!(message.files.unwrap(), [faber_engine::model::FileInfo { path: "answer.txt".into(), size: 7 }]);
+    engine.remove(&id);
+    assert!(!scratch.exists());
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn r107_project_hook_opt_in_does_not_enable_chat_startup_hooks() {
+    let data = tempfile::tempdir().unwrap();
+    let f = fake(fixture("codex", "chat"));
+    let (engine, _) = engine(data.path(), Vendor::Codex, f.spawn.clone());
+    engine.save_settings(Settings { user_hooks: Some(true), ..Settings::default() }).unwrap();
+    engine.warm(WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: choice("codex", None) });
+    assert!(f.args.lock().unwrap()[0].windows(2).any(|args| args == ["--disable", "hooks"]));
+    engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+    engine.warm(WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: choice("codex", None) });
+    assert!(!f.args.lock().unwrap()[1].windows(2).any(|args| args == ["--disable", "hooks"]), "Ask retains its prior hook behavior");
+    engine.save_settings(Settings { permissions: Some(Permissions::DontAsk), ..Settings::default() }).unwrap();
+    engine.warm(WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: choice("codex", None) });
+    assert_eq!(f.args.lock().unwrap().len(), 3, "both cached hook configurations are retired on mode changes");
+    engine.shutdown();
 }
 
 #[tokio::test]
@@ -145,7 +327,7 @@ async fn a_chat_turn_streams_to_the_screen_and_is_saved_with_model_reason_sessio
     assert!(reply.text.contains("Rayleigh"));
     assert_eq!(reply.model.as_deref(), Some("claude-haiku-5-5"));
     assert_eq!(reply.reason.as_deref(), Some("reason.chosen"));
-    assert!(f.args.lock().unwrap()[0].contains(&"--restricted".to_string()));
+    assert!(f.args.lock().unwrap()[0].contains(&"bypassPermissions".to_string()));
     let saved = read_json(&dir.path().join("conversations").join(format!("{id}.json")));
     assert_eq!(saved["sessions"]["claude"], "c5b9834c-dfc7-4086-beed-2212be93b722");
     assert_eq!(saved["title"], SKY);
@@ -281,6 +463,7 @@ async fn always_allow_answers_the_next_request_for_the_same_tool_without_asking_
         .collect();
     let dir = tempfile::tempdir().unwrap();
     let (engine, mut rx) = engine(dir.path(), Vendor::Claude, fake(entries).spawn);
+    engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
     let id = engine.send(ask(Area::Chat, TWO_WRITES, choice("claude", None))).unwrap();
     let mut asked: Vec<String> = Vec::new();
     finished(&mut rx, |m| {
@@ -302,6 +485,7 @@ async fn two_permission_requests_at_once_wait_in_a_queue_and_both_get_answered()
     let dir = tempfile::tempdir().unwrap();
     let (engine, mut rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "parallel")).spawn);
     let text = "Search the web for the latest stable version of Node.js and, in parallel, for the latest version of Python. Run both searches at the same time, then answer in two lines.";
+    engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
     let id = engine.send(ask(Area::Chat, text, choice("claude", None))).unwrap();
     let (mut shown, mut answered) = (Vec::new(), Vec::new());
     let reply = finished(&mut rx, |m| {
@@ -331,6 +515,7 @@ async fn text_blocks_around_a_tool_are_kept_apart() {
     let first = entries.iter_mut().find(|e| e.msg["method"] == "item/agentMessage/delta").unwrap();
     first.msg["params"]["delta"] = format!("🔎 {}", first.msg["params"]["delta"].as_str().unwrap()).into();
     let (engine, mut rx) = engine(dir.path(), Vendor::Codex, fake(entries).spawn);
+    engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
     let project = engine.add_project(&dir.path().to_string_lossy());
     let text = "Create a.txt containing one. Then create b.txt containing two. Make each file in a separate step.";
     let id = engine.send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, text, choice("codex", None)) }).unwrap();
@@ -420,6 +605,7 @@ async fn editing_a_message_branches_into_a_new_conversation_and_leaves_the_origi
     let id = engine.send(ask(Area::Chat, SKY, pick())).unwrap();
     finished(&mut rx, |_| {}).await;
     std::fs::write(dir.path().join("chat").join(&id).join("notes.txt"), "made earlier").unwrap();
+    std::fs::write(dir.path().join("chat").join(&id).join(".npmrc"), "synthetic credential").unwrap();
     let first = engine.open(&id).unwrap().messages[0].clone();
     let branch_id = engine
         .branch(BranchRequest { conversation_id: id.clone(), message_id: first.id.clone(), text: SKY.into(), choice: pick() })
@@ -433,6 +619,7 @@ async fn editing_a_message_branches_into_a_new_conversation_and_leaves_the_origi
     assert_eq!((of.conversation_id, of.message_id), (id.clone(), first.id));
     assert_eq!(branch.messages.len(), 2);
     assert_eq!(std::fs::read_to_string(dir.path().join("chat").join(&branch_id).join("notes.txt")).unwrap(), "made earlier");
+    assert!(!dir.path().join("chat").join(&branch_id).join(".npmrc").exists());
 }
 
 #[tokio::test]
@@ -454,6 +641,7 @@ async fn the_hooks_choice_is_saved_and_restarts_idle_project_clis_with_it() {
     let dir = tempfile::tempdir().unwrap();
     let f = fake(fixture("claude", "chat"));
     let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
     let project = engine.add_project(&dir.path().to_string_lossy());
     let warm =
         || WarmRequest { conversation_id: None, area: Area::Project, project_id: Some(project.id.clone()), choice: choice("claude", None) };
@@ -466,7 +654,67 @@ async fn the_hooks_choice_is_saved_and_restarts_idle_project_clis_with_it() {
     let appearance = serde_json::json!({ "base": "oficina" }).as_object().cloned();
     engine.save_settings(Settings { appearance, ..Settings::default() }).unwrap();
     engine.shutdown();
-    assert_eq!(read_json(&dir.path().join("settings.json")), serde_json::json!({ "userHooks": true, "appearance": { "base": "oficina" } }));
+    assert_eq!(
+        read_json(&dir.path().join("settings.json")),
+        serde_json::json!({ "userHooks": true, "permissions":"ask", "appearance": { "base": "oficina" } })
+    );
+}
+
+#[tokio::test]
+async fn permissions_default_without_a_migration_persist_and_restart_idle_project_sessions() {
+    let dir = project_folder();
+    for settings in [serde_json::json!({}), serde_json::json!({ "language": "en", "userHooks": true })] {
+        let old: Settings = serde_json::from_value(settings).unwrap();
+        assert_eq!(old.permissions.unwrap_or_default(), Permissions::DontAsk);
+    }
+    let f = fake(fixture("claude", "chat"));
+    let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let project = engine.add_project(&dir.path().to_string_lossy());
+    let warm =
+        || WarmRequest { conversation_id: None, area: Area::Project, project_id: Some(project.id.clone()), choice: choice("claude", None) };
+    let last_args = || f.args.lock().unwrap().last().cloned().unwrap();
+    engine.warm(warm());
+    assert!(last_args().contains(&"bypassPermissions".into()));
+    engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+    engine.warm(warm());
+    assert!(!last_args().contains(&"bypassPermissions".into()));
+    assert_eq!(f.args.lock().unwrap().len(), 2);
+    engine.save_settings(Settings { language: Some("de".into()), ..Settings::default() }).unwrap();
+    let saved: Settings = serde_json::from_value(read_json(&dir.path().join("settings.json"))).unwrap();
+    assert_eq!(saved.permissions, Some(Permissions::Ask));
+    engine.save_settings(Settings { permissions: Some(Permissions::DontAsk), ..Settings::default() }).unwrap();
+    engine.warm(warm());
+    assert!(last_args().contains(&"bypassPermissions".into()));
+    assert_eq!(f.args.lock().unwrap().len(), 3);
+    assert_eq!(engine.settings().language.as_deref(), Some("de"));
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn r107_tightening_permissions_stops_chat_and_projects() {
+    let dir = project_folder();
+    let entries = vec![
+        Entry { input: true, msg: serde_json::json!({ "type": "user", "message": { "content": "wait" } }) },
+        Entry { input: false, msg: serde_json::json!({ "type": "system", "subtype": "init", "session_id": "active", "model": "haiku" }) },
+        Entry { input: true, msg: serde_json::json!({ "type": "control_request", "request": { "subtype": "interrupt" } }) },
+    ];
+    let f = fake(entries);
+    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let project = engine.add_project(&dir.path().to_string_lossy());
+    let work = engine.send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, "wait", choice("claude", None)) }).unwrap();
+    let chat = engine.send(ask(Area::Chat, "wait", choice("claude", None))).unwrap();
+    engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+    assert_eq!(engine.open(&work).unwrap().messages.last().unwrap().status, Some(Status::Stopped));
+    assert_eq!(engine.open(&chat).unwrap().messages.last().unwrap().status, Some(Status::Stopped));
+    let _ = finished(&mut rx, |_| {}).await;
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while f.wire.lines_with("interrupt") == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    engine.shutdown();
 }
 
 #[tokio::test]
@@ -945,10 +1193,20 @@ async fn a_queued_message_that_cannot_be_dispatched_stays_queued() {
 #[tokio::test]
 async fn files_sent_while_a_turn_runs_are_saved_at_once_and_shown_without_the_note_to_the_model() {
     let dir = tempfile::tempdir().unwrap();
+    let chosen = project_folder();
     let note = "second\n\nAttached files (in your working folder):\n- attachments/notes.txt";
     let f = fake(claude_turns(&[("first", true), (note, true)]));
     let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
-    let id = engine.send(ask(Area::Chat, "first", choice("claude", Some("haiku")))).unwrap();
+    let id = engine.chat_folder(None, Some(chosen.path())).unwrap().id;
+    engine.send(SendRequest { conversation_id: Some(id.clone()), ..ask(Area::Chat, "first", choice("claude", Some("haiku"))) }).unwrap();
+    let refused = SendRequest {
+        conversation_id: Some(id.clone()),
+        files: vec![faber_engine::workspace::Attachment { name: ".npmrc".into(), base64: "c3ludGhldGlj".into() }],
+        ..ask(Area::Chat, "refused", choice("claude", Some("haiku")))
+    };
+    assert_eq!(engine.send(refused).unwrap_err(), "error.projectSandbox");
+    assert!(engine.open(&id).unwrap().queued.is_empty());
+    assert!(!chosen.path().join("attachments/.npmrc").exists());
     let file = faber_engine::workspace::Attachment { name: "notes.txt".into(), base64: "aGk=".into() };
     let more =
         SendRequest { conversation_id: Some(id.clone()), files: vec![file], ..ask(Area::Chat, "second", choice("claude", Some("haiku"))) };
@@ -956,6 +1214,7 @@ async fn files_sent_while_a_turn_runs_are_saved_at_once_and_shown_without_the_no
     let queued = engine.open(&id).unwrap().queued;
     assert_eq!(queued[0].text, "second", "the waiting bubble shows what the person wrote");
     assert_eq!(queued[0].attachments.as_deref(), Some(&["notes.txt".to_string()][..]));
+    assert_eq!(std::fs::read(chosen.path().join("attachments/notes.txt")).unwrap(), b"hi");
 
     let c = until(&engine, &id, |c| settled(c, 4)).await;
     engine.shutdown();

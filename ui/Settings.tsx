@@ -1,7 +1,7 @@
 import { createEffect, createSignal, For, type JSX, Match, Show, Switch } from 'solid-js';
 import { api, type Appearance, type CheckResult, type Look, type Settings as Saved, type Vendor, type VendorUsage } from './api.ts';
 import { AppearanceSection } from './Appearance.tsx';
-import { Toggle } from './controls.tsx';
+import { Segmented, Toggle } from './controls.tsx';
 import { factory } from './draft.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { LANGUAGES, t } from './i18n.ts';
@@ -46,6 +46,9 @@ interface Props {
   kept?: Appearance;
   /** Resolves to false when the save was refused or failed. */
   onSave: (patch: Saved) => Promise<boolean>;
+  chatFolder?: string;
+  chatFolderLocked?: boolean;
+  onChatFolder?: (scratch: boolean) => Promise<void>;
   onClose: () => void;
   /** Opens the account cards; Settings comes back as it was, from `keep`. */
   onOpenSetup: (keep: Keep) => void;
@@ -142,6 +145,27 @@ export function Settings(props: Props) {
               <div class="toggles">
                 <Toggle label={t('set.hooksBody')} hint={t('set.hooksHint')} checked={props.saved.userHooks === true} onChange={(on) => props.onSave({ userHooks: on })} />
               </div>
+            </Row>
+            <Segmented
+              id="set-permissions"
+              label={t('set.permissions')}
+              value={props.saved.permissions ?? 'dontAsk'}
+              options={[
+                ['dontAsk', t('set.permissions.dontAsk')],
+                ['ask', t('set.permissions.ask')],
+              ]}
+              onPick={(permissions) => void props.onSave({ permissions })}
+            />
+            <Row label={t('set.chatFolder')}>
+              <p class="hint">{t('set.chatFolderHint')}</p>
+              <Show when={props.onChatFolder}>
+                <p>{props.chatFolder ?? t('set.privateFolder')}</p>
+                <button class="btn" disabled={props.chatFolderLocked} onClick={() => void props.onChatFolder?.(false)}>{t('set.chooseFolder')}</button>
+                <Show when={props.chatFolder}>
+                  <button class="btn" disabled={props.chatFolderLocked} onClick={() => void props.onChatFolder?.(true)}>{t('set.privateFolder')}</button>
+                </Show>
+                <Show when={props.chatFolderLocked}><p class="hint">{t('error.chatFolderLocked')}</p></Show>
+              </Show>
             </Row>
             <Row label={t('set.notifications')}>
               <div class="toggles">

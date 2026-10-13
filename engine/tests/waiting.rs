@@ -371,12 +371,14 @@ fn seed(dir: &Path, long: bool) -> Conversation {
     answer.model = Some("claude-opus-5-5".into());
     answer.reason = Some("reason.route.chat.hard".into());
     let c = Conversation {
+        working_folder: None,
         choice: None,
         id: "seeded".into(),
         title: "Existing chat".into(),
         area: Area::Chat,
         project_id: None,
         sessions: BTreeMap::from([(Vendor::Claude, "old-session".into())]),
+        command_gate: false,
         cost_base: BTreeMap::new(),
         allow_always: None,
         branch_of: None,

@@ -68,6 +68,7 @@ export interface Conversation {
   choice?: Choice;
   area: Area;
   projectId?: string;
+  workingFolder?: string;
   sessions: Partial<Record<Vendor, string>>;
   allowAlways?: string[];
   branchOf?: { conversationId: string; messageId: string };
@@ -141,6 +142,7 @@ export type Experience = 'beginner' | 'experienced';
 export interface Settings {
   appearance?: Appearance;
   userHooks?: boolean;
+  permissions?: 'dontAsk' | 'ask';
   notifications?: boolean;
   notificationSound?: boolean;
   language?: string;
@@ -287,6 +289,7 @@ export const api = {
   sendQueued: (id: string, turnId: string) => invoke<void>('send_queued', { id, turnId }),
   removeProject: (id: string) => invoke<void>('remove_project', { id }),
   addProject: () => invoke<Project | null>('add_project'),
+  chatFolder: (id: string | undefined, scratch = false) => invoke<Conversation | null>('chat_folder', { id: id ?? null, scratch }),
   previewLook: (appearance: Appearance) => invoke<Look>('preview_look', { appearance }),
   saveSettings: (patch: Settings) => invoke<SavedSettings>('save_settings', { patch }),
   saveTheme: (appearance: Appearance, name: string) => invoke<boolean>('save_theme', { appearance, name }),

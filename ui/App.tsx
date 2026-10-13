@@ -676,6 +676,17 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
               start={back()?.section ?? settingsAt()}
               kept={back()?.draft}
               onSave={saveSettings}
+              chatFolder={current()?.workingFolder}
+              chatFolderLocked={!!current()?.messages.length || loading()}
+              onChatFolder={area() === 'chat' ? async (scratch) => {
+                try {
+                  const conversation = await api.chatFolder(current()?.id, scratch);
+                  if (conversation) {
+                    await refresh();
+                    await go({ area: 'chat', id: conversation.id });
+                  }
+                } catch (err) { setSaveError(failureText(err)); }
+              } : undefined}
               onClose={closeSettings}
               onOpenSetup={(keep) => {
                 setBack(keep);
@@ -819,6 +830,9 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                           onCleanup(() => observer.disconnect());
                         });
                       }}>
+                        <Show when={area() === 'chat' || project()}>
+                          <p class="hint" role="status">{t(state().settings.permissions === 'ask' ? 'project.permissionsAsk' : 'project.permissionsDontAsk')}</p>
+                        </Show>
                         <Show
                           when={current()?.messages.length ? current() : undefined}
                           fallback={<Empty vendors={state().vendors.length} area={area()} project={project()} onConnect={openSetup} />}

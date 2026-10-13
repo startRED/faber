@@ -1,0 +1,1 @@
+{"engineError": "driver_error", "evidence": {"outsideReadObserved": false, "outsideWriteChanged": false, "publishedHeadChanged": false}, "finished": true, "tools": [], "type": "manualSandboxProbe", "vendor": "codex", "diagnostic": "filesystem glob **/.git supports only deny access"}
