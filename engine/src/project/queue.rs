@@ -62,6 +62,10 @@ impl Candidate {
             extra: Extra::new(),
         })
     }
+
+    pub fn definitions(&self) -> &[super::proof::Definition] {
+        &self.definitions
+    }
 }
 /// Observed by a fresh read-only reviewer driver after admission, never chosen by the writer.
 #[derive(Debug, Clone, Serialize, Deserialize)]

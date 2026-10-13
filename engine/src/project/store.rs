@@ -619,6 +619,26 @@ impl Journal {
         Ok(found)
     }
 
+    pub fn save_report(&self, report: &super::report::MissionReport) -> Result<(), JournalError> {
+        self.same_mission(&report.mission)?;
+        if report.schema > SCHEMA {
+            return Err(JournalError::Newer);
+        }
+        self.put(&self.records.join("report.json"), report)
+    }
+
+    pub fn report(&self) -> Result<Option<super::report::MissionReport>, JournalError> {
+        let found: Option<super::report::MissionReport> = self.get(&self.records.join("report.json"))?;
+        if let Some(report) = &found {
+            self.same_mission(&report.mission)?;
+        }
+        Ok(found)
+    }
+
+    pub fn list_checks(&self) -> Result<Vec<super::wire::CheckReceipt>, JournalError> {
+        self.list::<super::wire::CheckReceipt>("checks")
+    }
+
     pub fn save_compile_receipt(&self, receipt: &super::wire::CompileReceipt) -> Result<(), JournalError> {
         self.same_mission(&receipt.mission)?;
         if receipt.schema > SCHEMA {

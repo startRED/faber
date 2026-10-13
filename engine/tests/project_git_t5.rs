@@ -557,3 +557,64 @@ fn landing_sets_promotion_pending_when_grant_has_self_update() {
     assert_eq!(head, TREE);
     assert!(r.promotion_pending, "landing with self_update must set promotion_pending");
 }
+
+#[test]
+fn landing_writes_mission_report_with_tokens_checks_receipts_and_timings() {
+    use faber_engine::project::report::UnknownOr;
+    let (_repo, _data, mut b, g, l, _root) = setup(&[TREE, ""]);
+    let mut r = runner(&b);
+    landed_receipts(&b, &mut r);
+    r.record_tokens("writer", Some(500), Some(200), Some(50), Some(100));
+    let head = r
+        .land(
+            &mut b,
+            "w1",
+            &l,
+            || Ok(Some(g.clone())),
+            "Fix",
+            Termination { process: None, tree_dead: true, cost_settled: true },
+            |_| Ok(()),
+        )
+        .unwrap();
+    assert_eq!(head, TREE);
+
+    let report_file = b.journal().records().join("report.json");
+    assert!(report_file.exists(), "report.json must be written upon landing");
+
+    let report = b.journal().report().unwrap().expect("report must be loadable");
+    assert_eq!(report.mission, "m1");
+    assert_eq!(report.goal, "Fix");
+    assert_eq!(report.state, "done");
+
+    // Tokens per role
+    let writer_tokens = report.tokens_per_role.get("writer").expect("writer tokens must exist");
+    assert_eq!(writer_tokens.input, UnknownOr::Known(500));
+    assert_eq!(writer_tokens.cache_read, UnknownOr::Known(200));
+    assert_eq!(writer_tokens.cache_write, UnknownOr::Known(50));
+    assert_eq!(writer_tokens.output, UnknownOr::Known(100));
+
+    // Unknown tokens marked as unknown, never guessed (spec G8)
+    let lead_tokens = report.tokens_per_role.get("lead").expect("lead tokens must exist");
+    assert_eq!(lead_tokens.input, UnknownOr::Unknown("unknown".into()));
+    assert_eq!(lead_tokens.output, UnknownOr::Unknown("unknown".into()));
+
+    // Checks
+    assert!(!report.checks.is_empty(), "checks must be reported");
+    assert_eq!(report.checks[0].id, "C1");
+    assert_eq!(report.checks[0].result, "pass");
+
+    // Commit and tree receipts
+    let commit = report.commit_receipt.expect("commit receipt must be present");
+    assert_eq!(commit.head, UnknownOr::Known(TREE.into()));
+    assert_eq!(commit.tree, UnknownOr::Known(TREE.into()));
+    assert_eq!(commit.parent, UnknownOr::Known(BASE.into()));
+
+    let forward = report.tree_receipt.expect("tree receipt must be present");
+    assert_eq!(forward.old_head, UnknownOr::Known(BASE.into()));
+    assert_eq!(forward.new_head, UnknownOr::Known(TREE.into()));
+    assert_eq!(forward.tree, UnknownOr::Known(TREE.into()));
+
+    // Timings
+    assert!(matches!(report.timings.landed_at, UnknownOr::Known(_)));
+    assert!(matches!(report.timings.duration_seconds, UnknownOr::Known(_)));
+}

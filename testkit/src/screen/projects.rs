@@ -689,6 +689,14 @@ pub fn probe_mission(sandbox: &Path) -> Result {
     ensure(std::fs::read(repo.join(".git/index")).map_err(|e| e.to_string())? == owner_index, || "owner index changed".into())?;
     ensure(std::fs::read(repo.join("src/a.rs")).map_err(|e| e.to_string())? == b"dirty owner", || "owner edit changed".into())?;
     ensure(broker.journal().plan().map_err(|e| e.key())?.unwrap().tasks[0].state == TaskState::Done, || "landing was not recorded".into())?;
+    let report_file = repo.join(".faber/missions/m1/report.json");
+    ensure(report_file.exists(), || "report.json was not written on landing".into())?;
+    let report_content = std::fs::read_to_string(&report_file).map_err(|e| e.to_string())?;
+    ensure(report_content.contains("\"tokensPerRole\""), || "report missing tokensPerRole".into())?;
+    ensure(report_content.contains("\"checks\""), || "report missing checks".into())?;
+    ensure(report_content.contains("\"commitReceipt\""), || "report missing commitReceipt".into())?;
+    ensure(report_content.contains("\"treeReceipt\""), || "report missing treeReceipt".into())?;
+    ensure(report_content.contains("\"timings\""), || "report missing timings".into())?;
     check(broker.finish())?;
     std::fs::write(sandbox.join("project-git.ok"), "fixture mission proved").map_err(|e| e.to_string())
 }

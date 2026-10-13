@@ -16,6 +16,7 @@ pub mod lead;
 pub mod lease;
 pub mod proof;
 pub mod queue;
+pub mod report;
 pub mod run;
 pub mod store;
 pub mod update;
@@ -1196,7 +1197,8 @@ records!(
     Receipt,
     Runtime,
     update::UpdateManifest,
-    update::LastGoodRecord
+    update::LastGoodRecord,
+    report::MissionReport
 );
 
 pub mod policy;

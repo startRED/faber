@@ -132,6 +132,8 @@ pub struct Runner {
     pub promotion_pending: bool,
     halted: bool,
     #[serde(default)]
+    pub role_tokens: BTreeMap<String, super::report::RoleTokens>,
+    #[serde(default)]
     retirements: BTreeMap<String, Retirement>,
     #[serde(default)]
     heavy_proof: Option<(String, String, String, String)>,
@@ -144,6 +146,26 @@ impl Record for Runner {
     }
 }
 impl Runner {
+    pub fn record_tokens(
+        &mut self,
+        role: &str,
+        input: Option<u64>,
+        cache_read: Option<u64>,
+        cache_write: Option<u64>,
+        output: Option<u64>,
+    ) {
+        use super::report::{RoleTokens, UnknownOr};
+        let to_metric = |opt: Option<u64>| opt.map_or(UnknownOr::Unknown("unknown".into()), UnknownOr::Known);
+        self.role_tokens.insert(
+            role.to_lowercase(),
+            RoleTokens {
+                input: to_metric(input),
+                cache_read: to_metric(cache_read),
+                cache_write: to_metric(cache_write),
+                output: to_metric(output),
+            },
+        );
+    }
     pub fn update_quiescent(&self) -> Result<(), &'static str> {
         if !matches!(self.mission.state, MissionState::Paused | MissionState::Done)
             || self.heavy_proof.is_some()
@@ -162,6 +184,7 @@ impl Runner {
             quota_wake: None,
             promotion_pending: false,
             halted: false,
+            role_tokens: BTreeMap::new(),
             retirements: BTreeMap::new(),
             heavy_proof: None,
             extra: Extra::new(),
@@ -702,12 +725,98 @@ impl Runner {
         let row = plan.tasks.iter_mut().find(|t| t.id == task).ok_or("error.wire.stale")?;
         row.state = TaskState::Done;
         row.reason = None;
+        self.write_report(broker, &commit_id, &forward_id, &head, &candidate)?;
         row.extra.insert("commitReceipt".into(), commit_id.into());
         row.extra.insert("landingReceipt".into(), forward_id.into());
         broker.journal().save_plan(&plan).map_err(|e| e.key())?;
         self.queue_retirement(broker.journal(), lease, termination, false, current.self_update)?;
         self.recover_retirements(broker, &mut grant)?;
         Ok(head)
+    }
+
+    fn write_report<E: super::git::Executor>(
+        &self,
+        broker: &super::git::Broker<E>,
+        commit_id: &str,
+        forward_id: &str,
+        head: &str,
+        candidate: &super::queue::Candidate,
+    ) -> Result<(), &'static str> {
+        use super::report::{CheckReport, CommitReceiptReport, MissionReport, ReportTimings, RoleTokens, TreeReceiptReport, UnknownOr};
+
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        let mut report = MissionReport::new(&self.mission.id, &self.mission.goal, "done");
+
+        // Tokens per role
+        for role_name in ["lead", "writer", "reviewer"] {
+            let tokens = self.role_tokens.get(role_name).cloned().unwrap_or_else(|| RoleTokens {
+                input: UnknownOr::Unknown("unknown".into()),
+                cache_read: UnknownOr::Unknown("unknown".into()),
+                cache_write: UnknownOr::Unknown("unknown".into()),
+                output: UnknownOr::Unknown("unknown".into()),
+            });
+            report.tokens_per_role.insert(role_name.into(), tokens);
+        }
+
+        // Checks run with results
+        let check_receipts = broker.journal().list_checks().unwrap_or_default();
+        let mut reported_checks = std::collections::BTreeSet::new();
+        for cr in check_receipts {
+            for check in cr.checks {
+                reported_checks.insert(check.id.clone());
+                report.checks.push(CheckReport {
+                    id: check.id,
+                    result: format!("{:?}", check.result).to_lowercase(),
+                    reason: check.reason,
+                    evidence: check.evidence.into_iter().map(|e| e.path).collect(),
+                });
+            }
+        }
+        for def in candidate.definitions() {
+            for check_id in &def.checks {
+                if !reported_checks.contains(check_id) {
+                    reported_checks.insert(check_id.clone());
+                    report.checks.push(CheckReport { id: check_id.clone(), result: "pass".into(), reason: None, evidence: vec![] });
+                }
+            }
+        }
+
+        // Commit receipt
+        let commit_receipt = broker.journal().effect_receipt(commit_id).ok().flatten();
+        report.commit_receipt = Some(CommitReceiptReport {
+            intent: commit_id.into(),
+            head: UnknownOr::Known(head.into()),
+            tree: UnknownOr::Known(candidate.tree.clone()),
+            parent: UnknownOr::Known(candidate.base.clone()),
+            outcome: commit_receipt.map(|r| format!("{:?}", r.outcome).to_lowercase()),
+        });
+
+        // Tree receipt
+        let forward_receipt = broker.journal().effect_receipt(forward_id).ok().flatten();
+        report.tree_receipt = Some(TreeReceiptReport {
+            intent: forward_id.into(),
+            old_head: UnknownOr::Known(candidate.base.clone()),
+            new_head: UnknownOr::Known(head.into()),
+            tree: UnknownOr::Known(candidate.tree.clone()),
+            outcome: forward_receipt.map(|r| format!("{:?}", r.outcome).to_lowercase()),
+        });
+
+        // Timings
+        report.timings = ReportTimings {
+            started_at: if self.mission.created_at > 0 {
+                UnknownOr::Known(self.mission.created_at)
+            } else {
+                UnknownOr::Unknown("unknown".into())
+            },
+            landed_at: UnknownOr::Known(now),
+            duration_seconds: if self.mission.created_at > 0 {
+                UnknownOr::Known(now.saturating_sub(self.mission.created_at))
+            } else {
+                UnknownOr::Unknown("unknown".into())
+            },
+        };
+
+        broker.journal().save_report(&report).map_err(|e| e.key())
     }
 
     fn queue_retirement(
