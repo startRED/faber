@@ -372,7 +372,7 @@ fn permissions_keep_the_workspace_sandbox_and_disable_project_network_without_ap
                 assert_eq!(method, if t.resume.is_some() { "thread/resume" } else { "thread/start" });
                 assert_eq!(params["cwd"], "project");
                 assert_eq!(params["model"], "model");
-                if area == Area::Project && permissions == Permissions::DontAsk {
+                if permissions == Permissions::DontAsk {
                     assert!(params.get("sandbox").is_none());
                     assert_eq!(params["approvalPolicy"], "never");
                     assert_eq!(params["config"]["sandbox_workspace_write.network_access"], false);
@@ -393,90 +393,94 @@ fn permissions_keep_the_workspace_sandbox_and_disable_project_network_without_ap
 
 #[tokio::test]
 async fn l2_serialized_start_and_resume_carry_the_no_approval_offline_policy() {
-    for resume in [false, true] {
-        let f = fake(fixture("codex", if resume { "resume" } else { "chat" }));
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let server = CodexServer::start(CodexServerOptions {
-            bin: "codex".into(),
-            cwd: ".".into(),
-            area: Area::Project,
-            user_hooks: false,
-            windows: false,
-            spawn: f.spawn.clone(),
-        });
-        let session = server.open(
-            CodexThread {
+    for area in [Area::Chat, Area::Project] {
+        for resume in [false, true] {
+            let f = fake(fixture("codex", if resume { "resume" } else { "chat" }));
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            let server = CodexServer::start(CodexServerOptions {
+                bin: "codex".into(),
                 cwd: ".".into(),
-                model: None,
-                effort: None,
-                resume: resume.then(|| "thread-id".into()),
-                instructions: None,
-                user_name: None,
-                permissions: Permissions::DontAsk,
-            },
-            Arc::new(move |e| {
-                let _ = tx.send(e);
-            }),
-        );
-        loop {
-            let e = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.unwrap().unwrap();
-            if matches!(e, EngineEvent::Started { .. }) {
-                break;
+                area,
+                user_hooks: false,
+                windows: false,
+                spawn: f.spawn.clone(),
+            });
+            let session = server.open(
+                CodexThread {
+                    cwd: ".".into(),
+                    model: None,
+                    effort: None,
+                    resume: resume.then(|| "thread-id".into()),
+                    instructions: None,
+                    user_name: None,
+                    permissions: Permissions::DontAsk,
+                },
+                Arc::new(move |e| {
+                    let _ = tx.send(e);
+                }),
+            );
+            loop {
+                let e = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.unwrap().unwrap();
+                if matches!(e, EngineEvent::Started { .. }) {
+                    break;
+                }
             }
+            let messages = f.wire.messages();
+            let message = messages.iter().find(|m| m["method"] == if resume { "thread/resume" } else { "thread/start" }).unwrap();
+            assert_eq!(message["params"]["approvalPolicy"], "never");
+            assert!(message["params"].get("sandbox").is_none());
+            let id = message["params"]["config"]["default_permissions"].as_str().unwrap();
+            assert_eq!(message["params"]["config"][format!("permissions.{id}")]["filesystem"][":root"], "deny");
+            assert_eq!(message["params"]["config"]["sandbox_workspace_write.network_access"], false);
+            assert_eq!(message["params"]["config"]["shell_environment_policy.set"]["GIT_ALLOW_PROTOCOL"], "");
+            session.close();
         }
-        let messages = f.wire.messages();
-        let message = messages.iter().find(|m| m["method"] == if resume { "thread/resume" } else { "thread/start" }).unwrap();
-        assert_eq!(message["params"]["approvalPolicy"], "never");
-        assert!(message["params"].get("sandbox").is_none());
-        let id = message["params"]["config"]["default_permissions"].as_str().unwrap();
-        assert_eq!(message["params"]["config"][format!("permissions.{id}")]["filesystem"][":root"], "deny");
-        assert_eq!(message["params"]["config"]["sandbox_workspace_write.network_access"], false);
-        assert_eq!(message["params"]["config"]["shell_environment_policy.set"]["GIT_ALLOW_PROTOCOL"], "");
-        session.close();
     }
 }
 
 #[tokio::test]
 async fn a_project_with_no_approvals_declines_a_residual_request_without_emitting_a_card() {
-    let entries = fixture("codex", "tools")
-        .into_iter()
-        .map(|mut e| {
-            if e.input && e.msg.get("result").is_some() && e.msg["result"].get("decision").is_some() {
-                e.msg["result"]["decision"] = "decline".into();
-            }
-            e
-        })
-        .collect();
-    let (events, mismatches) = drive(
-        entries,
-        |spawn, sink| {
-            let server = CodexServer::start(CodexServerOptions {
-                bin: "codex".into(),
-                cwd: ".".into(),
-                area: Area::Project,
-                user_hooks: false,
-                windows: false,
-                spawn,
-            });
-            server.open(
-                CodexThread {
+    for area in [Area::Chat, Area::Project] {
+        let entries = fixture("codex", "tools")
+            .into_iter()
+            .map(|mut e| {
+                if e.input && e.msg.get("result").is_some() && e.msg["result"].get("decision").is_some() {
+                    e.msg["result"]["decision"] = "decline".into();
+                }
+                e
+            })
+            .collect();
+        let (events, mismatches) = drive(
+            entries,
+            |spawn, sink| {
+                let server = CodexServer::start(CodexServerOptions {
+                    bin: "codex".into(),
                     cwd: ".".into(),
-                    model: None,
-                    effort: None,
-                    resume: None,
-                    instructions: None,
-                    user_name: None,
-                    permissions: Permissions::DontAsk,
-                },
-                sink,
-            )
-        },
-        "Create a.txt containing one. Then create b.txt containing two. Make each file in a separate step.",
-        |event, _| matches!(event, EngineEvent::Done { .. }),
-    )
-    .await;
-    assert!(mismatches.is_empty(), "{mismatches:?}");
-    assert!(!events.iter().any(|e| matches!(e, EngineEvent::Permission { .. })));
+                    area,
+                    user_hooks: false,
+                    windows: false,
+                    spawn,
+                });
+                server.open(
+                    CodexThread {
+                        cwd: ".".into(),
+                        model: None,
+                        effort: None,
+                        resume: None,
+                        instructions: None,
+                        user_name: None,
+                        permissions: Permissions::DontAsk,
+                    },
+                    sink,
+                )
+            },
+            "Create a.txt containing one. Then create b.txt containing two. Make each file in a separate step.",
+            |event, _| matches!(event, EngineEvent::Done { .. }),
+        )
+        .await;
+        assert!(mismatches.is_empty(), "{mismatches:?}");
+        assert!(!events.iter().any(|e| matches!(e, EngineEvent::Permission { .. })));
+    }
 }
 
 #[test]

@@ -39,6 +39,8 @@ fn engine(dir: &Path, vendors: &[Vendor], spawn: Spawner, ask: Option<Ask>) -> (
         ask,
     };
     let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
+    // These scenarios exercise permission queues and stale card answers, not the unattended default.
+    engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
     for vendor in engine.vendors() {
         engine.note_account_events(
             vendor,

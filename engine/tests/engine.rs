@@ -71,6 +71,129 @@ fn read_json(path: &Path) -> serde_json::Value {
 }
 
 #[tokio::test]
+async fn r107_a_saved_chat_folder_is_used_and_is_never_deleted_with_the_conversation() {
+    let data = tempfile::tempdir().unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let (first, mut rx) = engine(data.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn);
+    let id = first.send(ask(Area::Chat, SKY, choice("claude", None))).unwrap();
+    finished(&mut rx, |_| {}).await;
+    first.shutdown();
+    let record = data.path().join("conversations").join(format!("{id}.json"));
+    let mut saved = read_json(&record);
+    saved["workingFolder"] = folder.path().to_string_lossy().into_owned().into();
+    std::fs::write(&record, serde_json::to_vec(&saved).unwrap()).unwrap();
+    std::fs::write(folder.path().join("output.txt"), "visible output").unwrap();
+    let (reopened, _) = engine(data.path(), Vendor::Claude, fake(vec![]).spawn);
+    assert_eq!(reopened.workspace_file(&id, "output.txt"), Some(folder.path().join("output.txt")));
+    reopened.remove(&id);
+    assert!(folder.path().join("output.txt").is_file());
+    assert!(!data.path().join("chat").join(id).exists());
+    reopened.shutdown();
+}
+
+#[tokio::test]
+async fn r106_orphaned_chat_scratch_is_cleaned_but_saved_conversations_are_kept() {
+    let data = tempfile::tempdir().unwrap();
+    let orphan = data.path().join("chat/11111111-1111-4111-8111-111111111111");
+    std::fs::create_dir_all(&orphan).unwrap();
+    std::fs::write(orphan.join("temporary.txt"), "orphan").unwrap();
+    let retained = data.path().join("chat/22222222-2222-4222-8222-222222222222");
+    std::fs::create_dir_all(&retained).unwrap();
+    std::fs::create_dir_all(data.path().join("conversations")).unwrap();
+    // Even an unreadable record is retained: cleanup must not discard a person's files on a parse failure.
+    std::fs::write(data.path().join("conversations/22222222-2222-4222-8222-222222222222.json"), "{}").unwrap();
+    let (engine, _) = engine(data.path(), Vendor::Claude, fake(vec![]).spawn);
+    assert!(!orphan.exists());
+    assert!(retained.exists());
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn r107_chat_folder_choice_is_canonical_persisted_and_fixed_before_the_first_message() {
+    let data = tempfile::tempdir().unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "chat"));
+    let cwd = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = cwd.clone();
+    let spawn = f.spawn.clone();
+    let (engine, mut rx) = engine(
+        data.path(),
+        Vendor::Claude,
+        Arc::new(move |bin, args, dir| {
+            seen.lock().unwrap().push(dir.to_path_buf());
+            spawn(bin, args, dir)
+        }),
+    );
+    let c = engine.chat_folder(None, Some(&folder.path().join("."))).unwrap();
+    let canonical = faber_engine::permissions::working_root(folder.path()).unwrap();
+    assert_eq!(c.working_folder.as_deref(), canonical.to_str());
+    assert_eq!(engine.open(&c.id).unwrap().working_folder, c.working_folder);
+    engine.send(SendRequest { conversation_id: Some(c.id.clone()), ..ask(Area::Chat, SKY, choice("claude", None)) }).unwrap();
+    finished(&mut rx, |_| {}).await;
+    assert_eq!(*cwd.lock().unwrap(), [canonical]);
+    assert!(f.args.lock().unwrap()[0].contains(&"bypassPermissions".into()));
+    assert_eq!(engine.chat_folder(Some(&c.id), None).unwrap_err(), "error.chatFolderLocked");
+    let branch = engine
+        .branch(BranchRequest {
+            conversation_id: c.id.clone(),
+            message_id: engine.open(&c.id).unwrap().messages[0].id.clone(),
+            text: SKY.into(),
+            choice: choice("claude", None),
+        })
+        .unwrap();
+    finished(&mut rx, |_| {}).await;
+    assert_eq!(engine.open(&branch).unwrap().working_folder, c.working_folder);
+    engine.remove(&c.id);
+    engine.remove(&branch);
+    assert!(folder.path().is_dir());
+    assert!(engine.chat_folder(None, Some(&folder.path().join("missing"))).is_err());
+    #[cfg(windows)]
+    assert!(engine.chat_folder(None, Some(Path::new("//unresolved.example/share"))).is_err());
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn r107_private_chat_files_survive_turns_and_are_cleaned_with_the_conversation() {
+    let data = tempfile::tempdir().unwrap();
+    let spawn = fake(fixture("claude", "chat")).spawn;
+    let (engine, mut rx) = engine(
+        data.path(),
+        Vendor::Claude,
+        Arc::new(move |bin, args, dir| {
+            std::fs::write(dir.join(".faber/tmp/temporary.txt"), "temporary").unwrap();
+            std::fs::write(dir.join("answer.txt"), "visible").unwrap();
+            spawn(bin, args, dir)
+        }),
+    );
+    let id = engine.send(ask(Area::Chat, SKY, choice("claude", None))).unwrap();
+    let message = finished(&mut rx, |_| {}).await;
+    let scratch = data.path().join("chat").join(&id);
+    assert!(scratch.join("answer.txt").is_file());
+    assert!(!scratch.join(".faber/tmp").exists());
+    assert_eq!(message.files.unwrap(), [faber_engine::model::FileInfo { path: "answer.txt".into(), size: 7 }]);
+    engine.remove(&id);
+    assert!(!scratch.exists());
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn r107_project_hook_opt_in_does_not_enable_chat_startup_hooks() {
+    let data = tempfile::tempdir().unwrap();
+    let f = fake(fixture("codex", "chat"));
+    let (engine, _) = engine(data.path(), Vendor::Codex, f.spawn.clone());
+    engine.save_settings(Settings { user_hooks: Some(true), ..Settings::default() }).unwrap();
+    engine.warm(WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: choice("codex", None) });
+    assert!(f.args.lock().unwrap()[0].windows(2).any(|args| args == ["--disable", "hooks"]));
+    engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+    engine.warm(WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: choice("codex", None) });
+    assert!(!f.args.lock().unwrap()[1].windows(2).any(|args| args == ["--disable", "hooks"]), "Ask retains its prior hook behavior");
+    engine.save_settings(Settings { permissions: Some(Permissions::DontAsk), ..Settings::default() }).unwrap();
+    engine.warm(WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: choice("codex", None) });
+    assert_eq!(f.args.lock().unwrap().len(), 3, "both cached hook configurations are retired on mode changes");
+    engine.shutdown();
+}
+
+#[tokio::test]
 async fn manual_effort_and_the_missing_effort_default_reach_both_drivers_and_are_saved() {
     for vendor in Vendor::ALL {
         for effort in [None, Some(Effort::Low), Some(Effort::Medium), Some(Effort::High)] {
@@ -144,7 +267,7 @@ async fn a_chat_turn_streams_to_the_screen_and_is_saved_with_model_reason_sessio
     assert!(reply.text.contains("Rayleigh"));
     assert_eq!(reply.model.as_deref(), Some("claude-haiku-5-5"));
     assert_eq!(reply.reason.as_deref(), Some("reason.chosen"));
-    assert!(f.args.lock().unwrap()[0].contains(&"--restricted".to_string()));
+    assert!(f.args.lock().unwrap()[0].contains(&"bypassPermissions".to_string()));
     let saved = read_json(&dir.path().join("conversations").join(format!("{id}.json")));
     assert_eq!(saved["sessions"]["claude"], "c5b9834c-dfc7-4086-beed-2212be93b722");
     assert_eq!(saved["title"], SKY);
@@ -280,6 +403,7 @@ async fn always_allow_answers_the_next_request_for_the_same_tool_without_asking_
         .collect();
     let dir = tempfile::tempdir().unwrap();
     let (engine, mut rx) = engine(dir.path(), Vendor::Claude, fake(entries).spawn);
+    engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
     let id = engine.send(ask(Area::Chat, TWO_WRITES, choice("claude", None))).unwrap();
     let mut asked: Vec<String> = Vec::new();
     finished(&mut rx, |m| {
@@ -301,6 +425,7 @@ async fn two_permission_requests_at_once_wait_in_a_queue_and_both_get_answered()
     let dir = tempfile::tempdir().unwrap();
     let (engine, mut rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "parallel")).spawn);
     let text = "Search the web for the latest stable version of Node.js and, in parallel, for the latest version of Python. Run both searches at the same time, then answer in two lines.";
+    engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
     let id = engine.send(ask(Area::Chat, text, choice("claude", None))).unwrap();
     let (mut shown, mut answered) = (Vec::new(), Vec::new());
     let reply = finished(&mut rx, |m| {
@@ -420,6 +545,7 @@ async fn editing_a_message_branches_into_a_new_conversation_and_leaves_the_origi
     let id = engine.send(ask(Area::Chat, SKY, pick())).unwrap();
     finished(&mut rx, |_| {}).await;
     std::fs::write(dir.path().join("chat").join(&id).join("notes.txt"), "made earlier").unwrap();
+    std::fs::write(dir.path().join("chat").join(&id).join(".npmrc"), "synthetic credential").unwrap();
     let first = engine.open(&id).unwrap().messages[0].clone();
     let branch_id = engine
         .branch(BranchRequest { conversation_id: id.clone(), message_id: first.id.clone(), text: SKY.into(), choice: pick() })
@@ -433,6 +559,7 @@ async fn editing_a_message_branches_into_a_new_conversation_and_leaves_the_origi
     assert_eq!((of.conversation_id, of.message_id), (id.clone(), first.id));
     assert_eq!(branch.messages.len(), 2);
     assert_eq!(std::fs::read_to_string(dir.path().join("chat").join(&branch_id).join("notes.txt")).unwrap(), "made earlier");
+    assert!(!dir.path().join("chat").join(&branch_id).join(".npmrc").exists());
 }
 
 #[tokio::test]
@@ -500,7 +627,7 @@ async fn permissions_default_without_a_migration_persist_and_restart_idle_projec
 }
 
 #[tokio::test]
-async fn m5_tightening_permissions_stops_running_projects_and_leaves_chat_alone() {
+async fn r107_tightening_permissions_stops_chat_and_projects() {
     let dir = tempfile::tempdir().unwrap();
     let entries = vec![
         Entry { input: true, msg: serde_json::json!({ "type": "user", "message": { "content": "wait" } }) },
@@ -514,7 +641,7 @@ async fn m5_tightening_permissions_stops_running_projects_and_leaves_chat_alone(
     let chat = engine.send(ask(Area::Chat, "wait", choice("claude", None))).unwrap();
     engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
     assert_eq!(engine.open(&work).unwrap().messages.last().unwrap().status, Some(Status::Stopped));
-    assert_eq!(engine.open(&chat).unwrap().messages.last().unwrap().status, Some(Status::Streaming));
+    assert_eq!(engine.open(&chat).unwrap().messages.last().unwrap().status, Some(Status::Stopped));
     let _ = finished(&mut rx, |_| {}).await;
     tokio::time::timeout(Duration::from_secs(3), async {
         while f.wire.lines_with("interrupt") == 0 {

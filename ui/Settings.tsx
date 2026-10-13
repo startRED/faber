@@ -46,6 +46,9 @@ interface Props {
   kept?: Appearance;
   /** Resolves to false when the save was refused or failed. */
   onSave: (patch: Saved) => Promise<boolean>;
+  chatFolder?: string;
+  chatFolderLocked?: boolean;
+  onChatFolder?: (scratch: boolean) => Promise<void>;
   onClose: () => void;
   /** Opens the account cards; Settings comes back as it was, from `keep`. */
   onOpenSetup: (keep: Keep) => void;
@@ -153,6 +156,17 @@ export function Settings(props: Props) {
               ]}
               onPick={(permissions) => void props.onSave({ permissions })}
             />
+            <Row label={t('set.chatFolder')}>
+              <p class="hint">{t('set.chatFolderHint')}</p>
+              <Show when={props.onChatFolder}>
+                <p>{props.chatFolder ?? t('set.privateFolder')}</p>
+                <button class="btn" disabled={props.chatFolderLocked} onClick={() => void props.onChatFolder?.(false)}>{t('set.chooseFolder')}</button>
+                <Show when={props.chatFolder}>
+                  <button class="btn" disabled={props.chatFolderLocked} onClick={() => void props.onChatFolder?.(true)}>{t('set.privateFolder')}</button>
+                </Show>
+                <Show when={props.chatFolderLocked}><p class="hint">{t('error.chatFolderLocked')}</p></Show>
+              </Show>
+            </Row>
             <Row label={t('set.notifications')}>
               <div class="toggles">
                 <Toggle label={t('set.notifyMe')} hint={t('set.notifyHint')} checked={props.saved.notifications !== false} onChange={(on) => props.onSave({ notifications: on })} />

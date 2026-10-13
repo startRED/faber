@@ -215,6 +215,24 @@ async fn add_project(app: AppHandle, faber: State<'_, Faber>) -> Res<Option<Proj
     Ok(Some(faber.engine.add_project(&path.to_string_lossy())))
 }
 
+#[tauri::command]
+async fn chat_folder(app: AppHandle, faber: State<'_, Faber>, id: Option<String>, scratch: bool) -> Res<Option<Conversation>> {
+    if scratch {
+        return faber.engine.chat_folder(id.as_deref(), None).map(Some);
+    }
+    // A hidden test build must never open a visible native dialog.
+    if faber.hidden {
+        return Err("error.chatFolder".into());
+    }
+    let mut dialog = app.dialog().file();
+    if let Some(w) = main_window(&app) {
+        dialog = dialog.set_parent(&w);
+    }
+    let Some(picked) = dialog.blocking_pick_folder() else { return Ok(None) };
+    let path = picked.into_path().map_err(|_| "error.chatFolder")?;
+    faber.engine.chat_folder(id.as_deref(), Some(&path)).map(Some)
+}
+
 /// Copies a file from a chat workspace to wherever the user picks.
 #[tauri::command]
 async fn save_file(app: AppHandle, faber: State<'_, Faber>, id: String, path: String) -> Res<bool> {
@@ -430,6 +448,7 @@ fn main() {
             save_theme,
             open_theme,
             add_project,
+            chat_folder,
             save_file,
             show_file,
             read_image,

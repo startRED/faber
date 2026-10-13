@@ -10,7 +10,33 @@ use crate::sandbox::{CliSlot, Launch};
 const TWO_WRITES: &str = "Create a.txt containing 'one'. Then create b.txt containing 'two'. Use the Write tool for each, one at a time.";
 
 pub fn scenarios() -> Vec<Scenario> {
-    vec![Scenario { name: "a permission card is answered from the screen and the answer reaches the CLI", run: answers_a_card }]
+    vec![
+        Scenario { name: "a permission card is answered from the screen and the answer reaches the CLI", run: answers_a_card },
+        Scenario { name: "R107: default Chat applies its policy without permission cards", run: chat_without_cards },
+    ]
+}
+
+fn chat_without_cards(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let mut app = ctx.launch(Launch {
+        claude: CliSlot::Fake,
+        codex: CliSlot::Off,
+        recording: Some(ctx.paths.fixtures.join("claude/chat-policy.jsonl")),
+        ..Launch::default()
+    })?;
+    let page = &mut app.page;
+    let model = page.labelled("composer.model")?;
+    page.select_option(&model, "Claude Haiku")?;
+    ask(page, "check policy")?;
+    let actions = page.named("article", "answer.label")?.css(".actions");
+    page.wait_visible(&actions)?;
+    ensure(page.count(&css(".ask"))? == 0, || "default Chat must not leave a permission card".into())?;
+    let settings = page.named("button", "settings.open")?;
+    page.click(&settings)?;
+    let hint = page.text_of("set.chatFolderHint")?;
+    page.wait_visible(&css(".hint").has_text(&hint))?;
+    let folder = page.named("button", "set.chooseFolder")?;
+    same(page.attr(&folder, "disabled")?, Some("".into()), "the folder is fixed once messages exist")
 }
 
 fn answers_a_card(ctx: &mut Ctx) -> Result {

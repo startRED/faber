@@ -15,13 +15,17 @@ import { accountLine, seedQuotas, usageRows } from '../../ui/sidebar.ts';
 import { Settings } from '../../ui/Settings.tsx';
 import { check, deepEqual, equal, ok } from './check.ts';
 
-check('permissions scope H1/L3: Settings names Projects and the default is disclosed on the project screen', () => {
+check('R107: Settings names Chat and Projects and discloses the shared default', () => {
+  ok(en['set.permissions'].includes('Chat'));
   ok(en['set.permissions'].includes('Projects'));
   ok('project.permissionsDontAsk' in en);
+  ok(en['set.chatFolderHint'].includes('first message'));
+  ok(en['set.chatFolderHint'].includes('private folder'));
+  ok(en['set.chatFolderHint'].includes('delete the conversation'));
 });
 
 check('review2 H2: the default disclosure explains external reads and provider transmission', () => {
-  ok(en['project.permissionsDontAsk'].includes('outside this project'));
+  ok(en['project.permissionsDontAsk'].includes('outside this folder'));
   ok(en['project.permissionsDontAsk'].includes('provider'));
 });
 

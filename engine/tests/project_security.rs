@@ -122,8 +122,12 @@ fn m3_all_git_commands_reach_the_host_instead_of_only_named_destructive_forms() 
 }
 
 #[test]
-fn h1_m4_l3_the_owner_scoped_permissions_to_projects_and_existing_users_default_to_dont_ask() {
-    assert_eq!(claude_args(&launch(Area::Chat, Permissions::DontAsk)), claude_args(&launch(Area::Chat, Permissions::Ask)));
+fn r107_chat_reuses_project_protections_and_existing_users_default_to_dont_ask() {
+    let chat = settings(&claude_args(&launch(Area::Chat, Permissions::DontAsk)));
+    let project = settings(&claude_args(&launch(Area::Project, Permissions::DontAsk)));
+    for key in ["permissions", "sandbox", "env"] {
+        assert_eq!(chat[key], project[key], "shared protection {key}");
+    }
     for old in [json!({}), json!({ "setup": "done" })] {
         let old: Settings = serde_json::from_value(old).unwrap();
         assert_eq!(old.permissions.unwrap_or_default(), Permissions::DontAsk);

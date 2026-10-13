@@ -250,8 +250,10 @@ inside its own area.
   Usage limits, and Esc or Back closes it.
 - General has the language, name, CLI hooks switch and Permissions choice. "Don't ask" is the default for new and
   existing settings; "Ask before commands" preserves the previous behavior. Choices save at once and stay at the saved
-  value if the save fails. Chat keeps its restricted setup.
-- R97: Projects use bypass permissions with native deny rules for `.git` edits, credential directories and key files;
+  value if the save fails. R107 applies the same default and protections to Chat. Chat uses its chosen canonical folder
+  (fixed before the first message), or private per-conversation scratch; deletion/draft cleanup never removes a chosen
+  folder. General explains the rule and offers the folder choice.
+- R97/R107: Chat and Projects use bypass permissions with native deny rules for `.git` edits, credential directories and key files;
   Codex uses `never` approvals with a workspace-only permission profile and sandbox network access disabled.
   Native deny rules [apply even in bypass mode](https://code.claude.com/docs/en/permission-modes#available-modes), but
   [command patterns are not an OS sandbox](https://code.claude.com/docs/en/permissions#what-a-bash-rule-doesnt-match).
@@ -261,8 +263,9 @@ inside its own area.
   with the same profile, never through an unsandboxed fallback. Native Windows requires MXC support. Unsupported shell
   syntax and arbitrary programs are declined without a card. Secret reads
   are denied while environment templates and internal `.env` creation work. Git transports and GitHub authentication
-  are disabled in child commands. The project screen discloses the mode; tightening it stops current project turns.
-  Don't ask loads only user settings to keep project env/hooks out of the host launcher. Read-only shell commands and
+  are disabled in child commands. Both areas disclose the mode; tightening it stops current turns.
+  Don't ask loads only user settings to keep project env/hooks out of the host launcher. Chat also uses safe mode,
+  strict MCP configuration and its fixed tool list; Ask Chat retains restricted mode. Read-only shell commands and
   deletions use the sandbox too; file tools retain their canonical path checks, including network-link guards.
   Host file decisions, CLI startup customizations and external integrations are separate from command isolation;
   see the verified findings and limits in [the R97 security review](security-r97-review.md).

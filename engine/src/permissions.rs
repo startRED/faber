@@ -1,4 +1,4 @@
-//! Project tool decisions and OS sandbox configuration. Unsupported shell syntax fails closed.
+//! Shared working-folder decisions and OS sandbox configuration. Unsupported shell syntax fails closed.
 
 use serde_json::{Map, Value, json};
 use std::path::{Component, Path, PathBuf};
@@ -32,6 +32,26 @@ pub fn sandbox_config(root: &Path) -> Map<String, Value> {
 
 pub fn prepare_tmp(root: &Path) -> bool {
     target(root, ".faber/tmp", true, true).is_some_and(|path| std::fs::create_dir_all(path).is_ok())
+}
+
+/// Canonical local roots reuse the file policy's network-link and credential guards.
+pub fn working_root(root: &Path) -> Option<PathBuf> {
+    let path = target(root, ".", false, false)?;
+    #[cfg(windows)]
+    if let Some(local) = path.to_str()?.strip_prefix("\\\\?\\") {
+        return Some(PathBuf::from(local));
+    }
+    Some(path)
+}
+
+/// Only Faber's scratch temporary directory is disposable. Never follow a substituted link during cleanup.
+pub fn clean_tmp(root: &Path) {
+    let path = root.join(".faber/tmp");
+    if [root.join(".faber"), path.clone()].iter().all(|p| p.symlink_metadata().is_ok_and(|m| !m.file_type().is_symlink()))
+        && target(root, ".faber/tmp", true, true).is_some()
+    {
+        let _ = std::fs::remove_dir_all(path);
+    }
 }
 
 fn inline(value: &Value) -> String {

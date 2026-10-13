@@ -18,7 +18,7 @@ use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 const CHAT_INSTRUCTIONS: &str = "You are a helpful, precise assistant in a chat app. Answer in the language of the user. \
-Use Markdown when it helps. Your working folder is a private workspace for this conversation: run code and create files \
+Use Markdown when it helps. Your working folder belongs to this conversation: run code and create files \
 there when it helps, and mention the files you create.";
 
 /// Arguments for `codex app-server`. Projects keep the user's own setup, like a direct session, except hooks.
@@ -51,7 +51,7 @@ pub fn codex_thread(area: Area, model: Option<&str>, permissions: Permissions) -
         thread.insert("model".into(), model.into());
     }
     thread.insert("sandbox".into(), "workspace-write".into());
-    let dont_ask = area == Area::Project && permissions == Permissions::DontAsk;
+    let dont_ask = permissions == Permissions::DontAsk;
     thread.insert("approvalPolicy".into(), if dont_ask { "never" } else { "on-request" }.into());
     if dont_ask {
         thread.remove("sandbox");
@@ -329,7 +329,7 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
         // Developer instructions sit beside Codex's own, so a project keeps its default prompt.
         params.insert("developerInstructions".into(), name_instructions(name).into());
     }
-    if area == Area::Project && t.permissions == Permissions::DontAsk && t.instructions.is_none() {
+    if t.permissions == Permissions::DontAsk && t.instructions.is_none() {
         params.get_mut("config").unwrap()["shell_environment_policy.set"] = crate::permissions::child_env(&t.cwd);
     }
     params.insert("cwd".into(), t.cwd.to_string_lossy().into_owned().into());
@@ -497,7 +497,7 @@ async fn serve(started: std::io::Result<proc::Proc>, area: Area, mut rx: Unbound
                     (Some(method), Some(id)) => {
                         let thread = params["threadId"].as_str().and_then(|t| by_id.get(t)).and_then(|k| threads.get_mut(k));
                         match (method.ends_with("requestApproval"), thread) {
-                            (true, Some(t)) if area != Area::Project || t.params.permissions == Permissions::Ask => {
+                            (true, Some(t)) if t.params.permissions == Permissions::Ask && t.params.instructions.is_none() => {
                                 let key = match id { Value::String(s) => s.clone(), other => other.to_string() };
                                 t.approvals.insert(key.clone(), id.clone());
                                 let tool = params["kind"].as_str().unwrap_or(method).to_string();

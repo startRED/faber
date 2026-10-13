@@ -251,6 +251,16 @@ pub struct Engine {
 impl Engine {
     pub fn new(opts: EngineOptions, emit: Emit) -> Engine {
         let store = Store::new(&opts.data_dir);
+        // A crash can leave an unsaved draft behind. Visible records keep their scratch; orphan UUID folders do not.
+        let scratch = opts.data_dir.join("chat");
+        if scratch.symlink_metadata().is_ok_and(|m| !m.file_type().is_symlink()) {
+            for entry in std::fs::read_dir(&scratch).into_iter().flatten().flatten() {
+                let id = entry.file_name().to_string_lossy().into_owned();
+                if Uuid::parse_str(&id).is_ok() && !opts.data_dir.join("conversations").join(format!("{id}.json")).exists() {
+                    let _ = std::fs::remove_dir_all(entry.path());
+                }
+            }
+        }
         let ledger = store.ledger();
         let quotas = remembered(&ledger, unix_secs());
         let runtime = opts.runtime.clone();
@@ -425,6 +435,39 @@ impl Engine {
     }
     pub fn rename(&self, id: &str, title: &str) {
         self.with(|c| c.rename(id, title))
+    }
+    /// A folder is chosen by the person, before any messages or files belong to the conversation.
+    pub fn chat_folder(&self, id: Option<&str>, folder: Option<&Path>) -> Result<Conversation, String> {
+        self.with(|c| {
+            let folder = folder
+                .map(|p| crate::permissions::working_root(p).filter(|p| p.is_dir()).ok_or("error.chatFolder"))
+                .transpose()?
+                .map(|p| p.to_string_lossy().into_owned());
+            let id = match id {
+                Some(id) => {
+                    let conv = c.load(id).ok_or("error.conversationGone")?;
+                    if conv.area != Area::Chat || !conv.messages.is_empty() {
+                        return Err("error.chatFolderLocked".into());
+                    }
+                    id.to_string()
+                }
+                None => {
+                    c.drop_draft();
+                    c.blank(Area::Chat, None)
+                }
+            };
+            if let Some(live) = c.live.remove(&id) {
+                live.session.close();
+            }
+            let conv = c.convs.get_mut(&id).expect("loaded conversation");
+            conv.working_folder = folder;
+            conv.sessions.clear();
+            conv.cost_base.clear();
+            let result = conv.clone();
+            c.save(&id);
+            c.list_changed();
+            Ok(result)
+        })
     }
     pub fn remove(&self, id: &str) {
         self.with(|c| c.remove(id))
@@ -675,15 +718,24 @@ impl Core {
         self.opts.clis = clis;
     }
 
-    // Each chat conversation gets a private workspace folder: code runs and files are created there, never elsewhere.
-    fn workspace_of(&self, id: &str) -> PathBuf {
+    fn scratch_of(&self, id: &str) -> PathBuf {
         self.opts.data_dir.join("chat").join(id)
+    }
+
+    fn workspace_of(&self, id: &str) -> PathBuf {
+        let folder = match self.convs.get(id) {
+            Some(c) => c.working_folder.clone(),
+            None => self.store.get(id).and_then(|c| c.working_folder),
+        };
+        folder.map(PathBuf::from).unwrap_or_else(|| self.scratch_of(id))
     }
 
     fn cwd_of(&self, c: &Conversation) -> Result<PathBuf, String> {
         if c.area == Area::Chat {
             let dir = self.workspace_of(&c.id);
-            let _ = std::fs::create_dir_all(&dir);
+            if c.working_folder.is_none() {
+                std::fs::create_dir_all(&dir).map_err(|_| "error.projectSandbox")?;
+            }
             return Ok(dir);
         }
         self.store
@@ -761,12 +813,7 @@ impl Core {
         };
         self.store.save_settings(&settings).map_err(|_| "error.settings.saveFailed".to_string())?;
         if before.permissions.unwrap_or_default() == Permissions::DontAsk && settings.permissions == Some(Permissions::Ask) {
-            let active: Vec<String> = self
-                .live
-                .iter()
-                .filter(|(id, live)| live.turn.is_some() && self.convs.get(*id).is_some_and(|c| c.area == Area::Project))
-                .map(|(id, _)| id.clone())
-                .collect();
+            let active: Vec<String> = self.live.iter().filter(|(_, live)| live.turn.is_some()).map(|(id, _)| id.clone()).collect();
             for id in active {
                 if let Some(live) = self.live.remove(&id) {
                     live.session.interrupt();
@@ -784,12 +831,15 @@ impl Core {
         if settings.user_name != before.user_name {
             self.drop_draft();
         }
-        // Idle project CLIs restart on their next turn, so changed hooks or permissions apply right away.
+        // Idle CLIs restart on their next turn when permissions change; hooks remain a Projects choice.
         if settings.user_hooks != before.user_hooks || settings.permissions != before.permissions {
             let idle: Vec<String> = self
                 .live
                 .iter()
-                .filter(|(id, l)| l.turn.is_none() && self.convs.get(*id).is_some_and(|c| c.area == Area::Project))
+                .filter(|(id, l)| {
+                    l.turn.is_none()
+                        && (settings.permissions != before.permissions || self.convs.get(*id).is_some_and(|c| c.area == Area::Project))
+                })
                 .map(|(id, _)| id.clone())
                 .collect();
             for id in idle {
@@ -797,8 +847,14 @@ impl Core {
                     l.session.close();
                 }
             }
-            if let Some(server) = self.codex.remove(&(Area::Project, before.user_hooks == Some(true))) {
-                server.retire();
+            for area in [Area::Chat, Area::Project] {
+                if area == Area::Project || settings.permissions != before.permissions {
+                    for hooks in [false, true] {
+                        if let Some(server) = self.codex.remove(&(area, hooks)) {
+                            server.retire();
+                        }
+                    }
+                }
             }
         }
         Ok(settings)
@@ -1010,6 +1066,9 @@ impl Core {
             l.turn = None;
         }
         let workspace = self.workspace_of(conv);
+        if self.convs.get(conv).is_some_and(|c| c.area == Area::Chat && c.working_folder.is_none()) {
+            crate::permissions::clean_tmp(&workspace);
+        }
         let Some(c) = self.convs.get_mut(conv) else { return };
         if let Some(m) = turn_id.as_ref().and_then(|id| c.messages.iter_mut().find(|m| &m.id == id))
             && c.area == Area::Chat
@@ -1216,7 +1275,7 @@ impl Core {
                 && l.model == pick.model
                 && l.effort == pick.effort
                 && Some(&l.cli) == cli.as_ref()
-                && (self.convs.get(conv).is_some_and(|c| c.area == Area::Chat) || l.permissions == permissions)
+                && l.permissions == permissions
             {
                 l.used = self.tick; // most recently used
                 return Ok(());
@@ -1226,6 +1285,8 @@ impl Core {
         }
         let c = self.convs.get(conv).ok_or("error.conversationGone")?;
         let cwd = self.cwd_of(c)?;
+        let cwd =
+            if permissions == Permissions::DontAsk { crate::permissions::working_root(&cwd).ok_or("error.projectSandbox")? } else { cwd };
         let cli = cli.ok_or("error.notConnected")?;
         let spawn = spawner(&self.opts.spawn, &cli);
         self.next_sid += 1;
@@ -1237,11 +1298,11 @@ impl Core {
                 core.lock().unwrap_or_else(|e| e.into_inner()).handle(&key, sid, e);
             }
         });
-        let user_hooks = self.store.settings().user_hooks == Some(true);
+        let user_hooks = self.store.settings().user_hooks == Some(true) && (c.area == Area::Project || permissions == Permissions::Ask);
         let resume = c.sessions.get(&pick.vendor).cloned();
         let resumed = resume.is_some();
         let area = c.area;
-        if area == Area::Project && permissions == Permissions::DontAsk && !crate::permissions::prepare_tmp(&cwd) {
+        if permissions == Permissions::DontAsk && !crate::permissions::prepare_tmp(&cwd) {
             return Err("error.projectSandbox".into());
         }
         // The conversation's own name, fixed when it began: a rename in Settings never reaches a conversation under way.
@@ -1312,6 +1373,7 @@ impl Core {
             choice: None,
             area,
             project_id,
+            working_folder: None,
             sessions: BTreeMap::new(),
             cost_base: BTreeMap::new(),
             allow_always: None,
@@ -1346,10 +1408,20 @@ impl Core {
                 None => self.blank(req.area, req.project_id.clone()),
             },
         };
-        let attachments_dir = if req.area == Area::Chat {
-            self.workspace_of(&id).join("attachments")
+        let saved = if req.files.is_empty() {
+            vec![]
         } else {
-            self.opts.data_dir.join("attachments").join(&id)
+            let root = if req.area == Area::Chat {
+                self.cwd_of(self.convs.get(&id).ok_or("error.conversationGone")?)?
+            } else {
+                self.opts.data_dir.clone()
+            };
+            let dir = if req.area == Area::Chat { root.join("attachments") } else { root.join("attachments").join(&id) };
+            let files = save_files(&root, &dir, &req.files);
+            if files.len() != req.files.len() {
+                return Err("error.projectSandbox".into());
+            }
+            files
         };
         let at = now();
         let auto = req.choice.vendor == "auto";
@@ -1371,7 +1443,6 @@ impl Core {
         let joining_late = !c.sessions.contains_key(&pick.vendor) && !c.messages.is_empty();
         let history = c.messages.clone();
         // Attached files are saved where the model can open them with its own tools (PDFs, spreadsheets, archives...).
-        let saved = if req.files.is_empty() { vec![] } else { save_files(&attachments_dir, &req.files) };
         let name = |p: &Path| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let shown: Vec<String> = saved
             .iter()
@@ -1447,6 +1518,7 @@ impl Core {
         let c = self.convs.get_mut(&id).expect("just created");
         c.title = format!("↳ {}", source.title.trim_start_matches("↳ "));
         c.branch_of = Some(BranchOf { conversation_id: source.id.clone(), message_id: req.message_id.clone() });
+        c.working_folder = source.working_folder.clone();
         c.messages = source.messages[..at]
             .iter()
             .cloned()
@@ -1455,7 +1527,7 @@ impl Core {
                 m
             })
             .collect();
-        if source.area == Area::Chat && from.is_dir() {
+        if source.area == Area::Chat && source.working_folder.is_none() && from.is_dir() {
             copy_dir(&from, &to);
         }
         self.save(&id);
@@ -1499,7 +1571,7 @@ impl Core {
                 l.session.close();
             }
             self.convs.remove(&old);
-            let _ = std::fs::remove_dir_all(self.workspace_of(&old));
+            let _ = std::fs::remove_dir_all(self.scratch_of(&old));
         }
     }
 
@@ -1540,7 +1612,7 @@ impl Core {
         if self.store.get(id).is_some() || self.convs.contains_key(id) {
             self.store.remove(id);
             self.convs.remove(id);
-            let _ = std::fs::remove_dir_all(self.workspace_of(id));
+            let _ = std::fs::remove_dir_all(self.scratch_of(id));
             let _ = std::fs::remove_dir_all(self.opts.data_dir.join("attachments").join(id));
         }
         self.list_changed();
@@ -1617,6 +1689,14 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
 fn copy_dir(from: &Path, to: &Path) {
     let _ = std::fs::create_dir_all(to);
     for entry in std::fs::read_dir(from).into_iter().flatten().flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name == ".faber"
+            || name == ".git"
+            || entry.file_type().is_ok_and(|kind| kind.is_symlink())
+            || !crate::permissions::allows(from, "Read", &serde_json::json!({ "file_path": name }))
+        {
+            continue;
+        }
         let target = to.join(entry.file_name());
         if entry.path().is_dir() {
             copy_dir(&entry.path(), &target);

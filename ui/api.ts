@@ -58,6 +58,7 @@ export interface Conversation {
   choice?: Choice;
   area: Area;
   projectId?: string;
+  workingFolder?: string;
   sessions: Partial<Record<Vendor, string>>;
   allowAlways?: string[];
   branchOf?: { conversationId: string; messageId: string };
@@ -272,6 +273,7 @@ export const api = {
   remove: (id: string) => invoke<void>('remove', { id }),
   removeProject: (id: string) => invoke<void>('remove_project', { id }),
   addProject: () => invoke<Project | null>('add_project'),
+  chatFolder: (id: string | undefined, scratch = false) => invoke<Conversation | null>('chat_folder', { id: id ?? null, scratch }),
   previewLook: (appearance: Appearance) => invoke<Look>('preview_look', { appearance }),
   saveSettings: (patch: Settings) => invoke<SavedSettings>('save_settings', { patch }),
   saveTheme: (appearance: Appearance, name: string) => invoke<boolean>('save_theme', { appearance, name }),

@@ -296,13 +296,19 @@ fn fits_large_text(ctx: &mut Ctx) -> Result {
 }
 
 /// A launch that stops at a question: the recording asks to write two files and waits for the answers.
-pub(super) fn two_writes(ctx: &Ctx) -> Launch {
-    Launch {
+pub(super) fn two_writes(ctx: &Ctx) -> Result<Launch> {
+    // Card scenarios explicitly choose Ask; the app's default now applies to Chat too.
+    let path = ctx.sb.data.join("settings.json");
+    let mut settings: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    settings["permissions"] = "ask".into();
+    std::fs::write(path, settings.to_string()).map_err(|e| e.to_string())?;
+    Ok(Launch {
         claude: CliSlot::Fake,
         codex: CliSlot::Off,
         recording: Some(ctx.paths.fixtures.join("claude/tools.jsonl")),
         ..Launch::default()
-    }
+    })
 }
 
 /// Sends the request and returns once the first question has been asked.
@@ -316,7 +322,7 @@ pub(super) fn ask_two_writes(page: &mut Page) -> Result {
 
 fn opens_by_itself(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
-    let launch = two_writes(ctx);
+    let launch = two_writes(ctx)?;
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
     ask_two_writes(page)?;
@@ -367,7 +373,7 @@ fn opens_by_itself(ctx: &mut Ctx) -> Result {
 /// button is amber on first paint and the column opens once.
 fn opens_at_load(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
-    let launch = two_writes(ctx);
+    let launch = two_writes(ctx)?;
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
     ask_two_writes(page)?;
@@ -384,7 +390,7 @@ fn opens_at_load(ctx: &mut Ctx) -> Result {
 
 fn overlays_the_stage(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
-    let launch = two_writes(ctx);
+    let launch = two_writes(ctx)?;
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
     set_size(page, 1000, 700)?;
@@ -425,7 +431,7 @@ fn overlays_the_stage(ctx: &mut Ctx) -> Result {
 
 fn opens_a_running_conversation(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
-    let launch = two_writes(ctx);
+    let launch = two_writes(ctx)?;
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
     ask_two_writes(page)?;
@@ -457,7 +463,7 @@ fn opens_a_project_conversation(ctx: &mut Ctx) -> Result {
     std::fs::write(ctx.sb.data.join("settings.json"), settings.to_string()).map_err(|e| e.to_string())?;
     // One project, so the screen can send into it.
     seed_project(ctx, "Demo")?;
-    let launch = two_writes(ctx);
+    let launch = two_writes(ctx)?;
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
     let demo = css(".prow .item").has_text("Demo");
@@ -703,7 +709,7 @@ fn waits_for_the_conversation(ctx: &mut Ctx) -> Result {
 
 fn leaves_the_greeting_composer(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
-    let launch = two_writes(ctx);
+    let launch = two_writes(ctx)?;
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
     set_size(page, 1099, 700)?;
@@ -735,7 +741,7 @@ fn leaves_the_greeting_composer(ctx: &mut Ctx) -> Result {
 
 fn keeps_focus_in_dialogs(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
-    let launch = two_writes(ctx);
+    let launch = two_writes(ctx)?;
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
     set_size(page, 1000, 700)?;
@@ -814,7 +820,7 @@ fn keys_until_the_question(page: &mut Page, chords: &[&str]) -> Result<std::time
 
 fn waits_for_every_key(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
-    let launch = two_writes(ctx);
+    let launch = two_writes(ctx)?;
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
     let model = page.labelled("composer.model")?;
@@ -869,7 +875,7 @@ fn dismissal_sticks_narrow(ctx: &mut Ctx) -> Result {
 /// screen may open it narrower than a desk does.
 fn dismissal(ctx: &mut Ctx, reduce: bool, width: u32) -> Result {
     start_settings(ctx, "en")?;
-    let launch = two_writes(ctx);
+    let launch = two_writes(ctx)?;
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
     system_motion(page, reduce)?;
