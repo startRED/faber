@@ -45,6 +45,7 @@ pub enum CliSlot {
 /// What a scenario chooses for a launch; everything else comes from the sandbox.
 #[derive(Debug, Clone, Default)]
 pub struct Launch {
+    pub args: Vec<String>,
     /// Exercises raster costs that a local GPU can hide; used only by the motion benchmark.
     pub software_rendering: bool,
     pub claude: CliSlot,

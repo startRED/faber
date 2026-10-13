@@ -524,6 +524,8 @@ async fn a_settings_write_that_fails_keeps_the_saved_settings_and_changes_nothin
         user_hooks: Some(false),
         notifications: Some(true),
         notification_sound: Some(true),
+        keep_awake: Some(true),
+        autostart: Some(false),
         language: Some("pt-BR".into()),
         ..Settings::default()
     };
@@ -543,6 +545,8 @@ async fn a_settings_write_that_fails_keeps_the_saved_settings_and_changes_nothin
         language: Some("de".into()),
         notifications: Some(false),
         notification_sound: Some(false),
+        keep_awake: Some(false),
+        autostart: Some(true),
         ..Settings::default()
     };
     assert_eq!(engine.save_settings(patch.clone()).unwrap_err(), "error.settings.saveFailed");
@@ -1047,4 +1051,21 @@ async fn the_result_of_a_tool_that_ran_across_a_steer_lands_on_the_tool_not_on_t
     let tool = &c.messages[1].tools.as_ref().unwrap()[0];
     assert_eq!((tool.ok, tool.output.as_deref()), (Some(true), Some("done")), "the earlier reply's tool got its result");
     assert!(c.messages[3].tools.as_ref().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn system_preferences_survive_unrelated_patches_and_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let spawn = fake(fixture("claude", "chat")).spawn;
+    let (app, _) = engine(dir.path(), Vendor::Claude, spawn.clone());
+    assert_eq!((app.settings().keep_awake, app.settings().autostart), (None, None));
+    app.save_settings(Settings { keep_awake: Some(false), ..Settings::default() }).unwrap();
+    app.save_settings(Settings { autostart: Some(true), ..Settings::default() }).unwrap();
+    app.save_settings(Settings { language: Some("en".into()), ..Settings::default() }).unwrap();
+    app.shutdown();
+    let (app, _) = engine(dir.path(), Vendor::Claude, spawn);
+    assert_eq!((app.settings().keep_awake, app.settings().autostart), (Some(false), Some(true)));
+    app.save_settings(Settings { autostart: Some(false), ..Settings::default() }).unwrap();
+    assert_eq!((app.settings().keep_awake, app.settings().autostart), (Some(false), Some(false)));
+    app.shutdown();
 }
