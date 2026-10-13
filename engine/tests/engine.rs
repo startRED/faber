@@ -797,3 +797,132 @@ async fn a_conversation_saved_before_the_cost_base_existed_still_opens() {
     assert_eq!(second.open(&id).unwrap().messages.len(), 2);
     second.shutdown();
 }
+
+#[tokio::test]
+async fn codex_steers_mid_turn_and_both_turns_complete() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("codex", "steer"));
+    let (engine, mut rx) = engine(dir.path(), Vendor::Codex, f.spawn.clone());
+    let id = engine.send(ask(Area::Chat, "Count to ten slowly", choice("codex", Some("gpt-6-luna")))).unwrap();
+
+    let mut steered = false;
+    let mut replies = vec![];
+    while let Ok(Some(e)) = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await {
+        if let AppEvent::Message { message, .. } = e
+            && message.role == Role::Assistant
+        {
+            if !steered && message.status == Some(Status::Streaming) && !message.text.is_empty() {
+                steered = true;
+                let steer_req = SendRequest {
+                    conversation_id: Some(id.clone()),
+                    ..ask(Area::Chat, "Stop counting and say pong", choice("codex", Some("gpt-6-luna")))
+                };
+                engine.send(steer_req).unwrap();
+            }
+            if message.status != Some(Status::Streaming) {
+                replies.push(*message);
+                if replies.len() == 2 {
+                    break;
+                }
+            }
+        }
+    }
+    engine.shutdown();
+    assert!(steered, "steer was called mid-turn");
+    assert_eq!(replies.len(), 2, "both replies finished");
+    assert_eq!(replies[0].status, Some(Status::Done));
+    assert_eq!(replies[1].status, Some(Status::Done));
+    assert!(replies[1].text.contains("pong"));
+
+    let conv = engine.open(&id).unwrap();
+    assert_eq!(conv.messages.len(), 4);
+    assert_eq!(conv.messages[0].text, "Count to ten slowly");
+    assert_eq!(conv.messages[1].id, replies[0].id);
+    assert_eq!(conv.messages[2].text, "Stop counting and say pong");
+    assert_eq!(conv.messages[3].id, replies[1].id);
+    assert!(conv.queued.is_empty());
+}
+
+#[tokio::test]
+async fn claude_queues_message_mid_turn_and_auto_dispatches() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "chat"));
+    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let id = engine.send(ask(Area::Chat, SKY, choice("claude", Some("haiku")))).unwrap();
+
+    let mut queued_sent = false;
+    let mut saw_queue_event = false;
+    while let Ok(Some(e)) = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await {
+        match e {
+            AppEvent::Message { message, .. } if message.role == Role::Assistant => {
+                if !queued_sent && message.status == Some(Status::Streaming) {
+                    queued_sent = true;
+                    let queue_req = SendRequest {
+                        conversation_id: Some(id.clone()),
+                        ..ask(Area::Chat, "Queued question", choice("claude", Some("haiku")))
+                    };
+                    let send_res = engine.send(queue_req);
+                    assert!(send_res.is_ok());
+                    let current = engine.open(&id).unwrap();
+                    assert_eq!(current.queued.len(), 1);
+                    assert_eq!(current.queued[0].text, "Queued question");
+                }
+                if message.status != Some(Status::Streaming) {
+                    break;
+                }
+            }
+            AppEvent::Queue { queued, .. } if !queued.is_empty() => {
+                saw_queue_event = true;
+            }
+            _ => {}
+        }
+    }
+    engine.shutdown();
+    assert!(queued_sent);
+    assert!(saw_queue_event);
+}
+
+#[tokio::test]
+async fn stopping_turn_preserves_queue_and_supports_remove_and_send_queued() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "interrupt"));
+    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let prompt = "Write a 600-word essay about the history of bread.";
+    let id = engine.send(ask(Area::Chat, prompt, choice("claude", Some("haiku")))).unwrap();
+
+    let mut queued = false;
+    while let Ok(Some(e)) = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await {
+        if let AppEvent::Message { message, .. } = e {
+            if message.role == Role::Assistant && message.status == Some(Status::Streaming) && !queued {
+                queued = true;
+                let queue_req = SendRequest {
+                    conversation_id: Some(id.clone()),
+                    ..ask(Area::Chat, "Queued while running", choice("claude", Some("haiku")))
+                };
+                engine.send(queue_req).unwrap();
+                engine.interrupt(&id);
+            }
+            if message.role == Role::Assistant && message.status == Some(Status::Stopped) {
+                break;
+            }
+        }
+    }
+    assert!(queued);
+    let conv = engine.open(&id).unwrap();
+    assert_eq!(conv.queued.len(), 1, "queue is preserved after turn is stopped");
+    let queued_id = conv.queued[0].id.clone();
+    assert_eq!(conv.queued[0].text, "Queued while running");
+
+    // Queue survives restart
+    engine.shutdown();
+    let (reopened, _) = engine_idle(dir.path(), Vendor::Claude, fake(fixture("claude", "chat")).spawn, Duration::from_secs(120));
+    let conv_reopened = reopened.open(&id).unwrap();
+    assert_eq!(conv_reopened.queued.len(), 1, "queue survives engine restart");
+    assert_eq!(conv_reopened.queued[0].id, queued_id);
+
+    // Remove queued turn
+    reopened.remove_queued(&id, &queued_id);
+    let conv_after_remove = reopened.open(&id).unwrap();
+    assert_eq!(conv_after_remove.queued.len(), 0, "remove_queued removes the queued turn");
+    reopened.shutdown();
+}

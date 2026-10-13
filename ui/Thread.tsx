@@ -1,7 +1,7 @@
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import { createResource, createSignal, For, Index, Show, type Accessor } from 'solid-js';
-import { api, type Choice, type Message, type ToolUse, type VendorUsage } from './api.ts';
+import { api, type Choice, type Message, type QueuedTurn, type ToolUse, type VendorUsage } from './api.ts';
 import { Asks } from './Ask.tsx';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
@@ -240,11 +240,50 @@ function Mine(props: { m: Accessor<Message>; onBranch: OnBranch }) {
   );
 }
 
+function Queued(props: { conversationId: string; q: QueuedTurn; busy: boolean }) {
+  return (
+    <div class="mine queued">
+      <Show when={props.q.attachments?.length}>
+        <div class="attach">
+          <For each={props.q.attachments}>
+            {(name) => (
+              <span class="afile">
+                <span class="fi">
+                  <Icon name="sheet" />
+                </span>
+                <span>{name}</span>
+              </span>
+            )}
+          </For>
+        </div>
+      </Show>
+      <div class="you queued">
+        <span class="queue-badge">{t('queue.label')}</span>
+        <For each={props.q.images}>{(img) => <img alt={t('mine.image')} src={`data:${img.mediaType};base64,${img.base64}`} />}</For>
+        <Show when={props.q.text}>
+          <div class="queue-text">{props.q.text}</div>
+        </Show>
+        <div class="actions">
+          <button type="button" onClick={() => void api.removeQueued(props.conversationId, props.q.id)} aria-label={t('queue.removeLabel')}>
+            {t('queue.remove')}
+          </button>
+          <Show when={!props.busy}>
+            <button type="button" onClick={() => void api.sendQueued(props.conversationId, props.q.id)} aria-label={t('queue.sendNowLabel')}>
+              {t('queue.sendNow')}
+            </button>
+          </Show>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Messages only grow at the end, so each position keeps its component while the answer streams into it.
 // Only the messages from `from` on are drawn.
-export function Thread(props: Shared & { messages: Message[]; from: number }) {
+export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTurn[]; busy?: boolean; from: number }) {
   const prompt = (at: number) => (props.messages[at - 1]?.role === 'user' ? props.messages[at - 1] : undefined);
   return (
+    <>
     <Index each={props.messages.slice(props.from)}>
       {(m, i) => (
         <Show when={m().role === 'user'} fallback={<Answer {...props} m={m} prompt={prompt(props.from + i)} />}>
@@ -252,5 +291,9 @@ export function Thread(props: Shared & { messages: Message[]; from: number }) {
         </Show>
       )}
     </Index>
+      <For each={props.queued}>
+        {(q) => <Queued conversationId={props.conversationId} q={q} busy={props.busy ?? false} />}
+      </For>
+    </>
   );
 }

@@ -106,7 +106,7 @@ export function Composer(props: Props) {
   });
   const selected = () => Math.max(0, props.options.findIndex((o) => o.choice.vendor === props.choice.vendor && o.choice.model === props.choice.model));
   const hasContent = () => draft().text.trim() !== '' || draft().images.length > 0 || draft().files.length > 0;
-  const canSend = () => !props.busy && !props.locked && hasContent() && props.vendors.length > 0;
+  const canSend = () => !props.locked && hasContent() && props.vendors.length > 0;
 
   // The first keystroke starts the CLI, not focus: the box is focused as soon as Faber opens, and an unused Claude
   // process costs about 120 MB.
@@ -240,20 +240,18 @@ export function Composer(props: Props) {
             <Icon name="down" small />
           </label>
         </Show>
-        <Show
-          when={props.busy}
-          fallback={
-            <button type="submit" class="send" disabled={!canSend()} aria-label={t('composer.send')}>
-              <span aria-hidden="true">{t('composer.send')}</span>
-              <Icon name="up" small />
-            </button>
-          }
-        >
+        <Show when={props.busy}>
           <button type="button" class="send stop" onClick={() => props.onStop()} aria-label={t('composer.stop')}>
             <svg class="i sm" viewBox="0 0 24 24" aria-hidden="true" style={{ fill: 'currentColor', stroke: 'none' }}>
               <rect width="12" height="12" x="6" y="6" rx="2" />
             </svg>
             <span aria-hidden="true">{t('composer.stop')}</span>
+          </button>
+        </Show>
+        <Show when={!props.busy || hasContent()}>
+          <button type="submit" class="send" disabled={!canSend()} aria-label={t('composer.send')}>
+            <span aria-hidden="true">{t('composer.send')}</span>
+            <Icon name="up" small />
           </button>
         </Show>
       </div>

@@ -200,6 +200,20 @@ pub struct BranchOf {
     pub message_id: String,
 }
 
+/// A message queued while a turn was already running, waiting to be sent next.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueuedTurn {
+    pub id: String,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub images: Option<Vec<Image>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachments: Option<Vec<String>>,
+    pub choice: crate::router::Choice,
+    pub at: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Conversation {
@@ -228,6 +242,8 @@ pub struct Conversation {
     pub user_name: Option<String>,
     pub created_at: u64,
     pub updated_at: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub queued: Vec<QueuedTurn>,
     pub messages: Vec<Message>,
 }
 

@@ -248,6 +248,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                         quota_seen = false;
                         let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
                     }
+                    Some(SessionCommand::Steer(_)) => {}
                     Some(SessionCommand::Answer { request_id, allow, ack }) => {
                         // The request stays pending until the write worked, so a failed write can be answered again.
                         let delivery = match pending.get(&request_id) {

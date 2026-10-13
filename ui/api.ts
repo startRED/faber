@@ -52,6 +52,14 @@ export interface Message {
   waitUntil?: number;
   movedFrom?: Vendor;
 }
+export interface QueuedTurn {
+  id: string;
+  text: string;
+  images?: Image[];
+  attachments?: string[];
+  choice: Choice;
+  at: number;
+}
 export interface Conversation {
   id: string;
   title: string;
@@ -63,6 +71,7 @@ export interface Conversation {
   branchOf?: { conversationId: string; messageId: string };
   createdAt: number;
   updatedAt: number;
+  queued?: QueuedTurn[];
   messages: Message[];
 }
 export interface Summary {
@@ -225,6 +234,7 @@ export interface SetupProgressEvent {
 }
 export type AppEvent =
   | { type: 'message'; conversationId: string; message: Message }
+  | { type: 'queue'; conversationId: string; queued: QueuedTurn[] }
   | ({ type: 'quota' } & QuotaReading)
   | ({ type: 'running' } & RunningList)
   | { type: 'usage'; vendors: VendorUsage[] }
@@ -269,6 +279,8 @@ export const api = {
     invoke<void>('answer', { id, turnId, requestId, allow, always }),
   rename: (id: string, title: string) => invoke<void>('rename', { id, title }),
   remove: (id: string) => invoke<void>('remove', { id }),
+  removeQueued: (id: string, turnId: string) => invoke<void>('remove_queued', { id, turnId }),
+  sendQueued: (id: string, turnId: string) => invoke<void>('send_queued', { id, turnId }),
   removeProject: (id: string) => invoke<void>('remove_project', { id }),
   addProject: () => invoke<Project | null>('add_project'),
   previewLook: (appearance: Appearance) => invoke<Look>('preview_look', { appearance }),

@@ -299,6 +299,9 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
       if (e.type === 'message' && opening.hear(e.conversationId, e.message) === 'apply') {
         setCurrent((c) => (c?.id === e.conversationId ? upsert(c, e.message) : c));
       }
+      if (e.type === 'queue') {
+        setCurrent((c) => (c?.id === e.conversationId ? { ...c, queued: e.queued } : c));
+      }
     });
     const minute = setInterval(() => {
       setClock(Date.now());
@@ -813,6 +816,8 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                           {(c) => (
                             <Thread
                               messages={c().messages}
+                              queued={c().queued}
+                              busy={busy()}
                               usage={state().usage ?? []}
                               from={from()}
                               conversationId={c().id}

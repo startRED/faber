@@ -347,3 +347,25 @@ fn the_name_is_a_developer_instruction_that_resume_repeats_and_a_side_question_n
     let (_, side) = thread_params(Area::Chat, &thread(None, Some("Route."), Some("Erick")));
     assert!(side.get("developerInstructions").is_none());
 }
+
+#[tokio::test]
+async fn steer_mid_turn_sends_steer_call_to_codex_app_server() {
+    let entries = fixture("codex", "steer");
+    let mut steered = false;
+    let (events, mismatches) = run(entries, "Count to ten slowly", None, |e, s| {
+        if let EngineEvent::Text(t) = e
+            && t.contains("One, two")
+            && !steered
+        {
+            steered = true;
+            s.steer(UserTurn::text("Stop counting and say pong"));
+        }
+        matches!(e, EngineEvent::Done { .. })
+    })
+    .await;
+    assert_eq!(mismatches, Vec::<String>::new());
+    assert!(steered);
+    let full_text = text_of(&events);
+    assert!(full_text.contains("One, two..."));
+    assert!(full_text.contains("pong"));
+}

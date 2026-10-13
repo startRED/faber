@@ -91,6 +91,7 @@ pub enum Delivery {
 #[derive(Debug)]
 pub enum SessionCommand {
     Send(UserTurn),
+    Steer(UserTurn),
     /// `ack` hears what became of the answer. A session that is gone drops it, and the receiver then fails.
     Answer {
         request_id: String,
@@ -123,6 +124,9 @@ impl Session {
     }
     pub fn send(&self, turn: UserTurn) {
         (self.send)(SessionCommand::Send(turn));
+    }
+    pub fn steer(&self, turn: UserTurn) {
+        (self.send)(SessionCommand::Steer(turn));
     }
     /// The receiver hears whether the CLI got the answer. If the session is gone it fails instead, because the
     /// command, and the sender in it, were dropped.

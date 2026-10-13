@@ -28,6 +28,7 @@ import './settings.check.ts';
 import './pace.check.ts';
 import './setup.check.ts';
 import './styles.check.ts';
+import './steer.check.ts';
 import './thread.check.ts';
 import './tutorial.check.ts';
 

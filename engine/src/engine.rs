@@ -36,6 +36,7 @@ pub use usage_view::{VendorUsage, WindowUsage};
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum AppEvent {
     Message { conversation_id: String, message: Box<Message> },
+    Queue { conversation_id: String, queued: Vec<QueuedTurn> },
     Quota { vendor: Vendor, window: String, used: f64, resets_at: f64 },
     Usage { vendors: Vec<VendorUsage> },
     Running { revision: u64, items: Vec<RunningItem> },
@@ -412,6 +413,12 @@ impl Engine {
     }
     pub fn branch(&self, req: BranchRequest) -> Result<String, String> {
         self.with(|c| c.branch(req))
+    }
+    pub fn remove_queued(&self, id: &str, turn_id: &str) {
+        self.with(|c| c.remove_queued(id, turn_id))
+    }
+    pub fn send_queued(&self, id: &str, turn_id: &str) -> Result<(), String> {
+        self.with(|c| c.send_queued(id, turn_id))
     }
     pub fn warm(&self, req: WarmRequest) {
         self.with(|c| c.warm(req))
@@ -988,20 +995,31 @@ impl Core {
             l.turn = None;
         }
         let workspace = self.workspace_of(conv);
-        let Some(c) = self.convs.get_mut(conv) else { return };
-        if let Some(m) = turn_id.as_ref().and_then(|id| c.messages.iter_mut().find(|m| &m.id == id))
-            && c.area == Area::Chat
-        {
-            let files = new_files(&workspace, m.at);
-            if !files.is_empty() {
-                m.files = Some(files);
+        let completed_ok = if let Some(c) = self.convs.get_mut(conv) {
+            if let Some(m) = turn_id.as_ref().and_then(|id| c.messages.iter_mut().find(|m| &m.id == id))
+                && c.area == Area::Chat
+            {
+                let files = new_files(&workspace, m.at);
+                if !files.is_empty() {
+                    m.files = Some(files);
+                }
             }
-        }
-        c.updated_at = now();
+            c.updated_at = now();
+            turn_id.as_ref().and_then(|id| c.messages.iter().find(|m| &m.id == id)).is_some_and(|m| m.status == Some(Status::Done))
+        } else {
+            return;
+        };
         self.save(conv);
         self.save_ledger(false);
         self.push(conv, turn_id.as_deref(), true);
         self.list_changed();
+        let next =
+            if completed_ok { self.convs.get_mut(conv).and_then(|c| (!c.queued.is_empty()).then(|| c.queued.remove(0))) } else { None };
+        if let Some(next) = next {
+            self.save(conv);
+            self.emit_queue(conv);
+            let _ = self.dispatch_queued(conv, next);
+        }
         if self.live.get(conv).is_some_and(|l| self.opts.clis.get(&l.vendor) != Some(&l.cli))
             && let Some(l) = self.live.remove(conv)
         {
@@ -1063,6 +1081,108 @@ impl Core {
     fn list_changed(&mut self) {
         (self.emit)(AppEvent::List);
         self.refresh_running();
+    }
+
+    fn emit_queue(&mut self, conv: &str) {
+        if let Some(c) = self.convs.get(conv) {
+            (self.emit)(AppEvent::Queue { conversation_id: conv.to_string(), queued: c.queued.clone() });
+        }
+    }
+
+    fn remove_queued(&mut self, id: &str, turn_id: &str) {
+        if let Some(c) = self.convs.get_mut(id) {
+            c.queued.retain(|q| q.id != turn_id);
+            self.save(id);
+            self.emit_queue(id);
+        }
+    }
+
+    fn send_queued(&mut self, id: &str, turn_id: &str) -> Result<(), String> {
+        let busy = self.live.get(id).is_some_and(|l| l.turn.is_some())
+            || self.convs.get(id).and_then(|c| c.messages.last()).is_some_and(|m| m.status == Some(Status::Streaming));
+        if busy {
+            return Err("error.busy".into());
+        }
+        let Some(c) = self.convs.get_mut(id) else { return Err("error.conversationGone".into()) };
+        let pos = c.queued.iter().position(|q| q.id == turn_id).ok_or("error.messageGone")?;
+        let item = c.queued.remove(pos);
+        self.save(id);
+        self.emit_queue(id);
+        self.dispatch_queued(id, item)
+    }
+
+    fn dispatch_queued(&mut self, id: &str, item: QueuedTurn) -> Result<(), String> {
+        let fallback = pick_model(&item.choice, &self.vendors(), self.codex_recommended.as_deref()).ok_or("error.noSubscription")?;
+        let auto = item.choice.vendor == "auto";
+        let route = if auto { self.next_route(id) } else { None };
+        let c = self.convs.get_mut(id).ok_or("error.conversationGone")?;
+        c.choice = Some(Choice { effort: (!auto).then(|| item.choice.effort.unwrap_or(Effort::Medium)), ..item.choice.clone() });
+        let routing = route.is_some();
+        let pick = match &route {
+            Some(Some(before)) => before.clone(),
+            Some(None) => fallback.clone(),
+            None if auto => {
+                same_as_before(c, self.live.get(id)).filter(|p| self.opts.clis.contains_key(&p.vendor)).unwrap_or_else(|| fallback.clone())
+            }
+            None => fallback.clone(),
+        };
+        let joining_late = !c.sessions.contains_key(&pick.vendor) && !c.messages.is_empty();
+        let history = c.messages.clone();
+        let at = now();
+        let mut question = Message::new(new_id(), Role::User, item.text.clone(), at);
+        question.images = item.images.clone();
+        question.attachments = item.attachments.clone();
+        let mut reply = Message::new(new_id(), Role::Assistant, String::new(), at);
+        if !routing {
+            reply.vendor = Some(pick.vendor);
+            reply.model = pick.model.clone();
+        }
+        reply.reason = Some(if routing { "reason.routing".into() } else { pick.reason.clone() });
+        reply.tools = Some(vec![]);
+        reply.status = Some(Status::Streaming);
+        let reply_id = reply.id.clone();
+        let question_id = question.id.clone();
+        c.messages.push(question);
+        c.messages.push(reply);
+        c.updated_at = at;
+        self.save(id);
+        self.list_changed();
+        self.emit_message(id, &question_id);
+        let images = item.images.unwrap_or_default();
+        let attachments_len = item.attachments.as_ref().map_or(0, |a| a.len());
+        self.transfers.insert(
+            id.to_string(),
+            recovery::Transfer {
+                reply: reply_id.clone(),
+                pick: pick.clone(),
+                text: item.text.clone(),
+                images: images.clone(),
+                by_hand: !auto,
+                retried: false,
+                moving: false,
+            },
+        );
+        let text = if joining_late { with_history(&history, &item.text) } else { item.text };
+        if let Some(before) = route {
+            let only = before.as_ref().map(|p| p.vendor);
+            let route = self.route_for(&text, images.len() + attachments_len, only);
+            self.push(id, Some(&reply_id), true);
+            let (me, conv, images) = (self.me.clone(), id.to_string(), images);
+            tokio::spawn(async move {
+                let verdict = tokio::time::timeout(auto::ROUTE_BUDGET, route).await.ok().and_then(|r| r.ok()).flatten();
+                if let Some(core) = me.upgrade() {
+                    let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+                    let routed = verdict.and_then(|v| core.table(&v, only)).filter(|r| before.as_ref().is_none_or(|p| !r.weaker_than(p)));
+                    core.after_route(&conv, &reply_id, routed, pick, text, images);
+                }
+            });
+            return Ok(());
+        }
+        if let Err(error) = self.dispatch(id, &reply_id, &pick, text, images, !auto) {
+            self.fail_reply(id, &reply_id, error.clone());
+            return Err(error);
+        }
+        Ok(())
     }
 
     /// The conversations to show in the running list, in the order the screen draws them: blocks that hold a question
@@ -1286,6 +1406,7 @@ impl Core {
             user_name: self.store.settings().user_name.and_then(|name| clean_name(&name)),
             created_at: at,
             updated_at: at,
+            queued: Vec::new(),
             messages: vec![],
         };
         let id = c.id.clone();
@@ -1296,11 +1417,82 @@ impl Core {
     fn send(&mut self, req: SendRequest) -> Result<String, String> {
         let fallback = pick_model(&req.choice, &self.vendors(), self.codex_recommended.as_deref()).ok_or("error.noSubscription")?;
         let existing = req.conversation_id.as_deref().and_then(|id| self.load(id).map(|c| c.id.clone()));
-        if let Some(id) = &existing
-            && (self.live.get(id).is_some_and(|l| l.turn.is_some())
-                || self.convs.get(id).and_then(|c| c.messages.last()).is_some_and(|m| m.status == Some(Status::Streaming)))
-        {
-            return Err("error.busy".into());
+        if let Some(id) = &existing {
+            let busy = self.live.get(id).is_some_and(|l| l.turn.is_some())
+                || self.convs.get(id).and_then(|c| c.messages.last()).is_some_and(|m| m.status == Some(Status::Streaming));
+            if busy {
+                let can_steer = self.live.get(id).is_some_and(|l| l.vendor == Vendor::Codex && l.turn.is_some())
+                    && self.convs.get(id).is_some_and(|c| c.queued.is_empty());
+                let attachments_dir = if self.convs.get(id).is_some_and(|c| c.area == Area::Chat) {
+                    self.workspace_of(id).join("attachments")
+                } else {
+                    self.opts.data_dir.join("attachments").join(id)
+                };
+                let saved = if req.files.is_empty() { vec![] } else { save_files(&attachments_dir, &req.files) };
+                let name = |p: &Path| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let shown: Vec<String> = saved
+                    .iter()
+                    .map(|p| {
+                        if self.convs.get(id).is_some_and(|c| c.area == Area::Chat) {
+                            format!("attachments/{}", name(p))
+                        } else {
+                            p.to_string_lossy().into_owned()
+                        }
+                    })
+                    .collect();
+                let text = recovery::with_attachments(&req.text, self.convs.get(id).map_or(Area::Chat, |c| c.area), &shown);
+                let at = now();
+                if can_steer {
+                    let prev_reply_id = self.live.get(id).and_then(|l| l.turn.clone());
+                    if let Some(prev_id) = prev_reply_id.as_deref()
+                        && let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == prev_id))
+                    {
+                        m.status = Some(Status::Done);
+                        m.permissions = None;
+                    }
+                    if let Some(prev_id) = prev_reply_id.as_deref() {
+                        self.push(id, Some(prev_id), true);
+                    }
+                    let c = self.convs.get_mut(id).ok_or("error.conversationGone")?;
+                    let mut question = Message::new(new_id(), Role::User, req.text.clone(), at);
+                    question.images = (!req.images.is_empty()).then(|| req.images.clone());
+                    question.attachments = (!saved.is_empty()).then(|| saved.iter().map(|p| name(p)).collect());
+                    let mut reply = Message::new(new_id(), Role::Assistant, String::new(), at);
+                    reply.vendor = Some(Vendor::Codex);
+                    reply.model = self.live.get(id).and_then(|l| l.running.clone().or_else(|| l.model.clone()));
+                    reply.status = Some(Status::Streaming);
+                    reply.tools = Some(vec![]);
+                    let reply_id = reply.id.clone();
+                    let question_id = question.id.clone();
+                    c.messages.push(question);
+                    c.messages.push(reply);
+                    c.updated_at = at;
+                    self.save(id);
+                    self.list_changed();
+                    self.emit_message(id, &question_id);
+                    if let Some(l) = self.live.get_mut(id) {
+                        l.turn = Some(reply_id.clone());
+                        l.session.steer(UserTurn { text: text.clone(), images: req.images.clone() });
+                    }
+                    self.push(id, Some(&reply_id), true);
+                    return Ok(id.clone());
+                } else {
+                    let queued_turn = QueuedTurn {
+                        id: new_id(),
+                        text,
+                        images: (!req.images.is_empty()).then(|| req.images.clone()),
+                        attachments: (!saved.is_empty()).then(|| saved.iter().map(|p| name(p)).collect()),
+                        choice: req.choice,
+                        at,
+                    };
+                    let c = self.convs.get_mut(id).ok_or("error.conversationGone")?;
+                    c.queued.push(queued_turn);
+                    c.updated_at = at;
+                    self.save(id);
+                    self.emit_queue(id);
+                    return Ok(id.clone());
+                }
+            }
         }
         let draft = self.draft.clone().filter(|d| self.convs.get(d).is_some_and(|c| c.area == req.area && c.project_id == req.project_id));
         let id = match existing {

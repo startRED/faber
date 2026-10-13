@@ -299,6 +299,13 @@ struct Thread {
     approvals: HashMap<String, Value>,
 }
 
+fn steer_params(thread: &str, expected_turn: &str, turn: &UserTurn) -> Value {
+    let mut input: Vec<Value> =
+        turn.images.iter().map(|i| json!({ "type": "image", "url": format!("data:{};base64,{}", i.media_type, i.base64) })).collect();
+    input.push(json!({ "type": "text", "text": turn.text, "text_elements": [] }));
+    json!({ "threadId": thread, "expectedTurnId": expected_turn, "input": input })
+}
+
 fn turn_params(thread: &str, effort: Option<&str>, turn: &UserTurn) -> Value {
     let mut input: Vec<Value> =
         turn.images.iter().map(|i| json!({ "type": "image", "url": format!("data:{};base64,{}", i.media_type, i.base64) })).collect();
@@ -480,6 +487,13 @@ async fn serve(started: std::io::Result<proc::Proc>, area: Area, mut rx: Unbound
                                     request!("turn/start", params, Waiting::Other(key, "turn/start"));
                                 }
                             }
+                            Waiting::Other(key, "turn/steer") => {
+                                if let Some(t) = threads.get_mut(&key)
+                                    && let Some(new_turn_id) = msg["result"]["turnId"].as_str()
+                                {
+                                    t.turn = Some(new_turn_id.to_string());
+                                }
+                            }
                             Waiting::Other(..) => {}
                         }
                     }
@@ -546,6 +560,12 @@ async fn serve(started: std::io::Result<proc::Proc>, area: Area, mut rx: Unbound
                         match t.id.clone() {
                             Some(id) => request!("turn/start", turn_params(&id, t.params.effort.as_deref(), &turn), Waiting::Other(key, "turn/start")),
                             None => t.queued.push(turn),
+                        }
+                    }
+                    SessionCommand::Steer(turn) => {
+                        let Some(t) = threads.get_mut(&key) else { continue };
+                        if let (Some(id), Some(turn_id)) = (t.id.clone(), t.turn.clone()) {
+                            request!("turn/steer", steer_params(&id, &turn_id, &turn), Waiting::Other(key, "turn/steer"));
                         }
                     }
                     SessionCommand::Answer { request_id, allow, ack } => {
