@@ -283,6 +283,138 @@ mod tests {
         e.shutdown();
     }
 
+    fn canonical_area() -> tempfile::TempDir {
+        tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn local_update_pause_stops_owned_workers_without_releasing_leases_or_spend() {
+        let (dir, repo) = (canonical_area(), canonical_area());
+        let layout = crate::project::update::SlotLayout::new(
+            &dir.path().join("dev"),
+            &dir.path().join("installed-data"),
+            &dir.path().join("installed-release"),
+        )
+        .unwrap();
+        crate::project::update::UpdateManager::new(layout.clone()).unwrap();
+        let e = engine(&layout.dev_root().join("data"));
+        let (j, mut r) = runner_fixture(&e, repo.path());
+        r.mission.state = crate::project::MissionState::Running;
+        r.save(&j).unwrap();
+        e.mission_budget(Change::Admit(request())).unwrap();
+        let before = Budget::load(&e.ledger()).unwrap().invocations["i1"].clone();
+        let mut runtime = crate::project::Runtime::new();
+        runtime.leases.push(crate::project::Lease::new("repo", "m1", "w1", 1, vec!["src".into()], &"1".repeat(40), &"2".repeat(64), 1));
+        j.save_runtime(&runtime).unwrap();
+        let commands = Arc::new(Mutex::new(vec![]));
+        let captured = commands.clone();
+        e.with(|c| {
+            c.mission_sessions.insert(
+                "m1".into(),
+                vec![Session::from_fn(move |command| {
+                    captured.lock().unwrap().push(match command {
+                        crate::events::SessionCommand::Interrupt => "interrupt",
+                        crate::events::SessionCommand::Close => "close",
+                        _ => "unexpected",
+                    });
+                })],
+            );
+        });
+        e.pause_missions_for_update().await.unwrap();
+        assert_eq!(crate::project::run::Runner::load(&j).unwrap().mission.state, crate::project::MissionState::Paused);
+        assert_eq!(*commands.lock().unwrap(), ["interrupt", "close"]);
+        assert!(e.mission_sessions("m1").is_empty());
+        assert_eq!(j.runtime().unwrap(), runtime);
+        let after = Budget::load(&e.ledger()).unwrap();
+        assert!(after.grants["m1"].paused);
+        assert_eq!(after.invocations["i1"].paid_micros, before.paid_micros);
+        assert!(!after.invocations["i1"].settled && !after.invocations["i1"].terminated);
+        runtime.leases[0].state = crate::project::LeaseState::Released;
+        j.save_runtime(&runtime).unwrap();
+        assert_eq!(layout.missions_quiescent(), Err(crate::project::update::UpdateError::ActiveOperations));
+        e.shutdown();
+    }
+
+    #[tokio::test]
+    async fn local_update_admission_is_coordinated_and_remains_closed_through_probation() {
+        use crate::project::update::{CanaryVerdict, ExactTree, Slot, SlotLayout, SwapCheck, UpdateManager};
+        let (dir, repo) = (canonical_area(), canonical_area());
+        let layout =
+            SlotLayout::new(&dir.path().join("dev"), &dir.path().join("installed-data"), &dir.path().join("installed-release")).unwrap();
+        let manager = UpdateManager::new(layout.clone()).unwrap();
+        let payload = b"baseline";
+        let tree =
+            ExactTree::new(&"1".repeat(40), &"2".repeat(40), &ExactTree::compute_build_hash(payload), crate::project::SCHEMA).unwrap();
+        std::fs::write(layout.slot_dir(Slot::A).join(format!("faber{}", std::env::consts::EXE_SUFFIX)), payload).unwrap();
+        manager.adopt_baseline(Slot::A, tree.clone(), payload, 100).unwrap();
+        let e = engine(&layout.dev_root().join("data"));
+        e.set_local_update(layout.clone());
+        let admission = e.mission_update_admission().unwrap();
+        assert!(layout.coordinate().is_err());
+        drop(admission);
+        let mut grant = crate::project::Grant::new("repo", crate::project::GitMode::Seguro, 1, 100);
+        grant.self_update = true;
+        let identity = crate::project::RepoIdentity::new("repo", "checkout");
+        manager.prepare_next(tree.clone(), &grant, &identity, 1, &[], 101).unwrap();
+        manager
+            .record_canary_verdict(
+                CanaryVerdict::Pass {
+                    verified_at: 101,
+                    receipt_id: "canary".into(),
+                    tree,
+                    proof_receipt: "proof".into(),
+                    compatible_schemas: vec![1],
+                },
+                payload,
+                101,
+            )
+            .unwrap();
+        manager.enter_quiescence(false, false).unwrap();
+        manager.begin_swap(&grant, &identity, 1, SwapCheck { payload, active_window: false, active_operations: false }, 102).unwrap();
+        manager.begin_probation(103).unwrap();
+        manager.acknowledge_health(104).unwrap();
+        manager.complete_first_operation(104).unwrap();
+        let (j, mut r) = runner_fixture(&e, repo.path());
+        assert_eq!(r.resume_authorized(&j, &e), Err("error.update.activeOperations".into()));
+        assert_eq!(e.dispatch_mission_worker(j.clone(), request()).await, Err("error.update.activeOperations".into()));
+        assert_eq!(crate::project::run::Runner::start(&j, &e, r.mission.clone()).unwrap_err(), "error.update.activeOperations");
+        manager.finish_probation(403).unwrap();
+        assert!(e.mission_update_admission().is_ok());
+        e.shutdown();
+    }
+
+    #[tokio::test]
+    async fn local_update_completed_mission_closes_warm_workers_without_reopening_authority() {
+        let (dir, repo) = (canonical_area(), canonical_area());
+        let e = engine(dir.path());
+        let (j, mut r) = runner_fixture(&e, repo.path());
+        e.mission_budget(Change::Admit(request())).unwrap();
+        r.mission.state = crate::project::MissionState::Done;
+        r.save(&j).unwrap();
+        let commands = Arc::new(Mutex::new(vec![]));
+        let captured = commands.clone();
+        e.with(|c| {
+            c.mission_sessions.insert(
+                "m1".into(),
+                vec![Session::from_fn(move |command| {
+                    captured.lock().unwrap().push(match command {
+                        crate::events::SessionCommand::Interrupt => "interrupt",
+                        crate::events::SessionCommand::Close => "close",
+                        _ => "unexpected",
+                    });
+                })],
+            );
+        });
+        e.pause_missions_for_update().await.unwrap();
+        assert_eq!(*commands.lock().unwrap(), ["interrupt", "close"]);
+        assert_eq!(crate::project::run::Runner::load(&j).unwrap().mission.state, crate::project::MissionState::Done);
+        assert!(e.mission_sessions("m1").is_empty());
+        let budget = Budget::load(&e.ledger()).unwrap();
+        assert!(budget.grants["m1"].paused);
+        assert!(!budget.invocations["i1"].settled && !budget.invocations["i1"].terminated);
+        e.shutdown();
+    }
+
     #[tokio::test]
     async fn opus_h2_settled_dispatch_closes_before_resume_and_cleanup() {
         let (dir, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());

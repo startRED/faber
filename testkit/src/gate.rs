@@ -45,7 +45,9 @@ pub fn run(args: &[String]) -> Option<i32> {
             Some(0)
         }
         #[cfg(windows)]
-        Some("--desktop-probe") => Some(crate::desktop::probe()),
+        Some("--desktop-probe") => Some(crate::desktop::probe(false)),
+        #[cfg(windows)]
+        Some("--desktop-visible-probe") => Some(crate::desktop::probe(true)),
         _ => None,
     }
 }

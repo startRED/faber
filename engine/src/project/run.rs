@@ -144,6 +144,15 @@ impl Record for Runner {
     }
 }
 impl Runner {
+    pub fn update_quiescent(&self) -> Result<(), &'static str> {
+        if !matches!(self.mission.state, MissionState::Paused | MissionState::Done)
+            || self.heavy_proof.is_some()
+            || !self.retirements.is_empty()
+        {
+            return Err("reason.budget.paused");
+        }
+        Ok(())
+    }
     fn new(mission: Mission) -> Self {
         Self {
             schema: SCHEMA,
@@ -159,6 +168,7 @@ impl Runner {
         }
     }
     pub fn start(j: &Journal, engine: &crate::Engine, mission: Mission) -> Result<Self, String> {
+        let _update = engine.mission_update_admission()?;
         engine.mission_authority(&mission)?;
         Self::role_vendor(engine)?;
         Self::create(j, mission).map_err(str::to_string)
@@ -292,6 +302,7 @@ impl Runner {
         self.resume_authorized(j, engine)
     }
     pub(crate) fn resume_authorized(&mut self, j: &Journal, engine: &crate::Engine) -> Result<(), String> {
+        let _update = engine.mission_update_admission()?;
         let grant = engine.mission_authority(&self.mission)?;
         self.settle_dispatches(j, engine)?;
         self.reconcile(j, grant.revision).map_err(str::to_string)?;

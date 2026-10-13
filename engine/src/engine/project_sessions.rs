@@ -18,6 +18,77 @@ fn role_events() -> (EventSink, tokio::sync::mpsc::Receiver<EngineEvent>, Arc<st
 }
 
 impl Engine {
+    pub fn set_local_update(&self, layout: crate::project::update::SlotLayout) {
+        self.with(|c| c.local_update = Some(layout));
+    }
+
+    pub(crate) fn mission_update_admission(&self) -> Result<Option<crate::project::update::Coordinator>, String> {
+        let Some(layout) = self.with(|c| c.local_update.clone()) else { return Ok(None) };
+        let guard = layout.coordinate().map_err(|e| e.key().to_string())?;
+        let manifest = crate::project::update::UpdateManager::new(layout)
+            .map_err(|e| e.key().to_string())?
+            .manifest()
+            .map_err(|e| e.key().to_string())?
+            .ok_or("error.store.corrupt")?;
+        if matches!(
+            manifest.state,
+            crate::project::update::UpdateState::Quiescent
+                | crate::project::update::UpdateState::Swapping { .. }
+                | crate::project::update::UpdateState::Probation { .. }
+        ) {
+            return Err("error.update.activeOperations".into());
+        }
+        Ok(Some(guard))
+    }
+
+    pub async fn pause_missions_for_update(&self) -> Result<(), String> {
+        let coordinator = self.mission_lock();
+        let _turn = coordinator.lock().await;
+        let projects = self.projects_checked()?;
+        let data = self.with(|c| c.opts.data_dir.clone());
+        let root = crate::project::lease::real_path(&data.join("missions")).map_err(|e| e.key().to_string())?;
+        if !root.exists() {
+            return Ok(());
+        }
+        for entry in std::fs::read_dir(root).map_err(|_| "error.store.read")? {
+            let entry = entry.map_err(|_| "error.store.read")?;
+            let path = crate::project::lease::real_path(&entry.path().join("run.json")).map_err(|e| e.key().to_string())?;
+            if !path.exists() {
+                continue;
+            }
+            let bytes = crate::project::files::ScopedFile::new(&path, false)
+                .map_err(|e| e.key().to_string())?
+                .read_limited(16 * 1024 * 1024)
+                .map_err(|e| e.key().to_string())?
+                .ok_or("error.store.corrupt")?
+                .0;
+            let recorded: Runner = serde_json::from_slice(&bytes).map_err(|_| "error.store.corrupt")?;
+            let project = projects.iter().find(|p| p.id == recorded.mission.project_id).ok_or("error.journal.mismatch")?;
+            let journal =
+                Journal::open(std::path::Path::new(&project.path), &data, &recorded.mission.id).map_err(|e| e.key().to_string())?;
+            let mut runner = Runner::load(&journal).map_err(str::to_string)?;
+            if runner.mission.state == crate::project::MissionState::Done {
+                let paused = self.pause_mission_budget(&runner.mission.id);
+                let sessions = self.mission_sessions(&runner.mission.id);
+                for session in &sessions {
+                    session.interrupt();
+                }
+                if !sessions.is_empty() {
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+                for session in &sessions {
+                    session.close();
+                }
+                self.with(|c| c.mission_sessions.remove(&runner.mission.id));
+                paused?;
+            } else if runner.mission.state != crate::project::MissionState::Paused || !self.mission_sessions(&runner.mission.id).is_empty()
+            {
+                runner.stop(&journal, self).await?;
+                self.with(|c| c.mission_sessions.remove(&runner.mission.id));
+            }
+        }
+        Ok(())
+    }
     pub fn mission_lock(&self) -> Arc<tokio::sync::Mutex<()>> {
         self.with(|c| c.mission_lock.clone())
     }
@@ -25,6 +96,7 @@ impl Engine {
     pub async fn dispatch_mission_worker(&self, journal: Journal, request: crate::project::budget::Invocation) -> Result<(), String> {
         let coordinator = self.mission_lock();
         let _turn = coordinator.lock().await;
+        let _update = self.mission_update_admission()?;
         let mut runner = Runner::load(&journal).map_err(str::to_string)?;
         runner.admit(request.vendor).map_err(str::to_string)?;
         let worker = runner.workers.get(&request.worker).ok_or("error.wire.stale")?.clone();

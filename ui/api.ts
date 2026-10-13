@@ -403,6 +403,7 @@ export const api = {
   setupInstall: (vendor: Vendor) => invoke<void>('setup_install', { vendor }),
   setupSignIn: (vendor: Vendor) => invoke<void>('setup_sign_in', { vendor }),
   projectEnroll: (projectId: string) => invoke<EnrollView>('project_enroll', { projectId }),
+  localUpdateState: () => invoke<BuildView | null>('local_update_state'),
   projectGrant: (projectId: string, mode: GitMode, selfUpdate: boolean, revision: number) =>
     invoke<Grant>('project_grant', { projectId, mode, selfUpdate, revision }),
   projectRevoke: (projectId: string) => invoke<void>('project_revoke', { projectId }),

@@ -216,6 +216,7 @@ struct Core {
     live: HashMap<String, Live>,
     mission_sessions: HashMap<String, Vec<Session>>,
     mission_lock: Arc<tokio::sync::Mutex<()>>,
+    local_update: Option<crate::project::update::SlotLayout>,
     /// A new conversation still being typed: its CLI starts before the first message is sent.
     draft: Option<String>,
     /// Streaming text goes to the screen at most ~30 times a second; the message waiting per conversation.
@@ -285,6 +286,7 @@ impl Engine {
                 live: HashMap::new(),
                 mission_sessions: HashMap::new(),
                 mission_lock: Arc::new(tokio::sync::Mutex::new(())),
+                local_update: None,
                 draft: None,
                 pending: HashMap::new(),
                 next_sid: 0,

@@ -1,12 +1,11 @@
 //! The desktop shell: one window, a tray icon, and the commands the screen may call. The engine does the work.
 
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(windows, windows_subsystem = "windows")]
 
 // The test hooks (`report_checks`, the checks page) never ship: a release build cannot be made with them.
 #[cfg(all(feature = "test-hooks", not(debug_assertions)))]
 compile_error!("the `test-hooks` feature is for debug test builds only; it must not be enabled in a release build");
 
-mod autostart;
 mod awake;
 mod look;
 mod project_commands;
@@ -14,15 +13,16 @@ mod setup;
 mod terminal;
 mod tray;
 
-#[cfg(not(windows))]
-use autostart::NoopAutostart;
-#[cfg(windows)]
-use autostart::WindowsAutostart;
-use autostart::{AutostartKeeper, FakeAutostart, creates_window};
 #[cfg(windows)]
 use awake::WindowsPower;
 use awake::{CountedAwake, NoopPower, PowerKeepAwake};
 use base64::Engine as _;
+#[cfg(not(windows))]
+use faber::autostart::NoopAutostart;
+#[cfg(windows)]
+use faber::autostart::WindowsAutostart;
+use faber::autostart::{self, AutostartKeeper, FakeAutostart, creates_window};
+use faber::local_update::{self, Development};
 use faber_engine::cli::Cli;
 use faber_engine::codex::{ModelInfo, list_codex_models, read_codex_limits};
 use faber_engine::model::{Area, Conversation, Project, Settings, Vendor};
@@ -56,6 +56,7 @@ pub(crate) struct Faber {
     pub(crate) hidden: bool,
     /// Serialize journal snapshots and mutations, so an answer cannot overwrite a newer view.
     missions: Arc<tauri::async_runtime::Mutex<()>>,
+    local: Option<Development>,
     pub(crate) awake: Arc<Mutex<CountedAwake>>,
     pub(crate) autostart: Mutex<Arc<dyn AutostartKeeper>>,
 }
@@ -660,6 +661,11 @@ fn fetch_update(app: &AppHandle) {
 
 /// Brings the window back, building the screen again if it was closed to the tray.
 fn show(app: &AppHandle) {
+    if let Some(local) = &app.state::<Faber>().local
+        && !local.request_open().unwrap_or(false)
+    {
+        return;
+    }
     let window = main_window(app).or_else(|| {
         let faber = app.state::<Faber>();
         create_window(app, faber.hidden, &faber.data_dir).ok()
@@ -669,6 +675,22 @@ fn show(app: &AppHandle) {
         let _ = w.unminimize();
         let _ = w.set_focus();
     }
+}
+
+/// T9 owns presentation; no screen or worker can fabricate local promotion evidence.
+#[tauri::command]
+fn local_update_state(faber: State<'_, Faber>) -> Res<Option<faber_engine::project::wire::BuildView>> {
+    faber
+        .local
+        .as_ref()
+        .map(|dev| {
+            dev.view().map_err(|error| match error {
+                faber_engine::project::update::UpdateError::Newer => "error.journal.newer".into(),
+                faber_engine::project::update::UpdateError::Store(_) => error.key().into(),
+                _ => "error.store.corrupt".into(),
+            })
+        })
+        .unwrap_or(Ok(None))
 }
 
 fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Result<tauri::WebviewWindow> {
@@ -708,7 +730,10 @@ fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Resul
     // Automated runs (tests, judges) stay offscreen with their own browser profile, so they never steal the screen
     // or share state between runs.
     if hidden {
-        builder = builder.position(-32000.0, -32000.0).skip_taskbar(true).focused(false).data_directory(data_dir.join("webview"));
+        builder = builder.position(-32000.0, -32000.0).skip_taskbar(true).focused(false);
+    }
+    if hidden || app.state::<Faber>().local.is_some() {
+        builder = builder.data_directory(data_dir.join("webview"));
     }
     // An automated launch (hidden, or with a DevTools port) also asks the browser engine not to collect or upload crash
     // reports and not to ask SmartScreen about addresses. WebView2 has no documented switch for crash uploads and Tauri
@@ -742,8 +767,79 @@ fn main() {
     if let Some(code) = faber_engine::proc::guard_mode() {
         std::process::exit(code);
     }
+    let args: Vec<_> = std::env::args_os().skip(1).collect();
+    if let [mode, data, output] = args.as_slice()
+        && mode == "--faber-local-check-data"
+    {
+        std::process::exit(if local_update::probe_saved_data(std::path::Path::new(data), std::path::Path::new(output)).is_ok() {
+            0
+        } else {
+            1
+        });
+    }
+    if let [mode, output] = args.as_slice()
+        && mode == "--faber-local-identity"
+    {
+        std::process::exit(if local_update::write_identity(std::path::Path::new(output)).is_ok() { 0 } else { 1 });
+    }
+    if args.iter().any(|arg| arg.to_str().is_some_and(|arg| arg.starts_with("--faber-local-")))
+        && args.as_slice() != ["--faber-local-start"]
+    {
+        std::process::exit(1);
+    }
     let autostart_launch = !creates_window(std::env::args());
     let hidden = std::env::var("FABER_HIDDEN").is_ok_and(|v| v == "1");
+    let local_start = std::env::args_os().any(|arg| arg == "--faber-local-start");
+    let local = if std::env::var("FABER_CHANNEL").as_deref() == Ok("development") {
+        match Development::from_environment() {
+            Ok(local) => Some(local),
+            Err(_) => std::process::exit(1),
+        }
+    } else if autostart_launch {
+        match std::env::current_exe().ok().and_then(|exe| Development::from_slot(&exe).ok()) {
+            Some(local) => local,
+            None => std::process::exit(1),
+        }
+    } else {
+        None
+    };
+    if autostart_launch && let Some(dev) = &local {
+        let result = std::env::current_exe().ok().and_then(|exe| autostart::launch_command(&exe, Some(dev)).ok());
+        std::process::exit(if result.is_some_and(|command| command.spawn().is_ok()) { 0 } else { 1 });
+    }
+    if local_start && local.is_none() {
+        std::process::exit(1);
+    }
+    #[cfg(feature = "test-hooks")]
+    if local_start && let Some(dev) = &local {
+        let marker = dev.data().join("test-crash-next");
+        if marker.exists() {
+            if std::fs::remove_file(marker).is_err() {
+                std::process::exit(1);
+            }
+            std::process::exit(23);
+        }
+    }
+    let _slot_lease = if let Some(dev) = &local {
+        match dev.startup_lease(local_start) {
+            Ok(lease) => Some(lease),
+            Err(_) => std::process::exit(1),
+        }
+    } else {
+        None
+    };
+    let _data_lease = match local.as_ref().map(Development::data_lease).transpose() {
+        Ok(lease) => lease,
+        Err(_) => std::process::exit(1),
+    };
+    if local_start && let Some(dev) = &local {
+        // Tao creates a visible event-target HWND even without a WebView; defer the entire GUI runtime until asked.
+        match headless_start(dev) {
+            Ok(true) => {}
+            Ok(false) => return,
+            Err(_) => std::process::exit(1),
+        }
+    }
     let mut builder = tauri::Builder::default();
     // A second launch brings the open window forward. Runs with their own data folder (tests) stay separate.
     if std::env::var_os("FABER_DATA_DIR").is_none() {
@@ -797,6 +893,7 @@ fn main() {
             mission_stop,
             mission_resume,
             mission_answer,
+            local_update_state,
             setup::setup_check,
             setup::setup_install,
             setup::setup_sign_in,
@@ -806,7 +903,7 @@ fn main() {
             report_checks
         ])
         .setup(move |app| {
-            let data_dir = data_dir(app.handle())?;
+            let data_dir = local.as_ref().map(|dev| Ok(dev.data())).unwrap_or_else(|| data_dir(app.handle()))?;
             std::fs::create_dir_all(&data_dir)?;
             app.manage(tray::Tray::default());
             let clis = detect_clis();
@@ -829,7 +926,7 @@ fn main() {
             } else {
                 #[cfg(windows)]
                 {
-                    Arc::new(WindowsAutostart::new())
+                    Arc::new(WindowsAutostart::new(local.clone()))
                 }
                 #[cfg(not(windows))]
                 {
@@ -864,6 +961,9 @@ fn main() {
                 ask: None,
             };
             let engine = Engine::new(opts, emit);
+            if let Some(dev) = &local {
+                engine.set_local_update(dev.manager().map_err(|e| std::io::Error::other(e.key()))?.layout().clone());
+            }
             let missions = engine.mission_lock();
             app.manage(Faber {
                 engine,
@@ -872,6 +972,7 @@ fn main() {
                 data_dir: data_dir.clone(),
                 hidden,
                 missions,
+                local: local.clone(),
                 awake,
                 autostart: Mutex::new(autostart_keeper),
             });
@@ -890,14 +991,41 @@ fn main() {
                 std::fs::write(out, serde_json::json!({ "windowCount": app.webview_windows().len() }).to_string())?;
             }
             // Only installed builds update themselves; source runs and test runs never do.
-            if !hidden && !cfg!(debug_assertions) && std::env::var_os("FABER_DATA_DIR").is_none() {
+            if !cfg!(debug_assertions)
+                && local_update::release_updates(
+                    std::env::var("FABER_CHANNEL").as_deref().unwrap_or("release"),
+                    hidden,
+                    std::env::var_os("FABER_DATA_DIR").is_some(),
+                )
+            {
                 fetch_update(app.handle());
+            }
+            if let Some(dev) = &local {
+                let (dev, handle) = (dev.clone(), app.handle().clone());
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        let engine = handle.state::<Faber>().engine.clone();
+                        if dev.service_quiescence(&engine).await.is_ok()
+                            && std::env::current_exe().is_ok_and(|exe| dev.leaving_slot(&exe).unwrap_or(false))
+                            && dev.ensure_missions_quiescent().is_ok()
+                        {
+                            handle.exit(0);
+                            return;
+                        }
+                        if dev.open_pending().unwrap_or(false) && dev.resume_allowed().is_ok() {
+                            let handle = handle.clone();
+                            let _ = handle.clone().run_on_main_thread(move || show(&handle));
+                        }
+                        tokio::time::sleep(Duration::from_millis(250)).await;
+                    }
+                });
             }
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("Faber failed to start")
         .run(move |app, event| {
+            let _keep_roots_owned = (&_slot_lease, &_data_lease);
             // Closing the window frees the screen (about 90 MB) but keeps Faber in the tray, so running answers
             // finish; only Quit, or a test run, ends it.
             if let RunEvent::ExitRequested { code: None, api, .. } = &event
@@ -909,11 +1037,88 @@ fn main() {
                 terminal::terminate_hidden();
                 let faber = app.state::<Faber>();
                 lock(&faber.awake).shutdown();
+                if faber.local.is_some() {
+                    let _ = tauri::async_runtime::block_on(faber.engine.pause_missions_for_update());
+                }
                 faber.engine.shutdown();
+                if let Some(dev) = &faber.local {
+                    let _ = dev.record_clean_exit();
+                }
                 // On Windows this starts the installer, which replaces Faber and needs it closed.
-                if let Some((update, bytes)) = lock(&faber.update).take() {
+                if faber.local.is_none()
+                    && let Some((update, bytes)) = lock(&faber.update).take()
+                {
                     let _ = update.install(bytes);
                 }
             }
         });
+}
+
+fn headless_start(dev: &Development) -> Result<bool, faber_engine::project::update::UpdateError> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .map_err(|_| faber_engine::project::update::UpdateError::InvalidState("headless runtime failed"))?;
+    let _entered = runtime.enter();
+    local_update::validate_saved_data(&dev.data())?;
+    let _ = dev.cleanup_obsolete();
+    let engine = Engine::new(
+        EngineOptions {
+            data_dir: dev.data(),
+            clis: detect_clis(),
+            spawn: real_spawner(),
+            windows: cfg!(windows),
+            claude_env_billed: false,
+            max_warm: 0,
+            idle: Duration::from_secs(120),
+            runtime: runtime.handle().clone(),
+            ask: None,
+        },
+        Arc::new(|_| {}),
+    );
+    engine.set_local_update(dev.manager()?.layout().clone());
+    dev.startup_ready(
+        &std::env::current_exe().map_err(|_| faber_engine::project::update::UpdateError::InvalidState("startup executable missing"))?,
+    )?;
+    let result = runtime.block_on(async {
+        loop {
+            dev.service_quiescence(&engine).await?;
+            #[cfg(feature = "test-hooks")]
+            if dev.data().join("test-mission-admission").exists() {
+                std::fs::remove_file(dev.data().join("test-mission-admission"))
+                    .map_err(|_| faber_engine::project::update::UpdateError::ActiveOperations)?;
+                let project = engine
+                    .projects_checked()
+                    .map_err(|_| faber_engine::project::update::UpdateError::ActiveOperations)?
+                    .into_iter()
+                    .next()
+                    .ok_or(faber_engine::project::update::UpdateError::ActiveOperations)?;
+                let j = Journal::open(Path::new(&project.path), &dev.data(), "m1")
+                    .map_err(|_| faber_engine::project::update::UpdateError::ActiveOperations)?;
+                let mission = Runner::load(&j).map_err(|_| faber_engine::project::update::UpdateError::ActiveOperations)?.mission;
+                let result = Runner::start(&j, &engine, mission).map(|_| "unexpected admission".into()).unwrap_or_else(|key| key);
+                std::fs::write(dev.data().join("test-mission-admission-result"), result)
+                    .map_err(|_| faber_engine::project::update::UpdateError::ActiveOperations)?;
+            }
+            if dev.leaving_slot(&std::env::current_exe().map_err(|_| faber_engine::project::update::UpdateError::ActiveOperations)?)?
+                && dev.ensure_missions_quiescent().is_ok()
+            {
+                return Ok(false);
+            }
+            #[cfg(feature = "test-hooks")]
+            if dev.data().join("test-clean-exit-next").exists() {
+                std::fs::remove_file(dev.data().join("test-clean-exit-next"))
+                    .map_err(|_| faber_engine::project::update::UpdateError::InvalidState("test exit marker failed"))?;
+                dev.record_clean_exit()?;
+                return Ok(false);
+            }
+            if dev.open_pending()? && dev.resume_allowed().is_ok() && dev.request_open()? {
+                return Ok(true);
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+    });
+    engine.shutdown();
+    result
 }
