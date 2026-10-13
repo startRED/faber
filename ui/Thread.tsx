@@ -1,7 +1,7 @@
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import { createResource, createSignal, For, Index, Show, type Accessor } from 'solid-js';
-import { api, type Choice, type Message, type ToolUse, type VendorUsage } from './api.ts';
+import { api, type Choice, type Message, type QueuedTurn, type ToolUse, type VendorUsage } from './api.ts';
 import { Asks } from './Ask.tsx';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
@@ -138,7 +138,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
         </details>
         <Show when={streaming() && latest()}><div class="activity-latest" role="status" aria-live="polite" aria-atomic="true" title={latest()}>{latest()}</div></Show>
       </Show>
-      <Asks conversationId={props.conversationId} turnId={m().id} permissions={waiting()} />
+      <Asks conversationId={props.conversationId} turnId={m().id} permissions={waiting()} surface="ask" />
       <div class="md" aria-busy={streaming()} onClick={openLinks}>
         <div innerHTML={html(finalText())} />
         <Show when={streaming() && !waiting().length && !m().waitUntil}>
@@ -257,17 +257,62 @@ function Mine(props: { m: Accessor<Message>; onBranch: OnBranch }) {
   );
 }
 
+// A message written while an answer was running. The person can take it back until it is sent; one already handed to the
+// running answer (`sending`) cannot be, and one that waits for the next turn can be sent by hand once nothing runs.
+function Queued(props: { conversationId: string; q: QueuedTurn; busy: boolean; onError?: (err: unknown) => void }) {
+  return (
+    <div class="mine queued">
+      <Show when={props.q.attachments?.length}>
+        <div class="attach">
+          <For each={props.q.attachments}>
+            {(name) => (
+              <span class="afile">
+                <span class="fi">
+                  <Icon name="sheet" />
+                </span>
+                <span>{name}</span>
+              </span>
+            )}
+          </For>
+        </div>
+      </Show>
+      <div class="you queued">
+        <span class="queue-badge">{t('queue.label')}</span>
+        <For each={props.q.images}>{(img) => <img alt={t('mine.image')} src={`data:${img.mediaType};base64,${img.base64}`} />}</For>
+        <Show when={props.q.text}>
+          <div class="queue-text">{props.q.text}</div>
+        </Show>
+        <div class="actions">
+          <Show when={!props.q.sending}>
+            <button type="button" onClick={() => api.removeQueued(props.conversationId, props.q.id).catch((err) => props.onError?.(err))} aria-label={t('queue.removeLabel')}>
+              {t('queue.remove')}
+            </button>
+          </Show>
+          <Show when={!props.busy}>
+            <button type="button" onClick={() => api.sendQueued(props.conversationId, props.q.id).catch((err) => props.onError?.(err))} aria-label={t('queue.sendNowLabel')}>
+              {t('queue.sendNow')}
+            </button>
+          </Show>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Messages only grow at the end, so each position keeps its component while the answer streams into it.
 // Only the messages from `from` on are drawn.
-export function Thread(props: Shared & { messages: Message[]; from: number }) {
+export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTurn[]; busy?: boolean; onError?: (err: unknown) => void; from: number }) {
   const prompt = (at: number) => (props.messages[at - 1]?.role === 'user' ? props.messages[at - 1] : undefined);
   return (
-    <Index each={props.messages.slice(props.from)}>
-      {(m, i) => (
-        <Show when={m().role === 'user'} fallback={<Answer {...props} m={m} prompt={prompt(props.from + i)} />}>
-          <Mine m={m} onBranch={props.onBranch} />
-        </Show>
-      )}
-    </Index>
+    <>
+      <Index each={props.messages.slice(props.from)}>
+        {(m, i) => (
+          <Show when={m().role === 'user'} fallback={<Answer {...props} m={m} prompt={prompt(props.from + i)} />}>
+            <Mine m={m} onBranch={props.onBranch} />
+          </Show>
+        )}
+      </Index>
+      <For each={props.queued}>{(q) => <Queued conversationId={props.conversationId} q={q} busy={props.busy ?? false} onError={props.onError} />}</For>
+    </>
   );
 }

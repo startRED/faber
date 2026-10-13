@@ -14,6 +14,7 @@ pub mod learn;
 pub mod ledger;
 pub mod model;
 pub mod nudge;
+pub mod permissions;
 pub mod proc;
 pub mod route;
 pub mod router;

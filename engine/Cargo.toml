@@ -30,3 +30,7 @@ tokio = { version = "1", features = ["test-util"] }
 
 [lints]
 workspace = true
+
+[target.'cfg(windows)'.dev-dependencies]
+# Standard Rust cannot create junctions on stable, and symlinks require privileges on the maintainer's PC.
+junction = "2"

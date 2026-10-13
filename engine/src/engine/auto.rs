@@ -260,9 +260,10 @@ impl Core {
         let (cwd, instructions) = (self.opts.data_dir.clone(), Some(instructions.to_string()));
         let (model, effort) = (Some(model.to_string()), Some(effort.to_string()));
         let session = match vendor {
-            Vendor::Codex => self
-                .codex_server(Area::Chat, false, &cli)
-                .open(CodexThread { cwd, model, effort, resume: None, instructions, user_name: None }, sink),
+            Vendor::Codex => self.codex_server(Area::Chat, false, &cli).open(
+                CodexThread { cwd, model, effort, resume: None, instructions, user_name: None, permissions: Permissions::DontAsk },
+                sink,
+            ),
             Vendor::Claude => start_claude(
                 ClaudeOptions {
                     bin: cli.command.clone(),
@@ -273,10 +274,12 @@ impl Core {
                         effort,
                         resume: None,
                         user_hooks: false,
+                        permissions: Permissions::DontAsk,
                         instructions,
                         user_name: None,
                     },
                     spawn: spawner(&self.opts.spawn, &cli),
+                    sandbox: None,
                 },
                 sink,
             ),

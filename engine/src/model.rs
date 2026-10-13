@@ -23,7 +23,7 @@ impl Vendor {
     }
 }
 
-/// Chat never touches the user's files; a project works inside a folder the user opened.
+/// Chat uses a chosen folder or a private scratch folder; a project uses the folder the user opened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Area {
@@ -214,6 +214,26 @@ pub struct BranchOf {
     pub message_id: String,
 }
 
+/// A message written while a turn was running. It waits to be sent as the next turn, or, on a CLI that can take a message
+/// into a running turn, it is handed to that turn and leaves the queue once the CLI has taken it in. `text` is what the
+/// person wrote; the note about attached files is added when it goes to the CLI.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueuedTurn {
+    pub id: String,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub images: Option<Vec<Image>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachments: Option<Vec<String>>,
+    pub choice: crate::router::Choice,
+    pub at: u64,
+    /// Handed to the running turn and waiting for the CLI to take it in: it can no longer be taken back. Nothing is on
+    /// its way after a restart, so loading a conversation clears it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sending: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Conversation {
@@ -225,9 +245,15 @@ pub struct Conversation {
     pub area: Area,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
+    /// Chat's canonical folder, chosen before its first message. None uses Faber-owned scratch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_folder: Option<String>,
     /// One CLI session per vendor, so switching models keeps each vendor's own history and cache.
     #[serde(default)]
     pub sessions: BTreeMap<Vendor, String>,
+    /// Older sessions restart once with visible history to receive the host command tool.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub command_gate: bool,
     /// The cumulative cost each CLI session last reported, so a turn costs the difference (`usage::settle`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub cost_base: BTreeMap<Vendor, crate::usage::CostBase>,
@@ -242,6 +268,8 @@ pub struct Conversation {
     pub user_name: Option<String>,
     pub created_at: u64,
     pub updated_at: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub queued: Vec<QueuedTurn>,
     pub messages: Vec<Message>,
 }
 
@@ -351,6 +379,9 @@ pub struct Settings {
     /// Projects run the user's own CLI hooks too (off by default: a hook can block or slow every turn).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_hooks: Option<bool>,
+    /// Missing in older settings means commands run without asking in Chat and Projects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<Permissions>,
     /// Attention notifications and their chime are both on unless explicitly disabled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notifications: Option<bool>,
@@ -371,6 +402,12 @@ pub struct Settings {
     /// How the user wants to be called, asked (optionally) at the first run. A patch with an empty text clears it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_name: Option<String>,
+    /// Keep the computer awake while Faber works (on by default: SetThreadExecutionState with ES_CONTINUOUS | ES_SYSTEM_REQUIRED).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_awake: Option<bool>,
+    /// Start Faber when signing in to Windows (off by default: registered in HKCU Run).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autostart: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -378,6 +415,14 @@ pub struct Settings {
 pub enum Experience {
     Beginner,
     Experienced,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Permissions {
+    #[default]
+    DontAsk,
+    Ask,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

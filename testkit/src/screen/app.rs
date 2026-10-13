@@ -469,7 +469,7 @@ const THREAD: &str = r#"(() => {
 
 fn thread_in_every_look(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
-    let launch = super::shell::two_writes(ctx);
+    let launch = super::shell::two_writes(ctx)?;
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
     let size = json!({ "width": 1440, "height": 900, "deviceScaleFactor": 1, "mobile": false });

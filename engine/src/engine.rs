@@ -38,6 +38,7 @@ pub use usage_view::{VendorUsage, WindowUsage};
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum AppEvent {
     Message { conversation_id: String, message: Box<Message> },
+    Queue { conversation_id: String, queued: Vec<QueuedTurn> },
     Quota { vendor: Vendor, window: String, used: f64, resets_at: f64 },
     Usage { vendors: Vec<VendorUsage> },
     Running { revision: u64, items: Vec<RunningItem> },
@@ -146,12 +147,18 @@ struct Live {
     cli: Cli,
     /// The process continues a session an earlier process began.
     resumed: bool,
+    permissions: Permissions,
     by_hand: bool,
     approved: bool,
     started: f64,
     /// A turn has finished on this process, so the next one finds the CLI's cache warm.
     served: bool,
+    /// Queued messages handed to the running turn (Codex) and not yet taken in, oldest first.
+    steering: Vec<String>,
 }
+
+/// Messages waiting behind a running turn. Each may carry images, which stay in memory and go out with every queue event.
+const MAX_QUEUED: usize = 10;
 
 const HISTORY_LIMIT: usize = 20_000;
 
@@ -254,6 +261,16 @@ pub struct Engine {
 impl Engine {
     pub fn new(opts: EngineOptions, emit: Emit) -> Engine {
         let store = Store::new(&opts.data_dir);
+        // A crash can leave an unsaved draft behind. Visible records keep their scratch; orphan UUID folders do not.
+        let scratch = opts.data_dir.join("chat");
+        if scratch.symlink_metadata().is_ok_and(|m| !m.file_type().is_symlink()) {
+            for entry in std::fs::read_dir(&scratch).into_iter().flatten().flatten() {
+                let id = entry.file_name().to_string_lossy().into_owned();
+                if Uuid::parse_str(&id).is_ok() && !opts.data_dir.join("conversations").join(format!("{id}.json")).exists() {
+                    let _ = std::fs::remove_dir_all(entry.path());
+                }
+            }
+        }
         let ledger = store.ledger();
         let quotas = remembered(&ledger, unix_secs());
         let runtime = opts.runtime.clone();
@@ -417,6 +434,12 @@ impl Engine {
     pub fn branch(&self, req: BranchRequest) -> Result<String, String> {
         self.with(|c| c.branch(req))
     }
+    pub fn remove_queued(&self, id: &str, turn_id: &str) {
+        self.with(|c| c.remove_queued(id, turn_id))
+    }
+    pub fn send_queued(&self, id: &str, turn_id: &str) -> Result<(), String> {
+        self.with(|c| c.send_queued(id, turn_id))
+    }
     pub fn warm(&self, req: WarmRequest) {
         self.with(|c| c.warm(req))
     }
@@ -428,6 +451,46 @@ impl Engine {
     }
     pub fn rename(&self, id: &str, title: &str) {
         self.with(|c| c.rename(id, title))
+    }
+    /// A folder is chosen by the person, before any messages or files belong to the conversation.
+    pub fn chat_folder(&self, id: Option<&str>, folder: Option<&Path>) -> Result<Conversation, String> {
+        self.with(|c| {
+            let folder = folder
+                .map(|p| {
+                    let root = crate::permissions::working_root(p).filter(|p| p.is_dir()).ok_or("error.chatFolder")?;
+                    if c.store.settings().permissions.unwrap_or_default() == Permissions::DontAsk {
+                        crate::permissions::unattended_root(&root).ok_or("error.workingFolder")
+                    } else {
+                        Ok(root)
+                    }
+                })
+                .transpose()?
+                .map(|p| p.to_string_lossy().into_owned());
+            let id = match id {
+                Some(id) => {
+                    let conv = c.load(id).ok_or("error.conversationGone")?;
+                    if conv.area != Area::Chat || !conv.messages.is_empty() {
+                        return Err("error.chatFolderLocked".into());
+                    }
+                    id.to_string()
+                }
+                None => {
+                    c.drop_draft();
+                    c.blank(Area::Chat, None)
+                }
+            };
+            if let Some(live) = c.live.remove(&id) {
+                live.session.close();
+            }
+            let conv = c.convs.get_mut(&id).expect("loaded conversation");
+            conv.working_folder = folder;
+            conv.sessions.clear();
+            conv.cost_base.clear();
+            let result = conv.clone();
+            c.save(&id);
+            c.list_changed();
+            Ok(result)
+        })
     }
     pub fn remove(&self, id: &str) {
         self.with(|c| c.remove(id))
@@ -678,15 +741,24 @@ impl Core {
         self.opts.clis = clis;
     }
 
-    // Each chat conversation gets a private workspace folder: code runs and files are created there, never elsewhere.
-    fn workspace_of(&self, id: &str) -> PathBuf {
+    fn scratch_of(&self, id: &str) -> PathBuf {
         self.opts.data_dir.join("chat").join(id)
+    }
+
+    fn workspace_of(&self, id: &str) -> PathBuf {
+        let folder = match self.convs.get(id) {
+            Some(c) => c.working_folder.clone(),
+            None => self.store.get(id).and_then(|c| c.working_folder),
+        };
+        folder.map(PathBuf::from).unwrap_or_else(|| self.scratch_of(id))
     }
 
     fn cwd_of(&self, c: &Conversation) -> Result<PathBuf, String> {
         if c.area == Area::Chat {
             let dir = self.workspace_of(&c.id);
-            let _ = std::fs::create_dir_all(&dir);
+            if c.working_folder.is_none() {
+                std::fs::create_dir_all(&dir).map_err(|_| "error.projectSandbox")?;
+            }
             return Ok(dir);
         }
         self.store
@@ -702,10 +774,20 @@ impl Core {
             let mut c = self.store.get(id)?;
             // Read from disk, so no CLI runs it: an answer cut off by a crash shows as stopped, not typing forever.
             c.messages.iter_mut().for_each(settle);
+            c.queued.iter_mut().for_each(|q| q.sending = false);
             self.restore_recovery(&mut c);
             self.convs.insert(id.to_string(), c);
         }
-        self.convs.get_mut(id)
+        let guarded = self.store.settings().permissions.unwrap_or_default() == Permissions::DontAsk;
+        let c = self.convs.get_mut(id)?;
+        if c.command_gate != guarded {
+            c.sessions.remove(&Vendor::Codex);
+            c.cost_base.remove(&Vendor::Codex);
+            if !guarded {
+                c.command_gate = false;
+            }
+        }
+        Some(c)
     }
 
     fn save(&self, id: &str) {
@@ -759,6 +841,7 @@ impl Core {
         let settings = Settings {
             appearance: patch.appearance.or(before.appearance),
             user_hooks: patch.user_hooks.or(before.user_hooks),
+            permissions: patch.permissions.or(before.permissions),
             notifications: patch.notifications.or(before.notifications),
             notification_sound: patch.notification_sound.or(before.notification_sound),
             language: patch.language.or(before.language),
@@ -766,18 +849,38 @@ impl Core {
             experience: patch.experience.or(before.experience),
             tutorial_done: patch.tutorial_done.or(before.tutorial_done),
             user_name: patch.user_name.map_or(before.user_name.clone(), |name| clean_name(&name)),
+            keep_awake: patch.keep_awake.or(before.keep_awake),
+            autostart: patch.autostart.or(before.autostart),
         };
         self.store.save_settings(&settings).map_err(|_| "error.settings.saveFailed".to_string())?;
+        if before.permissions.unwrap_or_default() == Permissions::DontAsk && settings.permissions == Some(Permissions::Ask) {
+            let active: Vec<String> = self.live.iter().filter(|(_, live)| live.turn.is_some()).map(|(id, _)| id.clone()).collect();
+            for id in active {
+                if let Some(live) = self.live.remove(&id) {
+                    live.session.interrupt();
+                    live.session.close();
+                    if let Some(message) =
+                        live.turn.as_ref().and_then(|turn| self.convs.get_mut(&id)?.messages.iter_mut().find(|m| &m.id == turn))
+                    {
+                        settle(message);
+                    }
+                    self.finish(&id, live.turn);
+                }
+            }
+        }
         // The blank conversation being typed was started with the old name; the next one starts with the new one.
         if settings.user_name != before.user_name {
             self.drop_draft();
         }
-        // Idle project CLIs restart on their next turn, so a changed hooks choice applies right away.
-        if settings.user_hooks != before.user_hooks {
+        // Idle CLIs restart on their next turn when permissions change; hooks remain a Projects choice.
+        if settings.user_hooks != before.user_hooks || settings.permissions != before.permissions {
             let idle: Vec<String> = self
                 .live
                 .iter()
-                .filter(|(id, l)| l.turn.is_none() && self.convs.get(*id).is_some_and(|c| c.area == Area::Project))
+                .filter(|(id, l)| {
+                    l.turn.is_none()
+                        && (settings.permissions != before.permissions || self.convs.get(*id).is_some_and(|c| c.area == Area::Project))
+                })
                 .map(|(id, _)| id.clone())
                 .collect();
             for id in idle {
@@ -785,8 +888,14 @@ impl Core {
                     l.session.close();
                 }
             }
-            if let Some(server) = self.codex.remove(&(Area::Project, before.user_hooks == Some(true))) {
-                server.retire();
+            for area in [Area::Chat, Area::Project] {
+                if area == Area::Project || settings.permissions != before.permissions {
+                    for hooks in [false, true] {
+                        if let Some(server) = self.codex.remove(&(area, hooks)) {
+                            server.retire();
+                        }
+                    }
+                }
             }
         }
         Ok(settings)
@@ -815,6 +924,9 @@ impl Core {
                 }
                 let Some(c) = self.convs.get_mut(conv) else { return };
                 c.sessions.insert(vendor, session_id);
+                if vendor == Vendor::Codex {
+                    c.command_gate = self.live.get(conv).is_some_and(|l| l.permissions == Permissions::DontAsk);
+                }
                 // a draft is saved only once something is sent
                 if !c.messages.is_empty() {
                     self.save(conv);
@@ -868,7 +980,13 @@ impl Core {
                 }
             }
             EngineEvent::ToolResult { id, ok, declined, text } => {
-                if let Some(tool) = self.turn(conv).and_then(|m| m.tools.as_mut()).and_then(|t| t.iter_mut().find(|t| t.id == id)) {
+                // A message steered into the turn starts a new reply, so a tool that began in the one before still ends here.
+                let current = self.live.get(conv).and_then(|l| l.turn.clone());
+                let replies =
+                    self.convs.get_mut(conv).into_iter().flat_map(|c| c.messages.iter_mut().rev()).filter(|m| m.role == Role::Assistant);
+                let mut recent = replies.take(3).collect::<Vec<_>>();
+                recent.sort_by_key(|m| Some(&m.id) != current.as_ref());
+                if let Some(tool) = recent.into_iter().filter_map(|m| m.tools.as_mut()).flatten().find(|t| t.id == id) {
                     tool.ok = Some(ok);
                     tool.declined = declined;
                     tool.output = Some(text.chars().take(4000).collect());
@@ -884,6 +1002,8 @@ impl Core {
                 }
                 return self.push(conv, turn_id.as_deref(), true);
             }
+            EngineEvent::Injected { tag } => return self.taken_in(conv, tag),
+            EngineEvent::SteerFailed { tag } => return self.steer_failed(conv, &tag),
             EngineEvent::Quota { window, used, resets_at } => return self.note_quota(vendor, &window, used, resets_at),
             EngineEvent::Signals(s) => return self.apply_signals(vendor, s),
             EngineEvent::Done {
@@ -1013,26 +1133,47 @@ impl Core {
         self.transfers.remove(conv);
         if let Some(l) = self.live.get_mut(conv) {
             l.turn = None;
+            // Whatever was handed to the turn and not taken in stays in the queue, and goes out like the rest of it.
+            l.steering.clear();
+        }
+        let mut unsent = false;
+        if let Some(c) = self.convs.get_mut(conv) {
+            unsent = c.queued.iter().any(|q| q.sending);
+            c.queued.iter_mut().for_each(|q| q.sending = false);
         }
         let workspace = self.workspace_of(conv);
-        let Some(c) = self.convs.get_mut(conv) else { return };
-        if let Some(m) = turn_id.as_ref().and_then(|id| c.messages.iter_mut().find(|m| &m.id == id))
-            && c.area == Area::Chat
-        {
-            let files = new_files(&workspace, m.at);
-            if !files.is_empty() {
-                m.files = Some(files);
-            }
+        if self.convs.get(conv).is_some_and(|c| c.area == Area::Chat && c.working_folder.is_none()) {
+            crate::permissions::clean_tmp(&workspace);
         }
-        c.updated_at = now();
+        let completed_ok = if let Some(c) = self.convs.get_mut(conv) {
+            if let Some(m) = turn_id.as_ref().and_then(|id| c.messages.iter_mut().find(|m| &m.id == id))
+                && c.area == Area::Chat
+            {
+                let files = new_files(&workspace, m.at);
+                if !files.is_empty() {
+                    m.files = Some(files);
+                }
+            }
+            c.updated_at = now();
+            turn_id.as_ref().and_then(|id| c.messages.iter().find(|m| &m.id == id)).is_some_and(|m| m.status == Some(Status::Done))
+        } else {
+            return;
+        };
         self.save(conv);
         self.save_ledger(false);
         self.push(conv, turn_id.as_deref(), true);
         self.list_changed();
+        if unsent {
+            self.emit_queue(conv);
+        }
         if self.live.get(conv).is_some_and(|l| self.opts.clis.get(&l.vendor) != Some(&l.cli))
             && let Some(l) = self.live.remove(conv)
         {
             l.session.close();
+        }
+        // After the CLI check above: a changed CLI is replaced before the next turn starts, never under it.
+        if completed_ok {
+            self.drain(conv);
         }
         self.close_when_idle(conv);
     }
@@ -1092,6 +1233,271 @@ impl Core {
         self.refresh_running();
     }
 
+    fn requeue(&mut self, id: &str, item: QueuedTurn) {
+        if let Some(c) = self.convs.get_mut(id) {
+            c.queued.insert(0, item);
+            self.save(id);
+            self.emit_queue(id);
+        }
+    }
+
+    fn emit_queue(&mut self, conv: &str) {
+        if let Some(c) = self.convs.get(conv) {
+            (self.emit)(AppEvent::Queue { conversation_id: conv.to_string(), queued: c.queued.clone() });
+        }
+    }
+
+    /// A message written while a turn runs. Codex takes it into that turn (`turn/steer`) and the message becomes part of
+    /// the conversation when Codex says it has; every other case waits here and goes out as the next turn. Either way it
+    /// is saved with the conversation first, so a crash or a refusal cannot lose it.
+    fn enqueue(&mut self, id: &str, req: SendRequest) -> Result<String, String> {
+        let c = self.convs.get(id).ok_or("error.conversationGone")?;
+        if c.queued.len() >= MAX_QUEUED {
+            return Err("error.queueFull".into());
+        }
+        let root = if c.area == Area::Chat { self.cwd_of(c)? } else { self.opts.data_dir.clone() };
+        let attachments_dir = if c.area == Area::Chat { root.join("attachments") } else { root.join("attachments").join(id) };
+        let saved = if req.files.is_empty() { vec![] } else { save_files(&root, &attachments_dir, &req.files) };
+        if saved.len() != req.files.len() {
+            return Err("error.projectSandbox".into());
+        }
+        let names: Vec<String> =
+            saved.iter().map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()).collect();
+        let at = now();
+        let mut item = QueuedTurn {
+            id: new_id(),
+            text: req.text,
+            images: (!req.images.is_empty()).then_some(req.images),
+            attachments: (!names.is_empty()).then_some(names),
+            choice: req.choice,
+            at,
+            sending: false,
+        };
+        let c = self.convs.get(id).ok_or("error.conversationGone")?;
+        // Steering waits behind nothing: a message that is already queued would be passed by one sent straight in.
+        let steer = c.queued.iter().all(|q| q.sending)
+            && matches!(item.choice.vendor.as_str(), "auto" | "codex")
+            && self.live.get(id).is_some_and(|l| l.vendor == Vendor::Codex && l.turn.is_some());
+        if steer {
+            item.sending = true;
+            let turn = UserTurn { text: self.model_text(id, &item), images: item.images.clone().unwrap_or_default() };
+            if let Some(l) = self.live.get_mut(id) {
+                l.steering.push(item.id.clone());
+                l.session.steer(turn, &item.id);
+            }
+        }
+        if let Some(c) = self.convs.get_mut(id) {
+            c.queued.push(item);
+            c.updated_at = at;
+        }
+        self.save(id);
+        self.emit_queue(id);
+        Ok(id.to_string())
+    }
+
+    /// What the CLI is told for a message: what the person wrote, with the note about the files they attached.
+    fn model_text(&self, id: &str, item: &QueuedTurn) -> String {
+        let area = self.convs.get(id).map_or(Area::Chat, |c| c.area);
+        let shown: Vec<String> = item
+            .attachments
+            .iter()
+            .flatten()
+            .map(|name| {
+                if area == Area::Chat {
+                    format!("attachments/{name}")
+                } else {
+                    self.opts.data_dir.join("attachments").join(id).join(name).to_string_lossy().into_owned()
+                }
+            })
+            .collect();
+        recovery::with_attachments(&item.text, area, &shown)
+    }
+
+    /// Codex took the oldest message handed to the running turn in (or the one named): it joins the conversation, and the
+    /// answer goes on in a new reply under it, because that is what answers it.
+    fn taken_in(&mut self, conv: &str, tag: Option<String>) {
+        let Some(l) = self.live.get_mut(conv) else { return };
+        let Some(at) = tag.and_then(|t| l.steering.iter().position(|s| *s == t)).or((!l.steering.is_empty()).then_some(0)) else { return };
+        let queued_id = l.steering.remove(at);
+        let before = l.turn.clone();
+        let model = l.running.clone().or_else(|| l.model.clone());
+        let Some(c) = self.convs.get_mut(conv) else { return };
+        let Some(pos) = c.queued.iter().position(|q| q.id == queued_id) else { return };
+        let item = c.queued.remove(pos);
+        if let Some(m) = before.as_ref().and_then(|b| c.messages.iter_mut().find(|m| &m.id == b)) {
+            m.status = Some(Status::Done);
+        }
+        let now = now();
+        let mut question = Message::new(new_id(), Role::User, item.text.clone(), now);
+        question.images = item.images.clone();
+        question.attachments = item.attachments.clone();
+        let mut reply = Message::new(new_id(), Role::Assistant, String::new(), now);
+        reply.vendor = Some(Vendor::Codex);
+        reply.model = model;
+        reply.tools = Some(vec![]);
+        reply.status = Some(Status::Streaming);
+        let (question_id, reply_id) = (question.id.clone(), reply.id.clone());
+        c.messages.push(question);
+        c.messages.push(reply);
+        c.updated_at = now;
+        let text = self.model_text(conv, &item);
+        if let Some(l) = self.live.get_mut(conv) {
+            l.turn = Some(reply_id.clone());
+            l.answer_started = false;
+            l.break_pending = false;
+        }
+        // A plan limit now continues this reply, not the one the turn began in.
+        if let Some(t) = self.transfers.get_mut(conv) {
+            (t.reply, t.text, t.images) = (reply_id.clone(), text, item.images.unwrap_or_default());
+        }
+        self.save(conv);
+        self.list_changed();
+        self.emit_queue(conv);
+        self.emit_message(conv, &question_id);
+        if let Some(before) = before {
+            self.push(conv, Some(&before), true);
+        }
+        self.push(conv, Some(&reply_id), true);
+    }
+
+    /// Codex did not take the message in: it stays in the queue and goes out as the next turn.
+    fn steer_failed(&mut self, conv: &str, tag: &str) {
+        if let Some(l) = self.live.get_mut(conv) {
+            l.steering.retain(|s| s != tag);
+        }
+        if let Some(q) = self.convs.get_mut(conv).and_then(|c| c.queued.iter_mut().find(|q| q.id == tag)) {
+            q.sending = false;
+        }
+        self.save(conv);
+        self.emit_queue(conv);
+        self.drain(conv);
+    }
+
+    /// After an answer that finished well, the next message in the queue goes out. Anything else (a stop, a failure) leaves
+    /// the queue for the person to decide.
+    fn drain(&mut self, conv: &str) {
+        let idle = !self.live.get(conv).is_some_and(|l| l.turn.is_some());
+        let Some(c) = self.convs.get_mut(conv) else { return };
+        if !idle || c.messages.last().is_none_or(|m| m.status != Some(Status::Done)) || c.queued.is_empty() {
+            return;
+        }
+        let next = c.queued.remove(0);
+        self.save(conv);
+        self.emit_queue(conv);
+        let _ = self.dispatch_queued(conv, next);
+    }
+
+    fn remove_queued(&mut self, id: &str, turn_id: &str) {
+        if let Some(c) = self.convs.get_mut(id) {
+            let before = c.queued.len();
+            // One already handed to the running turn cannot be taken back.
+            c.queued.retain(|q| q.id != turn_id || q.sending);
+            if c.queued.len() != before {
+                self.save(id);
+                self.emit_queue(id);
+            }
+        }
+    }
+
+    fn send_queued(&mut self, id: &str, turn_id: &str) -> Result<(), String> {
+        let busy = self.live.get(id).is_some_and(|l| l.turn.is_some())
+            || self.convs.get(id).and_then(|c| c.messages.last()).is_some_and(|m| m.status == Some(Status::Streaming));
+        if busy {
+            return Err("error.busy".into());
+        }
+        let Some(c) = self.convs.get_mut(id) else { return Err("error.conversationGone".into()) };
+        let pos = c.queued.iter().position(|q| q.id == turn_id).ok_or("error.messageGone")?;
+        let item = c.queued.remove(pos);
+        self.save(id);
+        self.emit_queue(id);
+        self.dispatch_queued(id, item)
+    }
+
+    /// Starts a queued message as a turn. If nothing can answer it, it goes back to the front of the queue, so no message is
+    /// lost; once the turn exists, a failure shows on that turn's reply like any other.
+    fn dispatch_queued(&mut self, id: &str, item: QueuedTurn) -> Result<(), String> {
+        self.load(id).ok_or("error.conversationGone")?;
+        let Some(fallback) = pick_model(&item.choice, &self.vendors(), self.codex_recommended.as_deref()) else {
+            self.requeue(id, item);
+            return Err("error.noSubscription".into());
+        };
+        if !self.convs.contains_key(id) {
+            return Err("error.conversationGone".into());
+        }
+        let model_text = self.model_text(id, &item);
+        let auto = item.choice.vendor == "auto";
+        let route = if auto { self.next_route(id) } else { None };
+        let c = self.convs.get_mut(id).expect("checked above");
+        c.choice = Some(Choice { effort: (!auto).then(|| item.choice.effort.unwrap_or(Effort::Medium)), ..item.choice.clone() });
+        let routing = route.is_some();
+        let pick = match &route {
+            Some(Some(before)) => before.clone(),
+            Some(None) => fallback.clone(),
+            None if auto => {
+                same_as_before(c, self.live.get(id)).filter(|p| self.opts.clis.contains_key(&p.vendor)).unwrap_or_else(|| fallback.clone())
+            }
+            None => fallback.clone(),
+        };
+        let joining_late = !c.sessions.contains_key(&pick.vendor) && !c.messages.is_empty();
+        let history = c.messages.clone();
+        let at = now();
+        let mut question = Message::new(new_id(), Role::User, item.text.clone(), at);
+        question.images = item.images.clone();
+        question.attachments = item.attachments.clone();
+        let mut reply = Message::new(new_id(), Role::Assistant, String::new(), at);
+        if !routing {
+            reply.vendor = Some(pick.vendor);
+            reply.model = pick.model.clone();
+        }
+        reply.reason = Some(if routing { "reason.routing".into() } else { pick.reason.clone() });
+        reply.tools = Some(vec![]);
+        reply.status = Some(Status::Streaming);
+        let reply_id = reply.id.clone();
+        let question_id = question.id.clone();
+        c.messages.push(question);
+        c.messages.push(reply);
+        c.updated_at = at;
+        self.save(id);
+        self.list_changed();
+        self.emit_message(id, &question_id);
+        let images = item.images.unwrap_or_default();
+        let attachments_len = item.attachments.as_ref().map_or(0, |a| a.len());
+        self.transfers.insert(
+            id.to_string(),
+            recovery::Transfer {
+                reply: reply_id.clone(),
+                pick: pick.clone(),
+                text: model_text.clone(),
+                images: images.clone(),
+                by_hand: !auto,
+                retried: false,
+                moving: false,
+                check: "glance",
+            },
+        );
+        let text = if joining_late { with_history(&history, &model_text) } else { model_text };
+        if let Some(before) = route {
+            let only = before.as_ref().map(|p| p.vendor);
+            let route = self.route_for(&item.text, images.len() + attachments_len, only);
+            self.push(id, Some(&reply_id), true);
+            let (me, conv, images) = (self.me.clone(), id.to_string(), images);
+            tokio::spawn(async move {
+                let verdict = tokio::time::timeout(auto::ROUTE_BUDGET, route).await.ok().and_then(|r| r.ok()).flatten();
+                if let Some(core) = me.upgrade() {
+                    let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+                    let routed = verdict.and_then(|v| core.table(&v, only)).filter(|r| before.as_ref().is_none_or(|p| !r.weaker_than(p)));
+                    core.after_route(&conv, &reply_id, routed, pick, text, images);
+                }
+            });
+            return Ok(());
+        }
+        if let Err(error) = self.dispatch(id, &reply_id, &pick, text, images, !auto) {
+            self.fail_reply(id, &reply_id, error.clone());
+            return Err(error);
+        }
+        Ok(())
+    }
+
     /// The conversations to show in the running list, in the order the screen draws them: blocks that hold a question
     /// first, then the sidebar's project order with Chat last; inside a block the questions first, oldest first.
     fn running_items(&self) -> Vec<RunningItem> {
@@ -1138,7 +1544,8 @@ impl Core {
     /// The shared Codex process for an area and hooks choice, started again if it died.
     fn codex_server(&mut self, area: Area, user_hooks: bool, cli: &Cli) -> &CodexServer {
         let opts = CodexServerOptions {
-            bin: cli.command.clone(),
+            permissions: self.store.settings().permissions.unwrap_or_default(),
+            cli: cli.clone(),
             cwd: self.opts.data_dir.clone(),
             area,
             user_hooks,
@@ -1215,8 +1622,14 @@ impl Core {
     fn launch(&mut self, conv: &str, pick: &Pick) -> Result<(), String> {
         self.tick += 1;
         let cli = self.opts.clis.get(&pick.vendor).cloned();
+        let permissions = self.store.settings().permissions.unwrap_or_default();
         if let Some(l) = self.live.get_mut(conv) {
-            if l.vendor == pick.vendor && l.model == pick.model && l.effort == pick.effort && Some(&l.cli) == cli.as_ref() {
+            if l.vendor == pick.vendor
+                && l.model == pick.model
+                && l.effort == pick.effort
+                && Some(&l.cli) == cli.as_ref()
+                && l.permissions == permissions
+            {
                 l.used = self.tick; // most recently used
                 return Ok(());
             }
@@ -1225,21 +1638,57 @@ impl Core {
         }
         let c = self.convs.get(conv).ok_or("error.conversationGone")?;
         let cwd = self.cwd_of(c)?;
+        let cwd = if permissions == Permissions::DontAsk {
+            if c.area == Area::Chat && c.working_folder.is_none() {
+                // Owned UUID scratch remains usable under Faber's AppData directory.
+                crate::permissions::working_root(&cwd).ok_or("error.projectSandbox")?
+            } else {
+                crate::permissions::unattended_root(&cwd).ok_or("error.workingFolder")?
+            }
+        } else {
+            cwd
+        };
         let cli = cli.ok_or("error.notConnected")?;
         let spawn = spawner(&self.opts.spawn, &cli);
         self.next_sid += 1;
         let sid = self.next_sid;
         let me = self.me.clone();
         let key = conv.to_string();
+        // The last driver callback also ends its run on panic or task cancellation.
+        struct DriverEnd {
+            me: std::sync::Weak<Mutex<Core>>,
+            key: String,
+            sid: u64,
+            runtime: tokio::runtime::Handle,
+        }
+        impl Drop for DriverEnd {
+            fn drop(&mut self) {
+                let (me, key, sid) = (self.me.clone(), self.key.clone(), self.sid);
+                // A callback can be dropped with Core locked, so cleanup must not wait here.
+                self.runtime.spawn(async move {
+                    if let Some(core) = me.upgrade() {
+                        core.lock().unwrap_or_else(|e| e.into_inner()).handle(
+                            &key,
+                            sid,
+                            EngineEvent::Error { message: "error.driverStopped".into(), fatal: true },
+                        );
+                    }
+                });
+            }
+        }
+        let end = DriverEnd { me, key, sid, runtime: self.opts.runtime.clone() };
         let sink: EventSink = Arc::new(move |e| {
-            if let Some(core) = me.upgrade() {
-                core.lock().unwrap_or_else(|e| e.into_inner()).handle(&key, sid, e);
+            if let Some(core) = end.me.upgrade() {
+                core.lock().unwrap_or_else(|e| e.into_inner()).handle(&end.key, end.sid, e);
             }
         });
-        let user_hooks = self.store.settings().user_hooks == Some(true);
+        let user_hooks = self.store.settings().user_hooks == Some(true) && (c.area == Area::Project || permissions == Permissions::Ask);
         let resume = c.sessions.get(&pick.vendor).cloned();
         let resumed = resume.is_some();
         let area = c.area;
+        if permissions == Permissions::DontAsk && !crate::permissions::prepare_tmp(&cwd) {
+            return Err("error.projectSandbox".into());
+        }
         // The conversation's own name, fixed when it began: a rename in Settings never reaches a conversation under way.
         let user_name = c.user_name.clone();
         let (model, effort) = (pick.model.clone(), Some(pick.effort.clone()));
@@ -1248,14 +1697,15 @@ impl Core {
                 ClaudeOptions {
                     bin: cli.command.clone(),
                     cwd,
-                    launch: ClaudeLaunch { area, model, effort, resume, user_hooks, instructions: None, user_name },
+                    launch: ClaudeLaunch { area, model, effort, resume, user_hooks, permissions, instructions: None, user_name },
                     spawn,
+                    sandbox: self.opts.clis.get(&Vendor::Codex).cloned(),
                 },
                 sink,
             ),
             Vendor::Codex => self
                 .codex_server(area, user_hooks, &cli)
-                .open(CodexThread { cwd, model, effort, resume, instructions: None, user_name }, sink),
+                .open(CodexThread { cwd, model, effort, resume, instructions: None, user_name, permissions }, sink),
         };
         self.live.insert(
             conv.to_string(),
@@ -1272,10 +1722,12 @@ impl Core {
                 used: self.tick,
                 cli,
                 resumed,
+                permissions,
                 by_hand: false,
                 approved: false,
                 started: 0.0,
                 served: false,
+                steering: vec![],
             },
         );
         // ponytail: count-based limit on idle Claude processes; a RAM budget across all CLIs comes with parallel workers.
@@ -1307,13 +1759,16 @@ impl Core {
             choice: None,
             area,
             project_id,
+            working_folder: None,
             sessions: BTreeMap::new(),
+            command_gate: false,
             cost_base: BTreeMap::new(),
             allow_always: None,
             branch_of: None,
             user_name: self.store.settings().user_name.and_then(|name| clean_name(&name)),
             created_at: at,
             updated_at: at,
+            queued: Vec::new(),
             messages: vec![],
         };
         let id = c.id.clone();
@@ -1328,7 +1783,7 @@ impl Core {
             && (self.live.get(id).is_some_and(|l| l.turn.is_some())
                 || self.convs.get(id).and_then(|c| c.messages.last()).is_some_and(|m| m.status == Some(Status::Streaming)))
         {
-            return Err("error.busy".into());
+            return self.enqueue(id, req);
         }
         let draft = self.draft.clone().filter(|d| self.convs.get(d).is_some_and(|c| c.area == req.area && c.project_id == req.project_id));
         let id = match existing {
@@ -1341,10 +1796,21 @@ impl Core {
                 None => self.blank(req.area, req.project_id.clone()),
             },
         };
-        let attachments_dir = if req.area == Area::Chat {
-            self.workspace_of(&id).join("attachments")
+        self.load(&id).ok_or("error.conversationGone")?;
+        let saved = if req.files.is_empty() {
+            vec![]
         } else {
-            self.opts.data_dir.join("attachments").join(&id)
+            let root = if req.area == Area::Chat {
+                self.cwd_of(self.convs.get(&id).ok_or("error.conversationGone")?)?
+            } else {
+                self.opts.data_dir.clone()
+            };
+            let dir = if req.area == Area::Chat { root.join("attachments") } else { root.join("attachments").join(&id) };
+            let files = save_files(&root, &dir, &req.files);
+            if files.len() != req.files.len() {
+                return Err("error.projectSandbox".into());
+            }
+            files
         };
         let at = now();
         let auto = req.choice.vendor == "auto";
@@ -1366,7 +1832,6 @@ impl Core {
         let joining_late = !c.sessions.contains_key(&pick.vendor) && !c.messages.is_empty();
         let history = c.messages.clone();
         // Attached files are saved where the model can open them with its own tools (PDFs, spreadsheets, archives...).
-        let saved = if req.files.is_empty() { vec![] } else { save_files(&attachments_dir, &req.files) };
         let name = |p: &Path| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let shown: Vec<String> = saved
             .iter()
@@ -1443,6 +1908,7 @@ impl Core {
         let c = self.convs.get_mut(&id).expect("just created");
         c.title = format!("↳ {}", source.title.trim_start_matches("↳ "));
         c.branch_of = Some(BranchOf { conversation_id: source.id.clone(), message_id: req.message_id.clone() });
+        c.working_folder = source.working_folder.clone();
         c.messages = source.messages[..at]
             .iter()
             .cloned()
@@ -1451,7 +1917,7 @@ impl Core {
                 m
             })
             .collect();
-        if source.area == Area::Chat && from.is_dir() {
+        if source.area == Area::Chat && source.working_folder.is_none() && from.is_dir() {
             copy_dir(&from, &to);
         }
         // The resend carries what the selected message carried: its images and attached files. A chat workspace copy already
@@ -1513,7 +1979,7 @@ impl Core {
                 l.session.close();
             }
             self.convs.remove(&old);
-            let _ = std::fs::remove_dir_all(self.workspace_of(&old));
+            let _ = std::fs::remove_dir_all(self.scratch_of(&old));
         }
     }
 
@@ -1554,7 +2020,7 @@ impl Core {
         if self.store.get(id).is_some() || self.convs.contains_key(id) {
             self.store.remove(id);
             self.convs.remove(id);
-            let _ = std::fs::remove_dir_all(self.workspace_of(id));
+            let _ = std::fs::remove_dir_all(self.scratch_of(id));
             let _ = std::fs::remove_dir_all(self.opts.data_dir.join("attachments").join(id));
         }
         self.list_changed();
@@ -1631,6 +2097,14 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
 fn copy_dir(from: &Path, to: &Path) {
     let _ = std::fs::create_dir_all(to);
     for entry in std::fs::read_dir(from).into_iter().flatten().flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name == ".faber"
+            || name == ".git"
+            || entry.file_type().is_ok_and(|kind| kind.is_symlink())
+            || !crate::permissions::allows(from, "Read", &serde_json::json!({ "file_path": name }))
+        {
+            continue;
+        }
         let target = to.join(entry.file_name());
         if entry.path().is_dir() {
             copy_dir(&entry.path(), &target);

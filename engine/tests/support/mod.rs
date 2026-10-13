@@ -80,6 +80,9 @@ fn key(msg: &Value) -> String {
     if method == Some("turn/start") {
         return format!("turn/start {} {}", id, msg["params"]["input"]);
     }
+    if method == Some("turn/steer") {
+        return format!("turn/steer {} {}", id, msg["params"]["input"]);
+    }
     if let Some(m) = method {
         return if id.is_null() { m.to_string() } else { format!("{m} {id}") };
     }
@@ -138,6 +141,10 @@ impl Wire {
     /// How many of the lines written so far hold `needle`.
     pub fn lines_with(&self, needle: &str) -> usize {
         String::from_utf8_lossy(&self.written.lock().unwrap()).lines().filter(|l| l.contains(needle)).count()
+    }
+
+    pub fn messages(&self) -> Vec<Value> {
+        String::from_utf8_lossy(&self.written.lock().unwrap()).lines().map(|line| serde_json::from_str(line).unwrap()).collect()
     }
 
     fn wrap(&self, p: Proc) -> Proc {
@@ -203,7 +210,14 @@ pub fn replay(entries: Vec<Entry>, mismatches: Mismatches) -> Proc {
             }
             let Ok(Some(line)) = lines.next_line().await else { break };
             // A line cut short is the writer's failure, not a mismatch of the recording.
-            let Ok(sent) = serde_json::from_str(&line) else { continue };
+            let Ok(sent) = serde_json::from_str::<Value>(&line) else { continue };
+            if sent["method"] == "config/read" && entries.get(at).is_none_or(|entry| entry.msg["method"] != "config/read") {
+                let reply = format!("{}\n", serde_json::json!({"id":sent["id"],"result":{"config":{}}}));
+                if fake_out.write_all(reply.as_bytes()).await.is_err() {
+                    return;
+                }
+                continue;
+            }
             let sent = key(&sent);
             let expected = if at < entries.len() && entries[at].input { key(&entries[at].msg) } else { "(no input expected)".into() };
             if sent == expected {

@@ -42,7 +42,7 @@ check('review 3: keyboard collapse keeps focus on the project toggle; filtering 
   } finally { dispose(); root.remove(); }
 });
 
-check('review 4/13: full-motion growth retargets while typing and capped editing keeps the caret and scroll stable', async () => {
+check('review 4/13: full-motion growth is laid out at once and opened up by a clip, and capped editing keeps the caret and scroll stable', async () => {
   const root = surface();
   let fill!: (text: string) => void;
   const dispose = render(() => createComponent(Composer, { vendors: ['codex'], options: [], choice: { vendor: 'auto' },
@@ -55,7 +55,11 @@ check('review 4/13: full-motion growth retargets while typing and capped editing
     fill('Wrapped prompt. '.repeat(30));
     await settle(45);
     if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      ok(field.clientHeight > initial && field.clientHeight < Math.min(field.scrollHeight, innerHeight * 0.4), 'growth has an intermediate frame');
+      // The field is already at its new height: only the card around it is drawn smaller and opens up, so no layout runs.
+      ok(field.clientHeight > initial, 'the field grows at once');
+      const card = root.querySelector<HTMLElement>('.composer')!;
+      ok(card.getAnimations().some((a) => a.playState === 'running' && (a.effect as KeyframeEffect).getKeyframes().some((k) => 'clipPath' in k)), 'the card opens up with a clip');
+      ok(!field.getAnimations().length, 'the field itself is not animated');
     }
     for (let i = 0; i < 6; i++) {
       document.execCommand('insertText', false, ' another word');

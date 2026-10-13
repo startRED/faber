@@ -31,6 +31,9 @@ pub fn key(msg: &Value) -> String {
     if method == Some("turn/start") {
         return format!("turn/start {} {}", id, msg["params"]["input"]);
     }
+    if method == Some("turn/steer") {
+        return format!("turn/steer {} {}", id, msg["params"]["input"]);
+    }
     if let Some(m) = method {
         return if id.is_null() { m.to_string() } else { format!("{m} {id}") };
     }
@@ -62,6 +65,9 @@ impl Replay {
     /// One line the app wrote. Returns the lines to send back: the recorded outputs up to the next recorded input.
     pub fn feed(&mut self, line: &str) -> io::Result<Vec<String>> {
         let msg: Value = serde_json::from_str(line).map_err(|e| io::Error::other(format!("not JSON ({e}): {line}")))?;
+        if msg["method"] == "config/read" && self.entries.get(self.at).is_none_or(|entry| entry.msg["method"] != "config/read") {
+            return Ok(vec![serde_json::json!({"id":msg["id"],"result":{"config":{}}}).to_string()]);
+        }
         let sent = key(&msg);
         let expected = match self.entries.get(self.at) {
             Some(entry) if entry.input => key(&entry.msg),

@@ -53,11 +53,18 @@ impl Core {
             effort: Some("low".into()),
             resume: None,
             user_hooks: false,
+            permissions: Permissions::DontAsk,
             instructions: Some("Reply with the single word ok.".into()),
             user_name: None,
         };
         let session = start_claude(
-            ClaudeOptions { bin: cli.command.clone(), cwd: self.opts.data_dir.clone(), launch, spawn: spawner(&self.opts.spawn, &cli) },
+            ClaudeOptions {
+                bin: cli.command.clone(),
+                cwd: self.opts.data_dir.clone(),
+                launch,
+                spawn: spawner(&self.opts.spawn, &cli),
+                sandbox: None,
+            },
             sink,
         );
         *stop.lock().unwrap_or_else(|e| e.into_inner()) = Some(session.clone());

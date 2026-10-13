@@ -56,3 +56,16 @@ jobs:
         with:
           releaseId: ${{ needs.create.outputs.id }}
           args: ${{ matrix.args }}
+
+  # Owner decision R110: main follows each published release. Fast-forward only; a main that moved on its own stops here.
+  main:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - run: |
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/phase-1-base
+          git merge-base --is-ancestor origin/main "$GITHUB_SHA"
+          git push origin "$GITHUB_SHA:refs/heads/main"

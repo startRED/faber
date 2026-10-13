@@ -5,7 +5,7 @@ use faber_engine::codex::{
     thread_params,
 };
 use faber_engine::events::{Delivery, EngineEvent, Session, UserTurn};
-use faber_engine::model::Area;
+use faber_engine::model::{Area, Permissions};
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,13 +17,27 @@ async fn run(
     resume: Option<&str>,
     react: impl FnMut(&EngineEvent, &Session) -> bool,
 ) -> (Vec<EngineEvent>, Vec<String>) {
-    let thread =
-        CodexThread { cwd: ".".into(), model: None, effort: None, resume: resume.map(String::from), instructions: None, user_name: None };
+    let thread = CodexThread {
+        cwd: ".".into(),
+        model: None,
+        effort: None,
+        resume: resume.map(String::from),
+        instructions: None,
+        user_name: None,
+        permissions: Permissions::Ask,
+    };
     drive(
         entries,
         |spawn, sink| {
-            let opts =
-                CodexServerOptions { bin: "codex".into(), cwd: ".".into(), area: Area::Chat, user_hooks: false, windows: false, spawn };
+            let opts = CodexServerOptions {
+                permissions: Permissions::Ask,
+                cli: faber_engine::cli::Cli { command: "codex".into(), prefix: vec![] },
+                cwd: ".".into(),
+                area: Area::Chat,
+                user_hooks: false,
+                windows: false,
+                spawn,
+            };
             CodexServer::start(opts).open(thread, sink)
         },
         first,
@@ -118,7 +132,8 @@ async fn codex_permissions_the_first_command_is_allowed_and_the_second_declined(
 async fn codex_an_answer_that_fails_to_write_keeps_the_approval_and_the_retry_is_written_once() {
     let f = fake(fixture("codex", "tools"));
     let opts = CodexServerOptions {
-        bin: "codex".into(),
+        permissions: Permissions::Ask,
+        cli: faber_engine::cli::Cli { command: "codex".into(), prefix: vec![] },
         cwd: ".".into(),
         area: Area::Chat,
         user_hooks: false,
@@ -126,7 +141,15 @@ async fn codex_an_answer_that_fails_to_write_keeps_the_approval_and_the_retry_is
         spawn: f.spawn.clone(),
     };
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    let thread = CodexThread { cwd: ".".into(), model: None, effort: None, resume: None, instructions: None, user_name: None };
+    let thread = CodexThread {
+        cwd: ".".into(),
+        model: None,
+        effort: None,
+        resume: None,
+        instructions: None,
+        user_name: None,
+        permissions: Permissions::Ask,
+    };
     let session = CodexServer::start(opts).open(thread, Arc::new(move |e| drop(tx.send(e))));
     session.send(UserTurn::text("Create a.txt containing one. Then create b.txt containing two. Make each file in a separate step."));
     let request = next_permission(&mut rx).await;
@@ -151,7 +174,8 @@ async fn codex_an_answer_that_fails_to_write_keeps_the_approval_and_the_retry_is
 async fn codex_an_answer_that_may_be_half_written_is_never_written_again() {
     let f = fake(fixture("codex", "tools"));
     let opts = CodexServerOptions {
-        bin: "codex".into(),
+        permissions: Permissions::Ask,
+        cli: faber_engine::cli::Cli { command: "codex".into(), prefix: vec![] },
         cwd: ".".into(),
         area: Area::Chat,
         user_hooks: false,
@@ -159,7 +183,15 @@ async fn codex_an_answer_that_may_be_half_written_is_never_written_again() {
         spawn: f.spawn.clone(),
     };
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    let thread = CodexThread { cwd: ".".into(), model: None, effort: None, resume: None, instructions: None, user_name: None };
+    let thread = CodexThread {
+        cwd: ".".into(),
+        model: None,
+        effort: None,
+        resume: None,
+        instructions: None,
+        user_name: None,
+        permissions: Permissions::Ask,
+    };
     let session = CodexServer::start(opts).open(thread, Arc::new(move |e| drop(tx.send(e))));
     session.send(UserTurn::text("Create a.txt containing one. Then create b.txt containing two. Make each file in a separate step."));
     let request = next_permission(&mut rx).await;
@@ -235,18 +267,72 @@ fn codex_a_message_that_arrives_whole_without_deltas_is_still_shown_once() {
 
 #[test]
 fn codex_chat_is_lean_and_sandboxed_projects_keep_the_user_setup_without_hooks() {
-    let chat = codex_args(Area::Chat, false, false).join(" ");
+    let chat = codex_args(Area::Chat, false, false, Permissions::Ask).join(" ");
     assert!(chat.contains("--disable plugins") && chat.contains("mcp_servers={}") && chat.contains("project_doc_max_bytes=0"));
     assert!(chat.contains("--disable hooks") && !chat.contains("windows.sandbox"));
-    let project = codex_args(Area::Project, true, false).join(" ");
+    let project = codex_args(Area::Project, true, false, Permissions::Ask).join(" ");
     assert!(project.contains("windows.sandbox=\"unelevated\"") && project.contains("--disable hooks"));
     assert!(!project.contains("plugins") && !project.contains("mcp_servers"));
-    assert!(!codex_args(Area::Project, false, true).join(" ").contains("hooks"));
+    assert!(!codex_args(Area::Project, false, true, Permissions::Ask).join(" ").contains("hooks"));
     for area in [Area::Chat, Area::Project] {
-        assert_eq!(codex_thread(area, None)["sandbox"], "workspace-write");
-        assert_eq!(codex_thread(area, None)["approvalPolicy"], "on-request");
+        assert_eq!(codex_thread(area, None, Permissions::Ask)["sandbox"], "workspace-write");
+        assert_eq!(codex_thread(area, None, Permissions::Ask)["approvalPolicy"], "on-request");
     }
-    assert!(codex_thread(Area::Chat, None).contains_key("baseInstructions"));
+    assert!(codex_thread(Area::Chat, None, Permissions::Ask).contains_key("baseInstructions"));
+}
+
+#[tokio::test]
+async fn review3_user_mcp_servers_are_disabled_before_start_and_resume_without_copying_values() {
+    for area in [Area::Chat, Area::Project] {
+        for resume in [None, Some("thread".into())] {
+            let method = if resume.is_some() { "thread/resume" } else { "thread/start" };
+            let entries = vec![
+                Entry { input: true, msg: json!({"id":1,"method":"initialize"}) },
+                Entry { input: false, msg: json!({"id":1,"result":{}}) },
+                Entry { input: true, msg: json!({"method":"initialized"}) },
+                Entry { input: true, msg: json!({"id":"faber-config-1","method":"config/read"}) },
+                Entry {
+                    input: false,
+                    msg: json!({"id":"faber-config-1","result":{"config":{"mcp_servers":{"github.push":{"env":{"TOKEN":"synthetic-do-not-copy"}}}}}}),
+                },
+                Entry { input: true, msg: json!({"id":2,"method":method}) },
+                Entry { input: false, msg: json!({"id":2,"result":{"thread":{"id":"thread","model":"model"}}}) },
+            ];
+            let f = fake(entries);
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            let server = CodexServer::start(CodexServerOptions {
+                permissions: Permissions::DontAsk,
+                cli: faber_engine::cli::Cli { command: "codex".into(), prefix: vec![] },
+                cwd: ".".into(),
+                area,
+                user_hooks: false,
+                windows: true,
+                spawn: f.spawn.clone(),
+            });
+            let session = server.open(
+                CodexThread {
+                    cwd: ".".into(),
+                    model: None,
+                    effort: None,
+                    resume,
+                    instructions: None,
+                    user_name: None,
+                    permissions: Permissions::DontAsk,
+                },
+                Arc::new(move |e| drop(tx.send(e))),
+            );
+            tokio::time::timeout(Duration::from_secs(3), async { while !matches!(rx.recv().await, Some(EngineEvent::Started { .. })) {} })
+                .await
+                .unwrap();
+            let messages = f.wire.messages();
+            let thread = messages.iter().find(|msg| msg["method"] == method).unwrap();
+            assert_eq!(thread["params"]["config"]["mcp_servers"]["github.push"], json!({"enabled":false}));
+            assert!(!serde_json::to_string(&messages).unwrap().contains("synthetic-do-not-copy"));
+            assert!(f.mismatches.lock().unwrap().is_empty());
+            session.close();
+            server.retire();
+        }
+    }
 }
 
 #[tokio::test]
@@ -269,7 +355,8 @@ async fn a_cli_that_never_answers_gives_an_empty_list_instead_of_hanging() {
 async fn one_process_serves_two_conversations_at_once_and_keeps_their_answers_apart() {
     let f = fake(fixture("codex", "two"));
     let opts = CodexServerOptions {
-        bin: "codex".into(),
+        permissions: Permissions::Ask,
+        cli: faber_engine::cli::Cli { command: "codex".into(), prefix: vec![] },
         cwd: ".".into(),
         area: Area::Chat,
         user_hooks: false,
@@ -280,8 +367,15 @@ async fn one_process_serves_two_conversations_at_once_and_keeps_their_answers_ap
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let open = |name: &'static str| {
         let tx = tx.clone();
-        let thread =
-            CodexThread { cwd: ".".into(), model: None, effort: Some("medium".into()), resume: None, instructions: None, user_name: None };
+        let thread = CodexThread {
+            cwd: ".".into(),
+            model: None,
+            effort: Some("medium".into()),
+            resume: None,
+            instructions: None,
+            user_name: None,
+            permissions: Permissions::Ask,
+        };
         server.open(thread, Arc::new(move |e| drop(tx.send((name, e)))))
     };
     let (a, b) = (open("a"), open("b"));
@@ -306,7 +400,7 @@ async fn one_process_serves_two_conversations_at_once_and_keeps_their_answers_ap
 }
 
 #[test]
-fn a_side_question_thread_has_its_own_instructions_reads_and_runs_nothing_and_is_not_saved() {
+fn a_side_question_thread_has_its_own_instructions_restricted_reads_no_writes_and_is_not_saved() {
     let thread = CodexThread {
         cwd: ".".into(),
         model: Some("gpt-6-luna".into()),
@@ -314,15 +408,145 @@ fn a_side_question_thread_has_its_own_instructions_reads_and_runs_nothing_and_is
         resume: None,
         instructions: Some("Route.".into()),
         user_name: None,
+        permissions: Permissions::Ask,
     };
     let (method, params) = thread_params(Area::Chat, &thread);
     assert_eq!(method, "thread/start");
-    assert_eq!(
-        (&params["baseInstructions"], &params["sandbox"], &params["approvalPolicy"]),
-        (&"Route.".into(), &"read-only".into(), &"never".into())
-    );
+    assert_eq!((&params["baseInstructions"], &params["approvalPolicy"]), (&"Route.".into(), &"never".into()));
     assert_eq!(params["model"], "gpt-6-luna");
     assert_eq!(params["ephemeral"], true, "it stays out of the user's Codex history");
+}
+
+#[test]
+fn permissions_keep_the_workspace_sandbox_and_disable_project_network_without_approvals() {
+    for area in [Area::Chat, Area::Project] {
+        for permissions in [Permissions::DontAsk, Permissions::Ask] {
+            for resume in [None, Some("thread-id".into())] {
+                let t = CodexThread {
+                    cwd: "project".into(),
+                    model: Some("model".into()),
+                    effort: None,
+                    resume,
+                    instructions: None,
+                    user_name: None,
+                    permissions,
+                };
+                let (method, params) = thread_params(area, &t);
+                assert_eq!(method, if t.resume.is_some() { "thread/resume" } else { "thread/start" });
+                assert_eq!(params["cwd"], "project");
+                assert_eq!(params["model"], "model");
+                if permissions == Permissions::DontAsk {
+                    assert!(params.get("sandbox").is_none());
+                    assert_eq!(params["approvalPolicy"], "never");
+                    assert_eq!(params["config"]["sandbox_workspace_write.network_access"], false);
+                } else {
+                    assert_eq!(params["sandbox"], "workspace-write");
+                    assert_eq!(params["approvalPolicy"], "on-request");
+                    assert!(params.get("config").is_none());
+                }
+                assert_eq!(params.get("baseInstructions").is_some(), area == Area::Chat);
+                let (_, side) = thread_params(area, &CodexThread { instructions: Some("Route.".into()), ..t });
+                assert!(side.get("sandbox").is_none());
+                assert_eq!(side["approvalPolicy"], "never");
+                let id = side["config"]["default_permissions"].as_str().unwrap();
+                assert_eq!(side["config"][format!("permissions.{id}")]["filesystem"][":workspace_roots"]["."], "read");
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn l2_serialized_start_and_resume_carry_the_no_approval_offline_policy() {
+    for area in [Area::Chat, Area::Project] {
+        for resume in [false, true] {
+            let f = fake(fixture("codex", if resume { "resume" } else { "chat" }));
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            let server = CodexServer::start(CodexServerOptions {
+                permissions: Permissions::Ask,
+                cli: faber_engine::cli::Cli { command: "codex".into(), prefix: vec![] },
+                cwd: ".".into(),
+                area,
+                user_hooks: false,
+                windows: false,
+                spawn: f.spawn.clone(),
+            });
+            let session = server.open(
+                CodexThread {
+                    cwd: ".".into(),
+                    model: None,
+                    effort: None,
+                    resume: resume.then(|| "thread-id".into()),
+                    instructions: None,
+                    user_name: None,
+                    permissions: Permissions::DontAsk,
+                },
+                Arc::new(move |e| {
+                    let _ = tx.send(e);
+                }),
+            );
+            loop {
+                let e = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.unwrap().unwrap();
+                if matches!(e, EngineEvent::Started { .. }) {
+                    break;
+                }
+            }
+            let messages = f.wire.messages();
+            let message = messages.iter().find(|m| m["method"] == if resume { "thread/resume" } else { "thread/start" }).unwrap();
+            assert_eq!(message["params"]["approvalPolicy"], "never");
+            assert!(message["params"].get("sandbox").is_none());
+            let id = message["params"]["config"]["default_permissions"].as_str().unwrap();
+            assert_eq!(message["params"]["config"][format!("permissions.{id}")]["filesystem"][":root"], "deny");
+            assert_eq!(message["params"]["config"]["sandbox_workspace_write.network_access"], false);
+            assert_eq!(message["params"]["config"]["shell_environment_policy.set"]["GIT_ALLOW_PROTOCOL"], "");
+            session.close();
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_project_with_no_approvals_declines_a_residual_request_without_emitting_a_card() {
+    for area in [Area::Chat, Area::Project] {
+        let entries = fixture("codex", "tools")
+            .into_iter()
+            .map(|mut e| {
+                if e.input && e.msg.get("result").is_some() && e.msg["result"].get("decision").is_some() {
+                    e.msg["result"]["decision"] = "decline".into();
+                }
+                e
+            })
+            .collect();
+        let (events, mismatches) = drive(
+            entries,
+            |spawn, sink| {
+                let server = CodexServer::start(CodexServerOptions {
+                    permissions: Permissions::Ask,
+                    cli: faber_engine::cli::Cli { command: "codex".into(), prefix: vec![] },
+                    cwd: ".".into(),
+                    area,
+                    user_hooks: false,
+                    windows: false,
+                    spawn,
+                });
+                server.open(
+                    CodexThread {
+                        cwd: ".".into(),
+                        model: None,
+                        effort: None,
+                        resume: None,
+                        instructions: None,
+                        user_name: None,
+                        permissions: Permissions::DontAsk,
+                    },
+                    sink,
+                )
+            },
+            "Create a.txt containing one. Then create b.txt containing two. Make each file in a separate step.",
+            |event, _| matches!(event, EngineEvent::Done { .. }),
+        )
+        .await;
+        assert!(mismatches.is_empty(), "{mismatches:?}");
+        assert!(!events.iter().any(|e| matches!(e, EngineEvent::Permission { .. })));
+    }
 }
 
 #[test]
@@ -334,6 +558,7 @@ fn the_name_is_a_developer_instruction_that_resume_repeats_and_a_side_question_n
         resume: resume.map(String::from),
         instructions: instructions.map(String::from),
         user_name: name.map(String::from),
+        permissions: Permissions::Ask,
     };
     let (method, start) = thread_params(Area::Project, &thread(None, None, Some("Erick")));
     assert_eq!(method, "thread/start");
@@ -348,4 +573,186 @@ fn the_name_is_a_developer_instruction_that_resume_repeats_and_a_side_question_n
     assert!(none.get("developerInstructions").is_none());
     let (_, side) = thread_params(Area::Chat, &thread(None, Some("Route."), Some("Erick")));
     assert!(side.get("developerInstructions").is_none());
+}
+
+const COUNT: &str = "Count from 1 to 30, one number per line, each followed by a five-word comment.";
+const STEER: &str = "stop at 10";
+
+/// Sends a steer when the first words of the answer arrive and runs the session to the end of the turn.
+async fn steer_after_first_words(fixture_name: &str, until: fn(&EngineEvent) -> bool) -> (Vec<EngineEvent>, Vec<String>) {
+    let mut steered = false;
+    run(fixture("codex", fixture_name), COUNT, None, |e, s| {
+        if matches!(e, EngineEvent::Text(_)) && !steered {
+            steered = true;
+            s.steer(UserTurn::text(STEER), "faber-probe-1");
+        }
+        until(e)
+    })
+    .await
+}
+
+#[tokio::test]
+async fn a_steered_message_reaches_the_turn_and_the_driver_says_when_codex_took_it_in() {
+    let (events, mismatches) = steer_after_first_words("steer", |e| matches!(e, EngineEvent::Done { .. })).await;
+    assert_eq!(mismatches, Vec::<String>::new());
+    // Live capture (codex-cli 0.162.1): Codex echoes the client id on the steered user message, between the answer it
+    // cut short and the new answer, which it begins with a new agent message item.
+    let injected: Vec<_> = events.iter().enumerate().filter(|(_, e)| matches!(e, EngineEvent::Injected { .. })).collect();
+    assert_eq!(injected.len(), 1);
+    assert_eq!(injected[0].1, &EngineEvent::Injected { tag: Some("faber-probe-1".into()) });
+    let before = text_of(&events[..injected[0].0]);
+    let after = text_of(&events[injected[0].0..]);
+    assert!(before.starts_with("1 #"), "{before:?}");
+    assert!(after.contains("Counting starts") && after.trim_end().ends_with("as you asked."), "{after:?}");
+    assert!(!events.iter().any(|e| matches!(e, EngineEvent::SteerFailed { .. } | EngineEvent::Error { .. })));
+}
+
+#[tokio::test]
+async fn a_steer_codex_refuses_is_reported_as_not_delivered_and_is_no_error() {
+    for name in ["steer-rejected", "steer-late"] {
+        let (events, mismatches) = steer_after_first_words(name, |e| matches!(e, EngineEvent::SteerFailed { .. })).await;
+        assert_eq!(mismatches, Vec::<String>::new(), "{name}");
+        assert!(events.contains(&EngineEvent::SteerFailed { tag: "faber-probe-1".into() }), "{name}: {events:?}");
+        assert!(!events.iter().any(|e| matches!(e, EngineEvent::Injected { .. } | EngineEvent::Error { .. })), "{name}");
+    }
+}
+
+#[tokio::test]
+async fn a_steer_before_the_turn_has_an_id_is_not_delivered() {
+    // The thread exists but no turn/started came yet, so there is nothing to name in expectedTurnId.
+    let entries: Vec<Entry> = fixture("codex", "steer").into_iter().take(8).collect();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let f = fake(entries);
+    let thread = CodexThread {
+        cwd: ".".into(),
+        model: None,
+        effort: None,
+        resume: None,
+        instructions: None,
+        user_name: None,
+        permissions: Permissions::Ask,
+    };
+    let opts = CodexServerOptions {
+        permissions: Permissions::Ask,
+        cli: faber_engine::cli::Cli { command: "codex".into(), prefix: vec![] },
+        cwd: ".".into(),
+        area: Area::Chat,
+        user_hooks: false,
+        windows: false,
+        spawn: f.spawn.clone(),
+    };
+    let session = CodexServer::start(opts).open(thread, Arc::new(move |e| drop(tx.send(e))));
+    session.steer(UserTurn::text("early"), "q9");
+    let seen = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if let Some(EngineEvent::SteerFailed { tag }) = rx.recv().await {
+                return tag;
+            }
+        }
+    })
+    .await
+    .expect("the driver never said the steer was dropped");
+    assert_eq!(seen, "q9");
+    session.close();
+}
+
+#[test]
+fn review3_dynamic_command_failures_keep_their_output_and_failed_status() {
+    let events = parse_codex_notification(
+        &json!({"method":"item/completed","params":{"item":{
+            "id":"tool","type":"dynamicToolCall","status":"completed","success":false,
+            "contentItems":[{"type":"inputText","text":"sandbox refused"}]
+        }}}),
+        &mut CodexTurnState::default(),
+    );
+    assert_eq!(events, vec![EngineEvent::ToolResult { id: "tool".into(), ok: false, declined: false, text: "sandbox refused".into() }]);
+}
+
+#[tokio::test]
+async fn review3_command_gate_declines_git_mutations_and_runs_builds_only_in_the_sandbox() {
+    for area in [Area::Chat, Area::Project] {
+        let root = tempfile::tempdir().unwrap();
+        let mut entries = vec![
+            Entry { input: true, msg: json!({"id":1,"method":"initialize"}) },
+            Entry { input: false, msg: json!({"id":1,"result":{}}) },
+            Entry { input: true, msg: json!({"method":"initialized"}) },
+            Entry { input: true, msg: json!({"id":2,"method":"thread/start"}) },
+            Entry { input: false, msg: json!({"id":2,"result":{"thread":{"id":"thread","model":"model"}}}) },
+        ];
+        for (i, command) in ["git reset --hard HEAD~1", "git clean -fdx", "git rebase", "git push", "cargo test"].into_iter().enumerate() {
+            entries.push(Entry{input:false,msg:json!({"id":format!("call-{i}"),"method":"item/tool/call","params":{"threadId":"thread","tool":"run_command","arguments":{"command":command}}})});
+            entries.push(Entry { input: true, msg: json!({"id":format!("call-{i}"),"result":{"success":i==4}}) });
+        }
+        let f = fake(entries);
+        let argv = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (start, capture) = (f.spawn.clone(), argv.clone());
+        let spawn: faber_engine::proc::Spawner = Arc::new(move |bin, args, cwd| {
+            if args.first().is_some_and(|arg| arg == "app-server") {
+                return start(bin, args, cwd);
+            }
+            capture.lock().unwrap().push(args.to_vec());
+            Ok(faber_engine::proc::Proc {
+                stdin: Box::new(tokio::io::sink()),
+                stdout: Box::new(std::io::Cursor::new(b"build completed".to_vec())),
+                stderr: None,
+                child: None,
+            })
+        });
+        let server = CodexServer::start(CodexServerOptions {
+            cli: faber_engine::cli::Cli { command: "codex".into(), prefix: vec![] },
+            cwd: root.path().into(),
+            area,
+            user_hooks: false,
+            windows: true,
+            permissions: Permissions::DontAsk,
+            spawn,
+        });
+        let session = server.open(
+            CodexThread {
+                cwd: root.path().into(),
+                model: None,
+                effort: None,
+                resume: None,
+                instructions: None,
+                user_name: None,
+                permissions: Permissions::DontAsk,
+            },
+            Arc::new(|_| {}),
+        );
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while f.wire.lines_with("\"id\":\"call-") < 5 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let messages = f.wire.messages();
+        for i in 0..5 {
+            let reply = messages.iter().find(|msg| msg["id"] == format!("call-{i}")).unwrap();
+            assert_eq!(reply["result"]["success"], i == 4);
+        }
+        let argv = argv.lock().unwrap();
+        assert_eq!(argv.len(), 1, "only the build may start a child");
+        assert!(argv[0].iter().any(|arg| arg == "sandbox"));
+        assert!(argv[0].ends_with(&["cargo".into(), "test".into()]));
+        assert!(f.mismatches.lock().unwrap().is_empty());
+        session.close();
+        server.retire();
+    }
+}
+
+#[test]
+fn only_a_user_message_after_the_first_of_a_turn_counts_as_taken_in() {
+    let started = |client: serde_json::Value| json!({ "method": "item/started", "params": { "item": { "type": "userMessage", "id": "u", "clientId": client, "content": [] } } });
+    let mut state = CodexTurnState::default();
+    assert!(parse_codex_notification(&started(json!(null)), &mut state).is_empty(), "the turn's own prompt");
+    let again = parse_codex_notification(&started(json!(null)), &mut state);
+    assert_eq!(again, vec![EngineEvent::Injected { tag: None }]);
+    // Our own tag, echoed back, is enough even if the first message was not seen.
+    let mut fresh = CodexTurnState::default();
+    let tagged = parse_codex_notification(&started(json!("faber-probe-1")), &mut fresh);
+    assert_eq!(tagged, vec![EngineEvent::Injected { tag: Some("faber-probe-1".into()) }]);
+    // A new turn starts counting again.
+    parse_codex_notification(&json!({ "method": "turn/started", "params": { "turn": { "id": "t2" } } }), &mut state);
+    assert!(parse_codex_notification(&started(json!(null)), &mut state).is_empty());
 }

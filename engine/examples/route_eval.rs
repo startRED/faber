@@ -11,7 +11,7 @@ use faber_engine::claude::{ClaudeLaunch, ClaudeOptions, EventSink, start_claude}
 use faber_engine::cli::{Cli, find_cli};
 use faber_engine::codex::{CodexServer, CodexServerOptions, CodexThread};
 use faber_engine::events::{EngineEvent, Session, UserTurn};
-use faber_engine::model::{Area, Vendor};
+use faber_engine::model::{Area, Permissions, Vendor};
 use faber_engine::proc::{Spawner, real_spawner};
 use faber_engine::route::{INSTRUCTIONS, ROUTER, asked, question};
 use std::path::PathBuf;
@@ -87,13 +87,35 @@ impl Router {
         let session = match vendor {
             Vendor::Codex => {
                 let (_, server) = self.codex.as_ref()?;
-                server.open(CodexThread { cwd: self.dir.clone(), model, effort, resume: None, instructions, user_name: None }, sink)
+                server.open(
+                    CodexThread {
+                        cwd: self.dir.clone(),
+                        model,
+                        effort,
+                        resume: None,
+                        instructions,
+                        user_name: None,
+                        permissions: Permissions::Ask,
+                    },
+                    sink,
+                )
             }
             Vendor::Claude => {
                 let cli = self.claude.as_ref()?;
-                let launch =
-                    ClaudeLaunch { area: Area::Chat, model, effort, resume: None, user_hooks: false, instructions, user_name: None };
-                start_claude(ClaudeOptions { bin: cli.command.clone(), cwd: self.dir.clone(), launch, spawn: spawner(cli) }, sink)
+                let launch = ClaudeLaunch {
+                    area: Area::Chat,
+                    model,
+                    effort,
+                    resume: None,
+                    user_hooks: false,
+                    instructions,
+                    user_name: None,
+                    permissions: Permissions::Ask,
+                };
+                start_claude(
+                    ClaudeOptions { bin: cli.command.clone(), cwd: self.dir.clone(), launch, spawn: spawner(cli), sandbox: None },
+                    sink,
+                )
             }
         };
         Some((session, rx))
@@ -118,7 +140,8 @@ async fn main() {
     std::fs::create_dir_all(&dir).expect("a folder to work in");
     let codex = find_cli("codex").map(|cli| {
         let server = CodexServer::start(CodexServerOptions {
-            bin: cli.command.clone(),
+            permissions: Permissions::Ask,
+            cli: cli.clone(),
             cwd: dir.clone(),
             area: Area::Chat,
             user_hooks: false,

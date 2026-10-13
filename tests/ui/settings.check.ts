@@ -15,6 +15,24 @@ import { accountLine, seedQuotas, usageRows } from '../../ui/sidebar.ts';
 import { Settings } from '../../ui/Settings.tsx';
 import { check, deepEqual, equal, ok } from './check.ts';
 
+check('R107: Settings names Chat and Projects and discloses the shared default', () => {
+  ok(en['set.permissions'].includes('Chat'));
+  ok(en['set.permissions'].includes('Projects'));
+  ok('project.permissionsDontAsk' in en);
+  ok(en['set.chatFolderHint'].includes('first message'));
+  ok(en['set.chatFolderHint'].includes('private folder'));
+  ok(en['set.chatFolderHint'].includes('delete the conversation'));
+});
+
+check('review3: Settings discloses sandbox dependencies, integration limits and forbidden folders', () => {
+  const hint = en['project.permissionsDontAsk'];
+  ok(hint.includes('Codex CLI'));
+  ok(hint.includes('integrations'));
+  for (const folder of ['home', 'drive', 'Windows', 'Program Files', 'AppData']) ok(hint.includes(folder), folder);
+  ok(hint.includes('Ask before commands'));
+  ok('error.workingFolder' in en);
+});
+
 const look = (over: Partial<Look> = {}): Look => ({
   vars: {},
   scheme: 'dark',
@@ -136,6 +154,11 @@ check('settings: the new sections are written in every language, and the file hi
     'set.notifyHint',
     'set.playSound',
     'set.soundHint',
+    'set.system',
+    'set.keepAwake',
+    'set.keepAwakeHint',
+    'set.autostart',
+    'set.autostartHint',
     'set.usage',
     'set.privacy',
     'set.accountsHint',
@@ -212,7 +235,7 @@ check('settings: notification switches default on, save separately and restore a
     },
   }));
   try {
-    const switches = view.host.querySelectorAll<HTMLInputElement>('.row:last-child input[role="switch"]');
+    const switches = view.host.querySelectorAll('.toggles')[1]!.querySelectorAll<HTMLInputElement>('input[role="switch"]');
     equal(switches.length, 2);
     const notify = switches[0]!;
     const sound = switches[1]!;
@@ -234,6 +257,48 @@ check('settings: notification switches default on, save separately and restore a
     deepEqual(saved(), { notifications: true, notificationSound: false });
     deepEqual(patches, [{ notifications: false }, { notifications: false }, { notificationSound: false }, { notifications: true }]);
   } finally { view.stop(); }
+});
+
+check('settings: keep-awake defaults on and autostart defaults off, saving separately and restoring on refusal', async () => {
+  const original = Object.getOwnPropertyDescriptor(navigator, 'userAgent');
+  Object.defineProperty(navigator, 'userAgent', { configurable: true, value: 'Windows' });
+  const [saved, setSaved] = createSignal<Saved>({});
+  const patches: Saved[] = [];
+  let accept = false;
+  const view = mount(() => createComponent(Settings, {
+    look: look(), get saved() { return saved(); }, vendors: [], quotas: {}, now: 0,
+    onClose: () => {}, onOpenSetup: () => {},
+    onSave: async (patch) => {
+      patches.push(patch);
+      if (accept) setSaved({ ...saved(), ...patch });
+      return accept;
+    },
+  }));
+  try {
+    const switches = view.host.querySelectorAll<HTMLInputElement>('.row:last-child input[role="switch"]');
+    equal(switches.length, 2);
+    const awake = switches[0]!;
+    const autostart = switches[1]!;
+    equal(awake.checked, true, 'keep-awake defaults on');
+    equal(autostart.checked, false, 'autostart defaults off');
+    awake.click();
+    await tick();
+    equal(awake.checked, true, 'a refused save restores the keep-awake switch');
+    deepEqual(saved(), {});
+    accept = true;
+    awake.click();
+    await tick();
+    equal(awake.checked, false);
+    autostart.click();
+    await tick();
+    equal(autostart.checked, true);
+    deepEqual(saved(), { keepAwake: false, autostart: true });
+    deepEqual(patches, [{ keepAwake: false }, { keepAwake: false }, { autostart: true }]);
+  } finally {
+    view.stop();
+    if (original) Object.defineProperty(navigator, 'userAgent', original);
+    else Reflect.deleteProperty(navigator, 'userAgent');
+  }
 });
 
 check('settings: an answer that arrives after Appearance closed leaves the draft alone', async () => {
@@ -312,4 +377,20 @@ check('settings: only a CLI that says it is signed in is a connected account', (
   equal(accountLine(cli('signedOut', false)), 'notConnected');
   equal(accountLine(cli('unknown')), 'unsure');
   equal(accountLine(cli('unknown', false)), 'notConnected', 'nothing installed, nothing to check');
+});
+
+check('settings: unsupported system controls are absent outside Windows', () => {
+  const original = Object.getOwnPropertyDescriptor(navigator, 'userAgent');
+  Object.defineProperty(navigator, 'userAgent', { configurable: true, value: 'Macintosh' });
+  const view = mount(() => createComponent(Settings, {
+    look: look(), saved: {}, vendors: [], quotas: {}, now: 0,
+    onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+  }));
+  try {
+    equal(view.host.querySelectorAll('input[role="switch"]').length, 3);
+  } finally {
+    view.stop();
+    if (original) Object.defineProperty(navigator, 'userAgent', original);
+    else Reflect.deleteProperty(navigator, 'userAgent');
+  }
 });

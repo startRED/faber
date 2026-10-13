@@ -3,6 +3,7 @@ import type { Choice, Effort, Vendor } from './api.ts';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 import type { Option } from './models.ts';
+import { reveal } from './motion.ts';
 
 export interface Draft {
   text: string;
@@ -75,18 +76,18 @@ export function Composer(props: Props) {
   onCleanup(() => clearTimeout(pause));
   let fileInput: HTMLInputElement | undefined;
   let field: HTMLTextAreaElement | undefined;
+  let growing: Animation | undefined;
   const resize = () => {
     if (!field?.isConnected) return;
     const previous = field.getBoundingClientRect().height;
     const style = getComputedStyle(field);
-    // Restore the rendered height before enabling the transition, so measurement never paints a collapse.
-    field.style.transition = 'none';
+    // Measured and set in one task, so the collapse to 0 px is never painted.
     field.style.height = '0px';
     const height = Math.min(parseFloat(style.maxHeight), Math.max(parseFloat(style.minHeight), draft().text ? field.scrollHeight : 0));
-    field.style.height = `${previous}px`;
-    field.getBoundingClientRect();
-    field.style.removeProperty('transition');
     field.style.height = `${height}px`;
+    // The field is at its new size at once; the card around it opens up to it (a clip, not a layout change).
+    growing?.cancel();
+    growing = height > previous + 1 ? reveal(field.closest<HTMLElement>('.composer')!, height - previous) : undefined;
   };
   createEffect(on(() => draft().text, () => queueMicrotask(resize), { defer: true }));
   onMount(() => {
@@ -106,7 +107,7 @@ export function Composer(props: Props) {
   });
   const selected = () => Math.max(0, props.options.findIndex((o) => o.choice.vendor === props.choice.vendor && o.choice.model === props.choice.model));
   const hasContent = () => draft().text.trim() !== '' || draft().images.length > 0 || draft().files.length > 0;
-  const canSend = () => !props.busy && !props.locked && hasContent() && props.vendors.length > 0;
+  const canSend = () => !props.locked && hasContent() && props.vendors.length > 0;
 
   // The first keystroke starts the CLI, not focus: the box is focused as soon as Faber opens, and an unused Claude
   // process costs about 120 MB.
@@ -242,20 +243,18 @@ export function Composer(props: Props) {
             <Icon name="down" small />
           </label>
         </Show>
-        <Show
-          when={props.busy}
-          fallback={
-            <button type="submit" class="send" disabled={!canSend()} aria-label={t('composer.send')}>
-              <span aria-hidden="true">{t('composer.send')}</span>
-              <Icon name="up" small />
-            </button>
-          }
-        >
+        <Show when={props.busy}>
           <button type="button" class="send stop" onClick={() => props.onStop()} aria-label={t('composer.stop')}>
             <svg class="i sm" viewBox="0 0 24 24" aria-hidden="true" style={{ fill: 'currentColor', stroke: 'none' }}>
               <rect width="12" height="12" x="6" y="6" rx="2" />
             </svg>
             <span aria-hidden="true">{t('composer.stop')}</span>
+          </button>
+        </Show>
+        <Show when={!props.busy || hasContent()}>
+          <button type="submit" class="send" disabled={!canSend()} aria-label={t('composer.send')}>
+            <span aria-hidden="true">{t('composer.send')}</span>
+            <Icon name="up" small />
           </button>
         </Show>
       </div>
