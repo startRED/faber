@@ -863,12 +863,13 @@ impl Core {
                     if !final_answer {
                         m.activity_end = Some(m.text.encode_utf16().count());
                     }
-                    m.tools.get_or_insert_default().push(ToolUse { id, name, input, ok: None, output: None });
+                    m.tools.get_or_insert_default().push(ToolUse { id, name, input, ok: None, output: None, declined: false });
                 }
             }
-            EngineEvent::ToolResult { id, ok, text } => {
+            EngineEvent::ToolResult { id, ok, declined, text } => {
                 if let Some(tool) = self.turn(conv).and_then(|m| m.tools.as_mut()).and_then(|t| t.iter_mut().find(|t| t.id == id)) {
                     tool.ok = Some(ok);
+                    tool.declined = declined;
                     tool.output = Some(text.chars().take(4000).collect());
                 }
             }

@@ -89,6 +89,9 @@ fn block_text(content: &Value) -> String {
     }
 }
 
+/// How a refused approval comes back as the tool's error: the text Faber answers with, and the older wording of the recordings.
+const DECLINED: [&str; 2] = ["The user declined.", "The user denied"];
+
 fn s(v: &Value) -> String {
     v.as_str().unwrap_or_default().to_string()
 }
@@ -123,7 +126,15 @@ pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
             .collect(),
         "user" => items(&msg["message"]["content"])
             .filter(|c| c["type"] == "tool_result")
-            .map(|c| EngineEvent::ToolResult { id: s(&c["tool_use_id"]), ok: c["is_error"] != true, text: block_text(&c["content"]) })
+            .map(|c| {
+                let (ok, text) = (c["is_error"] != true, block_text(&c["content"]));
+                EngineEvent::ToolResult {
+                    id: s(&c["tool_use_id"]),
+                    ok,
+                    declined: !ok && DECLINED.iter().any(|d| text.starts_with(d)),
+                    text,
+                }
+            })
             .collect(),
         "control_request" if msg["request"]["subtype"] == "can_use_tool" => vec![EngineEvent::Permission {
             request_id: s(&msg["request_id"]),
@@ -253,7 +264,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                         let delivery = match pending.get(&request_id) {
                             None => Delivery::Unknown,
                             Some(input) => {
-                                let response = if allow { json!({ "behavior": "allow", "updatedInput": input }) } else { json!({ "behavior": "deny", "message": "The user declined." }) };
+                                let response = if allow { json!({ "behavior": "allow", "updatedInput": input }) } else { json!({ "behavior": "deny", "message": DECLINED[0] }) };
                                 let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id, "response": response } });
                                 match proc::write_line(&mut *stdin, &msg).await {
                                     Ok(()) => {

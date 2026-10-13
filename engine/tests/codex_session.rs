@@ -107,9 +107,11 @@ async fn codex_permissions_the_first_command_is_allowed_and_the_second_declined(
     .await;
     assert_eq!(mismatches, Vec::<String>::new());
     assert_eq!(asks, ["command", "command"]);
-    let results: Vec<bool> =
-        events.iter().filter_map(|e| if let EngineEvent::ToolResult { ok, .. } = e { Some(*ok) } else { None }).collect();
-    assert_eq!(results, [true, false]);
+    let results: Vec<(bool, bool)> = events
+        .iter()
+        .filter_map(|e| if let EngineEvent::ToolResult { ok, declined, .. } = e { Some((*ok, *declined)) } else { None })
+        .collect();
+    assert_eq!(results, [(true, false), (false, true)], "a refused approval is declined, not a failure");
 }
 
 #[tokio::test]

@@ -23,6 +23,8 @@ pub enum EngineEvent {
     ToolResult {
         id: String,
         ok: bool,
+        /// The tool was refused before it ran (a declined approval), which is not a failure of the work.
+        declined: bool,
         text: String,
     },
     Permission {

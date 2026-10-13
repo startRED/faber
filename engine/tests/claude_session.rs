@@ -89,9 +89,11 @@ async fn permissions_the_first_write_is_allowed_and_the_second_denied() {
     .await;
     assert_eq!(mismatches, Vec::<String>::new());
     assert_eq!(asks, ["Write", "Write"]);
-    let results: Vec<bool> =
-        events.iter().filter_map(|e| if let EngineEvent::ToolResult { ok, .. } = e { Some(*ok) } else { None }).collect();
-    assert_eq!(results, [true, false]);
+    let results: Vec<(bool, bool)> = events
+        .iter()
+        .filter_map(|e| if let EngineEvent::ToolResult { ok, declined, .. } = e { Some((*ok, *declined)) } else { None })
+        .collect();
+    assert_eq!(results, [(true, false), (false, true)], "a refused approval is declined, not a failure");
 }
 
 #[tokio::test]

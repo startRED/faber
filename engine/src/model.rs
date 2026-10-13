@@ -79,6 +79,9 @@ pub struct ToolUse {
     pub ok: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
+    /// The user (or the CLI's own approval) refused the tool, so it never ran; `ok` is false but nothing failed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub declined: bool,
 }
 
 /// A permission request waiting for the user.

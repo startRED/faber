@@ -154,7 +154,7 @@ pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<
             }
             let ok = item["status"] == "completed" && (item["exitCode"].is_null() || item["exitCode"] == 0);
             let text = item["aggregatedOutput"].as_str().or(item["status"].as_str()).unwrap_or_default().into();
-            vec![EngineEvent::ToolResult { id, ok, text }]
+            vec![EngineEvent::ToolResult { id, ok, declined: item["status"] == "declined", text }]
         }
         "turn/started" => {
             state.base = state.total;
