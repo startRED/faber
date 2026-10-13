@@ -118,3 +118,33 @@ async fn the_first_turn_after_a_resume_is_logged_as_resumed_when_its_share_is_lo
     second.shutdown();
     assert_eq!(logged(dir.path()).len(), 1, "a healthy warm turn adds nothing");
 }
+
+/// Two turns on one process, the second warm and low (the case that is logged).
+async fn low_warm_turn(dir: &Path) {
+    let (engine, mut rx) = engine(dir, vec![user("one"), init(), result(300), user("two"), result(300)]);
+    let id = turn(&engine, &mut rx, None, "one").await;
+    turn(&engine, &mut rx, Some(id), "two").await;
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn a_log_that_cannot_be_written_never_breaks_the_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    // A folder sits where the file would go, so every append fails.
+    std::fs::create_dir(dir.path().join("cache-health.jsonl")).unwrap();
+    low_warm_turn(dir.path()).await;
+    assert!(dir.path().join("cache-health.jsonl").is_dir());
+}
+
+#[tokio::test]
+async fn a_log_at_its_size_cap_is_not_appended_to() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("cache-health.jsonl");
+    std::fs::write(&file, vec![b'x'; 1_000_000]).unwrap();
+    low_warm_turn(dir.path()).await;
+    assert_eq!(std::fs::metadata(&file).unwrap().len(), 1_000_000, "a capped file stays as it was");
+    // Just under the cap, one more line still fits (and the cap is checked before the write, so it may pass it once).
+    std::fs::write(&file, vec![b'x'; 999_999]).unwrap();
+    low_warm_turn(dir.path()).await;
+    assert!(std::fs::metadata(&file).unwrap().len() > 1_000_000);
+}
