@@ -257,3 +257,43 @@ async fn a_turn_without_a_quota_notice_clears_subscription_confirmation_after_se
         .unwrap();
     assert!(done < cleared, "settle the own cost before clearing the billing verdict");
 }
+
+// Live captures (claude 2.1.296, the flags Faber uses), a second user line written while the first answer streams:
+// - `queued`: the first answer was a plain reply. Claude Code finished it, sent its result, then started the second line
+//   as a turn of its own with its own init and result.
+// - `queued-midturn`: the first answer used a tool. Claude Code folded the line into that turn at the end of the tool
+//   step: one result for both, and the answer to the second line sits in the same reply.
+// Which of the two happens depends on the turn, so Faber holds the line itself and writes it after the result.
+#[tokio::test]
+async fn a_line_written_while_an_answer_streams_waits_for_the_result_and_is_a_turn_of_its_own() {
+    let entries = fixture("claude", "queued");
+    let (events, mismatches) = run(entries, "Count from 1 to 30, one number per line, each followed by a five-word comment.", {
+        let mut dones = 0;
+        move |e, s| {
+            if matches!(e, EngineEvent::Done { .. }) {
+                dones += 1;
+                if dones == 1 {
+                    s.send(UserTurn::text("stop at 10"));
+                }
+            }
+            dones == 2
+        }
+    })
+    .await;
+    assert_eq!(mismatches, Vec::<String>::new());
+    let done: Vec<_> = events.iter().filter(|e| matches!(e, EngineEvent::Done { ok: true, .. })).collect();
+    assert_eq!(done.len(), 2, "each line has a result of its own");
+    assert!(text_of(&events).contains("The journey begins with one."));
+}
+
+#[test]
+fn a_line_written_during_a_tool_turn_is_folded_into_it_and_the_turn_has_one_result() {
+    let events: Vec<EngineEvent> = fixture("claude", "queued-midturn")
+        .iter()
+        .filter(|e| !e.input)
+        .flat_map(|e| faber_engine::claude::parse_claude_message(&e.msg))
+        .collect();
+    let dones = events.iter().filter(|e| matches!(e, EngineEvent::Done { .. })).count();
+    assert_eq!(dones, 1, "Faber would take the first result for the end of the turn and lose what follows");
+    assert!(text_of(&events).trim_end().ends_with("pong"), "{:?}", text_of(&events));
+}

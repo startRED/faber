@@ -171,6 +171,17 @@ async fn remove(faber: State<'_, Faber>, id: String) -> Res<()> {
 }
 
 #[tauri::command]
+async fn remove_queued(faber: State<'_, Faber>, id: String, turn_id: String) -> Res<()> {
+    faber.engine.remove_queued(&id, &turn_id);
+    Ok(())
+}
+
+#[tauri::command]
+async fn send_queued(faber: State<'_, Faber>, id: String, turn_id: String) -> Res<()> {
+    faber.engine.send_queued(&id, &turn_id)
+}
+
+#[tauri::command]
 async fn remove_project(faber: State<'_, Faber>, id: String) -> Res<()> {
     faber.engine.remove_project(&id);
     Ok(())
@@ -451,6 +462,8 @@ fn main() {
             answer,
             rename,
             remove,
+            remove_queued,
+            send_queued,
             remove_project,
             preview_look,
             save_settings,
