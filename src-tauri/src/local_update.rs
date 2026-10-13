@@ -20,6 +20,16 @@ fn invalid(message: &'static str) -> UpdateError {
 fn io_error(_: std::io::Error) -> UpdateError {
     UpdateError::Store(faber_engine::store::Fault::Write)
 }
+fn same_path(left: &Path, right: &Path) -> Result<bool> {
+    let normalize = |path: PathBuf| {
+        let text = path.to_string_lossy().replace('\\', "/");
+        let text = text.trim_start_matches("//?/");
+        #[cfg(any(windows, target_os = "macos"))]
+        let text = text.to_lowercase();
+        PathBuf::from(text)
+    };
+    Ok(normalize(real_path(left)?) == normalize(real_path(right)?))
+}
 pub fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
@@ -27,6 +37,14 @@ pub fn now() -> u64 {
 #[derive(Clone)]
 pub struct Development {
     layout: SlotLayout,
+    installed_data: PathBuf,
+    installed_release: PathBuf,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Enrollment {
+    channel: String,
     installed_data: PathBuf,
     installed_release: PathBuf,
 }
@@ -48,6 +66,24 @@ impl Development {
             required("FABER_INSTALLED_DATA")?,
             required("FABER_INSTALLED_RELEASE")?,
         )
+    }
+
+    pub fn from_launcher(executable: &Path) -> Result<Self> {
+        if faber_engine::project::update::is_forbidden_root(executable) {
+            return Err(invalid("installed launcher excluded"));
+        }
+        let root = real_path(executable)?.parent().ok_or(invalid("missing launcher parent"))?.to_path_buf();
+        let bytes = ScopedFile::new(&root.join("development.json"), false)?
+            .read_limited(64 * 1024)?
+            .ok_or(invalid("missing development enrollment"))?
+            .0;
+        let config: Enrollment = serde_json::from_slice(&bytes).map_err(|_| invalid("corrupt development enrollment"))?;
+        let dev = Self::new(&config.channel, root, config.installed_data, config.installed_release)?;
+        if !same_path(executable, &dev.helper())? {
+            return Err(invalid("wrong development entry point"));
+        }
+        dev.verify_helper()?;
+        Ok(dev)
     }
 
     pub fn manager(&self) -> Result<UpdateManager> {
@@ -83,6 +119,33 @@ impl Development {
     }
     pub fn helper(&self) -> PathBuf {
         self.layout.dev_root().join(format!("faber-local{}", std::env::consts::EXE_SUFFIX))
+    }
+
+    pub fn view(&self) -> Result<Option<faber_engine::project::wire::BuildView>> {
+        Ok(self.manager()?.manifest()?.map(|manifest| {
+            let describe =
+                |slot: Slot, tree: &ExactTree| format!("{} · {}", if slot == Slot::A { "A" } else { "B" }, &tree.commit_oid[..12]);
+            let waiting = match manifest.state {
+                UpdateState::PreparingNext { .. } => Some("projects.state.running"),
+                UpdateState::CanaryPending { .. } => Some("projects.task.review"),
+                UpdateState::Ready { .. } | UpdateState::Quiescent => Some("reason.task.waiting"),
+                UpdateState::Swapping { .. } if manifest.extra.get("cleanExit") == Some(&Value::Bool(true)) => {
+                    Some("projects.state.paused")
+                }
+                UpdateState::Swapping { .. } | UpdateState::Probation { .. } => Some("projects.state.running"),
+                UpdateState::Quarantined { .. } | UpdateState::RolledBack { .. } => Some("projects.state.blocked"),
+                _ => None,
+            };
+            faber_engine::project::wire::BuildView {
+                current: manifest.current_good.as_ref().map(|good| describe(good.slot, &good.tree)),
+                next: manifest
+                    .staged_tree
+                    .as_ref()
+                    .map(|tree| describe(manifest.last_good.as_ref().map_or(manifest.active_slot, |good| good.slot).other(), tree)),
+                last_good: manifest.last_good.as_ref().map(|good| describe(good.slot, &good.tree)),
+                waiting: waiting.map(String::from),
+            }
+        }))
     }
 
     pub fn lock(&self) -> Result<Coordinator> {
@@ -147,11 +210,27 @@ impl Development {
         Ok(())
     }
 
+    fn slot_helper(&self, slot: Slot) -> Result<Option<PathBuf>> {
+        let dir = self.layout.slot_dir(slot);
+        let Some((expected, _)) = ScopedFile::new(&dir.join("helper.sha256"), false)?.read()? else {
+            return Ok(None);
+        };
+        let path = dir.join(format!("faber-local{}", std::env::consts::EXE_SUFFIX));
+        let hash = ScopedFile::new(&real_path(&path)?, false)?.hash()?.ok_or(invalid("future helper missing"))?;
+        if expected != hash.as_bytes() {
+            return Err(invalid("future helper changed"));
+        }
+        Ok(Some(path))
+    }
+
     pub fn resume_allowed(&self) -> Result<()> {
         let manifest = self.manager()?.manifest()?.ok_or(invalid("missing manifest"))?;
         match manifest.state {
             UpdateState::Probation { health_acknowledged: true, .. } if manifest.first_operation_completed => Ok(()),
-            UpdateState::Healthy | UpdateState::Idle | UpdateState::RolledBack { .. } => Ok(()),
+            UpdateState::Swapping { .. } | UpdateState::Probation { .. } => {
+                Err(invalid("health and first operation required before resume"))
+            }
+            _ if manifest.current_good.as_ref().is_some_and(|good| good.slot == manifest.active_slot) => Ok(()),
             _ => Err(invalid("health and first operation required before resume")),
         }
     }
@@ -183,7 +262,7 @@ impl Development {
         } else {
             &manifest.current_good.as_ref().ok_or(UpdateError::NoLastGood)?.tree
         };
-        if real_path(&std::env::current_exe().map_err(io_error)?)? != real_path(&self.binary(manifest.active_slot))? {
+        if !same_path(&std::env::current_exe().map_err(io_error)?, &self.binary(manifest.active_slot))? {
             return Err(invalid("development launch outside active slot"));
         }
         self.verify_slot(manifest.active_slot, tree)?;
@@ -241,6 +320,10 @@ impl Development {
         }
         let marker = ScopedFile::new(&self.build_dir().join(".faber-owned"), false)?.read()?;
         if marker.as_ref().map(|(bytes, _)| bytes.as_slice()) != Some(b"faber-local-build-v1") {
+            real_path(&self.build_dir())?;
+            if fs::read_dir(self.build_dir()).map_err(io_error)?.next().is_none() {
+                return fs::remove_dir(self.build_dir()).map_err(io_error);
+            }
             return Err(invalid("uncertain build output retained"));
         }
         remove_owned_tree(&self.build_dir(), &self.layout.staging_dir())
@@ -298,21 +381,13 @@ impl Development {
         let lock = self.lock()?;
         let manager = self.manager()?;
         self.verify_helper()?;
-        // A helper built with current was not used for its own promotion; it becomes trusted for this future transition.
+        // The enrolled launcher never changes. A healthy slot's helper controls only its next transition.
         let current = manager.manifest()?.ok_or(invalid("missing manifest"))?.current_good.ok_or(UpdateError::NoLastGood)?;
         self.verify_slot(current.slot, &current.tree)?;
-        let next_helper = self.layout.slot_dir(current.slot).join(format!("faber-local{}", std::env::consts::EXE_SUFFIX));
-        if let Some((expected, _)) = ScopedFile::new(&self.layout.slot_dir(current.slot).join("helper.sha256"), false)?.read()? {
-            let bytes = read_payload(&next_helper)?;
-            if expected != ExactTree::compute_build_hash(&bytes).as_bytes() {
-                return Err(invalid("future helper changed"));
-            }
-            write_payload(&self.helper(), &bytes)?;
-            ScopedFile::new(&self.layout.dev_root().join("helper.sha256"), false)?.write(&expected, None)?;
-        }
+        let supervisor = self.slot_helper(current.slot)?.unwrap_or_else(|| self.helper());
         manager.enter_quiescence(check.active_window, check.active_operations)?;
         manager.begin_swap(grant, repo, revision, check, time)?;
-        let mut command = NativeCommand::new(self.helper(), self.layout.dev_root().into());
+        let mut command = NativeCommand::new(supervisor, self.layout.dev_root().into());
         command.args.push("--transition".into());
         self.environment(&mut command);
         // The helper retries the coordinator lock until this process releases it. It never inherits a kill-on-close job.
@@ -426,15 +501,28 @@ fn restored(dev: &Development, action: RollbackAction) -> Result<Monitor> {
         RollbackAction::RollbackToLastGood { target_slot, quarantine_slot } => {
             let manifest = dev.manager()?.manifest()?.ok_or(invalid("missing rollback"))?;
             dev.verify_slot(target_slot, &manifest.last_good.ok_or(UpdateError::NoLastGood)?.tree)?;
-            dev.remove_slot(quarantine_slot)?;
-            dev.clean_build_output()?;
+            // Cleanup is retried at startup/staging; it must never suppress a verified last-good launch.
+            let _ = dev.remove_slot(quarantine_slot);
+            let _ = dev.clean_build_output();
             Ok(Monitor::Rollback(target_slot))
         }
         _ => Ok(Monitor::Stopped),
     }
 }
 pub fn recover(dev: &Development, time: u64) -> Result<Monitor> {
-    match dev.manager()?.recover_transition(time)? {
+    let manager = dev.manager()?;
+    if manager.manifest().is_err() {
+        let bytes = ScopedFile::new(&dev.layout.dev_root().join("rollback.json"), false)?
+            .read_limited(16 * 1024 * 1024)?
+            .ok_or(invalid("missing rollback checkpoint"))?
+            .0;
+        let checkpoint: faber_engine::project::update::UpdateManifest =
+            serde_json::from_slice(&bytes).map_err(|_| invalid("corrupt rollback checkpoint"))?;
+        let good = if matches!(checkpoint.state, UpdateState::Swapping { .. }) { checkpoint.last_good } else { checkpoint.current_good };
+        let good = good.ok_or(UpdateError::NoLastGood)?;
+        dev.verify_slot(good.slot, &good.tree)?;
+    }
+    match manager.recover_transition(time)? {
         Some(action) => restored(dev, action),
         None => Ok(Monitor::Stopped),
     }
@@ -447,6 +535,10 @@ pub fn monitor(dev: &Development, alive: bool, time: u64) -> Result<Monitor> {
         let reason = if time < manifest.updated_at {
             Some(RollbackReason::StartupCorrupt)
         } else if !alive {
+            if health_acknowledged && manifest.first_operation_completed && dev.has_clean_exit()? {
+                manager.pause_probation(time)?;
+                return Ok(Monitor::Stopped);
+            }
             Some(RollbackReason::ProbationCrash)
         } else if !health_acknowledged && time > health_ack_deadline {
             Some(RollbackReason::HealthTimeout)
@@ -460,7 +552,7 @@ pub fn monitor(dev: &Development, alive: bool, time: u64) -> Result<Monitor> {
         }
         if time >= probation_deadline {
             manager.finish_probation(time)?;
-            dev.clean_build_output()?;
+            let _ = dev.clean_build_output();
             return Ok(Monitor::Healthy);
         }
         return Ok(Monitor::Waiting);
@@ -470,6 +562,76 @@ pub fn monitor(dev: &Development, alive: bool, time: u64) -> Result<Monitor> {
 
 pub fn compatible_round_trip(saved: &Value, old: &Value, next: &Value) -> Result<()> {
     if old != saved || next != saved { Err(invalid("rollback data round trip is lossy")) } else { Ok(()) }
+}
+
+fn saved_inventory(root: &Path) -> Result<Value> {
+    fn collect(path: &Path, root: &Path, values: &mut BTreeMap<String, Value>) -> Result<()> {
+        if !path.exists() {
+            return Ok(());
+        }
+        for entry in fs::read_dir(path).map_err(io_error)? {
+            let path = real_path(&entry.map_err(io_error)?.path())?;
+            if path.file_name().is_some_and(|name| name == "webview" || name == "workspaces") {
+                continue;
+            }
+            if path.is_dir() {
+                collect(&path, root, values)?;
+            } else if path.extension().is_some_and(|extension| extension == "json") {
+                let bytes = ScopedFile::new(&path, false)?.read_limited(16 * 1024 * 1024)?.ok_or(invalid("missing saved record"))?.0;
+                let value = serde_json::from_slice(&bytes).map_err(|_| invalid("corrupt saved record"))?;
+                values.insert(
+                    path.strip_prefix(root).map_err(|_| invalid("outside saved data"))?.to_string_lossy().replace('\\', "/"),
+                    value,
+                );
+            }
+        }
+        Ok(())
+    }
+    real_path(root)?;
+    let mut values = BTreeMap::new();
+    collect(root, root, &mut values)?;
+    serde_json::to_value(values).map_err(|_| invalid("data serialization"))
+}
+
+fn round_trip<T: serde::de::DeserializeOwned + serde::Serialize>(value: &Value) -> Result<Value> {
+    serde_json::to_value(serde_json::from_value::<T>(value.clone()).map_err(|_| invalid("incompatible saved record"))?)
+        .map_err(|_| invalid("data serialization"))
+}
+
+/// Runs in each executable, on a private copy. Real record codecs must preserve grants, spend and extension fields.
+pub fn probe_saved_data(root: &Path, output: &Path) -> Result<()> {
+    validate_saved_data(root)?;
+    let mut records = saved_inventory(root)?;
+    for (path, record) in records.as_object_mut().ok_or(invalid("invalid saved inventory"))? {
+        let name = path.rsplit('/').next().unwrap_or(path);
+        *record = match name {
+            "runtime.json" => round_trip::<faber_engine::project::Runtime>(record)?,
+            "grant.json" => round_trip::<Grant>(record)?,
+            "budget.json" => round_trip::<faber_engine::project::budget::Budget>(record)?,
+            "ledger.json" => round_trip::<faber_engine::ledger::Ledger>(record)?,
+            "mission.json" => round_trip::<faber_engine::project::Mission>(record)?,
+            "plan.json" => round_trip::<faber_engine::project::Plan>(record)?,
+            _ => record.clone(),
+        };
+    }
+    ScopedFile::new(&real_path(output)?, true)?.write(&serde_json::to_vec(&records).expect("plain data serializes"), None)?;
+    Ok(())
+}
+
+pub fn native_compatible(previous: &Path, next: &Path, saved_data: &Path) -> Result<()> {
+    let saved = saved_inventory(saved_data)?;
+    let parent = saved_data.parent().ok_or(invalid("missing compatibility parent"))?;
+    let mut receipts = vec![];
+    for (program, name) in [(previous, "old-data.json"), (next, "next-data.json")] {
+        let output = parent.join(name);
+        let mut command = NativeCommand::new(program.into(), parent.into());
+        command.args =
+            vec!["--faber-local-check-data".into(), saved_data.to_string_lossy().into_owned(), output.to_string_lossy().into_owned()];
+        run_bounded(&command, std::time::Duration::from_secs(30))?;
+        let bytes = ScopedFile::new(&output, false)?.read_limited(16 * 1024 * 1024)?.ok_or(invalid("missing compatibility receipt"))?.0;
+        receipts.push(serde_json::from_slice(&bytes).map_err(|_| invalid("corrupt compatibility receipt"))?);
+    }
+    compatible_round_trip(&saved, &receipts[0], &receipts[1])
 }
 
 pub struct SnapshotEntry {
@@ -523,7 +685,9 @@ pub trait Runner {
     fn accepted(&mut self, repo: &RepoIdentity, commit: &str, tree: &str, snapshot: &Path) -> Result<String>;
     fn build(&mut self, snapshot: &Path, target: &Path) -> Result<(PathBuf, PathBuf)>;
     fn canary(&mut self, executable: &Path, tree: &ExactTree, data: &Path) -> Result<CanaryVerdict>;
-    fn compatible(&mut self, previous: &Path, next: &Path, saved_data: &Path) -> Result<()>;
+    fn compatible(&mut self, previous: &Path, next: &Path, saved_data: &Path) -> Result<()> {
+        native_compatible(previous, next, saved_data)
+    }
 }
 
 pub struct Stage<'a> {
@@ -552,6 +716,13 @@ impl Development {
             return Err(invalid("baseline payload mismatch"));
         }
         let helper_bytes = read_payload(helper)?;
+        let enrollment = Enrollment {
+            channel: "development".into(),
+            installed_data: self.installed_data.clone(),
+            installed_release: self.installed_release.clone(),
+        };
+        ScopedFile::new(&self.layout.dev_root().join("development.json"), false)?
+            .write(&serde_json::to_vec(&enrollment).expect("plain data serializes"), None)?;
         write_payload(&self.binary(Slot::A), &bytes)?;
         write_payload(&self.helper(), &helper_bytes)?;
         ScopedFile::new(&self.layout.dev_root().join("helper.sha256"), false)?
@@ -591,6 +762,22 @@ impl Development {
             return Err(invalid("accepted tree changed"));
         }
         self.begin_build_output()?;
+        if let UpdateState::PreparingNext { slot, ref tree } | UpdateState::CanaryPending { slot, ref tree } = manifest.state
+            && tree.commit_oid == request.commit
+            && tree.tree_oid == request.tree
+            && manifest.candidate_repo.as_ref() == Some(&request.repo.common_dir)
+            && self.verify_slot(slot, tree).is_ok()
+            && self.slot_helper(slot).is_ok_and(|helper| helper.is_some())
+        {
+            let result = (|| {
+                let compatibility = self.build_dir().join("compatibility");
+                copy_saved_data(&self.data(), &compatibility)?;
+                runner.compatible(&self.binary(manifest.active_slot), &self.binary(slot), &compatibility)?;
+                self.run_canary(slot, tree, runner)
+            })();
+            self.clean_build_output()?;
+            return result.map(|()| slot);
+        }
         let snapshot = self.build_dir().join("source");
         let result = (|| {
             let entries = snapshot_entries(&git(git_executor, &source, &["ls-tree", "-rz", request.tree])?, &snapshot)?;
@@ -623,7 +810,18 @@ impl Development {
                 }
             }
             let bytes = read_payload(&executable)?;
-            let tree = ExactTree::new(request.commit, request.tree, &ExactTree::compute_build_hash(&bytes), SCHEMA)?;
+            let identity =
+                ScopedFile::new(&target.join("local-identity.json"), false)?.read()?.ok_or(invalid("missing candidate identity"))?.0;
+            let identity: Value = serde_json::from_slice(&identity).map_err(|_| invalid("invalid candidate identity"))?;
+            let schema = identity["schema"].as_u64().and_then(|s| u32::try_from(s).ok()).ok_or(invalid("invalid candidate schema"))?;
+            if identity["buildHash"].as_str() != Some(&ExactTree::compute_build_hash(&bytes)) {
+                return Err(invalid("candidate identity payload mismatch"));
+            }
+            let mut tree = ExactTree::new(request.commit, request.tree, &ExactTree::compute_build_hash(&bytes), schema)?;
+            tree.extra.insert("proofReceipt".into(), proof.clone().into());
+            if schema > SCHEMA {
+                return Err(UpdateError::Newer);
+            }
             let compatibility = self.build_dir().join("compatibility");
             copy_saved_data(&self.data(), &compatibility)?;
             runner.compatible(&self.binary(manifest.active_slot), &executable, &compatibility)?;
@@ -640,31 +838,7 @@ impl Development {
             )?;
             let helper_hash = ScopedFile::new(&helper, false)?.hash()?.ok_or(invalid("missing helper"))?;
             ScopedFile::new(&self.layout.slot_dir(slot).join("helper.sha256"), false)?.write(helper_hash.as_bytes(), None)?;
-            let canary = self.build_dir().join("canary");
-            for (name, bytes) in [
-                ("Cargo.toml", include_bytes!("../../tests/fixtures/projects/canary/Cargo.toml").as_slice()),
-                ("src/lib.rs", include_bytes!("../../tests/fixtures/projects/canary/src/lib.rs").as_slice()),
-                ("goal.json", include_bytes!("../../tests/fixtures/projects/canary/goal.json").as_slice()),
-            ] {
-                ScopedFile::new(&canary.join(name), true)?.write(bytes, None)?;
-            }
-            let verdict = runner.canary(&self.binary(slot), &tree, &canary)?;
-            if verdict == CanaryVerdict::NotRun {
-                return Ok(slot);
-            }
-            match &verdict {
-                CanaryVerdict::Pass { tree: verified, proof_receipt, .. } if verified == &tree && proof_receipt == &proof => {}
-                _ => {
-                    manager.record_canary_verdict(
-                        CanaryVerdict::Fail { at: now(), reason: "error.update.canaryFailed".into() },
-                        &bytes,
-                        now(),
-                    )?;
-                    self.clear_slot(slot)?;
-                    return Err(invalid("mandatory canary unavailable or failed"));
-                }
-            }
-            manager.record_canary_verdict(verdict, &bytes, now())?;
+            self.run_canary(slot, &tree, runner)?;
             Ok(slot)
         })();
         let cleanup = self.clean_build_output();
@@ -678,6 +852,38 @@ impl Development {
                 Ok(slot)
             }
         }
+    }
+
+    fn run_canary(&self, slot: Slot, tree: &ExactTree, runner: &mut impl Runner) -> Result<()> {
+        self.verify_slot(slot, tree)?;
+        let bytes = read_payload(&self.binary(slot))?;
+        let proof = tree.extra.get("proofReceipt").and_then(Value::as_str).ok_or(invalid("missing accepted proof receipt"))?;
+        let canary = self.build_dir().join("canary");
+        for (name, bytes) in [
+            ("Cargo.toml", include_bytes!("../../tests/fixtures/projects/canary/Cargo.toml").as_slice()),
+            ("src/lib.rs", include_bytes!("../../tests/fixtures/projects/canary/src/lib.rs").as_slice()),
+            ("goal.json", include_bytes!("../../tests/fixtures/projects/canary/goal.json").as_slice()),
+        ] {
+            ScopedFile::new(&canary.join(name), true)?.write(bytes, None)?;
+        }
+        let verdict = runner.canary(&self.binary(slot), tree, &canary)?;
+        if verdict == CanaryVerdict::NotRun {
+            self.manager()?.wait_for_canary(now())?;
+            return Ok(());
+        }
+        match &verdict {
+            CanaryVerdict::Pass { tree: verified, proof_receipt, .. } if verified == tree && proof_receipt == proof => {}
+            _ => {
+                self.manager()?.record_canary_verdict(
+                    CanaryVerdict::Fail { at: now(), reason: "error.update.canaryFailed".into() },
+                    &bytes,
+                    now(),
+                )?;
+                self.clear_slot(slot)?;
+                return Err(invalid("mandatory canary unavailable or failed"));
+            }
+        }
+        self.manager()?.record_canary_verdict(verdict, &bytes, now())
     }
 }
 
@@ -759,10 +965,11 @@ pub fn native_build(snapshot: &Path, target: &Path, dependencies: &Path, node: &
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
     }
-    Ok((
-        target.join(format!("release/faber{}", std::env::consts::EXE_SUFFIX)),
-        target.join(format!("release/faber-local{}", std::env::consts::EXE_SUFFIX)),
-    ))
+    let executable = target.join(format!("release/faber{}", std::env::consts::EXE_SUFFIX));
+    let mut inspect = NativeCommand::new(executable.clone(), target.into());
+    inspect.args = vec!["--faber-local-identity".into(), target.join("local-identity.json").to_string_lossy().into_owned()];
+    run_bounded(&inspect, std::time::Duration::from_secs(30))?;
+    Ok((executable, target.join(format!("release/faber-local{}", std::env::consts::EXE_SUFFIX))))
 }
 
 fn copy_dependencies(source: &Path, target: &Path) -> Result<()> {
@@ -794,8 +1001,12 @@ struct OwnedChild {
 }
 impl OwnedChild {
     fn start(command: &NativeCommand) -> Result<Self> {
+        Self::start_guarded(command, &std::env::current_exe().map_err(io_error)?)
+    }
+    fn start_guarded(command: &NativeCommand, guard: &Path) -> Result<Self> {
         #[cfg(not(windows))]
         {
+            let _ = guard;
             Ok(Self { child: command.spawn()?, detached: false })
         }
         #[cfg(windows)]
@@ -812,7 +1023,7 @@ impl OwnedChild {
             limits.limit_kill_on_job_close();
             job.set_extended_limit_info(&limits).map_err(|_| invalid("process containment failed"))?;
             // Reuse the engine's guard dispatch/handshake so the actual child cannot run before job assignment.
-            let child = Command::new(std::env::current_exe().map_err(io_error)?)
+            let child = Command::new(guard)
                 .arg("--faber-process-guard")
                 .arg(&command.program)
                 .args(&command.args)
@@ -897,12 +1108,19 @@ impl Development {
     /// Engine startup supplies health only after fallible data loading/reconciliation and its bounded first operation.
     pub fn startup_ready(&self, executable: &Path) -> Result<()> {
         let manifest = self.manager()?.manifest()?.ok_or(invalid("missing manifest"))?;
-        if real_path(executable)? != real_path(&self.binary(manifest.active_slot))? {
+        if !same_path(executable, &self.binary(manifest.active_slot))? {
             return Err(invalid("wrong startup slot"));
         }
         let tree = match &manifest.state {
             UpdateState::Probation { tree, .. } => tree,
-            UpdateState::Idle | UpdateState::Healthy | UpdateState::RolledBack { .. } => {
+            UpdateState::Idle
+            | UpdateState::Healthy
+            | UpdateState::RolledBack { .. }
+            | UpdateState::PreparingNext { .. }
+            | UpdateState::CanaryPending { .. }
+            | UpdateState::Ready { .. }
+            | UpdateState::Quiescent
+            | UpdateState::Quarantined { .. } => {
                 self.verify_slot(manifest.active_slot, &manifest.current_good.as_ref().ok_or(UpdateError::NoLastGood)?.tree)?;
                 return validate_saved_data(&self.data());
             }
@@ -936,6 +1154,94 @@ impl Development {
         manager.acknowledge_health(health)?;
         manager.complete_first_operation(operation)
     }
+
+    pub fn record_clean_exit(&self) -> Result<()> {
+        let manifest = self.manager()?.manifest()?.ok_or(invalid("missing manifest"))?;
+        if let UpdateState::Probation { tree, health_acknowledged: true, .. } = &manifest.state
+            && manifest.first_operation_completed
+        {
+            ScopedFile::new(&self.signal_path("exit"), false)?
+                .write(&serde_json::to_vec(&serde_json::json!({"tree": tree})).expect("plain data serializes"), None)?;
+        }
+        Ok(())
+    }
+    fn has_clean_exit(&self) -> Result<bool> {
+        let Some((bytes, _)) = ScopedFile::new(&self.signal_path("exit"), false)?.read()? else {
+            return Ok(false);
+        };
+        let signal: Value = serde_json::from_slice(&bytes).map_err(|_| invalid("corrupt exit signal"))?;
+        let manifest = self.manager()?.manifest()?.ok_or(invalid("missing manifest"))?;
+        Ok(matches!(manifest.state, UpdateState::Probation { ref tree, .. }
+            if signal["tree"] == serde_json::to_value(tree).expect("plain data serializes")))
+    }
+
+    pub fn cleanup_obsolete(&self) -> Result<()> {
+        let manifest = self.manager()?.manifest()?.ok_or(invalid("missing manifest"))?;
+        if let UpdateState::RolledBack { quarantined_slot, .. } = manifest.state {
+            self.remove_slot(quarantined_slot)?;
+        }
+        self.clean_build_output()
+    }
+}
+
+pub fn write_identity(output: &Path) -> Result<()> {
+    let executable = std::env::current_exe().map_err(io_error)?;
+    let hash = ScopedFile::new(&real_path(&executable)?, false)?.hash()?.ok_or(invalid("missing identity payload"))?;
+    ScopedFile::new(&real_path(output)?, true)?
+        .write(&serde_json::to_vec(&serde_json::json!({"schema": SCHEMA, "buildHash": hash})).expect("plain data serializes"), None)?;
+    Ok(())
+}
+
+fn run_bounded(command: &NativeCommand, timeout: std::time::Duration) -> Result<()> {
+    let mut child = OwnedChild::start(command)?;
+    let started = std::time::Instant::now();
+    loop {
+        if let Some(status) = child.child.try_wait().map_err(io_error)? {
+            return if status.success() { Ok(()) } else { Err(invalid("local probe failed")) };
+        }
+        if started.elapsed() >= timeout {
+            return Err(invalid("local probe timeout"));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
+/// The development entry point is the enrolled helper, never an unproven slot's main function.
+pub fn launch(dev: &Development, open: bool) -> Result<()> {
+    dev.verify_helper()?;
+    let Ok(coordinator) = dev.lock() else {
+        if open {
+            ScopedFile::new(&dev.signal_path("open"), false)?.write(b"{}", None)?;
+        }
+        return Ok(());
+    };
+    if open {
+        ScopedFile::new(&dev.signal_path("open"), false)?.write(b"{}", None)?;
+    }
+    let outcome = recover(dev, now())?;
+    let manifest = dev.manager()?.manifest()?.ok_or(invalid("missing launch manifest"))?;
+    if manifest.extra.get("cleanExit") == Some(&Value::Bool(true)) && matches!(manifest.state, UpdateState::Swapping { .. }) {
+        let slot = manifest.current_good.ok_or(UpdateError::NoLastGood)?.slot;
+        let supervisor = dev.slot_helper(slot)?.unwrap_or_else(|| dev.helper());
+        if same_path(&supervisor, &std::env::current_exe().map_err(io_error)?)? {
+            return helper_run(dev, false);
+        }
+        let mut command = NativeCommand::new(supervisor, dev.layout.dev_root().into());
+        command.args.push("--transition".into());
+        dev.environment(&mut command);
+        command.spawn()?;
+        return Ok(());
+    }
+    let slot = if let Monitor::Rollback(slot) = outcome { slot } else { manifest.active_slot };
+    let tree = &manifest.current_good.as_ref().ok_or(UpdateError::NoLastGood)?.tree;
+    dev.verify_slot(slot, tree)?;
+    if let Ok(lease) = dev.slot_lease(slot) {
+        drop(lease);
+        dev.slot_command(slot).spawn()?;
+    }
+    let _ = dev.cleanup_obsolete();
+    drop(coordinator);
+    Ok(())
 }
 
 /// The bounded startup operation reads saved JSON without rewriting it or releasing a consumed grant.
@@ -998,12 +1304,104 @@ pub fn helper_main(dev: &Development, recovering: bool) -> Result<()> {
         }
     };
     let result = helper_run(dev, recovering);
-    if result.is_err()
-        && let Monitor::Rollback(slot) = recover(dev, now())?
-    {
-        dev.slot_command(slot).spawn()?;
+    if result.is_err() {
+        let outcome = recover(dev, now())?;
+        let manifest = dev.manager()?.manifest()?.ok_or(invalid("missing recovery manifest"))?;
+        let slot = match outcome {
+            Monitor::Rollback(slot) => Some(slot),
+            _ if matches!(manifest.state, UpdateState::Healthy | UpdateState::RolledBack { .. }) => Some(manifest.active_slot),
+            _ => None,
+        };
+        if let Some(slot) = slot {
+            dev.verify_slot(slot, &manifest.current_good.as_ref().ok_or(UpdateError::NoLastGood)?.tree)?;
+            let started = std::time::Instant::now();
+            loop {
+                match dev.slot_lease(slot) {
+                    Ok(lease) => {
+                        drop(lease);
+                        dev.slot_command(slot).spawn()?;
+                        break;
+                    }
+                    Err(_) if started.elapsed() < std::time::Duration::from_secs(30) => {
+                        std::thread::sleep(std::time::Duration::from_millis(100))
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+        }
     }
     result
+}
+
+#[cfg(windows)]
+struct SessionWindow {
+    window: winsafe::gui::WindowMain,
+    ended: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+#[cfg(windows)]
+impl SessionWindow {
+    fn start(dev: Development, lifecycle: std::sync::Arc<std::sync::Mutex<()>>) -> Result<Self> {
+        use winsafe::{co, gui, prelude::*};
+        let (send, receive) = std::sync::mpsc::channel();
+        let ended = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ending = ended.clone();
+        let thread = std::thread::spawn(move || {
+            // A top-level window receives ENDSESSION; WS_VISIBLE is absent even during creation.
+            let window = gui::WindowMain::new(gui::WindowMainOpts {
+                class_name: "FaberLocalSession",
+                style: co::WS::OVERLAPPED,
+                ex_style: co::WS_EX::NOACTIVATE | co::WS_EX::TOOLWINDOW,
+                size: (0, 0),
+                ..Default::default()
+            });
+            let created = window.clone();
+            window.on().wm_create(move |_| {
+                if created.hwnd().IsWindowVisible() {
+                    return Err(std::io::Error::other("visible session observer refused").into());
+                }
+                let _ = send.send(created.clone());
+                Ok(0)
+            });
+            window.on().wm_end_session(move |event| {
+                let _guard = lifecycle.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                session_ending(&dev, event.is_session_being_ended).map_err(|e| std::io::Error::other(e.key()))?;
+                if event.is_session_being_ended {
+                    ending.store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+                Ok(())
+            });
+            let _ = window.run_main(Some(co::SW::HIDE));
+        });
+        receive
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .map(|window| Self { window, ended, thread: Some(thread) })
+            .map_err(|_| invalid("session observer unavailable"))
+    }
+}
+
+#[cfg(windows)]
+impl Drop for SessionWindow {
+    fn drop(&mut self) {
+        use winsafe::prelude::*;
+        if self.window.hwnd() != &winsafe::HWND::NULL {
+            self.window.close();
+        }
+        // No session callback may race recovery after the supervisor releases its lifecycle mutex.
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+#[cfg(any(windows, feature = "test-hooks"))]
+fn session_ending(dev: &Development, ending: bool) -> Result<()> {
+    if ending && dev.manager()?.manifest()?.is_some_and(|m| matches!(m.state, UpdateState::Swapping { .. } | UpdateState::Probation { .. }))
+    {
+        dev.manager()?.pause_probation(now())?;
+    }
+    Ok(())
 }
 
 fn helper_run(dev: &Development, recovering: bool) -> Result<()> {
@@ -1014,6 +1412,10 @@ fn helper_run(dev: &Development, recovering: bool) -> Result<()> {
         }
         return Ok(());
     }
+    #[cfg(windows)]
+    let lifecycle = std::sync::Arc::new(std::sync::Mutex::new(()));
+    #[cfg(windows)]
+    let _session = SessionWindow::start(dev.clone(), lifecycle.clone())?;
     let manifest = manager.manifest()?.ok_or(invalid("missing manifest"))?;
     let UpdateState::Swapping { from_slot, to_slot, ref tree } = manifest.state else {
         return Err(invalid("helper needs pending swap"));
@@ -1028,14 +1430,32 @@ fn helper_run(dev: &Development, recovering: bool) -> Result<()> {
         }
     };
     dev.verify_slot(to_slot, tree)?;
-    let health = ScopedFile::new(&dev.signal_path("health"), false)?;
-    if let Some(hash) = health.hash()? {
-        health.claim(&hash)?.delete()?;
+    for name in ["health", "exit"] {
+        let signal = ScopedFile::new(&dev.signal_path(name), false)?;
+        if let Some(hash) = signal.hash()? {
+            signal.claim(&hash)?.delete()?;
+        }
     }
-    manager.begin_probation(now())?;
-    let mut child = match OwnedChild::start(&dev.slot_command(to_slot)) {
+    {
+        #[cfg(windows)]
+        let _guard = lifecycle.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        #[cfg(windows)]
+        if _session.ended.load(std::sync::atomic::Ordering::SeqCst) {
+            return Ok(());
+        }
+        manager.begin_probation(now())?;
+    }
+    let command = dev.slot_command(to_slot);
+    // A detached guard must not keep the independent supervisor's image mapped on Windows.
+    let mut child = match OwnedChild::start_guarded(&command, &command.program) {
         Ok(child) => child,
         Err(_) => {
+            #[cfg(windows)]
+            let _guard = lifecycle.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            #[cfg(windows)]
+            if _session.ended.load(std::sync::atomic::Ordering::SeqCst) {
+                return Ok(());
+            }
             drop(old);
             if let Monitor::Rollback(slot) = recover(dev, now())? {
                 dev.slot_command(slot).spawn()?;
@@ -1045,7 +1465,18 @@ fn helper_run(dev: &Development, recovering: bool) -> Result<()> {
     };
     let supervision = std::time::Instant::now();
     loop {
-        let alive = child.child.try_wait().map_err(io_error)?.is_none();
+        #[cfg(windows)]
+        let guard = lifecycle.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        #[cfg(feature = "test-hooks")]
+        if let Ok(ending) = fs::read_to_string(dev.data().join("test-session-end")) {
+            fs::remove_file(dev.data().join("test-session-end")).map_err(io_error)?;
+            session_ending(dev, ending == "true")?;
+        }
+        let status = child.child.try_wait().map_err(io_error)?;
+        let alive = status.is_none();
+        if status.is_some_and(|status| status.success()) {
+            dev.record_clean_exit()?;
+        }
         let signal = dev.accept_health_signal();
         let current = manager.manifest()?.ok_or(invalid("missing manifest"))?;
         let must_stop = !alive
@@ -1066,7 +1497,7 @@ fn helper_run(dev: &Development, recovering: bool) -> Result<()> {
             let outcome = if matches!(current.state, UpdateState::Probation { .. }) {
                 monitor(dev, false, now())?
             } else if let UpdateState::RolledBack { restored_slot, quarantined_slot, .. } = current.state {
-                dev.remove_slot(quarantined_slot)?;
+                let _ = dev.remove_slot(quarantined_slot);
                 Monitor::Rollback(restored_slot)
             } else {
                 Monitor::Stopped
@@ -1078,11 +1509,24 @@ fn helper_run(dev: &Development, recovering: bool) -> Result<()> {
         }
         let probation_due = matches!(current.state, UpdateState::Probation { probation_deadline, .. } if now() >= probation_deadline);
         if (!probation_due || supervision.elapsed() >= std::time::Duration::from_secs(300))
-            && monitor(dev, true, now())? == Monitor::Healthy
+            && match monitor(dev, true, now()) {
+                Ok(outcome) => outcome == Monitor::Healthy,
+                Err(error) => {
+                    // Promotion may have committed its safe checkpoint before the live manifest write failed.
+                    recover(dev, now())?;
+                    if manager.manifest()?.is_some_and(|manifest| manifest.state == UpdateState::Healthy) {
+                        true
+                    } else {
+                        return Err(error);
+                    }
+                }
+            }
         {
             child.detach()?;
             return Ok(());
         }
+        #[cfg(windows)]
+        drop(guard);
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
 }

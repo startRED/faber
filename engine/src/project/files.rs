@@ -171,16 +171,25 @@ impl ScopedFile {
                 .map_err(|_| Fault::Write)?,
             )
         };
-        file.write_all(bytes).and_then(|()| file.sync_all()).map_err(|e| Fault::of_write(&e))?;
-        if let Some(permissions) = permissions {
-            file.set_permissions(permissions).map_err(|e| Fault::of_write(&e))?;
+        let result = (|| -> Result<(), LeaseError> {
+            file.write_all(bytes).and_then(|()| file.sync_all()).map_err(|e| Fault::of_write(&e))?;
+            if let Some(permissions) = permissions {
+                file.set_permissions(permissions).map_err(|e| Fault::of_write(&e))?;
+            }
+            drop(file);
+            #[cfg(windows)]
+            fs::rename(self.path.with_file_name(&temp), &self.path).map_err(|e| Fault::of_write(&e))?;
+            #[cfg(unix)]
+            rustix::fs::renameat(&self.parent, &temp, &self.parent, self.path.file_name().unwrap()).map_err(|_| Fault::Write)?;
+            Ok(())
+        })();
+        if result.is_err() {
+            #[cfg(windows)]
+            let _ = fs::remove_file(self.path.with_file_name(&temp));
+            #[cfg(unix)]
+            let _ = rustix::fs::unlinkat(&self.parent, &temp, rustix::fs::AtFlags::empty());
         }
-        drop(file);
-        #[cfg(windows)]
-        fs::rename(self.path.with_file_name(&temp), &self.path).map_err(|e| Fault::of_write(&e))?;
-        #[cfg(unix)]
-        rustix::fs::renameat(&self.parent, &temp, &self.parent, self.path.file_name().unwrap()).map_err(|_| Fault::Write)?;
-        Ok(())
+        result
     }
 
     pub fn rename(&self, target: &Self) -> Result<(), LeaseError> {
@@ -208,6 +217,16 @@ mod tests {
     fn tempdir() -> tempfile::TempDir {
         // Match enrolled broker roots; macOS's ambient /var temp path is a system symlink.
         tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn failed_atomic_replacement_removes_its_temporary_payload() {
+        let dir = tempdir();
+        let target = dir.path().join("target");
+        let file = ScopedFile::new(&target, false).unwrap();
+        std::fs::create_dir(&target).unwrap();
+        assert!(file.write(b"payload", None).is_err());
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1, "failed writes must not leak .faber-patch files");
     }
 
     #[test]

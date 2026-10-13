@@ -1109,6 +1109,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "win32job",
+ "winsafe",
 ]
 
 [[package]]

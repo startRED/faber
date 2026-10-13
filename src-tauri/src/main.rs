@@ -644,11 +644,17 @@ fn show(app: &AppHandle) {
 
 /// T9 owns presentation; no screen or worker can fabricate local promotion evidence.
 #[tauri::command]
-fn local_update_state(faber: State<'_, Faber>) -> Res<Option<faber_engine::project::update::UpdateManifest>> {
+fn local_update_state(faber: State<'_, Faber>) -> Res<Option<faber_engine::project::wire::BuildView>> {
     faber
         .local
         .as_ref()
-        .map(|dev| dev.manager().and_then(|manager| manager.manifest()).map_err(|error| error.key().into()))
+        .map(|dev| {
+            dev.view().map_err(|error| match error {
+                faber_engine::project::update::UpdateError::Newer => "error.journal.newer".into(),
+                faber_engine::project::update::UpdateError::Store(_) => error.key().into(),
+                _ => "error.store.corrupt".into(),
+            })
+        })
         .unwrap_or(Ok(None))
 }
 
@@ -718,6 +724,26 @@ fn main() {
     if let Some(code) = faber_engine::proc::guard_mode() {
         std::process::exit(code);
     }
+    let args: Vec<_> = std::env::args_os().skip(1).collect();
+    if let [mode, data, output] = args.as_slice()
+        && mode == "--faber-local-check-data"
+    {
+        std::process::exit(if local_update::probe_saved_data(std::path::Path::new(data), std::path::Path::new(output)).is_ok() {
+            0
+        } else {
+            1
+        });
+    }
+    if let [mode, output] = args.as_slice()
+        && mode == "--faber-local-identity"
+    {
+        std::process::exit(if local_update::write_identity(std::path::Path::new(output)).is_ok() { 0 } else { 1 });
+    }
+    if args.iter().any(|arg| arg.to_str().is_some_and(|arg| arg.starts_with("--faber-local-")))
+        && args.as_slice() != ["--faber-local-start"]
+    {
+        std::process::exit(1);
+    }
     let hidden = std::env::var("FABER_HIDDEN").is_ok_and(|v| v == "1");
     let local_start = std::env::args_os().any(|arg| arg == "--faber-local-start");
     let local = if std::env::var("FABER_CHANNEL").as_deref() == Ok("development") {
@@ -755,8 +781,10 @@ fn main() {
     };
     if local_start && let Some(dev) = &local {
         // Tao creates a visible event-target HWND even without a WebView; defer the entire GUI runtime until asked.
-        if headless_start(dev).is_err() {
-            std::process::exit(1);
+        match headless_start(dev) {
+            Ok(true) => {}
+            Ok(false) => return,
+            Err(_) => std::process::exit(1),
         }
     }
     let mut builder = tauri::Builder::default();
@@ -899,6 +927,9 @@ fn main() {
                 terminal::terminate_hidden();
                 let faber = app.state::<Faber>();
                 faber.engine.shutdown();
+                if let Some(dev) = &faber.local {
+                    let _ = dev.record_clean_exit();
+                }
                 // On Windows this starts the installer, which replaces Faber and needs it closed.
                 if faber.local.is_none()
                     && let Some((update, bytes)) = lock(&faber.update).take()
@@ -909,7 +940,7 @@ fn main() {
         });
 }
 
-fn headless_start(dev: &Development) -> Result<(), faber_engine::project::update::UpdateError> {
+fn headless_start(dev: &Development) -> Result<bool, faber_engine::project::update::UpdateError> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -917,6 +948,7 @@ fn headless_start(dev: &Development) -> Result<(), faber_engine::project::update
         .map_err(|_| faber_engine::project::update::UpdateError::InvalidState("headless runtime failed"))?;
     let _entered = runtime.enter();
     local_update::validate_saved_data(&dev.data())?;
+    let _ = dev.cleanup_obsolete();
     let engine = Engine::new(
         EngineOptions {
             data_dir: dev.data(),
@@ -936,8 +968,15 @@ fn headless_start(dev: &Development) -> Result<(), faber_engine::project::update
     )?;
     let result = runtime.block_on(async {
         loop {
+            #[cfg(feature = "test-hooks")]
+            if dev.data().join("test-clean-exit-next").exists() {
+                std::fs::remove_file(dev.data().join("test-clean-exit-next"))
+                    .map_err(|_| faber_engine::project::update::UpdateError::InvalidState("test exit marker failed"))?;
+                dev.record_clean_exit()?;
+                return Ok(false);
+            }
             if dev.open_pending()? && dev.resume_allowed().is_ok() && dev.request_open()? {
-                return Ok(());
+                return Ok(true);
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
         }

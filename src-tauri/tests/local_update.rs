@@ -97,6 +97,9 @@ fn monitor_waits_for_health_and_first_operation_then_five_minutes() {
     assert_eq!(monitor(&dev, true, 403).unwrap(), Monitor::Waiting);
     assert_eq!(monitor(&dev, true, 404).unwrap(), Monitor::Healthy);
     assert_eq!(fs::read(dev.binary(Slot::A)).unwrap(), b"old");
+    let promoted = manager.manifest().unwrap().unwrap().current_good.unwrap();
+    let evidence: CanaryVerdict = serde_json::from_value(promoted.extra["canaryEvidence"].clone()).unwrap();
+    assert!(matches!(evidence, CanaryVerdict::Pass { proof_receipt, .. } if proof_receipt == "proof"));
 }
 
 #[test]
@@ -164,6 +167,20 @@ fn recovery_requires_an_existing_unchanged_trusted_helper() {
 }
 
 #[test]
+fn enrolled_launcher_has_explicit_configuration_without_a_slot_or_environment() {
+    let dir = area();
+    let dev = config(dir.path());
+    let executable = dir.path().join("baseline");
+    let helper = dir.path().join("helper");
+    fs::write(&executable, b"old").unwrap();
+    fs::write(&helper, b"helper").unwrap();
+    dev.adopt(tree(b"old"), &executable, &helper, 100).unwrap();
+    let descriptor: serde_json::Value = serde_json::from_slice(&fs::read(dir.path().join("dev/development.json")).unwrap()).unwrap();
+    assert_eq!(descriptor["channel"], "development");
+    assert_eq!(descriptor["installedData"], dir.path().join("stable-data").to_string_lossy().as_ref());
+}
+
+#[test]
 fn revoked_transition_refuses_before_reading_or_rotating_the_helper() {
     let dir = area();
     let dev = config(dir.path());
@@ -209,6 +226,59 @@ fn compatibility_requires_lossless_old_and_new_round_trips() {
         assert!(compatible_round_trip(&saved, &changed, &saved).is_err());
         assert!(compatible_round_trip(&saved, &saved, &changed).is_err());
     }
+}
+
+#[test]
+fn executable_data_probe_round_trips_real_records_and_extensions_without_writes() {
+    let dir = area();
+    let data = dir.path().join("data");
+    fs::create_dir(&data).unwrap();
+    let mut grant = Grant::new("repo", GitMode::Seguro, 1, 100);
+    grant.extra.insert("consumed".into(), true.into());
+    let mut runtime = faber_engine::project::Runtime::new();
+    runtime.extra.insert("spent".into(), 7.into());
+    let mut mission = faber_engine::project::Mission::new("m1", "p1", "repo", "goal", "base", 1, 100);
+    mission.extra.insert("extension".into(), "keep".into());
+    for (name, value) in [
+        ("grant.json", serde_json::to_value(grant).unwrap()),
+        ("runtime.json", serde_json::to_value(runtime).unwrap()),
+        ("mission.json", serde_json::to_value(mission).unwrap()),
+    ] {
+        fs::write(data.join(name), serde_json::to_vec(&value).unwrap()).unwrap();
+    }
+    let before: Vec<_> = fs::read_dir(&data)
+        .unwrap()
+        .map(|e| {
+            let path = e.unwrap().path();
+            (path.clone(), fs::read(path).unwrap())
+        })
+        .collect();
+    let output = dir.path().join("probe.json");
+    probe_saved_data(&data, &output).unwrap();
+    let receipt: serde_json::Value = serde_json::from_slice(&fs::read(output).unwrap()).unwrap();
+    assert_eq!(receipt["grant.json"]["consumed"], true);
+    assert_eq!(receipt["runtime.json"]["spent"], 7);
+    assert_eq!(receipt["mission.json"]["extension"], "keep");
+    for (path, bytes) in before {
+        assert_eq!(fs::read(path).unwrap(), bytes);
+    }
+}
+
+#[test]
+fn user_open_really_cancels_quiescence_and_requires_a_fresh_canary() {
+    let dir = area();
+    let dev = config(dir.path());
+    pending(&dev);
+    let path = dir.path().join("dev/manifest.json");
+    let mut saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    saved["state"] = "quiescent".into();
+    fs::write(path, serde_json::to_vec(&saved).unwrap()).unwrap();
+    assert!(dev.request_open().unwrap());
+    assert!(matches!(
+        dev.manager().unwrap().manifest().unwrap().unwrap().state,
+        faber_engine::project::update::UpdateState::CanaryPending { .. }
+    ));
+    assert!(dev.manager().unwrap().enter_quiescence(false, false).is_err());
 }
 
 #[test]
@@ -403,6 +473,15 @@ impl Runner for Gates {
         let helper = target.join("faber-local.exe");
         fs::write(&exe, b"next").unwrap();
         fs::write(&helper, b"next helper").unwrap();
+        fs::write(
+            target.join("local-identity.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "schema": if self.fail == "new-schema" { SCHEMA + 1 } else { SCHEMA },
+                "buildHash": ExactTree::compute_build_hash(b"next")
+            }))
+            .unwrap(),
+        )
+        .unwrap();
         Ok((exe, helper))
     }
     fn compatible(
@@ -440,6 +519,192 @@ impl Runner for Gates {
             compatible_schemas: vec![SCHEMA],
         })
     }
+}
+
+#[test]
+fn healthy_checkpoint_never_replays_an_older_transition() {
+    for prepare_again in [false, true] {
+        let dir = area();
+        let dev = config(dir.path());
+        pending(&dev);
+        let manager = dev.manager().unwrap();
+        manager.begin_probation(104).unwrap();
+        manager.acknowledge_health(105).unwrap();
+        manager.complete_first_operation(106).unwrap();
+        manager.finish_probation(404).unwrap();
+        if prepare_again {
+            let mut grant = Grant::new("repo", GitMode::Seguro, 1, 100);
+            grant.self_update = true;
+            manager.prepare_next(tree(b"third"), &grant, &RepoIdentity::new("repo", "checkout"), 1, &[], 405).unwrap();
+            fs::write(dev.binary(Slot::A), b"third").unwrap();
+        }
+        fs::write(dir.path().join("dev/manifest.json"), b"corrupt").unwrap();
+        let _ = recover(&dev, 406);
+        assert_eq!(fs::read(dev.binary(Slot::B)).unwrap(), b"next", "healthy payload is immutable");
+        let manifest = manager.manifest().unwrap().unwrap();
+        assert_eq!(manifest.active_slot, Slot::B);
+        if prepare_again {
+            assert_eq!(manifest.last_good.as_ref().unwrap().slot, Slot::B);
+        }
+        assert!(!manifest.rejected_build_hashes.contains(&tree(b"next").build_hash));
+    }
+}
+
+#[test]
+fn rollback_relaunch_decision_survives_cleanup_failures() {
+    for locked in [false, true] {
+        let dir = area();
+        let dev = config(dir.path());
+        pending(&dev);
+        dev.manager().unwrap().begin_probation(104).unwrap();
+        let lease = locked.then(|| dev.slot_lease(Slot::B).unwrap());
+        if !locked {
+            fs::create_dir_all(dev.build_dir()).unwrap();
+            fs::write(dev.build_dir().join("unowned"), b"retain").unwrap();
+        }
+        assert_eq!(monitor(&dev, false, 105).unwrap(), Monitor::Rollback(Slot::A));
+        assert_eq!(fs::read(dev.binary(Slot::A)).unwrap(), b"old");
+        drop(lease);
+        if locked {
+            dev.cleanup_obsolete().unwrap();
+            assert!(!dev.binary(Slot::B).exists());
+        }
+    }
+}
+
+#[test]
+fn healthy_handoff_survives_cleanup_failure() {
+    let dir = area();
+    let dev = config(dir.path());
+    pending(&dev);
+    let manager = dev.manager().unwrap();
+    manager.begin_probation(104).unwrap();
+    manager.acknowledge_health(105).unwrap();
+    manager.complete_first_operation(106).unwrap();
+    fs::create_dir_all(dev.build_dir()).unwrap();
+    fs::write(dev.build_dir().join("unowned"), b"retain").unwrap();
+    assert_eq!(monitor(&dev, true, 404).unwrap(), Monitor::Healthy);
+    assert_eq!(fs::read(dev.binary(Slot::B)).unwrap(), b"next");
+}
+
+#[test]
+fn interrupted_empty_build_cleanup_does_not_wedge_staging() {
+    let dir = area();
+    let dev = config(dir.path());
+    dev.manager().unwrap();
+    fs::create_dir_all(dev.build_dir()).unwrap();
+    dev.clean_build_output().unwrap();
+    dev.begin_build_output().unwrap();
+    dev.clean_build_output().unwrap();
+}
+
+#[test]
+fn clean_quit_pauses_probation_without_quarantine_or_relaunch() {
+    let dir = area();
+    let dev = config(dir.path());
+    pending(&dev);
+    let manager = dev.manager().unwrap();
+    manager.begin_probation(104).unwrap();
+    manager.acknowledge_health(105).unwrap();
+    manager.complete_first_operation(106).unwrap();
+    fs::write(dir.path().join("dev/exit.json"), serde_json::to_vec(&serde_json::json!({"tree": tree(b"next")})).unwrap()).unwrap();
+    assert_eq!(monitor(&dev, false, 107).unwrap(), Monitor::Stopped);
+    let manifest = manager.manifest().unwrap().unwrap();
+    assert!(manifest.rejected_build_hashes.is_empty());
+    assert_eq!(fs::read(dev.binary(Slot::B)).unwrap(), b"next");
+}
+
+#[test]
+fn orderly_session_end_before_health_retries_full_probation_without_rejection() {
+    let dir = area();
+    let dev = config(dir.path());
+    pending(&dev);
+    let manager = dev.manager().unwrap();
+    manager.begin_probation(104).unwrap();
+    manager.pause_probation(105).unwrap();
+    assert!(manager.manifest().unwrap().unwrap().rejected_build_hashes.is_empty());
+    manager.begin_probation(106).unwrap();
+    let state = manager.manifest().unwrap().unwrap().state;
+    assert!(matches!(
+        state,
+        faber_engine::project::update::UpdateState::Probation {
+            health_acknowledged: false,
+            health_ack_deadline: 136,
+            probation_deadline: 406,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn refused_transition_does_not_rotate_or_leak_a_helper() {
+    for mapped_helper in [false, true] {
+        let dir = area();
+        let dev = config(dir.path());
+        pending(&dev);
+        fs::write(dev.helper(), b"trusted helper").unwrap();
+        fs::write(dir.path().join("dev/helper.sha256"), ExactTree::compute_build_hash(b"trusted helper")).unwrap();
+        fs::write(dir.path().join(format!("dev/slots/a/faber-local{}", std::env::consts::EXE_SUFFIX)), b"future helper").unwrap();
+        fs::write(dir.path().join("dev/slots/a/helper.sha256"), ExactTree::compute_build_hash(b"future helper")).unwrap();
+        let mut grant = Grant::new("repo", GitMode::Seguro, 1, 100);
+        grant.self_update = true;
+        #[cfg(windows)]
+        let mapped = mapped_helper.then(|| {
+            use std::os::windows::fs::OpenOptionsExt;
+            fs::OpenOptions::new().read(true).share_mode(1).open(dev.helper()).unwrap()
+        });
+        #[cfg(not(windows))]
+        let _ = mapped_helper;
+        assert!(matches!(
+            dev.transition(
+                &grant,
+                &RepoIdentity::new("repo", "checkout"),
+                1,
+                SwapCheck { payload: b"next", active_window: true, active_operations: false },
+                104
+            ),
+            Err(faber_engine::project::update::UpdateError::ActiveWindow)
+        ));
+        assert_eq!(fs::read(dev.helper()).unwrap(), b"trusted helper");
+        assert!(
+            !fs::read_dir(dir.path().join("dev")).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().starts_with(".faber-patch-"))
+        );
+        #[cfg(windows)]
+        drop(mapped);
+    }
+}
+
+#[test]
+fn candidate_reported_schema_cannot_bypass_rollback_compatibility() {
+    let dir = area();
+    let dev = config(dir.path());
+    let manager = dev.manager().unwrap();
+    fs::write(dev.binary(Slot::A), b"old").unwrap();
+    manager.adopt_baseline(Slot::A, tree(b"old"), b"old", now()).unwrap();
+    let checkout = dir.path().join("checkout");
+    fs::create_dir(&checkout).unwrap();
+    let repo = RepoIdentity::new("repo", &checkout.to_string_lossy());
+    let mut grant = Grant::new("repo", GitMode::Seguro, 1, now());
+    grant.self_update = true;
+    let result = dev.stage(
+        Stage { repo: &repo, commit: &"1".repeat(40), tree: &"2".repeat(40), grant: &grant, revision: 1, required_space: 1 },
+        &mut Source { calls: 0, tree: "2".repeat(40) },
+        &mut Gates { fail: "new-schema", built: false },
+    );
+    assert!(result.is_err(), "candidate schema must come from the candidate, not this process");
+    assert_eq!(fs::read(dev.binary(Slot::A)).unwrap(), b"old");
+}
+
+#[cfg(windows)]
+#[test]
+fn startup_accepts_windows_case_and_verbatim_aliases() {
+    let dir = area();
+    let dev = config(dir.path());
+    let manager = dev.manager().unwrap();
+    fs::write(dev.binary(Slot::A), b"old").unwrap();
+    manager.adopt_baseline(Slot::A, tree(b"old"), b"old", 100).unwrap();
+    let alias = std::path::PathBuf::from(dev.binary(Slot::A).to_string_lossy().trim_start_matches(r"\\?\").to_uppercase());
+    dev.startup_ready(&alias).unwrap();
 }
 
 #[test]
@@ -522,4 +787,54 @@ fn only_new_accepted_candidate_can_supersede_a_waiting_build() {
     let mut grant = Grant::new("repo", GitMode::Seguro, 1, 100);
     grant.self_update = true;
     assert!(manager.supersede_next(&grant, &RepoIdentity::new("repo", "checkout"), 1, 104).is_err(), "swap cannot be coalesced");
+}
+
+#[test]
+fn waiting_canary_retries_the_same_payload_without_rebuilding() {
+    let dir = area();
+    let dev = config(dir.path());
+    let manager = dev.manager().unwrap();
+    fs::write(dev.binary(Slot::A), b"old").unwrap();
+    manager.adopt_baseline(Slot::A, tree(b"old"), b"old", now()).unwrap();
+    let checkout = dir.path().join("checkout");
+    fs::create_dir(&checkout).unwrap();
+    let repo = RepoIdentity::new("repo", &checkout.to_string_lossy());
+    let mut grant = Grant::new("repo", GitMode::Seguro, 1, now());
+    grant.self_update = true;
+    let commit = "1".repeat(40);
+    let source_tree = "2".repeat(40);
+    let request = || Stage { repo: &repo, commit: &commit, tree: &source_tree, grant: &grant, revision: 1, required_space: 1 };
+    let mut source = Source { calls: 0, tree: "2".repeat(40) };
+    dev.stage(request(), &mut source, &mut Gates { fail: "canary-unavailable", built: false }).unwrap();
+    assert!(matches!(manager.manifest().unwrap().unwrap().state, faber_engine::project::update::UpdateState::CanaryPending { .. }));
+    let mut incompatible = Gates { fail: "compatibility", built: false };
+    assert!(dev.stage(request(), &mut source, &mut incompatible).is_err(), "retry must probe the latest saved data");
+    assert!(!incompatible.built);
+    let mut retry = Gates { fail: "", built: false };
+    dev.stage(request(), &mut source, &mut retry).unwrap();
+    assert!(!retry.built, "quota/review availability must not force a rebuild");
+    assert!(matches!(manager.manifest().unwrap().unwrap().state, faber_engine::project::update::UpdateState::Ready { .. }));
+}
+
+#[test]
+fn incomplete_waiting_payload_requires_a_new_accepted_build() {
+    let dir = area();
+    let dev = config(dir.path());
+    let manager = dev.manager().unwrap();
+    fs::write(dev.binary(Slot::A), b"old").unwrap();
+    manager.adopt_baseline(Slot::A, tree(b"old"), b"old", now()).unwrap();
+    let checkout = dir.path().join("checkout");
+    fs::create_dir(&checkout).unwrap();
+    let repo = RepoIdentity::new("repo", &checkout.to_string_lossy());
+    let mut grant = Grant::new("repo", GitMode::Seguro, 1, now());
+    grant.self_update = true;
+    let commit = "1".repeat(40);
+    let source_tree = "2".repeat(40);
+    let request = || Stage { repo: &repo, commit: &commit, tree: &source_tree, grant: &grant, revision: 1, required_space: 1 };
+    let mut source = Source { calls: 0, tree: source_tree.clone() };
+    dev.stage(request(), &mut source, &mut Gates { fail: "canary-unavailable", built: false }).unwrap();
+    fs::remove_file(dir.path().join(format!("dev/slots/b/faber-local{}", std::env::consts::EXE_SUFFIX))).unwrap();
+    let mut retry = Gates { fail: "", built: false };
+    dev.stage(request(), &mut source, &mut retry).unwrap();
+    assert!(retry.built, "partial slot publication must never reuse a canary-only shortcut");
 }

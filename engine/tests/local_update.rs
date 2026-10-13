@@ -462,6 +462,29 @@ fn probation_cannot_complete_before_five_minutes() {
 }
 
 #[test]
+fn promotion_and_clean_exit_checkpoints_survive_an_interrupted_live_commit() {
+    for clean_exit in [false, true] {
+        let dir = tempdir();
+        let mgr = probation_manager(dir.path());
+        mgr.acknowledge_health(1050).unwrap();
+        mgr.complete_first_operation(1051).unwrap();
+        let disk = Arc::new(FaultyDisk { fail_write: AtomicBool::new(true), fail_rename: AtomicBool::new(false) });
+        let faulty = UpdateManager::with_disk(mgr.layout().clone(), disk).unwrap();
+        assert!(if clean_exit { faulty.pause_probation(1330) } else { faulty.finish_probation(1330) }.is_err());
+        assert_eq!(mgr.recover_transition(1331).unwrap(), None);
+        let manifest = mgr.manifest().unwrap().unwrap();
+        if clean_exit {
+            assert!(matches!(manifest.state, UpdateState::Swapping { .. }));
+            assert_eq!(manifest.extra.get("cleanExit"), Some(&serde_json::Value::Bool(true)));
+        } else {
+            assert_eq!(manifest.state, UpdateState::Healthy);
+            assert_eq!(manifest.current_good.unwrap().slot, Slot::B);
+        }
+        assert!(manifest.rejected_build_hashes.is_empty());
+    }
+}
+
+#[test]
 fn next_update_retains_the_healthy_current_build_before_reusing_previous_slot() {
     let dir = tempdir();
     let mgr = probation_manager(dir.path());

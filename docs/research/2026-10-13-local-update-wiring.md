@@ -21,6 +21,13 @@ kill-on-close Windows job. A healthy child is handed off only after five minutes
 last-good payload before launching it once, with no window or installer. The independent transition checkpoint
 also handles a corrupt live manifest, and is retired after rollback so corruption cannot replay it.
 
+The review corrections are recorded in [local-update-review-fixes](2026-10-13-local-update-review-fixes.md).
+The enrolled launcher is now immutable and carries `development.json`. Launch it with `--launch` for a headless
+start or `--open` for an explicit user open request; never use a slot binary as the development entry point.
+Healthy/pause commits supersede the transition checkpoint before the live write, and preparing another slot
+checkpoints current before reuse. Cleanup failure cannot suppress rollback launch or healthy handoff. Orderly
+exit pauses without quarantine; the hidden Windows session observer handles shutdown/logoff without activation.
+
 R106 cleanup removes superseded inactive payloads and known build outputs automatically. Current and last-good
 are retained. A build ownership marker prevents sweeping uncertain directories. Slot locks prevent cleanup of
 a live executable. A minimum 4 GiB free-space check, or the larger requested estimate, precedes snapshot/build;
@@ -50,7 +57,13 @@ open request: Tao otherwise creates a visible event-target HWND even with no Web
 becomes eligible for a future transition, after that slot has earned current-good status.
 
 T9 owns presentation. The only new screen command is read-only `local_update_state`; no screen command accepts
-proof, compatibility, quiescence or canary assertions. No T5 runner or Projects UI file is changed.
+proof, compatibility, quiescence or canary assertions. No T5 runner file is changed.
+
+The review follow-up connects that read-only view to the existing Projects build card, including before a mission
+exists, using its existing translated labels. The default `Runner::compatible` now runs bounded headless codec
+probes in old and next on copied private data. `native_build` obtains candidate schema/hash identity from the built
+executable. Unavailable canaries stay pending; an intact accepted payload can retry without rebuilding, after a
+fresh compatibility check. T5 still supplies acceptance, canary execution/reservation and settled-operation gates.
 
 ## Evidence and remaining qualification
 
@@ -65,7 +78,7 @@ the hidden test build and the independent helper. It proves forced early-crash r
 one rollback, exact retained bytes, unchanged spend/grants/extensions and absence of visible windows.
 
 Full G6/G8 remain unqualified until T5 connects its real acceptance, reservations, canary workflow and mission
-resume, and T9 presents status. No real-CLI canary, paid probe, full native slot build through the accepted runner,
+resume. Projects now presents the local read-only status. No real-CLI canary, paid probe, full native slot build through the accepted runner,
 public release, installed app mutation or cross-vendor implementation review is claimed by this adapter's fixtures.
 Windows owns descendant containment; the Unix path retains the repository's existing direct-child limitation.
 Final proof logs and CI results belong to the draft PR, not a claim that the full self-development loop is accepted.

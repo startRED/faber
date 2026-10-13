@@ -12,7 +12,8 @@ const demo: Project = { id: 'review-project', name: 'Review project', path: 'C:/
 const view = (revision = 1): MissionView => ({ missionId: 'review-mission', revision, state: 'running', mode: 'normal', gitMode: 'seguro', goal: 'Review goal', tasks: [], cost: { ownMicros: null, capMicros: null, complete: false }, pace: [], decisions: [] });
 
 async function withProjects(run: (root: HTMLElement, emit: (v: MissionView) => void, change: (p: Project) => void) => Promise<void>) {
-  const originals = { projectEnroll: api.projectEnroll, projectGrant: api.projectGrant, missionStart: api.missionStart, missionState: api.missionState, onMission: api.onMission };
+  const originals = { ...api };
+  Object.assign(api, { localUpdateState: async () => null });
   let listener: (v: MissionView) => void = () => {};
   api.projectEnroll = async (id) => ({ projectId: id, repo: demo.path, base: 'base', mode: 'seguro', revision: 1, selfUpdate: false });
   api.projectGrant = async () => ({ repo: demo.path, mode: 'seguro', revision: 1, grantedAt: 1, selfUpdate: false });
@@ -29,6 +30,17 @@ async function withProjects(run: (root: HTMLElement, emit: (v: MissionView) => v
   try { await settle(); await run(root, (v) => listener(v), setProject); }
   finally { dispose(); root.remove(); Object.assign(api, originals); saveGoal(demo.id, ''); localStorage.removeItem('faber.project.mission.' + demo.id); }
 }
+
+check('projects: local build status uses the read-only channel view before a mission exists', () => withProjects(async (root) => {
+  Object.assign(api, { localUpdateState: async () => ({ current: 'slot-b', next: 'slot-a', lastGood: 'slot-b', waiting: 'projects.task.review' }) });
+  // A project identity refresh re-reads the development view without creating work.
+  window.dispatchEvent(new Event('focus'));
+  await settle();
+  const card = root.querySelector('[data-testid="local-build"]');
+  ok(card, 'development status must be available without starting a mission');
+  ok(card!.textContent?.includes('slot-b'), 'current slot must come from local_update_state');
+  ok(card!.textContent?.includes('slot-a'), 'next slot must come from local_update_state');
+}));
 
 async function start(root: HTMLElement) {
   const field = root.querySelector<HTMLTextAreaElement>('#mission-goal')!;

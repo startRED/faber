@@ -38,6 +38,7 @@ notify-rust = "4"
 
 [target.'cfg(windows)'.dependencies]
 win32job = "2"
+winsafe = { version = "0.0.29", features = ["gui"] }
 
 # Only tray/native.rs may use FFI; the engine and testkit keep the workspace's forbid.
 [lints.rust]
