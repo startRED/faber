@@ -175,7 +175,53 @@ impl Assumption {
     pub fn validate(&self) -> Result<(), WireError> {
         ids(std::slice::from_ref(&self.id))?;
         text(&self.text)?;
+        if self.source.trim().is_empty() {
+            return Err(WireError::Malformed);
+        }
         text(&self.source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Fact {
+    pub key: String,
+    pub value: String,
+    pub source: String,
+    #[serde(default)]
+    pub readers: Vec<String>,
+}
+
+impl Fact {
+    pub fn validate(&self) -> Result<(), WireError> {
+        if self.key.is_empty()
+            || self.key.len() > 128
+            || !self.key.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+        {
+            return Err(WireError::Malformed);
+        }
+        text(&self.value)?;
+        if self.source.trim().is_empty() {
+            return Err(WireError::Malformed);
+        }
+        text(&self.source)?;
+        ids(&self.readers)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FactSheet {
+    pub schema: u32,
+    pub mission: String,
+    pub facts: Vec<Fact>,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
+impl Record for FactSheet {
+    fn schema(&self) -> u32 {
+        self.schema
     }
 }
 
@@ -227,6 +273,20 @@ pub struct RiskAnswers {
     pub irreversible: Vec<String>,
 }
 
+impl RiskAnswers {
+    pub fn faber_defaults() -> Self {
+        Self {
+            public: Some(true),
+            others_data: Some(false),
+            money: Some(false),
+            minors: Some(false),
+            regulated: Some(false),
+            commercial: Some(false),
+            irreversible: vec![],
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SheetQuestion {
@@ -253,6 +313,13 @@ pub struct DeliverableSheet {
     #[serde(default)]
     pub taste: Vec<String>,
 }
+
+impl Record for DeliverableSheet {
+    fn schema(&self) -> u32 {
+        1
+    }
+}
+
 impl DeliverableSheet {
     pub fn validate(&self) -> Result<(), WireError> {
         if self.pieces.len() > 64 || self.questions.len() > 3 || self.facts.len() > 64 || self.assumptions.len() > 64 {
@@ -283,6 +350,9 @@ impl DeliverableSheet {
             texts(&q.options)?;
             text(&q.default)?;
             texts(&q.changes)?;
+            if q.changes.is_empty() || !q.options.iter().any(|opt| opt == &q.default) {
+                return Err(WireError::Malformed);
+            }
         }
         Ok(())
     }
@@ -426,6 +496,10 @@ impl CheckOutcome {
             return Err(WireError::Malformed);
         }
         self.reason.as_deref().map_or(Ok(()), text)
+    }
+
+    pub fn is_pass(&self) -> bool {
+        self.result == CheckResult::Pass && !self.evidence.is_empty()
     }
 }
 

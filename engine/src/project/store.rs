@@ -448,6 +448,75 @@ impl Journal {
         }
         Ok(brief.filter(|b| !b.stale(now, version)))
     }
+
+    pub fn save_sheet(&self, sheet: &super::wire::DeliverableSheet) -> Result<(), JournalError> {
+        sheet.validate().map_err(|_| JournalError::Store(Fault::Corrupt))?;
+        self.put(&self.records.join("sheet.json"), sheet)
+    }
+
+    pub fn sheet(&self) -> Result<Option<super::wire::DeliverableSheet>, JournalError> {
+        let found: Option<super::wire::DeliverableSheet> = self.get(&self.records.join("sheet.json"))?;
+        if let Some(s) = &found {
+            s.validate().map_err(|_| JournalError::Store(Fault::Corrupt))?;
+        }
+        Ok(found)
+    }
+
+    pub fn save_facts(&self, sheet: &super::wire::FactSheet) -> Result<(), JournalError> {
+        self.same_mission(&sheet.mission)?;
+        if sheet.schema > SCHEMA {
+            return Err(JournalError::Newer);
+        }
+        for fact in &sheet.facts {
+            fact.validate().map_err(|_| JournalError::Store(Fault::Corrupt))?;
+        }
+        self.put(&self.records.join("facts.json"), sheet)
+    }
+
+    pub fn facts(&self) -> Result<Option<super::wire::FactSheet>, JournalError> {
+        let found: Option<super::wire::FactSheet> = self.get(&self.records.join("facts.json"))?;
+        if let Some(sheet) = &found {
+            self.same_mission(&sheet.mission)?;
+            for fact in &sheet.facts {
+                fact.validate().map_err(|_| JournalError::Store(Fault::Corrupt))?;
+            }
+        }
+        Ok(found)
+    }
+
+    pub fn save_compile_receipt(&self, receipt: &super::wire::CompileReceipt) -> Result<(), JournalError> {
+        self.same_mission(&receipt.mission)?;
+        if receipt.schema > SCHEMA {
+            return Err(JournalError::Newer);
+        }
+        let path = self.named("compiles", &format!("rev-{}", receipt.plan_revision))?;
+        self.put(&path, receipt)
+    }
+
+    pub fn compile_receipt(&self, plan_revision: u64) -> Result<Option<super::wire::CompileReceipt>, JournalError> {
+        self.get(&self.named("compiles", &format!("rev-{plan_revision}"))?)
+    }
+
+    pub fn save_check_receipt(&self, receipt: &super::wire::CheckReceipt) -> Result<(), JournalError> {
+        if !valid_id(&receipt.id) || !valid_id(&receipt.task) {
+            return Err(JournalError::BadId);
+        }
+        if receipt.schema > SCHEMA {
+            return Err(JournalError::Newer);
+        }
+        for check in &receipt.checks {
+            check.validate().map_err(|_| JournalError::Store(Fault::Corrupt))?;
+        }
+        let path = self.named("checks", &receipt.id)?;
+        if self.get::<super::wire::CheckReceipt>(&path)?.is_some() {
+            return Err(JournalError::ReceiptExists);
+        }
+        self.put(&path, receipt)
+    }
+
+    pub fn check_receipt(&self, id: &str) -> Result<Option<super::wire::CheckReceipt>, JournalError> {
+        self.get(&self.named("checks", id)?)
+    }
 }
 #[cfg(test)]
 mod kit_path_tests {
