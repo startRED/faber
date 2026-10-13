@@ -156,6 +156,8 @@ export const en = {
   'error.theme.write': 'The theme file could not be saved. Your old file is untouched. Check the disk and the folder, then try again.',
   'error.theme.read': 'The theme file could not be read.',
   'error.settings.saveFailed': 'Faber could not save your settings. Nothing was changed.',
+  'error.settings.autostartFailed': 'Faber could not change startup at sign-in. Your settings were not changed.',
+  'error.driverStopped': 'The CLI session stopped unexpectedly. Try sending your message again.',
   'set.back': '← Back',
   'set.label': 'Settings',
   'set.general': 'General',

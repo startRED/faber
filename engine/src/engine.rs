@@ -1206,9 +1206,32 @@ impl Core {
         let sid = self.next_sid;
         let me = self.me.clone();
         let key = conv.to_string();
+        // The last driver callback also ends its run on panic or task cancellation.
+        struct DriverEnd {
+            me: std::sync::Weak<Mutex<Core>>,
+            key: String,
+            sid: u64,
+            runtime: tokio::runtime::Handle,
+        }
+        impl Drop for DriverEnd {
+            fn drop(&mut self) {
+                let (me, key, sid) = (self.me.clone(), self.key.clone(), self.sid);
+                // A callback can be dropped with Core locked, so cleanup must not wait here.
+                self.runtime.spawn(async move {
+                    if let Some(core) = me.upgrade() {
+                        core.lock().unwrap_or_else(|e| e.into_inner()).handle(
+                            &key,
+                            sid,
+                            EngineEvent::Error { message: "error.driverStopped".into(), fatal: true },
+                        );
+                    }
+                });
+            }
+        }
+        let end = DriverEnd { me, key, sid, runtime: self.opts.runtime.clone() };
         let sink: EventSink = Arc::new(move |e| {
-            if let Some(core) = me.upgrade() {
-                core.lock().unwrap_or_else(|e| e.into_inner()).handle(&key, sid, e);
+            if let Some(core) = end.me.upgrade() {
+                core.lock().unwrap_or_else(|e| e.into_inner()).handle(&end.key, end.sid, e);
             }
         });
         let user_hooks = self.store.settings().user_hooks == Some(true);

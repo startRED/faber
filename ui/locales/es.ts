@@ -155,6 +155,8 @@ export const es: Messages = {
   'error.theme.write': 'No se pudo guardar el archivo de tema. El archivo anterior sigue intacto. Revisa el disco y la carpeta e inténtalo de nuevo.',
   'error.theme.read': 'No se pudo leer el archivo de tema.',
   'error.settings.saveFailed': 'Faber no pudo guardar los ajustes. No se cambió nada.',
+  'error.settings.autostartFailed': 'Faber no pudo cambiar el inicio automático al iniciar sesión. No se cambiaron tus ajustes.',
+  'error.driverStopped': 'La sesión de la CLI se detuvo inesperadamente. Intenta enviar tu mensaje de nuevo.',
   'set.back': '← Volver',
   'set.label': 'Ajustes',
   'set.general': 'General',

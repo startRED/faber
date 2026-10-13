@@ -17,7 +17,7 @@ mod tray;
 use autostart::NoopAutostart;
 #[cfg(windows)]
 use autostart::WindowsAutostart;
-use autostart::{AutostartKeeper, FakeAutostart, is_autostart_arg};
+use autostart::{AutostartKeeper, FakeAutostart, creates_window};
 #[cfg(windows)]
 use awake::WindowsPower;
 use awake::{CountedAwake, NoopPower, PowerKeepAwake};
@@ -49,7 +49,7 @@ pub(crate) struct Faber {
     pub(crate) data_dir: PathBuf,
     pub(crate) hidden: bool,
     pub(crate) awake: Arc<Mutex<CountedAwake>>,
-    pub(crate) autostart: Arc<dyn AutostartKeeper>,
+    pub(crate) autostart: Mutex<Arc<dyn AutostartKeeper>>,
 }
 
 type Res<T> = Result<T, String>;
@@ -188,17 +188,9 @@ async fn save_settings(faber: State<'_, Faber>, mut patch: Settings) -> Result<S
     if let Some(map) = &patch.appearance {
         patch.appearance = Some(look::validated(map)?.0.to_map());
     }
-    if let Some(keep_awake) = patch.keep_awake {
-        lock(&faber.awake).set_enabled(keep_awake);
-    }
-    if let Some(autostart) = patch.autostart {
-        if autostart {
-            let _ = faber.autostart.register();
-        } else {
-            let _ = faber.autostart.unregister();
-        }
-    }
-    let mut settings = faber.engine.save_settings(patch)?;
+    let autostart = lock(&faber.autostart);
+    let mut settings = autostart::save(autostart.as_ref(), patch.autostart, || faber.engine.save_settings(patch))?;
+    lock(&faber.awake).set_enabled(settings.keep_awake.unwrap_or(true));
     settings.appearance = look::usable(settings.appearance.take());
     let look = look::stored(settings.appearance.as_ref());
     Ok(SavedSettings { settings, look })
@@ -419,11 +411,16 @@ fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Resul
 }
 
 fn main() {
+    let autostart_launch = !creates_window(std::env::args());
     let hidden = std::env::var("FABER_HIDDEN").is_ok_and(|v| v == "1");
     let mut builder = tauri::Builder::default();
     // A second launch brings the open window forward. Runs with their own data folder (tests) stay separate.
     if std::env::var_os("FABER_DATA_DIR").is_none() {
-        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| show(app)));
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _| {
+            if creates_window(args) {
+                show(app);
+            }
+        }));
     }
     builder
         .plugin(tauri_plugin_dialog::init())
@@ -470,7 +467,7 @@ fn main() {
             app.manage(tray::Tray::default());
             let clis = detect_clis();
             let handle = app.handle().clone();
-            let is_test = hidden || std::env::var_os("FABER_DATA_DIR").is_some();
+            let is_test = cfg!(feature = "test-hooks") || hidden || std::env::var_os("FABER_DATA_DIR").is_some();
             let power: Box<dyn PowerKeepAwake> = if is_test {
                 Box::new(NoopPower)
             } else {
@@ -496,7 +493,7 @@ fn main() {
                 }
             };
             let keep_awake = faber_engine::store::Store::new(&data_dir).settings().keep_awake.unwrap_or(true);
-            let awake = Arc::new(Mutex::new(CountedAwake::new(power, keep_awake)));
+            let awake = Arc::new(Mutex::new(CountedAwake::new(power, keep_awake)?));
             let awake_for_emit = awake.clone();
             let emit = Arc::new(move |e: AppEvent| {
                 // The engine calls this with its lock held, and the tray waits for the main thread, which can be waiting
@@ -529,18 +526,21 @@ fn main() {
                 data_dir: data_dir.clone(),
                 hidden,
                 awake,
-                autostart: autostart_keeper,
+                autostart: Mutex::new(autostart_keeper),
             });
             app.state::<Faber>().engine.watch_accounts();
             if let Some(codex) = clis.get(&Vendor::Codex) {
                 load_models(app.handle(), codex.clone(), data_dir.clone());
             }
-            let autostart_launch = is_autostart_arg(std::env::args());
-            if !autostart_launch || hidden {
+            if !autostart_launch {
                 create_window(app.handle(), hidden, &data_dir)?;
             }
             if !hidden {
                 tray::create(app)?;
+            }
+            #[cfg(feature = "test-hooks")]
+            if autostart_launch && let Some(out) = std::env::var_os("FABER_CHECKS_OUT") {
+                std::fs::write(out, serde_json::json!({ "windowCount": app.webview_windows().len() }).to_string())?;
             }
             // Only installed builds update themselves; source runs and test runs never do.
             if !hidden && !cfg!(debug_assertions) && std::env::var_os("FABER_DATA_DIR").is_none() {
@@ -554,7 +554,7 @@ fn main() {
             // Closing the window frees the screen (about 90 MB) but keeps Faber in the tray, so running answers
             // finish; only Quit, or a test run, ends it.
             if let RunEvent::ExitRequested { code: None, api, .. } = &event
-                && !hidden
+                && (!hidden || autostart_launch)
             {
                 api.prevent_exit();
             }

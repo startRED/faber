@@ -212,9 +212,70 @@ pub fn is_autostart_arg(args: impl IntoIterator<Item = String>) -> bool {
     args.into_iter().any(|a| a == AUTOSTART_FLAG)
 }
 
+pub fn creates_window(args: impl IntoIterator<Item = String>) -> bool {
+    !is_autostart_arg(args)
+}
+
+/// Changes the registration and settings together; tests supply both operations.
+pub fn save<T>(keeper: &dyn AutostartKeeper, enabled: Option<bool>, persist: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    let Some(enabled) = enabled else { return persist() };
+    let failed = |error| {
+        eprintln!("faber: autostart registration failed: {error}");
+        "error.settings.autostartFailed".to_string()
+    };
+    let before = keeper.is_registered().map_err(failed)?;
+    let apply = |on| if on { keeper.register() } else { keeper.unregister() };
+    apply(enabled).map_err(failed)?;
+    match persist() {
+        Ok(saved) => Ok(saved),
+        Err(error) => {
+            apply(before).map_err(failed)?;
+            Err(error)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct Refused;
+    impl AutostartKeeper for Refused {
+        fn register(&self) -> Result<(), String> {
+            Err("access denied".into())
+        }
+        fn unregister(&self) -> Result<(), String> {
+            Err("access denied".into())
+        }
+        fn is_registered(&self) -> Result<bool, String> {
+            Ok(false)
+        }
+    }
+
+    #[test]
+    fn registry_failure_refuses_the_save() {
+        for enabled in [false, true] {
+            let mut persisted = false;
+            let result = save(&Refused, Some(enabled), || {
+                persisted = true;
+                Ok(())
+            });
+            assert_eq!(result, Err("error.settings.autostartFailed".into()));
+            assert!(!persisted);
+        }
+    }
+
+    #[test]
+    fn settings_failure_restores_the_previous_registration() {
+        for before in [false, true] {
+            let keeper = FakeAutostart::new(before);
+            assert_eq!(
+                save(&keeper, Some(!before), || Err::<(), _>("error.settings.saveFailed".into())),
+                Err("error.settings.saveFailed".into())
+            );
+            assert_eq!(keeper.is_registered(), Ok(before));
+        }
+    }
 
     #[test]
     fn fake_autostart_records_state_without_touching_registry() {
@@ -233,5 +294,11 @@ mod tests {
         assert!(is_autostart_arg(vec!["faber.exe".into(), "--autostart".into()]));
         assert!(!is_autostart_arg(vec!["faber.exe".into(), "--other".into()]));
         assert!(!is_autostart_arg(vec![]));
+    }
+
+    #[test]
+    fn autostart_never_creates_a_window_even_in_hidden_tests() {
+        assert!(!creates_window(vec!["faber.exe".into(), AUTOSTART_FLAG.into()]));
+        assert!(creates_window(vec!["faber.exe".into()]));
     }
 }

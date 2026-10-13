@@ -500,3 +500,44 @@ async fn removing_a_running_conversation_drops_its_row() {
     assert!(engine.open(&id).is_none());
     engine.shutdown();
 }
+
+#[tokio::test]
+async fn a_driver_panic_removes_only_its_run_from_overlapping_chat_and_project_work() {
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+    use tokio::io::{AsyncRead, ReadBuf};
+    struct Panics(tokio::sync::oneshot::Receiver<()>);
+    impl AsyncRead for Panics {
+        fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, _buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
+            match Pin::new(&mut self.0).poll(cx) {
+                Poll::Ready(Ok(())) => panic!("simulated driver panic"),
+                Poll::Ready(Err(_)) => return Poll::Ready(Ok(())),
+                Poll::Pending => {}
+            }
+            Poll::Pending
+        }
+    }
+    for vendor in Vendor::ALL {
+        let triggers = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let keep = triggers.clone();
+        let spawn: Spawner = Arc::new(move |_, _, _| {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            keep.lock().unwrap().push(tx);
+            Ok(faber_engine::proc::Proc { stdin: Box::new(tokio::io::sink()), stdout: Box::new(Panics(rx)), stderr: None, child: None })
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, mut rx) = engine(dir.path(), &[vendor], spawn, None);
+        let project = engine.add_project(&dir.path().to_string_lossy());
+        let chat = engine.send(request(Area::Chat, None, SKY, vendor.name())).unwrap();
+        let work = engine.send(request(Area::Project, Some(&project.id), SKY, vendor.name())).unwrap();
+        lists_until(&mut rx, WAIT, |rows| rows.len() == 2).await;
+        // Give both driver futures a poll; Codex must install each thread's event sink first.
+        tokio::task::yield_now().await;
+        triggers.lock().unwrap().remove(0).send(()).unwrap();
+        lists_until(&mut rx, WAIT, |rows| rows.len() == 1 && rows[0].conversation_id == work).await;
+        assert_eq!(engine.open(&chat).unwrap().messages.last().unwrap().status, Some(Status::Error));
+        engine.shutdown();
+        assert!(engine.state().running.items.is_empty());
+    }
+}

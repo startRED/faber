@@ -13,6 +13,8 @@ const QUESTION: &str = "In one sentence: why is the sky blue?";
 
 pub fn scenarios() -> Vec<Scenario> {
     vec![
+        Scenario { name: "system toggles persist independently and survive reopening Settings", run: system_toggles_persist },
+        Scenario { name: "autostart begins in the tray without creating a webview window", run: autostart_has_no_window },
         Scenario {
             name: "every section of Settings says its part: the accounts, the usage limits and what stays on this PC",
             run: walks_the_sections,
@@ -354,5 +356,43 @@ fn closed_settings_is_freed(ctx: &mut Ctx) -> Result {
         }
     }
     ensure(freed, || "the page still holds the Settings it closed".to_string())?;
+    ctx.close(app.id)
+}
+
+fn autostart_has_no_window(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let out = ctx.sb.data.join("startup.json");
+    let launch = Launch { args: vec!["--autostart".into()], checks_out: Some(out.clone()), ..claude_chat(ctx) };
+    let id = ctx.spawn(launch)?;
+    eventually("autostart setup to finish", crate::app::startup(), || out.exists())?;
+    let report: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(out).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    same(report["windowCount"].as_u64(), Some(0), "autostart webview windows")?;
+    ensure(ctx.exited(id).is_none(), || "autostart exited instead of staying in the tray".into())?;
+    ctx.close(id)
+}
+
+fn system_toggles_persist(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let mut app = ctx.launch(claude_chat(ctx))?;
+    let page = &mut app.page;
+    open_settings(page)?;
+    let awake = page.named("switch", "set.keepAwake")?;
+    let autostart = page.named("switch", "set.autostart")?;
+    let file = ctx.sb.data.join("settings.json");
+    for (keep_awake, start) in [(false, true), (true, false)] {
+        page.click(&awake)?;
+        page.click(&autostart)?;
+        eventually("system preferences to reach settings.json", Duration::from_secs(15), || {
+            std::fs::read_to_string(&file)
+                .ok()
+                .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+                .is_some_and(|saved| saved["keepAwake"] == keep_awake && saved["autostart"] == start)
+        })?;
+        page.reload()?;
+        open_settings(page)?;
+        same(page.is_checked(&awake)?, keep_awake, "keep-awake after reload")?;
+        same(page.is_checked(&autostart)?, start, "autostart after reload")?;
+    }
     ctx.close(app.id)
 }
