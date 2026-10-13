@@ -258,7 +258,8 @@ R108 adds reading the PR's check results and a merge card. Merging needs the own
 
 Files (all new, so Task 5 does not conflict): `engine/src/project/remote.rs` (one `pub mod remote;` line appended at the
 end of `project.rs`, where Task 5 does not edit), `testkit/src/remote.rs` (stateful fake git + gh, `pub mod` line in
-`testkit/src/lib.rs`), `testkit/tests/project_remote.rs`, the `reason.remote.*` keys in the five `ui/locales/*.ts`.
+`testkit/src/lib.rs`), `testkit/src/remote/tests.rs` (unit tests of the testkit library: an integration test there would make `cargo test`
+rebuild the running `faber-test` binary), the `reason.remote.*` keys in the five `ui/locales/*.ts`.
 
 Design:
 - `Runner` runs one `Call { tool: Git | Gh, cwd, args }` and returns `Reply { code, stdout }` or `Lost::Missing`
@@ -270,7 +271,7 @@ Design:
   an engine-read Done or Failed), `open` (remote intents without a settled receipt).
 - `Target { cwd, repo (owner/name), remote, url, branch (faber/...), head (oid), base, attempt, repo_identity, revision }`.
   The pushed ref is `<head oid>:refs/heads/<branch>`, so only the proven commit leaves, never a branch that moved since.
-- `preflight`: `gh --version`, `gh auth status` and the account login map to `reason.remote.ghMissing` and
+- `preflight`: `gh auth status` (a missing gh or a logged-out one) and the account login map to `reason.remote.ghMissing` and
   `reason.remote.ghLoggedOut`; `gh repo view` supplies `repo` for the start card.
 - `push`: grant, no open remote intent, local config guard (no command-bearing keys), effective push URL equals the
   granted one, secret scan of `git log -p <head> --not --remotes=<remote>`, `ls-remote` of the branch, ancestor check
@@ -288,7 +289,7 @@ Design:
   --match-head-commit <head>`, never deleting the branch, with the same intent/receipt/settle rule.
 - `reconcile` after a crash reads the live state of every open remote intent and settles it; it never re-runs one.
 
-Tests first (`testkit/tests/project_remote.rs`, scripted fake, no process, no network): Seguro denies push, PR, CI and
+Tests first (`testkit/src/remote/tests.rs`, scripted fake, no process, no network): Seguro denies push, PR, CI and
 merge; gh missing and gh logged out return keys with no intent; success push records intent then Done with the exact oid;
 already-pushed head sends nothing; divergence blocks and sends nothing; secret in the outgoing diff blocks; push rejected
 is Failed and retryable by a new attempt id; network loss after push is `Unknown` and `reconcile` settles it Done, and a
@@ -298,7 +299,7 @@ refused without yes, with an AI answer, with a yes for another head, with failin
 a person yes and passes `--match-head-commit`, no force flag and no branch deletion in any recorded call; `Process`
 builds shell-free argv with the expected environment (no spawn).
 
-Focused proof: `cargo test -p faber-testkit --test project_remote`, `cargo test -p faber-engine remote`, then the full set.
+Focused proof: `cargo test -p faber-testkit remote::tests`, then the full set.
 
 Seam for the runner (after Task 5 merges, because it edits the runner and the journal):
 1. After the local fast-forward and proof, call `remote::publish(&mut Process::find()?, &mut ledger, &target, &pr)`
@@ -306,8 +307,9 @@ Seam for the runner (after Task 5 merges, because it edits the runner and the jo
 2. Implement `Ledger` for the mission journal: `intent`/`receipt` over `record_intent`/`record_receipt`, `settle` over a new
    journal method that lets engine-read evidence replace `Unknown` (today only a Person decision can, in `Journal::reconcile`),
    `open` over `pending()` filtered to Push/DraftPr/Merge.
-3. Add `IntentKind::Merge` and `Effect::Merge` (`Step::Merge` maps to `DraftPr` until then) and a merge card in the board;
-   the Person's answer on `merge-<pr>-<head12>` is turned into `OwnerYes::from_decision`.
+3. Add `IntentKind::Merge` and `Effect::Merge` (`Step::Merge` maps to `DraftPr` until then) and a merge card in the board
+   (`MergeCard::decision()`, question key `decision.remote.merge`); the Person's answer on `merge-<pr>-<head12>` is turned
+   into `OwnerYes::from_decision`.
 4. At recovery call `remote::reconcile` for open remote intents before dispatching anything.
 5. Show the account from `preflight` and the `repo` on the Equilibrado start card.
 
