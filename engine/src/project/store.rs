@@ -73,6 +73,19 @@ struct Effects {
     entries: Vec<Entry>,
 }
 
+impl Effects {
+    fn pending(self) -> Vec<Intent> {
+        let mut open: Vec<Intent> = self
+            .entries
+            .into_iter()
+            .filter(|e| e.receipt.as_ref().is_none_or(|r| r.outcome == Outcome::Unknown))
+            .map(|e| e.intent)
+            .collect();
+        open.sort_by(|a, b| (a.at, &a.id).cmp(&(b.at, &b.id)));
+        open
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CachedProof {
@@ -128,6 +141,21 @@ pub struct Journal {
     records: PathBuf,
     private: PathBuf,
     disk: Arc<dyn Disk>,
+}
+
+#[cfg(test)]
+mod pending_path_tests {
+    use super::*;
+    #[test]
+    fn public_pending_preserves_owner_relative_paths_while_private_guard_refuses_them() {
+        let root = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
+        let data = PathBuf::from(root.path().file_name().unwrap()).join("data");
+        let journal = Journal::open(&root.path().join("repo"), &data, "m1").unwrap();
+        let intent = Intent::new("dispatch", "m1", super::super::IntentKind::Dispatch, 1, 100);
+        journal.record_intent(&intent).unwrap();
+        assert_eq!(journal.pending().unwrap(), vec![intent]);
+        assert!(Journal::pending_private(journal.private()).is_err());
+    }
 }
 
 impl Journal {
@@ -355,7 +383,7 @@ impl Journal {
 
     /// Intents with no receipt or an uncertain outcome: recovery must reconcile before anything resumes.
     pub fn pending(&self) -> Result<Vec<Intent>, JournalError> {
-        Self::pending_private(&self.private)
+        Ok(self.effects()?.pending())
     }
 
     pub(crate) fn pending_private(private: &Path) -> Result<Vec<Intent>, JournalError> {
@@ -369,14 +397,7 @@ impl Journal {
         if effects.schema() > SCHEMA {
             return Err(JournalError::Newer);
         }
-        let mut open: Vec<Intent> = effects
-            .entries
-            .into_iter()
-            .filter(|e| e.receipt.as_ref().is_none_or(|r| r.outcome == Outcome::Unknown))
-            .map(|e| e.intent)
-            .collect();
-        open.sort_by(|a, b| (a.at, &a.id).cmp(&(b.at, &b.id)));
-        Ok(open)
+        Ok(effects.pending())
     }
 
     pub fn record_check(&self, receipt: &super::wire::CheckReceipt) -> Result<(), JournalError> {

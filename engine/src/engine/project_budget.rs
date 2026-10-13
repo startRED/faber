@@ -283,9 +283,13 @@ mod tests {
         e.shutdown();
     }
 
+    fn canonical_area() -> tempfile::TempDir {
+        tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap()
+    }
+
     #[tokio::test]
     async fn local_update_pause_stops_owned_workers_without_releasing_leases_or_spend() {
-        let (dir, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (dir, repo) = (canonical_area(), canonical_area());
         let layout = crate::project::update::SlotLayout::new(
             &dir.path().join("dev"),
             &dir.path().join("installed-data"),
@@ -334,7 +338,7 @@ mod tests {
     #[tokio::test]
     async fn local_update_admission_is_coordinated_and_remains_closed_through_probation() {
         use crate::project::update::{CanaryVerdict, ExactTree, Slot, SlotLayout, SwapCheck, UpdateManager};
-        let (dir, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (dir, repo) = (canonical_area(), canonical_area());
         let layout =
             SlotLayout::new(&dir.path().join("dev"), &dir.path().join("installed-data"), &dir.path().join("installed-release")).unwrap();
         let manager = UpdateManager::new(layout.clone()).unwrap();
@@ -381,7 +385,7 @@ mod tests {
 
     #[tokio::test]
     async fn local_update_completed_mission_closes_warm_workers_without_reopening_authority() {
-        let (dir, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (dir, repo) = (canonical_area(), canonical_area());
         let e = engine(dir.path());
         let (j, mut r) = runner_fixture(&e, repo.path());
         e.mission_budget(Change::Admit(request())).unwrap();

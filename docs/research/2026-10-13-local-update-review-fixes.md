@@ -99,3 +99,11 @@ The quiescence seam is wired. The separately granted real canary, automatic acce
 tiny-goal repair acceptance still require their production receipts and qualified driver path; this integration
 does not substitute an imitation runner. Uncertain worker authority intentionally requires reconciliation before
 a swap. No recorded PID is adopted or killed, and no lease or spending record is deleted to make an update proceed.
+
+The first merged macOS CI run exposed a journal compatibility regression: changing every pending-effect read to an
+anchored update read rejected macOS's `/var` temporary-directory alias. The runner keeps its existing typed reader;
+only the lifecycle guard uses the strict private reader. Both readers share pending-effect filtering and ordering.
+`public_pending_preserves_owner_relative_paths_while_private_guard_refuses_them` failed before this correction and
+passes after it; restoring the regression also makes the test fail. New lifecycle fixtures use canonical temporary
+roots without relaxing the production guard's link or relative-path rejection. The same fixture correction removes
+the Windows CI runner's `RUNNER~1` temporary-root alias, which the production enrollment guard correctly refuses.
