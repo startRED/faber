@@ -130,9 +130,11 @@ fn handoff(ctx: &mut Ctx) -> Result {
     rejected.terminate();
     blocked?;
     ensure(status.is_some_and(|s| s.contains('1')), || "running mission admitted promotion".into())?;
-    ensure(matches!(manager.manifest().map_err(|e| e.key())?.ok_or("missing ready build")?.state, UpdateState::Ready { .. }), || {
-        "refused promotion changed build slots".into()
-    })?;
+    let manifest = manager.manifest().map_err(|e| e.key())?.ok_or("missing ready build")?;
+    ensure(matches!(manifest.state, UpdateState::Ready { .. }), || "refused promotion changed build slots".into())?;
+    ensure(manifest.current_good.as_ref().is_some_and(|g| g.slot == Slot::A), || "current slot must be Slot::A".into())?;
+    ensure(manifest.staged_tree.is_some(), || "next staged build slot must be present".into())?;
+    ensure(manifest.last_good.as_ref().is_some_and(|g| g.slot == Slot::A), || "last good slot is Slot::A".into())?;
     let baseline = start("--launch")?;
     let paused = eventually("old engine services pause before promotion", Duration::from_secs(15), || {
         faber_engine::project::run::Runner::load(&journal).is_ok_and(|r| r.mission.state == faber_engine::project::MissionState::Paused)

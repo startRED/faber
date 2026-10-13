@@ -145,7 +145,7 @@ impl Development {
             let waiting = match manifest.state {
                 UpdateState::PreparingNext { .. } => Some("projects.state.running"),
                 UpdateState::CanaryPending { .. } => Some("projects.task.review"),
-                UpdateState::Ready { .. } | UpdateState::Quiescent => Some("reason.task.waiting"),
+                UpdateState::Ready { .. } | UpdateState::Quiescent => Some("reason.update.quiescence"),
                 UpdateState::Swapping { .. } if manifest.extra.get("cleanExit") == Some(&Value::Bool(true)) => {
                     Some("projects.state.paused")
                 }

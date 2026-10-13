@@ -74,15 +74,20 @@ export function Projects(props: Props) {
 
   createEffect(on(goal, () => queueMicrotask(resize), { defer: true }));
 
-  onMount(() => {
-    let disposed = false;
-    const refresh = () => { void api.localUpdateState().then((view) => {
+  let disposed = false;
+  onCleanup(() => { disposed = true; });
+
+  const refreshLocalBuild = () => {
+    void api.localUpdateState().then((view) => {
       if (!disposed) setLocalBuild(view ?? undefined);
-    }, (err) => { if (!disposed) setError(errorText(err)); }); };
-    refresh();
-    const timer = setInterval(refresh, 30_000);
-    window.addEventListener('focus', refresh);
-    onCleanup(() => { disposed = true; clearInterval(timer); window.removeEventListener('focus', refresh); });
+    }, (err) => { if (!disposed) setError(errorText(err)); });
+  };
+
+  onMount(() => {
+    refreshLocalBuild();
+    const timer = setInterval(refreshLocalBuild, 30_000);
+    window.addEventListener('focus', refreshLocalBuild);
+    onCleanup(() => { clearInterval(timer); window.removeEventListener('focus', refreshLocalBuild); });
     let width = 0;
     const observer = new ResizeObserver(([entry]) => {
       if (entry.contentRect.width === width) return;
@@ -100,11 +105,22 @@ export function Projects(props: Props) {
     // Listen for mission events
     const unlisten = api.onMission((view) => {
       accept(view);
+      refreshLocalBuild();
     }).catch((err) => { setError(errorText(err)); return () => {}; });
     onCleanup(() => {
       void unlisten.then((fn) => fn(), () => {});
     });
   });
+
+  createEffect(
+    on(
+      mission,
+      () => {
+        refreshLocalBuild();
+      },
+      { defer: true },
+    ),
+  );
 
   // When project changes, restore saved goal and enroll
   const projectIdentity = createMemo(() => props.project?.id);
