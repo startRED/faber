@@ -363,6 +363,12 @@ pub struct Settings {
     /// How the user wants to be called, asked (optionally) at the first run. A patch with an empty text clears it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_name: Option<String>,
+    /// Keep the computer awake while Faber works (on by default: SetThreadExecutionState with ES_CONTINUOUS | ES_SYSTEM_REQUIRED).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_awake: Option<bool>,
+    /// Start Faber when signing in to Windows (off by default: registered in HKCU Run).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autostart: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

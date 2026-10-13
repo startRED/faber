@@ -142,6 +142,8 @@ export interface Settings {
   /** How the person asked to be called (at most 40 characters); the engine keeps it trimmed and none when cleared. A save with
    * an empty text clears it. */
   userName?: string;
+  keepAwake?: boolean;
+  autostart?: boolean;
 }
 export interface ModelInfo {
   id: string;
