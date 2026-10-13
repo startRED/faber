@@ -149,6 +149,14 @@ export function Settings(props: Props) {
                 <Toggle label={t('set.playSound')} hint={t('set.soundHint')} checked={props.saved.notificationSound !== false} onChange={(on) => props.onSave({ notificationSound: on })} />
               </div>
             </Row>
+            <Show when={navigator.userAgent.includes('Windows')}>
+              <Row label={t('set.system')}>
+                <div class="toggles">
+                  <Toggle label={t('set.keepAwake')} hint={t('set.keepAwakeHint')} checked={props.saved.keepAwake !== false} onChange={(on) => props.onSave({ keepAwake: on })} />
+                  <Toggle label={t('set.autostart')} hint={t('set.autostartHint')} checked={props.saved.autostart === true} onChange={(on) => props.onSave({ autostart: on })} />
+                </div>
+              </Row>
+            </Show>
           </Match>
           <Match when={section() === 'appearance'}>
             <AppearanceSection
