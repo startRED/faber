@@ -381,6 +381,7 @@ fn seed(dir: &Path, long: bool) -> Conversation {
         allow_always: None,
         branch_of: None,
         user_name: None,
+        persona_version: None,
         created_at: 1,
         updated_at: 2,
         queued: vec![],

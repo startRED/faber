@@ -64,6 +64,10 @@ fn valid_author(author: &Author) -> bool {
         .iter()
         .all(|s| !s.trim().is_empty() && s.len() <= 256 && !s.chars().any(|c| c.is_control() || matches!(c, '<' | '>')))
 }
+fn native_path(path: &Path) -> String {
+    let raw = path.to_string_lossy();
+    if let Some(unc) = raw.strip_prefix("\\\\?\\UNC\\") { format!("\\\\{unc}") } else { raw.strip_prefix("\\\\?\\").unwrap_or(&raw).into() }
+}
 fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
@@ -75,6 +79,8 @@ pub struct Invocation {
     /// Only ordinary `config --get user.*` enrollment reads see the user's global git configuration.
     pub identity: bool,
     pub author: Option<Author>,
+    /// A broker-owned disposable index; never the owner checkout index.
+    pub private_index: Option<PathBuf>,
 }
 impl Invocation {
     fn new(cwd: &Path, args: &[&str]) -> Self {
@@ -99,7 +105,7 @@ impl Invocation {
             fixed.extend(["-c".into(), config]);
         }
         fixed.extend(args.iter().map(|s| (*s).into()));
-        Self { cwd: cwd.into(), args: fixed, identity: false, author: None }
+        Self { cwd: cwd.into(), args: fixed, identity: false, author: None, private_index: None }
     }
 }
 
@@ -151,6 +157,9 @@ impl Process {
             .env("GIT_OPTIONAL_LOCKS", "0")
             .env("GIT_NO_LAZY_FETCH", "1")
             .env("GIT_LITERAL_PATHSPECS", "1");
+        if let Some(index) = &call.private_index {
+            command.env("GIT_INDEX_FILE", native_path(index));
+        }
         if let Some(author) = &call.author {
             command
                 .env("GIT_AUTHOR_NAME", &author.name)
@@ -287,7 +296,7 @@ impl<E: Executor> Broker<E> {
         &self.executor
     }
     // The caller must read current authority here, rather than capture a grant snapshot at admission.
-    fn authority(&self, grant: &mut impl FnMut() -> Result<Option<Grant>, GitError>, effect: Effect) -> Result<Grant, GitError> {
+    pub(crate) fn authority(&self, grant: &mut impl FnMut() -> Result<Option<Grant>, GitError>, effect: Effect) -> Result<Grant, GitError> {
         self.leases.verify_lock()?;
         let grant = grant()?.ok_or(GitError::Authority("reason.grant.none"))?;
         grant.allows(&self.repository.identity, self.revision, effect).map_err(GitError::Authority)?;
@@ -414,12 +423,8 @@ impl<E: Executor> Broker<E> {
             return Err(GitError::Lease(LeaseError::Owned));
         }
         let base = lease.base.clone();
-        let raw = root.to_str().ok_or(GitError::Repository)?;
-        let path = if let Some(unc) = raw.strip_prefix("\\\\?\\UNC\\") {
-            format!("\\\\{unc}")
-        } else {
-            raw.strip_prefix("\\\\?\\").unwrap_or(raw).into()
-        };
+        root.to_str().ok_or(GitError::Repository)?;
+        let path = native_path(&root);
         let call = Invocation::new(Path::new(&self.repository.identity.root), &["worktree", "add", "--detach", "--", &path, &base]);
         if let Err(e) = self.effect(&mut grant, id, IntentKind::Worktree, &[call], &[("path", &path), ("base", &base)], None) {
             self.leases.quarantine(lease)?;
@@ -466,11 +471,37 @@ impl<E: Executor> Broker<E> {
     /// Task 7 supplies accepted paths after its proof/review gates. Git never stages the entire directory.
     pub fn commit(
         &mut self,
+        grant: impl FnMut() -> Result<Option<Grant>, GitError>,
+        lease: &Lease,
+        id: &str,
+        message: &str,
+        accepted: &[String],
+    ) -> Result<String, GitError> {
+        self.commit_checked(grant, lease, id, message, accepted, None)
+    }
+    pub fn commit_proven(
+        &mut self,
+        grant: impl FnMut() -> Result<Option<Grant>, GitError>,
+        lease: &Lease,
+        id: &str,
+        message: &str,
+        accepted: &[String],
+        tree: &str,
+    ) -> Result<String, GitError> {
+        if !valid_oid(tree) {
+            return Err(GitError::Base);
+        }
+        self.commit_checked(grant, lease, id, message, accepted, Some(tree))
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn commit_checked(
+        &mut self,
         mut grant: impl FnMut() -> Result<Option<Grant>, GitError>,
         lease: &Lease,
         id: &str,
         message: &str,
         accepted: &[String],
+        proven: Option<&str>,
     ) -> Result<String, GitError> {
         let author = self.authority(&mut grant, Effect::Commit)?.author.filter(valid_author).ok_or(GitError::Author)?;
         self.leases.idle(lease)?;
@@ -520,6 +551,9 @@ impl<E: Executor> Broker<E> {
             if !valid_oid(&tree) {
                 return Err(GitError::Process);
             }
+            if proven.is_some_and(|expected| expected != tree) {
+                return Err(GitError::Authority("reason.queue.stale"));
+            }
             let mut call = Invocation::new(&root, &["commit-tree", &tree, "-p", &head, "-m", message]);
             call.author = Some(author.clone());
             self.effect(
@@ -541,6 +575,104 @@ impl<E: Executor> Broker<E> {
             }
         };
         text(output, GitError::Base)
+    }
+    pub fn head(&mut self) -> Result<String, GitError> {
+        self.leases.verify_lock()?;
+        let branch = format!("refs/heads/faber/{}", self.mission);
+        if !self.leases.owns_branch(&branch) {
+            return Err(LeaseError::Owned.into());
+        }
+        let head = text(
+            self.executor.execute(&Invocation::new(Path::new(&self.repository.identity.root), &["rev-parse", "--verify", &branch]))?,
+            GitError::Base,
+        )?;
+        if !valid_oid(&head) {
+            return Err(GitError::Base);
+        }
+        Ok(head)
+    }
+    /// Compose the current detached candidate without staging into its real index.
+    pub fn compose_tree(
+        &mut self,
+        mut grant: impl FnMut() -> Result<Option<Grant>, GitError>,
+        lease: &Lease,
+        accepted: &[String],
+    ) -> Result<String, GitError> {
+        self.authority(&mut grant, Effect::Worktree)?;
+        self.leases.idle(lease)?;
+        let mut paths = accepted.to_vec();
+        paths.sort();
+        paths.dedup();
+        if paths.is_empty() || paths != self.leases.audit(lease)? || self.head()? != lease.base {
+            return Err(GitError::Base);
+        }
+        let root = self.leases.worktree(lease)?;
+        let head = text(self.executor.execute(&Invocation::new(&root, &["rev-parse", "HEAD"]))?, GitError::Base)?;
+        if head != lease.base {
+            return Err(GitError::Base);
+        }
+        let index = real_path(
+            &self
+                .journal()
+                .private()
+                .canonicalize()
+                .map_err(|_| GitError::Process)?
+                .join(format!("compose-{}.index", uuid::Uuid::new_v4())),
+        )?;
+        let mut read = Invocation::new(&root, &["read-tree", &head]);
+        read.private_index = Some(index.clone());
+        let mut stage = Invocation::new(&root, &["add", "--"]);
+        stage.args.extend(paths);
+        stage.private_index = Some(index.clone());
+        let mut tree = Invocation::new(&root, &["write-tree"]);
+        tree.private_index = Some(index.clone());
+        let id = uuid::Uuid::new_v4().to_string();
+        let output =
+            self.effect(&mut grant, &id, IntentKind::Worktree, &[read, stage, tree], &[("phase", "compose"), ("base", &head)], None)?;
+        let tree = text(output, GitError::Process)?;
+        if !valid_oid(&tree) {
+            return Err(GitError::Process);
+        }
+        self.leases.audit(lease)?;
+        for path in [index.clone(), index.with_extension("index.lock")] {
+            real_path(&path)?;
+            match std::fs::remove_file(&path) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(LeaseError::Store(Fault::of_write(&e)).into()),
+            }
+        }
+        Ok(tree)
+    }
+    /// R106: delete only a durably released broker-owned worktree. Live, unknown and quarantined work is retained.
+    pub fn retire_worktree(
+        &mut self,
+        mut grant: impl FnMut() -> Result<Option<Grant>, GitError>,
+        lease: &Lease,
+        id: &str,
+    ) -> Result<(), GitError> {
+        self.authority(&mut grant, Effect::Worktree)?;
+        let root = self.leases.retired_worktree(lease)?;
+        let path = native_path(&root);
+        if let Some(receipt) = self.journal().effect_receipt(id)? {
+            if receipt.outcome == Outcome::Done
+                && receipt.evidence.get("phase").map(String::as_str) == Some("cleanup")
+                && receipt.evidence.get("path") == Some(&path)
+                && !root.exists()
+            {
+                return Ok(());
+            }
+            return Err(GitError::Process);
+        }
+        if !root.exists() {
+            return Err(GitError::Process);
+        }
+        let call = Invocation::new(Path::new(&self.repository.identity.root), &["worktree", "remove", "--force", "--", &path]);
+        self.effect(&mut grant, id, IntentKind::Worktree, &[call], &[("phase", "cleanup"), ("path", &path)], None)?;
+        if root.exists() {
+            return Err(GitError::Process);
+        }
+        Ok(())
     }
     pub fn finish(self) -> Result<(), GitError> {
         Ok(self.leases.finish()?)

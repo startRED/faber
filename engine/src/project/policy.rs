@@ -84,14 +84,8 @@ pub async fn reject_native(
 }
 
 pub(crate) fn invocation(vendor: Vendor, model: Option<&str>, effort: Option<&str>, side_question: bool) -> Result<(), Blocker> {
-    let prefix = match vendor {
-        Vendor::Claude => "claude-",
-        Vendor::Codex => "gpt-",
-    };
     if side_question
-        || !model.is_some_and(|m| {
-            m.starts_with(prefix) && m.len() > prefix.len() && m.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.')
-        })
+        || !model.is_some_and(|m| super::worker::full_model_id(vendor, m))
         || !matches!(effort, Some("low" | "medium" | "high" | "xhigh" | "max"))
     {
         return Err(Blocker::Invocation);

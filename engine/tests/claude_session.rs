@@ -338,7 +338,7 @@ fn the_name_is_appended_to_the_default_prompt_of_a_conversation_but_never_to_a_s
         assert!(after(&args, "--append-system-prompt").contains("called Erick."));
         assert!(!args.contains(&"--system-prompt".into()), "the default prompt stays");
         assert_eq!(args, claude_args(&named(launch(area))), "the same launch gives the same arguments");
-        assert!(!claude_args(&launch(area)).contains(&"--append-system-prompt".into()));
+        assert!(after(&claude_args(&launch(area)), "--append-system-prompt").contains("You are Faber"));
     }
     let resumed = claude_args(&named(ClaudeLaunch { resume: Some("abc".into()), ..launch(Area::Chat) }));
     assert_eq!(after(&resumed, "--append-system-prompt"), after(&claude_args(&named(launch(Area::Chat))), "--append-system-prompt"));

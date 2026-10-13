@@ -28,9 +28,10 @@ use faber_engine::codex::{ModelInfo, list_codex_models, read_codex_limits};
 use faber_engine::model::{Area, Conversation, Project, Settings, Vendor};
 use faber_engine::proc::{Spawner, real_spawner};
 use faber_engine::project::git::{Process, enroll};
+use faber_engine::project::run::Runner;
 use faber_engine::project::store::Journal;
 use faber_engine::project::wire::{DecisionView, EnrollView, MissionView, TaskView};
-use faber_engine::project::{DecidedBy, Effect, GitMode, Grant, Mission, MissionState, RunMode};
+use faber_engine::project::{Effect, GitMode, Grant, Mission, RunMode};
 use faber_engine::{AppEvent, AppState, BranchRequest, Engine, EngineOptions, SendRequest, WarmRequest};
 use look::{Failure, Look, ThemeFile};
 use serde::Serialize;
@@ -54,7 +55,7 @@ pub(crate) struct Faber {
     pub(crate) data_dir: PathBuf,
     pub(crate) hidden: bool,
     /// Serialize journal snapshots and mutations, so an answer cannot overwrite a newer view.
-    missions: Mutex<()>,
+    missions: Arc<tauri::async_runtime::Mutex<()>>,
     pub(crate) awake: Arc<Mutex<CountedAwake>>,
     pub(crate) autostart: Mutex<Arc<dyn AutostartKeeper>>,
 }
@@ -361,7 +362,7 @@ fn build_mission_view(faber: &Faber, mission: &Mission, journal: &Journal, grant
     Ok(MissionView {
         mission_id: mission.id.clone(),
         revision: project_commands::revision(mission),
-        state: if mission.state == MissionState::Running { MissionState::Blocked } else { mission.state },
+        state: mission.state,
         mode: mission.mode,
         git_mode: grant.mode,
         goal: mission.goal.clone(),
@@ -371,11 +372,7 @@ fn build_mission_view(faber: &Faber, mission: &Mission, journal: &Journal, grant
         pace,
         decisions: decision_views,
         build: None,
-        reason: if mission.state == MissionState::Running {
-            Some("reason.mission.runnerUnavailable".into())
-        } else {
-            mission.reason.clone()
-        },
+        reason: mission.reason.clone(),
     })
 }
 
@@ -383,12 +380,13 @@ fn find_mission_and_journal(faber: &Faber, mission_id: &str) -> Res<(Project, Jo
     project_commands::id(mission_id)?;
     let projects = faber.engine.projects_checked()?;
     for p in projects {
-        let record = Path::new(&p.path).join(".faber/missions").join(mission_id).join("mission.json");
-        if !record.is_file() {
+        let record = Path::new(&p.path).join(".faber/missions").join(mission_id);
+        let checkpoint = faber.data_dir.join("missions").join(mission_id).join("run.json");
+        if !record.join("mission.json").is_file() && !(record.is_dir() && checkpoint.is_file()) {
             continue;
         }
         let journal = Journal::open(Path::new(&p.path), &faber.data_dir, mission_id).map_err(|e| e.key().to_string())?;
-        let mission = journal.mission().map_err(|e| e.key().to_string())?.ok_or("error.journal.mismatch")?;
+        let mission = Runner::open(&journal).map_err(str::to_string)?.mission;
         if mission.id != mission_id || mission.project_id != p.id || p.repo.as_ref().is_none_or(|r| r.common_dir != mission.repo) {
             return Err("error.journal.mismatch".into());
         }
@@ -399,7 +397,7 @@ fn find_mission_and_journal(faber: &Faber, mission_id: &str) -> Res<(Project, Jo
 
 fn restore_mission_notices(app: &AppHandle) -> Res<()> {
     let faber = app.state::<Faber>();
-    let _turn = lock(&faber.missions);
+    let _turn = faber.missions.blocking_lock();
     for project in faber.engine.projects_checked()? {
         let entries = match std::fs::read_dir(Path::new(&project.path).join(".faber/missions")) {
             Ok(entries) => entries,
@@ -489,19 +487,30 @@ async fn project_revoke(faber: State<'_, Faber>, project_id: String) -> Res<()> 
 
 #[tauri::command]
 async fn mission_start(app: AppHandle, faber: State<'_, Faber>, project_id: String, goal: String) -> Res<String> {
+    let _turn = faber.missions.lock().await;
     project_commands::id(&project_id)?;
     let project = faber.engine.project(&project_id)?;
     let grant = project.grant.as_ref().ok_or("reason.grant.none")?;
     project.allows(Effect::Worktree, grant.revision).map_err(|k| k.to_string())?;
     project_commands::text(&goal)?;
-    let _ = app;
-    // T5 is absent on this branch. A journal state is not proof that a worker started.
-    Err("reason.mission.runnerUnavailable".into())
+    Runner::role_vendor(&faber.engine)?;
+    let mut process = Process::find().map_err(|e| e.key().to_string())?;
+    let repo = enroll(&mut process, Path::new(&project.path), "HEAD").map_err(|e| e.key().to_string())?;
+    if project.repo.as_ref() != Some(&repo.identity) {
+        return Err("reason.grant.otherRepo".into());
+    }
+    let mission = faber.engine.new_mission(&project, &goal, &repo.base)?;
+    let journal = Journal::open(Path::new(&project.path), &faber.data_dir, &mission.id).map_err(|e| e.key().to_string())?;
+    let runner = Runner::start(&journal, &faber.engine, mission)?;
+    let view = build_mission_view(&faber, &runner.mission, &journal, grant)?;
+    let _ = app.emit("mission", &view);
+    tray::on_mission(&app, &view);
+    Ok(runner.mission.id)
 }
 
 #[tauri::command]
 async fn mission_state(faber: State<'_, Faber>, mission_id: String) -> Res<MissionView> {
-    let _turn = lock(&faber.missions);
+    let _turn = faber.missions.lock().await;
     let (project, journal, mission) = find_mission_and_journal(&faber, &mission_id)?;
     let grant = project.grant.unwrap_or_else(|| Grant::new(&mission.repo, GitMode::Seguro, mission.grant_revision, mission.created_at));
     build_mission_view(&faber, &mission, &journal, &grant)
@@ -509,13 +518,13 @@ async fn mission_state(faber: State<'_, Faber>, mission_id: String) -> Res<Missi
 
 #[tauri::command]
 async fn mission_mode(app: AppHandle, faber: State<'_, Faber>, mission_id: String, mode: RunMode) -> Res<MissionView> {
-    let _turn = lock(&faber.missions);
-    let (project, journal, mut mission) = find_mission_and_journal(&faber, &mission_id)?;
+    let _turn = faber.missions.lock().await;
+    let (project, journal, mission) = find_mission_and_journal(&faber, &mission_id)?;
     project_commands::editable(&mission)?;
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    mission.mode = mode;
-    project_commands::changed(&mut mission, now)?;
-    journal.save_mission(&mission).map_err(|e| e.key().to_string())?;
+    let mut runner = Runner::load(&journal).map_err(str::to_string)?;
+    runner.mode(&journal, mode, now).map_err(str::to_string)?;
+    let mission = runner.mission;
     let grant = project.grant.unwrap_or_else(|| Grant::new(&mission.repo, GitMode::Seguro, mission.grant_revision, mission.created_at));
     let view = build_mission_view(&faber, &mission, &journal, &grant)?;
     let _ = app.emit("mission", &view);
@@ -525,14 +534,12 @@ async fn mission_mode(app: AppHandle, faber: State<'_, Faber>, mission_id: Strin
 
 #[tauri::command]
 async fn mission_stop(app: AppHandle, faber: State<'_, Faber>, mission_id: String) -> Res<MissionView> {
-    let _turn = lock(&faber.missions);
-    let (project, journal, mut mission) = find_mission_and_journal(&faber, &mission_id)?;
+    let _turn = faber.missions.lock().await;
+    let (project, journal, mission) = find_mission_and_journal(&faber, &mission_id)?;
     project_commands::editable(&mission)?;
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    mission.state = MissionState::Paused;
-    mission.reason = Some("reason.interrupted".into());
-    project_commands::changed(&mut mission, now)?;
-    journal.save_mission(&mission).map_err(|e| e.key().to_string())?;
+    let mut runner = Runner::load(&journal).map_err(str::to_string)?;
+    runner.stop(&journal, &faber.engine).await?;
+    let mission = runner.mission;
     let grant = project.grant.unwrap_or_else(|| Grant::new(&mission.repo, GitMode::Seguro, mission.grant_revision, mission.created_at));
     let view = build_mission_view(&faber, &mission, &journal, &grant)?;
     let _ = app.emit("mission", &view);
@@ -542,12 +549,18 @@ async fn mission_stop(app: AppHandle, faber: State<'_, Faber>, mission_id: Strin
 
 #[tauri::command]
 async fn mission_resume(app: AppHandle, faber: State<'_, Faber>, mission_id: String) -> Res<MissionView> {
-    let _turn = lock(&faber.missions);
+    let _turn = faber.missions.lock().await;
     let (project, journal, mission) = find_mission_and_journal(&faber, &mission_id)?;
     project_commands::editable(&mission)?;
     project.allows(Effect::Worktree, mission.grant_revision).map_err(str::to_string)?;
-    let _ = (app, journal);
-    Err("reason.mission.runnerUnavailable".into())
+    let mut runner = Runner::load(&journal).map_err(str::to_string)?;
+    runner.resume(&journal, &faber.engine)?;
+    let mission = runner.mission;
+    let grant = project.grant.ok_or("reason.grant.none")?;
+    let view = build_mission_view(&faber, &mission, &journal, &grant)?;
+    let _ = app.emit("mission", &view);
+    tray::on_mission(&app, &view);
+    Ok(view)
 }
 
 #[tauri::command]
@@ -558,17 +571,15 @@ async fn mission_answer(
     decision_id: String,
     answer: String,
 ) -> Res<MissionView> {
-    let _turn = lock(&faber.missions);
-    let (project, journal, mut mission) = find_mission_and_journal(&faber, &mission_id)?;
+    let _turn = faber.missions.lock().await;
+    let (project, journal, mission) = find_mission_and_journal(&faber, &mission_id)?;
     project_commands::editable(&mission)?;
     project_commands::id(&decision_id)?;
     project_commands::text(&answer)?;
-    let mut decision = journal.decision(&decision_id).map_err(|e| e.key().to_string())?.ok_or("error.decision.option")?;
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    decision.answer(DecidedBy::Person, &answer, now).map_err(|k| k.to_string())?;
-    journal.save_decision(&decision).map_err(|e| e.key().to_string())?;
-    project_commands::changed(&mut mission, now)?;
-    journal.save_mission(&mission).map_err(|e| e.key().to_string())?;
+    let mut runner = Runner::load(&journal).map_err(str::to_string)?;
+    runner.answer(&journal, &decision_id, &answer, now).map_err(str::to_string)?;
+    let mission = runner.mission;
     let grant = project.grant.unwrap_or_else(|| Grant::new(&mission.repo, GitMode::Seguro, mission.grant_revision, mission.created_at));
     let view = build_mission_view(&faber, &mission, &journal, &grant)?;
     let _ = app.emit("mission", &view);
@@ -585,7 +596,7 @@ async fn probe_mission_attention(
     focused: bool,
     attention: String,
 ) -> Res<Value> {
-    let _turn = lock(&faber.missions);
+    let _turn = faber.missions.lock().await;
     let (project, journal, mission) = find_mission_and_journal(&faber, &mission_id)?;
     let grant = project.grant.ok_or("reason.grant.none")?;
     let view = build_mission_view(&faber, &mission, &journal, &grant)?;
@@ -852,13 +863,15 @@ fn main() {
                 runtime: tauri::async_runtime::handle().inner().clone(),
                 ask: None,
             };
+            let engine = Engine::new(opts, emit);
+            let missions = engine.mission_lock();
             app.manage(Faber {
-                engine: Engine::new(opts, emit),
+                engine,
                 models: Mutex::default(),
                 update: Mutex::default(),
                 data_dir: data_dir.clone(),
                 hidden,
-                missions: Mutex::new(()),
+                missions,
                 awake,
                 autostart: Mutex::new(autostart_keeper),
             });
