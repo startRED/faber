@@ -248,7 +248,9 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                         quota_seen = false;
                         let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
                     }
-                    Some(SessionCommand::Steer(_)) => {}
+                    // Claude Code queues what it is sent mid-turn in an order its docs do not promise, so Faber holds the
+                    // message itself and never steers this CLI; if asked anyway, say it was not delivered.
+                    Some(SessionCommand::Steer { tag, .. }) => on_event(EngineEvent::SteerFailed { tag }),
                     Some(SessionCommand::Answer { request_id, allow, ack }) => {
                         // The request stays pending until the write worked, so a failed write can be answered again.
                         let delivery = match pending.get(&request_id) {
