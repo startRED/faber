@@ -19,6 +19,22 @@ fn attachments_get_safe_unique_names_and_are_not_reported_as_created_by_the_answ
 }
 
 #[test]
+fn attachments_accept_a_trusted_tilde_root_without_relaxing_file_boundaries() {
+    let parent = tempfile::tempdir().unwrap();
+    let root = parent.path().join("working~1");
+    std::fs::create_dir(&root).unwrap();
+    let file = || Attachment { name: "notes.pdf".into(), base64: "JVBERi0xLjQ=".into() };
+    let saved = save_files(&root, &root.join("attachments"), &[file(), file()]);
+    assert_eq!(saved, [root.join("attachments/notes.pdf"), root.join("attachments/notes-1.pdf")]);
+    assert!(saved.iter().all(|path| path.is_file()));
+    for dir in [parent.path().join("outside"), root.join(".git"), root.join("../outside")] {
+        assert!(save_files(&root, &dir, &[file()]).is_empty());
+    }
+    assert!(!parent.path().join("outside").exists());
+    assert!(!root.join(".git").exists());
+}
+
+#[test]
 fn only_files_changed_since_the_turn_started_are_listed_with_forward_slashes() {
     let dir = tempfile::tempdir().unwrap();
     let old = dir.path().join("old.txt");

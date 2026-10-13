@@ -93,6 +93,11 @@ A literal-tilde working-root test reproduced the same denial locally. Git now va
 the canonical root rather than treating its trusted prefix as shell syntax. User-supplied expansion/traversal and
 network paths remain rejected, with the existing external-read and `-C` directory tests retained.
 
+Windows CI also exposed attachment writes under a trusted 8.3 temporary root being rejected as shell
+expansion. A literal-tilde root test reproduced the failure before the fix. Host attachment paths now
+use relative operands under their trusted root; outside directories, traversal, junctions and `.git`
+remain refused by the same file policy. Duplicate-name handling is covered by the regression too.
+
 ## Boundary and limits
 
 This is a host tool policy, not OS isolation. File decisions use canonical paths and refuse protected targets. Shell
