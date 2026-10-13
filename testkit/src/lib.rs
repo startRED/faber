@@ -14,6 +14,7 @@ pub mod proctree;
 pub mod replay;
 pub mod report;
 pub mod runner;
+pub mod sentinel;
 pub mod sandbox;
 pub mod screen;
 pub mod server;

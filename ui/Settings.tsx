@@ -80,7 +80,7 @@ export function Settings(props: Props) {
     }
   });
   return (
-    <div class="settings">
+    <div class="settings" data-screen="settings" data-surface="settings">
       <nav class="s-nav nav" aria-label={t('set.label')}>
         <button class="item" onClick={() => props.onClose()}>
           <span>{t('set.back')}</span>

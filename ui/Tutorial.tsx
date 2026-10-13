@@ -47,6 +47,7 @@ function Card(props: { step: TourStep; n: number; total: number; onNext: () => v
   return (
     <div
       class="coach"
+      data-surface="tutorial.card"
       ref={(el) => (card = el)}
       role="dialog"
       aria-modal="true"
