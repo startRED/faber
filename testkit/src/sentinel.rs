@@ -293,6 +293,11 @@ pub fn shrink_problem(height_after: f64, min: f64) -> Option<String> {
     (height_after > min + 1.0).then(|| format!("{height_after:.0} px after sending, back to {min:.0} px wanted"))
 }
 
+/// I5. A thread that was at its end stays at its end when the composer grows (`from_end` is how far from it, in px).
+pub fn kept_problem(from_end: f64) -> Option<String> {
+    (from_end > 1.0).then(|| format!("the thread is {from_end:.0} px from its end after the composer grew"))
+}
+
 /// L4. The last line of the last message must end at least 24 px above the composer.
 pub fn gap_problem(last_line_bottom: f64, composer_top: f64) -> Option<String> {
     let gap = composer_top - last_line_bottom;
@@ -484,5 +489,15 @@ mod tests {
         assert_eq!(cut_problem(700.0, 700.0, false), None);
         assert!(cut_problem(712.0, 700.0, false).is_some());
         assert!(cut_problem(700.0, 700.0, true).unwrap().contains("covered"), "planted twin: the composer lies over the last item");
+    }
+
+    #[test]
+    fn a_thread_that_leaves_its_end_when_the_composer_grows_is_found() {
+        assert_eq!(kept_problem(0.0), None);
+        assert_eq!(kept_problem(0.4), None, "less than a pixel is rounding");
+        assert!(
+            kept_problem(180.0).unwrap().contains("180 px"),
+            "planted twin: the thread stays where it was and the composer covers its end"
+        );
     }
 }

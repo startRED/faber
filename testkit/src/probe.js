@@ -28,7 +28,8 @@
   const roots = () => [document, ...[...document.querySelectorAll('.motion-exit')].map((layer) => layer.shadowRoot).filter(Boolean)];
   const effective = (el) => {
     let opacity = 1;
-    for (let node = el; node && node.nodeType === 1; node = node.parentElement) opacity *= parseFloat(getComputedStyle(node).opacity);
+    // Past the top of a shadow root the next element is its host.
+    for (let node = el; node && node.nodeType === 1; node = node.parentElement ?? node.getRootNode().host) opacity *= parseFloat(getComputedStyle(node).opacity);
     return opacity;
   };
   // [present, x, y, width, height, opacity] of the most visible element of this surface, the original or an exit copy.
