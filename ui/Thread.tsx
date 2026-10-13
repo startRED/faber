@@ -8,6 +8,7 @@ import { QuotaCard } from './QuotaCard.tsx';
 import { untilReset } from './Sidebar.tsx';
 import { fromEngine, t } from './i18n.ts';
 import { prettyModel, vendorName, type Option } from './models.ts';
+import { animateList } from './motion.ts';
 
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
 
@@ -81,49 +82,65 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
   const m = () => props.m();
   const streaming = () => m().status === 'streaming';
   const waiting = () => m().permissions ?? [];
+  // Unknown legacy boundaries and tool-terminated turns keep the entire answer visible.
+  const boundary = () => {
+    const end = m().activityEnd;
+    return m().tools?.length && Number.isInteger(end) && end! > 0 && end! < m().text.length && m().text.slice(end).trim() ? end! : 0;
+  };
+  const narration = () => boundary() ? [m().text.slice(0, boundary())] : [];
+  const finalText = () => m().text.slice(boundary());
+  const steps = () => narration().length + (m().tools?.length ?? 0) + (m().thinking ? 1 : 0);
+  const commands = () => m().tools?.filter((tool) => /bash|command|exec|shell/i.test(tool.name)).length ?? 0;
+  const latest = () => {
+    const tool = m().tools?.at(-1);
+    return tool && tool.ok === undefined ? toolLabel(tool) : finalText().trim().split('\n').at(-1) || (tool ? toolLabel(tool) : m().thinking);
+  };
   return (
-    <article class="ai" aria-label={t('answer.label')} aria-busy={streaming()}>
+    <article class="ai" aria-label={t('answer.label')}>
       <div class="model">
         <span class="vm" classList={{ claude: m().vendor === 'claude', codex: m().vendor === 'codex' }}>
           <VendorMark vendor={m().vendor} />
           <b>{m().vendor ? vendorName(m().vendor!) : t('model.auto')}</b>
         </span>
         <span>{streaming() && m().waitUntil ? t('run.waiting', { when: untilReset(m().waitUntil!) }) : streaming() ? t('answer.answering') : m().vendor ? prettyModel(m().model) : ''}</span>
+        <Show when={m().effort}>{(effort) => <span>{t('effort.label')}: {t(`effort.${effort()}`)}</span>}</Show>
         <Show when={m().reason}>
           <em>· {fromEngine(m().reason, { when: m().waitUntil ? untilReset(m().waitUntil!) : t('quota.unknown'), from: m().movedFrom ? vendorName(m().movedFrom!) : '', to: m().vendor ? vendorName(m().vendor!) : '' })}</em>
         </Show>
       </div>
       <Show when={m().pace}>{(pace) => <p class="pace">{t(`reason.pace.${pace().kind}`, { vendor: vendorName(pace().vendor) })}</p>}</Show>
       <QuotaCard id={props.conversationId} m={m()} usage={props.usage ?? []} />
-      <Show when={m().thinking}>
-        <details class="thinking">
-          <summary>{t('answer.thinking')}</summary>
-          <div>{m().thinking}</div>
+      <Show when={steps()}>
+        <details class="activity">
+          <summary>{t(streaming() ? 'activity.working' : 'activity.done', { steps: t('activity.steps', { n: steps() }), commands: t('activity.commands', { n: commands() }) })}</summary>
+          <div class="activity-body">
+            <Show when={m().thinking}><div class="activity-thinking">{m().thinking}</div></Show>
+            <For each={narration()}>{(text) => <div class="md" onClick={openLinks} innerHTML={html(text)} />}</For>
+            <div class="tools">
+              <For each={m().tools}>
+                {(tool) => (
+                  <span class={tool.ok === false ? 'bad' : ''} title={tool.output ?? toolLabel(tool)}>
+                    <Show when={tool.ok === true}>
+                      <Icon name="check" small />
+                    </Show>
+                    <i>{toolLabel(tool)}</i>
+                  </span>
+                )}
+              </For>
+            </div>
+          </div>
         </details>
-      </Show>
-      <Show when={m().tools?.length}>
-        <div class="tools">
-          <For each={m().tools}>
-            {(tool) => (
-              <span class={tool.ok === false ? 'bad' : ''} title={tool.output ?? toolLabel(tool)}>
-                <Show when={tool.ok === true}>
-                  <Icon name="check" small />
-                </Show>
-                <i>{toolLabel(tool)}</i>
-              </span>
-            )}
-          </For>
-        </div>
+        <Show when={streaming() && latest()}><div class="activity-latest" role="status" aria-live="polite" aria-atomic="true" title={latest()}>{latest()}</div></Show>
       </Show>
       <Asks conversationId={props.conversationId} turnId={m().id} permissions={waiting()} />
-      <div class="md" onClick={openLinks}>
-        <div innerHTML={html(m().text)} />
+      <div class="md" aria-busy={streaming()} onClick={openLinks}>
+        <div innerHTML={html(finalText())} />
         <Show when={streaming() && !waiting().length && !m().waitUntil}>
           <span class="cursor" aria-hidden="true" />
         </Show>
       </div>
       <Show when={m().files?.length}>
-        <div class="files" aria-label={t('files.label')}>
+        <div class="files" aria-label={t('files.label')} ref={animateList}>
           <For each={m().files}>{(f) => <FileCard conversationId={props.conversationId} file={f} />}</For>
         </div>
       </Show>

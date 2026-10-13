@@ -45,6 +45,8 @@ pub enum CliSlot {
 /// What a scenario chooses for a launch; everything else comes from the sandbox.
 #[derive(Debug, Clone, Default)]
 pub struct Launch {
+    /// Exercises raster costs that a local GPU can hide; used only by the motion benchmark.
+    pub software_rendering: bool,
     pub claude: CliSlot,
     pub codex: CliSlot,
     /// `FABER_FAKE_RECORDING`, for the fake CLIs.
@@ -235,6 +237,9 @@ pub fn child_env(parent: &[(String, String)], sb: &Sandbox, launch: &Launch, fak
     set("CODEX_HOME", path(&sb.profile.join("fake-home")));
     set("WEBVIEW2_USER_DATA_FOLDER", path(&sb.webview));
     set("FABER_HIDDEN", "1".into());
+    if launch.software_rendering {
+        set("FABER_SOFTWARE_RENDERING", "1".into());
+    }
     set("FABER_DATA_DIR", path(&sb.data));
     set("FABER_FAKE_STATE_DIR", path(&sb.state));
     set("FABER_SETUP_SOURCE", launch.setup_source.clone().unwrap_or_else(|| DEAD_ORIGIN.into()));
@@ -325,6 +330,7 @@ mod tests {
             ("HTTPS_PROXY", "http://real-proxy:8080"),
             ("claude_oauth_token", "lowercase-secret"),
             ("FABER_CLI_CLAUDE", "stale"),
+            ("FABER_SOFTWARE_RENDERING", "stale"),
             ("NO_PROXY", "internal.example"),
             ("SystemRoot", r"C:\Windows"),
             ("DISPLAY", ":99"),
@@ -338,6 +344,9 @@ mod tests {
             assert!(env.values().all(|v| !v.contains(secret)), "{secret} reached the child: {env:?}");
         }
         assert!(!env.contains_key("Path") && !env.contains_key("claude_oauth_token"));
+        assert!(!env.contains_key("FABER_SOFTWARE_RENDERING"));
+        let software = child_env(&real, &sb, &Launch { software_rendering: true, ..launch.clone() }, Path::new("fake-cli.exe"));
+        assert_eq!(software.get("FABER_SOFTWARE_RENDERING").map(String::as_str), Some("1"));
         assert!(
             env.keys().filter(|k| k.to_ascii_uppercase().starts_with("WEBVIEW2_")).all(|k| k == "WEBVIEW2_USER_DATA_FOLDER"),
             "{env:?}"

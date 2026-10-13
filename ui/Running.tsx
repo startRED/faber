@@ -5,6 +5,7 @@ import { Icon, VendorMark } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 import { Peek } from './Mark.tsx';
 import { vendorName } from './models.ts';
+import { animateList } from './motion.ts';
 import { untilReset } from './Sidebar.tsx';
 import { blocksOf, elapsed } from './running.ts';
 
@@ -41,7 +42,7 @@ export function Running(props: {
         </h2>
         <span class="n num">{props.items.length}</span>
       </div>
-      <div class="rc-body">
+      <div class="rc-body" ref={animateList}>
         <Show
           when={props.items.length > 0}
           fallback={
@@ -63,10 +64,10 @@ export function Running(props: {
                     </span>
                   </Show>
                 </h3>
-                <ul class="ritems">
+                <ul class="ritems" ref={animateList}>
                   <For each={block.items}>
                     {(item) => (
-                      <li class="ri" classList={{ need: item.state === 'needsYou' }}>
+                      <li class="ri" classList={{ need: item.state === 'needsYou' }} ref={animateList}>
                         <div class="rhead">
                           <Show when={item.state === 'needsYou'}>
                             <span class="ask-label">

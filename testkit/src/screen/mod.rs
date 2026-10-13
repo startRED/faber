@@ -7,6 +7,7 @@ pub mod containment;
 pub mod first_run;
 pub mod permissions;
 pub mod projects;
+pub mod review;
 pub mod settings;
 pub mod setup;
 pub mod shell;
@@ -33,6 +34,7 @@ pub fn all() -> Vec<Scenario> {
         .chain(permissions::scenarios())
         .chain(projects::scenarios())
         .chain(shell::scenarios())
+        .chain(review::scenarios())
         .chain(settings::scenarios())
         .chain(setup::scenarios())
         .chain(first_run::scenarios());
@@ -150,6 +152,8 @@ pub fn ask(page: &mut Page, question: &str) -> Result {
     // first time; Send turns enabled once the message can go.
     let send = page.named("button", "composer.send")?;
     page.wait_enabled(&send)?;
+    // A native click establishes input focus; DOM focus alone can precede the window's input frame.
+    page.click(&composer)?;
     page.press_on(&composer, "Enter")?;
     page.wait_for("the composer to empty", "document.querySelector('.composer textarea')?.value === ''")
 }

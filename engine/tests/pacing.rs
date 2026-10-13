@@ -126,7 +126,7 @@ async fn auto_after_a_manual_turn_does_not_bypass_unknown_billing() {
     let mut r = rig(dir.path(), &[Vendor::Claude], verdicts(vec![("chat", "easy")]));
     r.engine
         .note_account_events(Vendor::Claude, vec![EngineEvent::Signals(Signals { billing: Some(Billing::Unknown), ..Signals::default() })]);
-    let chosen = SendRequest { choice: Choice { vendor: "claude".into(), model: Some("haiku".into()) }, ..auto(SKY) };
+    let chosen = SendRequest { choice: Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None }, ..auto(SKY) };
     let id = r.engine.send(chosen).unwrap();
     finished(&mut r.rx).await;
     let sent = r.claude.wire.lines_with("\"type\":\"user\"");
@@ -143,7 +143,7 @@ fn both(dir: &Path, ask: Ask) -> Rig {
 }
 
 fn auto(text: &str) -> SendRequest {
-    let choice = Choice { vendor: "auto".into(), model: None };
+    let choice = Choice { vendor: "auto".into(), model: None, effort: None };
     SendRequest { conversation_id: None, area: Area::Chat, project_id: None, text: text.into(), images: vec![], files: vec![], choice }
 }
 
@@ -336,7 +336,7 @@ async fn a_login_billed_by_use_is_never_picked_by_auto_but_the_user_can_pick_it(
     assert_eq!((reply.vendor, went), (Some(Vendor::Codex), Went::Codex("gpt-6.1-sol")));
     assert!(r.claude.args.lock().unwrap().is_empty());
 
-    let by_hand = SendRequest { choice: Choice { vendor: "claude".into(), model: Some("haiku".into()) }, ..auto(SKY) };
+    let by_hand = SendRequest { choice: Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None }, ..auto(SKY) };
     r.engine.send(by_hand).unwrap();
     let reply = finished(&mut r.rx).await;
     assert_eq!((reply.vendor, reply.status), (Some(Vendor::Claude), Some(Status::Done)), "the user's own choice stands");

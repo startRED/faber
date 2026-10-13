@@ -164,6 +164,7 @@ mod tests {
                     by_hand: true,
                     approved: false,
                     started: NOW,
+                    answer_started: false,
                 },
             );
             c.remove(&id);

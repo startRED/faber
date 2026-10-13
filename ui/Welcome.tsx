@@ -4,6 +4,7 @@ import { Icon, VendorMark } from './Glyphs.tsx';
 import { greetingParts } from './greeting.ts';
 import { lang, t } from './i18n.ts';
 import { vendorName } from './models.ts';
+import { animateList } from './motion.ts';
 import { pickUp } from './running.ts';
 
 const SUGGESTIONS = ['suggest.1', 'suggest.2', 'suggest.3'] as const;
@@ -36,7 +37,7 @@ export function Welcome(props: {
   const live = (id: string) => props.running.find((i) => i.conversationId === id);
   const where = (c: Summary) => (c.area === 'chat' ? t('area.chat') : (props.projects.find((p) => p.id === c.projectId)?.name ?? t('area.projects')));
   return (
-    <div class="welcome-grid">
+    <div class="welcome-grid" ref={animateList}>
       <div class="w-main">
         <h1 class="display hello">
           {title()[0]}
@@ -60,7 +61,7 @@ export function Welcome(props: {
         </section>
       </div>
       <Show when={rows().length > 0}>
-        <section class="resume" aria-labelledby="resume-title">
+        <section class="resume" aria-labelledby="resume-title" ref={animateList}>
           <h2 id="resume-title">{t('s1.pickUp')}</h2>
           <For each={rows()}>
             {(c) => {

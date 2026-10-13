@@ -3,7 +3,7 @@
 //!
 //! Screenshots of the checkpoints go to `target/faber-test/shots/` (`b7-*.png`).
 
-use super::{Result, Scenario, claude_chat, ensure, eventually, no_cli, pass_look, pause, same, skip_tour};
+use super::{Result, Scenario, claude_chat, ensure, eventually, no_cli, pass_look, pause, same, skip_tour, system_motion};
 use crate::app::{Ctx, Opened};
 use crate::page::{Page, css};
 use crate::sandbox::{CliSlot, Launch};
@@ -247,6 +247,7 @@ fn step_two(ctx: &mut Ctx) -> Result {
 
     // The rest of the first settings, and the question that decides the tutorial.
     page.click(&tcards[1])?;
+    page.wait_for("the Workshop preview", "document.documentElement.dataset.base === 'oficina'")?;
     page.wait_for("the large text to stay", "parseFloat(getComputedStyle(document.body).fontSize) === 16")?;
     let compact = page.named("button", "set.densityCompact")?;
     page.click(&compact)?;
@@ -387,13 +388,22 @@ fn tutorial_fits_the_window(ctx: &mut Ctx) -> Result {
     ctx.write_settings(&json!({ "language": "en", "setup": "done", "appearance": { "base": "sala" }, "tutorialDone": false }))?;
     let launch = claude_chat(ctx);
     let mut app = ctx.launch(launch)?;
+    system_motion(&mut app.page, false)?;
     app.page.wait_visible(&css(".coach"))?;
+    app.page.wait_for(
+        "full motion after viewport settling",
+        "document.documentElement.dataset.motion === 'full' && !document.documentElement.classList.contains('resizing')",
+    )?;
     // The window's own buttons stay reachable: the dim does not cover the title bar, and the ring moves with a transform only.
     let reach = "(() => { const e = document.elementFromPoint(innerWidth - 20, 14); return !!e && !!e.closest('.top'); })()";
     app.page.wait_for("the title bar above the dim", reach)?;
     app.page.wait_for("the ring", "document.querySelectorAll('.tour-ring').length === 1")?;
     let moves = app.page.eval("getComputedStyle(document.querySelector('.tour-ring')).transitionProperty")?;
     same(moves.as_str(), Some("transform"), "what the ring animates")?;
+    system_motion(&mut app.page, true)?;
+    let moves = app.page.eval("getComputedStyle(document.querySelector('.tour-ring')).transitionProperty")?;
+    same(moves.as_str(), Some("none"), "reduced motion disables ring transitions")?;
+    system_motion(&mut app.page, false)?;
     let inside = "(() => { const r = document.querySelector('.coach').getBoundingClientRect();                   return r.x >= 0 && r.y >= 0 && r.right <= innerWidth && r.bottom <= innerHeight && r.width > 0; })()";
     for step in 0..3 {
         for (width, height) in [(1440, 900), (1100, 700), (899, 700), (800, 600), (720, 480)] {

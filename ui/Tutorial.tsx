@@ -4,13 +4,14 @@ import { keepFocusIn } from './focus.ts';
 import { t } from './i18n.ts';
 import type { Key } from './locales/en.ts';
 import { Mark } from './Mark.tsx';
+import { animateList } from './motion.ts';
 import { type Box, type Placement, placeCard, type TourStep, tourFor } from './tour.ts';
 
 /** Where the element a card points at is on screen now, or none when it is missing or hidden (the Projects button below
  * 900 px, where the sidebar is behind its button). */
 function anchorBox(anchor: string): Box | undefined {
   const el = document.querySelector<HTMLElement>(`[data-tour="${anchor}"]`);
-  if (!el || el.getClientRects().length === 0) return undefined;
+  if (!el || el.getClientRects().length === 0 || el.closest('[aria-hidden="true"]') || getComputedStyle(el).visibility === 'hidden') return undefined;
   const r = el.getBoundingClientRect();
   return r.width > 0 && r.height > 0 ? { x: r.x, y: r.y, w: r.width, h: r.height } : undefined;
 }
@@ -119,7 +120,7 @@ export function Tutorial(props: { experience?: Experience; onEnd: () => void }) 
   });
 
   return (
-    <div class="tour">
+    <div class="tour" ref={animateList}>
       <div class="tour-dim" classList={{ clear: !!hole() }} />
       <Show when={hole()}>
         {(box) => (
