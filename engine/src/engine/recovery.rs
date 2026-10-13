@@ -236,6 +236,11 @@ impl Core {
                     self.move_failed(id, &t.reply);
                     return Ok(());
                 };
+                if self.begin_unbounded(spare.vendor).is_err() {
+                    spare.session.close();
+                    self.move_failed(id, &t.reply);
+                    return Ok(());
+                }
                 *spare.asked.lock().unwrap_or_else(|e| e.into_inner()) = Some(self.secs());
                 spare.session.send(UserTurn::text(prompt));
                 let (me, id, reply) = (self.me.clone(), id.to_string(), t.reply.clone());

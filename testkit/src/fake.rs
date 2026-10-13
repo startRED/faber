@@ -96,9 +96,10 @@ pub fn run(env: &Env, args: &[String], stdin: &mut dyn BufRead, stdout: &mut dyn
     }
     let setup: Setup = serde_json::from_str(&std::fs::read_to_string(&env.recording)?).map_err(io::Error::other)?;
     let state = env.state_dir.as_deref().ok_or_else(|| io::Error::other("Setup replay requires an isolated FABER_FAKE_STATE_DIR"))?;
+    let born = crate::proctree::current_birth()?;
     let code = setup_run(&setup, env, state, args, stdin, stdout, stderr);
     // Windows reuses process ids: once this one is gone, its id must not count as a leaked CLI.
-    append(state, &json!({ "exited": std::process::id() }))?;
+    append(state, &json!({ "exited": std::process::id(), "born": born }))?;
     code
 }
 
@@ -123,7 +124,11 @@ fn setup_run(
         targets.push(marker.to_string_lossy().into_owned());
     }
     let cwd = std::env::current_dir().unwrap_or_default().to_string_lossy().into_owned();
-    append(state, &json!({ "pid": std::process::id(), "cwd": cwd, "vendor": setup.vendor, "args": args, "targets": targets }))?;
+    let born = crate::proctree::current_birth()?;
+    append(
+        state,
+        &json!({ "pid": std::process::id(), "born": born, "cwd": cwd, "vendor": setup.vendor, "args": args, "targets": targets }),
+    )?;
     if args.first().map(String::as_str) == Some("--version") {
         writeln!(stdout, "{}", setup.version)?;
         return Ok(0);

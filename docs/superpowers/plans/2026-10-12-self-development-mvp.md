@@ -1,9 +1,10 @@
 # Self-development MVP implementation plan
 
-Date: 2026-10-12. Status: shortened plan; Task 1 is done, Tasks 2 and 4 are in review.
+Date: 2026-10-12. Status: R105 order; T1 done, T2/T4 done pending integration and their remaining proof gates.
 Spec: [Self-development MVP](../specs/2026-10-12-self-development-mvp-design.md).
-Goal: Faber completes a proven local change to Faber and promotes its next development build by 2026-10-20 to 22.
-R96 moves this slice ahead of Full Chat. The rest of Chat, catalog, powers, Livre, and public release automation wait.
+Goal: Faber completes a proven local change and promotes its next development build.
+22 October is an internal milestone; acceptance is conditional on the complete bar and safety gates.
+R96 moves this slice ahead of Full Chat. The rest of Chat, catalog/installs, route learning, Livre, and public release automation wait.
 
 ## Execution rules
 
@@ -54,112 +55,28 @@ Cross-vendor review gates every accepted source change; the writer never reviews
 
 ## Dependencies and parallel areas (R91)
 
-Nine tasks replace fifteen. Six need implementation; two still need review. Keep the original IDs for branch and review
-references.
-Task 1 is done. Task 2 is in review on `selfdev-t2`; Task 4 is in review on `selfdev-t4`.
-Their scope below stays unchanged. An in-review dependency is not done.
-Task 5 absorbs Tasks 6, 7 and 8. Task 11 absorbs Task 12. Tasks 14 and 15 move to Later.
-Reuse accepted work from `phase-1-base` and `notify-sound`; do not rebuild it.
+R105 adopts the [rework fit analysis](../../../../faber-notas/pesquisa/rework-fit.md), Proposed final order.
+Keep task IDs. T1 is done; T2 (driver policy) and T4 (git broker/leases) are done pending integration,
+second review/CI and G1/G2 qualification. Their accepted journal and safety contracts remain binding.
 
-| Task | Required tasks | Owned area | May be developed in parallel with |
-|---|---|---|---|
-| 1. Frozen contracts and journal (done) | None | Project schemas, persistence, documentation | Contract is frozen |
-| 2. Driver policy and lifecycle gate (in review) | 1 | Drivers, events, process lifecycle | 4 after shared schema freeze |
-| 3. Mission budget hook | 1; accepted Auto quota pacing from phase-1-base | Project admission/settlement adapter | 2/4; 9 on contract mocks |
-| 4. Git broker and worktree leases (in review) | 1 | Project git/lease modules | 2/3 |
-| 5. Mission runner, queue and recovery | 2, 3, 4 | Runtime, workers, proof/integration, recovery | 9 on contract mocks; 11 pure update state |
-| 9. Projects screen | 1; 5 before final integration | UI board/API/locales, shell command adapter | 3/5 on mocks; 11 disjoint pure state |
-| 10. Mission notification wiring | 1; accepted notify-sound 158566b; 5/9 before integration | Mission needs-you adapter | 11 with one owner for shell wiring |
-| 11. Self-update and canary | 1; 5/9 before integration | Existing updater adapter, rollback, canary | 5/9 pure state; 10 disjoint files |
-| 13. Real Seguro acceptance | 3, 5, 9, 10, 11 | Acceptance report and targeted fixes | Read-only work on independent nodes |
+| Order | Task | Dependency / owned area |
+|---|---|---|
+| 1 | T3: Mission grants and admission | T1 + accepted Auto pacing; shared spending adapter and spend-path red tests |
+| 2 | T5K: On-the-fly kits | T1/T2 gate; one owner freezes additive wire/kit/bar contracts, inventory, delivery, attestation, gaps |
+| 3 | T5B: Complete software bar | T5K contract; compiler, grounded checks, native proofs and receipts |
+| 4 | T5: Recoverable runner and queue | T2/T3/T4/T5K/T5B; persona, verbatim envelopes, reflexes, scars, pins/escalation |
+| 5 | T9 + T10: Projects and needs-you | T5; minimal UI, receipts/assumptions, AS-1..4 and existing notifier |
+| 6 | T11: Local build/canary/rollback | T5/T9; compatible data, owned slots/disk and immutable last good |
+| 7 | T13: Acceptance | T3/T5/T9/T10/T11; software parity, bounded plain-CLI probes, G1-G10 and AS-1..9 |
 
-Task numbers suggest landing order. Start any task whose dependencies are done (R91).
-Tasks 9/10 can use accepted contract mocks now. Task 11 can develop pure update state now.
-Their final integration waits for the listed runtime dependencies.
-Ready nodes start within live grants, daily pace, RAM, and review capacity. Never wait for a whole wave.
-Only disjoint writer areas may overlap. Shared engine, shell, API, locale registries, and manifests have one owner.
-MVP automated missions use read-only fan-out and one source writer. Parallel writer qualification is Later.
+Run G1/G2 feasibility before automated roles. T9 mocks/ux-polish reconciliation and T11 pure slot state may
+start now; disjoint T5K/T5B modules may overlap after the shared schema freeze. Serialize integration and heavy proofs.
+Ready nodes start within grants, daily pace, RAM and review capacity. Shipped missions keep one source writer.
+Reuse phase-1-base, notify-sound and ux-polish; do not rebuild them. T14/T15 remain Later.
 
-## Task 1 — Freeze the minimum contracts and durable journal
-
-Files: new `engine/src/project.rs`, `engine/src/project/store.rs`, `engine/tests/project.rs`;
-`engine/src/lib.rs`, `engine/src/model.rs`, `engine/src/store.rs`, `engine/tests/ledger.rs`;
-later implementation documentation in `docs/design.md` and the proposed roadmap section.
-
-Tests first: old Project JSON loads without granting effects; repo/grant identity survives reload; graph rejects cycles,
-missing IDs and duplicate deliverables; contract revision invalidates only descendants; failed rename/full disk keeps old state.
-Corrupt safety data blocks admission; atomic-write failure returns a locale key; old readers preserve extension records.
-Focused proof: `cargo test -p faber-engine --test project` and `cargo test -p faber-engine --test ledger`.
-
-- [ ] Define repo/grant/task/contract/decision/lease/artifact/receipt shapes from the spec, with schema versions.
-- [ ] Add `.faber/missions/<id>/` records and private runtime sidecars using fallible atomic writes.
-- [ ] Return persistence errors for every safety ledger reached by Projects; never fall back to empty authority.
-- [ ] Publish the fixed UI event/command and worker JSON contracts, including errors and examples.
-- [ ] In this future task only, apply the agreed roadmap order proposal and minimum screen inventory update.
-- [ ] Run G, receive other-vendor review, then commit `feat: define durable project missions`.
-
-## Task 2 — Prove driver restrictions, termination, and invocation controls
-
-Files: `engine/src/claude.rs`, `engine/src/codex.rs`, `engine/src/events.rs`, `engine/src/proc.rs`;
-new `engine/src/project/policy.rs`, `engine/tests/project_policy.rs`;
-`engine/tests/claude_session.rs`, `codex_session.rs`, `engine/tests/support/mod.rs`;
-new `tests/fixtures/projects/policy-*.jsonl`, `testkit/src/screen/projects.rs`, its registration;
-platform helper wiring/Cargo manifests only for the required installed Windows wrappers.
-
-Tests first: explicit model/effort/permission on launch and resume; supported restrictions accepted, absent capability denied;
-git push/reset/ref deletion, shell chains, native subagents, MCP/hook escape and linked `.git` common-dir writes denied;
-interrupted result acknowledged; ignored interrupt kills owned descendants; reused PID and shared-server tasks remain safe.
-Scripted unit tests use fake `Proc`; real process/metadata escapes run only in hidden testkit scenarios.
-Focused proof: `cargo test -p faber-engine --test project_policy` plus both driver session test targets.
-
-Task 2 follow-up evidence (2026-10-12, `selfdev-t2`):
-
-- Baseline implementation: `11c798c`. All automated roles still fail admission before spawning; Chat/manual
-  Projects launch defaults are preserved. Cross-vendor review findings, corrections, controls and raw bounded
-  evidence are in [the research report](../../research/2026-10-12-project-policy-probes.md) and its JSON sibling.
-- Review regressions cover completion without `turn/started`, sends during interrupt grace, customization
-  switches, installed Claude flags, all nine fake-wire escape requests, and unconditional admission denial.
-  The review's no-Codex-shell-switch claim and proposed `on-request` containment fix are false.
-- Windows tree blocker is closed: assign the trusted host guard to a kill-on-close job before the CLI can start.
-  Hidden fake tests require the guard/CLI/child/grandchild to disappear on stop, ownership drop and host crash;
-  stale creation-time/PID records cannot kill a live peer. PID reuse is simulated deterministically, not forced.
-  Non-Windows retains its existing child path and tree blocker.
-- R103 owner authorization granted a separate six-slot subscription experiment, not unattended admission.
-  The hidden opt-in example consumed all six slots (fourteen one-escape prompts); slot 4 failed before a prompt
-  and was not retried. Claude 2.1.296/haiku low exposed no tools and left all six artifacts unchanged.
-  Codex 0.162.1/gpt-6-luna low initially wrote outside via implicit TEMP roots; disable shell/subagent features,
-  implicit TEMP roots and network. Its tightened final session left all six tested artifacts unchanged.
-- Model-reported EPERM accompanies failed native-code items; independently checked artifacts are the evidence.
-  An absent unapproved MCP tool is not hostile-config containment proof. Linked common git metadata, read scope,
-  configured customizations and resumed policy remain unproved. Never unlock from these bounded observations.
-- Exposure remains blocked: cumulative usage was recorded, but no hard input/output/nested-call bound or real
-  interrupt-latency sample exists. All successful turns completed before the probe deadline; elapsed turn time
-  is not stop latency. No guessed token price, daily headroom or safe stop margin is introduced (Task 3 owns grants).
-- Spec issue: section 5 requires restrictions even for automated read-only roles, while section 13's read-only
-  fallback is ambiguous. Keep saved/local planning available; deny unverified automated CLI roles.
-- Shared file inventory and review disposition are in the research report. Git broker/lease files were untouched.
-- Follow-up GA: all seven required proof commands exit 0; `cargo t --all` reports 590 passed, no failures/skips.
-  The Windows fake tree scenario removes four owned processes in each mode and preserves the stale-PID peer.
-
-Second review follow-up: [Opus disposition](../../research/2026-10-12-task-2-opus-review.md).
-Manual sessions have no automatic silence interrupt; role watches and explicit stops remain bounded.
-Provider pinning matches the probe, role resume IDs are validated, guard acknowledgement is asynchronous,
-the cache example dispatches guard mode, and reordered Codex completions require a matching RPC identity.
-Both role loops replay native-denial fixtures. Job proofs cover inherited members; delegated WMI/task/COM
-launches, read/network scope, hostile config, mention expansion and real resume policy remain prerequisites.
-No additional model session is authorized or executed in this round; all automated roles remain denied.
-Second-review GA: all required proofs exit 0; full run 602 passed, no failures/skips. The EOF regression was
-reproduced with a fake child and fixed through forwarding-future ownership. Warm guard 2.0 MB, warm tree 117.2 MB.
-
-- [ ] Add role policy distinct from existing side-question `instructions`, which currently disables needed worker behavior.
-- [ ] Keep official CLIs unchanged; configure per-session native-tool restrictions without global config edits.
-- [ ] Use structured engine `read`/`patch`/`proof` requests; no general shell parser or new MCP server.
-- [ ] Add explicit Claude git deny rules; Codex `workspace-write` for writers, read-only for analysis, no escalation.
-- [ ] Handle capability/terminal-reason keys, graceful stop acknowledgment, tree termination and silence timeout.
-- [ ] Establish an enforceable invocation exposure bound or verified live usage plus safe stop margin, including nested calls.
-- [ ] Run separate bounded official-capability probes and record exact versions/controls/latency; no credentials or paid fallback.
-- [ ] If restrictions or spend bounds cannot be proved, record the blocker and stop automated-role rollout.
-- [ ] Run GA, cross-vendor review, commit `feat: constrain project CLI execution`.
+Task 2 implementation and both reviews are integrated. Role containment and exposure qualification remain blocked;
+see [policy probes](../../research/2026-10-12-project-policy-probes.md) and
+[second-review disposition](../../research/2026-10-12-task-2-opus-review.md). Existing manual launch defaults remain intact.
 
 ## Task 3 — Connect mission grants to existing Auto pacing
 
@@ -180,26 +97,23 @@ Focused proof: `cargo test -p faber-engine --test project_budget` plus existing 
   setup.
 - [ ] Run G, cross-vendor review, commit `feat: connect mission spending grants`.
 
-## Task 4 — Add the shell-free git broker and exclusive leases
+## Task 5K: On-the-fly kits and the shared contract
 
-Files: new `engine/src/project/git.rs`, `engine/src/project/lease.rs`, `engine/tests/project_git.rs`,
-`engine/tests/project_lease.rs`; existing `engine/src/cli.rs` resolver as needed;
-`testkit/src/screen/projects.rs`, `testkit/src/sandbox.rs`, new scripted git fixtures.
-Shared exports belong to Task 1's owner.
+Sources: [tool selection](../specs/2026-10-12-tool-selection-rework-design.md), MVP G9,
+and the fit analysis. One owner revises wire/kit/bar contracts additively; retain old durable records.
+Implement inventory/cards, scoped selection, frozen pins/hashes, inline delivery, attestation, gaps and kit receipts.
+Native levers need capability/escape proof; unsupported isolation blocks admission.
+Test first: incompatible loadouts, hash drift, unwanted discovery, required gaps, crash/reload receipts and selector targets.
+Run GA and independent review; record G9 measurements without paid probes or performance claims from fixtures.
 
-Tests first: canonical common-dir identity; non-git/bare/no-base rejection; refs/arguments reject injection;
-dirty owner checkout untouched; lease conflicts across case, parent paths, junctions and renames;
-stale generation rejected; live process lease cannot expire into reassignment; revocation prevents next effect;
-compare-and-swap refuses stale heads; no destructive cleanup or branch deletion.
-Unit tests inspect argv/receipts with a fake executor. Hidden scenarios use temporary real repositories only.
-Focused proof: `cargo test -p faber-engine --test project_git` and `cargo test -p faber-engine --test project_lease`.
+## Task 5B: Complete software bar and compiler
 
-- [ ] Validate enrollment, grant revision and author identity. Default to Seguro, never implicitly grant it.
-- [ ] Create detached writer/candidate worktrees and `faber/<mission-id>` without switching the owner's checkout.
-- [ ] Persist leases atomically; implement scoped hash-checked file operations and diff audit.
-- [ ] Use explicit git argv; keep hooks/credential prompts from becoming an unattended execution escape.
-- [ ] Preserve worktrees/artifacts on conflict, dirty state, unknown termination, or failed cleanup.
-- [ ] Run GA, cross-vendor review, commit `feat: isolate local project git work`.
+Source: [generated pipelines](../specs/2026-10-12-generated-pipelines-design.md), MVP G10 and complete software bar.
+Persist the deliverable/risk sheet, grounded additions, check owners, scoped paths and compile/check receipts.
+Back-chain and prune; cheap proofs precede exact-tree review. Native advisory/license/registry/secret checks use fixtures.
+Test first: orphan/generic nodes, unsupported grounds, missing mandatory checks, stale receipts and partial rerun invalidation.
+Keep every mandatory bar check; conditional checks need evidenced applicability. Run GA and independent review.
+T13 supplies real parity/benchmark evidence; fixture success never substitutes for live required proofs.
 
 ## Task 5 — Run missions through briefs, proofs, queue and recovery
 
@@ -332,7 +246,7 @@ Focused proof: project/recovery/local-update targets and their hidden scenarios;
 - [ ] Build/canary/promote at no-window quiescence; verify the accepted revision is the one running.
 - [ ] Perform bounded rollback drill and resume; record cost completeness, peak RAM, timings and exact receipts.
 - [ ] Report time/token savings as unknown without paired evidence; make no unmeasured performance claim.
-- [ ] Mark spec G1–G8 passed only with evidence; missing controls keep R96 incomplete.
+- [ ] Record software/map parity, bounded plain-CLI probes, G1-G10 and AS-1..9 only with evidence; missing controls keep R96 incomplete.
 - [ ] Run GA, cross-vendor review, commit `test: prove the self-development MVP`.
 
 ## Later — outside the MVP
@@ -345,18 +259,9 @@ Focused proof: project/recovery/local-update targets and their hidden scenarios;
 
 ## Calendar and stop condition
 
-| Window | Intended result |
-|---|---|
-| 12 October | Task 1 done; Tasks 2/4 in review; shortened docs only under this request |
-| 13-14 October | Finish reviews; small Task 3 hook; Task 5 first closes containment/termination/exposure feasibility; Tasks 9/10 mocks and 11 pure state start when ready |
-| 15-17 October | Task 5 mission runner, queue and recovery; Task 9 board advances against contracts |
-| 18-19 October | Integrate Tasks 9/10/11; prove notification wiring, exact-tree canary, compatibility and hidden rollback |
-| 20-22 October | Task 13 real Seguro goal, canary, promotion, rollback/resume drill and necessary fixes; begin Full Chat only after acceptance |
-| After usable gate | Later list only; neither remote drafts nor parallel writer qualification is in the MVP |
-
-The critical chain is accepted drivers/git, mission grants, recoverable runner, self-update canary, real acceptance.
-R91 applies throughout. Dates never hold an eligible ready task behind a batch.
-Do not add catalog, a generic tool server, design overhaul, or public release automation.
+R105 estimates 230-364 remaining agent-hours. Acceptance is conditional, approximately late October to mid November;
+22 October is an internal progress milestone. Follow the task order above; do not cut the bar to meet a date.
+Do not add catalog/installs, a generic tool server, route learning, TL-ADE head-to-head or public release automation.
 If spending or containment cannot be proved, stop automated execution and retain read-only planning.
-If proofs or canary fail, retain current and unfinished work. A date never overrides a gate.
-The final report distinguishes source tests, hidden integration proof, real-CLI evidence, and checks not run.
+If proofs or canary fail, retain current and unfinished work. The final report distinguishes source tests,
+hidden integration proof, real-CLI evidence and checks not run.

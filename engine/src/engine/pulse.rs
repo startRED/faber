@@ -22,6 +22,9 @@ impl Core {
         if self.allows(Vendor::Claude, family_of(PULSE_MODEL), Purpose::Pulse, false).is_err() {
             return;
         }
+        if self.begin_unbounded(Vendor::Claude).is_err() {
+            return;
+        }
         self.last_pulse = now;
         let (me, stop) = (self.me.clone(), Stop::default());
         let closer = stop.clone();
