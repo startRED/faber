@@ -97,7 +97,7 @@ impl Core {
                 step_ok: snap.step_ok(now),
             }
         };
-        choose_paced(verdict.kind, verdict.difficulty, verdict.confidence, &usable, &factor)
+        choose_paced(verdict.kind, verdict.difficulty, verdict.check, verdict.confidence, &usable, &factor)
     }
 
     /// While the user types in Auto.

@@ -47,6 +47,7 @@ pub const ROUTER: [(Vendor, &str, &str); 2] = [(Vendor::Codex, "gpt-6-luna", "me
 
 pub const KINDS: [&str; 7] = ["chat", "writing", "code", "math", "research", "image", "other"];
 pub const LEVELS: [&str; 3] = ["easy", "medium", "hard"];
+pub const CHECKS: [&str; 3] = ["machine", "glance", "blind"];
 
 pub const INSTRUCTIONS: &str = "You classify a user's request for a router. Never answer the request itself.
 kind: chat (casual talk, greetings, short facts), writing (texts, emails, translation, stories, plans), code (programs, \
@@ -117,6 +118,8 @@ struct Answer {
     kind: String,
     difficulty: String,
     #[serde(default)]
+    check: String,
+    #[serde(default)]
     confidence: f64,
 }
 
@@ -126,6 +129,8 @@ struct Answer {
 pub struct Asked {
     pub kind: &'static str,
     pub difficulty: &'static str,
+    /// How easily the person can tell a wrong answer from a right one (`CHECKS`); missing or unknown reads as `glance`.
+    pub check: &'static str,
     pub confidence: f64,
 }
 
@@ -135,13 +140,14 @@ pub fn asked(answer: &str) -> Option<Asked> {
     let a: Answer = serde_json::from_str(json).ok()?;
     let kind = KINDS.into_iter().find(|k| *k == a.kind).unwrap_or("other");
     let difficulty = LEVELS.into_iter().find(|l| *l == a.difficulty)?;
-    Some(Asked { kind, difficulty, confidence: a.confidence.clamp(0.0, 1.0) })
+    let check = CHECKS.into_iter().find(|c| *c == a.check).unwrap_or("glance");
+    Some(Asked { kind, difficulty, check, confidence: a.confidence.clamp(0.0, 1.0) })
 }
 
 /// The router's line and the table's pick with no quota information.
 pub fn read(answer: &str, candidates: &[Profile]) -> Option<Routed> {
     let a = asked(answer)?;
-    choose(a.kind, a.difficulty, a.confidence, candidates)
+    choose(a.kind, a.difficulty, a.check, a.confidence, candidates)
 }
 
 /// The bar a task must clear: (general intelligence, agentic coding). `expert` is not a level the router can name; it is
@@ -180,9 +186,12 @@ fn matters(kind: &str, level: &str) -> bool {
     matches!(kind, "code" | "math" | "research") && matches!(level, "medium" | "hard")
 }
 
-/// An unsure verdict gets the next level's bar.
-fn level_of(difficulty: &'static str, confidence: f64) -> &'static str {
-    match (confidence < 0.5, difficulty) {
+/// An unsure verdict gets the next level's bar, and so does a `blind` one where quality matters: self-checking pays most
+/// where the person cannot verify the answer quickly, as with math's early hard bar (`bar`). The two are one step, never
+/// two, and a `machine` check lowers nothing: this is raise-only.
+fn level_of(kind: &str, difficulty: &'static str, check: &str, confidence: f64) -> &'static str {
+    let step = confidence < 0.5 || (check == "blind" && matters(kind, difficulty));
+    match (step, difficulty) {
         (true, "easy") => "medium",
         (true, _) => "hard",
         (false, level) => level,
@@ -237,9 +246,15 @@ fn strongest(candidates: &[Profile]) -> Option<Profile> {
 }
 
 /// The cheapest candidate that clears the bar (the faster on a tie), or the strongest when none does. An unsure verdict
-/// gets the next level's bar. This is the table with no quota information.
-pub fn choose(kind: &'static str, difficulty: &'static str, confidence: f64, candidates: &[Profile]) -> Option<Routed> {
-    let level = level_of(difficulty, confidence);
+/// gets the next level's bar, as does a blind one (`level_of`). This is the table with no quota information.
+pub fn choose(
+    kind: &'static str,
+    difficulty: &'static str,
+    check: &'static str,
+    confidence: f64,
+    candidates: &[Profile],
+) -> Option<Routed> {
+    let level = level_of(kind, difficulty, check, confidence);
     let (profile, price) = match cheapest(kind, level, candidates, &|_| Factor::NEUTRAL, false) {
         Some((p, price, _)) => (p, price),
         None => {
@@ -257,12 +272,13 @@ pub fn choose(kind: &'static str, difficulty: &'static str, confidence: f64, can
 pub fn choose_paced(
     kind: &'static str,
     difficulty: &'static str,
+    check: &'static str,
     confidence: f64,
     candidates: &[Profile],
     factor: &dyn Fn(&Profile) -> Factor,
 ) -> Option<Routed> {
-    let level = level_of(difficulty, confidence);
-    let usual = choose(kind, difficulty, confidence, candidates)?;
+    let level = level_of(kind, difficulty, check, confidence);
+    let usual = choose(kind, difficulty, check, confidence, candidates)?;
     let Some((profile, price, step)) = cheapest(kind, level, candidates, factor, true) else {
         return Some(usual);
     };

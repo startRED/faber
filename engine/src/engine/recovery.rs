@@ -157,11 +157,13 @@ impl Core {
         }
     }
 
+    // The reason key does not keep the router's `check`, so a recovery re-pick drops the blind bump.
     fn verdict(pick: &Pick) -> Asked {
         let words: Vec<&str> = pick.reason.split('.').collect();
         Asked {
             kind: KINDS.into_iter().find(|k| words.contains(k)).unwrap_or("chat"),
             difficulty: LEVELS.into_iter().find(|k| words.contains(k)).unwrap_or("medium"),
+            check: "glance",
             confidence: 0.95,
         }
     }
