@@ -236,7 +236,7 @@ fn r107_permissions_cover_chat_and_projects_and_keep_denies_with_user_hooks() {
         let skip = claude_args(&ClaudeLaunch { permissions: Permissions::DontAsk, ..asking });
         assert!(skip.windows(2).any(|a| a == ["--permission-mode", "bypassPermissions"]));
         let config: serde_json::Value = serde_json::from_str(&skip[skip.iter().position(|a| a == "--settings").unwrap() + 1]).unwrap();
-        assert_eq!(config["disableAllHooks"].as_bool(), (!hooks).then_some(true));
+        assert_eq!(config["disableAllHooks"], true);
         assert_eq!(config["permissions"]["blockReadsOutsideWorkingDirectories"], true);
         assert!(skip.contains(&"Edit(//**/.git/**)".into()));
     }

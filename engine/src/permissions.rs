@@ -6,19 +6,57 @@ use std::path::{Component, Path, PathBuf};
 /// A fresh name prevents a project's lower-priority settings from adding grants to the host profile.
 pub fn sandbox_config(root: &Path, writable: bool) -> Map<String, Value> {
     let id = format!("faber-{}", uuid::Uuid::new_v4().simple());
-    let profile = json!({ "extends": ":workspace", "filesystem": {
+    let mut profile = json!({ "extends": ":workspace", "filesystem": {
         ":root": "deny", ":minimal": "read", ":tmpdir": "deny", ":slash_tmp": "deny", "glob_scan_max_depth": 3,
         "~/.claude": "deny", "~/.codex": "deny", "~/.gemini": "deny", "~/.ssh": "deny", "~/.aws": "deny",
         "~/.claude.json": "deny", "~/.git-credentials": "deny", "~/.npmrc": "deny", "~/.config/gh": "deny",
         "~/AppData/Roaming/GitHub CLI": "deny", "~/.docker": "deny", "~/.azure": "deny", "~/.kube": "deny",
-        ":workspace_roots": { ".": if writable { "write" } else { "read" }, ".git": "read", "**/.git": "read", "**/.git/**": "read", ".mcp.json": "read",
+        ":workspace_roots": { ".": if writable { "write" } else { "read" }, ".git": "read", ".mcp.json": "read",
             ".claude": "deny", ".codex": "deny", ".gemini": "deny", ".ssh": "deny", ".aws": "deny",
             "**/*updater.key*": "deny", "**/.claude.json": "deny", "**/.git-credentials": "deny", "**/.npmrc": "deny",
             "**/hosts.yml": "deny", "**/credentials.toml": "deny", ".env": "deny", ".env.local": "deny",
             ".env.production": "deny", ".env.*.local": "deny" }
     }, "network": { "enabled": false } });
+    for name in [".credentials.json", "credentials.json", "auth.json"] {
+        profile["filesystem"][":workspace_roots"][format!("**/{name}")] = "deny".into();
+    }
+    if root.is_absolute() {
+        let mut dirs = vec![root.to_path_buf()];
+        let mut left = 10_000usize;
+        'scan: while let Some(dir) = dirs.pop() {
+            let entries = std::fs::read_dir(&dir).ok();
+            if left == 0 || entries.is_none() {
+                // A partial scan must not grant writes around unknown repository metadata.
+                profile["filesystem"][":workspace_roots"]["."] = "read".into();
+                break;
+            }
+            left -= 1;
+            for entry in entries.unwrap() {
+                let Ok(entry) = entry else {
+                    profile["filesystem"][":workspace_roots"]["."] = "read".into();
+                    break 'scan;
+                };
+                let path = entry.path();
+                let Some(relative) = path.strip_prefix(root).ok().and_then(Path::to_str) else {
+                    profile["filesystem"][":workspace_roots"]["."] = "read".into();
+                    break 'scan;
+                };
+                if entry.file_name().to_string_lossy().trim_end_matches(['.', ' ']).eq_ignore_ascii_case(".git") {
+                    profile["filesystem"][":workspace_roots"][relative.replace('\\', "/")] = "read".into();
+                } else if !secret(&path, true) {
+                    let Ok(kind) = entry.file_type() else {
+                        profile["filesystem"][":workspace_roots"]["."] = "read".into();
+                        break 'scan;
+                    };
+                    if kind.is_dir() && !kind.is_symlink() {
+                        dirs.push(path);
+                    }
+                }
+            }
+        }
+    }
     let mut config = json!({ "default_permissions": id, format!("permissions.{id}"): profile,
-        "sandbox_workspace_write.network_access": false, "allow_login_shell": false,
+        "sandbox_workspace_write.network_access": false, "sandbox_workspace_write.writable_roots": [], "allow_login_shell": false,
         "shell_environment_policy.set": child_env(root), "shell_environment_policy.ignore_default_excludes": false
     })
     .as_object()
@@ -44,6 +82,39 @@ pub fn working_root(root: &Path) -> Option<PathBuf> {
     Some(path)
 }
 
+/// Broad personal/system roots are permitted only when the person keeps command approvals on.
+pub fn unattended_root(root: &Path) -> Option<PathBuf> {
+    let root = working_root(root)?;
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from);
+    let mut system: Vec<PathBuf> = ["SystemRoot", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "APPDATA", "LOCALAPPDATA"]
+        .into_iter()
+        .filter_map(std::env::var_os)
+        .map(PathBuf::from)
+        .collect();
+    if cfg!(windows)
+        && let Some(home) = &home
+    {
+        system.push(home.join("AppData"));
+    }
+    (!sensitive_root(&root, home.as_deref(), &system)).then_some(root)
+}
+
+fn sensitive_root(root: &Path, home: Option<&Path>, system: &[PathBuf]) -> bool {
+    let same = |a: &Path, b: &Path| {
+        if cfg!(windows) {
+            a.to_string_lossy().trim_start_matches("\\\\?\\").eq_ignore_ascii_case(b.to_string_lossy().trim_start_matches("\\\\?\\"))
+        } else {
+            a == b
+        }
+    };
+    root.parent().is_none()
+        || home.is_some_and(|home| same(root, &home.canonicalize().unwrap_or_else(|_| home.to_path_buf())))
+        || system.iter().any(|dir| {
+            let dir = dir.canonicalize().unwrap_or_else(|_| dir.clone());
+            root.ancestors().any(|ancestor| same(ancestor, &dir))
+        })
+}
+
 /// Only Faber's scratch temporary directory is disposable. Never follow a substituted link during cleanup.
 pub fn clean_tmp(root: &Path) {
     let path = root.join(".faber/tmp");
@@ -57,11 +128,17 @@ pub fn clean_tmp(root: &Path) {
 fn inline(value: &Value) -> String {
     match value {
         Value::Object(table) => {
-            format!("{{{}}}", table.iter().map(|(key, value)| format!("{}={}", json!(key), inline(value))).collect::<Vec<_>>().join(","))
+            format!("{{{}}}", table.iter().map(|(key, value)| format!("{}={}", literal(key), inline(value))).collect::<Vec<_>>().join(","))
         }
+        Value::String(value) => literal(value),
         // Host-generated scalars are strings, booleans or integers, whose JSON syntax is also valid TOML.
         _ => value.to_string(),
     }
+}
+
+fn literal(value: &str) -> String {
+    // Single-quoted TOML survives legacy PowerShell's native argument forwarding.
+    if value.contains('\'') || value.contains(['\n', '\r']) { json!(value).to_string() } else { format!("'{value}'") }
 }
 
 fn quoted(value: &str, powershell: bool) -> String {
@@ -84,6 +161,28 @@ pub fn checked_input(
     if !shell {
         return None;
     }
+    let command = command_argv(root, tool, input, sandbox, resolve)?;
+    let mut updated = input.clone();
+    let command = command.iter().map(|arg| quoted(arg, tool == "PowerShell")).collect::<Vec<_>>().join(" ");
+    updated["command"] = format!("{}{command}", if tool == "PowerShell" { "& " } else { "" }).into();
+    if updated.get("run_in_background").is_some() {
+        updated["run_in_background"] = false.into();
+    }
+    Some(updated)
+}
+
+/// The same validated argv feeds both vendors' sandboxed command tools.
+pub fn command_argv(
+    root: &Path,
+    tool: &str,
+    input: &Value,
+    sandbox: Option<&crate::cli::Cli>,
+    resolve: &dyn Fn(&str) -> Option<crate::cli::Cli>,
+) -> Option<Vec<String>> {
+    if !["Bash", "PowerShell"].contains(&tool) {
+        return None;
+    }
+    let allowed = allows(root, tool, input);
     let mut args = words(input["command"].as_str()?)?;
     let program = args[0].to_ascii_lowercase();
     let sub = args.get(1).map(String::as_str).unwrap_or_default();
@@ -146,18 +245,22 @@ pub fn checked_input(
     let root = root.canonicalize().ok()?;
     let root_text = root.to_string_lossy().replace("\\\\?\\", "");
     let mut command = vec![cli.command.clone()];
-    for (key, value) in sandbox_config(Path::new(&root_text), true) {
+    let config = sandbox_config(Path::new(&root_text), true);
+    let profile = config["default_permissions"].as_str()?.to_owned();
+    for (key, value) in config {
         command.extend(["-c".into(), format!("{key}={}", inline(&value))]);
     }
-    command.extend(["sandbox".into(), "--include-managed-config".into(), "-C".into(), root_text, "--".into()]);
+    command.extend([
+        "sandbox".into(),
+        "--permission-profile".into(),
+        profile,
+        "--include-managed-config".into(),
+        "-C".into(),
+        root_text,
+        "--".into(),
+    ]);
     command.extend(args);
-    let mut updated = input.clone();
-    let command = command.iter().map(|arg| quoted(arg, tool == "PowerShell")).collect::<Vec<_>>().join(" ");
-    updated["command"] = format!("{}{command}", if tool == "PowerShell" { "& " } else { "" }).into();
-    if updated.get("run_in_background").is_some() {
-        updated["run_in_background"] = false.into();
-    }
-    Some(updated)
+    Some(command)
 }
 
 /// Child commands get no Git transport or GitHub authentication, without reading any credential value.
@@ -169,7 +272,8 @@ pub fn child_env(root: &Path) -> Value {
         "GIT_CONFIG_KEY_1": "core.hooksPath", "GIT_CONFIG_VALUE_1": "/dev/null",
         "GH_CONFIG_DIR": root.join(".faber/no-gh-auth").to_string_lossy(), "GH_PROMPT_DISABLED": "1",
         "GH_TOKEN": "", "GITHUB_TOKEN": "", "GH_ENTERPRISE_TOKEN": "", "GITHUB_ENTERPRISE_TOKEN": "",
-        "TMP": tmp.to_string_lossy(), "TEMP": tmp.to_string_lossy(), "TMPDIR": tmp.to_string_lossy()
+        "TMP": tmp.to_string_lossy(), "TEMP": tmp.to_string_lossy(), "TMPDIR": tmp.to_string_lossy(),
+        "NODE_OPTIONS": "--preserve-symlinks --preserve-symlinks-main"
     })
 }
 
@@ -178,7 +282,8 @@ fn secret(path: &Path, reading: bool) -> bool {
         path.components().map(|p| p.as_os_str().to_string_lossy().trim_end_matches(['.', ' ']).to_ascii_lowercase()).collect();
     let Some(name) = names.last() else { return true };
     if name.contains("updater.key")
-        || [".claude.json", ".git-credentials", ".npmrc", "hosts.yml"].contains(&name.as_str())
+        || [".claude.json", ".credentials.json", "credentials.json", "auth.json", ".git-credentials", ".npmrc", "hosts.yml"]
+            .contains(&name.as_str())
         || names
             .iter()
             .any(|p| [".ssh", ".aws", ".claude", ".codex", ".gemini", ".docker", ".azure", ".kube", "no-gh-auth"].contains(&p.as_str()))
@@ -534,6 +639,25 @@ pub fn allows(root: &Path, tool: &str, input: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn review3_sensitive_roots_include_canonical_home_drive_and_system_subtrees() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        let system: Vec<PathBuf> = ["Windows", "Program Files", "AppData"].into_iter().map(|name| dir.path().join(name)).collect();
+        std::fs::create_dir(&home).unwrap();
+        for root in &system {
+            std::fs::create_dir_all(root.join("nested")).unwrap();
+        }
+        assert!(sensitive_root(&working_root(&home).unwrap(), Some(&home), &system));
+        for root in &system {
+            assert!(sensitive_root(&working_root(&root.join("nested")).unwrap(), Some(&home), &system));
+        }
+        let root = working_root(dir.path()).unwrap();
+        assert!(sensitive_root(root.ancestors().last().unwrap(), Some(&home), &system));
+        assert!(!sensitive_root(&root.join("Windows-other"), Some(&home), &system));
+        assert!(!sensitive_root(&home.join("project"), Some(&home), &system));
+    }
 
     #[test]
     #[cfg(windows)]

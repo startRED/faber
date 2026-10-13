@@ -200,7 +200,7 @@ export const ptBR: Messages = {
   'error.permission.undelivered': "O Faber não conseguiu enviar a resposta de permissão. Tente novamente.",
   // R107: handwritten wording; native-speaker review pending (English is the source).
   "set.permissions": "Permiss?es no Chat e em Projetos",
-  "project.permissionsDontAsk": "Chat e Projetos executam sem cart?es de aprova??o. Os comandos usam uma ?rea isolada dentro da pasta de trabalho. Integra??es confi?veis em Projetos podem ler fora dessa pasta e enviar a sa?da ao provedor. Se o isolamento n?o estiver dispon?vel, os comandos falham.",
+  "project.permissionsDontAsk": "Chat e Projetos executam sem cartões de aprovação. Ferramentas de integração ficam desativadas. Os comandos precisam de uma área isolada compatível; comandos do Claude Code também precisam da CLI do Codex instalada. A pasta pessoal, raízes de unidades e pastas Windows, Program Files e AppData só funcionam com Perguntar antes dos comandos.",
   "error.projectSandbox": "O Faber n?o conseguiu preparar o isolamento da pasta de trabalho. Confira as permiss?es da pasta e tente novamente.",
   "project.permissionsAsk": "Chat e Projetos pedem aprova??o antes de comandos. Mudar para este modo interrompe as tarefas atuais.",
   'set.permissions.dontAsk': "Não perguntar",
@@ -211,9 +211,11 @@ export const ptBR: Messages = {
   "set.privateFolder": "Pasta privada",
   "error.chatFolderLocked": "Escolha a pasta de trabalho antes da primeira mensagem. Inicie uma nova conversa para usar outra pasta.",
   "error.chatFolder": "O Faber n?o conseguiu usar esta pasta. Escolha uma pasta local em que voc? possa gravar.",
+  "error.workingFolder": "Esta pasta é ampla demais para Não perguntar. Escolha uma pasta de projeto ou mude para Perguntar antes dos comandos.",
   'set.hooks': 'Seus hooks da CLI',
   'set.hooksBody': 'Os projetos rodam os meus próprios hooks da CLI',
-  'set.hooksHint': 'Desligado por padrão: um hook pode deixar cada resposta mais lenta ou travá-la. O chat nunca os roda.',
+  // R107 security review: handwritten wording; native-speaker review pending.
+  'set.hooksHint': "Desativados por padrão. Os hooks só executam com Perguntar antes dos comandos; podem mudar respostas ou executar fora da política de ferramentas. Não perguntar desativa os hooks.",
   'set.name': 'Seu nome',
   'set.nameHint': 'Aparece na saudação e é dito à IA quando uma conversa começa. Apague para ficar sem.',
   'set.subscriptions': 'Contas ligadas',

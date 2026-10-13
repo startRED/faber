@@ -45,6 +45,56 @@ fn ask(area: Area, text: &str, choice: Choice) -> SendRequest {
     SendRequest { conversation_id: None, area, project_id: None, text: text.into(), images: vec![], files: vec![], choice }
 }
 
+#[tokio::test]
+async fn review3_legacy_sessions_restart_with_history_and_gated_sessions_resume() {
+    let dir = tempfile::tempdir().unwrap();
+    let (first, mut rx) = engine(dir.path(), Vendor::Codex, fake(fixture("codex", "chat")).spawn);
+    let id = first.send(ask(Area::Chat, SKY, choice("codex", None))).unwrap();
+    finished(&mut rx, |_| {}).await;
+    let saved = first.open(&id).unwrap();
+    assert!(saved.command_gate && saved.sessions.contains_key(&Vendor::Codex));
+    first.shutdown();
+    let (gated, _) = engine(dir.path(), Vendor::Codex, fake(vec![]).spawn);
+    assert_eq!(gated.open(&id).unwrap().sessions, saved.sessions);
+    gated.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+    assert!(!gated.open(&id).unwrap().sessions.contains_key(&Vendor::Codex));
+    gated.shutdown();
+    let path = dir.path().join("conversations").join(format!("{id}.json"));
+    let mut legacy = serde_json::to_value(&saved).unwrap();
+    legacy.as_object_mut().unwrap().remove("commandGate");
+    std::fs::write(path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+    let (old, _) = engine(dir.path(), Vendor::Codex, fake(vec![]).spawn);
+    old.save_settings(Settings { permissions: Some(Permissions::DontAsk), ..Settings::default() }).unwrap();
+    let c = old.open(&id).unwrap();
+    assert!(!c.sessions.contains_key(&Vendor::Codex));
+    assert_eq!(c.messages, saved.messages, "visible history is preserved for the new thread");
+    old.shutdown();
+}
+
+#[tokio::test]
+async fn review3_sensitive_chat_roots_are_refused_only_without_prompts() {
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, _) = engine(dir.path(), Vendor::Claude, fake(vec![]).spawn);
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap();
+    assert_eq!(engine.chat_folder(None, Some(Path::new(&home))).unwrap_err(), "error.workingFolder");
+    engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+    assert!(engine.chat_folder(None, Some(Path::new(&home))).is_ok());
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn review3_existing_sensitive_projects_cannot_start_without_prompts() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(vec![]);
+    let (engine, _) = engine(dir.path(), Vendor::Claude, f.spawn);
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap();
+    let project = engine.add_project(&Path::new(&home).to_string_lossy());
+    let request = SendRequest { project_id: Some(project.id), ..ask(Area::Project, "hello", choice("claude", Some("haiku"))) };
+    assert_eq!(engine.send(request).unwrap_err(), "error.workingFolder");
+    assert!(f.args.lock().unwrap().is_empty(), "no CLI may start in a refused folder");
+    engine.shutdown();
+}
+
 /// Answers the way the screen does, in the background: the engine confirms an answer only once the CLI has it, and
 /// the callbacks of `finished` cannot wait. `m` is the message that holds the card.
 fn answer(engine: &Engine, id: &str, m: &Message, request_id: &str, allow: bool, always: bool) {
@@ -582,6 +632,7 @@ async fn the_hooks_choice_is_saved_and_restarts_idle_project_clis_with_it() {
     let dir = tempfile::tempdir().unwrap();
     let f = fake(fixture("claude", "chat"));
     let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
     let project = engine.add_project(&dir.path().to_string_lossy());
     let warm =
         || WarmRequest { conversation_id: None, area: Area::Project, project_id: Some(project.id.clone()), choice: choice("claude", None) };
@@ -594,7 +645,10 @@ async fn the_hooks_choice_is_saved_and_restarts_idle_project_clis_with_it() {
     let appearance = serde_json::json!({ "base": "oficina" }).as_object().cloned();
     engine.save_settings(Settings { appearance, ..Settings::default() }).unwrap();
     engine.shutdown();
-    assert_eq!(read_json(&dir.path().join("settings.json")), serde_json::json!({ "userHooks": true, "appearance": { "base": "oficina" } }));
+    assert_eq!(
+        read_json(&dir.path().join("settings.json")),
+        serde_json::json!({ "userHooks": true, "permissions":"ask", "appearance": { "base": "oficina" } })
+    );
 }
 
 #[tokio::test]

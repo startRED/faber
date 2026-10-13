@@ -17,6 +17,28 @@ pub struct Proc {
 
 pub type Spawner = Arc<dyn Fn(&str, &[String], &Path) -> io::Result<Proc> + Send + Sync>;
 
+/// Drain both pipes without retaining an unbounded build log; dropping the future kills the owned child.
+pub(crate) async fn command_output(mut p: Proc) -> (bool, String) {
+    async fn drain(mut pipe: Box<dyn AsyncRead + Send + Unpin>) -> io::Result<String> {
+        let mut tail = Vec::new();
+        let mut buf = [0u8; 4096];
+        loop {
+            let n = pipe.read(&mut buf).await?;
+            if n == 0 {
+                return Ok(String::from_utf8_lossy(&tail).into_owned());
+            }
+            tail.extend_from_slice(&buf[..n]);
+            if tail.len() > 4096 {
+                tail.drain(..tail.len() - 4096);
+            }
+        }
+    }
+    drop(p.stdin);
+    let stderr = p.stderr.take().unwrap_or_else(|| Box::new(tokio::io::empty()));
+    let (out, err, code) = tokio::join!(drain(p.stdout), drain(stderr), exit_code(&mut p.child));
+    (code == "0" && out.is_ok() && err.is_ok(), format!("{}{}", out.unwrap_or_default(), err.unwrap_or_default()))
+}
+
 /// Starts a real process with piped stdio, no shell and, on Windows, no console window.
 pub fn real_spawner() -> Spawner {
     Arc::new(|bin, args, cwd| {
@@ -96,5 +118,27 @@ pub(crate) async fn exit_code(child: &mut Option<Child>) -> String {
             Err(_) => "unknown".into(),
         },
         None => "0".into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn command_output_drains_large_pipes_and_keeps_a_bounded_tail() {
+        let (mut write, read) = tokio::io::duplex(32);
+        tokio::spawn(async move {
+            write.write_all(&vec![b'x'; 100_000]).await.unwrap();
+            write.write_all(b"TAIL_OK").await.unwrap();
+        });
+        let p = Proc {
+            stdin: Box::new(tokio::io::sink()),
+            stdout: Box::new(read),
+            stderr: Some(Box::new(std::io::Cursor::new(b"STDERR_OK".to_vec()))),
+            child: None,
+        };
+        let (ok, text) = tokio::time::timeout(std::time::Duration::from_secs(3), command_output(p)).await.unwrap();
+        assert!(ok && text.ends_with("TAIL_OKSTDERR_OK"));
+        assert!(text.len() <= 8192);
     }
 }

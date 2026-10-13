@@ -237,6 +237,11 @@ async fn add_project(app: AppHandle, faber: State<'_, Faber>) -> Res<Option<Proj
     }
     let Some(picked) = dialog.blocking_pick_folder() else { return Ok(None) };
     let path = picked.into_path().map_err(|e| e.to_string())?;
+    if faber.engine.state().settings.permissions.unwrap_or_default() == faber_engine::model::Permissions::DontAsk
+        && faber_engine::permissions::unattended_root(&path).is_none()
+    {
+        return Err("error.workingFolder".into());
+    }
     Ok(Some(faber.engine.add_project(&path.to_string_lossy())))
 }
 

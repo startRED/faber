@@ -50,8 +50,7 @@ const TOOL_DENY: &[&str] = &[
 ];
 
 /// Arguments for one long-lived Claude Code process that takes many turns over stdin.
-/// Projects get the user's own setup (skills, MCP servers, plugins), like a direct session; the user's hooks stay
-/// off unless they turn them on, because hooks can rewrite answers. Permission prompts come back to Faber over stdio.
+/// Ask preserves Projects' setup. Don't ask disables startup integrations and routes tools to the shared policy.
 pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     let mut args: Vec<String> = [
         "-p",
@@ -88,6 +87,9 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
             }
         }
         if launch.permissions == Permissions::DontAsk {
+            if launch.area == Area::Project {
+                args.extend(["--safe-mode".into(), "--strict-mcp-config".into()]);
+            }
             // Restricted mode refuses bypassPermissions. Chat disables customizations with safe mode and
             // keeps its lean tools/MCP setup, with the same host policy and sandbox as Projects.
             args.extend(["--setting-sources".into(), "user".into()]);
@@ -98,8 +100,7 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
             settings["sandbox"] = json!({ "autoAllowBashIfSandboxed": false });
             settings["env"] = crate::permissions::child_env(std::path::Path::new("."));
         }
-        if (launch.area == Area::Project && !launch.user_hooks) || (launch.area == Area::Chat && launch.permissions == Permissions::DontAsk)
-        {
+        if launch.permissions == Permissions::DontAsk || (launch.area == Area::Project && !launch.user_hooks) {
             settings["disableAllHooks"] = true.into();
         }
         if settings.as_object().is_some_and(|s| !s.is_empty()) {

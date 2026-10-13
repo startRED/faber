@@ -159,7 +159,8 @@ impl Probe {
     fn codex_server(&self) -> CodexServer {
         let cli = find_cli("codex").expect("codex is not installed");
         CodexServer::start(CodexServerOptions {
-            bin: cli.command.clone(),
+            permissions: Permissions::Ask,
+            cli: cli.clone(),
             cwd: self.dir.clone(),
             area: Area::Chat,
             user_hooks: false,

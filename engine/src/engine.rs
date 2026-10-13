@@ -452,7 +452,14 @@ impl Engine {
     pub fn chat_folder(&self, id: Option<&str>, folder: Option<&Path>) -> Result<Conversation, String> {
         self.with(|c| {
             let folder = folder
-                .map(|p| crate::permissions::working_root(p).filter(|p| p.is_dir()).ok_or("error.chatFolder"))
+                .map(|p| {
+                    let root = crate::permissions::working_root(p).filter(|p| p.is_dir()).ok_or("error.chatFolder")?;
+                    if c.store.settings().permissions.unwrap_or_default() == Permissions::DontAsk {
+                        crate::permissions::unattended_root(&root).ok_or("error.workingFolder")
+                    } else {
+                        Ok(root)
+                    }
+                })
                 .transpose()?
                 .map(|p| p.to_string_lossy().into_owned());
             let id = match id {
@@ -767,7 +774,16 @@ impl Core {
             self.restore_recovery(&mut c);
             self.convs.insert(id.to_string(), c);
         }
-        self.convs.get_mut(id)
+        let guarded = self.store.settings().permissions.unwrap_or_default() == Permissions::DontAsk;
+        let c = self.convs.get_mut(id)?;
+        if c.command_gate != guarded {
+            c.sessions.remove(&Vendor::Codex);
+            c.cost_base.remove(&Vendor::Codex);
+            if !guarded {
+                c.command_gate = false;
+            }
+        }
+        Some(c)
     }
 
     fn save(&self, id: &str) {
@@ -898,6 +914,9 @@ impl Core {
                 }
                 let Some(c) = self.convs.get_mut(conv) else { return };
                 c.sessions.insert(vendor, session_id);
+                if vendor == Vendor::Codex {
+                    c.command_gate = self.live.get(conv).is_some_and(|l| l.permissions == Permissions::DontAsk);
+                }
                 // a draft is saved only once something is sent
                 if !c.messages.is_empty() {
                     self.save(conv);
@@ -1370,6 +1389,7 @@ impl Core {
     /// Starts a queued message as a turn. If nothing can answer it, it goes back to the front of the queue, so no message is
     /// lost; once the turn exists, a failure shows on that turn's reply like any other.
     fn dispatch_queued(&mut self, id: &str, item: QueuedTurn) -> Result<(), String> {
+        self.load(id).ok_or("error.conversationGone")?;
         let Some(fallback) = pick_model(&item.choice, &self.vendors(), self.codex_recommended.as_deref()) else {
             self.requeue(id, item);
             return Err("error.noSubscription".into());
@@ -1496,7 +1516,8 @@ impl Core {
     /// The shared Codex process for an area and hooks choice, started again if it died.
     fn codex_server(&mut self, area: Area, user_hooks: bool, cli: &Cli) -> &CodexServer {
         let opts = CodexServerOptions {
-            bin: cli.command.clone(),
+            permissions: self.store.settings().permissions.unwrap_or_default(),
+            cli: cli.clone(),
             cwd: self.opts.data_dir.clone(),
             area,
             user_hooks,
@@ -1589,8 +1610,16 @@ impl Core {
         }
         let c = self.convs.get(conv).ok_or("error.conversationGone")?;
         let cwd = self.cwd_of(c)?;
-        let cwd =
-            if permissions == Permissions::DontAsk { crate::permissions::working_root(&cwd).ok_or("error.projectSandbox")? } else { cwd };
+        let cwd = if permissions == Permissions::DontAsk {
+            if c.area == Area::Chat && c.working_folder.is_none() {
+                // Owned UUID scratch remains usable under Faber's AppData directory.
+                crate::permissions::working_root(&cwd).ok_or("error.projectSandbox")?
+            } else {
+                crate::permissions::unattended_root(&cwd).ok_or("error.workingFolder")?
+            }
+        } else {
+            cwd
+        };
         let cli = cli.ok_or("error.notConnected")?;
         let spawn = spawner(&self.opts.spawn, &cli);
         self.next_sid += 1;
@@ -1703,6 +1732,7 @@ impl Core {
             project_id,
             working_folder: None,
             sessions: BTreeMap::new(),
+            command_gate: false,
             cost_base: BTreeMap::new(),
             allow_always: None,
             branch_of: None,
@@ -1737,6 +1767,7 @@ impl Core {
                 None => self.blank(req.area, req.project_id.clone()),
             },
         };
+        self.load(&id).ok_or("error.conversationGone")?;
         let saved = if req.files.is_empty() {
             vec![]
         } else {

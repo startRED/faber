@@ -200,7 +200,7 @@ export const fr: Messages = {
   'error.permission.undelivered': "Faber n’a pas pu envoyer la réponse à la demande d’autorisation. Réessayez.",
   // R107: handwritten wording; native-speaker review pending (English is the source).
   "set.permissions": "Autorisations du Chat et des Projets",
-  "project.permissionsDontAsk": "Le Chat et les Projets fonctionnent sans cartes d?autorisation. Les commandes utilisent un bac ? sable dans le dossier de travail. Les int?grations de confiance des Projets peuvent lire en dehors de ce dossier et envoyer les r?sultats ? leur fournisseur. Si le bac ? sable est indisponible, les commandes ?chouent.",
+  "project.permissionsDontAsk": "Le Chat et les Projets fonctionnent sans cartes d’autorisation. Les outils d’intégration sont désactivés. Les commandes nécessitent un bac à sable compatible ; celles de Claude Code exigent aussi la CLI Codex installée. Le dossier personnel, les racines des lecteurs et les dossiers Windows, Program Files et AppData fonctionnent uniquement avec Demander avant les commandes.",
   "error.projectSandbox": "Faber n?a pas pu pr?parer le bac ? sable du dossier de travail. V?rifiez les autorisations du dossier et r?essayez.",
   "project.permissionsAsk": "Le Chat et les Projets demandent une autorisation avant les commandes. Passer ? ce mode arr?te les t?ches en cours.",
   'set.permissions.dontAsk': "Ne pas demander",
@@ -211,9 +211,11 @@ export const fr: Messages = {
   "set.privateFolder": "Dossier priv?",
   "error.chatFolderLocked": "Choisissez le dossier de travail avant le premier message. Commencez une nouvelle conversation pour utiliser un autre dossier.",
   "error.chatFolder": "Faber n?a pas pu utiliser ce dossier. Choisissez un dossier local dans lequel vous pouvez ?crire.",
+  "error.workingFolder": "Ce dossier est trop large pour Ne pas demander. Choisissez un dossier de projet ou passez à Demander avant les commandes.",
   'set.hooks': 'Vos hooks de la CLI',
   'set.hooksBody': 'Les projets exécutent mes propres hooks de la CLI',
-  'set.hooksHint': 'Désactivé par défaut : un hook peut ralentir ou bloquer chaque réponse. Le chat ne les exécute jamais.',
+  // R107 security review: handwritten wording; native-speaker review pending.
+  'set.hooksHint': "Désactivés par défaut. Les hooks fonctionnent uniquement avec Demander avant les commandes ; ils peuvent changer les réponses ou agir hors des règles des outils. Ne pas demander désactive les hooks.",
   'set.name': 'Votre nom',
   'set.nameHint': 'Il apparaît dans l’accueil et il est dit à l’IA au début d’une conversation. Videz le champ pour ne plus en avoir.',
   'set.subscriptions': 'Comptes connectés',

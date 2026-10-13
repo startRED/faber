@@ -200,7 +200,7 @@ export const de: Messages = {
   'error.permission.undelivered': "Faber konnte die Antwort auf die Berechtigungsanfrage nicht senden. Versuche es erneut.",
   // R107: handwritten wording; native-speaker review pending (English is the source).
   "set.permissions": "Berechtigungen f?r Chat und Projekte",
-  "project.permissionsDontAsk": "Chat und Projekte laufen ohne Freigabekarten. Befehle werden in einer Sandbox im Arbeitsordner ausgef?hrt. Vertrauensw?rdige Integrationen in Projekten k?nnen au?erhalb dieses Ordners lesen und Ausgaben an ihren Anbieter senden. Ist die Sandbox nicht verf?gbar, schlagen Befehle fehl.",
+  "project.permissionsDontAsk": "Chat und Projekte laufen ohne Freigabekarten. Integrationswerkzeuge sind deaktiviert. Befehle brauchen eine unterstützte Sandbox; Befehle von Claude Code brauchen auch die installierte Codex CLI. Dein Benutzerordner, Laufwerkswurzeln und Ordner unter Windows, Program Files und AppData funktionieren nur mit Vor Befehlen fragen.",
   "error.projectSandbox": "Faber konnte die Sandbox f?r den Arbeitsordner nicht vorbereiten. Pr?fe die Ordnerberechtigungen und versuche es erneut.",
   "project.permissionsAsk": "Chat und Projekte fragen vor Befehlen nach. Beim Wechsel in diesen Modus werden laufende Aufgaben gestoppt.",
   'set.permissions.dontAsk': "Nicht nachfragen",
@@ -211,9 +211,11 @@ export const de: Messages = {
   "set.privateFolder": "Privater Ordner",
   "error.chatFolderLocked": "W?hle den Arbeitsordner vor der ersten Nachricht. Beginne eine neue Unterhaltung, um einen anderen Ordner zu nutzen.",
   "error.chatFolder": "Faber konnte diesen Ordner nicht verwenden. W?hle einen lokalen Ordner, in den du schreiben kannst.",
+  "error.workingFolder": "Dieser Ordner ist für Nicht fragen zu umfassend. Wähle einen Projektordner oder wechsle zu Vor Befehlen fragen.",
   'set.hooks': 'Deine CLI-Hooks',
   'set.hooksBody': 'Projekte führen meine eigenen CLI-Hooks aus',
-  'set.hooksHint': 'Standardmäßig aus: Ein Hook kann jede Antwort verlangsamen oder blockieren. Der Chat führt sie nie aus.',
+  // R107 security review: handwritten wording; native-speaker review pending.
+  'set.hooksHint': "Standardmäßig aus. Hooks laufen nur mit Vor Befehlen fragen; sie können Antworten ändern oder außerhalb der Werkzeugregeln laufen. Nicht fragen deaktiviert Hooks.",
   'set.name': 'Dein Name',
   'set.nameHint': 'Steht in der Begrüßung und wird der KI zu Beginn einer Unterhaltung genannt. Leeren, um ohne Namen zu starten.',
   'set.subscriptions': 'Verbundene Konten',

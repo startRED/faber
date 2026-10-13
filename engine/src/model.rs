@@ -237,6 +237,9 @@ pub struct Conversation {
     /// One CLI session per vendor, so switching models keeps each vendor's own history and cache.
     #[serde(default)]
     pub sessions: BTreeMap<Vendor, String>,
+    /// Older sessions restart once with visible history to receive the host command tool.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub command_gate: bool,
     /// The cumulative cost each CLI session last reported, so a turn costs the difference (`usage::settle`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub cost_base: BTreeMap<Vendor, crate::usage::CostBase>,

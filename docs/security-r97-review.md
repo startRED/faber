@@ -121,11 +121,11 @@ external writable caches, detached-server assumptions and unsupported sandbox po
 Profiles retain vendor safeguards and bound glob expansion to three levels, as the configuration reference requires.
 Config/argv checks do not prove every platform's runtime enforcement or future-file glob behavior.
 
-Native Windows Claude Code has no Bash sandbox. CLI authentication, user-installed startup helpers, plugins and trusted
-hooks are outside this tool boundary; a malicious CLI/plugin or a concurrent filesystem replacement is not isolated by
+Native Windows Claude Code has no Bash sandbox. CLI authentication and user-installed startup helpers are outside
+this tool boundary; unattended plugins/hooks are disabled. A malicious CLI or a concurrent filesystem replacement is not isolated by
 canonicalization or inherited environment settings. Do not treat this feature as a sandbox for hostile projects. Full
-OS enforcement, native sandbox runtime behavior, and live permission-rule matching were not tested: tests may not call
-real CLIs. Capabilities were checked with help, schema and tagged source. An attempted `codex sandbox windows --help`
+OS enforcement was initially checked only through help, schema and tagged source. The live probes below supersede
+that limit for this Windows host; automated tests still never call real CLIs. An attempted `codex sandbox windows --help`
 was interpreted as a command because there is no `windows` subcommand, and failed to start that program; it was not a
 successful sandbox probe or a model session. The Windows junction test uses a Windows-only **dev dependency** because stable Rust cannot create
 junctions and this PC lacks symlink privilege; no test shells out and the dependency does not ship in Faber.
@@ -143,3 +143,57 @@ Primary references: [Claude permission rules](https://code.claude.com/docs/en/pe
 [installed-version config loading](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/core/src/config/mod.rs),
 [installed-version thread start/resume](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server/src/request_processors/thread_processor.rs),
 [installed-version sandbox command](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/cli/src/debug_sandbox.rs).
+
+## Independent Chat reviews: verified findings and live probes
+
+This section supersedes the earlier integration and runtime limitations where noted. Both independent reviews
+targeted `4b6339f`. Each newly fixed gap first failed a regression assertion or the authorized live probe.
+
+| Review finding | Verdict and change | Regression evidence |
+|---|---|---|
+| Opus H1: missing mutation coverage | Real. Both areas assert the catch-all ask rule, unknown/external-tool rejection and home/workspace credential denies. Nine source mutations each failed an assertion. | `review3_catch_all_routes_untrusted_tools_to_the_host_in_both_areas`; `review3_codex_credential_denies_survive_in_both_areas_and_on_resume` |
+| Opus H2: unattended integrations can push | Real. Apps/plugins/browser/computer use and automatic MCP dependency installation are disabled. An empty `mcp_servers` table does not clear inherited tables: before start/resume, the CLI's config API supplies names and Faber overrides each server with `enabled=false`. Values are skipped with `serde::de::IgnoredAny`, never forwarded or recorded. Both CLIs also disable hooks/startup integrations in Don't ask. Ask retains its setup. | `review3_user_mcp_servers_are_disabled_before_start_and_resume_without_copying_values`; `review3_unattended_startup_cannot_run_integration_hooks_even_after_opt_in` |
+| Opus M1: overly broad folders | Real. Don't ask rejects canonical home folders, drive roots and Windows/Program Files/AppData trees, including existing chosen folders on launch. Ask permits them. Only Faber-owned per-conversation scratch is exempt from the AppData restriction. Settings explains the restriction. | `review3_sensitive_chat_roots_are_refused_only_without_prompts`; `review3_sensitive_roots_include_canonical_home_drive_and_system_subtrees` |
+| Opus M2 / Gemini H1: Windows backend | The launch ambiguity was real; the claim that thread config is ignored is false. Installed-version `ConfigManager::load_with_cli_overrides` appends request overrides after server overrides, so the thread's MXC selection wins. Official docs also say unelevated applies a restricted token and ACL boundaries; it is not unrestricted, although it lacks denied reads. Startup now pins MXC too, removing ambiguity. Final canary reads/writes failed with actual filesystem `EPERM` errors under MXC. | `review3_codex_unattended_projects_disable_integrations_and_pin_mxc`; `review3_live_captures_contain_actual_denied_file_operations_and_git_requests` |
+| Gemini H2: git mutations | Real command-policy gap, not proof of a successful published-history rewrite. Read-only `.git` protects history but is not a git command allowlist: `clean` can delete worktree files. Don't ask now disables native Codex shell tools and exposes a host command tool using the same validator/sandbox argv as Claude. Direct push/reset/rebase/clean requests are declined. Existing sessions restart once with visible history to install that tool; gated sessions resume normally. | `review3_command_gate_declines_git_mutations_and_runs_builds_only_in_the_sandbox`; `review3_legacy_sessions_restart_with_history_and_gated_sessions_resume` |
+| Gemini M1: project-local auth files | Real. `.credentials.json`, `credentials.json` and `auth.json` are now protected by the shared file policy and sandbox profile. | `review3_project_local_auth_files_are_unreadable_and_denied_in_the_profile` |
+| Gemini M2: Claude command dependency / MCP unavailable | Real dependency, intentional safety boundary. Claude commands still require an available native Codex sandbox runner; there is no unsandboxed fallback. Settings now states the dependency and integration restrictions. No MCP tool is auto-approved. | existing `review2_h3` sandbox-wrapper tests; `review3: Settings discloses sandbox dependencies, integration limits and forbidden folders` |
+| Gemini L1: incomplete disclosure | Real; the five locales now state the helper dependency, integration/hook restrictions and forbidden folders. Four handwritten locales await native review. | `review3: Settings discloses sandbox dependencies, integration limits and forbidden folders` |
+| Gemini L2: fake tests do not prove runtime enforcement | Real validation limit; supplemented by owner-authorized subscription probes. Captured failures must be real filesystem denials, not startup failures. CI tests only replay/inspect trimmed captures. | `review3_live_captures_contain_actual_denied_file_operations_and_git_requests` |
+
+Mutation list: remove `*`; approve WebFetch/Agent; remove profile `~/.claude`; remove profile `~/.codex`;
+remove workspace `.claude`; remove workspace `.codex`; remove workspace `.gemini`; remove native
+`Read(~/.claude/**)`; remove native `Read(~/.codex/**)`. Every mutation failed the focused `review3` assertions;
+the original files were restored after each check. No mutation test starts a CLI.
+
+The probes used Claude Code 2.1.296 and Codex 0.162.1, subscription authentication, fresh owned scratch folders,
+two outside canaries, and a nested throwaway repository with two commits and a fake published upstream.
+Each agent attempted read, write and `git -C repo reset --hard HEAD~1` once per probe scenario. Initial probes
+found additional integration bugs: the required `--permission-profile` flag was missing; arbitrary read-access
+globs such as `**/.git` are rejected by the installed CLI; Windows native argument forwarding broke quoted TOML
+tables. Failing regressions and before-captures precede those fixes. Existing nested Git metadata now gets exact
+read-only bindings; an incomplete/bounded metadata scan makes the workspace read-only rather than granting writes.
+`review3_unrepresentable_git_bindings_make_the_workspace_read_only` first reproduced a skipped non-UTF-8 subtree;
+unrepresentable bindings now also make the workspace read-only.
+That filesystem regression runs on Windows/Linux; [APFS requires valid UTF-8 names](https://developer.apple.com/library/archive/documentation/FileManagement/Conceptual/APFS_Guide/FAQ/FAQ.html).
+Legacy extra writable roots are explicitly cleared and runtime workspace roots are fixed to the chosen folder.
+
+After correcting those failures, Python's Windows Store alias could not run in MXC. Node initially failed when
+canonicalizing an ancestor drive, so child `NODE_OPTIONS` uses Node's supported symlink-preserving loader flags,
+without granting ancestor reads. The final local Node script ran under both CLIs: opening the read canary and
+opening the write canary each returned `EPERM`; reset was declined by Faber; neither canary nor the published
+head changed. Final and before captures live in `tests/fixtures/security-probes/{claude,codex}{,-before}.json`, with paths
+scrubbed and no account data. `engine/examples/security_probe.rs` is manual-only, never an automated test.
+A broad `:workspace` MXC capability check also failed while enumerating this host's unrecognized `G:` volume;
+the restricted final profile succeeded. No volume, credential file or account configuration was changed by Faber.
+
+These probes verify this host and these operations, not every platform, runtime, future-file glob or hostile project.
+Node loader flags can change symlink/module identity behavior; unsupported interpreters and external caches may fail.
+Native sandbox support remains mandatory. The earlier malicious-CLI/auth-helper and filesystem-race limits still
+apply; unattended plugins/hooks are now disabled. One owned probe directory remains under ignored `target` after
+automatic approval review rejected its cleanup as `blocked by policy`.
+
+Additional primary evidence: [installed config override order](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server/src/config_manager.rs),
+[installed table merging](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/config/src/merge.rs),
+[installed filesystem grammar](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/core/src/config/permissions.rs),
+[Node loader flags](https://nodejs.org/api/cli.html#--preserve-symlinks-main).

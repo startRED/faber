@@ -24,9 +24,13 @@ check('R107: Settings names Chat and Projects and discloses the shared default',
   ok(en['set.chatFolderHint'].includes('delete the conversation'));
 });
 
-check('review2 H2: the default disclosure explains external reads and provider transmission', () => {
-  ok(en['project.permissionsDontAsk'].includes('outside this folder'));
-  ok(en['project.permissionsDontAsk'].includes('provider'));
+check('review3: Settings discloses sandbox dependencies, integration limits and forbidden folders', () => {
+  const hint = en['project.permissionsDontAsk'];
+  ok(hint.includes('Codex CLI'));
+  ok(hint.includes('integrations'));
+  for (const folder of ['home', 'drive', 'Windows', 'Program Files', 'AppData']) ok(hint.includes(folder), folder);
+  ok(hint.includes('Ask before commands'));
+  ok('error.workingFolder' in en);
 });
 
 const look = (over: Partial<Look> = {}): Look => ({

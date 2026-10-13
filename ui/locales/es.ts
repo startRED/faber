@@ -200,7 +200,7 @@ export const es: Messages = {
   'error.permission.undelivered': "Faber no pudo enviar la respuesta de permiso. Inténtalo de nuevo.",
   // R107: handwritten wording; native-speaker review pending (English is the source).
   "set.permissions": "Permisos para Chat y Proyectos",
-  "project.permissionsDontAsk": "Chat y Proyectos se ejecutan sin tarjetas de aprobaci?n. Los comandos usan un entorno aislado dentro de la carpeta de trabajo. Las integraciones de confianza en Proyectos pueden leer fuera de esta carpeta y enviar la salida a su proveedor. Si el aislamiento no est? disponible, los comandos fallan.",
+  "project.permissionsDontAsk": "Chat y Proyectos se ejecutan sin tarjetas de aprobación. Las herramientas de integración están desactivadas. Los comandos necesitan un entorno aislado compatible; los comandos de Claude Code también necesitan la CLI de Codex instalada. La carpeta personal, las raíces de unidades y las carpetas Windows, Program Files y AppData solo funcionan con Preguntar antes de los comandos.",
   "error.projectSandbox": "Faber no pudo preparar el aislamiento de la carpeta de trabajo. Revisa los permisos de la carpeta e int?ntalo de nuevo.",
   "project.permissionsAsk": "Chat y Proyectos piden aprobaci?n antes de ejecutar comandos. Cambiar a este modo detiene las tareas en curso.",
   'set.permissions.dontAsk': "No preguntar",
@@ -211,9 +211,11 @@ export const es: Messages = {
   "set.privateFolder": "Carpeta privada",
   "error.chatFolderLocked": "Elige la carpeta de trabajo antes del primer mensaje. Inicia una nueva conversaci?n para usar otra carpeta.",
   "error.chatFolder": "Faber no pudo usar esta carpeta. Elige una carpeta local en la que puedas escribir.",
+  "error.workingFolder": "Esta carpeta es demasiado amplia para No preguntar. Elige una carpeta de proyecto o cambia a Preguntar antes de los comandos.",
   'set.hooks': 'Tus hooks de la CLI',
   'set.hooksBody': 'Los proyectos ejecutan mis propios hooks de la CLI',
-  'set.hooksHint': 'Desactivado por defecto: un hook puede ralentizar o bloquear cada respuesta. El chat nunca los ejecuta.',
+  // R107 security review: handwritten wording; native-speaker review pending.
+  'set.hooksHint': "Desactivados por defecto. Los hooks solo se ejecutan con Preguntar antes de los comandos; pueden cambiar respuestas o ejecutarse fuera de las reglas de herramientas. No preguntar desactiva los hooks.",
   'set.name': 'Tu nombre',
   'set.nameHint': 'Aparece en el saludo y se le dice a la IA cuando empieza una conversación. Bórralo para quedarte sin nombre.',
   'set.subscriptions': 'Cuentas conectadas',
