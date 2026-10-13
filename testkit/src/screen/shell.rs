@@ -810,7 +810,8 @@ fn keys_until_the_question(page: &mut Page, chords: &[&str]) -> Result<std::time
         pause(0.3);
         if page.is_visible(&card)? {
             after += 1;
-            if after >= 4 {
+            // Finish the whole key cycle: its net caret movement must not depend on when the question arrived.
+            if after >= 4 && (turn + 1) % chords.len() == 0 {
                 return Ok(last);
             }
         }
@@ -826,15 +827,20 @@ fn waits_for_every_key(ctx: &mut Ctx) -> Result {
     let model = page.labelled("composer.model")?;
     page.select_option(&model, "Claude Haiku")?;
     ask(page, TWO_WRITES)?;
-    // The conversation opens and its composer is drawn; a few words go in, and the caret goes to 3 and comes back.
-    page.wait_for(
-        "the conversation to open",
-        "document.querySelector('.crumb b')?.textContent.length > 0 && !document.querySelector('.crumb b').textContent.includes('New')",
-    )?;
+    // The title can arrive before the snapshot replaces the welcome composer with the conversation's composer.
+    page.wait_visible(&css(".dock .composer textarea"))?;
+    page.wait_enabled(&model)?;
     let composer = page.labelled("composer.message")?;
+    // As in `ask`, establish native input focus on the replacement field before typing through DevTools.
+    page.click(&composer)?;
     page.fill(&composer, "hello")?;
+    page.wait_for(
+        "the typed text and its caret",
+        "(() => { const f = document.querySelector('.dock .composer textarea'); return document.activeElement === f && f.value === 'hello' && f.selectionStart === 5 && f.selectionEnd === 5; })()",
+    )?;
     page.press("ArrowLeft")?;
     page.press("ArrowLeft")?;
+    same(page.eval_on(&composer, "return [el.selectionStart, el.selectionEnd];")?, json!([3, 3]), "the caret starts at 3")?;
     // Only arrow keys from here on: they move the caret and change no text, so no `input` event comes. The question
     // arrives meanwhile, and the column must keep out of the way for as long as the keys come.
     let last = keys_until_the_question(page, &["ArrowLeft", "ArrowRight"])?;
@@ -842,6 +848,11 @@ fn waits_for_every_key(ctx: &mut Ctx) -> Result {
     let closed_for = last.elapsed();
     ensure(closed_for < Duration::from_millis(1400), || format!("too slow to look: {closed_for:?}"))?;
     ensure(!page.is_visible(&css(".runcol"))?, || format!("the column opened {closed_for:?} after the last key"))?;
+    same(
+        page.eval_on(&composer, "return [el.selectionStart, el.selectionEnd];")?,
+        json!([3, 3]),
+        "the keys returned the caret to 3 before the column opens",
+    )?;
     page.wait_visible(&css(".runcol .ask").has_text("a.txt"))?;
     let waited = last.elapsed();
     ensure(waited >= Duration::from_millis(1450), || format!("the column opened {waited:?} after the last key"))?;
