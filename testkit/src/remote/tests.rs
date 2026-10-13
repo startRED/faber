@@ -538,7 +538,7 @@ fn config_that_cannot_be_read_or_understood_blocks_the_push() {
 }
 
 /// What the repository itself may carry, with the reason each key is harmless to a push. Anything else is refused.
-const ALLOWED: [&str; 22] = [
+const ALLOWED: [&str; 27] = [
     "core.repositoryformatversion",
     "core.filemode",
     "core.bare",
@@ -557,6 +557,12 @@ const ALLOWED: [&str; 22] = [
     "branch.faber/m1.merge",
     "Branch.faber/m1.Merge",
     "branch.faber/m1.vscode-merge-base",
+    // The owner's repository keeps one pair per tracked branch, and a mission worktree reads that shared config.
+    "branch.main.remote",
+    "branch.main.merge",
+    "branch.Faber/other.merge",
+    "branch.feature/a.b.vscode-merge-base",
+    "BRANCH.x.REMOTE",
     "user.name",
     "user.email",
     "USER.Email",
@@ -566,7 +572,7 @@ const ALLOWED: [&str; 22] = [
 #[test]
 fn only_listed_config_keys_may_come_from_the_repository() {
     for allowed in ALLOWED {
-        assert!(allowed_key(allowed, "origin", "faber/m1"), "{allowed}");
+        assert!(allowed_key(allowed, "origin"), "{allowed}");
     }
     for refused in [
         // Third time a blocklist missed a key that runs a command: everything not listed above is refused.
@@ -618,11 +624,13 @@ fn only_listed_config_keys_may_come_from_the_repository() {
         "remote.origin2.url",
         "remote.my.remote.url",
         "remote.origin.sub.url",
-        "branch.main.merge",
-        "branch.main.remote",
-        "branch.Faber/m1.merge",
-        "branch.faber/m1x.merge",
-        "branch.faber.merge",
+        // Any other key of a branch is refused, whatever the branch.
+        "branch.main.rebase",
+        "branch.main.pushRemote",
+        "branch.faber/m1.pushremote",
+        "branch.main.mergeOptions",
+        "branch.main.description",
+        "branch.main.autoSetupRebase",
         // The section decides what a name means: the same last word in another section is another setting.
         "foo.origin.url",
         "foo.origin.fetch",
@@ -652,7 +660,7 @@ fn only_listed_config_keys_may_come_from_the_repository() {
         "core",
         ".",
     ] {
-        assert!(!allowed_key(refused, "origin", "faber/m1"), "{refused}");
+        assert!(!allowed_key(refused, "origin"), "{refused}");
     }
 }
 
@@ -1845,22 +1853,36 @@ fn an_intent_with_no_receipt_is_settled_only_by_finding_it_done() {
 // Review round 4: other remotes, protocols, inherited config, history rewrites and borrowed objects
 
 #[test]
-fn only_the_granted_remote_and_the_own_branch_may_be_configured() {
+fn only_the_granted_remote_may_be_configured_and_another_has_its_own_refusal() {
     for refused in [
         "remote.Origin.url",
         "remote.ORIGIN.fetch",
         "remote.other.url",
         "remote.other.fetch",
         "remote.mirror.url",
-        "branch.main.merge",
-        "branch.main.remote",
-        "branch.Faber/m1.merge",
+        "remote.other.pushurl",
+        "Remote.other.pushUrl",
+        "remote.my.remote.url",
     ] {
         for scope in ["local", "worktree"] {
             let mut fake = scoped(scope, refused);
-            assert_eq!(key(push(&mut fake, &mut Mem::new(GitMode::Equilibrado), &target())), "reason.remote.config", "{scope} {refused}");
+            assert_eq!(
+                key(push(&mut fake, &mut Mem::new(GitMode::Equilibrado), &target())),
+                "reason.remote.otherRemote",
+                "{scope} {refused}"
+            );
             assert!(fake.pushes().is_empty());
         }
+        // The person's own scopes are theirs; the command line holds only Faber's pins.
+        let mut fake = scoped("global", refused);
+        push(&mut fake, &mut Mem::new(GitMode::Equilibrado), &target()).unwrap();
+        let mut fake = scoped("command", refused);
+        assert_eq!(key(push(&mut fake, &mut Mem::new(GitMode::Equilibrado), &target())), "reason.remote.config", "command {refused}");
+    }
+    // The granted remote's other keys are still the config refusal, not "another remote".
+    for refused in ["remote.origin.pushurl", "remote.origin.proxy", "remote.pushdefault"] {
+        let mut fake = scoped("local", refused);
+        assert_eq!(key(push(&mut fake, &mut Mem::new(GitMode::Equilibrado), &target())), "reason.remote.config", "{refused}");
     }
     // The granted name is compared exactly the other way round too: a remote called "Origin" is not "origin".
     let mut t = target();
@@ -1868,9 +1890,155 @@ fn only_the_granted_remote_and_the_own_branch_may_be_configured() {
     let mut ledger = Mem::new(GitMode::Equilibrado);
     ledger.grant.as_mut().unwrap().remote = Some("Origin".into());
     let mut fake = scoped("local", "remote.origin.url");
-    assert_eq!(key(push(&mut fake, &mut ledger, &t)), "reason.remote.config");
+    assert_eq!(key(push(&mut fake, &mut ledger, &t)), "reason.remote.otherRemote");
     let mut fake = scoped("local", "remote.Origin.url");
     push(&mut fake, &mut ledger, &t).unwrap();
+}
+
+/// A repository like the owner's: the granted remote, and a pair of keys for each of many tracked branches.
+fn tracked_branches(scope: &str, count: usize) -> FakeRemote {
+    let mut fake = FakeRemote::default();
+    fake.config.push((scope.into(), "remote.origin.url".into()));
+    fake.config.push((scope.into(), "remote.origin.fetch".into()));
+    for n in 0..count {
+        fake.config.push((scope.into(), format!("branch.feature/b{n}.remote")));
+        fake.config.push((scope.into(), format!("branch.feature/b{n}.merge")));
+    }
+    fake
+}
+
+#[test]
+fn the_branch_sections_of_a_clone_with_many_tracked_branches_do_not_block_the_push() {
+    for scope in ["local", "worktree"] {
+        let mut fake = tracked_branches(scope, 44);
+        fake.config.push((scope.into(), "branch.faber/m1.remote".into()));
+        fake.config.push((scope.into(), "branch.faber/m1.merge".into()));
+        fake.config.push((scope.into(), "branch.dotted.name.vscode-merge-base".into()));
+        fake.values.push(("branch.feature/b3.remote".into(), ".".into()));
+        let mut ledger = Mem::new(GitMode::Equilibrado);
+        push(&mut fake, &mut ledger, &target()).unwrap_or_else(|e| panic!("{scope}: {}", e.key()));
+        assert_eq!(fake.pushes().len(), 1);
+        // The values are read once, in one call, not once per branch.
+        assert_eq!(fake.calls.iter().filter(|c| has(c, "--get-regexp")).count(), 1);
+    }
+    // With no branch key in the repository the values are not read at all.
+    let mut fake = FakeRemote::default();
+    push(&mut fake, &mut Mem::new(GitMode::Equilibrado), &target()).unwrap();
+    assert!(fake.calls.iter().all(|c| !has(c, "--get-regexp")));
+}
+
+#[test]
+fn a_branch_key_with_a_value_that_does_something_blocks_the_push() {
+    for (variable, value) in [
+        ("remote", "other"),
+        ("remote", "Origin"),
+        ("remote", "https://evil.invalid/x.git"),
+        ("remote", "ext::sh -c touch% x"),
+        ("remote", "../elsewhere"),
+        ("remote", "/a/repo"),
+        ("remote", "-oProxyCommand=x"),
+        ("remote", "origin\u{1}"),
+        ("remote", ""),
+        ("merge", "main"),
+        ("merge", "refs/tags/v1"),
+        ("merge", "refs/remotes/origin/main"),
+        ("merge", "refs/heads/"),
+        ("merge", "refs/heads/a\u{7}b"),
+        ("merge", "refs/heads/a\nb"),
+        ("merge", "refs/heads/a\tb"),
+        ("merge", ""),
+        ("vscode-merge-base", ""),
+        ("vscode-merge-base", "origin/a\u{1b}[31m"),
+        ("vscode-merge-base", "origin/a\nb"),
+    ] {
+        for branch in ["faber/m1", "feature/other"] {
+            for scope in ["local", "worktree"] {
+                let name = format!("branch.{branch}.{variable}");
+                let mut fake = tracked_branches(scope, 3);
+                fake.config.push((scope.into(), name.clone()));
+                fake.values.push((name, value.into()));
+                let mut ledger = Mem::new(GitMode::Equilibrado);
+                assert_eq!(key(push(&mut fake, &mut ledger, &target())), "reason.remote.config", "{scope} {branch}.{variable} = {value:?}");
+                assert!(fake.pushes().is_empty() && ledger.entries.is_empty());
+            }
+        }
+    }
+    // The harmless values of the same keys pass: the point is the value, not the key.
+    for (variable, value) in [
+        ("remote", "origin"),
+        ("remote", "."),
+        ("merge", "refs/heads/main"),
+        ("merge", "refs/heads/feature/a.b"),
+        ("vscode-merge-base", "origin/main"),
+    ] {
+        let name = format!("branch.faber/m1.{variable}");
+        let mut fake = scoped("local", &name);
+        fake.values.push((name, value.into()));
+        push(&mut fake, &mut Mem::new(GitMode::Equilibrado), &target()).unwrap_or_else(|e| panic!("{variable} = {value}: {}", e.key()));
+    }
+}
+
+#[test]
+fn only_the_repository_scopes_have_their_branch_values_judged() {
+    // The person's own global and system config is theirs; it never reaches the second read.
+    for scope in ["global", "system"] {
+        let mut fake = scoped(scope, "branch.main.remote");
+        fake.values.push(("branch.main.remote".into(), "https://elsewhere.invalid/x".into()));
+        push(&mut fake, &mut Mem::new(GitMode::Equilibrado), &target()).unwrap();
+        assert!(fake.calls.iter().all(|c| !has(c, "--get-regexp")));
+    }
+    // The person's global branch keys, next to the repository's own harmless ones, are not judged either.
+    let mut fake = tracked_branches("local", 2);
+    fake.config.push(("global".into(), "branch.main.remote".into()));
+    fake.values.push(("branch.main.remote".into(), "https://elsewhere.invalid/x".into()));
+    push(&mut fake, &mut Mem::new(GitMode::Equilibrado), &target()).unwrap();
+    // The names of git's keys are case-insensitive in the section and the variable, and the values are read all the same.
+    for name in ["Branch.faber/m1.Merge", "BRANCH.faber/m1.REMOTE"] {
+        let mut fake = scoped("local", name);
+        fake.values.push((name.into(), "main".into()));
+        assert_eq!(key(push(&mut fake, &mut Mem::new(GitMode::Equilibrado), &target())), "reason.remote.config", "{name}");
+    }
+    // A hostile local record is found wherever it comes in the list, among harmless ones.
+    let mut fake = tracked_branches("local", 2);
+    fake.values.push(("branch.feature/b1.merge".into(), "main".into()));
+    let mut ledger = Mem::new(GitMode::Equilibrado);
+    assert_eq!(key(push(&mut fake, &mut ledger, &target())), "reason.remote.config");
+}
+
+#[test]
+fn a_branch_value_read_that_fails_or_is_not_understood_blocks_the_push() {
+    let mut ledger = Mem::new(GitMode::Equilibrado);
+    for (code, stdout, expected) in [
+        (128, "", "reason.git.command"),
+        (1, "", "reason.git.command"),
+        (0, "local\0branch.main.remote\0", "reason.remote.config"),
+        (0, "local\0", "reason.remote.config"),
+        (0, "local", "reason.remote.config"),
+        (0, "branch.main.remote\norigin\0", "reason.remote.config"),
+        (0, "local\0core.bare\ntrue\0", "reason.remote.config"),
+        (0, "local\0branch.main.pushremote\norigin\0", "reason.remote.config"),
+        (0, "local\0branch.main.remote\nhttps://x.invalid/r\0", "reason.remote.config"),
+    ] {
+        let mut runner = Tweak {
+            fake: scoped("local", "branch.main.remote"),
+            change: |call: &Call, _: &mut FakeRemote, got: Result<Reply, Lost>| {
+                if has(call, "--get-regexp") { said(code, stdout) } else { got }
+            },
+        };
+        assert_eq!(key(push(&mut runner, &mut ledger, &target())), expected, "{code} {stdout:?}");
+        assert!(runner.fake.pushes().is_empty());
+    }
+}
+
+#[test]
+fn the_values_of_branch_keys_are_judged_the_same_way_alone() {
+    use faber_engine::project::remote::inert_branch_value as inert;
+    assert!(inert("remote", "origin", "origin") && inert("REMOTE", ".", "origin") && !inert("remote", "origin", "Origin"));
+    assert!(inert("merge", "refs/heads/a/b-c_d.e", "origin") && !inert("merge", "refs/heads/", "origin"));
+    assert!(!inert("merge", "refs/heads/a\u{0}b", "origin") && !inert("merge", "refs/heads/a\u{7f}", "origin"));
+    assert!(inert("vscode-merge-base", "origin/x", "origin") && !inert("vscode-merge-base", "", "origin"));
+    assert!(!inert("pushremote", "origin", "origin") && !inert("rebase", "true", "origin") && !inert("", "origin", "origin"));
+    assert!(!inert("merge", &format!("refs/heads/{}", "a".repeat(1100)), "origin"));
 }
 
 #[test]

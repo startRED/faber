@@ -500,6 +500,7 @@ export const en = {
   "reason.remote.pending": "An earlier publish step is not settled yet. Faber checks the remote before sending anything else.",
   "reason.remote.config": "This repository has Git settings that Faber does not allow for a push (only the basics of the remote, the branch and the author are). Nothing was sent.",
   "reason.remote.layout": "This repository rewrites history or borrows objects from elsewhere (grafts, a shallow clone or alternates), so Faber cannot prove what would leave. Nothing was sent.",
+  "reason.remote.otherRemote": "This repository has a second remote. Faber pushes only to the remote you granted, so it will not push while another one is configured. Nothing was sent.",
   "reason.remote.url": "The remote no longer points where you granted. Nothing was sent.",
   "reason.remote.secret": "A possible secret was found in what would be sent. Nothing was sent.",
   "reason.remote.unreachable": "The remote could not be reached. Your work stays local.",

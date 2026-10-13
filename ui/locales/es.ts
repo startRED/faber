@@ -592,6 +592,7 @@ export const es: Messages = {
   "reason.remote.pending": "Un paso anterior de la publicación aún no está resuelto. Faber comprueba el remoto antes de enviar nada más.",
   "reason.remote.config": "Este repositorio tiene ajustes de Git que Faber no permite en un envío (solo valen lo básico del remoto, de la rama y del autor). No se envió nada.",
   "reason.remote.layout": "Este repositorio reescribe el historial o toma objetos de otro lugar (grafts, un clon superficial o alternates), así que Faber no puede demostrar qué saldría. No se envió nada.",
+  "reason.remote.otherRemote": "Este repositorio tiene un segundo remoto. Faber solo envía al remoto que autorizaste, así que no envía mientras haya otro configurado. No se envió nada.",
   "reason.remote.url": "El remoto ya no apunta a donde lo autorizaste. No se envió nada.",
   "reason.remote.secret": "Se encontró un posible secreto en lo que se iba a enviar. No se envió nada.",
   "reason.remote.unreachable": "No se pudo contactar con el remoto. Tu trabajo se queda en local.",

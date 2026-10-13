@@ -285,10 +285,15 @@ nothing read from them is trusted):
   --name-only`. In the local and worktree scopes only these keys may appear: the `core.*` basics `git init` and the
   platforms write (`repositoryformatversion`, `filemode`, `bare`, `logallrefupdates`, `symlinks`, `ignorecase`,
   `precomposeunicode`, `longpaths`, `autocrlf`), `extensions.worktreeConfig` and `extensions.objectFormat` (the layout git
-  must understand to open the repository), `remote.<granted remote>.url` and `.fetch`, `branch.<own branch>.remote`,
+  must understand to open the repository), `remote.<granted remote>.url` and `.fetch`, `branch.<any branch>.remote`,
   `.merge` and `.vscode-merge-base`, and `user.name` and `user.email`. Section and variable names are compared without
-  case, a subsection exactly, as git does: `[remote "Origin"]` is another remote than `origin`, so any other remote or
-  branch section is refused. Anything else blocks the push, so does an unparsable line: that includes every `include`
+  case, a subsection exactly, as git does: `[remote "Origin"]` is another remote than `origin`, so a second remote is
+  refused with its own reason (`reason.remote.otherRemote`). The branch keys are allowed for every branch because a clone
+  keeps one pair per tracked branch and a mission worktree reads that shared config; they cannot change where or what is
+  pushed, since every network call names the granted URL and an explicit refspec, and `pushRemote`, `rebase` and every
+  other branch key stay refused. Their values are read in one `git config --show-scope -z --get-regexp '^branch[.]'`
+  and must be inert: `remote` is the granted remote or `.`, `merge` is a `refs/heads/...` name, and no value holds a
+  control character. Anything else blocks the push, so does an unparsable line: that includes every `include`
   and `includeIf` (`--list` follows them and judges what they bring, and the include key itself is not listed), `gpg.*`,
   `credential.*`, `url.*`, `core.hooksPath`, `core.worktree`, `remote.*.pushurl` and the promisor keys. The command scope
   may hold only Faber's own pins: the environment's `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>`,

@@ -592,6 +592,7 @@ export const de: Messages = {
   "reason.remote.pending": "Ein früherer Veröffentlichungsschritt ist noch nicht geklärt. Faber prüft das Remote, bevor etwas anderes gesendet wird.",
   "reason.remote.config": "Dieses Repository enthält Git-Einstellungen, die Faber für einen Push nicht zulässt (erlaubt sind nur die Grundlagen zu Remote, Branch und Autor). Es wurde nichts gesendet.",
   "reason.remote.layout": "Dieses Repository schreibt die Historie um oder leiht sich Objekte von anderswo (Grafts, ein flacher Klon oder Alternates), daher kann Faber nicht belegen, was gesendet würde. Es wurde nichts gesendet.",
+  "reason.remote.otherRemote": "Dieses Repository hat ein zweites Remote. Faber sendet nur an das Remote, das Sie freigegeben haben, und sendet daher nicht, solange ein anderes konfiguriert ist. Es wurde nichts gesendet.",
   "reason.remote.url": "Das Remote zeigt nicht mehr dorthin, wo du es freigegeben hast. Es wurde nichts gesendet.",
   "reason.remote.secret": "In dem, was gesendet werden sollte, wurde ein mögliches Geheimnis gefunden. Es wurde nichts gesendet.",
   "reason.remote.unreachable": "Das Remote war nicht erreichbar. Deine Arbeit bleibt lokal.",

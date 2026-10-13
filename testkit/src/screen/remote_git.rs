@@ -140,7 +140,7 @@ fn allowlist(program: &str, sandbox: &Path) -> Result {
     // Every key real git wrote on its own is on the list, so the list is not missing something `git init` needs.
     let listed = git(program, &repo, &["config", "--local", "--list", "--name-only"])?;
     for key in listed.lines() {
-        ensure(allowed_key(key, "origin", "faber/m1"), || format!("git wrote {key} itself and the list refuses it"))?;
+        ensure(allowed_key(key, "origin"), || format!("git wrote {key} itself and the list refuses it"))?;
     }
     git(program, &repo, &["config", "extensions.worktreeConfig", "true"])?;
     git(program, &repo, &["config", "--worktree", "user.name", "Worktree"])?;
@@ -321,7 +321,8 @@ fn link(program: &str, sandbox: &Path) -> Result {
     ensure(reply.code == 0, || format!("a read from the private folder failed with {}", reply.code))
 }
 
-/// Other remotes and branches in the repository's config: git keeps "Origin" and "origin" apart, so the check does too.
+/// Other remotes in the repository's config: git keeps "Origin" and "origin" apart, so the check does too. A second
+/// remote is refused with its own reason, and a branch that follows a remote that is not the granted one is refused too.
 fn other_remotes(program: &str, sandbox: &Path) -> Result {
     let repo = sandbox.join("remotes");
     let head = repository(program, &repo)?;
@@ -335,20 +336,98 @@ fn other_remotes(program: &str, sandbox: &Path) -> Result {
     ensure(remotes.lines().any(|l| l == "Origin") && remotes.lines().any(|l| l == "origin"), || {
         format!("control: git did not keep Origin and origin apart: {remotes}")
     })?;
-    ensure(guard(&mut runner) == Err(RemoteError::Config), || "a remote named Origin was taken for origin".into())?;
+    ensure(guard(&mut runner) == Err(RemoteError::OtherRemote), || "a remote named Origin was taken for origin".into())?;
     git(program, &repo, &["config", "--unset", "remote.Origin.url"])?;
     for (key, value) in [
         ("remote.mirror.url", "ext::sh -c touch% x"),
         ("remote.leak.url", "https://attacker.invalid/leak.git"),
         ("remote.leak.fetch", "+refs/heads/*:refs/remotes/leak/*"),
-        ("branch.main.merge", "refs/heads/main"),
-        ("branch.main.remote", "leak"),
+        ("remote.leak.pushurl", "https://attacker.invalid/leak.git"),
     ] {
+        git(program, &repo, &["config", key, value])?;
+        ensure(guard(&mut runner) == Err(RemoteError::OtherRemote), || format!("{key} in the repository was let through"))?;
+        git(program, &repo, &["config", "--unset", key])?;
+    }
+    // A branch that follows a remote the repository does not have (or the person did not grant) is refused as config.
+    for (key, value) in [("branch.main.remote", "leak"), ("branch.faber/m1.remote", "https://attacker.invalid/leak.git")] {
         git(program, &repo, &["config", key, value])?;
         ensure(guard(&mut runner) == Err(RemoteError::Config), || format!("{key} in the repository was let through"))?;
         git(program, &repo, &["config", "--unset", key])?;
     }
     ensure(guard(&mut runner) == Ok(()), || "the repository did not recover".into())
+}
+
+/// The owner's repository: one remote and a pair of branch keys for each of many tracked branches, in a config that
+/// every linked worktree shares. A mission works in such a worktree, so a push from there must be allowed; the values
+/// that do something, and the keys that are not a pair, still are not.
+fn owner_repo(program: &str, sandbox: &Path) -> Result {
+    let repo = sandbox.join("owner");
+    let head = repository(program, &repo)?;
+    let remote = sandbox.join("owner-remote.git");
+    std::fs::create_dir_all(&remote).map_err(|e| e.to_string())?;
+    git(program, &remote, &["init", "--bare", "--initial-branch=main"])?;
+    let url = slashes(&remote);
+    git(program, &repo, &["remote", "add", "origin", &url])?;
+    for n in 0..44 {
+        let name = format!("feature/b{n}");
+        git(program, &repo, &["config", &format!("branch.{name}.remote"), "origin"])?;
+        git(program, &repo, &["config", &format!("branch.{name}.merge"), &format!("refs/heads/{name}")])?;
+    }
+    git(program, &repo, &["config", "branch.main.remote", "."])?;
+    git(program, &repo, &["config", "branch.main.merge", "refs/heads/main"])?;
+    git(program, &repo, &["config", "branch.faber/m1.remote", "origin"])?;
+    git(program, &repo, &["config", "branch.faber/m1.merge", "refs/heads/faber/m1"])?;
+    git(program, &repo, &["config", "branch.release.v1.2.vscode-merge-base", "origin/main"])?;
+    let granted = |at: &Path| {
+        let mut t = target(at, &head);
+        t.url = url.clone();
+        t
+    };
+    let mut runner = process(&sandbox.join("neutral"));
+    ensure(guard_config(&mut runner, &granted(&repo)) == Ok(()), || "the owner's branch sections were refused".into())?;
+    // The mission's own linked worktree reads the same config, and pushes from there.
+    let linked = sandbox.join("owner-linked");
+    git(program, &repo, &["worktree", "add", "--detach", "--", &slashes(&linked), "HEAD"])?;
+    ensure(guard_config(&mut runner, &granted(&linked)) == Ok(()), || {
+        "the owner's branch sections were refused in a linked worktree".into()
+    })?;
+    ensure(guard_layout(&mut runner, &granted(&linked)) == Ok(()), || "a linked worktree of the owner's repository was refused".into())?;
+    let reply = runner.run(&push_call(&linked, &url, &head, "refs/heads/faber/m1")).map_err(|_| "the push did not run")?;
+    ensure(reply.code == 0, || format!("the push from a linked worktree failed with {}", reply.code))?;
+    ensure(git(program, &remote, &["rev-parse", "refs/heads/faber/m1"])? == head, || {
+        "the push from a linked worktree did not deliver".into()
+    })?;
+    // The control: git itself lists these 90 keys, so the list was not shortened to make the check pass.
+    let listed = git(program, &linked, &["config", "--list", "--name-only"])?;
+    ensure(listed.lines().filter(|l| l.starts_with("branch.")).count() >= 90, || "control: git does not list the branch keys".into())?;
+    // Values that do something, wherever they sit, and keys that are not a plain pair.
+    for (key, value) in [
+        ("branch.feature/b7.remote", "https://attacker.invalid/leak.git"),
+        ("branch.feature/b7.remote", "ext::sh -c touch% x"),
+        ("branch.feature/b7.remote", "../elsewhere"),
+        ("branch.feature/b7.remote", "leak"),
+        ("branch.feature/b7.merge", "main"),
+        ("branch.feature/b7.merge", "refs/tags/v1"),
+        ("branch.faber/m1.merge", "refs/heads/a\u{1}b"),
+        ("branch.feature/b7.merge", "refs/heads/a\nb"),
+        ("branch.feature/b7.pushRemote", "origin"),
+        ("branch.feature/b7.rebase", "true"),
+        ("branch.feature/b7.mergeOptions", "--no-ff"),
+        ("branch.autoSetupRebase", "always"),
+    ] {
+        // A control character or a line break in a value is stored by git as an escape and read back as itself.
+        let set = raw(program, &repo, &["config", key, value])?;
+        ensure(set.status.success(), || format!("fixture: git did not store {key}: {}", String::from_utf8_lossy(&set.stderr)))?;
+        ensure(guard_config(&mut runner, &granted(&linked)) == Err(RemoteError::Config), || {
+            format!("{key} = {value:?} was let through from a linked worktree")
+        })?;
+        git(program, &repo, &["config", "--unset-all", key])?;
+    }
+    // A second remote has its own refusal, also from the linked worktree.
+    git(program, &repo, &["config", "remote.other.url", "https://attacker.invalid/o.git"])?;
+    ensure(guard_config(&mut runner, &granted(&linked)) == Err(RemoteError::OtherRemote), || "a second remote was let through".into())?;
+    git(program, &repo, &["config", "--unset", "remote.other.url"])?;
+    ensure(guard_config(&mut runner, &granted(&linked)) == Ok(()), || "the owner's repository did not recover".into())
 }
 
 /// The environment of this probe allows every transport and sets config of its own, as a hostile one could. The calls of
@@ -480,6 +559,7 @@ pub fn probe(sandbox: &Path) -> Result {
     bare_layout(&program, sandbox)?;
     link(&program, sandbox)?;
     other_remotes(&program, sandbox)?;
+    owner_repo(&program, sandbox)?;
     protocols(&program, sandbox)?;
     inherited_config(&program, sandbox)?;
     layout(&program, sandbox)?;

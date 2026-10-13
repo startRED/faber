@@ -76,6 +76,8 @@ pub struct FakeRemote {
     pub config: Vec<(String, String)>,
     /// The exit code of `git config --list`.
     pub config_code: i32,
+    /// The values of branch keys, `(key, value)`; a branch key without one reads as a harmless value.
+    pub values: Vec<(String, String)>,
     /// Files of the repository that exist, as git names them: `info/grafts`, `shallow`, `objects/info/alternates`.
     pub layout: Vec<String>,
     /// What `git log -p` prints for the commits the live remote does not have, if it was asked for them properly.
@@ -118,6 +120,7 @@ impl Default for FakeRemote {
                 ("local".into(), "core.bare".into()),
             ],
             config_code: 0,
+            values: vec![],
             layout: vec![],
             outgoing: "+fn main() {}\n".into(),
             log_code: 0,
@@ -244,6 +247,24 @@ impl FakeRemote {
                     return fail(self.config_code);
                 }
                 ok(self.config.iter().map(|(scope, key)| format!("{scope}\t{key}\n")).collect::<String>())
+            }
+            ["config", "--show-scope", "-z", "--get-regexp", "^branch[.]"] => {
+                // `scope NUL key LF value NUL`, for every branch key of the repository, as `-z` prints it.
+                ok(self
+                    .config
+                    .iter()
+                    .filter(|(_, key)| key.to_ascii_lowercase().starts_with("branch."))
+                    .map(|(scope, key)| {
+                        let value = self.values.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone()).unwrap_or_else(|| {
+                            match key.rsplit('.').next().unwrap_or("").to_ascii_lowercase().as_str() {
+                                "remote" => "origin".into(),
+                                "merge" => "refs/heads/main".into(),
+                                _ => "origin/main".into(),
+                            }
+                        });
+                        format!("{scope}\0{key}\n{value}\0")
+                    })
+                    .collect::<String>())
             }
             ["rev-parse", "--path-format=absolute", rest @ ..] => {
                 // `--git-path X` prints where git would read X.

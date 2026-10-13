@@ -116,6 +116,8 @@ pub enum RemoteError {
     Config,
     /// Grafts, a shallow file or alternates change what git walks or reads, so what would leave cannot be proven.
     Layout,
+    /// The repository has a second remote. Only the granted one is allowed, so the person sees why instead of a config error.
+    OtherRemote,
     /// The remote no longer leads only to the URL the person granted.
     Url,
     Secret,
@@ -154,6 +156,7 @@ impl RemoteError {
             Self::Pending => "reason.remote.pending",
             Self::Config => "reason.remote.config",
             Self::Layout => "reason.remote.layout",
+            Self::OtherRemote => "reason.remote.otherRemote",
             Self::Url => "reason.remote.url",
             Self::Secret => "reason.remote.secret",
             Self::Oversized => "reason.remote.oversized",
@@ -424,8 +427,10 @@ pub fn preflight(runner: &mut impl Runner, url: &str) -> Result<Account, RemoteE
 /// this list is either unneeded by a push or can run a command, reroute the connection or change what the scan sees;
 /// a list of the bad keys was missed three times, so this is the list of the good ones. Section and variable names are
 /// case-insensitive, as in git; a subsection (a remote's or a branch's name) is compared exactly, as git does, and
-/// only the granted remote's and the own branch's are listed: another one is another remote.
-pub fn allowed_key(key: &str, remote: &str, branch: &str) -> bool {
+/// only the granted remote's is listed: another one is another remote ([`other_remote`] gives it its own refusal).
+/// Any branch's `remote`, `merge` and `vscode-merge-base` are listed, because a clone keeps one pair per tracked branch
+/// and a mission worktree reads that shared config; [`inert_branch_value`] judges their values.
+pub fn allowed_key(key: &str, remote: &str) -> bool {
     let Some((section, rest)) = key.split_once('.') else { return false };
     let (middle, variable) = match rest.rsplit_once('.') {
         Some((middle, variable)) => (Some(middle), variable),
@@ -435,8 +440,11 @@ pub fn allowed_key(key: &str, remote: &str, branch: &str) -> bool {
     match (section.as_str(), middle) {
         // The remote's address and refspec; the push goes to the granted URL itself, and `pin_url` checks the name.
         ("remote", Some(name)) => name == remote && matches!(variable.as_str(), "url" | "fetch"),
-        // Which remote and branch the own branch follows; `vscode-merge-base` is an editor's note about it.
-        ("branch", Some(name)) => name == branch && matches!(variable.as_str(), "remote" | "merge" | "vscode-merge-base"),
+        // Which remote and branch a branch follows; `vscode-merge-base` is an editor's note about it. Safe whatever the
+        // branch: every network call names the granted URL and an explicit refspec, and the push is not run on a
+        // branch's behalf (no `push.default`, `pushRemote` or `rebase`, which stay refused), so these keys can never
+        // change where or what is pushed. Only their values are checked, in `guard_branches`.
+        ("branch", Some(_)) => matches!(variable.as_str(), "remote" | "merge" | "vscode-merge-base"),
         (_, Some(_)) => false,
         (_, None) => matches!(
             format!("{section}.{variable}").as_str(),
@@ -461,6 +469,27 @@ pub fn allowed_key(key: &str, remote: &str, branch: &str) -> bool {
     }
 }
 
+/// A remote other than the granted one, in any of its keys. The owner's repository has only one today; a second one
+/// is refused with its own reason, never accepted silently.
+pub fn other_remote(key: &str, remote: &str) -> bool {
+    let Some((section, rest)) = key.split_once('.') else { return false };
+    section.eq_ignore_ascii_case("remote") && rest.rsplit_once('.').is_some_and(|(name, _)| name != remote)
+}
+
+/// The value of a branch's `remote`, `merge` or `vscode-merge-base` does nothing: `remote` is the granted remote or
+/// `.` (this repository), `merge` is a branch name under `refs/heads/`, and no value has a control character.
+pub fn inert_branch_value(variable: &str, value: &str, remote: &str) -> bool {
+    if value.len() > 1024 || value.chars().any(char::is_control) {
+        return false;
+    }
+    match variable.to_ascii_lowercase().as_str() {
+        "remote" => value == remote || value == ".",
+        "merge" => value.strip_prefix("refs/heads/").is_some_and(|name| !name.is_empty()),
+        "vscode-merge-base" => !value.is_empty(),
+        _ => false,
+    }
+}
+
 /// Keys Faber itself sets on the command line, which git lists as `command` scope.
 fn pinned_key(key: &str) -> bool {
     key.eq_ignore_ascii_case("core.hookspath")
@@ -476,13 +505,38 @@ pub fn guard_config(runner: &mut impl Runner, t: &Target) -> Result<(), RemoteEr
     if reply.code != 0 {
         return Err(RemoteError::Command);
     }
+    let mut branches = false;
     for line in reply.stdout.lines().filter(|l| !l.trim().is_empty()) {
         let Some((scope, key)) = line.split_once('\t') else { return Err(RemoteError::Config) };
         match scope {
             "system" | "global" => {}
-            "local" | "worktree" if allowed_key(key, &t.remote, &t.branch) => {}
+            "local" | "worktree" if other_remote(key, &t.remote) => return Err(RemoteError::OtherRemote),
+            "local" | "worktree" if allowed_key(key, &t.remote) => branches |= key.to_ascii_lowercase().starts_with("branch."),
             "command" if pinned_key(key) => {}
             _ => return Err(RemoteError::Config),
+        }
+    }
+    if branches { guard_branches(runner, t) } else { Ok(()) }
+}
+
+/// The values of the branch keys the repository carries, all in one read: the names alone were judged above. `-z`
+/// keeps a value with a line break in one record (`scope NUL key LF value NUL`), so it cannot pass as two.
+fn guard_branches(runner: &mut impl Runner, t: &Target) -> Result<(), RemoteError> {
+    let reply = ask(runner, &git(&t.cwd, &["config", "--show-scope", "-z", "--get-regexp", "^branch[.]"]))?;
+    if reply.code != 0 {
+        return Err(RemoteError::Command);
+    }
+    // `scope NUL key LF value NUL`, repeated: with `-z` git separates the scope from the key with a NUL, not a tab.
+    let mut fields = reply.stdout.split('\0');
+    while let Some(scope) = fields.next().filter(|f| !f.is_empty()) {
+        let Some(record) = fields.next() else { return Err(RemoteError::Config) };
+        let Some((key, value)) = record.split_once('\n') else { return Err(RemoteError::Config) };
+        if !matches!(scope, "local" | "worktree") {
+            continue;
+        }
+        let variable = key.rsplit_once('.').map_or("", |(_, variable)| variable);
+        if !allowed_key(key, &t.remote) || !inert_branch_value(variable, value, &t.remote) {
+            return Err(RemoteError::Config);
         }
     }
     Ok(())
