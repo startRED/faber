@@ -249,10 +249,75 @@ Focused proof: project/recovery/local-update targets and their hidden scenarios;
 - [ ] Record software/map parity, bounded plain-CLI probes, G1-G10 and AS-1..9 only with evidence; missing controls keep R96 incomplete.
 - [ ] Run GA, cross-vendor review, commit `test: prove the self-development MVP`.
 
+## Task 14 — Equilibrado remote: push, draft PR, CI status, merge card
+
+R108 slice 1, moved out of "Later". Equilibrado only; Seguro keeps denying every remote effect, reads included.
+Rules come from the design (git modes, queue step 8, section 10): exact own-branch non-forced push, one draft PR, secret
+scan first, intent then receipt, a third "maybe done" state settled by reading live remote state, never a retry.
+R108 adds reading the PR's check results and a merge card. Merging needs the owner's explicit yes per action.
+
+Files (all new, so Task 5 does not conflict): `engine/src/project/remote.rs` (one `pub mod remote;` line appended at the
+end of `project.rs`, where Task 5 does not edit), `testkit/src/remote.rs` (stateful fake git + gh, `pub mod` line in
+`testkit/src/lib.rs`), `testkit/tests/project_remote.rs`, the `reason.remote.*` keys in the five `ui/locales/*.ts`.
+
+Design:
+- `Runner` runs one `Call { tool: Git | Gh, cwd, args }` and returns `Reply { code, stdout }` or `Lost::Missing`
+  (not installed, nothing ran) or `Lost::Interrupted` (started, no answer). `Process` is the real one: shell-free, the
+  person's own environment, git credential helper and gh login used as they are, hidden window, no prompts
+  (`GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`, `GH_PROMPT_DISABLED=1`), a timeout, capped output. Faber reads no
+  token and no credential file; stderr is never read.
+- `Ledger` is the seam to the mission journal: current grant, `intent`, `receipt`, `settle` (replaces `Unknown` with
+  an engine-read Done or Failed), `open` (remote intents without a settled receipt).
+- `Target { cwd, repo (owner/name), remote, url, branch (faber/...), head (oid), base, attempt, repo_identity, revision }`.
+  The pushed ref is `<head oid>:refs/heads/<branch>`, so only the proven commit leaves, never a branch that moved since.
+- `preflight`: `gh --version`, `gh auth status` and the account login map to `reason.remote.ghMissing` and
+  `reason.remote.ghLoggedOut`; `gh repo view` supplies `repo` for the start card.
+- `push`: grant, no open remote intent, local config guard (no command-bearing keys), effective push URL equals the
+  granted one, secret scan of `git log -p <head> --not --remotes=<remote>`, `ls-remote` of the branch, ancestor check
+  (diverged blocks), intent, re-check grant, push without force or hooks. A non-zero exit or lost link is settled by
+  `ls-remote`: head there is Done, the old value is Failed, unreadable is `Unknown` and the call returns
+  `reason.remote.maybe`. Never pushed twice for one uncertain delivery.
+- `open_pr`: reuse any existing PR of the own branch (open, closed or merged), else verify the remote head, intent,
+  `gh pr create --draft`, then always read the PR list back, so `Done` always carries the PR number; the same
+  settle rule for an unclear create.
+- `ci`: `gh pr view --json statusCheckRollup,headRefOid,...` into `Ci { Pending | Passing | Failing | None, failed names }`;
+  a PR head that is not the proven head is `reason.remote.headMoved`.
+- `merge_card` builds `MergeCard { pr, head, base, ci }` and the decision id `merge-<pr>-<head12>`. `OwnerYes` can only be
+  made from a Decision that a Person answered "yes" on that exact card. `merge` refuses without it, in Seguro, when CI is
+  pending or failing, or when the head moved; it runs `gh pr ready` if needed and `gh pr merge --merge
+  --match-head-commit <head>`, never deleting the branch, with the same intent/receipt/settle rule.
+- `reconcile` after a crash reads the live state of every open remote intent and settles it; it never re-runs one.
+
+Tests first (`testkit/tests/project_remote.rs`, scripted fake, no process, no network): Seguro denies push, PR, CI and
+merge; gh missing and gh logged out return keys with no intent; success push records intent then Done with the exact oid;
+already-pushed head sends nothing; divergence blocks and sends nothing; secret in the outgoing diff blocks; push rejected
+is Failed and retryable by a new attempt id; network loss after push is `Unknown` and `reconcile` settles it Done, and a
+second case settles it Failed, without a second push; unreadable remote stays `Unknown`; duplicate PR prevented (existing
+PR reused, create lost then found, create lost and unknown); CI pending, passing, failing, none and moved head; merge
+refused without yes, with an AI answer, with a yes for another head, with failing CI, in Seguro; merge succeeds with
+a person yes and passes `--match-head-commit`, no force flag and no branch deletion in any recorded call; `Process`
+builds shell-free argv with the expected environment (no spawn).
+
+Focused proof: `cargo test -p faber-testkit --test project_remote`, `cargo test -p faber-engine remote`, then the full set.
+
+Seam for the runner (after Task 5 merges, because it edits the runner and the journal):
+1. After the local fast-forward and proof, call `remote::publish(&mut Process::find()?, &mut ledger, &target, &pr)`
+   (`preflight`, `push`, `open_pr`), show the result as a separate remote receipt, never as "Done".
+2. Implement `Ledger` for the mission journal: `intent`/`receipt` over `record_intent`/`record_receipt`, `settle` over a new
+   journal method that lets engine-read evidence replace `Unknown` (today only a Person decision can, in `Journal::reconcile`),
+   `open` over `pending()` filtered to Push/DraftPr/Merge.
+3. Add `IntentKind::Merge` and `Effect::Merge` (`Step::Merge` maps to `DraftPr` until then) and a merge card in the board;
+   the Person's answer on `merge-<pr>-<head12>` is turned into `OwnerYes::from_decision`.
+4. At recovery call `remote::reconcile` for open remote intents before dispatching anything.
+5. Show the account from `preflight` and the `repo` on the Equilibrado start card.
+
+- [ ] Write the failing tests and the fake, see them fail for the right reason.
+- [ ] Implement `remote.rs`, locale keys (en source, four by hand), see them pass.
+- [ ] Run the proof set and `cargo t --all`, commit `feat: add the Equilibrado remote module`.
+- [ ] Push `selfdev-remote`, open a draft PR into `selfdev`, wait for CI.
+
 ## Later — outside the MVP
 
-- Former Task 14: Equilibrado. Exact granted own-ref non-forced push and one draft PR; secret scan, intent/receipt
-  reconciliation, no target merge or release. Seguro always denies remote effects.
 - Former Task 15: qualified parallel writers. Disjoint leases plus measured Studio containment/cost/RAM/review gates;
   paired equal-acceptance evidence includes failed spend and coordination. Insufficient evidence keeps writers serial;
   10% comparison tolerance grants no extra spending.
