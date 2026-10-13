@@ -10,6 +10,7 @@ use crate::events::{EngineEvent, Session, UserTurn};
 use crate::learn::Span;
 use crate::ledger::{Ledger, plausible};
 use crate::model::*;
+use crate::nudge;
 use crate::proc::Spawner;
 use crate::router::{Choice, Effort, Pick, pick_model};
 use crate::signals::Signals;
@@ -888,6 +889,7 @@ impl Core {
             } => {
                 // Claude reports a conversation total; Codex has already priced this turn's individual requests.
                 let session = self.convs.get(conv).and_then(|c| c.sessions.get(&vendor)).cloned().unwrap_or_default();
+                let area = self.convs.get(conv).map_or(Area::Chat, |c| c.area);
                 let fresh = self.live.get(conv).is_some_and(|l| !l.resumed);
                 let before = self.convs.get(conv).and_then(|c| c.cost_base.get(&vendor));
                 let settled = if vendor == Vendor::Codex {
@@ -923,6 +925,7 @@ impl Core {
                     m.cache_write_1h_tokens = Some(cache_write_1h_tokens);
                     m.incomplete = (incomplete || m.incomplete.unwrap_or(false)).then_some(true);
                     m.permissions = None;
+                    m.nudge = nudge::of(m, area);
                 }
                 if !ok && self.transfers.get(conv).is_some_and(|t| t.moving) {
                     if let Some(reply) = turn_id {

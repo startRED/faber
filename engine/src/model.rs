@@ -155,6 +155,9 @@ pub struct Message {
     pub moved_from: Option<Vendor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recovery: Option<Recovery>,
+    /// The next rung, offered when the turn's own tools show it stopped early (see `nudge`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nudge: Option<crate::nudge::Nudge>,
 }
 
 impl Message {
@@ -189,6 +192,7 @@ impl Message {
             wait_until: None,
             moved_from: None,
             recovery: None,
+            nudge: None,
         }
     }
 }

@@ -51,6 +51,8 @@ export interface Message {
   pace?: { kind: 'step' | 'low'; vendor: Vendor };
   waitUntil?: number;
   movedFrom?: Vendor;
+  /** The next rung up, offered when the turn's own tools show it stopped early. */
+  nudge?: { reason: string; vendor: Vendor; model: string; effort: Effort };
 }
 export interface Conversation {
   id: string;

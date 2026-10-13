@@ -20,6 +20,7 @@ import './inbox.check.ts';
 import './interactions.check.ts';
 import './models.check.ts';
 import './motion.check.ts';
+import './nudge.check.ts';
 import './opening.check.ts';
 import './review-answer.check.ts';
 import './review-motion.check.ts';
