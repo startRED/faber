@@ -7,6 +7,7 @@
 //! is refused rather than guessed at ([`store::Journal`]).
 
 pub mod bar;
+pub mod budget;
 mod files;
 pub mod git;
 pub mod kit;

@@ -102,6 +102,8 @@ pub struct Store {
     settings: PathBuf,
     budget: PathBuf,
     disk: Arc<dyn Disk>,
+    budget_owner: Option<fs::File>,
+    owner_required: bool,
 }
 
 impl Store {
@@ -119,7 +121,28 @@ impl Store {
             settings: data_dir.join("settings.json"),
             budget: data_dir.join("budget.json"),
             disk,
+            budget_owner: None,
+            owner_required: false,
         }
+    }
+
+    /// Own the spending ledger for this engine's lifetime, including builds with a custom data folder.
+    pub(crate) fn claim_budget(&mut self) -> Result<(), Fault> {
+        self.owner_required = true;
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(self.budget.with_extension("lock"))
+            .map_err(|e| Fault::of_write(&e))?;
+        file.try_lock().map_err(|_| Fault::Write)?;
+        self.budget_owner = Some(file);
+        Ok(())
+    }
+
+    pub(crate) fn release_budget(&mut self) {
+        self.budget_owner = None;
     }
 
     fn write<T: Serialize>(&self, path: &Path, value: &T) -> Result<(), Fault> {
@@ -190,9 +213,17 @@ impl Store {
 
     /// Reads `budget.json`; a damaged file is copied aside once, as evidence, before the error is returned.
     fn read_ledger(&self) -> Result<Ledger, Fault> {
-        match read_checked::<Ledger>(&self.budget) {
-            Ok(found) => {
-                let mut ledger = found.unwrap_or_default();
+        let checked = read_checked::<Ledger>(&self.budget).and_then(|found| {
+            let ledger = found.unwrap_or_default();
+            if crate::project::budget::Budget::load(&ledger).is_err()
+                || crate::model::Vendor::ALL.iter().any(|v| ledger.of(*v).own_spend.values().any(|cost| !cost.is_finite() || *cost < 0.0))
+            {
+                return Err(Fault::Corrupt);
+            }
+            Ok(ledger)
+        });
+        match checked {
+            Ok(mut ledger) => {
                 ledger.sanitize();
                 Ok(ledger)
             }
@@ -224,6 +255,9 @@ impl Store {
 
     /// Compact on purpose: it is rewritten often and a person never has to read it.
     pub fn save_ledger(&self, ledger: &Ledger) -> Result<(), Fault> {
+        if self.owner_required && self.budget_owner.is_none() {
+            return Err(Fault::Write);
+        }
         replace(&*self.disk, &self.budget, serde_json::to_string(ledger).expect("plain data always serializes").as_bytes())
     }
 }

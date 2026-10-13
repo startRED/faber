@@ -27,6 +27,7 @@ use uuid::Uuid;
 
 mod answer;
 mod auto;
+mod project_budget;
 mod pulse;
 mod recovery;
 mod usage_view;
@@ -228,6 +229,10 @@ struct Core {
     /// What Faber remembers about each vendor's quota (`budget.json`).
     ledger: Ledger,
     ledger_saved: f64,
+    /// Safety changes cannot admit work after a failed ledger save.
+    ledger_failed: bool,
+    /// No ownership or unreadable authority: keep Chat in memory and leave the durable budget intact.
+    projects_closed: bool,
     /// When the last quota pulse started.
     last_pulse: f64,
     /// The PC's offset from UTC in seconds, as the screen reports it.
@@ -248,8 +253,16 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(opts: EngineOptions, emit: Emit) -> Engine {
-        let store = Store::new(&opts.data_dir);
-        let ledger = store.ledger();
+        let mut store = Store::new(&opts.data_dir);
+        let owned = store.claim_budget().is_ok();
+        let mut ledger = store.ledger();
+        let projects_closed = !owned
+            || store.ledger_checked().is_err()
+            || match crate::project::budget::recover_unbounded(&mut ledger) {
+                Ok(true) => store.save_ledger(&ledger).is_err(),
+                Ok(false) => false,
+                Err(_) => true,
+            };
         let quotas = remembered(&ledger, unix_secs());
         let runtime = opts.runtime.clone();
         let core = Arc::new_cyclic(|me| {
@@ -274,6 +287,8 @@ impl Engine {
                 spare: None,
                 ledger,
                 ledger_saved: 0.0,
+                ledger_failed: false,
+                projects_closed,
                 last_pulse: 0.0,
                 utc_offset: 0,
                 offset_known: false,
@@ -488,6 +503,7 @@ impl Engine {
             }
             c.close_spare();
             c.save_ledger(true);
+            c.store.release_budget();
         })
     }
 }
@@ -501,9 +517,15 @@ impl Core {
     /// Writes the ledger, but at most every half minute unless `force`: readings come with every answer. A failed write is
     /// tried again with the next reading.
     fn save_ledger(&mut self, force: bool) {
+        if self.projects_closed {
+            return;
+        }
         let now = self.secs();
-        if (force || !(0.0..LEDGER_EVERY).contains(&(now - self.ledger_saved))) && self.store.save_ledger(&self.ledger).is_ok() {
-            self.ledger_saved = now;
+        if force || !(0.0..LEDGER_EVERY).contains(&(now - self.ledger_saved)) {
+            self.ledger_failed = self.store.save_ledger(&self.ledger).is_err();
+            if !self.ledger_failed {
+                self.ledger_saved = now;
+            }
         }
     }
 
@@ -539,6 +561,7 @@ impl Core {
         }
         if let Some(possible) = s.paid_fallback {
             v.paid_fallback = Some(possible);
+            v.paid_fallback_at = Some(now);
         }
         if let Some(billing) = s.billing {
             v.billing = billing;
@@ -610,6 +633,9 @@ impl Core {
         self.ledger.of_mut(vendor).spend(cost, incomplete, now, self.utc_offset);
         self.ledger.of_mut(vendor).span(Span { start, end, model: model.to_string(), cost, incomplete });
         self.ledger.of_mut(vendor).learn_weights(now);
+        if crate::project::budget::finish_unbounded(&mut self.ledger, vendor).is_err() {
+            self.projects_closed = true;
+        }
         self.save_ledger(true);
         self.emit_usage();
     }
@@ -1152,6 +1178,10 @@ impl Core {
             m.model = Some(running);
         }
         let started = self.secs();
+        if !self.live.contains_key(id) {
+            return Err("error.conversationGone".into());
+        }
+        self.begin_unbounded(pick.vendor)?;
         if let Some(l) = self.live.get_mut(id) {
             l.started = started;
             l.turn = Some(reply_id.to_string());
@@ -1477,6 +1507,7 @@ impl Core {
     }
 
     fn remove(&mut self, id: &str) {
+        self.note_turn(id, None, true);
         if let Some(l) = self.live.remove(id) {
             l.session.close();
         }

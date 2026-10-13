@@ -48,7 +48,12 @@ async fn opus_4_interrupt_after_completion_keeps_the_warm_session() {
     tokio::task::yield_now().await;
     tokio::time::advance(Duration::from_secs(6)).await;
     tokio::task::yield_now().await;
-    assert!(rx.try_recv().is_err(), "idle interrupt killed a warm session");
+    while let Ok(event) = rx.try_recv() {
+        assert!(
+            matches!(event, EngineEvent::Signals(s) if s.billing == Some(faber_engine::budget::Billing::Unknown)),
+            "idle interrupt produced a lifecycle event"
+        );
+    }
     session.send(UserTurn::text("second"));
     assert_eq!(support::read_message(&mut input).await["message"]["content"], "second");
     session.close();

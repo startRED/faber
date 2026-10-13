@@ -112,6 +112,16 @@ pub fn select(opts: &Options, changed: &[String]) -> BTreeSet<Suite> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn configured_build_jobs_limit_the_runner_without_changing_its_default() {
+        assert_eq!(super::capped_jobs(16, Some("4")), 4);
+        assert_eq!(super::capped_jobs(16, Some("2")), 2);
+        for configured in [None, Some("0"), Some("-1"), Some("bad")] {
+            assert_eq!(super::capped_jobs(16, configured), 8);
+        }
+        let logical = std::thread::available_parallelism().unwrap().get();
+        assert_eq!(super::jobs(), super::capped_jobs(logical, std::env::var("CARGO_BUILD_JOBS").ok().as_deref()));
+    }
     use super::*;
 
     fn paths(list: &[&str]) -> Vec<String> {

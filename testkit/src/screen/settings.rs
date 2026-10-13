@@ -170,6 +170,8 @@ fn opens_at_usage(ctx: &mut Ctx) -> Result {
     // A screen that loads again asks the engine and shows the same readings.
     page.reload()?;
     page.wait_for("the quota after a reload", "document.querySelector('.usage .share')?.textContent === '47%'")?;
+    // Quota is seeded before the remembered conversation's asynchronous snapshot has rendered.
+    page.wait_visible(&actions)?;
     open_settings(page)?;
     open_section(page, "set.usage")?;
     page.wait_for("the same figures", &format!("({shares}) === '7% 47%'"))

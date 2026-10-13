@@ -314,3 +314,7 @@ Commit 1: `f804b08`, trust boundaries. All seven AGENTS.md proofs and `cargo t -
 All eight required commands exit 0: npm run lint, npm run typecheck, npm run build, cargo fmt --all --check, cargo clippy --workspace --all-targets -- -D warnings, cargo clippy -p faber --features test-hooks -- -D warnings, cargo t, cargo t --all. The complete run contains 761 Rust, 83 UI and 79 hidden screen tests. Idle memory is 108 MB and the warm whole app tree is 119.0 MB. The source remains byte-identical after the final 37 killed mutations. No installs or HTTP request occurred in the new native tests.
 
 The latest selfdev base has ten additional budget/integration commits. A merge preview reports a single module-declaration conflict in engine/src/project.rs. Base integration and its required proofs/CI are the next step. This does not change the missing live G10 evidence.
+
+### Base integration proofs
+
+Integrated selfdev at 041da3b; the sole conflict retained both the bar and budget module declarations. All seven AGENTS.md proofs plus cargo t --all exit 0 on the combined source. Both cargo t and cargo t --all report 982 passed, zero failed/not-run/skipped. The warm whole app tree measures 119.3 MB. Fix commits: f804b08 (trust boundaries) and f657b5b (native evidence and durable compilation). The integration commit preserves both histories. PR and final Windows/macOS CI results will be recorded in the external report after publication.
