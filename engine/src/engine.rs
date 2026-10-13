@@ -28,6 +28,7 @@ use uuid::Uuid;
 mod answer;
 mod auto;
 mod project_budget;
+mod project_sessions;
 mod pulse;
 mod recovery;
 mod usage_view;
@@ -207,6 +208,8 @@ struct Core {
     /// Conversations in use, the source of truth while the app runs; every change is written through to disk.
     convs: HashMap<String, Conversation>,
     live: HashMap<String, Live>,
+    mission_sessions: HashMap<String, Vec<Session>>,
+    mission_lock: Arc<tokio::sync::Mutex<()>>,
     /// A new conversation still being typed: its CLI starts before the first message is sent.
     draft: Option<String>,
     /// Streaming text goes to the screen at most ~30 times a second; the message waiting per conversation.
@@ -274,6 +277,8 @@ impl Engine {
                 me: me.clone(),
                 convs: HashMap::new(),
                 live: HashMap::new(),
+                mission_sessions: HashMap::new(),
+                mission_lock: Arc::new(tokio::sync::Mutex::new(())),
                 draft: None,
                 pending: HashMap::new(),
                 next_sid: 0,
@@ -534,6 +539,9 @@ impl Engine {
             c.credit = None;
             for (_, l) in c.live.drain() {
                 l.session.close();
+            }
+            for session in c.mission_sessions.drain().flat_map(|(_, sessions)| sessions) {
+                session.close();
             }
             for (_, server) in c.codex.drain() {
                 server.retire();

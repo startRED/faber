@@ -23,11 +23,11 @@ fn pause_resume_reconciles_pending_effects_without_replay_or_done() {
     r.pause(&j).unwrap();
     assert_eq!(r.mission.state, MissionState::Paused);
     j.record_intent(&Intent::new("dispatch", "m1", IntentKind::Dispatch, 3, 1)).unwrap();
-    assert!(r.resume(&j, 3).is_err());
+    assert!(r.reconcile(&j, 3).is_err());
     let restored = Runner::load(&j).unwrap();
     assert_eq!(restored.mission.state, MissionState::Paused);
     assert_eq!(j.pending().unwrap().len(), 1);
-    assert!(r.resume(&j, 4).is_err());
+    assert!(r.reconcile(&j, 4).is_err());
     assert!(restored.queue.front().is_none());
 }
 #[test]
@@ -175,7 +175,8 @@ fn unmaterialized_builds_reserve_native_free_space_until_retired() {
     assert_eq!(r.prepare_build_with(&j, "w2", budget, 40, |_| Some(100)), Err("reason.disk.low"));
     r.cleanup_task(&j, "w1", Termination { process: None, tree_dead: true, cost_settled: true }).unwrap();
     assert!(!Resources::load(&j).unwrap().entries().iter().any(|r| r.id == id));
-    r.resume(&j, 3).unwrap();
+    r.reconcile(&j, 3).unwrap();
+    r.mission.state = MissionState::Running;
     r.prepare_build_with(&j, "w2", budget, 80, |_| Some(100)).unwrap();
 }
 
@@ -226,6 +227,53 @@ fn durable_write_fault_closes_runner_admission_and_keeps_the_old_checkpoint() {
     assert!(r.pause(&j).is_err());
     assert_eq!(r.admit(Vendor::Codex), Err("error.store.write"));
     assert_eq!(Runner::load(&j).unwrap().mission.state, MissionState::Planning);
+}
+
+#[test]
+fn opus_h1_split_checkpoint_recovers_authoritative_state() {
+    use faber_engine::store::{Disk, RealDisk};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    struct MirrorFault(AtomicBool);
+    impl Disk for MirrorFault {
+        fn write(&self, p: &std::path::Path, b: &[u8]) -> std::io::Result<()> {
+            if self.0.load(Ordering::SeqCst) && p.file_name().unwrap().to_string_lossy().starts_with("mission.json") {
+                return Err(std::io::ErrorKind::StorageFull.into());
+            }
+            RealDisk.write(p, b)
+        }
+        fn rename(&self, a: &std::path::Path, b: &std::path::Path) -> std::io::Result<()> {
+            RealDisk.rename(a, b)
+        }
+    }
+    let (repo, data) = (tempdir(), tempdir());
+    let disk = Arc::new(MirrorFault(AtomicBool::new(false)));
+    let j = Journal::open_with(repo.path(), data.path(), "m1", disk.clone()).unwrap();
+    let mut r = Runner::create(&j, mission()).unwrap();
+    disk.0.store(true, Ordering::SeqCst);
+    assert_eq!(r.pause(&j), Err("error.store.full"));
+    assert_eq!(r.admit(Vendor::Codex), Err("error.store.write"));
+    disk.0.store(false, Ordering::SeqCst);
+    let j = Journal::open(repo.path(), data.path(), "m1").unwrap();
+    let restored = Runner::load(&j).unwrap();
+    assert_eq!(restored.mission.state, MissionState::Paused);
+    assert_eq!(j.mission().unwrap().unwrap(), restored.mission);
+}
+
+#[test]
+fn opus_h1_external_mirror_write_cannot_override_runner() {
+    let (repo, data) = (tempdir(), tempdir());
+    let j = Journal::open(repo.path(), data.path(), "m1").unwrap();
+    let r = Runner::create(&j, mission()).unwrap();
+    let mut mirror = r.mission.clone();
+    mirror.state = MissionState::Done;
+    mirror.mode = faber_engine::project::RunMode::Autonomous;
+    j.save_mission(&mirror).unwrap();
+    let restored = Runner::load(&j).unwrap();
+    assert_eq!(restored.mission, r.mission);
+    assert_eq!(j.mission().unwrap().unwrap(), r.mission);
 }
 
 #[test]

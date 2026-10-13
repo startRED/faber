@@ -482,7 +482,7 @@ impl ProofSet {
         self.receipts.values()
     }
     /// Called only by the execution coordinator. One heavy proof occupies the build lane at a time.
-    pub fn start(&mut self, id: &str) -> Result<(), &'static str> {
+    pub(crate) fn start(&mut self, id: &str) -> Result<(), &'static str> {
         let d = self.definitions.iter().find(|d| d.id == id).ok_or("reason.proof.definition")?;
         if self.active.contains(id)
             || self.receipts.contains_key(id)

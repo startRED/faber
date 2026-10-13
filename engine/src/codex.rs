@@ -390,7 +390,7 @@ impl CodexServer {
             let server = Self::start_with_policy(opts, Some(role));
             let session = server.open(thread, sink);
             server.retire();
-            session
+            session.for_project(role)
         })
     }
     /// The process starts right away, so a warmed-up conversation is already booting while the user types.

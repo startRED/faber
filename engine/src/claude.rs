@@ -123,7 +123,7 @@ pub fn start_project_claude(
     on_event: EventSink,
 ) -> Result<Session, crate::project::policy::Blocker> {
     let args = project_claude_args(&opts.launch, role)?;
-    crate::project::policy::admit(crate::model::Vendor::Claude).map(|()| start_with_policy(opts, on_event, args, true))
+    crate::project::policy::admit(crate::model::Vendor::Claude).map(|()| start_with_policy(opts, on_event, args, true).for_project(role))
 }
 
 fn block_text(content: &Value) -> String {

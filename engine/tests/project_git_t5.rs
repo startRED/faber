@@ -221,6 +221,72 @@ fn landed_receipts(b: &Broker<Fake>, r: &mut faber_engine::project::run::Runner)
 }
 
 #[test]
+fn opus_h3_landing_checkpoint_recovers_without_requeued_retirement() {
+    use faber_engine::store::{Disk, RealDisk};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    struct Crash(AtomicUsize, AtomicUsize);
+    impl Disk for Crash {
+        fn write(&self, p: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+            if p.file_name().unwrap().to_string_lossy().starts_with("run.json")
+                && self.0.load(Ordering::SeqCst) != 0
+                && self.1.fetch_add(1, Ordering::SeqCst) + 1 == self.0.load(Ordering::SeqCst)
+            {
+                return Err(std::io::ErrorKind::StorageFull.into());
+            }
+            RealDisk.write(p, bytes)
+        }
+        fn rename(&self, a: &std::path::Path, b: &std::path::Path) -> std::io::Result<()> {
+            RealDisk.rename(a, b)
+        }
+    }
+    let disk = Arc::new(Crash(AtomicUsize::new(0), AtomicUsize::new(0)));
+    let (repo, data, mut b, g, l, root) = setup_with(&[TREE, ""], disk.clone());
+    let mut r = runner(&b);
+    landed_receipts(&b, &mut r);
+    disk.0.store(3, Ordering::SeqCst);
+    assert_eq!(
+        r.land(
+            &mut b,
+            "w1",
+            &l,
+            || Ok(Some(g.clone())),
+            "Fix",
+            Termination { process: None, tree_dead: true, cost_settled: true },
+            |_| Ok(())
+        ),
+        Err("error.store.full")
+    );
+    disk.0.store(0, Ordering::SeqCst);
+    let removed = b.executor().calls.iter().filter(|c| c.args.contains(&"remove".into())).count();
+    let repository = Repository {
+        identity: RepoIdentity::new(
+            &repo.path().join(".git").canonicalize().unwrap().to_string_lossy(),
+            &repo.path().canonicalize().unwrap().to_string_lossy(),
+        ),
+        base: BASE.into(),
+        author: g.author.clone(),
+    };
+    drop(b);
+    let mut b = Broker::open(
+        repository,
+        Journal::open(repo.path(), data.path(), "m1").unwrap(),
+        "m1",
+        3,
+        Fake { outputs: VecDeque::from([String::new()]), calls: vec![] },
+    )
+    .unwrap();
+    let mut r = faber_engine::project::run::Runner::load(b.journal()).unwrap();
+    r.recover_retirements(&mut b, || Ok(Some(g.clone()))).unwrap();
+    assert!(!root.exists());
+    assert!(r.queue.get("w1").is_none());
+    r.recover_retirements(&mut b, || Ok(Some(g.clone()))).unwrap();
+    assert_eq!(removed + b.executor().calls.iter().filter(|c| c.args.contains(&"remove".into())).count(), 1);
+}
+
+#[test]
 fn recovered_commit_checks_current_grant_before_any_fast_forward() {
     use faber_engine::project::{Intent, IntentKind, Outcome, Receipt};
     let (_repo, _data, mut b, mut g, l, _root) = setup(&[]);
@@ -463,9 +529,9 @@ fn resume_distinguishes_archived_dead_processes_from_live_quarantine_without_res
     b.leases().attach_process(&l, process).unwrap();
     b.leases().quarantine(&l).unwrap();
     r.pause(b.journal()).unwrap();
-    assert_eq!(r.resume(b.journal(), 3), Err("reason.lease.live"));
+    assert_eq!(r.reconcile(b.journal(), 3), Err("reason.lease.live"));
     b.leases().archive(&l, Termination { process: Some(process), tree_dead: true, cost_settled: true }).unwrap();
-    r.resume(b.journal(), 3).unwrap();
+    r.reconcile(b.journal(), 3).unwrap();
     assert_eq!(b.journal().runtime().unwrap().leases[0].state, faber_engine::project::LeaseState::Quarantined);
     assert!(b.leases().check(&l, "src/a.rs").is_err());
     assert_eq!(b.executor().calls.len(), 1);

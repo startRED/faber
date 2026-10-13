@@ -158,6 +158,9 @@ impl Journal {
     pub fn records(&self) -> &Path {
         &self.records
     }
+    pub fn mission_id(&self) -> &str {
+        &self.mission
+    }
 
     pub fn private(&self) -> &Path {
         &self.private

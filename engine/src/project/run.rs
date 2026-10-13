@@ -133,6 +133,8 @@ pub struct Runner {
     halted: bool,
     #[serde(default)]
     retirements: BTreeMap<String, Retirement>,
+    #[serde(default)]
+    heavy_proof: Option<(String, String, String, String)>,
     #[serde(flatten)]
     extra: Extra,
 }
@@ -142,6 +144,58 @@ impl Record for Runner {
     }
 }
 impl Runner {
+    fn new(mission: Mission) -> Self {
+        Self {
+            schema: SCHEMA,
+            mission,
+            workers: BTreeMap::new(),
+            queue: Queue::default(),
+            quota_wake: None,
+            promotion_pending: false,
+            halted: false,
+            retirements: BTreeMap::new(),
+            heavy_proof: None,
+            extra: Extra::new(),
+        }
+    }
+    pub fn start(j: &Journal, engine: &crate::Engine, mission: Mission) -> Result<Self, String> {
+        engine.mission_authority(&mission)?;
+        Self::role_vendor(engine)?;
+        Self::create(j, mission).map_err(str::to_string)
+    }
+    pub fn role_vendor(engine: &crate::Engine) -> Result<Vendor, String> {
+        let mut vendors = engine.vendors();
+        if vendors.is_empty() {
+            vendors.extend(Vendor::ALL);
+        }
+        let mut reason = None;
+        for vendor in vendors {
+            match super::policy::admit(vendor) {
+                Ok(()) => return Ok(vendor),
+                Err(e) => {
+                    reason.get_or_insert(e.key());
+                }
+            }
+        }
+        Err(reason.unwrap_or("reason.project.restrictionsUnproven").into())
+    }
+    /// Adopt a legacy T1/T9 record once; private checkpoints always win after that.
+    pub fn open(j: &Journal) -> Result<Self, &'static str> {
+        if j.get::<Self>(&j.private().join("run.json")).map_err(|e| e.key())?.is_some() {
+            return Self::load(j);
+        }
+        let mut mission = j.mission().map_err(|e| e.key())?.ok_or("error.journal.mismatch")?;
+        if !super::git::valid_oid(&mission.base) || mission.branch != format!("faber/{}", mission.id) || mission.grant_revision == 0 {
+            return Err("error.store.corrupt");
+        }
+        if mission.state == MissionState::Running {
+            mission.state = MissionState::Paused;
+            mission.reason = Some("reason.interrupted".into());
+        }
+        let mut runner = Self::new(mission);
+        runner.save(j)?;
+        Ok(runner)
+    }
     pub fn create(j: &Journal, mission: Mission) -> Result<Self, &'static str> {
         if mission.schema != SCHEMA
             || mission.state != MissionState::Planning
@@ -154,27 +208,36 @@ impl Runner {
         {
             return Err("reason.project.exists");
         }
-        let mut runner = Self {
-            schema: SCHEMA,
-            mission,
-            workers: BTreeMap::new(),
-            queue: Queue::default(),
-            quota_wake: None,
-            promotion_pending: false,
-            halted: false,
-            retirements: BTreeMap::new(),
-            extra: Extra::new(),
-        };
+        let mut runner = Self::new(mission);
         runner.save(j)?;
         Ok(runner)
     }
     pub fn load(j: &Journal) -> Result<Self, &'static str> {
-        let runner: Self = j.get(&j.private().join("run.json")).map_err(|e| e.key())?.ok_or("error.store.corrupt")?;
+        let mut runner: Self = j.get(&j.private().join("run.json")).map_err(|e| e.key())?.ok_or("error.store.corrupt")?;
         if runner.schema != SCHEMA
-            || j.mission().map_err(|e| e.key())?.as_ref() != Some(&runner.mission)
+            || j.private().file_name().and_then(|s| s.to_str()) != Some(&runner.mission.id)
             || runner.workers.values().any(|w| w.schema != SCHEMA)
         {
             return Err("error.store.corrupt");
+        }
+        match j.mission() {
+            Ok(mirror) if mirror.as_ref() == Some(&runner.mission) => {}
+            Err(super::store::JournalError::Newer) => return Err("error.journal.newer"),
+            _ => j.save_mission(&runner.mission).map_err(|e| e.key())?,
+        }
+        if let Some((task, id, identity, receipt_id)) = runner.heavy_proof.clone()
+            && let Some(receipt) = j.check(&receipt_id).map_err(|e| e.key())?
+        {
+            if receipt.task != task
+                || receipt.id != receipt_id
+                || Self::receipt_identity(&receipt) != identity
+                || receipt.extra.get("definition").and_then(|d| d.get("id")).and_then(serde_json::Value::as_str) != Some(&id)
+            {
+                return Err("reason.proof.receipt");
+            }
+            j.put(&j.records().join("checks").join(format!("{receipt_id}.json")), &receipt).map_err(|e| e.key())?;
+            runner.heavy_proof = None;
+            runner.save(j)?;
         }
         Ok(runner)
     }
@@ -195,7 +258,7 @@ impl Runner {
         self.promotion_pending = false;
         self.save(j)
     }
-    pub fn resume(&mut self, j: &Journal, revision: u64) -> Result<(), &'static str> {
+    pub fn reconcile(&self, j: &Journal, revision: u64) -> Result<(), &'static str> {
         if self.halted || self.mission.state != MissionState::Paused || revision != self.mission.grant_revision {
             return Err("reason.grant.stale");
         }
@@ -205,6 +268,9 @@ impl Runner {
         if !self.retirements.is_empty() {
             return Err("reason.project.reconcile");
         }
+        if self.heavy_proof.is_some() {
+            return Err("reason.proof.busy");
+        }
         let runtime = j.runtime().map_err(|e| e.key())?;
         if runtime.leases.iter().any(|l| l.process.is_some() && !super::lease::retirement_known(l)) {
             return Err("reason.lease.live");
@@ -213,8 +279,59 @@ impl Runner {
         for w in self.workers.values() {
             w.pin.validate()?;
         }
+        Ok(())
+    }
+    pub fn resume(&mut self, j: &Journal, engine: &crate::Engine) -> Result<(), String> {
+        engine.mission_authority(&self.mission)?;
+        if self.workers.is_empty() {
+            Self::role_vendor(engine)?;
+        }
+        for worker in self.workers.values() {
+            super::policy::admit(worker.pin.vendor).map_err(|e| e.key().to_string())?;
+        }
+        self.resume_authorized(j, engine)
+    }
+    pub(crate) fn resume_authorized(&mut self, j: &Journal, engine: &crate::Engine) -> Result<(), String> {
+        let grant = engine.mission_authority(&self.mission)?;
+        self.settle_dispatches(j, engine)?;
+        self.reconcile(j, grant.revision).map_err(str::to_string)?;
+        if engine.mission_unsettled(&self.mission.id)? {
+            return Err("reason.project.reconcile".into());
+        }
+        engine.mission_budget(super::budget::Change::Pause { mission: self.mission.id.clone(), paused: false })?;
         self.mission.state = MissionState::Running;
-        self.save(j)
+        self.mission.reason = None;
+        if let Err(key) = self.save(j) {
+            let _ = engine.mission_budget(super::budget::Change::Pause { mission: self.mission.id.clone(), paused: true });
+            return Err(key.into());
+        }
+        Ok(())
+    }
+    /// Only the shared ledger's known terminated and priced invocation can close a legacy dispatch intent.
+    pub fn settle_dispatches(&mut self, j: &Journal, engine: &crate::Engine) -> Result<(), String> {
+        for intent in j.pending().map_err(|e| e.key().to_string())? {
+            if intent.kind != IntentKind::Dispatch
+                || intent.expected.get("invocation") != Some(&intent.id)
+                || intent.expected.contains_key("generation")
+            {
+                continue;
+            }
+            let reservation = engine.mission_reservation(&intent.id)?;
+            if reservation.request.mission != self.mission.id
+                || intent.mission != self.mission.id
+                || intent.task.as_deref() != Some(&reservation.request.worker)
+                || intent.grant_revision != self.mission.grant_revision
+            {
+                return Err("error.project.invocation".into());
+            }
+            if !reservation.terminated || !reservation.settled {
+                continue;
+            }
+            let mut receipt = super::Receipt::new(&intent.id, super::Outcome::Done, self.mission.updated_at);
+            receipt.evidence.insert("invocation".into(), intent.id);
+            j.record_receipt(&receipt).map_err(|e| e.key().to_string())?;
+        }
+        Ok(())
     }
     pub fn admit(&self, vendor: Vendor) -> Result<(), &'static str> {
         if self.halted {
@@ -224,6 +341,71 @@ impl Runner {
             return Err("reason.budget.paused");
         }
         super::policy::admit(vendor).map_err(|e| e.key())
+    }
+    fn proof_identity(id: &str, proof: &super::proof::ProofSet) -> String {
+        super::lease::hash(
+            serde_json::json!({"tree":proof.tree,"input":proof.input,
+            "definition":proof.definitions().iter().find(|d| d.id == id),"paths":proof.paths()})
+            .to_string()
+            .as_bytes(),
+        )
+    }
+    fn receipt_identity(receipt: &super::wire::CheckReceipt) -> String {
+        super::lease::hash(
+            serde_json::json!({"tree":receipt.candidate,"input":receipt.extra.get("input"),
+            "definition":receipt.extra.get("definition"),"paths":receipt.extra.get("changedPaths")})
+            .to_string()
+            .as_bytes(),
+        )
+    }
+    pub fn start_proof(&mut self, j: &Journal, task: &str, id: &str, proof: &mut super::proof::ProofSet) -> Result<String, &'static str> {
+        if self.halted || self.mission.state != MissionState::Running {
+            return Err("reason.budget.paused");
+        }
+        if !super::valid_id(task) {
+            return Err("error.wire.stale");
+        }
+        let definition = proof.definitions().iter().find(|d| d.id == id).ok_or("reason.proof.definition")?;
+        if definition.heavy {
+            let persisted: Self = j.get(&j.private().join("run.json")).map_err(|e| e.key())?.ok_or("error.store.corrupt")?;
+            if self.heavy_proof.is_some() || persisted.heavy_proof.is_some() {
+                return Err("reason.proof.busy");
+            }
+        }
+        let heavy = definition.heavy;
+        let receipt = uuid::Uuid::new_v4().to_string();
+        proof.start(id)?;
+        if heavy {
+            self.heavy_proof = Some((task.into(), id.into(), Self::proof_identity(id, proof), receipt.clone()));
+        }
+        self.save(j)?;
+        Ok(receipt)
+    }
+    pub fn finish_proof(
+        &mut self,
+        j: &Journal,
+        task: &str,
+        proof: &mut super::proof::ProofSet,
+        receipt: &str,
+        id: &str,
+        observation: super::proof::Observation,
+    ) -> Result<super::wire::CheckReceipt, &'static str> {
+        let definition = proof.definitions().iter().find(|d| d.id == id).ok_or("reason.proof.definition")?;
+        let heavy = definition.heavy;
+        if heavy && self.heavy_proof.as_ref() != Some(&(task.into(), id.into(), Self::proof_identity(id, proof), receipt.into())) {
+            return Err("reason.proof.busy");
+        }
+        let mut receipt = proof.record(receipt, id, observation)?;
+        receipt.task = task.into();
+        if let Err(e) = j.record_check(&receipt) {
+            self.halted = true;
+            return Err(e.key());
+        }
+        if heavy {
+            self.heavy_proof = None;
+        }
+        self.save(j)?;
+        Ok(receipt)
     }
     /// Persist reflexes before returning any action. Malformed input never invokes a driver.
     pub fn receive(&mut self, j: &Journal, task: &str, text: &str) -> Result<super::worker::Reply, &'static str> {
@@ -243,11 +425,35 @@ impl Runner {
     pub fn prepare_dispatch(&mut self, j: &Journal, engine: &crate::Engine, request: super::budget::Invocation) -> Result<(), String> {
         self.admit(request.vendor).map_err(str::to_string)?;
         let worker = self.workers.get(&request.worker).ok_or("error.wire.stale")?;
-        if request.mission != self.mission.id || request.model != worker.pin.model || request.effort != worker.pin.effort {
+        let kind = match worker.brief.role {
+            Role::Lead => super::budget::Kind::Lead,
+            Role::Reviewer => super::budget::Kind::Review,
+            _ => super::budget::Kind::Worker,
+        };
+        if request.mission != self.mission.id
+            || request.model != worker.pin.model
+            || request.effort != worker.pin.effort
+            || request.vendor != worker.pin.vendor
+            || request.kind != kind
+        {
             return Err("error.project.invocation".into());
+        }
+        if worker.brief.role == Role::Writer {
+            let launch =
+                j.pending().map_err(|e| e.key().to_string())?.into_iter().find(|i| i.id == request.id).ok_or("reason.project.reconcile")?;
+            if launch.kind != IntentKind::Dispatch
+                || launch.task.as_deref() != Some(&request.worker)
+                || launch.grant_revision != self.mission.grant_revision
+                || launch.expected.get("generation") != worker.brief.lease.map(|n| n.to_string()).as_ref()
+            {
+                return Err("reason.project.reconcile".into());
+            }
         }
         engine.mission_authority(&self.mission)?;
         engine.mission_budget(super::budget::Change::Admit(request.clone()))?;
+        if worker.brief.role == Role::Writer {
+            return Ok(());
+        }
         let mut intent =
             Intent::new(&request.id, &self.mission.id, IntentKind::Dispatch, self.mission.grant_revision, self.mission.updated_at);
         intent.task = Some(request.worker);
@@ -261,23 +467,66 @@ impl Runner {
         engine.mission_authority(&self.mission)?;
         engine.mission_budget(super::budget::Change::Continue { id: invocation.into() }).map(|_| ())
     }
-    pub async fn stop(&mut self, j: &Journal, engine: &crate::Engine, sessions: &[crate::events::Session]) -> Result<(), String> {
+    fn changed(&mut self, at: u64) -> Result<(), &'static str> {
+        if self.halted {
+            return Err("error.store.write");
+        }
+        if self.mission.state == MissionState::Done {
+            return Err("error.wire.stale");
+        }
+        let revision = self.mission.extra.get("viewRevision").and_then(serde_json::Value::as_u64).unwrap_or(self.mission.updated_at);
+        self.mission.extra.insert("viewRevision".into(), revision.checked_add(1).ok_or("error.wire.stale")?.into());
+        self.mission.updated_at = at;
+        Ok(())
+    }
+    pub fn mode(&mut self, j: &Journal, mode: super::RunMode, at: u64) -> Result<(), &'static str> {
+        self.changed(at)?;
+        self.mission.mode = mode;
+        self.save(j)
+    }
+    pub fn answer(&mut self, j: &Journal, id: &str, answer: &str, at: u64) -> Result<(), &'static str> {
+        if !super::valid_id(id) {
+            return Err("error.journal.badId");
+        }
+        if answer.len() > super::wire::MAX_TEXT {
+            return Err("error.wire.tooBig");
+        }
+        if answer.trim().is_empty() || answer.contains('\0') {
+            return Err("error.wire.malformed");
+        }
+        self.changed(at)?;
+        let mut decision = j.decision(id).map_err(|e| e.key())?.ok_or("error.decision.option")?;
+        decision.answer(super::DecidedBy::Person, answer, at)?;
+        if let Err(e) = j.save_decision(&decision) {
+            self.halted = true;
+            return Err(e.key());
+        }
+        self.save(j)
+    }
+    pub async fn stop(&mut self, j: &Journal, engine: &crate::Engine) -> Result<(), String> {
         // Close memory admission before any fallible IO. Never free leases or reservations from a stop request.
+        if self.mission.state == MissionState::Done {
+            return Err("error.wire.stale".into());
+        }
+        let changed = self.changed(engine.mission_time()).map_err(str::to_string);
         self.mission.state = MissionState::Paused;
+        self.mission.reason = Some("reason.interrupted".into());
         self.quota_wake = None;
         self.promotion_pending = false;
-        let budget = engine.mission_budget(super::budget::Change::Pause { mission: self.mission.id.clone(), paused: true });
+        let sessions = engine.mission_sessions(&self.mission.id);
+        let budget = engine.pause_mission_budget(&self.mission.id);
         let saved = self.save(j).map_err(str::to_string);
-        for session in sessions {
+        for session in &sessions {
             session.interrupt();
         }
         if !sessions.is_empty() {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
-        for session in sessions {
+        for session in &sessions {
             session.close();
         }
         budget?;
+        changed?;
         saved
     }
     pub fn install_plan(
@@ -446,13 +695,6 @@ impl Runner {
         row.extra.insert("landingReceipt".into(), forward_id.into());
         broker.journal().save_plan(&plan).map_err(|e| e.key())?;
         self.queue_retirement(broker.journal(), lease, termination, false)?;
-        self.queue.landed(task)?;
-        if plan.tasks.iter().all(|t| t.state == TaskState::Done) {
-            self.mission.state = MissionState::Done;
-            self.quota_wake = None;
-            self.promotion_pending = false;
-        }
-        self.save(broker.journal())?;
         self.recover_retirements(broker, &mut grant)?;
         Ok(head)
     }
@@ -481,6 +723,15 @@ impl Runner {
                     abandoned,
                 },
             );
+        }
+        if !abandoned {
+            self.queue.landed(&lease.task)?;
+            let plan = j.plan().map_err(|e| e.key())?.ok_or("reason.project.compile")?;
+            if plan.tasks.iter().all(|t| t.state == TaskState::Done) {
+                self.mission.state = MissionState::Done;
+                self.quota_wake = None;
+                self.promotion_pending = false;
+            }
         }
         self.save(j)
     }

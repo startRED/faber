@@ -19,6 +19,7 @@ pub(super) fn revision(mission: &Mission) -> u64 {
     mission.extra.get("viewRevision").and_then(serde_json::Value::as_u64).unwrap_or(mission.updated_at)
 }
 
+#[cfg(test)]
 pub(super) fn changed(mission: &mut Mission, now: u64) -> Result<(), String> {
     let next = revision(mission).checked_add(1).ok_or("error.wire.stale")?;
     mission.extra.insert("viewRevision".into(), next.into());

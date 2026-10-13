@@ -137,12 +137,63 @@ fn partial_reruns_invalidate_only_readers_and_descendants() {
 
 #[test]
 fn only_one_heavy_proof_owns_the_build_lane() {
+    let (repo, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let j = faber_engine::project::store::Journal::open(repo.path(), data.path(), "m1").unwrap();
+    let mut r = faber_engine::project::run::Runner::create(
+        &j,
+        faber_engine::project::Mission::new("m1", "p1", "repo", "Fix", &"1".repeat(40), 3, 1),
+    )
+    .unwrap();
+    r.mission.state = faber_engine::project::MissionState::Running;
+    r.save(&j).unwrap();
     let mut other = definition();
     other.id = "other".into();
     let mut set = ProofSet::new("1".repeat(40), "input".into(), vec![definition(), other], vec![]).unwrap();
-    set.start("rust").unwrap();
-    assert!(set.start("other").is_err());
+    let receipt = r.start_proof(&j, "a", "rust", &mut set).unwrap();
+    assert!(r.start_proof(&j, "a", "other", &mut set).is_err());
     assert!(!set.verified());
-    set.record("r1", "rust", observation()).unwrap();
-    set.start("other").unwrap();
+    r.finish_proof(&j, "a", &mut set, &receipt, "rust", observation()).unwrap();
+    r.start_proof(&j, "a", "other", &mut set).unwrap();
+}
+
+#[test]
+fn opus_m2_heavy_lane_spans_candidates() {
+    let (repo, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let j = faber_engine::project::store::Journal::open(repo.path(), data.path(), "m1").unwrap();
+    let mut r = faber_engine::project::run::Runner::create(
+        &j,
+        faber_engine::project::Mission::new("m1", "p1", "repo", "Fix", &"1".repeat(40), 3, 1),
+    )
+    .unwrap();
+    r.mission.state = faber_engine::project::MissionState::Running;
+    r.save(&j).unwrap();
+    let mut a = ProofSet::new("1".repeat(40), "a".into(), vec![definition()], vec![]).unwrap();
+    let mut b = ProofSet::new("2".repeat(40), "b".into(), vec![definition()], vec![]).unwrap();
+    let receipt = r.start_proof(&j, "a", "rust", &mut a).unwrap();
+    let mut restored = faber_engine::project::run::Runner::load(&j).unwrap();
+    assert_eq!(restored.start_proof(&j, "b", "rust", &mut b), Err("reason.proof.busy"));
+    r.finish_proof(&j, "a", &mut a, &receipt, "rust", observation()).unwrap();
+    restored = faber_engine::project::run::Runner::load(&j).unwrap();
+    restored.start_proof(&j, "b", "rust", &mut b).unwrap();
+}
+
+#[test]
+fn opus_m2_known_proof_receipt_recovers_after_checkpoint_fault() {
+    let (repo, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let j = faber_engine::project::store::Journal::open(repo.path(), data.path(), "m1").unwrap();
+    let mut r = faber_engine::project::run::Runner::create(
+        &j,
+        faber_engine::project::Mission::new("m1", "p1", "repo", "Fix", &"1".repeat(40), 3, 1),
+    )
+    .unwrap();
+    r.mission.state = faber_engine::project::MissionState::Running;
+    r.save(&j).unwrap();
+    let mut a = ProofSet::new("1".repeat(40), "a".into(), vec![definition()], vec![]).unwrap();
+    let receipt = r.start_proof(&j, "a", "rust", &mut a).unwrap();
+    std::fs::create_dir(j.private().join("run.json.tmp")).unwrap();
+    assert_eq!(r.finish_proof(&j, "a", &mut a, &receipt, "rust", observation()), Err("error.store.write"));
+    std::fs::remove_dir(j.private().join("run.json.tmp")).unwrap();
+    let mut restored = faber_engine::project::run::Runner::load(&j).unwrap();
+    let mut b = ProofSet::new("2".repeat(40), "b".into(), vec![definition()], vec![]).unwrap();
+    restored.start_proof(&j, "b", "rust", &mut b).unwrap();
 }

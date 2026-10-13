@@ -105,6 +105,23 @@ pub fn screen_fixture(sandbox: &Path) -> Result {
     let data = sandbox.join("data");
     std::fs::write(data.join("projects.json"), serde_json::to_vec(&vec![project.clone()]).unwrap()).map_err(|e| e.to_string())?;
     let journal = Journal::open(&repo, &data, "screen_mission").map_err(|e| e.key().to_string())?;
+    let mut ledger = faber_engine::ledger::Ledger::default();
+    let mut budget = faber_engine::project::budget::Budget::default();
+    budget.grants.insert(
+        "screen_mission".into(),
+        faber_engine::project::budget::Grant {
+            cap_micros: 100_000,
+            worker_micros: 50_000,
+            vendors: std::collections::BTreeMap::from([(faber_engine::model::Vendor::Codex, 100_000)]),
+            review_micros: 20_000,
+            repair_micros: 20_000,
+            canary_micros: 10_000,
+            paused: false,
+            extra: Default::default(),
+        },
+    );
+    ledger.extra.insert("missionBudget".into(), serde_json::to_value(budget).unwrap());
+    std::fs::write(data.join("budget.json"), serde_json::to_vec(&ledger).unwrap()).map_err(|e| e.to_string())?;
     let mut mission = Mission::new("screen_mission", "demo", &enrolled.identity.common_dir, "A measured project goal", &base, 1, 100);
     mission.state = MissionState::Paused;
     journal.save_mission(&mission).map_err(|e| e.key().to_string())?;
