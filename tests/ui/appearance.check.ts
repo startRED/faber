@@ -1,7 +1,7 @@
 import themes from '../../src-tauri/src/themes.json';
 import { clearance, dustShadows, makeGrains } from '../../ui/Ambient.tsx';
 import type { AppState, Appearance, Look, SavedSettings } from '../../ui/api.ts';
-import { applyLook, effectiveMotion, inOrder, previewer, refreshed, saveAndApply, switchTheme, watchSystem, windowHidden } from '../../ui/appearance.ts';
+import { appliedLook, applyLook, effectiveMotion, inOrder, previewer, refreshed, saveAndApply, switchTheme, watchSystem, windowHidden } from '../../ui/appearance.ts';
 import { en } from '../../ui/locales/en.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
@@ -39,6 +39,44 @@ function keepRoot(): () => void {
     Object.assign(root.dataset, data);
   };
 }
+
+check('appearance: theme cross-fades use native snapshots, suppress stale previews and stay off in reduced motion', async () => {
+  const restore = keepRoot();
+  const saved = appliedLook();
+  const original = document.startViewTransition;
+  let calls = 0;
+  let skips = 0;
+  let update!: () => void;
+  document.startViewTransition = (callback) => {
+    calls++;
+    let resolve!: () => void;
+    const done = new Promise<void>((r) => { resolve = r; });
+    update = () => { if (typeof callback === 'function') void callback(); resolve(); };
+    return { updateCallbackDone: done, finished: done, skipTransition: () => { skips++; } } as unknown as ViewTransition;
+  };
+  try {
+    await applyLook(sala({ motion: 'none' }));
+    await applyLook(sala());
+    const warm = sala({ appearance: { ...sala().appearance, base: 'oficina' } });
+    const pending = applyLook(warm);
+    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      equal(calls, 1);
+      await applyLook(sala({ motion: 'reduced' }));
+      equal(skips, 1);
+      update();
+      await pending;
+      equal(document.documentElement.dataset.base, 'sala', 'a snapshot from a closed preview never applies later');
+    }
+    const before = calls;
+    await applyLook({ ...warm, motion: 'reduced' });
+    await applyLook(sala({ motion: 'none' }));
+    equal(calls, before, 'reduced and none take no snapshots');
+  } finally {
+    document.startViewTransition = original;
+    if (saved) await applyLook(saved);
+    restore();
+  }
+});
 
 check('appearance: a look writes every variable, the scheme and the flags on the element it is given', () => {
   const target = document.createElement('div');

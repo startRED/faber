@@ -89,13 +89,28 @@ own inks.
 - Every interface size is the base text size plus or minus a few pixels. Reading text is 1.5 px larger than the base.
 - Display headings are clamped to `9vw`, so an 86 px heading fits small windows.
 
-### Motion and effects
+### Motion
 
-- No arrival or transition lasts longer than 400 ms.
-- New items rise 6 px over 400 ms. Buttons respond in 140 to 240 ms. The "running" dot pulses every 1.6 to 2 s.
+- Chrome uses the `--motion-*` tokens in `ui/styles.css`: 150 ms feedback, 180 ms exits, theme-controlled 200–240 ms
+  entrances and a 220 ms theme cross-fade. No chrome animation, including its stagger, exceeds 300 ms. The enter curve
+  has a soft spring-like settle; exits ease in. Travel is 24 px for the running column, up to 6 px for content and a
+  0.97 scale for cards and menus. Cards use a 2 px arrival blur; overlays use an 8 px static backdrop blur.
+- New items rise up to 6 px over 200 to 240 ms; exits take 180 ms. Buttons respond in 140 to 240 ms. The "running" dot pulses every 1.6 to 2 s.
   Workshop only fades and never moves anything vertically.
-- Reduced motion keeps only fades of up to 120 ms. No motion removes everything. A system that asks for less motion
+- Reduced motion and no motion both remove every animation and transition. A system that asks for less motion
   caps the user's level, and a change in the system setting changes only the level.
+- The running column slides and fades; its thread uses a short measured width transition so glyphs never stretch.
+  The stage is never cloned. During travel, stage shadows and rounded clipping are omitted to avoid expensive raster
+  effects; they return at rest. Offscreen messages and markdown blocks use native content visibility with intrinsic
+  size estimates. Panel content staggers by 18 ms, capped at 48 ms. Surviving list rows
+  use FLIP. The composer and native disclosures retain short measured height changes; reduced motion is instant.
+  Window resizing cancels travel and reflows instantly so content stays inside the new viewport.
+  Exit copies are inert, isolated in a shadow tree and removed when their animation finishes. At most 12 visible copies
+  per list exit together; no component or process is kept alive for an exit. Native dropdown pickers animate where the
+  webview supports customizable selects, with the usual native control as the fallback. Theme changes use native
+  View Transitions when available and apply immediately otherwise; no dependency or retained screen is needed.
+
+### Effects
 - Effects appear only on the new conversation screen, never behind text the user reads, and they stop when the window
   is hidden.
   - **Dark Room:** a static projector beam, a glow that breathes every 7 s and 72 dust grains (CSS shadows that twinkle on the compositor, no canvas loop) that fade
@@ -207,6 +222,9 @@ inside its own area.
 - Four hand-written suggestions per language. Clicking one fills the composer and moves focus there. It sends nothing.
 - "Pick up where you left off" lists the three most recently updated conversations.
 - The composer keeps its model picker, "AI: choose for me".
+- Auto chooses both the model and its effort. A manual model adds an adjacent low, medium or high effort choice,
+  defaulting to medium (R102). Each conversation remembers its choice. Changes apply to the next message only;
+  the composer says so, and each answer keeps the effort actually used. Both CLI drivers always receive that effort.
 - The ambient effect of the theme runs here.
 - With no AI connected, the greeting, the suggestions and the list give way to an empty state with Curioso and a button
   that opens account management. The composer stays on screen but cannot send.

@@ -61,7 +61,7 @@ fn request(area: Area, project: Option<&str>, text: &str, vendor: &str) -> SendR
         text: text.into(),
         images: vec![],
         files: vec![],
-        choice: Choice { vendor: vendor.into(), model: None },
+        choice: Choice { vendor: vendor.into(), model: None, effort: None },
     }
 }
 

@@ -10,11 +10,14 @@ import { Settings } from '../../ui/Settings.tsx';
 import { Thread } from '../../ui/Thread.tsx';
 import { check, equal, ok } from './check.ts';
 
-check('pace: the quota reason follows the original route for a step and low quota', () => {
+check('pace: quota reasons, manual effort and grouped activity coexist without hiding the answer', () => {
   useLanguage('en');
   for (const kind of ['step', 'low'] as const) {
     const host = document.createElement('div');
-    const m = { id: 'reply', role: 'assistant', text: 'Answer', at: 1, status: 'done', vendor: 'claude', reason: 'reason.route.code.medium', pace: { kind, vendor: 'claude' } } as Message;
+    const narration = 'Checking the files.\n\n';
+    const m = { id: 'reply', role: 'assistant', text: narration + 'Answer', activityEnd: narration.length,
+      tools: [{ id: 'check', name: 'Bash', input: { command: 'check' }, ok: true }], effort: 'high',
+      at: 1, status: 'done', vendor: 'claude', reason: 'reason.route.code.medium', pace: { kind, vendor: 'claude' } } as Message;
     const dispose = render(() => createComponent(Thread, { conversationId: 'chat', messages: [m], from: 0, options: [], onBranch: () => {} }), host);
     try {
       const normal = host.querySelector('.model em');
@@ -22,6 +25,10 @@ check('pace: the quota reason follows the original route for a step and low quot
       ok(normal && pace, 'both reasons show');
       ok(normal!.compareDocumentPosition(pace!) & Node.DOCUMENT_POSITION_FOLLOWING);
       ok(pace!.textContent!.toLowerCase().includes(kind === 'step' ? 'one step up' : 'running low'));
+      ok(host.querySelector('.model')!.textContent!.includes('Effort: High'));
+      equal(host.querySelectorAll('details.activity').length, 1);
+      equal(host.querySelector<HTMLDetailsElement>('details.activity')!.open, false);
+      equal(host.querySelector('.ai > .md')!.textContent!.trim(), 'Answer');
     } finally { dispose(); }
   }
 });

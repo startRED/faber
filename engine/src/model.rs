@@ -95,6 +95,12 @@ pub struct Message {
     pub id: String,
     pub role: Role,
     pub text: String,
+    /// UTF-16 offsets where a new CLI text block starts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_breaks: Option<Vec<usize>>,
+    /// Start of an explicit final answer, or end of text preceding the last tool call when the CLI has no phases.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity_end: Option<usize>,
     /// Milliseconds since the Unix epoch.
     pub at: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -105,6 +111,8 @@ pub struct Message {
     pub vendor: Option<Vendor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -155,11 +163,14 @@ impl Message {
             id,
             role,
             text,
+            text_breaks: None,
+            activity_end: None,
             at,
             images: None,
             attachments: None,
             vendor: None,
             model: None,
+            effort: None,
             reason: None,
             thinking: None,
             tools: None,
@@ -194,6 +205,9 @@ pub struct BranchOf {
 pub struct Conversation {
     pub id: String,
     pub title: String,
+    /// The choice for the next message, retained independently in each conversation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub choice: Option<crate::router::Choice>,
     pub area: Area,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,

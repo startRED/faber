@@ -60,7 +60,7 @@ fn by_hand() -> SendRequest {
         text: SKY.into(),
         images: vec![],
         files: vec![],
-        choice: Choice { vendor: "claude".into(), model: Some("haiku".into()) },
+        choice: Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None },
     }
 }
 
@@ -140,8 +140,12 @@ async fn a_router_question_is_a_span_too_and_has_its_own_cost() {
     // A fresh reading and a seen plan, so that no pulse is due and the gate lets the router ask.
     let plan = EngineEvent::Signals(Signals { plan: Some("max".into()), billing: Some(Billing::Subscription), ..Signals::default() });
     engine.note_account_events(Vendor::Claude, vec![reading(0.05), plan]);
-    let typing =
-        WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: Choice { vendor: "auto".into(), model: None } };
+    let typing = WarmRequest {
+        conversation_id: None,
+        area: Area::Chat,
+        project_id: None,
+        choice: Choice { vendor: "auto".into(), model: None, effort: None },
+    };
     engine.route_draft(typing, text.into());
     for _ in 0..100 {
         if !engine.ledger().claude.spans.is_empty() {

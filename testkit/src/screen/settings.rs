@@ -172,6 +172,8 @@ fn opens_at_usage(ctx: &mut Ctx) -> Result {
     page.wait_for("the quota after a reload", "document.querySelector('.usage .share')?.textContent === '47%'")?;
     // Quota is seeded before the remembered conversation's asynchronous snapshot has rendered.
     page.wait_visible(&actions)?;
+    // DOM readiness can precede the new document's native pointer hit-test frame.
+    page.eval("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")?;
     open_settings(page)?;
     open_section(page, "set.usage")?;
     page.wait_for("the same figures", &format!("({shares}) === '7% 47%'"))

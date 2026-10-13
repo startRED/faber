@@ -387,6 +387,10 @@ fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Resul
         if let Some(port) = port {
             args.push_str(&format!(" --remote-debugging-port={port}"));
         }
+        #[cfg(feature = "test-hooks")]
+        if hidden && std::env::var("FABER_SOFTWARE_RENDERING").as_deref() == Ok("1") {
+            args.push_str(" --disable-gpu");
+        }
         builder = builder.additional_browser_args(&args);
     }
     builder.build()

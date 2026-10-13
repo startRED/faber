@@ -158,6 +158,7 @@ mod tests {
                     }),
                     turn: Some("turn".into()),
                     break_pending: false,
+                    answer_started: false,
                     used: 0,
                     cli: Cli { command: "not-a-cli".into(), prefix: vec![] },
                     resumed: false,

@@ -97,12 +97,12 @@ impl Core {
                     }
                 })
                 .collect::<Vec<_>>();
-            // Older files have no dispatch intent: require explicit recovery and keep the default effort.
+            // Older files have no dispatch intent: require explicit recovery and preserve any saved effort.
             Recovery {
                 pick: Pick {
                     vendor,
                     model: m.model.clone(),
-                    effort: "medium".into(),
+                    effort: m.effort.clone().unwrap_or_else(|| "medium".into()),
                     reason: m.reason.clone().unwrap_or_else(|| "reason.chosen".into()),
                     pace: m.pace.clone(),
                 },

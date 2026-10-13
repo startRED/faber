@@ -137,6 +137,7 @@ fn quote(word: &str) -> String {
 /// Every top-level window the calling thread's desktop has: (handle, owner process, visible).
 pub fn windows() -> Result<Vec<(usize, u32, bool)>, String> {
     let mut found = Vec::new();
+    winsafe::SetLastError(co::ERROR::SUCCESS);
     EnumWindows(|hwnd| {
         found.push((hwnd.ptr() as usize, hwnd.GetWindowThreadProcessId().1, hwnd.IsWindowVisible()));
         true

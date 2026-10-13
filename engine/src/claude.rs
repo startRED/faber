@@ -148,7 +148,7 @@ pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
         "stream_event" => {
             let event = &msg["event"];
             if event["type"] == "content_block_start" && event["content_block"]["type"] == "text" {
-                return vec![EngineEvent::Break];
+                return vec![EngineEvent::Break { final_answer: false }];
             }
             if event["type"] != "content_block_delta" {
                 return vec![];
