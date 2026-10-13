@@ -47,7 +47,8 @@ const ROWS: [Config; 3] = [
 // What the scenarios share.
 
 fn viewport(page: &mut Page, width: u32, height: u32) -> Result {
-    page.cdp.call("Emulation.setDeviceMetricsOverride", json!({ "width": width, "height": height, "deviceScaleFactor": 1, "mobile": false }))?;
+    page.cdp
+        .call("Emulation.setDeviceMetricsOverride", json!({ "width": width, "height": height, "deviceScaleFactor": 1, "mobile": false }))?;
     page.wait_for("the window size", &format!("innerWidth === {width} && innerHeight === {height}"))?;
     // The screen suppresses motion for a quarter of a second after a resize.
     pause(0.4);
@@ -61,7 +62,10 @@ fn apply(page: &mut Page, c: &Config) -> Result {
     page.eval(&format!("window.__TAURI_INTERNALS__.invoke('save_settings', {{ patch: {patch} }}).then(() => true)"))?;
     viewport(page, c.width, c.height)?;
     page.reload()?;
-    page.wait_for("the settings to show", &format!("document.documentElement.lang === '{}' && document.documentElement.dataset.base === '{}'", c.language, c.look))
+    page.wait_for(
+        "the settings to show",
+        &format!("document.documentElement.lang === '{}' && document.documentElement.dataset.base === '{}'", c.language, c.look),
+    )
 }
 
 fn inject(page: &mut Page) -> Result {
@@ -108,8 +112,12 @@ fn watch(ctx: &Ctx, label: &str, page: &mut Page, names: &[&str], act: impl FnOn
 }
 
 fn click(page: &mut Page, selector: &str) -> Result {
-    page.eval(&format!("(() => {{ const el = document.querySelector({}); if (!el) throw new Error('nothing matches {}'); el.click(); return true; }})()", json!(selector), selector.replace('\'', "")))
-        .map(drop)
+    page.eval(&format!(
+        "(() => {{ const el = document.querySelector({}); if (!el) throw new Error('nothing matches {}'); el.click(); return true; }})()",
+        json!(selector),
+        selector.replace('\'', "")
+    ))
+    .map(drop)
 }
 
 fn screen_of(page: &mut Page) -> Result<String> {
@@ -123,8 +131,12 @@ fn gate(ctx: &mut Ctx, name: &str, findings: &[Finding]) -> Result {
     let blocking = sentinel::blocking(findings, &known);
     ctx.notes.push(format!("{} findings, {} blocking", findings.len(), blocking.len()));
     ensure(blocking.is_empty(), || {
-        let lines: Vec<String> =
-            blocking.iter().map(|f| format!("{} {} {} {}: {} [{}] fingerprint {}", f.kind, f.screen, f.surface, f.element, f.metric, f.config, f.fingerprint())).collect();
+        let lines: Vec<String> = blocking
+            .iter()
+            .map(|f| {
+                format!("{} {} {} {}: {} [{}] fingerprint {}", f.kind, f.screen, f.surface, f.element, f.metric, f.config, f.fingerprint())
+            })
+            .collect();
         format!("new findings that block:\n  {}", lines.join("\n  "))
     })
 }
@@ -200,7 +212,9 @@ fn motion(ctx: &mut Ctx) -> Result {
         }
         if look == "narrow" {
             for step in ["opens", "closes"] {
-                let w = watch(ctx, &format!("sidebar {step}"), page, &["sidebar"], |p| click(p, if step == "opens" { ".topbar .menu" } else { ".scrim" }))?;
+                let w = watch(ctx, &format!("sidebar {step}"), page, &["sidebar"], |p| {
+                    click(p, if step == "opens" { ".topbar .menu" } else { ".scrim" })
+                })?;
                 judge_motion(ctx, &mut found, &screen, "sidebar", &format!("{step}, over the stage"), &config, &w.samples[0])?;
             }
         }
@@ -241,7 +255,9 @@ fn motion(ctx: &mut Ctx) -> Result {
     pause(0.6);
     system_motion(page, false)?;
     pause(0.3);
-    page.eval("Element.prototype.animate = function () { return { finished: Promise.resolve(), cancel() {}, playState: 'finished' }; }; true")?;
+    page.eval(
+        "Element.prototype.animate = function () { return { finished: Promise.resolve(), cancel() {}, playState: 'finished' }; }; true",
+    )?;
     let mut planted = Vec::new();
     let w = watch(ctx, "planted teleport", page, &["running"], |p| click(p, ".run-btn"))?;
     judge_motion(ctx, &mut planted, "chat.new", "running", "opens with no animation", "planted", &w.samples[0])?;
@@ -295,7 +311,9 @@ const FIELD: &str = r#"(() => {
 /// L4 and L5 at the end of the thread. With `follow`, the thread is left where the app keeps it (I5: it must still be at
 /// its end after the composer grew); otherwise it is scrolled to its end first.
 fn thread_end(page: &mut Page, config: &str, follow: bool, found: &mut Vec<Finding>) -> Result<Value> {
-    let end = page.eval(&THREAD_END.replace("thread.scrollTop = thread.scrollHeight;", if follow { "" } else { "thread.scrollTop = thread.scrollHeight;" }))?;
+    let end = page.eval(
+        &THREAD_END.replace("thread.scrollTop = thread.scrollHeight;", if follow { "" } else { "thread.scrollTop = thread.scrollHeight;" }),
+    )?;
     ensure(!end.is_null(), || "the thread has no message".to_string())?;
     if end["atEnd"] != json!(true) {
         found.push(Finding::new("I5", "chat.thread", "thread", ".thread", config, "the thread left its end when the composer grew"));
@@ -323,7 +341,13 @@ fn type_lines(page: &mut Page, config: &str, found: &mut Vec<Finding>) -> Result
         let f = page.eval(FIELD)?;
         let n = |key: &str| f[key].as_f64().unwrap_or_default();
         (line, min) = (n("line"), n("min"));
-        rows.push(Typed { lines, height: n("height"), scroll_height: n("scrollHeight"), bar_gap: n("barGap"), caret_visible: f["caret"] == json!(true) });
+        rows.push(Typed {
+            lines,
+            height: n("height"),
+            scroll_height: n("scrollHeight"),
+            bar_gap: n("barGap"),
+            caret_visible: f["caret"] == json!(true),
+        });
         if lines == 10 {
             // I5: the composer has grown at the end of the thread; the last message must still clear it.
             thread_end(page, &format!("{config}, composer at 10 lines"), true, found)?;
@@ -366,7 +390,8 @@ const result = 42;
                     "text": if i % 2 == 0 { "A question.".into() } else { block.repeat(2) }, "at": 0, "status": "done" })
         })
         .collect();
-    let body = json!({ "id": id, "title": LONG_TITLE, "area": "chat", "sessions": {}, "createdAt": 1, "updatedAt": 1, "messages": messages });
+    let body =
+        json!({ "id": id, "title": LONG_TITLE, "area": "chat", "sessions": {}, "createdAt": 1, "updatedAt": 1, "messages": messages });
     std::fs::write(folder.join(format!("{id}.json")), body.to_string()).map_err(|e| e.to_string())
 }
 
@@ -383,7 +408,13 @@ fn composer(ctx: &mut Ctx) -> Result {
         if page.eval(&format!("document.querySelector('.crumb b')?.textContent === {}", json!(LONG_TITLE)))? != json!(true) {
             page.click(&css(".list .item").has_text(LONG_TITLE))?;
         }
-        page.wait_for("the long thread to be open", &format!("document.querySelector('.crumb b')?.textContent === {} && !!document.querySelector('.col > article.ai')", json!(LONG_TITLE)))?;
+        page.wait_for(
+            "the long thread to be open",
+            &format!(
+                "document.querySelector('.crumb b')?.textContent === {} && !!document.querySelector('.col > article.ai')",
+                json!(LONG_TITLE)
+            ),
+        )?;
         pause(0.5);
         let config = row.label();
         thread_end(page, &config, false, &mut found)?;
@@ -396,14 +427,19 @@ fn composer(ctx: &mut Ctx) -> Result {
     let page = &mut app.page;
     viewport(page, 1440, 900)?;
     let last = ROWS[ROWS.len() - 1].label();
-    let plant = |page: &mut Page, css: &str| page.eval(&format!("(() => {{ const s = document.createElement('style'); s.id = 'sx-plant'; s.textContent = {}; document.head.append(s); return true; }})()", json!(css))).map(drop);
+    let plant = |page: &mut Page, css: &str| {
+        page.eval(&format!("(() => {{ const s = document.createElement('style'); s.id = 'sx-plant'; s.textContent = {}; document.head.append(s); return true; }})()", json!(css))).map(drop)
+    };
     let unplant = |page: &mut Page| page.eval("document.getElementById('sx-plant')?.remove(); true").map(drop);
     pause(0.3);
     plant(page, ".composer textarea { height: 60px !important; min-height: 60px !important; max-height: 60px !important; }")?;
     let mut twin = Vec::new();
     type_lines(page, &last, &mut twin)?;
     ensure(twin.iter().any(|f| f.kind == "I1") && twin.iter().any(|f| f.kind == "I2"), || {
-        format!("planted defect not caught: a fixed composer height (I1, I2): {:?}", twin.iter().map(|f| format!("{} {}", f.kind, f.metric)).collect::<Vec<_>>())
+        format!(
+            "planted defect not caught: a fixed composer height (I1, I2): {:?}",
+            twin.iter().map(|f| format!("{} {}", f.kind, f.metric)).collect::<Vec<_>>()
+        )
     })?;
     unplant(page)?;
     pause(0.3);
@@ -516,11 +552,19 @@ fn text(ctx: &mut Ctx) -> Result {
     let page = &mut app.page;
     apply(page, &sweep[0])?;
     let renamed = "Renomeada › ação «ß» ñ ü — 日本語 ✓";
-    page.eval(&format!("window.__TAURI_INTERNALS__.invoke('rename', {{ id: {}, title: {} }}).then(() => true)", json!(SEEDED_ID), json!(renamed)))?;
+    page.eval(&format!(
+        "window.__TAURI_INTERNALS__.invoke('rename', {{ id: {}, title: {} }}).then(() => true)",
+        json!(SEEDED_ID),
+        json!(renamed)
+    ))?;
     let file = ctx.sb.data.join("conversations").join(format!("{SEEDED_ID}.json"));
     let mut stored = String::new();
     super::eventually("the engine to write the new title", std::time::Duration::from_secs(10), || {
-        stored = std::fs::read_to_string(&file).ok().and_then(|body| serde_json::from_str::<Value>(&body).ok()).and_then(|v| v["title"].as_str().map(String::from)).unwrap_or_default();
+        stored = std::fs::read_to_string(&file)
+            .ok()
+            .and_then(|body| serde_json::from_str::<Value>(&body).ok())
+            .and_then(|v| v["title"].as_str().map(String::from))
+            .unwrap_or_default();
         stored == renamed
     })
     .map_err(|e| format!("{e}; the file holds the title {stored:?}"))?;

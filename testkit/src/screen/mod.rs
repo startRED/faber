@@ -7,8 +7,8 @@ pub mod containment;
 pub mod first_run;
 pub mod permissions;
 pub mod review;
-pub mod settings;
 pub mod sentinel;
+pub mod settings;
 pub mod setup;
 pub mod shell;
 

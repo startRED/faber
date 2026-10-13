@@ -395,7 +395,9 @@ fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Resul
         // slows or stops animation frames; these switches ask it not to. The sentinel's clock check proves they held.
         #[cfg(feature = "test-hooks")]
         if hidden {
-            args.push_str(" --disable-renderer-backgrounding --disable-backgrounding-occluded-windows --disable-background-timer-throttling");
+            args.push_str(
+                " --disable-renderer-backgrounding --disable-backgrounding-occluded-windows --disable-background-timer-throttling",
+            );
         }
         builder = builder.additional_browser_args(&args);
     }

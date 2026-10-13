@@ -39,7 +39,14 @@ pub struct Finding {
 
 impl Finding {
     pub fn new(kind: &'static str, screen: &str, surface: &str, element: &str, config: &str, metric: impl Into<String>) -> Finding {
-        Finding { kind, screen: screen.into(), surface: surface.into(), element: element.into(), config: config.into(), metric: metric.into() }
+        Finding {
+            kind,
+            screen: screen.into(),
+            surface: surface.into(),
+            element: element.into(),
+            config: config.into(),
+            metric: metric.into(),
+        }
     }
 
     pub fn severity(&self) -> Severity {
@@ -86,7 +93,8 @@ pub fn write_findings(folder: &Path, scenario: &str, findings: &[Finding]) -> Re
     std::fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
     let name: String = scenario.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
     let path = folder.join(format!("{name}.json"));
-    std::fs::write(&path, serde_json::to_string_pretty(&records).expect("findings are JSON")).map_err(|e| format!("{}: {e}", path.display()))
+    std::fs::write(&path, serde_json::to_string_pretty(&records).expect("findings are JSON"))
+        .map_err(|e| format!("{}: {e}", path.display()))
 }
 
 // The frame clock.
@@ -242,10 +250,10 @@ pub fn composer_problems(rows: &[Typed], line: f64, stage: f64) -> Vec<(&'static
     // The first line sits inside the field's minimum height; from the second on, each line adds one line height until
     // the cap, which is at least 30% of the stage.
     if let Some(two) = rows.iter().find(|r| r.lines == 2) {
-        if let Some(one) = rows.iter().find(|r| r.lines == 1) {
-            if two.height < one.height - 0.5 {
-                out.push(("I1", format!("the field shrinks from {:.0} to {:.0} px at the second line", one.height, two.height)));
-            }
+        if let Some(one) = rows.iter().find(|r| r.lines == 1)
+            && two.height < one.height - 0.5
+        {
+            out.push(("I1", format!("the field shrinks from {:.0} to {:.0} px at the second line", one.height, two.height)));
         }
         for r in rows.iter().filter(|r| r.lines > 2) {
             let want = two.height + f64::from(r.lines - 2) * line;
@@ -259,14 +267,23 @@ pub fn composer_problems(rows: &[Typed], line: f64, stage: f64) -> Vec<(&'static
         out.push(("I2", format!("the field stops at {cap:.0} px, {:.0}% of the {stage:.0} px stage, 30% to 40% wanted", share * 100.0)));
     }
     if last.scroll_height <= last.height + 1.0 {
-        out.push(("I2", format!("{} lines do not scroll inside the field (content {:.0} px, field {:.0} px)", last.lines, last.scroll_height, last.height)));
+        out.push((
+            "I2",
+            format!(
+                "{} lines do not scroll inside the field (content {:.0} px, field {:.0} px)",
+                last.lines, last.scroll_height, last.height
+            ),
+        ));
     }
     if rows.iter().any(|r| !r.caret_visible) {
         out.push(("I2", "the caret leaves the visible part of the field".into()));
     }
     let first_gap = rows[0].bar_gap;
     if let Some(r) = rows.iter().find(|r| (r.bar_gap - first_gap).abs() > 1.0) {
-        out.push(("I4", format!("the send button moved {:.0} px from the composer's bottom edge at {} lines", r.bar_gap - first_gap, r.lines)));
+        out.push((
+            "I4",
+            format!("the send button moved {:.0} px from the composer's bottom edge at {} lines", r.bar_gap - first_gap, r.lines),
+        ));
     }
     out
 }
@@ -362,7 +379,14 @@ mod tests {
 
     #[test]
     fn a_panel_that_slides_in_has_frames_in_between() {
-        let slide = frames(&[(0.0, false, 0.0, 0.0), (16.0, true, 300.0, 0.1), (33.0, true, 200.0, 0.5), (50.0, true, 80.0, 0.9), (66.0, true, 0.0, 1.0), (83.0, true, 0.0, 1.0)]);
+        let slide = frames(&[
+            (0.0, false, 0.0, 0.0),
+            (16.0, true, 300.0, 0.1),
+            (33.0, true, 200.0, 0.5),
+            (50.0, true, 80.0, 0.9),
+            (66.0, true, 0.0, 1.0),
+            (83.0, true, 0.0, 1.0),
+        ]);
         assert_eq!(teleport(&slide), Motion::Smooth(3));
     }
 
@@ -394,7 +418,10 @@ mod tests {
         let read = samples(&rows);
         assert_eq!(read.len(), 2);
         assert!(!read[0].present && read[1].present && read[1].o == 0.5);
-        assert_eq!(anims(&json!([{ "target": "div.runcol", "props": ["transform", "opacity"], "ms": 220, "infinite": false }]))[0].props, ["transform", "opacity"]);
+        assert_eq!(
+            anims(&json!([{ "target": "div.runcol", "props": ["transform", "opacity"], "ms": 220, "infinite": false }]))[0].props,
+            ["transform", "opacity"]
+        );
     }
 
     #[test]
@@ -402,8 +429,8 @@ mod tests {
         let fade = Anim { target: "div.ask".into(), props: vec!["opacity".into()], ms: 100.0, infinite: false };
         let slide = Anim { target: "aside.runcol".into(), props: vec!["transform".into(), "opacity".into()], ms: 220.0, infinite: false };
         let slow = Anim { target: "div.ask".into(), props: vec!["opacity".into()], ms: 400.0, infinite: false };
-        assert!(reduced_problems("reduced", &[fade.clone()]).is_empty());
-        assert_eq!(reduced_problems("reduced", &[slide.clone()]).len(), 1, "planted twin: a slide under reduced motion");
+        assert!(reduced_problems("reduced", std::slice::from_ref(&fade)).is_empty());
+        assert_eq!(reduced_problems("reduced", std::slice::from_ref(&slide)).len(), 1, "planted twin: a slide under reduced motion");
         assert_eq!(reduced_problems("reduced", &[slow]).len(), 1);
         assert_eq!(reduced_problems("none", &[fade]).len(), 1, "even a fade is motion under none");
         assert!(reduced_problems("none", &[]).is_empty());
