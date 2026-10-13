@@ -54,6 +54,16 @@ pub(super) fn run_probe(ctx: &mut Ctx, mode: &str) -> Result {
         path.push(PathBuf::from(system).join("System32"));
     }
     if mode == "--remote-git" {
+        // A hostile environment: every transport allowed and config of its own. The module's calls must ignore both.
+        for (name, value) in [
+            ("GIT_ALLOW_PROTOCOL", "file:ext:https:ssh"),
+            ("GIT_CONFIG_COUNT", "1"),
+            ("GIT_CONFIG_KEY_0", "http.proxy"),
+            ("GIT_CONFIG_VALUE_0", "http://127.0.0.1:9"),
+            ("GIT_CONFIG_PARAMETERS", "'http.proxy=http://127.0.0.1:9'"),
+        ] {
+            env.insert(name.into(), value.into());
+        }
         // The marker programs of that probe are shell scripts, which git finds a shell for through the PATH only.
         let shell = Path::new(&git.command).ancestors().map(|folder| folder.join("usr/bin")).find(|bin| bin.join("sh.exe").is_file());
         path.extend(shell);

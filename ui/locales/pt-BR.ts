@@ -591,6 +591,7 @@ export const ptBR: Messages = {
   "reason.remote.target": "A branch, o remoto ou o texto para publicar não é válido.",
   "reason.remote.pending": "Uma etapa anterior da publicação ainda não foi resolvida. O Faber confere o remoto antes de enviar qualquer outra coisa.",
   "reason.remote.config": "Este repositório tem configurações do Git que o Faber não permite num envio (só valem o básico do remoto, da branch e do autor). Nada foi enviado.",
+  "reason.remote.layout": "Este repositório reescreve o histórico ou pega objetos de outro lugar (grafts, clone raso ou alternates), então o Faber não consegue provar o que sairia. Nada foi enviado.",
   "reason.remote.url": "O remoto não aponta mais para onde você autorizou. Nada foi enviado.",
   "reason.remote.secret": "Foi encontrado um possível segredo no que seria enviado. Nada foi enviado.",
   "reason.remote.unreachable": "Não foi possível alcançar o remoto. Seu trabalho fica só no computador.",

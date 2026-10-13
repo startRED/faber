@@ -5,7 +5,7 @@ use super::projects::{git, run_probe};
 use super::{Result, Scenario, ensure};
 use faber_engine::project::RepoIdentity;
 use faber_engine::project::remote::{
-    RemoteError, Runner, Target, allowed_key, guard_config, private_dir, private_path, push_call, scan_call,
+    RemoteError, Runner, Target, allowed_key, git_net, guard_config, guard_layout, private_dir, private_path, push_call, scan_call,
 };
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -134,13 +134,13 @@ fn allowlist(program: &str, sandbox: &Path) -> Result {
     let mut runner = process(&sandbox.join("neutral"));
     let guard = |runner: &mut faber_engine::project::remote::Process| guard_config(runner, &target(&repo, &head));
     git(program, &repo, &["remote", "add", "origin", "https://example.invalid/owner/repo.git"])?;
-    git(program, &repo, &["config", "branch.main.remote", "origin"])?;
-    git(program, &repo, &["config", "branch.main.merge", "refs/heads/main"])?;
+    git(program, &repo, &["config", "branch.faber/m1.remote", "origin"])?;
+    git(program, &repo, &["config", "branch.faber/m1.merge", "refs/heads/faber/m1"])?;
     ensure(guard(&mut runner) == Ok(()), || "an ordinary repository was refused".into())?;
     // Every key real git wrote on its own is on the list, so the list is not missing something `git init` needs.
     let listed = git(program, &repo, &["config", "--local", "--list", "--name-only"])?;
     for key in listed.lines() {
-        ensure(allowed_key(key), || format!("git wrote {key} itself and the list refuses it"))?;
+        ensure(allowed_key(key, "origin", "faber/m1"), || format!("git wrote {key} itself and the list refuses it"))?;
     }
     git(program, &repo, &["config", "extensions.worktreeConfig", "true"])?;
     git(program, &repo, &["config", "--worktree", "user.name", "Worktree"])?;
@@ -316,9 +316,158 @@ fn link(program: &str, sandbox: &Path) -> Result {
     git(program, &remote, &["init", "--bare", "--initial-branch=main"])?;
     let mut runner = process(&plain);
     let reply = runner
-        .run(&faber_engine::project::remote::git(&runner.neutral(), &["ls-remote", "--heads", "--tags", &slashes(&remote)]))
+        .run(&git_net(&runner.neutral(), &slashes(&remote), &["ls-remote", "--heads", "--tags", &slashes(&remote)]))
         .map_err(|_| "no reply")?;
     ensure(reply.code == 0, || format!("a read from the private folder failed with {}", reply.code))
+}
+
+/// Other remotes and branches in the repository's config: git keeps "Origin" and "origin" apart, so the check does too.
+fn other_remotes(program: &str, sandbox: &Path) -> Result {
+    let repo = sandbox.join("remotes");
+    let head = repository(program, &repo)?;
+    let mut runner = process(&sandbox.join("neutral"));
+    let guard = |runner: &mut faber_engine::project::remote::Process| guard_config(runner, &target(&repo, &head));
+    git(program, &repo, &["remote", "add", "origin", "https://example.invalid/owner/repo.git"])?;
+    ensure(guard(&mut runner) == Ok(()), || "the granted remote alone was refused".into())?;
+    // The control: this git has two remotes here, "Origin" and "origin".
+    git(program, &repo, &["config", "remote.Origin.url", "https://attacker.invalid/exfil.git"])?;
+    let remotes = git(program, &repo, &["remote"])?;
+    ensure(remotes.lines().any(|l| l == "Origin") && remotes.lines().any(|l| l == "origin"), || {
+        format!("control: git did not keep Origin and origin apart: {remotes}")
+    })?;
+    ensure(guard(&mut runner) == Err(RemoteError::Config), || "a remote named Origin was taken for origin".into())?;
+    git(program, &repo, &["config", "--unset", "remote.Origin.url"])?;
+    for (key, value) in [
+        ("remote.mirror.url", "ext::sh -c touch% x"),
+        ("remote.leak.url", "https://attacker.invalid/leak.git"),
+        ("remote.leak.fetch", "+refs/heads/*:refs/remotes/leak/*"),
+        ("branch.main.merge", "refs/heads/main"),
+        ("branch.main.remote", "leak"),
+    ] {
+        git(program, &repo, &["config", key, value])?;
+        ensure(guard(&mut runner) == Err(RemoteError::Config), || format!("{key} in the repository was let through"))?;
+        git(program, &repo, &["config", "--unset", key])?;
+    }
+    ensure(guard(&mut runner) == Ok(()), || "the repository did not recover".into())
+}
+
+/// The environment of this probe allows every transport and sets config of its own, as a hostile one could. The calls of
+/// the module ignore both, and the controls show that git itself would not.
+fn protocols(program: &str, sandbox: &Path) -> Result {
+    let repo = sandbox.join("protocols");
+    let head = repository(program, &repo)?;
+    let remote = sandbox.join("protocols-remote.git");
+    std::fs::create_dir_all(&remote).map_err(|e| e.to_string())?;
+    git(program, &remote, &["init", "--bare", "--initial-branch=main"])?;
+    let mut runner = process(&sandbox.join("neutral"));
+    // ext:: runs a command. The control: an unguarded push in this environment runs it.
+    let ran_ext = marker(sandbox, "ext");
+    let ext = format!("ext::sh -c echo% ran% >% {}", slashes(&ran_ext));
+    let control = raw(program, &repo, &["push", "--porcelain", &ext, &format!("{head}:refs/heads/x")])?;
+    ensure(ran(&ran_ext), || {
+        format!("control: an unguarded push to an ext:: URL did not run the command: {}", String::from_utf8_lossy(&control.stderr))
+    })?;
+    std::fs::remove_file(&ran_ext).map_err(|e| e.to_string())?;
+    let reply = runner.run(&push_call(&repo, &ext, &head, "refs/heads/faber/m1")).map_err(|_| "the push did not run")?;
+    ensure(reply.code != 0 && !ran(&ran_ext), || "the module's push ran an ext:: URL".into())?;
+    // A file:// URL is refused for a call granted for https, though the environment allows file.
+    let file_url = format!("file:///{}", slashes(&remote).trim_start_matches('/'));
+    let control = raw(program, &repo, &["ls-remote", "--heads", &file_url])?;
+    ensure(control.status.success(), || "control: the environment does not allow file:// in this probe".into())?;
+    let https = "https://example.invalid/owner/repo.git";
+    let reply = runner.run(&git_net(&repo, https, &["ls-remote", "--heads", &file_url])).map_err(|_| "no reply")?;
+    ensure(reply.code != 0, || "a call granted for https read a file:// URL".into())?;
+    // And a call with no URL of its own may use no transport at all.
+    let reply = runner.run(&faber_engine::project::remote::git(&repo, &["ls-remote", "--heads", &file_url])).map_err(|_| "no reply")?;
+    ensure(reply.code != 0, || "a call with no granted URL read a file:// URL".into())?;
+    // The granted local path itself still works, which shows the refusals are the pins and not a broken setup.
+    let reply = runner.run(&git_net(&repo, &file_url, &["ls-remote", "--heads", &file_url])).map_err(|_| "no reply")?;
+    ensure(reply.code == 0, || format!("the one granted transport did not work: {}", reply.code))
+}
+
+/// Config the environment injects (`GIT_CONFIG_COUNT` and the rest) never reaches a call, in the repository or outside.
+fn inherited_config(program: &str, sandbox: &Path) -> Result {
+    let repo = sandbox.join("inherited");
+    let head = repository(program, &repo)?;
+    let listed = raw(program, &repo, &["config", "--list", "--show-scope"])?;
+    let listed = String::from_utf8_lossy(&listed.stdout).replace('\r', "");
+    ensure(listed.contains("command\thttp.proxy="), || format!("control: the probe's environment injects no config: {listed}"))?;
+    let mut runner = process(&sandbox.join("neutral"));
+    ensure(guard_config(&mut runner, &target(&repo, &head)) == Ok(()), || {
+        "the environment's config reached a call in the repository".into()
+    })?;
+    let outside = runner
+        .run(&faber_engine::project::remote::git(&runner.neutral(), &["config", "--list", "--show-scope"]))
+        .map_err(|_| "no reply")?;
+    ensure(outside.code == 0 && !outside.stdout.contains("http.proxy"), || {
+        "the environment's config reached a call in the neutral folder".into()
+    })
+}
+
+/// Grafts, a shallow file and alternates change what the scan walks and reads, so none may exist.
+fn layout(program: &str, sandbox: &Path) -> Result {
+    let repo = sandbox.join("layout");
+    let first = repository(program, &repo)?;
+    // The second commit adds a marker and the third removes it, so only the history in between shows it.
+    std::fs::write(repo.join("second"), "SECRET-MARK").map_err(|e| e.to_string())?;
+    git(program, &repo, &["add", "--", "second"])?;
+    git(program, &repo, &["commit", "--no-gpg-sign", "-m", "second"])?;
+    git(program, &repo, &["rm", "-q", "--", "second"])?;
+    git(program, &repo, &["commit", "--no-gpg-sign", "-m", "third"])?;
+    let head = git(program, &repo, &["rev-parse", "HEAD"])?;
+    let mut runner = process(&sandbox.join("neutral"));
+    let guard = |runner: &mut faber_engine::project::remote::Process, at: &Path| guard_layout(runner, &target(at, &head));
+    ensure(guard(&mut runner, &repo) == Ok(()), || "an ordinary repository was refused".into())?;
+    let scan = |runner: &mut faber_engine::project::remote::Process| -> Result<String> {
+        Ok(runner.run(&scan_call(&repo, &head, &[])).map_err(|_| "the scan did not run")?.stdout)
+    };
+    ensure(scan(&mut runner)?.contains("SECRET-MARK"), || "the scan does not show the commit between".into())?;
+    // Grafts: the control is that git, in this version, drops the commit from the walk.
+    let grafts = repo.join(".git").join("info").join("grafts");
+    std::fs::create_dir_all(grafts.parent().ok_or("no folder")?).map_err(|e| e.to_string())?;
+    std::fs::write(&grafts, format!("{head} {first}\n")).map_err(|e| e.to_string())?;
+    ensure(!scan(&mut runner)?.contains("SECRET-MARK"), || "control: this git ignores info/grafts, so the check proves nothing".into())?;
+    ensure(guard(&mut runner, &repo) == Err(RemoteError::Layout), || "info/grafts was let through".into())?;
+    std::fs::remove_file(&grafts).map_err(|e| e.to_string())?;
+    ensure(guard(&mut runner, &repo) == Ok(()), || "the repository did not recover from grafts".into())?;
+    // http-alternates is a file git reads the same way.
+    let http = repo.join(".git").join("objects").join("info").join("http-alternates");
+    std::fs::create_dir_all(http.parent().ok_or("no folder")?).map_err(|e| e.to_string())?;
+    std::fs::write(&http, "https://example.invalid/objects\n").map_err(|e| e.to_string())?;
+    ensure(guard(&mut runner, &repo) == Err(RemoteError::Layout), || "objects/info/http-alternates was let through".into())?;
+    std::fs::remove_file(&http).map_err(|e| e.to_string())?;
+    // A link that points nowhere is still a file git would read: it counts.
+    let gone = sandbox.join("layout-gone");
+    std::fs::create_dir_all(&gone).map_err(|e| e.to_string())?;
+    let alternates = repo.join(".git").join("objects").join("info").join("alternates");
+    std::fs::create_dir_all(alternates.parent().ok_or("no folder")?).map_err(|e| e.to_string())?;
+    make_link(sandbox, &alternates, &gone)?;
+    std::fs::remove_dir(&gone).map_err(|e| e.to_string())?;
+    ensure(guard(&mut runner, &repo) == Err(RemoteError::Layout), || "a dangling link for alternates was let through".into())?;
+    std::fs::remove_dir(&alternates).map_err(|e| e.to_string())?;
+    // A shallow clone and a shared clone are made by git itself.
+    let source = format!("file:///{}", slashes(&repo).trim_start_matches('/'));
+    let shallow = sandbox.join("layout-shallow");
+    let made = raw(program, sandbox, &["clone", "--depth", "1", "--no-local", &source, &slashes(&shallow)])?;
+    ensure(made.status.success(), || format!("fixture: shallow clone failed: {}", String::from_utf8_lossy(&made.stderr)))?;
+    ensure(shallow.join(".git").join("shallow").is_file(), || "fixture: the clone is not shallow".into())?;
+    ensure(guard(&mut runner, &shallow) == Err(RemoteError::Layout), || "a shallow repository was let through".into())?;
+    let shared = sandbox.join("layout-shared");
+    let made = raw(program, sandbox, &["clone", "--shared", &slashes(&repo), &slashes(&shared)])?;
+    ensure(made.status.success(), || format!("fixture: shared clone failed: {}", String::from_utf8_lossy(&made.stderr)))?;
+    ensure(shared.join(".git").join("objects").join("info").join("alternates").is_file(), || {
+        "fixture: the clone has no alternates".into()
+    })?;
+    ensure(guard(&mut runner, &shared) == Err(RemoteError::Layout), || "a repository with alternates was let through".into())?;
+    // A linked worktree follows the common dir, where git keeps these files.
+    let linked = sandbox.join("layout-linked");
+    git(program, &repo, &["worktree", "add", "--detach", "--", &slashes(&linked), "HEAD"])?;
+    ensure(guard(&mut runner, &linked) == Ok(()), || "a linked worktree of an ordinary repository was refused".into())?;
+    std::fs::write(&grafts, format!("{head} {first}\n")).map_err(|e| e.to_string())?;
+    ensure(guard(&mut runner, &linked) == Err(RemoteError::Layout), || {
+        "grafts of the common dir were not seen from a linked worktree".into()
+    })?;
+    std::fs::remove_file(&grafts).map_err(|e| e.to_string())
 }
 
 /// Called only by the test helper under `Owned`, with its sandbox environment and hidden desktop.
@@ -330,5 +479,9 @@ pub fn probe(sandbox: &Path) -> Result {
     lazy_fetch(&program, sandbox)?;
     bare_layout(&program, sandbox)?;
     link(&program, sandbox)?;
+    other_remotes(&program, sandbox)?;
+    protocols(&program, sandbox)?;
+    inherited_config(&program, sandbox)?;
+    layout(&program, sandbox)?;
     std::fs::write(sandbox.join("project-git.ok"), "ok").map_err(|e| e.to_string())
 }

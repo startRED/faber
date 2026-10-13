@@ -7,8 +7,8 @@
 use super::{Delivery, FakePr, FakeRemote};
 use faber_engine::project::remote::{
     Account, Call, Ci, CiState, Ledger, Lost, MergeCard, Open, OwnerYes, PrSpec, PrState, Process, RemoteError, Reply, Runner, Step,
-    Target, Tool, allowed_key, ci, lost_on_timeout, merge, merge_card, open_pr, preflight, private_dir, private_path, publish, push,
-    read_capped, reconcile, reply_code,
+    Target, Tool, allowed_key, ci, git_net, indexed_config_vars, lost_on_timeout, merge, merge_card, open_pr, preflight, private_dir,
+    private_path, publish, push, read_capped, reconcile, reply_code, scheme_of,
 };
 use faber_engine::project::{DecidedBy, Decision, GitMode, Grant, Outcome, RepoIdentity};
 use std::collections::BTreeMap;
@@ -152,6 +152,9 @@ impl<F: FnMut(&Call, &mut FakeRemote, Result<Reply, Lost>) -> Result<Reply, Lost
     }
     fn neutral(&self) -> PathBuf {
         self.fake.neutral()
+    }
+    fn exists(&self, path: &Path) -> bool {
+        self.fake.exists(path)
     }
 }
 
@@ -319,6 +322,8 @@ fn a_push_sends_the_exact_proven_commit_to_the_granted_url_without_force() {
         "i18n.logOutputEncoding=UTF-8",
         "diff.renames=false",
         "color.ui=never",
+        // Only the transport the granted URL needs is ever allowed; `GIT_ALLOW_PROTOCOL` is set to match.
+        "protocol.allow=never",
         // A signature shown by log runs the program the repository names for it.
         "log.showSignature=false",
         // A bare repository in the working folder would be adopted as the repository.
@@ -533,7 +538,7 @@ fn config_that_cannot_be_read_or_understood_blocks_the_push() {
 }
 
 /// What the repository itself may carry, with the reason each key is harmless to a push. Anything else is refused.
-const ALLOWED: [&str; 24] = [
+const ALLOWED: [&str; 22] = [
     "core.repositoryformatversion",
     "core.filemode",
     "core.bare",
@@ -547,13 +552,11 @@ const ALLOWED: [&str; 24] = [
     "extensions.objectformat",
     "remote.origin.url",
     "remote.origin.fetch",
-    "remote.my.remote.url",
-    "remote.Origin.fetch",
-    "branch.main.remote",
-    "branch.main.merge",
+    "REMOTE.origin.URL",
+    "branch.faber/m1.remote",
     "branch.faber/m1.merge",
-    "branch.a.b.remote",
-    "branch.main.vscode-merge-base",
+    "Branch.faber/m1.Merge",
+    "branch.faber/m1.vscode-merge-base",
     "user.name",
     "user.email",
     "USER.Email",
@@ -563,7 +566,7 @@ const ALLOWED: [&str; 24] = [
 #[test]
 fn only_listed_config_keys_may_come_from_the_repository() {
     for allowed in ALLOWED {
-        assert!(allowed_key(allowed), "{allowed}");
+        assert!(allowed_key(allowed, "origin", "faber/m1"), "{allowed}");
     }
     for refused in [
         // Third time a blocklist missed a key that runs a command: everything not listed above is refused.
@@ -607,6 +610,19 @@ fn only_listed_config_keys_may_come_from_the_repository() {
         "remote.pushdefault",
         "remote.url",
         "remote.origin",
+        // Other remotes and branches, and the subsection is compared exactly: git keeps "Origin" and "origin" apart.
+        "remote.Origin.url",
+        "remote.ORIGIN.fetch",
+        "remote.other.url",
+        "remote.other.fetch",
+        "remote.origin2.url",
+        "remote.my.remote.url",
+        "remote.origin.sub.url",
+        "branch.main.merge",
+        "branch.main.remote",
+        "branch.Faber/m1.merge",
+        "branch.faber/m1x.merge",
+        "branch.faber.merge",
         // The section decides what a name means: the same last word in another section is another setting.
         "foo.origin.url",
         "foo.origin.fetch",
@@ -636,13 +652,13 @@ fn only_listed_config_keys_may_come_from_the_repository() {
         "core",
         ".",
     ] {
-        assert!(!allowed_key(refused), "{refused}");
+        assert!(!allowed_key(refused, "origin", "faber/m1"), "{refused}");
     }
 }
 
 #[test]
 fn the_listed_keys_pass_in_every_scope_and_any_other_blocks_the_push() {
-    for scope in ["local", "worktree", "command"] {
+    for scope in ["local", "worktree"] {
         for allowed in ALLOWED {
             let mut ledger = Mem::new(GitMode::Equilibrado);
             let mut fake = scoped(scope, allowed);
@@ -683,6 +699,11 @@ fn the_listed_keys_pass_in_every_scope_and_any_other_blocks_the_push() {
 #[test]
 fn only_the_command_line_pins_may_show_up_as_command_scope() {
     // Faber's own `-c` options are what git lists in that scope; they are allowed there and nowhere else.
+    // Nothing else can be command scope: the environment's own config is cleared from every call.
+    for listed in ["user.name", "remote.origin.url", "branch.faber/m1.merge", "core.bare", "http.proxy"] {
+        let mut fake = scoped("command", listed);
+        assert_eq!(key(push(&mut fake, &mut Mem::new(GitMode::Equilibrado), &target())), "reason.remote.config", "command {listed}");
+    }
     for pin in
         ["core.hookspath", "core.pager", "core.fsmonitor", "log.showsignature", "log.showRoot", "safe.bareRepository", "diff.external"]
     {
@@ -1819,4 +1840,202 @@ fn an_intent_with_no_receipt_is_settled_only_by_finding_it_done() {
     let mut fake = pushed(Some(OLD));
     assert_eq!(reconcile(&mut fake, &mut ledger, &target()).unwrap(), [("push-222222222222-1".to_string(), None)]);
     assert!(ledger.entries[0].receipt.is_none());
+}
+
+// Review round 4: other remotes, protocols, inherited config, history rewrites and borrowed objects
+
+#[test]
+fn only_the_granted_remote_and_the_own_branch_may_be_configured() {
+    for refused in [
+        "remote.Origin.url",
+        "remote.ORIGIN.fetch",
+        "remote.other.url",
+        "remote.other.fetch",
+        "remote.mirror.url",
+        "branch.main.merge",
+        "branch.main.remote",
+        "branch.Faber/m1.merge",
+    ] {
+        for scope in ["local", "worktree"] {
+            let mut fake = scoped(scope, refused);
+            assert_eq!(key(push(&mut fake, &mut Mem::new(GitMode::Equilibrado), &target())), "reason.remote.config", "{scope} {refused}");
+            assert!(fake.pushes().is_empty());
+        }
+    }
+    // The granted name is compared exactly the other way round too: a remote called "Origin" is not "origin".
+    let mut t = target();
+    t.remote = "Origin".into();
+    let mut ledger = Mem::new(GitMode::Equilibrado);
+    ledger.grant.as_mut().unwrap().remote = Some("Origin".into());
+    let mut fake = scoped("local", "remote.origin.url");
+    assert_eq!(key(push(&mut fake, &mut ledger, &t)), "reason.remote.config");
+    let mut fake = scoped("local", "remote.Origin.url");
+    push(&mut fake, &mut ledger, &t).unwrap();
+}
+
+#[test]
+fn which_protocol_a_url_may_use() {
+    for (url, scheme) in [
+        ("https://github.com/o/r.git", "https"),
+        ("ssh://git@github.com/o/r.git", "ssh"),
+        ("git@github.com:o/r.git", "ssh"),
+        ("file:///tmp/r.git", "file"),
+        ("/tmp/r.git", "file"),
+        ("/tmp/a@b:c.git", "file"),
+        ("C:/tmp/r.git", "file"),
+        ("C:\\tmp\\r.git", "file"),
+        ("ext::sh -c touch% x", "none"),
+        ("ext::ssh user@host:path", "none"),
+        ("-oProxyCommand=x@y:z", "none"),
+        ("host.example:owner/repo.git", "none"),
+        ("fd::3", "none"),
+        ("transport::x", "none"),
+        ("http://github.com/o/r.git", "none"),
+        ("git://github.com/o/r.git", "none"),
+        ("ftp://example.invalid/r", "none"),
+        ("-oProxyCommand=x", "none"),
+        ("", "none"),
+    ] {
+        assert_eq!(scheme_of(url), scheme, "{url}");
+    }
+}
+
+#[test]
+fn network_calls_allow_exactly_the_granted_scheme_and_no_other_call_allows_any() {
+    for (url, scheme) in
+        [(FakeRemote::URL, "https"), ("git@github.com:owner/repo.git", "ssh"), ("ssh://git@github.com/owner/repo.git", "ssh")]
+    {
+        let mut t = target();
+        t.url = url.into();
+        let mut fake = FakeRemote { push_urls: vec![url.into()], ..FakeRemote::default() };
+        push(&mut fake, &mut Mem::new(GitMode::Equilibrado), &t).unwrap();
+        let mut network = 0;
+        for call in fake.calls.iter().filter(|c| c.tool == Tool::Git) {
+            let allowed: Vec<&String> = call.args.iter().filter(|a| a.starts_with("protocol.") && a.ends_with(".allow=always")).collect();
+            assert!(has(call, "protocol.allow=never"), "{:?}", call.args);
+            if has(call, "ls-remote") || has(call, "push") {
+                network += 1;
+                assert_eq!(allowed, [&format!("protocol.{scheme}.allow=always")], "{url}");
+            } else {
+                assert!(allowed.is_empty(), "{:?}", call.args);
+            }
+        }
+        assert_eq!(network, 2, "ls-remote and the push");
+    }
+}
+
+fn envs_of(call: &Call) -> BTreeMap<String, Option<String>> {
+    let process = Process::at("C:/tools/git.exe".into(), "C:/tools/gh.exe".into(), "C:/faber/remote".into());
+    process.command(call).get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()))).collect()
+}
+
+#[test]
+fn the_child_process_may_use_only_the_protocol_its_call_names() {
+    let cwd = Path::new("/work/repo");
+    // The environment's own GIT_ALLOW_PROTOCOL beats every protocol.*.allow in config, so it is set per call.
+    for (url, expect) in [
+        ("https://example.invalid/o/r.git", "https"),
+        ("ssh://git@example.invalid/o/r.git", "ssh"),
+        ("git@example.invalid:o/r.git", "ssh"),
+        ("ext::sh -c touch% x", "none"),
+        ("http://example.invalid/o/r.git", "none"),
+    ] {
+        let call = git_net(cwd, url, &["ls-remote", url]);
+        assert_eq!(envs_of(&call).get("GIT_ALLOW_PROTOCOL"), Some(&Some(expect.to_string())), "{url}");
+        // A URL no transport fits gets none turned on, in the environment or in the options.
+        let on = call.args.iter().filter(|a| a.ends_with(".allow=always")).count();
+        assert_eq!(on, usize::from(expect != "none"), "{url}");
+    }
+    // A call with no URL of its own may use none, and gh (which only speaks https and ssh) nothing else.
+    let local = faber_engine::project::remote::git(cwd, &["status"]);
+    assert_eq!(envs_of(&local).get("GIT_ALLOW_PROTOCOL"), Some(&Some("none".to_string())));
+    let gh = Call { tool: Tool::Gh, cwd: cwd.into(), args: vec!["pr".into(), "list".into()] };
+    assert_eq!(envs_of(&gh).get("GIT_ALLOW_PROTOCOL"), Some(&Some("https:ssh".to_string())));
+    // A hand-made call cannot claim a protocol by being near one: only a -c pair counts.
+    let sneaky = Call { tool: Tool::Git, cwd: cwd.into(), args: vec!["ls-remote".into(), "protocol.file.allow=always".into()] };
+    assert_eq!(envs_of(&sneaky).get("GIT_ALLOW_PROTOCOL"), Some(&Some("none".to_string())));
+}
+
+#[test]
+fn config_from_the_environment_never_reaches_a_call() {
+    let process = Process::at("C:/tools/git.exe".into(), "C:/tools/gh.exe".into(), "C:/faber/remote".into());
+    for tool in [Tool::Git, Tool::Gh] {
+        // Also in the neutral folder, where the network reads run.
+        for cwd in ["/work/repo", "C:/faber/remote"] {
+            let call = Call { tool, cwd: PathBuf::from(cwd), args: vec!["x".into()] };
+            let envs = envs_of(&call);
+            for name in ["GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT", "GIT_GRAFT_FILE", "GIT_SHALLOW_FILE"] {
+                assert_eq!(envs.get(name), Some(&None), "{name} must be removed for {tool:?} in {cwd}");
+            }
+        }
+    }
+    // The indexed pairs are found by name, whatever their number, and nothing else is touched.
+    let names = [
+        "PATH",
+        "GIT_CONFIG_KEY_0",
+        "git_config_value_12",
+        "GIT_CONFIG_KEYS",
+        "GIT_CONFIG_COUNT",
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_SYSTEM",
+    ];
+    assert_eq!(indexed_config_vars(names.map(String::from)), ["GIT_CONFIG_KEY_0", "git_config_value_12"]);
+    let call = Call { tool: Tool::Git, cwd: PathBuf::from("/work/repo"), args: vec!["x".into()] };
+    let command = process.command_with(&call, ["GIT_CONFIG_KEY_0".to_string(), "GIT_CONFIG_VALUE_0".to_string()]);
+    let envs: BTreeMap<_, _> = command.get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.is_some())).collect();
+    assert_eq!((envs.get("GIT_CONFIG_KEY_0"), envs.get("GIT_CONFIG_VALUE_0")), (Some(&false), Some(&false)));
+}
+
+#[test]
+fn history_rewrites_and_borrowed_objects_block_the_push() {
+    for file in ["info/grafts", "shallow", "objects/info/alternates", "objects/info/http-alternates"] {
+        let mut ledger = Mem::new(GitMode::Equilibrado);
+        let mut fake = FakeRemote { layout: vec![file.into()], ..FakeRemote::default() };
+        assert_eq!(key(push(&mut fake, &mut ledger, &target())), "reason.remote.layout", "{file}");
+        assert!(fake.pushes().is_empty() && ledger.entries.is_empty(), "{file}");
+        assert!(!fake.calls.iter().any(|c| has(c, "log")), "{file}: nothing was scanned on a layout that lies");
+    }
+    // One call asks git where it would read each of the four, so a worktree or a moved git dir is followed.
+    let mut fake = FakeRemote::default();
+    push(&mut fake, &mut Mem::new(GitMode::Equilibrado), &target()).unwrap();
+    let call = fake.calls.iter().find(|c| has(c, "--git-path")).unwrap();
+    for file in ["info/grafts", "shallow", "objects/info/alternates", "objects/info/http-alternates"] {
+        assert!(has(call, file), "{file}");
+    }
+    assert!(has(call, "--path-format=absolute"));
+}
+
+#[test]
+fn a_layout_git_cannot_name_blocks_the_push() {
+    type Bad = Box<dyn Fn() -> Result<Reply, Lost>>;
+    let bad: Vec<Bad> = vec![
+        Box::new(|| said(128, "")),
+        Box::new(|| {
+            let paths = ["info/grafts", "shallow", "objects/info/alternates", "objects/info/http-alternates"];
+            said(
+                128,
+                &paths
+                    .map(|p| {
+                        format!(
+                            "{}/{p}
+",
+                            FakeRemote::GIT_DIR
+                        )
+                    })
+                    .concat(),
+            )
+        }),
+        Box::new(|| said(0, "/repo/.git/info/grafts\n")),
+        Box::new(|| said(0, "info/grafts\nshallow\nobjects/info/alternates\nobjects/info/http-alternates\n")),
+        Box::new(|| said(0, "")),
+    ];
+    for reply in bad {
+        let mut ledger = Mem::new(GitMode::Equilibrado);
+        let mut runner = Tweak {
+            fake: FakeRemote::default(),
+            change: |call: &Call, _: &mut FakeRemote, original| if has(call, "--git-path") { reply() } else { original },
+        };
+        assert_eq!(key(push(&mut runner, &mut ledger, &target())), "reason.git.command");
+        assert!(runner.fake.pushes().is_empty() && ledger.entries.is_empty());
+    }
 }

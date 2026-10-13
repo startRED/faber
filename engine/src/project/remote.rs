@@ -63,6 +63,11 @@ pub trait Runner {
     /// A folder of Faber's own where calls that must not see any repository run: empty, private, and under no
     /// repository. Never a shared folder such as the temp folder, which anything can turn into a repository.
     fn neutral(&self) -> PathBuf;
+
+    /// Whether a file or a link, even a dangling one, is there. Only the layout check reads the disk, through this.
+    fn exists(&self, path: &Path) -> bool {
+        path.symlink_metadata().is_ok()
+    }
 }
 
 // What the journal keeps
@@ -109,6 +114,8 @@ pub enum RemoteError {
     Pending,
     /// The repository's own config would run a command or reroute the connection.
     Config,
+    /// Grafts, a shallow file or alternates change what git walks or reads, so what would leave cannot be proven.
+    Layout,
     /// The remote no longer leads only to the URL the person granted.
     Url,
     Secret,
@@ -146,6 +153,7 @@ impl RemoteError {
             Self::Target => "reason.remote.target",
             Self::Pending => "reason.remote.pending",
             Self::Config => "reason.remote.config",
+            Self::Layout => "reason.remote.layout",
             Self::Url => "reason.remote.url",
             Self::Secret => "reason.remote.secret",
             Self::Oversized => "reason.remote.oversized",
@@ -272,11 +280,13 @@ fn settled(ledger: &mut impl Ledger) -> Result<(), RemoteError> {
 
 /// Every option that changes what git prints, or what it runs, is set here on the command line, which beats the
 /// repository's own config: a worker can write that config, and a scan that trusts it can be made blind.
-const GIT_OPTIONS: [&str; 16] = [
+const GIT_OPTIONS: [&str; 17] = [
     "core.pager=",
     "core.fsmonitor=false",
     "diff.external=",
     "protocol.ext.allow=never",
+    // Every transport is off unless `git_net` turns on the one the granted URL uses.
+    "protocol.allow=never",
     "submodule.recurse=false",
     "push.recurseSubmodules=no",
     "push.followTags=false",
@@ -304,6 +314,44 @@ pub fn git(cwd: &Path, args: &[&str]) -> Call {
     }
     all.extend(args.iter().map(|s| (*s).to_string()));
     Call { tool: Tool::Git, cwd: cwd.into(), args: all }
+}
+
+/// The transport a URL needs: only https and ssh are ever granted, `file` is for a local path a test names, and
+/// everything else (`ext::`, `fd::`, `git://`, plain `http://`, an option) is none.
+pub fn scheme_of(url: &str) -> &'static str {
+    let bytes = url.as_bytes();
+    let drive = bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && matches!(bytes[2], b'/' | b'\\');
+    if url.starts_with("https://") {
+        "https"
+    } else if url.starts_with("ssh://") {
+        "ssh"
+    } else if url.starts_with("file://") || url.starts_with('/') || drive {
+        "file"
+    } else if !url.contains("://") && !url.contains("::") && url.contains('@') && url.contains(':') && !url.starts_with('-') {
+        "ssh"
+    } else {
+        "none"
+    }
+}
+
+/// A git call that talks to `url`. It turns on that one transport, over `protocol.allow=never`; the process gets the
+/// same single transport in `GIT_ALLOW_PROTOCOL`, which would otherwise beat every `protocol.*.allow` in config.
+pub fn git_net(cwd: &Path, url: &str, args: &[&str]) -> Call {
+    let mut call = git(cwd, args);
+    let scheme = scheme_of(url);
+    if scheme != "none" {
+        let pin = ["-c".to_string(), format!("protocol.{scheme}.allow=always")];
+        call.args.splice(0..0, pin);
+    }
+    call
+}
+
+/// The transport a git call turned on with [`git_net`], or `none`.
+pub fn allowed_protocol(args: &[String]) -> &str {
+    args.windows(2)
+        .filter(|pair| pair[0] == "-c")
+        .find_map(|pair| pair[1].strip_prefix("protocol.")?.strip_suffix(".allow=always"))
+        .unwrap_or("none")
 }
 
 fn gh(cwd: &Path, args: &[&str]) -> Call {
@@ -374,15 +422,24 @@ pub fn preflight(runner: &mut impl Runner, url: &str) -> Result<Account, RemoteE
 
 /// The only keys the repository (or its worktree) may carry. A worker can write that config, and every key outside
 /// this list is either unneeded by a push or can run a command, reroute the connection or change what the scan sees;
-/// a list of the bad keys was missed three times, so this is the list of the good ones. Case is ignored, as git does.
-pub fn allowed_key(key: &str) -> bool {
-    let key = key.to_ascii_lowercase();
-    let parts: Vec<&str> = key.split('.').collect();
-    let (first, last) = (parts[0], parts[parts.len() - 1]);
-    match parts.len() {
-        0..=1 => false,
-        2 => matches!(
-            key.as_str(),
+/// a list of the bad keys was missed three times, so this is the list of the good ones. Section and variable names are
+/// case-insensitive, as in git; a subsection (a remote's or a branch's name) is compared exactly, as git does, and
+/// only the granted remote's and the own branch's are listed: another one is another remote.
+pub fn allowed_key(key: &str, remote: &str, branch: &str) -> bool {
+    let Some((section, rest)) = key.split_once('.') else { return false };
+    let (middle, variable) = match rest.rsplit_once('.') {
+        Some((middle, variable)) => (Some(middle), variable),
+        None => (None, rest),
+    };
+    let (section, variable) = (section.to_ascii_lowercase(), variable.to_ascii_lowercase());
+    match (section.as_str(), middle) {
+        // The remote's address and refspec; the push goes to the granted URL itself, and `pin_url` checks the name.
+        ("remote", Some(name)) => name == remote && matches!(variable.as_str(), "url" | "fetch"),
+        // Which remote and branch the own branch follows; `vscode-merge-base` is an editor's note about it.
+        ("branch", Some(name)) => name == branch && matches!(variable.as_str(), "remote" | "merge" | "vscode-merge-base"),
+        (_, Some(_)) => false,
+        (_, None) => matches!(
+            format!("{section}.{variable}").as_str(),
             // What `git init` writes, and the platform switches it adds: they only describe the checkout.
             "core.repositoryformatversion"
                 | "core.filemode"
@@ -401,11 +458,6 @@ pub fn allowed_key(key: &str) -> bool {
                 | "user.name"
                 | "user.email"
         ),
-        // The remote's address and refspec; the push goes to the granted URL itself, and `pin_url` checks the name.
-        _ if first == "remote" => matches!(last, "url" | "fetch"),
-        // Which remote and branch the own branch follows; `vscode-merge-base` is an editor's note about it.
-        _ if first == "branch" => matches!(last, "remote" | "merge" | "vscode-merge-base"),
-        _ => false,
     }
 }
 
@@ -415,9 +467,10 @@ fn pinned_key(key: &str) -> bool {
         || GIT_OPTIONS.iter().any(|option| option.split('=').next().is_some_and(|name| name.eq_ignore_ascii_case(key)))
 }
 
-/// Nothing but [`allowed_key`] may come from the repository, its worktree or the command line. That covers includes
-/// too: `--list` follows them and reports each key under the including scope, and `include.path` is not listed.
-/// System and global scopes are the person's own: their credential helper and URL rewrites are what they want.
+/// Nothing but [`allowed_key`] may come from the repository or its worktree, and the command line is Faber's own pins:
+/// the environment's `-c` equivalents are cleared from every call. That covers includes too: `--list` follows them and
+/// reports each key under the including scope, and `include.path` is not listed. System and global scopes are the
+/// person's own: their credential helper and URL rewrites are what they want.
 pub fn guard_config(runner: &mut impl Runner, t: &Target) -> Result<(), RemoteError> {
     let reply = ask(runner, &git(&t.cwd, &["config", "--list", "--show-scope", "--name-only"]))?;
     if reply.code != 0 {
@@ -427,12 +480,30 @@ pub fn guard_config(runner: &mut impl Runner, t: &Target) -> Result<(), RemoteEr
         let Some((scope, key)) = line.split_once('\t') else { return Err(RemoteError::Config) };
         match scope {
             "system" | "global" => {}
-            "local" | "worktree" if allowed_key(key) => {}
-            "command" if allowed_key(key) || pinned_key(key) => {}
+            "local" | "worktree" if allowed_key(key, &t.remote, &t.branch) => {}
+            "command" if pinned_key(key) => {}
             _ => return Err(RemoteError::Config),
         }
     }
     Ok(())
+}
+
+/// Files that change what git walks or which objects it reads, so what the scan prints is not what would leave.
+const LAYOUT_FILES: [&str; 4] = ["info/grafts", "shallow", "objects/info/alternates", "objects/info/http-alternates"];
+
+/// The repository has no grafts, no shallow file and no alternates. Git says where it would read each, so a linked
+/// worktree or a moved git dir is followed. Refused if any exists, even as a dangling link.
+pub fn guard_layout(runner: &mut impl Runner, t: &Target) -> Result<(), RemoteError> {
+    let mut args = vec!["rev-parse", "--path-format=absolute"];
+    for file in LAYOUT_FILES {
+        args.extend(["--git-path", file]);
+    }
+    let reply = ask(runner, &git(&t.cwd, &args))?;
+    let paths: Vec<&str> = reply.stdout.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    if reply.code != 0 || paths.len() != LAYOUT_FILES.len() || !paths.iter().all(|p| Path::new(p).is_absolute()) {
+        return Err(RemoteError::Command);
+    }
+    if paths.iter().any(|path| runner.exists(Path::new(path))) { Err(RemoteError::Layout) } else { Ok(()) }
 }
 
 /// The remote name must still lead to exactly the URL the person granted, and to no other.
@@ -453,7 +524,7 @@ struct Live {
 
 fn live(runner: &mut impl Runner, t: &Target) -> Result<Live, RemoteError> {
     let cwd = runner.neutral();
-    let reply = ask(runner, &git(&cwd, &["ls-remote", "--heads", "--tags", &t.url]))?;
+    let reply = ask(runner, &git_net(&cwd, &t.url, &["ls-remote", "--heads", "--tags", &t.url]))?;
     if reply.code != 0 {
         return Err(RemoteError::Unreachable);
     }
@@ -519,7 +590,7 @@ pub fn scan_call(cwd: &Path, head: &str, live: &[String]) -> Call {
 
 /// The push itself: the exact commit to the own branch of the URL, never forced, never through a hook.
 pub fn push_call(cwd: &Path, url: &str, head: &str, full_ref: &str) -> Call {
-    git(cwd, &["push", "--no-verify", "--porcelain", url, &format!("{head}:{full_ref}")])
+    git_net(cwd, url, &["push", "--no-verify", "--porcelain", url, &format!("{head}:{full_ref}")])
 }
 
 /// The exit code a reply gets when its output went past the cap.
@@ -553,6 +624,7 @@ pub fn push(runner: &mut impl Runner, ledger: &mut impl Ledger, t: &Target) -> R
     authority(ledger, t, Effect::Push)?;
     settled(ledger)?;
     guard_config(runner, t)?;
+    guard_layout(runner, t)?;
     pin_url(runner, t)?;
     let now = live(runner, t)?;
     scan_outgoing(runner, t, &now)?;
@@ -1085,8 +1157,10 @@ pub struct Process {
 
 const OUTPUT_CAP: usize = 16 << 20;
 const TIMEOUT: Duration = Duration::from_secs(180);
-/// Variables that would aim git at another repository than the one the call names.
-const REPO_VARIABLES: [&str; 8] = [
+/// Variables that would aim git at another repository than the one the call names, or at other history or config than
+/// the repository's own: the guards read the files at the default places, and these would move them. `GIT_CONFIG` is
+/// what `git config --list` itself would read instead of the repository, and the others add config from outside it.
+const REPO_VARIABLES: [&str; 13] = [
     "GIT_DIR",
     "GIT_WORK_TREE",
     "GIT_INDEX_FILE",
@@ -1095,7 +1169,21 @@ const REPO_VARIABLES: [&str; 8] = [
     "GIT_ALTERNATE_OBJECT_DIRECTORIES",
     "GIT_NAMESPACE",
     "GIT_PREFIX",
+    "GIT_GRAFT_FILE",
+    "GIT_SHALLOW_FILE",
+    "GIT_CONFIG",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
 ];
+
+/// The indexed config pairs (`GIT_CONFIG_KEY_<n>`, `GIT_CONFIG_VALUE_<n>`) among the names of an environment.
+pub fn indexed_config_vars(names: impl IntoIterator<Item = String>) -> Vec<String> {
+    let indexed = |name: &str| {
+        let upper = name.to_ascii_uppercase();
+        upper.starts_with("GIT_CONFIG_KEY_") || upper.starts_with("GIT_CONFIG_VALUE_")
+    };
+    names.into_iter().filter(|name| indexed(name)).collect()
+}
 
 fn native(name: &str) -> PathBuf {
     let Some(cli) = crate::cli::find_cli(name) else { return PathBuf::new() };
@@ -1154,6 +1242,11 @@ impl Process {
     /// The command for one call. The environment is the person's own, so their credential helper and gh login work,
     /// except for what would point git elsewhere or ask a question.
     pub fn command(&self, call: &Call) -> Command {
+        self.command_with(call, indexed_config_vars(std::env::vars_os().map(|(name, _)| name.to_string_lossy().into_owned())))
+    }
+
+    /// [`Self::command`], given the indexed config variables of the environment to clear.
+    pub fn command_with(&self, call: &Call, indexed: impl IntoIterator<Item = String>) -> Command {
         let program = match call.tool {
             Tool::Git => &self.git,
             Tool::Gh => &self.gh,
@@ -1163,6 +1256,11 @@ impl Process {
         for name in REPO_VARIABLES {
             command.env_remove(name);
         }
+        for name in indexed {
+            command.env_remove(name);
+        }
+        // The environment's own list of transports beats every `protocol.*.allow`, so it names the one this call needs.
+        command.env("GIT_ALLOW_PROTOCOL", if call.tool == Tool::Git { allowed_protocol(&call.args) } else { "https:ssh" });
         if let Some(parent) = call.cwd.parent() {
             // git looks at the working folder itself and never above it, so a stray repository higher up is not adopted.
             command.env("GIT_CEILING_DIRECTORIES", parent);

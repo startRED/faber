@@ -10,7 +10,7 @@
 
 use faber_engine::project::remote::{Call, Lost, Reply, Runner, Tool};
 use serde_json::{Value, json};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// How one effect ends as the caller sees it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,6 +76,8 @@ pub struct FakeRemote {
     pub config: Vec<(String, String)>,
     /// The exit code of `git config --list`.
     pub config_code: i32,
+    /// Files of the repository that exist, as git names them: `info/grafts`, `shallow`, `objects/info/alternates`.
+    pub layout: Vec<String>,
     /// What `git log -p` prints for the commits the live remote does not have, if it was asked for them properly.
     pub outgoing: String,
     /// The exit code of `git log`.
@@ -116,6 +118,7 @@ impl Default for FakeRemote {
                 ("local".into(), "core.bare".into()),
             ],
             config_code: 0,
+            layout: vec![],
             outgoing: "+fn main() {}\n".into(),
             log_code: 0,
             remote_head: None,
@@ -167,6 +170,8 @@ fn fail(code: i32) -> Result<Reply, Lost> {
 impl FakeRemote {
     /// The push URL the tests grant.
     pub const URL: &'static str = "https://example.invalid/owner/repo.git";
+    /// Where the fake repository keeps its git files.
+    pub const GIT_DIR: &'static str = if cfg!(windows) { "C:/repo/.git" } else { "/repo/.git" };
     /// The folder the fake reports as the neutral one: Faber's own, never the shared temp folder.
     pub const NEUTRAL: &'static str = "/faber/remote-cwd";
 
@@ -239,6 +244,11 @@ impl FakeRemote {
                     return fail(self.config_code);
                 }
                 ok(self.config.iter().map(|(scope, key)| format!("{scope}\t{key}\n")).collect::<String>())
+            }
+            ["rev-parse", "--path-format=absolute", rest @ ..] => {
+                // `--git-path X` prints where git would read X.
+                let wanted = rest.chunks(2).filter(|pair| pair[0] == "--git-path").filter_map(|pair| pair.get(1));
+                ok(wanted.map(|name| format!("{}/{name}\n", Self::GIT_DIR)).collect::<String>())
             }
             ["remote", "get-url", "--push", "--all", _] => ok(self.push_urls.iter().map(|u| format!("{u}\n")).collect::<String>()),
             ["log", rest @ ..] => {
@@ -389,6 +399,10 @@ impl FakeRemote {
 impl Runner for FakeRemote {
     fn neutral(&self) -> PathBuf {
         PathBuf::from(Self::NEUTRAL)
+    }
+
+    fn exists(&self, path: &Path) -> bool {
+        self.layout.iter().any(|name| path == Path::new(&format!("{}/{name}", Self::GIT_DIR)))
     }
 
     fn run(&mut self, call: &Call) -> Result<Reply, Lost> {
