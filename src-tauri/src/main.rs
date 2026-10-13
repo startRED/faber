@@ -415,9 +415,15 @@ fn restore_mission_notices(app: &AppHandle) -> Res<()> {
             let grant = owner.grant.ok_or("reason.grant.none")?;
             let view = build_mission_view(&faber, &mission, &journal, &grant)?;
             tray::on_mission(app, &view);
+            sync_mission_awake(&faber, &mission.id, mission.state);
         }
     }
     Ok(())
+}
+
+fn sync_mission_awake(faber: &Faber, mission_id: &str, state: faber_engine::project::MissionState) {
+    let mut awake = lock(&faber.awake);
+    awake.set_mission_awake(mission_id, state == faber_engine::project::MissionState::Running);
 }
 
 #[tauri::command]
@@ -503,6 +509,7 @@ async fn mission_start(app: AppHandle, faber: State<'_, Faber>, project_id: Stri
     let mission = faber.engine.new_mission(&project, &goal, &repo.base)?;
     let journal = Journal::open(Path::new(&project.path), &faber.data_dir, &mission.id).map_err(|e| e.key().to_string())?;
     let runner = Runner::start(&journal, &faber.engine, mission)?;
+    sync_mission_awake(&faber, &runner.mission.id, runner.mission.state);
     let view = build_mission_view(&faber, &runner.mission, &journal, grant)?;
     let _ = app.emit("mission", &view);
     tray::on_mission(&app, &view);
@@ -526,6 +533,7 @@ async fn mission_mode(app: AppHandle, faber: State<'_, Faber>, mission_id: Strin
     let mut runner = Runner::load(&journal).map_err(str::to_string)?;
     runner.mode(&journal, mode, now).map_err(str::to_string)?;
     let mission = runner.mission;
+    sync_mission_awake(&faber, &mission.id, mission.state);
     let grant = project.grant.unwrap_or_else(|| Grant::new(&mission.repo, GitMode::Seguro, mission.grant_revision, mission.created_at));
     let view = build_mission_view(&faber, &mission, &journal, &grant)?;
     let _ = app.emit("mission", &view);
@@ -541,6 +549,7 @@ async fn mission_stop(app: AppHandle, faber: State<'_, Faber>, mission_id: Strin
     let mut runner = Runner::load(&journal).map_err(str::to_string)?;
     runner.stop(&journal, &faber.engine).await?;
     let mission = runner.mission;
+    sync_mission_awake(&faber, &mission.id, mission.state);
     let grant = project.grant.unwrap_or_else(|| Grant::new(&mission.repo, GitMode::Seguro, mission.grant_revision, mission.created_at));
     let view = build_mission_view(&faber, &mission, &journal, &grant)?;
     let _ = app.emit("mission", &view);
@@ -557,6 +566,7 @@ async fn mission_resume(app: AppHandle, faber: State<'_, Faber>, mission_id: Str
     let mut runner = Runner::load(&journal).map_err(str::to_string)?;
     runner.resume(&journal, &faber.engine)?;
     let mission = runner.mission;
+    sync_mission_awake(&faber, &mission.id, mission.state);
     let grant = project.grant.ok_or("reason.grant.none")?;
     let view = build_mission_view(&faber, &mission, &journal, &grant)?;
     let _ = app.emit("mission", &view);
@@ -581,6 +591,7 @@ async fn mission_answer(
     let mut runner = Runner::load(&journal).map_err(str::to_string)?;
     runner.answer(&journal, &decision_id, &answer, now).map_err(str::to_string)?;
     let mission = runner.mission;
+    sync_mission_awake(&faber, &mission.id, mission.state);
     let grant = project.grant.unwrap_or_else(|| Grant::new(&mission.repo, GitMode::Seguro, mission.grant_revision, mission.created_at));
     let view = build_mission_view(&faber, &mission, &journal, &grant)?;
     let _ = app.emit("mission", &view);
