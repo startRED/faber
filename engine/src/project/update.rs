@@ -714,6 +714,26 @@ impl UpdateManager {
         Ok(())
     }
 
+    /// The trusted adapter has accepted a newer tree and holds the inactive slot's process lock.
+    /// A live swap/probation is immutable; only an unpromoted candidate can be coalesced.
+    pub fn supersede_next(&self, grant: &Grant, repo: &RepoIdentity, revision: u64, now: u64) -> Result<(), UpdateError> {
+        grant.allows(repo, revision, Effect::SelfUpdate).map_err(UpdateError::Grant)?;
+        let mut manifest = self.manifest()?.ok_or(UpdateError::InvalidState("no manifest initialized"))?;
+        if !matches!(manifest.state, UpdateState::PreparingNext { .. } | UpdateState::CanaryPending { .. } | UpdateState::Ready { .. })
+            || now < manifest.updated_at
+            || manifest.candidate_repo.as_ref() != Some(&repo.common_dir)
+        {
+            return Err(UpdateError::InvalidState("candidate cannot be superseded"));
+        }
+        manifest.state = UpdateState::Idle;
+        manifest.staged_tree = None;
+        manifest.candidate_repo = None;
+        manifest.candidate_evidence = None;
+        manifest.first_operation_completed = false;
+        manifest.updated_at = now;
+        self.save_manifest(&manifest)
+    }
+
     pub fn enter_quiescence(&self, active_window: bool, active_operations: bool) -> Result<(), UpdateError> {
         if active_window {
             return Err(UpdateError::ActiveWindow);
@@ -783,6 +803,9 @@ impl UpdateManager {
         if serde_json::to_vec_pretty(&rollback).expect("plain data serializes").len() as u64 > MAX_MANIFEST {
             return Err(UpdateError::InvalidState("insufficient rollback manifest headroom"));
         }
+        // The trusted helper can restore the exact last-good tuple even when next cannot decode the live manifest.
+        ScopedFile::new(&self.layout.dev_root().join("rollback.json"), false)?
+            .write(&serde_json::to_vec(&manifest).expect("plain data serializes"), None)?;
         self.save_manifest(&manifest)?;
         Ok(target_slot)
     }
@@ -899,6 +922,8 @@ impl UpdateManager {
         }
         Self::restore(&mut manifest, reason, now);
         self.save_manifest(&manifest)?;
+        ScopedFile::new(&self.layout.dev_root().join("rollback.json"), false)?
+            .write(&serde_json::to_vec(&manifest).expect("plain data serializes"), None)?;
         Ok(action)
     }
 
@@ -967,7 +992,31 @@ impl UpdateManager {
     }
 
     pub fn recover_transition(&self, now: u64) -> Result<Option<RollbackAction>, UpdateError> {
-        let Some(manifest) = self.manifest()? else { return Ok(None) };
+        let manifest = match self.manifest() {
+            Ok(Some(manifest)) => manifest,
+            Ok(None) => return Ok(None),
+            Err(error @ UpdateError::Store(Fault::Corrupt))
+            | Err(error @ UpdateError::Newer)
+            | Err(error @ UpdateError::InvalidState(_))
+            | Err(error @ UpdateError::InvalidTree(_)) => {
+                let Some((bytes, _)) = ScopedFile::new(&self.layout.dev_root().join("rollback.json"), false)?.read_limited(MAX_MANIFEST)?
+                else {
+                    return Err(error);
+                };
+                let mut checkpoint: UpdateManifest = serde_json::from_slice(&bytes).map_err(|_| Fault::Corrupt)?;
+                checkpoint.validate()?;
+                if !matches!(checkpoint.state, UpdateState::Swapping { .. }) {
+                    return Err(UpdateError::InvalidState("invalid rollback checkpoint"));
+                }
+                let action = Self::evaluate_rollback(&checkpoint, &RollbackReason::StartupCorrupt);
+                Self::restore(&mut checkpoint, RollbackReason::StartupCorrupt, now);
+                self.save_manifest(&checkpoint)?;
+                ScopedFile::new(&self.layout.dev_root().join("rollback.json"), false)?
+                    .write(&serde_json::to_vec(&checkpoint).expect("plain data serializes"), None)?;
+                return Ok(Some(action));
+            }
+            Err(error) => return Err(error),
+        };
         if matches!(manifest.state, UpdateState::Swapping { .. } | UpdateState::Probation { .. }) {
             self.trigger_rollback(RollbackReason::StartupCorrupt, now).map(Some)
         } else {

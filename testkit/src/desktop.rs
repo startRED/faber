@@ -154,11 +154,23 @@ pub fn visible_windows_of(pids: &[u32]) -> Result<Vec<usize>, String> {
 
 /// What the probe says: how many windows its own desktop shows, and which. Written by `fake-cli --desktop-probe`, which
 /// is started on the hidden desktop; it makes no window, so nothing can ever be seen, wherever it ends up.
-pub fn probe() -> i32 {
+pub fn probe(visible_only: bool) -> i32 {
     match windows() {
         Ok(list) => {
-            let handles: Vec<String> = list.iter().map(|(h, ..)| h.to_string()).collect();
+            let handles: Vec<String> = list
+                .iter()
+                .filter(|(_, _, visible)| !visible_only || *visible)
+                .map(|(h, pid, _)| if visible_only { format!("{h}:{pid}") } else { h.to_string() })
+                .collect();
             eprintln!("windows {}", handles.join(","));
+            if visible_only && !handles.is_empty() {
+                let _ = EnumWindows(|hwnd| {
+                    if hwnd.IsWindowVisible() {
+                        eprintln!("class {} {:?}", hwnd.GetWindowThreadProcessId().1, hwnd.GetClassName());
+                    }
+                    true
+                });
+            }
             0
         }
         Err(e) => {

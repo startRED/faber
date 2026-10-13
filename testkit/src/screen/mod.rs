@@ -5,6 +5,8 @@ pub mod app;
 #[cfg(windows)]
 pub mod containment;
 pub mod first_run;
+#[cfg(windows)]
+pub mod local_update;
 pub mod permissions;
 pub mod projects;
 pub mod projects_ui;
@@ -44,6 +46,8 @@ pub fn all() -> Vec<Scenario> {
     let all = all.chain(containment::scenarios());
     #[cfg(windows)]
     let all = all.chain(project_drivers::scenarios());
+    #[cfg(windows)]
+    let all = all.chain(local_update::scenarios());
     all.collect()
 }
 

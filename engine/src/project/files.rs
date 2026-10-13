@@ -7,7 +7,7 @@ use std::fs::{File, Permissions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-pub(crate) struct ScopedFile {
+pub struct ScopedFile {
     path: PathBuf,
     #[cfg(windows)]
     _pins: Vec<File>,
@@ -66,7 +66,7 @@ fn directory(path: &Path, create: bool) -> Result<File, LeaseError> {
 }
 
 impl ScopedFile {
-    pub(crate) fn new(path: &Path, create_parents: bool) -> Result<Self, LeaseError> {
+    pub fn new(path: &Path, create_parents: bool) -> Result<Self, LeaseError> {
         let parent = path.parent().ok_or(LeaseError::Path)?;
         if !path.is_absolute() || path.file_name().is_none() {
             return Err(LeaseError::Path);
@@ -120,11 +120,11 @@ impl ScopedFile {
         Ok(Some(file))
     }
 
-    pub(crate) fn read(&self) -> Result<Option<(Vec<u8>, Permissions)>, LeaseError> {
+    pub fn read(&self) -> Result<Option<(Vec<u8>, Permissions)>, LeaseError> {
         self.read_limited(super::wire::MAX_TEXT as u64)
     }
 
-    pub(crate) fn read_limited(&self, limit: u64) -> Result<Option<(Vec<u8>, Permissions)>, LeaseError> {
+    pub fn read_limited(&self, limit: u64) -> Result<Option<(Vec<u8>, Permissions)>, LeaseError> {
         let Some(file) = self.checked()? else { return Ok(None) };
         let metadata = file.metadata().map_err(|_| Fault::Read)?;
         if metadata.len() > limit {
@@ -138,12 +138,12 @@ impl ScopedFile {
         Ok(Some((bytes, metadata.permissions())))
     }
 
-    pub(crate) fn hash(&self) -> Result<Option<String>, LeaseError> {
+    pub fn hash(&self) -> Result<Option<String>, LeaseError> {
         self.checked()?.map(|mut file| super::lease::hash_reader(&mut file)).transpose()
     }
 
     /// Claim a leaf before inspecting it for deletion; a producer may safely reuse the original name.
-    pub(crate) fn claim(&self, expected_hash: &str) -> Result<Self, LeaseError> {
+    pub fn claim(&self, expected_hash: &str) -> Result<Self, LeaseError> {
         let target = Self::new(&self.path.with_file_name(format!(".faber-patch-{}.tmp", uuid::Uuid::new_v4())), false)?;
         self.rename(&target)?;
         // Keep a raced artifact under its claimed name for inspection; never return unproven bytes for deletion.
@@ -153,7 +153,7 @@ impl ScopedFile {
         Ok(target)
     }
 
-    pub(crate) fn write(&self, bytes: &[u8], permissions: Option<Permissions>) -> Result<(), LeaseError> {
+    pub fn write(&self, bytes: &[u8], permissions: Option<Permissions>) -> Result<(), LeaseError> {
         let temp = format!(".faber-patch-{}.tmp", uuid::Uuid::new_v4());
         #[cfg(windows)]
         let mut file =
@@ -183,7 +183,7 @@ impl ScopedFile {
         Ok(())
     }
 
-    pub(crate) fn rename(&self, target: &Self) -> Result<(), LeaseError> {
+    pub fn rename(&self, target: &Self) -> Result<(), LeaseError> {
         #[cfg(windows)]
         fs::rename(&self.path, &target.path).map_err(|e| Fault::of_write(&e))?;
         #[cfg(unix)]
@@ -192,7 +192,7 @@ impl ScopedFile {
         Ok(())
     }
 
-    pub(crate) fn delete(&self) -> Result<(), LeaseError> {
+    pub fn delete(&self) -> Result<(), LeaseError> {
         #[cfg(windows)]
         fs::remove_file(&self.path).map_err(|e| Fault::of_write(&e))?;
         #[cfg(unix)]
