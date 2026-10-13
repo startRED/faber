@@ -260,7 +260,8 @@ impl Page {
     }
 
     pub fn click(&mut self, loc: &Loc) -> Result<(), String> {
-        let at = self.on(loc, "enabled", Self::CENTER)?;
+        // Visibility can precede the rendered layout after navigation or scrolling.
+        let at = self.on(loc, "enabled", "el.scrollIntoView({ block: 'center', inline: 'center' }); const before = el.getBoundingClientRect(); return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => { const r = el.getBoundingClientRect(); const x = r.x + r.width / 2, y = r.y + r.height / 2; const hit = document.elementFromPoint(x, y); resolve(el.isConnected && r.x === before.x && r.y === before.y && r.width === before.width && r.height === before.height && hit && el.contains(hit) ? { x, y } : { why: 'the click target has not reached its rendered layout' }); })));")?;
         self.cdp.click_at(at["x"].as_f64().unwrap_or_default(), at["y"].as_f64().unwrap_or_default())
     }
 

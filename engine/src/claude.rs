@@ -301,7 +301,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                                 }
                             }
                             watch.activity();
-                            if msg["type"] == "result" { watch.finish(); }
+                            if finished { watch.finish(); }
                             for event in parse_claude_message(&msg) {
                                 if let EngineEvent::Permission { request_id, input, .. } = &event {
                                     pending.insert(request_id.clone(), input.clone());
@@ -316,7 +316,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                                 proc::stop(&mut *stdin, &mut child).await;
                                 break;
                             }
-                            if msg["type"] == "result" {
+                            if finished {
                                 for turn in std::mem::take(&mut queued) {
                                     quota_seen = false;
                                     watch.begin(project);

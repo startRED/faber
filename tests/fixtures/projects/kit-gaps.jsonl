@@ -1,0 +1,3 @@
+{"need":"app:missing!","reply":{"candidates":[{"name":"Fixture resource","url":"https://example.org/tool","license":"MIT","release":"fixture-1","kind":"skill","runsCode":false,"downside":"Requires a separate installation that stays parked in the MVP."}]},"blocked":true}
+{"need":"framework:unfamiliar!","reply":{"candidates":[]},"blocked":false}
+{"need":"media:audio","reply":{"candidates":[]},"blocked":false}

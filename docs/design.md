@@ -335,13 +335,15 @@ nothing else moves.
 
 ### Worker envelope
 
-Every worker turn ends with one JSON object, version 1, with no unknown fields. The engine refuses an envelope over
+Every worker turn ends with one JSON object, version 2, with no unknown fields. Durable journal records remain version 1;
+old records stay readable and retain their extension data. Wire version 1 is not accepted for a new dispatch.
+The engine refuses an envelope over
 512 KB, a stale task, attempt, base, contract digest or lease generation (`error.wire.stale`), an action outside the role
 (`error.wire.role`), and a path that leaves the worktree (`error.wire.path`). A file write carries the SHA-256 of the
 content it replaces, or none for a new file.
 
 ```json
-{"schema": 1, "task": "fix", "attempt": 1, "base": "3d3d502", "contract": "<sha-256>", "lease": 4,
+{"schema": 2, "task": "fix", "attempt": 1, "base": "3d3d502", "contract": "<sha-256>", "lease": 4,
  "action": {"patch": {"ops": [
    {"write": {"path": "engine/src/x.rs", "expect": "<sha-256 of the file as read>", "content": "..."}},
    {"rename": {"from": "a.rs", "to": "b.rs", "expect": "<sha-256>"}}
@@ -360,6 +362,46 @@ content it replaces, or none for a new file.
 
 The AI answers only technical decisions; direction, taste, money and legal ones wait for the person
 (`error.decision.person`), in autonomous mode too.
+
+Wire v2 adds optional fields without changing role authority. `ping` is `Order`, `Found`, `Blocked`, `NeedEyes`,
+`DoneReady` or `Disagree`; `note` is at most 60 whitespace-delimited words. Envelope `requires`, `checks` and `quotes`
+are verbatim-text ids; task `requires` continues to mean task dependencies. Briefs retain each id's exact UTF-8 text.
+Task drafts add `labels` (verb, at most eight normalized needs, risk, freshness and facets), scoped `paths`, check ids
+and a `kit` receipt/digest pin. Plans add the deliverable `sheet`, grounded `bar` and `compileReceipt` reference.
+Completions add a check `receipt` id, bounded check outcomes, artifact paths/SHA-256 hashes, claims tied to checks,
+assumptions with provenance, `unconfirmed`, `kitUsed` and newly requested needs. Unknown nested fields remain errors.
+
+`wire::CheckReceipt` is distinct from the journal's effect `Receipt`; it binds checks and evidence to one candidate,
+model, effort and known or unknown cost, with links to effect receipts. Check results are pass, fail or not-run:
+pass requires evidence; failure and not-run require a reason. `CompileReceipt` records phase timestamps and cost tags.
+These types publish the shared T5K/T5B/T5 contract. A worker's claimed receipt is data; only engine-verified proofs and
+the independent exact-tree review can authorize acceptance. Missing optional fields do not imply a passing bar or kit.
+
+### Automatic project kits
+
+`project/kit.rs` and its submodules implement the pure T5K contracts. Cards are written from reported inventory,
+scoped project sections and named engine proofs; kits are assembled from needs, never saved as hand-written loadouts.
+`Inventory::new` validates, hashes and indexes an immutable snapshot once per inventory change. Assembly uses that
+snapshot, origin priors, job ownership, conflicts, role budgets and safety filters. Versioned Beta outcomes only break
+ties. A blind, shuffled shortlist supports shadow comparisons; the code selection remains authoritative.
+
+Persist the selection with `Journal::record_kit` before dispatch. Compose approved, hash-checked inline bodies into
+the existing safe role prompt with `compose_role_prompt`; the role prompt remains its byte-for-byte prefix. This
+adapter changes no driver flags or policy. Record init with `attest_kit` before work, then add the outcome with
+`complete_kit`. Completion cannot replace the selection or its attestation. Receipts live in
+`.faber/missions/<id>/kits/<task>-<attempt>.json` and preserve additive root and nested metadata. Card caches and cited
+field briefs do the same; a newer durable schema is refused as newer. Dispatch and card-writer replies retain their
+strict schemas. A failed write prevents dispatch.
+The runner must enforce T2 admission and handle mismatched/unreported init; these receipts never grant containment.
+
+G0 is empty. G1 returns at most three cited suggestions with downsides, with installation parked. G2 stores bounded,
+cited primary-source briefs in `.faber/briefs/`; G3 retains verified role controls. Only a missing required capability
+parks its dependent node. The pure start-card adapter supplies two locale keys; T9 owns their screen and translations.
+The Auto labels adapter shares the existing classification turn and preserves its model-choice table. T5 integrates
+classification, fresh pass sessions, dispatch, proofs and two-order comparisons; T5B resolves native bar proof IDs.
+
+See [the T5K proof report](research/2026-10-12-project-kits.md) for measured synthetic performance and the live G9
+evidence still required by T13. Fixture attestation is not proof of native isolation.
 
 ### Screen commands and event
 

@@ -43,6 +43,7 @@ async fn opus_4_interrupt_after_completion_keeps_the_warm_session() {
     support::read_message(&mut input).await;
     support::emit(&mut output, serde_json::json!({"type":"result","subtype":"success"})).await;
     assert!(matches!(rx.recv().await, Some(EngineEvent::Done { .. })));
+    assert!(matches!(rx.recv().await, Some(EngineEvent::Signals(s)) if s.billing == Some(faber_engine::budget::Billing::Unknown)));
     session.interrupt();
     tokio::task::yield_now().await;
     tokio::time::advance(Duration::from_secs(6)).await;

@@ -88,3 +88,14 @@ Post-reboot proof: all seven AGENTS.md commands plus `cargo t --all` exit 0 with
 debug info. Both runner commands report 792 passed, zero failed/not-run/skipped. All 13 follow-up mutations fail
 their named assertions. Hidden probes report zero visible windows; idle memory is 108-110 MB, six-theme memory
 183-185 MB, and the thousand-message thread is 140-142 MB.
+
+Integration with `origin/selfdev` brings the accepted T5K and T11 work unchanged. The two conflicts preserve
+the native completion guard (`finished` is the same result predicate), quota-report tracking and both lifecycle
+tests; the runner uses the base's half-core ceiling plus the configured positive limit and retains both test sets.
+Both focused integration tests pass and both guard-removal checks fail. There are now 15 follow-up mutation
+results, including these merge checks. Wire/kit/bar changes come only from the accepted base.
+
+Integrated-tree proof: all seven AGENTS.md commands plus `cargo t --all` exit 0. Both runner commands report
+900 passed, zero failed/not-run/skipped. Hidden probes still show zero visible windows; idle memory is 107-112 MB,
+six-theme memory is 186 MB and the thousand-message thread is 140-142 MB. Four jobs and line-tables-only debug
+info remain in use.

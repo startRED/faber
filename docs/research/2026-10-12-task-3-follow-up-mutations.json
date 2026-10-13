@@ -76,5 +76,17 @@
     "test": "the_fake_clis_creation_time_matches_the_process_snapshot",
     "exitCode": 101,
     "killed": true
+  },
+  {
+    "mutant": "merge-native-completion",
+    "test": "opus_4_interrupt_after_completion_keeps_the_warm_session",
+    "exitCode": 101,
+    "killed": true
+  },
+  {
+    "mutant": "merge-runner-limit",
+    "test": "configured_build_jobs_limit_the_runner_without_changing_its_default",
+    "exitCode": 101,
+    "killed": true
   }
 ]
