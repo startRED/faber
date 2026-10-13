@@ -6,6 +6,7 @@ import { factory } from './draft.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { LANGUAGES, t } from './i18n.ts';
 import { vendorName } from './models.ts';
+import { animateList } from './motion.ts';
 import { accountLine, type Quotas, usageRows } from './sidebar.ts';
 import { PlanName } from './QuotaCard.tsx';
 import { untilReset, windowName } from './Sidebar.tsx';
@@ -94,7 +95,7 @@ export function Settings(props: Props) {
           )}
         </For>
       </nav>
-      <div class="s-main" classList={{ wide: section() === 'appearance' }}>
+      <div class="s-main" classList={{ wide: section() === 'appearance' }} ref={animateList}>
         <header class="s-head">
           <h2 class="display">{title()}</h2>
           <Show when={section() === 'appearance'}>

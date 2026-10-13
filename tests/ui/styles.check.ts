@@ -14,6 +14,25 @@ function onPage<T>(html: string, look: (root: HTMLElement) => T): T {
   }
 }
 
+check('ambient: the promoted glow is bounded by its visible mask and keeps the beam aligned', () => {
+  for (const width of [720, 1440]) {
+    onPage(`<div class="ambient" style="position:relative;inset:auto;width:${width}px;height:900px;--amb-beam:block">
+      <div class="amb amb-beam"><div class="beam"><i></i><i></i></div></div>
+      <div class="amb amb-glow"><div class="amb-beam"><div class="beam"><i></i><i></i></div></div></div>
+    </div>`, (root) => {
+      const glow = root.querySelector<HTMLElement>('.amb-glow')!;
+      const bounds = glow.getBoundingClientRect();
+      // The existing mask's 170 px circle, centred 60 px above the stage, ends at y = 110.
+      ok(bounds.width <= 340 && bounds.height <= 110, 'transparent mask pixels must not promote a stage-sized surface');
+      const beam = root.querySelector('.amb-beam .beam')!.getBoundingClientRect();
+      const highlight = glow.querySelector('.beam')!.getBoundingClientRect();
+      for (const key of ['x', 'y', 'width', 'height'] as const) {
+        ok(Math.abs(beam[key] - highlight[key]) < 0.5, `the clipped glow keeps the original beam ${key}`);
+      }
+    });
+  }
+});
+
 check('sidebar: the "+" buttons are hidden by opacity, so the keyboard can still reach them', () => {
   onPage('<section class="projects"><div class="group-h"><button class="plus">+</button></div><div class="prow"><button class="plus">+</button></div></section>', (root) => {
     for (const plus of root.querySelectorAll<HTMLElement>('.plus')) {

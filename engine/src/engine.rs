@@ -11,7 +11,7 @@ use crate::learn::Span;
 use crate::ledger::{Ledger, plausible};
 use crate::model::*;
 use crate::proc::Spawner;
-use crate::router::{Choice, Pick, pick_model};
+use crate::router::{Choice, Effort, Pick, pick_model};
 use crate::signals::Signals;
 use crate::store::Store;
 use crate::usage;
@@ -139,6 +139,7 @@ struct Live {
     /// The answer being written right now.
     turn: Option<String>,
     break_pending: bool,
+    answer_started: bool,
     used: u64,
     /// The CLI this process was started with; a replaced CLI starts a new process on the next turn.
     cli: Cli,
@@ -451,6 +452,42 @@ impl Engine {
     }
     pub fn add_project(&self, path: &str) -> Project {
         self.with(|c| c.add_project(path))
+    }
+    pub fn project(&self, id: &str) -> Result<Project, String> {
+        self.with(|c| {
+            c.store
+                .projects_checked()
+                .map_err(|e| e.key().to_string())?
+                .into_iter()
+                .find(|p| p.id == id)
+                .ok_or_else(|| "error.project.notFound".into())
+        })
+    }
+
+    pub fn projects_checked(&self) -> Result<Vec<Project>, String> {
+        self.with(|c| c.store.projects_checked().map_err(|e| e.key().to_string()))
+    }
+    pub fn update_project(&self, before: &Project, project: &Project) -> Result<(), String> {
+        self.with(|c| {
+            let mut projects = c.store.projects_checked().map_err(|e| e.key().to_string())?;
+            if let Some(pos) = projects.iter().position(|p| p.id == project.id) {
+                if &projects[pos] != before {
+                    return Err("reason.grant.stale".into());
+                }
+                if before == project {
+                    return Ok(());
+                }
+                projects[pos] = project.clone();
+                if c.store.save_projects(&projects).is_ok() {
+                    c.list_changed();
+                    Ok(())
+                } else {
+                    Err("error.store.write".into())
+                }
+            } else {
+                Err("error.project.notFound".into())
+            }
+        })
     }
     pub fn remove_project(&self, id: &str) {
         self.with(|c| {
@@ -839,7 +876,15 @@ impl Core {
                 self.refresh_running();
                 return;
             }
-            EngineEvent::Break => {
+            EngineEvent::Break { final_answer } => {
+                if final_answer && self.live.get(conv).is_some_and(|l| !l.answer_started) {
+                    if let Some(m) = self.turn(conv) {
+                        m.activity_end = Some(m.text.encode_utf16().count());
+                    }
+                    if let Some(l) = self.live.get_mut(conv) {
+                        l.answer_started = true;
+                    }
+                }
                 let has_text = self.turn(conv).is_some_and(|m| !m.text.is_empty());
                 if let (true, Some(l)) = (has_text, self.live.get_mut(conv)) {
                     l.break_pending = true;
@@ -851,6 +896,7 @@ impl Core {
                 let Some(m) = self.turn(conv) else { return };
                 if pending && !delta.is_empty() {
                     m.text.push_str("\n\n");
+                    m.text_breaks.get_or_insert_default().push(m.text.encode_utf16().count());
                 }
                 m.text.push_str(&delta);
                 if pending
@@ -866,7 +912,11 @@ impl Core {
                 }
             }
             EngineEvent::Tool { id, name, input } => {
+                let final_answer = self.live.get(conv).is_some_and(|l| l.answer_started);
                 if let Some(m) = self.turn(conv) {
+                    if !final_answer {
+                        m.activity_end = Some(m.text.encode_utf16().count());
+                    }
                     m.tools.get_or_insert_default().push(ToolUse { id, name, input, ok: None, output: None });
                 }
             }
@@ -1161,9 +1211,10 @@ impl Core {
         self.gate_turn_approved(pick, by_hand, approved)?;
         self.launch(id, pick)?;
         self.credit = None;
-        if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.last_mut()) {
+        if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id)) {
             m.vendor = Some(pick.vendor);
             m.model = pick.model.clone();
+            m.effort = Some(pick.effort.clone());
             m.wait_until = None;
             if m.reason.as_deref() == Some("reason.waiting") {
                 m.reason = Some(pick.reason.clone());
@@ -1185,6 +1236,13 @@ impl Core {
         if let Some(l) = self.live.get_mut(id) {
             l.started = started;
             l.turn = Some(reply_id.to_string());
+            // Same-reply quota continuations must keep an already-visible answer outside activity.
+            l.answer_started = self
+                .convs
+                .get(id)
+                .and_then(|c| c.messages.last())
+                .is_some_and(|m| m.id == reply_id && m.activity_end.unwrap_or(0) < m.text.encode_utf16().count());
+            l.break_pending = false;
             l.by_hand = by_hand;
             l.approved = approved;
             l.break_pending |= self.convs.get(id).and_then(|c| c.messages.last()).is_some_and(|m| !m.text.is_empty());
@@ -1250,6 +1308,7 @@ impl Core {
                 session,
                 turn: None,
                 break_pending: false,
+                answer_started: false,
                 used: self.tick,
                 cli,
                 resumed,
@@ -1284,6 +1343,7 @@ impl Core {
         let c = Conversation {
             id: new_id(),
             title: String::new(),
+            choice: None,
             area,
             project_id,
             sessions: BTreeMap::new(),
@@ -1329,6 +1389,7 @@ impl Core {
         let auto = req.choice.vendor == "auto";
         let route = if auto { self.next_route(&id) } else { None };
         let c = self.convs.get_mut(&id).ok_or("error.conversationGone")?;
+        c.choice = Some(Choice { effort: (!auto).then(|| req.choice.effort.unwrap_or(Effort::Medium)), ..req.choice.clone() });
         let routing = route.is_some();
         let pick = match &route {
             Some(Some(before)) => before.clone(),
@@ -1561,7 +1622,8 @@ fn spawner(base: &Spawner, cli: &Cli) -> Spawner {
 fn same_as_before(c: &Conversation, live: Option<&Live>) -> Option<Pick> {
     let last = c.messages.iter().rev().find(|m| m.role == Role::Assistant && m.vendor.is_some())?;
     let vendor = last.vendor?;
-    let effort = live.filter(|l| l.vendor == vendor).map_or_else(|| "medium".to_string(), |l| l.effort.clone());
+    let effort =
+        live.filter(|l| l.vendor == vendor).map_or_else(|| last.effort.clone().unwrap_or_else(|| "medium".into()), |l| l.effort.clone());
     let reason = last.reason.clone().filter(|r| r != "reason.routing").unwrap_or_else(|| "reason.autoDefault".into());
     Some(Pick { vendor, model: last.model.clone(), effort, reason, pace: None })
 }

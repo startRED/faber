@@ -18,6 +18,38 @@ use std::sync::Arc;
 
 const COMMON: &str = "E:/src/faber/.git";
 
+#[test]
+fn screen_grant_refuses_stale_revision_repository_rebinding_and_deferred_publication() {
+    let mut p = Project::new("p1".into(), "P".into(), "E:/src/faber".into());
+    p.repo = Some(repo());
+    p.grant = Some(grant(GitMode::Seguro, 3));
+    let before = p.clone();
+    assert_eq!(p.accept_grant(grant(GitMode::Seguro, 3)), Err("reason.grant.stale"));
+    assert_eq!(p, before);
+    let mut other = grant(GitMode::Seguro, 4);
+    other.repo = "E:/another/.git".into();
+    assert_eq!(p.accept_grant(other), Err("reason.grant.otherRepo"));
+    assert_eq!(p, before);
+    assert_eq!(p.accept_grant(grant(GitMode::Equilibrado, 4)), Err("reason.grant.mode"));
+    assert_eq!(p, before);
+    assert_eq!(p.accept_grant(grant(GitMode::Seguro, 4)), Ok(()));
+}
+
+#[test]
+fn screen_grant_refuses_newer_authority_and_preserves_additive_metadata() {
+    let mut p = Project::new("p1".into(), "P".into(), "E:/src/faber".into());
+    p.repo = Some(repo());
+    let mut old = grant(GitMode::Seguro, 3);
+    old.extra.insert("futureMetadata".into(), serde_json::json!({"keep":true}));
+    p.grant = Some(old.clone());
+    p.accept_grant(grant(GitMode::Seguro, 4)).unwrap();
+    assert_eq!(p.grant.as_ref().unwrap().extra, old.extra);
+    p.grant.as_mut().unwrap().schema = SCHEMA + 1;
+    let before = p.clone();
+    assert_eq!(p.accept_grant(grant(GitMode::Seguro, 5)), Err("reason.grant.newer"));
+    assert_eq!(p, before);
+}
+
 fn repo() -> RepoIdentity {
     RepoIdentity::new(COMMON, "E:/src/faber")
 }

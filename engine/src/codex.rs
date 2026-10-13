@@ -143,7 +143,7 @@ pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<
             let item = &p["item"];
             let kind = item["type"].as_str().unwrap_or_default();
             if kind == "agentMessage" {
-                return vec![EngineEvent::Break];
+                return vec![EngineEvent::Break { final_answer: item["phase"] == "final_answer" }];
             }
             if NOT_TOOLS.contains(&kind) {
                 return vec![];

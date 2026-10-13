@@ -95,6 +95,12 @@ pub struct Message {
     pub id: String,
     pub role: Role,
     pub text: String,
+    /// UTF-16 offsets where a new CLI text block starts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_breaks: Option<Vec<usize>>,
+    /// Start of an explicit final answer, or end of text preceding the last tool call when the CLI has no phases.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity_end: Option<usize>,
     /// Milliseconds since the Unix epoch.
     pub at: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -105,6 +111,8 @@ pub struct Message {
     pub vendor: Option<Vendor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -155,11 +163,14 @@ impl Message {
             id,
             role,
             text,
+            text_breaks: None,
+            activity_end: None,
             at,
             images: None,
             attachments: None,
             vendor: None,
             model: None,
+            effort: None,
             reason: None,
             thinking: None,
             tools: None,
@@ -194,6 +205,9 @@ pub struct BranchOf {
 pub struct Conversation {
     pub id: String,
     pub title: String,
+    /// The choice for the next message, retained independently in each conversation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub choice: Option<crate::router::Choice>,
     pub area: Area,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
@@ -262,6 +276,31 @@ impl Project {
             (Some(repo), Some(grant)) => grant.allows(repo, revision, effect),
             _ => Err("reason.grant.none"),
         }
+    }
+
+    /// Accept the authority shown on the start card.
+    pub fn accept_grant(&mut self, mut grant: crate::project::Grant) -> Result<(), &'static str> {
+        if grant.schema > crate::project::SCHEMA || self.grant.as_ref().is_some_and(|g| g.schema > crate::project::SCHEMA) {
+            return Err("reason.grant.newer");
+        }
+        let expected = self.grant.as_ref().map_or(Some(1), |g| g.revision.checked_add(1)).ok_or("reason.grant.stale")?;
+        if grant.revision != expected {
+            return Err("reason.grant.stale");
+        }
+        if self.repo.as_ref().is_none_or(|r| r.common_dir != grant.repo) {
+            return Err("reason.grant.otherRepo");
+        }
+        // Publication is deferred in the self-development MVP (R103).
+        if grant.mode != crate::project::GitMode::Seguro {
+            return Err("reason.grant.mode");
+        }
+        if let Some(previous) = &self.grant {
+            for (key, value) in &previous.extra {
+                grant.extra.entry(key.clone()).or_insert_with(|| value.clone());
+            }
+        }
+        self.grant = Some(grant);
+        Ok(())
     }
 }
 

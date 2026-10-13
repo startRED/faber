@@ -233,6 +233,7 @@ mod tests {
                 session,
                 turn: turns.last().map(|t| t.0.to_string()),
                 break_pending: false,
+                answer_started: false,
                 used: 0,
                 cli: Cli { command: "claude".into(), prefix: vec![] },
                 resumed: false,
@@ -467,7 +468,7 @@ mod tests {
                     text: "hello".into(),
                     images: vec![],
                     files: vec![],
-                    choice: Choice { vendor: "claude".into(), model: None },
+                    choice: Choice { vendor: "claude".into(), model: None, effort: None },
                 });
                 let _ = done.send((listed, sent));
             }

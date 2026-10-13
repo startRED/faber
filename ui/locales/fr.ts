@@ -83,6 +83,11 @@ export const fr: Messages = {
   'composer.clear': 'retirer ×',
   'composer.removeAttachments': 'Retirer les pièces jointes',
   'composer.model': 'Modèle',
+  'effort.label': 'Effort',
+  'effort.low': 'Faible',
+  'effort.medium': 'Moyen',
+  'effort.high': 'Élevé',
+  'effort.nextMessage': 'L’effort s’applique à partir du prochain message.',
   'composer.send': 'Envoyer',
   'composer.stop': 'Arrêter',
   'model.auto': 'Auto',
@@ -115,6 +120,10 @@ export const fr: Messages = {
   'answer.label': 'Réponse',
   'answer.answering': 'répond',
   'answer.thinking': 'Réflexion',
+  'activity.working': 'En cours · {steps} · {commands}',
+  'activity.done': 'Travail effectué · {steps} · {commands}',
+  'activity.steps': { one: '{n} étape', other: '{n} étapes' },
+  'activity.commands': { one: '{n} commande', other: '{n} commandes' },
   'answer.stopped': 'Interrompue.',
   'answer.copy': 'Copier',
   'answer.redo': 'Refaire avec…',
@@ -253,7 +262,7 @@ export const fr: Messages = {
   'look.motion.reduced': 'Réduit',
   'look.motion.none': 'Aucun',
   'look.motion.fullHint': 'Tout bouge : glissements, lueurs et l’effet de la nouvelle conversation.',
-  'look.motion.reducedHint': 'Seulement de courts fondus. Rien ne boucle ni ne se déplace. S’active tout seul quand le système demande moins de mouvement.',
+  'look.motion.reducedHint': 'Les changements sont immédiats, sans animation. S’active tout seul quand le système demande moins de mouvement.',
   'look.motion.noneHint': 'Ni transitions ni animation.',
   'look.effect.ambient': 'Effet de la nouvelle conversation',
   'look.effect.texture': 'Texture de fond',
@@ -376,4 +385,222 @@ export const fr: Messages = {
   "quota.seven_day_opus": "Opus · 7 jours",
   "quota.seven_day_sonnet": "Sonnet · 7 jours",
   "quota.seven_day_haiku": "Haiku · 7 jours",
+  // Native speaker must translate (needs native review).
+  "projects.title": "Projects",
+  // Native speaker must translate (needs native review).
+  "projects.empty.selectProject": "Select a project folder to start a mission.",
+  // Native speaker must translate (needs native review).
+  "projects.repo": "Repository",
+  // Native speaker must translate (needs native review).
+  "projects.base": "Base revision",
+  // Native speaker must translate (needs native review).
+  "projects.author": "Author",
+  // Native speaker must translate (needs native review).
+  "projects.presence.title": "Tool selection",
+  // Native speaker must translate (needs native review).
+  "projects.presence.continueWithout": "Continue without missing tools",
+  // Native speaker must translate (needs native review).
+  "projects.presence.findTools": "Let Faber find and install the best tools",
+  // Native speaker must translate (needs native review).
+  "reason.kit.continueWithout": "Use verified built-in capabilities when mission execution is available.",
+  // Native speaker must translate (needs native review).
+  "reason.kit.findToolsInstallParked": "Tool installation is parked in the self-development MVP; the available role controls remain the capability floor.",
+  // Native speaker must translate (needs native review).
+  "projects.gitMode.title": "Git authority",
+  // Native speaker must translate (needs native review).
+  "projects.gitMode.seguro": "Seguro (Local worktree only)",
+  // Native speaker must translate (needs native review).
+  "projects.gitMode.seguroDesc": "Separate worktree, local commits, fast-forwards only the mission branch. No remote effects.",
+  // Native speaker must translate (needs native review).
+  "projects.gitMode.equilibrado": "Equilibrado (Local commits + draft PR)",
+  // Native speaker must translate (needs native review).
+  "projects.gitMode.equilibradoDesc": "Seguro plus pushing the mission branch and creating one draft PR.",
+  // Native speaker must translate (needs native review).
+  "projects.selfUpdate.trust": "Allow Faber to update itself",
+  // Native speaker must translate (needs native review).
+  "projects.selfUpdate.trustDesc": "Promotes proven builds to the next local slot after canary verification and quarantine checks.",
+  // Native speaker must translate (needs native review).
+  "projects.goal.label": "Mission goal",
+  // Native speaker must translate (needs native review).
+  "projects.goal.placeholder": "Describe what you want Faber to build, fix, or improve in this project...",
+  // Native speaker must translate (needs native review).
+  "projects.action.start": "Start mission",
+  // Native speaker must translate (needs native review).
+  "projects.action.stop": "Stop",
+  // Native speaker must translate (needs native review).
+  "projects.action.resume": "Resume",
+  // Native speaker must translate (needs native review).
+  "projects.mode.normal": "Normal",
+  // Native speaker must translate (needs native review).
+  "projects.mode.autonomous": "Autonomous",
+  // Native speaker must translate (needs native review).
+  "projects.needsYou": "Needs you",
+  // Native speaker must translate (needs native review).
+  "projects.needsYou.desc": "Faber is waiting for your decision before proceeding.",
+  // Native speaker must translate (needs native review).
+  "projects.decision.default": "Default",
+  // Native speaker must translate (needs native review).
+  "projects.decision.customPlaceholder": "Or type a custom answer...",
+  // Native speaker must translate (needs native review).
+  "projects.decision.answer": "Answer",
+  // Native speaker must translate (needs native review).
+  "decision.kind.direction": "Direction",
+  // Native speaker must translate (needs native review).
+  "decision.kind.taste": "Taste",
+  // Native speaker must translate (needs native review).
+  "decision.kind.money": "Budget",
+  // Native speaker must translate (needs native review).
+  "decision.kind.legal": "Legal",
+  // Native speaker must translate (needs native review).
+  "decision.kind.technical": "Technical",
+  // Native speaker must translate (needs native review).
+  "projects.tasks.title": "Tasks",
+  // Native speaker must translate (needs native review).
+  "projects.task.ready": "Ready",
+  // Native speaker must translate (needs native review).
+  "projects.task.running": "Running",
+  // Native speaker must translate (needs native review).
+  "projects.task.review": "Review",
+  // Native speaker must translate (needs native review).
+  "projects.task.done": "Done",
+  // Native speaker must translate (needs native review).
+  "projects.task.blocked": "Blocked",
+  // Native speaker must translate (needs native review).
+  "projects.task.builder": "Builder",
+  // Native speaker must translate (needs native review).
+  "projects.task.reviewer": "Reviewer",
+  // Native speaker must translate (needs native review).
+  "projects.receipt.unverified": "Unverified",
+  // Native speaker must translate (needs native review).
+  "projects.receipt.notRun": "Not run",
+  // Native speaker must translate (needs native review).
+  "projects.receipt.verified": "Verified",
+  // Native speaker must translate (needs native review).
+  "projects.cost.title": "Own cost",
+  // Native speaker must translate (needs native review).
+  "projects.cost.unknown": "Unknown",
+  // Native speaker must translate (needs native review).
+  "projects.cost.cap": "Cap",
+  // Native speaker must translate (needs native review).
+  "projects.pace.title": "Account pace",
+  // Native speaker must translate (needs native review).
+  "projects.pace.used": "used",
+  // Native speaker must translate (needs native review).
+  "projects.pace.room": "daily room",
+  // Native speaker must translate (needs native review).
+  "projects.build.title": "Local build",
+  // Native speaker must translate (needs native review).
+  "projects.build.current": "Current",
+  // Native speaker must translate (needs native review).
+  "projects.build.next": "Next",
+  // Native speaker must translate (needs native review).
+  "projects.build.lastGood": "Last good",
+  // Native speaker must translate (needs native review).
+  "projects.build.waiting": "Waiting for",
+  // Native speaker must translate (needs native review).
+  "reason.task.waiting": "Waiting for dependencies",
+  // Native speaker must translate (needs native review).
+  "error.project.notFound": "Project not found",
+  // Native speaker must translate (needs native review).
+  "error.journal.mismatch": "Journal mismatch",
+  // Native speaker must translate (needs native review).
+  "reason.grant.none": "Project has no active git grant",
+  // Native speaker must translate (needs native review).
+  "projects.mode.label": "Run mode",
+  // Native speaker must translate (needs native review).
+  "projects.state.planning": "Planning",
+  // Native speaker must translate (needs native review).
+  "projects.state.running": "Running",
+  // Native speaker must translate (needs native review).
+  "projects.state.paused": "Paused",
+  // Native speaker must translate (needs native review).
+  "projects.state.blocked": "Blocked",
+  // Native speaker must translate (needs native review).
+  "projects.state.done": "Done",
+  // Native speaker must translate (needs native review).
+  "projects.value.missing": "\u2014",
+  // Native speaker must translate (needs native review).
+  "projects.details": "Details and evidence",
+  // Native speaker must translate (needs native review).
+  "projects.details.scope": "Scope",
+  // Native speaker must translate (needs native review).
+  "projects.details.proofs": "Required checks",
+  // Native speaker must translate (needs native review).
+  "projects.details.noEvidence": "No engine-verified evidence is available.",
+  // Native speaker must translate (needs native review).
+  "projects.pace.freshness": "Reading: {when}",
+  // Native speaker must translate (needs native review).
+  "reason.mission.runnerUnavailable": "Mission execution is waiting for the approved runner. No work has started.",
+  // Native speaker must translate (needs native review).
+  "error.project.missionRequired": "Start a mission to work in this project. Direct project sessions are unavailable.",
+  // Native speaker must translate (needs native review).
+  "error.wire.malformed": "The request has invalid or missing values.",
+  // Native speaker must translate (needs native review).
+  "error.wire.tooBig": "The request is too large.",
+  // Native speaker must translate (needs native review).
+  "error.wire.stale": "This mission changed. Reload it before answering.",
+  // Native speaker must translate (needs native review).
+  "reason.grant.stale": "The git grant changed. Review the start card again.",
+  // Native speaker must translate (needs native review).
+  "reason.grant.mode": "Remote publication is parked in the self-development MVP.",
+  // Native speaker must translate (needs native review).
+  "reason.grant.otherRepo": "The folder now belongs to another repository. Add it again before granting authority.",
+  // Native speaker must translate (needs native review).
+  "reason.grant.revoked": "The project grant was revoked.",
+  // Native speaker must translate (needs native review).
+  "error.journal.badId": "The mission or decision identifier is invalid.",
+  // Native speaker must translate (needs native review).
+  "error.store.write": "The changes could not be saved. Nothing was approved.",
+  // Native speaker must translate (needs native review).
+  "error.store.read": "Saved records could not be read.",
+  // Native speaker must translate (needs native review).
+  "error.store.corrupt": "Saved records are damaged.",
+  // Native speaker must translate (needs native review).
+  "error.decision.option": "Enter a valid answer to this decision.",
+  // Native speaker must translate (needs native review).
+  "error.decision.answered": "This decision has already been answered.",
+  // Native speaker must translate (needs native review).
+  "error.decision.person": "This decision needs your answer.",
+  // Native speaker must translate (needs native review).
+  "reason.build.unavailable": "Local build slots have not been initialized.",
+  // Native speaker must translate (needs native review).
+  "reason.git.repository": "Choose a folder that belongs to a Git repository.",
+  // Native speaker must translate (needs native review).
+  "reason.git.base": "The starting Git revision could not be resolved.",
+  // Native speaker must translate (needs native review).
+  "reason.git.ref": "The mission branch reference is invalid.",
+  // Native speaker must translate (needs native review).
+  "reason.git.command": "The Git operation failed.",
+  // Native speaker must translate (needs native review).
+  "reason.git.unknown": "Native Git is unavailable or could not be checked.",
+  // Native speaker must translate (needs native review).
+  "reason.grant.noAuthor": "Set a Git author before granting commit authority.",
+  // Native speaker must translate (needs native review).
+  "reason.grant.newer": "This git grant needs a newer version of Faber.",
+  // Native speaker must translate (needs native review).
+  "error.journal.newer": "These mission records need a newer version of Faber.",
+  // Native speaker must translate (needs native review).
+  "error.store.full": "The disk is full. Nothing was approved.",
+  // Native speaker must translate (needs native review).
+  "reason.interrupted": "Paused at the last saved checkpoint.",
+  // Native speaker must translate (needs native review).
+  "error.plan.tooBig": "The mission plan exceeds the task limit.",
+  // Native speaker must translate (needs native review).
+  "error.plan.badId": "The mission plan has an invalid task identifier.",
+  // Native speaker must translate (needs native review).
+  "error.plan.duplicateTask": "The mission plan repeats a task identifier.",
+  // Native speaker must translate (needs native review).
+  "error.plan.missingTask": "A task depends on a task that is missing.",
+  // Native speaker must translate (needs native review).
+  "error.plan.cycle": "The mission plan has circular dependencies.",
+  // Native speaker must translate (needs native review).
+  "error.plan.duplicateDeliverable": "Two tasks claim the same deliverable.",
+  // Native speaker must translate (needs native review).
+  "error.plan.badPath": "The mission plan names a path outside its scope.",
+  // Native speaker must translate (needs native review).
+  "error.plan.readOnlyWrites": "A read-only task claims permission to write files.",
+  // Native speaker must translate (needs native review).
+  "error.plan.overlap": "Unordered writers overlap the same source files.",
+  // Native speaker must translate (needs native review).
+  "crumb.separator": "\u203a",
 };

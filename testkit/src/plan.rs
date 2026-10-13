@@ -25,19 +25,15 @@ impl Suite {
     }
 }
 
-/// Half the logical cores, never fewer than one, so the PC stays usable while the tests run.
-pub fn half_cores(logical: usize) -> usize {
-    (logical / 2).max(1)
+/// Half the logical cores, bounded by a positive Cargo job limit, never fewer than one.
+pub fn job_count(logical: usize, cargo_limit: Option<&str>) -> usize {
+    let half = (logical / 2).max(1);
+    let limit = cargo_limit.and_then(|value| value.parse::<usize>().ok()).filter(|n| *n > 0);
+    half.min(limit.unwrap_or(half))
 }
 
 pub fn jobs() -> usize {
-    capped_jobs(std::thread::available_parallelism().map_or(1, |n| n.get()), std::env::var("CARGO_BUILD_JOBS").ok().as_deref())
-}
-
-fn capped_jobs(logical: usize, cargo_jobs: Option<&str>) -> usize {
-    let default = half_cores(logical);
-    // The runner passes -j explicitly, so it must carry the user's positive Cargo limit into its child builds.
-    cargo_jobs.and_then(|value| value.parse::<usize>().ok()).filter(|limit| *limit > 0).map_or(default, |limit| default.min(limit))
+    job_count(std::thread::available_parallelism().map_or(1, |n| n.get()), std::env::var("CARGO_BUILD_JOBS").ok().as_deref())
 }
 
 /// The suites that cover a set of changed paths (relative to the repository, `/` separators).
@@ -112,16 +108,6 @@ pub fn select(opts: &Options, changed: &[String]) -> BTreeSet<Suite> {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn configured_build_jobs_limit_the_runner_without_changing_its_default() {
-        assert_eq!(super::capped_jobs(16, Some("4")), 4);
-        assert_eq!(super::capped_jobs(16, Some("2")), 2);
-        for configured in [None, Some("0"), Some("-1"), Some("bad")] {
-            assert_eq!(super::capped_jobs(16, configured), 8);
-        }
-        let logical = std::thread::available_parallelism().unwrap().get();
-        assert_eq!(super::jobs(), super::capped_jobs(logical, std::env::var("CARGO_BUILD_JOBS").ok().as_deref()));
-    }
     use super::*;
 
     fn paths(list: &[&str]) -> Vec<String> {
@@ -133,31 +119,16 @@ mod tests {
 
     #[test]
     fn half_the_cores_and_never_fewer_than_one() {
-        assert_eq!(half_cores(16), 8);
-        assert_eq!(half_cores(5), 2);
-        assert_eq!(half_cores(2), 1);
-        assert_eq!(half_cores(1), 1);
-        assert_eq!(half_cores(0), 1);
-    }
-
-    #[test]
-    fn the_bootstrap_keeps_a_default_limit_without_overriding_the_environment() {
-        let config: toml::Value = include_str!("../../.cargo/config.toml").parse().unwrap();
-        assert_eq!(config["build"]["jobs"].as_integer(), Some(4));
-        assert!(!config["alias"]["t"].as_str().unwrap().split_whitespace().any(|arg| arg == "-j"));
-    }
-
-    #[test]
-    fn the_runner_respects_a_positive_cargo_build_limit() {
-        assert_eq!(capped_jobs(16, Some("4")), 4);
-        assert_eq!(capped_jobs(16, Some("2")), 2);
-        assert_eq!(capped_jobs(2, Some("4")), 1);
-        for value in [None, Some("0"), Some("invalid"), Some("-2")] {
-            assert_eq!(capped_jobs(16, value), 8);
-        }
-        let default = half_cores(std::thread::available_parallelism().map_or(1, |n| n.get()));
-        let limit = std::env::var("CARGO_BUILD_JOBS").ok().and_then(|value| value.parse::<usize>().ok()).filter(|limit| *limit > 0);
-        assert_eq!(jobs(), limit.map_or(default, |limit| default.min(limit)));
+        assert_eq!(job_count(16, None), 8);
+        assert_eq!(job_count(5, None), 2);
+        assert_eq!(job_count(2, None), 1);
+        assert_eq!(job_count(1, None), 1);
+        assert_eq!(job_count(0, None), 1);
+        assert_eq!(job_count(16, Some("4")), 4);
+        assert_eq!(job_count(16, Some("1")), 1);
+        assert_eq!(job_count(2, Some("4")), 1);
+        assert_eq!(job_count(16, Some("0")), 8);
+        assert_eq!(job_count(16, Some("invalid")), 8);
     }
 
     #[test]

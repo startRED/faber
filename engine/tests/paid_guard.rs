@@ -51,7 +51,7 @@ async fn paid_notices_stop_an_unapproved_subscription_turn_and_clear_permissions
                 text: "first".into(),
                 images: vec![],
                 files: vec![],
-                choice: Choice { vendor: "auto".into(), model: None },
+                choice: Choice { vendor: "auto".into(), model: None, effort: None },
             })
             .unwrap();
         for _ in 0..100 {

@@ -22,6 +22,8 @@ import { failureText, lang, t, templates, useLanguage } from './i18n.ts';
 import { createWidth } from './layout.ts';
 import { Lockup, Peek } from './Mark.tsx';
 import { modelOptions, prettyModel } from './models.ts';
+import { animateDetails, animateList, watchMotion } from './motion.ts';
+import { Projects } from './Projects.tsx';
 import { createOpening, upsert } from './opening.ts';
 import { Running } from './Running.tsx';
 import { createAutoOpen, openPlace, type Place, placeOfRunning, store, waitingKeys } from './running.ts';
@@ -60,6 +62,7 @@ const TYPING = 'textarea, input:not([type=checkbox], [type=radio], [type=range],
 /** `initial` is the state the page started from; `main.tsx` has already applied its look and handed the running list to
  * the store. */
 export function App(props: { initial: AppState; inbox: { take: (listener: ((event: AppEvent) => void) | undefined) => void } }) {
+  watchMotion();
   const saved = recall<Place | undefined>('faber.place', undefined);
   useLanguage(props.initial.settings.language);
   const [state, setState] = createSignal<AppState>(props.initial);
@@ -67,7 +70,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   // with another conversation's project.
   const [place, setPlace] = createSignal<Place>({ area: saved?.area ?? 'chat', projectId: saved?.projectId });
   const [current, setCurrent] = createSignal<Conversation>();
-  const [choice, setChoice] = createSignal<Choice>(recall<Choice>('faber.choice', { vendor: 'auto' }));
+  const [choice, setChoice] = createSignal<Choice>({ vendor: 'auto' });
   const [quotas, setQuotas] = createSignal(seedQuotas(props.initial.quotas));
   const [clock, setClock] = createSignal(Date.now());
   const [error, setError] = createSignal<string>();
@@ -136,6 +139,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   };
   let fill: ((text: string) => void) | undefined;
   let stick = true;
+  let lastScrollTop = 0;
   // Where focus was, until the tutorial took it. Weak, so a control that left the page (Settings closed with the focus in
   // it) is not kept alive, with everything it hangs from, until focus moves again.
   let lastFocus: WeakRef<HTMLElement> | undefined;
@@ -252,6 +256,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
     setLoading(next.id !== undefined);
     setError(undefined);
     stick = true;
+    lastScrollTop = 0;
     let snapshot: Conversation | undefined;
     try {
       snapshot = (next.id ? await api.open(next.id) : undefined) ?? undefined;
@@ -264,6 +269,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
     setLoading(false);
     setFrom(Math.max(0, (done.conversation?.messages.length ?? 0) - PAGE));
     setCurrent(done.conversation);
+    setChoice(next.id ? recall<Choice>(`faber.choice.${next.id}`, done.conversation?.choice ?? { vendor: 'auto' }) : { vendor: 'auto' });
     if (done.conversation) queueMicrotask(() => restoreRejected(done.conversation!.id, done.conversation!.messages.at(-1)));
   };
   const fresh = (next: Pick<Place, 'area' | 'projectId'>) => go({ ...next, id: undefined });
@@ -396,7 +402,9 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   );
 
   const onScroll = (el: HTMLDivElement) => {
-    stick = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 40) stick = true;
+    else if (el.scrollTop < lastScrollTop - 1) stick = false;
+    lastScrollTop = el.scrollTop;
     if (el.scrollTop < 400 && from() > 0) {
       // The earlier messages appear above; keep what the user is reading in place.
       const before = el.scrollHeight;
@@ -414,7 +422,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
 
   const pickChoice = (c: Choice) => {
     setChoice(c);
-    remember('faber.choice', c);
+    if (current()) remember(`faber.choice.${current()!.id}`, c);
   };
 
   const target = () => ({ area: area(), projectId: area() === 'project' ? projectId() : undefined });
@@ -422,6 +430,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   const send = async (draft: Draft) => {
     // The place is taken once: the message, and the conversation it opens, belong to the place it was written in.
     const at = place();
+    const chosen = picked();
     const ticket = ++sendTicket;
     let accepted = false;
     setError(undefined);
@@ -434,8 +443,10 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
         text: draft.text,
         images: draft.images,
         files: draft.files,
-        choice: picked(),
+        choice: chosen,
       });
+      const key = `faber.choice.${id}`;
+      remember(key, place() === at ? picked() : recall<Choice>(key, chosen));
       accepted = true;
       if (ticket === sendTicket) held.set(id, { draft });
       const moved = place() === at && id !== opening.id;
@@ -457,9 +468,12 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   const branch = async (messageId: string, text: string, picked: Choice) => {
     const c = current();
     if (!c) return;
+    const at = place();
     setError(undefined);
     try {
-      await go({ ...place(), id: await api.branch({ conversationId: c.id, messageId, text, choice: picked }) });
+      const id = await api.branch({ conversationId: c.id, messageId, text, choice: picked });
+      remember(`faber.choice.${id}`, picked);
+      await go({ ...at, id });
     } catch (err) {
       fail(err);
     }
@@ -496,6 +510,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   };
   const remove = async (id: string) => {
     await api.remove(id);
+    try { localStorage.removeItem(`faber.choice.${id}`); } catch { /* Storage can be unavailable. */ }
     if (opening.id === id) void fresh(place());
   };
 
@@ -555,6 +570,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
         choice={picked()}
         onChoice={pickChoice}
         busy={busy() && !loading()}
+        nextMessage={!!current()?.messages.length}
         locked={loading()}
         placeholder={area() === 'project' ? t('composer.projectPlaceholder') : newChat() ? t('composer.chatPlaceholder') : t('composer.replyPlaceholder')}
         onSend={(d) => void send(d)}
@@ -591,7 +607,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   );
 
   return (
-    <div class="app">
+    <div class="app" ref={(el) => { animateList(el); animateDetails(el); }}>
       {/* The title bar is the window's title bar: empty space drags the window, double click maximizes. */}
       <header class="top" classList={{ mac }} data-tauri-drag-region>
         <span class="brand" data-tauri-drag-region>
@@ -672,7 +688,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
             />
           }
         >
-          <div class="shell" classList={{ docked: columnOpen() && docked() }} inert={tourOpen()}>
+          <div class="shell" classList={{ docked: columnOpen() && docked() }} inert={tourOpen()} ref={animateList}>
             <aside
               class="side"
               classList={{ shown: sideOverlay() }}
@@ -680,7 +696,8 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
               aria-label={t('side.label')}
               role={sideOverlay() ? 'dialog' : undefined}
               aria-modal={sideOverlay() ? 'true' : undefined}
-              inert={trapped()}
+              inert={trapped() || (narrow() && !sideOverlay())}
+              aria-hidden={narrow() && !sideOverlay() ? 'true' : undefined}
             >
               <Sidebar
                 conversations={state().conversations}
@@ -717,14 +734,14 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                     <Match when={place().id}>
                       {area() === 'chat' ? t('area.chat') : t('crumb.project')}
                       <span class="sep" aria-hidden="true">
-                        â€º
+                        {t('crumb.separator')}
                       </span>
                       <b>{title() ?? ''}</b>
                     </Match>
                     <Match when={area() === 'project' && project()}>
                       {t('crumb.project')}
                       <span class="sep" aria-hidden="true">
-                        â€º
+                        {t('crumb.separator')}
                       </span>
                       <b>{project()?.name}</b>
                     </Match>
@@ -735,7 +752,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                   </Switch>
                 </div>
                 <div class="right">
-                  <Show when={state().vendors.length > 0 && !newChat()}>
+                  <Show when={state().vendors.length > 0 && !newChat() && area() !== 'project'}>
                     <span class="chip" title={t('topbar.model')}>
                       <Show when={answering()} fallback={<>{options().find((o) => o.choice.vendor === picked().vendor && o.choice.model === picked().model)?.label}</>}>
                         {(m) => (
@@ -772,60 +789,84 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                   </button>
                 </div>
               </div>
-              <div class="work" classList={{ under: columnOpen() && !docked() }} ref={(el) => (work = el)}>
-                <Show when={newChat()}>
-                  {/* The effects of the look sit behind the greeting; dust keeps clear of the text and the composer. */}
-                  <Ambient vendors={state().vendors} avoid={() => [...work!.querySelectorAll('.hello, .lead, .composer, .try, .resume')]} />
-                </Show>
-                <div class="thread" classList={{ welcome: newChat() }} ref={(el) => (thread = el)} onScroll={(e) => onScroll(e.currentTarget)} inert={trapped()}>
-                  <Show
-                    when={newChat()}
-                    fallback={
-                      <div class="col">
+              <div class="work" classList={{ under: columnOpen() && !docked() }} ref={(el) => { work = el; animateList(el); }}>
+                <Show
+                  when={area() === 'project' && !place().id}
+                  fallback={
+                    <>
+                      <Show when={newChat()}>
+                        {/* The effects of the look sit behind the greeting; dust keeps clear of the text and the composer. */}
+                        <Ambient vendors={state().vendors} avoid={() => [...work!.querySelectorAll('.hello, .lead, .composer, .try, .resume')]} />
+                      </Show>
+                      <div class="thread" classList={{ welcome: newChat() }} ref={(el) => {
+                        thread = el;
+                        onMount(() => {
+                          // Keep the tail visible as the composer grows, without pulling a reader back down.
+                          const observer = new ResizeObserver(() => { if (stick) el.scrollTop = el.scrollHeight; });
+                          observer.observe(el);
+                          onCleanup(() => observer.disconnect());
+                        });
+                      }} onScroll={(e) => onScroll(e.currentTarget)} inert={trapped()}>
                         <Show
-                          when={current()?.messages.length ? current() : undefined}
-                          fallback={<Empty vendors={state().vendors.length} area={area()} project={project()} onConnect={openSetup} />}
+                          when={newChat()}
+                          fallback={
+                            <div class="col" ref={(el) => {
+                              animateList(el);
+                              onMount(() => {
+                                const observer = new ResizeObserver(() => { if (thread && stick) thread.scrollTop = thread.scrollHeight; });
+                                observer.observe(el);
+                                onCleanup(() => observer.disconnect());
+                              });
+                            }}>
+                              <Show
+                                when={current()?.messages.length ? current() : undefined}
+                                fallback={<Empty vendors={state().vendors.length} area={area()} project={project()} onConnect={openSetup} />}
+                              >
+                                {(c) => (
+                                  <Thread
+                                    messages={c().messages}
+                                    usage={state().usage ?? []}
+                                    from={from()}
+                                    conversationId={c().id}
+                                    options={options()}
+                                    onBranch={(messageId, text, chosen) => void branch(messageId, text, chosen ?? picked())}
+                                  />
+                                )}
+                              </Show>
+                              <Show when={error()}>
+                                <div class="note err" role="alert">
+                                  {error()}
+                                </div>
+                              </Show>
+                            </div>
+                          }
                         >
-                          {(c) => (
-                            <Thread
-                              messages={c().messages}
-                              usage={state().usage ?? []}
-                              from={from()}
-                              conversationId={c().id}
-                              options={options()}
-                              onBranch={(messageId, text, chosen) => void branch(messageId, text, chosen ?? picked())}
-                            />
-                          )}
-                        </Show>
-                        <Show when={error()}>
-                          <div class="note err" role="alert">
-                            {error()}
-                          </div>
+                          <Welcome
+                            recent={state().conversations}
+                            name={state().settings.userName}
+                            running={items()}
+                            projects={state().projects}
+                            onSuggest={(text) => fill?.(text)}
+                            onOpen={openSummary}
+                          >
+                            {composer()}
+                          </Welcome>
+                          <Show when={error()}>
+                            <div class="note err" role="alert">
+                              {error()}
+                            </div>
+                          </Show>
                         </Show>
                       </div>
-                    }
-                  >
-                    <Welcome
-                      recent={state().conversations}
-                      name={state().settings.userName}
-                      running={items()}
-                      projects={state().projects}
-                      onSuggest={(text) => fill?.(text)}
-                      onOpen={openSummary}
-                    >
-                      {composer()}
-                    </Welcome>
-                    <Show when={error()}>
-                      <div class="note err" role="alert">
-                        {error()}
-                      </div>
-                    </Show>
-                  </Show>
-                </div>
-                <Show when={!newChat() && !needsProject()}>
-                  <div class="dock" inert={trapped()}>
-                    {composer()}
-                  </div>
+                      <Show when={!newChat() && !needsProject() && area() !== 'project'}>
+                        <div class="dock" inert={trapped()}>
+                          {composer()}
+                        </div>
+                      </Show>
+                    </>
+                  }
+                >
+                  <Projects project={project()} vendors={state().vendors} now={clock()} />
                 </Show>
                 <Show when={columnOpen() && !docked()}>{runningColumn()}</Show>
               </div>

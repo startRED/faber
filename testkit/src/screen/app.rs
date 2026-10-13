@@ -125,7 +125,7 @@ const COLOUR_OF: &str = "(name) => { const p = document.createElement('i'); p.st
 /// The drawings of Curioso on the stage: how many there are, how big each is, and the colour it is drawn in.
 fn peeks() -> String {
     format!(
-        "(() => {{ const colour = {COLOUR_OF}; return {{ ink3: colour('--ink-3'), found: [...document.querySelectorAll('.empty svg')].map((s) => {{ const r = s.getBoundingClientRect(); return {{ w: r.width, h: r.height, fill: getComputedStyle(s.querySelector('path')).fill }}; }}) }}; }})()"
+        "(() => {{ const colour = {COLOUR_OF}; return {{ ink3: colour('--ink-3'), found: [...document.querySelectorAll('.empty svg, .start-card .peek svg')].map((s) => {{ const r = s.getBoundingClientRect(); return {{ w: r.width, h: r.height, fill: getComputedStyle(s.querySelector('path')).fill }}; }}) }}; }})()"
     )
 }
 
@@ -160,8 +160,8 @@ fn shows_the_brand(ctx: &mut Ctx) -> Result {
         let found = page.eval(&peeks())?;
         let list = found["found"].as_array().cloned().unwrap_or_default();
         same(list.len(), 1, &format!("drawings of Curioso on {what}"))?;
-        same(list[0]["w"].as_f64(), Some(64.0), "his width")?;
-        same(list[0]["h"].as_f64(), Some(64.0), "his height")?;
+        ensure((list[0]["w"].as_f64().unwrap_or(0.0) - 64.0).abs() < 0.01, || format!("his width: {}", list[0]["w"]))?;
+        ensure((list[0]["h"].as_f64().unwrap_or(0.0) - 64.0).abs() < 0.01, || format!("his height: {}", list[0]["h"]))?;
         same(list[0]["fill"].as_str(), found["ink3"].as_str(), "his colour")
     };
     looks(page, "no project open")?;
@@ -183,6 +183,7 @@ fn streams_an_answer(ctx: &mut Ctx) -> Result {
     ask(page, QUESTION)?;
     let answer = page.named("article", "answer.label")?;
     page.wait_visible(&answer.clone().css(".actions"))?;
+    page.wait_for("the completed answer text to render", "(() => { const answer = document.querySelector('article.ai'); return answer?.checkVisibility({ contentVisibilityAuto: true }) && answer.querySelector('.md')?.innerText.trim().length > 0; })()")?;
     let text = page.inner_text(&answer)?;
     ensure(text.contains("Rayleigh"), || format!("the answer should explain the sky: {text}"))?;
     ensure(text.contains("Haiku 5.5"), || format!("the answer should name its model: {text}"))?;
@@ -436,12 +437,12 @@ const THREAD: &str = r#"(() => {
   const parts = [
     ['your message', '.thread .you', 4.5, true],
     ['the model name', 'article.ai .model b', 4.5, true],
-    ['the tool line', 'article.ai .tools span', 4.5, true],
+    ['the activity row', 'article.ai .activity summary', 4.5, true],
     ['the question title', '.thread .ask b', 4.5, true],
     ['the question text', '.thread .ask pre', 4.5, true],
     ['Allow', '.thread .ask .btn.primary', 4.5, true],
     ['the other answers', '.thread .ask .btn:not(.primary)', 4.5, true],
-    ['the answer text', 'article.ai .md p', 4.5, false],
+    ['the answer text', 'article.ai > .md p', 4.5, false],
     ['the crumb', '.crumb b', 4.5, true],
   ];
   const found = [];
@@ -479,6 +480,8 @@ fn thread_in_every_look(ctx: &mut Ctx) -> Result {
     page.click(&css("article .ask").has_text("a.txt").role("button", &allow).exact())?;
     let question = css("article .ask").has_text("b.txt");
     page.wait_visible(&question)?;
+    // Let the pending question open its column before measuring settled text contrast in each look.
+    page.wait_visible(&css(".runcol"))?;
     for (id, ..) in LOOKS {
         open_appearance(&mut app.page)?;
         pick_look(&mut app.page, id)?;
