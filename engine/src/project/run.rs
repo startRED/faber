@@ -113,6 +113,16 @@ pub fn invalidated(plan: &Plan, paths: &[String]) -> BTreeSet<String> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct Retirement {
+    lease: super::Lease,
+    process: Option<super::ProcessId>,
+    cleanup_intent: String,
+    #[serde(default)]
+    abandoned: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Runner {
     schema: u32,
     pub mission: Mission,
@@ -121,6 +131,8 @@ pub struct Runner {
     pub quota_wake: Option<u64>,
     pub promotion_pending: bool,
     halted: bool,
+    #[serde(default)]
+    retirements: BTreeMap<String, Retirement>,
     #[serde(flatten)]
     extra: Extra,
 }
@@ -150,6 +162,7 @@ impl Runner {
             quota_wake: None,
             promotion_pending: false,
             halted: false,
+            retirements: BTreeMap::new(),
             extra: Extra::new(),
         };
         runner.save(j)?;
@@ -189,8 +202,11 @@ impl Runner {
         if !j.pending().map_err(|e| e.key())?.is_empty() {
             return Err("reason.project.reconcile");
         }
+        if !self.retirements.is_empty() {
+            return Err("reason.project.reconcile");
+        }
         let runtime = j.runtime().map_err(|e| e.key())?;
-        if runtime.leases.iter().any(|l| l.process.is_some() && l.state != super::LeaseState::Released) {
+        if runtime.leases.iter().any(|l| l.process.is_some() && !super::lease::retirement_known(l)) {
             return Err("reason.lease.live");
         }
         // Reconciliation never adopts or kills a recorded PID. T2 owns handles; T3 owns unsettled reservations.
@@ -285,8 +301,24 @@ impl Runner {
         let plan = j.plan().map_err(|e| e.key())?.ok_or("reason.project.compile")?;
         schedule(&plan, &j.contracts().map_err(|e| e.key())?, &j.decisions().map_err(|e| e.key())?, capacity)
     }
-    pub fn prepare_build(&mut self, j: &Journal, budget: super::disk::DiskBudget, bytes: u64) -> Result<(), &'static str> {
-        self.prepare_build_sample(j, budget, bytes, super::disk::available_bytes(j.private()))
+    pub fn prepare_build(&mut self, j: &Journal, task: &str, budget: super::disk::DiskBudget, bytes: u64) -> Result<String, &'static str> {
+        self.prepare_build_with(j, task, budget, bytes, super::disk::available_bytes)
+    }
+    /// Sample every writable volume, including separate git common directories. No build writes precede the reservation.
+    pub fn prepare_build_with(
+        &mut self,
+        j: &Journal,
+        task: &str,
+        budget: super::disk::DiskBudget,
+        bytes: u64,
+        mut sample: impl FnMut(&std::path::Path) -> Option<u64>,
+    ) -> Result<String, &'static str> {
+        let mut readings = vec![sample(j.private()), sample(j.records())];
+        for lease in j.runtime().map_err(|e| e.key())?.leases {
+            readings.push(sample(std::path::Path::new(&lease.repo)));
+        }
+        let free = readings.into_iter().try_fold(u64::MAX, |free, reading| reading.map(|n| free.min(n)));
+        self.reserve_build(j, task, budget, bytes, free)
     }
     /// A missing native reading closes admission; fixtures supply recorded readings through this pure boundary.
     pub fn prepare_build_sample(
@@ -295,15 +327,26 @@ impl Runner {
         budget: super::disk::DiskBudget,
         bytes: u64,
         free: Option<u64>,
-    ) -> Result<(), &'static str> {
+    ) -> Result<String, &'static str> {
+        self.reserve_build(j, "fixture", budget, bytes, free)
+    }
+    fn reserve_build(
+        &mut self,
+        j: &Journal,
+        task: &str,
+        budget: super::disk::DiskBudget,
+        bytes: u64,
+        free: Option<u64>,
+    ) -> Result<String, &'static str> {
         if self.halted {
             return Err("error.store.write");
         }
         if matches!(self.mission.state, MissionState::Paused | MissionState::Done | MissionState::Blocked) {
             return Err("reason.budget.paused");
         }
-        let resources = super::disk::Resources::load(j)?;
-        if let Err(key) = budget.admit(free, resources.used_bytes(j)?, bytes) {
+        let mut resources = super::disk::Resources::load(j)?;
+        let reserved = resources.outstanding_bytes(j)?;
+        if let Err(key) = budget.admit(free.map(|n| n.saturating_sub(reserved)), resources.used_bytes(j)?, bytes) {
             self.mission.state = MissionState::Paused;
             self.mission.reason = Some(key.into());
             self.quota_wake = None;
@@ -311,7 +354,7 @@ impl Runner {
             self.save(j)?;
             return Err(key);
         }
-        Ok(())
+        resources.reserve_build(j, task, bytes)
     }
     /// A worker's DoneReady is only a result proposal. The exact engine receipt decides verified status.
     pub fn completion(&mut self, j: &Journal, task: &str, tree: &str, complete: &super::wire::Complete) -> Result<bool, &'static str> {
@@ -345,8 +388,6 @@ impl Runner {
             return Err("reason.budget.paused");
         }
         let candidate = self.queue.get(task).ok_or("reason.queue.serial")?.clone();
-        self.queue.accepted(task, &candidate.base, candidate.grant_revision)?;
-        bar(&candidate)?;
         if lease.task != task || lease.base != candidate.base || lease.mission != self.mission.id {
             return Err("error.wire.stale");
         }
@@ -354,7 +395,11 @@ impl Runner {
         self.save(broker.journal())?;
         let done = |id: &str| broker.journal().effect_receipt(id).map_err(|e| e.key());
         let committed = done(&commit_id)?;
+        let had_commit = committed.is_some();
         let forwarded = done(&forward_id)?;
+        if forwarded.is_some() && !had_commit {
+            return Err("reason.project.reconcile");
+        }
         let head = if let Some(receipt) = committed {
             if receipt.outcome != super::Outcome::Done
                 || receipt.evidence.get("tree") != Some(&candidate.tree)
@@ -364,9 +409,23 @@ impl Runner {
             }
             receipt.evidence.get("head").filter(|s| super::git::valid_oid(s)).cloned().ok_or("reason.project.reconcile")?
         } else {
-            let current = grant().map_err(|e| e.key())?.ok_or("reason.grant.none")?;
-            self.queue.accepted(task, &broker.head().map_err(|e| e.key())?, current.revision)?;
+            candidate.base.clone()
+        };
+        let current = grant().map_err(|e| e.key())?.ok_or("reason.grant.none")?;
+        if current.revision != candidate.grant_revision {
+            return Err("reason.queue.stale");
+        }
+        let expected = if forwarded.is_some() { &head } else { &candidate.base };
+        if broker.head().map_err(|e| e.key())? != *expected {
+            return Err("reason.queue.stale");
+        }
+        self.queue.accepted(task, &candidate.base, current.revision)?;
+        broker.authority(&mut grant, super::Effect::FastForward).map_err(|e| e.key())?;
+        bar(&candidate)?;
+        let head = if !had_commit {
             broker.commit_proven(&mut grant, lease, &commit_id, message, &candidate.paths, &candidate.tree).map_err(|e| e.key())?
+        } else {
+            head
         };
         if let Some(receipt) = forwarded {
             if receipt.outcome != super::Outcome::Done
@@ -386,6 +445,7 @@ impl Runner {
         row.extra.insert("commitReceipt".into(), commit_id.into());
         row.extra.insert("landingReceipt".into(), forward_id.into());
         broker.journal().save_plan(&plan).map_err(|e| e.key())?;
+        self.queue_retirement(broker.journal(), lease, termination, false)?;
         self.queue.landed(task)?;
         if plan.tasks.iter().all(|t| t.state == TaskState::Done) {
             self.mission.state = MissionState::Done;
@@ -393,37 +453,119 @@ impl Runner {
             self.promotion_pending = false;
         }
         self.save(broker.journal())?;
-        broker
-            .leases()
-            .release(
-                lease,
-                super::lease::Termination {
-                    process: termination.process,
-                    tree_dead: termination.tree_dead,
-                    cost_settled: termination.cost_settled,
-                },
-            )
-            .map_err(|e| e.key())?;
-        broker.retire_worktree(&mut grant, lease, &format!("cleanup-{}", uuid::Uuid::new_v4())).map_err(|e| e.key())?;
-        self.cleanup_task(broker.journal(), task, termination)?;
+        self.recover_retirements(broker, &mut grant)?;
         Ok(head)
     }
+
+    fn queue_retirement(
+        &mut self,
+        j: &Journal,
+        lease: &super::Lease,
+        proof: super::lease::Termination,
+        abandoned: bool,
+    ) -> Result<(), &'static str> {
+        if !proof.tree_dead || !proof.cost_settled || !j.pending().map_err(|e| e.key())?.is_empty() {
+            return Err("reason.disk.needed");
+        }
+        if let Some(old) = self.retirements.get(&lease.task) {
+            if old.lease != *lease || old.process != proof.process || old.abandoned != abandoned {
+                return Err("reason.lease.live");
+            }
+        } else {
+            self.retirements.insert(
+                lease.task.clone(),
+                Retirement {
+                    lease: lease.clone(),
+                    process: proof.process,
+                    cleanup_intent: format!("cleanup-{}", uuid::Uuid::new_v4()),
+                    abandoned,
+                },
+            );
+        }
+        self.save(j)
+    }
+
+    /// The caller releases the last artifact consumer after failure/abandon/rollback; no completion is inferred.
+    pub fn retire_task<E: super::git::Executor>(
+        &mut self,
+        broker: &mut super::git::Broker<E>,
+        lease: &super::Lease,
+        proof: super::lease::Termination,
+        grant: impl FnMut() -> Result<Option<super::Grant>, super::git::GitError>,
+    ) -> Result<(), &'static str> {
+        self.queue_retirement(broker.journal(), lease, proof, true)?;
+        self.recover_retirements(broker, grant)
+    }
+
+    /// Replays only local retirement checkpoints. Pending external effects still require T4 reconciliation.
+    pub fn recover_retirements<E: super::git::Executor>(
+        &mut self,
+        broker: &mut super::git::Broker<E>,
+        mut grant: impl FnMut() -> Result<Option<super::Grant>, super::git::GitError>,
+    ) -> Result<(), &'static str> {
+        for (task, retirement) in self.retirements.clone() {
+            if retirement.abandoned
+                && let Some(candidate) = self.queue.get(&task)
+            {
+                let id = format!("abandoned-{}", retirement.lease.generation);
+                let name = format!("{id}.json");
+                broker.journal().put(&broker.journal().private().join(&name), candidate).map_err(|e| e.key())?;
+                let mut public = super::Artifact::new(
+                    &id,
+                    &task,
+                    retirement.lease.attempt,
+                    super::ArtifactKind::Findings,
+                    &candidate.base,
+                    &retirement.lease.contract_digest,
+                );
+                public.tree = Some(candidate.tree.clone());
+                public.changed = candidate.paths.clone();
+                public.extra.insert("input".into(), candidate.input.clone().into());
+                public.extra.insert("conflicts".into(), serde_json::json!(candidate.conflicts));
+                broker.journal().save_artifact(&public).map_err(|e| e.key())?;
+                self.queue.abandon(&task)?;
+                self.save(broker.journal())?;
+            }
+            let proof = super::lease::Termination { process: retirement.process, tree_dead: true, cost_settled: true };
+            let runtime = broker.journal().runtime().map_err(|e| e.key())?;
+            let held = runtime
+                .leases
+                .iter()
+                .find(|l| l.generation == retirement.lease.generation && l.task == task)
+                .ok_or("reason.lease.stale")?;
+            match held.state {
+                super::LeaseState::Held => broker.leases().release(&retirement.lease, proof).map_err(|e| e.key())?,
+                super::LeaseState::Quarantined => broker.leases().archive(&retirement.lease, proof).map_err(|e| e.key())?,
+                super::LeaseState::Released => {}
+                super::LeaseState::Releasing => return Err("reason.lease.live"),
+            }
+            broker.retire_worktree(&mut grant, &retirement.lease, &retirement.cleanup_intent).map_err(|e| e.key())?;
+            self.cleanup_task(broker.journal(), &task, proof)?;
+            self.retirements.remove(&task);
+            self.save(broker.journal())?;
+        }
+        Ok(())
+    }
     pub fn cleanup_task(&mut self, j: &Journal, task: &str, proof: super::lease::Termination) -> Result<(), &'static str> {
-        if !proof.tree_dead || !proof.cost_settled {
+        if !proof.tree_dead || !proof.cost_settled || !j.pending().map_err(|e| e.key())?.is_empty() {
             return Err("reason.disk.needed");
         }
         let mut resources = super::disk::Resources::load(j)?;
         let ids: Vec<_> = resources.entries().iter().filter(|r| r.task == task).map(|r| r.id.clone()).collect();
         for id in ids {
+            let owner = resources.entries().iter().find(|r| r.id == id).ok_or("reason.disk.resource")?.process;
+            if owner.is_some() && owner != proof.process {
+                return Err("reason.disk.needed");
+            }
             resources.unneeded(j, &id)?;
             resources.clean(
                 j,
                 &id,
-                super::lease::Termination { process: proof.process, tree_dead: proof.tree_dead, cost_settled: proof.cost_settled },
+                super::lease::Termination { process: owner, tree_dead: proof.tree_dead, cost_settled: proof.cost_settled },
             )?;
         }
         let runtime = j.runtime().map_err(|e| e.key())?;
-        for lease in runtime.leases.iter().filter(|l| l.task == task && l.state == super::LeaseState::Released) {
+        for lease in runtime.leases.iter().filter(|l| l.task == task && super::lease::retirement_known(l)) {
             let prefix = format!("patch-{}-", lease.generation);
             for entry in std::fs::read_dir(j.private()).map_err(|_| "error.store.read")? {
                 let entry = entry.map_err(|_| "error.store.read")?;

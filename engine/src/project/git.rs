@@ -296,7 +296,7 @@ impl<E: Executor> Broker<E> {
         &self.executor
     }
     // The caller must read current authority here, rather than capture a grant snapshot at admission.
-    fn authority(&self, grant: &mut impl FnMut() -> Result<Option<Grant>, GitError>, effect: Effect) -> Result<Grant, GitError> {
+    pub(crate) fn authority(&self, grant: &mut impl FnMut() -> Result<Option<Grant>, GitError>, effect: Effect) -> Result<Grant, GitError> {
         self.leases.verify_lock()?;
         let grant = grant()?.ok_or(GitError::Authority("reason.grant.none"))?;
         grant.allows(&self.repository.identity, self.revision, effect).map_err(GitError::Authority)?;
@@ -423,12 +423,8 @@ impl<E: Executor> Broker<E> {
             return Err(GitError::Lease(LeaseError::Owned));
         }
         let base = lease.base.clone();
-        let raw = root.to_str().ok_or(GitError::Repository)?;
-        let path = if let Some(unc) = raw.strip_prefix("\\\\?\\UNC\\") {
-            format!("\\\\{unc}")
-        } else {
-            raw.strip_prefix("\\\\?\\").unwrap_or(raw).into()
-        };
+        root.to_str().ok_or(GitError::Repository)?;
+        let path = native_path(&root);
         let call = Invocation::new(Path::new(&self.repository.identity.root), &["worktree", "add", "--detach", "--", &path, &base]);
         if let Err(e) = self.effect(&mut grant, id, IntentKind::Worktree, &[call], &[("path", &path), ("base", &base)], None) {
             self.leases.quarantine(lease)?;
@@ -658,6 +654,19 @@ impl<E: Executor> Broker<E> {
         self.authority(&mut grant, Effect::Worktree)?;
         let root = self.leases.retired_worktree(lease)?;
         let path = native_path(&root);
+        if let Some(receipt) = self.journal().effect_receipt(id)? {
+            if receipt.outcome == Outcome::Done
+                && receipt.evidence.get("phase").map(String::as_str) == Some("cleanup")
+                && receipt.evidence.get("path") == Some(&path)
+                && !root.exists()
+            {
+                return Ok(());
+            }
+            return Err(GitError::Process);
+        }
+        if !root.exists() {
+            return Err(GitError::Process);
+        }
         let call = Invocation::new(Path::new(&self.repository.identity.root), &["worktree", "remove", "--force", "--", &path]);
         self.effect(&mut grant, id, IntentKind::Worktree, &[call], &[("phase", "cleanup"), ("path", &path)], None)?;
         if root.exists() {

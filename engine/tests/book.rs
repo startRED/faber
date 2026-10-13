@@ -1,6 +1,8 @@
 //! Scars carry proven regression checks, never prompt rules or failure text.
 use faber_engine::book::{Scar, ScarStore};
 use faber_engine::project::wire::{ArtifactRef, CheckKind, CheckOutcome, CheckReceipt, CheckResult};
+mod support;
+use support::tempdir;
 fn receipt(id: &str, check: &str, tree: &str, result: CheckResult) -> CheckReceipt {
     CheckReceipt {
         schema: 1,
@@ -47,16 +49,14 @@ fn only_red_green_exact_check_evidence_enters_the_scar_store() {
     assert_eq!(restored.checks_for(&["ui/Projects.tsx".into()]).len(), 4);
     assert!(restored.checks_for(&["engine/src/run.rs".into()]).is_empty());
     let text = std::fs::read_to_string(dir.path().join("scars.json")).unwrap();
-    assert!(!text.contains("rule"));
-    assert!(!text.contains("failure text"));
+    let mut records: serde_json::Value = serde_json::from_str(&text).unwrap();
+    records[0]["rule"] = "Never put scar rules in a prompt".into();
+    std::fs::write(dir.path().join("scars.json"), serde_json::to_vec(&records).unwrap()).unwrap();
+    assert!(ScarStore::open(dir.path()).is_err());
 }
 #[test]
 fn unknown_or_corrupt_scar_records_are_not_an_empty_store() {
     let dir = tempdir();
     std::fs::write(dir.path().join("scars.json"), "{broken").unwrap();
     assert!(ScarStore::open(dir.path()).is_err());
-}
-
-fn tempdir() -> tempfile::TempDir {
-    tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap()
 }

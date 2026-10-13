@@ -6,6 +6,8 @@ use faber_engine::project::run::Runner;
 use faber_engine::project::store::Journal;
 use faber_engine::project::worker::{ModelPin, Worker};
 use faber_engine::project::{Brief, ContractPin, Intent, IntentKind, Mission, MissionState, ProcessId, Role};
+mod support;
+use support::tempdir;
 fn mission() -> Mission {
     Mission::new("m1", "p1", "repo", "Fix", &"1".repeat(40), 3, 1)
 }
@@ -130,6 +132,76 @@ fn stopped_runner_never_admits_builds_even_with_ample_disk_space() {
 }
 
 #[test]
+fn cleanup_distinguishes_process_free_outputs_from_another_live_process() {
+    let repo = tempdir();
+    let data = tempdir();
+    let j = Journal::open(repo.path(), data.path(), "m1").unwrap();
+    let mut r = Runner::create(&j, mission()).unwrap();
+    let mut resources = Resources::load(&j).unwrap();
+    let free = resources.register_for(&j, "free", "w1", ResourceKind::Temp, None).unwrap();
+    std::fs::create_dir_all(&free).unwrap();
+    let other = ProcessId { pid: 20, started_at: 99 };
+    let live = resources.register_for(&j, "other", "w1", ResourceKind::Build, Some(other)).unwrap();
+    std::fs::create_dir_all(&live).unwrap();
+    let result =
+        r.cleanup_task(&j, "w1", Termination { process: Some(ProcessId { pid: 10, started_at: 42 }), tree_dead: true, cost_settled: true });
+    assert!(result.is_err());
+    assert!(!free.exists(), "process-free output has no separate live owner");
+    assert!(live.exists(), "a different process still requires its own termination proof");
+}
+
+#[test]
+fn repeated_build_admission_reserves_bytes_across_restart() {
+    let repo = tempdir();
+    let data = tempdir();
+    let j = Journal::open(repo.path(), data.path(), "m1").unwrap();
+    let mut r = Runner::create(&j, mission()).unwrap();
+    let budget = DiskBudget { limit_bytes: 100, reserve_bytes: 10 };
+    r.prepare_build_sample(&j, budget, 60, Some(1000)).unwrap();
+    let mut recovered = Runner::load(&j).unwrap();
+    assert_eq!(recovered.prepare_build_sample(&j, budget, 60, Some(1000)), Err("reason.disk.low"));
+    assert_eq!(recovered.mission.state, MissionState::Paused);
+}
+
+#[test]
+fn unmaterialized_builds_reserve_native_free_space_until_retired() {
+    let repo = tempdir();
+    let data = tempdir();
+    let j = Journal::open(repo.path(), data.path(), "m1").unwrap();
+    let mut r = Runner::create(&j, mission()).unwrap();
+    let budget = DiskBudget { limit_bytes: 10000, reserve_bytes: 10 };
+    let id = r.prepare_build_with(&j, "w1", budget, 60, |_| Some(100)).unwrap();
+    assert_eq!(Resources::load(&j).unwrap().outstanding_bytes(&j).unwrap(), 60);
+    assert_eq!(r.prepare_build_with(&j, "w2", budget, 40, |_| Some(100)), Err("reason.disk.low"));
+    r.cleanup_task(&j, "w1", Termination { process: None, tree_dead: true, cost_settled: true }).unwrap();
+    assert!(!Resources::load(&j).unwrap().entries().iter().any(|r| r.id == id));
+    r.resume(&j, 3).unwrap();
+    r.prepare_build_with(&j, "w2", budget, 80, |_| Some(100)).unwrap();
+}
+
+#[test]
+fn build_admission_samples_every_write_volume_and_unknown_or_full_volume_pauses() {
+    for reading in [Some(9), None] {
+        let repo = tempdir();
+        let data = tempdir();
+        let j = Journal::open(repo.path(), data.path(), "m1").unwrap();
+        let mut r = Runner::create(&j, mission()).unwrap();
+        let mut paths = vec![];
+        assert!(
+            r.prepare_build_with(&j, "w1", DiskBudget { limit_bytes: 1000, reserve_bytes: 10 }, 20, |path| {
+                paths.push(path.to_path_buf());
+                if path == j.private() { Some(1000) } else { reading }
+            })
+            .is_err()
+        );
+        assert!(paths.contains(&j.private().to_path_buf()));
+        assert!(paths.contains(&j.records().to_path_buf()));
+        assert!(Resources::load(&j).unwrap().entries().is_empty());
+        assert_eq!(r.mission.state, MissionState::Paused);
+    }
+}
+
+#[test]
 fn durable_write_fault_closes_runner_admission_and_keeps_the_old_checkpoint() {
     use faber_engine::store::{Disk, RealDisk};
     use std::sync::{
@@ -200,8 +272,4 @@ fn completions_require_the_engine_receipt_for_the_exact_candidate_and_input() {
     let complete: Complete = serde_json::from_value(serde_json::json!({"summary":"Done","next":"review","receipt":"green"})).unwrap();
     assert!(r.completion(&j, "w1", &"2".repeat(40), &complete).unwrap());
     assert!(r.completion(&j, "w1", &"3".repeat(40), &complete).is_err());
-}
-
-fn tempdir() -> tempfile::TempDir {
-    tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap()
 }

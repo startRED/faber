@@ -41,7 +41,9 @@ keeps ownership of its current/next/last-good slots. No local update or installe
 
 ## R106 disk ownership
 
-Native free-space sampling happens at build admission. Unknown readings, insufficient reserve or a
+Native free-space sampling covers private, repository and recorded git-common write volumes at build admission.
+Durable build reservations count unmaterialized bytes against native free space and the mission disk limit.
+Unknown readings, insufficient reserve or a
 mission disk-limit overflow pause admission before any build resource is created. Checked arithmetic
 cannot wrap into extra capacity. Owned worktrees count alongside build, temporary and log resources.
 
@@ -50,6 +52,11 @@ unsettled costs, unresolved intents and links retain their data. A completed loc
 known lease, removes the exact broker-owned worktree, and deletes unused build/temp/log resources and
 obsolete private patch backups. Public records and authoritative safety ledgers remain. No shared
 Cargo cache, owner checkout, installed release or running executable is a cleanup target.
+
+Retirement checkpoints survive candidate removal and replay known deletion receipts without repeating git effects.
+The same seam retires settled failed, stalled, abandoned and rolled-back attempts after their final consumer releases
+them, retaining the discarded candidate as an artifact. Different process owners and unresolved effects remain parked.
+See the [review disposition](2026-10-13-task-5-review.md) for reproductions, false subclaims and mutation evidence.
 
 ## Evidence and remaining qualification
 

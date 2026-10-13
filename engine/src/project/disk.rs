@@ -48,6 +48,8 @@ pub struct Resource {
     pub task: String,
     pub process: Option<ProcessId>,
     needed: bool,
+    #[serde(default)]
+    reserved_bytes: u64,
     #[serde(flatten)]
     extra: Extra,
 }
@@ -101,10 +103,21 @@ impl Resources {
         kind: ResourceKind,
         process: Option<ProcessId>,
     ) -> Result<PathBuf, &'static str> {
+        self.register_reserved(j, id, task, kind, process, 0)
+    }
+    fn register_reserved(
+        &mut self,
+        j: &Journal,
+        id: &str,
+        task: &str,
+        kind: ResourceKind,
+        process: Option<ProcessId>,
+        reserved_bytes: u64,
+    ) -> Result<PathBuf, &'static str> {
         if !valid_id(task) || !valid_id(id) || self.entries.len() >= 4096 || self.entries.iter().any(|r| r.id == id) {
             return Err("reason.disk.resource");
         }
-        let resource = Resource { id: id.into(), kind, task: task.into(), process, needed: true, extra: Extra::new() };
+        let resource = Resource { id: id.into(), kind, task: task.into(), process, needed: true, reserved_bytes, extra: Extra::new() };
         let path = Self::path(j, &resource)?;
         if path.exists() {
             return Err("reason.disk.resource");
@@ -121,6 +134,16 @@ impl Resources {
         next.save(j)?;
         *self = next;
         Ok(())
+    }
+    pub fn reserve_build(&mut self, j: &Journal, task: &str, bytes: u64) -> Result<String, &'static str> {
+        let id = format!("build-{}", uuid::Uuid::new_v4());
+        self.register_reserved(j, &id, task, ResourceKind::Build, None, bytes)?;
+        Ok(id)
+    }
+    pub fn outstanding_bytes(&self, j: &Journal) -> Result<u64, &'static str> {
+        self.entries
+            .iter()
+            .try_fold(0_u64, |n, r| n.checked_add(r.reserved_bytes.saturating_sub(size(&Self::path(j, r)?)?)).ok_or("reason.disk.low"))
     }
     pub fn clean(&mut self, j: &Journal, id: &str, proof: Termination) -> Result<(), &'static str> {
         let r = self.entries.iter().find(|r| r.id == id).ok_or("reason.disk.resource")?;
@@ -145,7 +168,10 @@ impl Resources {
         &self.entries
     }
     pub fn used_bytes(&self, j: &Journal) -> Result<u64, &'static str> {
-        let mut used = self.entries.iter().try_fold(0_u64, |n, r| n.checked_add(size(&Self::path(j, r)?)?).ok_or("reason.disk.low"))?;
+        let mut used = self
+            .entries
+            .iter()
+            .try_fold(0_u64, |n, r| n.checked_add(size(&Self::path(j, r)?)?.max(r.reserved_bytes)).ok_or("reason.disk.low"))?;
         let private = real_path(j.private()).map_err(|e| e.key())?.canonicalize().map_err(|_| "error.store.read")?;
         for lease in j.runtime().map_err(|e| e.key())?.leases {
             if let Some(value) = lease.extra.get("gitRoot") {

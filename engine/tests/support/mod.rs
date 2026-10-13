@@ -297,3 +297,6 @@ pub async fn drive(
     let mismatches = fake.mismatches.lock().unwrap().clone();
     (events, mismatches)
 }
+pub fn tempdir() -> tempfile::TempDir {
+    tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap()
+}

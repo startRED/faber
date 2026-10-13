@@ -181,6 +181,10 @@ impl Queue {
     pub fn get(&self, id: &str) -> Option<&Candidate> {
         self.entries.iter().find(|c| c.id == id)
     }
+    pub(crate) fn abandon(&mut self, id: &str) -> Result<Candidate, &'static str> {
+        let index = self.entries.iter().position(|c| c.id == id).ok_or("reason.queue.serial")?;
+        self.entries.remove(index).ok_or("reason.queue.serial")
+    }
     pub fn front(&self) -> Option<&Candidate> {
         self.entries.front()
     }

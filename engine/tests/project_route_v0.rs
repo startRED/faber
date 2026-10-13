@@ -3,11 +3,20 @@ use faber_engine::project::Role;
 use faber_engine::project::run::{RouteStep, RouteV0};
 use faber_engine::project::store::Journal;
 use faber_engine::project::worker::ModelPin;
+mod support;
+use support::tempdir;
 #[test]
 fn route_v0_keeps_typed_pins_cost_and_receipts_and_never_becomes_a_plan() {
     let repo = tempdir();
     let data = tempdir();
     let j = Journal::open(repo.path(), data.path(), "m1").unwrap();
+    let plan = faber_engine::project::Plan::new(
+        "m1",
+        7,
+        vec![faber_engine::project::Task::new("keep", "Existing plan", faber_engine::project::TaskKind::Research)],
+    );
+    j.save_plan(&plan).unwrap();
+    let before = std::fs::read(j.records().join("plan.json")).unwrap();
     let mut route = RouteV0 {
         schema: 1,
         shape: "faber.code-change".into(),
@@ -21,7 +30,7 @@ fn route_v0_keeps_typed_pins_cost_and_receipts_and_never_becomes_a_plan() {
         }],
     };
     assert!(route.record(&j).is_err());
-    assert!(j.plan().unwrap().is_none());
+    assert_eq!(std::fs::read(j.records().join("plan.json")).unwrap(), before);
     use faber_engine::project::{Intent, IntentKind, Outcome, Receipt};
     j.record_intent(&Intent::new("seen", "m1", IntentKind::Dispatch, 3, 1)).unwrap();
     j.record_receipt(&Receipt::new("seen", Outcome::Done, 2)).unwrap();
@@ -31,9 +40,6 @@ fn route_v0_keeps_typed_pins_cost_and_receipts_and_never_becomes_a_plan() {
     assert!(report.contains("faber.code-change"));
     assert!(report.contains("cliVersion"));
     assert!(report.contains("receipts"));
-    assert!(j.plan().unwrap().is_none());
-}
-
-fn tempdir() -> tempfile::TempDir {
-    tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap()
+    assert_eq!(std::fs::read(j.records().join("plan.json")).unwrap(), before);
+    assert_eq!(j.plan().unwrap().unwrap(), plan);
 }
