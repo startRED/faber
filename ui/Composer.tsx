@@ -3,6 +3,7 @@ import type { Choice, Effort, Vendor } from './api.ts';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 import type { Option } from './models.ts';
+import { reveal } from './motion.ts';
 
 export interface Draft {
   text: string;
@@ -75,18 +76,18 @@ export function Composer(props: Props) {
   onCleanup(() => clearTimeout(pause));
   let fileInput: HTMLInputElement | undefined;
   let field: HTMLTextAreaElement | undefined;
+  let growing: Animation | undefined;
   const resize = () => {
     if (!field?.isConnected) return;
     const previous = field.getBoundingClientRect().height;
     const style = getComputedStyle(field);
-    // Restore the rendered height before enabling the transition, so measurement never paints a collapse.
-    field.style.transition = 'none';
+    // Measured and set in one task, so the collapse to 0 px is never painted.
     field.style.height = '0px';
     const height = Math.min(parseFloat(style.maxHeight), Math.max(parseFloat(style.minHeight), draft().text ? field.scrollHeight : 0));
-    field.style.height = `${previous}px`;
-    field.getBoundingClientRect();
-    field.style.removeProperty('transition');
     field.style.height = `${height}px`;
+    // The field is at its new size at once; the card around it opens up to it (a clip, not a layout change).
+    growing?.cancel();
+    growing = height > previous + 1 ? reveal(field.closest<HTMLElement>('.composer')!, height - previous) : undefined;
   };
   createEffect(on(() => draft().text, () => queueMicrotask(resize), { defer: true }));
   onMount(() => {
