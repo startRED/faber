@@ -1,9 +1,11 @@
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import { createResource, createSignal, For, Index, Show, type Accessor } from 'solid-js';
-import { api, type Choice, type Message, type ToolUse } from './api.ts';
+import { api, type Choice, type Message, type ToolUse, type VendorUsage } from './api.ts';
 import { Asks } from './Ask.tsx';
 import { Icon, VendorMark } from './Glyphs.tsx';
+import { QuotaCard } from './QuotaCard.tsx';
+import { untilReset } from './Sidebar.tsx';
 import { fromEngine, t } from './i18n.ts';
 import { prettyModel, vendorName, type Option } from './models.ts';
 
@@ -72,6 +74,7 @@ interface Shared {
   conversationId: string;
   options: Option[];
   onBranch: OnBranch;
+  usage?: VendorUsage[];
 }
 
 function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
@@ -85,11 +88,13 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
           <VendorMark vendor={m().vendor} />
           <b>{m().vendor ? vendorName(m().vendor!) : t('model.auto')}</b>
         </span>
-        <span>{streaming() ? t('answer.answering') : m().vendor ? prettyModel(m().model) : ''}</span>
+        <span>{streaming() && m().waitUntil ? t('run.waiting', { when: untilReset(m().waitUntil!) }) : streaming() ? t('answer.answering') : m().vendor ? prettyModel(m().model) : ''}</span>
         <Show when={m().reason}>
-          <em>· {fromEngine(m().reason)}</em>
+          <em>· {fromEngine(m().reason, { when: m().waitUntil ? untilReset(m().waitUntil!) : t('quota.unknown'), from: m().movedFrom ? vendorName(m().movedFrom!) : '', to: m().vendor ? vendorName(m().vendor!) : '' })}</em>
         </Show>
       </div>
+      <Show when={m().pace}>{(pace) => <p class="pace">{t(`reason.pace.${pace().kind}`, { vendor: vendorName(pace().vendor) })}</p>}</Show>
+      <QuotaCard id={props.conversationId} m={m()} usage={props.usage ?? []} />
       <Show when={m().thinking}>
         <details class="thinking">
           <summary>{t('answer.thinking')}</summary>
@@ -113,7 +118,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
       <Asks conversationId={props.conversationId} turnId={m().id} permissions={waiting()} />
       <div class="md" onClick={openLinks}>
         <div innerHTML={html(m().text)} />
-        <Show when={streaming() && !waiting().length}>
+        <Show when={streaming() && !waiting().length && !m().waitUntil}>
           <span class="cursor" aria-hidden="true" />
         </Show>
       </div>
@@ -126,8 +131,9 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
         <div class="note">{t('answer.stopped')}</div>
       </Show>
       <Show when={m().error}>
-        <div class="note err">{fromEngine(m().error)}</div>
+        <div class="note err">{fromEngine(m().error, { when: m().waitUntil ? untilReset(m().waitUntil!) : t('quota.unknown') })}</div>
       </Show>
+      <Show when={m().incomplete}><p class="note">{t('answer.meterIncomplete')}</p></Show>
       <Show when={!streaming()}>
         <div class="actions">
           <button onClick={() => void navigator.clipboard.writeText(m().text)}>{t('answer.copy')}</button>

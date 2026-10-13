@@ -326,8 +326,13 @@ impl Ctx {
                 Err(_) => {}
             }
         };
-        page.wait_for_within("the screen to render", "!!document.querySelector('.app')", timeout)
-            .map_err(|e| format!("{e}. stderr: {}", self.stderr(id)))?;
+        page.cdp.wait_loaded(deadline).map_err(|e| format!("{e}. stderr: {}", self.stderr(id)))?;
+        page.wait_for_within(
+            "the screen to render",
+            "!!document.querySelector('.app')",
+            deadline.saturating_duration_since(Instant::now()),
+        )
+        .map_err(|e| format!("{e}. stderr: {}", self.stderr(id)))?;
         self.guard_desktop(id)?;
         self.record(id)?;
         Ok(Opened { id, pid: self.live[id].pid, page })
@@ -460,7 +465,15 @@ impl Ctx {
             }
             Err(e) => problems.push(e),
         }
-        let escaped: Vec<String> = self.live.iter().flat_map(|l| l.escaped.iter()).map(|r| format!("{}#{}", r.name, r.pid)).collect();
+        let escaped: Vec<String> = self
+            .live
+            .iter()
+            .flat_map(|l| {
+                l.escaped.iter().map(move |r| {
+                    format!("{}#{} (parent {}, born {}, root {}, recorded tree {:?})", r.name, r.pid, r.parent, r.born, l.pid, l.seen)
+                })
+            })
+            .collect();
         if !escaped.is_empty() {
             problems.push(format!("a process of the app is outside its job object, so it cannot be ended: {}", escaped.join(", ")));
         }

@@ -2,7 +2,7 @@
 
 use super::{Result, Scenario, ask, claude_chat, ensure, eventually, no_cli, pass_look, pause, same, start_settings, system_motion};
 use crate::app::Ctx;
-use crate::page::{Page, css, role, role_any};
+use crate::page::{Page, css, role};
 use serde_json::json;
 use std::time::{Duration, Instant};
 
@@ -323,7 +323,8 @@ fn keeps_appearance(ctx: &mut Ctx) -> Result {
     let page = &mut app.page;
     let general = page.named("button", "set.general")?;
     page.click(&general)?;
-    page.check(&role_any("switch"))?;
+    let hooks = page.named("switch", "set.hooksBody")?;
+    page.check(&hooks)?;
     // The look applies once it is saved, but the switch does not wait for the screen; closing earlier could lose it.
     let file = ctx.sb.data.join("settings.json");
     eventually("the choices to reach settings.json", Duration::from_secs(15), || {
@@ -347,7 +348,7 @@ fn keeps_appearance(ctx: &mut Ctx) -> Result {
     page.press("Control+,")?;
     let general = page.named("heading", "set.general")?;
     page.wait_visible(&general)?;
-    same(page.is_checked(&role_any("switch"))?, true, "the saved choice")
+    same(page.is_checked(&hooks)?, true, "the saved choice")
 }
 
 fn fits_every_look(ctx: &mut Ctx) -> Result {
@@ -530,7 +531,7 @@ fn refused_save(ctx: &mut Ctx) -> Result {
     // A switch moves before its save is answered; a refused save puts it back.
     let general = page.named("button", "set.general")?;
     page.click(&general)?;
-    let hooks = role_any("switch");
+    let hooks = page.named("switch", "set.hooksBody")?;
     let before = page.is_checked(&hooks)?;
     page.click(&hooks)?;
     page.wait_for("the switch to be put back", &format!("document.querySelector('.sw2').checked === {before}"))?;

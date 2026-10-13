@@ -1,7 +1,7 @@
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
-import type { Appearance, CheckResult, Look, QuotaReading } from '../../ui/api.ts';
+import type { Appearance, CheckResult, Look, QuotaReading, Settings as Saved } from '../../ui/api.ts';
 import { AppearanceSection } from '../../ui/Appearance.tsx';
 import { previewer } from '../../ui/appearance.ts';
 import { Mini } from '../../ui/FirstRun.tsx';
@@ -12,6 +12,7 @@ import { es } from '../../ui/locales/es.ts';
 import { fr } from '../../ui/locales/fr.ts';
 import { ptBR } from '../../ui/locales/pt-BR.ts';
 import { accountLine, seedQuotas, usageRows } from '../../ui/sidebar.ts';
+import { Settings } from '../../ui/Settings.tsx';
 import { check, deepEqual, equal, ok } from './check.ts';
 
 const look = (over: Partial<Look> = {}): Look => ({
@@ -130,6 +131,11 @@ check('settings: usage lines are the short window first; an old reading keeps it
 
 check('settings: the new sections are written in every language, and the file hint, the locks and the privacy facts are not left in English', () => {
   const keys = [
+    'set.notifications',
+    'set.notifyMe',
+    'set.notifyHint',
+    'set.playSound',
+    'set.soundHint',
     'set.usage',
     'set.privacy',
     'set.accountsHint',
@@ -191,6 +197,44 @@ type AppearanceProps = Parameters<typeof AppearanceSection>[0];
 const section = (props: AppearanceProps) => mount(() => createComponent(AppearanceSection, props));
 const useButton = (host: HTMLElement) => host.querySelector<HTMLButtonElement>('.ap-bar .btn.primary')!;
 const presetButton = (host: HTMLElement, id: string) => host.querySelector<HTMLButtonElement>(`[aria-labelledby="look-${id}-name"]`)!;
+
+check('settings: notification switches default on, save separately and restore a refused change without playing anything', async () => {
+  const [saved, setSaved] = createSignal<Saved>({});
+  const patches: Saved[] = [];
+  let accept = false;
+  const view = mount(() => createComponent(Settings, {
+    look: look(), get saved() { return saved(); }, vendors: [], quotas: {}, now: 0,
+    onClose: () => {}, onOpenSetup: () => {},
+    onSave: async (patch) => {
+      patches.push(patch);
+      if (accept) setSaved({ ...saved(), ...patch });
+      return accept;
+    },
+  }));
+  try {
+    const switches = view.host.querySelectorAll<HTMLInputElement>('.row:last-child input[role="switch"]');
+    equal(switches.length, 2);
+    const notify = switches[0]!;
+    const sound = switches[1]!;
+    equal(notify.checked, true);
+    equal(sound.checked, true);
+    notify.click();
+    await tick();
+    equal(notify.checked, true, 'a refused save restores the switch');
+    deepEqual(saved(), {});
+    accept = true;
+    notify.click();
+    await tick();
+    equal(notify.checked, false);
+    equal(sound.checked, true, 'disabling notifications keeps the sound preference');
+    sound.click();
+    await tick();
+    notify.click();
+    await tick();
+    deepEqual(saved(), { notifications: true, notificationSound: false });
+    deepEqual(patches, [{ notifications: false }, { notifications: false }, { notificationSound: false }, { notifications: true }]);
+  } finally { view.stop(); }
+});
 
 check('settings: an answer that arrives after Appearance closed leaves the draft alone', async () => {
   const [draft, setDraft] = createSignal<Appearance>({ base: 'oficina' });

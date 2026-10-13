@@ -34,11 +34,17 @@ fn a_codex_rate_limit_update_gives_plan_credits_and_reach() {
         "secondary": null, "credits": {"hasCredits": false, "unlimited": false, "balance": "0"}, "spendControlReached": null, "planType": "pro", "rateLimitReachedType": null}}});
     assert_eq!(
         codex_signals(&msg),
-        Signals { reach: Some(Reach::Clear), paid_fallback: Some(false), plan: Some("pro".into()), ..Signals::default() }
+        Signals {
+            reach: Some(Reach::Clear),
+            paid_fallback: Some(false),
+            plan: Some("pro".into()),
+            credit_balance: Some(0.0),
+            ..Signals::default()
+        }
     );
     let out = json!({"params": {"rateLimits": {"primary": {"resetsAt": 100}, "secondary": {"resetsAt": 900}, "rateLimitReachedType": "primary", "credits": {"hasCredits": true}}}});
     let s = codex_signals(&out);
-    assert_eq!(s.reach, Some(Reach::Out(Some(900.0))));
+    assert_eq!(s.reach, Some(Reach::Out(Some(100.0))));
     assert_eq!(s.paid_fallback, Some(true));
 }
 
@@ -94,4 +100,31 @@ fn a_message_that_says_nothing_about_the_account_is_empty() {
     assert!(Signals::default().is_empty());
     assert!(claude_signals(&json!({ "type": "rate_limit_event", "rate_limit_info": {} })).is_empty());
     assert!(!claude_signals(&json!({ "rate_limit_info": { "isUsingOverage": false } })).is_empty());
+}
+
+#[test]
+fn claude_provider_and_environment_overrides_are_billed_per_use() {
+    use faber_engine::signals::claude_env_billed;
+    for field in [json!({"apiKeySource":"env"}), json!({"apiProvider":"bedrock"})] {
+        let mut status = json!({"loggedIn":true,"authMethod":"claude.ai","subscriptionType":"max"});
+        status.as_object_mut().unwrap().extend(field.as_object().unwrap().clone());
+        assert_eq!(claude_plan(&status.to_string()).billing, Some(Billing::UsageBilled));
+    }
+    for name in ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX"] {
+        assert!(claude_env_billed([name.into()]));
+    }
+    assert!(!claude_env_billed(["PATH".into(), "FABER_DATA_DIR".into()]));
+}
+
+#[test]
+fn a_codex_reached_limit_uses_only_blocking_windows_and_unknown_means_no_reset() {
+    let limits = |kind, primary, secondary| {
+        json!({"params":{"rateLimits":{
+            "primary":{"usedPercent":primary,"resetsAt":100}, "secondary":{"usedPercent":secondary,"resetsAt":900},
+            "rateLimitReachedType":kind
+        }}})
+    };
+    assert_eq!(codex_signals(&limits("primary", 100, 30)).reach, Some(Reach::Out(Some(100.0))));
+    assert_eq!(codex_signals(&limits("primary", 100, 100)).reach, Some(Reach::Out(Some(900.0))));
+    assert_eq!(codex_signals(&limits("unrecognised", 10, 30)).reach, Some(Reach::Out(None)));
 }

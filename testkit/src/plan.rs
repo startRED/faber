@@ -131,6 +131,13 @@ mod tests {
     }
 
     #[test]
+    fn the_bootstrap_keeps_a_default_limit_without_overriding_the_environment() {
+        let config: toml::Value = include_str!("../../.cargo/config.toml").parse().unwrap();
+        assert_eq!(config["build"]["jobs"].as_integer(), Some(4));
+        assert!(!config["alias"]["t"].as_str().unwrap().split_whitespace().any(|arg| arg == "-j"));
+    }
+
+    #[test]
     fn the_runner_respects_a_positive_cargo_build_limit() {
         assert_eq!(capped_jobs(16, Some("4")), 4);
         assert_eq!(capped_jobs(16, Some("2")), 2);

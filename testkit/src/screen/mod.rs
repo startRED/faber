@@ -150,18 +150,8 @@ pub fn ask(page: &mut Page, question: &str) -> Result {
     // first time; Send turns enabled once the message can go.
     let send = page.named("button", "composer.send")?;
     page.wait_enabled(&send)?;
-    // On a busy machine the key can be lost on its way to the page. The composer empties once Enter has been taken, so
-    // press again, a few times at most, while it still holds the question.
-    for _ in 0..3 {
-        page.press_on(&composer, "Enter")?;
-        let empty = eventually("the composer to empty", Duration::from_secs(2), || {
-            page.eval_on(&composer, "return { value: el.value };").is_ok_and(|v| v["value"] == "")
-        });
-        if empty.is_ok() {
-            return Ok(());
-        }
-    }
-    Err("Enter was pressed three times and the message did not go".to_string())
+    page.press_on(&composer, "Enter")?;
+    page.wait_for("the composer to empty", "document.querySelector('.composer textarea')?.value === ''")
 }
 
 /// Makes the page report the system's motion preference, whatever the machine says: `true` is "reduce motion" (the Windows

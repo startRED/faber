@@ -335,13 +335,15 @@ nothing else moves.
 
 ### Worker envelope
 
-Every worker turn ends with one JSON object, version 1, with no unknown fields. The engine refuses an envelope over
+Every worker turn ends with one JSON object, version 2, with no unknown fields. Durable journal records remain version 1;
+old records stay readable and retain their extension data. Wire version 1 is not accepted for a new dispatch.
+The engine refuses an envelope over
 512 KB, a stale task, attempt, base, contract digest or lease generation (`error.wire.stale`), an action outside the role
 (`error.wire.role`), and a path that leaves the worktree (`error.wire.path`). A file write carries the SHA-256 of the
 content it replaces, or none for a new file.
 
 ```json
-{"schema": 1, "task": "fix", "attempt": 1, "base": "3d3d502", "contract": "<sha-256>", "lease": 4,
+{"schema": 2, "task": "fix", "attempt": 1, "base": "3d3d502", "contract": "<sha-256>", "lease": 4,
  "action": {"patch": {"ops": [
    {"write": {"path": "engine/src/x.rs", "expect": "<sha-256 of the file as read>", "content": "..."}},
    {"rename": {"from": "a.rs", "to": "b.rs", "expect": "<sha-256>"}}
@@ -360,6 +362,46 @@ content it replaces, or none for a new file.
 
 The AI answers only technical decisions; direction, taste, money and legal ones wait for the person
 (`error.decision.person`), in autonomous mode too.
+
+Wire v2 adds optional fields without changing role authority. `ping` is `Order`, `Found`, `Blocked`, `NeedEyes`,
+`DoneReady` or `Disagree`; `note` is at most 60 whitespace-delimited words. Envelope `requires`, `checks` and `quotes`
+are verbatim-text ids; task `requires` continues to mean task dependencies. Briefs retain each id's exact UTF-8 text.
+Task drafts add `labels` (verb, at most eight normalized needs, risk, freshness and facets), scoped `paths`, check ids
+and a `kit` receipt/digest pin. Plans add the deliverable `sheet`, grounded `bar` and `compileReceipt` reference.
+Completions add a check `receipt` id, bounded check outcomes, artifact paths/SHA-256 hashes, claims tied to checks,
+assumptions with provenance, `unconfirmed`, `kitUsed` and newly requested needs. Unknown nested fields remain errors.
+
+`wire::CheckReceipt` is distinct from the journal's effect `Receipt`; it binds checks and evidence to one candidate,
+model, effort and known or unknown cost, with links to effect receipts. Check results are pass, fail or not-run:
+pass requires evidence; failure and not-run require a reason. `CompileReceipt` records phase timestamps and cost tags.
+These types publish the shared T5K/T5B/T5 contract. A worker's claimed receipt is data; only engine-verified proofs and
+the independent exact-tree review can authorize acceptance. Missing optional fields do not imply a passing bar or kit.
+
+### Automatic project kits
+
+`project/kit.rs` and its submodules implement the pure T5K contracts. Cards are written from reported inventory,
+scoped project sections and named engine proofs; kits are assembled from needs, never saved as hand-written loadouts.
+`Inventory::new` validates, hashes and indexes an immutable snapshot once per inventory change. Assembly uses that
+snapshot, origin priors, job ownership, conflicts, role budgets and safety filters. Versioned Beta outcomes only break
+ties. A blind, shuffled shortlist supports shadow comparisons; the code selection remains authoritative.
+
+Persist the selection with `Journal::record_kit` before dispatch. Compose approved, hash-checked inline bodies into
+the existing safe role prompt with `compose_role_prompt`; the role prompt remains its byte-for-byte prefix. This
+adapter changes no driver flags or policy. Record init with `attest_kit` before work, then add the outcome with
+`complete_kit`. Completion cannot replace the selection or its attestation. Receipts live in
+`.faber/missions/<id>/kits/<task>-<attempt>.json` and preserve additive root and nested metadata. Card caches and cited
+field briefs do the same; a newer durable schema is refused as newer. Dispatch and card-writer replies retain their
+strict schemas. A failed write prevents dispatch.
+The runner must enforce T2 admission and handle mismatched/unreported init; these receipts never grant containment.
+
+G0 is empty. G1 returns at most three cited suggestions with downsides, with installation parked. G2 stores bounded,
+cited primary-source briefs in `.faber/briefs/`; G3 retains verified role controls. Only a missing required capability
+parks its dependent node. The pure start-card adapter supplies two locale keys; T9 owns their screen and translations.
+The Auto labels adapter shares the existing classification turn and preserves its model-choice table. T5 integrates
+classification, fresh pass sessions, dispatch, proofs and two-order comparisons; T5B resolves native bar proof IDs.
+
+See [the T5K proof report](research/2026-10-12-project-kits.md) for measured synthetic performance and the live G9
+evidence still required by T13. Fixture attestation is not proof of native isolation.
 
 ### Screen commands and event
 
@@ -442,3 +484,70 @@ Nothing blocks the network at the operating system, and WebView2 has no document
 that bypasses the switches is not seen. The audit sees only requests that reach the fake release server.
 Known limit: the loopback-only rule is not enforced. Test processes get dead proxy variables and the switches above, but
 nothing stops a program from opening its own connection; blocking outbound traffic for test processes is deferred.
+
+
+## Auto quota pacing
+
+Auto requires billing confirmed as a subscription before any user, router, pulse or summary request. The same quota gate
+checks every dispatch and rechecks waiting requests; plan checks spend no quota. Unknown billing is denied. The shell
+starts account watching before Auto, and the screen supplies the local UTC offset on start and each minute. Vendor-wide
+windows pace the whole shared account against approximately one seventh of the weekly quota per day; family windows
+restrict only that family. Paid-fallback evidence survives restart, and missing evidence remains possible. Approval for
+paid credits is bound to one conversation, reply and vendor, is consumed by that dispatch, and cannot authorize an
+auxiliary request or bypass unknown billing.
+
+A quota pulse asks Haiku for one word in a fresh, tool-free session only when Auto is in use and its reading is stale,
+at most once every twenty minutes. It closes after sixty seconds. Codex quota readings do not require a model request.
+`budget.json` stores bounded quota history, metered spans, learned whole-account shape, explained model weights and
+own spend. User turns, routing, pulses and hand-over summaries count in Faber's own API-equivalent USD, including cache
+reads and writes. Percentage changes and shared-account credits never become Faber's own dollars. Codex prices each
+request's token delta at its context tier; a multi-request turn does not inherit a long-context fee just from its sum.
+Incomplete meters show a lower bound and cannot teach weights or plan size. Idle account movement is flagged as foreign,
+even below the two-point resolution of the numerical outside-use estimate. Own-cost learning accepts only explained,
+non-overlapping stretches; the weekly shape continues to describe the whole account. The spec's R89/R90 sections are
+in `docs/superpowers/specs/2026-10-11-auto-quota-pacing-design.md`.
+
+When included quota runs out, Auto tries another eligible profile once, carrying the conversation and partial reply;
+long histories use a bounded, tool-free summary. It waits only for a usable reset within six hours, with guarded
+resumption, Stop and shutdown cancellation. A pinned vendor asks before moving. The composer retains an unsent request
+and its attachments without overwriting newer input; explicit resumption clears only the matching restored draft.
+Settings separates whole-account bars from Faber's own spend and explains foreign use, incomplete meters and billing.
+
+### Synthetic monthly acceptance
+
+`engine/tests/simulation.rs` runs four weeks with 200 deterministic seeds, busy weekday usage, shared-account use and
+a burst. Both modes use the same gate and synthetic capacity: 100 cost units for the smaller vendor, 400 for the larger.
+The simulation provides ideal fresh readings; it does not model real account latency or establish a live guarantee.
+The full test is ignored in ordinary runs and was run explicitly with
+`cargo test --release -p faber-engine --test simulation -- --ignored --nocapture` on 2026-10-12.
+
+| Measure | Pacing on | Pacing off |
+| --- | ---: | ---: |
+| Mean exhausted hours per four-week run | 0.135 | 0.900 |
+| Seeds with any vendor exhausted in four weeks | 2.0% | 14.5% |
+| Median unused share of the larger quota at reset | 2.5% | 0.9% |
+| Mean profile IQ + agent score on the tasks that matter | 81.42 | 80.58 |
+| Dropped task share | 0.597% | 0.151% |
+| Mean dropped tasks per four-week run | 65.5 | 16.6 |
+
+No budget constants were tuned for this run. The four-seed smoke uses `[0, 1, 2, 12]`; seed 12 adds an unpaced-exhaustion
+case because the original first four seeds all tied at zero exhausted hours. The smoke asserts strictly fewer exhausted
+hours, fewer than 1% dropped tasks, no worse quality, fewer than 5% exhausted seeds, and less than 25% unused larger quota.
+It passed with 0.000 versus 1.500 exhausted hours and 0.844% versus 0.325% drops. The full 200-seed run passed all the same
+acceptance limits.
+
+### Measurement still requiring the owner
+
+The manual `engine/examples/cache_probe.rs` now obtains one baseline before its measured pulses, retains each window's
+latest reading, checks unchanged resets and plausible readings, closes immediately on overage, rejection or lost billing,
+and applies the gate before each pulse with a sixty-second timeout. It prints own API-equivalent USD separately from
+account movement, which is an upper bound on a pulse's quota effect because the accounts are shared. Its three tests
+use fake events only, covering the denominator, invalid/reset/missing readings, duplicate windows and immediate stops.
+The real-account cache experiment and the real CLI pulse memory peak were not run here. No cache result or pulse peak
+is claimed. The owner can record them after running the manual probe; `docs/roadmap.md` was kept unstaged as instructed.
+
+Existing hidden-screen memory proofs passed: Task 11 measured 108-110 MB idle, 184 MB after six looks, and 141 MB for
+1,000 messages. These measurements used the fake CLI and are not a real pulse memory measurement. With
+`CARGO_TARGET_DIR=target/proofs`, testkit artifacts and screenshots live in `target/proofs/faber-test`; no junction is
+needed. The locale keys, review disposition and implementation limits are listed in
+`docs/superpowers/auto-quota-pacing-report.md`.

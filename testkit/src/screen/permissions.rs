@@ -29,14 +29,16 @@ fn answers_a_card(ctx: &mut Ctx) -> Result {
     ask(page, TWO_WRITES)?;
 
     // The CLI asks to write a.txt. Allow it ("Always allow" holds the same word, so the name must match exactly); the card for b.txt follows, and the recording denies that one.
-    let first = css(".ask").has_text("a.txt");
+    let first = css("article .ask").has_text("a.txt");
     page.wait_visible(&first)?;
-    let allow = page.named("button", "ask.allow")?.exact();
+    let allow = first.clone().role("button", &page.text_of("ask.allow")?).exact();
     page.click(&allow)?;
     page.wait_gone(&first)?;
-    let second = css(".ask").has_text("b.txt");
+    let second = css("article .ask").has_text("b.txt");
     page.wait_visible(&second)?;
-    let deny = page.named("button", "ask.deny")?.exact();
+    page.wait_visible(&css(".runcol .ask").has_text("b.txt"))?;
+    let deny = second.clone().role("button", &page.text_of("ask.deny")?).exact();
+    ensure(page.count(&deny)? == 1, || "the answer locator must name one button while both question copies are visible".to_string())?;
     page.click(&deny)?;
 
     // The recording ends the turn only if the CLI got both answers as recorded.

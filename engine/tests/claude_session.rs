@@ -43,6 +43,7 @@ async fn opus_4_interrupt_after_completion_keeps_the_warm_session() {
     support::read_message(&mut input).await;
     support::emit(&mut output, serde_json::json!({"type":"result","subtype":"success"})).await;
     assert!(matches!(rx.recv().await, Some(EngineEvent::Done { .. })));
+    assert!(matches!(rx.recv().await, Some(EngineEvent::Signals(s)) if s.billing == Some(faber_engine::budget::Billing::Unknown)));
     session.interrupt();
     tokio::task::yield_now().await;
     tokio::time::advance(Duration::from_secs(6)).await;
@@ -338,4 +339,22 @@ fn the_name_is_appended_to_the_default_prompt_of_a_conversation_but_never_to_a_s
     assert_eq!(after(&resumed, "--append-system-prompt"), after(&claude_args(&named(launch(Area::Chat))), "--append-system-prompt"));
     let side = claude_args(&named(ClaudeLaunch { instructions: Some("Route.".into()), ..launch(Area::Project) }));
     assert!(!side.contains(&"--append-system-prompt".into()));
+}
+
+#[tokio::test]
+async fn a_turn_without_a_quota_notice_clears_subscription_confirmation_after_settlement() {
+    let entries = fixture("claude", "chat").into_iter().filter(|e| e.msg["type"] != "rate_limit_event").collect();
+    let (events, mismatches) = run(
+        entries,
+        "In one sentence: why is the sky blue?",
+        |e, _| matches!(e, EngineEvent::Signals(s) if s.billing == Some(faber_engine::budget::Billing::Unknown)),
+    )
+    .await;
+    assert!(mismatches.is_empty());
+    let done = events.iter().position(|e| matches!(e, EngineEvent::Done { .. })).unwrap();
+    let cleared = events
+        .iter()
+        .position(|e| matches!(e, EngineEvent::Signals(s) if s.billing == Some(faber_engine::budget::Billing::Unknown)))
+        .unwrap();
+    assert!(done < cleared, "settle the own cost before clearing the billing verdict");
 }

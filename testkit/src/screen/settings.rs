@@ -26,6 +26,7 @@ pub fn scenarios() -> Vec<Scenario> {
             name: "the quota in the sidebar opens Settings on the usage limits, and a reload shows the same figures",
             run: opens_at_usage,
         },
+        Scenario { name: "a click waits for the target's rendered layout before sending one pointer click", run: clicks_rendered_target },
         Scenario {
             name: "a look is a draft: the page wears it only after Use this look, and Back to default undoes it",
             run: look_is_a_draft,
@@ -89,10 +90,14 @@ fn walks_the_sections(ctx: &mut Ctx) -> Result {
     page.wait_for("the quota to show", "document.querySelector('.usage .share')?.textContent === '47%'")?;
     open_settings(page)?;
 
-    // General: the language and the one switch.
+    // General: the language, hooks and both notification switches.
     let language = page.labelled("set.language")?;
     page.wait_visible(&language)?;
-    same(page.count(&role_any("switch"))?, 1, "switches on General")?;
+    same(page.count(&role_any("switch"))?, 3, "switches on General")?;
+    for key in ["set.notifyMe", "set.playSound"] {
+        let toggle = page.named("switch", key)?;
+        same(page.is_checked(&toggle)?, true, "notifications default on")?;
+    }
     ctx.shot(&mut app, "settings-general")?;
 
     // Appearance: the six looks are drawn before the picture is taken.
@@ -163,13 +168,20 @@ fn opens_at_usage(ctx: &mut Ctx) -> Result {
     let shares = "[...document.querySelectorAll('.usage-v .urow .share')].map((e) => e.textContent).join(' ')";
     same(page.eval(shares)?.as_str(), Some("7% 47%"), "the figures at the usage limits")?;
     // A screen that loads again asks the engine and shows the same readings.
-    page.eval("location.reload()")?;
-    eventually("the quota after a reload", Duration::from_secs(25), || {
-        page.eval("document.querySelector('.usage .share')?.textContent === '47%'").is_ok_and(|v| v == true)
-    })?;
+    page.reload()?;
+    page.wait_for("the quota after a reload", "document.querySelector('.usage .share')?.textContent === '47%'")?;
     open_settings(page)?;
     open_section(page, "set.usage")?;
     page.wait_for("the same figures", &format!("({shares}) === '7% 47%'"))
+}
+
+fn clicks_rendered_target(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let mut app = ctx.launch(claude_chat(ctx))?;
+    let page = &mut app.page;
+    page.eval("(() => { const b = document.createElement('button'); b.id = 'layout-target'; b.style.cssText = 'position:fixed;left:300px;top:300px;width:80px;height:40px;z-index:9999'; b.onclick = () => window.__targetClicks = (window.__targetClicks ?? 0) + 1; b.scrollIntoView = () => requestAnimationFrame(() => { b.style.left = '600px'; }); document.body.append(b); window.__targetClicks = 0; })()")?;
+    page.click(&css("#layout-target"))?;
+    same(page.eval("window.__targetClicks")?.as_u64(), Some(1), "exactly one click reaches the target after its layout changes")
 }
 
 fn look_is_a_draft(ctx: &mut Ctx) -> Result {

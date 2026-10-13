@@ -73,6 +73,7 @@ pub fn codex_thread(area: Area, model: Option<&str>) -> Map<String, Value> {
 pub struct Totals {
     pub input: u64,
     pub cached: u64,
+    pub written: Option<u64>,
     pub output: u64,
 }
 
@@ -81,6 +82,7 @@ impl Totals {
         Totals {
             input: self.input.saturating_sub(base.input),
             cached: self.cached.saturating_sub(base.cached),
+            written: self.written.zip(base.written).and_then(|(now, before)| now.checked_sub(before)),
             output: self.output.saturating_sub(base.output),
         }
     }
@@ -96,12 +98,17 @@ pub struct CodexTurnState {
     pub total: Option<Totals>,
     /// `total` when the current turn started.
     pub base: Option<Totals>,
+    pub model: String,
+    cost: f64,
+    priced: bool,
+    price_incomplete: bool,
+    prompt: Option<u64>,
 }
 
 impl CodexTurnState {
     /// A thread that starts empty has used nothing yet; a resumed one learns its total from the update that comes first.
     pub fn new(resumed: bool) -> Self {
-        CodexTurnState { total: (!resumed).then(Totals::default), ..Default::default() }
+        CodexTurnState { total: (!resumed).then(|| Totals { written: Some(0), ..Totals::default() }), ..Default::default() }
     }
 }
 
@@ -161,12 +168,58 @@ pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<
         }
         "turn/started" => {
             state.base = state.total;
+            state.cost = 0.0;
+            state.priced = false;
+            state.price_incomplete = false;
+            state.prompt = None;
             vec![]
         }
         "thread/tokenUsage/updated" => {
+            let before = state.total;
             let t = &p["tokenUsage"]["total"];
-            let g = |k: &str| t[k].as_u64().unwrap_or(0);
-            state.total = Some(Totals { input: g("inputTokens"), cached: g("cachedInputTokens"), output: g("outputTokens") });
+            let (Some(input), Some(cached), Some(output)) =
+                (t["inputTokens"].as_u64(), t["cachedInputTokens"].as_u64(), t["outputTokens"].as_u64())
+            else {
+                state.price_incomplete = true;
+                return vec![];
+            };
+            if before.is_some_and(|previous| {
+                input < previous.input
+                    || cached < previous.cached
+                    || output < previous.output
+                    || previous.written.zip(t["cacheWriteInputTokens"].as_u64()).is_some_and(|(old, new)| new < old)
+            }) {
+                state.price_incomplete = true;
+                return vec![];
+            }
+            state.total = Some(Totals { input, cached, written: t["cacheWriteInputTokens"].as_u64(), output });
+            if state.base.is_some()
+                && let Some(before) = before
+            {
+                let total = state.total.expect("just set");
+                let delta = total.since(before);
+                if delta.input > 0 || delta.output > 0 {
+                    let last = p["tokenUsage"]["last"]["inputTokens"].as_u64();
+                    if delta.input > 0 {
+                        state.prompt =
+                            last.filter(|input| *input >= delta.input).or_else(|| (delta.input <= 272_000).then_some(delta.input));
+                    } else if last.is_some() {
+                        state.prompt = last;
+                    }
+                    let context = state.prompt.unwrap_or(0);
+                    // Without a request-sized reading, standard short-context rates are only a lower bound.
+                    state.price_incomplete |= context == 0 && (delta.input > 272_000 || delta.input == 0);
+                    let cost = delta.written.and_then(|write| {
+                        crate::usage::api_price_for_prompt(&state.model, delta.input, delta.output, delta.cached, write, 0, context)
+                    });
+                    if let Some(cost) = cost {
+                        state.cost += cost;
+                        state.priced = true;
+                    } else {
+                        state.price_incomplete |= !state.model.is_empty();
+                    }
+                }
+            }
             vec![]
         }
         "account/rateLimits/updated" => [&p["rateLimits"]["primary"], &p["rateLimits"]["secondary"]]
@@ -189,14 +242,14 @@ pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<
             let u = used.unwrap_or_default();
             vec![EngineEvent::Done {
                 ok: status == "completed",
-                reason: status,
-                cost_total_usd: None,
+                reason: p["turn"]["error"]["message"].as_str().map(String::from).unwrap_or(status),
+                cost_total_usd: state.priced.then_some(state.cost),
                 input_tokens: u.input,
                 output_tokens: u.output,
                 cache_read_tokens: u.cached,
-                cache_write_tokens: 0,
+                cache_write_tokens: u.written.unwrap_or(0),
                 cache_write_1h_tokens: 0,
-                incomplete: used.is_none(),
+                incomplete: used.is_none() || u.written.is_none() || state.price_incomplete,
             }]
         }
         "error" => {
@@ -510,6 +563,7 @@ async fn serve(
                                 let thread = &msg["result"]["thread"];
                                 let id = s(&thread["id"]);
                                 let shown = thread["model"].as_str().map(String::from).or_else(|| t.params.model.clone()).unwrap_or_else(|| "codex".into());
+                                t.state.model = shown.clone();
                                 (t.sink)(EngineEvent::Started { session_id: id.clone(), model: shown });
                                 by_id.insert(id.clone(), key);
                                 t.id = Some(id.clone());
@@ -706,52 +760,56 @@ async fn serve(
 
 /// Asks a short-lived `codex app-server` for the account's quota windows and plan, so the first reading does not wait for a
 /// turn. The answers are dressed as the notifications the server sends later and go through the same parser; the rest of
-/// them (the account's email and other details) is dropped unread. Gives no events on any failure.
+/// them (the account's email and other details) is dropped unread. A failed reply does not discard the other reply's evidence.
 pub async fn read_codex_limits(bin: &str, cwd: &Path, windows: bool, spawn: Spawner, timeout: Duration) -> Vec<EngineEvent> {
     let Ok(p) = spawn(bin, &codex_args(Area::Chat, windows, false), cwd) else { return vec![] };
     let mut stdin = p.stdin;
     let mut child = p.child;
     let mut lines = BufReader::new(p.stdout).lines();
+    let mut events = vec![];
     let ask = async {
         let init = json!({ "id": 1, "method": "initialize", "params": { "clientInfo": { "name": "faber", "title": "Faber", "version": "0.0.0" } } });
         let _ = proc::write_line(&mut *stdin, &init).await;
-        let mut events = vec![];
         let mut answered = 0;
         while let Ok(Some(line)) = lines.next_line().await {
             let Ok(msg) = serde_json::from_str::<Value>(&line) else { continue };
-            if !msg["error"].is_null() {
-                return vec![];
-            }
             match msg["id"].as_i64() {
                 Some(1) => {
+                    if !msg["error"].is_null() {
+                        return;
+                    }
                     let _ = proc::write_line(&mut *stdin, &json!({ "method": "initialized" })).await;
                     let _ = proc::write_line(&mut *stdin, &json!({ "id": 2, "method": "account/rateLimits/read" })).await;
                     let _ =
                         proc::write_line(&mut *stdin, &json!({ "id": 3, "method": "account/read", "params": { "refreshToken": false } }))
                             .await;
                 }
-                Some(2) => {
-                    let note = json!({ "method": "account/rateLimits/updated", "params": { "rateLimits": msg["result"]["rateLimits"] } });
-                    events.extend(parse_codex_notification(&note, &mut CodexTurnState::default()));
-                    answered += 1;
+                Some(2) if answered & 1 == 0 => {
+                    if msg["error"].is_null() {
+                        let note =
+                            json!({ "method": "account/rateLimits/updated", "params": { "rateLimits": msg["result"]["rateLimits"] } });
+                        events.extend(parse_codex_notification(&note, &mut CodexTurnState::default()));
+                    }
+                    answered |= 1;
                 }
-                Some(3) => {
-                    let account = &msg["result"]["account"];
-                    // `chatgpt`, `apiKey`, ...: the same mode names `account/updated` uses, in lower case.
-                    let mode = account["type"].as_str().map(str::to_ascii_lowercase);
-                    let note = json!({ "method": "account/updated", "params": { "authMode": mode, "planType": account["planType"] } });
-                    events.extend(parse_codex_notification(&note, &mut CodexTurnState::default()));
-                    answered += 1;
+                Some(3) if answered & 2 == 0 => {
+                    if msg["error"].is_null() {
+                        let account = &msg["result"]["account"];
+                        // `chatgpt`, `apiKey`, ...: the same mode names `account/updated` uses, in lower case.
+                        let mode = account["type"].as_str().map(str::to_ascii_lowercase);
+                        let note = json!({ "method": "account/updated", "params": { "authMode": mode, "planType": account["planType"] } });
+                        events.extend(parse_codex_notification(&note, &mut CodexTurnState::default()));
+                    }
+                    answered |= 2;
                 }
                 _ => {}
             }
-            if answered == 2 {
+            if answered == 3 {
                 break;
             }
         }
-        events
     };
-    let events = tokio::time::timeout(timeout, ask).await.unwrap_or_default();
+    let _ = tokio::time::timeout(timeout, ask).await;
     proc::stop(&mut *stdin, &mut child).await;
     events
 }

@@ -26,5 +26,13 @@ tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 
-[lints]
-workspace = true
+[target.'cfg(target_os = "linux")'.dependencies]
+# Already used by the notification plugin; its Linux builder cannot suppress the desktop's own sound.
+notify-rust = "4"
+
+# Only tray/native.rs may use FFI; the engine and testkit keep the workspace's forbid.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

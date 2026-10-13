@@ -1,7 +1,7 @@
 //! The shell of the screen: the layout at each width, the running column and when it opens, the new conversation with
 //! its greeting, and the quota in the sidebar's footer.
 
-use super::{Result, Scenario, ask, claude_chat, ensure, eventually, no_cli, pause, same, start_settings, system_motion};
+use super::{Result, Scenario, ask, claude_chat, ensure, no_cli, pause, same, start_settings, system_motion};
 use crate::app::Ctx;
 use crate::page::{Page, css};
 use crate::sandbox::{CliSlot, Launch};
@@ -372,7 +372,7 @@ fn opens_at_load(ctx: &mut Ctx) -> Result {
     let page = &mut app.page;
     ask_two_writes(page)?;
     page.wait_visible(&css(".runcol .ask").has_text("a.txt"))?;
-    page.eval("location.reload()")?;
+    page.reload()?;
     page.wait_visible(&css(".run-btn.need"))?;
     page.wait_visible(&css(".runcol .ask").has_text("a.txt"))?;
     // Closed by the user, it stays closed for the same question.
@@ -603,10 +603,8 @@ fn shows_the_quota(ctx: &mut Ctx) -> Result {
     ctx.shot(&mut app, "quota")?;
     let page = &mut app.page;
     // A screen that loads again asks the engine and shows the same reading.
-    page.eval("location.reload()")?;
-    eventually("the quota after a reload", Duration::from_secs(20), || {
-        page.eval("document.querySelector('.usage .share')?.textContent === '47%'").is_ok_and(|v| v == true)
-    })
+    page.reload()?;
+    page.wait_for("the quota after a reload", "document.querySelector('.usage .share')?.textContent === '47%'")
 }
 
 // ---- Seeded conversations and the checks of the second pass of the review.
@@ -804,7 +802,7 @@ fn keys_until_the_question(page: &mut Page, chords: &[&str]) -> Result<std::time
         pause(0.3);
         if page.is_visible(&card)? {
             after += 1;
-            if after >= 4 {
+            if after >= 4 && turn % chords.len() == chords.len() - 1 {
                 return Ok(last);
             }
         }
@@ -819,6 +817,7 @@ fn waits_for_every_key(ctx: &mut Ctx) -> Result {
     let page = &mut app.page;
     let model = page.labelled("composer.model")?;
     page.select_option(&model, "Claude Haiku")?;
+    delay_open(page, 800)?;
     ask(page, TWO_WRITES)?;
     // The conversation opens and its composer is drawn; a few words go in, and the caret goes to 3 and comes back.
     page.wait_for(
@@ -829,6 +828,9 @@ fn waits_for_every_key(ctx: &mut Ctx) -> Result {
     page.fill(&composer, "hello")?;
     page.press("ArrowLeft")?;
     page.press("ArrowLeft")?;
+    let initial = page.eval_on(&composer, "return { text: el.value, at: el.selectionStart, end: el.selectionEnd };")?;
+    same(initial["text"].as_str(), Some("hello"), "the draft before the snapshot arrives")?;
+    same((initial["at"].as_u64(), initial["end"].as_u64()), (Some(3), Some(3)), "the initial caret")?;
     // Only arrow keys from here on: they move the caret and change no text, so no `input` event comes. The question
     // arrives meanwhile, and the column must keep out of the way for as long as the keys come.
     let last = keys_until_the_question(page, &["ArrowLeft", "ArrowRight"])?;

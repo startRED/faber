@@ -212,7 +212,11 @@ fn result_events(msg: &Value) -> Vec<EngineEvent> {
     let counters = total.is_some_and(|t| t > 0.0) || prompt + n("output_tokens") > 0;
     vec![EngineEvent::Done {
         ok: msg["subtype"] == "success" && msg["is_error"] != true,
-        reason: msg["terminal_reason"].as_str().or(msg["subtype"].as_str()).unwrap_or_default().into(),
+        reason: msg["errors"]
+            .as_array()
+            .filter(|errors| !errors.is_empty())
+            .map(|errors| errors.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" "))
+            .unwrap_or_else(|| msg["terminal_reason"].as_str().or(msg["subtype"].as_str()).unwrap_or_default().into()),
         cost_total_usd: total.filter(|_| counters),
         input_tokens: prompt,
         output_tokens: n("output_tokens"),
@@ -256,6 +260,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
         let mut pending: HashMap<String, Value> = HashMap::new();
         let mut closed = false;
         let mut control_id = 0u32;
+        let mut quota_seen = false;
         let mut watch = proc::TurnWatch::default();
         let mut queued = vec![];
         loop {
@@ -286,6 +291,8 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                     }
                     match serde_json::from_str::<Value>(&line) {
                         Ok(msg) => {
+                            quota_seen |= msg["type"] == "rate_limit_event";
+                            let finished = msg["type"] == "result";
                             if project {
                                 match crate::project::policy::reject_native(&mut *stdin, crate::model::Vendor::Claude, &msg).await {
                                     Ok(true) => continue,
@@ -294,7 +301,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                                 }
                             }
                             watch.activity();
-                            if msg["type"] == "result" { watch.finish(); }
+                            if finished { watch.finish(); }
                             for event in parse_claude_message(&msg) {
                                 if let EngineEvent::Permission { request_id, input, .. } = &event {
                                     pending.insert(request_id.clone(), input.clone());
@@ -302,12 +309,16 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                                 }
                                 on_event(event);
                             }
+                            if finished && !quota_seen {
+                                on_event(EngineEvent::Signals(crate::signals::Signals { billing: Some(crate::budget::Billing::Unknown), ..Default::default() }));
+                            }
                             if closed && !watch.active() {
                                 proc::stop(&mut *stdin, &mut child).await;
                                 break;
                             }
-                            if msg["type"] == "result" {
+                            if finished {
                                 for turn in std::mem::take(&mut queued) {
+                                    quota_seen = false;
                                     watch.begin(project);
                                     let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
                                 }
@@ -319,6 +330,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                 cmd = rx.recv(), if !closed => match cmd {
                     Some(SessionCommand::Send(turn)) => {
                         if watch.stopping() { queued.push(turn); continue; }
+                        quota_seen = false;
                         watch.begin(project);
                         let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
                     }

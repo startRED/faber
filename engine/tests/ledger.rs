@@ -34,7 +34,7 @@ fn the_history_is_bounded() {
     }
     assert_eq!(l.history["five_hour"].len(), 200);
     for i in 0..1000 {
-        l.span(Span { start: i as f64, end: i as f64 + 1.0, model: "a".into(), cost: None });
+        l.span(Span { incomplete: false, start: i as f64, end: i as f64 + 1.0, model: "a".into(), cost: None });
     }
     assert_eq!(l.spans.len(), 200);
 }
@@ -43,12 +43,12 @@ fn the_history_is_bounded() {
 fn the_shortest_vendor_wide_window_is_the_one_learned_from() {
     let mut l = VendorLedger::default();
     l.record("seven_day", 0.4, RESET, BASE, 0);
-    assert_eq!(l.primary(), Some("seven_day"));
+    assert_eq!(l.primary(BASE), Some("seven_day"));
     l.record("five_hour", 0.1, RESET, BASE, 0);
     l.record("seven_day_opus", 0.1, RESET, BASE, 0);
-    assert_eq!(l.primary(), Some("five_hour"));
+    assert_eq!(l.primary(BASE), Some("five_hour"));
     l.record("5_minutes", 0.1, RESET, BASE, 0);
-    assert_eq!(l.primary(), Some("5_minutes"));
+    assert_eq!(l.primary(BASE), Some("5_minutes"));
 }
 
 #[test]
@@ -117,14 +117,28 @@ fn a_typed_plan_does_not_survive_a_detection_that_disagrees() {
     assert_eq!(l.typed_plan, None);
 }
 
-/// Three hours of readings with one clean stretch in the middle: quiet, quiet, then `points` more with a turn of cost `cost`.
+/// Consecutive 15-second turns: every reading is a completion, starting from the preceding turn's baseline.
 fn block(l: &mut VendorLedger, k: usize, points: f64, cost: f64) {
-    let t = BASE + 3.0 * HOUR * k as f64;
+    let t = BASE + 15.0 * k as f64;
+    let reset = BASE + 5.0 * HOUR;
     let used = 0.05 + points * k as f64 / 100.0;
-    l.record("five_hour", used, RESET, t, 0);
-    l.record("five_hour", used, RESET, t + HOUR, 0);
-    l.span(Span { start: t + 1.2 * HOUR, end: t + 1.5 * HOUR, model: "a".into(), cost: Some(cost) });
-    l.record("five_hour", used + points / 100.0, RESET, t + 2.0 * HOUR, 0);
+    if k == 0 {
+        l.record("five_hour", used, reset, t, 0);
+    }
+    l.span(Span { incomplete: false, start: t, end: t + 15.0, model: "a".into(), cost: Some(cost) });
+    l.record("five_hour", used + points / 100.0, reset, t + 15.0, 0);
+}
+
+#[test]
+fn calibration_fixtures_use_short_turns_and_completion_only_readings() {
+    let mut l = VendorLedger::default();
+    for k in 0..2 {
+        block(&mut l, k, 3.0, 0.5);
+    }
+    assert!(l.spans.iter().all(|s| s.end - s.start == 15.0), "ordinary turns take 15 seconds in this fixture");
+    let completions: Vec<_> = l.spans.iter().map(|s| s.end).collect();
+    let readings: Vec<_> = l.history["five_hour"].iter().skip(1).map(|p| p.at).collect();
+    assert_eq!(readings, completions, "after the previous completion's baseline, every reading ends a metered turn");
 }
 
 #[test]
@@ -133,14 +147,14 @@ fn a_capacity_that_jumps_is_a_plan_change_the_name_did_not_announce() {
     for k in 0..8 {
         block(&mut l, k, 3.0, 0.5);
     }
-    let now = BASE + 30.0 * HOUR;
+    let now = BASE + 8.0 * 15.0;
     assert!(!l.learn_weights(now));
     near(l.weights.capacity.unwrap(), 6.0);
     for k in 8..28 {
-        block(&mut l, k, 3.0, 0.125);
+        block(&mut l, k, 3.0, 2.0);
     }
-    let later = BASE + 100.0 * HOUR;
-    assert!(l.learn_weights(later), "24 points per cost unit against 6");
+    let later = BASE + 28.0 * 15.0;
+    assert!(l.learn_weights(later), "1.5 points per dollar against 6: an explained plan upgrade");
     assert_eq!(l.weights.capacity, None);
     assert_eq!(l.since, later);
     assert!(l.relearning(later + HOUR));
@@ -150,8 +164,8 @@ fn a_capacity_that_jumps_is_a_plan_change_the_name_did_not_announce() {
 fn outside_use_shows_in_the_snapshot_as_a_jump() {
     let mut l = VendorLedger::default();
     let now = BASE + 10.0 * HOUR;
-    l.record("five_hour", 0.10, RESET, now - 3.0 * HOUR, 0);
-    l.record("five_hour", 0.16, RESET, now - HOUR, 0);
+    l.record("five_hour", 0.10, RESET, now - 2.0 * HOUR, 0);
+    l.record("five_hour", 0.16, RESET, now, 0);
     assert!(l.snap(now).jumped);
     assert!(l.outside(now).outside > 0.0);
 }
@@ -195,6 +209,7 @@ fn a_full_ledger_stays_small() {
         }
         for i in 0..500 {
             v.span(Span {
+                incomplete: false,
                 start: 1_791_000_000.123 + i as f64,
                 end: 1_791_000_030.456 + i as f64,
                 model: "claude-sonnet-5-5".into(),
@@ -285,4 +300,32 @@ fn fields_a_newer_faber_wrote_survive_in_the_ledger() {
     assert_eq!(back["daily"]["spent"], 1.5, "an older Faber must not drop a newer allocation");
     assert_eq!(back["claude"]["grants"][0]["id"], "g1");
     assert_eq!(back["claude"]["since"], 1.0);
+}
+
+#[test]
+fn paid_fallback_survives_a_restart_and_missing_evidence_stays_conservative() {
+    use faber_engine::budget::{Billing, Purpose, Why, gate};
+    for flag in [Some(true), None] {
+        let mut ledger = VendorLedger { paid_fallback: flag, ..VendorLedger::default() };
+        ledger.record("seven_day", 0.95, RESET, BASE, 0);
+        let mut restored: VendorLedger = serde_json::from_str(&serde_json::to_string(&ledger).unwrap()).unwrap();
+        restored.billing = Billing::Subscription;
+        assert_eq!(restored.paid_fallback, flag);
+        assert_eq!(gate(&restored.snap(BASE), None, Purpose::Pulse, false, BASE), Err(Why::Paid));
+    }
+    let mut legacy: VendorLedger = serde_json::from_str("{}").unwrap();
+    legacy.billing = Billing::Subscription;
+    legacy.record("seven_day", 0.95, RESET, BASE, 0);
+    assert_eq!(gate(&legacy.snap(BASE), None, Purpose::Router, false, BASE), Err(Why::Paid));
+}
+
+#[test]
+fn expired_readings_leave_the_live_primary_and_are_pruned_on_refresh() {
+    let mut l = VendorLedger::default();
+    l.record("five_hour", 1.0, BASE + HOUR, BASE, 0);
+    l.record("seven_day", 0.05, RESET, BASE, 0);
+    assert_eq!(l.primary(BASE + 2.0 * HOUR), Some("seven_day"));
+    assert_eq!(l.snap(BASE + 2.0 * HOUR).windows.len(), 1);
+    l.record("seven_day", 0.06, RESET, BASE + 2.0 * HOUR, 0);
+    assert!(!l.readings.contains_key("five_hour"));
 }

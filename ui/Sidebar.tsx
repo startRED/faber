@@ -89,6 +89,7 @@ export function Sidebar(props: Props) {
     <div class="crow">
       <button class="item" aria-current={row.c.id === props.place.id} onClick={() => props.onOpen(row.c)}>
         <span>{row.c.title}</span>
+        <Show when={props.running.find((r) => r.conversationId === row.c.id)?.waitUntil}>{(at) => <span class="waiting-label" title={t('run.waiting', { when: untilReset(at()) })}>{t('run.waiting', { when: untilReset(at()) })}</span>}</Show>
       </button>
       <button class="x" classList={{ confirm: confirming() === row.c.id }} aria-label={t('side.delete', { title: row.c.title })} onClick={() => remove(row.c.id)}>
         {confirming() === row.c.id ? t('side.confirmDelete') : '×'}
