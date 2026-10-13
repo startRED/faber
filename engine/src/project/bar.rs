@@ -1052,11 +1052,24 @@ pub fn software_bar(sheet: &DeliverableSheet) -> Vec<BarCheck> {
 /// Owner decision E10: the quality bar wins over the date; never let the lead remove a mandatory check.
 pub fn verify_mandatory_checks(sheet: &DeliverableSheet, proposed_bar: &[BarCheck]) -> Result<(), BarError> {
     let full_bar = software_bar(sheet);
-    let proposed_ids: BTreeSet<&str> = proposed_bar.iter().map(|c| c.id.as_str()).collect();
+    let mut proposed_ids = BTreeSet::new();
+    for check in proposed_bar {
+        check.validate().map_err(|_| BarError::Malformed(check.id.clone()))?;
+        if !proposed_ids.insert(check.id.as_str()) {
+            return Err(BarError::Malformed(check.id.clone()));
+        }
+    }
 
     for check in &full_bar {
-        if check.mandatory && !proposed_ids.contains(check.id.as_str()) {
-            return Err(BarError::MissingMandatoryCheck(check.id.clone()));
+        if check.mandatory {
+            let proposed =
+                proposed_bar.iter().find(|c| c.id == check.id).ok_or_else(|| BarError::MissingMandatoryCheck(check.id.clone()))?;
+            let mut expected = check.clone();
+            // Ownership is assigned by compilation, never a change to the requirement.
+            expected.owner = proposed.owner.clone();
+            if &expected != proposed {
+                return Err(BarError::Malformed(check.id.clone()));
+            }
         }
     }
     Ok(())
@@ -1066,9 +1079,18 @@ pub fn verify_mandatory_checks(sheet: &DeliverableSheet, proposed_bar: &[BarChec
 pub fn validate_ground(repo_root: &Path, ground: &Ground) -> Result<(), BarError> {
     match ground.kind {
         GroundKind::Repository => {
-            let (file_part, heading_part) = ground.reference.split_once('#').unwrap_or((&ground.reference, ""));
+            let (file_part, heading_part) = ground
+                .reference
+                .split_once('#')
+                .filter(|(_, h)| !h.trim().is_empty())
+                .ok_or_else(|| BarError::InvalidGround(ground.reference.clone()))?;
+            let scoped = super::lease::normalized(file_part).map_err(|_| BarError::InvalidGround(ground.reference.clone()))?;
+            if scoped.is_empty() {
+                return Err(BarError::InvalidGround(ground.reference.clone()));
+            }
 
-            let file_path = repo_root.join(file_part);
+            let file_path =
+                super::lease::real_path(&repo_root.join(scoped)).map_err(|_| BarError::InvalidGround(ground.reference.clone()))?;
             if !file_path.is_file() {
                 return Err(BarError::InvalidGround(format!("repository file '{}' does not exist", file_part)));
             }
@@ -1196,6 +1218,9 @@ pub fn apply_critic(bar: &[BarCheck], additions: &[BarCheck]) -> Result<Vec<BarC
     for addition in additions {
         let norm = addition.attribute.to_ascii_lowercase();
         if let Some(existing) = out.iter_mut().find(|c| c.attribute == norm) {
+            if existing.mandatory && existing != addition {
+                return Err(BarError::Malformed(existing.id.clone()));
+            }
             *existing = addition.clone();
             existing.attribute = norm;
         } else {
@@ -1326,6 +1351,7 @@ impl CompilerError {
 /// - Rejects generic nodes lacking check ID or scoped path
 /// - Rejects orphan checks and tasks
 pub fn validate_compiler_graph(tasks: &[super::Task], bar: &[BarCheck], deliverables: &[String]) -> Result<(), CompilerError> {
+    super::Plan::new("compiler", 0, tasks.to_vec()).validate().map_err(|_| CompilerError::OrphanTask("invalid-graph".into()))?;
     for task in tasks {
         if task.checks.is_empty() {
             return Err(CompilerError::GenericNodeLacksCheck(task.id.clone()));
@@ -1336,9 +1362,16 @@ pub fn validate_compiler_graph(tasks: &[super::Task], bar: &[BarCheck], delivera
     }
 
     for check in bar {
-        let has_owner = tasks.iter().any(|t| t.id == check.owner || t.checks.contains(&check.id));
+        let has_owner = tasks.iter().any(|t| t.id == check.owner && t.checks.contains(&check.id));
         if !has_owner {
             return Err(CompilerError::OrphanCheck(check.id.clone()));
+        }
+        if check.validate().is_err() || check.paths.is_empty() || check.evidence.trim().is_empty() || check.pass.trim().is_empty() {
+            return Err(CompilerError::OrphanEvidence(check.id.clone()));
+        }
+        let owner = tasks.iter().find(|t| t.id == check.owner).ok_or_else(|| CompilerError::OrphanCheck(check.id.clone()))?;
+        if !owner.proofs.contains(&check.proof) || check.paths.iter().any(|p| !owner.paths.iter().any(|area| super::overlaps(area, p))) {
+            return Err(CompilerError::OrphanEvidence(check.id.clone()));
         }
     }
 
@@ -1371,6 +1404,12 @@ pub fn validate_compiler_graph(tasks: &[super::Task], bar: &[BarCheck], delivera
     for task in tasks {
         if !needed.contains(&task.id) {
             return Err(CompilerError::OrphanTask(task.id.clone()));
+        }
+        if task.checks.iter().any(|id| !bar.iter().any(|c| &c.id == id)) {
+            return Err(CompilerError::OrphanCheck(task.id.clone()));
+        }
+        if task.paths.iter().any(|p| super::lease::normalized(p).is_err() || super::clean_path(p).is_none_or(|p| p.is_empty())) {
+            return Err(CompilerError::GenericNodeLacksPath(task.id.clone()));
         }
     }
 

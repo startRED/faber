@@ -1,6 +1,5 @@
 //! Check receipts, partial reruns, content addressing, and first-party native checks.
 use super::wire::{CheckOutcome, CheckReceipt, CheckResult, CompileReceipt};
-use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -19,34 +18,8 @@ pub struct CheckCandidate {
 
 /// Computes the content-addressed digest of a check execution candidate.
 pub fn compute_check_digest(candidate: &CheckCandidate) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(candidate.check_id.as_bytes());
-    hasher.update(b"\0");
-    hasher.update(candidate.brief.as_bytes());
-    hasher.update(b"\0");
-    for input in &candidate.inputs {
-        hasher.update(input.as_bytes());
-        hasher.update(b";");
-    }
-    hasher.update(b"\0");
-    hasher.update(candidate.loadout.as_bytes());
-    hasher.update(b"\0");
-    hasher.update(candidate.model.as_bytes());
-    hasher.update(b"\0");
-    hasher.update(candidate.base_revision.as_bytes());
-    hasher.update(b"\0");
-    hasher.update(candidate.toolchain.as_bytes());
-    hasher.update(b"\0");
-    for dep in &candidate.dependencies {
-        hasher.update(dep.as_bytes());
-        hasher.update(b";");
-    }
-    hasher.update(b"\0");
-    for env in &candidate.environment {
-        hasher.update(env.as_bytes());
-        hasher.update(b";");
-    }
-    format!("{:x}", hasher.finalize())
+    // JSON preserves both field and list boundaries, including embedded delimiters.
+    super::lease::hash(&serde_json::to_vec(candidate).expect("string-only candidate serializes"))
 }
 
 #[derive(Debug, Clone, Default)]
@@ -57,7 +30,11 @@ pub struct CheckCache {
 
 impl CheckCache {
     pub fn record(&mut self, digest: &str, outcome: &CheckOutcome) {
-        self.by_digest.insert(digest.to_string(), outcome.clone());
+        if outcome.validate().is_ok() {
+            self.by_digest.insert(digest.to_string(), outcome.clone());
+        } else {
+            self.by_digest.remove(digest);
+        }
     }
 
     pub fn get(&self, digest: &str) -> Option<&CheckOutcome> {
@@ -88,7 +65,10 @@ impl CheckCache {
         }
 
         for task_id in to_invalidate {
-            self.by_task.remove(&task_id);
+            if let Some(checks) = self.by_task.remove(&task_id) {
+                let ids: BTreeSet<_> = checks.iter().map(|c| &c.id).collect();
+                self.by_digest.retain(|_, c| !ids.contains(&c.id));
+            }
         }
     }
 }
@@ -100,6 +80,9 @@ pub enum ProofError {
     MissingReason,
     MalformedArtifact,
     MissingPhases,
+    MissingCheck,
+    DuplicateCheck,
+    CheckFailed,
 }
 
 impl ProofError {
@@ -110,6 +93,9 @@ impl ProofError {
             ProofError::MissingReason => "error.proof.missingReason",
             ProofError::MalformedArtifact => "error.proof.malformedArtifact",
             ProofError::MissingPhases => "error.proof.missingPhases",
+            ProofError::MissingCheck => "error.proof.missingCheck",
+            ProofError::DuplicateCheck => "error.proof.duplicateCheck",
+            ProofError::CheckFailed => "error.proof.checkFailed",
         }
     }
 }
@@ -119,19 +105,37 @@ pub fn validate_check_receipt(receipt: &CheckReceipt, expected_candidate: &str) 
     if receipt.candidate != expected_candidate {
         return Err(ProofError::CandidateMismatch);
     }
+    if receipt.schema != super::SCHEMA
+        || !super::valid_id(&receipt.id)
+        || !super::valid_id(&receipt.task)
+        || receipt.checks.is_empty()
+        || receipt.checks.len() > super::MAX_TASKS * super::wire::MAX_PATHS
+        || receipt.model.trim().is_empty()
+        || receipt.effort.trim().is_empty()
+        || receipt.candidate.len() != 64
+        || !receipt.candidate.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    {
+        return Err(ProofError::MissingCheck);
+    }
+    let mut ids = BTreeSet::new();
     for check in &receipt.checks {
+        if !ids.insert(&check.id) {
+            return Err(ProofError::DuplicateCheck);
+        }
         if check.result == CheckResult::Pass {
             if check.evidence.is_empty() {
                 return Err(ProofError::InferredPass);
             }
-            for art in &check.evidence {
-                if art.path.trim().is_empty() || art.sha256.len() != 64 {
-                    return Err(ProofError::MalformedArtifact);
-                }
-            }
         } else if check.reason.as_deref().unwrap_or("").trim().is_empty() {
             return Err(ProofError::MissingReason);
         }
+        check.validate().map_err(|_| ProofError::MalformedArtifact)?;
+    }
+    for art in &receipt.artifacts {
+        art.validate().map_err(|_| ProofError::MalformedArtifact)?;
+    }
+    if receipt.effect_receipts.iter().any(|id| !super::valid_id(id)) {
+        return Err(ProofError::MalformedArtifact);
     }
     Ok(())
 }
@@ -140,8 +144,62 @@ pub fn validate_compile_receipt(receipt: &CompileReceipt, expected_candidate: &s
     if receipt.candidate != expected_candidate {
         return Err(ProofError::CandidateMismatch);
     }
-    if receipt.phases.is_empty() {
+    use super::wire::CompilePhaseKind as P;
+    let expected =
+        [(P::Sheet, "plan.sheet"), (P::Bar, "plan.bar"), (P::Critic, "plan.critic"), (P::Steps, "plan.compile"), (P::Code, "plan.compile")];
+    if receipt.schema != super::SCHEMA
+        || !super::valid_id(&receipt.id)
+        || !super::valid_id(&receipt.mission)
+        || receipt.phases.len() != expected.len()
+        || receipt.plan_revision == 0
+        || receipt.candidate.len() != 64
+        || !receipt.candidate.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    {
         return Err(ProofError::MissingPhases);
+    }
+    let mut end = 0;
+    for (actual, (phase, tag)) in receipt.phases.iter().zip(expected) {
+        if actual.phase != phase || actual.cost_tag != tag || actual.started_at < end {
+            return Err(ProofError::MissingPhases);
+        }
+        end = actual.started_at.checked_add(actual.duration_micros).ok_or(ProofError::MissingPhases)?;
+    }
+    if receipt.check_receipts.iter().any(|id| !super::valid_id(id))
+        || receipt.dropped.iter().any(|d| !super::valid_id(&d.id) || d.text.trim().is_empty())
+    {
+        return Err(ProofError::MissingPhases);
+    }
+    Ok(())
+}
+
+/// A receipt may describe a failed/not-run proof; it cannot accept a candidate.
+/// The caller supplies engine-owned receipts, never a worker's Complete claims.
+pub fn validate_acceptance(bar: &[super::wire::BarCheck], receipts: &[CheckReceipt], candidate: &str) -> Result<(), ProofError> {
+    if bar.is_empty() {
+        return Err(ProofError::MissingCheck);
+    }
+    let mut outcomes = BTreeMap::new();
+    for receipt in receipts {
+        validate_check_receipt(receipt, candidate)?;
+        for check in &receipt.checks {
+            let required = bar.iter().find(|c| c.id == check.id).ok_or(ProofError::MissingCheck)?;
+            if receipt.task != required.owner || check.kind != required.kind {
+                return Err(ProofError::CandidateMismatch);
+            }
+            if outcomes.insert(&check.id, check).is_some() {
+                return Err(ProofError::DuplicateCheck);
+            }
+        }
+    }
+    let mut ids = BTreeSet::new();
+    for required in bar {
+        if !ids.insert(&required.id) {
+            return Err(ProofError::DuplicateCheck);
+        }
+        let outcome = outcomes.get(&required.id).ok_or(ProofError::MissingCheck)?;
+        if (required.mandatory || required.severity == super::wire::Severity::Blocking) && !outcome.is_pass() {
+            return Err(ProofError::CheckFailed);
+        }
     }
     Ok(())
 }
@@ -166,14 +224,14 @@ pub fn scan_secrets(content: &str) -> Result<(), Vec<SecretViolation>> {
     for line in content.lines() {
         if let Some(idx) = line.find("AKIA") {
             let rest = &line[idx..];
-            if rest.len() >= 20 && rest[..20].chars().all(|c| c.is_ascii_alphanumeric()) {
-                violations.push(SecretViolation { pattern: "aws_access_key".into(), snippet: line.trim().into() });
+            if rest.as_bytes().get(..20).is_some_and(|s| s.iter().all(u8::is_ascii_alphanumeric)) {
+                violations.push(SecretViolation { pattern: "aws_access_key".into(), snippet: "[redacted]".into() });
             }
         }
         if let Some(idx) = line.find("ghp_") {
             let rest = &line[idx..];
             if rest.len() >= 36 {
-                violations.push(SecretViolation { pattern: "github_pat".into(), snippet: line.trim().into() });
+                violations.push(SecretViolation { pattern: "github_pat".into(), snippet: "[redacted]".into() });
             }
         }
     }

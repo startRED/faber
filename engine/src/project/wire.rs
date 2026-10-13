@@ -348,9 +348,10 @@ fn drafts(tasks: &[TaskDraft]) -> Result<(), WireError> {
     }
     for t in tasks {
         text(&t.title)?;
-        for list in [&t.requires, &t.decisions, &t.contracts, &t.proofs] {
+        for list in [&t.requires, &t.decisions, &t.contracts] {
             ids(list)?;
         }
+        check_ids(&t.proofs)?;
         texts(&t.deliverables)?;
         texts(&t.writes)?;
         check_ids(&t.checks)?;
@@ -395,7 +396,10 @@ impl Action {
                 if let Some(receipt) = &p.compile_receipt {
                     ids(std::slice::from_ref(receipt))?;
                 }
-                Plan::new("draft", 0, p.tasks.iter().map(TaskDraft::to_task).collect()).validate().map_err(WireError::Plan)
+                let mut plan = Plan::new("draft", 0, p.tasks.iter().map(TaskDraft::to_task).collect());
+                plan.sheet = p.sheet.clone();
+                plan.bar = p.bar.clone();
+                plan.validate().map_err(WireError::Plan)
             }
             Action::Amend(a) => {
                 text(&a.reason)?;

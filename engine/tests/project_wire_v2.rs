@@ -39,12 +39,28 @@ fn labels_and_bar_sheet_round_trip_without_turning_requirements_into_dependencie
         "bar": [{"id": "C1", "piece": "screen", "attribute": "keyboard", "check": "Keep keyboard focus", "kind": "program", "severity": "blocking",
             "ground": {"kind": "owner", "reference": "R1"}, "proof": "screen", "owner": "a", "paths": ["ui/App.tsx"]}]}}));
     value["ping"] = json!("Order");
+    let incomplete = value.clone();
+    assert!(Envelope::parse(&incomplete.to_string(), &expect(), Role::Lead).is_err());
+    let sheet: wire::DeliverableSheet = serde_json::from_value(value["action"]["plan"]["sheet"].clone()).unwrap();
+    let mut bar = faber_engine::project::bar::software_bar(&sheet);
+    let mut tasks = Vec::new();
+    for (i, check) in bar.iter_mut().enumerate() {
+        let id = if i == 0 { "a".to_string() } else { format!("proof-{i}") };
+        check.owner = id.clone();
+        let mut task = value["action"]["plan"]["tasks"][0].clone();
+        task["id"] = json!(id);
+        task["checks"] = json!([check.id]);
+        task["proofs"] = json!([check.proof]);
+        tasks.push(task);
+    }
+    value["action"]["plan"]["tasks"] = json!(tasks);
+    value["action"]["plan"]["bar"] = json!(bar);
     let env = Envelope::parse(&value.to_string(), &expect(), Role::Lead).unwrap();
     if let wire::Action::Plan(plan) = env.action {
         let task = plan.tasks[0].to_task();
         assert!(task.requires.is_empty());
         assert_eq!(serde_json::to_value(task).unwrap()["labels"]["needs"][0], "ui:component!");
-        assert_eq!(serde_json::to_value(plan).unwrap()["bar"][0]["check"], "Keep keyboard focus");
+        assert!(!plan.bar.is_empty());
     } else {
         panic!("not a plan")
     }

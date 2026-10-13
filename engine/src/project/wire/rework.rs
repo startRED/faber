@@ -325,6 +325,15 @@ impl DeliverableSheet {
         if self.pieces.len() > 64 || self.questions.len() > 3 || self.facts.len() > 64 || self.assumptions.len() > 64 {
             return Err(WireError::TooBig);
         }
+        if self.pieces.is_empty() {
+            return Err(WireError::Malformed);
+        }
+        let mut piece_ids = std::collections::BTreeSet::new();
+        for p in &self.pieces {
+            if !piece_ids.insert(&p.id) || p.kind.trim().is_empty() || p.lives_in.trim().is_empty() || p.paths.is_empty() {
+                return Err(WireError::Malformed);
+            }
+        }
         self.facets.validate()?;
         texts(&self.risk.irreversible)?;
         texts(&self.user_actions)?;
@@ -337,6 +346,9 @@ impl DeliverableSheet {
             ids(&p.made_from)?;
             ids(&p.pairs_with)?;
             texts(&p.protected)?;
+            if p.made_from.iter().chain(&p.pairs_with).any(|id| !piece_ids.contains(id) || id == &p.id) {
+                return Err(WireError::Malformed);
+            }
         }
         for f in &self.facts {
             ids(std::slice::from_ref(&f.id))?;

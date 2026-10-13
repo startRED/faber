@@ -177,11 +177,17 @@ impl Journal {
 
     pub fn save_plan(&self, plan: &Plan) -> Result<(), JournalError> {
         self.same_mission(&plan.mission)?;
+        plan.validate().map_err(|_| JournalError::Store(Fault::Corrupt))?;
         self.put(&self.records.join("plan.json"), plan)
     }
 
     pub fn plan(&self) -> Result<Option<Plan>, JournalError> {
-        self.get(&self.records.join("plan.json"))
+        let plan: Option<Plan> = self.get(&self.records.join("plan.json"))?;
+        if let Some(plan) = &plan {
+            self.same_mission(&plan.mission)?;
+            plan.validate().map_err(|_| JournalError::Store(Fault::Corrupt))?;
+        }
+        Ok(plan)
     }
 
     pub fn save_contract(&self, contract: &Contract) -> Result<(), JournalError> {
@@ -489,12 +495,24 @@ impl Journal {
         if receipt.schema > SCHEMA {
             return Err(JournalError::Newer);
         }
+        super::proof::validate_compile_receipt(receipt, &receipt.candidate).map_err(|_| JournalError::Store(Fault::Corrupt))?;
         let path = self.named("compiles", &format!("rev-{}", receipt.plan_revision))?;
+        if self.get::<super::wire::CompileReceipt>(&path)?.is_some() {
+            return Err(JournalError::ReceiptExists);
+        }
         self.put(&path, receipt)
     }
 
     pub fn compile_receipt(&self, plan_revision: u64) -> Result<Option<super::wire::CompileReceipt>, JournalError> {
-        self.get(&self.named("compiles", &format!("rev-{plan_revision}"))?)
+        let found: Option<super::wire::CompileReceipt> = self.get(&self.named("compiles", &format!("rev-{plan_revision}"))?)?;
+        if let Some(receipt) = &found {
+            self.same_mission(&receipt.mission)?;
+            if receipt.plan_revision != plan_revision {
+                return Err(JournalError::Mismatch);
+            }
+            super::proof::validate_compile_receipt(receipt, &receipt.candidate).map_err(|_| JournalError::Store(Fault::Corrupt))?;
+        }
+        Ok(found)
     }
 
     pub fn save_check_receipt(&self, receipt: &super::wire::CheckReceipt) -> Result<(), JournalError> {
@@ -504,9 +522,7 @@ impl Journal {
         if receipt.schema > SCHEMA {
             return Err(JournalError::Newer);
         }
-        for check in &receipt.checks {
-            check.validate().map_err(|_| JournalError::Store(Fault::Corrupt))?;
-        }
+        super::proof::validate_check_receipt(receipt, &receipt.candidate).map_err(|_| JournalError::Store(Fault::Corrupt))?;
         let path = self.named("checks", &receipt.id)?;
         if self.get::<super::wire::CheckReceipt>(&path)?.is_some() {
             return Err(JournalError::ReceiptExists);
@@ -515,7 +531,14 @@ impl Journal {
     }
 
     pub fn check_receipt(&self, id: &str) -> Result<Option<super::wire::CheckReceipt>, JournalError> {
-        self.get(&self.named("checks", id)?)
+        let found: Option<super::wire::CheckReceipt> = self.get(&self.named("checks", id)?)?;
+        if let Some(receipt) = &found {
+            if receipt.id != id {
+                return Err(JournalError::Mismatch);
+            }
+            super::proof::validate_check_receipt(receipt, &receipt.candidate).map_err(|_| JournalError::Store(Fault::Corrupt))?;
+        }
+        Ok(found)
     }
 }
 #[cfg(test)]

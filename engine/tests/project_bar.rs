@@ -640,6 +640,7 @@ fn compiler_rejects_orphan_checks_evidence_and_tasks() {
     let mut t1 = faber_engine::project::Task::new("t1", "Task 1", faber_engine::project::TaskKind::Writer);
     t1.paths = vec!["src/main.rs".into()];
     t1.checks = vec!["check.1".into()];
+    t1.proofs = vec!["proof.1".into()];
 
     // Bar check points to non-existent owner task "missing_task"
     let orphan_check_bar = vec![BarCheck {
@@ -699,6 +700,7 @@ fn compiler_back_chains_and_prunes_unneeded_tasks() {
     let mut t1 = faber_engine::project::Task::new("t1", "Task 1", faber_engine::project::TaskKind::Writer);
     t1.paths = vec!["src/main.rs".into()];
     t1.checks = vec!["check.1".into()];
+    t1.proofs = vec!["proof.1".into()];
 
     let mut t_dead = faber_engine::project::Task::new("t_dead", "Dead task", faber_engine::project::TaskKind::Writer);
     t_dead.paths = vec!["src/dead.rs".into()];
@@ -807,6 +809,7 @@ fn compiler_handles_200_nodes_in_under_200_ms() {
         let mut t = faber_engine::project::Task::new(&id, &format!("Task {i}"), faber_engine::project::TaskKind::Writer);
         t.paths = vec![format!("src/file_{i}.rs")];
         t.checks = vec![format!("check.{i}")];
+        t.proofs = vec![format!("proof.{i}")];
         if i > 0 && i % 2 == 0 {
             t.requires = vec![format!("task_{}", i - 1)];
         }
@@ -1027,28 +1030,35 @@ fn compile_receipt_stores_phase_timestamps_and_dropped_tasks() {
                 phase: CompilePhaseKind::Sheet,
                 started_at: 1000,
                 duration_micros: 200,
-                cost_tag: "free".into(),
+                cost_tag: "plan.sheet".into(),
                 cost_micros: Some(0),
             },
             CompilePhase {
                 phase: CompilePhaseKind::Bar,
                 started_at: 1200,
                 duration_micros: 300,
-                cost_tag: "free".into(),
+                cost_tag: "plan.bar".into(),
+                cost_micros: Some(0),
+            },
+            CompilePhase {
+                phase: CompilePhaseKind::Critic,
+                started_at: 1500,
+                duration_micros: 0,
+                cost_tag: "plan.critic".into(),
                 cost_micros: Some(0),
             },
             CompilePhase {
                 phase: CompilePhaseKind::Steps,
                 started_at: 1500,
                 duration_micros: 400,
-                cost_tag: "free".into(),
+                cost_tag: "plan.compile".into(),
                 cost_micros: Some(0),
             },
             CompilePhase {
                 phase: CompilePhaseKind::Code,
                 started_at: 1900,
                 duration_micros: 150,
-                cost_tag: "free".into(),
+                cost_tag: "plan.compile".into(),
                 cost_micros: Some(0),
             },
         ],
@@ -1062,7 +1072,7 @@ fn compile_receipt_stores_phase_timestamps_and_dropped_tasks() {
     journal.save_compile_receipt(&receipt).unwrap();
     let loaded = journal.compile_receipt(1).unwrap().expect("compile receipt should exist");
     assert_eq!(loaded.id, "comp1");
-    assert_eq!(loaded.phases.len(), 4);
+    assert_eq!(loaded.phases.len(), 5);
     assert_eq!(loaded.dropped.len(), 1);
     assert_eq!(loaded.dropped[0].id, "unused_task");
 }
