@@ -611,7 +611,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
         <div class="toast" role="alert">
           <span>{saveError()}</span>
           <button type="button" aria-label={t('toast.dismiss')} onClick={() => setSaveError(undefined)}>
-            Ã—
+            ×
           </button>
         </div>
       </Show>
