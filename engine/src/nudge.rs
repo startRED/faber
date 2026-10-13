@@ -4,7 +4,7 @@
 //! the person decides. Pure functions over a finished message; the engine feeds them.
 
 use crate::model::{Area, Message, Status, ToolUse, Vendor};
-use crate::route::PROFILES;
+use crate::route::{PROFILES, Profile};
 use crate::router::Pick;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -22,14 +22,15 @@ pub struct Nudge {
 const EFFORTS: [&str; 3] = ["low", "medium", "high"];
 
 /// The next rung above a pick: the same model one effort up when the table has that row, else the next stronger model
-/// of the same vendor at its default (medium) effort, else None. A pick the table does not know has no rung.
-pub fn next_rung(now: &Pick) -> Option<Pick> {
+/// of the same vendor at its default (medium) effort, else None. Only profiles in `allowed` (what the account can run) are
+/// offered. A pick the table does not know has no rung.
+pub fn next_rung(now: &Pick, allowed: &[Profile]) -> Option<Pick> {
     let model = now.model.as_deref()?;
     let here = PROFILES.iter().find(|p| p.vendor == now.vendor && p.model == model && p.effort == now.effort)?;
     let up = EFFORTS.iter().position(|e| *e == here.effort)? + 1;
-    let same = EFFORTS.get(up).and_then(|e| PROFILES.iter().find(|p| p.vendor == here.vendor && p.model == here.model && p.effort == *e));
+    let same = EFFORTS.get(up).and_then(|e| allowed.iter().find(|p| p.vendor == here.vendor && p.model == here.model && p.effort == *e));
     let next = same.or_else(|| {
-        PROFILES
+        allowed
             .iter()
             .filter(|p| p.vendor == here.vendor && p.effort == "medium" && (p.iq, p.agent) > (here.iq, here.agent))
             .min_by_key(|p| (p.iq, p.agent))
@@ -192,13 +193,14 @@ fn is_source(path: &str) -> bool {
     path.rsplit_once('.').is_some_and(|(_, ext)| SOURCE.iter().any(|s| ext.eq_ignore_ascii_case(s)))
 }
 
-/// What a finished turn offers, if anything. Only a turn that ended done, on a model the table knows, with a rung above.
-pub fn of(m: &Message, area: Area) -> Option<Nudge> {
+/// What a finished turn offers, if anything. Only a turn that ended done, on a model the table knows, with a rung above that
+/// `allowed` (the profiles the account can run) holds.
+pub fn of(m: &Message, area: Area, allowed: &[Profile]) -> Option<Nudge> {
     if m.status != Some(Status::Done) {
         return None;
     }
     let now = Pick { vendor: m.vendor?, model: m.model.clone(), effort: m.effort.clone()?, reason: String::new(), pace: None };
-    let next = next_rung(&now)?;
+    let next = next_rung(&now, allowed)?;
     let tools = m.tools.as_deref().unwrap_or_default();
     // A declined check never ran, so it neither failed nor verified anything.
     let last_check = tools.iter().rposition(|t| is_check(t) && !t.declined);
@@ -221,6 +223,7 @@ pub fn of(m: &Message, area: Area) -> Option<Nudge> {
 mod tests {
     use super::*;
     use crate::model::Role;
+    use crate::route::candidates;
     use serde_json::json;
 
     fn pick(vendor: Vendor, model: &str, effort: &str) -> Pick {
@@ -228,7 +231,11 @@ mod tests {
     }
 
     fn rung(vendor: Vendor, model: &str, effort: &str) -> Option<(String, String)> {
-        next_rung(&pick(vendor, model, effort)).map(|p| (p.model.unwrap(), p.effort))
+        next_rung(&pick(vendor, model, effort), &PROFILES).map(|p| (p.model.unwrap(), p.effort))
+    }
+
+    fn rung_in(allowed: &[Profile], vendor: Vendor, model: &str, effort: &str) -> Option<(String, String)> {
+        next_rung(&pick(vendor, model, effort), allowed).map(|p| (p.model.unwrap(), p.effort))
     }
 
     fn to(model: &str, effort: &str) -> Option<(String, String)> {
@@ -255,7 +262,7 @@ mod tests {
         assert_eq!(rung(Vendor::Codex, "gpt-6.1-sol", "high"), None);
         assert_eq!(rung(Vendor::Claude, "claude-haiku-5-5", "high"), None);
         assert_eq!(rung(Vendor::Claude, "sonnet", "medium"), None);
-        assert_eq!(next_rung(&Pick { model: None, ..pick(Vendor::Codex, "x", "medium") }), None);
+        assert_eq!(next_rung(&Pick { model: None, ..pick(Vendor::Codex, "x", "medium") }, &PROFILES), None);
     }
 
     fn tool(name: &str, input: Value, ok: Option<bool>) -> ToolUse {
@@ -281,13 +288,13 @@ mod tests {
     }
 
     fn why(m: &Message, area: Area) -> Option<String> {
-        of(m, area).map(|n| n.reason)
+        of(m, area, &PROFILES).map(|n| n.reason)
     }
 
     #[test]
     fn a_last_check_that_failed_on_a_turn_that_ended_done_offers_the_next_rung() {
         let m = turn(vec![edit("src/a.rs"), bash("cd engine && cargo test --lib", false)]);
-        let n = of(&m, Area::Project).unwrap();
+        let n = of(&m, Area::Project, &PROFILES).unwrap();
         assert_eq!(
             (n.reason.as_str(), n.vendor, n.model.as_str(), n.effort.as_str()),
             ("nudge.failedCheck", Vendor::Claude, "claude-sonnet-5-5", "high")
@@ -317,7 +324,7 @@ mod tests {
         m.vendor = Some(Vendor::Codex);
         m.model = Some("gpt-6.1-sol".into());
         m.effort = Some("medium".into());
-        let n = of(&m, Area::Project).unwrap();
+        let n = of(&m, Area::Project, &PROFILES).unwrap();
         assert_eq!((n.reason.as_str(), n.model.as_str(), n.effort.as_str()), ("nudge.failedCheck", "gpt-6.1-sol", "high"));
     }
 
@@ -355,22 +362,22 @@ mod tests {
         m.vendor = Some(Vendor::Codex);
         m.model = Some("gpt-6.1-sol".into());
         m.effort = Some("low".into());
-        let n = of(&m, Area::Project).unwrap();
+        let n = of(&m, Area::Project, &PROFILES).unwrap();
         assert_eq!((n.reason.as_str(), n.effort.as_str()), ("nudge.noCheck", "medium"));
         let notes = tool("fileChange", json!([{ "path": "docs/a.md", "kind": "add" }]), Some(true));
         m.tools = Some(vec![notes]);
-        assert_eq!(of(&m, Area::Project), None);
+        assert_eq!(of(&m, Area::Project, &PROFILES), None);
     }
 
     #[test]
     fn a_stopped_turn_and_a_pick_with_no_rung_offer_nothing() {
         let mut m = turn(vec![bash("cargo test", false)]);
         m.status = Some(Status::Stopped);
-        assert_eq!(of(&m, Area::Project), None);
+        assert_eq!(of(&m, Area::Project, &PROFILES), None);
         let mut m = turn(vec![bash("cargo test", false)]);
         m.model = Some("claude-opus-5-5".into());
         m.effort = Some("high".into());
-        assert_eq!(of(&m, Area::Project), None);
+        assert_eq!(of(&m, Area::Project, &PROFILES), None);
     }
 
     #[test]
@@ -432,5 +439,25 @@ mod tests {
         // A check that ran and failed before the declined one still counts.
         let m = turn(vec![bash("cargo test", false), declined()]);
         assert_eq!(why(&m, Area::Project).as_deref(), Some("nudge.failedCheck"));
+    }
+
+    #[test]
+    fn a_rung_the_account_cannot_run_is_not_offered() {
+        // Codex lists Luna but not Sol: Luna has nothing above it that this account can run.
+        let luna = candidates(&[Vendor::Codex], &["gpt-6-luna".to_string()]);
+        assert_eq!(next_rung(&pick(Vendor::Codex, "gpt-6-luna", "medium"), &luna), None);
+        let mut m = turn(vec![bash("cargo test", false)]);
+        m.vendor = Some(Vendor::Codex);
+        m.model = Some("gpt-6-luna".into());
+        m.effort = Some("medium".into());
+        assert_eq!(of(&m, Area::Project, &luna), None);
+        assert!(of(&m, Area::Project, &PROFILES).is_some(), "the full table still offers Sol");
+        // Without a connected Claude CLI, Haiku has no Sonnet to move to; effort steps stay on the same model.
+        let sol = candidates(&[Vendor::Codex], &["gpt-6.1-sol".to_string()]);
+        assert_eq!(next_rung(&pick(Vendor::Codex, "gpt-6.1-sol", "low"), &sol).map(|p| p.effort), Some("medium".into()));
+        assert_eq!(next_rung(&pick(Vendor::Claude, "claude-haiku-5-5", "medium"), &sol), None);
+        // A stronger model skips a missing one and lands on the next the account has.
+        let no_sonnet: Vec<Profile> = PROFILES.into_iter().filter(|p| p.model != "claude-sonnet-5-5").collect();
+        assert_eq!(rung_in(&no_sonnet, Vendor::Claude, "claude-haiku-5-5", "medium"), to("claude-opus-5-5", "medium"));
     }
 }

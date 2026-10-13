@@ -938,6 +938,7 @@ impl Core {
                 }
                 let missing = cost.is_none() || ((native.is_none() || vendor == Vendor::Codex) && incomplete);
                 self.note_turn(conv, cost, missing);
+                let can_run = crate::route::candidates(&self.vendors(), &self.codex_models);
                 if let Some(m) = self.turn(conv) {
                     m.status = Some(if ok { Status::Done } else { Status::Stopped });
                     m.cost_usd = cost.map(|cost| m.cost_usd.unwrap_or(0.0) + cost).or(m.cost_usd);
@@ -948,7 +949,7 @@ impl Core {
                     m.cache_write_1h_tokens = Some(cache_write_1h_tokens);
                     m.incomplete = (incomplete || m.incomplete.unwrap_or(false)).then_some(true);
                     m.permissions = None;
-                    m.nudge = nudge::of(m, area);
+                    m.nudge = nudge::of(m, area, &can_run);
                 }
                 if !ok && self.transfers.get(conv).is_some_and(|t| t.moving) {
                     if let Some(reply) = turn_id {
