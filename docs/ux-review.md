@@ -90,3 +90,15 @@ must validate the remaining active-frame cost on its slower machine.
 After the interrupted run was restarted, all seven proofs and the separate `cargo t --all` passed: 179 affected
 checks and 656 complete checks, with no failures or skips. The full replay measured 21.1 ms welcome motion p95;
 the highest post-reboot thread stress peak was 214.8 MB (223 MB after cycling all six looks), below 250 MB.
+
+A subsequent software replay still exceeded 25 ms after the observer correction. A controlled original/cropped/
+original glow comparison measured 22.2/14.7/18.1 ms motion p95: the promoted outer glow was still stage-sized although
+the radial mask revealed only a small region. Its surface now matches the mask's 340 by 110 px visible bounds,
+keeping the beam at the same stage coordinates and the 170 px circle centred 60 px above it. A stylesheet check
+fails on the original bounds and verifies both the smaller surface and beam alignment at 720 and 1440 px widths.
+The unchanged software frame benchmark then measured 13.6 ms welcome motion p95 and 0.6 ms geometry reads.
+The temporary comparisons were removed; the permanent benchmark still exercises the original five transitions,
+60-frame minimum and 25/8 ms budgets. No dependency, timeout increase or retry was added.
+All seven proofs and `cargo t --all` passed for the bounded surface: 180 affected checks and 657 complete checks,
+no failures or skips. The full replay measured 15.8 ms welcome motion p95; thread stress peaked at 216.4 MB,
+and the highest six-look reading was 223 MB. The preceding observer-fix push passed Windows and macOS CI.

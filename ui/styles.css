@@ -578,8 +578,9 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .dust i:nth-child(3) { animation-duration: 10s; animation-delay: -6s; }
 @keyframes twinkle { to { opacity: 0.4; } }
 /* The light that breathes lives only around the lens, above and right of the greeting. */
-.amb-glow { display: var(--amb-beam); inset: 0; -webkit-mask-image: radial-gradient(circle 170px at min(100% - 120px, 740px) -60px, #000 30%, transparent 100%); mask-image: radial-gradient(circle 170px at min(100% - 120px, 740px) -60px, #000 30%, transparent 100%); }
-.amb-glow .amb-beam { position: absolute; display: block; }
+/* Promote only the visible part of the mask, avoiding a stage-sized software composition each frame. */
+.amb-glow { display: var(--amb-beam); left: calc(min(100% - 120px, 740px) - 170px); top: 0; width: 340px; height: 110px; overflow: hidden; -webkit-mask-image: radial-gradient(circle 170px at 170px -60px, #000 30%, transparent 100%); mask-image: radial-gradient(circle 170px at 170px -60px, #000 30%, transparent 100%); }
+.amb-glow .amb-beam { position: absolute; display: block; left: -210px; }
 .amb-glow { opacity: 0; }
 .amb-glow .beam { opacity: 1; }
 /* Fade the composed mask and blur together, so software rendering does not repaint the beam every frame. */
