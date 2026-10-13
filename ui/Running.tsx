@@ -32,7 +32,7 @@ export function Running(props: {
     return t(e.key, { n: e.n });
   };
   return (
-    <aside id="running" class="runcol" aria-labelledby="running-title" role={props.modal ? 'dialog' : undefined} aria-modal={props.modal ? 'true' : undefined} ref={props.ref}>
+    <aside id="running" class="runcol" data-surface="running" aria-labelledby="running-title" role={props.modal ? 'dialog' : undefined} aria-modal={props.modal ? 'true' : undefined} ref={props.ref}>
       <div class="rc-head">
         <button class="iconbtn" aria-label={t('run.close')} title={t('run.close')} onClick={() => props.onClose()}>
           <Icon name="close" />

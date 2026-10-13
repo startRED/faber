@@ -12,22 +12,29 @@ pub fn scenarios() -> Vec<Scenario> {
     vec![
         Scenario { name: "local_update: independent helper restores an early crash headlessly without changing saved grants", run: crash },
         Scenario { name: "local_update: trusted launcher recovers before a broken candidate can enter main", run: interrupted },
+        Scenario {
+            name: "local_update: autostart uses the trusted launcher to recover a broken candidate without environment variables",
+            run: autostart,
+        },
         Scenario { name: "local_update: hidden session observer preserves next on orderly logoff or shutdown", run: session },
         Scenario {
-            name: "local_update: clean quit retries full probation; healthy cleanup and second promotion stay headless",
+            name: "local_update: autostart after clean quit retries full probation; healthy cleanup and second promotion stay headless",
             run: handoff,
         },
     ]
 }
 
 fn crash(ctx: &mut Ctx) -> Result {
-    rollback(ctx, false, false)
+    rollback(ctx, false, false, false)
 }
 fn interrupted(ctx: &mut Ctx) -> Result {
-    rollback(ctx, true, false)
+    rollback(ctx, true, false, false)
+}
+fn autostart(ctx: &mut Ctx) -> Result {
+    rollback(ctx, true, false, true)
 }
 fn session(ctx: &mut Ctx) -> Result {
-    rollback(ctx, false, true)
+    rollback(ctx, false, true, false)
 }
 fn handoff(ctx: &mut Ctx) -> Result {
     let root = ctx.sb.sandbox.join("development");
@@ -38,6 +45,12 @@ fn handoff(ctx: &mut Ctx) -> Result {
     let helper = ctx.paths.target.join("debug/faber-local.exe");
     let helper_bytes = fs::read(&helper).map_err(|e| e.to_string())?;
     let launcher = root.join("faber-local.exe");
+    fs::write(
+        root.join("development.json"),
+        serde_json::to_vec(&serde_json::json!({"channel": "development", "installedData": stable_data, "installedRelease": release}))
+            .map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
     fs::write(&launcher, &helper_bytes).map_err(|e| e.to_string())?;
     fs::write(root.join("helper.sha256"), ExactTree::compute_build_hash(&helper_bytes)).map_err(|e| e.to_string())?;
     let tree = ExactTree::new(&"1".repeat(40), &"2".repeat(40), &ExactTree::compute_build_hash(&payload), SCHEMA).map_err(|e| e.key())?;
@@ -114,7 +127,7 @@ fn handoff(ctx: &mut Ctx) -> Result {
         let lock = fs::OpenOptions::new().read(true).write(true).open(root.join("slots/a/running.lock")).map_err(|e| e.to_string())?;
         ensure(lock.try_lock().is_ok(), || "Quit relaunched last good".into())?;
         drop(lock);
-        let resumed = start("--launch")?;
+        let resumed = start_autostart(ctx, &launcher, &env)?;
         let result = (|| {
             eventually("resumed full probation", Duration::from_secs(30), || {
                 manager.manifest().is_ok_and(|m| m.is_some_and(|m| matches!(m.state, UpdateState::Probation { .. })))
@@ -194,7 +207,7 @@ fn handoff(ctx: &mut Ctx) -> Result {
     }
     result
 }
-fn rollback(ctx: &mut Ctx, interrupted: bool, session: bool) -> Result {
+fn rollback(ctx: &mut Ctx, interrupted: bool, session: bool, autostart: bool) -> Result {
     let root = ctx.sb.sandbox.join("development");
     let release = ctx.sb.sandbox.join("release");
     let stable_data = ctx.sb.sandbox.join("stable-data");
@@ -255,10 +268,12 @@ fn rollback(ctx: &mut Ctx, interrupted: bool, session: bool) -> Result {
             .map_err(|e| e.to_string())?,
     )
     .map_err(|e| e.to_string())?;
-    if interrupted {
+    if interrupted && !autostart {
         for key in ["FABER_CHANNEL", "FABER_DEV_ROOT", "FABER_INSTALLED_DATA", "FABER_INSTALLED_RELEASE"] {
             env.remove(key);
         }
+    }
+    if interrupted {
         manager.begin_probation(time).map_err(|e| e.key())?;
         // This candidate exits before startup_lease can delegate recovery. The entry must never execute it.
         fs::write(root.join("slots/b/faber.exe"), b"not a runnable executable").map_err(|e| e.to_string())?;
@@ -272,9 +287,13 @@ fn rollback(ctx: &mut Ctx, interrupted: bool, session: bool) -> Result {
             bytes.get(offset + 24 + 68..offset + 24 + 70).and_then(|bytes| <[u8; 2]>::try_from(bytes).ok()).map(u16::from_le_bytes);
         ensure(subsystem == Some(2), || format!("{} has a visible console subsystem", path.display()))?;
     }
-    let (owned, _, _) =
+    let owned = if autostart {
+        start_autostart(ctx, &helper, &env)?
+    } else {
         Owned::start(&helper, &[if interrupted { "--launch" } else { "--transition" }.into()], &env, &ctx.sb.sandbox, &ctx.paths.fake_cli)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?
+            .0
+    };
     let result = (|| {
         if session {
             eventually("session observer's supervised next", Duration::from_secs(30), || {
@@ -319,6 +338,22 @@ fn rollback(ctx: &mut Ctx, interrupted: bool, session: bool) -> Result {
             "rollback reset spend or dropped fields".into()
         })?;
         ensure(fs::read(root.join("slots/a/faber.exe")).map_err(|e| e.to_string())? == payload, || "last-good executable changed".into())?;
+        if autostart {
+            let mut login_env = env.clone();
+            for key in ["FABER_CHANNEL", "FABER_DEV_ROOT", "FABER_INSTALLED_DATA", "FABER_INSTALLED_RELEASE", "FABER_DATA_DIR"] {
+                login_env.remove(key);
+            }
+            let legacy =
+                Owned::start(&root.join("slots/a/faber.exe"), &["--autostart".into()], &login_env, &ctx.sb.sandbox, &ctx.paths.fake_cli)
+                    .map_err(|e| e.to_string())?
+                    .0;
+            let result =
+                eventually("legacy slot autostart delegates before GUI or slot lease", Duration::from_secs(10), || !legacy.is_running());
+            assert_hidden(ctx, &[&owned, &legacy], &env)?;
+            legacy.terminate();
+            result?;
+            ensure(legacy.status().is_some_and(|status| status.contains('0')), || "legacy autostart failed delegation".into())?;
+        }
         // The helper has no Tauri runtime. Its restored engine has no WebView or console, even on the default CI desktop.
         if let Some(ids) = owned.members() {
             let windows = crate::desktop::windows()?;
@@ -332,6 +367,31 @@ fn rollback(ctx: &mut Ctx, interrupted: bool, session: bool) -> Result {
     })();
     owned.terminate();
     result
+}
+
+fn start_autostart(ctx: &Ctx, helper: &std::path::Path, env: &std::collections::BTreeMap<String, String>) -> Result<Owned> {
+    let registration =
+        Owned::start(helper, &["--test-autostart-command".into()], env, &ctx.sb.sandbox, &ctx.paths.fake_cli).map_err(|e| e.to_string())?.0;
+    let result = eventually("sandboxed autostart command", Duration::from_secs(10), || !registration.is_running());
+    registration.terminate();
+    result?;
+    let root = helper.parent().ok_or("missing launcher root")?;
+    let report: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join("data/test-autostart-command.json")).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?;
+    fs::remove_file(root.join("data/test-autostart-command.json")).map_err(|e| e.to_string())?;
+    let program = std::path::PathBuf::from(report["program"].as_str().ok_or("missing autostart executable")?);
+    let args = report["args"]
+        .as_array()
+        .ok_or("missing autostart arguments")?
+        .iter()
+        .map(|arg| arg.as_str().map(String::from).ok_or("invalid autostart argument".into()))
+        .collect::<Result<Vec<_>>>()?;
+    let mut login_env = env.clone();
+    for key in ["FABER_CHANNEL", "FABER_DEV_ROOT", "FABER_INSTALLED_DATA", "FABER_INSTALLED_RELEASE", "FABER_DATA_DIR"] {
+        login_env.remove(key);
+    }
+    Owned::start(&program, &args, &login_env, &ctx.sb.sandbox, &ctx.paths.fake_cli).map(|v| v.0).map_err(|e| e.to_string())
 }
 
 fn assert_hidden(ctx: &Ctx, jobs: &[&Owned], env: &std::collections::BTreeMap<String, String>) -> Result {

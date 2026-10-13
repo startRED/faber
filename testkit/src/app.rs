@@ -304,7 +304,7 @@ impl Ctx {
             launch.setup_source = self.server.as_ref().map(|s| s.origin.clone());
         }
         let env = child_env(&env_pairs(), &self.sb, &launch, &self.paths.fake_cli);
-        let (owned, stdout, stderr) = Owned::start(&self.paths.app, &[], &env, &self.sb.sandbox, &self.paths.fake_cli)
+        let (owned, stdout, stderr) = Owned::start(&self.paths.app, &launch.args, &env, &self.sb.sandbox, &self.paths.fake_cli)
             .map_err(|e| format!("cannot start {}: {e}", self.paths.app.display()))?;
         let owned = Arc::new(owned);
         registry().owned.push(owned.clone());

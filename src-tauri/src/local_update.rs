@@ -86,6 +86,22 @@ impl Development {
         Ok(dev)
     }
 
+    pub fn from_slot(executable: &Path) -> Result<Option<Self>> {
+        let Some(slot) = executable.parent() else { return Ok(None) };
+        let Some(slots) = slot.parent() else { return Ok(None) };
+        if executable.file_name().is_none_or(|name| !name.eq_ignore_ascii_case(format!("faber{}", std::env::consts::EXE_SUFFIX)))
+            || slots.file_name().is_none_or(|name| !name.eq_ignore_ascii_case("slots"))
+        {
+            return Ok(None);
+        }
+        let root = slots.parent().ok_or(invalid("missing slot root"))?;
+        let dev = Self::from_launcher(&root.join(format!("faber-local{}", std::env::consts::EXE_SUFFIX)))?;
+        if !same_path(executable, &dev.binary(Slot::A))? && !same_path(executable, &dev.binary(Slot::B))? {
+            return Err(invalid("unknown development slot"));
+        }
+        Ok(Some(dev))
+    }
+
     pub fn manager(&self) -> Result<UpdateManager> {
         // Revalidate aliases on each entry, including after a restart.
         UpdateManager::new(SlotLayout::new(self.layout.dev_root(), &self.installed_data, &self.installed_release)?)

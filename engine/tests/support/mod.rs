@@ -108,6 +108,9 @@ fn key(msg: &Value) -> String {
     if method == Some("turn/start") {
         return format!("turn/start {} {}", id, msg["params"]["input"]);
     }
+    if method == Some("turn/steer") {
+        return format!("turn/steer {} {}", id, msg["params"]["input"]);
+    }
     if let Some(m) = method {
         return if id.is_null() { m.to_string() } else { format!("{m} {id}") };
     }

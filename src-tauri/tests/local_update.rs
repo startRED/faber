@@ -58,6 +58,58 @@ fn helper_and_slot_commands_are_native_headless_and_use_separate_data() {
     assert!(!command.environment.keys().any(|key| key.contains("TOKEN") || key.contains("API_KEY")));
 }
 
+#[test]
+fn development_autostart_uses_the_trusted_launcher_instead_of_a_slot() {
+    let dir = area();
+    let dev = config(dir.path());
+    dev.manager().unwrap();
+    fs::write(dev.helper(), b"trusted helper").unwrap();
+    fs::write(dir.path().join("dev/helper.sha256"), ExactTree::compute_build_hash(b"trusted helper")).unwrap();
+    fs::write(
+        dir.path().join("dev/development.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "channel": "development", "installedData": dir.path().join("stable-data"), "installedRelease": dir.path().join("release")
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    for slot in [Slot::A, Slot::B] {
+        let command = faber::autostart::launch_command(&dev.binary(slot), Some(&dev)).unwrap();
+        assert_eq!(command.program, dev.helper());
+        assert_eq!(command.args, ["--launch"]);
+        assert!(!command.environment.contains_key("FABER_CHANNEL"));
+    }
+    fs::write(dev.helper(), b"changed helper").unwrap();
+    assert!(faber::autostart::launch_command(&dev.binary(Slot::A), Some(&dev)).is_err());
+    let installed = dir.path().join(format!("release/faber{}", std::env::consts::EXE_SUFFIX));
+    let command = faber::autostart::launch_command(&installed, None).unwrap();
+    assert_eq!(command.program, installed);
+    assert_eq!(command.args, [faber::autostart::AUTOSTART_FLAG]);
+}
+
+#[test]
+fn legacy_slot_autostart_discovers_enrollment_and_refuses_an_untrusted_entry() {
+    let dir = area();
+    let dev = config(dir.path());
+    fs::write(dir.path().join("baseline"), b"old").unwrap();
+    fs::write(dir.path().join("helper"), b"trusted helper").unwrap();
+    dev.adopt(tree(b"old"), &dir.path().join("baseline"), &dir.path().join("helper"), 100).unwrap();
+    for slot in [Slot::A, Slot::B] {
+        let discovered = Development::from_slot(&dev.binary(slot)).unwrap().unwrap();
+        assert_eq!(faber::autostart::launch_command(&dev.binary(slot), Some(&discovered)).unwrap().program, dev.helper());
+        #[cfg(windows)]
+        Development::from_slot(&std::path::PathBuf::from(dev.binary(slot).to_string_lossy().to_uppercase()))
+            .unwrap()
+            .unwrap()
+            .verify_helper()
+            .unwrap();
+    }
+    assert!(Development::from_slot(&dir.path().join(format!("release/faber{}", std::env::consts::EXE_SUFFIX))).unwrap().is_none());
+    assert!(Development::from_slot(&dir.path().join(format!("dev/slots/unknown/faber{}", std::env::consts::EXE_SUFFIX))).is_err());
+    fs::write(dir.path().join("dev/development.json"), b"corrupt enrollment").unwrap();
+    assert!(Development::from_slot(&dev.binary(Slot::A)).is_err());
+}
+
 fn pending(dev: &Development) {
     let manager = dev.manager().unwrap();
     fs::write(dev.binary(Slot::A), b"old").unwrap();

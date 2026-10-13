@@ -14,6 +14,16 @@ fn main() {
         }
         .map_err(|_| ())?;
         #[cfg(feature = "test-hooks")]
+        if args.as_slice() == ["--test-autostart-command"] {
+            let manifest = dev.manager().map_err(|_| ())?.manifest().map_err(|_| ())?.ok_or(())?;
+            let command = faber::autostart::launch_command(&dev.binary(manifest.active_slot), Some(&dev)).map_err(|_| ())?;
+            return std::fs::write(
+                dev.data().join("test-autostart-command.json"),
+                serde_json::to_vec(&serde_json::json!({"program": command.program, "args": command.args})).map_err(|_| ())?,
+            )
+            .map_err(|_| ());
+        }
+        #[cfg(feature = "test-hooks")]
         if args.as_slice() == ["--test-compatible"] {
             return faber::local_update::native_compatible(
                 &dev.binary(faber_engine::project::update::Slot::A),

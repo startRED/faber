@@ -49,3 +49,23 @@ direct-child limitation. Full G6/G8 and updated independent review are not claim
 Local pre-commit validation: all eight required commands exited 0. Both `cargo t` and `cargo t --all` reported
 1,094 passed, 0 failed, 0 not run and 0 skipped, including the hidden Windows screen suite. The maximum reported
 screen memory was 231.9 MB, below the inherited 233 MB reference; the 250 MB gate is unchanged.
+
+## Phase 1 integration
+
+The merge from `origin/selfdev` preserves the local startup/probe gates, shutdown checkpoint and release-updater
+exclusion alongside counted keep-awake, opt-in tray autostart, the UX sentinel and Chat send-while-busy.
+The three textual conflicts were the shell's state fields, early argument handling and state initialization.
+
+Development autostart registers the immutable enrolled helper with `--launch`, rather than a reusable slot path.
+Registration verifies the helper and persisted enrollment, so login works without development environment variables.
+A direct slot `--autostart` also discovers that enrollment and delegates before any slot lease or GUI runtime;
+corrupt enrollment fails closed. Installed release autostart retains `faber --autostart` and its tray behavior.
+
+`development_autostart_uses_the_trusted_launcher_instead_of_a_slot` failed on the original slot command and now
+checks both slots, changed-helper rejection and the installed release command. The hidden regression
+`local_update: autostart uses the trusted launcher to recover a broken candidate without environment variables`
+failed attempting to execute the poisoned candidate; it now checks immutable last-good rollback, saved data,
+headless launch and direct slot delegation. `legacy_slot_autostart_discovers_enrollment_and_refuses_an_untrusted_entry`
+covers slot aliases, corrupt enrollment and unknown entry points without processes or registry writes.
+The existing full five-minute handoff now resumes a clean-exit probation through the same autostart command.
+All registry interactions in screen tests remain fake; only owned temporary slots and hidden binaries are used.
