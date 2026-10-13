@@ -392,6 +392,42 @@ hours, fewer than 1% dropped tasks, no worse quality, fewer than 5% exhausted se
 It passed with 0.000 versus 1.500 exhausted hours and 0.844% versus 0.325% drops. The full 200-seed run passed all the same
 acceptance limits.
 
+### Cache and router, measured on 13/10/2026
+
+`engine/examples/cache_probe.rs` ran against the real CLIs on a Claude Max subscription (Sonnet 5.5) and a ChatGPT
+subscription (GPT-6 Luna). Every question carries about 3,800 new tokens, so a second turn that reads the whole earlier
+prefix still shows about 72%: the new question is written, not read. The table now has a `1h written` column.
+
+| Scenario | Second turn: read / written | Reading |
+| :--- | :--- | :--- |
+| Claude, three turns in one process | 10,876 / 4,296 | the baseline: the whole prefix is read |
+| Claude, resume at once, same effort | 10,876 / 4,299 | a restart with `--resume` loses nothing |
+| Claude, medium, then resume at high (twice) | 10,876 / 4,296 and 4,295 | **an effort change keeps the cache** |
+| Claude, resume after 240 s and 360 s | 10,876 / 4,295 and 4,298 | the 120 s idle close costs nothing |
+| Claude, resume after 3,700 s | 0 / 15,171 | the cache lives one hour, then everything is written again |
+| Codex, three turns on one thread | read 43%, 34%, 86% | Codex's own cache varies a lot between turns |
+| Codex, low then medium on one thread (twice) | read 19% and 34% | no loss beyond that variance |
+| Codex, a turn after 6 min and after 35 min | read 84% both | still warm after half an hour |
+
+On a subscription, Claude writes every cache entry with the one-hour lifetime, so closing an idle process after 120 s
+and resuming it inside the hour is free, and so is a change of effort through `--resume`. Changing effort before the
+next message therefore needs no deferral to a natural break. A change of model still starts a new cache.
+
+`engine/examples/route_eval.rs` sends 30 hand-labelled requests (kind, difficulty and the new `check`) to each router,
+one fresh session each, the way Auto asks:
+
+| Router | Valid JSON | Kind | Difficulty | Check | Median / slowest |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| GPT-6 Luna, medium | 100% | 93% | 70% | 87% | 3.3 s / 9.1 s |
+| GPT-6 Luna, low | 100% | 90% | 70% | 83% | 3.3 s / 4.5 s |
+| Haiku 5.5, medium | 100% | 100% | 70% | 73% | 9.6 s / 28.7 s |
+| Haiku 5.5, low | 100% | 100% | 70% | 77% | 9.5 s / 19.7 s |
+
+Low effort made neither router faster at the median and Luna slightly less accurate, so the routers stay at medium.
+The labels are one reader's, so a disagreement is a question, not a proven mistake. By the labels, the requests the
+routers called `blind` against the label were easy, of a kind the raise ignores, or already hard; the raise only moves
+medium code, math and research.
+
 ### Measurement still requiring the owner
 
 The manual `engine/examples/cache_probe.rs` now obtains one baseline before its measured pulses, retains each window's
@@ -399,8 +435,8 @@ latest reading, checks unchanged resets and plausible readings, closes immediate
 and applies the gate before each pulse with a sixty-second timeout. It prints own API-equivalent USD separately from
 account movement, which is an upper bound on a pulse's quota effect because the accounts are shared. Its three tests
 use fake events only, covering the denominator, invalid/reset/missing readings, duplicate windows and immediate stops.
-The real-account cache experiment and the real CLI pulse memory peak were not run here. No cache result or pulse peak
-is claimed. The owner can record them after running the manual probe; `docs/roadmap.md` was kept unstaged as instructed.
+The cache experiment ran on 13/10/2026 (above). The real CLI pulse memory peak has not been measured, and no pulse peak
+is claimed.
 
 Existing hidden-screen memory proofs passed: Task 11 measured 108-110 MB idle, 184 MB after six looks, and 141 MB for
 1,000 messages. These measurements used the fake CLI and are not a real pulse memory measurement. With

@@ -107,6 +107,13 @@ name. Auto aims to pick a model that does the task well, without waste and quick
   greeting first). Those stay with their subscription, so the CLI keeps the history, and only move up. Once a message
   needed more, the conversation stays with that model. A sent message waits at most 30 s for its route; past it, the
   turn starts with the everyday default. The answer shows the chosen model and the reason.
+- The router also says how the work can be checked: by a machine (a test, an exit code, a number to recount), at a
+  glance, or blind (the person cannot tell a wrong answer from a right one). A blind medium request in code, math or
+  research gets the hard bar, as math always did, because the model's own checking matters most where nobody else can
+  check (done, `engine/src/route.rs`; measured in [design.md](design.md)).
+- An answer whose last check failed, or whose code changed with nothing checking it, offers one step up: the same
+  model one effort higher, else the next model at medium. It runs as a new branch, so a conversation's model and effort
+  never change (done, `engine/src/nudge.rs`).
 - **Still to build.** The table learns from what the user approves or redoes. The draft is routed at most twice per
   message while the user types; today it is routed at every pause.
 - The router is measured too: on the benchmark of real requests, its picks must match always using the strongest
@@ -329,9 +336,9 @@ phase.
    a hidden choice.
 3. **Set the model and the effort before a conversation starts, and never change model, effort, tools or system prompt
    in the middle of one without need.** The prompt cache is the biggest saving. A change of model always starts a new
-   cache, and a change of tools or system prompt invalidates everything after it. A change of effort may keep the cache
-   today, but Faber does not count on it. Facts that change travel as text inside the next message, never as a
-   system-prompt edit.
+   cache, and a change of tools or system prompt invalidates everything after it. A change of effort kept the Claude cache
+   through `--resume` and cost Codex nothing measurable (13/10/2026, [design.md](design.md)). Facts that change travel as
+   text inside the next message, never as a system-prompt edit.
 4. **Hand work to another model through a written summary or a diff, not the conversation.** Thinking blocks are tied to
    the model that wrote them.
 5. **Interrupt gracefully before killing, watch for silence, and kill the whole process tree on Windows.** The stop uses
