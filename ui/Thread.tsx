@@ -132,7 +132,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
         </details>
         <Show when={streaming() && latest()}><div class="activity-latest" role="status" aria-live="polite" aria-atomic="true" title={latest()}>{latest()}</div></Show>
       </Show>
-      <Asks conversationId={props.conversationId} turnId={m().id} permissions={waiting()} />
+      <Asks conversationId={props.conversationId} turnId={m().id} permissions={waiting()} surface="ask" />
       <div class="md" aria-busy={streaming()} onClick={openLinks}>
         <div innerHTML={html(finalText())} />
         <Show when={streaming() && !waiting().length && !m().waitUntil}>

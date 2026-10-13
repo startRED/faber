@@ -356,9 +356,9 @@ rest. The design is in `docs/superpowers/specs/2026-10-12-ux-sentinel-design.md`
   with a median under 20 ms and a `transitionend` (three tries). Then `Animation.setPlaybackRate(0.25)` makes every
   animation 4 times slower, so a panel that jumps is seen as one frame. The test build starts with three browser switches
   that stop the engine from slowing frames on a window no monitor shows.
-- **Scenarios.** Panels move through frames and reduced motion moves nothing (M1, M6). The composer grows and shrinks
-  and the end of the thread stays clear (I1, I2, I4, L4, L5; the cap is measured against the window height, 40vh). No
-  text is garbled in five languages, and a title with `› « » ß ç ã` survives the engine's file (T1; the static scan in
+- **Scenarios.** Panels move through frames and reduced motion moves nothing (M1, M6). A permission card arrives
+  through frames (M1, dialogs). The composer grows and shrinks and the end of the thread stays clear (I1 to I5, L4,
+  L5; the cap is measured against the window height, 40vh). No text is garbled in five languages, and a title with `› « » ß ç ã` survives the engine's file (T1; the static scan in
   `tests/ui/mojibake.check.ts` covers every locale and source string).
 - **Findings and the gate.** A finding is the hash of kind, screen, surface and element. Only critical and high
   findings whose hash is not in `tests/ux/baseline.json` fail a run; medium ones are written down and become tasks. The

@@ -3,9 +3,10 @@
 //! probe (`probe.js`) measures; the rules are in `crate::sentinel`, where each has its planted-defect twin as a unit
 //! test. Here every detector also meets a planted defect in the live page (never in the repository), and must find it.
 
-use super::{Result, Scenario, claude_chat, ensure, pause, start_settings, system_motion};
+use super::{Result, Scenario, ask, claude_chat, ensure, pause, start_settings, system_motion};
 use crate::app::Ctx;
 use crate::page::{Page, css};
+use crate::sandbox::{CliSlot, Launch};
 use crate::sentinel::{self, Anim, Finding, Motion, Sample, Typed};
 use serde_json::{Value, json};
 
@@ -14,6 +15,7 @@ const PROBE: &str = include_str!("../probe.js");
 pub fn scenarios() -> Vec<Scenario> {
     vec![
         Scenario { name: "sentinel: panels move through frames, and reduced motion moves nothing", run: motion },
+        Scenario { name: "sentinel: a permission card arrives through frames", run: permission },
         Scenario { name: "sentinel: the composer grows and shrinks, and the end of the thread stays clear", run: composer },
         Scenario { name: "sentinel: no text is garbled in five languages, and titles survive the engine's files", run: text },
     ]
@@ -174,6 +176,16 @@ fn motion(ctx: &mut Ctx) -> Result {
     inject(page)?;
     clock_and_slow(page)?;
 
+    // The probe sees through the shadow root of an exit copy: a host at half opacity makes its content half visible.
+    let seen = page.eval(
+        "(() => { const host = document.createElement('div'); host.className = 'motion-exit'; host.style.opacity = '0.5'; document.body.append(host);
+          const child = document.createElement('div'); child.dataset.surface = 'probe.twin'; child.style.cssText = 'width:10px;height:10px';
+          host.attachShadow({ mode: 'open' }).append(child); const state = window.__sx.stateOf('probe.twin'); host.remove(); return state; })()",
+    )?;
+    ensure(seen[0] == json!(1) && seen[5].as_f64().is_some_and(|o| (o - 0.5).abs() < 0.01), || {
+        format!("the probe must count the opacity of a shadow host (present, then 0.5 opacity wanted): {seen}")
+    })?;
+
     // The tutorial card, coming in and moving to the next step.
     let heading = page.named("heading", "first.look.title")?;
     page.wait_visible(&heading)?;
@@ -282,6 +294,56 @@ fn motion(ctx: &mut Ctx) -> Result {
     ctx.close(app.id)
 }
 
+/// The request of the recording `claude/tools.jsonl`: the CLI asks to write a.txt, and after the answer b.txt.
+const TWO_WRITES: &str = "Create a.txt containing 'one'. Then create b.txt containing 'two'. Use the Write tool for each, one at a time.";
+
+/// M1 on the permission card (a dialog). The card arrives as shipped; put away and shown again with its animation taken
+/// away, it must be found.
+fn permission(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let launch = Launch {
+        claude: CliSlot::Fake,
+        codex: CliSlot::Off,
+        recording: Some(ctx.paths.fixtures.join("claude/tools.jsonl")),
+        ..Launch::default()
+    };
+    let mut app = ctx.launch(launch)?;
+    let page = &mut app.page;
+    let mut found = Vec::new();
+    viewport(page, 1440, 900)?;
+    inject(page)?;
+    clock_and_slow(page)?;
+    let model = page.labelled("composer.model")?;
+    page.select_option(&model, "Claude Haiku")?;
+    let config = Config { width: 1440, height: 900, look: "sala", language: "en", size: 15, motion: "full" }.label();
+    let w = watch(ctx, "ask appears", page, &["ask"], |p| {
+        ask(p, TWO_WRITES)?;
+        p.wait_visible(&css(".ask").has_text("a.txt"))
+    })?;
+    judge_motion(ctx, &mut found, "chat.thread", "ask", "appears", &config, &w.samples[0])?;
+    let page = &mut app.page;
+    page.eval(
+        "(() => { const s = document.createElement('style'); s.id = 'sx-plant'; s.textContent = '.ask { animation: none !important; }'; document.head.append(s); return true; })()",
+    )?;
+    // The same card put away and shown again, now with no animation.
+    // The running column opens by itself next to the card; the twin starts when everything has come to rest.
+    page.wait_for("the running column to open", "!!document.querySelector('aside.runcol')")?;
+    page.wait_for(
+        "the page to rest",
+        "document.getAnimations().every((a) => a.effect.getTiming().iterations === Infinity || a.playState !== 'running')",
+    )?;
+    page.eval("document.querySelectorAll('.ask').forEach((el) => { el.style.display = 'none'; }); true")?;
+    pause(0.6);
+    let w = watch(ctx, "ask planted", page, &["ask"], |p| {
+        p.eval("document.querySelectorAll('.ask').forEach((el) => { el.style.display = ''; }); true").map(drop)
+    })?;
+    let mut planted = Vec::new();
+    judge_motion(ctx, &mut planted, "chat.thread", "ask", "appears with no animation", "planted", &w.samples[0])?;
+    caught("a permission card with no motion (M1)", planted.iter().any(|f| f.kind == "M1"))?;
+    gate(ctx, "permission", &found)?;
+    ctx.close(app.id)
+}
+
 // 2. The composer and the end of the thread.
 
 /// Where the last message ends, where the composer starts, and where the scroll area ends, with the thread at its end.
@@ -295,7 +357,7 @@ const THREAD_END: &str = r#"(() => {
   const box = last.getBoundingClientRect();
   const at = document.elementFromPoint(box.left + box.width / 2, Math.min(box.bottom - 2, innerHeight - 1));
   return { covered: !at || !last.contains(at), lastBottom: last.getBoundingClientRect().bottom, composerTop: document.querySelector('.composer').getBoundingClientRect().top,
-           areaBottom: thread.getBoundingClientRect().bottom, atEnd: thread.scrollHeight - thread.scrollTop - thread.clientHeight < 1 };
+           areaBottom: thread.getBoundingClientRect().bottom, fromEnd: thread.scrollHeight - thread.scrollTop - thread.clientHeight };
 })()"#;
 
 /// The composer's field after typing: the numbers `Typed` holds.
@@ -315,11 +377,11 @@ fn thread_end(page: &mut Page, config: &str, follow: bool, found: &mut Vec<Findi
         &THREAD_END.replace("thread.scrollTop = thread.scrollHeight;", if follow { "" } else { "thread.scrollTop = thread.scrollHeight;" }),
     )?;
     ensure(!end.is_null(), || "the thread has no message".to_string())?;
-    if end["atEnd"] != json!(true) {
-        found.push(Finding::new("I5", "chat.thread", "thread", ".thread", config, "the thread left its end when the composer grew"));
+    let n = |key: &str| end[key].as_f64().unwrap_or_default();
+    if follow && let Some(metric) = sentinel::kept_problem(n("fromEnd")) {
+        found.push(Finding::new("I5", "chat.thread", "thread", ".thread", config, metric));
         return Ok(end);
     }
-    let n = |key: &str| end[key].as_f64().unwrap_or_default();
     if let Some(metric) = sentinel::gap_problem(n("lastBottom"), n("composerTop")) {
         found.push(Finding::new("L4", "chat.thread", "thread", ".thread", config, metric));
     }
@@ -333,14 +395,16 @@ fn thread_end(page: &mut Page, config: &str, follow: bool, found: &mut Vec<Findi
 fn type_lines(page: &mut Page, config: &str, found: &mut Vec<Finding>) -> Result {
     let composer = page.labelled("composer.message")?;
     let mut rows = Vec::new();
-    let (mut line, mut min) = (24.0, 40.0);
+    // The one-line height is read before anything is typed: a field that keeps its height must not move the yardstick.
+    let before = page.eval(FIELD)?;
+    let (mut line, min) = (before["line"].as_f64().unwrap_or(24.0), before["min"].as_f64().unwrap_or(40.0));
     for lines in [1u32, 2, 5, 10, 40] {
         let text = (1..=lines).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n");
         page.fill(&composer, &text)?;
         pause(0.12);
         let f = page.eval(FIELD)?;
         let n = |key: &str| f[key].as_f64().unwrap_or_default();
-        (line, min) = (n("line"), n("min"));
+        line = n("line");
         rows.push(Typed {
             lines,
             height: n("height"),
@@ -426,7 +490,8 @@ fn composer(ctx: &mut Ctx) -> Result {
     // scroll area cuts off. Each must be found by the same code that finds nothing above.
     let page = &mut app.page;
     viewport(page, 1440, 900)?;
-    let last = ROWS[ROWS.len() - 1].label();
+    // The settings are those of the last row the loop applied (the narrowest), seen at the widest size.
+    let last = format!("{}, resized to 1440x900", ROWS[0].label());
     let plant = |page: &mut Page, css: &str| {
         page.eval(&format!("(() => {{ const s = document.createElement('style'); s.id = 'sx-plant'; s.textContent = {}; document.head.append(s); return true; }})()", json!(css))).map(drop)
     };
@@ -443,6 +508,28 @@ fn composer(ctx: &mut Ctx) -> Result {
     })?;
     unplant(page)?;
     pause(0.3);
+
+    // A composer that only ever grows (I3), a send button that follows the text up (I4), a thread that loses its place
+    // when the field grows (I5): three defects of behaviour, so they are planted as an input handler, not as a style.
+    page.eval(
+        "(() => { const field = document.querySelector('.composer textarea'), send = document.querySelector('.composer .send'), thread = document.querySelector('.thread');
+          window.__sxLoose = () => { field.style.setProperty('min-height', field.getBoundingClientRect().height + 'px', 'important');
+            send.style.transform = `translateY(${-field.scrollHeight / 3}px)`; setTimeout(() => { thread.scrollTop = 0; }, 30); };
+          document.addEventListener('input', window.__sxLoose, true); return true; })()",
+    )?;
+    let mut twin = Vec::new();
+    type_lines(page, &last, &mut twin)?;
+    let kinds: Vec<&str> = twin.iter().map(|f| f.kind).collect();
+    for kind in ["I3", "I4", "I5"] {
+        caught(
+            &format!("{kind} by a handler that only grows the field, moves the button and scrolls the thread away (found {kinds:?})"),
+            kinds.contains(&kind),
+        )?;
+    }
+    page.eval(
+        "document.removeEventListener('input', window.__sxLoose, true); document.querySelector('.composer textarea').style.removeProperty('min-height'); document.querySelector('.composer .send').style.transform = ''; true",
+    )?;
+    pause(0.3);
     plant(page, ".thread { padding-bottom: 8px !important; }")?;
     let mut twin = Vec::new();
     let end = thread_end(page, &last, false, &mut twin)?;
@@ -452,6 +539,7 @@ fn composer(ctx: &mut Ctx) -> Result {
     let mut twin = Vec::new();
     thread_end(page, &last, false, &mut twin)?;
     caught("a last item with the composer over it (L5)", twin.iter().any(|f| f.kind == "L5"))?;
+    unplant(page)?;
 
     gate(ctx, "composer", &found)?;
     ctx.close(app.id)
