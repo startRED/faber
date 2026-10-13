@@ -9,7 +9,7 @@
 pub mod bar;
 pub mod budget;
 pub mod disk;
-mod files;
+pub mod files;
 pub mod git;
 pub mod kit;
 pub mod lead;

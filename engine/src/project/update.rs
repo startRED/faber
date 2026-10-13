@@ -11,6 +11,7 @@ use super::lease::{LeaseError, hash, real_path};
 use super::{Effect, Extra, Grant, RepoIdentity, SCHEMA};
 use crate::store::{Disk, Fault, replace};
 use serde::{Deserialize, Serialize};
+use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -416,6 +417,12 @@ pub struct SlotLayout {
     dev_root: PathBuf,
 }
 
+pub struct Coordinator {
+    _file: File,
+    #[cfg(unix)]
+    _directory: File,
+}
+
 impl SlotLayout {
     pub fn new(dev_root: &Path, installed_data: &Path, installed_release: &Path) -> Result<Self, UpdateError> {
         if is_forbidden_root(dev_root) || is_forbidden_root(installed_data) {
@@ -465,6 +472,70 @@ impl SlotLayout {
 
     pub fn dev_root(&self) -> &Path {
         &self.dev_root
+    }
+
+    pub fn coordinate(&self) -> Result<Coordinator, UpdateError> {
+        let path = real_path(&self.dev_root.join("update.lock"))?;
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create(true).truncate(false);
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            options.share_mode(3).custom_flags(0x0020_0000);
+        }
+        let file = options.open(path).map_err(|_| Fault::Write)?;
+        file.try_lock().map_err(|_| UpdateError::ActiveOperations)?;
+        #[cfg(unix)]
+        let directory = {
+            let directory = File::open(self.dev_root()).map_err(|_| Fault::Read)?;
+            directory.try_lock().map_err(|_| UpdateError::ActiveOperations)?;
+            directory
+        };
+        Ok(Coordinator {
+            _file: file,
+            #[cfg(unix)]
+            _directory: directory,
+        })
+    }
+
+    pub fn missions_quiescent(&self) -> Result<(), UpdateError> {
+        let data = real_path(&self.dev_root.join("data"))?;
+        let ledger = crate::store::Store::new(&data).ledger_checked()?;
+        let budget = super::budget::Budget::load(&ledger).map_err(|_| Fault::Corrupt)?;
+        if budget.invocations.values().any(|r| !r.terminated || !r.settled) {
+            return Err(UpdateError::ActiveOperations);
+        }
+        let root = real_path(&data.join("missions"))?;
+        if !root.exists() {
+            return Ok(());
+        }
+        for entry in std::fs::read_dir(root).map_err(|_| Fault::Read)? {
+            let path = real_path(&entry.map_err(|_| Fault::Read)?.path())?;
+            if !path.is_dir() {
+                return Err(Fault::Corrupt.into());
+            }
+            let read = |name: &str| ScopedFile::new(&path.join(name), false)?.read_limited(16 * 1024 * 1024);
+            if let Some((bytes, _)) = read("run.json")? {
+                let runner: super::run::Runner = serde_json::from_slice(&bytes).map_err(|_| Fault::Corrupt)?;
+                if super::Record::schema(&runner) != SCHEMA || path.file_name().and_then(|s| s.to_str()) != Some(&runner.mission.id) {
+                    return Err(Fault::Corrupt.into());
+                }
+                runner.update_quiescent().map_err(|_| UpdateError::ActiveOperations)?;
+                if !super::store::Journal::pending_private(&path).map_err(|_| Fault::Corrupt)?.is_empty() {
+                    return Err(UpdateError::ActiveOperations);
+                }
+            }
+            if let Some((bytes, _)) = read("runtime.json")? {
+                let runtime: super::Runtime = serde_json::from_slice(&bytes).map_err(|_| Fault::Corrupt)?;
+                if runtime.schema != SCHEMA || runtime.leases.iter().any(|lease| lease.schema != SCHEMA) {
+                    return Err(Fault::Corrupt.into());
+                }
+                if runtime.leases.iter().any(|lease| !super::lease::retirement_known(lease)) {
+                    return Err(UpdateError::ActiveOperations);
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn manifest_path(&self) -> PathBuf {
@@ -606,6 +677,16 @@ impl UpdateManager {
         Ok(())
     }
 
+    fn checkpoint(&self, manifest: &UpdateManifest) -> Result<(), UpdateError> {
+        manifest.validate()?;
+        let bytes = serde_json::to_vec(manifest).expect("plain data serializes");
+        if bytes.len() as u64 > MAX_MANIFEST {
+            return Err(UpdateError::InvalidState("checkpoint too large"));
+        }
+        ScopedFile::new(&self.layout.dev_root().join("rollback.json"), false)?.write(&bytes, None)?;
+        Ok(())
+    }
+
     /// Register the running, healthy development build once; the adapter supplies its verified payload.
     pub fn adopt_baseline(&self, slot: Slot, tree: ExactTree, payload: &[u8], now: u64) -> Result<(), UpdateError> {
         tree.validate()?;
@@ -616,6 +697,7 @@ impl UpdateManager {
         let good = LastGoodRecord::new(slot, tree, now, now);
         manifest.last_good = Some(good.clone());
         manifest.current_good = Some(good);
+        self.checkpoint(&manifest)?;
         self.save_manifest(&manifest)
     }
 
@@ -660,6 +742,16 @@ impl UpdateManager {
         if manifest.last_good.as_ref().is_some_and(|good| good.slot != manifest.active_slot) {
             return Err(UpdateError::NoLastGood);
         }
+
+        // Commit the current healthy tuple before its older fallback slot may be reused.
+        let mut safe = manifest.clone();
+        safe.state = UpdateState::Idle;
+        safe.staged_tree = None;
+        safe.candidate_repo = None;
+        safe.candidate_evidence = None;
+        safe.first_operation_completed = false;
+        safe.updated_at = now;
+        self.checkpoint(&safe)?;
 
         manifest.staged_tree = Some(tree.clone());
         manifest.candidate_repo = Some(repo.common_dir.clone());
@@ -712,6 +804,40 @@ impl UpdateManager {
         manifest.updated_at = now;
         self.save_manifest(&manifest)?;
         Ok(())
+    }
+
+    /// The trusted adapter has accepted a newer tree and holds the inactive slot's process lock.
+    /// A live swap/probation is immutable; only an unpromoted candidate can be coalesced.
+    pub fn supersede_next(&self, grant: &Grant, repo: &RepoIdentity, revision: u64, now: u64) -> Result<(), UpdateError> {
+        grant.allows(repo, revision, Effect::SelfUpdate).map_err(UpdateError::Grant)?;
+        let mut manifest = self.manifest()?.ok_or(UpdateError::InvalidState("no manifest initialized"))?;
+        if !matches!(manifest.state, UpdateState::PreparingNext { .. } | UpdateState::CanaryPending { .. } | UpdateState::Ready { .. })
+            || now < manifest.updated_at
+            || manifest.candidate_repo.as_ref() != Some(&repo.common_dir)
+        {
+            return Err(UpdateError::InvalidState("candidate cannot be superseded"));
+        }
+        manifest.state = UpdateState::Idle;
+        manifest.staged_tree = None;
+        manifest.candidate_repo = None;
+        manifest.candidate_evidence = None;
+        manifest.first_operation_completed = false;
+        manifest.updated_at = now;
+        self.save_manifest(&manifest)
+    }
+
+    pub fn wait_for_canary(&self, now: u64) -> Result<(), UpdateError> {
+        let mut manifest = self.manifest()?.ok_or(UpdateError::NoLastGood)?;
+        let (slot, tree) = match &manifest.state {
+            UpdateState::PreparingNext { slot, tree } | UpdateState::CanaryPending { slot, tree } => (*slot, tree.clone()),
+            _ => return Err(UpdateError::InvalidState("not waiting for canary")),
+        };
+        if now < manifest.updated_at {
+            return Err(UpdateError::InvalidState("stale canary time"));
+        }
+        manifest.state = UpdateState::CanaryPending { slot, tree };
+        manifest.updated_at = now;
+        self.save_manifest(&manifest)
     }
 
     pub fn enter_quiescence(&self, active_window: bool, active_operations: bool) -> Result<(), UpdateError> {
@@ -783,6 +909,8 @@ impl UpdateManager {
         if serde_json::to_vec_pretty(&rollback).expect("plain data serializes").len() as u64 > MAX_MANIFEST {
             return Err(UpdateError::InvalidState("insufficient rollback manifest headroom"));
         }
+        // The trusted helper can restore the exact last-good tuple even when next cannot decode the live manifest.
+        self.checkpoint(&manifest)?;
         self.save_manifest(&manifest)?;
         Ok(target_slot)
     }
@@ -797,6 +925,7 @@ impl UpdateManager {
             return Err(UpdateError::InvalidState("invalid probation time"));
         }
         manifest.active_slot = to_slot;
+        manifest.extra.remove("cleanExit");
         manifest.state = UpdateState::Probation {
             slot: to_slot,
             tree,
@@ -860,12 +989,22 @@ impl UpdateManager {
             return Err(UpdateError::InvalidState("first operation not complete"));
         }
         manifest.current_good = Some(LastGoodRecord::new(slot, tree, promoted_at, now));
+        if let Some(evidence) = &manifest.candidate_evidence {
+            manifest
+                .current_good
+                .as_mut()
+                .unwrap()
+                .extra
+                .insert("canaryEvidence".into(), serde_json::to_value(evidence).expect("plain data serializes"));
+        }
         manifest.staged_tree = None;
         manifest.candidate_repo = None;
         manifest.candidate_evidence = None;
         manifest.rollback_count = 0;
         manifest.state = UpdateState::Healthy;
         manifest.updated_at = now;
+        // This is the promotion commit point; a crash before the live write must never replay the older rollback.
+        self.checkpoint(&manifest)?;
         self.save_manifest(&manifest)?;
         Ok(())
     }
@@ -888,6 +1027,24 @@ impl UpdateManager {
         }
     }
 
+    /// A trusted orderly exit/session end retries the full probation without credit for elapsed time.
+    pub fn pause_probation(&self, now: u64) -> Result<(), UpdateError> {
+        let mut manifest = self.manifest()?.ok_or(UpdateError::NoLastGood)?;
+        let (slot, tree) = match &manifest.state {
+            UpdateState::Probation { slot, tree, .. } => (*slot, tree.clone()),
+            UpdateState::Swapping { to_slot, tree, .. } => (*to_slot, tree.clone()),
+            _ => return Err(UpdateError::InvalidState("clean exit outside transition")),
+        };
+        let from_slot = manifest.last_good.as_ref().ok_or(UpdateError::NoLastGood)?.slot;
+        manifest.state = UpdateState::Swapping { from_slot, to_slot: slot, tree };
+        manifest.active_slot = from_slot;
+        manifest.first_operation_completed = false;
+        manifest.extra.insert("cleanExit".into(), true.into());
+        manifest.updated_at = now.max(manifest.updated_at);
+        self.checkpoint(&manifest)?;
+        self.save_manifest(&manifest)
+    }
+
     pub fn trigger_rollback(&self, reason: RollbackReason, now: u64) -> Result<RollbackAction, UpdateError> {
         let mut manifest = self.manifest()?.ok_or(UpdateError::InvalidState("no manifest initialized"))?;
         let action = Self::evaluate_rollback(&manifest, &reason);
@@ -899,6 +1056,8 @@ impl UpdateManager {
         }
         Self::restore(&mut manifest, reason, now);
         self.save_manifest(&manifest)?;
+        ScopedFile::new(&self.layout.dev_root().join("rollback.json"), false)?
+            .write(&serde_json::to_vec(&manifest).expect("plain data serializes"), None)?;
         Ok(action)
     }
 
@@ -967,7 +1126,58 @@ impl UpdateManager {
     }
 
     pub fn recover_transition(&self, now: u64) -> Result<Option<RollbackAction>, UpdateError> {
-        let Some(manifest) = self.manifest()? else { return Ok(None) };
+        let manifest = match self.manifest() {
+            Ok(Some(manifest)) => manifest,
+            Ok(None) => return Ok(None),
+            Err(error @ UpdateError::Store(Fault::Corrupt))
+            | Err(error @ UpdateError::Newer)
+            | Err(error @ UpdateError::InvalidState(_))
+            | Err(error @ UpdateError::InvalidTree(_)) => {
+                let Some((bytes, _)) = ScopedFile::new(&self.layout.dev_root().join("rollback.json"), false)?.read_limited(MAX_MANIFEST)?
+                else {
+                    return Err(error);
+                };
+                let mut checkpoint: UpdateManifest = serde_json::from_slice(&bytes).map_err(|_| Fault::Corrupt)?;
+                checkpoint.validate()?;
+                if (matches!(checkpoint.state, UpdateState::Healthy | UpdateState::Idle) && checkpoint.current_good.is_some())
+                    || (matches!(checkpoint.state, UpdateState::Swapping { .. })
+                        && checkpoint.extra.get("cleanExit") == Some(&serde_json::Value::Bool(true)))
+                {
+                    self.save_manifest(&checkpoint)?;
+                    return Ok(None);
+                }
+                if !matches!(checkpoint.state, UpdateState::Swapping { .. }) {
+                    return Err(UpdateError::InvalidState("invalid rollback checkpoint"));
+                }
+                let action = Self::evaluate_rollback(&checkpoint, &RollbackReason::StartupCorrupt);
+                Self::restore(&mut checkpoint, RollbackReason::StartupCorrupt, now);
+                self.save_manifest(&checkpoint)?;
+                ScopedFile::new(&self.layout.dev_root().join("rollback.json"), false)?
+                    .write(&serde_json::to_vec(&checkpoint).expect("plain data serializes"), None)?;
+                return Ok(Some(action));
+            }
+            Err(error) => return Err(error),
+        };
+        if let UpdateState::Probation { tree, probation_deadline, .. } = &manifest.state {
+            let checkpoint = ScopedFile::new(&self.layout.dev_root().join("rollback.json"), false)?.read_limited(MAX_MANIFEST)?;
+            if let Some((bytes, _)) = checkpoint {
+                let committed: UpdateManifest = serde_json::from_slice(&bytes).map_err(|_| Fault::Corrupt)?;
+                committed.validate()?;
+                let healthy = committed.state == UpdateState::Healthy
+                    && committed.current_good.as_ref().is_some_and(|good| good.tree == *tree && good.healthy_at >= *probation_deadline);
+                let paused = matches!(&committed.state, UpdateState::Swapping { tree: paused_tree, .. } if paused_tree == tree)
+                    && committed.extra.get("cleanExit") == Some(&serde_json::Value::Bool(true))
+                    && committed.updated_at >= manifest.updated_at;
+                if healthy || paused {
+                    self.save_manifest(&committed)?;
+                    return Ok(None);
+                }
+            }
+        }
+        if manifest.extra.get("cleanExit") == Some(&serde_json::Value::Bool(true)) && matches!(manifest.state, UpdateState::Swapping { .. })
+        {
+            return Ok(None);
+        }
         if matches!(manifest.state, UpdateState::Swapping { .. } | UpdateState::Probation { .. }) {
             self.trigger_rollback(RollbackReason::StartupCorrupt, now).map(Some)
         } else {

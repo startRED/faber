@@ -18,6 +18,7 @@ import { Segmented, Toggle } from './controls.tsx';
 import { resizeComposer } from './composer-size.ts';
 import { Peek } from './Mark.tsx';
 import { Icon } from './Glyphs.tsx';
+import { LocalBuild } from './LocalBuild.tsx';
 import { fromEngine, lang, t } from './i18n.ts';
 import { animateList } from './motion.ts';
 import {
@@ -44,6 +45,7 @@ const TASK_STATES: TaskState[] = ['ready', 'running', 'review', 'done', 'blocked
 
 export function Projects(props: Props) {
   const [enroll, setEnroll] = createSignal<EnrollView>();
+  const [localBuild, setLocalBuild] = createSignal<BuildView>();
   const [missionData, setMissionData] = createStore<{ view?: MissionView }>({});
   const mission = () => missionData.view;
   const setMission = (view?: MissionView) => {
@@ -73,6 +75,14 @@ export function Projects(props: Props) {
   createEffect(on(goal, () => queueMicrotask(resize), { defer: true }));
 
   onMount(() => {
+    let disposed = false;
+    const refresh = () => { void api.localUpdateState().then((view) => {
+      if (!disposed) setLocalBuild(view ?? undefined);
+    }, (err) => { if (!disposed) setError(errorText(err)); }); };
+    refresh();
+    const timer = setInterval(refresh, 30_000);
+    window.addEventListener('focus', refresh);
+    onCleanup(() => { disposed = true; clearInterval(timer); window.removeEventListener('focus', refresh); });
     let width = 0;
     const observer = new ResizeObserver(([entry]) => {
       if (entry.contentRect.width === width) return;
@@ -241,7 +251,7 @@ export function Projects(props: Props) {
     const m = mission();
     return formatCost(m?.cost.ownMicros);
   });
-  const build = (): BuildView => mission()?.build ?? { waiting: 'reason.build.unavailable' };
+  const build = (): BuildView => localBuild() ?? mission()?.build ?? { waiting: 'reason.build.unavailable' };
 
   return (
     <div class="projects-stage" ref={(el) => animateList(el)}>
@@ -255,6 +265,7 @@ export function Projects(props: Props) {
           </div>
         }
       >
+        <Show when={!mission() && localBuild()}>{(view) => <LocalBuild view={view()} />}</Show>
         <Show when={error()}>
           <div class="note err" role="alert">
             {fromEngine(error())}
@@ -598,25 +609,7 @@ export function Projects(props: Props) {
 
                 <Show when={build()}>
                   {(b: () => BuildView) => (
-                    <div class="build-card">
-                      <h3>{t('projects.build.title')}</h3>
-                      <div class="build-slots">
-                        <div>
-                          <b>{t('projects.build.current')}:</b> {b().current ?? t('projects.value.missing')}
-                        </div>
-                        <div>
-                          <b>{t('projects.build.next')}:</b> {b().next ?? t('projects.value.missing')}
-                        </div>
-                        <div>
-                          <b>{t('projects.build.lastGood')}:</b> {b().lastGood ?? t('projects.value.missing')}
-                        </div>
-                        <Show when={b().waiting}>
-                          <div class="note">
-                            <b>{t('projects.build.waiting')}:</b> {fromEngine(b().waiting ?? undefined)}
-                          </div>
-                        </Show>
-                      </div>
-                    </div>
+                    <LocalBuild view={b()} />
                   )}
                 </Show>
               </div>

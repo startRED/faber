@@ -1098,6 +1098,7 @@ dependencies = [
  "notify-rust",
  "serde",
  "serde_json",
+ "sysinfo",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
@@ -1105,6 +1106,10 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
+ "tempfile",
+ "tokio",
+ "win32job",
+ "winsafe",
 ]
 
 [[package]]

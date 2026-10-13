@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = false
+default-run = "faber"
 
 [features]
 # Test builds only (testkit/): a command the screen's checks report through, and the page that runs them. Never default.
@@ -25,10 +26,19 @@ tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
+tokio = { version = "1", features = ["io-util", "macros", "process", "rt-multi-thread", "time"] }
+sysinfo = { version = "0.39.6", default-features = false, features = ["disk"] }
+
+[dev-dependencies]
+tempfile = "3"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Already used by the notification plugin; its Linux builder cannot suppress the desktop's own sound.
 notify-rust = "4"
+
+[target.'cfg(windows)'.dependencies]
+win32job = "2"
+winsafe = { version = "0.0.29", features = ["gui"] }
 
 # Only tray/native.rs may use FFI; the engine and testkit keep the workspace's forbid.
 [lints.rust]

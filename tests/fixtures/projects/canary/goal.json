@@ -1,0 +1,9 @@
+{
+  "goal": "Fix normalize so the named proof trims and lowercases without changing its assertions.",
+  "lease": ["src/lib.rs"],
+  "proof": ["cargo", "test", "--offline", "trims_and_lowercases"],
+  "otherVendorReviewRequired": true,
+  "remoteEffectsAllowed": false,
+  "recursiveSelfUpdateAllowed": false,
+  "spendingReservationRequired": true
+}

@@ -113,6 +113,13 @@ pub fn build_test_app(paths: &Paths, jobs: usize) -> Result<(), String> {
     let mut tauri = Command::new("node");
     tauri.current_dir(&paths.root).args(tauri_args(&paths.target, jobs));
     run("Tauri build", tauri)?;
+    let mut helper = Command::new("cargo");
+    helper
+        .current_dir(&paths.root)
+        .args(["build", "--quiet", "--package", "faber", "--bin", "faber-local", "--features", "test-hooks", "--target-dir"])
+        .arg(&paths.target)
+        .args(["-j", &jobs.to_string()]);
+    run("local rollback helper", helper)?;
     if fingerprint(&production) != before {
         return Err("the test build changed dist/, which only the production build may write".into());
     }
