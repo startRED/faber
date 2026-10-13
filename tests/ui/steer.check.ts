@@ -111,3 +111,28 @@ check('steer: thread renders queued turns with badge and remove/sendNow actions'
     root.remove();
   }
 });
+
+check('steer: a message already handed to the running answer cannot be removed', async () => {
+  const root = document.createElement('div');
+  document.body.append(root);
+  const message: Message = { id: 'm1', role: 'assistant', text: 'Working...', at: 0, status: 'streaming', vendor: 'codex' };
+  const queued: QueuedTurn[] = [
+    { id: 'wait', at: 1, text: 'Waits for the next turn', choice: { vendor: 'codex' } },
+    { id: 'sent', at: 2, text: 'Already in the turn', choice: { vendor: 'codex' }, sending: true },
+  ];
+  const dispose = render(() => createComponent(Thread, {
+    conversationId: 'conv-test', messages: [message], queued, busy: true, from: 0, options: [], onBranch: () => {},
+  }), root);
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+  try {
+    await settle();
+    const bubbles = [...root.querySelectorAll('.mine.queued')];
+    equal(bubbles.length, 2, 'both queued messages are drawn');
+    const remove = (bubble: Element) => bubble.querySelector('button[aria-label="' + t('queue.removeLabel') + '"]');
+    ok(remove(bubbles[0]), 'a message waiting for the next turn can be removed');
+    equal(remove(bubbles[1]), null, 'a message already in the running turn cannot');
+  } finally {
+    dispose();
+    root.remove();
+  }
+});

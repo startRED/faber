@@ -148,6 +148,7 @@ export const en = {
   'queue.sendNowLabel': 'Send queued message now',
   'error.noSubscription': 'No connected subscription can answer this. Connect one in Settings.',
   'error.busy': 'Wait for the current answer or stop it first.',
+  'error.queueFull': 'Too many messages are waiting. Wait for the current answer, or remove one.',
   'error.projectGone': 'This project is no longer in Faber.',
   'error.conversationGone': 'This conversation is no longer in Faber.',
   'error.messageGone': 'That message is no longer in this conversation.',

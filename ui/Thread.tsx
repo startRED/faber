@@ -240,7 +240,9 @@ function Mine(props: { m: Accessor<Message>; onBranch: OnBranch }) {
   );
 }
 
-function Queued(props: { conversationId: string; q: QueuedTurn; busy: boolean }) {
+// A message written while an answer was running. The person can take it back until it is sent; one already handed to the
+// running answer (`sending`) cannot be, and one that waits for the next turn can be sent by hand once nothing runs.
+function Queued(props: { conversationId: string; q: QueuedTurn; busy: boolean; onError?: (err: unknown) => void }) {
   return (
     <div class="mine queued">
       <Show when={props.q.attachments?.length}>
@@ -264,11 +266,13 @@ function Queued(props: { conversationId: string; q: QueuedTurn; busy: boolean })
           <div class="queue-text">{props.q.text}</div>
         </Show>
         <div class="actions">
-          <button type="button" onClick={() => void api.removeQueued(props.conversationId, props.q.id)} aria-label={t('queue.removeLabel')}>
-            {t('queue.remove')}
-          </button>
+          <Show when={!props.q.sending}>
+            <button type="button" onClick={() => api.removeQueued(props.conversationId, props.q.id).catch((err) => props.onError?.(err))} aria-label={t('queue.removeLabel')}>
+              {t('queue.remove')}
+            </button>
+          </Show>
           <Show when={!props.busy}>
-            <button type="button" onClick={() => void api.sendQueued(props.conversationId, props.q.id)} aria-label={t('queue.sendNowLabel')}>
+            <button type="button" onClick={() => api.sendQueued(props.conversationId, props.q.id).catch((err) => props.onError?.(err))} aria-label={t('queue.sendNowLabel')}>
               {t('queue.sendNow')}
             </button>
           </Show>
@@ -280,20 +284,18 @@ function Queued(props: { conversationId: string; q: QueuedTurn; busy: boolean })
 
 // Messages only grow at the end, so each position keeps its component while the answer streams into it.
 // Only the messages from `from` on are drawn.
-export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTurn[]; busy?: boolean; from: number }) {
+export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTurn[]; busy?: boolean; onError?: (err: unknown) => void; from: number }) {
   const prompt = (at: number) => (props.messages[at - 1]?.role === 'user' ? props.messages[at - 1] : undefined);
   return (
     <>
-    <Index each={props.messages.slice(props.from)}>
-      {(m, i) => (
-        <Show when={m().role === 'user'} fallback={<Answer {...props} m={m} prompt={prompt(props.from + i)} />}>
-          <Mine m={m} onBranch={props.onBranch} />
-        </Show>
-      )}
-    </Index>
-      <For each={props.queued}>
-        {(q) => <Queued conversationId={props.conversationId} q={q} busy={props.busy ?? false} />}
-      </For>
+      <Index each={props.messages.slice(props.from)}>
+        {(m, i) => (
+          <Show when={m().role === 'user'} fallback={<Answer {...props} m={m} prompt={prompt(props.from + i)} />}>
+            <Mine m={m} onBranch={props.onBranch} />
+          </Show>
+        )}
+      </Index>
+      <For each={props.queued}>{(q) => <Queued conversationId={props.conversationId} q={q} busy={props.busy ?? false} onError={props.onError} />}</For>
     </>
   );
 }

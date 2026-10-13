@@ -59,6 +59,8 @@ export interface QueuedTurn {
   attachments?: string[];
   choice: Choice;
   at: number;
+  /** Handed to the running turn and not yet taken in: it can no longer be removed. */
+  sending?: boolean;
 }
 export interface Conversation {
   id: string;

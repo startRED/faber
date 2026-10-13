@@ -147,6 +147,7 @@ export const fr: Messages = {
   'queue.sendNowLabel': 'Envoyer le message en attente maintenant',
   'error.noSubscription': 'Aucun abonnement connecté ne peut répondre. Connectez-en un dans les Réglages.',
   'error.busy': 'Attendez la fin de la réponse en cours ou arrêtez-la d’abord.',
+  'error.queueFull': 'Trop de messages sont en attente. Attendez la réponse en cours ou retirez-en un.',
   'error.projectGone': 'Ce projet n’est plus dans Faber.',
   'error.conversationGone': 'Cette conversation n’est plus dans Faber.',
   'error.messageGone': 'Ce message ne fait plus partie de cette conversation.',

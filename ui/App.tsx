@@ -434,6 +434,9 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
     const at = place();
     const chosen = picked();
     const ticket = ++sendTicket;
+    // Written while an answer runs, the message is queued or handed to that answer: it is the engine's to keep, so a
+    // rejected answer must not put it back in the box.
+    const alongside = busy();
     let accepted = false;
     setError(undefined);
     stick = true;
@@ -450,11 +453,11 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
       const key = `faber.choice.${id}`;
       remember(key, place() === at ? picked() : recall<Choice>(key, chosen));
       accepted = true;
-      if (ticket === sendTicket) held.set(id, { draft });
+      if (ticket === sendTicket && !alongside) held.set(id, { draft });
       const moved = place() === at && id !== opening.id;
       if (moved) await go({ ...at, id });
       const sent = moved && current()?.id === id ? current() : await api.open(id);
-      if (ticket === sendTicket) {
+      if (ticket === sendTicket && !alongside) {
         const reply = sent?.messages.at(-1);
         const tracked = held.get(id) ?? { draft };
         tracked.reply = reply?.id;
@@ -818,6 +821,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                               messages={c().messages}
                               queued={c().queued}
                               busy={busy()}
+                              onError={fail}
                               usage={state().usage ?? []}
                               from={from()}
                               conversationId={c().id}

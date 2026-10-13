@@ -147,6 +147,7 @@ export const es: Messages = {
   'queue.sendNowLabel': 'Enviar mensaje en cola ahora',
   'error.noSubscription': 'Ninguna suscripción conectada puede responder. Conecta una en Ajustes.',
   'error.busy': 'Espera a que termine la respuesta actual o detenla primero.',
+  'error.queueFull': 'Hay demasiados mensajes en cola. Espera la respuesta actual o elimina uno.',
   'error.projectGone': 'Este proyecto ya no está en Faber.',
   'error.conversationGone': 'Esta conversación ya no está en Faber.',
   'error.messageGone': 'Ese mensaje ya no está en esta conversación.',

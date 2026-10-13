@@ -147,6 +147,7 @@ export const ptBR: Messages = {
   'queue.sendNowLabel': 'Enviar mensagem da fila agora',
   'error.noSubscription': 'Nenhuma assinatura conectada pode responder. Conecte uma em Configurações.',
   'error.busy': 'Espere a resposta atual terminar ou pare antes.',
+  'error.queueFull': 'Há mensagens demais na fila. Espere a resposta atual ou remova uma.',
   'error.projectGone': 'Este projeto não está mais no Faber.',
   'error.conversationGone': 'Esta conversa não está mais no Faber.',
   'error.messageGone': 'Essa mensagem não está mais nesta conversa.',

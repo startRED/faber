@@ -351,7 +351,6 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .send:hover:not(:disabled) { filter: brightness(1.07); }
 .send:disabled { opacity: 0.45; cursor: default; }
 .send.stop { background: var(--s3); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line-3); }
-.send + .send { margin-left: 0; }
 
 /* Settings */
 .s-main { overflow-y: auto; overflow-x: hidden; padding: 28px 36px 36px; display: flex; flex-direction: column; gap: 18px; }
