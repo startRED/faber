@@ -210,6 +210,9 @@ impl VendorLedger {
         let primary = self.primary(now).map(String::from);
         self.day_baselines.retain(|name, _| self.readings.contains_key(name));
         self.daily_samples.retain(|name, _| self.readings.contains_key(name));
+        // Keep reset history for calibration, but retire abandoned windows after a month.
+        self.history
+            .retain(|name, points| self.readings.contains_key(name) || points.last().is_some_and(|p| p.at >= now - 30.0 * 86_400.0));
         let list = self.history.entry(window.to_string()).or_default();
         let previous = list.last().copied();
         list.push(point);

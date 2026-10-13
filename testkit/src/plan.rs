@@ -31,7 +31,11 @@ pub fn half_cores(logical: usize) -> usize {
 }
 
 pub fn jobs() -> usize {
-    half_cores(std::thread::available_parallelism().map_or(1, |n| n.get()))
+    configured_jobs(std::thread::available_parallelism().map_or(1, |n| n.get()), std::env::var("CARGO_BUILD_JOBS").ok().as_deref())
+}
+
+fn configured_jobs(logical: usize, configured: Option<&str>) -> usize {
+    configured.and_then(|n| n.parse::<usize>().ok()).filter(|n| *n > 0).unwrap_or_else(|| half_cores(logical))
 }
 
 /// The suites that cover a set of changed paths (relative to the repository, `/` separators).
@@ -106,6 +110,16 @@ pub fn select(opts: &Options, changed: &[String]) -> BTreeSet<Suite> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn configured_build_jobs_limit_the_runner_without_changing_its_default() {
+        assert_eq!(super::configured_jobs(16, Some("4")), 4);
+        assert_eq!(super::configured_jobs(16, Some("2")), 2);
+        for configured in [None, Some("0"), Some("-1"), Some("bad")] {
+            assert_eq!(super::configured_jobs(16, configured), 8);
+        }
+        let logical = std::thread::available_parallelism().unwrap().get();
+        assert_eq!(super::jobs(), super::configured_jobs(logical, std::env::var("CARGO_BUILD_JOBS").ok().as_deref()));
+    }
     use super::*;
 
     fn paths(list: &[&str]) -> Vec<String> {

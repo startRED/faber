@@ -231,6 +231,8 @@ struct Core {
     ledger_saved: f64,
     /// Safety changes cannot admit work after a failed ledger save.
     ledger_failed: bool,
+    /// No ownership or unreadable authority: keep Chat in memory and leave the durable budget intact.
+    projects_closed: bool,
     /// When the last quota pulse started.
     last_pulse: f64,
     /// The PC's offset from UTC in seconds, as the screen reports it.
@@ -254,7 +256,8 @@ impl Engine {
         let mut store = Store::new(&opts.data_dir);
         let owned = store.claim_budget().is_ok();
         let mut ledger = store.ledger();
-        let ledger_failed = !owned
+        let projects_closed = !owned
+            || store.ledger_checked().is_err()
             || match crate::project::budget::recover_unbounded(&mut ledger) {
                 Ok(true) => store.save_ledger(&ledger).is_err(),
                 Ok(false) => false,
@@ -284,7 +287,8 @@ impl Engine {
                 spare: None,
                 ledger,
                 ledger_saved: 0.0,
-                ledger_failed,
+                ledger_failed: false,
+                projects_closed,
                 last_pulse: 0.0,
                 utc_offset: 0,
                 offset_known: false,
@@ -513,6 +517,9 @@ impl Core {
     /// Writes the ledger, but at most every half minute unless `force`: readings come with every answer. A failed write is
     /// tried again with the next reading.
     fn save_ledger(&mut self, force: bool) {
+        if self.projects_closed {
+            return;
+        }
         let now = self.secs();
         if force || !(0.0..LEDGER_EVERY).contains(&(now - self.ledger_saved)) {
             self.ledger_failed = self.store.save_ledger(&self.ledger).is_err();
@@ -627,8 +634,7 @@ impl Core {
         self.ledger.of_mut(vendor).span(Span { start, end, model: model.to_string(), cost, incomplete });
         self.ledger.of_mut(vendor).learn_weights(now);
         if crate::project::budget::finish_unbounded(&mut self.ledger, vendor).is_err() {
-            self.ledger_failed = true;
-            return;
+            self.projects_closed = true;
         }
         self.save_ledger(true);
         self.emit_usage();
@@ -1501,6 +1507,7 @@ impl Core {
     }
 
     fn remove(&mut self, id: &str) {
+        self.note_turn(id, None, true);
         if let Some(l) = self.live.remove(id) {
             l.session.close();
         }

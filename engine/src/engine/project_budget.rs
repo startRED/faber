@@ -8,7 +8,7 @@ impl Engine {
     pub fn mission_budget(&self, change: Change) -> Result<Status, String> {
         self.with(|c| {
             c.store.ledger_checked().map_err(|e| e.key().to_string())?;
-            if c.ledger_failed {
+            if c.projects_closed || c.ledger_failed {
                 return Err("error.store.write".into());
             }
             let mut next = c.ledger.clone();
@@ -29,7 +29,7 @@ impl Engine {
     pub fn mission_route(&self, verdict: &Asked, request: &Invocation, only: Option<Vendor>) -> Result<Routed, String> {
         self.with(|c| {
             c.store.ledger_checked().map_err(|e| e.key().to_string())?;
-            if c.ledger_failed {
+            if c.projects_closed || c.ledger_failed {
                 return Err("error.store.write".into());
             }
             let b = Budget::load(&c.ledger).map_err(str::to_string)?;
@@ -48,17 +48,12 @@ impl Engine {
 impl Core {
     /// Foreground work takes priority; its active count closes new Projects admission, never Chat.
     pub(super) fn begin_unbounded(&mut self, vendor: Vendor) -> Result<(), String> {
-        // Chat can relearn a damaged cache; its quarantine still blocks all Projects admission.
-        if self.ledger_failed {
-            return Err("error.store.write".into());
-        }
         let now = self.secs();
-        budget::start_unbounded(&mut self.ledger, vendor, now).map_err(str::to_string)?;
-        if let Err(e) = self.store.save_ledger(&self.ledger) {
-            budget::finish_unbounded(&mut self.ledger, vendor).map_err(str::to_string)?;
-            return Err(e.key().into());
+        if budget::start_unbounded(&mut self.ledger, vendor, now).is_err() {
+            self.projects_closed = true;
         }
-        self.ledger_saved = self.secs();
+        // Mission storage can close Projects, but never the person's foreground work.
+        self.save_ledger(true);
         Ok(())
     }
 }
@@ -100,8 +95,8 @@ mod tests {
             extra: Extra::new(),
         }
     }
-    fn engine(root: &Path) -> Engine {
-        let e = Engine::new(
+    fn new_engine(root: &Path) -> Engine {
+        Engine::new(
             EngineOptions {
                 data_dir: root.into(),
                 clis: BTreeMap::from([(Vendor::Codex, Cli { command: "not-a-cli".into(), prefix: vec![] })]),
@@ -114,7 +109,10 @@ mod tests {
                 ask: None,
             },
             Arc::new(|_| {}),
-        );
+        )
+    }
+    fn engine(root: &Path) -> Engine {
+        let e = new_engine(root);
         e.set_time_source(Arc::new(|| NOW));
         e.with(|c| {
             c.codex_models = vec!["gpt-6.1-sol".into()];
@@ -134,6 +132,104 @@ mod tests {
         });
         e.mission_budget(Change::Allocate { vendor: Vendor::Codex, cap_micros: 400_000 }).unwrap();
         e
+    }
+
+    #[tokio::test]
+    async fn removing_a_live_chat_retires_its_running_counter_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path());
+        let closed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = closed.clone();
+        let id = e.with(|c| {
+            let id = c.blank(Area::Chat, None);
+            c.begin_unbounded(Vendor::Codex).unwrap();
+            c.live.insert(
+                id.clone(),
+                Live {
+                    vendor: Vendor::Codex,
+                    model: Some("gpt-6.1-sol".into()),
+                    running: None,
+                    effort: "medium".into(),
+                    sid: 1,
+                    session: Session::from_fn(move |cmd| {
+                        if matches!(cmd, crate::events::SessionCommand::Close) {
+                            seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        }
+                    }),
+                    turn: Some("turn".into()),
+                    break_pending: false,
+                    used: 0,
+                    cli: Cli { command: "not-a-cli".into(), prefix: vec![] },
+                    resumed: false,
+                    by_hand: true,
+                    approved: false,
+                    started: NOW,
+                },
+            );
+            c.remove(&id);
+            id
+        });
+        assert_eq!(Budget::load(&e.ledger()).unwrap().unbounded[&Vendor::Codex], 0);
+        assert_eq!(e.ledger().codex.unmetered[&2], 1);
+        e.with(|c| c.remove(&id));
+        assert_eq!(e.ledger().codex.unmetered[&2], 1);
+        assert_eq!(closed.load(std::sync::atomic::Ordering::SeqCst), 1);
+        e.shutdown();
+    }
+
+    #[tokio::test]
+    async fn mission_storage_failures_never_block_chat_or_overwrite_the_owner() {
+        for failure in 0..4 {
+            let dir = tempfile::tempdir().unwrap();
+            let first = engine(dir.path());
+            if failure > 0 {
+                first.with(|c| {
+                    let b = c.ledger.extra.get_mut("missionBudget").unwrap();
+                    match failure {
+                        1 => b["schema"] = serde_json::json!(99),
+                        2 => b["invocations"] = serde_json::json!("bad receipts"),
+                        _ => b["unbounded"] = serde_json::json!("bad active counts"),
+                    }
+                });
+                first.with(|c| c.save_ledger(true));
+                first.shutdown();
+            }
+            let before = std::fs::read(dir.path().join("budget.json")).unwrap();
+            let second = new_engine(dir.path());
+            second.set_time_source(Arc::new(|| NOW));
+            second.with(|c| {
+                c.begin_unbounded(Vendor::Codex).unwrap();
+                c.note_span(Vendor::Codex, NOW, "gpt-6.1-sol", Some(0.01), false);
+                c.begin_unbounded(Vendor::Codex).unwrap();
+                c.note_span(Vendor::Codex, NOW, "gpt-6.1-sol", None, true);
+                assert_eq!(c.ledger.codex.unmetered[&2], 1);
+            });
+            assert!(second.mission_budget(Change::Allocate { vendor: Vendor::Codex, cap_micros: 1 }).is_err());
+            second.shutdown();
+            assert!(std::fs::read(dir.path().join("budget.json")).unwrap() == before, "Chat must preserve the authoritative budget");
+            if failure > 0 {
+                assert!(std::fs::read(dir.path().join("budget.json.quarantine")).unwrap() == before);
+            }
+            first.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn a_failed_chat_journal_write_keeps_chat_available_and_projects_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path());
+        std::fs::create_dir(dir.path().join("budget.json.tmp")).unwrap();
+        e.with(|c| {
+            c.begin_unbounded(Vendor::Codex).unwrap();
+            c.note_span(Vendor::Codex, NOW, "gpt-6.1-sol", Some(0.01), false);
+            c.begin_unbounded(Vendor::Codex).unwrap();
+        });
+        assert!(e.mission_budget(Change::Allocate { vendor: Vendor::Codex, cap_micros: 1 }).is_err());
+        std::fs::remove_dir(dir.path().join("budget.json.tmp")).unwrap();
+        e.with(|c| c.note_span(Vendor::Codex, NOW, "gpt-6.1-sol", Some(0.01), false));
+        assert_eq!(Budget::load(&e.ledger()).unwrap().unbounded[&Vendor::Codex], 0);
+        e.mission_budget(Change::Allocate { vendor: Vendor::Codex, cap_micros: 1 }).unwrap();
+        e.shutdown();
     }
 
     #[tokio::test]

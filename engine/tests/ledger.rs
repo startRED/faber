@@ -40,6 +40,22 @@ fn the_history_is_bounded() {
 }
 
 #[test]
+fn abandoned_windows_expire_without_shrinking_active_pacing_history() {
+    let mut l = VendorLedger::default();
+    for i in 0..200 {
+        l.record("seven_day_opus", 0.2, BASE + 7.0 * 86_400.0, BASE + i as f64, 0);
+    }
+    l.record("five_hour", 0.2, BASE + 10.0 * 86_400.0, BASE + 8.0 * 86_400.0, 0);
+    assert_eq!(l.history["seven_day_opus"].len(), 200, "recent reset history remains available");
+    let later = BASE + 32.0 * 86_400.0;
+    for i in 0..200 {
+        l.record("five_hour", 0.2, later + 18_000.0, later + i as f64, 0);
+    }
+    assert!(!l.history.contains_key("seven_day_opus"));
+    assert_eq!(l.history["five_hour"].len(), 200);
+}
+
+#[test]
 fn other_windows_never_shrink_existing_primary_pacing_history() {
     let mut l = VendorLedger::default();
     for i in 0..250 {

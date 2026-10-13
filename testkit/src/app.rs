@@ -58,10 +58,14 @@ impl Paths {
     }
 }
 
+/// A process id and its creation time in microseconds since 1970.
+pub type ProcessIdentity = (u32, u64);
+
 /// A command the fake CLI was asked to run, as it wrote it down.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Recorded {
     pub pid: u32,
+    pub born: u64,
     pub cwd: String,
     pub vendor: String,
     pub args: Vec<String>,
@@ -77,7 +81,7 @@ impl Recorded {
 /// Reads `commands.jsonl`: the commands, and the ids of those that wrote down that they ended. No file means no CLI ran.
 /// A file that cannot be read, or a line that is not a complete record, is an error: an audit that skips what it cannot
 /// read would pass a CLI that ran outside the sandbox.
-pub fn read_records(state: &Path) -> Result<(Vec<Recorded>, Vec<u32>), String> {
+pub fn read_records(state: &Path) -> Result<(Vec<Recorded>, Vec<ProcessIdentity>), String> {
     let path = state.join("commands.jsonl");
     let text = match std::fs::read_to_string(&path) {
         Ok(text) => text,
@@ -88,8 +92,9 @@ pub fn read_records(state: &Path) -> Result<(Vec<Recorded>, Vec<u32>), String> {
     for (n, line) in text.lines().enumerate().filter(|(_, line)| !line.trim().is_empty()) {
         let bad = |what: &str| format!("commands.jsonl line {}: {what}", n + 1);
         let value: Value = serde_json::from_str(line).map_err(|e| bad(&e.to_string()))?;
+        let born = value["born"].as_u64().filter(|n| *n > 0).ok_or_else(|| bad("no creation time"))?;
         if let Some(pid) = value["exited"].as_u64() {
-            exited.push(pid as u32);
+            exited.push((pid as u32, born));
             continue;
         }
         let text = |name: &str| value[name].as_str().map(str::to_string).ok_or_else(|| bad(&format!("no {name}")));
@@ -99,6 +104,7 @@ pub fn read_records(state: &Path) -> Result<(Vec<Recorded>, Vec<u32>), String> {
         };
         commands.push(Recorded {
             pid: value["pid"].as_u64().ok_or_else(|| bad("no pid"))? as u32,
+            born,
             cwd: text("cwd")?,
             vendor: text("vendor")?,
             args: strings("args")?,
@@ -114,9 +120,9 @@ pub fn read_records(state: &Path) -> Result<(Vec<Recorded>, Vec<u32>), String> {
 /// - `seen`: every process of the app's tree recorded while it ran (id and creation time).
 /// - `roots`: the app's own processes. Whatever still names one as its parent, and was created after it, counts too,
 ///   unless the root's id now belongs to a different process.
-/// - `running`: ids of fake CLIs that never wrote that they ended. An id only counts if its process was created after
-///   `not_before`, because an older process cannot be one of ours.
-pub fn leaked(rows: &[ProcRow], seen: &[ProcRow], roots: &[ProcRow], running: &[u32], not_before: u64) -> Vec<ProcRow> {
+/// - `running`: identities of fake CLIs that never wrote that they ended. A process must match its recorded creation
+///   time and be born after `not_before`; a later owner of its PID cannot be one of ours.
+pub fn leaked(rows: &[ProcRow], seen: &[ProcRow], roots: &[ProcRow], running: &[ProcessIdentity], not_before: u64) -> Vec<ProcRow> {
     let mut all = rows.to_vec();
     let mut trees: Vec<Vec<ProcRow>> = Vec::new();
     for root in roots {
@@ -129,7 +135,9 @@ pub fn leaked(rows: &[ProcRow], seen: &[ProcRow], roots: &[ProcRow], running: &[
     }
     rows.iter()
         .filter(|r| {
-            same_process(r, seen) || trees.iter().any(|tree| same_process(r, tree)) || (running.contains(&r.pid) && r.born >= not_before)
+            same_process(r, seen)
+                || trees.iter().any(|tree| same_process(r, tree))
+                || (running.contains(&(r.pid, r.born)) && r.born >= not_before)
         })
         .cloned()
         .collect()
@@ -426,9 +434,9 @@ impl Ctx {
     }
 
     /// Fake CLIs that never wrote that they ended.
-    fn running(&self) -> Result<Vec<u32>, String> {
+    fn running(&self) -> Result<Vec<ProcessIdentity>, String> {
         let (commands, exited) = read_records(&self.sb.state)?;
-        Ok(commands.iter().map(|c| c.pid).filter(|pid| !exited.contains(pid)).collect())
+        Ok(commands.iter().map(|c| (c.pid, c.born)).filter(|id| !exited.contains(id)).collect())
     }
 
     fn all_seen(&self) -> Vec<ProcRow> {
@@ -460,8 +468,15 @@ impl Ctx {
         match self.survivors() {
             Ok(rows) if rows.is_empty() => {}
             Ok(rows) => {
-                let list: Vec<String> = rows.iter().map(|r| format!("{}#{}", r.name, r.pid)).collect();
-                problems.push(format!("a process of the app or of a CLI is still running: {}", list.join(", ")));
+                let list: Vec<String> =
+                    rows.iter().map(|r| format!("{}#{} (parent {}, born {})", r.name, r.pid, r.parent, r.born)).collect();
+                problems.push(format!(
+                    "a process of the app or of a CLI is still running: {}; roots {:?}; recorded {:?}; running {:?}",
+                    list.join(", "),
+                    self.roots(),
+                    self.all_seen(),
+                    self.running()?
+                ));
             }
             Err(e) => problems.push(e),
         }
@@ -673,9 +688,37 @@ mod tests {
     }
 
     #[test]
+    fn an_unfinished_cli_record_cannot_claim_a_reused_process_id() {
+        let mut reused = row(71, 1, T + 999_000);
+        reused.name = "wuaucltcore.exe".into();
+        assert!(leaked(&[reused], &[], &[], &[(71, T + 600_000)], T + 500_000).is_empty());
+    }
+
+    #[test]
     fn a_cli_that_never_wrote_its_end_counts_only_if_it_is_younger_than_the_app() {
         let rows = [row(70, 1, T + 10), row(71, 1, T + 999_000)];
-        assert_eq!(ids(&leaked(&rows, &[], &[], &[70, 71], T + 500_000)), [71]);
+        assert_eq!(ids(&leaked(&rows, &[], &[], &[(70, T + 10), (71, T + 999_000)], T + 500_000)), [71]);
+    }
+
+    #[test]
+    fn an_exit_record_only_settles_its_exact_cli_process() {
+        let paths = Paths::discover().unwrap();
+        let mut ctx = Ctx::new(&paths).unwrap();
+        let command = |born| json!({"pid": 7, "born": born, "cwd": "C:/s", "vendor": "codex", "args": [], "targets": []});
+        std::fs::write(
+            ctx.sb.state.join("commands.jsonl"),
+            format!("{}\n{}\n{}\n", command(1), json!({"exited": 7, "born": 1}), command(2)),
+        )
+        .unwrap();
+        assert_eq!(ctx.running().unwrap(), [(7, 2)]);
+        std::fs::write(
+            ctx.sb.state.join("commands.jsonl"),
+            format!("{}\n", json!({"pid": 7, "cwd": "C:/s", "vendor": "codex", "args": [], "targets": []})),
+        )
+        .unwrap();
+        assert!(ctx.running().unwrap_err().contains("no creation time"));
+        std::fs::remove_file(ctx.sb.state.join("commands.jsonl")).unwrap();
+        ctx.finish().unwrap();
     }
 
     #[test]
@@ -683,11 +726,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("commands.jsonl"),
-            "{\"pid\":7,\"cwd\":\"C:/s\",\"vendor\":\"claude\",\"args\":[\"auth\",\"status\"],\"targets\":[\"C:/s/x\"]}\n{\"exited\":7}\n{\"pid\":8,\"cwd\":\"C:/s\",\"vendor\":\"codex\",\"args\":[\"login\"],\"targets\":[]}\n",
+            "{\"born\":1,\"pid\":7,\"cwd\":\"C:/s\",\"vendor\":\"claude\",\"args\":[\"auth\",\"status\"],\"targets\":[\"C:/s/x\"]}\n{\"born\":1,\"exited\":7}\n{\"born\":1,\"pid\":8,\"cwd\":\"C:/s\",\"vendor\":\"codex\",\"args\":[\"login\"],\"targets\":[]}\n",
         )
         .unwrap();
         let (commands, exited) = read_records(dir.path()).unwrap();
-        assert_eq!(exited, [7]);
+        assert_eq!(exited, [(7, 1)]);
         assert_eq!(commands.len(), 2);
         assert_eq!(commands[0].line(), "auth status");
         assert_eq!(commands[1].vendor, "codex");
@@ -699,15 +742,15 @@ mod tests {
     fn a_log_that_is_cut_off_or_incomplete_is_an_error_and_never_an_empty_list() {
         let dir = tempfile::tempdir().unwrap();
         let write = |text: &str| std::fs::write(dir.path().join("commands.jsonl"), text).unwrap();
-        write("{\"pid\":7,\"cwd\":\"C:/s\",\"vendor\":\"claude\",\"args\":[],\"tar");
+        write("{\"born\":1,\"pid\":7,\"cwd\":\"C:/s\",\"vendor\":\"claude\",\"args\":[],\"tar");
         assert!(read_records(dir.path()).unwrap_err().contains("line 1"));
         write(
-            "{\"pid\":7,\"vendor\":\"claude\",\"args\":[],\"targets\":[]}
+            "{\"born\":1,\"pid\":7,\"vendor\":\"claude\",\"args\":[],\"targets\":[]}
 ",
         );
         assert!(read_records(dir.path()).unwrap_err().contains("no cwd"));
         write(
-            "{\"pid\":7,\"cwd\":\"C:/s\",\"vendor\":\"claude\",\"args\":[1],\"targets\":[]}
+            "{\"born\":1,\"pid\":7,\"cwd\":\"C:/s\",\"vendor\":\"claude\",\"args\":[1],\"targets\":[]}
 ",
         );
         assert!(read_records(dir.path()).unwrap_err().contains("non-text"));
@@ -754,8 +797,8 @@ mod tests {
         let outside = ctx.sb.root.parent().unwrap().to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/");
         let inside = ctx.sb.data.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/");
         let record = |cwd: &str, target: &str| {
-            let command = json!({ "pid": 1, "cwd": cwd, "vendor": "claude", "args": [], "targets": [target] });
-            format!("{command}\n{}\n", json!({ "exited": 1 }))
+            let command = json!({ "pid": 1, "born": 1, "cwd": cwd, "vendor": "claude", "args": [], "targets": [target] });
+            format!("{command}\n{}\n", json!({ "exited": 1, "born": 1 }))
         };
         std::fs::write(ctx.sb.state.join("commands.jsonl"), record(&inside, &inside)).unwrap();
         ctx.audit().expect("a CLI that stayed inside");

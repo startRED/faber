@@ -234,7 +234,7 @@ fn own_today(ledger: &Ledger, vendor: Vendor, week: &str, start: f64, now: f64) 
     let last = ((now + 14.0 * 3600.0) / DAY).floor() as i64;
     let sample = v.day_baselines.get(week).ok_or("reason.budget.day")?;
     if v.unmetered.iter().any(|(day, n)| *n > sample.unmetered.get(day).copied().unwrap_or(0))
-        || sample.unmetered.iter().any(|(day, n)| *n > v.unmetered.get(day).copied().unwrap_or(0))
+        || sample.unmetered.range(first..=last).any(|(day, n)| *n > v.unmetered.get(day).copied().unwrap_or(0))
     {
         return Err("reason.budget.unknown");
     }
@@ -534,8 +534,10 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
                     status = Status::Stop("reason.budget.breach");
                 } else {
                     let delta = paid - r.paid_micros;
-                    // A reconciliation clock cannot move spend outside the last trusted admission interval.
-                    let at = now.max(b.last_at).max(r.started_at).min(b.last_at.max(r.started_at) + STALE_SECS);
+                    // Fresh quota extends trusted time for delayed receipts; a clock glitch alone cannot.
+                    let trusted =
+                        ledger.of(r.request.vendor).readings.values().map(|r| r.read_at).fold(b.last_at.max(r.started_at), f64::max);
+                    let at = now.max(b.last_at).max(r.started_at).min(trusted + STALE_SECS);
                     let v = reconciled.get_or_insert_with(|| (r.request.vendor, ledger.of(r.request.vendor).clone()));
                     v.1.spend(Some(delta as f64 / 1e6), false, at, offset);
                     r.paid_micros = paid;

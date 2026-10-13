@@ -44,6 +44,8 @@ cost. A crash retires persisted active counts into existing unmetered spend. Fre
 so yesterday's uncertainty does not become a permanent running request. Unknown mission exposure remains reserved.
 Only explicit Pause changes an existing mission's pause; top-ups and new-day grants cannot override the person's Stop.
 An OS file lock gives each spending directory one engine writer, including builds that bypass the single-instance plugin.
+Missing ownership or unreadable budget authority closes Projects while Chat keeps its pacing ledger in memory;
+that engine never overwrites the authoritative budget. Retryable write failures also close admission until a save succeeds.
 
 ## Evidence and limits
 

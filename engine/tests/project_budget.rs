@@ -458,6 +458,30 @@ fn known_live_cost_holds_exposure_without_claiming_it_is_unknown() {
 }
 
 #[test]
+fn pruned_old_unknown_cost_does_not_invalidate_a_current_baseline() {
+    let mut l = ledger();
+    l.codex.unmetered.insert(-40, 1);
+    l.codex.day_baselines.get_mut("seven_day").unwrap().unmetered.insert(-40, 1);
+    l.codex.spend(Some(0.001), false, NOW, 0);
+    assert!(!l.codex.unmetered.contains_key(&-40));
+    apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 100_000 }, NOW, 0).unwrap();
+    l.codex.day_baselines.get_mut("seven_day").unwrap().unmetered.insert(2, 1);
+    assert_eq!(apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 200_000 }, NOW, 0), Err("reason.budget.unknown"));
+}
+
+#[test]
+fn a_late_report_with_fresh_quota_books_the_actual_day_and_span() {
+    let mut l = ready(200_000);
+    apply(&mut l, Change::Admit(request("i1", "m1", "w1", Kind::Worker, 10_000)), NOW, 0).unwrap();
+    let later = 3.0 * DAY + 3600.0;
+    l.codex.record("seven_day", 0.26, RESET, later, 0);
+    apply(&mut l, Change::Report { id: "i1".into(), event: done(Some(0.005), false), terminated: true }, later, 0).unwrap();
+    assert_eq!(l.codex.own_spend.get(&3), Some(&0.005));
+    assert!(!l.codex.own_spend.contains_key(&2));
+    assert_eq!(l.codex.spans.last().unwrap().end, later);
+}
+
+#[test]
 fn future_report_or_pause_does_not_poison_the_admission_clock() {
     for pause in [false, true] {
         let mut l = ready(200_000);
@@ -466,6 +490,8 @@ fn future_report_or_pause_does_not_poison_the_admission_clock() {
             apply(&mut l, Change::Pause { mission: "m1".into(), paused: false }, RESET * 10.0, 0).unwrap();
         } else {
             apply(&mut l, Change::Report { id: "i1".into(), event: done(Some(0.005), false), terminated: true }, RESET * 10.0, 0).unwrap();
+            assert_eq!(l.codex.own_spend.get(&2), Some(&0.005));
+            assert_eq!(l.codex.own_spend.len(), 1, "a future clock cannot move settlement into a future day");
         }
         apply(&mut l, Change::Admit(request("i2", "m1", "w2", Kind::Worker, 10_000)), NOW, 0).unwrap();
     }

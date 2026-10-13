@@ -47,3 +47,44 @@ Local proofs: lint, typecheck, build, fmt, both clippy commands, `cargo t` and `
 Both test runs report 782 passed, zero failed/not-run/skipped. Hidden desktop probes see zero visible windows;
 idle memory is 108-112 MB, six-theme memory 186 MB, and the thousand-message thread 141-144 MB.
 The existing four-week pacing smoke simulation passes; no pacing constants or learning history limit were reduced.
+
+## Independent verification follow-up (N1-N6)
+
+| Finding | Verdict and correction / evidence |
+|---|---|
+| N1 | Real. Removing a conversation records its unfinished turn before closing the session. The regression asserts one retired active count, one unknown-cost receipt and one close, including repeated removal. |
+| N2 | Real. Separate permanent Projects closure (missing ownership, incompatible/corrupt authority or unrecoverable metadata) from retryable ledger writes. Chat continues in memory; Projects still denies, and Chat cannot overwrite another owner's or an unreadable budget. Tests cover a second engine, newer schema, bad receipts/active counts, repeated turns and a failed journal write followed by recovery. |
+| N3 | Real for pruned historical counters. Compare missing baseline counters only within the current day's possible local offsets, matching the existing spend check. Current-day counter loss still denies. The old-baseline claim is not a bug: an absent unknown-cost snapshot provides no evidence that current-day unknown spend preceded the baseline, so denial remains necessary. |
+| N4 | Real abandoned-window retention. Retire an unreported, expired window only after its last point is over 30 days old; retain all 200 points for every active window and recent reset. The regression checks both retention and eventual expiry; the existing primary-history proof remains unchanged. |
+| N5 | False as a T3 defect: the supplied exposure qualifies exactly one vendor/model/effort. Removing identity checks admits an unqualified profile. Selecting across multiple independently qualified profiles remains T5's caller responsibility; no bound is transplanted and no wire/kit/bar contract changes. |
+| N6 | Real for delayed receipts with fresh quota evidence. Fresh readings extend the trusted booking interval, preserving the actual day and span end. Without newer evidence the conservative clamp remains; an explicit future-day assertion protects against clock glitches. |
+
+N1-N4 and N6 regressions failed against the previous implementation before corrections. Guard-removal runs
+also cover N5's existing qualification boundary and N6's future-clock protection; compilation failures are not
+accepted as evidence. Results are in [the follow-up mutation record](2026-10-12-task-3-follow-up-mutations.json).
+No real CLI session, paid credit, visible window, credential or installed app was used.
+
+The first broad run hit a compiler crash while the runner overrode `CARGO_BUILD_JOBS=4` with eight jobs.
+A native probe showed Windows still reports 16 cores under process affinity, so affinity did not enforce the
+requested limit. The runner now honors positive `CARGO_BUILD_JOBS` values, keeping its half-core default when
+unset. Its regression failed first at 8 versus 4 and checks both parsing and the actual `jobs()` call; removing
+the wiring fails it under the authorized two-job environment. No retry or timeout policy changed.
+The full engine suite, ten mutation checks, lint, typecheck, build, fmt and both clippy commands pass.
+Before the reboot, even a direct two-job build exhausted Windows commit memory while
+compiling the desktop crate (`memory allocation of 1982464 bytes failed`). The first runner attempt passed its
+77 UI/screen checks, but its Rust build failed. The reboot restored memory headroom; the four-job environment is
+used again. Real model/paid-credit behavior remains unproven.
+
+The resumed full run passed 788 checks but failed one process audit after the reconnect flow itself passed.
+Its surviving-process report named a console host and Windows Update. A pure red regression reproduces the
+audit's ability to claim an unrelated successor of an unfinished fake CLI's PID. Start and exit records now
+include creation time; both the running-record filter and leak check require that identity. Missing timestamps
+are errors, and real recorded survivors still fail. Native creation time also exposed the WMI wrapper's loss of
+CIM fractional precision; the snapshot now preserves the original six microsecond digits. Its native/snapshot
+identity test failed before correction. Guard-removal checks cover all three audit corrections. Cleanup still
+ends only owned jobs; no unrelated process is killed and no timeout or retry policy changes.
+
+Post-reboot proof: all seven AGENTS.md commands plus `cargo t --all` exit 0 with four jobs and line-tables-only
+debug info. Both runner commands report 792 passed, zero failed/not-run/skipped. All 13 follow-up mutations fail
+their named assertions. Hidden probes report zero visible windows; idle memory is 108-110 MB, six-theme memory
+183-185 MB, and the thousand-message thread is 140-142 MB.
