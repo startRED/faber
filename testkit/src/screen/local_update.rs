@@ -18,7 +18,7 @@ pub fn scenarios() -> Vec<Scenario> {
         },
         Scenario { name: "local_update: hidden session observer preserves next on orderly logoff or shutdown", run: session },
         Scenario {
-            name: "local_update: autostart after clean quit retries full probation; healthy cleanup and second promotion stay headless",
+            name: "local_update: running mission blocks promotion until paused; autostart probation and rollback remain headless",
             run: handoff,
         },
     ]
@@ -110,11 +110,47 @@ fn handoff(ctx: &mut Ctx) -> Result {
     compatibility.terminate();
     compatible?;
     ensure(status.is_some_and(|s| s.contains('0')), || "native compatibility rejected preserved saved data".into())?;
+    let repo_dir = ctx.sb.sandbox.join("mission-repo");
+    fs::create_dir_all(&repo_dir).map_err(|e| e.to_string())?;
+    let mut project = faber_engine::model::Project::new("p1".into(), "Fixture".into(), repo_dir.to_string_lossy().into_owned());
+    project.repo = Some(repo.clone());
+    project.grant = Some(grant.clone());
+    faber_engine::store::Store::new(&data).save_projects(&[project]).map_err(|e| e.key())?;
+    let journal = faber_engine::project::store::Journal::open(&repo_dir, &data, "m1").map_err(|e| e.key())?;
+    let mut runner = faber_engine::project::run::Runner::create(
+        &journal,
+        faber_engine::project::Mission::new("m1", "p1", "repo", "Fixture", &"1".repeat(40), 1, now()),
+    )
+    .map_err(str::to_string)?;
+    runner.mission.state = faber_engine::project::MissionState::Running;
+    runner.save(&journal).map_err(str::to_string)?;
+    let rejected = start("--test-transition")?;
+    let blocked = eventually("running mission refuses transition", Duration::from_secs(10), || !rejected.is_running());
+    let status = rejected.status();
+    rejected.terminate();
+    blocked?;
+    ensure(status.is_some_and(|s| s.contains('1')), || "running mission admitted promotion".into())?;
+    ensure(matches!(manager.manifest().map_err(|e| e.key())?.ok_or("missing ready build")?.state, UpdateState::Ready { .. }), || {
+        "refused promotion changed build slots".into()
+    })?;
+    let baseline = start("--launch")?;
+    let paused = eventually("old engine services pause before promotion", Duration::from_secs(15), || {
+        faber_engine::project::run::Runner::load(&journal).is_ok_and(|r| r.mission.state == faber_engine::project::MissionState::Paused)
+    });
+    if let Err(error) = paused {
+        baseline.terminate();
+        return Err(error);
+    }
     let first = start("--test-transition")?;
     let result = (|| {
         eventually("first probation health", Duration::from_secs(30), || {
             manager.manifest().is_ok_and(|m| m.is_some_and(|m| m.first_operation_completed))
         })?;
+        fs::write(data.join("test-mission-admission"), b"once").map_err(|e| e.to_string())?;
+        eventually("probation's real engine refuses new mission admission", Duration::from_secs(10), || {
+            fs::read_to_string(data.join("test-mission-admission-result")).is_ok_and(|result| result == "error.update.activeOperations")
+        })?;
+        fs::remove_file(data.join("test-mission-admission-result")).map_err(|e| e.to_string())?;
         assert_hidden(ctx, &[&first], &env)?;
         fs::write(data.join("test-clean-exit-next"), b"once").map_err(|e| e.to_string())?;
         eventually("clean quit pauses without restarting", Duration::from_secs(10), || {
@@ -158,7 +194,6 @@ fn handoff(ctx: &mut Ctx) -> Result {
                 eventually("second transition succeeds while B is running", Duration::from_secs(10), || {
                     manager.manifest().is_ok_and(|m| m.is_some_and(|m| matches!(m.state, UpdateState::Swapping { .. })))
                 })?;
-                fs::write(data.join("test-clean-exit-next"), b"once").map_err(|e| e.to_string())?;
                 eventually("second promotion early crash restores B", Duration::from_secs(40), || {
                     manager
                         .manifest()
@@ -202,8 +237,9 @@ fn handoff(ctx: &mut Ctx) -> Result {
         result
     })();
     first.terminate();
+    baseline.terminate();
     if result.is_ok() {
-        ctx.notes.push("clean quit without rollback/relaunch; full 300 s probation; cleanup failure cannot kill healthy child; second transition while B lives; immutable launcher; saved spend/grants unchanged".into());
+        ctx.notes.push("running mission refuses transition; old engine pauses through T5 stop; probation refuses admission; clean quit without rollback/relaunch; full 300 s probation; cleanup failure cannot kill healthy child; second transition while B lives; immutable launcher; saved spend/grants unchanged".into());
     }
     result
 }

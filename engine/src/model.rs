@@ -246,6 +246,9 @@ pub struct Conversation {
     /// time the conversation resumes, whatever Settings says by then; a conversation saved before this field has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_name: Option<String>,
+    /// Stable persona version used when this conversation began; legacy sessions keep None.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persona_version: Option<u32>,
     pub created_at: u64,
     pub updated_at: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -263,12 +266,6 @@ pub fn clean_name(raw: &str) -> Option<String> {
     let name: String = kept.trim().chars().take(NAME_LIMIT).collect();
     let name = name.trim_end();
     (!name.is_empty()).then(|| name.to_string())
-}
-
-/// The one line both CLIs get when a conversation starts with a name. The name only changes how the answer addresses the
-/// user, so the line asks for nothing else.
-pub fn name_instructions(name: &str) -> String {
-    format!("The user would like to be called {name}. Use the name only where it feels natural, and never mention this note.")
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

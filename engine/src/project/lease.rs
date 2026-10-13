@@ -55,10 +55,22 @@ impl From<Fault> for LeaseError {
 }
 
 /// Supplied by the engine's process containment and spending ledgers, never a worker or heartbeat.
+#[derive(Clone, Copy)]
 pub struct Termination {
     pub process: Option<ProcessId>,
     pub tree_dead: bool,
     pub cost_settled: bool,
+}
+
+pub(crate) fn retirement_known(lease: &Lease) -> bool {
+    lease.state == LeaseState::Released
+        || (lease.state == LeaseState::Quarantined
+            && lease.extra.get("retirement").is_some_and(|r| {
+                r["generation"].as_u64() == Some(lease.generation)
+                    && r["process"] == serde_json::json!(lease.process)
+                    && r["treeDead"] == true
+                    && r["costSettled"] == true
+            }))
 }
 
 /// Trusted containment proof for every process owned on this repository, including unknown launches, plus a person decision.
@@ -624,6 +636,19 @@ impl Leases {
         let root = real_path(&root)?.canonicalize().map_err(|_| Fault::Read)?;
         let private = real_path(self.journal.private())?.canonicalize().map_err(|_| Fault::Read)?;
         if !root.starts_with(&private) || root == private || root.starts_with(Path::new(&self.repo.root)) {
+            return Err(LeaseError::Path);
+        }
+        Ok(root)
+    }
+    pub(crate) fn retired_worktree(&self, lease: &Lease) -> Result<PathBuf, LeaseError> {
+        let held = &self.runtime.leases[self.matching(lease)?];
+        if !retirement_known(held) || !self.journal.pending()?.is_empty() {
+            return Err(LeaseError::Live);
+        }
+        let root: PathBuf =
+            serde_json::from_value(held.extra.get("gitRoot").cloned().ok_or(LeaseError::Stale)?).map_err(|_| Fault::Corrupt)?;
+        let expected = self.journal.private().canonicalize().map_err(|_| Fault::Read)?.join(format!("writer-{}", held.generation));
+        if real_path(&root)? != expected {
             return Err(LeaseError::Path);
         }
         Ok(root)

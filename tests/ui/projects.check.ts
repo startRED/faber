@@ -89,6 +89,14 @@ check('projects review: failed grant keeps goal, displays refusal, and never sta
   ok(root.querySelector('[role="alert"]')?.textContent?.includes('grant'), 'refusal is visible');
 }));
 
+check('projects T5: a refused role shows the T2 reason key and keeps the goal', () => withProjects(async (root) => {
+  api.missionStart = async () => { throw 'reason.project.restrictionsUnproven'; };
+  await start(root);
+  ok(root.querySelector('[role="alert"]')?.textContent?.includes('reason.project.restrictionsUnproven'));
+  equal(root.querySelector<HTMLTextAreaElement>('#mission-goal')?.value, 'Review goal');
+  ok(!root.querySelector('.mission-board'));
+}));
+
 check('projects review: mission state is localized and unknown cap is never invented', () => withProjects(async (root) => {
   await start(root);
   equal(root.querySelector('.badge')?.textContent?.trim(), 'Running');

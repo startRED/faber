@@ -158,12 +158,15 @@ impl Journal {
     pub fn records(&self) -> &Path {
         &self.records
     }
+    pub fn mission_id(&self) -> &str {
+        &self.mission
+    }
 
     pub fn private(&self) -> &Path {
         &self.private
     }
 
-    fn put<T: Serialize>(&self, path: &Path, value: &T) -> Result<(), JournalError> {
+    pub(crate) fn put<T: Serialize>(&self, path: &Path, value: &T) -> Result<(), JournalError> {
         if let Some(dir) = path.parent() {
             fs::create_dir_all(dir).map_err(|e| Fault::of_write(&e))?;
         }
@@ -171,7 +174,7 @@ impl Journal {
         Ok(replace(&*self.disk, path, json.as_bytes())?)
     }
 
-    fn get<T: DeserializeOwned + Record>(&self, path: &Path) -> Result<Option<T>, JournalError> {
+    pub(crate) fn get<T: DeserializeOwned + Record>(&self, path: &Path) -> Result<Option<T>, JournalError> {
         match read_checked::<T>(path)? {
             Some(record) if record.schema() > SCHEMA => Err(JournalError::Newer),
             found => Ok(found),
@@ -352,8 +355,21 @@ impl Journal {
 
     /// Intents with no receipt or an uncertain outcome: recovery must reconcile before anything resumes.
     pub fn pending(&self) -> Result<Vec<Intent>, JournalError> {
-        let mut open: Vec<Intent> = self
-            .effects()?
+        Self::pending_private(&self.private)
+    }
+
+    pub(crate) fn pending_private(private: &Path) -> Result<Vec<Intent>, JournalError> {
+        let bytes = super::files::ScopedFile::new(&private.join("effects.json"), false)
+            .map_err(|_| JournalError::Store(Fault::Read))?
+            .read_limited(16 * 1024 * 1024)
+            .map_err(|_| JournalError::Store(Fault::Read))?
+            .ok_or(Fault::Corrupt)?
+            .0;
+        let effects: Effects = serde_json::from_slice(&bytes).map_err(|_| Fault::Corrupt)?;
+        if effects.schema() > SCHEMA {
+            return Err(JournalError::Newer);
+        }
+        let mut open: Vec<Intent> = effects
             .entries
             .into_iter()
             .filter(|e| e.receipt.as_ref().is_none_or(|r| r.outcome == Outcome::Unknown))
@@ -363,6 +379,30 @@ impl Journal {
         Ok(open)
     }
 
+    pub fn record_check(&self, receipt: &super::wire::CheckReceipt) -> Result<(), JournalError> {
+        if !valid_id(&receipt.id) || receipt.schema != SCHEMA {
+            return Err(JournalError::Mismatch);
+        }
+        let path = self.private.join("checks").join(format!("{}.json", receipt.id));
+        if self.get::<super::wire::CheckReceipt>(&path)?.is_some() {
+            return Err(JournalError::ReceiptExists);
+        }
+        self.put(&path, receipt)?;
+        self.put(&self.named("checks", &receipt.id)?, receipt)
+    }
+    pub fn check(&self, id: &str) -> Result<Option<super::wire::CheckReceipt>, JournalError> {
+        if !valid_id(id) {
+            return Err(JournalError::BadId);
+        }
+        self.get(&self.private.join("checks").join(format!("{id}.json")))
+    }
+    /// Read the authoritative private effect ledger, never its editable repository copy.
+    pub fn effect_receipt(&self, id: &str) -> Result<Option<Receipt>, JournalError> {
+        if !valid_id(id) {
+            return Err(JournalError::BadId);
+        }
+        Ok(self.effects()?.entries.into_iter().find(|e| e.intent.id == id).and_then(|e| e.receipt))
+    }
     pub fn save_runtime(&self, runtime: &Runtime) -> Result<(), JournalError> {
         self.put(&self.private.join("runtime.json"), runtime)
     }

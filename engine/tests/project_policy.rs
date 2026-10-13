@@ -250,3 +250,13 @@ fn terminal_reasons_are_fixed_keys_including_unknown_and_interrupted_results() {
         assert_eq!(terminal_reason(raw), key);
     }
 }
+
+#[test]
+fn automatic_parameters_reject_moving_model_aliases_before_admission() {
+    let mut c = launch(None);
+    c.model = Some("claude-sonnet-latest".into());
+    assert!(project_claude_args(&c, Role::Writer).is_err());
+    let mut t = thread(None);
+    t.model = Some("gpt-latest".into());
+    assert!(project_thread_params(&t, Role::Writer).is_err());
+}

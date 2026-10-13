@@ -69,3 +69,33 @@ headless launch and direct slot delegation. `legacy_slot_autostart_discovers_enr
 covers slot aliases, corrupt enrollment and unknown entry points without processes or registry writes.
 The existing full five-minute handoff now resumes a clean-exit probation through the same autostart command.
 All registry interactions in screen tests remain fake; only owned temporary slots and hidden binaries are used.
+
+## Task 5 quiescence integration
+
+The next merge retains `disk` and public `files`, the runner's shared async mission lock alongside local lifecycle
+state, and both runner and local-update screen scenarios. The local exact-tree git invocation also carries T5's
+new private-index field without borrowing the owner's index.
+
+Build transition, probation promotion, recovery and helper startup check authoritative private runner records,
+pending effect receipts, nonretired leases and worker termination/cost reservations. A caller's idle claim cannot
+override those records. Running or planning missions must pause first. Unknown effects, held/releasing/unsafe
+quarantined leases, unfinished heavy proofs and unsettled workers keep both build payloads intact.
+
+Mission start, resume and worker dispatch hold the same OS coordinator as the lifecycle helper. The guard rejects
+admission during quiescence, swap and the whole probation interval. Both GUI and headless engines install it.
+An update pause request uses T5's existing stop path under the mission lock: pause admission, checkpoint the runner,
+interrupt and close owned sessions. It neither releases a lease nor declares unknown cost settled. The old slot
+exits only after durable quiescence and a committed swap; the helper waits for its OS lease before starting next.
+Completed missions also close warm owned sessions without reopening the mission or settling unknown spending.
+
+`running_mission_blocks_transition_despite_the_callers_idle_claim`, `running_mission_blocks_promotion_until_paused`
+and `paused_mission_with_an_active_lease_blocks_rollback_without_losing_last_good` failed before the guard and pass
+after it. `pending_effect_and_heavy_proof_block_rollback_without_mutating_builds` protects unfinished effects.
+Engine tests check coordinated admission through probation and owned worker stop without erasing spend or leases.
+The hidden handoff now starts with a running mission, verifies refusal, lets the actual old engine pause it, then
+retries transition and checks admission in the actual candidate before its full five-minute probation.
+
+The quiescence seam is wired. The separately granted real canary, automatic accepted-build registration and complete
+tiny-goal repair acceptance still require their production receipts and qualified driver path; this integration
+does not substitute an imitation runner. Uncertain worker authority intentionally requires reconciliation before
+a swap. No recorded PID is adopted or killed, and no lease or spending record is deleted to make an update proceed.

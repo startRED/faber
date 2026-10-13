@@ -519,7 +519,7 @@ fn the_name_is_a_developer_instruction_that_resume_repeats_and_a_side_question_n
     assert!(chat["baseInstructions"].as_str().unwrap().starts_with("You are a helpful"));
     assert_eq!(chat["developerInstructions"], start["developerInstructions"]);
     let (_, none) = thread_params(Area::Chat, &thread(None, None, None));
-    assert!(none.get("developerInstructions").is_none());
+    assert!(none["developerInstructions"].as_str().unwrap().contains("You are Faber"));
     let (_, side) = thread_params(Area::Chat, &thread(None, Some("Route."), Some("Erick")));
     assert!(side.get("developerInstructions").is_none());
 }

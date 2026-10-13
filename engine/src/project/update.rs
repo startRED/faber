@@ -11,6 +11,7 @@ use super::lease::{LeaseError, hash, real_path};
 use super::{Effect, Extra, Grant, RepoIdentity, SCHEMA};
 use crate::store::{Disk, Fault, replace};
 use serde::{Deserialize, Serialize};
+use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -416,6 +417,12 @@ pub struct SlotLayout {
     dev_root: PathBuf,
 }
 
+pub struct Coordinator {
+    _file: File,
+    #[cfg(unix)]
+    _directory: File,
+}
+
 impl SlotLayout {
     pub fn new(dev_root: &Path, installed_data: &Path, installed_release: &Path) -> Result<Self, UpdateError> {
         if is_forbidden_root(dev_root) || is_forbidden_root(installed_data) {
@@ -465,6 +472,70 @@ impl SlotLayout {
 
     pub fn dev_root(&self) -> &Path {
         &self.dev_root
+    }
+
+    pub fn coordinate(&self) -> Result<Coordinator, UpdateError> {
+        let path = real_path(&self.dev_root.join("update.lock"))?;
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create(true).truncate(false);
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            options.share_mode(3).custom_flags(0x0020_0000);
+        }
+        let file = options.open(path).map_err(|_| Fault::Write)?;
+        file.try_lock().map_err(|_| UpdateError::ActiveOperations)?;
+        #[cfg(unix)]
+        let directory = {
+            let directory = File::open(self.dev_root()).map_err(|_| Fault::Read)?;
+            directory.try_lock().map_err(|_| UpdateError::ActiveOperations)?;
+            directory
+        };
+        Ok(Coordinator {
+            _file: file,
+            #[cfg(unix)]
+            _directory: directory,
+        })
+    }
+
+    pub fn missions_quiescent(&self) -> Result<(), UpdateError> {
+        let data = real_path(&self.dev_root.join("data"))?;
+        let ledger = crate::store::Store::new(&data).ledger_checked()?;
+        let budget = super::budget::Budget::load(&ledger).map_err(|_| Fault::Corrupt)?;
+        if budget.invocations.values().any(|r| !r.terminated || !r.settled) {
+            return Err(UpdateError::ActiveOperations);
+        }
+        let root = real_path(&data.join("missions"))?;
+        if !root.exists() {
+            return Ok(());
+        }
+        for entry in std::fs::read_dir(root).map_err(|_| Fault::Read)? {
+            let path = real_path(&entry.map_err(|_| Fault::Read)?.path())?;
+            if !path.is_dir() {
+                return Err(Fault::Corrupt.into());
+            }
+            let read = |name: &str| ScopedFile::new(&path.join(name), false)?.read_limited(16 * 1024 * 1024);
+            if let Some((bytes, _)) = read("run.json")? {
+                let runner: super::run::Runner = serde_json::from_slice(&bytes).map_err(|_| Fault::Corrupt)?;
+                if super::Record::schema(&runner) != SCHEMA || path.file_name().and_then(|s| s.to_str()) != Some(&runner.mission.id) {
+                    return Err(Fault::Corrupt.into());
+                }
+                runner.update_quiescent().map_err(|_| UpdateError::ActiveOperations)?;
+                if !super::store::Journal::pending_private(&path).map_err(|_| Fault::Corrupt)?.is_empty() {
+                    return Err(UpdateError::ActiveOperations);
+                }
+            }
+            if let Some((bytes, _)) = read("runtime.json")? {
+                let runtime: super::Runtime = serde_json::from_slice(&bytes).map_err(|_| Fault::Corrupt)?;
+                if runtime.schema != SCHEMA || runtime.leases.iter().any(|lease| lease.schema != SCHEMA) {
+                    return Err(Fault::Corrupt.into());
+                }
+                if runtime.leases.iter().any(|lease| !super::lease::retirement_known(lease)) {
+                    return Err(UpdateError::ActiveOperations);
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn manifest_path(&self) -> PathBuf {

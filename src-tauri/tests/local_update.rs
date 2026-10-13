@@ -110,7 +110,7 @@ fn legacy_slot_autostart_discovers_enrollment_and_refuses_an_untrusted_entry() {
     assert!(Development::from_slot(&dev.binary(Slot::A)).is_err());
 }
 
-fn pending(dev: &Development) {
+fn ready(dev: &Development) {
     let manager = dev.manager().unwrap();
     fs::write(dev.binary(Slot::A), b"old").unwrap();
     fs::write(dev.binary(Slot::B), b"next").unwrap();
@@ -132,8 +132,122 @@ fn pending(dev: &Development) {
             102,
         )
         .unwrap();
+}
+
+fn pending(dev: &Development) {
+    ready(dev);
+    let manager = dev.manager().unwrap();
+    let repo = RepoIdentity::new("repo", "checkout");
+    let mut grant = Grant::new("repo", GitMode::Seguro, 1, 100);
+    grant.self_update = true;
     manager.enter_quiescence(false, false).unwrap();
     manager.begin_swap(&grant, &repo, 1, SwapCheck { payload: b"next", active_window: false, active_operations: false }, 103).unwrap();
+}
+
+fn running_mission(
+    dev: &Development,
+    repo: &std::path::Path,
+) -> (faber_engine::project::store::Journal, faber_engine::project::run::Runner) {
+    let j = faber_engine::project::store::Journal::open(repo, &dev.data(), "m1").unwrap();
+    let mission = faber_engine::project::Mission::new("m1", "p1", "repo", "Fix", &"1".repeat(40), 1, 100);
+    let mut runner = faber_engine::project::run::Runner::create(&j, mission).unwrap();
+    runner.mission.state = faber_engine::project::MissionState::Running;
+    runner.save(&j).unwrap();
+    (j, runner)
+}
+
+#[test]
+fn running_mission_blocks_promotion_until_paused() {
+    use faber_engine::project::update::{UpdateError, UpdateState};
+    let dir = area();
+    let dev = config(dir.path());
+    pending(&dev);
+    let (j, mut runner) = running_mission(&dev, &dir.path().join("repo"));
+    let manager = dev.manager().unwrap();
+    manager.begin_probation(104).unwrap();
+    manager.acknowledge_health(105).unwrap();
+    manager.complete_first_operation(105).unwrap();
+    let before = manager.manifest().unwrap().unwrap();
+    assert_eq!(monitor(&dev, true, 404), Err(UpdateError::ActiveOperations));
+    assert_eq!(manager.manifest().unwrap().unwrap(), before);
+    assert_eq!(fs::read(dev.binary(Slot::A)).unwrap(), b"old");
+    runner.pause(&j).unwrap();
+    assert_eq!(monitor(&dev, true, 404).unwrap(), Monitor::Healthy);
+    assert_eq!(manager.manifest().unwrap().unwrap().state, UpdateState::Healthy);
+}
+
+#[test]
+fn running_mission_blocks_transition_despite_the_callers_idle_claim() {
+    use faber_engine::project::update::UpdateError;
+    let dir = area();
+    let dev = config(dir.path());
+    ready(&dev);
+    fs::write(dev.helper(), b"trusted helper").unwrap();
+    fs::write(dir.path().join("dev/helper.sha256"), ExactTree::compute_build_hash(b"trusted helper")).unwrap();
+    let (j, mut runner) = running_mission(&dev, &dir.path().join("repo"));
+    let before = dev.manager().unwrap().manifest().unwrap();
+    let repo = RepoIdentity::new("repo", "checkout");
+    let mut grant = Grant::new("repo", GitMode::Seguro, 1, 100);
+    grant.self_update = true;
+    // A visible-window refusal keeps this unit test process-free after the mission becomes safe.
+    let check = || SwapCheck { payload: b"next", active_window: true, active_operations: false };
+    assert_eq!(dev.transition(&grant, &repo, 1, check(), 103), Err(UpdateError::ActiveOperations));
+    assert_eq!(dev.manager().unwrap().manifest().unwrap(), before);
+    runner.pause(&j).unwrap();
+    assert_eq!(dev.transition(&grant, &repo, 1, check(), 103), Err(UpdateError::ActiveWindow));
+}
+
+#[test]
+fn paused_mission_with_an_active_lease_blocks_rollback_without_losing_last_good() {
+    use faber_engine::project::update::UpdateError;
+    use faber_engine::project::{Lease, LeaseState, Runtime};
+    let dir = area();
+    let dev = config(dir.path());
+    pending(&dev);
+    let (j, mut runner) = running_mission(&dev, &dir.path().join("repo"));
+    runner.pause(&j).unwrap();
+    let mut runtime = Runtime::new();
+    runtime.leases.push(Lease::new("repo", "m1", "w1", 1, vec!["src".into()], &"1".repeat(40), &"2".repeat(64), 1));
+    let before = dev.manager().unwrap().manifest().unwrap();
+    for state in [LeaseState::Held, LeaseState::Releasing, LeaseState::Quarantined] {
+        runtime.leases[0].state = state;
+        j.save_runtime(&runtime).unwrap();
+        assert_eq!(recover(&dev, 104), Err(UpdateError::ActiveOperations));
+        assert_eq!(dev.manager().unwrap().manifest().unwrap(), before);
+        for slot in [Slot::A, Slot::B] {
+            assert!(dev.binary(slot).exists());
+        }
+    }
+    runtime.leases[0].state = LeaseState::Released;
+    j.save_runtime(&runtime).unwrap();
+    assert_eq!(recover(&dev, 104).unwrap(), Monitor::Rollback(Slot::A));
+    assert_eq!(fs::read(dev.binary(Slot::A)).unwrap(), b"old");
+}
+
+#[test]
+fn pending_effect_and_heavy_proof_block_rollback_without_mutating_builds() {
+    use faber_engine::project::update::UpdateError;
+    use faber_engine::project::{Intent, IntentKind};
+    for heavy in [false, true] {
+        let dir = area();
+        let dev = config(dir.path());
+        pending(&dev);
+        let (j, mut runner) = running_mission(&dev, &dir.path().join("repo"));
+        runner.pause(&j).unwrap();
+        if heavy {
+            let path = j.private().join("run.json");
+            let mut json: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            json["heavyProof"] = serde_json::json!(["w1", "C1", "identity", "receipt"]);
+            fs::write(path, serde_json::to_vec(&json).unwrap()).unwrap();
+        } else {
+            j.record_intent(&Intent::new("dispatch", "m1", IntentKind::Dispatch, 1, 100)).unwrap();
+        }
+        let before = dev.manager().unwrap().manifest().unwrap();
+        assert_eq!(recover(&dev, 104), Err(UpdateError::ActiveOperations));
+        assert_eq!(dev.manager().unwrap().manifest().unwrap(), before);
+        assert_eq!(fs::read(dev.binary(Slot::A)).unwrap(), b"old");
+        assert_eq!(fs::read(dev.binary(Slot::B)).unwrap(), b"next");
+    }
 }
 
 #[test]

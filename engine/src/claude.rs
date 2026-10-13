@@ -1,7 +1,8 @@
 //! Claude Code driver: one long-lived `claude -p` process per conversation, spoken to in stream-json over stdio.
 
 use crate::events::{Delivery, EngineEvent, Session, SessionCommand, UserTurn};
-use crate::model::{Area, name_instructions};
+use crate::model::Area;
+use crate::persona::{PersonaInput, persona, worker_contract};
 use crate::proc::{self, Spawner};
 use crate::signals::claude_signals;
 use serde_json::{Value, json};
@@ -68,9 +69,9 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
         args.push("--settings".into());
         args.push(json!({ "disableAllHooks": true }).to_string());
     }
-    if let (None, Some(name)) = (&launch.instructions, &launch.user_name) {
+    if launch.instructions.is_none() {
         args.push("--append-system-prompt".into());
-        args.push(name_instructions(name));
+        args.push(persona(&PersonaInput { name: launch.user_name.as_deref() }));
     }
     for (flag, value) in [("--model", &launch.model), ("--effort", &launch.effort), ("--resume", &launch.resume)] {
         if let Some(v) = value {
@@ -94,7 +95,7 @@ pub fn project_claude_args(launch: &ClaudeLaunch, role: crate::project::Role) ->
         return Err(policy::Blocker::Invocation);
     }
     let mut restricted = launch.clone();
-    restricted.instructions = Some(policy::instructions(role).into());
+    restricted.instructions = Some(worker_contract(role));
     restricted.user_name = None;
     let mut args = claude_args(&restricted);
     // Unlike side questions, mission sessions may resume with the same fixed policy.
@@ -122,7 +123,7 @@ pub fn start_project_claude(
     on_event: EventSink,
 ) -> Result<Session, crate::project::policy::Blocker> {
     let args = project_claude_args(&opts.launch, role)?;
-    crate::project::policy::admit(crate::model::Vendor::Claude).map(|()| start_with_policy(opts, on_event, args, true))
+    crate::project::policy::admit(crate::model::Vendor::Claude).map(|()| start_with_policy(opts, on_event, args, true).for_project(role))
 }
 
 fn block_text(content: &Value) -> String {

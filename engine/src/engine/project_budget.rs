@@ -4,6 +4,49 @@ use crate::project::budget::{self, Budget, Change, Invocation, Status};
 use crate::route::{Asked, Routed};
 
 impl Engine {
+    pub fn new_mission(&self, project: &Project, goal: &str, base: &str) -> Result<crate::project::Mission, String> {
+        let repo = project.repo.as_ref().ok_or("reason.grant.otherRepo")?;
+        let grant = project.grant.as_ref().ok_or("reason.grant.none")?;
+        Ok(crate::project::Mission::new(
+            &Uuid::new_v4().to_string(),
+            &project.id,
+            &repo.common_dir,
+            goal,
+            base,
+            grant.revision,
+            self.mission_time(),
+        ))
+    }
+    pub(crate) fn mission_time(&self) -> u64 {
+        self.with(|c| c.secs() as u64)
+    }
+    pub(crate) fn mission_sessions(&self, mission: &str) -> Vec<Session> {
+        self.with(|c| c.mission_sessions.get(mission).cloned().unwrap_or_default())
+    }
+    pub(crate) fn pause_mission_budget(&self, mission: &str) -> Result<(), String> {
+        let absent = self.with(|c| {
+            let ledger = c.store.ledger_checked().map_err(|e| e.key().to_string())?;
+            let budget = Budget::load(&ledger).map_err(str::to_string)?;
+            Ok::<_, String>(!budget.grants.contains_key(mission) && !budget.invocations.values().any(|r| r.request.mission == mission))
+        })?;
+        if absent {
+            return Ok(());
+        }
+        self.mission_budget(Change::Pause { mission: mission.into(), paused: true }).map(|_| ())
+    }
+    pub(crate) fn mission_reservation(&self, id: &str) -> Result<budget::Reservation, String> {
+        self.with(|c| {
+            let ledger = c.store.ledger_checked().map_err(|e| e.key().to_string())?;
+            Budget::load(&ledger).map_err(str::to_string)?.invocations.get(id).cloned().ok_or("reason.budget.identity".into())
+        })
+    }
+    pub(crate) fn mission_unsettled(&self, mission: &str) -> Result<bool, String> {
+        self.with(|c| {
+            let ledger = c.store.ledger_checked().map_err(|e| e.key().to_string())?;
+            let budget = Budget::load(&ledger).map_err(str::to_string)?;
+            Ok(budget.invocations.values().any(|r| r.request.mission == mission && (!r.settled || !r.terminated)))
+        })
+    }
     /// The board reads the same durable cost and daily line as admission; absent measurements stay unknown.
     pub fn mission_readings(&self, mission: &str) -> Result<(crate::project::wire::CostView, Vec<crate::project::wire::PaceView>), String> {
         self.with(|c| {
@@ -61,6 +104,22 @@ impl Engine {
         })
     }
 
+    /// Re-read current mission authority; a UI revision or a worker brief never serves as a grant.
+    pub fn mission_authority(&self, mission: &crate::project::Mission) -> Result<crate::project::Grant, String> {
+        self.with(|c| {
+            let project = c
+                .store
+                .projects_checked()
+                .map_err(|e| e.key().to_string())?
+                .into_iter()
+                .find(|p| p.id == mission.project_id)
+                .ok_or("reason.grant.none")?;
+            let repo = project.repo.as_ref().filter(|r| r.common_dir == mission.repo).ok_or("reason.grant.otherRepo")?;
+            let grant = project.grant.ok_or("reason.grant.none")?;
+            grant.allows(repo, mission.grant_revision, crate::project::Effect::Worktree).map_err(str::to_string)?;
+            Ok(grant)
+        })
+    }
     /// Feed a classified brief into Auto's existing paced table with mission admission as one extra filter.
     /// This spends no quota; T5 supplies the verdict and a verified exposure from its qualified driver.
     pub fn mission_route(&self, verdict: &Asked, request: &Invocation, only: Option<Vendor>) -> Result<Routed, String> {
@@ -169,6 +228,288 @@ mod tests {
         });
         e.mission_budget(Change::Allocate { vendor: Vendor::Codex, cap_micros: 400_000 }).unwrap();
         e
+    }
+
+    fn runner_fixture(e: &Engine, repo: &Path) -> (crate::project::store::Journal, crate::project::run::Runner) {
+        let mut p = e.add_project(&repo.to_string_lossy());
+        let before = p.clone();
+        p.repo = Some(crate::project::RepoIdentity::new("repo", &repo.to_string_lossy()));
+        p.grant = Some(crate::project::Grant::new("repo", crate::project::GitMode::Seguro, 3, 1));
+        e.update_project(&before, &p).unwrap();
+        let j = crate::project::store::Journal::open(repo, &e.with(|c| c.opts.data_dir.clone()), "m1").unwrap();
+        let r = crate::project::run::Runner::create(&j, crate::project::Mission::new("m1", &p.id, "repo", "Fix", &"1".repeat(40), 3, 1))
+            .unwrap();
+        e.mission_budget(Change::Grant { mission: "m1".into(), grant: grant(250_000) }).unwrap();
+        (j, r)
+    }
+
+    #[tokio::test]
+    async fn opus_m1_stop_resume_reopens_only_reconciled_budget() {
+        let (dir, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let e = engine(dir.path());
+        let (j, mut r) = runner_fixture(&e, repo.path());
+        r.stop(&j, &e).await.unwrap();
+        assert!(Budget::load(&e.ledger()).unwrap().grants["m1"].paused);
+        r.resume_authorized(&j, &e).unwrap();
+        assert!(!Budget::load(&e.ledger()).unwrap().grants["m1"].paused);
+        e.shutdown();
+    }
+
+    #[tokio::test]
+    async fn screen_stop_interrupts_only_owned_mission_sessions_even_on_checkpoint_failure() {
+        let (dir, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let e = engine(dir.path());
+        let (j, mut r) = runner_fixture(&e, repo.path());
+        let commands = Arc::new(Mutex::new(vec![]));
+        let recorded = commands.clone();
+        let session = Session::from_fn(move |command| {
+            recorded.lock().unwrap().push(match command {
+                crate::events::SessionCommand::Interrupt => "interrupt",
+                crate::events::SessionCommand::Close => "close",
+                _ => "unexpected",
+            })
+        });
+        e.with(|c| {
+            c.mission_sessions.insert("m1".into(), vec![session]);
+            c.mission_sessions.insert("other".into(), vec![Session::from_fn(|_| panic!("another mission was interrupted"))]);
+        });
+        std::fs::create_dir(j.private().join("run.json.tmp")).unwrap();
+        assert!(r.stop(&j, &e).await.is_err());
+        assert!(Budget::load(&e.ledger()).unwrap().grants["m1"].paused);
+        assert_eq!(*commands.lock().unwrap(), vec!["interrupt", "close"]);
+        e.with(|c| {
+            c.mission_sessions.remove("other");
+        });
+        e.shutdown();
+    }
+
+    #[tokio::test]
+    async fn local_update_pause_stops_owned_workers_without_releasing_leases_or_spend() {
+        let (dir, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let layout = crate::project::update::SlotLayout::new(
+            &dir.path().join("dev"),
+            &dir.path().join("installed-data"),
+            &dir.path().join("installed-release"),
+        )
+        .unwrap();
+        crate::project::update::UpdateManager::new(layout.clone()).unwrap();
+        let e = engine(&layout.dev_root().join("data"));
+        let (j, mut r) = runner_fixture(&e, repo.path());
+        r.mission.state = crate::project::MissionState::Running;
+        r.save(&j).unwrap();
+        e.mission_budget(Change::Admit(request())).unwrap();
+        let before = Budget::load(&e.ledger()).unwrap().invocations["i1"].clone();
+        let mut runtime = crate::project::Runtime::new();
+        runtime.leases.push(crate::project::Lease::new("repo", "m1", "w1", 1, vec!["src".into()], &"1".repeat(40), &"2".repeat(64), 1));
+        j.save_runtime(&runtime).unwrap();
+        let commands = Arc::new(Mutex::new(vec![]));
+        let captured = commands.clone();
+        e.with(|c| {
+            c.mission_sessions.insert(
+                "m1".into(),
+                vec![Session::from_fn(move |command| {
+                    captured.lock().unwrap().push(match command {
+                        crate::events::SessionCommand::Interrupt => "interrupt",
+                        crate::events::SessionCommand::Close => "close",
+                        _ => "unexpected",
+                    });
+                })],
+            );
+        });
+        e.pause_missions_for_update().await.unwrap();
+        assert_eq!(crate::project::run::Runner::load(&j).unwrap().mission.state, crate::project::MissionState::Paused);
+        assert_eq!(*commands.lock().unwrap(), ["interrupt", "close"]);
+        assert!(e.mission_sessions("m1").is_empty());
+        assert_eq!(j.runtime().unwrap(), runtime);
+        let after = Budget::load(&e.ledger()).unwrap();
+        assert!(after.grants["m1"].paused);
+        assert_eq!(after.invocations["i1"].paid_micros, before.paid_micros);
+        assert!(!after.invocations["i1"].settled && !after.invocations["i1"].terminated);
+        runtime.leases[0].state = crate::project::LeaseState::Released;
+        j.save_runtime(&runtime).unwrap();
+        assert_eq!(layout.missions_quiescent(), Err(crate::project::update::UpdateError::ActiveOperations));
+        e.shutdown();
+    }
+
+    #[tokio::test]
+    async fn local_update_admission_is_coordinated_and_remains_closed_through_probation() {
+        use crate::project::update::{CanaryVerdict, ExactTree, Slot, SlotLayout, SwapCheck, UpdateManager};
+        let (dir, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let layout =
+            SlotLayout::new(&dir.path().join("dev"), &dir.path().join("installed-data"), &dir.path().join("installed-release")).unwrap();
+        let manager = UpdateManager::new(layout.clone()).unwrap();
+        let payload = b"baseline";
+        let tree =
+            ExactTree::new(&"1".repeat(40), &"2".repeat(40), &ExactTree::compute_build_hash(payload), crate::project::SCHEMA).unwrap();
+        std::fs::write(layout.slot_dir(Slot::A).join(format!("faber{}", std::env::consts::EXE_SUFFIX)), payload).unwrap();
+        manager.adopt_baseline(Slot::A, tree.clone(), payload, 100).unwrap();
+        let e = engine(&layout.dev_root().join("data"));
+        e.set_local_update(layout.clone());
+        let admission = e.mission_update_admission().unwrap();
+        assert!(layout.coordinate().is_err());
+        drop(admission);
+        let mut grant = crate::project::Grant::new("repo", crate::project::GitMode::Seguro, 1, 100);
+        grant.self_update = true;
+        let identity = crate::project::RepoIdentity::new("repo", "checkout");
+        manager.prepare_next(tree.clone(), &grant, &identity, 1, &[], 101).unwrap();
+        manager
+            .record_canary_verdict(
+                CanaryVerdict::Pass {
+                    verified_at: 101,
+                    receipt_id: "canary".into(),
+                    tree,
+                    proof_receipt: "proof".into(),
+                    compatible_schemas: vec![1],
+                },
+                payload,
+                101,
+            )
+            .unwrap();
+        manager.enter_quiescence(false, false).unwrap();
+        manager.begin_swap(&grant, &identity, 1, SwapCheck { payload, active_window: false, active_operations: false }, 102).unwrap();
+        manager.begin_probation(103).unwrap();
+        manager.acknowledge_health(104).unwrap();
+        manager.complete_first_operation(104).unwrap();
+        let (j, mut r) = runner_fixture(&e, repo.path());
+        assert_eq!(r.resume_authorized(&j, &e), Err("error.update.activeOperations".into()));
+        assert_eq!(e.dispatch_mission_worker(j.clone(), request()).await, Err("error.update.activeOperations".into()));
+        assert_eq!(crate::project::run::Runner::start(&j, &e, r.mission.clone()).unwrap_err(), "error.update.activeOperations");
+        manager.finish_probation(403).unwrap();
+        assert!(e.mission_update_admission().is_ok());
+        e.shutdown();
+    }
+
+    #[tokio::test]
+    async fn local_update_completed_mission_closes_warm_workers_without_reopening_authority() {
+        let (dir, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let e = engine(dir.path());
+        let (j, mut r) = runner_fixture(&e, repo.path());
+        e.mission_budget(Change::Admit(request())).unwrap();
+        r.mission.state = crate::project::MissionState::Done;
+        r.save(&j).unwrap();
+        let commands = Arc::new(Mutex::new(vec![]));
+        let captured = commands.clone();
+        e.with(|c| {
+            c.mission_sessions.insert(
+                "m1".into(),
+                vec![Session::from_fn(move |command| {
+                    captured.lock().unwrap().push(match command {
+                        crate::events::SessionCommand::Interrupt => "interrupt",
+                        crate::events::SessionCommand::Close => "close",
+                        _ => "unexpected",
+                    });
+                })],
+            );
+        });
+        e.pause_missions_for_update().await.unwrap();
+        assert_eq!(*commands.lock().unwrap(), ["interrupt", "close"]);
+        assert_eq!(crate::project::run::Runner::load(&j).unwrap().mission.state, crate::project::MissionState::Done);
+        assert!(e.mission_sessions("m1").is_empty());
+        let budget = Budget::load(&e.ledger()).unwrap();
+        assert!(budget.grants["m1"].paused);
+        assert!(!budget.invocations["i1"].settled && !budget.invocations["i1"].terminated);
+        e.shutdown();
+    }
+
+    #[tokio::test]
+    async fn opus_h2_settled_dispatch_closes_before_resume_and_cleanup() {
+        let (dir, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let e = engine(dir.path());
+        let (j, mut r) = runner_fixture(&e, repo.path());
+        e.mission_budget(Change::Admit(request())).unwrap();
+        let mut intent = crate::project::Intent::new("i1", "m1", crate::project::IntentKind::Dispatch, 3, 1);
+        intent.task = Some("w1".into());
+        intent.expected.insert("invocation".into(), "i1".into());
+        j.record_intent(&intent).unwrap();
+        e.mission_budget(Change::Report {
+            id: "i1".into(),
+            event: EngineEvent::Done {
+                ok: true,
+                reason: "completed".into(),
+                cost_total_usd: None,
+                input_tokens: 1000,
+                output_tokens: 100,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                cache_write_1h_tokens: 0,
+                incomplete: false,
+            },
+            terminated: true,
+        })
+        .unwrap();
+        assert!(Budget::load(&e.ledger()).unwrap().invocations["i1"].settled);
+        r.pause(&j).unwrap();
+        r.resume_authorized(&j, &e).unwrap();
+        assert!(j.pending().unwrap().is_empty());
+        let public = std::fs::read_to_string(j.records().join("receipts/i1.json")).unwrap();
+        assert!(!public.contains("\"s1\""), "dispatch receipts must not publish private session identities");
+        r.cleanup_task(&j, "w1", crate::project::lease::Termination { process: None, tree_dead: true, cost_settled: true }).unwrap();
+        e.shutdown();
+    }
+
+    #[tokio::test]
+    async fn opus_h2_native_start_closes_dispatch_but_unknown_spend_stays_parked() {
+        let (dir, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let e = engine(dir.path());
+        let (j, mut r) = runner_fixture(&e, repo.path());
+        let mut brief = crate::project::Brief::new(
+            "w1",
+            1,
+            crate::project::Role::Research,
+            "Read",
+            &"1".repeat(40),
+            crate::project::ContractPin { id: "c1".into(), digest: "a".repeat(64) },
+        );
+        brief.grant_micros = Some(100_000);
+        brief.stop = "Done or blocked".into();
+        brief.scope = vec!["fixture".into()];
+        r.workers.insert(
+            "w1".into(),
+            crate::project::worker::Worker::new(
+                brief,
+                crate::project::worker::ModelPin {
+                    vendor: Vendor::Codex,
+                    model: "gpt-6.1-sol".into(),
+                    effort: "medium".into(),
+                    cli_version: "0.162.1".into(),
+                },
+                3,
+            )
+            .unwrap(),
+        );
+        r.save(&j).unwrap();
+        e.mission_budget(Change::Admit(request())).unwrap();
+        let mut intent = crate::project::Intent::new("i1", "m1", crate::project::IntentKind::Dispatch, 3, 1);
+        intent.task = Some("w1".into());
+        intent.expected.insert("invocation".into(), "i1".into());
+        j.record_intent(&intent).unwrap();
+        e.mission_event(&j, "i1", "w1", &mut String::new(), EngineEvent::Started { session_id: "s1".into(), model: "gpt-6.1-sol".into() })
+            .unwrap();
+        assert!(j.pending().unwrap().is_empty());
+        assert_eq!(crate::project::run::Runner::load(&j).unwrap().workers["w1"].answered.len(), 1);
+        e.mission_budget(Change::Report {
+            id: "i1".into(),
+            event: EngineEvent::Error { message: "error.cli.closed".into(), fatal: true },
+            terminated: true,
+        })
+        .unwrap();
+        r.pause(&j).unwrap();
+        e.pause_mission_budget("m1").unwrap();
+        assert_eq!(r.resume_authorized(&j, &e), Err("reason.project.reconcile".into()));
+        assert!(Budget::load(&e.ledger()).unwrap().grants["m1"].paused);
+        e.shutdown();
+    }
+
+    #[tokio::test]
+    async fn screen_dispatch_uses_t2_before_any_session_or_spend() {
+        let (dir, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let e = engine(dir.path());
+        let (j, r) = runner_fixture(&e, repo.path());
+        assert_eq!(e.dispatch_mission_worker(j.clone(), request()).await, Err("reason.project.restrictionsUnproven".into()));
+        assert!(j.pending().unwrap().is_empty());
+        assert!(Budget::load(&e.ledger()).unwrap().invocations.is_empty());
+        assert!(e.mission_sessions(&r.mission.id).is_empty());
+        e.shutdown();
     }
 
     #[tokio::test]

@@ -8,15 +8,19 @@
 
 pub mod bar;
 pub mod budget;
+pub mod disk;
 pub mod files;
 pub mod git;
 pub mod kit;
 pub mod lead;
 pub mod lease;
 pub mod proof;
+pub mod queue;
+pub mod run;
 pub mod store;
 pub mod update;
 pub mod wire;
+pub mod worker;
 
 use crate::model::Vendor;
 use serde::{Deserialize, Serialize};

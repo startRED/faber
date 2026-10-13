@@ -2,6 +2,7 @@
 use faber_engine::project::files::ScopedFile;
 use faber_engine::project::git::{Executor, Invocation, valid_oid};
 use faber_engine::project::lease::real_path;
+pub use faber_engine::project::update::Coordinator;
 use faber_engine::project::update::{
     CanaryVerdict, ExactTree, RollbackAction, RollbackReason, Slot, SlotLayout, SwapCheck, UpdateError, UpdateManager, UpdateState,
 };
@@ -166,27 +167,32 @@ impl Development {
 
     pub fn lock(&self) -> Result<Coordinator> {
         self.manager()?;
-        let path = real_path(&self.layout.dev_root().join("update.lock"))?;
-        let mut options = OpenOptions::new();
-        options.read(true).write(true).create(true).truncate(false);
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::OpenOptionsExt;
-            options.share_mode(3).custom_flags(0x0020_0000);
+        self.layout.coordinate()
+    }
+
+    pub fn ensure_missions_quiescent(&self) -> Result<()> {
+        let result = self.layout.missions_quiescent();
+        if matches!(result, Err(UpdateError::ActiveOperations)) {
+            ScopedFile::new(&self.signal_path("quiesce"), true)?.write(b"{}", None)?;
         }
-        let file = options.open(path).map_err(io_error)?;
-        file.try_lock().map_err(|_| invalid("local update already owned"))?;
-        #[cfg(unix)]
-        let directory = {
-            let directory = File::open(self.layout.dev_root()).map_err(io_error)?;
-            directory.try_lock().map_err(|_| invalid("local update already owned"))?;
-            directory
-        };
-        Ok(Coordinator {
-            _file: file,
-            #[cfg(unix)]
-            _directory: directory,
-        })
+        result
+    }
+
+    pub async fn service_quiescence(&self, engine: &faber_engine::Engine) -> Result<()> {
+        let signal = ScopedFile::new(&self.signal_path("quiesce"), false)?;
+        if let Some(hash) = signal.hash()? {
+            engine.pause_missions_for_update().await.map_err(|_| UpdateError::ActiveOperations)?;
+            signal.claim(&hash)?.delete()?;
+        }
+        Ok(())
+    }
+
+    pub fn leaving_slot(&self, executable: &Path) -> Result<bool> {
+        let manifest = self.manager()?.manifest()?.ok_or(invalid("missing manifest"))?;
+        if let UpdateState::Swapping { from_slot, .. } = manifest.state {
+            return same_path(executable, &self.binary(from_slot));
+        }
+        Ok(false)
     }
 
     pub fn slot_command(&self, slot: Slot) -> NativeCommand {
@@ -395,6 +401,7 @@ impl Development {
     pub fn transition(&self, grant: &Grant, repo: &RepoIdentity, revision: u64, check: SwapCheck<'_>, time: u64) -> Result<()> {
         grant.allows(repo, revision, Effect::SelfUpdate).map_err(UpdateError::Grant)?;
         let lock = self.lock()?;
+        self.ensure_missions_quiescent()?;
         let manager = self.manager()?;
         self.verify_helper()?;
         // The enrolled launcher never changes. A healthy slot's helper controls only its next transition.
@@ -411,12 +418,6 @@ impl Development {
         drop(lock);
         Ok(())
     }
-}
-
-pub struct Coordinator {
-    _file: File,
-    #[cfg(unix)]
-    _directory: File,
 }
 
 pub struct NativeCommand {
@@ -527,6 +528,11 @@ fn restored(dev: &Development, action: RollbackAction) -> Result<Monitor> {
 }
 pub fn recover(dev: &Development, time: u64) -> Result<Monitor> {
     let manager = dev.manager()?;
+    if manager.manifest().is_err()
+        || manager.manifest()?.is_some_and(|m| matches!(m.state, UpdateState::Swapping { .. } | UpdateState::Probation { .. }))
+    {
+        dev.ensure_missions_quiescent()?;
+    }
     if manager.manifest().is_err() {
         let bytes = ScopedFile::new(&dev.layout.dev_root().join("rollback.json"), false)?
             .read_limited(16 * 1024 * 1024)?
@@ -548,6 +554,7 @@ pub fn monitor(dev: &Development, alive: bool, time: u64) -> Result<Monitor> {
     let manager = dev.manager()?;
     let manifest = manager.manifest()?.ok_or(invalid("missing manifest"))?;
     if let UpdateState::Probation { health_ack_deadline, probation_deadline, health_acknowledged, .. } = manifest.state {
+        dev.ensure_missions_quiescent()?;
         let reason = if time < manifest.updated_at {
             Some(RollbackReason::StartupCorrupt)
         } else if !alive {
@@ -684,7 +691,13 @@ pub fn snapshot_entries(bytes: &[u8], root: &Path) -> Result<Vec<SnapshotEntry>>
 }
 
 fn git(executor: &mut impl Executor, repo: &Path, args: &[&str]) -> Result<Vec<u8>> {
-    let call = Invocation { cwd: repo.into(), args: args.iter().map(|arg| (*arg).into()).collect(), identity: false, author: None };
+    let call = Invocation {
+        cwd: repo.into(),
+        args: args.iter().map(|arg| (*arg).into()).collect(),
+        identity: false,
+        author: None,
+        private_index: None,
+    };
     let output = executor.execute(&call).map_err(|_| invalid("source git failed"))?;
     if !output.success {
         return Err(invalid("source git failed"));
@@ -1445,6 +1458,7 @@ fn helper_run(dev: &Development, recovering: bool) -> Result<()> {
             Err(error) => return Err(error),
         }
     };
+    dev.ensure_missions_quiescent()?;
     dev.verify_slot(to_slot, tree)?;
     for name in ["health", "exit"] {
         let signal = ScopedFile::new(&dev.signal_path(name), false)?;
@@ -1508,6 +1522,16 @@ fn helper_run(dev: &Development, recovering: bool) -> Result<()> {
                 _ => true,
             };
         if must_stop {
+            match dev.ensure_missions_quiescent() {
+                Ok(()) => {}
+                Err(UpdateError::ActiveOperations) => {
+                    #[cfg(windows)]
+                    drop(guard);
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    continue;
+                }
+                Err(error) => return Err(error),
+            }
             child.stop()?;
             drop(old);
             let outcome = if matches!(current.state, UpdateState::Probation { .. }) {
@@ -1528,6 +1552,12 @@ fn helper_run(dev: &Development, recovering: bool) -> Result<()> {
             && match monitor(dev, true, now()) {
                 Ok(outcome) => outcome == Monitor::Healthy,
                 Err(error) => {
+                    if matches!(error, UpdateError::ActiveOperations) {
+                        #[cfg(windows)]
+                        drop(guard);
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                        continue;
+                    }
                     // Promotion may have committed its safe checkpoint before the live manifest write failed.
                     recover(dev, now())?;
                     if manager.manifest()?.is_some_and(|manifest| manifest.state == UpdateState::Healthy) {
