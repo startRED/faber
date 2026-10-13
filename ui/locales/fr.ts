@@ -591,7 +591,11 @@ export const fr: Messages = {
   "reason.remote.notOpen": "Cette pull request n'est pas ouverte.",
   "reason.remote.prFailed": "La pull request n'a pas pu être ouverte.",
   "reason.remote.mergeFailed": "La fusion n'a pas eu lieu.",
+  "reason.remote.oversized": "Ce qui serait envoyé est trop volumineux pour y chercher des secrets. Rien n'a été envoyé.",
+  "reason.remote.foreign": "Cette pull request ne vient pas de la branche de cette mission dans ce dépôt.",
+  "reason.remote.account": "Le GitHub CLI est connecté avec un autre compte que celui que vous avez autorisé. Rien n'a été fait.",
   "reason.grant.noRemote": "Le dépôt distant n'est pas celui que vous avez autorisé.",
+  "reason.grant.noAccount": "L'autorisation n'indique aucun compte GitHub. Revoyez la carte de démarrage.",
   "decision.remote.merge": "Marquer cette pull request comme prête et la fusionner ?",
   // Native speaker must translate (needs native review).
   "reason.grant.noAuthor": "Set a Git author before granting commit authority.",

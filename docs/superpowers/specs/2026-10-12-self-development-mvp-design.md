@@ -27,7 +27,8 @@ It then develops the rest of Full Chat. Full Chat is not a prerequisite.
 | AGENTS.md | Original code; hidden processes; no credential access; locales; proof before coherent commits |
 
 R83's research proposes Equilibrado as the general default. R96 and this request narrow it to Seguro here.
-Equilibrado is Later, outside this MVP. Its grant rules below remain binding when implemented.
+Equilibrado is Later for the runner, outside this MVP, but its remote module (R108 slice 1) is built and tested: push of the mission's own branch, one draft PR, check results, and a merge card.
+A merge needs the owner's yes for one exact card (repository, PR number, full head SHA, base); the AI's answer never counts. Its grant rules below remain binding.
 R91 supersedes the roadmap's estimate-only budget warning for this slice.
 An estimate may warn. A live spending cap must stop admission before its boundary.
 R93 does not permit overwriting R95's installed stable release.
@@ -37,12 +38,12 @@ The two slots belong to a separate local development instance.
 
 | Included | Deferred |
 |---|---|
-| Existing local git repository; one active mission per repository | Repository creation, Livre, target/main branch merge |
+| Existing local git repository; one active mission per repository | Repository creation, Livre, any merge without the owner's yes |
 | Lead, short contracts, dependency graph, decisions with authors | General catalog, all 15 powers, taste learning |
 | Worker grants, area leases, per-writer worktrees, artifacts | Swarms, peer chat, cloud workers, permanent managers |
 | Read-only research/review/test proposals; one initial writer | Parallel writers and performance promises |
 | Serial proof/review/fast-forward queue | Speculative merge trees, merge batches, public release automation |
-| Seguro local changes | Equilibrado push/draft PR, PR ready state, public tags, deployments, paid acceleration |
+| Seguro local changes | Equilibrado runner wiring (the remote module exists; see plan Task 14), public tags, deployments, paid acceleration |
 | Minimal Projects board and local self-update | Full Chat work and broad software specialization |
 
 Parallel writers are Later, outside the MVP. They require disjointness, containment, metering, and class qualification.
@@ -100,7 +101,7 @@ Keep approval bound to repository identity and grant revision. Revocation takes 
 | Mode | Allowed after the grant | Still blocked or parked |
 |---|---|---|
 | Seguro, selected by default | Separate worktrees; local commits; fast-forward the mission's `faber/...` branch | All remote effects and changes to the person's branch |
-| Equilibrado | Seguro plus non-forced push of that exact own branch and one draft PR | Main/target merge, marking ready, repo creation, releases |
+| Equilibrado | Seguro plus non-forced push of that exact own branch, one draft PR, reading its checks, and a merge of that PR only with the owner's explicit yes for the exact PR number, full head SHA and base | Any merge without that yes, marking ready on its own, force, deleting branches, repo creation, releases |
 | Livre | Not offered | No hidden fallback to it |
 
 The mission branch is `faber/<mission-id>`; each writer gets a detached private worktree.

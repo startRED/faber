@@ -3,14 +3,20 @@
 //!
 //! git and gh run shell-free through [`Runner`], with the person's own git credential helper and gh login; Faber
 //! never reads a token or a credential file. Every effect writes its intent before and its receipt after through
-//! [`Ledger`]. A call that may have reached the remote but gave no answer is settled by reading the live remote state,
-//! never by running it again; when that read fails too the receipt stays `Unknown` and nothing else may leave.
-//! Errors are `reason.*` keys.
+//! [`Ledger`]. A call that may have reached the remote but gave no clean answer is settled by reading the live remote
+//! state, never by running it again; when that read fails too, or the call was killed, the receipt stays `Unknown` and
+//! nothing else may leave until [`reconcile`] settles it. Errors are `reason.*` keys.
+//!
+//! The repository is not trusted: a worker can write its config, its refs and its attributes. So every command that
+//! talks to the network either runs outside the repository against the granted URL itself (reads), or runs after the
+//! repository's own config, in every scope but the person's, was found free of anything that runs a command or
+//! reroutes a connection (the push).
 
 use super::git::valid_oid;
 use super::proof::scan_secrets;
-use super::{DecidedBy, Decision, DecisionKind, Effect, Grant, Outcome, RepoIdentity};
-use serde_json::Value;
+use super::{DecidedBy, Decision, DecisionKind, Effect, Extra, Grant, Outcome, RepoIdentity};
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -43,7 +49,8 @@ pub struct Reply {
 pub enum Lost {
     /// The tool is not installed: nothing ran.
     Missing,
-    /// It started but no answer came (a dropped link, a timeout): it may or may not have taken effect.
+    /// It was started and had to be killed (a timeout): it may or may not have taken effect, and nothing it started
+    /// can be assumed gone. A tool that exits with an error is an answer, not this.
     Interrupted,
 }
 
@@ -92,9 +99,11 @@ pub enum RemoteError {
     Pending,
     /// The repository's own config would run a command or reroute the connection.
     Config,
-    /// The remote's effective push URL is not the granted one.
+    /// The remote no longer leads only to the URL the person granted.
     Url,
     Secret,
+    /// What would leave is too big to check, so it does not leave.
+    Oversized,
     Unreachable,
     Diverged,
     Rejected,
@@ -102,6 +111,10 @@ pub enum RemoteError {
     Maybe,
     NotPushed,
     HeadMoved,
+    /// A PR that is not the mission's own branch in this repository.
+    Foreign,
+    /// gh acts as another account than the one the person granted.
+    Account,
     /// Output that is not what git or gh print.
     Command,
     NeedsYes,
@@ -125,12 +138,15 @@ impl RemoteError {
             Self::Config => "reason.remote.config",
             Self::Url => "reason.remote.url",
             Self::Secret => "reason.remote.secret",
+            Self::Oversized => "reason.remote.oversized",
             Self::Unreachable => "reason.remote.unreachable",
             Self::Diverged => "reason.remote.diverged",
             Self::Rejected => "reason.remote.rejected",
             Self::Maybe => "reason.remote.maybe",
             Self::NotPushed => "reason.remote.notPushed",
             Self::HeadMoved => "reason.remote.headMoved",
+            Self::Foreign => "reason.remote.foreign",
+            Self::Account => "reason.remote.account",
             Self::Command => "reason.git.command",
             Self::NeedsYes => "reason.remote.needsYes",
             Self::Ci => "reason.remote.ci",
@@ -144,7 +160,7 @@ impl RemoteError {
 /// Everything one remote effect is bound to.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Target {
-    /// A checkout of the repository; git and gh run here.
+    /// The checkout root of the repository. Only local reads and the push run here.
     pub cwd: PathBuf,
     pub identity: RepoIdentity,
     /// The grant revision the work was admitted under.
@@ -153,7 +169,7 @@ pub struct Target {
     pub repo: String,
     /// The git remote name the grant names.
     pub remote: String,
-    /// That remote's effective push URL as shown at the grant.
+    /// That remote's push URL as shown at the grant. Every network call goes to this exact URL, not to the name.
     pub url: String,
     /// The mission's own branch, `faber/...`.
     pub branch: String,
@@ -171,7 +187,6 @@ fn ref_ok(name: &str) -> bool {
         && !name.starts_with(['-', '/', '.'])
         && !name.ends_with(['/', '.'])
         && !name.contains("..")
-        && !name.contains("@{")
         && name.bytes().all(|b| b.is_ascii_alphanumeric() || b"/_-.".contains(&b))
         && name.split('/').all(|part| !part.is_empty() && !part.starts_with('.') && !part.ends_with(".lock"))
 }
@@ -181,7 +196,20 @@ fn name_ok(name: &str) -> bool {
 }
 
 fn slug_ok(repo: &str) -> bool {
-    repo.split_once('/').is_some_and(|(owner, name)| name_ok(owner) && name_ok(name) && !name.contains('/'))
+    repo.split_once('/').is_some_and(|(owner, name)| name_ok(owner) && name_ok(name))
+}
+
+/// An https or ssh URL (or the scp form) that names `repo`, so a fork or another host cannot stand in for it.
+fn url_shape(url: &str) -> bool {
+    let known =
+        url.starts_with("https://") || url.starts_with("ssh://") || (!url.contains("://") && url.contains('@') && url.contains(':'));
+    known && url.len() <= 512 && !url.chars().any(|c| c.is_control() || c.is_whitespace()) && !url.starts_with('-')
+}
+
+fn url_ok(url: &str, repo: &str) -> bool {
+    let path = url.strip_suffix(".git").unwrap_or(url).to_ascii_lowercase();
+    let repo = repo.to_ascii_lowercase();
+    url_shape(url) && (path.ends_with(&format!("/{repo}")) || path.ends_with(&format!(":{repo}")))
 }
 
 fn check(t: &Target) -> Result<(), RemoteError> {
@@ -189,13 +217,10 @@ fn check(t: &Target) -> Result<(), RemoteError> {
         && ref_ok(&t.branch)
         && ref_ok(&t.base)
         && valid_oid(&t.head)
-        && t.head.len() >= 12
         && name_ok(&t.remote)
         && !t.remote.starts_with(['-', '.'])
         && slug_ok(&t.repo)
-        && !t.url.is_empty()
-        && t.url.len() <= 512
-        && !t.url.chars().any(|c| c.is_control() || c.is_whitespace());
+        && url_ok(&t.url, &t.repo);
     if ok { Ok(()) } else { Err(RemoteError::Target) }
 }
 
@@ -213,6 +238,21 @@ fn authority(ledger: &mut impl Ledger, t: &Target, effect: Effect) -> Result<(),
         return Err(RemoteError::Grant("reason.grant.noRemote"));
     }
     Ok(())
+}
+
+/// The account gh acts as must be the one the person granted.
+fn account_ok(ledger: &mut impl Ledger, login: &str) -> Result<(), RemoteError> {
+    let grant = ledger.grant()?.ok_or(RemoteError::Grant("reason.grant.none"))?;
+    match grant.remote_account.as_deref() {
+        Some(granted) if granted.eq_ignore_ascii_case(login) => Ok(()),
+        Some(_) => Err(RemoteError::Account),
+        None => Err(RemoteError::Grant("reason.grant.noAccount")),
+    }
+}
+
+fn acting(runner: &mut impl Runner, ledger: &mut impl Ledger) -> Result<(), RemoteError> {
+    let login = login(runner, &neutral_dir())?;
+    account_ok(ledger, &login)
 }
 
 fn settled(ledger: &mut impl Ledger) -> Result<(), RemoteError> {
@@ -245,6 +285,11 @@ fn gh(cwd: &Path, args: &[&str]) -> Call {
     Call { tool: Tool::Gh, cwd: cwd.into(), args: args.iter().map(|s| (*s).to_string()).collect() }
 }
 
+/// Where calls that must not see the repository run: not a repository, so none of its config, refs or attributes apply.
+fn neutral_dir() -> PathBuf {
+    std::env::temp_dir()
+}
+
 fn missing(tool: Tool) -> RemoteError {
     match tool {
         Tool::Git => RemoteError::GitMissing,
@@ -265,78 +310,146 @@ fn ask(runner: &mut impl Runner, call: &Call) -> Result<Reply, RemoteError> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Account {
     pub login: String,
-    /// `owner/name` of the repository gh resolves in the checkout.
+    /// `owner/name` of the repository gh resolves from the remote URL.
     pub repo: String,
 }
 
+fn login(runner: &mut impl Runner, cwd: &Path) -> Result<String, RemoteError> {
+    let reply = ask(runner, &gh(cwd, &["api", "user", "--jq", ".login"]))?;
+    let login = reply.stdout.trim().to_string();
+    if reply.code != 0 || login.is_empty() || !name_ok(&login) || login.len() > 39 {
+        return Err(RemoteError::Command);
+    }
+    Ok(login)
+}
+
 /// Whether gh is installed and signed in, and who and where it would act. Shown on the Equilibrado start card.
-pub fn preflight(runner: &mut impl Runner, cwd: &Path) -> Result<Account, RemoteError> {
-    if ask(runner, &gh(cwd, &["auth", "status"]))?.code != 0 {
+/// It runs outside the checkout and resolves the repository from the URL, so the checkout's own config never applies.
+pub fn preflight(runner: &mut impl Runner, url: &str) -> Result<Account, RemoteError> {
+    if !url_shape(url) {
+        return Err(RemoteError::Target);
+    }
+    let cwd = neutral_dir();
+    if ask(runner, &gh(&cwd, &["auth", "status"]))?.code != 0 {
         return Err(RemoteError::GhLoggedOut);
     }
-    let login = ask(runner, &gh(cwd, &["api", "user", "--jq", ".login"]))?;
-    let repo = ask(runner, &gh(cwd, &["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]))?;
-    let (login, repo) = (login.stdout.trim().to_string(), repo.stdout.trim().to_string());
-    if login.is_empty() || !name_ok(&login) || login.len() > 39 || !slug_ok(&repo) || repo.len() > 201 {
+    let login = login(runner, &cwd)?;
+    let repo = ask(runner, &gh(&cwd, &["repo", "view", url, "--json", "nameWithOwner", "--jq", ".nameWithOwner"]))?;
+    let repo = repo.stdout.trim().to_string();
+    if !slug_ok(&repo) || repo.len() > 201 {
         return Err(RemoteError::Command);
     }
     Ok(Account { login, repo })
 }
 
-// Push
+// Repository config
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Pushed {
-    pub head: String,
-    /// The remote already had the proven commit; nothing was sent.
-    pub already: bool,
-}
-
-const BLOCKING_CONFIG: &str = r"^(core\.(sshcommand|gitproxy|askpass)|credential\.(.*\.)?helper|remote\..*\.(proxy|receivepack|uploadpack|vcs)|hook\..*|http\.(.*\.)?proxy)$";
-
-/// The repository's own config must not run a command or reroute the connection. The person's global config, with
-/// the credential helper, is not looked at: it is the person's own.
-fn guard_config(runner: &mut impl Runner, t: &Target) -> Result<(), RemoteError> {
-    let reply = ask(runner, &git(&t.cwd, &["config", "--local", "--includes", "--name-only", "--get-regexp", BLOCKING_CONFIG]))?;
-    match reply.code {
-        1 => Ok(()),
-        0 => Err(RemoteError::Config),
-        _ => Err(RemoteError::Command),
+/// Config keys that run a command or reroute a connection. Only the person's own scopes may set them.
+pub fn blocking_key(key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    let parts: Vec<&str> = key.split('.').collect();
+    let (first, last) = (parts[0], parts[parts.len() - 1]);
+    match first {
+        "credential" | "http" | "url" | "hook" | "ssh" | "protocol" => true,
+        "core" => matches!(last, "sshcommand" | "gitproxy" | "askpass"),
+        "remote" => parts.len() >= 3 && matches!(last, "proxy" | "receivepack" | "uploadpack" | "vcs" | "mirror"),
+        _ => false,
     }
 }
 
-/// The remote name must still lead to the URL the person granted.
-fn pin_url(runner: &mut impl Runner, t: &Target) -> Result<(), RemoteError> {
-    let reply = ask(runner, &git(&t.cwd, &["remote", "get-url", "--push", &t.remote]))?;
-    if reply.code == 0 && reply.stdout.trim() == t.url { Ok(()) } else { Err(RemoteError::Url) }
-}
-
-/// Everything that would leave: commits the remote does not have, as patches. Fails closed on any error.
-fn scan_outgoing(runner: &mut impl Runner, t: &Target) -> Result<(), RemoteError> {
-    let remotes = format!("--remotes={}", t.remote);
-    let reply = ask(runner, &git(&t.cwd, &["log", "-p", "--format=", "--no-ext-diff", "--no-textconv", &t.head, "--not", &remotes]))?;
+/// Nothing the repository, its worktree or the command line configured may run a command or reroute the connection.
+/// System and global scopes are the person's own: their credential helper and URL rewrites are what they want.
+fn guard_config(runner: &mut impl Runner, t: &Target) -> Result<(), RemoteError> {
+    let reply = ask(runner, &git(&t.cwd, &["config", "--list", "--show-scope", "--name-only"]))?;
     if reply.code != 0 {
         return Err(RemoteError::Command);
     }
-    scan_secrets(&reply.stdout).map_err(|_| RemoteError::Secret)
+    for line in reply.stdout.lines().filter(|l| !l.trim().is_empty()) {
+        let Some((scope, key)) = line.split_once('\t') else { return Err(RemoteError::Config) };
+        match scope {
+            "system" | "global" => {}
+            "local" | "worktree" | "command" if !blocking_key(key) => {}
+            _ => return Err(RemoteError::Config),
+        }
+    }
+    Ok(())
 }
 
-/// The branch on the live remote, if it exists there.
-fn remote_branch(runner: &mut impl Runner, t: &Target) -> Result<Option<String>, RemoteError> {
-    let full = format!("refs/heads/{}", t.branch);
-    let reply = ask(runner, &git(&t.cwd, &["ls-remote", "--heads", &t.remote, &full]))?;
+/// The remote name must still lead to exactly the URL the person granted, and to no other.
+fn pin_url(runner: &mut impl Runner, t: &Target) -> Result<(), RemoteError> {
+    let reply = ask(runner, &git(&t.cwd, &["remote", "get-url", "--push", "--all", &t.remote]))?;
+    let urls: Vec<&str> = reply.stdout.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    if reply.code == 0 && urls == [t.url.as_str()] { Ok(()) } else { Err(RemoteError::Url) }
+}
+
+// The live remote
+
+/// What the remote advertises right now. Read outside the repository, from the granted URL itself.
+struct Live {
+    branch: Option<String>,
+    /// Every branch and tag head, whatever the repository's own tracking refs say.
+    oids: Vec<String>,
+}
+
+fn live(runner: &mut impl Runner, t: &Target) -> Result<Live, RemoteError> {
+    let reply = ask(runner, &git(&neutral_dir(), &["ls-remote", "--heads", "--tags", &t.url]))?;
     if reply.code != 0 {
         return Err(RemoteError::Unreachable);
     }
-    for line in reply.stdout.lines() {
-        if let Some((oid, name)) = line.split_once('\t')
-            && name == full
-        {
-            return if valid_oid(oid) { Ok(Some(oid.into())) } else { Err(RemoteError::Command) };
+    let full = format!("refs/heads/{}", t.branch);
+    let (mut branch, mut oids) = (None, vec![]);
+    for line in reply.stdout.lines().filter(|l| !l.trim().is_empty()) {
+        let Some((oid, name)) = line.split_once('\t') else { return Err(RemoteError::Command) };
+        if !valid_oid(oid) {
+            return Err(RemoteError::Command);
         }
+        if name == full {
+            branch = Some(oid.to_string());
+        }
+        oids.push(oid.to_string());
     }
-    Ok(None)
+    oids.sort();
+    oids.dedup();
+    Ok(Live { branch, oids })
 }
+
+fn remote_branch(runner: &mut impl Runner, t: &Target) -> Result<Option<String>, RemoteError> {
+    live(runner, t).map(|l| l.branch)
+}
+
+/// The most live heads excluded from the scan. Past it more is scanned, never less.
+const EXCLUDE_CAP: usize = 200;
+
+/// Everything that would leave, as patches: commits the live remote does not have, in full. Binary files are read as
+/// text, merge commits are shown against every parent, and commit messages are included. Fails closed on any error.
+fn scan_outgoing(runner: &mut impl Runner, t: &Target, live: &Live) -> Result<(), RemoteError> {
+    let mut args = vec![
+        "log",
+        "--ignore-missing",
+        "-p",
+        "--text",
+        "-m",
+        "--no-renames",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--format=%B",
+        &t.head,
+        "--not",
+    ];
+    args.extend(live.oids.iter().take(EXCLUDE_CAP).map(String::as_str));
+    let reply = ask(runner, &git(&t.cwd, &args))?;
+    match reply.code {
+        0 => {}
+        OVER => return Err(RemoteError::Oversized),
+        _ => return Err(RemoteError::Command),
+    }
+    // A secret in UTF-16 has a zero byte between its letters.
+    let squeezed = reply.stdout.replace('\0', "");
+    scan_secrets(&reply.stdout).and_then(|()| scan_secrets(&squeezed)).map_err(|_| RemoteError::Secret)
+}
+
+/// The exit code a reply gets when its output went past the cap.
+const OVER: i32 = 125;
 
 /// What a read of the remote says about an effect that gave no clean answer.
 enum Seen<T> {
@@ -367,8 +480,9 @@ pub fn push(runner: &mut impl Runner, ledger: &mut impl Ledger, t: &Target) -> R
     settled(ledger)?;
     guard_config(runner, t)?;
     pin_url(runner, t)?;
-    scan_outgoing(runner, t)?;
-    let old = remote_branch(runner, t)?;
+    let now = live(runner, t)?;
+    scan_outgoing(runner, t, &now)?;
+    let old = now.branch.clone();
     if old.as_deref() == Some(t.head.as_str()) {
         return Ok(Pushed { head: t.head.clone(), already: true });
     }
@@ -388,20 +502,26 @@ pub fn push(runner: &mut impl Runner, ledger: &mut impl Ledger, t: &Target) -> R
         return Err(e);
     }
     let spec = format!("{}:{full}", t.head);
-    let sent = runner.run(&git(&t.cwd, &["push", "--no-verify", "--porcelain", &t.remote, &spec]));
+    let sent = runner.run(&git(&t.cwd, &["push", "--no-verify", "--porcelain", &t.url, &spec]));
+    let pushed = || Pushed { head: t.head.clone(), already: false };
     match sent {
         Ok(reply) if reply.code == 0 => {
             ledger.receipt(&id, Outcome::Done, evidence(&[("new", &t.head), ("via", "push")]), None)?;
-            Ok(Pushed { head: t.head.clone(), already: false })
+            Ok(pushed())
         }
         Err(Lost::Missing) => {
             ledger.receipt(&id, Outcome::Failed, expected, Some(RemoteError::GitMissing.key()))?;
             Err(RemoteError::GitMissing)
         }
-        _ => match probe_push(runner, t, &expected) {
+        // Killed: what it started may still be running or may land later. Not read now; `reconcile` settles it.
+        Err(Lost::Interrupted) => {
+            ledger.receipt(&id, Outcome::Unknown, expected, Some(RemoteError::Maybe.key()))?;
+            Err(RemoteError::Maybe)
+        }
+        Ok(_) => match probe_push(runner, t, &expected) {
             Seen::Yes(found) => {
                 ledger.receipt(&id, Outcome::Done, found, None)?;
-                Ok(Pushed { head: t.head.clone(), already: false })
+                Ok(pushed())
             }
             Seen::No => {
                 ledger.receipt(&id, Outcome::Failed, expected, Some(RemoteError::Rejected.key()))?;
@@ -413,6 +533,13 @@ pub fn push(runner: &mut impl Runner, ledger: &mut impl Ledger, t: &Target) -> R
             }
         },
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pushed {
+    pub head: String,
+    /// The remote already had the proven commit; nothing was sent.
+    pub already: bool,
 }
 
 // Pull requests
@@ -432,6 +559,10 @@ pub struct Pr {
     pub state: PrState,
     /// The commit the PR's branch points at.
     pub head: String,
+    /// The branch name the PR comes from.
+    pub branch: String,
+    /// The PR comes from another repository (a fork).
+    pub cross: bool,
     pub base: String,
     /// Found rather than created by this call.
     pub existing: bool,
@@ -443,8 +574,8 @@ pub struct PrSpec {
     pub body: String,
 }
 
-const PR_FIELDS: &str = "number,url,isDraft,state,headRefName,headRefOid,baseRefName";
-const PR_VIEW_FIELDS: &str = "number,url,isDraft,state,headRefName,headRefOid,baseRefName,statusCheckRollup";
+const PR_FIELDS: &str = "number,url,isDraft,state,headRefName,headRefOid,baseRefName,isCrossRepository";
+const PR_VIEW_FIELDS: &str = "number,url,isDraft,state,headRefName,headRefOid,baseRefName,isCrossRepository,statusCheckRollup";
 
 fn parse_pr(value: &Value) -> Result<Pr, RemoteError> {
     let state = match value["state"].as_str() {
@@ -460,6 +591,8 @@ fn parse_pr(value: &Value) -> Result<Pr, RemoteError> {
         draft: value["isDraft"].as_bool().ok_or(RemoteError::Command)?,
         state,
         head: text("headRefOid").and_then(|oid| if valid_oid(&oid) { Ok(oid) } else { Err(RemoteError::Command) })?,
+        branch: text("headRefName")?,
+        cross: value["isCrossRepository"].as_bool().ok_or(RemoteError::Command)?,
         base: text("baseRefName")?,
         existing: false,
     })
@@ -472,19 +605,23 @@ fn json(reply: &Reply) -> Result<Value, RemoteError> {
     serde_json::from_str(&reply.stdout).map_err(|_| RemoteError::Command)
 }
 
-/// Every PR (any state) whose head is the own branch.
+/// Every PR (any state) that comes from the own branch of this very repository. gh filters by branch name alone, so a
+/// fork's PR of the same name is dropped here.
 fn list_prs(runner: &mut impl Runner, t: &Target) -> Result<Vec<Pr>, RemoteError> {
-    // ponytail: matched by branch name alone; a fork's PR with the very same `faber/...` name would also match.
-    let reply = ask(
-        runner,
-        &gh(&t.cwd, &["pr", "list", "--repo", &t.repo, "--head", &t.branch, "--state", "all", "--limit", "5", "--json", PR_FIELDS]),
-    )?;
-    json(&reply)?.as_array().ok_or(RemoteError::Command)?.iter().map(parse_pr).collect()
+    let call =
+        gh(&neutral_dir(), &["pr", "list", "--repo", &t.repo, "--head", &t.branch, "--state", "all", "--limit", "20", "--json", PR_FIELDS]);
+    let reply = ask(runner, &call)?;
+    let all: Vec<Pr> = json(&reply)?.as_array().ok_or(RemoteError::Command)?.iter().map(parse_pr).collect::<Result<_, _>>()?;
+    Ok(all.into_iter().filter(|pr| !pr.cross && pr.branch == t.branch).collect())
 }
 
-fn probe_pr(runner: &mut impl Runner, t: &Target) -> Seen<Pr> {
+/// Whether the PR a lost `create` should have made is there. A PR of the branch that is not this commit and base is
+/// not proof of anything.
+fn probe_pr(runner: &mut impl Runner, t: &Target, expected: &BTreeMap<String, String>) -> Seen<Pr> {
+    let (head, base) = (expected.get("head").map_or("", String::as_str), expected.get("base").map_or("", String::as_str));
     match list_prs(runner, t) {
-        Ok(found) => found.into_iter().next().map_or(Seen::No, Seen::Yes),
+        Ok(found) if found.is_empty() => Seen::No,
+        Ok(found) => found.into_iter().find(|pr| pr.head == head && pr.base == base).map_or(Seen::Unsure, Seen::Yes),
         Err(_) => Seen::Unsure,
     }
 }
@@ -497,8 +634,8 @@ fn pr_text_ok(spec: &PrSpec) -> bool {
         && plain(&spec.body, true)
 }
 
-/// Opens the one draft PR of the own branch. An existing PR of that branch, in any state, is returned instead of a new
-/// one. The proven commit must already be on the remote.
+/// Opens the one draft PR of the own branch. An existing PR of that branch in this repository, in any state, is
+/// returned instead of a new one. The proven commit must already be on the remote.
 pub fn open_pr(runner: &mut impl Runner, ledger: &mut impl Ledger, t: &Target, spec: &PrSpec) -> Result<Pr, RemoteError> {
     check(t)?;
     if !pr_text_ok(spec) {
@@ -507,7 +644,11 @@ pub fn open_pr(runner: &mut impl Runner, ledger: &mut impl Ledger, t: &Target, s
     authority(ledger, t, Effect::DraftPr)?;
     settled(ledger)?;
     scan_secrets(&format!("{}\n{}", spec.title, spec.body)).map_err(|_| RemoteError::Secret)?;
+    acting(runner, ledger)?;
     if let Some(found) = list_prs(runner, t)?.into_iter().next() {
+        if found.base != t.base {
+            return Err(RemoteError::HeadMoved);
+        }
         return Ok(Pr { existing: true, ..found });
     }
     if remote_branch(runner, t)?.as_deref() != Some(t.head.as_str()) {
@@ -521,15 +662,22 @@ pub fn open_pr(runner: &mut impl Runner, ledger: &mut impl Ledger, t: &Target, s
         return Err(e);
     }
     let (title, body) = (format!("--title={}", spec.title), format!("--body={}", spec.body));
-    let created =
-        runner.run(&gh(&t.cwd, &["pr", "create", "--draft", "--repo", &t.repo, "--head", &t.branch, "--base", &t.base, &title, &body]));
+    let created = runner
+        .run(&gh(&neutral_dir(), &["pr", "create", "--draft", "--repo", &t.repo, "--head", &t.branch, "--base", &t.base, &title, &body]));
     let clean = matches!(&created, Ok(reply) if reply.code == 0);
-    if let Err(Lost::Missing) = created {
-        ledger.receipt(&id, Outcome::Failed, expected, Some(RemoteError::GhMissing.key()))?;
-        return Err(RemoteError::GhMissing);
+    match created {
+        Err(Lost::Missing) => {
+            ledger.receipt(&id, Outcome::Failed, expected, Some(RemoteError::GhMissing.key()))?;
+            return Err(RemoteError::GhMissing);
+        }
+        Err(Lost::Interrupted) => {
+            ledger.receipt(&id, Outcome::Unknown, expected, Some(RemoteError::Maybe.key()))?;
+            return Err(RemoteError::Maybe);
+        }
+        Ok(_) => {}
     }
     // The PR list is read back either way, so the receipt always carries the number and a lost answer cannot duplicate.
-    match probe_pr(runner, t) {
+    match probe_pr(runner, t, &expected) {
         Seen::Yes(found) => {
             let number = found.number.to_string();
             ledger.receipt(&id, Outcome::Done, evidence(&[("number", &number), ("url", &found.url)]), None)?;
@@ -605,11 +753,15 @@ fn summarize(checks: &[Value], head: &str) -> Ci {
     Ci { state, head: head.into(), failed, total: seen.len() }
 }
 
+/// The live PR, which must be the mission's own branch of this repository, and its checks.
 fn view_pr(runner: &mut impl Runner, t: &Target, number: u64) -> Result<(Pr, Ci), RemoteError> {
     let number = number.to_string();
-    let reply = ask(runner, &gh(&t.cwd, &["pr", "view", &number, "--repo", &t.repo, "--json", PR_VIEW_FIELDS]))?;
+    let reply = ask(runner, &gh(&neutral_dir(), &["pr", "view", &number, "--repo", &t.repo, "--json", PR_VIEW_FIELDS]))?;
     let value = json(&reply)?;
     let pr = parse_pr(&value)?;
+    if pr.cross || pr.branch != t.branch {
+        return Err(RemoteError::Foreign);
+    }
     let checks = value["statusCheckRollup"].as_array().map_or(&[][..], Vec::as_slice);
     let ci = summarize(checks, &pr.head);
     Ok((pr, ci))
@@ -628,9 +780,10 @@ pub fn ci(runner: &mut impl Runner, ledger: &mut impl Ledger, t: &Target, number
 
 // Merge
 
-/// What the person is asked: this PR, at this commit, with these checks.
+/// What the person is asked: this PR of this repository, at this commit, into this base, with these checks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MergeCard {
+    pub repo: String,
     pub pr: u64,
     pub head: String,
     pub base: String,
@@ -638,14 +791,25 @@ pub struct MergeCard {
 }
 
 impl MergeCard {
-    pub fn decision_id(&self) -> String {
-        format!("merge-{}-{}", self.pr, &self.head[..12.min(self.head.len())])
+    fn binding(&self) -> Value {
+        json!({ "repo": self.repo, "pr": self.pr, "head": self.head, "base": self.base })
     }
 
-    /// The decision to put on the board. Only the person can answer it: it is a direction decision.
+    /// Names the exact repository, PR number, full head and base, so a yes for one cannot be found under another.
+    pub fn decision_id(&self) -> String {
+        let digest = Sha256::digest(self.binding().to_string().as_bytes());
+        let hex: String = digest.iter().take(20).map(|b| format!("{b:02x}")).collect();
+        format!("merge-{}-{hex}", self.pr)
+    }
+
+    /// The decision to put on the board. Only the person can answer it: it is a direction decision. It carries the
+    /// binding in full, and [`OwnerYes::from_decision`] compares all of it.
     pub fn decision(&self) -> Decision {
         let mut decision = Decision::new(&self.decision_id(), "lead", "decision.remote.merge", DecisionKind::Direction);
         decision.options = vec!["yes".into(), "no".into()];
+        let mut extra = Extra::new();
+        extra.insert("card".into(), self.binding());
+        decision.extra = extra;
         decision
     }
 }
@@ -654,17 +818,24 @@ impl MergeCard {
 /// can unlock a merge.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OwnerYes {
+    repo: String,
     pr: u64,
     head: String,
+    base: String,
 }
 
 impl OwnerYes {
     pub fn from_decision(card: &MergeCard, decision: &Decision) -> Option<OwnerYes> {
         (decision.id == card.decision_id()
+            && decision.extra.get("card") == Some(&card.binding())
             && decision.answered_by == Some(DecidedBy::Person)
             && decision.answer.as_deref() == Some("yes")
             && decision.answered_at.is_some())
-        .then(|| OwnerYes { pr: card.pr, head: card.head.clone() })
+        .then(|| OwnerYes { repo: card.repo.clone(), pr: card.pr, head: card.head.clone(), base: card.base.clone() })
+    }
+
+    fn is_for(&self, card: &MergeCard) -> bool {
+        self.repo == card.repo && self.pr == card.pr && self.head == card.head && self.base == card.base
     }
 }
 
@@ -676,10 +847,10 @@ pub fn merge_card(runner: &mut impl Runner, ledger: &mut impl Ledger, t: &Target
     if pr.state != PrState::Open {
         return Err(RemoteError::NotOpen);
     }
-    if pr.head != t.head {
+    if pr.head != t.head || pr.base != t.base {
         return Err(RemoteError::HeadMoved);
     }
-    Ok(MergeCard { pr: number, head: pr.head, base: pr.base, ci })
+    Ok(MergeCard { repo: t.repo.clone(), pr: number, head: pr.head, base: pr.base, ci })
 }
 
 fn probe_merge(runner: &mut impl Runner, t: &Target, number: u64) -> Seen<BTreeMap<String, String>> {
@@ -691,7 +862,7 @@ fn probe_merge(runner: &mut impl Runner, t: &Target, number: u64) -> Seen<BTreeM
 }
 
 /// Marks the PR ready and merges it, only with the person's yes for this card, green or absent checks and an
-/// unmoved head. Merge commit, guarded by the head; the branch is never deleted.
+/// unmoved head and base. Merge commit, guarded by the head; the branch is never deleted.
 pub fn merge(
     runner: &mut impl Runner,
     ledger: &mut impl Ledger,
@@ -701,11 +872,12 @@ pub fn merge(
 ) -> Result<(), RemoteError> {
     check(t)?;
     authority(ledger, t, Effect::DraftPr)?;
-    yes.filter(|y| y.pr == card.pr && y.head == card.head).ok_or(RemoteError::NeedsYes)?;
-    if card.head != t.head {
+    yes.filter(|y| y.is_for(card)).ok_or(RemoteError::NeedsYes)?;
+    if card.repo != t.repo || card.head != t.head || card.base != t.base {
         return Err(RemoteError::HeadMoved);
     }
     settled(ledger)?;
+    acting(runner, ledger)?;
     let (pr, now) = view_pr(runner, t, card.pr)?;
     if pr.state != PrState::Open {
         return Err(RemoteError::NotOpen);
@@ -724,48 +896,55 @@ pub fn merge(
         ledger.receipt(&id, Outcome::Failed, expected, Some(e.key()))?;
         return Err(e);
     }
-    let mut clean = true;
+    let mut last = Ok(Reply { code: 0, stdout: String::new() });
     if pr.draft {
-        clean = matches!(runner.run(&gh(&t.cwd, &["pr", "ready", &number, "--repo", &t.repo])), Ok(r) if r.code == 0);
+        last = runner.run(&gh(&neutral_dir(), &["pr", "ready", &number, "--repo", &t.repo]));
     }
-    if clean {
-        let sent = runner.run(&gh(&t.cwd, &["pr", "merge", &number, "--repo", &t.repo, "--merge", "--match-head-commit", &card.head]));
-        if let Err(Lost::Missing) = sent {
-            ledger.receipt(&id, Outcome::Failed, expected, Some(RemoteError::GhMissing.key()))?;
-            return Err(RemoteError::GhMissing);
-        }
-        if matches!(&sent, Ok(r) if r.code == 0) {
+    if matches!(&last, Ok(r) if r.code == 0) {
+        last = runner.run(&gh(&neutral_dir(), &["pr", "merge", &number, "--repo", &t.repo, "--merge", "--match-head-commit", &card.head]));
+    }
+    match last {
+        Ok(r) if r.code == 0 => {
             ledger.receipt(&id, Outcome::Done, evidence(&[("pr", &number), ("via", "merge")]), None)?;
-            return Ok(());
-        }
-    }
-    match probe_merge(runner, t, card.pr) {
-        Seen::Yes(found) => {
-            ledger.receipt(&id, Outcome::Done, found, None)?;
             Ok(())
         }
-        Seen::No => {
-            ledger.receipt(&id, Outcome::Failed, expected, Some(RemoteError::MergeFailed.key()))?;
-            Err(RemoteError::MergeFailed)
+        Err(Lost::Missing) => {
+            ledger.receipt(&id, Outcome::Failed, expected, Some(RemoteError::GhMissing.key()))?;
+            Err(RemoteError::GhMissing)
         }
-        Seen::Unsure => {
+        Err(Lost::Interrupted) => {
             ledger.receipt(&id, Outcome::Unknown, expected, Some(RemoteError::Maybe.key()))?;
             Err(RemoteError::Maybe)
         }
+        Ok(_) => match probe_merge(runner, t, card.pr) {
+            Seen::Yes(found) => {
+                ledger.receipt(&id, Outcome::Done, found, None)?;
+                Ok(())
+            }
+            Seen::No => {
+                ledger.receipt(&id, Outcome::Failed, expected, Some(RemoteError::MergeFailed.key()))?;
+                Err(RemoteError::MergeFailed)
+            }
+            Seen::Unsure => {
+                ledger.receipt(&id, Outcome::Unknown, expected, Some(RemoteError::Maybe.key()))?;
+                Err(RemoteError::Maybe)
+            }
+        },
     }
 }
 
 // Recovery
 
-/// Settles every open remote intent by reading the live remote state. Nothing is ever run again. `None` means the
-/// remote could not be read and the intent stays open.
+/// Settles every open remote intent by reading the live remote state, under the same grant as the effects. Nothing is
+/// ever run again. `None` means the remote could not be read and the intent stays open.
 pub fn reconcile(runner: &mut impl Runner, ledger: &mut impl Ledger, t: &Target) -> Result<Vec<(String, Option<Outcome>)>, RemoteError> {
     check(t)?;
+    authority(ledger, t, Effect::Push)?;
     let mut out = vec![];
     for open in ledger.open()? {
         let seen = match open.step {
             Step::Push => probe_push(runner, t, &open.expected),
-            Step::Pr => match probe_pr(runner, t) {
+            Step::Pr => match probe_pr(runner, t, &open.expected) {
                 Seen::Yes(pr) => Seen::Yes(evidence(&[("number", &pr.number.to_string()), ("url", &pr.url), ("via", "reconcile")])),
                 Seen::No => Seen::No,
                 Seen::Unsure => Seen::Unsure,
@@ -805,10 +984,11 @@ pub struct Published {
 pub fn publish(runner: &mut impl Runner, ledger: &mut impl Ledger, t: &Target, spec: &PrSpec) -> Result<Published, RemoteError> {
     check(t)?;
     authority(ledger, t, Effect::Push)?;
-    let account = preflight(runner, &t.cwd)?;
+    let account = preflight(runner, &t.url)?;
     if account.repo != t.repo {
         return Err(RemoteError::Url);
     }
+    account_ok(ledger, &account.login)?;
     let pushed = push(runner, ledger, t)?;
     let pr = open_pr(runner, ledger, t, spec)?;
     Ok(Published { account, pushed, pr })
@@ -846,6 +1026,40 @@ fn native(name: &str) -> PathBuf {
     path
 }
 
+/// Reads up to `cap` bytes and drains the rest, so the writer never blocks. The flag says whether more came.
+pub fn read_capped(reader: &mut impl Read, cap: usize) -> (Vec<u8>, bool) {
+    let (mut kept, mut over, mut chunk) = (Vec::new(), false, [0u8; 8192]);
+    while let Ok(n) = reader.read(&mut chunk) {
+        if n == 0 {
+            break;
+        }
+        if kept.len() + n > cap {
+            over = true;
+        } else {
+            kept.extend_from_slice(&chunk[..n]);
+        }
+    }
+    (kept, over)
+}
+
+/// The code a call reports: output past the cap is a failure of its own, whatever the tool exited with.
+pub fn reply_code(over: bool, exit: Option<i32>) -> i32 {
+    if over { OVER } else { exit.unwrap_or(-1) }
+}
+
+/// Windows: a job that ends everything the tool started, so a killed push has no helper left that can still land it.
+#[cfg(windows)]
+fn confine(child: &std::process::Child) -> Option<win32job::Job> {
+    use std::os::windows::io::AsRawHandle;
+    let job = win32job::Job::create().ok()?;
+    let mut limits = job.query_extended_limit_info().ok()?;
+    limits.limit_kill_on_job_close();
+    job.set_extended_limit_info(&limits).ok()?;
+    // ponytail: assigned after the spawn, so a helper started in those first microseconds escapes; a suspended start would close it.
+    job.assign_process(child.as_raw_handle() as isize).ok()?;
+    Some(job)
+}
+
 impl Process {
     /// A missing tool is not an error here: its calls answer [`Lost::Missing`].
     pub fn find() -> Process {
@@ -867,6 +1081,10 @@ impl Process {
         command.args(&call.args).current_dir(&call.cwd).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
         for name in REPO_VARIABLES {
             command.env_remove(name);
+        }
+        if let Some(parent) = call.cwd.parent() {
+            // git looks at the working folder itself and never above it, so a stray repository higher up is not adopted.
+            command.env("GIT_CEILING_DIRECTORIES", parent);
         }
         command
             .env("GIT_TERMINAL_PROMPT", "0")
@@ -892,29 +1110,21 @@ impl Runner for Process {
             return Err(Lost::Missing);
         }
         let mut child = self.command(call).spawn().map_err(|_| Lost::Missing)?;
+        #[cfg(windows)]
+        let job = confine(&child);
         let Some(mut stdout) = child.stdout.take() else { return Err(Lost::Interrupted) };
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let (mut kept, mut over, mut chunk) = (Vec::new(), false, [0u8; 8192]);
-            while let Ok(n) = stdout.read(&mut chunk) {
-                if n == 0 {
-                    break;
-                }
-                if kept.len() + n > OUTPUT_CAP {
-                    over = true;
-                } else {
-                    kept.extend_from_slice(&chunk[..n]);
-                }
-            }
-            let _ = tx.send((kept, over));
+            let _ = tx.send(read_capped(&mut stdout, OUTPUT_CAP));
         });
         let deadline = Instant::now() + TIMEOUT;
         let status = loop {
             match child.try_wait() {
                 Ok(Some(status)) => break status,
                 Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
-                // ponytail: kills the tool, not a helper it started; a push that outlives this is settled by reading the remote.
                 _ => {
+                    #[cfg(windows)]
+                    drop(job);
                     let _ = child.kill();
                     let _ = child.wait();
                     return Err(Lost::Interrupted);
@@ -923,7 +1133,7 @@ impl Runner for Process {
         };
         let (kept, over) = rx.recv_timeout(Duration::from_secs(5)).map_err(|_| Lost::Interrupted)?;
         // Output beyond the cap cannot be scanned or trusted: report it as a failure, never as a partial success.
-        let code = if over { 125 } else { status.code().unwrap_or(-1) };
+        let code = reply_code(over, status.code());
         Ok(Reply { code, stdout: String::from_utf8_lossy(&kept).into_owned() })
     }
 }

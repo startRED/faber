@@ -591,7 +591,11 @@ export const ptBR: Messages = {
   "reason.remote.notOpen": "Este pull request não está aberto.",
   "reason.remote.prFailed": "Não foi possível abrir o pull request.",
   "reason.remote.mergeFailed": "A mesclagem não aconteceu.",
+  "reason.remote.oversized": "O que seria enviado é grande demais para procurar segredos. Nada foi enviado.",
+  "reason.remote.foreign": "Esse pull request não vem da branch desta missão neste repositório.",
+  "reason.remote.account": "O GitHub CLI está com login em outra conta, diferente da que você autorizou. Nada foi feito.",
   "reason.grant.noRemote": "O remoto não é o que você autorizou.",
+  "reason.grant.noAccount": "A autorização não indica nenhuma conta do GitHub. Revise o cartão de início de novo.",
   "decision.remote.merge": "Marcar este pull request como pronto e mesclar?",
   // Native speaker must translate (needs native review).
   "reason.grant.noAuthor": "Set a Git author before granting commit authority.",
