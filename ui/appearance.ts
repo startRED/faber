@@ -8,6 +8,9 @@ const systemReduces = matchMedia('(prefers-reduced-motion: reduce)');
 const [applied, setApplied] = createSignal<Look>();
 const [reduced, setReduced] = createSignal(systemReduces.matches);
 const [hidden, setHidden] = createSignal(document.hidden);
+let lookRevision = 0;
+let fading: ViewTransition | undefined;
+let snapshots = 0;
 
 /** The look on the page, once one was applied. */
 export const appliedLook = applied;
@@ -26,15 +29,36 @@ export const refreshed = (current: AppState, fresh: AppState): AppState => ({ ..
 const on = (flag: boolean) => (flag ? 'on' : 'off');
 
 /** Writes a look to `target`: the page itself, or an element that previews it. */
-export function applyLook(look: Look, target: HTMLElement = document.documentElement): void {
-  for (const [name, value] of Object.entries(look.vars)) target.style.setProperty(`--${name}`, value);
-  target.style.colorScheme = look.scheme;
-  target.dataset.base = look.appearance.base;
-  target.dataset.motion = effectiveMotion(look.motion, reduced());
-  target.dataset.ambient = on(look.effects.ambient);
-  target.dataset.texture = on(look.effects.texture);
-  target.dataset.glow = on(look.effects.glow);
-  if (target === document.documentElement) setApplied(look);
+export function applyLook(look: Look, target: HTMLElement = document.documentElement): void | Promise<void> {
+  const page = target === document.documentElement;
+  const revision = page ? ++lookRevision : 0;
+  const previous = applied();
+  if (page) { fading?.skipTransition(); fading = undefined; }
+  const write = () => {
+    // A preview that closed before its snapshot was taken must never land later.
+    if (page && revision !== lookRevision) return;
+    for (const [name, value] of Object.entries(look.vars)) target.style.setProperty(`--${name}`, value);
+    target.style.colorScheme = look.scheme;
+    target.dataset.base = look.appearance.base;
+    target.dataset.motion = effectiveMotion(look.motion, reduced());
+    target.dataset.ambient = on(look.effects.ambient);
+    target.dataset.texture = on(look.effects.texture);
+    target.dataset.glow = on(look.effects.glow);
+    if (page) setApplied(look);
+  };
+  if (page && previous && previous.appearance.base !== look.appearance.base && motion() === 'full' && look.motion === 'full' && !systemReduces.matches && document.startViewTransition) {
+    const transition = document.startViewTransition(write);
+    snapshots++;
+    target.dataset.themeTransition = '';
+    fading = transition;
+    const done = () => {
+      if (fading === transition) fading = undefined;
+      if (!--snapshots) delete target.dataset.themeTransition;
+    };
+    void transition.finished.then(done, done);
+    return transition.updateCallbackDone;
+  }
+  write();
 }
 
 /** Follows the system's motion setting and the window's visibility. A change in the system setting changes only the
@@ -42,6 +66,7 @@ export function applyLook(look: Look, target: HTMLElement = document.documentEle
 export function watchSystem(): () => void {
   const onMotion = () => {
     setReduced(systemReduces.matches);
+    if (systemReduces.matches) fading?.skipTransition();
     const look = applied();
     if (look) document.documentElement.dataset.motion = effectiveMotion(look.motion, systemReduces.matches);
   };
@@ -72,7 +97,7 @@ export function switchTheme(current: Appearance | undefined, base: string): Appe
  * answers with is applied; a rejection leaves the page as it was. */
 export async function saveAndApply(patch: Settings, save: (patch: Settings) => Promise<SavedSettings>): Promise<SavedSettings> {
   const saved = await save(patch);
-  if (patch.appearance) applyLook(saved.look);
+  if (patch.appearance) await applyLook(saved.look);
   return saved;
 }
 
@@ -104,7 +129,7 @@ export function previewer(
     const mine = ++latest;
     try {
       const look = await request(draft);
-      if (mine === latest) apply(look, draft);
+      if (mine === latest) await apply(look, draft);
     } catch (err) {
       if (mine === latest) fail(err, draft);
     }

@@ -4,6 +4,7 @@ import { Icon, VendorMark } from './Glyphs.tsx';
 import { lang, t } from './i18n.ts';
 import { en, type Key } from './locales/en.ts';
 import { Peek } from './Mark.tsx';
+import { animateList, keepForExit } from './motion.ts';
 import { vendorName } from './models.ts';
 import type { Place } from './running.ts';
 import { groupChats, matches, type Quotas, showsChats, tailOf, tightest } from './sidebar.ts';
@@ -89,6 +90,7 @@ export function Sidebar(props: Props) {
     <div class="crow">
       <button class="item" aria-current={row.c.id === props.place.id} onClick={() => props.onOpen(row.c)}>
         <span>{row.c.title}</span>
+        <Show when={props.running.find((r) => r.conversationId === row.c.id)?.waitUntil}>{(at) => <span class="waiting-label" title={t('run.waiting', { when: untilReset(at()) })}>{t('run.waiting', { when: untilReset(at()) })}</span>}</Show>
       </button>
       <button class="x" classList={{ confirm: confirming() === row.c.id }} aria-label={t('side.delete', { title: row.c.title })} onClick={() => remove(row.c.id)}>
         {confirming() === row.c.id ? t('side.confirmDelete') : '×'}
@@ -118,8 +120,8 @@ export function Sidebar(props: Props) {
         <Icon name="search" small />
         <input type="search" placeholder={t('side.search')} aria-label={t('side.search')} value={query()} onInput={(e) => setQuery(e.currentTarget.value)} />
       </label>
-      <div class="side-scroll" onMouseLeave={() => setConfirming(undefined)}>
-        <section class="projects" aria-labelledby="side-projects">
+      <div class="side-scroll" onMouseLeave={() => setConfirming(undefined)} ref={(el) => animateList(el, true)}>
+        <section class="projects" aria-labelledby="side-projects" ref={(el) => animateList(el, true)}>
           <div class="group-h">
             <span id="side-projects">{t('side.projects')}</span>
             <button class="plus" aria-label={t('side.addProject')} title={t('side.addProject')} onClick={() => props.onAddProject()}>
@@ -139,6 +141,7 @@ export function Sidebar(props: Props) {
               {(p) => {
                 const tail = () => tailOf(props.running, p.id);
                 const here = () => props.place.area === 'project' && props.place.projectId === p.id;
+                const shown = keepForExit(() => expanded(p));
                 return (
                   <div class="proj">
                     <div class="prow">
@@ -171,11 +174,15 @@ export function Sidebar(props: Props) {
                         <Icon name="plus" small />
                       </button>
                     </div>
-                    <Show when={expanded(p)}>
-                      <div class="proj-chats">
-                        <For each={inProject(p)}>{(c) => <Row c={c} />}</For>
+                    <div class="fold" classList={{ open: expanded(p) }} inert={!expanded(p)}>
+                      <div class="fold-inner">
+                        <Show when={shown()}>
+                          <div class="proj-chats" ref={animateList}>
+                            <For each={inProject(p)}>{(c) => <Row c={c} />}</For>
+                          </div>
+                        </Show>
                       </div>
-                    </Show>
+                    </div>
                   </div>
                 );
               }}
@@ -185,10 +192,10 @@ export function Sidebar(props: Props) {
         <Show when={nothing()}>
           <div class="side-empty">{t('side.noMatch')}</div>
         </Show>
-        <div class="list">
+        <div class="list" ref={(el) => animateList(el, true)}>
           <For each={chats()}>
             {(g) => (
-              <section>
+              <section ref={animateList}>
                 <div class="group-h">{t(`side.${g.group}` as Key)}</div>
                 <For each={g.chats}>{(c) => <Row c={c} />}</For>
               </section>

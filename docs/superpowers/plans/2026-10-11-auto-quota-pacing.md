@@ -22,6 +22,15 @@
 - One commit per task, made once its tests pass.
 - **R89 (Erick, 2026-10-12):** the spec wins. Auto denies `Billing::Unknown`; only a confirmed subscription can receive an automatic request. Missing quota readings are allowed only after billing is confirmed. A hand-picked user turn and a quota-free plan check keep their documented exceptions.
 
+- **R90 (Erick, 2026-10-12):** accounts are shared. Own spend is API-equivalent USD from Faber's metered turns, including
+  every reported cache kind; never derive it from account percentages or credit balances. Apply R90 in Task 9's one
+  commit to the spec, this plan and the ledger wiring. The account profile still forecasts the whole account (R88);
+  own-cost weights and plan size exclude foreign or incomplete stretches.
+- Review corrections already proved: paid fallback is unknown until explicitly ruled out and survives restart;
+  dead windows are ignored and pruned; Codex recovery uses only blocking resets; overnight jumps use proportional
+  overlap with the last two hours; `m = 25 x p` above the daily line (maximum plausible `p` is 15); capacity comparisons
+  use models common to both samples. The historical prototype diffs below yield to these corrections.
+
 ## Review Focus
 
 1. A message waiting for quota when the app closes or the user presses stop: it must not send itself later, and the text must not be lost (pinned in Task 10).
@@ -5076,6 +5085,9 @@ git commit -m "feat(engine): plan detection and the quota pulse"
 
 ### Task 8: The pacing table and dispatch through the gate
 
+Owner integration note (R89): wire `watch_accounts` in the shell and the screen's local clock offset in this commit, before Auto starts requiring confirmed billing. Replay account checks through the fake CLI; never call a real CLI in proofs. Admission is rechecked at dispatch; live work stops on unapproved overage, credit decreases or loss of confirmed subscription billing. Pulses close within 60 seconds. `engine/src/route.rs` changes only for this task's pacing table.
+
+
 Auto prices on the quota of the moment of sending, never of the moment of typing, and nothing reaches a CLI without the gate.
 
 **Files:**
@@ -6411,367 +6423,36 @@ git add engine
 git commit -m "feat(engine): the pacing table and dispatch through the gate"
 ```
 
-### Task 9: Learning wired to real turns
+### Task 9: Own metering and learning from explained turns (R90)
 
-The weights and the outside-use estimate learn from what Faber really did.
+Reuse the verified Task 9 wiring where it matches R90. This task includes the shared-account correction in one commit.
 
-**Files:**
-- `engine/src/engine.rs`
-- `engine/src/engine/answer.rs`
-- `engine/src/engine/auto.rs`
-- `engine/tests/learning.rs`
-- `engine/tests/pacing.rs`
+**Files:** `engine/src/{engine,usage,codex,events,learn,ledger,model}.rs`, `engine/src/engine/{auto,pulse,answer}.rs`,
+`engine/tests/{learning,pacing,learn,ledger,turn_usage}.rs`, and this plan and its spec.
 
 **Interfaces:**
-- Consumes: Tasks 4, 8. Produces: `Core::note_turn`, `Live.started`, a span for every user turn and every router question, `learn_weights` after each user turn with a forced save when the capacity jumps.
+- `Live.started` and `Core::note_turn` identify the request that actually ran. Every user turn, router question and pulse
+  leaves a bounded span; summaries use the same metering in Task 10. Idle warmed sessions spend nothing.
+- Claude's own API-rated total is settled per session. Codex deltas include `cacheWriteInputTokens`; the initial total
+  of a new thread is zero, while a resumed thread requires a real baseline. Missing counters remain incomplete.
+- `usage::api_price` prices uncached input, cache reads, cache writes, one-hour writes and output without double counting.
+  `usage::fresh_price` handles one-request auxiliary sessions. API prices are documented in the code and spec.
+- `VendorLedger.own_spend` records own USD per local day, separately from account percentages. Per-turn spans keep cost
+  and completeness; bounded daily totals survive trimming the span history. Partial measurements cannot teach weights.
+- The learning span ends at the quota reading reported before Done, so the prior turn's cost cannot enter the next interval.
+- Only one-model, non-overlapping, fully metered intervals covered by own turns (120 seconds tolerance) calibrate weights.
+  Idle drops and drops more than twice the earlier explained movement plus one point are foreign and excluded.
+- The hourly shape describes the whole account (R88); monetary spend never comes from that shape or account percentages.
 
-- [ ] **Step 1: Add the tests (they fail or do not compile yet)**
+**Tests and proofs:**
+1. Reuse `learning.rs`: a user turn keeps its own model, time and USD; eight measured turns calibrate; a router question
+   keeps its own cost, with no pulse when the reading is fresh. Add the cross-vendor 1/7 daily-line routing test.
+2. Add R90 regression: establish eight clean metered stretches, then inject an idle account drop and a much larger drop
+   during a cheap own turn. Both are foreign, neither changes weights/capacity, and own USD remains the sum of metered turns.
+3. Price cache reads and both write lifetimes; parse Codex write deltas and preserve missing-counter completeness.
+4. Run all seven proof commands, then explicitly stage the task's paths, commit and run plain `git push`.
 
-```diff
---- a/engine/tests/learning.rs
-+++ b/engine/tests/learning.rs
-@@ -0,0 +1,156 @@
-+//! What the engine hands to the learning: the span of every request Faber makes, and the weights learned from them.
-+
-+mod support;
-+
-+use faber_engine::budget::Billing;
-+use faber_engine::cli::Cli;
-+use faber_engine::engine::Ask;
-+use faber_engine::events::EngineEvent;
-+use faber_engine::model::{Area, Message, Role, Status, Vendor};
-+use faber_engine::proc::Spawner;
-+use faber_engine::route::question;
-+use faber_engine::router::Choice;
-+use faber_engine::signals::Signals;
-+use faber_engine::{AppEvent, Engine, EngineOptions, SendRequest, WarmRequest};
-+use serde_json::json;
-+use std::collections::BTreeMap;
-+use std::path::Path;
-+use std::sync::Arc;
-+use std::sync::atomic::{AtomicU64, Ordering};
-+use std::time::Duration;
-+use support::{Entry, fake, fixture};
-+use tokio::sync::mpsc::UnboundedReceiver;
-+
-+const SKY: &str = "In one sentence: why is the sky blue?";
-+/// The recorded five-hour window resets at this time.
-+const RESETS: u64 = 1_791_627_000;
-+const START: u64 = 1_791_620_000;
-+
-+/// A clock that moves one second every time it is read, from a base the test sets: a turn then takes time, as it does.
-+struct Ticking {
-+    base: AtomicU64,
-+    ticks: AtomicU64,
-+}
-+
-+fn start(dir: &Path, spawn: Spawner, ask: Option<Ask>) -> (Engine, UnboundedReceiver<AppEvent>, Arc<Ticking>) {
-+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-+    let opts = EngineOptions {
-+        data_dir: dir.into(),
-+        clis: BTreeMap::from([(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] })]),
-+        spawn,
-+        windows: false,
-+        max_warm: 3,
-+        idle: Duration::from_secs(120),
-+        runtime: tokio::runtime::Handle::current(),
-+        ask,
-+    };
-+    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
-+    let clock = Arc::new(Ticking { base: AtomicU64::new(START), ticks: AtomicU64::new(0) });
-+    let c = clock.clone();
-+    engine.set_time_source(Arc::new(move || (c.base.load(Ordering::SeqCst) + c.ticks.fetch_add(1, Ordering::SeqCst)) as f64));
-+    (engine, rx, clock)
-+}
-+
-+fn by_hand() -> SendRequest {
-+    SendRequest {
-+        conversation_id: None,
-+        area: Area::Chat,
-+        project_id: None,
-+        text: SKY.into(),
-+        images: vec![],
-+        files: vec![],
-+        choice: Choice { vendor: "claude".into(), model: Some("haiku".into()) },
-+    }
-+}
-+
-+async fn finished(rx: &mut UnboundedReceiver<AppEvent>) -> Message {
-+    loop {
-+        let e = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.expect("no finished answer in time").expect("engine gone");
-+        if let AppEvent::Message { message, .. } = e
-+            && message.role == Role::Assistant
-+            && message.status != Some(Status::Streaming)
-+        {
-+            return *message;
-+        }
-+    }
-+}
-+
-+fn reading(used: f64) -> EngineEvent {
-+    EngineEvent::Quota { window: "five_hour".into(), used, resets_at: RESETS as f64 }
-+}
-+
-+#[tokio::test]
-+async fn a_user_turn_leaves_its_span_with_the_model_and_the_cost() {
-+    let dir = tempfile::tempdir().unwrap();
-+    let (engine, mut rx, _) = start(dir.path(), fake(fixture("claude", "chat")).spawn, None);
-+    engine.send(by_hand()).unwrap();
-+    let reply = finished(&mut rx).await;
-+    let spans = engine.ledger().claude.spans;
-+    assert_eq!(spans.len(), 1);
-+    assert_eq!(spans[0].model, "claude-haiku-5-5");
-+    // The ledger keeps a millionth of a dollar.
-+    let (kept, shown) = (spans[0].cost.unwrap(), reply.cost_usd.unwrap());
-+    assert!((kept - shown).abs() < 1e-6, "the cost of the turn, not the running total: {kept} vs {shown}");
-+    assert!(spans[0].cost.is_some_and(|c| c > 0.0));
-+    assert!(spans[0].start >= START as f64 && spans[0].end > spans[0].start, "{spans:?}");
-+    engine.shutdown();
-+}
-+
-+#[tokio::test]
-+async fn eight_measured_turns_teach_the_weights_and_the_stretches_are_kept() {
-+    let dir = tempfile::tempdir().unwrap();
-+    let (engine, mut rx, clock) = start(dir.path(), fake(fixture("claude", "chat")).spawn, None);
-+    for i in 0..8 {
-+        clock.base.store(START + i * 600, Ordering::SeqCst);
-+        clock.ticks.store(0, Ordering::SeqCst);
-+        // Three points below what the recording will report, so each turn moves the window by three points.
-+        engine.note_account_events(Vendor::Claude, vec![reading(0.04)]);
-+        engine.send(by_hand()).unwrap();
-+        finished(&mut rx).await;
-+    }
-+    let claude = engine.ledger().claude;
-+    assert_eq!(claude.spans.len(), 8);
-+    assert_eq!(claude.stretches.len(), 8);
-+    assert_eq!(claude.stretches_since, 8);
-+    assert!(claude.weights.capacity.is_some_and(|c| c > 0.0), "{:?}", claude.weights);
-+    assert!(claude.weights.w.contains_key("claude-haiku-5-5"));
-+    engine.shutdown();
-+    let saved: faber_engine::ledger::Ledger =
-+        serde_json::from_str(&std::fs::read_to_string(dir.path().join("budget.json")).unwrap()).unwrap();
-+    assert_eq!(saved.claude.stretches.len(), 8, "what was learned survives a restart");
-+}
-+
-+#[tokio::test]
-+async fn a_router_question_is_a_span_too_and_has_no_cost() {
-+    let dir = tempfile::tempdir().unwrap();
-+    // The router's session is the Claude chat recording, with the question it will be asked as the recorded input.
-+    let text = "Plan a trip to Lisbon";
-+    let entries: Vec<Entry> = fixture("claude", "chat")
-+        .into_iter()
-+        .map(|mut e| {
-+            if e.input {
-+                e.msg["message"]["content"] = json!(question(text, 0));
-+            }
-+            e
-+        })
-+        .collect();
-+    let f = fake(entries);
-+    let (engine, _rx, _) = start(dir.path(), f.spawn.clone(), None);
-+    // A fresh reading and a seen plan, so that no pulse is due and the gate lets the router ask.
-+    let plan = EngineEvent::Signals(Signals { plan: Some("max".into()), billing: Some(Billing::Subscription), ..Signals::default() });
-+    engine.note_account_events(Vendor::Claude, vec![reading(0.05), plan]);
-+    let typing =
-+        WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: Choice { vendor: "auto".into(), model: None } };
-+    engine.route_draft(typing, text.into());
-+    for _ in 0..100 {
-+        if !engine.ledger().claude.spans.is_empty() {
-+            break;
-+        }
-+        tokio::time::sleep(Duration::from_millis(30)).await;
-+    }
-+    let spans = engine.ledger().claude.spans;
-+    assert_eq!(spans.len(), 1, "one question, one span");
-+    assert_eq!(spans[0].cost, None);
-+    assert_eq!(f.args.lock().unwrap().len(), 1, "no pulse: the reading was fresh");
-+    engine.shutdown();
-+}
-```
-
-```diff
---- a/engine/tests/pacing.rs
-+++ b/engine/tests/pacing.rs
-@@ -354,3 +354,18 @@
-     assert_eq!(again.engine.open(&id).unwrap().messages[1].pace, None);
-     again.engine.shutdown();
- }
-+
-+#[tokio::test]
-+async fn a_week_spent_faster_than_one_seventh_a_day_is_priced_up_on_either_vendor() {
-+    // One day of seven gone and a fifth of the week used (14.3% a day would be 14.3%): the vendor is left for the other.
-+    for (spent, other) in [(Vendor::Claude, Vendor::Codex), (Vendor::Codex, Vendor::Claude)] {
-+        let dir = tempfile::tempdir().unwrap();
-+        let r = both(dir.path(), verdicts(vec![("code", "medium")]));
-+        r.engine.note_account_events(spent, vec![plan("max"), quota("seven_day", 0.2, 6 * DAY)]);
-+        r.engine.note_account_events(other, vec![plan("pro"), quota("seven_day", 0.1, 6 * DAY)]);
-+        let id = r.engine.send(auto(CODE)).unwrap();
-+        let (reply, _) = r.went(&id, 0).await;
-+        assert_eq!(reply.vendor, Some(other), "{spent:?} is ahead of the daily line");
-+        r.engine.shutdown();
-+    }
-+}
-```
-
-- [ ] **Step 2: Run the new tests and see them fail**
-
-Run: `cargo test -p faber-engine` (the named test files)
-Expected: compile errors or failures naming the missing items.
-
-- [ ] **Step 3: Implement**
-
-`engine/src/engine.rs`
-
-```diff
---- a/engine/src/engine.rs
-+++ b/engine/src/engine.rs
-@@ -136,6 +136,8 @@
-     cli: Cli,
-     /// The process continues a session an earlier process began.
-     resumed: bool,
-+    /// When the turn being answered was handed to the CLI (Unix seconds); the learning needs the span it ran in.
-+    started: f64,
- }
- 
- const HISTORY_LIMIT: usize = 20_000;
-@@ -497,6 +499,22 @@
-         self.ledger.of_mut(vendor).span(Span { start, end, model: model.to_string(), cost });
-     }
- 
-+    /// A user turn ended: its span goes to the learning, and the weights are learned again from the stretches so far. A
-+    /// capacity that moved by more than a factor of two is a plan change the name did not announce; the ledger restarts
-+    /// its learning and the file is written at once.
-+    fn note_turn(&mut self, conv: &str, cost: Option<f64>) {
-+        let Some(l) = self.live.get(conv).filter(|l| l.started > 0.0) else { return };
-+        let (vendor, start, model) = (l.vendor, l.started, l.running.clone().or_else(|| l.model.clone()).unwrap_or_default());
-+        self.note_span(vendor, start, &model, cost);
-+        let now = self.secs();
-+        if self.ledger.of_mut(vendor).learn_weights(now) {
-+            self.save_ledger(true);
-+        }
-+        if let Some(l) = self.live.get_mut(conv) {
-+            l.started = 0.0;
-+        }
-+    }
-+
-     fn claude_plan_checked(&mut self, found: Option<Signals>) {
-         let Some(s) = found else { return self.ledger.claude.plan_failed() };
-         let (named, by_use) = (s.plan.is_some(), s.billing == Some(Billing::UsageBilled));
-@@ -729,6 +747,7 @@
-                 if let (Some(base), Some(c)) = (settled.base, self.convs.get_mut(conv)) {
-                     c.cost_base.insert(vendor, base);
-                 }
-+                self.note_turn(conv, settled.cost);
-                 if let Some(m) = self.turn(conv) {
-                     m.status = Some(if ok { Status::Done } else { Status::Stopped });
-                     m.cost_usd = settled.cost;
-@@ -751,6 +770,7 @@
-                     }
-                 }
-                 if fatal {
-+                    self.note_turn(conv, None);
-                     self.live.remove(conv);
-                     return self.finish(conv, turn_id);
-                 }
-@@ -924,8 +944,10 @@
-         {
-             m.model = Some(running);
-         }
-+        let now = self.secs();
-         if let Some(l) = self.live.get_mut(id) {
-             l.turn = Some(reply_id.to_string());
-+            l.started = now;
-             l.session.send(UserTurn { text, images });
-         }
-         self.push(id, Some(reply_id), true);
-@@ -991,6 +1013,7 @@
-                 used: self.tick,
-                 cli,
-                 resumed,
-+                started: 0.0,
-             },
-         );
-         // ponytail: count-based limit on idle Claude processes; a RAM budget across all CLIs comes with parallel workers.
-```
-
-`engine/src/engine/answer.rs`
-
-```diff
---- a/engine/src/engine/answer.rs
-+++ b/engine/src/engine/answer.rs
-@@ -235,6 +235,7 @@
-                 used: 0,
-                 cli: Cli { command: "claude".into(), prefix: vec![] },
-                 resumed: false,
-+                started: 0.0,
-             };
-             c.live.insert(id.clone(), live);
-             c.refresh_running();
-```
-
-`engine/src/engine/auto.rs`
-
-```diff
---- a/engine/src/engine/auto.rs
-+++ b/engine/src/engine/auto.rs
-@@ -44,6 +44,8 @@
-     answer: oneshot::Receiver<Option<String>>,
-     id: u64,
-     vendor: Vendor,
-+    /// When the question was sent (Unix seconds); set by `ask_router`. An idle router session uses no quota.
-+    asked: Arc<Mutex<Option<f64>>>,
- }
- 
- /// A draft's route still holds for the sent text when the text only grew a little past it.
-@@ -182,7 +184,8 @@
-             tokio::spawn(async move { drop(tx.send(answer.await)) });
-             return (Some(rx), None);
-         }
--        let Some(Spare { session, answer, .. }) = self.spare.take().or_else(|| self.open_router()) else { return (None, None) };
-+        let Some(Spare { session, answer, asked, .. }) = self.spare.take().or_else(|| self.open_router()) else { return (None, None) };
-+        *asked.lock().unwrap_or_else(|e| e.into_inner()) = Some(self.secs());
-         session.send(UserTurn::text(prompt));
-         (Some(answer), Some(Arc::new(Mutex::new(Some(session)))))
-     }
-@@ -199,9 +202,16 @@
-         let text = Arc::new(Mutex::new(String::new()));
-         let tx = Arc::new(Mutex::new(Some(tx)));
-         let me = self.me.clone();
-+        let asked: Arc<Mutex<Option<f64>>> = Arc::default();
-+        let when = asked.clone();
-         let sink: EventSink = Arc::new(move |e| match e {
-             EngineEvent::Text(t) => text.lock().unwrap_or_else(|e| e.into_inner()).push_str(&t),
-             EngineEvent::Done { .. } | EngineEvent::Error { .. } => {
-+                // The question used the vendor's quota: the learning must not count that as use from outside.
-+                let start = when.lock().unwrap_or_else(|e| e.into_inner()).take();
-+                if let (Some(start), Some(core)) = (start, me.upgrade()) {
-+                    core.lock().unwrap_or_else(|e| e.into_inner()).note_span(vendor, start, model, None);
-+                }
-                 if let Some(tx) = tx.lock().unwrap_or_else(|e| e.into_inner()).take() {
-                     let _ = tx.send(Some(std::mem::take(&mut *text.lock().unwrap_or_else(|e| e.into_inner()))));
-                 }
-@@ -239,7 +249,7 @@
-             ),
-         };
-         self.next_sid += 1;
--        Some(Spare { session, answer, id: self.next_sid, vendor })
-+        Some(Spare { session, answer, id: self.next_sid, vendor, asked })
-     }
- 
-     /// Starts a routed first message once its route is known, or the everyday default when the route is late.
-```
-
-- [ ] **Step 4: Run the engine suite, clippy and fmt**
-
-Run: `cargo test -p faber-engine && cargo clippy -p faber-engine --all-targets -- -D warnings && cargo fmt --all --check`
-Expected: all pass.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add engine
-git commit -m "feat(engine): learning wired to real turns"
-```
+Commit: `feat(engine): meter own spend and learn only from explained turns`.
 
 ### Task 10: Move or wait when a vendor cannot answer
 
@@ -6959,7 +6640,7 @@ It draws a user week from a seed, runs it with pacing off and on, and asserts on
 
 - [ ] **Step 2: Run it**
 
-Run: `cargo test -p faber-engine --test simulation` then `cargo test -p faber-engine --test simulation -- --ignored`
+Run: `cargo test -p faber-engine --test simulation` then `cargo test --release -p faber-engine --test simulation -- --ignored --nocapture`
 Expected: both pass.
 
 - [ ] **Step 3: Document**
@@ -6986,3 +6667,31 @@ git commit -m "test(engine): simulate a month of pacing and document it"
 - **Review Focus:** items 1-5 map to Task 10 tests, Task 8 tests (`a_login_billed_by_use...`, `a_clock_set_backwards...`, `a_reading_that_may_be_wrong...`), Task 5 `a_budget_file_that_is_damaged_old_or_odd...`, Task 4 sanitize, and Task 5 `a_reading_that_cannot_be_real...`.
 
 Plan complete and saved to `docs/superpowers/plans/2026-10-11-auto-quota-pacing.md`. Please review the plan. Does it capture what you want?
+
+
+## Execution record (2026-10-12)
+
+Tasks 8 through 11 are implemented and pushed, including all confirmed findings of the independent review. Task 7 was folded
+into Task 8. Account watching and local-clock wiring moved into Task 8 so R89 could not leave Auto unusable before
+billing confirmation. The actual shell command list lives in `src-tauri/src/main.rs`. Task 9 (`5e09d23`) applied R90 to
+this plan, the spec and the own-spend ledger in one commit. Follow-up `734fdb0` prices Codex's individual requests at the
+published context tier and preserves valid baselines through malformed/repeated updates; `d47ba93` flags small idle
+foreign use without treating it as Faber money. The historical prototype diffs yield to these corrections.
+
+Task 10's four described test bodies were written and extended with family, consent, resumption and shutdown cases.
+Task 11's `approve_credits`, `move_turn` and `wait_turn` commands bind the conversation, reply and vendor rather than a
+vendor-wide approval. Typing a plan cannot make unknown billing eligible. Quota failures preserve drafts and attachments;
+resumption clears only their matching restored draft and preserves newer edits.
+
+Task 12 adds the original Faber prototype simulation, the immediate-stop/latest-reading/baseline corrections to the
+manual cache probe, and documentation in `docs/design.md`. The smoke now includes seed 12, an unpaced-exhaustion case,
+so it asserts strictly fewer exhausted hours instead of a tie on the original first four seeds. All 200 monthly seeds
+ran in release mode: exhausted hours 0.135 versus 0.900, exhausted seeds 2.0% versus 14.5%, unused larger quota 2.5%,
+quality 81.42 versus 80.58, dropped tasks 0.597% (off: 0.151%). No pacing constants were tuned. The three probe tests
+use fake event streams and never call a real CLI.
+
+The owner's explicit protected-path rule overrides Task 12's proposed edit to `docs/roadmap.md`; its existing changes
+were preserved and left unstaged. Real cache measurements and the real pulse memory peak remain owner-run checks, not
+fabricated results. Native-speaker locale review remains required before release. The complete 42-key list and review
+disposition are in `docs/superpowers/auto-quota-pacing-report.md`. Every implementation/fix commit used all seven proofs
+and plain `git push`; screen and shell work used `cargo t --all`, on the hidden Windows desktop.

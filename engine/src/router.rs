@@ -1,7 +1,25 @@
 //! Which model answers a turn, and why.
 
-use crate::model::Vendor;
+use crate::model::{PaceNote, Vendor};
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Effort {
+    Low,
+    Medium,
+    High,
+}
+
+impl Effort {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Choice {
@@ -9,14 +27,18 @@ pub struct Choice {
     pub vendor: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<Effort>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Pick {
     pub vendor: Vendor,
     pub model: Option<String>,
     pub effort: String,
     pub reason: String,
+    /// Why the quota changed the pick, when it did (Auto only).
+    pub pace: Option<PaceNote>,
 }
 
 /// Medium effort by default: high quality for most work without spending quota on easy turns.
@@ -31,10 +53,22 @@ pub fn pick_model(choice: &Choice, available: &[Vendor], codex_recommended: Opti
         model: model.or(codex_recommended.filter(|_| vendor == Vendor::Codex)).map(String::from),
         effort: EFFORT.into(),
         reason: reason.into(),
+        pace: None,
     };
     if choice.vendor != "auto" {
         let vendor = Vendor::ALL.into_iter().find(|v| v.name() == choice.vendor)?;
-        return available.contains(&vendor).then(|| pick(vendor, choice.model.as_deref(), "reason.chosen"));
+        return available.contains(&vendor).then(|| {
+            let model = choice.model.as_deref().map(|model| {
+                // Pin the picker's aliases to the same full IDs as Auto's measured table.
+                crate::route::PROFILES
+                    .iter()
+                    .find(|p| p.vendor == Vendor::Claude && vendor == Vendor::Claude && p.model.split('-').nth(1) == Some(model))
+                    .map_or(model, |p| p.model)
+            });
+            let mut chosen = pick(vendor, model, "reason.chosen");
+            chosen.effort = choice.effort.unwrap_or(Effort::Medium).name().into();
+            chosen
+        });
     }
     if available.contains(&Vendor::Claude) {
         return Some(pick(Vendor::Claude, Some("sonnet"), "reason.autoDefault"));

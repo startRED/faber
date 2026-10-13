@@ -22,6 +22,7 @@ import { failureText, lang, t, templates, useLanguage } from './i18n.ts';
 import { createWidth } from './layout.ts';
 import { Lockup, Peek } from './Mark.tsx';
 import { modelOptions, prettyModel } from './models.ts';
+import { animateDetails, animateList, watchMotion } from './motion.ts';
 import { createOpening, upsert } from './opening.ts';
 import { Running } from './Running.tsx';
 import { createAutoOpen, openPlace, type Place, placeOfRunning, store, waitingKeys } from './running.ts';
@@ -60,6 +61,7 @@ const TYPING = 'textarea, input:not([type=checkbox], [type=radio], [type=range],
 /** `initial` is the state the page started from; `main.tsx` has already applied its look and handed the running list to
  * the store. */
 export function App(props: { initial: AppState; inbox: { take: (listener: ((event: AppEvent) => void) | undefined) => void } }) {
+  watchMotion();
   const saved = recall<Place | undefined>('faber.place', undefined);
   useLanguage(props.initial.settings.language);
   const [state, setState] = createSignal<AppState>(props.initial);
@@ -67,7 +69,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   // with another conversation's project.
   const [place, setPlace] = createSignal<Place>({ area: saved?.area ?? 'chat', projectId: saved?.projectId });
   const [current, setCurrent] = createSignal<Conversation>();
-  const [choice, setChoice] = createSignal<Choice>(recall<Choice>('faber.choice', { vendor: 'auto' }));
+  const [choice, setChoice] = createSignal<Choice>({ vendor: 'auto' });
   const [quotas, setQuotas] = createSignal(seedQuotas(props.initial.quotas));
   const [clock, setClock] = createSignal(Date.now());
   const [error, setError] = createSignal<string>();
@@ -114,8 +116,29 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   const width = createWidth();
   let thread: HTMLDivElement | undefined;
   let work: HTMLElement | undefined;
+  let restore: ((draft: Draft) => boolean) | undefined;
+  let clearRestored: ((draft: Draft) => boolean) | undefined;
+  const held = new Map<string, { draft: Draft; reply?: string; restored?: boolean }>();
+  let sendTicket = 0;
+  const restoreRejected = (id: string, m: import("./api.ts").Message | undefined) => {
+    const saved = held.get(id);
+    if (!saved || !m || (saved.reply && saved.reply !== m.id)) return;
+    if (m.status === "streaming") {
+      saved.reply = m.id;
+      if (saved.restored && place().id === id) clearRestored?.(saved.draft);
+      saved.restored = false;
+      return;
+    }
+    if (["error.quotaWait", "error.moveFailed", "error.quotaOut"].includes(m.error ?? "")) {
+      if (place().id !== id) return;
+      saved.restored = restore?.(saved.draft) || saved.restored;
+      if (m.error !== 'error.moveFailed') return;
+    }
+    held.delete(id);
+  };
   let fill: ((text: string) => void) | undefined;
   let stick = true;
+  let lastScrollTop = 0;
   // Where focus was, until the tutorial took it. Weak, so a control that left the page (Settings closed with the focus in
   // it) is not kept alive, with everything it hangs from, until focus moves again.
   let lastFocus: WeakRef<HTMLElement> | undefined;
@@ -232,6 +255,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
     setLoading(next.id !== undefined);
     setError(undefined);
     stick = true;
+    lastScrollTop = 0;
     let snapshot: Conversation | undefined;
     try {
       snapshot = (next.id ? await api.open(next.id) : undefined) ?? undefined;
@@ -244,6 +268,8 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
     setLoading(false);
     setFrom(Math.max(0, (done.conversation?.messages.length ?? 0) - PAGE));
     setCurrent(done.conversation);
+    setChoice(next.id ? recall<Choice>(`faber.choice.${next.id}`, done.conversation?.choice ?? { vendor: 'auto' }) : { vendor: 'auto' });
+    if (done.conversation) queueMicrotask(() => restoreRejected(done.conversation!.id, done.conversation!.messages.at(-1)));
   };
   const fresh = (next: Pick<Place, 'area' | 'projectId'>) => go({ ...next, id: undefined });
   const openSummary = (c: Summary) => {
@@ -267,12 +293,17 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
     // its snapshot and nothing is lost between the two.
     props.inbox.take((e) => {
       if (e.type === 'list') void refresh();
+      if (e.type === 'usage') setState((s) => ({ ...s, usage: e.vendors }));
+      if (e.type === 'message') restoreRejected(e.conversationId, e.message.role === 'assistant' ? e.message : undefined);
       if (e.type === 'quota') setQuotas((q) => withQuota(q, e));
       if (e.type === 'message' && opening.hear(e.conversationId, e.message) === 'apply') {
         setCurrent((c) => (c?.id === e.conversationId ? upsert(c, e.message) : c));
       }
     });
-    const minute = setInterval(() => setClock(Date.now()), 60_000);
+    const minute = setInterval(() => {
+      setClock(Date.now());
+      void api.setClock(-new Date().getTimezoneOffset() * 60);
+    }, 60_000);
     // Any key in a text field holds the running column back for a moment, whether or not the text changed (the arrows
     // move the caret), and so does an input method that is composing.
     const typing = (e: Event) => {
@@ -370,7 +401,9 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   );
 
   const onScroll = (el: HTMLDivElement) => {
-    stick = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 40) stick = true;
+    else if (el.scrollTop < lastScrollTop - 1) stick = false;
+    lastScrollTop = el.scrollTop;
     if (el.scrollTop < 400 && from() > 0) {
       // The earlier messages appear above; keep what the user is reading in place.
       const before = el.scrollHeight;
@@ -388,7 +421,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
 
   const pickChoice = (c: Choice) => {
     setChoice(c);
-    remember('faber.choice', c);
+    if (current()) remember(`faber.choice.${current()!.id}`, c);
   };
 
   const target = () => ({ area: area(), projectId: area() === 'project' ? projectId() : undefined });
@@ -396,6 +429,9 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   const send = async (draft: Draft) => {
     // The place is taken once: the message, and the conversation it opens, belong to the place it was written in.
     const at = place();
+    const chosen = picked();
+    const ticket = ++sendTicket;
+    let accepted = false;
     setError(undefined);
     stick = true;
     try {
@@ -406,20 +442,37 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
         text: draft.text,
         images: draft.images,
         files: draft.files,
-        choice: picked(),
+        choice: chosen,
       });
-      if (place() === at && id !== opening.id) await go({ ...at, id });
+      const key = `faber.choice.${id}`;
+      remember(key, place() === at ? picked() : recall<Choice>(key, chosen));
+      accepted = true;
+      if (ticket === sendTicket) held.set(id, { draft });
+      const moved = place() === at && id !== opening.id;
+      if (moved) await go({ ...at, id });
+      const sent = moved && current()?.id === id ? current() : await api.open(id);
+      if (ticket === sendTicket) {
+        const reply = sent?.messages.at(-1);
+        const tracked = held.get(id) ?? { draft };
+        tracked.reply = reply?.id;
+        held.set(id, tracked);
+        restoreRejected(id, reply);
+      }
     } catch (err) {
       fail(err);
+      if (!accepted && ticket === sendTicket && place() === at) restore?.(draft);
     }
   };
 
   const branch = async (messageId: string, text: string, picked: Choice) => {
     const c = current();
     if (!c) return;
+    const at = place();
     setError(undefined);
     try {
-      await go({ ...place(), id: await api.branch({ conversationId: c.id, messageId, text, choice: picked }) });
+      const id = await api.branch({ conversationId: c.id, messageId, text, choice: picked });
+      remember(`faber.choice.${id}`, picked);
+      await go({ ...at, id });
     } catch (err) {
       fail(err);
     }
@@ -456,6 +509,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   };
   const remove = async (id: string) => {
     await api.remove(id);
+    try { localStorage.removeItem(`faber.choice.${id}`); } catch { /* Storage can be unavailable. */ }
     if (opening.id === id) void fresh(place());
   };
 
@@ -514,6 +568,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
         choice={picked()}
         onChoice={pickChoice}
         busy={busy() && !loading()}
+        nextMessage={!!current()?.messages.length}
         locked={loading()}
         placeholder={area() === 'project' ? t('composer.projectPlaceholder') : newChat() ? t('composer.chatPlaceholder') : t('composer.replyPlaceholder')}
         onSend={(d) => void send(d)}
@@ -523,6 +578,11 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
           if (!loading() && picked().vendor === 'auto') void api.routeDraft({ conversationId: current()?.id, ...target(), choice: picked() }, text);
         }}
         onReady={(f) => (fill = f)}
+        onRestore={(f) => {
+          restore = f;
+          queueMicrotask(() => current() && restoreRejected(current()!.id, current()!.messages.at(-1)));
+        }}
+        onClearRestored={(f) => (clearRestored = f)}
       />
     </Show>
   );
@@ -539,7 +599,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   );
 
   return (
-    <div class="app">
+    <div class="app" ref={(el) => { animateList(el); animateDetails(el); }}>
       {/* The title bar is the window's title bar: empty space drags the window, double click maximizes. */}
       <header class="top" classList={{ mac }} data-tauri-drag-region>
         <span class="brand" data-tauri-drag-region>
@@ -551,7 +611,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
         <div class="toast" role="alert">
           <span>{saveError()}</span>
           <button type="button" aria-label={t('toast.dismiss')} onClick={() => setSaveError(undefined)}>
-            ×
+            Ã—
           </button>
         </div>
       </Show>
@@ -605,6 +665,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
               saved={state().settings}
               vendors={state().vendors}
               quotas={quotas()}
+              usage={state().usage ?? []}
               now={clock()}
               start={back()?.section ?? settingsAt()}
               kept={back()?.draft}
@@ -619,7 +680,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
             />
           }
         >
-          <div class="shell" classList={{ docked: columnOpen() && docked() }} inert={tourOpen()}>
+          <div class="shell" classList={{ docked: columnOpen() && docked() }} inert={tourOpen()} ref={animateList}>
             <aside
               class="side"
               classList={{ shown: sideOverlay() }}
@@ -627,7 +688,8 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
               aria-label={t('side.label')}
               role={sideOverlay() ? 'dialog' : undefined}
               aria-modal={sideOverlay() ? 'true' : undefined}
-              inert={trapped()}
+              inert={trapped() || (narrow() && !sideOverlay())}
+              aria-hidden={narrow() && !sideOverlay() ? 'true' : undefined}
             >
               <Sidebar
                 conversations={state().conversations}
@@ -719,16 +781,31 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                   </button>
                 </div>
               </div>
-              <div class="work" classList={{ under: columnOpen() && !docked() }} ref={(el) => (work = el)}>
+              <div class="work" classList={{ under: columnOpen() && !docked() }} ref={(el) => { work = el; animateList(el); }}>
                 <Show when={newChat()}>
                   {/* The effects of the look sit behind the greeting; dust keeps clear of the text and the composer. */}
                   <Ambient vendors={state().vendors} avoid={() => [...work!.querySelectorAll('.hello, .lead, .composer, .try, .resume')]} />
                 </Show>
-                <div class="thread" classList={{ welcome: newChat() }} ref={(el) => (thread = el)} onScroll={(e) => onScroll(e.currentTarget)} inert={trapped()}>
+                <div class="thread" classList={{ welcome: newChat() }} ref={(el) => {
+                  thread = el;
+                  onMount(() => {
+                    // Keep the tail visible as the composer grows, without pulling a reader back down.
+                    const observer = new ResizeObserver(() => { if (stick) el.scrollTop = el.scrollHeight; });
+                    observer.observe(el);
+                    onCleanup(() => observer.disconnect());
+                  });
+                }} onScroll={(e) => onScroll(e.currentTarget)} inert={trapped()}>
                   <Show
                     when={newChat()}
                     fallback={
-                      <div class="col">
+                      <div class="col" ref={(el) => {
+                        animateList(el);
+                        onMount(() => {
+                          const observer = new ResizeObserver(() => { if (thread && stick) thread.scrollTop = thread.scrollHeight; });
+                          observer.observe(el);
+                          onCleanup(() => observer.disconnect());
+                        });
+                      }}>
                         <Show when={area() === 'project' && project()}>
                           <p class="hint" role="status">{t(state().settings.permissions === 'ask' ? 'project.permissionsAsk' : 'project.permissionsDontAsk')}</p>
                         </Show>
@@ -739,6 +816,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                           {(c) => (
                             <Thread
                               messages={c().messages}
+                              usage={state().usage ?? []}
                               from={from()}
                               conversationId={c().id}
                               options={options()}

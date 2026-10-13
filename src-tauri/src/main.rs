@@ -13,7 +13,7 @@ mod tray;
 
 use base64::Engine as _;
 use faber_engine::cli::Cli;
-use faber_engine::codex::{ModelInfo, list_codex_models};
+use faber_engine::codex::{ModelInfo, list_codex_models, read_codex_limits};
 use faber_engine::model::{Conversation, Project, Settings, Vendor};
 use faber_engine::proc::{Spawner, real_spawner};
 use faber_engine::{AppEvent, AppState, BranchRequest, Engine, EngineOptions, SendRequest, WarmRequest};
@@ -99,6 +99,28 @@ async fn send(faber: State<'_, Faber>, req: SendRequest) -> Res<String> {
 #[tauri::command]
 async fn branch(faber: State<'_, Faber>, req: BranchRequest) -> Res<String> {
     faber.engine.branch(req)
+}
+
+#[tauri::command]
+fn set_clock(faber: State<'_, Faber>, utc_offset: i64) {
+    faber.engine.set_utc_offset(utc_offset);
+}
+
+#[tauri::command]
+fn answer_plan(faber: State<'_, Faber>, vendor: Vendor, plan: String) {
+    faber.engine.answer_plan(vendor, &plan);
+}
+#[tauri::command]
+fn approve_credits(faber: State<'_, Faber>, id: String, turn_id: String, vendor: Vendor) -> Res<()> {
+    faber.engine.approve_credits(&id, &turn_id, vendor)
+}
+#[tauri::command]
+fn move_turn(faber: State<'_, Faber>, id: String, turn_id: String) -> Res<()> {
+    faber.engine.move_turn(&id, &turn_id)
+}
+#[tauri::command]
+fn wait_turn(faber: State<'_, Faber>, id: String, turn_id: String) -> Res<()> {
+    faber.engine.wait_turn(&id, &turn_id)
 }
 
 #[tauri::command]
@@ -279,6 +301,8 @@ pub(crate) fn load_models(app: &AppHandle, codex: Cli, cwd: PathBuf) {
     let spawn: Spawner = Arc::new(move |bin, args, cwd| real(bin, &prefix.iter().chain(args).cloned().collect::<Vec<_>>(), cwd));
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
+        let events = read_codex_limits(&codex.command, &cwd, cfg!(windows), spawn.clone(), Duration::from_secs(20)).await;
+        app.state::<Faber>().engine.note_account_events(Vendor::Codex, events);
         let list = list_codex_models(&codex.command, &cwd, cfg!(windows), spawn, Duration::from_secs(20)).await;
         let faber = app.state::<Faber>();
         let recommended = list.iter().find(|m| m.is_default).map(|m| m.id.clone());
@@ -363,6 +387,10 @@ fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Resul
         if let Some(port) = port {
             args.push_str(&format!(" --remote-debugging-port={port}"));
         }
+        #[cfg(feature = "test-hooks")]
+        if hidden && std::env::var("FABER_SOFTWARE_RENDERING").as_deref() == Ok("1") {
+            args.push_str(" --disable-gpu");
+        }
         builder = builder.additional_browser_args(&args);
     }
     builder.build()
@@ -386,6 +414,11 @@ fn main() {
             send,
             branch,
             warm,
+            set_clock,
+            answer_plan,
+            approve_credits,
+            move_turn,
+            wait_turn,
             route_draft,
             interrupt,
             answer,
@@ -431,6 +464,7 @@ fn main() {
                 clis: clis.clone(),
                 spawn: real_spawner(),
                 windows: cfg!(windows),
+                claude_env_billed: faber_engine::signals::claude_env_billed(std::env::vars_os().map(|(name, _)| name)),
                 max_warm: 3,
                 idle: Duration::from_secs(120),
                 runtime: tauri::async_runtime::handle().inner().clone(),
@@ -443,6 +477,7 @@ fn main() {
                 data_dir: data_dir.clone(),
                 hidden,
             });
+            app.state::<Faber>().engine.watch_accounts();
             if let Some(codex) = clis.get(&Vendor::Codex) {
                 load_models(app.handle(), codex.clone(), data_dir.clone());
             }

@@ -1,7 +1,7 @@
 //! The shell of the screen: the layout at each width, the running column and when it opens, the new conversation with
 //! its greeting, and the quota in the sidebar's footer.
 
-use super::{Result, Scenario, ask, claude_chat, ensure, eventually, no_cli, pause, same, start_settings, system_motion};
+use super::{Result, Scenario, ask, claude_chat, ensure, no_cli, pause, same, start_settings, system_motion};
 use crate::app::Ctx;
 use crate::page::{Page, css};
 use crate::sandbox::{CliSlot, Launch};
@@ -334,8 +334,8 @@ fn opens_by_itself(ctx: &mut Ctx) -> Result {
     let button = page.inner_text(&css(".run-btn"))?;
     ensure(button.contains(&words), || format!("the amber button should say {words:?}: {button:?}"))?;
     // A question with a long path stays inside the reading column and the stage, beside the docked column.
-    let inside = page.eval("(() => { const stage = document.querySelector('.main').getBoundingClientRect().right; return [...document.querySelectorAll('article .ask, article .tools span')].every((e) => e.getBoundingClientRect().right <= stage + 0.5); })()")?;
-    same(inside.as_bool(), Some(true), "the card and the tool line stay inside the stage")?;
+    let inside = page.eval("(() => { const stage = document.querySelector('.main').getBoundingClientRect().right; return [...document.querySelectorAll('article .ask, article .activity summary')].every((e) => e.getBoundingClientRect().right <= stage + 0.5); })()")?;
+    same(inside.as_bool(), Some(true), "the card and the activity row stay inside the stage")?;
     ctx.shot(&mut app, "running-column-asks")?;
     let page = &mut app.page;
     // Closing it leaves only the button amber, and the same question does not open it again.
@@ -372,7 +372,7 @@ fn opens_at_load(ctx: &mut Ctx) -> Result {
     let page = &mut app.page;
     ask_two_writes(page)?;
     page.wait_visible(&css(".runcol .ask").has_text("a.txt"))?;
-    page.eval("location.reload()")?;
+    page.reload()?;
     page.wait_visible(&css(".run-btn.need"))?;
     page.wait_visible(&css(".runcol .ask").has_text("a.txt"))?;
     // Closed by the user, it stays closed for the same question.
@@ -605,10 +605,8 @@ fn shows_the_quota(ctx: &mut Ctx) -> Result {
     ctx.shot(&mut app, "quota")?;
     let page = &mut app.page;
     // A screen that loads again asks the engine and shows the same reading.
-    page.eval("location.reload()")?;
-    eventually("the quota after a reload", Duration::from_secs(20), || {
-        page.eval("document.querySelector('.usage .share')?.textContent === '47%'").is_ok_and(|v| v == true)
-    })
+    page.reload()?;
+    page.wait_for("the quota after a reload", "document.querySelector('.usage .share')?.textContent === '47%'")
 }
 
 // ---- Seeded conversations and the checks of the second pass of the review.

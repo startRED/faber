@@ -54,6 +54,15 @@ pub struct Image {
     pub base64: String,
 }
 
+/// Dispatch intent for a quota error that still offers explicit recovery after restart. Consent is never stored here.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Recovery {
+    pub pick: crate::router::Pick,
+    pub text: String,
+    pub by_hand: bool,
+    pub retried: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolUse {
     pub id: String,
@@ -86,6 +95,12 @@ pub struct Message {
     pub id: String,
     pub role: Role,
     pub text: String,
+    /// UTF-16 offsets where a new CLI text block starts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_breaks: Option<Vec<usize>>,
+    /// Start of an explicit final answer, or end of text preceding the last tool call when the CLI has no phases.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity_end: Option<usize>,
     /// Milliseconds since the Unix epoch.
     pub at: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -96,6 +111,8 @@ pub struct Message {
     pub vendor: Option<Vendor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -119,7 +136,7 @@ pub struct Message {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_tokens: Option<u64>,
     /// Prompt tokens of the main response read from the CLI's cache, and written to it (the part with the 1-hour lifetime
-    /// separately). Claude Code only; Codex bills no write.
+    /// separately). Codex reports one cache-write kind and no separate one-hour counter.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_read_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -129,6 +146,15 @@ pub struct Message {
     /// True when the token numbers cover only part of the turn (sub-model work, or no usage was seen).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub incomplete: Option<bool>,
+    /// Why the quota changed the model Auto chose, when it did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pace: Option<PaceNote>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_until: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moved_from: Option<Vendor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery: Option<Recovery>,
 }
 
 impl Message {
@@ -137,11 +163,14 @@ impl Message {
             id,
             role,
             text,
+            text_breaks: None,
+            activity_end: None,
             at,
             images: None,
             attachments: None,
             vendor: None,
             model: None,
+            effort: None,
             reason: None,
             thinking: None,
             tools: None,
@@ -156,6 +185,10 @@ impl Message {
             cache_write_tokens: None,
             cache_write_1h_tokens: None,
             incomplete: None,
+            pace: None,
+            wait_until: None,
+            moved_from: None,
+            recovery: None,
         }
     }
 }
@@ -172,6 +205,9 @@ pub struct BranchOf {
 pub struct Conversation {
     pub id: String,
     pub title: String,
+    /// The choice for the next message, retained independently in each conversation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub choice: Option<crate::router::Choice>,
     pub area: Area,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
@@ -261,6 +297,8 @@ pub struct RunningItem {
     pub since: u64,
     /// The questions the user has not answered yet.
     pub permissions: Vec<Permission>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wait_until: Option<f64>,
 }
 
 /// The running list as the engine last sent it. The revision grows by one with every list the engine emits, so a
@@ -282,6 +320,14 @@ pub struct QuotaReading {
     pub resets_at: f64,
 }
 
+/// Why the quota changed the pick of Auto, shown under the model name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaceNote {
+    /// `step` (one rung up, bought with quota that would expire) or `low` (moved away from a vendor that is running low).
+    pub kind: String,
+    pub vendor: Vendor,
+}
+
 /// The user's choices, in one plain file. Appearance belongs to the screen, so the engine only keeps it.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -294,6 +340,11 @@ pub struct Settings {
     /// Missing in older settings means commands run without asking in Projects.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permissions: Option<Permissions>,
+    /// Attention notifications and their chime are both on unless explicitly disabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notifications: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notification_sound: Option<bool>,
     /// The language of the screen ("en", "pt-BR"...); none follows the system.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,

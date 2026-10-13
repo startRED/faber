@@ -41,7 +41,7 @@ fn the_multiplier_follows_the_projection() {
     near(m_of(0.2, 1.0), 0.140625, 1e-9);
     near(m_of(0.94, 1.0), 25.0, 1e-6);
     assert_eq!(m_of(1.0, 1.0), 25.0);
-    assert_eq!(m_of(3.0, 0.2), 25.0);
+    assert_eq!(m_of(3.0, 0.2), 75.0);
     // One day of seven left: the margin shrinks, so a week at 45% is nearly all waste.
     near(m_of(0.45, 1.0 / 7.0), 0.1, 1e-9);
     near(m_of(0.887, 1.0 / 7.0), 1.0, 0.02);
@@ -105,7 +105,7 @@ fn a_window_is_priced_from_its_projection() {
     let w = window(0.10, 2.5 * HOUR, 5.0 * HOUR);
     near(window_m(&w, NOW, &shape, 0, true), 0.1, 1e-9);
     // 80% used at the halfway mark runs out.
-    assert_eq!(window_m(&window(0.8, 2.5 * HOUR, 5.0 * HOUR), NOW, &shape, 0, true), 25.0);
+    assert_eq!(window_m(&window(0.8, 2.5 * HOUR, 5.0 * HOUR), NOW, &shape, 0, true), 40.0);
 }
 
 #[test]
@@ -118,7 +118,7 @@ fn a_discount_is_not_believed_when_the_reading_may_be_wrong() {
     let from_the_future = Window { read_at: NOW + 100.0, ..spare };
     assert_eq!(window_m(&from_the_future, NOW, &shape, 0, true), 1.0, "the clock went back");
     let over = Window { read_at: NOW - 7.0 * HOUR, ..window(0.8, 2.5 * HOUR, 5.0 * HOUR) };
-    assert_eq!(window_m(&over, NOW, &shape, 0, true), 25.0, "a stale reading still prices up");
+    assert_eq!(window_m(&over, NOW, &shape, 0, true), 40.0, "a stale reading still prices up");
 }
 
 #[test]
@@ -283,4 +283,24 @@ fn a_one_message_approval_lifts_the_quota_rules() {
     let out = Snap { paid_fallback: true, ..snap(vec![seven(1.0, DAY)]) };
     assert_eq!(gate(&out, None, TURN, false, NOW), Err(Why::Exhausted));
     assert_eq!(gate(&out, None, TURN, true, NOW), Ok(()));
+}
+
+#[test]
+fn expired_vendor_and_family_windows_do_not_mask_spare_live_quota() {
+    let live = snap(vec![seven(0.05, DAY)]);
+    let mut mixed = live.clone();
+    mixed.windows.push(five(1.0, -HOUR));
+    mixed.windows.push(("seven_day_opus".into(), window(1.0, -HOUR, 7.0 * DAY)));
+    near(m(&mixed), m(&live), 1e-9);
+    near(mixed.profile_m(Some("opus"), &Shape::uniform(), 0, NOW), m(&live), 1e-9);
+    assert!(m(&mixed) < 1.0);
+}
+
+#[test]
+fn the_daily_line_and_twice_its_rate_have_distinct_prices() {
+    let on_line = snap(vec![seven(1.0 / 7.0, 6.0 * DAY)]);
+    let ahead = snap(vec![seven(2.0 / 7.0, 6.0 * DAY)]);
+    near(m(&on_line), 25.0, 1e-9);
+    near(m(&ahead), 50.0, 1e-9);
+    assert!(m(&ahead) > m(&on_line));
 }

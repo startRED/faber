@@ -1,5 +1,5 @@
-import { createSignal, For, onCleanup, Show } from 'solid-js';
-import type { Choice, Vendor } from './api.ts';
+import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from 'solid-js';
+import type { Choice, Effort, Vendor } from './api.ts';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 import type { Option } from './models.ts';
@@ -18,6 +18,7 @@ interface Props {
   choice: Choice;
   onChoice: (choice: Choice) => void;
   busy: boolean;
+  nextMessage?: boolean;
   /** A conversation is still opening: nothing can be sent or warmed until it is in. */
   locked?: boolean;
   placeholder: string;
@@ -28,6 +29,8 @@ interface Props {
   onPause: (text: string) => void;
   /** Hands the screen a function that puts text in the box and focuses it, without sending (the suggestions of the new
    * conversation use it). */
+  onRestore?: (restore: (draft: Draft) => boolean) => void;
+  onClearRestored?: (clear: (draft: Draft) => boolean) => void;
   onReady?: (fill: (text: string) => void) => void;
 }
 
@@ -72,6 +75,35 @@ export function Composer(props: Props) {
   onCleanup(() => clearTimeout(pause));
   let fileInput: HTMLInputElement | undefined;
   let field: HTMLTextAreaElement | undefined;
+  const resize = () => {
+    if (!field?.isConnected) return;
+    const previous = field.getBoundingClientRect().height;
+    const style = getComputedStyle(field);
+    // Restore the rendered height before enabling the transition, so measurement never paints a collapse.
+    field.style.transition = 'none';
+    field.style.height = '0px';
+    const height = Math.min(parseFloat(style.maxHeight), Math.max(parseFloat(style.minHeight), draft().text ? field.scrollHeight : 0));
+    field.style.height = `${previous}px`;
+    field.getBoundingClientRect();
+    field.style.removeProperty('transition');
+    field.style.height = `${height}px`;
+  };
+  createEffect(on(() => draft().text, () => queueMicrotask(resize), { defer: true }));
+  onMount(() => {
+    let width = 0;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry.contentRect.width === width) return;
+      const first = width === 0;
+      width = entry.contentRect.width;
+      if (!first) resize();
+    });
+    observer.observe(field!);
+    window.addEventListener('resize', resize);
+    onCleanup(() => {
+      observer.disconnect();
+      window.removeEventListener('resize', resize);
+    });
+  });
   const selected = () => Math.max(0, props.options.findIndex((o) => o.choice.vendor === props.choice.vendor && o.choice.model === props.choice.model));
   const hasContent = () => draft().text.trim() !== '' || draft().images.length > 0 || draft().files.length > 0;
   const canSend = () => !props.busy && !props.locked && hasContent() && props.vendors.length > 0;
@@ -97,6 +129,15 @@ export function Composer(props: Props) {
     warm();
     field?.focus();
     field?.setSelectionRange(text.length, text.length);
+  });
+  props.onRestore?.((saved) => {
+    if (hasContent() || props.locked) return false;
+    setDraft(saved); setNames(saved.files.map((f) => f.name)); warmed = false;
+    field?.focus(); return true;
+  });
+  props.onClearRestored?.((saved) => {
+    if (draft() !== saved) return false;
+    setDraft(EMPTY); setNames([]); warmed = false; return true;
   });
   const add = async (list: Iterable<File>) => {
     const result = await attach(list, draft());
@@ -130,7 +171,7 @@ export function Composer(props: Props) {
       </Show>
       <textarea
         aria-label={t('composer.message')}
-        rows={Math.min(10, Math.max(1, draft().text.split('\n').length))}
+        rows={1}
         placeholder={props.placeholder}
         value={draft().text}
         onInput={(e) => {
@@ -170,8 +211,10 @@ export function Composer(props: Props) {
           <select
             aria-label={t('composer.model')}
             value={selected()}
+            disabled={props.locked}
             onChange={(e) => {
-              props.onChoice(props.options[Number(e.currentTarget.value)]!.choice);
+              const choice = props.options[Number(e.currentTarget.value)]!.choice;
+              props.onChoice(choice.vendor === 'auto' ? choice : { ...choice, effort: props.choice.effort ?? 'medium' });
               warmed = false; // the next keystroke warms the newly chosen model
             }}
           >
@@ -185,6 +228,18 @@ export function Composer(props: Props) {
           </select>
           <Icon name="down" small />
         </label>
+        <Show when={props.choice.vendor !== 'auto' && props.choice.model}>
+          <label class="chip choose effort">
+            <span>{t('effort.label')}</span>
+            <select aria-label={t('effort.label')} value={props.choice.effort ?? 'medium'} disabled={props.locked} onChange={(e) => {
+              props.onChoice({ ...props.choice, effort: e.currentTarget.value as Effort });
+              warmed = false;
+            }}>
+              <For each={['low', 'medium', 'high'] as const}>{(effort) => <option value={effort}>{t(`effort.${effort}`)}</option>}</For>
+            </select>
+            <Icon name="down" small />
+          </label>
+        </Show>
         <Show
           when={props.busy}
           fallback={
@@ -202,6 +257,9 @@ export function Composer(props: Props) {
           </button>
         </Show>
       </div>
+      <Show when={props.nextMessage && props.choice.vendor !== 'auto' && props.choice.model}>
+        <p class="effort-hint">{t('effort.nextMessage')}</p>
+      </Show>
     </form>
   );
 }

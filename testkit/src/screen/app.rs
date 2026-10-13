@@ -2,7 +2,7 @@
 
 use super::{Result, Scenario, ask, claude_chat, ensure, eventually, no_cli, pass_look, pause, same, start_settings, system_motion};
 use crate::app::Ctx;
-use crate::page::{Page, css, role, role_any};
+use crate::page::{Page, css, role};
 use serde_json::json;
 use std::time::{Duration, Instant};
 
@@ -183,6 +183,7 @@ fn streams_an_answer(ctx: &mut Ctx) -> Result {
     ask(page, QUESTION)?;
     let answer = page.named("article", "answer.label")?;
     page.wait_visible(&answer.clone().css(".actions"))?;
+    page.wait_for("the completed answer text to render", "(() => { const answer = document.querySelector('article.ai'); return answer?.checkVisibility({ contentVisibilityAuto: true }) && answer.querySelector('.md')?.innerText.trim().length > 0; })()")?;
     let text = page.inner_text(&answer)?;
     ensure(text.contains("Rayleigh"), || format!("the answer should explain the sky: {text}"))?;
     ensure(text.contains("Haiku 5.5"), || format!("the answer should name its model: {text}"))?;
@@ -323,7 +324,8 @@ fn keeps_appearance(ctx: &mut Ctx) -> Result {
     let page = &mut app.page;
     let general = page.named("button", "set.general")?;
     page.click(&general)?;
-    page.check(&role_any("switch"))?;
+    let hooks = page.named("switch", "set.hooksBody")?;
+    page.check(&hooks)?;
     // The look applies once it is saved, but the switch does not wait for the screen; closing earlier could lose it.
     let file = ctx.sb.data.join("settings.json");
     eventually("the choices to reach settings.json", Duration::from_secs(15), || {
@@ -347,7 +349,7 @@ fn keeps_appearance(ctx: &mut Ctx) -> Result {
     page.press("Control+,")?;
     let general = page.named("heading", "set.general")?;
     page.wait_visible(&general)?;
-    same(page.is_checked(&role_any("switch"))?, true, "the saved choice")
+    same(page.is_checked(&hooks)?, true, "the saved choice")
 }
 
 fn fits_every_look(ctx: &mut Ctx) -> Result {
@@ -435,12 +437,12 @@ const THREAD: &str = r#"(() => {
   const parts = [
     ['your message', '.thread .you', 4.5, true],
     ['the model name', 'article.ai .model b', 4.5, true],
-    ['the tool line', 'article.ai .tools span', 4.5, true],
+    ['the activity row', 'article.ai .activity summary', 4.5, true],
     ['the question title', '.thread .ask b', 4.5, true],
     ['the question text', '.thread .ask pre', 4.5, true],
     ['Allow', '.thread .ask .btn.primary', 4.5, true],
     ['the other answers', '.thread .ask .btn:not(.primary)', 4.5, true],
-    ['the answer text', 'article.ai .md p', 4.5, false],
+    ['the answer text', 'article.ai > .md p', 4.5, false],
     ['the crumb', '.crumb b', 4.5, true],
   ];
   const found = [];
@@ -478,6 +480,8 @@ fn thread_in_every_look(ctx: &mut Ctx) -> Result {
     page.click(&css("article .ask").has_text("a.txt").role("button", &allow).exact())?;
     let question = css("article .ask").has_text("b.txt");
     page.wait_visible(&question)?;
+    // Let the pending question open its column before measuring settled text contrast in each look.
+    page.wait_visible(&css(".runcol"))?;
     for (id, ..) in LOOKS {
         open_appearance(&mut app.page)?;
         pick_look(&mut app.page, id)?;
@@ -530,7 +534,7 @@ fn refused_save(ctx: &mut Ctx) -> Result {
     // A switch moves before its save is answered; a refused save puts it back.
     let general = page.named("button", "set.general")?;
     page.click(&general)?;
-    let hooks = role_any("switch");
+    let hooks = page.named("switch", "set.hooksBody")?;
     let before = page.is_checked(&hooks)?;
     page.click(&hooks)?;
     page.wait_for("the switch to be put back", &format!("document.querySelector('.sw2').checked === {before}"))?;

@@ -115,6 +115,16 @@ impl Page {
         self.cdp.eval(expression)
     }
 
+    pub fn reload(&mut self) -> Result<(), String> {
+        let deadline = Instant::now() + DEFAULT_WAIT;
+        self.cdp.reload(deadline)?;
+        self.wait_for_within(
+            "the reloaded screen to render",
+            "!!document.querySelector('.app')",
+            deadline.saturating_duration_since(Instant::now()),
+        )
+    }
+
     pub fn wait_for(&mut self, what: &str, expression: &str) -> Result<(), String> {
         self.cdp.wait_for(what, expression, DEFAULT_WAIT)
     }
@@ -225,7 +235,15 @@ impl Page {
         result
     }
 
-    const CENTER: &'static str = "el.scrollIntoView({ block: 'center', inline: 'center' }); const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 };";
+    // A pointer action waits for finite layout motion, just as it already waits for visibility and enabled state.
+    const CENTER: &'static str = "if (document.documentElement.hasAttribute('data-theme-transition')) return { why: 'theme snapshot is changing' }; \
+        el.scrollIntoView({ block: 'center', inline: 'center' }); \
+        for (let p = el; p; p = p.parentElement) { \
+            if (p.getAnimations().some((a) => a.playState === 'running' && Number.isFinite(a.effect.getTiming().iterations) && \
+                a.effect.getKeyframes().some((f) => ['transform', 'width', 'height', 'paddingRight', 'gridTemplateColumns', 'gridTemplateRows'].some((key) => key in f)))) \
+                return { why: 'element is moving' }; \
+        } \
+        const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 };";
 
     pub fn inner_text(&mut self, loc: &Loc) -> Result<String, String> {
         Ok(self.on(loc, "attached", "return { value: el.innerText };")?["value"].as_str().unwrap_or_default().to_string())
@@ -291,7 +309,10 @@ impl Page {
         let state = self.on(
             loc,
             "enabled",
-            &format!("const at = (() => {{ {} }})(); return {{ checked: el.checked, x: at.x, y: at.y }};", Self::CENTER),
+            &format!(
+                "const at = (() => {{ {} }})(); if (at.why) return at; return {{ checked: el.checked, x: at.x, y: at.y }};",
+                Self::CENTER
+            ),
         )?;
         if state["checked"] == json!(true) {
             return Ok(());

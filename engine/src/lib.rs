@@ -8,6 +8,7 @@ pub mod cli;
 pub mod codex;
 pub mod engine;
 pub mod events;
+pub mod handover;
 pub mod install;
 pub mod learn;
 pub mod ledger;

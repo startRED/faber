@@ -3,7 +3,7 @@
 
 use super::auto::{Stop, stop_router};
 use super::*;
-use crate::budget::{Purpose, gate};
+use crate::budget::{Purpose, family_of};
 
 /// A reading older than this is worth asking for again, and a pulse is not repeated sooner either.
 const PULSE_EVERY: f64 = 20.0 * 60.0;
@@ -19,22 +19,30 @@ impl Core {
         if !due(newest) || !due(self.last_pulse) {
             return;
         }
-        if gate(&self.ledger.claude.snap(now), None, Purpose::Pulse, false, now).is_err() {
+        if self.allows(Vendor::Claude, family_of(PULSE_MODEL), Purpose::Pulse, false).is_err() {
             return;
         }
         self.last_pulse = now;
         let (me, stop) = (self.me.clone(), Stop::default());
         let closer = stop.clone();
+        let started = Arc::new(Mutex::new(Some(now)));
+        let finished = started.clone();
+        let timeout_core = me.clone();
         let sink: EventSink = Arc::new(move |e| match e {
             EngineEvent::Quota { .. } | EngineEvent::Signals(_) => {
                 if let Some(core) = me.upgrade() {
-                    core.lock().unwrap_or_else(|e| e.into_inner()).note_account_event(Vendor::Claude, e);
+                    let mut c = core.lock().unwrap_or_else(|e| e.into_inner());
+                    c.note_account_event(Vendor::Claude, e);
+                    if c.allows(Vendor::Claude, family_of(PULSE_MODEL), Purpose::Pulse, false).is_err() {
+                        stop_router(Some(closer.clone()));
+                    }
                 }
             }
-            EngineEvent::Done { .. } | EngineEvent::Error { .. } => {
+            e @ (EngineEvent::Done { .. } | EngineEvent::Error { .. }) => {
                 stop_router(Some(closer.clone()));
-                if let Some(core) = me.upgrade() {
-                    core.lock().unwrap_or_else(|e| e.into_inner()).note_span(Vendor::Claude, now, PULSE_MODEL, None);
+                if let (Some(at), Some(core)) = (finished.lock().unwrap_or_else(|e| e.into_inner()).take(), me.upgrade()) {
+                    let (cost, incomplete) = usage::fresh_price(&e, PULSE_MODEL);
+                    core.lock().unwrap_or_else(|e| e.into_inner()).note_span(Vendor::Claude, at, PULSE_MODEL, cost, incomplete);
                 }
             }
             _ => {}
@@ -61,5 +69,12 @@ impl Core {
         );
         *stop.lock().unwrap_or_else(|e| e.into_inner()) = Some(session.clone());
         session.send(UserTurn::text("ok"));
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            stop_router(Some(stop));
+            if let (Some(at), Some(core)) = (started.lock().unwrap_or_else(|e| e.into_inner()).take(), timeout_core.upgrade()) {
+                core.lock().unwrap_or_else(|e| e.into_inner()).note_span(Vendor::Claude, at, PULSE_MODEL, None, true);
+            }
+        });
     }
 }

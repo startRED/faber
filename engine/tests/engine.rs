@@ -3,7 +3,7 @@ mod support;
 use faber_engine::cli::{Cli, resolve_cli};
 use faber_engine::model::{Area, Experience, Message, Permissions, Role, Settings, Setup, Status, Vendor};
 use faber_engine::proc::Spawner;
-use faber_engine::router::{Choice, pick_model};
+use faber_engine::router::{Choice, Effort, pick_model};
 use faber_engine::{AppEvent, BranchRequest, Engine, EngineOptions, SendRequest, WarmRequest};
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -27,6 +27,7 @@ fn engine_idle(dir: &Path, vendor: Vendor, spawn: Spawner, idle: Duration) -> (E
         clis,
         spawn,
         windows: false,
+        claude_env_billed: false,
         max_warm: 3,
         idle,
         runtime: tokio::runtime::Handle::current(),
@@ -36,7 +37,7 @@ fn engine_idle(dir: &Path, vendor: Vendor, spawn: Spawner, idle: Duration) -> (E
 }
 
 fn choice(vendor: &str, model: Option<&str>) -> Choice {
-    Choice { vendor: vendor.into(), model: model.map(String::from) }
+    Choice { vendor: vendor.into(), model: model.map(String::from), effort: None }
 }
 
 fn ask(area: Area, text: &str, choice: Choice) -> SendRequest {
@@ -67,6 +68,68 @@ async fn finished(rx: &mut UnboundedReceiver<AppEvent>, mut react: impl FnMut(&M
 
 fn read_json(path: &Path) -> serde_json::Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+#[tokio::test]
+async fn manual_effort_and_the_missing_effort_default_reach_both_drivers_and_are_saved() {
+    for vendor in Vendor::ALL {
+        for effort in [None, Some(Effort::Low), Some(Effort::Medium), Some(Effort::High)] {
+            let dir = tempfile::tempdir().unwrap();
+            let f = fake(fixture(vendor.name(), "chat"));
+            let (engine, mut rx) = engine(dir.path(), vendor, f.spawn.clone());
+            let selected = Choice { effort, ..choice(vendor.name(), Some(if vendor == Vendor::Claude { "haiku" } else { "gpt-6-luna" })) };
+            let id = engine.send(ask(Area::Chat, SKY, selected)).unwrap();
+            let reply = finished(&mut rx, |_| {}).await;
+            engine.shutdown();
+            let expected = effort.unwrap_or(Effort::Medium).name();
+            assert_eq!(reply.effort.as_deref(), Some(expected));
+            if vendor == Vendor::Claude {
+                let args = f.args.lock().unwrap();
+                let at = args[0].iter().position(|a| a == "--effort").unwrap();
+                assert_eq!(args[0][at + 1], expected);
+                let model = args[0].iter().position(|a| a == "--model").unwrap();
+                assert_eq!(args[0][model + 1], "claude-haiku-5-5");
+            } else {
+                assert_eq!(f.wire.lines_with("\"method\":\"turn/start\""), 1);
+                assert_eq!(f.wire.lines_with(&format!("\"effort\":\"{expected}\"")), 1);
+            }
+            let saved = read_json(&dir.path().join("conversations").join(format!("{id}.json")));
+            assert_eq!(saved["choice"]["effort"].as_str(), Some(expected));
+            assert_eq!(saved["messages"][1]["effort"].as_str(), Some(expected));
+            let (reopened, _) = engine_idle(dir.path(), vendor, fake(fixture(vendor.name(), "chat")).spawn, Duration::from_secs(120));
+            assert_eq!(reopened.open(&id).unwrap().choice.unwrap().effort, Some(effort.unwrap_or(Effort::Medium)));
+            reopened.shutdown();
+        }
+    }
+}
+
+#[tokio::test]
+async fn changing_effort_while_a_turn_runs_applies_only_to_the_next_message() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "chat"));
+    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let low = Choice { effort: Some(Effort::Low), ..choice("claude", Some("haiku")) };
+    let high = Choice { effort: Some(Effort::High), ..low.clone() };
+    let id = engine.send(ask(Area::Chat, SKY, low)).unwrap();
+    engine.warm(WarmRequest { conversation_id: Some(id.clone()), area: Area::Chat, project_id: None, choice: high.clone() });
+    assert_eq!(f.args.lock().unwrap().len(), 1, "typing a new effort must not replace the active turn");
+    assert_eq!(finished(&mut rx, |_| {}).await.effort.as_deref(), Some("low"));
+    engine.send(SendRequest { conversation_id: Some(id.clone()), ..ask(Area::Chat, SKY, high) }).unwrap();
+    assert_eq!(finished(&mut rx, |_| {}).await.effort.as_deref(), Some("high"));
+    engine.shutdown();
+    let c = engine.open(&id).unwrap();
+    assert_eq!(c.messages[1].effort.as_deref(), Some("low"));
+    assert_eq!(c.messages[3].effort.as_deref(), Some("high"));
+}
+
+#[test]
+fn manual_effort_accepts_only_three_levels_and_auto_ignores_a_manual_effort() {
+    for effort in ["max", "xhigh", "unknown"] {
+        assert!(serde_json::from_value::<Choice>(serde_json::json!({ "vendor": "claude", "model": "haiku", "effort": effort })).is_err());
+    }
+    let before = choice("auto", None);
+    let after = Choice { effort: Some(Effort::High), ..before.clone() };
+    assert_eq!(pick_model(&before, &Vendor::ALL, Some("gpt-6-luna")), pick_model(&after, &Vendor::ALL, Some("gpt-6-luna")));
 }
 
 #[tokio::test]
@@ -263,7 +326,10 @@ async fn two_permission_requests_at_once_wait_in_a_queue_and_both_get_answered()
 #[tokio::test]
 async fn text_blocks_around_a_tool_are_kept_apart() {
     let dir = tempfile::tempdir().unwrap();
-    let (engine, mut rx) = engine(dir.path(), Vendor::Codex, fake(fixture("codex", "tools")).spawn);
+    let mut entries = fixture("codex", "tools");
+    let first = entries.iter_mut().find(|e| e.msg["method"] == "item/agentMessage/delta").unwrap();
+    first.msg["params"]["delta"] = format!("🔎 {}", first.msg["params"]["delta"].as_str().unwrap()).into();
+    let (engine, mut rx) = engine(dir.path(), Vendor::Codex, fake(entries).spawn);
     engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
     let project = engine.add_project(&dir.path().to_string_lossy());
     let text = "Create a.txt containing one. Then create b.txt containing two. Make each file in a separate step.";
@@ -283,6 +349,67 @@ async fn text_blocks_around_a_tool_are_kept_apart() {
     let blocks: Vec<&str> = reply.text.split("\n\n").collect();
     assert!(blocks[0].contains("a.txt"), "{}", reply.text);
     assert!(blocks.len() > 1 && !blocks[1].is_empty(), "expected two blocks in: {}", reply.text);
+    assert_eq!(reply.text_breaks.as_ref().unwrap()[0], blocks[0].encode_utf16().count() + 2);
+    let saved = read_json(&dir.path().join("conversations").join(format!("{id}.json")));
+    assert_eq!(saved["messages"][1]["textBreaks"], serde_json::json!(reply.text_breaks));
+}
+
+#[tokio::test]
+async fn multi_block_answers_and_empty_terminal_blocks_preserve_text_and_tool_boundaries() {
+    for mode in 0..4 {
+        let with_tool = mode != 0;
+        let dir = tempfile::tempdir().unwrap();
+        let mut entries = fixture("codex", "chat");
+        let at =
+            entries.iter().position(|e| e.msg["method"] == "item/started" && e.msg["params"]["item"]["type"] == "agentMessage").unwrap();
+        let template = entries[at].clone();
+        entries.retain(|e| {
+            !matches!(e.msg["method"].as_str(), Some("item/agentMessage/delta"))
+                && !(matches!(e.msg["method"].as_str(), Some("item/started" | "item/completed"))
+                    && e.msg["params"]["item"]["type"] == "agentMessage")
+        });
+        let mut stream = Vec::new();
+        for (i, text) in ["🔎 Explanation.", "First result.", "Second result.", ""].into_iter().enumerate() {
+            if i == 1 && with_tool {
+                let mut tool = template.clone();
+                tool.msg["params"]["item"] = serde_json::json!({ "id": "tool", "type": "commandExecution", "command": "check" });
+                stream.push(tool.clone());
+                tool.msg["method"] = "item/completed".into();
+                tool.msg["params"]["item"]["exitCode"] = 0.into();
+                stream.push(tool);
+            }
+            if mode == 3 && i > 0 {
+                break;
+            }
+            let mut start = template.clone();
+            start.msg["params"]["item"]["id"] = format!("block-{i}").into();
+            start.msg["params"]["item"]["phase"] = if mode != 1 && i == 0 { "commentary" } else { "final_answer" }.into();
+            stream.push(start.clone());
+            start.msg["method"] = "item/agentMessage/delta".into();
+            start.msg["params"]["itemId"] = format!("block-{i}").into();
+            start.msg["params"]["delta"] = text.into();
+            stream.push(start);
+        }
+        entries.splice(at..at, stream);
+        let (engine, mut rx) = engine(dir.path(), Vendor::Codex, fake(entries).spawn);
+        let id = engine.send(ask(Area::Chat, SKY, choice("codex", None))).unwrap();
+        let reply = finished(&mut rx, |_| {}).await;
+        engine.shutdown();
+        assert_eq!(reply.text, if mode == 3 { "🔎 Explanation." } else { "🔎 Explanation.\n\nFirst result.\n\nSecond result." });
+        assert_eq!(
+            reply.text_breaks,
+            if mode == 3 {
+                None
+            } else {
+                Some(vec!["🔎 Explanation.\n\n".encode_utf16().count(), "🔎 Explanation.\n\nFirst result.\n\n".encode_utf16().count()])
+            }
+        );
+        let saved = read_json(&dir.path().join("conversations").join(format!("{id}.json")));
+        assert_eq!(
+            saved["messages"][1]["activityEnd"],
+            serde_json::json!(if mode == 1 { 0 } else { "🔎 Explanation.".encode_utf16().count() })
+        );
+    }
 }
 
 #[tokio::test]
@@ -422,6 +549,28 @@ async fn the_first_run_choices_survive_a_patch_that_does_not_mention_them() {
 }
 
 #[tokio::test]
+async fn notification_switches_survive_unrelated_patches_and_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "chat"));
+    let (app, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    assert_eq!((app.settings().notifications, app.settings().notification_sound), (None, None));
+    app.save_settings(Settings { notifications: Some(false), ..Settings::default() }).unwrap();
+    app.save_settings(Settings { notification_sound: Some(false), ..Settings::default() }).unwrap();
+    app.save_settings(Settings { language: Some("en".into()), ..Settings::default() }).unwrap();
+    assert_eq!((app.settings().notifications, app.settings().notification_sound), (Some(false), Some(false)));
+    app.save_settings(Settings { notifications: Some(true), ..Settings::default() }).unwrap();
+    app.shutdown();
+    let (reopened, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    assert_eq!((reopened.settings().notifications, reopened.settings().notification_sound), (Some(true), Some(false)));
+    reopened.save_settings(Settings { notification_sound: Some(true), ..Settings::default() }).unwrap();
+    reopened.shutdown();
+    assert_eq!(
+        read_json(&dir.path().join("settings.json")),
+        serde_json::json!({ "notifications": true, "notificationSound": true, "language": "en" })
+    );
+}
+
+#[tokio::test]
 async fn a_settings_write_that_fails_keeps_the_saved_settings_and_changes_nothing_live() {
     let dir = tempfile::tempdir().unwrap();
     let f = fake(fixture("claude", "chat"));
@@ -430,6 +579,8 @@ async fn a_settings_write_that_fails_keeps_the_saved_settings_and_changes_nothin
     let saved = Settings {
         appearance: serde_json::json!({ "base": "oficina" }).as_object().cloned(),
         user_hooks: Some(false),
+        notifications: Some(true),
+        notification_sound: Some(true),
         language: Some("pt-BR".into()),
         ..Settings::default()
     };
@@ -444,7 +595,13 @@ async fn a_settings_write_that_fails_keeps_the_saved_settings_and_changes_nothin
     // A directory where the temp file goes makes the write fail while settings.json stays valid.
     let tmp = dir.path().join("settings.json.tmp");
     std::fs::create_dir(&tmp).unwrap();
-    let patch = Settings { user_hooks: Some(true), language: Some("de".into()), ..Settings::default() };
+    let patch = Settings {
+        user_hooks: Some(true),
+        language: Some("de".into()),
+        notifications: Some(false),
+        notification_sound: Some(false),
+        ..Settings::default()
+    };
     assert_eq!(engine.save_settings(patch.clone()).unwrap_err(), "error.settings.saveFailed");
     assert_eq!(std::fs::read(&file).unwrap(), bytes);
     assert_eq!(engine.state().settings, saved);

@@ -32,7 +32,28 @@ what the week looks like from here.
 | D10 | Spare quota only buys quality on tasks that matter (code, math and research of medium or high difficulty). Easy chat stays on the fast model. | Erick |
 | D11 (R86) | Faber never spends paid extra credits or usage-based billing without asking. When quota runs out it moves to the other vendor or waits, and it uses paid credits only if the user approves at that moment, for that one message. | Erick |
 | D12 (R87) | The plan is detected automatically (`claude auth status` for Claude Code; `account/read` and `account/updated` for Codex). The user is asked only if detection fails. Codex keeps using the subscription login, not an API key. (The research recommends an API key until OpenAI confirms in writing that a third-party app may use the ChatGPT login; that stays open for Erick, and nothing in this design depends on it.) | AI, Erick delegated |
-| D13 (R88) | On a weekly plan the daily budget is 100% / 7 = 14.28% of the week per day, and Auto paces against that line for both vendors (Claude 20x `seven_day`, Codex 20x 10080-minute window), so each weekly quota lasts all 7 days. The line is the expected-use curve of section 1: uniform (1/7 a day) until the learned shape has data, then the learned shape. Section 3.1 prices a vendor against it: use under the line is cheaper, use at 70% of it is normal, use above it is dearer, and a vendor far ahead of it is left for the other. The idea comes from per-day quota management in TL-ADE; no code is reused. | Erick, via coordinator |
+| D13 (R88) | On a weekly plan the daily budget is 100% / 7 = 14.28% of the week per day, and Auto paces against that line for both vendors (Claude 20x `seven_day`, Codex 20x 10080-minute window), so each weekly quota lasts all 7 days. The line is the expected-use curve of section 1: uniform (1/7 a day) until the learned shape has data, then the learned shape. Section 3.1 prices a vendor against it: the safe pivot depends on time left, pricing pressure begins below the daily line, and the multiplier keeps increasing above it so a vendor far ahead is left for the other. The idea comes from per-day quota management in TL-ADE; no code is reused. | Erick, via coordinator |
+
+## R90: shared accounts and own spend (Erick, 2026-10-12)
+
+The owner's father shares both accounts. Account percentage movement is never Faber's own spend. The ledger meters
+Faber's requests in API-equivalent USD per turn, including cache reads and writes. Claude's native API-rated cumulative
+cost is differenced by session; it includes its sub-model work and cache lifetimes. Codex's reported token deltas are
+priced at the published standard API rates, per request rather than from a multi-request turn's aggregate. Requests
+above 272,000 prompt tokens use double input/cache prices and 1.5 times output prices on the supported GPT-6 models.
+When the request-sized context is absent, a large aggregate is a marked lower bound, excluded from learning; duplicate,
+missing or regressed readings cannot re-charge earlier tokens. Missing counters are incomplete, never fabricated zeroes. User turns,
+router questions, quota pulses and hand-over summaries all count. Estimates, monetary caps and the board use only
+this own-spend ledger; account credit balances and account percentage changes cannot write own USD.
+
+The whole account stays on R88's approximately 14.28% per day line. Use by someone else shrinks the account room
+available to Faber. The hourly shape still describes the whole account; it does not attribute money to Faber.
+Own-cost weights and plan size accept only non-overlapping, fully metered stretches covered by Faber's turns, with
+at most 120 seconds of uncovered time. A drop during idle time, or more than twice the previously explained movement
+plus one point of reading resolution, is foreign use and excluded. Foreign changes never trigger a capacity reset.
+
+Prices checked on 2026-10-12: [Claude API pricing](https://platform.claude.com/docs/en/about-claude/pricing) and
+[OpenAI API pricing](https://developers.openai.com/api/docs/pricing). These are API-equivalent values, not subscription invoices.
 
 ## 1. What Auto knows about each subscription
 
@@ -95,13 +116,13 @@ Derived values, per window:
     about a third). Because outside use can only add points, the **lower quartile** of the last 20 accepted stretches is
     kept, not the median. It can still be too high when outside use hides inside the stretches, so it is a ceiling on
     the truth, and when the median is more than 2x the lower quartile the model's estimate is marked unreliable and `w`
-    stays 1. For Codex the cost is the credits implied by the tokens and the published rates (only the ratio between
-    models matters). For Claude it is the per-turn `total_cost_usd` (section 6), which covers sub-model calls too.
+    stays 1. Both vendors use Faber's own per-turn API-equivalent USD under R90: Codex's individual request deltas at
+    the applicable context tier, and Claude's native cumulative-cost difference, which covers sub-model calls too.
   - `w` of a model is its raw points per dollar over the median raw value of its vendor's models, clamped to 0.5 to 2,
     and 1 until 8 accepted stretches exist for it.
   - The raw **capacity** of a vendor (the median raw points per dollar over all its models, before dividing and
-    clamping) is kept too. It is the plan-size signal: a change of more than 2x in it is a plan change (section 2),
-    because the normalized `w` would hide a fourfold change.
+    clamping) is kept too. It is the plan-size signal: a change of more than 2x over models common to both samples is
+    a plan change (section 2); newly qualifying models cannot create a false change in the median.
 
 A vendor gets one state from its **worst vendor-wide window** (the one with the highest price multiplier `m`, section
 3). A family window adds to the state only of that family's profiles and never changes the vendor's label. The state is
@@ -129,7 +150,10 @@ Steady heavy outside use already raises the projection, and D4 says it is not an
   `usage-billed`, from `authMode` (Codex) and from `claude auth status` (a Console or API-key sign-in is reported as
   `api_key`, and then has no `subscriptionType`). Auto only routes to a vendor whose verdict is `subscription`; a
   `usage-billed` login is used only when the user picks that vendor by hand. A plan the user types in never overrides
-  this verdict and never authorizes usage-based billing.
+  this verdict and never authorizes usage-based billing. An inherited API key, auth token, cloud-provider switch or
+  custom endpoint is an independent usage-billed override; only environment variable names are inspected, never their
+  credential values. `apiKeySource` and `apiProvider` also take precedence over `subscriptionType`. A Claude turn that
+  finishes without a quota notice clears subscription confirmation after its own cost is settled.
 - **Claude Code**: `claude auth status` prints `subscriptionType` (for example `max`). It does not say 5x or 20x.
   `engine/src/account.rs` already runs this command without a shell for the sign-in check; the same run now also keeps
   `subscriptionType` and drops everything else in the output. It runs on start and about every 15 minutes while Faber is
@@ -173,7 +197,7 @@ recordings and the profile numbers; what changed, and why:
 For each window with a live reading: `elapsed` is the profile-weighted share of the window already passed, `left = 1 -
 elapsed`, `p = used / max(elapsed, 0.10)`, `margin = 0.3 x sqrt(left)`, and
 
-`m = clamp((margin / (1 - p))², 0.1, 25)`, and `m = 25` when `p >= 1`.
+`m = clamp((margin / (1 - p))², 0.1, 25)`, and `m = 25 x p` when `p >= 1` (bounded by the maximum plausible projection, 15).
 
 The **vendor's `m`** is the highest over its vendor-wide windows. A **profile's `m`** is the highest of its vendor's `m`
 and the `m` of its own family window, if there is one; so a full Opus window prices Opus up and leaves Sonnet and Haiku
@@ -184,7 +208,7 @@ gives 0.14, 0.94 or more gives 25. With one day of 7 left (`margin` 0.113): `p` 
 rate; with no history any 3 points count), while the plan is relearned or not known (section 2), or while the vendor's
 verdict is not `subscription`. A vendor with no live reading has `m = 1`.
 
-**The daily line (D13).** `elapsed` is the uniform share (day 1 of 7 = 1/7 = 14.28%) until the learned shape has data, so with nothing learned a vendor that has used more than 14.28% of its week per day elapsed is priced up, and one that has used less than 70% of that is discounted. The same formula runs for both vendors; there is no separate daily counter, and engine test `a_week_spent_faster_than_one_seventh_a_day_is_priced_up_on_either_vendor` pins it.
+**The daily line (D13).** `elapsed` is the uniform share (day 1 of 7 = 1/7 = 14.28%) until the learned shape has data, so 14.28% of the account per day is the reference line. Pricing pressure begins below that line at `p > 1 - 0.3 x sqrt(left)`; the line itself costs 25, and a vendor at twice its rate costs 50. A discount requires a projection below that safe pivot. Shared-account use always contributes to the projection. The same formula runs for both vendors; there is no separate daily counter, and engine test `a_week_spent_faster_than_one_seventh_a_day_is_priced_up_on_either_vendor` pins it.
 
 ### 3.2 The choice
 
@@ -479,7 +503,7 @@ the recordings in `tests/fixtures/` already shows these facts and defects:
   reads 3,185 tokens and writes 74. (The recording keeps no clock, so the gap is unknown; the measurement below fixes
   that.)
 - Codex's `inputTokens` **includes** `cachedInputTokens` (14,254 against 6,912 on a first turn; 14,290 against 14,080 on
-  the second, a 98.5% hit). `cacheWriteInputTokens` is always 0, as Codex bills no write.
+  the second, a 98.5% hit). `cacheWriteInputTokens` is 0 in these recordings. The driver must preserve reported write deltas; the current API publishes a write price, so missing fields cannot be treated as known zeroes (R90).
 - Codex `last` is the latest model call, `total` is the thread so far; a turn with tools makes several calls, so the
   per-turn usage is the difference of `total` across the turn, not `last`. After a `thread/resume` Codex sends one
   `tokenUsage/updated` **before** the new `turn/started`, carrying the thread so far (in `codex/resume.jsonl`: total

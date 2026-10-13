@@ -20,6 +20,8 @@ pub struct Cdp {
     next: u64,
     /// An outer deadline (a wait that polls) that every call under it must meet as well.
     deadline: Option<Instant>,
+    frame: Value,
+    loaded: Option<String>,
 }
 
 /// The time left until `deadline`. Zero is an error too, because a socket timeout of zero means "no timeout".
@@ -69,7 +71,9 @@ impl Cdp {
             let error = match page_url(port, deadline).and_then(|url| open(&url, deadline)) {
                 Ok(mut cdp) => {
                     // An offscreen window is never focused; without this it ignores keys until someone clicks it.
-                    let _ = cdp.call("Emulation.setFocusEmulationEnabled", json!({ "enabled": true }));
+                    cdp.set_deadline(Some(deadline));
+                    cdp.call("Emulation.setFocusEmulationEnabled", json!({ "enabled": true }))?;
+                    cdp.set_deadline(None);
                     return Ok(cdp);
                 }
                 Err(e) => e,
@@ -86,7 +90,7 @@ impl Cdp {
         std::mem::replace(&mut self.deadline, deadline)
     }
 
-    /// One protocol call. Events that arrive meanwhile are ignored. The whole call, the send and every read, shares one
+    /// One protocol call. Load events are retained even when they arrive before the reply. The whole call shares one
     /// deadline, so a page that never stops sending events cannot keep it from ending.
     pub fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
         let own = Instant::now() + CALL_LIMIT;
@@ -100,12 +104,7 @@ impl Cdp {
             if Instant::now() >= deadline { format!("timed out waiting for {what}") } else { format!("DevTools send: {e}") }
         })?;
         loop {
-            let message = self.socket.read().map_err(|e| {
-                // A read the socket cut short at the deadline is the deadline passing, not a broken socket.
-                if Instant::now() >= deadline { format!("timed out waiting for {what}") } else { format!("DevTools read ({method}): {e}") }
-            })?;
-            let Message::Text(text) = message else { continue };
-            let reply: Value = serde_json::from_str(text.as_str()).map_err(|e| format!("DevTools sent bad JSON: {e}"))?;
+            let reply = self.read(deadline, &what)?;
             if reply["id"] != json!(id) {
                 continue;
             }
@@ -114,6 +113,66 @@ impl Cdp {
                 None => Ok(reply["result"].clone()),
             };
         }
+    }
+
+    fn read(&mut self, deadline: Instant, what: &str) -> Result<Value, String> {
+        self.socket.get_mut().deadline = deadline;
+        loop {
+            left(deadline, what)?;
+            let message = self.socket.read().map_err(|e| {
+                if Instant::now() >= deadline { format!("timed out waiting for {what}") } else { format!("DevTools read ({what}): {e}") }
+            })?;
+            let Message::Text(text) = message else { continue };
+            let reply: Value = serde_json::from_str(text.as_str()).map_err(|e| format!("DevTools sent bad JSON: {e}"))?;
+            let params = &reply["params"];
+            match reply["method"].as_str() {
+                Some("Page.frameNavigated") if params["frame"]["parentId"].is_null() && !params["frame"]["id"].is_null() => {
+                    self.frame = params["frame"].clone();
+                }
+                Some("Page.lifecycleEvent") if params["name"] == "load" && params["frameId"] == self.frame["id"] => {
+                    self.loaded = params["loaderId"].as_str().map(str::to_string);
+                }
+                _ => {}
+            }
+            return Ok(reply);
+        }
+    }
+
+    /// Subscribes before inspecting the document. Chromium replays lifecycle events for an already loaded page.
+    pub fn wait_loaded(&mut self, deadline: Instant) -> Result<(), String> {
+        let deadline = self.deadline.map_or(deadline, |o| o.min(deadline));
+        let outer = self.set_deadline(Some(deadline));
+        let result = (|| {
+            self.call("Page.enable", json!({}))?;
+            self.frame = self.call("Page.getFrameTree", json!({}))?["frameTree"]["frame"].clone();
+            self.call("Page.setLifecycleEventsEnabled", json!({ "enabled": true }))?;
+            self.loaded_after(deadline, None)
+        })();
+        self.set_deadline(outer);
+        result
+    }
+
+    fn loaded_after(&mut self, deadline: Instant, previous: Option<&str>) -> Result<(), String> {
+        loop {
+            let loader = self.frame["loaderId"].as_str();
+            if loader.is_some() && loader == self.loaded.as_deref() && loader != previous && app_url(&self.frame["url"]) {
+                return Ok(());
+            }
+            self.read(deadline, "the app document to load")?;
+        }
+    }
+
+    /// A reload must replace the main document; neither its old load event nor an iframe can satisfy this wait.
+    pub fn reload(&mut self, deadline: Instant) -> Result<(), String> {
+        let deadline = self.deadline.map_or(deadline, |o| o.min(deadline));
+        let outer = self.set_deadline(Some(deadline));
+        let result = (|| {
+            let previous = self.frame["loaderId"].as_str().ok_or("the page has no loaded document")?.to_string();
+            self.call("Page.reload", json!({}))?;
+            self.loaded_after(deadline, Some(&previous))
+        })();
+        self.set_deadline(outer);
+        result
     }
 
     /// Runs a script in the page and returns its value (a promise is awaited).
@@ -283,10 +342,14 @@ fn page_url(port: u16, deadline: Instant) -> Result<String, String> {
     let targets: Vec<Value> = serde_json::from_slice(&body).map_err(|e| format!("the target list is not JSON: {e}"))?;
     targets
         .iter()
-        .filter(|t| t["type"] == "page" && !t["url"].as_str().unwrap_or_default().starts_with("devtools://"))
+        .filter(|t| t["type"] == "page" && app_url(&t["url"]))
         .find_map(|t| t["webSocketDebuggerUrl"].as_str())
         .map(str::to_string)
         .ok_or_else(|| "no page is listed yet".to_string())
+}
+
+fn app_url(url: &Value) -> bool {
+    url.as_str().is_some_and(|url| url.starts_with("http://tauri.localhost/") || url.starts_with("tauri://localhost/"))
 }
 
 fn open(url: &str, deadline: Instant) -> Result<Cdp, String> {
@@ -294,7 +357,7 @@ fn open(url: &str, deadline: Instant) -> Result<Cdp, String> {
     let addr: SocketAddr = host.parse().map_err(|e| format!("the DevTools address {host}: {e}"))?;
     let stream = TcpStream::connect_timeout(&addr, left(deadline, "the DevTools socket")?).map_err(|e| e.to_string())?;
     let (socket, _) = tungstenite::client(url, Limited { stream, deadline }).map_err(|e| format!("DevTools handshake: {e}"))?;
-    Ok(Cdp { socket, next: 0, deadline: None })
+    Ok(Cdp { socket, next: 0, deadline: None, frame: Value::Null, loaded: None })
 }
 
 #[cfg(test)]
@@ -327,6 +390,7 @@ mod tests {
                     let _ = stream.read(&mut sink);
                     let targets = json!([
                         { "type": "other", "url": "x", "webSocketDebuggerUrl": format!("ws://127.0.0.1:{port}/devtools/page/NOPE") },
+                        { "type": "page", "url": "about:blank", "webSocketDebuggerUrl": format!("ws://127.0.0.1:{port}/devtools/page/BLANK") },
                         { "type": "page", "url": "http://tauri.localhost/", "webSocketDebuggerUrl": format!("ws://127.0.0.1:{port}/devtools/page/P1") },
                     ])
                     .to_string();
@@ -341,13 +405,25 @@ mod tests {
                 }
                 let log = log.clone();
                 std::thread::spawn(move || {
-                    let mut socket = tungstenite::accept(stream).unwrap();
+                    #[allow(clippy::result_large_err)] // Tungstenite fixes the callback's error type.
+                    let mut socket = tungstenite::accept_hdr(stream, |request: &tungstenite::handshake::server::Request, response| {
+                        assert_eq!(request.uri().path(), "/devtools/page/P1", "never attach to the provisional blank target");
+                        Ok(response)
+                    })
+                    .unwrap();
                     while let Ok(Message::Text(text)) = socket.read() {
                         let request: Value = serde_json::from_str(text.as_str()).unwrap();
                         log.lock().unwrap().push(request.clone());
                         // An event before every answer: the client must skip it.
                         socket.send(Message::text(json!({ "method": "Page.frameNavigated", "params": {} }).to_string())).unwrap();
                         let reply = match request["method"].as_str().unwrap() {
+                            "Page.getFrameTree" => {
+                                json!({ "frameTree": { "frame": { "id": "main", "loaderId": "first", "url": "http://tauri.localhost/" } } })
+                            }
+                            "Page.setLifecycleEventsEnabled" => {
+                                socket.send(Message::text(json!({ "method": "Page.lifecycleEvent", "params": { "frameId": "main", "loaderId": "first", "name": "load" } }).to_string())).unwrap();
+                                json!({})
+                            }
                             "Runtime.evaluate" => match request["params"]["expression"].as_str().unwrap() {
                                 "boom" => {
                                     json!({ "result": { "type": "object" }, "exceptionDetails": { "text": "Uncaught", "exception": { "description": "Error: boom" } } })
@@ -365,6 +441,21 @@ mod tests {
                             json!({ "id": request["id"], "result": reply })
                         };
                         socket.send(Message::text(answer.to_string())).unwrap();
+                        if request["method"] == "Page.reload" {
+                            for event in [
+                                json!({ "method": "Page.lifecycleEvent", "params": { "frameId": "main", "loaderId": "first", "name": "load" } }),
+                                json!({ "method": "Page.frameNavigated", "params": { "frame": { "id": "main", "loaderId": "second", "url": "http://tauri.localhost/" } } }),
+                                json!({ "method": "Page.frameNavigated", "params": { "frame": { "id": "child", "parentId": "main", "loaderId": "second", "url": "http://tauri.localhost/" } } }),
+                                json!({ "method": "Page.lifecycleEvent", "params": { "frameId": "child", "loaderId": "second", "name": "load" } }),
+                            ] {
+                                socket.send(Message::text(event.to_string())).unwrap();
+                            }
+                            socket.get_mut().set_read_timeout(Some(Duration::from_millis(100))).unwrap();
+                            let error = socket.get_mut().peek(&mut [0u8; 1]).expect_err("no evaluation before the new main document loads");
+                            assert!(matches!(error.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut));
+                            socket.get_mut().set_read_timeout(None).unwrap();
+                            socket.send(Message::text(json!({ "method": "Page.lifecycleEvent", "params": { "frameId": "main", "loaderId": "second", "name": "load" } }).to_string())).unwrap();
+                        }
                     }
                 });
             }
@@ -385,6 +476,28 @@ mod tests {
         assert!(seen.lock().unwrap()[1]["params"]["awaitPromise"] == json!(true));
     }
 
+    #[test]
+    fn loading_retains_events_before_the_reply_and_reload_requires_the_new_main_document() {
+        let (port, seen) = mock();
+        let mut cdp = Cdp::connect(port, Duration::from_secs(5)).unwrap();
+        cdp.wait_loaded(Instant::now() + Duration::from_secs(2)).unwrap();
+        cdp.reload(Instant::now() + Duration::from_secs(2)).unwrap();
+        assert_eq!(cdp.eval("1 + 1").unwrap(), json!(2));
+        assert_eq!(cdp.frame["loaderId"], "second");
+        let methods: Vec<String> = seen.lock().unwrap().iter().map(|r| r["method"].as_str().unwrap().to_string()).collect();
+        assert_eq!(
+            methods,
+            [
+                "Emulation.setFocusEmulationEnabled",
+                "Page.enable",
+                "Page.getFrameTree",
+                "Page.setLifecycleEventsEnabled",
+                "Page.reload",
+                "Runtime.evaluate"
+            ]
+        );
+    }
+
     // A page that never stops sending events and never answers must not keep a call from ending on time.
     #[test]
     fn a_call_ends_at_its_deadline_even_while_events_keep_arriving() {
@@ -400,7 +513,7 @@ mod tests {
                     let mut sink = [0u8; 1024];
                     let _ = stream.read(&mut sink);
                     let body =
-                        json!([{ "type": "page", "url": "x", "webSocketDebuggerUrl": format!("ws://127.0.0.1:{port}/p") }]).to_string();
+                        json!([{ "type": "page", "url": "http://tauri.localhost/", "webSocketDebuggerUrl": format!("ws://127.0.0.1:{port}/p") }]).to_string();
                     write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}", body.len()).unwrap();
                     held.push(stream);
                     continue;
@@ -440,7 +553,7 @@ mod tests {
                     let mut sink = [0u8; 1024];
                     let _ = stream.read(&mut sink);
                     let body =
-                        json!([{ "type": "page", "url": "x", "webSocketDebuggerUrl": format!("ws://127.0.0.1:{port}/p") }]).to_string();
+                        json!([{ "type": "page", "url": "http://tauri.localhost/", "webSocketDebuggerUrl": format!("ws://127.0.0.1:{port}/p") }]).to_string();
                     write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}", body.len()).unwrap();
                     held.push(stream);
                     continue;

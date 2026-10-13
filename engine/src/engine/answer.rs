@@ -195,6 +195,7 @@ mod tests {
             clis: BTreeMap::new(),
             spawn: Arc::new(|_, _, _| Err(std::io::Error::other("no process in this test"))),
             windows: false,
+            claude_env_billed: false,
             max_warm: 1,
             idle: Duration::from_secs(60),
             runtime: tokio::runtime::Handle::current(),
@@ -232,10 +233,14 @@ mod tests {
                 session,
                 turn: turns.last().map(|t| t.0.to_string()),
                 break_pending: false,
+                answer_started: false,
                 used: 0,
                 cli: Cli { command: "claude".into(), prefix: vec![] },
                 resumed: false,
                 permissions: Permissions::Ask,
+                by_hand: true,
+                approved: false,
+                started: 0.0,
             };
             c.live.insert(id.clone(), live);
             c.refresh_running();
@@ -464,7 +469,7 @@ mod tests {
                     text: "hello".into(),
                     images: vec![],
                     files: vec![],
-                    choice: Choice { vendor: "claude".into(), model: None },
+                    choice: Choice { vendor: "claude".into(), model: None, effort: None },
                 });
                 let _ = done.send((listed, sent));
             }

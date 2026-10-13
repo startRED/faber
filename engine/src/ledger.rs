@@ -3,7 +3,7 @@
 //! the engine keeps one and writes it to `budget.json`.
 
 use crate::budget::{Billing, Reach, Shape, Snap, Window, vendor_wide, window_secs};
-use crate::learn::{Learned, Outside, Point, Span, Stretch, Weights, capacity_changed, outside, stretches, weights};
+use crate::learn::{Learned, Outside, Point, Span, Stretch, Weights, outside, same_models_changed, stretches, weights};
 use crate::model::Vendor;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -38,6 +38,9 @@ pub struct VendorLedger {
     pub readings: BTreeMap<String, Reading>,
     pub history: BTreeMap<String, Vec<Point>>,
     pub spans: Vec<Span>,
+    /// Own API-equivalent USD per local day, independent of account percentages.
+    pub own_spend: BTreeMap<i64, f64>,
+    pub unmetered: BTreeMap<i64, u32>,
     pub learned: Learned,
     pub weights: Weights,
     pub stretches: Vec<Stretch>,
@@ -48,15 +51,17 @@ pub struct VendorLedger {
     pub since: f64,
     pub relearn_until: f64,
     pub stretches_since: usize,
-    // What follows is about the moment, not the week: never written to disk.
+    // Billing and live reach are rechecked; paid-fallback evidence and own metering survive a restart.
     #[serde(skip)]
     pub billing: Billing,
     #[serde(skip)]
     pub reach: Reach,
     #[serde(skip)]
     pub overage_active: bool,
+    /// None means paid fallback is still possible until the CLI explicitly rules it out.
+    pub paid_fallback: Option<bool>,
     #[serde(skip)]
-    pub paid_fallback: bool,
+    pub credit_balance: Option<f64>,
     /// When a plan check last succeeded, and how many failed in a row since.
     #[serde(skip)]
     pub plan_seen_at: Option<f64>,
@@ -99,6 +104,7 @@ impl Ledger {
 
 impl VendorLedger {
     fn sanitize(&mut self) {
+        self.own_spend.retain(|_, cost| cost.is_finite() && *cost >= 0.0);
         self.readings.retain(|_, r| plausible(r.used, r.resets_at) && r.read_at.is_finite());
         for list in self.history.values_mut() {
             list.retain(|p| plausible(p.used, p.resets_at) && p.at.is_finite());
@@ -117,6 +123,7 @@ impl VendorLedger {
         {
             self.learned = Learned::default();
         }
+        self.weights.raw.retain(|_, r| r.is_finite() && *r > 0.0);
         self.weights.w.retain(|_, w| w.is_finite());
         self.weights.w.values_mut().for_each(|w| *w = w.clamp(0.5, 2.0));
         self.weights.capacity = self.weights.capacity.filter(|c| c.is_finite() && *c > 0.0);
@@ -129,9 +136,11 @@ impl VendorLedger {
 
     /// The window the week's shape and the weights are learned from: the shortest vendor-wide one, which moves the most
     /// points per unit of use. Only its readings are kept as a history.
-    pub fn primary(&self) -> Option<&str> {
+    pub fn primary(&self, now: f64) -> Option<&str> {
         self.readings
-            .keys()
+            .iter()
+            .filter(|(_, r)| r.resets_at > now)
+            .map(|(n, _)| n)
             .filter(|n| vendor_wide(n))
             .filter_map(|n| Some((window_secs(n)?, n.as_str())))
             .min_by(|a, b| a.0.total_cmp(&b.0))
@@ -140,14 +149,16 @@ impl VendorLedger {
 
     /// A reading of a window. Readings that make no sense (not a number, below 0 or far above 1) are dropped.
     pub fn record(&mut self, window: &str, used: f64, resets_at: f64, now: f64, offset: i64) {
-        if !plausible(used, resets_at) {
+        self.own_spend.retain(|_, cost| cost.is_finite() && *cost >= 0.0);
+        self.readings.retain(|_, r| r.resets_at > now);
+        if !plausible(used, resets_at) || resets_at <= now {
             return;
         }
         // Whole seconds and hundredths are all a reading holds; the file stays small.
         let (now, resets_at, used) = (now.round(), resets_at.round(), (used * 1000.0).round() / 1000.0);
         self.readings.insert(window.to_string(), Reading { used, resets_at, read_at: now });
         let point = Point { at: now, used, resets_at };
-        let primary = self.primary().map(String::from);
+        let primary = self.primary(now).map(String::from);
         self.history.retain(|name, _| Some(name) == primary.as_ref());
         if primary.as_deref() != Some(window) {
             return;
@@ -184,18 +195,18 @@ impl VendorLedger {
 
     /// Use from outside Faber over the last week, from the primary window.
     pub fn outside(&self, now: f64) -> Outside {
-        self.primary().map(|w| outside(&self.recent(w), &self.recent_spans(), now)).unwrap_or_default()
+        self.primary(now).map(|w| outside(&self.recent(w), &self.recent_spans(), now)).unwrap_or_default()
     }
 
     /// Learns the weights again from the stretches in the history. Returns true when the vendor's capacity moved by more
     /// than a factor of two, which is a plan change the name did not announce.
     pub fn learn_weights(&mut self, now: f64) -> bool {
-        let Some(window) = self.primary().map(String::from) else { return false };
+        let Some(window) = self.primary(now).map(String::from) else { return false };
         let found = stretches(&self.recent(&window), &self.recent_spans());
         self.stretches = found.iter().rev().take(KEEP_STRETCHES).rev().cloned().collect();
         self.stretches_since = found.len();
         let fresh = weights(&found);
-        let changed = matches!((self.weights.capacity, fresh.capacity), (Some(old), Some(new)) if capacity_changed(old, new));
+        let changed = same_models_changed(&self.weights, &fresh);
         if changed {
             self.restart(now);
         } else {
@@ -264,6 +275,7 @@ impl VendorLedger {
         let windows = self
             .readings
             .iter()
+            .filter(|(_, r)| r.resets_at > now)
             .map(|(name, r)| {
                 (
                     name.clone(),
@@ -276,10 +288,30 @@ impl VendorLedger {
             billing: self.billing,
             reach: self.reach,
             overage_active: self.overage_active,
-            paid_fallback: self.paid_fallback,
+            paid_fallback: self.paid_fallback.unwrap_or(true),
             jumped: self.outside(now).jumped(),
             relearning: self.relearning(now),
             plan_ok: self.plan_ok(now),
+        }
+    }
+}
+
+impl VendorLedger {
+    pub fn spend(&mut self, cost: Option<f64>, incomplete: bool, now: f64, offset: i64) {
+        let day = ((now + offset as f64) / 86_400.0).floor() as i64;
+        if let Some(cost) = cost.filter(|c| c.is_finite() && *c >= 0.0) {
+            *self.own_spend.entry(day).or_default() += cost;
+        }
+        if incomplete || cost.is_none() {
+            *self.unmetered.entry(day).or_default() += 1;
+        }
+        self.own_spend.retain(|d, _| *d >= day - 30);
+        self.unmetered.retain(|d, _| *d >= day - 30);
+        while self.own_spend.len() > 31 {
+            self.own_spend.pop_first();
+        }
+        while self.unmetered.len() > 31 {
+            self.unmetered.pop_first();
         }
     }
 }

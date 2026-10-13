@@ -1,7 +1,7 @@
 //! The engine: conversations, live CLI sessions, permissions, branches and attachments.
 
 use crate::account::{self, AccountStatus};
-use crate::budget::Billing;
+use crate::budget::{Billing, Purpose, Reach, Why, family_of};
 use crate::claude::{ClaudeLaunch, ClaudeOptions, EventSink, start_claude};
 use crate::cli::Cli;
 use crate::codex::read_codex_limits;
@@ -11,7 +11,7 @@ use crate::learn::Span;
 use crate::ledger::{Ledger, plausible};
 use crate::model::*;
 use crate::proc::Spawner;
-use crate::router::{Choice, Pick, pick_model};
+use crate::router::{Choice, Effort, Pick, pick_model};
 use crate::signals::Signals;
 use crate::store::Store;
 use crate::usage;
@@ -28,12 +28,16 @@ use uuid::Uuid;
 mod answer;
 mod auto;
 mod pulse;
+mod recovery;
+mod usage_view;
+pub use usage_view::{VendorUsage, WindowUsage};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum AppEvent {
     Message { conversation_id: String, message: Box<Message> },
     Quota { vendor: Vendor, window: String, used: f64, resets_at: f64 },
+    Usage { vendors: Vec<VendorUsage> },
     Running { revision: u64, items: Vec<RunningItem> },
     List,
 }
@@ -51,6 +55,8 @@ pub struct EngineOptions {
     pub clis: BTreeMap<Vendor, Cli>,
     pub spawn: Spawner,
     pub windows: bool,
+    /// Whether the shell found an environment override that bills Claude requests per use.
+    pub claude_env_billed: bool,
     /// At most this many idle Claude processes stay ready; Codex conversations share one process and do not count.
     pub max_warm: usize,
     /// An idle Claude process closes after this long; its next turn resumes the same session.
@@ -108,6 +114,7 @@ pub struct AppState {
     /// The latest reading of each vendor's quota windows, with the time each resets. The screen decides which count as
     /// expired; the engine reports what the CLIs said.
     pub quotas: Vec<QuotaReading>,
+    pub usage: Vec<VendorUsage>,
 }
 
 /// How to continue a conversation in the CLI's own terminal interface.
@@ -131,12 +138,16 @@ struct Live {
     /// The answer being written right now.
     turn: Option<String>,
     break_pending: bool,
+    answer_started: bool,
     used: u64,
     /// The CLI this process was started with; a replaced CLI starts a new process on the next turn.
     cli: Cli,
     /// The process continues a session an earlier process began.
     resumed: bool,
     permissions: Permissions,
+    by_hand: bool,
+    approved: bool,
+    started: f64,
 }
 
 const HISTORY_LIMIT: usize = 20_000;
@@ -223,7 +234,11 @@ struct Core {
     last_pulse: f64,
     /// The PC's offset from UTC in seconds, as the screen reports it.
     utc_offset: i64,
+    offset_known: bool,
+    watch_requested: bool,
     clock: Option<Clock>,
+    transfers: HashMap<String, recovery::Transfer>,
+    credit: Option<(String, String, Vendor)>,
 }
 
 /// A handle to the engine; clones share the same engine.
@@ -263,7 +278,11 @@ impl Engine {
                 ledger_saved: 0.0,
                 last_pulse: 0.0,
                 utc_offset: 0,
+                offset_known: false,
+                watch_requested: false,
                 clock: None,
+                transfers: HashMap::new(),
+                credit: None,
             })
         });
         Engine { core, runtime }
@@ -279,7 +298,17 @@ impl Engine {
     }
     /// The PC's offset from UTC in seconds (east is positive). The engine has no time zone database, so the screen says.
     pub fn set_utc_offset(&self, secs: i64) {
-        self.with(|c| c.utc_offset = secs.clamp(-14 * 3600, 14 * 3600))
+        let start_watching = self.with(|c| {
+            let start = !c.offset_known && c.watch_requested;
+            c.utc_offset = secs.clamp(-14 * 3600, 14 * 3600);
+            c.offset_known = true;
+            c.wake_waiting();
+            c.emit_usage();
+            start
+        });
+        if start_watching {
+            self.watch_accounts();
+        }
     }
     /// Replaces the clock; the quota arithmetic reads the time through it.
     pub fn set_time_source(&self, clock: Clock) {
@@ -303,18 +332,30 @@ impl Engine {
             match vendor {
                 Vendor::Claude => {
                     let found = account::claude_account(&cli, &spawn, &cwd, timeout).await;
-                    self.with(|c| c.claude_plan_checked(found));
+                    self.with(|c| {
+                        c.claude_plan_checked(found);
+                        c.emit_usage();
+                    });
                 }
                 Vendor::Codex => {
                     let events = read_codex_limits(&cli.command, &cwd, windows, spawner(&spawn, &cli), timeout).await;
-                    self.with(|c| c.codex_plan_checked(events));
+                    self.with(|c| {
+                        c.codex_plan_checked(events);
+                        c.emit_usage();
+                    });
                 }
             }
         }
     }
-    /// Checks the plans now and every quarter of an hour while Faber runs. The shell starts it once.
+    /// Checks the plans once the screen supplies its local offset, then every quarter of an hour. The shell starts it once.
     pub fn watch_accounts(&self) {
-        let (me, runtime) = (self.with(|c| c.me.clone()), self.runtime.clone());
+        let Some(me) = self.with(|c| {
+            c.watch_requested = true;
+            c.offset_known.then(|| c.me.clone())
+        }) else {
+            return;
+        };
+        let runtime = self.runtime.clone();
         let handle = runtime.clone();
         runtime.spawn(async move {
             loop {
@@ -332,6 +373,7 @@ impl Engine {
             if !plan.is_empty() {
                 c.ledger.of_mut(vendor).typed_plan = Some(plan);
                 c.save_ledger(true);
+                c.emit_usage();
             }
         })
     }
@@ -429,6 +471,16 @@ impl Engine {
     }
     pub fn shutdown(&self) {
         self.with(|c| {
+            let active: Vec<_> = c.live.keys().cloned().collect();
+            for id in active {
+                c.note_turn(&id, None, true);
+            }
+            let ids: Vec<_> = c.convs.keys().cloned().collect();
+            for id in ids {
+                c.stop_waiting(&id);
+            }
+            c.transfers.clear();
+            c.credit = None;
             for (_, l) in c.live.drain() {
                 l.session.close();
             }
@@ -468,12 +520,18 @@ impl Core {
         self.ledger.of_mut(vendor).record(window, used, resets_at, now, self.utc_offset);
         self.save_ledger(false);
         (self.emit)(AppEvent::Quota { vendor, window: window.to_string(), used, resets_at });
+        self.stop_unapproved_paid(vendor, false);
+        self.emit_usage();
     }
 
     /// What a CLI said about the account: merged into what the ledger knows, field by field.
     fn apply_signals(&mut self, vendor: Vendor, s: Signals) {
         let now = self.secs();
         let v = self.ledger.of_mut(vendor);
+        let spent = matches!((v.credit_balance, s.credit_balance), (Some(before), Some(after)) if after < before);
+        if s.credit_balance.is_some() {
+            v.credit_balance = s.credit_balance;
+        }
         if let Some(reach) = s.reach {
             v.reach = reach;
         }
@@ -481,7 +539,7 @@ impl Core {
             v.overage_active = on;
         }
         if let Some(possible) = s.paid_fallback {
-            v.paid_fallback = possible;
+            v.paid_fallback = Some(possible);
         }
         if let Some(billing) = s.billing {
             v.billing = billing;
@@ -489,17 +547,88 @@ impl Core {
         if s.plan.is_some() {
             v.plan_detected(s.plan, now);
         }
+        self.stop_unapproved_paid(vendor, spent);
+        self.emit_usage();
+    }
+
+    fn stop_unapproved_paid(&mut self, vendor: Vendor, spent: bool) {
+        let v = self.ledger.of(vendor);
+        let paid = spent || v.overage_active || (v.paid_fallback.unwrap_or(true) && v.snap(self.secs()).exhausted(self.secs()));
+        let unknown = v.billing == Billing::Unknown;
+        let billed = v.billing == Billing::UsageBilled;
+        let stopped: Vec<String> = self
+            .live
+            .iter()
+            .filter(|(_, l)| {
+                l.vendor == vendor
+                    && l.turn.is_some()
+                    && ((!l.by_hand && (unknown || billed)) || (paid && !l.approved && !(l.by_hand && billed)))
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        if paid && !stopped.is_empty() {
+            self.ledger.of_mut(vendor).reach = Reach::Out(None);
+        }
+        for id in stopped {
+            self.note_turn(&id, None, true);
+            if let Some(l) = self.live.remove(&id) {
+                l.session.close();
+            }
+            if paid && !unknown && !billed && self.transfers.get(&id).is_some_and(|t| !t.by_hand) {
+                if let Err(error) = self.recover(&id, false)
+                    && let Some(reply) = self.transfers.get(&id).map(|t| t.reply.clone())
+                {
+                    self.fail_reply(&id, &reply, error);
+                }
+                continue;
+            }
+            if let Some(m) = self.convs.get_mut(&id).and_then(|c| c.messages.last_mut()) {
+                m.status = Some(Status::Stopped);
+                m.permissions = None;
+                m.error = Some(
+                    if unknown {
+                        "error.billingUnknown"
+                    } else if billed {
+                        "error.billedPerUse"
+                    } else {
+                        "error.quotaOut"
+                    }
+                    .into(),
+                );
+                let reply_id = m.id.clone();
+                self.finish(&id, Some(reply_id));
+            }
+        }
     }
 
     /// A request Faber made itself (an answer, a router question, a pulse): the learning has to know when it ran, so that use
     /// it did not cause can be told from use it did.
-    fn note_span(&mut self, vendor: Vendor, start: f64, model: &str, cost: Option<f64>) {
-        let end = self.secs();
-        self.ledger.of_mut(vendor).span(Span { start, end, model: model.to_string(), cost });
+    fn note_span(&mut self, vendor: Vendor, start: f64, model: &str, cost: Option<f64>, incomplete: bool) {
+        let now = self.secs();
+        let v = self.ledger.of(vendor);
+        let end =
+            v.primary(now).and_then(|name| v.readings.get(name)).map(|r| r.read_at).filter(|at| *at >= start && *at <= now).unwrap_or(now);
+        self.ledger.of_mut(vendor).spend(cost, incomplete, now, self.utc_offset);
+        self.ledger.of_mut(vendor).span(Span { start, end, model: model.to_string(), cost, incomplete });
+        self.ledger.of_mut(vendor).learn_weights(now);
+        self.save_ledger(true);
+        self.emit_usage();
+    }
+
+    fn note_turn(&mut self, conv: &str, cost: Option<f64>, incomplete: bool) {
+        let Some(l) = self.live.get(conv).filter(|l| l.started > 0.0) else { return };
+        let (vendor, start, model) = (l.vendor, l.started, l.running.clone().or_else(|| l.model.clone()).unwrap_or_default());
+        self.note_span(vendor, start, &model, cost, incomplete);
+        if let Some(l) = self.live.get_mut(conv) {
+            l.started = 0.0;
+        }
     }
 
     fn claude_plan_checked(&mut self, found: Option<Signals>) {
-        let Some(s) = found else { return self.ledger.claude.plan_failed() };
+        let Some(mut s) = found else { return self.ledger.claude.plan_failed() };
+        if self.opts.claude_env_billed && s.billing == Some(Billing::Subscription) {
+            s.billing = Some(Billing::UsageBilled);
+        }
         let (named, by_use) = (s.plan.is_some(), s.billing == Some(Billing::UsageBilled));
         self.apply_signals(Vendor::Claude, s);
         if !named && !by_use {
@@ -570,6 +699,7 @@ impl Core {
             let mut c = self.store.get(id)?;
             // Read from disk, so no CLI runs it: an answer cut off by a crash shows as stopped, not typing forever.
             c.messages.iter_mut().for_each(settle);
+            self.restore_recovery(&mut c);
             self.convs.insert(id.to_string(), c);
         }
         self.convs.get_mut(id)
@@ -577,7 +707,26 @@ impl Core {
 
     fn save(&self, id: &str) {
         if let Some(c) = self.convs.get(id) {
-            self.store.save(c);
+            if c.messages
+                .last()
+                .is_none_or(|m| !matches!(m.error.as_deref(), Some("error.quotaOut" | "error.quotaWait")) && m.recovery.is_none())
+            {
+                self.store.save(c);
+                return;
+            }
+            let mut saved = c.clone();
+            if let Some(m) = saved.messages.last_mut() {
+                m.recovery = self
+                    .transfers
+                    .get(id)
+                    .filter(|t| {
+                        t.reply == m.id
+                            && m.status == Some(Status::Error)
+                            && matches!(m.error.as_deref(), Some("error.quotaOut" | "error.quotaWait"))
+                    })
+                    .map(|t| Recovery { pick: t.pick.clone(), text: t.text.clone(), by_hand: t.by_hand, retried: t.retried });
+            }
+            self.store.save(&saved);
         }
     }
 
@@ -591,6 +740,7 @@ impl Core {
             settings: self.store.settings(),
             running: self.running.clone(),
             quotas,
+            usage: self.usage(),
         }
     }
 
@@ -601,6 +751,8 @@ impl Core {
             appearance: patch.appearance.or(before.appearance),
             user_hooks: patch.user_hooks.or(before.user_hooks),
             permissions: patch.permissions.or(before.permissions),
+            notifications: patch.notifications.or(before.notifications),
+            notification_sound: patch.notification_sound.or(before.notification_sound),
             language: patch.language.or(before.language),
             setup: patch.setup.or(before.setup),
             experience: patch.experience.or(before.experience),
@@ -683,7 +835,15 @@ impl Core {
                 self.refresh_running();
                 return;
             }
-            EngineEvent::Break => {
+            EngineEvent::Break { final_answer } => {
+                if final_answer && self.live.get(conv).is_some_and(|l| !l.answer_started) {
+                    if let Some(m) = self.turn(conv) {
+                        m.activity_end = Some(m.text.encode_utf16().count());
+                    }
+                    if let Some(l) = self.live.get_mut(conv) {
+                        l.answer_started = true;
+                    }
+                }
                 let has_text = self.turn(conv).is_some_and(|m| !m.text.is_empty());
                 if let (true, Some(l)) = (has_text, self.live.get_mut(conv)) {
                     l.break_pending = true;
@@ -695,6 +855,7 @@ impl Core {
                 let Some(m) = self.turn(conv) else { return };
                 if pending && !delta.is_empty() {
                     m.text.push_str("\n\n");
+                    m.text_breaks.get_or_insert_default().push(m.text.encode_utf16().count());
                 }
                 m.text.push_str(&delta);
                 if pending
@@ -710,7 +871,11 @@ impl Core {
                 }
             }
             EngineEvent::Tool { id, name, input } => {
+                let final_answer = self.live.get(conv).is_some_and(|l| l.answer_started);
                 if let Some(m) = self.turn(conv) {
+                    if !final_answer {
+                        m.activity_end = Some(m.text.encode_utf16().count());
+                    }
                     m.tools.get_or_insert_default().push(ToolUse { id, name, input, ok: None, output: None });
                 }
             }
@@ -741,30 +906,69 @@ impl Core {
                 cache_write_tokens,
                 cache_write_1h_tokens,
                 incomplete,
-                ..
+                reason,
             } => {
-                // The CLI reports a total for the whole conversation; the turn costs what is new since the last total.
+                // Claude reports a conversation total; Codex has already priced this turn's individual requests.
                 let session = self.convs.get(conv).and_then(|c| c.sessions.get(&vendor)).cloned().unwrap_or_default();
                 let fresh = self.live.get(conv).is_some_and(|l| !l.resumed);
                 let before = self.convs.get(conv).and_then(|c| c.cost_base.get(&vendor));
-                let settled = usage::settle(before, &session, fresh, cost_total_usd);
+                let settled = if vendor == Vendor::Codex {
+                    usage::Settled { cost: cost_total_usd.filter(|cost| cost.is_finite() && *cost >= 0.0), base: None }
+                } else {
+                    usage::settle(before, &session, fresh, cost_total_usd)
+                };
                 if let (Some(base), Some(c)) = (settled.base, self.convs.get_mut(conv)) {
                     c.cost_base.insert(vendor, base);
                 }
+                let model = self.live.get(conv).and_then(|l| l.running.as_deref().or(l.model.as_deref())).unwrap_or_default();
+                let native = settled.cost;
+                let cost = native.or_else(|| {
+                    usage::api_price_for_prompt(
+                        model,
+                        input_tokens,
+                        output_tokens,
+                        cache_read_tokens,
+                        cache_write_tokens,
+                        cache_write_1h_tokens,
+                        if vendor == Vendor::Codex { 0 } else { input_tokens },
+                    )
+                });
+                let missing = cost.is_none() || ((native.is_none() || vendor == Vendor::Codex) && incomplete);
+                self.note_turn(conv, cost, missing);
                 if let Some(m) = self.turn(conv) {
                     m.status = Some(if ok { Status::Done } else { Status::Stopped });
-                    m.cost_usd = settled.cost;
+                    m.cost_usd = cost.map(|cost| m.cost_usd.unwrap_or(0.0) + cost).or(m.cost_usd);
                     m.input_tokens = Some(input_tokens);
                     m.output_tokens = Some(output_tokens);
                     m.cache_read_tokens = Some(cache_read_tokens);
                     m.cache_write_tokens = Some(cache_write_tokens);
                     m.cache_write_1h_tokens = Some(cache_write_1h_tokens);
-                    m.incomplete = incomplete.then_some(true);
+                    m.incomplete = (incomplete || m.incomplete.unwrap_or(false)).then_some(true);
                     m.permissions = None;
+                }
+                if !ok && self.transfers.get(conv).is_some_and(|t| t.moving) {
+                    if let Some(reply) = turn_id {
+                        self.move_failed(conv, &reply);
+                    }
+                    return;
+                }
+                if !ok && recovery::plan_limit(&reason) {
+                    self.ledger.of_mut(vendor).reach = Reach::Out(None);
+                    self.save_ledger(true);
+                    if let Some(l) = self.live.remove(conv) {
+                        l.session.close();
+                    }
+                    if let Err(e) = self.recover(conv, false)
+                        && let Some(reply) = turn_id
+                    {
+                        self.fail_reply(conv, &reply, e);
+                    }
+                    return;
                 }
                 return self.finish(conv, turn_id);
             }
             EngineEvent::Error { message, fatal } => {
+                let limited = fatal && recovery::plan_limit(&message);
                 if let Some(m) = self.turn(conv) {
                     m.error = Some(message);
                     if fatal {
@@ -773,7 +977,26 @@ impl Core {
                     }
                 }
                 if fatal {
-                    self.live.remove(conv);
+                    self.note_turn(conv, None, true);
+                    if let Some(l) = self.live.remove(conv) {
+                        l.session.close();
+                    }
+                    if self.transfers.get(conv).is_some_and(|t| t.moving) {
+                        if let Some(reply) = turn_id {
+                            self.move_failed(conv, &reply);
+                        }
+                        return;
+                    }
+                    if limited {
+                        self.ledger.of_mut(vendor).reach = Reach::Out(None);
+                        self.save_ledger(true);
+                        if let Err(e) = self.recover(conv, false)
+                            && let Some(reply) = turn_id
+                        {
+                            self.fail_reply(conv, &reply, e);
+                        }
+                        return;
+                    }
                     return self.finish(conv, turn_id);
                 }
             }
@@ -782,6 +1005,7 @@ impl Core {
     }
 
     fn finish(&mut self, conv: &str, turn_id: Option<String>) {
+        self.transfers.remove(conv);
         if let Some(l) = self.live.get_mut(conv) {
             l.turn = None;
         }
@@ -923,16 +1147,60 @@ impl Core {
         server
     }
 
+    /// The gate before a user turn (3.4): the everyday default and the profile of an existing conversation are checked here
+    /// too, not only what the table picked. A vendor the user picked by hand is allowed even when it is billed by use.
+    fn gate_turn(&self, pick: &Pick, by_hand: bool) -> Result<(), String> {
+        self.gate_turn_approved(pick, by_hand, false)
+    }
+    fn gate_turn_approved(&self, pick: &Pick, by_hand: bool, approved: bool) -> Result<(), String> {
+        let family = pick.model.as_deref().and_then(family_of);
+        self.allows(pick.vendor, family, Purpose::UserTurn { by_hand }, approved).map_err(|why| {
+            match why {
+                Why::Billing if self.ledger.of(pick.vendor).billing == Billing::Unknown => "error.billingUnknown",
+                Why::Billing => "error.billedPerUse",
+                Why::Exhausted | Why::Window | Why::Paid => "error.quotaOut",
+            }
+            .to_string()
+        })
+    }
+
     /// Hands a turn to the conversation's CLI, starting the CLI if needed.
-    fn start(&mut self, id: &str, reply_id: &str, pick: &Pick, text: String, images: Vec<Image>) -> Result<(), String> {
+    fn start(&mut self, id: &str, reply_id: &str, pick: &Pick, text: String, images: Vec<Image>, by_hand: bool) -> Result<(), String> {
+        let approved = self.credit.as_ref().is_some_and(|(c, r, v)| c == id && r == reply_id && *v == pick.vendor);
+        self.gate_turn_approved(pick, by_hand, approved)?;
         self.launch(id, pick)?;
+        self.credit = None;
+        if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id)) {
+            m.vendor = Some(pick.vendor);
+            m.model = pick.model.clone();
+            m.effort = Some(pick.effort.clone());
+            m.wait_until = None;
+            if m.reason.as_deref() == Some("reason.waiting") {
+                m.reason = Some(pick.reason.clone());
+            }
+            m.error = None;
+            m.status = Some(Status::Streaming);
+            m.permissions = None;
+        }
         if let Some(running) = self.live.get(id).and_then(|l| l.running.clone())
             && let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id))
         {
             m.model = Some(running);
         }
+        let started = self.secs();
         if let Some(l) = self.live.get_mut(id) {
+            l.started = started;
             l.turn = Some(reply_id.to_string());
+            // Same-reply quota continuations must keep an already-visible answer outside activity.
+            l.answer_started = self
+                .convs
+                .get(id)
+                .and_then(|c| c.messages.last())
+                .is_some_and(|m| m.id == reply_id && m.activity_end.unwrap_or(0) < m.text.encode_utf16().count());
+            l.break_pending = false;
+            l.by_hand = by_hand;
+            l.approved = approved;
+            l.break_pending |= self.convs.get(id).and_then(|c| c.messages.last()).is_some_and(|m| !m.text.is_empty());
             l.session.send(UserTurn { text, images });
         }
         self.push(id, Some(reply_id), true);
@@ -1005,10 +1273,14 @@ impl Core {
                 session,
                 turn: None,
                 break_pending: false,
+                answer_started: false,
                 used: self.tick,
                 cli,
                 resumed,
                 permissions,
+                by_hand: false,
+                approved: false,
+                started: 0.0,
             },
         );
         // ponytail: count-based limit on idle Claude processes; a RAM budget across all CLIs comes with parallel workers.
@@ -1037,6 +1309,7 @@ impl Core {
         let c = Conversation {
             id: new_id(),
             title: String::new(),
+            choice: None,
             area,
             project_id,
             sessions: BTreeMap::new(),
@@ -1057,7 +1330,8 @@ impl Core {
         let fallback = pick_model(&req.choice, &self.vendors(), self.codex_recommended.as_deref()).ok_or("error.noSubscription")?;
         let existing = req.conversation_id.as_deref().and_then(|id| self.load(id).map(|c| c.id.clone()));
         if let Some(id) = &existing
-            && self.live.get(id).is_some_and(|l| l.turn.is_some())
+            && (self.live.get(id).is_some_and(|l| l.turn.is_some())
+                || self.convs.get(id).and_then(|c| c.messages.last()).is_some_and(|m| m.status == Some(Status::Streaming)))
         {
             return Err("error.busy".into());
         }
@@ -1081,6 +1355,7 @@ impl Core {
         let auto = req.choice.vendor == "auto";
         let route = if auto { self.next_route(&id) } else { None };
         let c = self.convs.get_mut(&id).ok_or("error.conversationGone")?;
+        c.choice = Some(Choice { effort: (!auto).then(|| req.choice.effort.unwrap_or(Effort::Medium)), ..req.choice.clone() });
         let routing = route.is_some();
         let pick = match &route {
             Some(Some(before)) => before.clone(),
@@ -1102,12 +1377,7 @@ impl Core {
             .iter()
             .map(|p| if c.area == Area::Chat { format!("attachments/{}", name(p)) } else { p.to_string_lossy().into_owned() })
             .collect();
-        let text = if shown.is_empty() {
-            req.text.clone()
-        } else {
-            let place = if c.area == Area::Chat { " (in your working folder)" } else { "" };
-            format!("{}\n\nAttached files{place}:\n{}", req.text, shown.iter().map(|p| format!("- {p}")).collect::<Vec<_>>().join("\n"))
-        };
+        let text = recovery::with_attachments(&req.text, c.area, &shown);
         let mut question = Message::new(new_id(), Role::User, req.text.clone(), at);
         question.images = (!req.images.is_empty()).then(|| req.images.clone());
         question.attachments = Some(saved.iter().map(|p| name(p)).collect());
@@ -1128,6 +1398,18 @@ impl Core {
         self.list_changed();
         // An open conversation only grows through these events, so the question goes out as well as the answer.
         self.emit_message(&id, &question_id);
+        self.transfers.insert(
+            id.clone(),
+            recovery::Transfer {
+                reply: reply_id.clone(),
+                pick: pick.clone(),
+                text: text.clone(),
+                images: req.images.clone(),
+                by_hand: !auto,
+                retried: false,
+                moving: false,
+            },
+        );
         let text = if joining_late { with_history(&history, &text) } else { text };
         if let Some(before) = route {
             let only = before.as_ref().map(|p| p.vendor);
@@ -1135,16 +1417,18 @@ impl Core {
             self.push(&id, Some(&reply_id), true);
             let (me, conv, images) = (self.me.clone(), id.clone(), req.images);
             tokio::spawn(async move {
-                let routed = tokio::time::timeout(auto::ROUTE_BUDGET, route).await.ok().and_then(|r| r.ok()).flatten();
-                // A conversation under way only moves up.
-                let routed = routed.filter(|r| before.as_ref().is_none_or(|p| !r.weaker_than(p)));
+                let verdict = tokio::time::timeout(auto::ROUTE_BUDGET, route).await.ok().and_then(|r| r.ok()).flatten();
                 if let Some(core) = me.upgrade() {
-                    core.lock().unwrap_or_else(|e| e.into_inner()).after_route(&conv, &reply_id, routed, pick, text, images);
+                    let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+                    // The table runs now, on the quota of this moment, not on the quota the user saw while typing. A
+                    // conversation under way only moves up.
+                    let routed = verdict.and_then(|v| core.table(&v, only)).filter(|r| before.as_ref().is_none_or(|p| !r.weaker_than(p)));
+                    core.after_route(&conv, &reply_id, routed, pick, text, images);
                 }
             });
             return Ok(id);
         }
-        if let Err(error) = self.start(&id, &reply_id, &pick, text, req.images) {
+        if let Err(error) = self.dispatch(&id, &reply_id, &pick, text, req.images, !auto) {
             // The reply never got a CLI: it ends with the error instead of staying in the running list for good.
             self.fail_reply(&id, &reply_id, error.clone());
             return Err(error);
@@ -1302,9 +1586,10 @@ fn spawner(base: &Spawner, cli: &Cli) -> Spawner {
 fn same_as_before(c: &Conversation, live: Option<&Live>) -> Option<Pick> {
     let last = c.messages.iter().rev().find(|m| m.role == Role::Assistant && m.vendor.is_some())?;
     let vendor = last.vendor?;
-    let effort = live.filter(|l| l.vendor == vendor).map_or_else(|| "medium".to_string(), |l| l.effort.clone());
+    let effort =
+        live.filter(|l| l.vendor == vendor).map_or_else(|| last.effort.clone().unwrap_or_else(|| "medium".into()), |l| l.effort.clone());
     let reason = last.reason.clone().filter(|r| r != "reason.routing").unwrap_or_else(|| "reason.autoDefault".into());
-    Some(Pick { vendor, model: last.model.clone(), effort, reason })
+    Some(Pick { vendor, model: last.model.clone(), effort, reason, pace: None })
 }
 
 /// The row of the running list for a conversation, if its latest reply is streaming or has unanswered permissions.
@@ -1325,6 +1610,7 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
         state: if permissions.is_empty() { RunState::Working } else { RunState::NeedsYou },
         since: reply.at,
         permissions,
+        wait_until: reply.wait_until.filter(|_| reply.status == Some(Status::Streaming)),
     })
 }
 

@@ -29,6 +29,7 @@ fn start(dir: &Path, vendor: Vendor, spawn: Spawner) -> (Engine, UnboundedReceiv
         clis: BTreeMap::from([(vendor, Cli { command: vendor.name().into(), prefix: vec![] })]),
         spawn,
         windows: false,
+        claude_env_billed: false,
         max_warm: 3,
         idle: Duration::from_secs(120),
         runtime: tokio::runtime::Handle::current(),
@@ -47,7 +48,7 @@ fn ask(vendor: &str) -> SendRequest {
         text: SKY.into(),
         images: vec![],
         files: vec![],
-        choice: Choice { vendor: vendor.into(), model: (vendor == "claude").then(|| "haiku".into()) },
+        choice: Choice { vendor: vendor.into(), model: (vendor == "claude").then(|| "haiku".into()), effort: None },
     }
 }
 
@@ -73,7 +74,7 @@ async fn a_claude_reading_reaches_the_ledger_is_saved_and_is_still_there_after_a
     assert_eq!(claude.readings["five_hour"].used, 0.07);
     assert_eq!(claude.readings["seven_day"].resets_at, 1_791_878_400.0);
     assert_eq!(claude.reach, Reach::Clear);
-    assert!(!claude.paid_fallback, "the recording says extra usage is rejected");
+    assert_eq!(claude.paid_fallback, Some(false), "the recording says extra usage is rejected");
     assert!(!claude.overage_active);
     engine.shutdown();
 
@@ -98,7 +99,7 @@ async fn a_codex_session_tells_the_ledger_the_plan_and_that_it_is_a_subscription
     assert_eq!(codex.billing, Billing::Subscription);
     assert_eq!(codex.readings["seven_day"].used, 0.47);
     assert!(codex.plan_ok(WHEN), "a plan seen a moment ago");
-    assert!(!codex.paid_fallback, "no credits");
+    assert_eq!(codex.paid_fallback, Some(false), "no credits");
     engine.shutdown();
 }
 
@@ -225,7 +226,7 @@ fn incomplete_window_payloads_do_not_fabricate_an_empty_quota() {
 }
 
 #[tokio::test]
-async fn an_account_read_error_returns_no_replacement_evidence() {
+async fn a_limits_error_keeps_the_successful_account_verdict() {
     let entries = vec![
         Entry { input: true, msg: json!({"id":1,"method":"initialize"}) },
         Entry { input: false, msg: json!({"id":1,"result":{}}) },
@@ -237,5 +238,39 @@ async fn an_account_read_error_returns_no_replacement_evidence() {
     ];
     let f = fake(entries);
     let dir = tempfile::tempdir().unwrap();
-    assert!(read_codex_limits("codex", dir.path(), false, f.spawn, Duration::from_secs(1)).await.is_empty());
+    let events = read_codex_limits("codex", dir.path(), false, f.spawn, Duration::from_secs(1)).await;
+    assert!(events.iter().any(|e| matches!(e, EngineEvent::Signals(s) if s.billing == Some(Billing::Subscription))));
+    assert!(!events.iter().any(|e| matches!(e, EngineEvent::Quota { .. })));
+}
+
+#[tokio::test]
+async fn a_successful_limits_reply_survives_an_account_error_or_timeout() {
+    for timeout in [false, true] {
+        let mut entries = vec![
+            Entry { input: true, msg: json!({"id":1,"method":"initialize"}) },
+            Entry { input: false, msg: json!({"id":1,"result":{}}) },
+            Entry { input: true, msg: json!({"method":"initialized"}) },
+            Entry { input: true, msg: json!({"id":2,"method":"account/rateLimits/read"}) },
+            Entry { input: true, msg: json!({"id":3,"method":"account/read"}) },
+            Entry {
+                input: false,
+                msg: json!({"id":2,"result":{"rateLimits":{"primary":{"usedPercent":30,"windowDurationMins":300,"resetsAt":1791627000}}}}),
+            },
+        ];
+        if !timeout {
+            entries.push(Entry { input: false, msg: json!({"id":3,"error":{"code":-1}}) });
+        }
+        let f = fake(entries);
+        let events = read_codex_limits("codex", ".".as_ref(), false, f.spawn, Duration::from_millis(100)).await;
+        assert!(events.iter().any(|e| matches!(e, EngineEvent::Quota { used, .. } if *used == 0.3)));
+        assert!(!events.iter().any(|e| matches!(e, EngineEvent::Signals(s) if s.billing.is_some())));
+    }
+}
+
+#[test]
+fn a_rejection_with_an_unknown_scope_blocks_the_vendor() {
+    let s = faber_engine::signals::claude_signals(&json!({"rate_limit_info":{"status":"rejected","resetsAt":1791627000}}));
+    assert_eq!(s.reach, Some(faber_engine::budget::Reach::Out(Some(1791627000.0))));
+    let family = faber_engine::signals::claude_signals(&json!({"rate_limit_info":{"status":"rejected","rateLimitType":"seven_day_opus"}}));
+    assert_eq!(family.reach, None);
 }

@@ -11,7 +11,9 @@ pub enum EngineEvent {
     },
     Text(String),
     /// A new block of text starts (for example after a tool ran), so it must not run into the previous one.
-    Break,
+    Break {
+        final_answer: bool,
+    },
     Thinking(String),
     Tool {
         id: String,
@@ -37,7 +39,8 @@ pub enum EngineEvent {
     Signals(crate::signals::Signals),
     /// What a finished turn used. `cost_total_usd` is Claude Code's own API-priced figure as it reports it: cumulative for
     /// the conversation, so the engine subtracts what it saw before (`usage::settle`); None when the result carries no
-    /// counters (an aborted turn) and on Codex, which reports no cost. `input_tokens` is the prompt of the main response,
+    /// counters (an aborted turn). On Codex it is Faber's computed API-equivalent cost of this turn, priced per request,
+    /// so the engine uses it directly. `input_tokens` is the prompt of the main response,
     /// cached part included, so a hit rate is `cache_read_tokens / input_tokens`.
     Done {
         ok: bool,
@@ -47,7 +50,7 @@ pub enum EngineEvent {
         output_tokens: u64,
         cache_read_tokens: u64,
         cache_write_tokens: u64,
-        /// The part of the cache written with the 1-hour lifetime (0 on Codex, which bills no write).
+        /// The part of the cache written with the 1-hour lifetime (0 on Codex, which reports one cache-write kind).
         cache_write_1h_tokens: u64,
         /// True when the token numbers cover only part of the turn: Claude's sub-model work is not in `usage`, and a Codex
         /// turn with no usage update to measure from reports none.

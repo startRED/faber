@@ -3,6 +3,14 @@
    a theme, a preset and a theme file are only different values for the same names. */
 
 * { box-sizing: border-box; }
+:root {
+  --dur-exit: 180ms; --thread-tail: 64px;
+  --motion-enter: var(--dur-ui, 220ms); --motion-exit: 180ms; --motion-fast: 150ms; --motion-theme: 220ms;
+  --motion-ease-out: cubic-bezier(.16, 1, .3, 1); --motion-ease-in: cubic-bezier(.4, 0, 1, 1);
+  --motion-spring: cubic-bezier(.2, .9, .25, 1.02);
+  --motion-slide: 24px; --motion-rise: var(--arrive-y, 6px); --motion-scale: .97;
+  --motion-blur: 2px; --motion-backdrop: 8px; --motion-stagger: 18ms;
+}
 html, body, #root { height: 100%; margin: 0; }
 body { background: var(--frame); color: var(--ink); font-family: var(--font-ui); font-stretch: var(--ui-stretch); font-size: var(--fs-ui); line-height: 1.45; overflow: hidden; }
 ::selection { background: var(--selection); color: var(--ink); }
@@ -40,8 +48,8 @@ input, textarea { caret-color: var(--accent); }
 
 /* Sidebar and the shell around the stage. From 1,100 px an open running column sits beside the stage (.docked); from 900 px
    the sidebar does; below that the sidebar is behind a button. ui/layout.ts holds the same two numbers. */
-.shell { position: relative; display: grid; grid-template-columns: 248px minmax(0, 1fr); min-height: 0; }
-.shell.docked { grid-template-columns: 248px minmax(500px, 1fr) 352px; }
+.shell { position: relative; display: grid; grid-template-columns: 248px minmax(0, 1fr) 0px; min-height: 0; overflow: clip; }
+.shell.docked { grid-template-columns: 248px minmax(0, 1fr) 352px; }
 .settings { display: grid; grid-template-columns: 248px 1fr; min-height: 0; }
 .side { display: flex; flex-direction: column; gap: 14px; padding: 8px 12px 40px; min-height: 0; min-width: 0; }
 .s-nav { padding: 8px 12px; align-content: start; }
@@ -88,6 +96,9 @@ input, textarea { caret-color: var(--accent); }
 .prow:hover .tail, .prow:has(:focus-visible) .tail { opacity: 0; }
 .run-dot { flex: none; width: 7px; height: 7px; border-radius: 1px; background: var(--accent); animation: var(--live-anim); }
 .proj-chats { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; padding-left: 10px; }
+.fold { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur-exit) ease-in; }
+.fold.open { grid-template-rows: 1fr; transition-duration: var(--dur-ui); transition-timing-function: var(--ease); }
+.fold-inner { min-height: 0; overflow: hidden; }
 .crow { position: relative; }
 
 .crow:hover .item, .crow:focus-within .item, .prow:hover .item, .prow:focus-within .item { padding-right: 30px; }
@@ -120,7 +131,7 @@ input, textarea { caret-color: var(--accent); }
 .topbar .right { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
 .topbar .chip { height: 30px; flex: none; }
 .work { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; min-height: 0; min-width: 0; }
-.thread { position: relative; z-index: 1; grid-column: 1; grid-row: 1; overflow-y: auto; overflow-x: hidden; padding: calc(22px * var(--dens)) 24px 8px; }
+.thread { position: relative; z-index: 1; grid-column: 1; grid-row: 1; overflow-y: auto; overflow-x: hidden; padding: calc(22px * var(--dens)) 24px var(--thread-tail); contain: strict; }
 .dock { position: relative; z-index: 1; grid-column: 1; grid-row: 2; }
 .col { width: min(100%, 660px); margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(18px * var(--dens)); }
 .empty { display: grid; justify-items: start; gap: 16px; padding-top: 14vh; }
@@ -135,7 +146,7 @@ input, textarea { caret-color: var(--accent); }
 
 /* The new conversation: the greeting and the composer on the left; the conversations to pick up on the right when the
    stage is wide enough, below the suggestions when it is not. */
-.thread.welcome { display: grid; align-content: safe center; padding: 0 clamp(24px, 4vw, 60px) 40px clamp(24px, 6vw, 76px); container-type: inline-size; }
+.thread.welcome { display: grid; align-content: safe center; padding: 0 clamp(24px, 4vw, 60px) 40px clamp(24px, 6vw, 76px); container-type: inline-size; transition: padding-right var(--dur-ui) var(--ease); }
 .welcome-grid { display: grid; grid-template-columns: minmax(0, 640px); gap: 40px 64px; }
 .w-main, .resume { position: relative; z-index: 2; min-width: 0; }
 .hello { font-size: min(var(--fs-display), 9vw); max-width: 8.4em; overflow-wrap: anywhere; padding-bottom: 4px; }
@@ -193,7 +204,7 @@ svg.i.sm { width: 14px; height: 14px; }
 
 /* The running column: beside the stage from 1,100 px, over it (above the composer) below that. */
 .runcol { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--s1); }
-.shell > .runcol { margin: 0 var(--stage-inset) var(--stage-inset) 0; border-radius: 0 var(--r-stage) var(--r-stage) 0; box-shadow: var(--stage-shadow); border-left: 1px solid var(--line); overflow: hidden; }
+.shell > .runcol { justify-self: end; width: calc(352px - var(--stage-inset)); margin: 0 var(--stage-inset) var(--stage-inset) 0; border-radius: 0 var(--r-stage) var(--r-stage) 0; box-shadow: var(--stage-shadow); border-left: 1px solid var(--line); overflow: hidden; }
 .work > .runcol { grid-column: 1; grid-row: 1; justify-self: end; z-index: 6; width: min(352px, 100%); border-left: 1px solid var(--line-2); box-shadow: -18px 0 40px -22px rgba(0, 0, 0, 0.7); }
 .rc-head { display: flex; align-items: center; gap: 8px; padding: 14px 12px 10px 18px; }
 .rc-head h2 { font-size: var(--fs-lead); }
@@ -221,8 +232,8 @@ svg.i.sm { width: 14px; height: 14px; }
 @media (max-width: 899px) {
   .shell { grid-template-columns: minmax(0, 1fr); }
   .main { margin-left: var(--stage-inset); }
-  .side { display: none; }
-  .side.shown { display: flex; position: absolute; left: 0; top: 0; bottom: 0; z-index: 30; width: 248px; background: var(--frame); box-shadow: 18px 0 40px -20px rgba(0, 0, 0, 0.7); }
+  .side { position: absolute; left: 0; top: 0; bottom: 0; z-index: 30; width: 248px; background: var(--frame); box-shadow: 18px 0 40px -20px rgba(0, 0, 0, 0.7); visibility: hidden; opacity: 0; transform: translateX(-100%); transition: transform var(--dur-exit) ease-in, opacity var(--dur-exit) ease-in; }
+  .side.shown { visibility: visible; opacity: 1; transform: translateX(0); transition: transform var(--dur-ui) var(--ease), opacity var(--dur-ui) var(--ease), visibility 0s; }
   .scrim { display: block; position: absolute; inset: 0; z-index: 25; background: rgba(0, 0, 0, 0.5); cursor: default; }
 }
 
@@ -238,7 +249,9 @@ svg.i.sm { width: 14px; height: 14px; }
 .you:hover .edit, .you .edit:focus-visible { visibility: visible; }
 .you.editing { width: 80%; display: grid; gap: 8px; }
 .you.editing textarea { resize: vertical; border: 0; outline: none; background: none; line-height: 1.5; }
-.ai { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; font-size: var(--fs-read); line-height: 1.6; min-width: 0; }
+.ai { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; font-size: var(--fs-read); line-height: 1.6; min-width: 0; content-visibility: auto; contain-intrinsic-size: auto 240px; }
+.ai > .md > div > :is(p, ul, ol, pre, blockquote, table) { content-visibility: auto; contain-intrinsic-size: auto 3lh; }
+.ai :focus-visible { outline-offset: -2px; }
 .model { display: flex; gap: 8px; align-items: center; font-size: calc(var(--fs-ui) - 1px); color: var(--ink-3); }
 .model b { font-weight: 500; }
 .model .vm.claude b { color: var(--claude-ink); }
@@ -274,6 +287,12 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 .tools span svg { flex: none; color: var(--accent-text); }
 .tools span i { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-style: normal; }
 .tools span.bad { color: var(--ink-3); text-decoration: line-through; }
+.activity { border-radius: var(--r-sm); background: var(--s1); color: var(--ink-2); font-size: calc(var(--fs-ui) - 1px); }
+.activity summary { cursor: pointer; padding: 10px 12px; border-radius: inherit; transition: background-color var(--dur-fast) var(--ease); }
+.activity summary:hover { background: var(--s2); }
+.activity-body { display: grid; gap: 12px; padding: 0 12px 12px; }
+.activity-thinking { white-space: pre-wrap; color: var(--ink-3); }
+.activity-latest { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: calc(var(--fs-ui) - 1px); }
 /* A question waiting for the user is the one place the amber meaning appears in a conversation. */
 .ask { display: grid; gap: 8px; padding: 12px 14px; border-radius: var(--r-md); background: linear-gradient(180deg, var(--amber-soft), transparent 120%), var(--card-bg); box-shadow: inset 0 0 0 1px var(--amber-line), var(--amber-light); animation: arrive var(--dur-arrive) var(--ease) both; }
 .ask b { color: var(--amber-ink); font-weight: 600; font-size: calc(var(--fs-ui) - 0.5px); }
@@ -311,11 +330,13 @@ select.pill option { background: var(--s2); color: var(--ink); }
 /* Composer */
 .composer { position: relative; z-index: 1; width: min(calc(100% - 48px), 660px); margin: 0 auto calc(18px * var(--dens)); display: grid; background: var(--card-bg); border-radius: var(--r-lg); box-shadow: var(--lift-shadow), var(--focus-light); transition: box-shadow var(--dur-ui) var(--ease); }
 .composer:focus-within { box-shadow: inset 0 0 0 1px var(--accent-line), var(--lift-shadow), var(--focus-light); }
-.composer textarea { resize: none; border: 0; outline: none; background: none; min-height: 60px; max-height: 240px; font-size: var(--fs-read); line-height: 1.5; padding: 16px 18px 4px; }
-.dock .composer textarea { min-height: 40px; padding: 13px 16px 0; }
+.composer textarea { resize: none; border: 0; outline: none; background: none; height: 60px; min-height: 60px; max-height: 40vh; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line-3) transparent; font-size: var(--fs-read); line-height: 1.5; padding: 16px 18px 4px; transition: height var(--dur-ui) var(--ease); }
+.dock .composer textarea { height: 40px; min-height: 40px; padding: 13px 16px 0; }
 .composer .chips { padding: 12px 14px 0; }
 .composer textarea::placeholder { color: var(--ink-3); }
 .cbar { display: flex; gap: 6px; align-items: center; padding: 8px 10px 10px 12px; }
+.cbar:has(.effort) { flex-wrap: wrap; }
+.effort-hint { margin: 0; padding: 0 12px 10px; font-size: calc(var(--fs-ui) - 2px); color: var(--ink-3); }
 /* The model chip: its icon and chevron are drawings, the select on top of them is the control. */
 .chip.choose { position: relative; height: 30px; gap: 6px; padding: 0 8px 0 10px; cursor: pointer; white-space: nowrap; }
 .chip.choose:hover { background: var(--s3); color: var(--ink); }
@@ -557,10 +578,13 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .dust i:nth-child(3) { animation-duration: 10s; animation-delay: -6s; }
 @keyframes twinkle { to { opacity: 0.4; } }
 /* The light that breathes lives only around the lens, above and right of the greeting. */
-.amb-glow { display: var(--amb-beam); inset: 0; -webkit-mask-image: radial-gradient(circle 170px at min(100% - 120px, 740px) -60px, #000 30%, transparent 100%); mask-image: radial-gradient(circle 170px at min(100% - 120px, 740px) -60px, #000 30%, transparent 100%); }
-.amb-glow .amb-beam { position: absolute; display: block; }
-.amb-glow .beam { opacity: 0; }
-html[data-motion='full'] .amb-glow .beam { animation: glow 7s var(--ease-io) infinite alternate; }
+/* Promote only the visible part of the mask, avoiding a stage-sized software composition each frame. */
+.amb-glow { display: var(--amb-beam); left: calc(min(100% - 120px, 740px) - 170px); top: 0; width: 340px; height: 110px; overflow: hidden; -webkit-mask-image: radial-gradient(circle 170px at 170px -60px, #000 30%, transparent 100%); mask-image: radial-gradient(circle 170px at 170px -60px, #000 30%, transparent 100%); }
+.amb-glow .amb-beam { position: absolute; display: block; left: -210px; }
+.amb-glow { opacity: 0; }
+.amb-glow .beam { opacity: 1; }
+/* Fade the composed mask and blur together, so software rendering does not repaint the beam every frame. */
+html[data-motion='full'] .amb-glow { will-change: opacity; animation: glow 7s var(--ease-io) infinite alternate; }
 @keyframes glow { to { opacity: 0.5; } }
 .amb-loom { display: var(--amb-loom); right: 0; bottom: 0; width: 440px; height: 600px; overflow: hidden; -webkit-mask-image: radial-gradient(circle at 100% 100%, #000 0, #000 28%, transparent 68%); mask-image: radial-gradient(circle at 100% 100%, #000 0, #000 28%, transparent 68%); }
 .amb-loom svg { position: absolute; right: 0; bottom: 0; width: 660px; height: 600px; }
@@ -582,30 +606,56 @@ html[data-motion='full'] .amb-glow .beam { animation: glow 7s var(--ease-io) inf
 @container (max-width: 920px) { .amb-loom { display: none; } }
 @container (max-width: 1140px) { .amb-flow { display: none; } }
 
-/* Motion levels. Reduced keeps state changes and drops loops and travel; none drops everything. */
-:is([data-motion='reduced'], [data-motion='none']) :is(.cursor, .live, .live::after, .run-dot, .loom-row, .loom-shuttle, .flow-trace, .amb-glow .beam, .dust i) { animation: none !important; }
+/* Chrome moves on the compositor; the running stage uses FLIP in motion.ts, never a grid-width transition. */
+.work > .runcol, .scrim, .coach { backdrop-filter: blur(var(--motion-backdrop)); }
+.work > .runcol { background: color-mix(in srgb, var(--s1) 94%, transparent); }
+.coach { background: color-mix(in srgb, var(--s2) 96%, transparent); }
+:is(.item, .rrow, .ri) { transition: filter var(--motion-fast) var(--motion-ease-out), background-color var(--motion-fast) var(--motion-ease-out), color var(--motion-fast) var(--motion-ease-out); }
+:is(.item, .rrow, .ri):hover { filter: brightness(1.06); }
+::view-transition, ::view-transition-group(*), ::view-transition-image-pair(*),
+::view-transition-old(*), ::view-transition-new(*) { pointer-events: none; }
+::view-transition-group(root) { animation: none; }
+::view-transition-old(root) { animation: theme-out var(--motion-theme) var(--motion-ease-in) both; mix-blend-mode: normal; }
+::view-transition-new(root) { animation: theme-in var(--motion-theme) var(--motion-ease-out) both; mix-blend-mode: normal; }
+@keyframes theme-out { to { opacity: 0; } }
+@keyframes theme-in { from { opacity: 0; } }
+/* Short feedback shares the theme's curve; exits finish sooner. Native selects keep their keyboard behavior. */
+:is(button, select, .plus, .x) { transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease), filter var(--dur-fast) var(--ease); }
+button:active:not(:disabled) { transform: translateY(1px) scale(.98); }
+[data-base='oficina'] button:active { transform: scale(.98); }
+:is(.ask, .toast, .ri.need, .coach) { animation-duration: var(--dur-ui); }
+.tour-ring { transition-duration: var(--dur-ui); }
+[data-motion-list] > :is(.ask, .toast, .ri.need, .coach) { animation: none; }
+.motion-exit { animation: none !important; }
+html.resizing :is(.shell, .main, .side, .fold, .thread.welcome, .tour-ring, .composer textarea) { transition: none !important; }
+@supports (appearance: base-select) {
+  :is(.chip.choose select, select.pill, select.redo), select::picker(select) { appearance: base-select; }
+  select::picker-icon { display: none; }
+  select::picker(select) { border: 0; border-radius: var(--r-md); padding: 4px; background: color-mix(in srgb, var(--s2) 96%, transparent); backdrop-filter: blur(var(--motion-backdrop)); color: var(--ink); box-shadow: var(--lift-shadow); max-width: calc(100vw - 24px); max-height: min(360px, 70vh); overflow: auto; scrollbar-width: thin; scrollbar-color: var(--line-3) transparent; opacity: 0; transform: translateY(var(--motion-rise)) scale(var(--motion-scale)); transition: opacity var(--motion-exit) var(--motion-ease-in), transform var(--motion-exit) var(--motion-ease-in), display var(--motion-exit) allow-discrete, overlay var(--motion-exit) allow-discrete; }
+  select:open::picker(select) { opacity: 1; transform: translateY(0) scale(1); transition-duration: var(--motion-enter); transition-timing-function: var(--motion-spring); }
+  select option { border: 0; border-radius: var(--r-xs); padding: 8px 12px; background: var(--s2); color: var(--ink-2); transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+  select option:is(:hover, :focus-visible, :checked) { background: var(--s3); color: var(--ink); }
+  @starting-style { select:open::picker(select) { opacity: 0; transform: translateY(var(--motion-rise)) scale(var(--motion-scale)); } }
+}
+:is([data-motion='reduced'], [data-motion='none']) :is(.cursor, .live, .live::after, .run-dot, .loom-row, .loom-shuttle, .flow-trace, .amb-glow, .dust i) { animation: none !important; }
 :is([data-motion='reduced'], [data-motion='none']) :is(.loom-shuttle, .flow-trace) { opacity: 0; }
 [data-motion='reduced'] { --arrive-y: 0px; }
-/* Reduced keeps only short fades: every duration is capped at 120 ms and the switch thumb stops travelling. */
-[data-motion='reduced'] * { --dur-fast: 120ms; --dur-ui: 120ms; --dur-move: 120ms; --dur-arrive: 120ms; }
-:is([data-motion='reduced'], [data-motion='none']) .sw2::after { transition: background var(--dur-fast); }
-[data-motion='reduced'] :is(.ask, .toast, .ri.need, .coach) { animation: fade 120ms ease-out both; }
-@keyframes fade { from { opacity: 0; } }
-:is([data-motion='reduced'], [data-motion='none']) .btn:active { transform: none; }
-:is([data-motion='reduced'], [data-motion='none']) :is(.try button:hover > span, .rrow:hover > *, .tcard:hover, .preset:hover .thumb) { transform: none; }
-[data-motion='none'], [data-motion='none'] * { --dur-fast: 0ms; --dur-ui: 0ms; --dur-move: 0ms; --dur-arrive: 0ms; }
-[data-motion='none'] *, [data-motion='none'] *::before, [data-motion='none'] *::after { animation: none !important; transition: none !important; }
-html.hidden-win .amb * { animation-play-state: paused !important; }
+/* Reduced and none are instant, including native pickers and theme snapshots. */
+:is([data-motion='reduced'], [data-motion='none']) :is(.btn:active, button:active, .try button:hover > span, .rrow:hover > *, .tcard:hover, .preset:hover .thumb) { transform: none; }
+:is([data-motion='reduced'], [data-motion='none']) *,
+:is([data-motion='reduced'], [data-motion='none']) *::before,
+:is([data-motion='reduced'], [data-motion='none']) *::after { animation: none !important; transition: none !important; }
+:is([data-motion='reduced'], [data-motion='none']) select::picker(select) { transition: none !important; transform: none !important; }
+:is(html[data-motion='reduced'], html[data-motion='none'])::view-transition-old(root),
+:is(html[data-motion='reduced'], html[data-motion='none'])::view-transition-new(root) { animation: none !important; }
+html.hidden-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 /* The system preference is honoured even before the script runs. */
 @media (prefers-reduced-motion: reduce) {
-  :root { --arrive-y: 0px; }
-  * { --dur-fast: 120ms; --dur-ui: 120ms; --dur-move: 120ms; --dur-arrive: 120ms; }
-  .sw2::after { transition: background var(--dur-fast); }
-  :is(.try button:hover > span, .rrow:hover > *, .tcard:hover, .preset:hover .thumb) { transform: none; }
-  .cursor, .live, .live::after, .run-dot, .loom-row, .loom-shuttle, .flow-trace, .amb-glow .beam, .dust i { animation: none !important; }
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+  select::picker(select) { transition: none !important; transform: none !important; }
+  ::view-transition-old(root), ::view-transition-new(root) { animation: none !important; }
+  :is(.btn:active, button:active, .try button:hover > span, .rrow:hover > *, .tcard:hover, .preset:hover .thumb) { transform: none; }
   .loom-shuttle, .flow-trace { opacity: 0; }
-  .ask, .toast, .ri.need, .coach { animation: fade 120ms ease-out both; }
-  .btn:active { transform: none; }
 }
 /* A short window: smaller pictures and tighter gaps, so the first settings, the name field and the buttons fit without scrolling. */
 @media (max-height: 940px) {
@@ -613,3 +663,13 @@ html.hidden-win .amb * { animation-play-state: paused !important; }
   .themes { margin-top: 16px; }
   .first-ctl { margin-top: 16px; padding-top: 14px; }
 }
+
+.pace, .pace-projection, .waiting-label { color: var(--ink-2); font-size: .85em; }
+.quota-card { padding: 12px; border: 1px solid var(--line); margin: 12px 0; }
+.quota-card .btn { margin: 4px; }
+.plan-form { display: flex; gap: 8px; align-items: end; }
+.plan-form label { display: grid; gap: 4px; }
+.urow .meter { position: relative; overflow: visible; }
+.urow .expected { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--ink); }
+.pace-projection { grid-column: 1 / -1; }
+.waiting-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

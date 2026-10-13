@@ -3,12 +3,28 @@ import { en } from '../../ui/locales/en.ts';
 import { es } from '../../ui/locales/es.ts';
 import { fr } from '../../ui/locales/fr.ts';
 import { ptBR } from '../../ui/locales/pt-BR.ts';
-import { LANGUAGES, templates } from '../../ui/i18n.ts';
+import { fromEngine, lang, LANGUAGES, templates, useLanguage } from '../../ui/i18n.ts';
 import { check, deepEqual, ok } from './check.ts';
 
 const LOCALES = { 'pt-BR': ptBR, es, fr, de };
 const slots = (text: string) => [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
 const forms = (entry: string | { one: string; other: string }) => (typeof entry === 'string' ? [entry] : [entry.one, entry.other]);
+
+check('i18n: permission failures are readable in every language', () => {
+  const before = lang();
+  try {
+    for (const { code, messages } of LANGUAGES) {
+      useLanguage(code);
+      for (const key of ['error.permission.stale', 'error.permission.undelivered']) {
+        ok(fromEngine(key) !== key, `${code} displays the raw engine key ${key}`);
+        const entry: unknown = Object.getOwnPropertyDescriptor(messages, key)?.value;
+        ok(typeof entry === 'string' && entry.trim(), `${code} has no text for ${key}`);
+      }
+    }
+  } finally {
+    useLanguage(before);
+  }
+});
 
 // The type checker already makes every language list every key; this checks what types cannot see.
 check('i18n: every language fills every text and keeps the same placeholders as English', () => {

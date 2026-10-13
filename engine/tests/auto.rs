@@ -24,12 +24,28 @@ fn engine(dir: &Path, vendor: Vendor, spawn: Spawner, ask: Ask) -> (Engine, Unbo
         clis,
         spawn,
         windows: false,
+        claude_env_billed: false,
         max_warm: 3,
         idle: Duration::from_secs(120),
         runtime: tokio::runtime::Handle::current(),
         ask: Some(ask),
     };
     let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
+    for vendor in engine.vendors() {
+        engine.note_account_events(
+            vendor,
+            vec![faber_engine::events::EngineEvent::Signals(faber_engine::signals::Signals {
+                billing: Some(faber_engine::budget::Billing::Subscription),
+                ..Default::default()
+            })],
+        );
+    }
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
+    engine.note_account_events(
+        Vendor::Claude,
+        vec![faber_engine::events::EngineEvent::Quota { window: "five_hour".into(), used: 0.0, resets_at: now + 18_000.0 }],
+    );
+
     engine.set_codex_models(vec!["gpt-6.1-sol".into(), "gpt-6-luna".into()], Some("gpt-6.1-sol".into()));
     (engine, rx)
 }
@@ -65,7 +81,7 @@ fn flag(args: &[String], name: &str) -> Option<String> {
 }
 
 fn auto(text: &str) -> SendRequest {
-    let choice = Choice { vendor: "auto".into(), model: None };
+    let choice = Choice { vendor: "auto".into(), model: None, effort: None };
     SendRequest { conversation_id: None, area: Area::Chat, project_id: None, text: text.into(), images: vec![], files: vec![], choice }
 }
 
@@ -112,8 +128,12 @@ async fn a_draft_routed_while_typing_answers_without_asking_again() {
     let dir = tempfile::tempdir().unwrap();
     let calls = Calls::default();
     let (engine, mut rx) = engine(dir.path(), Vendor::Codex, fake(fixture("codex", "chat")).spawn, router("chat", "easy", calls.clone()));
-    let typing =
-        WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: Choice { vendor: "auto".into(), model: None } };
+    let typing = WarmRequest {
+        conversation_id: None,
+        area: Area::Chat,
+        project_id: None,
+        choice: Choice { vendor: "auto".into(), model: None, effort: None },
+    };
     // Most of the message: the route still holds once the last words are typed.
     engine.route_draft(typing, SKY[..30].into());
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -172,18 +192,34 @@ async fn with_only_claude_the_router_process_starts_while_the_user_types() {
         clis,
         spawn: f.spawn.clone(),
         windows: false,
+        claude_env_billed: false,
         max_warm: 3,
         idle: Duration::from_secs(120),
         runtime: tokio::runtime::Handle::current(),
         ask: None,
     };
     let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
+    for vendor in engine.vendors() {
+        engine.note_account_events(
+            vendor,
+            vec![faber_engine::events::EngineEvent::Signals(faber_engine::signals::Signals {
+                billing: Some(faber_engine::budget::Billing::Subscription),
+                ..Default::default()
+            })],
+        );
+    }
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
+    engine.note_account_events(
+        Vendor::Claude,
+        vec![faber_engine::events::EngineEvent::Quota { window: "five_hour".into(), used: 0.0, resets_at: now + 18_000.0 }],
+    );
+
     let routers = || f.args.lock().unwrap().iter().filter(|a| a.contains(&"--system-prompt".to_string())).count();
     engine.warm(WarmRequest {
         conversation_id: None,
         area: Area::Chat,
         project_id: None,
-        choice: Choice { vendor: "auto".into(), model: None },
+        choice: Choice { vendor: "auto".into(), model: None, effort: None },
     });
     assert_eq!(routers(), 1, "a cold Claude takes about 9 s, so the router starts at the first keystroke");
     engine.send(auto(SKY)).unwrap();

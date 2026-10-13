@@ -89,13 +89,28 @@ own inks.
 - Every interface size is the base text size plus or minus a few pixels. Reading text is 1.5 px larger than the base.
 - Display headings are clamped to `9vw`, so an 86 px heading fits small windows.
 
-### Motion and effects
+### Motion
 
-- No arrival or transition lasts longer than 400 ms.
-- New items rise 6 px over 400 ms. Buttons respond in 140 to 240 ms. The "running" dot pulses every 1.6 to 2 s.
+- Chrome uses the `--motion-*` tokens in `ui/styles.css`: 150 ms feedback, 180 ms exits, theme-controlled 200–240 ms
+  entrances and a 220 ms theme cross-fade. No chrome animation, including its stagger, exceeds 300 ms. The enter curve
+  has a soft spring-like settle; exits ease in. Travel is 24 px for the running column, up to 6 px for content and a
+  0.97 scale for cards and menus. Cards use a 2 px arrival blur; overlays use an 8 px static backdrop blur.
+- New items rise up to 6 px over 200 to 240 ms; exits take 180 ms. Buttons respond in 140 to 240 ms. The "running" dot pulses every 1.6 to 2 s.
   Workshop only fades and never moves anything vertically.
-- Reduced motion keeps only fades of up to 120 ms. No motion removes everything. A system that asks for less motion
+- Reduced motion and no motion both remove every animation and transition. A system that asks for less motion
   caps the user's level, and a change in the system setting changes only the level.
+- The running column slides and fades; its thread uses a short measured width transition so glyphs never stretch.
+  The stage is never cloned. During travel, stage shadows and rounded clipping are omitted to avoid expensive raster
+  effects; they return at rest. Offscreen messages and markdown blocks use native content visibility with intrinsic
+  size estimates. Panel content staggers by 18 ms, capped at 48 ms. Surviving list rows
+  use FLIP. The composer and native disclosures retain short measured height changes; reduced motion is instant.
+  Window resizing cancels travel and reflows instantly so content stays inside the new viewport.
+  Exit copies are inert, isolated in a shadow tree and removed when their animation finishes. At most 12 visible copies
+  per list exit together; no component or process is kept alive for an exit. Native dropdown pickers animate where the
+  webview supports customizable selects, with the usual native control as the fallback. Theme changes use native
+  View Transitions when available and apply immediately otherwise; no dependency or retained screen is needed.
+
+### Effects
 - Effects appear only on the new conversation screen, never behind text the user reads, and they stop when the window
   is hidden.
   - **Dark Room:** a static projector beam, a glow that breathes every 7 s and 72 dust grains (CSS shadows that twinkle on the compositor, no canvas loop) that fade
@@ -207,6 +222,9 @@ inside its own area.
 - Four hand-written suggestions per language. Clicking one fills the composer and moves focus there. It sends nothing.
 - "Pick up where you left off" lists the three most recently updated conversations.
 - The composer keeps its model picker, "AI: choose for me".
+- Auto chooses both the model and its effort. A manual model adds an adjacent low, medium or high effort choice,
+  defaulting to medium (R102). Each conversation remembers its choice. Changes apply to the next message only;
+  the composer says so, and each answer keeps the effort actually used. Both CLI drivers always receive that effort.
 - The ambient effect of the theme runs here.
 - With no AI connected, the greeting, the suggestions and the list give way to an empty state with Curioso and a button
   that opens account management. The composer stays on screen but cannot send.
@@ -338,3 +356,70 @@ Nothing blocks the network at the operating system, and WebView2 has no document
 that bypasses the switches is not seen. The audit sees only requests that reach the fake release server.
 Known limit: the loopback-only rule is not enforced. Test processes get dead proxy variables and the switches above, but
 nothing stops a program from opening its own connection; blocking outbound traffic for test processes is deferred.
+
+
+## Auto quota pacing
+
+Auto requires billing confirmed as a subscription before any user, router, pulse or summary request. The same quota gate
+checks every dispatch and rechecks waiting requests; plan checks spend no quota. Unknown billing is denied. The shell
+starts account watching before Auto, and the screen supplies the local UTC offset on start and each minute. Vendor-wide
+windows pace the whole shared account against approximately one seventh of the weekly quota per day; family windows
+restrict only that family. Paid-fallback evidence survives restart, and missing evidence remains possible. Approval for
+paid credits is bound to one conversation, reply and vendor, is consumed by that dispatch, and cannot authorize an
+auxiliary request or bypass unknown billing.
+
+A quota pulse asks Haiku for one word in a fresh, tool-free session only when Auto is in use and its reading is stale,
+at most once every twenty minutes. It closes after sixty seconds. Codex quota readings do not require a model request.
+`budget.json` stores bounded quota history, metered spans, learned whole-account shape, explained model weights and
+own spend. User turns, routing, pulses and hand-over summaries count in Faber's own API-equivalent USD, including cache
+reads and writes. Percentage changes and shared-account credits never become Faber's own dollars. Codex prices each
+request's token delta at its context tier; a multi-request turn does not inherit a long-context fee just from its sum.
+Incomplete meters show a lower bound and cannot teach weights or plan size. Idle account movement is flagged as foreign,
+even below the two-point resolution of the numerical outside-use estimate. Own-cost learning accepts only explained,
+non-overlapping stretches; the weekly shape continues to describe the whole account. The spec's R89/R90 sections are
+in `docs/superpowers/specs/2026-10-11-auto-quota-pacing-design.md`.
+
+When included quota runs out, Auto tries another eligible profile once, carrying the conversation and partial reply;
+long histories use a bounded, tool-free summary. It waits only for a usable reset within six hours, with guarded
+resumption, Stop and shutdown cancellation. A pinned vendor asks before moving. The composer retains an unsent request
+and its attachments without overwriting newer input; explicit resumption clears only the matching restored draft.
+Settings separates whole-account bars from Faber's own spend and explains foreign use, incomplete meters and billing.
+
+### Synthetic monthly acceptance
+
+`engine/tests/simulation.rs` runs four weeks with 200 deterministic seeds, busy weekday usage, shared-account use and
+a burst. Both modes use the same gate and synthetic capacity: 100 cost units for the smaller vendor, 400 for the larger.
+The simulation provides ideal fresh readings; it does not model real account latency or establish a live guarantee.
+The full test is ignored in ordinary runs and was run explicitly with
+`cargo test --release -p faber-engine --test simulation -- --ignored --nocapture` on 2026-10-12.
+
+| Measure | Pacing on | Pacing off |
+| --- | ---: | ---: |
+| Mean exhausted hours per four-week run | 0.135 | 0.900 |
+| Seeds with any vendor exhausted in four weeks | 2.0% | 14.5% |
+| Median unused share of the larger quota at reset | 2.5% | 0.9% |
+| Mean profile IQ + agent score on the tasks that matter | 81.42 | 80.58 |
+| Dropped task share | 0.597% | 0.151% |
+| Mean dropped tasks per four-week run | 65.5 | 16.6 |
+
+No budget constants were tuned for this run. The four-seed smoke uses `[0, 1, 2, 12]`; seed 12 adds an unpaced-exhaustion
+case because the original first four seeds all tied at zero exhausted hours. The smoke asserts strictly fewer exhausted
+hours, fewer than 1% dropped tasks, no worse quality, fewer than 5% exhausted seeds, and less than 25% unused larger quota.
+It passed with 0.000 versus 1.500 exhausted hours and 0.844% versus 0.325% drops. The full 200-seed run passed all the same
+acceptance limits.
+
+### Measurement still requiring the owner
+
+The manual `engine/examples/cache_probe.rs` now obtains one baseline before its measured pulses, retains each window's
+latest reading, checks unchanged resets and plausible readings, closes immediately on overage, rejection or lost billing,
+and applies the gate before each pulse with a sixty-second timeout. It prints own API-equivalent USD separately from
+account movement, which is an upper bound on a pulse's quota effect because the accounts are shared. Its three tests
+use fake events only, covering the denominator, invalid/reset/missing readings, duplicate windows and immediate stops.
+The real-account cache experiment and the real CLI pulse memory peak were not run here. No cache result or pulse peak
+is claimed. The owner can record them after running the manual probe; `docs/roadmap.md` was kept unstaged as instructed.
+
+Existing hidden-screen memory proofs passed: Task 11 measured 108-110 MB idle, 184 MB after six looks, and 141 MB for
+1,000 messages. These measurements used the fake CLI and are not a real pulse memory measurement. With
+`CARGO_TARGET_DIR=target/proofs`, testkit artifacts and screenshots live in `target/proofs/faber-test`; no junction is
+needed. The locale keys, review disposition and implementation limits are listed in
+`docs/superpowers/auto-quota-pacing-report.md`.
