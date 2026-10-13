@@ -24,6 +24,22 @@ impl Engine {
         })
     }
 
+    /// Re-read current mission authority; a UI revision or a worker brief never serves as a grant.
+    pub fn mission_authority(&self, mission: &crate::project::Mission) -> Result<crate::project::Grant, String> {
+        self.with(|c| {
+            let project = c
+                .store
+                .projects_checked()
+                .map_err(|e| e.key().to_string())?
+                .into_iter()
+                .find(|p| p.id == mission.project_id)
+                .ok_or("reason.grant.none")?;
+            let repo = project.repo.as_ref().filter(|r| r.common_dir == mission.repo).ok_or("reason.grant.otherRepo")?;
+            let grant = project.grant.ok_or("reason.grant.none")?;
+            grant.allows(repo, mission.grant_revision, crate::project::Effect::Worktree).map_err(str::to_string)?;
+            Ok(grant)
+        })
+    }
     /// Feed a classified brief into Auto's existing paced table with mission admission as one extra filter.
     /// This spends no quota; T5 supplies the verdict and a verified exposure from its qualified driver.
     pub fn mission_route(&self, verdict: &Asked, request: &Invocation, only: Option<Vendor>) -> Result<Routed, String> {

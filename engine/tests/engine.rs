@@ -683,7 +683,11 @@ async fn without_a_name_nothing_is_added_and_clearing_it_stops_it_for_new_conver
     engine.shutdown();
     let args = f.args.lock().unwrap().clone();
     assert_eq!(args.len(), 3);
-    assert_eq!((appended(&args[0]), appended(&args[2])), (None, None));
+    for a in [&args[0], &args[2]] {
+        let prompt = appended(a).unwrap();
+        assert!(prompt.contains("You are Faber"));
+        assert!(!prompt.contains("called Erick."));
+    }
     assert!(appended(&args[1]).is_some());
     assert!(read_json(&dir.path().join("conversations").join(format!("{plain}.json"))).get("userName").is_none());
     assert!(!std::fs::read_to_string(dir.path().join("settings.json")).unwrap().contains("userName"));
@@ -743,7 +747,7 @@ async fn without_a_name_codex_gets_no_developer_instructions() {
     finished(&mut rx, |_| {}).await;
     engine.shutdown();
     assert_eq!(f.wire.lines_with("thread/start"), 1);
-    assert_eq!(f.wire.lines_with("developerInstructions"), 0);
+    assert_eq!(f.wire.lines_with("developerInstructions"), 1);
 }
 
 #[tokio::test]

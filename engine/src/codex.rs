@@ -3,7 +3,8 @@
 
 use crate::claude::EventSink;
 use crate::events::{Delivery, EngineEvent, Session, SessionCommand, UserTurn};
-use crate::model::{Area, name_instructions};
+use crate::model::Area;
+use crate::persona::{PersonaInput, persona, worker_contract};
 use crate::proc::{self, Spawner};
 use crate::signals::{codex_account, codex_signals};
 use serde::Serialize;
@@ -332,9 +333,9 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
         params.insert("approvalPolicy".into(), "never".into());
         // Nothing to resume later: it stays out of the user's Codex history.
         params.insert("ephemeral".into(), true.into());
-    } else if let Some(name) = &t.user_name {
+    } else {
         // Developer instructions sit beside Codex's own, so a project keeps its default prompt.
-        params.insert("developerInstructions".into(), name_instructions(name).into());
+        params.insert("developerInstructions".into(), persona(&PersonaInput { name: t.user_name.as_deref() }).into());
     }
     params.insert("cwd".into(), t.cwd.to_string_lossy().into_owned().into());
     let method = match &t.resume {
@@ -357,7 +358,7 @@ pub fn project_thread_params(
     let (method, mut params) = thread_params(Area::Project, t);
     params["approvalPolicy"] = "never".into();
     params["sandbox"] = if role == crate::project::Role::Writer { "workspace-write" } else { "read-only" }.into();
-    params["baseInstructions"] = policy::instructions(role).into();
+    params["baseInstructions"] = worker_contract(role).into();
     params["config"] = json!({"model_reasoning_effort": t.effort, "web_search":"disabled", "sandbox_workspace_write": {
         "network_access":false, "exclude_tmpdir_env_var":true, "exclude_slash_tmp":true
     }});

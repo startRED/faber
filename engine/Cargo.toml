@@ -7,6 +7,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+# The existing workspace dependency supplies a safe native disk-space reading at build admission.
+sysinfo = { version = "0.39.6", default-features = false, features = ["disk"] }
 base64 = "0.22"
 flate2 = "1"
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }

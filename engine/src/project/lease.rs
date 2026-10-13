@@ -625,6 +625,19 @@ impl Leases {
         }
         Ok(root)
     }
+    pub(crate) fn retired_worktree(&self, lease: &Lease) -> Result<PathBuf, LeaseError> {
+        let held = &self.runtime.leases[self.matching(lease)?];
+        if held.state != LeaseState::Released || !self.journal.pending()?.is_empty() {
+            return Err(LeaseError::Live);
+        }
+        let root: PathBuf =
+            serde_json::from_value(held.extra.get("gitRoot").cloned().ok_or(LeaseError::Stale)?).map_err(|_| Fault::Corrupt)?;
+        let expected = self.journal.private().canonicalize().map_err(|_| Fault::Read)?.join(format!("writer-{}", held.generation));
+        if real_path(&root)? != expected || !root.exists() {
+            return Err(LeaseError::Path);
+        }
+        Ok(root)
+    }
     pub fn quarantine(&mut self, lease: &Lease) -> Result<(), LeaseError> {
         let index = self.index(lease)?;
         let mut runtime = self.runtime.clone();

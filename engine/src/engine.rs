@@ -1315,6 +1315,7 @@ impl Core {
             allow_always: None,
             branch_of: None,
             user_name: self.store.settings().user_name.and_then(|name| clean_name(&name)),
+            persona_version: Some(crate::persona::VERSION),
             created_at: at,
             updated_at: at,
             messages: vec![],
