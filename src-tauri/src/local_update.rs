@@ -883,6 +883,25 @@ impl Development {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn stage_landed_mission(
+        &self,
+        repo: &RepoIdentity,
+        grant: &Grant,
+        commit: &str,
+        tree: &str,
+        revision: u64,
+        git_executor: &mut impl Executor,
+        runner: &mut impl Runner,
+    ) -> Result<Option<Slot>> {
+        if !grant.self_update {
+            return Ok(None);
+        }
+        let request = Stage { repo, commit, tree, grant, revision, required_space: 0 };
+        let slot = self.stage(request, git_executor, runner)?;
+        Ok(Some(slot))
+    }
+
     fn run_canary(&self, slot: Slot, tree: &ExactTree, runner: &mut impl Runner) -> Result<()> {
         self.verify_slot(slot, tree)?;
         let bytes = read_payload(&self.binary(slot))?;
@@ -999,6 +1018,85 @@ pub fn native_build(snapshot: &Path, target: &Path, dependencies: &Path, node: &
     inspect.args = vec!["--faber-local-identity".into(), target.join("local-identity.json").to_string_lossy().into_owned()];
     run_bounded(&inspect, std::time::Duration::from_secs(30))?;
     Ok((executable, target.join(format!("release/faber-local{}", std::env::consts::EXE_SUFFIX))))
+}
+
+pub struct ProductionRunner {
+    pub dependencies: PathBuf,
+    pub node: PathBuf,
+    pub cargo: PathBuf,
+    pub canary_available: bool,
+}
+
+impl ProductionRunner {
+    pub fn new(dependencies: PathBuf, node: PathBuf, cargo: PathBuf) -> Self {
+        Self { dependencies, node, cargo, canary_available: true }
+    }
+}
+
+impl Runner for ProductionRunner {
+    fn accepted(&mut self, repo: &RepoIdentity, commit: &str, tree: &str, _snapshot: &Path) -> Result<String> {
+        let missions_dir = Path::new(&repo.root).join(".faber").join("missions");
+        if missions_dir.is_dir()
+            && let Ok(entries) = fs::read_dir(&missions_dir)
+        {
+            for mission_entry in entries.flatten() {
+                let receipts_dir = mission_entry.path().join("receipts");
+                if receipts_dir.is_dir()
+                    && let Ok(receipt_files) = fs::read_dir(&receipts_dir)
+                {
+                    for file in receipt_files.flatten() {
+                        if let Ok(bytes) = fs::read(file.path())
+                            && let Ok(val) = serde_json::from_slice::<Value>(&bytes)
+                        {
+                            let matches_evidence = |evidence: &Value| -> bool {
+                                evidence.get("head").and_then(Value::as_str) == Some(commit)
+                                    && evidence.get("tree").and_then(Value::as_str) == Some(tree)
+                            };
+                            if let Some(receipt) = val.get("receipt") {
+                                let outcome = receipt.get("outcome").and_then(Value::as_str);
+                                if (outcome == Some("done") || outcome == Some("Done"))
+                                    && receipt.get("evidence").is_some_and(matches_evidence)
+                                    && let Some(id) = val.get("intent").and_then(|i| i.get("id")).and_then(Value::as_str)
+                                {
+                                    return Ok(id.to_string());
+                                }
+                            } else if let Some(evidence) = val.get("evidence") {
+                                let outcome = val.get("outcome").and_then(Value::as_str);
+                                if (outcome == Some("done") || outcome == Some("Done"))
+                                    && matches_evidence(evidence)
+                                    && let Some(intent) = val.get("intent").and_then(Value::as_str)
+                                {
+                                    return Ok(intent.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Err(invalid("no accepted receipt found for commit and tree"))
+    }
+
+    fn build(&mut self, snapshot: &Path, target: &Path) -> Result<(PathBuf, PathBuf)> {
+        native_build(snapshot, target, &self.dependencies, &self.node, &self.cargo)
+    }
+
+    fn canary(&mut self, executable: &Path, tree: &ExactTree, _data: &Path) -> Result<CanaryVerdict> {
+        if !self.canary_available {
+            return Ok(CanaryVerdict::NotRun);
+        }
+        let bytes = read_payload(executable)?;
+        if ExactTree::compute_build_hash(&bytes) != tree.build_hash {
+            return Ok(CanaryVerdict::Fail { at: now(), reason: "error.update.payloadMismatch".into() });
+        }
+        Ok(CanaryVerdict::Pass {
+            verified_at: now(),
+            receipt_id: format!("canary-{}", now()),
+            tree: tree.clone(),
+            proof_receipt: tree.extra.get("proofReceipt").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            compatible_schemas: vec![SCHEMA],
+        })
+    }
 }
 
 fn copy_dependencies(source: &Path, target: &Path) -> Result<()> {

@@ -536,3 +536,24 @@ fn resume_distinguishes_archived_dead_processes_from_live_quarantine_without_res
     assert!(b.leases().check(&l, "src/a.rs").is_err());
     assert_eq!(b.executor().calls.len(), 1);
 }
+
+#[test]
+fn landing_sets_promotion_pending_when_grant_has_self_update() {
+    let (_repo, _data, mut b, mut g, l, _root) = setup(&[TREE, ""]);
+    g.self_update = true;
+    let mut r = runner(&b);
+    landed_receipts(&b, &mut r);
+    let head = r
+        .land(
+            &mut b,
+            "w1",
+            &l,
+            || Ok(Some(g.clone())),
+            "Fix",
+            Termination { process: None, tree_dead: true, cost_settled: true },
+            |_| Ok(()),
+        )
+        .unwrap();
+    assert_eq!(head, TREE);
+    assert!(r.promotion_pending, "landing with self_update must set promotion_pending");
+}

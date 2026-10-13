@@ -705,7 +705,7 @@ impl Runner {
         row.extra.insert("commitReceipt".into(), commit_id.into());
         row.extra.insert("landingReceipt".into(), forward_id.into());
         broker.journal().save_plan(&plan).map_err(|e| e.key())?;
-        self.queue_retirement(broker.journal(), lease, termination, false)?;
+        self.queue_retirement(broker.journal(), lease, termination, false, current.self_update)?;
         self.recover_retirements(broker, &mut grant)?;
         Ok(head)
     }
@@ -716,6 +716,7 @@ impl Runner {
         lease: &super::Lease,
         proof: super::lease::Termination,
         abandoned: bool,
+        self_update: bool,
     ) -> Result<(), &'static str> {
         if !proof.tree_dead || !proof.cost_settled || !j.pending().map_err(|e| e.key())?.is_empty() {
             return Err("reason.disk.needed");
@@ -741,7 +742,7 @@ impl Runner {
             if plan.tasks.iter().all(|t| t.state == TaskState::Done) {
                 self.mission.state = MissionState::Done;
                 self.quota_wake = None;
-                self.promotion_pending = false;
+                self.promotion_pending = self_update;
             }
         }
         self.save(j)
@@ -755,7 +756,7 @@ impl Runner {
         proof: super::lease::Termination,
         grant: impl FnMut() -> Result<Option<super::Grant>, super::git::GitError>,
     ) -> Result<(), &'static str> {
-        self.queue_retirement(broker.journal(), lease, proof, true)?;
+        self.queue_retirement(broker.journal(), lease, proof, true, false)?;
         self.recover_retirements(broker, grant)
     }
 

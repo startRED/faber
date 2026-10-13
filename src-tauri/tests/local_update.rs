@@ -1004,3 +1004,79 @@ fn incomplete_waiting_payload_requires_a_new_accepted_build() {
     dev.stage(request(), &mut source, &mut retry).unwrap();
     assert!(retry.built, "partial slot publication must never reuse a canary-only shortcut");
 }
+
+#[test]
+fn stage_landed_mission_skips_when_self_update_is_false() {
+    let dir = area();
+    let dev = config(dir.path());
+    let checkout = dir.path().join("checkout");
+    fs::create_dir(&checkout).unwrap();
+    let repo = RepoIdentity::new("repo", &checkout.to_string_lossy());
+    let grant = Grant::new("repo", GitMode::Seguro, 1, now());
+    let mut source = Source { calls: 0, tree: "2".repeat(40) };
+    let mut runner = Gates { fail: "", built: false };
+    let staged = dev.stage_landed_mission(&repo, &grant, &"1".repeat(40), &"2".repeat(40), 1, &mut source, &mut runner).unwrap();
+    assert_eq!(staged, None);
+}
+
+#[test]
+fn stage_landed_mission_stages_when_self_update_is_true() {
+    let dir = area();
+    let dev = config(dir.path());
+    let manager = dev.manager().unwrap();
+    fs::write(dev.binary(Slot::A), b"old").unwrap();
+    manager.adopt_baseline(Slot::A, tree(b"old"), b"old", now()).unwrap();
+    let checkout = dir.path().join("checkout");
+    fs::create_dir(&checkout).unwrap();
+    let repo = RepoIdentity::new("repo", &checkout.to_string_lossy());
+    let mut grant = Grant::new("repo", GitMode::Seguro, 1, now());
+    grant.self_update = true;
+    let commit = "1".repeat(40);
+    let source_tree = "2".repeat(40);
+    let mut source = Source { calls: 0, tree: source_tree.clone() };
+    let mut runner = Gates { fail: "canary-unavailable", built: false };
+    let staged = dev.stage_landed_mission(&repo, &grant, &commit, &source_tree, 1, &mut source, &mut runner).unwrap();
+    assert_eq!(staged, Some(Slot::B));
+}
+
+#[test]
+fn production_runner_accepted_checks_landing_receipts() {
+    let dir = area();
+    let repo_dir = dir.path().join("repo");
+    let receipts_dir = repo_dir.join(".faber/missions/m1/receipts");
+    fs::create_dir_all(&receipts_dir).unwrap();
+    let commit = "1".repeat(40);
+    let tree_oid = "2".repeat(40);
+    let receipt_json = serde_json::json!({
+        "intent": {"id": "commit-123"},
+        "receipt": {
+            "outcome": "done",
+            "evidence": {
+                "head": commit,
+                "tree": tree_oid
+            }
+        }
+    });
+    fs::write(receipts_dir.join("r1.json"), serde_json::to_vec(&receipt_json).unwrap()).unwrap();
+    let repo = RepoIdentity::new("repo", &repo_dir.to_string_lossy());
+    let snapshot = dir.path().join("snapshot");
+    fs::create_dir(&snapshot).unwrap();
+    let mut runner = ProductionRunner::new(dir.path().join("node_modules"), dir.path().join("node.exe"), dir.path().join("cargo.exe"));
+    let accepted = runner.accepted(&repo, &commit, &tree_oid, &snapshot).unwrap();
+    assert_eq!(accepted, "commit-123");
+    let unaccepted = runner.accepted(&repo, &"9".repeat(40), &tree_oid, &snapshot);
+    assert!(unaccepted.is_err());
+}
+
+#[test]
+fn production_runner_canary_checks_payload_and_handles_availability() {
+    let dir = area();
+    let exe = dir.path().join(format!("faber{}", std::env::consts::EXE_SUFFIX));
+    fs::write(&exe, b"payload").unwrap();
+    let tree_obj = tree(b"payload");
+    let mut runner = ProductionRunner::new(dir.path().join("node_modules"), dir.path().join("node.exe"), dir.path().join("cargo.exe"));
+    runner.canary_available = false;
+    assert_eq!(runner.canary(&exe, &tree_obj, dir.path()).unwrap(), CanaryVerdict::NotRun);
+    runner.canary_available = true;
+    assert!(matches!(runner.canary(&exe, &tree_obj, dir.path()).unwrap(), CanaryVerdict::Pass { .. }));
+}
