@@ -1059,6 +1059,8 @@ async fn a_branched_resend_sends_the_images_and_files_of_the_selected_message_ag
         let dir = tempfile::tempdir().unwrap();
         let f = fake(fixture("claude", "chat"));
         let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+        // A temporary project folder sits under AppData on Windows CI, which unattended mode refuses (R109).
+        engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
         let pick = || choice("claude", Some("haiku"));
         let project = (area == Area::Project).then(|| {
             let folder = dir.path().join("work");
