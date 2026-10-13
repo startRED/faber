@@ -191,22 +191,19 @@ fn natural_motion(ctx: &mut Ctx) -> Result {
 
 fn layout_motion(ctx: &mut Ctx) -> Result {
     let mut app = large_thread(ctx, true)?;
-    for view in ["fold", "disclosure", "composer", "welcome"] {
-        if view == "welcome" {
-            app.page.press("Control+n")?;
-            app.page.wait_visible(&css(".thread.welcome"))?;
-            pause(0.3);
-        }
+    // The greeting's padding and the composer's height used to be animated here. They are not any more: padding and height
+    // are layout, so the greeting makes room at once and the composer card opens up by a clip (see ui/motion.ts `reveal`).
+    for view in ["fold", "disclosure", "composer"] {
         app.page.eval(&format!("window.__reviewLayoutView = '{view}'"))?;
         let measured = app.page.eval(r#"new Promise(resolve => {
       const view = window.__reviewLayoutView;
-      const welcome = document.querySelector('.thread.welcome');
       const fold = document.createElement('div'); fold.className = 'fold';
       fold.innerHTML = '<div class="fold-inner"><div style="height:240px">Project rows</div></div>';
       const details = document.createElement('details'); details.className = 'activity';
       details.innerHTML = '<summary>Measured work</summary><div class="activity-body"><div class="md">' + '<p>Work step</p>'.repeat(200) + '</div></div>';
       const field = document.querySelector('.composer textarea');
-      const original = field.style.height;
+      const card = field.closest('.composer');
+      const type = (lines) => { field.value = 'line\n'.repeat(lines); field.dispatchEvent(new Event('input', { bubbles: true })); };
       if (view === 'fold') document.querySelector('.projects').append(fold);
       if (view === 'disclosure') {
         const answer = document.querySelector('.col > article.ai:last-child');
@@ -217,15 +214,14 @@ fn layout_motion(ctx: &mut Ctx) -> Result {
       // Measure size transitions after fixture insertion and its separate arrival motion have settled.
       setTimeout(async () => {
       const intervals = [], idle = [], costs = [], animated = [];
-      const elements = [view === 'fold' ? fold : view === 'disclosure' ? details : view === 'composer' ? field : welcome];
+      const elements = [view === 'fold' ? fold : view === 'disclosure' ? details : view === 'composer' ? card : null];
       const measure = (active, cycle) => new Promise(done => {
         let previous = performance.now(), running = 0;
         const start = previous;
         if (active) {
-          if (welcome) welcome.style.paddingRight = cycle % 2 === 0 ? '352px' : '0px';
-          else if (view === 'fold') fold.classList.toggle('open');
+          if (view === 'fold') fold.classList.toggle('open');
           else if (view === 'disclosure') details.querySelector('summary').click();
-          else field.style.height = cycle % 2 === 0 ? '200px' : original;
+          else type(8 + cycle);
         }
         const frame = now => {
         const stamp = performance.now();
@@ -242,7 +238,7 @@ fn layout_motion(ctx: &mut Ctx) -> Result {
       // Five fixed cycles give p95 enough samples at 60 Hz; an idle baseline exposes host stalls.
       for (let i = 0; i < 5; i++) await measure(false, i);
       for (let i = 0; i < 5; i++) await measure(true, i);
-      fold.remove(); details.remove(); if (welcome) welcome.style.removeProperty('padding-right'); field.style.height = original;
+      fold.remove(); details.remove(); type(0);
       const p95 = values => [...values].sort((a,b) => a-b)[Math.floor(values.length*.95)];
       resolve({view, frames: intervals.length, animated: Math.min(...animated), expected: elements.length,
         p95: p95(intervals), layout: p95(costs), idle: p95(idle), worst: Math.max(...intervals), idleWorst: Math.max(...idle)});

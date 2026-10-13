@@ -300,6 +300,9 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
       if (e.type === 'message' && opening.hear(e.conversationId, e.message) === 'apply') {
         setCurrent((c) => (c?.id === e.conversationId ? upsert(c, e.message) : c));
       }
+      if (e.type === 'queue') {
+        setCurrent((c) => (c?.id === e.conversationId ? { ...c, queued: e.queued } : c));
+      }
     });
     const minute = setInterval(() => {
       setClock(Date.now());
@@ -432,6 +435,9 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
     const at = place();
     const chosen = picked();
     const ticket = ++sendTicket;
+    // Written while an answer runs, the message is queued or handed to that answer: it is the engine's to keep, so a
+    // rejected answer must not put it back in the box.
+    const alongside = busy();
     let accepted = false;
     setError(undefined);
     stick = true;
@@ -448,11 +454,11 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
       const key = `faber.choice.${id}`;
       remember(key, place() === at ? picked() : recall<Choice>(key, chosen));
       accepted = true;
-      if (ticket === sendTicket) held.set(id, { draft });
+      if (ticket === sendTicket && !alongside) held.set(id, { draft });
       const moved = place() === at && id !== opening.id;
       if (moved) await go({ ...at, id });
       const sent = moved && current()?.id === id ? current() : await api.open(id);
-      if (ticket === sendTicket) {
+      if (ticket === sendTicket && !alongside) {
         const reply = sent?.messages.at(-1);
         const tracked = held.get(id) ?? { draft };
         tracked.reply = reply?.id;
@@ -619,7 +625,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
         <div class="toast" role="alert">
           <span>{saveError()}</span>
           <button type="button" aria-label={t('toast.dismiss')} onClick={() => setSaveError(undefined)}>
-            Ã—
+            ×
           </button>
         </div>
       </Show>
@@ -688,9 +694,16 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
             />
           }
         >
-          <div class="shell" classList={{ docked: columnOpen() && docked() }} inert={tourOpen()} ref={animateList}>
+          <div
+            class="shell"
+            data-screen={`${area() === 'chat' ? 'chat' : 'project'}.${newChat() ? 'new' : 'thread'}`}
+            classList={{ docked: columnOpen() && docked() }}
+            inert={tourOpen()}
+            ref={animateList}
+          >
             <aside
               class="side"
+              data-surface="sidebar"
               classList={{ shown: sideOverlay() }}
               ref={(el) => (sideEl = el)}
               aria-label={t('side.label')}
@@ -825,6 +838,9 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                                 {(c) => (
                                   <Thread
                                     messages={c().messages}
+                                    queued={c().queued}
+                                    busy={busy()}
+                                    onError={fail}
                                     usage={state().usage ?? []}
                                     from={from()}
                                     conversationId={c().id}

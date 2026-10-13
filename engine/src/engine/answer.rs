@@ -240,6 +240,7 @@ mod tests {
                 by_hand: true,
                 approved: false,
                 started: 0.0,
+                steering: vec![],
             };
             c.live.insert(id.clone(), live);
             c.refresh_running();

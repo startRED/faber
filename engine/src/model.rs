@@ -200,6 +200,26 @@ pub struct BranchOf {
     pub message_id: String,
 }
 
+/// A message written while a turn was running. It waits to be sent as the next turn, or, on a CLI that can take a message
+/// into a running turn, it is handed to that turn and leaves the queue once the CLI has taken it in. `text` is what the
+/// person wrote; the note about attached files is added when it goes to the CLI.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueuedTurn {
+    pub id: String,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub images: Option<Vec<Image>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachments: Option<Vec<String>>,
+    pub choice: crate::router::Choice,
+    pub at: u64,
+    /// Handed to the running turn and waiting for the CLI to take it in: it can no longer be taken back. Nothing is on
+    /// its way after a restart, so loading a conversation clears it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sending: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Conversation {
@@ -231,6 +251,8 @@ pub struct Conversation {
     pub persona_version: Option<u32>,
     pub created_at: u64,
     pub updated_at: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub queued: Vec<QueuedTurn>,
     pub messages: Vec<Message>,
 }
 
@@ -402,6 +424,12 @@ pub struct Settings {
     /// How the user wants to be called, asked (optionally) at the first run. A patch with an empty text clears it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_name: Option<String>,
+    /// Keep the computer awake while Faber works (on by default: SetThreadExecutionState with ES_CONTINUOUS | ES_SYSTEM_REQUIRED).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_awake: Option<bool>,
+    /// Start Faber when signing in to Windows (off by default: registered in HKCU Run).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autostart: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

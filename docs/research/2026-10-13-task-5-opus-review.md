@@ -49,3 +49,19 @@ measurements remain unproven. T5B compiler/bar and native/screen proof executors
 Before the fix commit, all seven proof commands passed (native npm script executables avoid shell children).
 Both `cargo t` and `cargo t --all` passed 1,123 tests with zero failures or skips. Eleven mutations failed their
 target regressions. The merged base and pushed head are validated separately in PR #7.
+
+## Base integration proof failure
+
+The merged full run reported one CDP deadline unit failure (and its workspace failure), while all screen checks passed.
+The reporter discarded the panic behind Cargo stderr; the original transport error is therefore unknown. Isolated
+and four-thread diagnostic captures did not reproduce it and are not counted as a fix or a successful full proof.
+Two deterministic red/green tests instead reproduce concrete boundary defects:
+`native_transport_timeout_keeps_deadline_semantics_before_the_clock_tick` covers native `TimedOut`/`WouldBlock` before
+the clock crosses the deadline, and `rust_failure_output_keeps_the_panic_when_cargo_stderr_is_long` preserves the panic
+despite a long stderr tail. Rust documents the platform-dependent [socket timeout errors](https://doc.rust-lang.org/stable/std/net/struct.TcpStream.html#method.set_read_timeout).
+Native timeouts now use the existing deadline error, and each output stream keeps its bounded tail. Neither change
+extends a deadline or retries a call. Removing either fix fails its regression, adding two infrastructure mutations.
+The Opus paths retain their eleven mutation replays. After integrating `origin/selfdev` at `d634f25`, all seven
+proof commands pass, and both `cargo t` and `cargo t --all` pass 1,190 tests with zero failures or skips. The sentinel
+reports zero findings. The thirteen new mutation checks fail when their protections are removed. CI on the pushed
+head is recorded in PR #7; the draft keeps the qualification limits above visible for the next review.

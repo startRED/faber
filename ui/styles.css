@@ -141,12 +141,13 @@ input, textarea { caret-color: var(--accent); }
 .peek { width: min(100%, 44ch); height: 45px; overflow: hidden; color: var(--ink-3); border-bottom: 1px solid var(--line-2); }
 .peek svg { display: block; margin-left: -2px; } /* the drawing has 2 px of room on its left; his edge lines up with the heading */
 
-/* The column over the stage must not cover the greeting's composer: the greeting makes room for it on its left. */
+/* The column over the stage must not cover the greeting's composer: the greeting makes room for it on its left, at once:
+   padding is layout, so it is never animated (the column itself slides in over it). */
 .work.under .thread.welcome { padding-right: calc(min(352px, 100%) + 20px); }
 
 /* The new conversation: the greeting and the composer on the left; the conversations to pick up on the right when the
    stage is wide enough, below the suggestions when it is not. */
-.thread.welcome { display: grid; align-content: safe center; padding: 0 clamp(24px, 4vw, 60px) 40px clamp(24px, 6vw, 76px); container-type: inline-size; transition: padding-right var(--dur-ui) var(--ease); }
+.thread.welcome { display: grid; align-content: safe center; padding: 0 clamp(24px, 4vw, 60px) 40px clamp(24px, 6vw, 76px); container-type: inline-size; }
 .welcome-grid { display: grid; grid-template-columns: minmax(0, 640px); gap: 40px 64px; }
 .w-main, .resume { position: relative; z-index: 2; min-width: 0; }
 .hello { font-size: min(var(--fs-display), 9vw); max-width: 8.4em; overflow-wrap: anywhere; padding-bottom: 4px; }
@@ -249,6 +250,9 @@ svg.i.sm { width: 14px; height: 14px; }
 .you:hover .edit, .you .edit:focus-visible { visibility: visible; }
 .you.editing { width: 80%; display: grid; gap: 8px; }
 .you.editing textarea { resize: vertical; border: 0; outline: none; background: none; line-height: 1.5; }
+.you.queued { box-shadow: inset 0 0 0 1px var(--line-2), var(--card-shadow); display: grid; gap: 8px; }
+.queue-badge { display: inline-flex; align-items: center; font-size: calc(var(--fs-ui) - 2px); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-3); }
+.queue-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .ai { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; font-size: var(--fs-read); line-height: 1.6; min-width: 0; content-visibility: auto; contain-intrinsic-size: auto 240px; }
 .ai > .md > div > :is(p, ul, ol, pre, blockquote, table) { content-visibility: auto; contain-intrinsic-size: auto 3lh; }
 .ai :focus-visible { outline-offset: -2px; }
@@ -330,7 +334,7 @@ select.pill option { background: var(--s2); color: var(--ink); }
 /* Composer */
 .composer { position: relative; z-index: 1; width: min(calc(100% - 48px), 660px); margin: 0 auto calc(18px * var(--dens)); display: grid; background: var(--card-bg); border-radius: var(--r-lg); box-shadow: var(--lift-shadow), var(--focus-light); transition: box-shadow var(--dur-ui) var(--ease); }
 .composer:focus-within { box-shadow: inset 0 0 0 1px var(--accent-line), var(--lift-shadow), var(--focus-light); }
-.composer textarea { resize: none; border: 0; outline: none; background: none; height: 60px; min-height: 60px; max-height: 40vh; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line-3) transparent; font-size: var(--fs-read); line-height: 1.5; padding: 16px 18px 4px; transition: height var(--dur-ui) var(--ease); }
+.composer textarea { resize: none; border: 0; outline: none; background: none; height: 60px; min-height: 60px; max-height: 40vh; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line-3) transparent; font-size: var(--fs-read); line-height: 1.5; padding: 16px 18px 4px; }
 .dock .composer textarea { height: 40px; min-height: 40px; padding: 13px 16px 0; }
 .composer .chips { padding: 12px 14px 0; }
 .composer textarea::placeholder { color: var(--ink-3); }
@@ -627,7 +631,7 @@ button:active:not(:disabled) { transform: translateY(1px) scale(.98); }
 .tour-ring { transition-duration: var(--dur-ui); }
 [data-motion-list] > :is(.ask, .toast, .ri.need, .coach) { animation: none; }
 .motion-exit { animation: none !important; }
-html.resizing :is(.shell, .main, .side, .fold, .thread.welcome, .tour-ring, .composer textarea) { transition: none !important; }
+html.resizing :is(.shell, .main, .side, .fold, .tour-ring) { transition: none !important; }
 @supports (appearance: base-select) {
   :is(.chip.choose select, select.pill, select.redo), select::picker(select) { appearance: base-select; }
   select::picker-icon { display: none; }
