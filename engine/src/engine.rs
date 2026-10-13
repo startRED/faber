@@ -453,6 +453,25 @@ impl Engine {
     pub fn add_project(&self, path: &str) -> Project {
         self.with(|c| c.add_project(path))
     }
+    pub fn project(&self, id: &str) -> Option<Project> {
+        self.with(|c| c.store.projects().into_iter().find(|p| p.id == id))
+    }
+    pub fn update_project(&self, project: &Project) -> Result<(), &'static str> {
+        self.with(|c| {
+            let mut projects = c.store.projects();
+            if let Some(pos) = projects.iter().position(|p| p.id == project.id) {
+                projects[pos] = project.clone();
+                if c.store.save_projects(&projects).is_ok() {
+                    c.list_changed();
+                    Ok(())
+                } else {
+                    Err("error.store.write")
+                }
+            } else {
+                Err("error.project.notFound")
+            }
+        })
+    }
     pub fn remove_project(&self, id: &str) {
         self.with(|c| {
             let projects: Vec<Project> = c.store.projects().into_iter().filter(|p| p.id != id).collect();

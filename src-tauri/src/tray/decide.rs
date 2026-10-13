@@ -2,6 +2,8 @@
 //! screen sent. Nothing here touches Tauri, so all of it is tested without a tray.
 
 use faber_engine::model::{RunState, RunningItem, Settings};
+use faber_engine::project::wire::MissionView;
+use faber_engine::project::{DecisionKind, MissionState};
 use serde::Deserialize;
 use std::collections::HashSet;
 
@@ -132,13 +134,17 @@ pub(super) fn delivery(focused: bool, attention: Attention, settings: &Settings)
     }
 }
 
-/// What the tray remembers between lists, to ignore old ones and to notify once per question.
+/// What the tray remembers between lists and mission views, to ignore old ones and to notify once per question or decision.
 #[derive(Default)]
 pub(super) struct Watch {
     revision: Option<u64>,
     /// Every question seen since Faber started, answered or not: a key is notified once, ever (the turn id keeps a reused
     /// request id apart). ponytail: one small tuple per question, never pruned; prune by turn if a session ever asks millions.
     seen: HashSet<Question>,
+    /// Every mission decision seen, across reloads/restarts: (mission_id, decision_id).
+    seen_decisions: HashSet<(String, String)>,
+    last_running_counts: Counts,
+    last_mission_counts: Counts,
 }
 
 /// What a list changes: the numbers to show, and the title of the conversation of each question to notify.
@@ -149,6 +155,14 @@ pub(super) struct Update {
 }
 
 impl Watch {
+    pub(super) fn with_seen_decisions(seen_decisions: HashSet<(String, String)>) -> Self {
+        Watch { seen_decisions, ..Default::default() }
+    }
+
+    pub(super) fn seen_decisions(&self) -> &HashSet<(String, String)> {
+        &self.seen_decisions
+    }
+
     /// None for a list that is not newer than the last one taken in: it changes nothing. A question the user could
     /// already see (the window was focused when it came) is never notified later, and a question never notifies twice.
     pub(super) fn take(&mut self, revision: u64, items: &[RunningItem], window_focused: bool) -> Option<Update> {
@@ -165,7 +179,42 @@ impl Watch {
                 }
             }
         }
-        Some(Update { counts: counts(items), notices })
+        self.last_running_counts = counts(items);
+        let combined_counts = Counts {
+            running: self.last_running_counts.running + self.last_mission_counts.running,
+            needs_you: self.last_running_counts.needs_you + self.last_mission_counts.needs_you,
+        };
+        Some(Update { counts: combined_counts, notices })
+    }
+
+    /// Evaluates a mission view: concrete choices and direction/taste/money/legal blockers become needs-you items
+    /// and notify when not focused. Completion, commits, proofs, quota waits, promotions and technical decisions emit nothing.
+    /// Stable decision identity deduplicates across reloads and restarts.
+    pub(super) fn take_mission(&mut self, view: &MissionView, window_focused: bool) -> Option<Update> {
+        let mut notices = Vec::new();
+        let mut mission_needs = 0;
+        for d in &view.decisions {
+            if d.kind != DecisionKind::Technical {
+                mission_needs += 1;
+                let key = (view.mission_id.clone(), d.id.clone());
+                if self.seen_decisions.insert(key) && !window_focused {
+                    let title = if view.goal.is_empty() { "Mission".to_string() } else { view.goal.clone() };
+                    notices.push(title);
+                }
+            }
+        }
+        if matches!(view.state, MissionState::Blocked | MissionState::Paused)
+            && view.reason.as_ref().is_some_and(|r| r.starts_with("reason.grant."))
+        {
+            mission_needs += 1;
+        }
+        self.last_mission_counts =
+            Counts { running: if matches!(view.state, MissionState::Running) { 1 } else { 0 }, needs_you: mission_needs };
+        let combined_counts = Counts {
+            running: self.last_running_counts.running + self.last_mission_counts.running,
+            needs_you: self.last_running_counts.needs_you + self.last_mission_counts.needs_you,
+        };
+        Some(Update { counts: combined_counts, notices })
     }
 }
 
@@ -449,5 +498,106 @@ mod tests {
         let list = [item("a", "t1", "A", &[]), item("b", "t1", "B", &["0"])];
         assert_eq!(w.take(1, &list, false).unwrap().counts, Counts { running: 2, needs_you: 1 });
         assert_eq!(w.take(2, &[], false).unwrap().counts, Counts::default());
+    }
+
+    #[test]
+    fn stable_mission_decision_deduplicates_across_restart() {
+        let mut seen = HashSet::new();
+        seen.insert(("m1".into(), "d1".into()));
+        let mut w = Watch::with_seen_decisions(seen);
+        let view: MissionView = serde_json::from_value(json!({
+            "missionId": "m1",
+            "revision": 1,
+            "state": "running",
+            "mode": "normal",
+            "gitMode": "seguro",
+            "goal": "Refactor parser",
+            "tasks": [],
+            "cost": { "complete": false },
+            "pace": [],
+            "decisions": [
+                { "id": "d1", "question": "Use AGPL or MIT?", "kind": "legal", "options": ["AGPL", "MIT"] },
+                { "id": "d2", "question": "Pick accent color", "kind": "taste", "options": ["Lime", "Blue"] }
+            ]
+        }))
+        .unwrap();
+        let update = w.take_mission(&view, false).unwrap();
+        // d1 was seen before restart; only d2 notifies!
+        assert_eq!(update.notices, ["Refactor parser"]);
+        assert_eq!(update.counts.needs_you, 2);
+        // A second view with the same decisions notifies nothing:
+        let update2 = w.take_mission(&view, false).unwrap();
+        assert!(update2.notices.is_empty());
+    }
+
+    #[test]
+    fn focused_mission_decision_means_silence() {
+        let mut w = Watch::default();
+        let view: MissionView = serde_json::from_value(json!({
+            "missionId": "m1",
+            "revision": 1,
+            "state": "running",
+            "mode": "normal",
+            "gitMode": "seguro",
+            "goal": "Goal",
+            "tasks": [],
+            "cost": { "complete": false },
+            "pace": [],
+            "decisions": [
+                { "id": "d1", "question": "Question", "kind": "direction", "options": [] }
+            ]
+        }))
+        .unwrap();
+        let update = w.take_mission(&view, true).unwrap();
+        assert!(update.notices.is_empty(), "focused means silence");
+        assert_eq!(update.counts.needs_you, 1, "badge still counts needs-you");
+        // Coming back while unfocused later does not notify because it was seen while focused:
+        let update2 = w.take_mission(&view, false).unwrap();
+        assert!(update2.notices.is_empty(), "seen while focused never notifies later");
+    }
+
+    #[test]
+    fn completion_proof_commit_quota_wait_and_promotion_emit_nothing() {
+        let mut w = Watch::default();
+        for state in ["done", "running", "planning"] {
+            let view: MissionView = serde_json::from_value(json!({
+                "missionId": "m1",
+                "revision": 2,
+                "state": state,
+                "mode": "normal",
+                "gitMode": "seguro",
+                "goal": "Completed goal",
+                "tasks": [{"id": "t1", "title": "Proof passed", "state": "done"}],
+                "cost": { "complete": true },
+                "pace": [],
+                "decisions": []
+            }))
+            .unwrap();
+            let update = w.take_mission(&view, false).unwrap();
+            assert!(update.notices.is_empty());
+        }
+    }
+
+    #[test]
+    fn technical_decisions_emit_nothing() {
+        let mut w = Watch::default();
+        let view: MissionView = serde_json::from_value(json!({
+            "missionId": "m1",
+            "revision": 1,
+            "state": "running",
+            "mode": "normal",
+            "gitMode": "seguro",
+            "goal": "Fix bug",
+            "tasks": [],
+            "cost": { "complete": false },
+            "pace": [],
+            "decisions": [
+                { "id": "d1", "question": "Use tokio or async-std?", "kind": "technical", "options": [] }
+            ]
+        }))
+        .unwrap();
+        let update = w.take_mission(&view, false).unwrap();
+        assert!(update.notices.is_empty());
+        assert_eq!(update.counts.needs_you, 0, "technical decision is not needs-you");
     }
 }

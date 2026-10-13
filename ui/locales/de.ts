@@ -385,4 +385,124 @@ export const de: Messages = {
   "quota.seven_day_opus": "Opus · 7 Tage",
   "quota.seven_day_sonnet": "Sonnet · 7 Tage",
   "quota.seven_day_haiku": "Haiku · 7 Tage",
+  // Native speaker must translate
+  "projects.title": "Projects",
+  // Native speaker must translate
+  "projects.empty.selectProject": "Select a project folder to start a mission.",
+  // Native speaker must translate
+  "projects.repo": "Repository",
+  // Native speaker must translate
+  "projects.base": "Base revision",
+  // Native speaker must translate
+  "projects.author": "Author",
+  // Native speaker must translate
+  "projects.presence.title": "Tool selection",
+  // Native speaker must translate
+  "projects.presence.continueWithout": "Continue without missing tools",
+  // Native speaker must translate
+  "projects.presence.findTools": "Let Faber find and install the best tools",
+  // Native speaker must translate
+  "reason.kit.continueWithout": "Running with verified built-in capabilities only.",
+  // Native speaker must translate
+  "reason.kit.findToolsInstallParked": "Tool installation is parked in the self-development MVP; Faber proceeds with verified role controls.",
+  // Native speaker must translate
+  "projects.gitMode.title": "Git authority",
+  // Native speaker must translate
+  "projects.gitMode.seguro": "Seguro (Local worktree only)",
+  // Native speaker must translate
+  "projects.gitMode.seguroDesc": "Separate worktree, local commits, fast-forwards only the mission branch. No remote effects.",
+  // Native speaker must translate
+  "projects.gitMode.equilibrado": "Equilibrado (Local commits + draft PR)",
+  // Native speaker must translate
+  "projects.gitMode.equilibradoDesc": "Seguro plus pushing the mission branch and creating one draft PR.",
+  // Native speaker must translate
+  "projects.selfUpdate.trust": "Allow Faber to update itself",
+  // Native speaker must translate
+  "projects.selfUpdate.trustDesc": "Promotes proven builds to the next local slot after canary verification and quarantine checks.",
+  // Native speaker must translate
+  "projects.goal.label": "Mission goal",
+  // Native speaker must translate
+  "projects.goal.placeholder": "Describe what you want Faber to build, fix, or improve in this project...",
+  // Native speaker must translate
+  "projects.action.start": "Start mission",
+  // Native speaker must translate
+  "projects.action.stop": "Stop",
+  // Native speaker must translate
+  "projects.action.resume": "Resume",
+  // Native speaker must translate
+  "projects.mode.normal": "Normal",
+  // Native speaker must translate
+  "projects.mode.autonomous": "Autonomous",
+  // Native speaker must translate
+  "projects.needsYou": "Needs you",
+  // Native speaker must translate
+  "projects.needsYou.desc": "Faber is waiting for your decision before proceeding.",
+  // Native speaker must translate
+  "projects.decision.default": "Default",
+  // Native speaker must translate
+  "projects.decision.customPlaceholder": "Or type a custom answer...",
+  // Native speaker must translate
+  "projects.decision.answer": "Answer",
+  // Native speaker must translate
+  "decision.kind.direction": "Direction",
+  // Native speaker must translate
+  "decision.kind.taste": "Taste",
+  // Native speaker must translate
+  "decision.kind.money": "Budget",
+  // Native speaker must translate
+  "decision.kind.legal": "Legal",
+  // Native speaker must translate
+  "decision.kind.technical": "Technical",
+  // Native speaker must translate
+  "projects.tasks.title": "Tasks",
+  // Native speaker must translate
+  "projects.task.ready": "Ready",
+  // Native speaker must translate
+  "projects.task.running": "Running",
+  // Native speaker must translate
+  "projects.task.review": "Review",
+  // Native speaker must translate
+  "projects.task.done": "Done",
+  // Native speaker must translate
+  "projects.task.blocked": "Blocked",
+  // Native speaker must translate
+  "projects.task.builder": "Builder",
+  // Native speaker must translate
+  "projects.task.reviewer": "Reviewer",
+  // Native speaker must translate
+  "projects.receipt.unverified": "Unverified",
+  // Native speaker must translate
+  "projects.receipt.notRun": "Not run",
+  // Native speaker must translate
+  "projects.receipt.verified": "Verified",
+  // Native speaker must translate
+  "projects.cost.title": "Own cost",
+  // Native speaker must translate
+  "projects.cost.unknown": "Unknown",
+  // Native speaker must translate
+  "projects.cost.cap": "Cap",
+  // Native speaker must translate
+  "projects.pace.title": "Account pace",
+  // Native speaker must translate
+  "projects.pace.used": "used",
+  // Native speaker must translate
+  "projects.pace.room": "daily room",
+  // Native speaker must translate
+  "projects.build.title": "Local build",
+  // Native speaker must translate
+  "projects.build.current": "Current",
+  // Native speaker must translate
+  "projects.build.next": "Next",
+  // Native speaker must translate
+  "projects.build.lastGood": "Last good",
+  // Native speaker must translate
+  "projects.build.waiting": "Waiting for",
+  // Native speaker must translate
+  "reason.task.waiting": "Waiting for dependencies",
+  // Native speaker must translate
+  "error.project.notFound": "Project not found",
+  // Native speaker must translate
+  "error.journal.mismatch": "Journal mismatch",
+  // Native speaker must translate
+  "reason.grant.none": "Project has no active git grant",
 };

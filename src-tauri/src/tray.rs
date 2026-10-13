@@ -12,6 +12,9 @@ use badge::{glyph, tray_png, tray_side, with_badge};
 pub(crate) use decide::ShellTexts;
 use decide::{Counts, Shown, Watch, delivery, notice_text, tooltip};
 use faber_engine::model::RunningItem;
+use faber_engine::project::wire::MissionView;
+use std::collections::HashSet;
+use std::path::Path;
 use std::sync::Mutex;
 use tauri::image::Image;
 use tauri::menu::{IsMenuItem, Menu, MenuItem};
@@ -93,14 +96,33 @@ fn show_counts(app: &AppHandle, s: &State, side: u32) {
     }
 }
 
+fn load_seen_decisions(data_dir: &Path) -> HashSet<(String, String)> {
+    let path = data_dir.join("seen_decisions.json");
+    if let Ok(bytes) = std::fs::read(&path)
+        && let Ok(seen) = serde_json::from_slice(&bytes)
+    {
+        return seen;
+    }
+    HashSet::new()
+}
+
+fn save_seen_decisions(data_dir: &Path, seen: &HashSet<(String, String)>) {
+    let path = data_dir.join("seen_decisions.json");
+    if let Ok(json) = serde_json::to_string(seen) {
+        let _ = std::fs::write(path, json);
+    }
+}
+
 pub(crate) fn create(app: &tauri::App) -> tauri::Result<()> {
     let handle = app.handle();
+    let data_dir = handle.state::<crate::Faber>().data_dir.clone();
     #[cfg(not(windows))]
-    if let Err(e) = sound::prepare(&handle.state::<crate::Faber>().data_dir) {
+    if let Err(e) = sound::prepare(&data_dir) {
         eprintln!("faber: the attention chime could not be prepared ({e})");
     }
     let tray = handle.state::<Tray>();
     let mut s = lock(&tray);
+    s.watch = Watch::with_seen_decisions(load_seen_decisions(&data_dir));
     let open = MenuItem::with_id(app, "open", &s.texts.open, true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", &s.texts.quit, true, None::<&str>)?;
     let status = if cfg!(target_os = "linux") {
@@ -145,28 +167,8 @@ pub(crate) fn set_texts(app: &AppHandle, texts: ShellTexts) -> Result<(), String
     say(&s)
 }
 
-/// A new running list from the engine. Lists can arrive out of order (each runs on its own thread), so the newest
-/// revision wins.
-pub(crate) fn on_running(app: &AppHandle, revision: u64, items: &[RunningItem]) {
-    let faber = app.state::<crate::Faber>();
-    if faber.hidden {
-        return;
-    }
-    let settings = faber.engine.settings();
-    let tray = app.state::<Tray>();
-    let mut s = lock(&tray);
-    if s.icon.is_none() {
-        return;
-    }
-    // A closed window is not focused either.
-    let focused = crate::main_window(app).is_some_and(|w| w.is_focused().unwrap_or(false));
-    let Some(update) = s.watch.take(revision, items, focused) else { return };
-    let side = side(app);
-    if s.shown.changed(update.counts, side) {
-        s.counts = update.counts;
-        show_counts(app, &s, side);
-    }
-    for title in &update.notices {
+fn deliver_notices(app: &AppHandle, s: &State, settings: &faber_engine::model::Settings, notices: &[String]) {
+    for title in notices {
         // Recheck focus at delivery, in case the user returned while the tray picture was updating.
         let focused = crate::main_window(app).is_some_and(|w| w.is_focused().unwrap_or(false));
         #[cfg(windows)]
@@ -174,7 +176,7 @@ pub(crate) fn on_running(app: &AppHandle, revision: u64, items: &[RunningItem]) 
         // shortcut: no global macOS/Linux full-screen probe; add native detection when those backends are implemented (R92).
         #[cfg(not(windows))]
         let attention = decide::Attention::Normal;
-        let send = delivery(focused, attention, &settings);
+        let send = delivery(focused, attention, settings);
         if send.sound {
             #[cfg(windows)]
             if let Err(e) = native::play() {
@@ -182,7 +184,7 @@ pub(crate) fn on_running(app: &AppHandle, revision: u64, items: &[RunningItem]) 
             }
             #[cfg(not(windows))]
             {
-                let dir = faber.data_dir.clone();
+                let dir = app.state::<crate::Faber>().data_dir.clone();
                 tauri::async_runtime::spawn_blocking(move || {
                     if let Err(e) = sound::play(&dir) {
                         eprintln!("faber: the attention chime could not play ({e})");
@@ -212,4 +214,51 @@ pub(crate) fn on_running(app: &AppHandle, revision: u64, items: &[RunningItem]) 
             eprintln!("faber: the notification could not be sent ({e})");
         }
     }
+}
+
+/// A new running list from the engine. Lists can arrive out of order (each runs on its own thread), so the newest
+/// revision wins.
+pub(crate) fn on_running(app: &AppHandle, revision: u64, items: &[RunningItem]) {
+    let faber = app.state::<crate::Faber>();
+    if faber.hidden {
+        return;
+    }
+    let settings = faber.engine.settings();
+    let tray = app.state::<Tray>();
+    let mut s = lock(&tray);
+    if s.icon.is_none() {
+        return;
+    }
+    // A closed window is not focused either.
+    let focused = crate::main_window(app).is_some_and(|w| w.is_focused().unwrap_or(false));
+    let Some(update) = s.watch.take(revision, items, focused) else { return };
+    let side = side(app);
+    if s.shown.changed(update.counts, side) {
+        s.counts = update.counts;
+        show_counts(app, &s, side);
+    }
+    deliver_notices(app, &s, &settings, &update.notices);
+}
+
+/// A mission view update from the engine: non-technical decisions become needs-you items.
+pub(crate) fn on_mission(app: &AppHandle, view: &MissionView) {
+    let faber = app.state::<crate::Faber>();
+    if faber.hidden {
+        return;
+    }
+    let settings = faber.engine.settings();
+    let tray = app.state::<Tray>();
+    let mut s = lock(&tray);
+    if s.icon.is_none() {
+        return;
+    }
+    let focused = crate::main_window(app).is_some_and(|w| w.is_focused().unwrap_or(false));
+    let Some(update) = s.watch.take_mission(view, focused) else { return };
+    save_seen_decisions(&faber.data_dir, s.watch.seen_decisions());
+    let side = side(app);
+    if s.shown.changed(update.counts, side) {
+        s.counts = update.counts;
+        show_counts(app, &s, side);
+    }
+    deliver_notices(app, &s, &settings, &update.notices);
 }

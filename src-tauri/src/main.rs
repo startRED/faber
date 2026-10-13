@@ -16,6 +16,10 @@ use faber_engine::cli::Cli;
 use faber_engine::codex::{ModelInfo, list_codex_models, read_codex_limits};
 use faber_engine::model::{Conversation, Project, Settings, Vendor};
 use faber_engine::proc::{Spawner, real_spawner};
+use faber_engine::project::git::{Process, enroll};
+use faber_engine::project::store::Journal;
+use faber_engine::project::wire::{CostView, DecisionView, EnrollView, MissionView, PaceView, TaskView};
+use faber_engine::project::{DecidedBy, Effect, GitMode, Grant, Mission, MissionState, RunMode};
 use faber_engine::{AppEvent, AppState, BranchRequest, Engine, EngineOptions, SendRequest, WarmRequest};
 use look::{Failure, Look, ThemeFile};
 use serde::Serialize;
@@ -29,6 +33,7 @@ use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWin
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_updater::{Update, UpdaterExt};
+use uuid::Uuid;
 
 pub(crate) struct Faber {
     pub(crate) engine: Engine,
@@ -269,6 +274,231 @@ async fn set_shell_texts(app: AppHandle, texts: tray::ShellTexts) -> Res<()> {
     tray::set_texts(&app, texts)
 }
 
+fn build_mission_view(faber: &Faber, mission: &Mission, journal: &Journal, grant: &Grant) -> MissionView {
+    let plan = journal.plan().ok().flatten();
+    let decisions = journal.decisions().unwrap_or_default();
+    let decision_views = decisions
+        .into_iter()
+        .filter(|d| d.answer.is_none())
+        .map(|d| DecisionView {
+            id: d.id,
+            question: d.question,
+            kind: d.kind,
+            options: d.options,
+            default: d.default,
+            task: Some(d.asked_by),
+        })
+        .collect();
+    let task_views = if let Some(plan) = &plan {
+        plan.tasks
+            .iter()
+            .map(|t| TaskView {
+                id: t.id.clone(),
+                title: t.title.clone(),
+                state: t.state,
+                reason: t.reason.clone(),
+                builder: None,
+                reviewer: None,
+            })
+            .collect()
+    } else {
+        vec![]
+    };
+    let pace = faber
+        .engine
+        .state()
+        .quotas
+        .into_iter()
+        .map(|q| PaceView {
+            vendor: q.vendor,
+            window: q.window,
+            used: Some(q.used),
+            room: Some((1.0 - q.used).max(0.0)),
+            read_at: Some(q.resets_at),
+        })
+        .collect();
+    MissionView {
+        mission_id: mission.id.clone(),
+        revision: mission.updated_at,
+        state: mission.state,
+        mode: mission.mode,
+        git_mode: grant.mode,
+        goal: mission.goal.clone(),
+        plan: plan.as_ref().map(|p| format!("{} tasks planned", p.tasks.len())),
+        tasks: task_views,
+        cost: CostView { own_micros: None, cap_micros: Some(2_000_000), complete: matches!(mission.state, MissionState::Done) },
+        pace,
+        decisions: decision_views,
+        build: None,
+        reason: mission.reason.clone(),
+    }
+}
+
+fn find_mission_and_journal(faber: &Faber, mission_id: &str) -> Res<(Project, Journal, Mission)> {
+    let projects = faber.engine.state().projects;
+    for p in projects {
+        if let Ok(journal) = Journal::open(Path::new(&p.path), &faber.data_dir, mission_id)
+            && let Ok(Some(mission)) = journal.mission()
+            && mission.id == mission_id
+        {
+            return Ok((p, journal, mission));
+        }
+    }
+    Err("error.journal.mismatch".into())
+}
+
+#[tauri::command]
+async fn project_enroll(faber: State<'_, Faber>, project_id: String) -> Res<EnrollView> {
+    let project = faber.engine.project(&project_id).ok_or("error.project.notFound")?;
+    let folder = PathBuf::from(&project.path);
+    let mut proc = Process::find().map_err(|e| e.key().to_string())?;
+    let repo_info = enroll(&mut proc, &folder, "HEAD").map_err(|e| e.key().to_string())?;
+    let mut updated = project.clone();
+    updated.repo = Some(repo_info.identity.clone());
+    let _ = faber.engine.update_project(&updated);
+    let revision = project.grant.as_ref().map_or(1, |g| g.revision + 1);
+    let mode = project.grant.as_ref().map_or(GitMode::Seguro, |g| g.mode);
+    let self_update = project.grant.as_ref().is_some_and(|g| g.self_update);
+    let remote = project.grant.as_ref().and_then(|g| g.remote.clone());
+    let remote_account = project.grant.as_ref().and_then(|g| g.remote_account.clone());
+    Ok(EnrollView {
+        project_id,
+        repo: project.path.clone(),
+        base: repo_info.base,
+        author: repo_info.author,
+        mode,
+        revision,
+        self_update,
+        remote,
+        remote_account,
+    })
+}
+
+#[tauri::command]
+async fn project_grant(faber: State<'_, Faber>, project_id: String, mode: GitMode, self_update: bool, revision: u64) -> Res<Grant> {
+    let mut project = faber.engine.project(&project_id).ok_or("error.project.notFound")?;
+    let folder = PathBuf::from(&project.path);
+    let mut proc = Process::find().map_err(|e| e.key().to_string())?;
+    let repo_info = enroll(&mut proc, &folder, "HEAD").map_err(|e| e.key().to_string())?;
+    let common_dir = repo_info.identity.common_dir.clone();
+    project.repo = Some(repo_info.identity);
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let mut grant = Grant::new(&common_dir, mode, revision, now);
+    grant.author = repo_info.author;
+    grant.self_update = self_update;
+    if mode == GitMode::Equilibrado {
+        grant.remote = Some("origin".into());
+    }
+    project.grant = Some(grant.clone());
+    faber.engine.update_project(&project).map_err(|k| k.to_string())?;
+    Ok(grant)
+}
+
+#[tauri::command]
+async fn project_revoke(faber: State<'_, Faber>, project_id: String) -> Res<()> {
+    let mut project = faber.engine.project(&project_id).ok_or("error.project.notFound")?;
+    if let Some(grant) = &mut project.grant {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        grant.revoked_at = Some(now);
+        faber.engine.update_project(&project).map_err(|k| k.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn mission_start(app: AppHandle, faber: State<'_, Faber>, project_id: String, goal: String) -> Res<String> {
+    let project = faber.engine.project(&project_id).ok_or("error.project.notFound")?;
+    let grant = project.grant.as_ref().ok_or("reason.grant.none")?;
+    project.allows(Effect::Worktree, grant.revision).map_err(|k| k.to_string())?;
+    let folder = PathBuf::from(&project.path);
+    let mut proc = Process::find().map_err(|e| e.key().to_string())?;
+    let repo_info = enroll(&mut proc, &folder, "HEAD").map_err(|e| e.key().to_string())?;
+    let mission_id = format!("m_{}", &Uuid::new_v4().to_string()[..8]);
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let repo_common = project.repo.as_ref().map(|r| r.common_dir.as_str()).unwrap_or(&repo_info.identity.common_dir);
+    let mut mission = Mission::new(&mission_id, &project_id, repo_common, &goal, &repo_info.base, grant.revision, now);
+    mission.state = MissionState::Running;
+    let journal = Journal::open(&folder, &faber.data_dir, &mission_id).map_err(|e| e.key().to_string())?;
+    journal.save_mission(&mission).map_err(|e| e.key().to_string())?;
+    let view = build_mission_view(&faber, &mission, &journal, grant);
+    let _ = app.emit("mission", &view);
+    tray::on_mission(&app, &view);
+    Ok(mission_id)
+}
+
+#[tauri::command]
+async fn mission_state(faber: State<'_, Faber>, mission_id: String) -> Res<MissionView> {
+    let (project, journal, mission) = find_mission_and_journal(&faber, &mission_id)?;
+    let grant = project.grant.unwrap_or_else(|| Grant::new(&mission.repo, GitMode::Seguro, mission.grant_revision, mission.created_at));
+    Ok(build_mission_view(&faber, &mission, &journal, &grant))
+}
+
+#[tauri::command]
+async fn mission_mode(app: AppHandle, faber: State<'_, Faber>, mission_id: String, mode: RunMode) -> Res<MissionView> {
+    let (project, journal, mut mission) = find_mission_and_journal(&faber, &mission_id)?;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    mission.mode = mode;
+    mission.updated_at = now;
+    journal.save_mission(&mission).map_err(|e| e.key().to_string())?;
+    let grant = project.grant.unwrap_or_else(|| Grant::new(&mission.repo, GitMode::Seguro, mission.grant_revision, mission.created_at));
+    let view = build_mission_view(&faber, &mission, &journal, &grant);
+    let _ = app.emit("mission", &view);
+    tray::on_mission(&app, &view);
+    Ok(view)
+}
+
+#[tauri::command]
+async fn mission_stop(app: AppHandle, faber: State<'_, Faber>, mission_id: String) -> Res<MissionView> {
+    let (project, journal, mut mission) = find_mission_and_journal(&faber, &mission_id)?;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    mission.state = MissionState::Paused;
+    mission.reason = Some("reason.interrupted".into());
+    mission.updated_at = now;
+    journal.save_mission(&mission).map_err(|e| e.key().to_string())?;
+    let grant = project.grant.unwrap_or_else(|| Grant::new(&mission.repo, GitMode::Seguro, mission.grant_revision, mission.created_at));
+    let view = build_mission_view(&faber, &mission, &journal, &grant);
+    let _ = app.emit("mission", &view);
+    tray::on_mission(&app, &view);
+    Ok(view)
+}
+
+#[tauri::command]
+async fn mission_resume(app: AppHandle, faber: State<'_, Faber>, mission_id: String) -> Res<MissionView> {
+    let (project, journal, mut mission) = find_mission_and_journal(&faber, &mission_id)?;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    mission.state = MissionState::Running;
+    mission.reason = None;
+    mission.updated_at = now;
+    journal.save_mission(&mission).map_err(|e| e.key().to_string())?;
+    let grant = project.grant.unwrap_or_else(|| Grant::new(&mission.repo, GitMode::Seguro, mission.grant_revision, mission.created_at));
+    let view = build_mission_view(&faber, &mission, &journal, &grant);
+    let _ = app.emit("mission", &view);
+    tray::on_mission(&app, &view);
+    Ok(view)
+}
+
+#[tauri::command]
+async fn mission_answer(
+    app: AppHandle,
+    faber: State<'_, Faber>,
+    mission_id: String,
+    decision_id: String,
+    answer: String,
+) -> Res<MissionView> {
+    let (project, journal, mut mission) = find_mission_and_journal(&faber, &mission_id)?;
+    let mut decision = journal.decision(&decision_id).map_err(|e| e.key().to_string())?.ok_or("error.decision.option")?;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    decision.answer(DecidedBy::Person, &answer, now).map_err(|k| k.to_string())?;
+    journal.save_decision(&decision).map_err(|e| e.key().to_string())?;
+    mission.updated_at = now;
+    journal.save_mission(&mission).map_err(|e| e.key().to_string())?;
+    let grant = project.grant.unwrap_or_else(|| Grant::new(&mission.repo, GitMode::Seguro, mission.grant_revision, mission.created_at));
+    let view = build_mission_view(&faber, &mission, &journal, &grant);
+    let _ = app.emit("mission", &view);
+    tray::on_mission(&app, &view);
+    Ok(view)
+}
+
 /// Test builds only: the screen's checks (tests/ui/) send their result here. It goes to the file named by
 /// `FABER_CHECKS_OUT`, written whole before it appears, and then the app ends.
 #[cfg(feature = "test-hooks")]
@@ -439,6 +669,15 @@ fn main() {
             open_terminal,
             open_link,
             set_shell_texts,
+            project_enroll,
+            project_grant,
+            project_revoke,
+            mission_start,
+            mission_state,
+            mission_mode,
+            mission_stop,
+            mission_resume,
+            mission_answer,
             setup::setup_check,
             setup::setup_install,
             setup::setup_sign_in,
