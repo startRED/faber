@@ -11,7 +11,8 @@ fn main() {
     if let [mode, sandbox] = args.as_slice()
         && matches!(
             mode.as_str(),
-            "--project-git"
+            "--project-mission"
+                | "--project-git"
                 | "--project-git-delete"
                 | "--project-git-race"
                 | "--project-path-race"
@@ -22,6 +23,7 @@ fn main() {
     {
         let sandbox = std::path::Path::new(sandbox);
         let result = match mode.as_str() {
+            "--project-mission" => faber_testkit::screen::projects::probe_mission(sandbox),
             "--project-screen-fixture" => faber_testkit::screen::projects::screen_fixture(sandbox),
             "--project-git-delete" => faber_testkit::screen::projects::probe_deletion(sandbox),
             "--project-git-race" => faber_testkit::screen::projects::probe_race(sandbox),

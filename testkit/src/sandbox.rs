@@ -47,6 +47,7 @@ pub enum CliSlot {
 pub struct Launch {
     /// The native git directory, only for contained Projects integration fixtures.
     pub git_bin: Option<PathBuf>,
+    pub args: Vec<String>,
     /// Exercises raster costs that a local GPU can hide; used only by the motion benchmark.
     pub software_rendering: bool,
     pub claude: CliSlot,

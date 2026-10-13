@@ -3,7 +3,8 @@
 
 use crate::claude::EventSink;
 use crate::events::{Delivery, EngineEvent, Session, SessionCommand, UserTurn};
-use crate::model::{Area, name_instructions};
+use crate::model::Area;
+use crate::persona::{PersonaInput, persona, worker_contract};
 use crate::proc::{self, Spawner};
 use crate::signals::{codex_account, codex_signals};
 use serde::Serialize;
@@ -103,6 +104,8 @@ pub struct CodexTurnState {
     priced: bool,
     price_incomplete: bool,
     prompt: Option<u64>,
+    /// User messages seen in the current turn: the first is the turn's own prompt, any later one was steered in.
+    users: u32,
 }
 
 impl CodexTurnState {
@@ -145,6 +148,12 @@ pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<
             if kind == "agentMessage" {
                 return vec![EngineEvent::Break { final_answer: item["phase"] == "final_answer" }];
             }
+            if kind == "userMessage" {
+                state.users += 1;
+                // Our own tag echoed back says it for sure; without one, anything after the turn's first message does.
+                let tag = item["clientId"].as_str().filter(|t| !t.is_empty()).map(String::from);
+                return if tag.is_some() || state.users > 1 { vec![EngineEvent::Injected { tag }] } else { vec![] };
+            }
             if NOT_TOOLS.contains(&kind) {
                 return vec![];
             }
@@ -172,6 +181,7 @@ pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<
             state.priced = false;
             state.price_incomplete = false;
             state.prompt = None;
+            state.users = 0;
             vec![]
         }
         "thread/tokenUsage/updated" => {
@@ -296,6 +306,8 @@ enum Waiting {
     Initialize,
     Thread(u64),
     Other(u64, &'static str),
+    /// A `turn/steer`; its tag tells the engine which message it was.
+    Steer(u64, String),
 }
 
 /// A conversation's side of the shared process.
@@ -311,6 +323,15 @@ struct Thread {
     watch: proc::TurnWatch,
     blocked: bool,
     closing: bool,
+}
+
+/// `expectedTurnId` makes Codex refuse the message if that turn is no longer the active one, so a steer never lands in
+/// a turn the person did not mean. `clientUserMessageId` comes back as the `clientId` of the user message item.
+pub fn steer_params(thread: &str, expected_turn: &str, turn: &UserTurn, tag: &str) -> Value {
+    let mut params = turn_params(thread, None, turn);
+    params["expectedTurnId"] = expected_turn.into();
+    params["clientUserMessageId"] = tag.into();
+    params
 }
 
 fn turn_params(thread: &str, effort: Option<&str>, turn: &UserTurn) -> Value {
@@ -332,9 +353,9 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
         params.insert("approvalPolicy".into(), "never".into());
         // Nothing to resume later: it stays out of the user's Codex history.
         params.insert("ephemeral".into(), true.into());
-    } else if let Some(name) = &t.user_name {
+    } else {
         // Developer instructions sit beside Codex's own, so a project keeps its default prompt.
-        params.insert("developerInstructions".into(), name_instructions(name).into());
+        params.insert("developerInstructions".into(), persona(&PersonaInput { name: t.user_name.as_deref() }).into());
     }
     params.insert("cwd".into(), t.cwd.to_string_lossy().into_owned().into());
     let method = match &t.resume {
@@ -357,7 +378,7 @@ pub fn project_thread_params(
     let (method, mut params) = thread_params(Area::Project, t);
     params["approvalPolicy"] = "never".into();
     params["sandbox"] = if role == crate::project::Role::Writer { "workspace-write" } else { "read-only" }.into();
-    params["baseInstructions"] = policy::instructions(role).into();
+    params["baseInstructions"] = worker_contract(role).into();
     params["config"] = json!({"model_reasoning_effort": t.effort, "web_search":"disabled", "sandbox_workspace_write": {
         "network_access":false, "exclude_tmpdir_env_var":true, "exclude_slash_tmp":true
     }});
@@ -389,7 +410,7 @@ impl CodexServer {
             let server = Self::start_with_policy(opts, Some(role));
             let session = server.open(thread, sink);
             server.retire();
-            session
+            session.for_project(role)
         })
     }
     /// The process starts right away, so a warmed-up conversation is already booting while the user types.
@@ -532,11 +553,20 @@ async fn serve(
                     (None, Some(id)) => {
                         let Some(kind) = id.as_u64().and_then(|id| waiting.remove(&id)) else { continue };
                         if let Some(error) = msg.get("error") {
+                            // The turn ended, or cannot take a message: not an error of the conversation. The engine keeps the
+                            // message for the next turn.
+                            if let Waiting::Steer(key, tag) = kind {
+                                if let Some(t) = threads.get(&key) {
+                                    (t.sink)(EngineEvent::SteerFailed { tag });
+                                }
+                                continue;
+                            }
                             let detail = error["message"].as_str().map(String::from).unwrap_or_else(|| error.to_string());
                             let (keys, what, fatal): (Vec<u64>, &str, bool) = match kind {
                                 Waiting::Initialize => (threads.keys().copied().collect(), "initialize", true),
                                 Waiting::Thread(key) => (vec![key], "thread", true),
                                 Waiting::Other(key, m) => (vec![key], m, false),
+                                Waiting::Steer(..) => unreachable!("handled above"),
                             };
                             for t in keys.iter().filter_map(|k| threads.get(k)) {
                                 (t.sink)(EngineEvent::Error { message: format!("Codex {what} failed: {detail}"), fatal });
@@ -582,7 +612,8 @@ async fn serve(
                                     }
                                 }
                             }
-                            Waiting::Other(..) => {}
+                            // Accepted: the message is in the turn once Codex reports it as a user message (`Injected`).
+                            Waiting::Steer(..) | Waiting::Other(..) => {}
                         }
                     }
                     // A request from Codex: approvals reach the user; anything else is declined politely.
@@ -687,6 +718,17 @@ async fn serve(
                                 request!("turn/start", turn_params(&id, t.params.effort.as_deref(), &turn), Waiting::Other(key, "turn/start"));
                             }
                             None => t.queued.push(turn),
+                        }
+                    }
+                    SessionCommand::Steer { turn, tag } => {
+                        let Some(t) = threads.get_mut(&key) else { continue };
+                        match (t.id.clone(), t.turn.clone()) {
+                            (Some(id), Some(turn_id)) => {
+                                let params = steer_params(&id, &turn_id, &turn, &tag);
+                                request!("turn/steer", params, Waiting::Steer(key, tag));
+                            }
+                            // No turn to name yet, so Codex could not tell which one this is for.
+                            _ => (t.sink)(EngineEvent::SteerFailed { tag }),
                         }
                     }
                     SessionCommand::Answer { request_id, allow, ack } => {

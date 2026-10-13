@@ -9,6 +9,7 @@ use std::path::Path;
 pub fn scenarios() -> Vec<Scenario> {
     vec![
         Scenario { name: "projects screen: fixed IPC rejects invalid identities, stale grants and fake execution", run: commands },
+        Scenario { name: "projects T5: mode, answer and Stop use the authoritative runner", run: controls },
         Scenario { name: "projects screen: checkpoint, decisions, task evidence, six looks, widths and memory", run: board },
         Scenario {
             name: "projects screen: R92 mission receipts survive restart and all delivery policies stay windowless",
@@ -42,6 +43,9 @@ fn commands(ctx: &mut Ctx) -> Result {
     }
     refused(&mut app.page, "mission_state", json!({"missionId": "unknown"}), "error.journal.mismatch")?;
     ensure(!ctx.sb.sandbox.join("repo/.faber/missions/unknown").exists(), || "a read of an unknown mission created a journal".into())?;
+    std::fs::create_dir_all(ctx.sb.sandbox.join("repo/.faber/missions/empty")).map_err(|e| e.to_string())?;
+    refused(&mut app.page, "mission_state", json!({"missionId":"empty"}), "error.journal.mismatch")?;
+    ensure(!ctx.sb.data.join("missions/empty").exists(), || "an empty public folder created private authority".into())?;
     refused(
         &mut app.page,
         "project_grant",
@@ -55,8 +59,8 @@ fn commands(ctx: &mut Ctx) -> Result {
         "reason.grant.mode",
     )?;
     refused(&mut app.page, "mission_start", json!({"projectId":"demo","goal":""}), "error.wire.malformed")?;
-    refused(&mut app.page, "mission_start", json!({"projectId":"demo","goal":"A real goal"}), "reason.mission.runnerUnavailable")?;
-    refused(&mut app.page, "mission_resume", json!({"missionId":"screen_mission"}), "reason.mission.runnerUnavailable")?;
+    refused(&mut app.page, "mission_start", json!({"projectId":"demo","goal":"A real goal"}), "reason.project.restrictionsUnproven")?;
+    refused(&mut app.page, "mission_resume", json!({"missionId":"screen_mission"}), "reason.project.restrictionsUnproven")?;
     refused(
         &mut app.page,
         "mission_answer",
@@ -95,6 +99,37 @@ fn commands(ctx: &mut Ctx) -> Result {
     refused(&mut app.page, "mission_state", json!({"missionId":"screen_mission"}), "error.store.corrupt")?;
     std::fs::write(&plan, before).map_err(|e| e.to_string())?;
     ctx.notes.push("fixed commands; no journal on unknown read; stale/revoked grants refused; no worker or owner-checkout fallback".into());
+    Ok(())
+}
+
+fn controls(ctx: &mut Ctx) -> Result {
+    use faber_engine::project::{MissionState, RunMode, run::Runner, store::Journal};
+    let launch = fixture(ctx)?;
+    let mut app = ctx.launch(launch)?;
+    let args = json!({"missionId":"screen_mission"});
+    let state = invoke(&mut app.page, "mission_state", args.clone())?;
+    ensure(state["ok"] == true, || format!("state: {state}"))?;
+    let mode = invoke(&mut app.page, "mission_mode", json!({"missionId":"screen_mission","mode":"autonomous"}))?;
+    ensure(mode["ok"] == true, || format!("mode: {mode}"))?;
+    let j = Journal::open(&ctx.sb.sandbox.join("repo"), &ctx.sb.data, "screen_mission").map_err(|e| e.key().to_string())?;
+    same(Runner::load(&j).map_err(str::to_string)?.mission.mode, RunMode::Autonomous, "runner mode")?;
+    let answer = invoke(&mut app.page, "mission_answer", json!({"missionId":"screen_mission","decisionId":"choice","answer":"Keep"}))?;
+    ensure(answer["ok"] == true, || format!("answer: {answer}"))?;
+    ensure(answer["value"]["revision"].as_u64() > mode["value"]["revision"].as_u64(), || {
+        "answer did not advance the runner revision".into()
+    })?;
+    let runner = Runner::load(&j).map_err(str::to_string)?;
+    same(runner.mission.extra.get("viewRevision").and_then(Value::as_u64), answer["value"]["revision"].as_u64(), "runner answer revision")?;
+    let stopped = invoke(&mut app.page, "mission_stop", args)?;
+    ensure(stopped["ok"] == true, || format!("stop: {stopped}"))?;
+    same(Runner::load(&j).map_err(str::to_string)?.mission.state, MissionState::Paused, "runner stop")?;
+    let ledger: faber_engine::ledger::Ledger =
+        serde_json::from_slice(&std::fs::read(ctx.sb.data.join("budget.json")).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    ensure(faber_engine::project::budget::Budget::load(&ledger).map_err(str::to_string)?.grants["screen_mission"].paused, || {
+        "Stop did not pause the budget".into()
+    })?;
+    refused(&mut app.page, "mission_resume", json!({"missionId":"screen_mission"}), "reason.project.restrictionsUnproven")?;
+    ensure(ctx.records()?.is_empty(), || "a refused role reached a CLI".into())?;
     Ok(())
 }
 
@@ -143,7 +178,10 @@ fn board(ctx: &mut Ctx) -> Result {
     }
     system_motion(&mut app.page, true)?;
     let summary = css(".task-card summary").last();
+    // Native toggle delivery is queued after the click. Exercise that handoff even on a fast local WebView.
+    app.page.eval("(() => {const detail=[...document.querySelectorAll('.task-card details')].at(-1); const defer=event => {event.stopImmediatePropagation(); detail.removeEventListener('toggle',defer,true); setTimeout(() => detail.dispatchEvent(new Event('toggle')),250);}; detail.addEventListener('toggle',defer,true);})()")?;
     app.page.click(&summary)?;
+    app.page.wait_visible(&css(".task-card details").last().css("p").has_text("ui/Projects.tsx"))?;
     ensure(app.page.inner_text(&css(".task-card details").last())?.contains("ui/Projects.tsx"), || {
         "scope is missing from task evidence".into()
     })?;

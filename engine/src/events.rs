@@ -84,6 +84,16 @@ pub enum EngineEvent {
         /// turn with no usage update to measure from reports none.
         incomplete: bool,
     },
+    /// The running turn took in a message sent to it with `Session::steer`. `tag` is the one that call carried when the CLI
+    /// echoes it back; without one, the oldest message still on its way is the one.
+    Injected {
+        tag: Option<String>,
+    },
+    /// The CLI did not take a message sent with `Session::steer` (the turn had already ended, or cannot be steered). The
+    /// message was not delivered, so the engine keeps it for the next turn.
+    SteerFailed {
+        tag: String,
+    },
     /// `fatal`: the CLI process is gone and the next turn needs a new one.
     Error {
         message: String,
@@ -119,6 +129,11 @@ pub enum Delivery {
 #[derive(Debug)]
 pub enum SessionCommand {
     Send(UserTurn),
+    /// Adds a message to the turn that is running. `tag` names it in `Injected` and `SteerFailed`.
+    Steer {
+        turn: UserTurn,
+        tag: String,
+    },
     /// `ack` hears what became of the answer. A session that is gone drops it, and the receiver then fails.
     Answer {
         request_id: String,
@@ -133,6 +148,7 @@ pub enum SessionCommand {
 #[derive(Clone)]
 pub struct Session {
     send: std::sync::Arc<dyn Fn(SessionCommand) + Send + Sync>,
+    project_role: Option<crate::project::Role>,
 }
 
 impl std::fmt::Debug for Session {
@@ -147,10 +163,20 @@ impl Session {
     }
     /// A session whose commands go wherever `send` puts them, such as a thread in a shared process.
     pub(crate) fn from_fn(send: impl Fn(SessionCommand) + Send + Sync + 'static) -> Self {
-        Session { send: std::sync::Arc::new(send) }
+        Session { send: std::sync::Arc::new(send), project_role: None }
+    }
+    pub(crate) fn for_project(mut self, role: crate::project::Role) -> Self {
+        self.project_role = Some(role);
+        self
+    }
+    pub(crate) fn project_role(&self) -> Option<crate::project::Role> {
+        self.project_role
     }
     pub fn send(&self, turn: UserTurn) {
         (self.send)(SessionCommand::Send(turn));
+    }
+    pub fn steer(&self, turn: UserTurn, tag: &str) {
+        (self.send)(SessionCommand::Steer { turn, tag: tag.to_string() });
     }
     /// The receiver hears whether the CLI got the answer. If the session is gone it fails instead, because the
     /// command, and the sender in it, were dropped.

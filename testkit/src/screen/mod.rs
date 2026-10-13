@@ -10,6 +10,7 @@ pub mod projects;
 pub mod projects_ui;
 pub mod remote_git;
 pub mod review;
+pub mod sentinel;
 pub mod settings;
 pub mod setup;
 pub mod shell;
@@ -41,7 +42,8 @@ pub fn all() -> Vec<Scenario> {
         .chain(review::scenarios())
         .chain(settings::scenarios())
         .chain(setup::scenarios())
-        .chain(first_run::scenarios());
+        .chain(first_run::scenarios())
+        .chain(sentinel::scenarios());
     #[cfg(windows)]
     let all = all.chain(containment::scenarios());
     #[cfg(windows)]

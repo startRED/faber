@@ -6,26 +6,37 @@
 #[cfg(all(feature = "test-hooks", not(debug_assertions)))]
 compile_error!("the `test-hooks` feature is for debug test builds only; it must not be enabled in a release build");
 
+mod autostart;
+mod awake;
 mod look;
 mod project_commands;
 mod setup;
 mod terminal;
 mod tray;
 
+#[cfg(not(windows))]
+use autostart::NoopAutostart;
+#[cfg(windows)]
+use autostart::WindowsAutostart;
+use autostart::{AutostartKeeper, FakeAutostart, creates_window};
+#[cfg(windows)]
+use awake::WindowsPower;
+use awake::{CountedAwake, NoopPower, PowerKeepAwake};
 use base64::Engine as _;
 use faber_engine::cli::Cli;
 use faber_engine::codex::{ModelInfo, list_codex_models, read_codex_limits};
 use faber_engine::model::{Area, Conversation, Project, Settings, Vendor};
 use faber_engine::proc::{Spawner, real_spawner};
 use faber_engine::project::git::{Process, enroll};
+use faber_engine::project::run::Runner;
 use faber_engine::project::store::Journal;
 use faber_engine::project::wire::{DecisionView, EnrollView, MissionView, TaskView};
-use faber_engine::project::{DecidedBy, Effect, GitMode, Grant, Mission, MissionState, RunMode};
+use faber_engine::project::{Effect, GitMode, Grant, Mission, RunMode};
 use faber_engine::{AppEvent, AppState, BranchRequest, Engine, EngineOptions, SendRequest, WarmRequest};
 use look::{Failure, Look, ThemeFile};
 use serde::Serialize;
 use serde_json::{Map, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -44,7 +55,9 @@ pub(crate) struct Faber {
     pub(crate) data_dir: PathBuf,
     pub(crate) hidden: bool,
     /// Serialize journal snapshots and mutations, so an answer cannot overwrite a newer view.
-    missions: Mutex<()>,
+    missions: Arc<tauri::async_runtime::Mutex<()>>,
+    pub(crate) awake: Arc<Mutex<CountedAwake>>,
+    pub(crate) autostart: Mutex<Arc<dyn AutostartKeeper>>,
 }
 
 type Res<T> = Result<T, String>;
@@ -183,6 +196,17 @@ async fn remove(faber: State<'_, Faber>, id: String) -> Res<()> {
 }
 
 #[tauri::command]
+async fn remove_queued(faber: State<'_, Faber>, id: String, turn_id: String) -> Res<()> {
+    faber.engine.remove_queued(&id, &turn_id);
+    Ok(())
+}
+
+#[tauri::command]
+async fn send_queued(faber: State<'_, Faber>, id: String, turn_id: String) -> Res<()> {
+    faber.engine.send_queued(&id, &turn_id)
+}
+
+#[tauri::command]
 async fn remove_project(faber: State<'_, Faber>, id: String) -> Res<()> {
     faber.engine.remove_project(&id);
     Ok(())
@@ -200,7 +224,9 @@ async fn save_settings(faber: State<'_, Faber>, mut patch: Settings) -> Result<S
     if let Some(map) = &patch.appearance {
         patch.appearance = Some(look::validated(map)?.0.to_map());
     }
-    let mut settings = faber.engine.save_settings(patch)?;
+    let autostart = lock(&faber.autostart);
+    let mut settings = autostart::save(autostart.as_ref(), patch.autostart, || faber.engine.save_settings(patch))?;
+    lock(&faber.awake).set_enabled(settings.keep_awake.unwrap_or(true));
     settings.appearance = look::usable(settings.appearance.take());
     let look = look::stored(settings.appearance.as_ref());
     Ok(SavedSettings { settings, look })
@@ -336,7 +362,7 @@ fn build_mission_view(faber: &Faber, mission: &Mission, journal: &Journal, grant
     Ok(MissionView {
         mission_id: mission.id.clone(),
         revision: project_commands::revision(mission),
-        state: if mission.state == MissionState::Running { MissionState::Blocked } else { mission.state },
+        state: mission.state,
         mode: mission.mode,
         git_mode: grant.mode,
         goal: mission.goal.clone(),
@@ -346,11 +372,7 @@ fn build_mission_view(faber: &Faber, mission: &Mission, journal: &Journal, grant
         pace,
         decisions: decision_views,
         build: None,
-        reason: if mission.state == MissionState::Running {
-            Some("reason.mission.runnerUnavailable".into())
-        } else {
-            mission.reason.clone()
-        },
+        reason: mission.reason.clone(),
     })
 }
 
@@ -358,12 +380,13 @@ fn find_mission_and_journal(faber: &Faber, mission_id: &str) -> Res<(Project, Jo
     project_commands::id(mission_id)?;
     let projects = faber.engine.projects_checked()?;
     for p in projects {
-        let record = Path::new(&p.path).join(".faber/missions").join(mission_id).join("mission.json");
-        if !record.is_file() {
+        let record = Path::new(&p.path).join(".faber/missions").join(mission_id);
+        let checkpoint = faber.data_dir.join("missions").join(mission_id).join("run.json");
+        if !record.join("mission.json").is_file() && !(record.is_dir() && checkpoint.is_file()) {
             continue;
         }
         let journal = Journal::open(Path::new(&p.path), &faber.data_dir, mission_id).map_err(|e| e.key().to_string())?;
-        let mission = journal.mission().map_err(|e| e.key().to_string())?.ok_or("error.journal.mismatch")?;
+        let mission = Runner::open(&journal).map_err(str::to_string)?.mission;
         if mission.id != mission_id || mission.project_id != p.id || p.repo.as_ref().is_none_or(|r| r.common_dir != mission.repo) {
             return Err("error.journal.mismatch".into());
         }
@@ -374,7 +397,7 @@ fn find_mission_and_journal(faber: &Faber, mission_id: &str) -> Res<(Project, Jo
 
 fn restore_mission_notices(app: &AppHandle) -> Res<()> {
     let faber = app.state::<Faber>();
-    let _turn = lock(&faber.missions);
+    let _turn = faber.missions.blocking_lock();
     for project in faber.engine.projects_checked()? {
         let entries = match std::fs::read_dir(Path::new(&project.path).join(".faber/missions")) {
             Ok(entries) => entries,
@@ -464,19 +487,30 @@ async fn project_revoke(faber: State<'_, Faber>, project_id: String) -> Res<()> 
 
 #[tauri::command]
 async fn mission_start(app: AppHandle, faber: State<'_, Faber>, project_id: String, goal: String) -> Res<String> {
+    let _turn = faber.missions.lock().await;
     project_commands::id(&project_id)?;
     let project = faber.engine.project(&project_id)?;
     let grant = project.grant.as_ref().ok_or("reason.grant.none")?;
     project.allows(Effect::Worktree, grant.revision).map_err(|k| k.to_string())?;
     project_commands::text(&goal)?;
-    let _ = app;
-    // T5 is absent on this branch. A journal state is not proof that a worker started.
-    Err("reason.mission.runnerUnavailable".into())
+    Runner::role_vendor(&faber.engine)?;
+    let mut process = Process::find().map_err(|e| e.key().to_string())?;
+    let repo = enroll(&mut process, Path::new(&project.path), "HEAD").map_err(|e| e.key().to_string())?;
+    if project.repo.as_ref() != Some(&repo.identity) {
+        return Err("reason.grant.otherRepo".into());
+    }
+    let mission = faber.engine.new_mission(&project, &goal, &repo.base)?;
+    let journal = Journal::open(Path::new(&project.path), &faber.data_dir, &mission.id).map_err(|e| e.key().to_string())?;
+    let runner = Runner::start(&journal, &faber.engine, mission)?;
+    let view = build_mission_view(&faber, &runner.mission, &journal, grant)?;
+    let _ = app.emit("mission", &view);
+    tray::on_mission(&app, &view);
+    Ok(runner.mission.id)
 }
 
 #[tauri::command]
 async fn mission_state(faber: State<'_, Faber>, mission_id: String) -> Res<MissionView> {
-    let _turn = lock(&faber.missions);
+    let _turn = faber.missions.lock().await;
     let (project, journal, mission) = find_mission_and_journal(&faber, &mission_id)?;
     let grant = project.grant.unwrap_or_else(|| Grant::new(&mission.repo, GitMode::Seguro, mission.grant_revision, mission.created_at));
     build_mission_view(&faber, &mission, &journal, &grant)
@@ -484,13 +518,13 @@ async fn mission_state(faber: State<'_, Faber>, mission_id: String) -> Res<Missi
 
 #[tauri::command]
 async fn mission_mode(app: AppHandle, faber: State<'_, Faber>, mission_id: String, mode: RunMode) -> Res<MissionView> {
-    let _turn = lock(&faber.missions);
-    let (project, journal, mut mission) = find_mission_and_journal(&faber, &mission_id)?;
+    let _turn = faber.missions.lock().await;
+    let (project, journal, mission) = find_mission_and_journal(&faber, &mission_id)?;
     project_commands::editable(&mission)?;
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    mission.mode = mode;
-    project_commands::changed(&mut mission, now)?;
-    journal.save_mission(&mission).map_err(|e| e.key().to_string())?;
+    let mut runner = Runner::load(&journal).map_err(str::to_string)?;
+    runner.mode(&journal, mode, now).map_err(str::to_string)?;
+    let mission = runner.mission;
     let grant = project.grant.unwrap_or_else(|| Grant::new(&mission.repo, GitMode::Seguro, mission.grant_revision, mission.created_at));
     let view = build_mission_view(&faber, &mission, &journal, &grant)?;
     let _ = app.emit("mission", &view);
@@ -500,14 +534,12 @@ async fn mission_mode(app: AppHandle, faber: State<'_, Faber>, mission_id: Strin
 
 #[tauri::command]
 async fn mission_stop(app: AppHandle, faber: State<'_, Faber>, mission_id: String) -> Res<MissionView> {
-    let _turn = lock(&faber.missions);
-    let (project, journal, mut mission) = find_mission_and_journal(&faber, &mission_id)?;
+    let _turn = faber.missions.lock().await;
+    let (project, journal, mission) = find_mission_and_journal(&faber, &mission_id)?;
     project_commands::editable(&mission)?;
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    mission.state = MissionState::Paused;
-    mission.reason = Some("reason.interrupted".into());
-    project_commands::changed(&mut mission, now)?;
-    journal.save_mission(&mission).map_err(|e| e.key().to_string())?;
+    let mut runner = Runner::load(&journal).map_err(str::to_string)?;
+    runner.stop(&journal, &faber.engine).await?;
+    let mission = runner.mission;
     let grant = project.grant.unwrap_or_else(|| Grant::new(&mission.repo, GitMode::Seguro, mission.grant_revision, mission.created_at));
     let view = build_mission_view(&faber, &mission, &journal, &grant)?;
     let _ = app.emit("mission", &view);
@@ -517,12 +549,18 @@ async fn mission_stop(app: AppHandle, faber: State<'_, Faber>, mission_id: Strin
 
 #[tauri::command]
 async fn mission_resume(app: AppHandle, faber: State<'_, Faber>, mission_id: String) -> Res<MissionView> {
-    let _turn = lock(&faber.missions);
+    let _turn = faber.missions.lock().await;
     let (project, journal, mission) = find_mission_and_journal(&faber, &mission_id)?;
     project_commands::editable(&mission)?;
     project.allows(Effect::Worktree, mission.grant_revision).map_err(str::to_string)?;
-    let _ = (app, journal);
-    Err("reason.mission.runnerUnavailable".into())
+    let mut runner = Runner::load(&journal).map_err(str::to_string)?;
+    runner.resume(&journal, &faber.engine)?;
+    let mission = runner.mission;
+    let grant = project.grant.ok_or("reason.grant.none")?;
+    let view = build_mission_view(&faber, &mission, &journal, &grant)?;
+    let _ = app.emit("mission", &view);
+    tray::on_mission(&app, &view);
+    Ok(view)
 }
 
 #[tauri::command]
@@ -533,17 +571,15 @@ async fn mission_answer(
     decision_id: String,
     answer: String,
 ) -> Res<MissionView> {
-    let _turn = lock(&faber.missions);
-    let (project, journal, mut mission) = find_mission_and_journal(&faber, &mission_id)?;
+    let _turn = faber.missions.lock().await;
+    let (project, journal, mission) = find_mission_and_journal(&faber, &mission_id)?;
     project_commands::editable(&mission)?;
     project_commands::id(&decision_id)?;
     project_commands::text(&answer)?;
-    let mut decision = journal.decision(&decision_id).map_err(|e| e.key().to_string())?.ok_or("error.decision.option")?;
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    decision.answer(DecidedBy::Person, &answer, now).map_err(|k| k.to_string())?;
-    journal.save_decision(&decision).map_err(|e| e.key().to_string())?;
-    project_commands::changed(&mut mission, now)?;
-    journal.save_mission(&mission).map_err(|e| e.key().to_string())?;
+    let mut runner = Runner::load(&journal).map_err(str::to_string)?;
+    runner.answer(&journal, &decision_id, &answer, now).map_err(str::to_string)?;
+    let mission = runner.mission;
     let grant = project.grant.unwrap_or_else(|| Grant::new(&mission.repo, GitMode::Seguro, mission.grant_revision, mission.created_at));
     let view = build_mission_view(&faber, &mission, &journal, &grant)?;
     let _ = app.emit("mission", &view);
@@ -560,7 +596,7 @@ async fn probe_mission_attention(
     focused: bool,
     attention: String,
 ) -> Res<Value> {
-    let _turn = lock(&faber.missions);
+    let _turn = faber.missions.lock().await;
     let (project, journal, mission) = find_mission_and_journal(&faber, &mission_id)?;
     let grant = project.grant.ok_or("reason.grant.none")?;
     let view = build_mission_view(&faber, &mission, &journal, &grant)?;
@@ -689,6 +725,14 @@ fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Resul
         if hidden && std::env::var("FABER_SOFTWARE_RENDERING").as_deref() == Ok("1") {
             args.push_str(" --disable-gpu");
         }
+        // The sentinel measures frames. A window on a desktop no monitor shows may be counted as hidden, and the engine then
+        // slows or stops animation frames; these switches ask it not to. The sentinel's clock check proves they held.
+        #[cfg(feature = "test-hooks")]
+        if hidden {
+            args.push_str(
+                " --disable-renderer-backgrounding --disable-backgrounding-occluded-windows --disable-background-timer-throttling",
+            );
+        }
         builder = builder.additional_browser_args(&args);
     }
     builder.build()
@@ -698,11 +742,16 @@ fn main() {
     if let Some(code) = faber_engine::proc::guard_mode() {
         std::process::exit(code);
     }
+    let autostart_launch = !creates_window(std::env::args());
     let hidden = std::env::var("FABER_HIDDEN").is_ok_and(|v| v == "1");
     let mut builder = tauri::Builder::default();
     // A second launch brings the open window forward. Runs with their own data folder (tests) stay separate.
     if std::env::var_os("FABER_DATA_DIR").is_none() {
-        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| show(app)));
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _| {
+            if creates_window(args) {
+                show(app);
+            }
+        }));
     }
     builder
         .plugin(tauri_plugin_dialog::init())
@@ -725,6 +774,8 @@ fn main() {
             answer,
             rename,
             remove,
+            remove_queued,
+            send_queued,
             remove_project,
             preview_look,
             save_settings,
@@ -760,14 +811,44 @@ fn main() {
             app.manage(tray::Tray::default());
             let clis = detect_clis();
             let handle = app.handle().clone();
+            let is_test = cfg!(feature = "test-hooks") || hidden || std::env::var_os("FABER_DATA_DIR").is_some();
+            let power: Box<dyn PowerKeepAwake> = if is_test {
+                Box::new(NoopPower)
+            } else {
+                #[cfg(windows)]
+                {
+                    Box::new(WindowsPower)
+                }
+                #[cfg(not(windows))]
+                {
+                    Box::new(NoopPower)
+                }
+            };
+            let autostart_keeper: Arc<dyn AutostartKeeper> = if is_test {
+                Arc::new(FakeAutostart::new(false))
+            } else {
+                #[cfg(windows)]
+                {
+                    Arc::new(WindowsAutostart::new())
+                }
+                #[cfg(not(windows))]
+                {
+                    Arc::new(NoopAutostart)
+                }
+            };
+            let keep_awake = faber_engine::store::Store::new(&data_dir).settings().keep_awake.unwrap_or(true);
+            let awake = Arc::new(Mutex::new(CountedAwake::new(power, keep_awake)?));
+            let awake_for_emit = awake.clone();
             let emit = Arc::new(move |e: AppEvent| {
                 // The engine calls this with its lock held, and the tray waits for the main thread, which can be waiting
                 // for that lock. So the tray works on its own thread; it keeps the newest list, whatever the order.
-                if let AppEvent::Running { revision, items } = &e
-                    && !hidden
-                {
-                    let (app, revision, items) = (handle.clone(), *revision, items.clone());
-                    tauri::async_runtime::spawn_blocking(move || tray::on_running(&app, revision, &items));
+                if let AppEvent::Running { revision, items } = &e {
+                    let active_turns: HashSet<String> = items.iter().map(|i| i.turn_id.clone()).collect();
+                    lock(&awake_for_emit).sync_runs(active_turns);
+                    if !hidden {
+                        let (app, revision, items) = (handle.clone(), *revision, items.clone());
+                        tauri::async_runtime::spawn_blocking(move || tray::on_running(&app, revision, &items));
+                    }
                 }
                 let _ = handle.emit("faber:event", e);
             });
@@ -782,21 +863,31 @@ fn main() {
                 runtime: tauri::async_runtime::handle().inner().clone(),
                 ask: None,
             };
+            let engine = Engine::new(opts, emit);
+            let missions = engine.mission_lock();
             app.manage(Faber {
-                engine: Engine::new(opts, emit),
+                engine,
                 models: Mutex::default(),
                 update: Mutex::default(),
                 data_dir: data_dir.clone(),
                 hidden,
-                missions: Mutex::new(()),
+                missions,
+                awake,
+                autostart: Mutex::new(autostart_keeper),
             });
             app.state::<Faber>().engine.watch_accounts();
             if let Some(codex) = clis.get(&Vendor::Codex) {
                 load_models(app.handle(), codex.clone(), data_dir.clone());
             }
-            create_window(app.handle(), hidden, &data_dir)?;
+            if !autostart_launch {
+                create_window(app.handle(), hidden, &data_dir)?;
+            }
             if !hidden {
                 tray::create(app)?;
+            }
+            #[cfg(feature = "test-hooks")]
+            if autostart_launch && let Some(out) = std::env::var_os("FABER_CHECKS_OUT") {
+                std::fs::write(out, serde_json::json!({ "windowCount": app.webview_windows().len() }).to_string())?;
             }
             // Only installed builds update themselves; source runs and test runs never do.
             if !hidden && !cfg!(debug_assertions) && std::env::var_os("FABER_DATA_DIR").is_none() {
@@ -810,13 +901,14 @@ fn main() {
             // Closing the window frees the screen (about 90 MB) but keeps Faber in the tray, so running answers
             // finish; only Quit, or a test run, ends it.
             if let RunEvent::ExitRequested { code: None, api, .. } = &event
-                && !hidden
+                && (!hidden || autostart_launch)
             {
                 api.prevent_exit();
             }
             if let RunEvent::Exit = event {
                 terminal::terminate_hidden();
                 let faber = app.state::<Faber>();
+                lock(&faber.awake).shutdown();
                 faber.engine.shutdown();
                 // On Windows this starts the installer, which replaces Faber and needs it closed.
                 if let Some((update, bytes)) = lock(&faber.update).take() {

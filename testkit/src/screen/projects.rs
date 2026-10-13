@@ -15,6 +15,7 @@ use std::time::Duration;
 
 pub fn scenarios() -> Vec<Scenario> {
     vec![
+        Scenario { name: "projects T5: fixture mission lands an exact tree and retires operational data", run: mission },
         Scenario {
             name: "projects git and T11: detached work, CAS, hooks, filters, junction ownership and dirty owner preservation",
             run: local_git,
@@ -24,6 +25,9 @@ pub fn scenarios() -> Vec<Scenario> {
         Scenario { name: "projects git opus M3 and L4: candidate junction swap cannot redirect broker IO", run: path_race },
         Scenario { name: "projects git opus M1: git clean cannot erase pending effect authority", run: cleanup },
     ]
+}
+fn mission(ctx: &mut Ctx) -> Result {
+    run_probe(ctx, "--project-mission")
 }
 fn local_git(ctx: &mut Ctx) -> Result {
     run_probe(ctx, "--project-git")
@@ -106,6 +110,23 @@ pub fn screen_fixture(sandbox: &Path) -> Result {
     let data = sandbox.join("data");
     std::fs::write(data.join("projects.json"), serde_json::to_vec(&vec![project.clone()]).unwrap()).map_err(|e| e.to_string())?;
     let journal = Journal::open(&repo, &data, "screen_mission").map_err(|e| e.key().to_string())?;
+    let mut ledger = faber_engine::ledger::Ledger::default();
+    let mut budget = faber_engine::project::budget::Budget::default();
+    budget.grants.insert(
+        "screen_mission".into(),
+        faber_engine::project::budget::Grant {
+            cap_micros: 100_000,
+            worker_micros: 50_000,
+            vendors: std::collections::BTreeMap::from([(faber_engine::model::Vendor::Codex, 100_000)]),
+            review_micros: 20_000,
+            repair_micros: 20_000,
+            canary_micros: 10_000,
+            paused: false,
+            extra: Default::default(),
+        },
+    );
+    ledger.extra.insert("missionBudget".into(), serde_json::to_value(budget).unwrap());
+    std::fs::write(data.join("budget.json"), serde_json::to_vec(&ledger).unwrap()).map_err(|e| e.to_string())?;
     let mut mission = Mission::new("screen_mission", "demo", &enrolled.identity.common_dir, "A measured project goal", &base, 1, 100);
     mission.state = MissionState::Paused;
     journal.save_mission(&mission).map_err(|e| e.key().to_string())?;
@@ -563,4 +584,116 @@ pub fn probe_cleanup(sandbox: &Path) -> Result {
     let broker = check(Broker::open(repository, journal, "m1", 3, check(Process::find())?))?;
     ensure(broker.finish() == Err(GitError::Lease(LeaseError::Live)), || "cleaned mission released unreconciled ownership".into())?;
     std::fs::write(sandbox.join("project-git.ok"), "ok").map_err(|e| e.to_string())
+}
+
+pub fn probe_mission(sandbox: &Path) -> Result {
+    use faber_engine::model::Vendor;
+    use faber_engine::project::disk::{ResourceKind, Resources};
+    use faber_engine::project::lease::Termination;
+    use faber_engine::project::proof::{Definition, Observation, ProofSet};
+    use faber_engine::project::queue::{Candidate, Review};
+    use faber_engine::project::run::Runner;
+    use faber_engine::project::wire::ArtifactRef;
+    use faber_engine::project::{Mission, MissionState, Plan, Task, TaskKind, TaskState};
+    let (repo, repository, program) = review_repository(sandbox)?;
+    let base = repository.base.clone();
+    let identity = repository.identity.common_dir.clone();
+    std::fs::write(repo.join("src/a.rs"), "dirty owner").map_err(|e| e.to_string())?;
+    let owner_index = std::fs::read(repo.join(".git/index")).map_err(|e| e.to_string())?;
+    let (mut broker, grant, lease, root) = review_writer(sandbox, repository, Traced(check(Process::find())?))?;
+    check(broker.create_branch(|| Ok(Some(grant.clone())), "branch"))?;
+    let mut runner =
+        Runner::create(broker.journal(), Mission::new("m1", "p1", &identity, "Fixture fix", &base, 3, 1)).map_err(str::to_string)?;
+    runner.mission.state = MissionState::Running;
+    runner.save(broker.journal()).map_err(str::to_string)?;
+    let mut task = Task::new("writer", "Fixture fix", TaskKind::Writer);
+    task.state = TaskState::Review;
+    broker.journal().save_plan(&Plan::new("m1", 1, vec![task])).map_err(|e| e.key())?;
+    let mut resources = Resources::load(broker.journal()).map_err(str::to_string)?;
+    let build = resources.register_for(broker.journal(), "build-writer", "writer", ResourceKind::Build, None).map_err(str::to_string)?;
+    std::fs::create_dir_all(&build).map_err(|e| e.to_string())?;
+    std::fs::write(build.join("old-output"), "temporary").map_err(|e| e.to_string())?;
+    let definition = Definition {
+        id: "fixture-check".into(),
+        version: 1,
+        program: std::env::current_exe().map_err(|e| e.to_string())?,
+        argv: vec!["--project-mission".into()],
+        checks: vec!["C1".into()],
+        toolchain: "first-party-fixture".into(),
+        dependencies: "none".into(),
+        environment: std::collections::BTreeMap::new(),
+        heavy: false,
+    };
+    // This first-party fixture check runs in this already-contained native helper, not candidate code or a model.
+    let verify = |path: &Path| -> Result<Observation> {
+        let passed = std::fs::read(path).map_err(|e| e.to_string())? == b"after";
+        let stdout = if passed { b"pass".to_vec() } else { b"fail".to_vec() };
+        Ok(Observation {
+            exit: Some(if passed { 0 } else { 1 }),
+            evidence: ArtifactRef { path: "proofs/fixture.log".into(), sha256: hash(&stdout) },
+            stdout,
+            stderr: vec![],
+        })
+    };
+    let mut red =
+        ProofSet::new(base.clone(), "fixture".into(), vec![definition.clone()], vec!["src/a.rs".into()]).map_err(str::to_string)?;
+    red.record("red", "fixture-check", verify(&root.join("src/a.rs"))?).map_err(str::to_string)?;
+    ensure(!red.verified(), || "the fixture must begin red".into())?;
+    broker
+        .leases()
+        .patch(
+            &lease,
+            Some(&grant),
+            3,
+            &FileOp::Write(WriteOp { path: "src/a.rs".into(), expect: Some(hash(b"base")), content: "after".into() }),
+        )
+        .map_err(|e| e.key())?;
+    let tree = check(broker.compose_tree(|| Ok(Some(grant.clone())), &lease, &["src/a.rs".into()]))?;
+    let mut proof = ProofSet::new(tree.clone(), "fixture".into(), vec![definition], vec!["src/a.rs".into()]).map_err(str::to_string)?;
+    let receipt = proof.record("green", "fixture-check", verify(&root.join("src/a.rs"))?).map_err(str::to_string)?;
+    broker.journal().record_check(&receipt).map_err(|e| e.key())?;
+    let candidate = Candidate::new(
+        "writer",
+        base.clone(),
+        tree.clone(),
+        3,
+        Vendor::Codex,
+        "fixture".into(),
+        vec!["src/a.rs".into()],
+        proof.definitions().to_vec(),
+    )
+    .map_err(str::to_string)?;
+    runner.queue.enqueue(candidate).map_err(str::to_string)?;
+    let review = Review {
+        vendor: Vendor::Claude,
+        tree: tree.clone(),
+        proof_digest: proof.digest(),
+        session: "fixture-fresh-review".into(),
+        fresh: true,
+        accepted: true,
+        findings: vec![],
+    };
+    ensure(runner.queue.review("writer", review.clone()).is_err(), || "review must wait for proof".into())?;
+    runner.queue.prove("writer", proof).map_err(str::to_string)?;
+    runner.queue.review("writer", review).map_err(str::to_string)?;
+    let head = runner
+        .land(
+            &mut broker,
+            "writer",
+            &lease,
+            || Ok(Some(grant.clone())),
+            "Fix the fixture",
+            Termination { process: None, tree_dead: true, cost_settled: true },
+            |_| Ok(()),
+        )
+        .map_err(str::to_string)?;
+    ensure(!root.exists() && !build.exists(), || "R106 retained unused worktree or build".into())?;
+    ensure(git(&program, &repo, &["rev-parse", "faber/m1"])? == head, || "mission ref did not land".into())?;
+    ensure(git(&program, &repo, &["show", "faber/m1:src/a.rs"])? == "after", || "wrong landed content".into())?;
+    ensure(git(&program, &repo, &["rev-parse", "HEAD"])? == base, || "owner ref moved".into())?;
+    ensure(std::fs::read(repo.join(".git/index")).map_err(|e| e.to_string())? == owner_index, || "owner index changed".into())?;
+    ensure(std::fs::read(repo.join("src/a.rs")).map_err(|e| e.to_string())? == b"dirty owner", || "owner edit changed".into())?;
+    ensure(broker.journal().plan().map_err(|e| e.key())?.unwrap().tasks[0].state == TaskState::Done, || "landing was not recorded".into())?;
+    check(broker.finish())?;
+    std::fs::write(sandbox.join("project-git.ok"), "fixture mission proved").map_err(|e| e.to_string())
 }

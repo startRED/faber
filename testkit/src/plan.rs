@@ -108,6 +108,16 @@ pub fn select(opts: &Options, changed: &[String]) -> BTreeSet<Suite> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn configured_build_jobs_limit_the_runner_without_changing_its_default() {
+        assert_eq!(super::job_count(16, Some("4")), 4);
+        assert_eq!(super::job_count(16, Some("2")), 2);
+        for configured in [None, Some("0"), Some("-1"), Some("bad")] {
+            assert_eq!(super::job_count(16, configured), 8);
+        }
+        let logical = std::thread::available_parallelism().unwrap().get();
+        assert_eq!(super::jobs(), super::job_count(logical, std::env::var("CARGO_BUILD_JOBS").ok().as_deref()));
+    }
     use super::*;
 
     fn paths(list: &[&str]) -> Vec<String> {
@@ -129,6 +139,26 @@ mod tests {
         assert_eq!(job_count(2, Some("4")), 1);
         assert_eq!(job_count(16, Some("0")), 8);
         assert_eq!(job_count(16, Some("invalid")), 8);
+    }
+
+    #[test]
+    fn the_bootstrap_keeps_a_default_limit_without_overriding_the_environment() {
+        let config: toml::Value = include_str!("../../.cargo/config.toml").parse().unwrap();
+        assert_eq!(config["build"]["jobs"].as_integer(), Some(4));
+        assert!(!config["alias"]["t"].as_str().unwrap().split_whitespace().any(|arg| arg == "-j"));
+    }
+
+    #[test]
+    fn the_runner_respects_a_positive_cargo_build_limit() {
+        assert_eq!(job_count(16, Some("4")), 4);
+        assert_eq!(job_count(16, Some("2")), 2);
+        assert_eq!(job_count(2, Some("4")), 1);
+        for value in [None, Some("0"), Some("invalid"), Some("-2")] {
+            assert_eq!(job_count(16, value), 8);
+        }
+        let default = job_count(std::thread::available_parallelism().map_or(1, |n| n.get()), None);
+        let limit = std::env::var("CARGO_BUILD_JOBS").ok().and_then(|value| value.parse::<usize>().ok()).filter(|limit| *limit > 0);
+        assert_eq!(jobs(), limit.map_or(default, |limit| default.min(limit)));
     }
 
     #[test]
