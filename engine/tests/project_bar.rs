@@ -6,7 +6,8 @@ use faber_engine::project::wire::{
     Facets, Fact, FactSheet, Piece, RiskAnswers, SheetQuestion,
 };
 use std::collections::BTreeMap;
-use tempfile::tempdir;
+mod support;
+use support::canonical_tempdir as tempdir;
 
 #[test]
 fn deliverable_sheet_validates_pieces_contexts_and_seven_risk_answers() {

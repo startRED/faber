@@ -14,6 +14,11 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc::UnboundedReceiver;
 
+/// Broker fixtures begin at canonical roots, including macOS's /var system alias.
+pub fn canonical_tempdir() -> io::Result<tempfile::TempDir> {
+    tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize()?)
+}
+
 #[derive(Debug, Clone)]
 pub struct Entry {
     pub input: bool,

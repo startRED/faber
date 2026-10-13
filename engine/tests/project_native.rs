@@ -1,5 +1,7 @@
 use faber_engine::project::proof::native::*;
 use serde_json::json;
+mod support;
+use support::canonical_tempdir as tempdir;
 
 #[test]
 fn lock_inventory_covers_public_versions_and_rejects_unknown_sources() {
@@ -125,7 +127,7 @@ fn current_lockfiles_have_a_complete_public_inventory() {
 #[tokio::test]
 async fn unavailable_authorization_is_logged_without_a_network_call() {
     let package = PublicPackage { ecosystem: Ecosystem::Cargo, name: "serde".into(), version: "1.0.0".into() };
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempdir().unwrap();
     let journal = faber_engine::project::store::Journal::open(&dir.path().join("repo"), &dir.path().join("data"), "mission").unwrap();
     let result = query_osv(&package, &Default::default(), &journal).await.unwrap();
     assert!(result.body.is_none());
@@ -155,7 +157,7 @@ async fn osv_requires_public_registry_evidence_before_disclosing_a_package() {
         }
     }
     let captured = Arc::new(Mutex::new(Vec::new()));
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempdir().unwrap();
     let journal = faber_engine::project::store::Journal::open_with(
         &dir.path().join("repo"),
         &dir.path().join("data"),
@@ -198,7 +200,7 @@ async fn source_receipt_io_keeps_the_runtime_responsive() {
         }
     }
     let ready = Arc::new(AtomicBool::new(false));
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempdir().unwrap();
     let journal = faber_engine::project::store::Journal::open_with(
         &dir.path().join("repo"),
         &dir.path().join("data"),

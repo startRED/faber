@@ -318,3 +318,9 @@ The latest selfdev base has ten additional budget/integration commits. A merge p
 ### Base integration proofs
 
 Integrated selfdev at 041da3b; the sole conflict retained both the bar and budget module declarations. All seven AGENTS.md proofs plus cargo t --all exit 0 on the combined source. Both cargo t and cargo t --all report 982 passed, zero failed/not-run/skipped. The warm whole app tree measures 119.3 MB. Fix commits: f804b08 (trust boundaries) and f657b5b (native evidence and durable compilation). The integration commit preserves both histories. PR and final Windows/macOS CI results will be recorded in the external report after publication.
+
+### First CI result and portable fixture correction
+
+Draft PR: https://github.com/startRED/faber/pull/8, base selfdev, head c47feff. macOS job 115135192357 failed grounded_additions_verify_repo_heading_exists; cargo stopped at that test crate and reported the Rust suite failure as well. Its result was 535 passed, 2 failed, 1 skipped, not a pass. The fixture used the macOS /var temporary-directory alias, while broker IO requires enrolled canonical roots and forbids links. The fix uses one canonical_tempdir helper in the existing test support module for all four bar/compiler/native fixture files. Production link checks remain unchanged. The existing failing macOS test is the red counterexample; all four affected test files now pass locally. All required proofs are rerun before committing this correction. The screen skip on macOS remains an explicit limitation, not G10 evidence.
+
+Portable-fixture correction proofs: all eight commands exit 0; cargo t reports 899 passed and cargo t --all reports 982 passed, zero failed/not-run/skipped. The warm tree is 118.7 MB. The first Windows CI job passed all stages at c47feff (36m8s); the macOS failure remains recorded rather than rerun as an unexplained transient. The corrected fixture commit will receive fresh CI on both operating systems.
