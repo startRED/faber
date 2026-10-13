@@ -51,6 +51,7 @@ struct Turn {
     input: u64,
     cached: u64,
     written: u64,
+    written_1h: u64,
     output: u64,
     incomplete: bool,
     windows: Windows,
@@ -83,11 +84,20 @@ async fn finish(rx: &mut UnboundedReceiver<EngineEvent>, stop: Option<&dyn Fn()>
                     return turn;
                 }
             }
-            e @ EngineEvent::Done { ok, input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, incomplete, .. } => {
+            e @ EngineEvent::Done {
+                ok,
+                input_tokens,
+                cache_read_tokens,
+                cache_write_tokens,
+                cache_write_1h_tokens,
+                output_tokens,
+                incomplete,
+                ..
+            } => {
                 turn.ok = ok;
                 turn.own_cost = faber_engine::usage::fresh_price(&e, "claude-haiku-5-5").0;
-                (turn.input, turn.cached, turn.written, turn.output, turn.incomplete) =
-                    (input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, incomplete);
+                (turn.input, turn.cached, turn.written, turn.written_1h, turn.output, turn.incomplete) =
+                    (input_tokens, cache_read_tokens, cache_write_tokens, cache_write_1h_tokens, output_tokens, incomplete);
                 return turn;
             }
             EngineEvent::Error { message, fatal } => panic!("the CLI said: {message} (fatal: {fatal})"),
@@ -99,10 +109,11 @@ async fn finish(rx: &mut UnboundedReceiver<EngineEvent>, stop: Option<&dyn Fn()>
 fn row(scenario: &str, label: &str, t: &Turn) {
     let hit = if t.input == 0 { 0.0 } else { t.cached as f64 * 100.0 / t.input as f64 };
     println!(
-        "| {scenario} | {label} | {} | {} | {} | {hit:.1}% | {} | {} |",
+        "| {scenario} | {label} | {} | {} | {} | {} | {hit:.1}% | {} | {} |",
         t.input,
         t.cached,
         t.written,
+        t.written_1h,
         t.output,
         if t.incomplete { "incomplete" } else { "" }
     );
@@ -188,8 +199,8 @@ async fn main() {
     let dir = std::env::temp_dir().join("faber-cache-probe");
     std::fs::create_dir_all(&dir).expect("a folder to work in");
     let probe = Probe { dir };
-    println!("| scenario | turn | prompt tokens | cache read | cache written | hit | output | note |");
-    println!("|---|---|---|---|---|---|---|---|");
+    println!("| scenario | turn | prompt tokens | cache read | cache written | 1h written | hit | output | note |");
+    println!("|---|---|---|---|---|---|---|---|---|");
     match scenario {
         "claude-turns" => {
             let (session, mut rx) = probe.claude(None, "medium");
