@@ -311,6 +311,8 @@ fn permission(ctx: &mut Ctx) -> Result {
     let page = &mut app.page;
     let mut found = Vec::new();
     viewport(page, 1440, 900)?;
+    // The machine's own motion preference is not under test (a runner may ask for less): pin it, as the motion scenario does.
+    system_motion(page, false)?;
     inject(page)?;
     clock_and_slow(page)?;
     let model = page.labelled("composer.model")?;
