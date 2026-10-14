@@ -13,7 +13,7 @@ const DAY = 86_400_000;
 const startOfDay = (ms: number) => new Date(new Date(ms).toDateString()).getTime();
 
 /** "today, 14:08", "yesterday, 14:08", else the date: the words for the days come from the language itself. */
-function when(ms: number): string {
+export function when(ms: number): string {
   const days = Math.round((startOfDay(Date.now()) - startOfDay(ms)) / DAY);
   const time = new Intl.DateTimeFormat(lang(), { hour: '2-digit', minute: '2-digit' }).format(ms);
   if (days === 0 || days === 1) return `${new Intl.RelativeTimeFormat(lang(), { numeric: 'auto' }).format(-days, 'day')}, ${time}`;
@@ -64,45 +64,47 @@ export function Welcome(props: {
         <section class="resume" aria-labelledby="resume-title" ref={animateList}>
           <h2 id="resume-title">{t('s1.pickUp')}</h2>
           <For each={rows()}>
-            {(c) => {
-              const item = () => live(c.id);
-              return (
-                <button type="button" class="rrow" classList={{ ask: item()?.state === 'needsYou' }} onClick={() => props.onOpen(c)}>
-                  <span class="t">{c.title}</span>
-                  <span class="s">
-                    <Show
-                      when={item()}
-                      fallback={
-                        <>
-                          {where(c)} · {when(c.updatedAt)}
-                        </>
-                      }
-                    >
-                      {(i) => (
-                        <Show
-                          when={i().state === 'needsYou'}
-                          fallback={
-                            <span class="vm" classList={{ claude: i().vendor === 'claude', codex: i().vendor === 'codex' }}>
-                              <VendorMark vendor={i().vendor} />
-                              <Show when={i().vendor}>{(v) => <b>{vendorName(v())}</b>}</Show>
-                              <span class="verb">{i().vendor ? t('run.working') : t('run.routing')}</span>
-                            </span>
-                          }
-                        >
-                          <span class="amber-tag">
-                            <Icon name="ask" small />
-                            {t('run.needsYou')}
-                          </span>
-                        </Show>
-                      )}
-                    </Show>
-                  </span>
-                </button>
-              );
-            }}
+            {(c) => <ResumeRow conversation={c} item={live(c.id)} where={where(c)} onOpen={props.onOpen} />}
           </For>
         </section>
       </Show>
     </div>
+  );
+}
+
+/** One conversation to pick up: its title, and under it where it is and when, or what it is doing now. Shared by the homes. */
+export function ResumeRow(props: { conversation: Summary; item?: RunningItem; where: string; onOpen: (conversation: Summary) => void }) {
+  return (
+    <button type="button" class="rrow" classList={{ ask: props.item?.state === 'needsYou' }} onClick={() => props.onOpen(props.conversation)}>
+      <span class="t">{props.conversation.title}</span>
+      <span class="s">
+        <Show
+          when={props.item}
+          fallback={
+            <>
+              {props.where} · {when(props.conversation.updatedAt)}
+            </>
+          }
+        >
+          {(i) => (
+            <Show
+              when={i().state === 'needsYou'}
+              fallback={
+                <span class="vm" classList={{ claude: i().vendor === 'claude', codex: i().vendor === 'codex' }}>
+                  <VendorMark vendor={i().vendor} />
+                  <Show when={i().vendor}>{(v) => <b>{vendorName(v())}</b>}</Show>
+                  <span class="verb">{i().vendor ? t('run.working') : t('run.routing')}</span>
+                </span>
+              }
+            >
+              <span class="amber-tag">
+                <Icon name="ask" small />
+                {t('run.needsYou')}
+              </span>
+            </Show>
+          )}
+        </Show>
+      </span>
+    </button>
   );
 }

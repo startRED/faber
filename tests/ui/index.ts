@@ -17,6 +17,7 @@ import './appearance.check.ts';
 import './check.check.ts';
 import './composer.check.ts';
 import './effort.check.ts';
+import './idle.check.ts';
 import './i18n.check.ts';
 import './inbox.check.ts';
 import './interactions.check.ts';
