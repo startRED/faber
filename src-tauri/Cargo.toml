@@ -37,3 +37,10 @@ unsafe_code = "deny"
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }
+
+[dev-dependencies]
+tempfile = "3"
+
+[target.'cfg(windows)'.dev-dependencies]
+# Standard Rust cannot create junctions on stable; the overlap guard in update.rs is tested with one.
+junction = "2"
