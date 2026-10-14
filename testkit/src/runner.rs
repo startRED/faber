@@ -5,9 +5,10 @@ use crate::checks;
 use crate::plan::{Options, Suite, changed_paths, jobs, parse_args, select};
 use crate::report::{Outcome, Status, exit_code, line, summary};
 use crate::screen;
+use crate::slots;
 use crate::sweep;
 use crate::testbuild::{build_test_app, ensure_fake_cli};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
@@ -67,14 +68,18 @@ fn run_rust(root: &Path, jobs: usize, filter: Option<&str>) -> Vec<Outcome> {
 }
 
 /// Keeps the main checkout's `target` under the cap (R106), at most once an hour. Prints a line only when it freed space.
-fn sweep_builds(paths: &Paths) {
-    let Ok(output) = Command::new("git").current_dir(&paths.root).args(["worktree", "list", "--porcelain"]).output() else { return };
+/// Returns that `target`, which every worktree shares.
+fn sweep_builds(paths: &Paths) -> Option<PathBuf> {
+    let output = Command::new("git").current_dir(&paths.root).args(["worktree", "list", "--porcelain"]).output().ok()?;
     let worktrees = sweep::worktrees(&String::from_utf8_lossy(&output.stdout));
-    let (Some(main), Some(own)) = (worktrees.first(), paths.target.parent()) else { return };
+    let (Some(main), Some(own)) = (worktrees.first(), paths.target.parent()) else { return None };
     let target = main.join("target");
     let now = std::time::SystemTime::now();
-    if !output.status.success() || !target.is_dir() || !sweep::due(&target, now) {
-        return;
+    if !output.status.success() || !target.is_dir() {
+        return None;
+    }
+    if !sweep::due(&target, now) {
+        return Some(target);
     }
     let report = sweep::sweep(&target, own, &worktrees, now, sweep::CAP);
     let gb = |bytes: u64| bytes as f64 / (1u64 << 30) as f64;
@@ -85,6 +90,7 @@ fn sweep_builds(paths: &Paths) {
     if report.after > sweep::CAP {
         println!("Build folder: {:.1} GB is above the {:.0} GB cap, and nothing else is idle to remove", gb(report.after), gb(sweep::CAP));
     }
+    Some(target)
 }
 
 fn changed(root: &Path) -> Result<Vec<String>, String> {
@@ -126,7 +132,7 @@ pub fn run(args: &[String]) -> i32 {
             return 2;
         }
     };
-    sweep_builds(&paths);
+    let shared = sweep_builds(&paths);
     let changed = if opts.all || opts.suite.is_some() {
         Vec::new()
     } else {
@@ -143,6 +149,7 @@ pub fn run(args: &[String]) -> i32 {
         println!("Nothing changed that needs a test (use --all to run everything).");
         return 0;
     }
+    let _slot = shared.and_then(|target| slots::take(&target.join(".faber-slots")));
     // Ctrl+C ends the apps this run started and removes its temporary folders before the runner goes.
     let _ = ctrlc::set_handler(|| {
         emergency_cleanup();
