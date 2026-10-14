@@ -521,16 +521,13 @@ impl CodexServer {
             return Err(crate::project::policy::Blocker::Invocation);
         }
         project_thread_params(&thread, role)?;
+        crate::project::policy::admit_launch(crate::model::Vendor::Codex, &opts.bin)?;
         #[cfg(windows)]
-        if crate::project::policy::admit(crate::model::Vendor::Codex).is_ok() {
-            prepare_project_codex_catalog().map_err(|_| crate::project::policy::Blocker::Restrictions)?;
-        }
-        crate::project::policy::admit(crate::model::Vendor::Codex).map(|()| {
-            let server = Self::start_with_policy(opts, Some(role));
-            let session = server.open(thread, sink);
-            server.retire();
-            session.for_project(role)
-        })
+        prepare_project_codex_catalog().map_err(|_| crate::project::policy::Blocker::Restrictions)?;
+        let server = Self::start_with_policy(opts, Some(role));
+        let session = server.open(thread, sink);
+        server.retire();
+        Ok(session.for_project(role))
     }
     /// The process starts right away, so a warmed-up conversation is already booting while the user types.
     pub fn start(opts: CodexServerOptions) -> CodexServer {

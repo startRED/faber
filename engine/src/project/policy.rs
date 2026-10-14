@@ -7,7 +7,8 @@
 //! command/read isolation, linked-worktree common-dir protection, hook/plugin/MCP/subagent containment, or a maximum
 //! invocation exposure including nested calls. Claude's budget estimate is not a hard exposure bound.
 //! Windows owns a kill-on-close job before a trusted guard may start the CLI. Other platforms still own one child.
-//! Every automated role therefore stays blocked, including research/review. No real session is needed to deny it.
+//! Every automated role stays blocked, including research/review, until `qualification` finds a private, fresh receipt
+//! for the exact installed CLI version and executable hash (Windows only). No caller input can substitute for it.
 //!
 //! Before opening admission: record version-bound containment/escape proofs, platform tree termination and measured
 //! interrupt latency, and an enforceable exposure bound or verified live usage with a reserved safe stop margin.
@@ -52,9 +53,17 @@ pub fn blockers(_vendor: Vendor) -> &'static [Blocker] {
     &[Blocker::Restrictions, Blocker::ProcessTree, Blocker::Exposure]
 }
 
-/// This is deliberately not configurable: a manifest claim cannot unlock execution.
+/// Not configurable: no parameter, manifest or flag unlocks execution. Only a qualification receipt does, and only
+/// while it matches the installed program. This pre-check looks at the CLI found on PATH; the launch itself is checked
+/// again against the exact program it starts (`admit_launch`).
 pub fn admit(vendor: Vendor) -> Result<(), Blocker> {
-    Err(blockers(vendor)[0])
+    super::qualification::admitted(vendor, &|| crate::cli::find_cli(vendor.name()).filter(|c| c.prefix.is_empty()).map(|c| c.command))
+        .map_err(|_| blockers(vendor)[0])
+}
+
+/// The authoritative check, made by the driver constructors with the program they are about to start.
+pub fn admit_launch(vendor: Vendor, bin: &str) -> Result<(), Blocker> {
+    super::qualification::admitted(vendor, &|| Some(bin.to_string())).map_err(|_| blockers(vendor)[0])
 }
 
 /// Fixed role controls; these values are not an admission receipt.

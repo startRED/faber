@@ -265,6 +265,7 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(opts: EngineOptions, emit: Emit) -> Engine {
+        crate::project::qualification::use_dir(&opts.data_dir);
         let mut store = Store::new(&opts.data_dir);
         let owned = store.claim_budget().is_ok();
         let mut ledger = store.ledger();
