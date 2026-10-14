@@ -1,7 +1,7 @@
 # Task 13 acceptance: stopped, not accepted
 
-Continuation on 2026-10-14 under R112: executable hashing succeeds, but the installed
-role's MCP loadout fails the empty-set check. See the
+Continuation on 2026-10-14 under R112: inherited exposure and the native Writer
+write breach are repaired; interrupted spending metering fails. See the
 [new measured acceptance report](2026-10-20-self-development-acceptance.md).
 
 Initial measurements: 2026-10-13, America/Fortaleza (UTC−03:00). Baseline `dc46d45`;
@@ -25,8 +25,10 @@ Case 6 is not replaced by a positive claim: the public `Runner::resume` refuses 
 after native rollback, twice, without changing the pre-rollback $2 fixture grant. Existing pure seam
 tests prove authorized reconciliation and duplicate-charge rejection, not a live successful Resume.
 Fixture canary and other-vendor review records authorize only the scripted lifecycle assertions.
-The red/green fixture check is an in-process condition in the native test helper, not a `cargo test`
-through an admitted worker. Writer/reviewer queue records are fixture values. These checks exercise
+The original red/green fixture check was an in-process condition. The 2026-10-14
+continuation replaces it with an owned first-party checker through the production
+proof dispatcher, still not a `cargo test` through an admitted worker.
+Writer/reviewer queue records remain fixture values. These checks exercise
 the proof/landing/report contracts, not a complete fake-CLI mission through production admission.
 
 ## Stop point

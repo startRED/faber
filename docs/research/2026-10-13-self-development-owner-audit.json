@@ -11,6 +11,9 @@
                         " M .gitignore",
                         " M docs/roadmap.md"
                     ],
+    "baselineOwnerStatus": [" M .gitignore", " M docs/roadmap.md"],
+    "comparisonMeaning": "unchanged compares bytes with the pre-run snapshot, not with git HEAD; both dirty files were already modified before the run",
+    "baselineEvidence": "C:/Users/Erick/AppData/Local/Faber/t13-acceptance-2026-10-13/owner-install-before.json",
     "ownerScope":  "all tracked bytes plus HEAD/index/packed-refs; untracked and build outputs excluded",
     "stableScope":  "all install files"
 }

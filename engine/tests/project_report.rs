@@ -17,3 +17,11 @@ fn known_report_metrics_keep_the_existing_scalar_format() {
     assert_eq!(serde_json::from_str::<UnknownOr<u64>>("42").unwrap(), number);
     assert_eq!(serde_json::from_str::<UnknownOr<u64>>("\"unknown\"").unwrap(), UnknownOr::default());
 }
+
+#[test]
+fn literal_unknown_is_reserved_for_missing_evidence_in_the_scalar_format() {
+    let reserved = serde_json::to_string(&UnknownOr::Known("unknown".to_string())).unwrap();
+    assert_eq!(serde_json::from_str::<UnknownOr<String>>(&reserved).unwrap(), UnknownOr::default());
+    // Known string metrics are validated git object IDs; this marker cannot be a measured object ID.
+    assert!(!faber_engine::project::git::valid_oid("unknown"));
+}

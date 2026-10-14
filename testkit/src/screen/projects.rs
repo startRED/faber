@@ -628,10 +628,9 @@ pub fn probe_mission(sandbox: &Path) -> Result {
     use faber_engine::model::Vendor;
     use faber_engine::project::disk::{ResourceKind, Resources};
     use faber_engine::project::lease::Termination;
-    use faber_engine::project::proof::{Definition, Observation, ProofSet};
+    use faber_engine::project::proof::{Definition, ProofSet};
     use faber_engine::project::queue::{Candidate, Review};
     use faber_engine::project::run::Runner;
-    use faber_engine::project::wire::ArtifactRef;
     use faber_engine::project::{Mission, MissionState, Plan, Task, TaskKind, TaskState};
     let (repo, repository, program) = review_repository(sandbox)?;
     let base = repository.base.clone();
@@ -660,28 +659,20 @@ pub fn probe_mission(sandbox: &Path) -> Result {
         id: "fixture-check".into(),
         version: 1,
         program: std::env::current_exe().map_err(|e| e.to_string())?,
-        argv: vec!["--project-mission".into()],
+        argv: vec!["--project-proof".into(), root.join("src/a.rs").to_string_lossy().into_owned()],
         checks: vec!["C1".into()],
         toolchain: "first-party-fixture".into(),
         dependencies: "none".into(),
         environment: std::collections::BTreeMap::new(),
         heavy: false,
     };
-    // This first-party fixture check runs in this already-contained native helper, not candidate code or a model.
-    let verify = |path: &Path| -> Result<Observation> {
-        let passed = std::fs::read(path).map_err(|e| e.to_string())? == b"after";
-        let stdout = if passed { b"pass".to_vec() } else { b"fail".to_vec() };
-        Ok(Observation {
-            exit: Some(if passed { 0 } else { 1 }),
-            evidence: ArtifactRef { path: "proofs/fixture.log".into(), sha256: hash(&stdout) },
-            stdout,
-            stderr: vec![],
-        })
-    };
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| e.to_string())?;
+    let proof_spawn = faber_engine::proc::isolated_spawner(definition.environment.clone());
     let mut red =
         ProofSet::new(base.clone(), "fixture".into(), vec![definition.clone()], vec!["src/a.rs".into()]).map_err(str::to_string)?;
-    let red_receipt = red.record("red", "fixture-check", verify(&root.join("src/a.rs"))?).map_err(str::to_string)?;
-    broker.journal().record_check(&red_receipt).map_err(|e| e.key())?;
+    let red_receipt = runtime
+        .block_on(runner.run_proof(broker.journal(), "writer", "fixture-check", &mut red, &root, &proof_spawn))
+        .map_err(str::to_string)?;
     ensure(!red.verified(), || "the fixture must begin red".into())?;
     ensure(red_receipt.extra["exit"] == 1, || "missing nonzero red exit".into())?;
     broker
@@ -695,9 +686,9 @@ pub fn probe_mission(sandbox: &Path) -> Result {
         .map_err(|e| e.key())?;
     let tree = check(broker.compose_tree(|| Ok(Some(grant.clone())), &lease, &["src/a.rs".into()]))?;
     let mut proof = ProofSet::new(tree.clone(), "fixture".into(), vec![definition], vec!["src/a.rs".into()]).map_err(str::to_string)?;
-    let mut receipt = proof.record("green", "fixture-check", verify(&root.join("src/a.rs"))?).map_err(str::to_string)?;
-    receipt.task = "writer".into();
-    broker.journal().record_check(&receipt).map_err(|e| e.key())?;
+    runtime
+        .block_on(runner.run_proof(broker.journal(), "writer", "fixture-check", &mut proof, &root, &proof_spawn))
+        .map_err(str::to_string)?;
     let candidate = Candidate::new(
         "writer",
         base.clone(),
@@ -759,7 +750,7 @@ pub fn probe_mission(sandbox: &Path) -> Result {
             && report.tokens_per_role.values().all(|tokens| tokens == &Default::default()),
         || "persisted report altered exact tree or invented measurements".into(),
     )?;
-    ensure(broker.journal().check("red").map_err(|e| e.key())?.as_ref() == Some(&red_receipt), || {
+    ensure(broker.journal().check(&red_receipt.id).map_err(|e| e.key())?.as_ref() == Some(&red_receipt), || {
         "red receipt did not survive persistence".into()
     })?;
     let unchanged = owner_hash == hash(&std::fs::read(repo.join("src/a.rs")).map_err(|e| e.to_string())?)

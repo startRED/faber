@@ -2,6 +2,14 @@
 
 Baseline: `dc46d45`, branch `selfdev-t13`. Measured on 2026-10-13.
 
+2026-10-14 continuation: cases 1-3 now execute the trusted first-party checker
+through the engine's owned proof dispatcher, replacing the in-memory verify
+closure. Actual exit codes and private hashed logs are required; launch failure
+is `NotRun`. Case 4 still copies a prebuilt test launcher and injects
+`CanaryVerdict::Pass`; it does not build a candidate or run the miniature mission.
+The current [acceptance report](2026-10-20-self-development-acceptance.md) records
+the interrupted spending failure and the work that consequently remains blocked.
+
 The owner's R111 answers govern this run: private authority, cross-vendor review, Chat priority,
 and isolated target/install paths. R105 keeps 22 October as a milestone without reducing the bar.
 

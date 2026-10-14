@@ -173,14 +173,26 @@ pub type Spawner = Arc<dyn Fn(&str, &[String], &Path) -> io::Result<Proc> + Send
 
 /// Starts a real process with piped stdio, no shell and, on Windows, no console window.
 pub fn real_spawner() -> Spawner {
-    Arc::new(|bin, args, cwd| {
+    configured_spawner(None)
+}
+
+/// Proof executors inherit only their recorded environment, including the process guard.
+pub fn isolated_spawner(environment: std::collections::BTreeMap<String, String>) -> Spawner {
+    configured_spawner(Some(environment))
+}
+
+fn configured_spawner(environment: Option<std::collections::BTreeMap<String, String>>) -> Spawner {
+    Arc::new(move |bin, args, cwd| {
         #[cfg(windows)]
         {
-            spawn_windows(bin, args, cwd)
+            spawn_windows(bin, args, cwd, environment.as_ref())
         }
         #[cfg(not(windows))]
         {
             let mut cmd = Command::new(bin);
+            if let Some(environment) = &environment {
+                cmd.env_clear().envs(environment);
+            }
             cmd.args(args).current_dir(cwd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
             let mut child = cmd.spawn()?;
             Ok(Proc {
@@ -194,14 +206,23 @@ pub fn real_spawner() -> Spawner {
 }
 
 #[cfg(windows)]
-fn spawn_windows(bin: &str, args: &[String], cwd: &Path) -> io::Result<Proc> {
+fn spawn_windows(
+    bin: &str,
+    args: &[String],
+    cwd: &Path,
+    environment: Option<&std::collections::BTreeMap<String, String>>,
+) -> io::Result<Proc> {
     use std::io::Write;
     use std::os::windows::{io::AsRawHandle, process::CommandExt};
     let job = win32job::Job::create().map_err(io::Error::other)?;
     let mut limits = job.query_extended_limit_info().map_err(io::Error::other)?;
     limits.limit_kill_on_job_close();
     job.set_extended_limit_info(&limits).map_err(io::Error::other)?;
-    let child = std::process::Command::new(std::env::current_exe()?)
+    let mut command = std::process::Command::new(std::env::current_exe()?);
+    if let Some(environment) = environment {
+        command.env_clear().envs(environment);
+    }
+    let child = command
         .arg("--faber-process-guard")
         .arg(bin)
         .args(args)

@@ -5,6 +5,7 @@ use super::{Extra, SCHEMA};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+/// Scalar reports reserve the literal string "unknown" for missing evidence; known strings are git object IDs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
 pub enum UnknownOr<T> {

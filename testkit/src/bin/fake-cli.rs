@@ -8,6 +8,13 @@ fn main() {
         std::process::exit(code);
     }
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if let [mode, file] = args.as_slice()
+        && mode == "--project-proof"
+    {
+        let passed = std::fs::read(file).is_ok_and(|bytes| bytes == b"after");
+        println!("{}", if passed { "pass" } else { "fail" });
+        std::process::exit(if passed { 0 } else { 1 });
+    }
     if let [mode, sandbox] = args.as_slice()
         && matches!(
             mode.as_str(),
