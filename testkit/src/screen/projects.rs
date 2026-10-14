@@ -15,6 +15,10 @@ use std::time::Duration;
 
 pub fn scenarios() -> Vec<Scenario> {
     vec![
+        Scenario { name: "T13 1: red acceptance receipt cannot satisfy landing", run: mission_red },
+        Scenario { name: "T13 2: exact reviewed tree lands locally in Seguro", run: mission_landing },
+        Scenario { name: "T13 3: persisted report retains exact evidence and unknown measurements", run: mission_report },
+        Scenario { name: "T13 7: original checkout and sandbox stable install hashes stay unchanged", run: mission_unchanged },
         Scenario { name: "projects T5: fixture mission lands an exact tree and retires operational data", run: mission },
         Scenario {
             name: "projects git and T11: detached work, CAS, hooks, filters, junction ownership and dirty owner preservation",
@@ -25,6 +29,30 @@ pub fn scenarios() -> Vec<Scenario> {
         Scenario { name: "projects git opus M3 and L4: candidate junction swap cannot redirect broker IO", run: path_race },
         Scenario { name: "projects git opus M1: git clean cannot erase pending effect authority", run: cleanup },
     ]
+}
+fn acceptance(ctx: &mut Ctx, key: &str) -> Result {
+    run_probe(ctx, "--project-mission")?;
+    let report: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(ctx.sb.sandbox.join("t13-scripted.json")).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?;
+    ensure(report[key] == true, || format!("missing T13 {key} evidence: {report}"))?;
+    ctx.notes.push(format!(
+        "T13 {key}: head={}, tree={}, red exit={}, owner={}, index={}, stable={}; fixture only",
+        report["head"], report["tree"], report["redReceipt"]["exit"], report["ownerSha256"], report["indexSha256"], report["stableSha256"]
+    ));
+    Ok(())
+}
+fn mission_red(ctx: &mut Ctx) -> Result {
+    acceptance(ctx, "red")
+}
+fn mission_landing(ctx: &mut Ctx) -> Result {
+    acceptance(ctx, "landing")
+}
+fn mission_report(ctx: &mut Ctx) -> Result {
+    acceptance(ctx, "report")
+}
+fn mission_unchanged(ctx: &mut Ctx) -> Result {
+    acceptance(ctx, "unchanged")
 }
 fn mission(ctx: &mut Ctx) -> Result {
     run_probe(ctx, "--project-mission")
@@ -610,6 +638,11 @@ pub fn probe_mission(sandbox: &Path) -> Result {
     let identity = repository.identity.common_dir.clone();
     std::fs::write(repo.join("src/a.rs"), "dirty owner").map_err(|e| e.to_string())?;
     let owner_index = std::fs::read(repo.join(".git/index")).map_err(|e| e.to_string())?;
+    let stable = sandbox.join("stable-install");
+    std::fs::create_dir_all(&stable).map_err(|e| e.to_string())?;
+    std::fs::write(stable.join("faber.exe"), b"stable fixture, never executable").map_err(|e| e.to_string())?;
+    let stable_hash = hash(&std::fs::read(stable.join("faber.exe")).map_err(|e| e.to_string())?);
+    let owner_hash = hash(&std::fs::read(repo.join("src/a.rs")).map_err(|e| e.to_string())?);
     let (mut broker, grant, lease, root) = review_writer(sandbox, repository, Traced(check(Process::find())?))?;
     check(broker.create_branch(|| Ok(Some(grant.clone())), "branch"))?;
     let mut runner =
@@ -647,8 +680,10 @@ pub fn probe_mission(sandbox: &Path) -> Result {
     };
     let mut red =
         ProofSet::new(base.clone(), "fixture".into(), vec![definition.clone()], vec!["src/a.rs".into()]).map_err(str::to_string)?;
-    red.record("red", "fixture-check", verify(&root.join("src/a.rs"))?).map_err(str::to_string)?;
+    let red_receipt = red.record("red", "fixture-check", verify(&root.join("src/a.rs"))?).map_err(str::to_string)?;
+    broker.journal().record_check(&red_receipt).map_err(|e| e.key())?;
     ensure(!red.verified(), || "the fixture must begin red".into())?;
+    ensure(red_receipt.extra["exit"] == 1, || "missing nonzero red exit".into())?;
     broker
         .leases()
         .patch(
@@ -660,7 +695,8 @@ pub fn probe_mission(sandbox: &Path) -> Result {
         .map_err(|e| e.key())?;
     let tree = check(broker.compose_tree(|| Ok(Some(grant.clone())), &lease, &["src/a.rs".into()]))?;
     let mut proof = ProofSet::new(tree.clone(), "fixture".into(), vec![definition], vec!["src/a.rs".into()]).map_err(str::to_string)?;
-    let receipt = proof.record("green", "fixture-check", verify(&root.join("src/a.rs"))?).map_err(str::to_string)?;
+    let mut receipt = proof.record("green", "fixture-check", verify(&root.join("src/a.rs"))?).map_err(str::to_string)?;
+    receipt.task = "writer".into();
     broker.journal().record_check(&receipt).map_err(|e| e.key())?;
     let candidate = Candidate::new(
         "writer",
@@ -712,6 +748,32 @@ pub fn probe_mission(sandbox: &Path) -> Result {
     ensure(report_content.contains("\"commitReceipt\""), || "report missing commitReceipt".into())?;
     ensure(report_content.contains("\"treeReceipt\""), || "report missing treeReceipt".into())?;
     ensure(report_content.contains("\"timings\""), || "report missing timings".into())?;
+    let report: faber_engine::project::report::MissionReport = serde_json::from_str(&report_content).map_err(|e| e.to_string())?;
+    let commit = report.commit_receipt.as_ref().ok_or("missing commit receipt")?;
+    ensure(
+        report.state == "done"
+            && report.checks.len() == 1
+            && report.checks[0].result == "pass"
+            && commit.head == faber_engine::project::report::UnknownOr::Known(head.clone())
+            && commit.tree == faber_engine::project::report::UnknownOr::Known(tree.clone())
+            && report.tokens_per_role.values().all(|tokens| tokens == &Default::default()),
+        || "persisted report altered exact tree or invented measurements".into(),
+    )?;
+    ensure(broker.journal().check("red").map_err(|e| e.key())?.as_ref() == Some(&red_receipt), || {
+        "red receipt did not survive persistence".into()
+    })?;
+    let unchanged = owner_hash == hash(&std::fs::read(repo.join("src/a.rs")).map_err(|e| e.to_string())?)
+        && stable_hash == hash(&std::fs::read(stable.join("faber.exe")).map_err(|e| e.to_string())?);
+    ensure(unchanged, || "owner or stable fixture hash changed".into())?;
+    std::fs::write(
+        sandbox.join("t13-scripted.json"),
+        serde_json::json!({"red":true,"landing":true,"report":true,"unchanged":unchanged,
+            "head":head,"tree":tree,"ownerSha256":owner_hash,"indexSha256":hash(&owner_index),
+            "stableSha256":stable_hash,"redReceipt":red_receipt,"reportReceipt":report,
+            "scope":"scripted fixture; no qualified provider session"})
+        .to_string(),
+    )
+    .map_err(|e| e.to_string())?;
     check(broker.finish())?;
     std::fs::write(sandbox.join("project-git.ok"), "fixture mission proved").map_err(|e| e.to_string())
 }

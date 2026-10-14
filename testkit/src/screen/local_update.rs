@@ -11,17 +11,15 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 pub fn scenarios() -> Vec<Scenario> {
     vec![
         Scenario { name: "local_update: candidate starts hidden and returns a real canary handshake without inventing Pass", run: canary },
-        Scenario { name: "local_update: independent helper restores an early crash headlessly without changing saved grants", run: crash },
+        Scenario { name: "T13 5: independent helper restores an early crash headlessly without changing saved grants", run: crash },
+        Scenario { name: "T13 6: post-rollback Resume refuses unqualified dispatch without consuming the existing grant", run: resume },
         Scenario { name: "local_update: trusted launcher recovers before a broken candidate can enter main", run: interrupted },
         Scenario {
             name: "local_update: autostart uses the trusted launcher to recover a broken candidate without environment variables",
             run: autostart,
         },
         Scenario { name: "local_update: hidden session observer preserves next on orderly logoff or shutdown", run: session },
-        Scenario {
-            name: "local_update: running mission blocks promotion until paused; autostart probation and rollback remain headless",
-            run: handoff,
-        },
+        Scenario { name: "T13 4: fixture promotion reaches Healthy; quiescence, probation and rollback remain headless", run: handoff },
     ]
 }
 
@@ -76,6 +74,71 @@ fn canary(ctx: &mut Ctx) -> Result {
 
 fn crash(ctx: &mut Ctx) -> Result {
     rollback(ctx, false, false, false)
+}
+fn resume(ctx: &mut Ctx) -> Result {
+    let data = ctx.sb.sandbox.join("development/data");
+    fs::create_dir_all(&data).map_err(|e| e.to_string())?;
+    let repo = ctx.sb.sandbox.join("resume-repo");
+    fs::create_dir_all(&repo).map_err(|e| e.to_string())?;
+    let mut project = faber_engine::model::Project::new("p1".into(), "Fixture".into(), repo.to_string_lossy().into_owned());
+    project.repo = Some(RepoIdentity::new("repo", &repo.to_string_lossy()));
+    project.grant = Some(Grant::new("repo", GitMode::Seguro, 1, 1));
+    let store = faber_engine::store::Store::new(&data);
+    store.save_projects(&[project]).map_err(|e| e.key())?;
+    let mut ledger = faber_engine::ledger::Ledger::default();
+    let mut budget = faber_engine::project::budget::Budget::default();
+    budget.grants.insert(
+        "m1".into(),
+        faber_engine::project::budget::Grant {
+            cap_micros: 2_000_000,
+            worker_micros: 600_000,
+            vendors: std::collections::BTreeMap::from([(faber_engine::model::Vendor::Codex, 2_000_000)]),
+            review_micros: 400_000,
+            repair_micros: 700_000,
+            canary_micros: 0,
+            paused: true,
+            extra: Default::default(),
+        },
+    );
+    ledger.extra.insert("missionBudget".into(), serde_json::to_value(budget).map_err(|e| e.to_string())?);
+    store.save_ledger(&ledger).map_err(|e| e.key())?;
+    let before = fs::read(data.join("budget.json")).map_err(|e| e.to_string())?;
+    let journal = faber_engine::project::store::Journal::open(&repo, &data, "m1").map_err(|e| e.key())?;
+    let mut runner = faber_engine::project::run::Runner::create(
+        &journal,
+        faber_engine::project::Mission::new("m1", "p1", "repo", "Fixture", &"1".repeat(40), 1, 1),
+    )
+    .map_err(str::to_string)?;
+    runner.pause(&journal).map_err(str::to_string)?;
+    rollback(ctx, false, false, false)?;
+    let mut runner = faber_engine::project::run::Runner::load(&journal).map_err(str::to_string)?;
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| e.to_string())?;
+    let engine = faber_engine::Engine::new(
+        faber_engine::EngineOptions {
+            data_dir: data.clone(),
+            clis: Default::default(),
+            spawn: std::sync::Arc::new(|_, _, _| panic!("unqualified Resume must never spawn")),
+            windows: cfg!(windows),
+            claude_env_billed: false,
+            max_warm: 0,
+            idle: Duration::from_secs(30),
+            runtime: runtime.handle().clone(),
+            ask: None,
+        },
+        std::sync::Arc::new(|_| {}),
+    );
+    for _ in 0..2 {
+        ensure(runner.resume(&journal, &engine) == Err("reason.project.restrictionsUnproven".into()), || {
+            "unqualified Resume admitted a role".into()
+        })?;
+        ensure(fs::read(data.join("budget.json")).map_err(|e| e.to_string())? == before, || {
+            "refused Resume consumed or replaced the grant".into()
+        })?;
+    }
+    engine.shutdown();
+    ctx.notes
+        .push("Resume admission remains blocked; repeated requests preserve the $2 fixture grant. Successful Resume is not proven.".into());
+    Ok(())
 }
 fn interrupted(ctx: &mut Ctx) -> Result {
     rollback(ctx, true, false, false)
@@ -229,6 +292,13 @@ fn handoff(ctx: &mut Ctx) -> Result {
             eventually("five minute wall-clock promotion despite failed cleanup", Duration::from_secs(320), || {
                 manager.manifest().is_ok_and(|m| m.is_some_and(|m| m.state == UpdateState::Healthy))
             })?;
+            let healthy = manager.manifest().map_err(|e| e.key())?.ok_or("missing healthy manifest")?;
+            ensure(
+                healthy.active_slot == Slot::B
+                    && healthy.current_good.as_ref().is_some_and(|good| good.slot == Slot::B && good.tree == tree)
+                    && healthy.last_good.as_ref().is_some_and(|good| good.slot == Slot::A),
+                || "promotion lost the exact candidate or last good slot".into(),
+            )?;
             eventually("supervisor exits after healthy handoff", Duration::from_secs(10), || !resumed.is_running())?;
             eventually("previous helper image is retired before slot reuse", Duration::from_secs(10), || {
                 fs::OpenOptions::new().write(true).open(root.join("slots/a/faber-local.exe")).is_ok()

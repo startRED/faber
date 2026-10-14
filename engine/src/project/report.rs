@@ -5,11 +5,32 @@ use super::{Extra, SCHEMA};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
 pub enum UnknownOr<T> {
     Known(T),
     Unknown(String),
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for UnknownOr<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        enum Marker {
+            #[serde(rename = "unknown")]
+            Unknown,
+        }
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Metric<T> {
+            Unknown(Marker),
+            Known(T),
+        }
+        // The existing scalar format reserves "unknown" for missing evidence, including string metrics.
+        Ok(match Metric::deserialize(deserializer)? {
+            Metric::Unknown(_) => Self::Unknown("unknown".into()),
+            Metric::Known(value) => Self::Known(value),
+        })
+    }
 }
 
 impl<T> Default for UnknownOr<T> {
