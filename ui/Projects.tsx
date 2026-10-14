@@ -480,6 +480,25 @@ export function Projects(props: Props) {
                   />
                 </div>
 
+                {/* The technical detail behind the plain rows above, and what is kept of the repository. */}
+                <details class="setup-more setup-details">
+                  <summary>{t('projects.home.details')}</summary>
+                  <p>{t('projects.gitMode.seguroTech')}</p>
+                  <p>{t('projects.selfUpdate.trustTech')}</p>
+                  <p>
+                    <b>{t('projects.repo')}:</b> {enroll()?.repo ?? props.project?.path}
+                  </p>
+                  <Show when={enroll()?.base}>
+                    <p>
+                      <b>{t('projects.base')}:</b> {enroll()?.base}
+                    </p>
+                  </Show>
+                  <Show when={enroll()?.author}>
+                    <p>
+                      <b>{t('projects.author')}:</b> {enroll()?.author?.name} &lt;{enroll()?.author?.email}&gt;
+                    </p>
+                  </Show>
+                </details>
                 </section>
                 </div>
 
@@ -489,19 +508,9 @@ export function Projects(props: Props) {
                     <Peek />
                     <h2>{props.project?.name}</h2>
                     <div class="p-meta">
-                      <span>
-                        <b>{t('projects.repo')}:</b> {enroll()?.repo ?? props.project?.path}
+                      <span title={enroll()?.repo ?? props.project?.path}>
+                        <b>{t('projects.repo')}:</b> {tail(enroll()?.repo ?? props.project?.path ?? '')}
                       </span>
-                      <Show when={enroll()?.base}>
-                        <span>
-                          <b>{t('projects.base')}:</b> {enroll()?.base}
-                        </span>
-                      </Show>
-                      <Show when={enroll()?.author}>
-                        <span>
-                          <b>{t('projects.author')}:</b> {enroll()?.author?.name} &lt;{enroll()?.author?.email}&gt;
-                        </span>
-                      </Show>
                     </div>
                   </header>
                   {pickUpList()}

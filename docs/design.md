@@ -328,7 +328,7 @@ shown as a decision.
 
 The first screen of a project uses the layout of the Chat home (`welcome-grid`) with its own identity: the greeting
 "What should we tackle?", a goal composer with its own hints, the three safety controls kept visible as quiet rows under
-"How Faber works here", and a side column with the project, the conversations to pick up and the other projects. The
+"How Faber works here" (plain sentences, with the technical detail and the revision and author behind one small "Details" link), and a side column with the project and its folder in short form (the last two folder names, the full path on hover), the conversations to pick up and the other projects. The
 light leans the other way. The two layouts share classes, so a change to one home reaches the other.
 
 ### Records

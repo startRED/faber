@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 pub fn scenarios() -> Vec<Scenario> {
     vec![
         Scenario { name: "homes: the Chat home and the Projects home look alive, and stand still with reduced motion", run: looks },
+        Scenario { name: "homes: the safety rows read in plain words and few lines at 1280x800", run: plain_rows_at_1280 },
         Scenario {
             name: "homes: idle life costs the processor little, and nothing while the window is hidden",
             run: costs_nothing_while_hidden,
@@ -172,4 +173,38 @@ fn costs_nothing_while_hidden(ctx: &mut Ctx) -> Result {
     ));
     // A hidden window must not cost more than a still one, give or take the noise of the measurement.
     ensure(hidden <= reduced + 3.0, || format!("hidden {hidden:.1}% against still {reduced:.1}%"))
+}
+
+/// What the safety rows look like at the owner's common window size: every choice and sentence reads in a few clean lines.
+const ROWS: &str = r#"(() => {
+  const lines = (el) => Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight || '20'));
+  const rows = [...document.querySelectorAll('.setup .seg-ctl button, .setup .note, .setup .tg')].map((el) => ({ text: el.textContent.trim().slice(0, 40), lines: lines(el) }));
+  const meta = document.querySelector('.p-meta');
+  return { rows, meta: meta ? meta.textContent.trim() : '', title: meta?.querySelector('span')?.title ?? '', scrolls: document.querySelector('.projects-stage')?.scrollHeight > document.querySelector('.projects-stage')?.clientHeight };
+})()"#;
+
+fn plain_rows_at_1280(ctx: &mut Ctx) -> Result {
+    let mut app = start(ctx)?;
+    app.page
+        .cdp
+        .call("Emulation.setDeviceMetricsOverride", json!({ "width": 1280, "height": 800, "deviceScaleFactor": 1, "mobile": false }))?;
+    system_motion(&mut app.page, false)?;
+    app.page.wait_visible(&css(".hello"))?;
+    pause(1.0);
+    ctx.shot(&mut app, "homes-chat-1280")?;
+    open_project(&mut app)?;
+    pause(1.0);
+    let state = app.page.eval(ROWS)?;
+    for row in state["rows"].as_array().cloned().unwrap_or_default() {
+        ensure(row["lines"].as_u64().unwrap_or(9) <= 2, || format!("a row wraps awkwardly at 1280x800: {row}"))?;
+    }
+    let meta = state["meta"].as_str().unwrap_or_default();
+    ensure(!meta.contains("Fixture") && !meta.contains('<') && meta.split_whitespace().count() <= 6, || {
+        format!("the home shows raw repository facts: {meta}")
+    })?;
+    ensure(state["title"].as_str().unwrap_or_default().len() > meta.len(), || format!("the full path is on hover: {state}"))?;
+    ctx.shot(&mut app, "homes-project-1280")?;
+    app.page.click(&css(".setup-more summary"))?;
+    pause(0.4);
+    ctx.shot(&mut app, "homes-project-1280-details")
 }

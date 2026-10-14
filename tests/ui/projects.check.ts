@@ -417,7 +417,7 @@ check('projects: start card offers the two presence choices with parked install 
     await settle(20);
     equal(buttons[1]?.getAttribute('aria-pressed'), 'true');
     const note = root.querySelector('[role="note"]');
-    ok(note?.textContent?.includes('parked'), 'parked notice is displayed when findTools is chosen');
+    ok(note?.textContent?.includes('not ready yet'), 'the install-not-ready notice is displayed when findTools is chosen');
   } finally {
     dispose();
     root.remove();

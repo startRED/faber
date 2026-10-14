@@ -713,7 +713,9 @@ html.hidden-win, html.hidden-win *, html.hidden-win *::before, html.hidden-win *
 .setup h3 { padding-bottom: 6px; }
 .p-side h3 { padding-bottom: 10px; border-bottom: 1px solid var(--line); }
 .setup .ctl-section { padding: calc(12px * var(--dens)) 0; border-radius: 0; background: none; box-shadow: none; border-top: 1px solid var(--line); }
-.setup .ctl-section:last-child { border-bottom: 1px solid var(--line); }
+.setup .ctl-section:last-of-type { border-bottom: 1px solid var(--line); }
+.setup .setup-more { padding: calc(10px * var(--dens)) 0; }
+.setup .setup-more p { margin: 6px 0 0; overflow-wrap: anywhere; }
 .p-side { position: relative; z-index: 2; display: grid; align-content: start; gap: 28px; min-width: 0; }
 @container (min-width: 1000px) { .p-side { align-self: end; padding-bottom: 40px; } }
 .main:has(.projects-stage.home) .topbar { border-bottom-color: transparent; }

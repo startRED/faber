@@ -293,6 +293,9 @@ export const fr: Messages = {
   'projects.home.title': 'Que faisons-nous ?',
   'projects.home.lead': 'Donnez un objectif à Faber pour ce projet. Il travaille sur une copie séparée et montre ce qu’il a vérifié.',
   'projects.home.rules': 'Comment Faber travaille ici',
+  'projects.home.details': "Détails",
+  'projects.gitMode.seguroTech': "Mode sûr : worktree séparé, commits locaux uniquement et avance rapide seulement sur la branche de la mission.",
+  'projects.selfUpdate.trustTech': "Une nouvelle version passe à l'emplacement local suivant seulement après un essai canari et les contrôles de quarantaine.",
   'projects.home.others': 'Autres projets',
   'projects.home.hint.1': 'Décrivez ce qu’il faut créer, corriger ou améliorer dans ce projet',
   'projects.home.hint.2': 'Corrigez le test qui échoue de temps en temps',
@@ -413,27 +416,27 @@ export const fr: Messages = {
   // Native speaker must translate (needs native review).
   "projects.empty.selectProject": "Sélectionnez un dossier de projet pour démarrer une mission.",
   // Native speaker must translate (needs native review).
-  "projects.repo": "Dépôt",
+  "projects.repo": "Dossier",
   // Native speaker must translate (needs native review).
   "projects.base": "Révision de base",
   // Native speaker must translate (needs native review).
   "projects.author": "Auteur",
   // Native speaker must translate (needs native review).
-  "projects.presence.title": "Sélection des outils",
+  "projects.presence.title": "Si un outil manque",
   // Native speaker must translate (needs native review).
-  "projects.presence.continueWithout": "Continuer sans les outils manquants",
+  "projects.presence.continueWithout": "Continuer sans lui",
   // Native speaker must translate (needs native review).
-  "projects.presence.findTools": "Laisser Faber trouver et installer les meilleurs outils",
+  "projects.presence.findTools": "Le trouver et l'installer pour moi",
   // Native speaker must translate (needs native review).
-  "reason.kit.continueWithout": "Utilise les capacités intégrées vérifiées dès que l'exécution de la mission est disponible.",
+  "reason.kit.continueWithout": "Faber utilise les outils qu'il a déjà.",
   // Native speaker must translate (needs native review).
-  "reason.kit.findToolsInstallParked": "L'installation d'outils est mise de côté dans le MVP d'auto-développement ; les contrôles de rôle disponibles restent le socle de référence.",
+  "reason.kit.findToolsInstallParked": "L'installation d'outils n'est pas encore prête. Pour l'instant, Faber utilise ceux qu'il a déjà.",
   // Native speaker must translate (needs native review).
-  "projects.gitMode.title": "Autorité Git",
+  "projects.gitMode.title": "Ce que Faber peut faire de votre code",
   // Native speaker must translate (needs native review).
-  "projects.gitMode.seguro": "Seguro (Worktree local uniquement)",
+  "projects.gitMode.seguro": "Sûr : une copie séparée seulement",
   // Native speaker must translate (needs native review).
-  "projects.gitMode.seguroDesc": "Worktree séparé, commits locaux, avance rapide uniquement sur la branche de la mission. Aucun effet distant.",
+  "projects.gitMode.seguroDesc": "Faber travaille sur une copie séparée de votre projet. Il ne touche ni à GitHub ni à rien en ligne.",
   // Native speaker must translate (needs native review).
   "projects.gitMode.equilibrado": "Equilibrado (Commits locaux + draft PR)",
   // Native speaker must translate (needs native review).
@@ -441,7 +444,7 @@ export const fr: Messages = {
   // Native speaker must translate (needs native review).
   "projects.selfUpdate.trust": "Autoriser Faber à se mettre à jour lui-même",
   // Native speaker must translate (needs native review).
-  "projects.selfUpdate.trustDesc": "Promeut les builds éprouvés vers le prochain emplacement local après vérification canari et contrôles de quarantaine.",
+  "projects.selfUpdate.trustDesc": "Installe une nouvelle version de Faber seulement après avoir vérifié qu'elle fonctionne.",
   // Native speaker must translate (needs native review).
   "projects.goal.label": "Objectif de la mission",
   // Native speaker must translate (needs native review).

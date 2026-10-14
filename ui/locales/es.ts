@@ -293,6 +293,9 @@ export const es: Messages = {
   'projects.home.title': '¿Qué resolvemos?',
   'projects.home.lead': 'Dale una meta a Faber para este proyecto. Trabaja en una copia aparte y muestra lo que comprobó.',
   'projects.home.rules': 'Cómo trabaja Faber aquí',
+  'projects.home.details': "Detalles",
+  'projects.gitMode.seguroTech': "Modo seguro: worktree separado, solo commits locales y avance rápido solo en la rama de la misión.",
+  'projects.selfUpdate.trustTech': "Una versión nueva pasa a la siguiente ranura local solo tras una prueba canario y las comprobaciones de cuarentena.",
   'projects.home.others': 'Otros proyectos',
   'projects.home.hint.1': 'Describe qué construir, corregir o mejorar en este proyecto',
   'projects.home.hint.2': 'Arregla la prueba que falla de vez en cuando',
@@ -413,27 +416,27 @@ export const es: Messages = {
   // Native speaker must translate (needs native review).
   "projects.empty.selectProject": "Selecciona una carpeta de proyecto para iniciar una misión.",
   // Native speaker must translate (needs native review).
-  "projects.repo": "Repositorio",
+  "projects.repo": "Carpeta",
   // Native speaker must translate (needs native review).
   "projects.base": "Revisión base",
   // Native speaker must translate (needs native review).
   "projects.author": "Autor",
   // Native speaker must translate (needs native review).
-  "projects.presence.title": "Selección de herramientas",
+  "projects.presence.title": "Si falta una herramienta",
   // Native speaker must translate (needs native review).
-  "projects.presence.continueWithout": "Continuar sin las herramientas que faltan",
+  "projects.presence.continueWithout": "Seguir sin ella",
   // Native speaker must translate (needs native review).
-  "projects.presence.findTools": "Dejar que Faber busque e instale las mejores herramientas",
+  "projects.presence.findTools": "Buscarla e instalarla por mí",
   // Native speaker must translate (needs native review).
-  "reason.kit.continueWithout": "Usa funciones integradas verificadas cuando la ejecución de la misión esté disponible.",
+  "reason.kit.continueWithout": "Faber usa las herramientas que ya tiene.",
   // Native speaker must translate (needs native review).
-  "reason.kit.findToolsInstallParked": "La instalación de herramientas está en pausa en el MVP de autodesarrollo; los controles de rol disponibles siguen siendo el nivel mínimo.",
+  "reason.kit.findToolsInstallParked": "Instalar herramientas aún no está listo. Por ahora Faber usa las que ya tiene.",
   // Native speaker must translate (needs native review).
-  "projects.gitMode.title": "Autoridad de Git",
+  "projects.gitMode.title": "Qué puede hacer Faber con tu código",
   // Native speaker must translate (needs native review).
-  "projects.gitMode.seguro": "Seguro (Solo worktree local)",
+  "projects.gitMode.seguro": "Seguro: solo en una copia aparte",
   // Native speaker must translate (needs native review).
-  "projects.gitMode.seguroDesc": "Worktree separado, commits locales, avance rápido solo en la rama de la misión. Sin efectos remotos.",
+  "projects.gitMode.seguroDesc": "Faber trabaja en una copia aparte de tu proyecto. No toca GitHub ni nada en internet.",
   // Native speaker must translate (needs native review).
   "projects.gitMode.equilibrado": "Equilibrado (Commits locales + draft PR)",
   // Native speaker must translate (needs native review).
@@ -441,7 +444,7 @@ export const es: Messages = {
   // Native speaker must translate (needs native review).
   "projects.selfUpdate.trust": "Permitir que Faber se actualice solo",
   // Native speaker must translate (needs native review).
-  "projects.selfUpdate.trustDesc": "Promueve compilaciones comprobadas a la siguiente ranura local tras la verificación canario y comprobaciones de cuarentena.",
+  "projects.selfUpdate.trustDesc": "Instala una versión nueva de Faber solo después de comprobar que funciona.",
   // Native speaker must translate (needs native review).
   "projects.goal.label": "Objetivo de la misión",
   // Native speaker must translate (needs native review).

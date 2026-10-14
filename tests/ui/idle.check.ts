@@ -262,6 +262,11 @@ check('projects home: a project with no mission opens a home like the chat one, 
   // The composer sits where the chat one does: right under the lead, in the left column.
   ok(composer.getBoundingClientRect().top > root.querySelector('.lead')!.getBoundingClientRect().bottom, 'under the lead');
   ok(composer.getBoundingClientRect().right <= root.querySelector('.p-side')!.getBoundingClientRect().left, 'left of what to pick up');
+  const meta = root.querySelector<HTMLElement>('.p-meta')!;
+  equal(meta.querySelectorAll('span').length, 1, 'the home names only the folder, not the revision or the author');
+  ok(meta.querySelector('span')!.title.length >= meta.textContent!.length - 10, 'the full path is on hover');
+  ok(root.querySelector('.setup-more summary'), 'the technical detail sits behind one small link');
+  equal(root.querySelector('.setup-more')!.hasAttribute('open'), false, 'and starts closed');
   ok(root.querySelector('.composer .idle-box'), 'the idle composer has its hints');
 }));
 
