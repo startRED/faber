@@ -6,6 +6,7 @@
 #[cfg(all(feature = "test-hooks", not(debug_assertions)))]
 compile_error!("the `test-hooks` feature is for debug test builds only; it must not be enabled in a release build");
 
+mod folder;
 mod look;
 mod project_commands;
 mod setup;
@@ -210,8 +211,9 @@ async fn send_queued(faber: State<'_, Faber>, id: String, turn_id: String) -> Re
 
 #[tauri::command]
 async fn remove_project(faber: State<'_, Faber>, id: String) -> Res<()> {
-    faber.engine.remove_project(&id);
-    Ok(())
+    // One turn at a time with the mission commands, so a mission cannot start between the check and the removal.
+    let _turn = faber.missions.lock().await;
+    faber.engine.remove_project(&id)
 }
 
 /// The look of an appearance that is not saved. Failing pairs come back inside the look.
@@ -284,6 +286,15 @@ async fn save_file(app: AppHandle, faber: State<'_, Faber>, id: String, path: St
 async fn show_file(app: AppHandle, faber: State<'_, Faber>, id: String, path: String) -> Res<()> {
     let Some(source) = faber.engine.workspace_file(&id, &path) else { return Ok(()) };
     app.opener().reveal_item_in_dir(source).map_err(|e| e.to_string())
+}
+
+/// Shows a project's folder in the file manager. The saved path is checked first (folder.rs), and the folder is only
+/// revealed, never opened: if something else took its place, the file manager selects it and starts nothing.
+#[tauri::command]
+async fn show_project(app: AppHandle, faber: State<'_, Faber>, id: String) -> Res<()> {
+    let project = faber.engine.project(&id)?;
+    let folder = folder::local_folder(&project.path)?;
+    app.opener().reveal_item_in_dir(folder).map_err(|e| e.to_string())
 }
 
 /// An image from a chat workspace as a data URL, so the page never reads the disk itself.
@@ -750,6 +761,8 @@ fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Resul
         .inner_size(1280.0, 800.0)
         .min_inner_size(720.0, 480.0)
         .background_color(Color(r, g, b, 0xff))
+        // The "Paste" of the right-click menu reads the clipboard; without this WebView2 asks the person every time.
+        .enable_clipboard_access()
         // The page never leaves Faber; a web link that slips through opens in the browser instead.
         .on_navigation(move |url| {
             let inside = url.scheme() == "tauri"
@@ -933,6 +946,7 @@ fn main() {
             add_project,
             save_file,
             show_file,
+            show_project,
             read_image,
             open_terminal,
             open_link,

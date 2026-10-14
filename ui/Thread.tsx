@@ -3,6 +3,7 @@ import { marked } from 'marked';
 import { createResource, createSignal, For, Index, Show, type Accessor } from 'solid-js';
 import { api, type Choice, type Message, type QueuedTurn, type ToolUse, type VendorUsage } from './api.ts';
 import { Asks } from './Ask.tsx';
+import { copyItem, openMenu } from './contextmenu.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
 import { untilReset } from './Sidebar.tsx';
@@ -96,7 +97,13 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
     return tool && tool.ok === undefined ? toolLabel(tool) : finalText().trim().split('\n').at(-1) || (tool ? toolLabel(tool) : m().thinking);
   };
   return (
-    <article class="ai" aria-label={t('answer.label')}>
+    <article
+      class="ai"
+      aria-label={t('answer.label')}
+      onContextMenu={(e) =>
+        openMenu(e, [copyItem(m().text), ...(!streaming() && props.prompt ? [{ id: 'redo', label: t('menu.redo'), run: () => props.onBranch(props.prompt!.id, props.prompt!.text) }] : [])])
+      }
+    >
       <div class="model">
         <span class="vm" classList={{ claude: m().vendor === 'claude', codex: m().vendor === 'codex' }}>
           <VendorMark vendor={m().vendor} />
@@ -189,7 +196,10 @@ function Mine(props: { m: Accessor<Message>; onBranch: OnBranch }) {
     <Show
       when={editing() !== undefined}
       fallback={
-        <div class="mine">
+        <div
+          class="mine"
+          onContextMenu={(e) => openMenu(e, [copyItem(props.m().text), { id: 'edit', label: t('mine.edit'), run: () => setEditing(props.m().text) }])}
+        >
           <Show when={props.m().attachments?.length}>
             <div class="attach">
               <For each={props.m().attachments}>

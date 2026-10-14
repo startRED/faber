@@ -730,6 +730,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                 onOpen={openSummary}
                 onRemove={(id) => void remove(id)}
                 onSettings={(at) => (closeSide(false), openSettings(at))}
+                onError={(err) => setSaveError(failureText(err))}
               />
             </aside>
             <Show when={sideOverlay()}>

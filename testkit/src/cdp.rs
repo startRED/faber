@@ -231,6 +231,16 @@ impl Cdp {
         Ok(())
     }
 
+    /// A press of the right mouse button, which is what opens a context menu.
+    pub fn right_click_at(&mut self, x: f64, y: f64) -> Result<(), String> {
+        self.move_to(x, y)?;
+        for (kind, buttons) in [("mousePressed", 2), ("mouseReleased", 0)] {
+            let params = json!({ "type": kind, "x": x, "y": y, "button": "right", "buttons": buttons, "clickCount": 1 });
+            self.call("Input.dispatchMouseEvent", params)?;
+        }
+        Ok(())
+    }
+
     /// Types text into the focused element, as the keyboard would.
     pub fn insert_text(&mut self, text: &str) -> Result<(), String> {
         self.call("Input.insertText", json!({ "text": text })).map(drop)

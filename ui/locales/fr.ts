@@ -644,4 +644,39 @@ export const fr: Messages = {
   "error.plan.overlap": "Des écritures non ordonnées se chevauchent sur les mêmes fichiers source.",
   // Native speaker must translate (needs native review).
   "crumb.separator": "\u203a",
+  // Right-click menus (ui/ContextMenu.tsx).
+  // Native speaker must translate (needs native review).
+  "menu.label": "Actions",
+  // Native speaker must translate (needs native review).
+  "menu.rename": "Renommer",
+  // Native speaker must translate (needs native review).
+  "menu.renameLabel": "Nom de la conversation",
+  // Native speaker must translate (needs native review).
+  "menu.delete": "Supprimer",
+  // Native speaker must translate (needs native review).
+  "menu.newHere": "Nouvelle conversation dans ce projet",
+  // Native speaker must translate (needs native review).
+  "menu.openFolder": "Ouvrir le dossier",
+  // Native speaker must translate (needs native review).
+  "menu.removeProject": "Retirer de Faber",
+  // Native speaker must translate (needs native review).
+  "menu.removeConfirm": "Retirer ?",
+  // Native speaker must translate (needs native review).
+  "menu.copy": "Copier",
+  // Native speaker must translate (needs native review).
+  "menu.cut": "Couper",
+  // Native speaker must translate (needs native review).
+  "menu.paste": "Coller",
+  // Native speaker must translate (needs native review).
+  "menu.selectAll": "Tout sélectionner",
+  // Native speaker must translate (needs native review).
+  "menu.redo": "Refaire",
+  // Native speaker must translate (needs native review).
+  "error.project.busy": "Quelque chose travaille encore dans ce projet. Arrêtez-le d'abord, puis retirez le projet.",
+  // Native speaker must translate (needs native review).
+  "error.folder.notLocal": "Ce dossier n'est pas sur cet ordinateur, Faber ne l'ouvrira donc pas.",
+  // Native speaker must translate (needs native review).
+  "error.folder.missing": "Ce dossier n'existe plus.",
+  // Native speaker must translate (needs native review).
+  "error.folder.link": "Ce dossier est un lien vers un autre endroit, Faber ne l'ouvrira donc pas. Ouvrez le vrai dossier depuis l'explorateur de fichiers.",
 };

@@ -383,6 +383,7 @@ export const api = {
   removeQueued: (id: string, turnId: string) => invoke<void>('remove_queued', { id, turnId }),
   sendQueued: (id: string, turnId: string) => invoke<void>('send_queued', { id, turnId }),
   removeProject: (id: string) => invoke<void>('remove_project', { id }),
+  showProject: (id: string) => invoke<void>('show_project', { id }),
   addProject: () => invoke<Project | null>('add_project'),
   previewLook: (appearance: Appearance) => invoke<Look>('preview_look', { appearance }),
   saveSettings: (patch: Settings) => invoke<SavedSettings>('save_settings', { patch }),

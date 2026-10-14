@@ -644,4 +644,39 @@ export const de: Messages = {
   "error.plan.overlap": "Nicht geordnete Schreibvorgänge überschneiden dieselben Quelldateien.",
   // Native speaker must translate (needs native review).
   "crumb.separator": "\u203a",
+  // Right-click menus (ui/ContextMenu.tsx).
+  // Native speaker must translate (needs native review).
+  "menu.label": "Aktionen",
+  // Native speaker must translate (needs native review).
+  "menu.rename": "Umbenennen",
+  // Native speaker must translate (needs native review).
+  "menu.renameLabel": "Name der Unterhaltung",
+  // Native speaker must translate (needs native review).
+  "menu.delete": "Löschen",
+  // Native speaker must translate (needs native review).
+  "menu.newHere": "Neue Unterhaltung in diesem Projekt",
+  // Native speaker must translate (needs native review).
+  "menu.openFolder": "Ordner öffnen",
+  // Native speaker must translate (needs native review).
+  "menu.removeProject": "Aus Faber entfernen",
+  // Native speaker must translate (needs native review).
+  "menu.removeConfirm": "Entfernen?",
+  // Native speaker must translate (needs native review).
+  "menu.copy": "Kopieren",
+  // Native speaker must translate (needs native review).
+  "menu.cut": "Ausschneiden",
+  // Native speaker must translate (needs native review).
+  "menu.paste": "Einfügen",
+  // Native speaker must translate (needs native review).
+  "menu.selectAll": "Alles auswählen",
+  // Native speaker must translate (needs native review).
+  "menu.redo": "Wiederholen",
+  // Native speaker must translate (needs native review).
+  "error.project.busy": "In diesem Projekt arbeitet noch etwas. Beende es zuerst und entferne dann das Projekt.",
+  // Native speaker must translate (needs native review).
+  "error.folder.notLocal": "Dieser Ordner liegt nicht auf diesem Computer, deshalb öffnet Faber ihn nicht.",
+  // Native speaker must translate (needs native review).
+  "error.folder.missing": "Dieser Ordner ist nicht mehr da.",
+  // Native speaker must translate (needs native review).
+  "error.folder.link": "Dieser Ordner ist eine Verknüpfung zu einem anderen Ort, deshalb öffnet Faber ihn nicht. Öffne den echten Ordner im Dateimanager.",
 };
