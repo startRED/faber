@@ -267,6 +267,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     // The process starts right away, so a warmed-up session is already booting while the user types.
     let started = (opts.spawn)(&opts.bin, &args, &opts.cwd);
+    let tree = started.as_ref().ok().and_then(|p| p.child.as_ref()).and_then(proc::Process::owned_tree);
     tokio::spawn(async move {
         let mut p = match started {
             Ok(p) => p,
@@ -412,7 +413,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
             }
         }
     });
-    Session::new(tx)
+    Session::new(tx).with_tree(tree)
 }
 
 fn user_message(turn: &UserTurn) -> Value {

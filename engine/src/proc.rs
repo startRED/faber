@@ -76,16 +76,83 @@ pub struct Process {
     #[cfg(not(windows))]
     inner: Child,
     #[cfg(windows)]
-    inner: std::process::Child,
+    inner: Arc<Mutex<std::process::Child>>,
     #[cfg(windows)]
     job: Arc<Mutex<Option<win32job::Job>>>,
+    #[cfg(windows)]
+    identity: crate::project::ProcessId,
+}
+
+/// What a lease needs to know about one launched CLI tree, shared with whoever later releases the lease.
+/// It exists only for a process this engine started inside its own kill-on-close job (Windows); nothing can build
+/// one from a PID, a snapshot or a recorded file.
+#[derive(Clone)]
+pub struct OwnedTree {
+    identity: crate::project::ProcessId,
+    #[cfg(windows)]
+    job: Arc<Mutex<Option<win32job::Job>>>,
+    #[cfg(windows)]
+    root: Arc<Mutex<std::process::Child>>,
+}
+
+impl std::fmt::Debug for OwnedTree {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "OwnedTree({})", self.identity.pid)
+    }
+}
+
+/// Proof that an owned tree is gone. Only `OwnedTree::retire` makes one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Retired {
+    identity: crate::project::ProcessId,
+}
+
+impl Retired {
+    pub fn identity(&self) -> crate::project::ProcessId {
+        self.identity
+    }
+}
+
+impl OwnedTree {
+    /// The root's pid, with the microsecond this engine launched it: a reused pid has another start.
+    pub fn identity(&self) -> crate::project::ProcessId {
+        self.identity
+    }
+
+    /// Closes the kill-on-close job, so every member ends, then waits for the root to be reaped. Safe to repeat: a
+    /// tree already retired answers with the same identity and never touches another process.
+    pub async fn retire(&self) -> io::Result<Retired> {
+        #[cfg(windows)]
+        {
+            drop(self.job.lock().unwrap().take());
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                {
+                    let mut root = self.root.lock().unwrap();
+                    if root.try_wait()?.is_some() {
+                        break;
+                    }
+                    root.kill()?;
+                }
+                if Instant::now() >= deadline {
+                    return Err(io::Error::other("owned tree did not end"));
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            Ok(Retired { identity: self.identity })
+        }
+        #[cfg(not(windows))]
+        {
+            Err(io::Error::other("owned trees need the Windows job"))
+        }
+    }
 }
 
 impl Process {
     pub fn id(&self) -> Option<u32> {
         #[cfg(windows)]
         {
-            Some(self.inner.id())
+            Some(self.identity.pid)
         }
         #[cfg(not(windows))]
         {
@@ -93,12 +160,25 @@ impl Process {
         }
     }
 
+    /// The launched tree's owned identity, for a lease and its release proof. `None` where no job owns the tree.
+    pub fn owned_tree(&self) -> Option<OwnedTree> {
+        #[cfg(windows)]
+        {
+            Some(OwnedTree { identity: self.identity, job: self.job.clone(), root: self.inner.clone() })
+        }
+        #[cfg(not(windows))]
+        {
+            None
+        }
+    }
+
     pub fn start_kill(&mut self) -> io::Result<()> {
         #[cfg(windows)]
         {
             drop(self.job.lock().unwrap().take());
-            if self.inner.try_wait()?.is_none() {
-                self.inner.kill()?;
+            let mut root = self.inner.lock().unwrap();
+            if root.try_wait()?.is_none() {
+                root.kill()?;
             }
             Ok(())
         }
@@ -112,7 +192,7 @@ impl Process {
         #[cfg(windows)]
         {
             loop {
-                if let Some(status) = self.inner.try_wait()? {
+                if let Some(status) = self.inner.lock().unwrap().try_wait()? {
                     return Ok(status);
                 }
                 tokio::time::sleep(Duration::from_millis(10)).await;
@@ -129,7 +209,7 @@ impl Process {
 impl Drop for Process {
     fn drop(&mut self) {
         drop(self.job.lock().unwrap().take());
-        let _ = self.inner.kill();
+        let _ = self.inner.lock().unwrap().kill();
     }
 }
 
@@ -232,20 +312,22 @@ fn spawn_windows(
         .stderr(Stdio::piped())
         .creation_flags(0x0800_0000)
         .spawn()?;
-    let mut process = Process { inner: child, job: Arc::new(Mutex::new(Some(job))) };
+    let started_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_micros() as u64).max(1);
+    let identity = crate::project::ProcessId { pid: child.id(), started_at };
+    let process = Process { inner: Arc::new(Mutex::new(child)), job: Arc::new(Mutex::new(Some(job))), identity };
     process
         .job
         .lock()
         .unwrap()
         .as_ref()
         .expect("owned job")
-        .assign_process(process.inner.as_raw_handle() as isize)
+        .assign_process(process.inner.lock().unwrap().as_raw_handle() as isize)
         .map_err(io::Error::other)?;
-    let mut stdin = process.inner.stdin.take().expect("piped stdin");
+    let mut stdin = process.inner.lock().unwrap().stdin.take().expect("piped stdin");
     stdin.write_all(b"G")?;
     stdin.flush()?;
     let mut stdin = tokio::process::ChildStdin::from_std(stdin)?;
-    let mut stdout = tokio::process::ChildStdout::from_std(process.inner.stdout.take().expect("piped stdout"))?;
+    let mut stdout = tokio::process::ChildStdout::from_std(process.inner.lock().unwrap().stdout.take().expect("piped stdout"))?;
     let (input, mut pending) = tokio::io::duplex(8192);
     let (mut output, reader) = tokio::io::duplex(8192);
     let job = process.job.clone();
@@ -266,7 +348,7 @@ fn spawn_windows(
         };
         tokio::join!(input, output);
     });
-    let stderr = process.inner.stderr.take().map(tokio::process::ChildStderr::from_std).transpose()?;
+    let stderr = process.inner.lock().unwrap().stderr.take().map(tokio::process::ChildStderr::from_std).transpose()?;
     Ok(Proc {
         stdin: Box::new(input),
         stdout: Box::new(reader),

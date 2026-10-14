@@ -123,7 +123,29 @@ impl Engine {
         self.with(|c| c.mission_lock.clone())
     }
 
-    pub async fn dispatch_mission_worker(&self, journal: Journal, mut request: crate::project::budget::Invocation) -> Result<(), String> {
+    pub async fn dispatch_mission_worker(&self, journal: Journal, request: crate::project::budget::Invocation) -> Result<(), String> {
+        self.dispatch_role(journal, request, None).await
+    }
+
+    /// A Writer launch. Its lease must already hold the durable launch intent (`Leases::prepare_launch`); the
+    /// process identity attached afterwards comes from the owned tree the engine itself started, never from a caller.
+    /// A session with no owned tree (a replayed recording, or a platform without the job) is closed and refused.
+    pub async fn dispatch_mission_writer(
+        &self,
+        journal: Journal,
+        request: crate::project::budget::Invocation,
+        leases: &mut crate::project::lease::Leases,
+        lease: &crate::project::Lease,
+    ) -> Result<(), String> {
+        self.dispatch_role(journal, request, Some((leases, lease))).await
+    }
+
+    async fn dispatch_role(
+        &self,
+        journal: Journal,
+        mut request: crate::project::budget::Invocation,
+        launcher: Option<(&mut crate::project::lease::Leases, &crate::project::Lease)>,
+    ) -> Result<(), String> {
         let coordinator = self.mission_lock();
         let _turn = coordinator.lock().await;
         let _update = self.mission_update_admission()?;
@@ -132,8 +154,11 @@ impl Engine {
         // No trusted pre-request context census yet: use the published window, never the caller's estimate.
         let worker = runner.workers.get(&request.worker).ok_or("error.wire.stale")?.clone();
         role_invocation(&mut request, worker.brief.role)?;
-        // The qualified writer launcher must supply T4's owned process identity before source can be unlocked.
-        if worker.brief.role == ProjectRole::Writer {
+        // Source can be unlocked only through the launcher that attaches T4's owned process identity, and only to a Writer.
+        let writer = worker.brief.role == ProjectRole::Writer;
+        if writer != launcher.is_some()
+            || launcher.as_ref().is_some_and(|(_, lease)| lease.task != request.worker || lease.mission != request.mission)
+        {
             return Err("reason.project.processTreeUnproven".into());
         }
         let prompt = runner.prompt(&journal, &request.worker, &[]).map_err(str::to_string)?;
@@ -220,9 +245,39 @@ impl Engine {
             session.close();
             return Err("error.project.invocation".into());
         }
+        if let Some((leases, lease)) = launcher {
+            let attached = match session.tree() {
+                Some(tree) => leases.attach_process(lease, tree.identity()).map(|()| tree).map_err(|e| e.key().to_string()),
+                None => Err("reason.project.processTreeUnproven".to_string()),
+            };
+            match attached {
+                Ok(tree) => self.with(|c| c.worker_trees.insert(request.id.clone(), tree)),
+                Err(key) => {
+                    session.close();
+                    if let Some(tree) = session.tree() {
+                        let _ = tree.retire().await;
+                    }
+                    return Err(key);
+                }
+            };
+        }
         self.with(|c| c.mission_sessions.entry(runner.mission.id.clone()).or_default().push(session.clone()));
         session.send(UserTurn::text(prompt));
         Ok(())
+    }
+
+    /// The release proof of a Writer launched through `dispatch_mission_writer`: its owned tree is closed and reaped
+    /// here, the invocation's spending settles against what it reported (or its computed bound if it reported
+    /// nothing), and only then is a `Termination` built. An unknown invocation, a recording or a platform without
+    /// the job yields no proof.
+    pub async fn worker_termination(&self, invocation: &str) -> Result<crate::project::lease::Termination, String> {
+        let (tree, terminal) = self.with(|c| (c.worker_trees.get(invocation).cloned(), c.worker_terminals.get(invocation).cloned()));
+        let tree = tree.ok_or("reason.project.processTreeUnproven")?;
+        let retired = tree.retire().await.map_err(|_| "reason.project.processTreeUnproven".to_string())?;
+        let event = terminal.unwrap_or(EngineEvent::Error { message: "reason.interrupted".into(), fatal: true });
+        self.mission_budget(crate::project::budget::Change::Report { id: invocation.into(), event, terminated: true })?;
+        let settled = self.mission_reservation(invocation)?.settled;
+        Ok(crate::project::lease::Termination::from_retired(&retired, settled))
     }
 
     pub(super) fn mission_event(
@@ -241,9 +296,12 @@ impl Engine {
                 resolved.model = model;
                 worker.begin_turn(&resolved).map_err(str::to_string)?;
                 runner.save(journal).map_err(str::to_string)?;
-                let mut receipt = crate::project::Receipt::new(invocation, crate::project::Outcome::Done, self.mission_time());
-                receipt.evidence.insert("invocation".into(), invocation.into());
-                journal.record_receipt(&receipt).map_err(|e| e.key().to_string())?;
+                // A Writer's launch receipt was written when its owned process identity was attached.
+                if journal.effect_receipt(invocation).map_err(|e| e.key().to_string())?.is_none() {
+                    let mut receipt = crate::project::Receipt::new(invocation, crate::project::Outcome::Done, self.mission_time());
+                    receipt.evidence.insert("invocation".into(), invocation.into());
+                    journal.record_receipt(&receipt).map_err(|e| e.key().to_string())?;
+                }
             }
             EngineEvent::Text(delta) => {
                 if text.len().saturating_add(delta.len()) > crate::project::wire::MAX_ENVELOPE {
@@ -252,6 +310,7 @@ impl Engine {
                 text.push_str(&delta);
             }
             event @ (EngineEvent::Done { .. } | EngineEvent::Error { .. }) => {
+                self.with(|c| c.worker_terminals.insert(invocation.into(), event.clone()));
                 let stopped = self.mission_budget(crate::project::budget::Change::Report {
                     id: invocation.into(),
                     event: event.clone(),
@@ -341,6 +400,28 @@ mod tests {
             core.convs.get_mut(&id).unwrap().messages.push(message);
         });
         assert!(e.local_build_admission().is_err());
+        e.shutdown();
+    }
+    #[tokio::test]
+    async fn a_release_proof_needs_an_owned_tree_the_engine_started() {
+        let data = tempfile::tempdir().unwrap();
+        let e = Engine::new(
+            EngineOptions {
+                data_dir: data.path().into(),
+                clis: Default::default(),
+                spawn: Arc::new(|_, _, _| panic!("a proof must not spawn")),
+                windows: false,
+                claude_env_billed: false,
+                max_warm: 0,
+                idle: Duration::from_secs(30),
+                runtime: tokio::runtime::Handle::current(),
+                ask: None,
+            },
+            Arc::new(|_| {}),
+        );
+        // An invocation nobody launched, and a replayed recording's session, have no tree to retire.
+        assert_eq!(e.worker_termination("never-launched").await.err().as_deref(), Some("reason.project.processTreeUnproven"));
+        assert!(Session::from_fn(|_| {}).tree().is_none());
         e.shutdown();
     }
     #[test]

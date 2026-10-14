@@ -669,6 +669,33 @@ pub fn probe_mission(sandbox: &Path) -> Result {
     };
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| e.to_string())?;
     let proof_spawn = faber_engine::proc::isolated_spawner(definition.environment.clone());
+    // The writer's stand-in is a real process in an engine-owned job. Its identity comes from that job, and the landing
+    // below is released only by a proof built from retiring it: a recorded literal cannot stand in for it.
+    let _enter = runtime.enter();
+    broker.leases().prepare_launch(&lease, "launch", 3, 1).map_err(|e| e.key())?;
+    let ping = Path::new(&std::env::var("SystemRoot").map_err(|e| e.to_string())?).join("System32").join("ping.exe");
+    let mut stand_in =
+        faber_engine::proc::real_spawner()(&ping.to_string_lossy(), &["-n".into(), "60".into(), "127.0.0.1".into()], sandbox)
+            .map_err(|e| e.to_string())?;
+    let writer_tree = stand_in.child.as_ref().and_then(|c| c.owned_tree()).ok_or("the stand-in has no owned tree")?;
+    ensure(
+        writer_tree.identity().started_at != 0 && Some(writer_tree.identity().pid) == stand_in.child.as_ref().and_then(|c| c.id()),
+        || "owned identity is not the launched process".into(),
+    )?;
+    broker.leases().attach_process(&lease, writer_tree.identity()).map_err(|e| e.key())?;
+    runtime.block_on(tokio::time::sleep(Duration::from_millis(500)));
+    for forged in [
+        Termination { process: None, tree_dead: true, cost_settled: true },
+        Termination {
+            process: Some(faber_engine::project::ProcessId { started_at: writer_tree.identity().started_at - 1, ..writer_tree.identity() }),
+            tree_dead: true,
+            cost_settled: true,
+        },
+    ] {
+        ensure(broker.leases().release(&lease, forged).is_err(), || {
+            "a recorded literal released a lease with a live owned process".into()
+        })?;
+    }
     let mut red =
         ProofSet::new(base.clone(), "fixture".into(), vec![definition.clone()], vec!["src/a.rs".into()]).map_err(str::to_string)?;
     let red_receipt = runtime
@@ -676,6 +703,18 @@ pub fn probe_mission(sandbox: &Path) -> Result {
         .map_err(str::to_string)?;
     ensure(!red.verified(), || "the fixture must begin red".into())?;
     ensure(red_receipt.extra["exit"] == 1, || "missing nonzero red exit".into())?;
+    let retired = runtime.block_on(writer_tree.retire()).map_err(|e| e.to_string())?;
+    ensure(retired.identity() == writer_tree.identity(), || "the retirement proof names another process".into())?;
+    let mut rest = Vec::new();
+    {
+        use tokio::io::AsyncReadExt;
+        runtime
+            .block_on(tokio::time::timeout(Duration::from_secs(3), stand_in.stdout.read_to_end(&mut rest)))
+            .map_err(|_| "the retired stand-in still holds its pipe")?
+            .map_err(|e| e.to_string())?;
+    }
+    // Only a proof built from that retirement lets the broker touch the lease again.
+    broker.leases().settle_process(&lease, Termination::from_retired(&retired, true)).map_err(|e| e.key())?;
     broker
         .leases()
         .patch(
@@ -721,7 +760,7 @@ pub fn probe_mission(sandbox: &Path) -> Result {
             &lease,
             || Ok(Some(grant.clone())),
             "Fix the fixture",
-            Termination { process: None, tree_dead: true, cost_settled: true },
+            Termination::from_retired(&retired, true),
             |_| Ok(()),
         )
         .map_err(str::to_string)?;
@@ -762,7 +801,8 @@ pub fn probe_mission(sandbox: &Path) -> Result {
         serde_json::json!({"red":true,"landing":true,"report":true,"unchanged":unchanged,
             "head":head,"tree":tree,"ownerSha256":owner_hash,"indexSha256":hash(&owner_index),
             "stableSha256":stable_hash,"redReceipt":red_receipt,"reportReceipt":report,
-            "scope":"scripted fixture; no qualified provider session"})
+            "writerProcess":{"pid":retired.identity().pid,"startedAt":retired.identity().started_at,"retired":true},
+            "scope":"scripted fixture; real owned writer stand-in process; no qualified provider session"})
         .to_string(),
     )
     .map_err(|e| e.to_string())?;

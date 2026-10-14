@@ -507,6 +507,7 @@ pub fn project_thread_params(
 pub struct CodexServer {
     tx: UnboundedSender<ServerCommand>,
     next: Arc<AtomicU64>,
+    tree: Option<proc::OwnedTree>,
 }
 
 impl CodexServer {
@@ -538,8 +539,9 @@ impl CodexServer {
         let (tx, rx) = unbounded_channel();
         let args = if role.is_some() { project_codex_args(opts.windows) } else { codex_args(opts.area, opts.windows, opts.user_hooks) };
         let started = (opts.spawn)(&opts.bin, &args, &opts.cwd);
+        let tree = started.as_ref().ok().and_then(|p| p.child.as_ref()).and_then(proc::Process::owned_tree);
         tokio::spawn(serve(started, opts.area, rx, role));
-        CodexServer { tx, next: Arc::new(AtomicU64::new(1)) }
+        CodexServer { tx, next: Arc::new(AtomicU64::new(1)), tree }
     }
 
     /// False once the process has stopped; the engine then starts a new one.
@@ -555,7 +557,7 @@ impl CodexServer {
         }
         // Straight into the server's queue, so commands from all conversations keep the order they were given in.
         let server = self.tx.clone();
-        Session::from_fn(move |cmd| drop(server.send(ServerCommand::Session(key, cmd))))
+        Session::from_fn(move |cmd| drop(server.send(ServerCommand::Session(key, cmd)))).with_tree(self.tree.clone())
     }
 
     /// Stops the process once its last conversation closes; new conversations go to a server with the new settings.

@@ -62,6 +62,14 @@ pub struct Termination {
     pub cost_settled: bool,
 }
 
+impl Termination {
+    /// The production proof: a tree this engine started inside its own job and has just closed and reaped. Struct
+    /// literals still exist for fixtures; only this constructor derives `tree_dead` from an actual retirement.
+    pub fn from_retired(tree: &crate::proc::Retired, cost_settled: bool) -> Self {
+        Self { process: Some(tree.identity()), tree_dead: true, cost_settled }
+    }
+}
+
 pub(crate) fn retirement_known(lease: &Lease) -> bool {
     lease.state == LeaseState::Released
         || (lease.state == LeaseState::Quarantined

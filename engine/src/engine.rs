@@ -215,6 +215,9 @@ struct Core {
     convs: HashMap<String, Conversation>,
     live: HashMap<String, Live>,
     mission_sessions: HashMap<String, Vec<Session>>,
+    /// Owned process trees of writer roles by invocation id, and the terminal event each role reported.
+    worker_trees: HashMap<String, crate::proc::OwnedTree>,
+    worker_terminals: HashMap<String, EngineEvent>,
     mission_lock: Arc<tokio::sync::Mutex<()>>,
     local_update: Option<crate::project::update::SlotLayout>,
     local_build: bool,
@@ -287,6 +290,8 @@ impl Engine {
                 convs: HashMap::new(),
                 live: HashMap::new(),
                 mission_sessions: HashMap::new(),
+                worker_trees: HashMap::new(),
+                worker_terminals: HashMap::new(),
                 mission_lock: Arc::new(tokio::sync::Mutex::new(())),
                 local_update: None,
                 local_build: false,
