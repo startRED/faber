@@ -421,6 +421,13 @@ impl Ctx {
         Ok((crate::proctree::private_mb(live.pid)?, webview))
     }
 
+    /// The processor time, in seconds, the app and its whole tree have used so far; the difference of two readings is the cost of
+    /// what happened between them.
+    pub fn cpu_seconds(&mut self, id: usize) -> Result<f64, String> {
+        self.record(id)?;
+        crate::proctree::cpu_seconds(self.live[id].pid)
+    }
+
     /// Ends the app and waits for it, whatever else happens. Its children are recorded first, so the audit can check that
     /// they follow; if that fails the app is ended all the same, and the failure is reported.
     pub fn close(&mut self, id: usize) -> Result<(), String> {

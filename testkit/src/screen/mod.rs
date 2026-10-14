@@ -5,6 +5,7 @@ pub mod app;
 #[cfg(windows)]
 pub mod containment;
 pub mod first_run;
+pub mod homes;
 #[cfg(windows)]
 pub mod local_update;
 pub mod menus;
@@ -46,6 +47,7 @@ pub fn all() -> Vec<Scenario> {
         .chain(settings::scenarios())
         .chain(setup::scenarios())
         .chain(first_run::scenarios())
+        .chain(homes::scenarios())
         .chain(menus::scenarios())
         .chain(sentinel::scenarios());
     #[cfg(windows)]

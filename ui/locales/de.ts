@@ -287,6 +287,19 @@ export const de: Messages = {
   'look.accentAdjusted': 'Der Akzent wurde angepasst, damit er auf diesem Hintergrund lesbar bleibt.',
   'ambient.idea': 'Deine Idee',
   'ambient.done': 'Fertig, mit Beleg',
+  'ambient.goal': 'Dein Ziel',
+  'hint.chat.2': 'Füge einen Text ein und frag, was er wirklich sagt',
+  'hint.chat.3': 'Beschreibe ein Problem und bitte um drei Auswege',
+  'projects.home.title': 'Was packen wir an?',
+  'projects.home.lead': 'Gib Faber ein Ziel für dieses Projekt. Es arbeitet in einer getrennten Kopie und zeigt, was es geprüft hat.',
+  'projects.home.rules': 'So arbeitet Faber hier',
+  'projects.home.details': "Details",
+  'projects.gitMode.seguroTech': "Sicherer Modus: getrennter Worktree, nur lokale Commits und Vorspulen nur auf dem Missions-Branch.",
+  'projects.selfUpdate.trustTech': "Ein neuer Build rückt erst nach einem Canary-Lauf und den Quarantäneprüfungen in den nächsten lokalen Slot vor.",
+  'projects.home.others': 'Andere Projekte',
+  'projects.home.hint.1': 'Beschreibe, was in diesem Projekt gebaut, repariert oder verbessert werden soll',
+  'projects.home.hint.2': 'Repariere den Test, der nur manchmal scheitert',
+  'projects.home.hint.3': 'Baue eine Einstellung ein und beweise, dass sie funktioniert',
   'setup.title': 'Abonnements verbinden',
   'setup.body': 'Wähle die offiziellen KI-Tools, die du mit deinen eigenen Abonnements nutzen möchtest.',
   'setup.claude': 'Claude',
@@ -403,27 +416,27 @@ export const de: Messages = {
   // Native speaker must translate (needs native review).
   "projects.empty.selectProject": "Wähle einen Projektordner aus, um eine Mission zu starten.",
   // Native speaker must translate (needs native review).
-  "projects.repo": "Repository",
+  "projects.repo": "Ordner",
   // Native speaker must translate (needs native review).
   "projects.base": "Basis-Revision",
   // Native speaker must translate (needs native review).
   "projects.author": "Autor",
   // Native speaker must translate (needs native review).
-  "projects.presence.title": "Werkzeugauswahl",
+  "projects.presence.title": "Wenn ein Werkzeug fehlt",
   // Native speaker must translate (needs native review).
-  "projects.presence.continueWithout": "Ohne fehlende Werkzeuge fortfahren",
+  "projects.presence.continueWithout": "Ohne es weitermachen",
   // Native speaker must translate (needs native review).
-  "projects.presence.findTools": "Faber die besten Werkzeuge suchen und installieren lassen",
+  "projects.presence.findTools": "Für mich suchen und installieren",
   // Native speaker must translate (needs native review).
-  "reason.kit.continueWithout": "Nutzt geprüfte integrierte Fähigkeiten, sobald die Missionsausführung verfügbar ist.",
+  "reason.kit.continueWithout": "Faber nutzt die Werkzeuge, die es schon hat.",
   // Native speaker must translate (needs native review).
-  "reason.kit.findToolsInstallParked": "Die Werkzeuginstallation ist im MVP zur Selbstentwicklung geparkt; die verfügbaren Rollensteuerungen bleiben die Mindestausstattung.",
+  "reason.kit.findToolsInstallParked": "Werkzeuge zu installieren ist noch nicht fertig. Vorerst nutzt Faber die, die es schon hat.",
   // Native speaker must translate (needs native review).
-  "projects.gitMode.title": "Git-Berechtigung",
+  "projects.gitMode.title": "Was Faber mit deinem Code tun darf",
   // Native speaker must translate (needs native review).
-  "projects.gitMode.seguro": "Seguro (Nur lokaler Worktree)",
+  "projects.gitMode.seguro": "Sicher: nur eine getrennte Kopie",
   // Native speaker must translate (needs native review).
-  "projects.gitMode.seguroDesc": "Separater Worktree, lokale Commits, spult nur den Missions-Branch vor. Keine Auswirkungen auf Remotes.",
+  "projects.gitMode.seguroDesc": "Faber arbeitet an einer getrennten Kopie deines Projekts. Es rührt weder GitHub noch etwas im Internet an.",
   // Native speaker must translate (needs native review).
   "projects.gitMode.equilibrado": "Equilibrado (Lokale Commits + Draft-PR)",
   // Native speaker must translate (needs native review).
@@ -431,7 +444,7 @@ export const de: Messages = {
   // Native speaker must translate (needs native review).
   "projects.selfUpdate.trust": "Faber erlauben, sich selbst zu aktualisieren",
   // Native speaker must translate (needs native review).
-  "projects.selfUpdate.trustDesc": "Befördert bewährte Builds nach Canary-Verifizierung und Quarantäneprüfungen in den nächsten lokalen Slot.",
+  "projects.selfUpdate.trustDesc": "Installiert eine neue Faber-Version erst, nachdem getestet wurde, dass sie funktioniert.",
   // Native speaker must translate (needs native review).
   "projects.goal.label": "Missionsziel",
   // Native speaker must translate (needs native review).

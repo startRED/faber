@@ -38,7 +38,7 @@ fn power(ctx: &mut Ctx) -> Result {
     Ok(())
 }
 
-fn fixture(ctx: &mut Ctx) -> Result<Launch> {
+pub(super) fn fixture(ctx: &mut Ctx) -> Result<Launch> {
     start_settings(ctx, "en")?;
     super::projects::run_probe(ctx, "--project-screen-fixture")?;
     let git = faber_engine::cli::find_cli("git").ok_or("git is unavailable")?;

@@ -579,6 +579,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
         nextMessage={!!current()?.messages.length}
         locked={loading()}
         placeholder={area() === 'project' ? t('composer.projectPlaceholder') : newChat() ? t('composer.chatPlaceholder') : t('composer.replyPlaceholder')}
+        hints={newChat() ? [t('composer.chatPlaceholder'), t('hint.chat.2'), t('hint.chat.3')] : undefined}
         onSend={(d) => void send(d)}
         onStop={() => current() && void api.interrupt(current()!.id)}
         onWarm={() => void api.warm({ conversationId: current()?.id, ...target(), choice: picked() })}
@@ -883,7 +884,17 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                     </>
                   }
                 >
-                  <Projects project={project()} vendors={state().vendors} now={clock()} />
+                  <Projects
+                    project={project()}
+                    vendors={state().vendors}
+                    now={clock()}
+                    projects={state().projects}
+                    recent={state().conversations}
+                    running={items()}
+                    onOpen={openSummary}
+                    onProject={(id) => void fresh({ area: 'project', projectId: id })}
+                    onAdd={() => void addProject()}
+                  />
                 </Show>
                 <Show when={columnOpen() && !docked()}>{runningColumn()}</Show>
               </div>

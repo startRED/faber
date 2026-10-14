@@ -6,7 +6,7 @@ import { en } from '../../ui/locales/en.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
 // A look with every token of the base theme, as the shell would send it.
-const sala = (over: Partial<Look> = {}): Look => ({
+export const sala = (over: Partial<Look> = {}): Look => ({
   vars: { ...themes.css.base },
   scheme: 'dark',
   motion: 'full',
@@ -29,7 +29,7 @@ const sala = (over: Partial<Look> = {}): Look => ({
 });
 
 /** Puts `<html>` back the way it was when a check that applies a look onto the page is done. */
-function keepRoot(): () => void {
+export function keepRoot(): () => void {
   const root = document.documentElement;
   const style = root.style.cssText;
   const data = { ...root.dataset };
