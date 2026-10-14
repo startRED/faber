@@ -43,15 +43,26 @@ pub fn valid_id(id: &str) -> bool {
 }
 
 /// Whether a mission of this project is planning or running, read from the records under `repo` and the checkpoints under
-/// `data_dir`. A record that cannot be read counts as not running: it cannot run either.
+/// `data_dir`. It fails closed: a folder of records or a record that cannot be read counts as running, because an
+/// unreadable state cannot be told from a live one. Only a missing `.faber/missions` means there is none.
 pub fn has_active_mission(repo: &std::path::Path, data_dir: &std::path::Path, project_id: &str) -> bool {
-    let Ok(entries) = std::fs::read_dir(repo.join(".faber").join("missions")) else { return false };
-    entries.flatten().any(|entry| {
+    let entries = match std::fs::read_dir(repo.join(".faber").join("missions")) {
+        Ok(entries) => entries,
+        Err(e) => return e.kind() != std::io::ErrorKind::NotFound,
+    };
+    entries.into_iter().any(|entry| {
+        let Ok(entry) = entry else { return true };
         let id = entry.file_name().to_string_lossy().into_owned();
-        valid_id(&id)
-            && store::Journal::open(repo, data_dir, &id).ok().and_then(|journal| run::Runner::open(&journal).ok()).is_some_and(|runner| {
+        if !valid_id(&id) {
+            return false;
+        }
+        let Ok(journal) = store::Journal::open(repo, data_dir, &id) else { return true };
+        match run::Runner::open(&journal) {
+            Ok(runner) => {
                 runner.mission.project_id == project_id && matches!(runner.mission.state, MissionState::Planning | MissionState::Running)
-            })
+            }
+            Err(_) => true,
+        }
     })
 }
 

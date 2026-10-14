@@ -677,4 +677,6 @@ export const fr: Messages = {
   "error.folder.notLocal": "Ce dossier n'est pas sur cet ordinateur, Faber ne l'ouvrira donc pas.",
   // Native speaker must translate (needs native review).
   "error.folder.missing": "Ce dossier n'existe plus.",
+  // Native speaker must translate (needs native review).
+  "error.folder.link": "Ce dossier est un lien vers un autre endroit, Faber ne l'ouvrira donc pas. Ouvrez le vrai dossier depuis l'explorateur de fichiers.",
 };

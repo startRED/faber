@@ -215,6 +215,8 @@ struct Core {
     convs: HashMap<String, Conversation>,
     live: HashMap<String, Live>,
     mission_sessions: HashMap<String, Vec<Session>>,
+    /// The project each mission in `mission_sessions` belongs to, so a project can be asked whether a worker is alive in it.
+    mission_projects: HashMap<String, String>,
     mission_lock: Arc<tokio::sync::Mutex<()>>,
     local_update: Option<crate::project::update::SlotLayout>,
     local_build: bool,
@@ -286,6 +288,7 @@ impl Engine {
                 convs: HashMap::new(),
                 live: HashMap::new(),
                 mission_sessions: HashMap::new(),
+                mission_projects: HashMap::new(),
                 mission_lock: Arc::new(tokio::sync::Mutex::new(())),
                 local_update: None,
                 local_build: false,
@@ -516,7 +519,9 @@ impl Engine {
         self.with(|c| {
             let Some(project) = c.store.projects().into_iter().find(|p| p.id == id) else { return Err("error.project.notFound".into()) };
             let answering = c.convs.values().any(|conv| conv.project_id.as_deref() == Some(id) && running_item(conv).is_some());
-            if answering || crate::project::has_active_mission(Path::new(&project.path), &c.opts.data_dir, id) {
+            // A worker session alive in memory counts even if its records on disk were removed or cannot be read.
+            let working = c.mission_sessions.iter().any(|(m, s)| !s.is_empty() && c.mission_projects.get(m).is_some_and(|p| p == id));
+            if answering || working || crate::project::has_active_mission(Path::new(&project.path), &c.opts.data_dir, id) {
                 return Err("error.project.busy".into());
             }
             let projects: Vec<Project> = c.store.projects().into_iter().filter(|p| p.id != id).collect();
@@ -1987,13 +1992,14 @@ fn same_as_before(c: &Conversation, live: Option<&Live>) -> Option<Pick> {
     Some(Pick { vendor, model: last.model.clone(), effort, reason, pace: None })
 }
 
-/// A control character or an invisible formatting one (zero-width, direction overrides, line separators): nothing a person
-/// can see, so a title never keeps one.
+/// A control character or an invisible formatting one (zero-width space, direction marks and overrides, line separators):
+/// nothing a person can see, so a title never keeps one. The joiners U+200C and U+200D stay: they decide how Persian, Indic
+/// and emoji text is spelled, and removing them changes the word.
 fn unseen(c: char) -> bool {
     c.is_control()
         || matches!(
             c,
-            '\u{ad}' | '\u{61c}' | '\u{180e}' | '\u{200b}'..='\u{200f}' | '\u{2028}'..='\u{202e}' | '\u{2060}'..='\u{206f}' | '\u{feff}' | '\u{fff9}'..='\u{fffb}'
+            '\u{ad}' | '\u{61c}' | '\u{180e}' | '\u{200b}' | '\u{200e}'..='\u{200f}' | '\u{2028}'..='\u{202e}' | '\u{2060}'..='\u{206f}' | '\u{feff}' | '\u{fff9}'..='\u{fffb}'
         )
 }
 

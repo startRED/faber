@@ -493,3 +493,34 @@ check('right-click: after Rename from the keyboard, Enter and Esc both give focu
     root.remove();
   }
 });
+
+check('right-click: holding Enter on Delete arms it but the key repeat never confirms, a fresh press does', async () => {
+  const root = stage();
+  const calls: string[] = [];
+  const dispose = sidebar(root, calls);
+  try {
+    rightClick(root.querySelector('.crow')!);
+    await settle();
+    const button = entry(t('menu.delete'));
+    button.focus();
+    // The first press arms (Enter clicks on key down); the key stays down.
+    key(button, { key: 'Enter' });
+    button.click();
+    await deliberate();
+    // The auto repeat: the page stops it, and even a click that gets through confirms nothing while the key is down.
+    equal(key(button, { key: 'Enter', repeat: true }), false, 'a repeat is stopped');
+    button.click();
+    await settle();
+    deepEqual(calls, [], 'holding the key never deletes');
+    equal(menus().length, 1);
+    // Released, and pressed again: a separate press confirms.
+    button.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, cancelable: true, key: 'Enter' }));
+    key(button, { key: 'Enter' });
+    button.click();
+    await settle();
+    deepEqual(calls, ['remove c1']);
+  } finally {
+    dispose();
+    root.remove();
+  }
+});

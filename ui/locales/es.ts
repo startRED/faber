@@ -677,4 +677,6 @@ export const es: Messages = {
   "error.folder.notLocal": "Esa carpeta no está en este equipo, así que Faber no la abrirá.",
   // Native speaker must translate (needs native review).
   "error.folder.missing": "Esa carpeta ya no existe.",
+  // Native speaker must translate (needs native review).
+  "error.folder.link": "Esa carpeta es un enlace a otro lugar, así que Faber no la abrirá. Abre la carpeta real desde el explorador de archivos.",
 };

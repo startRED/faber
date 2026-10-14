@@ -677,4 +677,6 @@ export const de: Messages = {
   "error.folder.notLocal": "Dieser Ordner liegt nicht auf diesem Computer, deshalb öffnet Faber ihn nicht.",
   // Native speaker must translate (needs native review).
   "error.folder.missing": "Dieser Ordner ist nicht mehr da.",
+  // Native speaker must translate (needs native review).
+  "error.folder.link": "Dieser Ordner ist eine Verknüpfung zu einem anderen Ort, deshalb öffnet Faber ihn nicht. Öffne den echten Ordner im Dateimanager.",
 };

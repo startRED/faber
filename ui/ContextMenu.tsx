@@ -11,6 +11,9 @@ function Panel(props: { m: OpenMenu; leaving: boolean }) {
   const [armed, setArmed] = createSignal<string>();
   let menuEl: HTMLDivElement | undefined;
   let armedAt = 0;
+  // Enter or Space is down now, and the item was armed by that very press: only releasing the key frees it to be confirmed.
+  let keyDown = false;
+  let needsRelease = false;
   const buttons = () => [...(menuEl?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])];
   onMount(() => {
     const el = menuEl!;
@@ -32,9 +35,10 @@ function Panel(props: { m: OpenMenu; leaving: boolean }) {
     if (unavailable(item)) return;
     if (item.confirm && armed() !== item.id) {
       armedAt = performance.now();
+      needsRelease = keyDown;
       return setArmed(item.id);
     }
-    if (item.confirm && performance.now() - armedAt < SAME_GESTURE) return;
+    if (item.confirm && (needsRelease || performance.now() - armedAt < SAME_GESTURE)) return;
     closeMenu(true);
     item.run();
   };
@@ -48,7 +52,16 @@ function Panel(props: { m: OpenMenu; leaving: boolean }) {
       aria-label={t('menu.label')}
       inert={props.leaving}
       onMouseLeave={() => setArmed(undefined)}
+      onKeyUp={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') keyDown = needsRelease = false;
+      }}
       onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          // Holding the key repeats it: a repeat is never a new press, so it activates nothing.
+          if (e.repeat) e.preventDefault();
+          else keyDown = true;
+          return;
+        }
         if (e.key === 'ArrowDown') move((all, at) => (at + 1) % all.length);
         else if (e.key === 'ArrowUp') move((all, at) => (at <= 0 ? all.length - 1 : at - 1));
         else if (e.key === 'Home') move(() => 0);

@@ -668,4 +668,6 @@ export const ptBR: Messages = {
   "error.folder.notLocal": "Essa pasta não está neste computador, então o Faber não vai abri-la.",
   // Native speaker must translate (needs native review).
   "error.folder.missing": "Essa pasta não existe mais.",
+  // Native speaker must translate (needs native review).
+  "error.folder.link": "Essa pasta é um atalho para outro lugar, então o Faber não vai abri-la. Abra a pasta de verdade pelo gerenciador de arquivos.",
 };

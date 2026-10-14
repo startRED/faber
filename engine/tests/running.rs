@@ -586,5 +586,39 @@ async fn a_renamed_conversation_never_keeps_control_or_invisible_characters() {
     engine.rename(&id, "\u{7}\u{200b} \u{202e}");
     assert_eq!(engine.open(&id).unwrap().title, "ABCDE", "a name with nothing visible changes nothing");
     assert_ne!(before, "ABCDE");
+    // The joiners belong to the spelling of Persian, Indic and emoji text and stay.
+    let persian = "\u{646}\u{627}\u{645}\u{647}\u{200c}\u{627}\u{6cc}";
+    engine.rename(&id, persian);
+    assert_eq!(engine.open(&id).unwrap().title, persian);
+    let family = "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}";
+    engine.rename(&id, family);
+    assert_eq!(engine.open(&id).unwrap().title, family);
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn a_mission_record_that_cannot_be_read_keeps_its_project_from_being_removed() {
+    use faber_engine::project::MissionState::Paused;
+    let (data, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (engine, _rx) = engine(data.path(), &[Vendor::Codex], fake(fixture("codex", "chat")).spawn, None);
+    let id = mission_in(&engine, data.path(), repo.path(), Paused);
+    // The checkpoint is damaged: nothing says whether the mission works, so the project stays.
+    std::fs::write(data.path().join("missions").join("m1").join("run.json"), "{ not json").unwrap();
+    assert_eq!(engine.remove_project(&id), Err("error.project.busy".to_string()));
+    assert_eq!(engine.state().projects.len(), 1);
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn a_missions_folder_that_cannot_be_listed_keeps_the_project_but_a_missing_one_does_not() {
+    let (data, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (engine, _rx) = engine(data.path(), &[Vendor::Codex], fake(fixture("codex", "chat")).spawn, None);
+    let project = engine.add_project(&repo.path().to_string_lossy());
+    // `.faber/missions` is a file, so it cannot be listed: that is not "no missions".
+    std::fs::create_dir_all(repo.path().join(".faber")).unwrap();
+    std::fs::write(repo.path().join(".faber").join("missions"), "x").unwrap();
+    assert_eq!(engine.remove_project(&project.id), Err("error.project.busy".to_string()));
+    std::fs::remove_file(repo.path().join(".faber").join("missions")).unwrap();
+    assert_eq!(engine.remove_project(&project.id), Ok(()));
     engine.shutdown();
 }

@@ -553,6 +553,7 @@ export const en = {
   "error.project.busy": "Something is still working in this project. Stop it first, then remove the project.",
   "error.folder.notLocal": "That folder is not on this computer, so Faber will not open it.",
   "error.folder.missing": "That folder is not there any more.",
+  "error.folder.link": "That folder is a link to somewhere else, so Faber will not open it. Open the real folder from the file manager.",
 } as const;
 
 export type Key = keyof typeof en;
