@@ -534,6 +534,11 @@ The program is `faber-test`, run as `cargo t`.
    processes and 3x less memory and CPU, with no ceiling; no test is weakened. Steps: one engine test program, the
    `rust-lld` linker, lighter debug info and below-normal priority (landed 2026-10-14), then event waits,
    parallel lanes, skipping unchanged builds and a shared running app for the screen scenarios.
+7. **The build folder has a budget** (R106). Every worktree builds into a folder of the main checkout's `target`, and
+   Cargo never deletes anything there, so it grew to 123 GB and once filled the disk. `cargo t` sweeps it at start, at
+   most once an hour: folders of removed worktrees and builds replaced more than a day ago go, and above 60 GB
+   the least recently used worktree folders go too. A folder in use is never touched
+   ([design](design.md#build-folder-budget)).
 
 ## Design and identity
 

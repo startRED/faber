@@ -18,4 +18,5 @@ pub mod sandbox;
 pub mod screen;
 pub mod sentinel;
 pub mod server;
+pub mod sweep;
 pub mod testbuild;
