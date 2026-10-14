@@ -279,8 +279,9 @@ mod tests {
 
     fn saved_mission() -> (tempfile::TempDir, tempfile::TempDir, faber_engine::project::store::Journal, faber_engine::project::run::Runner)
     {
-        let repo = tempfile::tempdir().unwrap();
-        let data = tempfile::tempdir().unwrap();
+        let root = std::env::temp_dir().canonicalize().unwrap();
+        let repo = tempfile::tempdir_in(&root).unwrap();
+        let data = tempfile::tempdir_in(&root).unwrap();
         let j = faber_engine::project::store::Journal::open(repo.path(), data.path(), "m1").unwrap();
         let mut r = faber_engine::project::run::Runner::create(
             &j,

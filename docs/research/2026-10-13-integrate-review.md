@@ -90,6 +90,17 @@ to `engine/src/project/remote.rs` relative to that base. All eight proof command
 Both `cargo t` and `cargo t --all` finished with 1,363 passed, 0 failed, 0 not run and 0 skipped:
 1,118 Rust tests, 142 UI checks and 103 hidden screen scenarios. Full probation passed in both runs.
 
+## Portable fixture roots
+
+CI on `b253d6b` exposed a macOS fixture failure: mission observer registration returned `Store(Read)` for the
+system temporary directory's symlinked ancestor. Both `private_checkpoints_release_mission_power_on_done_disk_pause_and_blocked`
+and `proof_receipt_write_failure_releases_mission_power` reproduced the same failure locally with `TEMP` and `TMP`
+pointing through an isolated Windows junction. Both are green after creating their temporary directories beneath the
+canonical temporary root, following the existing local-update fixture pattern. Production path validation is unchanged.
+
+All eight required proof commands were repeated after this fixture repair and exited 0. Both `cargo t` and `cargo t --all`
+finished with 1,363 passed, 0 failed, 0 not run and 0 skipped, including 103 hidden screen scenarios and full probation.
+
 ## Limits
 
 The production writer dispatch seam still refuses execution without the T2/T4 containment qualification.

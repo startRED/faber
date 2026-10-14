@@ -188,7 +188,8 @@ fn proof_receipt_write_failure_releases_mission_power() {
         Arc,
         atomic::{AtomicBool, Ordering},
     };
-    let (repo, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let root = std::env::temp_dir().canonicalize().unwrap();
+    let (repo, data) = (tempfile::tempdir_in(&root).unwrap(), tempfile::tempdir_in(&root).unwrap());
     let j = Journal::open(repo.path(), data.path(), "m1").unwrap();
     let mut r = Runner::create(&j, Mission::new("m1", "p1", "repo", "Fix", &"1".repeat(40), 3, 1)).unwrap();
     let awake = Arc::new(AtomicBool::new(false));
