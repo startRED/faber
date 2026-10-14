@@ -725,6 +725,7 @@ async fn review3_command_gate_declines_git_mutations_and_runs_builds_only_in_the
                 stdout: Box::new(std::io::Cursor::new(b"build completed".to_vec())),
                 stderr: None,
                 child: None,
+                contained: None,
             })
         });
         let server = CodexServer::start(CodexServerOptions {

@@ -225,6 +225,7 @@ mod tests {
                 conv.messages.push(reply);
             }
             let live = Live {
+                cwd: PathBuf::new(),
                 vendor: Vendor::Claude,
                 model: None,
                 running: None,

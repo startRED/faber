@@ -148,6 +148,8 @@ struct Live {
     /// The process continues a session an earlier process began.
     resumed: bool,
     permissions: Permissions,
+    /// The folder the process was started in (checked); a turn that finds the folder resolving elsewhere starts a new process.
+    cwd: PathBuf,
     by_hand: bool,
     approved: bool,
     started: f64,
@@ -764,11 +766,11 @@ impl Core {
             let dir = self.workspace_of(&c.id);
             if c.working_folder.is_none() {
                 std::fs::create_dir_all(&dir).map_err(|_| "error.projectSandbox")?;
-            } else if crate::permissions::forbidden_folder(&dir) {
-                // The folder was fine when it was chosen; a link put there since may lead somewhere that is not.
-                return Err("error.workingFolder".into());
+                return Ok(dir);
             }
-            return Ok(dir);
+            // The folder was fine when it was chosen; a link put there since may lead somewhere that is not. The CLI starts in
+            // the path that was checked.
+            return crate::permissions::checked_folder(&dir).ok_or_else(|| "error.workingFolder".to_string());
         }
         self.store
             .projects()
@@ -776,7 +778,7 @@ impl Core {
             .find(|p| Some(&p.id) == c.project_id.as_ref())
             .map(|p| PathBuf::from(p.path))
             .ok_or_else(|| "error.projectGone".to_string())
-            .and_then(|path| if crate::permissions::forbidden_folder(&path) { Err("error.workingFolder".to_string()) } else { Ok(path) })
+            .and_then(|path| crate::permissions::checked_folder(&path).ok_or_else(|| "error.workingFolder".to_string()))
     }
 
     fn load(&mut self, id: &str) -> Option<&mut Conversation> {
@@ -1654,12 +1656,24 @@ impl Core {
         self.tick += 1;
         let cli = self.opts.clis.get(&pick.vendor).cloned();
         let permissions = self.store.settings().permissions.unwrap_or_default();
+        // Every turn checks the working folder again, also when the process of an earlier turn is reused: a link inside the path
+        // may have been pointed somewhere else since.
+        let cwd = match self.convs.get(conv).ok_or_else(|| "error.conversationGone".to_string()).and_then(|c| self.cwd_of(c)) {
+            Ok(cwd) => cwd,
+            Err(error) => {
+                if let Some(l) = self.live.remove(conv) {
+                    l.session.close();
+                }
+                return Err(error);
+            }
+        };
         if let Some(l) = self.live.get_mut(conv) {
             if l.vendor == pick.vendor
                 && l.model == pick.model
                 && l.effort == pick.effort
                 && Some(&l.cli) == cli.as_ref()
                 && l.permissions == permissions
+                && l.cwd == cwd
             {
                 l.used = self.tick; // most recently used
                 return Ok(());
@@ -1668,7 +1682,7 @@ impl Core {
             self.live.remove(conv);
         }
         let c = self.convs.get(conv).ok_or("error.conversationGone")?;
-        let cwd = self.cwd_of(c)?;
+        let cwd_used = cwd.clone();
         let cli = cli.ok_or("error.notConnected")?;
         let spawn = spawner(&self.opts.spawn, &cli);
         self.next_sid += 1;
@@ -1742,6 +1756,7 @@ impl Core {
                 cli,
                 resumed,
                 permissions,
+                cwd: cwd_used,
                 by_hand: false,
                 approved: false,
                 started: 0.0,

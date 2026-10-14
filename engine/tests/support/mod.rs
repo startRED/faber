@@ -228,7 +228,7 @@ pub fn replay(entries: Vec<Entry>, mismatches: Mismatches) -> Proc {
         }
         // stdin closed: the process exits, so its output ends
     });
-    Proc { stdin: Box::new(driver_in), stdout: Box::new(driver_out), stderr: None, child: None }
+    Proc { stdin: Box::new(driver_in), stdout: Box::new(driver_out), stderr: None, child: None, contained: None }
 }
 
 /// A spawner that replays `entries` each time it is called, recording the arguments it got and every line written.
@@ -340,7 +340,7 @@ pub fn pipes() -> (Spawner, Arc<Mutex<Vec<Pipe>>>) {
             done.store(true, Ordering::SeqCst);
         });
         queue.lock().unwrap().push(Pipe { out: fake_out, lines, closed });
-        Ok(Proc { stdin: Box::new(driver_in), stdout: Box::new(driver_out), stderr: None, child: None })
+        Ok(Proc { stdin: Box::new(driver_in), stdout: Box::new(driver_out), stderr: None, child: None, contained: None })
     });
     (spawn, made)
 }

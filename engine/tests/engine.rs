@@ -1620,8 +1620,6 @@ async fn r124_system_and_credential_folders_are_refused_as_working_folders_but_h
 #[cfg(windows)]
 async fn stop_leaves_no_worker(parent_script: &str, why: &str) {
     use faber_engine::claude::{ClaudeLaunch, ClaudeOptions, start_claude};
-    use faber_engine::proc::Proc;
-    use std::process::Stdio;
     let dir = tempfile::tempdir().unwrap();
     let worker = dir.path().join("worker.cmd");
     let parent = dir.path().join("parent.cmd");
@@ -1632,15 +1630,8 @@ async fn stop_leaves_no_worker(parent_script: &str, why: &str) {
     // The "CLI" is a batch file that starts a worker and waits, the way a CLI waits for the command it started.
     let spawn: Spawner = Arc::new(move |_bin, _args, cwd| {
         let mut cmd = tokio::process::Command::new("cmd.exe");
-        cmd.args(["/c", &script]).current_dir(cwd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
-        cmd.creation_flags(0x0800_0000);
-        let mut child = cmd.spawn()?;
-        Ok(Proc {
-            stdin: Box::new(child.stdin.take().unwrap()),
-            stdout: Box::new(child.stdout.take().unwrap()),
-            stderr: child.stderr.take().map(|s| Box::new(s) as Box<dyn tokio::io::AsyncRead + Send + Unpin>),
-            child: Some(child),
-        })
+        cmd.args(["/c", &script]).current_dir(cwd);
+        faber_engine::proc::spawn_command(cmd)
     });
     let session = start_claude(
         ClaudeOptions {
@@ -1677,6 +1668,61 @@ async fn stop_leaves_no_worker(parent_script: &str, why: &str) {
     assert_eq!(lines(&out), at_stop, "{why}");
 }
 
+/// A link (a junction on Windows) at `link` that points at `target`.
+fn link(link: &Path, target: &Path) {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).unwrap();
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let made = std::process::Command::new("cmd.exe")
+            .args(["/c", "mklink", "/J"])
+            .arg(link.to_string_lossy().replace('/', "\\"))
+            .arg(target.to_string_lossy().replace('/', "\\"))
+            .creation_flags(0x0800_0000)
+            .output()
+            .unwrap();
+        assert!(
+            made.status.success(),
+            "the junction could not be made: {} {}",
+            String::from_utf8_lossy(&made.stdout),
+            String::from_utf8_lossy(&made.stderr)
+        );
+    }
+}
+
+/// R124c, item 4: the working folder is checked at every turn, also when the process of an earlier turn is reused.
+#[tokio::test]
+async fn r124c_every_turn_rechecks_the_working_folder_also_when_the_process_is_reused() {
+    let dir = tempfile::tempdir().unwrap();
+    let chosen = project_folder();
+    let allowed = chosen.path().join("allowed");
+    let forbidden = chosen.path().join(".ssh").join("keys");
+    std::fs::create_dir_all(&allowed).unwrap();
+    std::fs::create_dir_all(&forbidden).unwrap();
+    let f = fake(claude_turns(&[("first", true), ("second", true)]));
+    let seen: Arc<Mutex<usize>> = Arc::default();
+    let spawn: Spawner = {
+        let (inner, seen) = (f.spawn.clone(), seen.clone());
+        Arc::new(move |bin, args, cwd| {
+            *seen.lock().unwrap() += 1;
+            inner(bin, args, cwd)
+        })
+    };
+    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, spawn);
+    let id = engine.chat_folder(None, Some(&allowed)).unwrap().id;
+    engine.send(SendRequest { conversation_id: Some(id.clone()), ..ask(Area::Chat, "first", choice("claude", Some("haiku"))) }).unwrap();
+    finished(&mut rx, |_| {}).await;
+    assert_eq!(*seen.lock().unwrap(), 1);
+    // The (empty) folder is replaced by a link into a refused place while the process of the first turn is still warm.
+    std::fs::remove_dir(&allowed).unwrap();
+    link(&allowed, &forbidden);
+    let second = SendRequest { conversation_id: Some(id.clone()), ..ask(Area::Chat, "second", choice("claude", Some("haiku"))) };
+    assert_eq!(engine.send(second).unwrap_err(), "error.workingFolder");
+    assert_eq!(*seen.lock().unwrap(), 1, "no new process was started in the refused folder");
+    engine.shutdown();
+}
+
 /// R124, item 3: switching to Ask must stop execution, not only the status. A command the CLI started is a child of the CLI;
 /// on Windows killing the CLI alone left it running and still changing files.
 #[cfg(windows)]
@@ -1687,6 +1733,40 @@ async fn r124_stopping_a_cli_also_stops_the_command_it_started() {
         "the command the CLI started kept running after the CLI was stopped",
     )
     .await;
+}
+
+/// R124c, item 1: the CLI is created suspended, put in its job and only then let run, so a worker it starts as its very first
+/// act is in the job too. Dropping the job (all that stopping does) must end that worker.
+#[cfg(windows)]
+#[tokio::test]
+async fn r124c_a_worker_the_cli_starts_as_its_first_act_dies_with_the_job() {
+    for round in 0..2 {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("worker.cmd"), "@echo off\r\n:loop\r\necho x>> %1\r\nping -n 2 127.0.0.1 >nul\r\ngoto loop\r\n")
+            .unwrap();
+        let parent = dir.path().join("parent.cmd");
+        std::fs::write(&parent, "@echo off\r\nstart /b cmd /c %~dp0worker.cmd %~dp0out.txt\r\nping -n 120 127.0.0.1 >nul\r\n").unwrap();
+        let mut cmd = tokio::process::Command::new("cmd.exe");
+        cmd.args(["/c", &parent.to_string_lossy()]).current_dir(dir.path());
+        let proc = faber_engine::proc::spawn_command(cmd).unwrap();
+        let out = dir.path().join("out.txt");
+        let lines = || std::fs::read_to_string(&out).map(|t| t.lines().count()).unwrap_or(0);
+        tokio::time::timeout(Duration::from_secs(20), async {
+            while lines() < 2 {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        })
+        .await
+        .expect("the worker started");
+        let faber_engine::proc::Proc { contained, child, .. } = proc;
+        assert!(contained.is_some(), "round {round}: the CLI is in a job");
+        drop(contained);
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+        let at_stop = lines();
+        tokio::time::sleep(Duration::from_millis(3000)).await;
+        assert_eq!(lines(), at_stop, "round {round}: the worker outlived the job");
+        drop(child);
+    }
 }
 
 /// R124b, item 6: a CLI that is already gone when the tree is killed (it quit on its own or when its input closed) left its worker

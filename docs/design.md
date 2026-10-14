@@ -272,7 +272,7 @@ inside its own area.
   `untrusted`) and carries the same credential denies and the same refusal of forwarded credential requests; it asks except for
   what the person pre-allowed in the tool's own settings. The system and credential folders are refused as working folders, judged
   by their resolved path (R124, R124b), and Faber's own requests never run the person's hooks. A CLI and everything it started
-  end together (a Windows job object, R124b). Settings shows the
+  end together (a Windows job object made before the CLI runs, failing closed; R124b, R124c). Settings shows the
   details; the thread shows one calm line with a link to them. The isolated mode below is `Permissions::Isolated`: Faber's
   own model list, router, internal checks and self-development roles use it, and the person cannot pick it.
 - R97/R107 (now the isolated mode only): bypass permissions with native deny rules for `.git` edits, credential directories

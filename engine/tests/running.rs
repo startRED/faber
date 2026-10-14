@@ -543,7 +543,13 @@ async fn a_driver_panic_removes_only_its_run_from_overlapping_chat_and_project_w
         let spawn: Spawner = Arc::new(move |_, _, _| {
             let (tx, rx) = tokio::sync::oneshot::channel();
             keep.lock().unwrap().push(tx);
-            Ok(faber_engine::proc::Proc { stdin: Box::new(tokio::io::sink()), stdout: Box::new(Panics(rx)), stderr: None, child: None })
+            Ok(faber_engine::proc::Proc {
+                stdin: Box::new(tokio::io::sink()),
+                stdout: Box::new(Panics(rx)),
+                stderr: None,
+                child: None,
+                contained: None,
+            })
         });
         let dir = tempfile::tempdir().unwrap();
         let (engine, mut rx) = engine(dir.path(), &[vendor], spawn, None);

@@ -485,7 +485,7 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
     let mut lines = BufReader::new(p.stdout).lines();
     let mut stdin = p.stdin;
     let mut child = p.child;
-    let mut job = proc::contain(&child);
+    let mut job = p.contained;
     let mut threads: HashMap<u64, Thread> = HashMap::new();
     let mut by_id: HashMap<String, u64> = HashMap::new();
     // Opened before Codex finished starting, in order, so request ids stay predictable.
@@ -802,7 +802,7 @@ pub async fn read_codex_limits(bin: &str, cwd: &Path, windows: bool, spawn: Spaw
     let Ok(p) = spawn(bin, &codex_args(Area::Chat, windows, false, Permissions::Isolated), cwd) else { return vec![] };
     let mut stdin = p.stdin;
     let mut child = p.child;
-    let mut job = proc::contain(&child);
+    let mut job = p.contained;
     let mut lines = BufReader::new(p.stdout).lines();
     let mut events = vec![];
     let ask = async {
@@ -868,7 +868,7 @@ pub async fn list_codex_models(bin: &str, cwd: &Path, windows: bool, spawn: Spaw
     let Ok(p) = spawn(bin, &codex_args(Area::Chat, windows, false, Permissions::Isolated), cwd) else { return vec![] };
     let mut stdin = p.stdin;
     let mut child = p.child;
-    let mut job = proc::contain(&child);
+    let mut job = p.contained;
     let mut lines = BufReader::new(p.stdout).lines();
     let ask = async {
         let init = json!({ "id": 1, "method": "initialize", "params": { "clientInfo": { "name": "faber", "title": "Faber", "version": "0.0.0" } } });

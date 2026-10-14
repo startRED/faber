@@ -439,17 +439,26 @@ fn resolve(cwd: &str, token: &str) -> String {
     parts.join("/")
 }
 
-/// A working folder Faber refuses with a calm message even in full access (R124): the Windows folder, Program Files, and a
-/// credential folder or any folder inside one. A drive root and the home folder stay allowed, as R121 says.
+/// A working folder Faber refuses with a calm message even in full access (R124): the Windows folder, Program Files, a credential
+/// folder or any folder inside one, and any administrative share (`C$`) of any host. A drive root and the home folder stay
+/// allowed, as R121 says. See `checked_folder`.
+pub fn forbidden_folder(root: &Path) -> bool {
+    checked_folder(root).is_none()
+}
+
+/// The folder to work in, or `None` when it is refused. Callers start the CLI in the returned path, so what is used is what
+/// was checked.
 ///
 /// The folder is resolved first (links, junctions, short names and verbatim prefixes all end up as the real path) and judged in
 /// one normal form, both as written and as resolved. A folder that cannot be resolved for a reason other than being absent is
-/// refused; an absent one is judged by its name (nothing can run in it, and the turn checks again when it starts).
-pub fn forbidden_folder(root: &Path) -> bool {
+/// refused; an absent one is judged by its name and returned as written (nothing can run in it, and the check is made again
+/// when a turn starts). A network path to an administrative share is refused whatever the host is called, because aliases such
+/// as the PC's LAN address cannot all be recognised.
+pub fn checked_folder(root: &Path) -> Option<PathBuf> {
     let real = match std::fs::canonicalize(root) {
         Ok(real) => Some(real),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(_) => return true,
+        Err(_) => return None,
     };
     // Each place is judged under the name it is written with and the real one it resolves to.
     let spellings = |path: &Path| {
@@ -468,12 +477,34 @@ pub fn forbidden_folder(root: &Path) -> bool {
         .flat_map(|(dir, _)| spellings(Path::new(&dir)))
         .collect();
     let mut here = vec![normal(&root.to_string_lossy())];
-    here.extend(real.map(|r| normal(&r.to_string_lossy())));
-    here.iter().any(|path| {
+    here.extend(real.as_ref().map(|r| normal(&r.to_string_lossy())));
+    let refused = here.iter().any(|path| {
         path.split('/').any(|piece| CREDENTIAL_FOLDERS.contains(&piece.trim_end_matches(['.', ' '])))
             || (cfg!(windows) && inside_any(path, &system))
             || inside_any(path, &moved)
-    })
+            || administrative_share(path)
+    });
+    if refused {
+        return None;
+    }
+    Some(real.map_or_else(|| root.to_path_buf(), plain))
+}
+
+/// `//host/C$/...`: a network path to the hidden share of a drive (or `ADMIN$`), whatever `host` is. In the normal form.
+fn administrative_share(path: &str) -> bool {
+    path.strip_prefix("//").and_then(|rest| rest.split('/').nth(1)).is_some_and(|share| share.ends_with('$'))
+}
+
+/// The resolved path without the `\\?\` prefix `canonicalize` adds on Windows (the CLIs and their tools do not all accept it).
+fn plain(path: PathBuf) -> PathBuf {
+    let text = path.to_string_lossy();
+    if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{unc}"));
+    }
+    match text.strip_prefix(r"\\?\") {
+        Some(local) if local.as_bytes().get(1) == Some(&b':') => PathBuf::from(local),
+        _ => path,
+    }
 }
 
 fn secret(path: &Path, reading: bool) -> bool {

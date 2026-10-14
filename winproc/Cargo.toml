@@ -1,0 +1,12 @@
+[package]
+name = "faber-winproc"
+description = "The one unsafe call Faber needs: letting a process that was created suspended run (after it joined its job)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Not `[lints] workspace = true`: the workspace forbids unsafe code, and this crate exists to keep that one call in one place.
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading"] }

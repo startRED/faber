@@ -45,11 +45,11 @@ fn status(stdout: Option<&'static str>) -> (Spawner, Calls) {
     let spawn: Spawner = Arc::new(move |bin, args, _cwd| {
         recorded.lock().unwrap().push((bin.into(), args.to_vec()));
         let Some(stdout) = stdout else {
-            return Ok(Proc { stdin: Box::new(tokio::io::sink()), stdout: Box::new(Pending), stderr: None, child: None });
+            return Ok(Proc { stdin: Box::new(tokio::io::sink()), stdout: Box::new(Pending), stderr: None, child: None, contained: None });
         };
         let (mut out, reader) = tokio::io::duplex(4096);
         tokio::spawn(async move { drop(out.write_all(stdout.as_bytes()).await) });
-        Ok(Proc { stdin: Box::new(tokio::io::sink()), stdout: Box::new(reader), stderr: None, child: None })
+        Ok(Proc { stdin: Box::new(tokio::io::sink()), stdout: Box::new(reader), stderr: None, child: None, contained: None })
     });
     (spawn, calls)
 }

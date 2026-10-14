@@ -312,7 +312,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
         let mut lines = BufReader::new(p.stdout).lines();
         let mut stdin = p.stdin;
         let mut child = p.child;
-        let mut job = proc::contain(&child);
+        let mut job = p.contained;
         let mut pending: HashMap<String, Value> = HashMap::new();
         let mut closed = false;
         let mut control_id = 0u32;

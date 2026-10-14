@@ -527,6 +527,54 @@ fn junction(link: &std::path::Path, target: &std::path::Path) {
     assert!(made.status.success(), "the junction could not be made");
 }
 
+/// R124c, item 4: the CLI is started in the path that was checked (the resolved one), not in the link the person typed.
+#[test]
+fn r124c_a_checked_folder_is_returned_in_its_resolved_form() {
+    use faber_engine::permissions::checked_folder;
+    let dir = tempfile::tempdir().unwrap();
+    let real = dir.path().join("real");
+    std::fs::create_dir_all(&real).unwrap();
+    let via = dir.path().join("via");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&real, &via).unwrap();
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let made = std::process::Command::new("cmd.exe")
+            .args(["/c", "mklink", "/J"])
+            .arg(&via)
+            .arg(&real)
+            .creation_flags(0x0800_0000)
+            .output()
+            .unwrap();
+        assert!(made.status.success());
+    }
+    let verbatim = "\\\\?\\";
+    let plain = |p: std::path::PathBuf| std::path::PathBuf::from(p.to_string_lossy().trim_start_matches(verbatim));
+    let checked = checked_folder(&via).unwrap();
+    assert!(!checked.to_string_lossy().starts_with(verbatim), "no verbatim prefix: {checked:?}");
+    assert_eq!(checked, plain(real.canonicalize().unwrap()));
+    // An absent folder is handed back as written.
+    assert_eq!(checked_folder(&dir.path().join("later")).unwrap(), dir.path().join("later"));
+}
+
+/// R124c, item 3: a network path to an administrative share (`C$`, `ADMIN$`) is refused whatever the host is called; an alias
+/// such as the PC's LAN address cannot be told from any other host by its name.
+#[test]
+fn r124c_a_network_path_to_an_administrative_share_is_refused_for_any_host() {
+    use faber_engine::permissions::forbidden_folder;
+    use std::path::Path;
+    for refused in [
+        "\\\\192.168.1.10\\C$\\Windows",
+        "\\\\some-other-name\\d$\\work",
+        "\\\\host\\ADMIN$\\System32",
+        "\\\\?\\UNC\\10.0.0.7\\C$\\Users",
+        "//nas/e$/stuff",
+    ] {
+        assert!(forbidden_folder(Path::new(refused)), "{refused}");
+    }
+}
+
 /// R124, item F: the refusal covers the system folders and anything in or under a credential folder; the home folder, a drive
 /// root and ordinary folders pass.
 #[test]

@@ -276,7 +276,12 @@ material you do not trust. The Settings text says exactly this.
   (for a Chat folder too, since R124b). R124b: the folder is resolved to its real path first (links, junctions, 8.3 names, the
   verbatim `\\?\` form and administrative-share aliases of this PC such as `\\localhost\C$`), and both the written and the resolved
   path are compared in one normal form (forward slashes, lower case). A folder that cannot be resolved for a reason other than
-  being absent is refused. This protects the folder the person picks; it does not limit what a command run inside it can reach.
+  being absent is refused. R124c: a network path to an administrative share (a share name ending in `$`, any host) is refused,
+  since aliases such as the PC's LAN address cannot all be recognised; the check also runs on every turn, also when the process of
+  the earlier turn is reused (the process is started again if the folder now resolves elsewhere), and the CLI starts in the
+  resolved path that was checked (`permissions::checked_folder`). Between the check and the start the folder could still be swapped
+  by someone with write access to its parents; that window is not closed. This protects the folder the person picks; it does not
+  limit what a command run inside it can reach, and the Settings text says the blocking of those folders for commands is best effort.
 - Hooks: the Settings switch applies only to Ask before commands. With full access the person's hooks always run.
 - Faber's own requests (the router, the pulse, any side question) start Claude with `--safe-mode`, `--setting-sources ""`,
   `--strict-mcp-config`, no tools and `disableAllHooks`, whatever mode the person chose. Before this a user hook ran during
@@ -296,13 +301,18 @@ material you do not trust. The Settings text says exactly this.
   shell off in every mode, and it runs on a Codex process of its own started with the `Isolated` arguments (one extra idle
   process once Auto routes through Codex; its memory cost was not measured here).
 - Switching from Don't ask to Ask stops running turns. R124b: on Windows every CLI the drivers start joins a job object with
-  kill-on-close and no breakaway (`proc::contain`, the safe `win32job` crate; this crate stays free of unsafe code). Stopping ends
+  kill-on-close and no breakaway (`proc::spawn_command`, the safe `win32job` crate). Stopping ends
   the job first and closes the input after, so a CLI that exits when its input closes cannot orphan its workers, and a CLI that
   quits on its own leaves none either. If the system refuses the job, `taskkill /T` (run directly, never through a shell) is
-  the fallback and a failure is logged. A process started in the instant between the spawn and the job assignment is outside the
-  job, which is why the fallback stays. The engine asks the drivers to stop and does not wait for the end: the live entry is
-  removed first, so any late event is dropped. Elsewhere only the CLI itself is ended; a process group would be the next step.
-  Switching to Don't ask does not touch a running turn.
+  the fallback and a failure is logged. Round 3 (R124c) closed the startup race: the CLI is created suspended
+  (`CREATE_SUSPENDED`, with `CREATE_NO_WINDOW`), put in the job, and only then resumed (`proc::spawn_command`), so nothing it
+  starts can be outside the job. Resuming needs the thread handle, which std and tokio do not give, so the thread is found through a
+  toolhelp snapshot in the one unsafe call of Faber, in its own crate (`winproc/`, outside the workspace's `forbid(unsafe_code)`).
+  If the job cannot be made or joined, the process is killed before it ran a single instruction and the spawn fails with the
+  usual start error: no CLI runs uncontained on Windows, so the `taskkill` fallback only serves test doubles and other systems.
+  The engine asks the drivers to stop and does not wait for the end: the live entry is removed first, so any late event is
+  dropped; with the job, the end is the kernel's work once the handle closes. Elsewhere only the CLI itself is ended; a process
+  group would be the next step. Switching to Don't ask does not touch a running turn.
 - A Codex session saved with the isolated host command tool (`commandGate`) restarts once, with its visible history,
   because that tool no longer exists in any mode the person can choose.
 - Code that wants the old sandbox must say `Permissions::Isolated`. The variant `Permissions::DontAsk` no longer exists
