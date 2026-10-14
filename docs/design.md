@@ -97,6 +97,10 @@ own inks.
   0.97 scale for cards and menus. Cards use a 2 px arrival blur; overlays use an 8 px static backdrop blur.
 - New items rise up to 6 px over 200 to 240 ms; exits take 180 ms. Buttons respond in 140 to 240 ms. The "running" dot pulses every 1.6 to 2 s.
   Workshop only fades and never moves anything vertically.
+- Frequency decides whether something moves at all. Anything the user does dozens of times a minute (a keystroke, a
+  shortcut, a tab or row switch, a row hover) changes instantly or with a 150 ms fade of colour or opacity at most;
+  expressive motion is for rare moments (first run, a finished task, an empty state). Motion is never the only
+  signal: every animated change also leaves a static cue (colour, icon or label).
 - Reduced motion and no motion both remove every animation and transition. A system that asks for less motion
   caps the user's level, and a change in the system setting changes only the level.
 - The running column slides and fades; its thread uses a short measured width transition so glyphs never stretch.
