@@ -572,6 +572,10 @@ belongs to them.
 - GitHub Releases on every tag, downloaded directly: an `.exe` (NSIS) installer for Windows, a universal `.dmg` for macOS,
   AppImage and `.deb` for Linux. Windows comes first, and macOS and Linux compatibility is kept from now on. arm64
   Windows and `.rpm` come later.
+- Every user-facing change ships by itself (R130). When CI goes green on `phase-1-base` and a `feat`, `fix` or `perf`
+  commit landed since the last tag, `auto-release.yml` tags the next patch version there and starts the release, so
+  installs update through the built-in updater without anyone asking. A finished area still gets its minor bump by hand.
+  The tag is the version; the release build writes it into `package.json`.
 - No paid signing for now. Windows shows a SmartScreen notice that the download page explains. The Microsoft Store and
   a code-signing certificate come back to the table when everything is complete.
 - macOS builds are not notarized, so users allow the app once in System Settings. Faber updates itself there too. If a

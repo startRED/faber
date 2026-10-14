@@ -1,0 +1,49 @@
+name: auto-release
+
+# Owner decision R130: every user-facing change ships on its own, so installs keep up through the built-in updater
+# without anyone asking. When CI goes green on phase-1-base and a feat, fix or perf commit landed since the last tag,
+# that commit is tagged with the next patch version. A finished area still gets its minor bump by hand.
+on:
+  workflow_run:
+    workflows: [ci]
+    branches: [phase-1-base]
+    types: [completed]
+  workflow_dispatch:
+
+# Green runs that finish close together queue here; each one sees the tag the one before it pushed.
+concurrency:
+  group: auto-release
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  tag:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: phase-1-base
+          fetch-depth: 0
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GREEN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          sha=${GREEN_SHA:-$(gh run list --workflow ci.yml --branch phase-1-base --event push --status success --limit 1 --json headSha --jq '.[0].headSha')}
+          last=$(git tag --list 'v*' --sort=-v:refname | head -1)
+          if [ -z "$sha" ] || [ "$(git rev-parse "$last^{commit}")" = "$sha" ] || ! git merge-base --is-ancestor "$last" "$sha"; then
+            echo "No green commit after $last."; exit 0
+          fi
+          if ! git log --no-merges --format=%s "$last..$sha" | grep -qE '^(feat|fix|perf)(\(|!|:)'; then
+            echo "Nothing user-facing since $last."; exit 0
+          fi
+          IFS=. read -r major minor patch <<< "${last#v}"
+          next="v$major.$minor.$((patch + 1))"
+          git tag "$next" "$sha"
+          git push origin "$next"
+          # A tag pushed with this token starts no workflow, so the release is started by hand.
+          gh workflow run release.yml --ref "$next"
+          echo "Released $next at $sha."
