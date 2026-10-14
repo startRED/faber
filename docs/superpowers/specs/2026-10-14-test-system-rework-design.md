@@ -1,6 +1,6 @@
 # Test system rework: beat TL-ADE's suite by 5x
 
-Date: 2026-10-14. Status: approach approved by Erick (R113, option 1); cold-run target R114 (Erick); this spec awaits his review.
+Date: 2026-10-14. Status: approach approved by Erick (R113, option 1); compilation left out and a real-work tier added (R115, Erick); no ceiling, R113 is the floor (R116, Erick); this spec awaits his review.
 Research: TL-ADE mapping and process sources were read on 2026-10-14 (no code copied, AGENTS.md).
 
 ## 1. Goal
@@ -8,6 +8,10 @@ Research: TL-ADE mapping and process sources were read on 2026-10-14 (no code co
 R113 (Erick): Faber's test system beats TL-ADE's by at least **5x in wall time and processes started** and **3x in peak
 RAM and CPU**, on the whole suite and on each matched scenario. Same PC, same core budget, nobody using it. No test is
 weakened or dropped to win. Behaviours Faber has no feature for are listed apart, never counted.
+
+R116 (Erick): there is no ceiling. The numbers above are the floor; the aim is the fastest and lightest Faber possible.
+Every step keeps a change only if the benchmark shows it helps, and after the planned steps the work goes on with the
+largest cost left in the report, until a step no longer finds a measurable gain.
 
 ## 2. Where we start (measured 2026-10-14, whole-system sampler, warm)
 
@@ -51,7 +55,7 @@ What is compared:
 | Tier | TL-ADE | Faber |
 |---|---|---|
 | Whole suite, warm | `vitest run` (default include, probes excluded) | `cargo t --all` |
-| Whole suite, cold | fresh clone, `npm ci`, then `vitest run` | fresh clone, `cargo t --all` with an empty build folder |
+| Real work | the app doing the tasks of section 3.1 | the app doing the same tasks |
 | Matched scenarios (8) | the files below, run alone | the matching tests via `cargo t --filter` |
 | Categories | real browser UI; spawns a fake CLI; real filesystem; pure logic | screen and UI checks; replayed sessions; real filesystem; pure logic |
 | Real git | 65 files | none yet: comes in with the self-development branches |
@@ -68,6 +72,28 @@ The 8 matched scenarios, each proving the same behaviour on both sides:
 | 6 | Unknown or blocked billing is never picked | `model_routing.test.ts`, `adapters/claude.test.ts` | `budget.rs`, `paid_guard.rs`, `pacing.rs` |
 | 7 | Tokens and cost are recorded, never invented | `adapters/claude.test.ts`, `usage_by_company.test.ts` | `turn_usage.rs` |
 | 8 | An npm `.cmd` shim resolves to the real program | `doctor.test.ts`, `parity/windows-durability.test.ts` | `engine.rs` |
+
+### 3.1 Real work
+
+Compilation is left out of every comparison (R115): it exists only when Faber develops itself, and installed apps
+arrive compiled. Next to the test suites, the two apps do the same work a person would ask for, driven by the same
+recorded CLI sessions, so no quota is spent and both get identical answers at identical speed. The measure is the cost
+of the app itself around the CLI: time from the request to the first shown event and to the end, peak memory, CPU and
+processes of the app with its screen (Faber with its WebView2, TL-ADE with its engine and the browser that shows its
+panel).
+
+| # | Task |
+|---|---|
+| 1 | Open the app and sit idle on a new conversation for 60 s |
+| 2 | One chat turn that streams an answer |
+| 3 | Close and reopen, then continue the same session |
+| 4 | A 50-turn conversation, then scroll its whole thread |
+| 5 | Interrupt a running turn and send the next one |
+| 6 | Show the quota of each vendor |
+| 7 | Run the proof of a small sample project (its own tests) and report it, once Faber has the proof runner |
+
+Each task is scripted once per app through its own screen (DevTools for both), on the hidden desktop, inside the job
+object of section 3. A task one app cannot do is listed, not measured.
 
 Seven more pairs match loosely (process tree, crash recovery, atomic writes, path guards, interrupt, quota in the UI, a
 chat round trip in the UI); they are reported as a second table, not counted for R113. TL-ADE behaviours with no Faber
@@ -123,13 +149,13 @@ so a fresh worktree compiles only Faber's own crates. The build folder budget an
 
 ## 5. Acceptance
 
-R113 is met when the benchmark tool reports, as medians of 3 runs:
+The floor (R113) is met when the benchmark tool reports, as medians of 3 runs:
 
 | Tier | Target against TL-ADE |
 |---|---|
 | Whole suite, warm | at least 5x less wall time and processes, 3x less peak memory and CPU |
 | Each of the 8 matched scenarios | the same ratios |
-| Whole suite, cold | at least 2x less wall time (Faber compile plus suite against TL-ADE `npm ci` plus suite) |
+| Each real-work task | the same ratios |
 
 And: every Faber test that passed before still passes, with the same assertions; `cargo t --all` stays green on
 Windows, macOS and Linux in CI; a forced failure inside a shared scenario still fails that scenario and does not leak into
@@ -146,16 +172,16 @@ the next one (a test proves it).
 - **The 5x may not hold for the matched scenarios** where TL-ADE's test is already small (a pure function in a few
   milliseconds). Each pair's report shows both numbers; a pair under 5x is listed, not hidden.
 
-## 7. Cold runs (R114, Erick)
+## 7. Compilation
 
-TL-ADE has no compile step, so a cold run is mostly Faber's handicap: about 3.5 minutes of Rust compilation before the
-first test. Only developers meet it (the owner, the AI, self-development); installed apps arrive compiled. The cold
-target is 2x, reached mainly through 4.5; warm runs and the matched scenarios keep 5x.
+A fresh folder needs about 3.5 minutes of Rust compilation before the first test; TL-ADE, on Node, has none. Only
+self-development meets it, so it is measured and reported for that work (4.5 keeps it short) and stays out of the
+comparison (R115, which replaces R114).
 
 ## 8. Order
 
 1. Commit 4.0 after the proof commands pass.
-2. The benchmark tool and the first fair report (before numbers).
+2. The benchmark tool, the real-work scripts and the first fair report (before numbers).
 3. 4.3 waits, then 4.1 shared app, then 4.2 lanes, measuring after each.
 4. 4.4 build skip, 4.5 cold cache.
 5. The final report in `docs/research/bench/`, and the screen-tests section of `docs/design.md` updated.
