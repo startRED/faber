@@ -289,8 +289,11 @@ characters and that both drivers pass it whenever `instructions` is `None`.
   their session (strict MCP config), so the 500 MB idle budget is untouched.
 - **Telemetry off for tools too.** Faber sets every documented opt-out in the tool's launch environment
   (`DISABLE_TELEMETRY=true` for mcp-for-blender, godot-ai and Unity MCP, plus `UNITY_MCP_DISABLE_TELEMETRY` and
-  `MCP_DISABLE_TELEMETRY` for Unity MCP). HyperFrames has opt-out anonymous telemetry (PostHog) and a `telemetry`
-  subcommand; its exact switch is confirmed at catalog intake. A tool with default telemetry and no opt-out is not
+  `MCP_DISABLE_TELEMETRY` for Unity MCP). Read in the repos on 2026-10-14, these are on by default too and get their
+  switch: HyperFrames `HYPERFRAMES_NO_TELEMETRY=1`, Impeccable `IMPECCABLE_NO_TELEMETRY=1`, gh `GH_TELEMETRY=false`,
+  the skills CLI `DISABLE_TELEMETRY=1`, Chrome DevTools MCP `--no-usage-statistics --no-performance-crux`, Windows-MCP
+  `ANONYMIZED_TELEMETRY=false`; `DO_NOT_TRACK=1` is set for every tool as well ([catalog
+  re-curation](../../research/2026-10-14/tool-catalog-recuration.md)). A tool with default telemetry and no opt-out is not
   recommended (RW-14).
 
 ### 3.2 Shelves
@@ -316,36 +319,53 @@ characters and that both drivers pass it whenever `instructions` is `None`.
 **First code step (Phase 3):** `engine/src/shelf.rs`: turns the tools each CLI reports at session start into cards and
 tiers, and renders the hot shelf lines for `faber:tools`; pure, fed by the drivers' existing event parsing.
 
-### 3.3 Recommended default kit per domain (verified 2026-10-12)
+### 3.3 Recommended default kit per domain (verified 2026-10-14)
 
-Sources in r4 and r5; changes after verification in appendix B. The second column installs at setup for the areas the
-person picked; the third needs something the person provides, or downloads on demand after a yes (ER5, ER6). Nothing
-is bundled.
+Every tool below was re-read in its own repository on 2026-10-14 (file tree, LICENSE file, real SKILL.md or server
+code, activity, telemetry); the per-tool rows, evidence paths and new candidates are in the [catalog
+re-curation](../../research/2026-10-14/tool-catalog-recuration.md), which replaces the r4 and r5 tool lists. The second
+column installs at setup for the areas the person picked; the third needs something the person provides, or downloads
+on demand after a yes (ER5, ER6). Nothing is bundled. Telemetry switches are in section 3.1. Tags: Erick's decisions
+keep their tag; **(AI)** marks a change from the 2026-10-12 table, made by the AI and not reviewed.
 
 | Domain | Store at setup (for the picked areas) | Ready when the person has it, or on demand after a yes | Not recommended (why) |
 | :--- | :--- | :--- | :--- |
-| Every code writer | ponytail (MIT) with Erick's cold-start prior for writers (E18), provisional (section 5.3) | — | caveman skill as the note style (section 5.2) |
-| Software process | superpowers (MIT): only `systematic-debugging` and `test-driven-development` as warm cards (section 7.3) | — | `using-superpowers` (conflicts with Faber's kit control) |
-| Frontend | Impeccable (Apache-2.0) and its detector; Taste-Skill v2 (MIT) for public web pages, as the base pass before Impeccable (Erick, R33 and E18; repo read 2026-10-14: it is art direction for landing and marketing pages only, with its own direction library, open-collection image search and browser inspector, while Impeccable covers app screens, native apps and refinement commands); frontend-design (anthropics/skills, check LICENSE.txt); Playwright MCP (Apache-2.0) | — | Taste-Skill on app screens or dashboards (its own scope excludes them); two Taste-Skill variants in one session (they conflict) |
-| Docs lookup | Context7 (MIT) after a one-time "sends your query and IP" notice | optional key | — |
-| Security | trailofbits/skills (CC-BY-SA-4.0, download only) as review lenses | — | Semgrep MCP (archived) |
-| Documents | — | docx, pdf, pptx, xlsx from anthropics/skills, once the person accepts their source-available license | — |
-| Business | marketingskills (MIT) | anthropics/claude-for-legal plugins, on request (output needs a lawyer's review) | — |
-| Research | Exa MCP (MIT) after the same notice (it sends queries) | optional key | — |
-| Discovery and bench | vercel-labs/skills CLI and find-skills (MIT); skill-creator and mcp-builder (anthropics/skills, Apache-2.0 per LICENSE.txt) | — | openai/skills repo (deprecated for openai/plugins) |
-| 3D | mcp-for-blender (MIT, `look` tool renders views; telemetry off); Khronos glTF-Validator (Apache-2.0) | Blender installed; Meshy MCP (key, Pro plan) | TRELLIS wrapper (no license, stale); Hunyuan3D (license excludes EU, UK, South Korea) |
-| Image | Codex built-in image generation (no install); maorcc/gimp-mcp (GPL-3.0, GIMP 3.2) for edits | Adobe hosted MCP (Creative Cloud; credits after a yes); ComfyUI with artokun/comfyui-mcp only when Codex is not connected | ComfyUI as a default (heavy) |
-| Pixel art and vector | sandraschi/inkscape-mcp (MIT) | diivi/aseprite-mcp (MIT; bought Aseprite; `render_onion_skin`, `compare_frames`); PixelLab hosted (token; no license) | — |
-| Video | heygen-com/hyperframes (Apache-2.0; HTML to MP4 rendered locally with headless Chrome and FFmpeg; agent skills); KyaniteLabs/kinocut (Apache-2.0, FFmpeg) | davinci-resolve-mcp (Resolve Studio) | Remotion skills as default (no license file; engine license limits companies over 3 staff) |
-| Audio and voice | FFmpeg `ebur128` and `loudnorm` as engine checks | On demand after a yes: HyperFrames `tts` (Kokoro-82M, local, 54 voices; model downloads on first use); debpalash/VoiceStudio (AGPL-3.0 desktop app: local cloning, voice design, dubbing; local HTTP API and MCP server; GPU recommended, about 5 GB for the CPU build); xDarkzx/Audacity-MCP with Audacity 3.x (4.x removed mod-script-pipe); ElevenLabs hosted MCP (credits) | ElevenLabs local MCP (archived); kokoro-tts-mcp (stale); Suno wrappers (unofficial endpoints) |
-| Game engines | — | godot-ai (MIT, Godot 4.7+, telemetry off); Unity MCP (MIT, telemetry off); mcmodding-mcp (MIT, docs) | Unreal servers (no license, stale or changed owner) |
-| Payments, data, deploy | — | Stripe (stripe/ai, test mode, restricted key); Supabase (supabase/mcp, `read_only=true`); Cloudflare skills | Postgres reference server (archived) |
+| Every code writer | ponytail (MIT) with Erick's cold-start prior for writers (E18), provisional (section 5.3) | — | caveman as the note style (R33; its CLI also sends telemetry by default) |
+| Software process | superpowers (MIT): only `systematic-debugging` and `test-driven-development` as warm cards (section 7.3); gh CLI (MIT) **(AI)**; ast-grep CLI (MIT) **(AI)**; draw.io MCP, local plugin only (Apache-2.0) for diagrams **(AI)** | mattpocock/skills (MIT; `grill-me`, `code-review`; its `tdd` duplicates superpowers), spec-kit and OpenSpec for big builds, open-code-review in delegate mode, repomix, knip, jscpd, Serena (GPL app, heavy; one navigation tool per session), codebase-memory-mcp (resident daemon), stack packs (Laravel Boost, Tauri MCP, DBHub) **(AI)** | `using-superpowers` (conflicts with Faber's kit control); GitHub MCP server (gh covers it without a token) **(AI)**; reference Memory server (Faber keeps its own memory) **(AI)** |
+| Frontend | Impeccable (Apache-2.0) and its detector, plugin hooks off; Taste-Skill v2 `design-taste-frontend` (MIT) for public web pages, as the base pass before Impeccable (Erick, R33 and E18; it is art direction for landing and marketing pages only, while Impeccable covers app screens, native apps and refinement); Vercel Web Interface Guidelines, pinned (MIT) **(AI)**; playwright-cli (Apache-2.0) with `run-code` denied, replacing Playwright MCP **(AI)** | Other Taste variants only when asked; emilkowalski/skills for motion; agent-browser (includes axe); Playwright test agents; Lighthouse; Chrome DevTools MCP; by stack: shadcn, Svelte, Storybook, GSAP; Figma (Framelink, figma-console) and Penpot MCP for their users **(AI)** | frontend-design (a weaker subset of Impeccable plus Taste; its folder is Apache-2.0, so the reason is quality) **(AI)**; Playwright MCP (`browser_run_code_unsafe` on by default) **(AI)**; UI UX Pro Max (duplicate); Adobe Stardust (bot-detection evasion) **(AI)**; Taste-Skill on app screens or dashboards; two Taste variants in one session |
+| Docs lookup | Context7 (MIT) after a one-time "sends your query and IP" notice | optional key; docs-mcp-server for offline docs (telemetry off) **(AI)** | — |
+| Security | OSV-Scanner (Apache-2.0) **(AI)**; Betterleaks (MIT) **(AI)**; trailofbits/skills (CC-BY-SA-4.0, download only) as five review lenses: differential-review, insecure-defaults, sharp-edges, variant-analysis, fp-check | Opengrep, zizmor, Varlock; reverse engineering on the person's own or legally analysable binaries: GhidraMCP, ILSpy with ILSpy-MCP, IDA MCP (owned IDA), capa, Cpp2IL, x64dbg-MCP, Wireshark-MCP **(AI)** | Semgrep MCP (archived; its successor inside Semgrep traces to semgrep.dev by default) and Semgrep's registry rules (not open source) **(AI)**; gitleaks (superseded by Betterleaks) **(AI)**; Trivy (2026 supply-chain compromise) **(AI)**; rtk (CVE-2026-54555, hook bypass) **(AI)** |
+| Documents | MarkItDown (MIT); Pandoc (GPL-2.0-or-later, run as its own program); Typst (Apache-2.0) with the lucifer1004 Typst skill (MIT); OfficeCLI (Apache-2.0, release binary, auto-update off) **(AI)** | Docling, OCRmyPDF, trafilatura; Zotero, Google Workspace, hosted Notion, Obsidian skills, MCPVault, Todoist, Microsoft 365 (read-only first) for their users **(AI)** | docx, pdf, pptx, xlsx from anthropics/skills: their LICENSE.txt is proprietary and forbids keeping copies outside Anthropic's services and making derivatives, so Faber's store cannot hold them **(AI; legal reading flagged for Erick, section 13)**; gws (stalled since March); Crawl4AI (licence adds a mandatory attribution clause) |
+| Business | marketingskills (MIT, 50 skills; its API CLIs only with the person's keys); humanizer (MIT; tuned for English) **(AI)** | claude-seo, claude-ads, Google Analytics MCP, mcp-gsc, pm-skills, Anthropic knowledge-work and financial-services skills (skills only, not their hosted connectors) **(AI)**; anthropics/claude-for-legal plugins, on request (Apache-2.0; output needs a lawyer's review) | claude-youtube, tapestry youtube-transcript (stale), feiskyer skills (reads browser cookies) **(AI)** |
+| Research | — (both CLIs have web search built in) **(AI)** | Exa hosted MCP after the "sends your queries" notice, optional key; mcp-searxng; hyperresearch; arXiv MCP **(AI)** | Exa local server: analytics to Agnost with no opt-out (RW-14) **(AI)**; gpt-researcher (paid keys) |
+| Discovery and bench | vercel-labs/skills CLI (MIT) | find-skills (Faber's selector covers most of it); skill-creator (Claude Code only; spawns sessions that spend quota) and mcp-builder (anthropics/skills, Apache-2.0 per LICENSE.txt) **(AI)** | openai/skills (deprecated for openai/plugins); openai/plugins as a bulk source (no root licence; check each plugin) **(AI)** |
+| 3D | glTF-Transform (MIT) **(AI)**; Khronos glTF-Validator (Apache-2.0) | Blender 5.1+: the official Blender Lab MCP (GPL-3.0, no telemetry found) **(AI)**; older Blender: mcp-for-blender (MIT, `look` tool renders views; telemetry on by default, switched off; safe mode); OpenSCAD MCP; three.js game skills; Meshy MCP (key, Pro plan) | TRELLIS and TRELLIS.2 (MIT, but no agent interface and a 24 GB GPU) **(AI)**; Hunyuan3D (licence excludes EU, UK, South Korea); Stable Fast 3D (revenue cap) |
+| Image | Codex built-in image generation (no install, ER6); ImageMagick **(AI)** | GIMP MCP (GIMP 3.2; it has a run-anything tool, so it asks first) **(AI)**, Photoshop, Illustrator and Lightroom MCPs for their owners; Adobe hosted MCP (Creative Cloud; credits after a yes); rembg with a commercial-safe model; local weights: FLUX.2 klein 4B (Apache-2.0), Z-Image-Turbo, stable-diffusion.cpp; ComfyUI with comfyui-mcp only when Codex is not connected | ComfyUI as a default (heavy, ER6) |
+| Pixel art and vector | vtracer (MIT) and svgo (MIT) **(AI)** | aravindev/inkscape_mcp with Inkscape **(AI)**; diivi/aseprite-mcp (MIT; bought Aseprite; `render_onion_skin`, `compare_frames`); Piskel MCP; PixelLab hosted (token; no licence); resvg (no Windows binary in the latest release) | sandraschi/inkscape-mcp (sprawling, metrics port on by default) **(AI)** |
+| Video | heygen-com/hyperframes (Apache-2.0; HTML to MP4 rendered locally with headless Chrome and FFmpeg; agent skills; Windows in its CI) (Erick, R105); FFmpeg official builds; auto-editor (Unlicense) **(AI)** | KyaniteLabs/kinocut (Apache-2.0; 203 MCP tools, so only with deferred tool loading) **(AI)**; PySceneDetect, Manim, capcut-cli; davinci-resolve-mcp (Resolve Studio); leancoderkavy Premiere MCP **(AI)** | Remotion skills as default (no licence file; engine licence limits companies over 3 staff); hetpatel Premiere MCP (telemetry on by default to its own server) **(AI)** |
+| Audio and voice | FFmpeg `ebur128` and `loudnorm` as engine checks | On demand after a yes (ER6): HyperFrames `tts` (Kokoro, local; model downloads on first use); debpalash/VoiceStudio (AGPL-3.0 desktop app: local cloning, voice design, dubbing; local HTTP API and MCP server); kokoro-onnx, KittenTTS, Piper (GPL, own process), Chatterbox; whisper.cpp, faster-whisper, WhisperX for timed captions; audio-separator; ACE-Step 1.5 (MIT weights) and HeartMuLa for music **(AI)**; xDarkzx/Audacity-MCP with Audacity 3.x; ElevenLabs hosted MCP and skills (credits; never its key-reading setup skill) | ElevenLabs local MCP (archived); kokoro-tts-mcp (stale); Suno wrappers (session cookie and a paid CAPTCHA service); OmniVoice, F5-TTS, MusicGen (non-commercial weights) **(AI)**; Buzz (telemetry by default; covered) **(AI)** |
+| Game engines and mods | — | godot-ai (MIT, Godot 4.7+, telemetry on by default, switched off) **(AI)**; Unity MCP (MIT, telemetry switched off) or IvanMurzak Unity-MCP; Unity's agent plugin skills (not its `unity-cli`) **(AI)**; ChiR24 Unreal_mcp (MIT, token) **(AI)**; Epic and Roblox built-in MCPs as guides; mcmodding-mcp and minecraft-dev-mcp; BepInEx, MelonLoader, SMAPI, tModLoader guides; UnityPy for the person's own games; universal-modder as skills only, without its session hook or hosted MCP (R104) **(AI)** | Phaser and React Three Fiber skills (nothing verifiable) **(AI)** |
+| Mobile | — | Maestro with its MCP, Expo skills and EAS CLI, Dart and Flutter MCP, android/skills, Callstack skills and agent-device **(AI)** | — |
+| Payments, data, deploy | — | Stripe (stripe/ai, test mode, restricted key; no read-only mode); Supabase (supabase/mcp, `read_only=true`); Cloudflare skills and MCP; Neon, Firebase, Vercel CLI, Render and Heroku MCPs; Clerk skills (no LICENSE file, flagged); MotherDuck, Excel MCPs with `--read-only`, Jupyter, Power BI (separate EULA) **(AI)** | Postgres reference server (archived); Prisma MCP (no source or licence found), better-auth skills (no licence), Netlify MCP (no LICENSE file), Vercel deploy skills (no licence), Railway skills (the agent creates accounts) **(AI)** |
+| Desktop automation and local models | — | Windows-MCP (MIT; pinned 0.8.7, telemetry off, without its PowerShell, Registry, FileSystem, Process and App tools) **(AI)**; Ollama with `OLLAMA_NO_CLOUD=1`, or llama.cpp when Ollama is too heavy **(AI)** | DesktopCommanderMCP (open guard-bypass reports; duplicates the CLIs' own tools) **(AI)**; macos-automator (archived, macOS only) |
+
+**What changed and why (AI).** Setup now holds only tools that need nothing from the person and showed no unfixed risk
+in their code: OSV-Scanner, Betterleaks, gh, ast-grep, draw.io, the Web Interface Guidelines, playwright-cli,
+MarkItDown, Pandoc, Typst, OfficeCLI, humanizer, glTF-Transform, ImageMagick, vtracer, svgo and auto-editor joined.
+Tools that need an app the person must already have (GIMP, Blender, Godot, Unity) moved to the third column even when
+the earlier table had them at setup. Earlier facts corrected by reading the code: mcp-for-blender, godot-ai and Unity
+MCP send telemetry by default (all three have the switch Faber sets); TRELLIS is MIT, not unlicensed; Unreal_mcp is
+licensed and active; Taste-Skill's default is now v2.0.0, a folder with scripts and a direction library; Impeccable sends
+telemetry by default. Erick's recorded choices are unchanged: ponytail in and caveman out (R33, E18), Taste-Skill
+before Impeccable on public pages (R33, E18, R56), HyperFrames as the video default (R105), free tools first and paid
+apps only when installed (ER5), Codex images and no ComfyUI default, heavy audio and VoiceStudio on demand (ER6),
+universal-modder in the catalog (R104).
 
 **Erick's two names, checked.** "Hyperframes" is HeyGen's open-source HyperFrames (Apache-2.0, 61.5k stars, pushed
 2026-10-12): HTML compositions rendered to MP4 locally (Node 22+, FFmpeg, headless Chrome), with optional HeyGen
 cloud or Lambda rendering, local Kokoro-82M text-to-speech and published agent skills. It fits Animated video and the
-TL-ADE's "HyperFrames way", and replaces Remotion as the video default; Windows support is not stated, so a day-one
-probe renders on Windows. "Voice Studio" is ambiguous. The one that fits is debpalash/VoiceStudio, formerly OmniVoice
+TL-ADE's "HyperFrames way", and replaces Remotion as the video default; its CI runs on Windows (repo read 2026-10-14), and a day-one
+probe still renders on Erick's PC. "Voice Studio" is ambiguous. The one that fits is debpalash/VoiceStudio, formerly OmniVoice
 Studio (AGPL-3.0, 59.8k stars, pushed 2026-10-12): a local Electron app for voice cloning from about 3 s of audio,
 voice design, dubbing and audiobooks, with a local HTTP API and an MCP server and analytics only with consent. HeyGen
 has no product of that name (its voices live in a Voice Library), and ImagineArt's Voice Studio is a hosted web tool.
@@ -897,6 +917,7 @@ E11 (no fixed-line runs), E17 (purpose facets), E18 (ponytail, caveman, Taste-Sk
 | RW-33 | Opt-in upload: typed payload, one honest ask, minimum server, maintainer gate |
 | RW-34 | Image generation through Codex's built-in tool on the app-server; HyperFrames as video default; VoiceStudio on demand |
 | RW-35 | Rule budget of 60 lines per brief; every clause placebo-tested |
+| RW-36 | Section 3.3 re-curated on 2026-10-14 from each tool's own repository (LICENSE, code, activity, telemetry); setup holds only tools that need nothing from the person; every change is tagged (AI) there |
 
 **Roadmap lines a later commit must change (not edited here):** "Recipes from past work are hints … never a track"
 (Powers) becomes "a matching route seeds the plan, which is still compiled for the request"; the "Right-sized" power
@@ -905,9 +926,14 @@ picks (ER6).
 
 ## 13. Questions for Erick
 
-No open questions: Erick answered Q1 to Q6 (ER5 to ER10). Two choices are his and wait until the upload server is
+Erick answered Q1 to Q6 (ER5 to ER10). Two choices are his and wait until the upload server is
 built in Phase 5: where it is hosted and its monthly cost cap (money), and the privacy text shown with the ask
 (legal). They will come as cards then.
+
+**Q7 (legal, 2026-10-14).** Anthropic's docx, pdf, pptx and xlsx skills carry a proprietary licence that forbids
+keeping copies outside Anthropic's services and making derivatives, so section 3.3 now lists them as not recommended
+and covers documents with free tools (OfficeCLI, MarkItDown, Pandoc, Typst). Whether a person may still turn them on
+inside Claude Code's own plugin system is a legal reading. Default if unanswered: not recommended.
 
 ## Appendix A. Persona draft (about 240 words, about 330 tokens; voice per ER10)
 
