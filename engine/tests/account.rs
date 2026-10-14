@@ -12,7 +12,7 @@
 //! https://developers.openai.com/codex/cli/reference/
 //! Native installation location: https://code.claude.com/docs/en/setup
 
-mod support;
+use crate::support;
 
 use faber_engine::cli::{self, Cli};
 use faber_engine::model::{Area, Role, Settings, Status, Vendor};

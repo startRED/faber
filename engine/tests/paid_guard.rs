@@ -1,5 +1,5 @@
 //! Account-wide billing changes stop work before any further tool can run.
-mod support;
+use crate::support;
 
 use faber_engine::budget::Billing;
 use faber_engine::cli::Cli;

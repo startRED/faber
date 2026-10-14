@@ -1,4 +1,4 @@
-mod support;
+use crate::support;
 
 use faber_engine::budget::{Billing, Reach};
 use faber_engine::cli::Cli;

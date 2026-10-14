@@ -4,7 +4,7 @@
 //! What Auto chose is read from what was sent to the CLIs (the arguments of a Claude process, the lines written to Codex), not
 //! from the answer's `model`: the recordings report their own model as soon as they start, and that overwrites it.
 
-mod support;
+use crate::support;
 
 use faber_engine::budget::Billing;
 use faber_engine::cli::Cli;

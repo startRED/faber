@@ -47,7 +47,7 @@ change rebuilt the test app) and must be measured again in Task 0.
 
 ---
 
-### Task 0: Land step 0 (one test program, rust-lld, debug info, below-normal priority)
+### Task 0: Land step 0 (one test program, rust-lld, debug info, below-normal priority) — done 2026-10-14
 
 **Files:**
 - Create: `engine/tests/all.rs`
@@ -190,6 +190,10 @@ fn every_test_file_is_listed() {
 ```
 
 If the branch has gained engine test files since 2026-10-14, list them too (the guard test names them).
+
+`all.rs` also declares `mod loopback;` and `mod support;` once, before the file list, and every test file replaces its own
+`mod support;` (or `mod loopback;` in `install.rs`) with `use crate::support;` (`use crate::loopback;`): Clippy's
+`duplicate_mod` refuses a module loaded once per file. `install_memory.rs` keeps its own `mod loopback;`.
 
 - [ ] **Step 2: Prove the guard fails, then passes**
 

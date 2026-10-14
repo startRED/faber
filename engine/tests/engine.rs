@@ -1,4 +1,4 @@
-mod support;
+use crate::support;
 
 use faber_engine::cli::{Cli, resolve_cli};
 use faber_engine::model::{Area, Experience, Message, Permissions, Role, Settings, Setup, Status, Vendor};

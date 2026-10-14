@@ -1,5 +1,5 @@
 //! A warm turn that read little of its prompt from cache leaves one line in the local cache-health log.
-mod support;
+use crate::support;
 
 use faber_engine::cli::Cli;
 use faber_engine::model::{Area, Role, Status, Vendor};

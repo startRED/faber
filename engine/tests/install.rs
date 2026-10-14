@@ -15,7 +15,7 @@
 //! The Node verifier currently has no bridge for this Rust target. Run only this
 //! target with `cargo test -p faber-engine --test install` for the RED evidence.
 
-mod loopback;
+use crate::loopback;
 
 use faber_engine::cli::Cli;
 use faber_engine::proc::{Proc, Spawner};

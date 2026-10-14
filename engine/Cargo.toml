@@ -5,6 +5,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+# One test program for every file in tests/ (see tests/all.rs), plus the memory test that must run alone.
+autotests = false
 
 [dependencies]
 base64 = "0.22"
@@ -34,3 +36,11 @@ workspace = true
 [target.'cfg(windows)'.dev-dependencies]
 # Standard Rust cannot create junctions on stable, and symlinks require privileges on the maintainer's PC.
 junction = "2"
+
+[[test]]
+name = "engine"
+path = "tests/all.rs"
+
+[[test]]
+name = "install_memory"
+path = "tests/install_memory.rs"

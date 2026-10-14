@@ -531,7 +531,7 @@ The program is `faber-test`, run as `cargo t`.
    [plan](superpowers/plans/2026-10-14-test-system-rework.md)). A job-object meter measures both projects the same way:
    the warm suites, 8 matched scenarios and 7 real-work tasks, never compilation. The floor is 5x less time and
    processes and 3x less memory and CPU, with no ceiling; no test is weakened. Steps: one engine test program, the
-   `rust-lld` linker, lighter debug info and below-normal priority (measured, not yet landed), then event waits,
+   `rust-lld` linker, lighter debug info and below-normal priority (landed 2026-10-14), then event waits,
    parallel lanes, skipping unchanged builds and a shared running app for the screen scenarios.
 
 ## Design and identity

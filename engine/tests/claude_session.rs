@@ -1,4 +1,4 @@
-mod support;
+use crate::support;
 
 use faber_engine::claude::{ClaudeLaunch, ClaudeOptions, claude_args, start_claude};
 use faber_engine::events::{Delivery, EngineEvent, UserTurn};

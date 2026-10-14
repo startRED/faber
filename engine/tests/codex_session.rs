@@ -1,4 +1,4 @@
-mod support;
+use crate::support;
 
 use faber_engine::codex::{
     CodexServer, CodexServerOptions, CodexThread, CodexTurnState, codex_args, codex_thread, list_codex_models, parse_codex_notification,

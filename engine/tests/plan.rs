@@ -1,6 +1,6 @@
 //! Plan detection, the billing verdict and the quota pulse. No real CLI runs: status commands and the pulse are replayed.
 
-mod support;
+use crate::support;
 
 use faber_engine::budget::Billing;
 use faber_engine::cli::Cli;

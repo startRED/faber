@@ -1,6 +1,6 @@
 //! What the engine hands to the learning: the span of every request Faber makes, and the weights learned from them.
 
-mod support;
+use crate::support;
 
 use faber_engine::budget::Billing;
 use faber_engine::cli::Cli;
