@@ -21,6 +21,54 @@ creation for the uncached bound, a fresh zero-model-turn preflight and a support
 context-only count. That count omits the upcoming user prompt and cannot open
 admission. The authorized role-cap rejection and gate statuses below remain.
 
+## Continuation while Codex was paused (2026-10-14 evening)
+
+Four commits after `40e3ef9`, none of which ran a real CLI, mission, canary or quota reading:
+
+- **R131 margin.** The uncalibrated-mission rule (first written as R130) now needs the fresh zero-turn reading to be
+  at least **2** points under the day's cumulative line, not 5 (`BOOTSTRAP_MARGIN` in
+  `engine/src/project/budget.rs`; `r131_*` tests in `engine/tests/project_budget.rs`). The boundary test failed at
+  0.408 before the constant changed. Nothing else in the rule moved: fresh, zero-turn, after the boundary, every
+  vendor the mission uses, US$2.00 cap, first stretch and baseline recorded from the mission, nothing invented.
+- **Codex role loadout census** (Codex's unfinished work, kept): closed single-model catalog file, empty developer
+  instructions, more native features disabled, and the live probe now requires explicit hook, skill, plugin and
+  feature censuses plus an acknowledged effective policy. A half-written change to `testkit/src/gate.rs` that called
+  engine methods which did not exist was set aside and re-done as the owned-tree work below.
+- **Receipt admission** (`engine/src/project/qualification.rs`). `policy::admit` is no longer a constant refusal and
+  still takes nothing from a caller. It opens only when `<data dir>/qualification/<vendor>.json` is a plain
+  regular file (no link, at most 8 KiB, mode 0600 on Unix), strict schema, `schema`/`vendor` match, all five probes
+  (`loadout`, `native`, `stop`, `exposure`, `billing`) recorded as passed, issued within 24 hours (an AI default, not
+  an owner number) and not in the future, and equal to what the installed program reports now: the exact trimmed
+  `--version` line and the SHA-256 of the exact executable. The receipt is read first; the CLI is hashed and asked for
+  its version only if a receipt exists. Script launchers (`node script.js`) never qualify. The driver constructors
+  re-check the very program they are about to launch (`policy::admit_launch`). Windows only, as before. 15 tests in
+  `engine/tests/project_qualification.rs`; targeted mutations of the version, binary, age, future-date, vendor,
+  completeness, size, unknown-field, hash-shape and unobserved-CLI checks each made a test fail. The link and
+  directory-as-receipt cases run only where links can be created (not on this PC without the privilege); the
+  hash function's own test was not mutated.
+- **Writer process proof.** `Process::owned_tree()` hands out an `OwnedTree` (root pid plus the microsecond the
+  engine launched it, and the kill-on-close job). `OwnedTree::retire()` closes the job, waits until the root is
+  reaped and returns `Retired`, the only input of `Termination::from_retired`. Sessions carry the tree
+  (`Session::tree()`); `Engine::dispatch_mission_writer` starts a Writer only through a lease that already holds its
+  launch intent, refuses a session without a tree, and attaches the tree's identity with `Leases::attach_process`.
+  `Engine::worker_termination` retires the tree, settles spending against the role's own terminal event (or its
+  computed bound if it reported none) and returns the proof; `Leases::settle_process` then lets the broker touch the
+  lease again. The Windows T13 lifecycle probe no longer releases its writer lease with
+  `Termination { process: None, .. }`: a real `ping.exe` runs in an engine job, two recorded literals are refused while
+  it lives, and landing uses the retirement proof. The tree scenario gained a retire-only case that fails when
+  `retire` does not end the tree (mutated and observed failing). Struct-literal `Termination` values still exist for
+  fixtures elsewhere; only `from_retired` derives `tree_dead` from a real retirement.
+
+Proofs for these four commits, run on the head that carries them (`cargo t --all` on Windows, target `t13`): `npm run
+lint`, `typecheck`, `build`, `cargo fmt --all --check` and both `cargo clippy` commands exit 0, and `cargo t --all`
+reports **1426 passed, 0 failed, 0 not run, 0 skipped** (it was 1393 before). A later one-line compile-time check that
+the two new async entry points stay `Send` was verified with clippy and the engine tests, not a second full run.
+
+Not done, and why it was left: no tool issues a receipt yet. `qualification::issue` writes one atomically and refuses
+an incomplete set, but mapping the live rows to the five probes needs a final passing row set that does not exist
+(Claude's paid-fallback attestation is still absent), so no guessed mapping was written. No receipt exists, so
+admission is still closed on this PC.
+
 ## Current R120 allocation blocker
 
 The fresh zero-model-turn account probe in
@@ -239,7 +287,7 @@ command log paths, calculated bounds, interruption metadata and accurate audit.
 
 | Gate | Status | Evidence / remaining |
 | --- | --- | --- |
-| G1 Authority | Not passed; partial native proof | Native denial/bytes and unknown-request stops pass. Fresh private receipt/writer integration pending. Earlier owner changes are outside any mission window. |
+| G1 Authority | Not passed; partial native proof | Native denial/bytes and unknown-request stops pass. Receipt admission (version + binary hash) and the owned writer process proof are implemented and tested, but no receipt has been issued and no real Writer has run. Earlier owner changes are outside any mission window. |
 | G2 Spending | Not passed; partial bound proof | R120 role bounds/sub-caps fit $2; full admission proof remains closed. Fresh Codex weekly use 31% exceeds today's R88 line 28.5714%; calibration/day baseline absent. |
 | G3 Scheduling | Not passed | No admitted live graph. |
 | G4 Acceptance | Not passed | Real fixture subprocess red/green proofs; no real candidate/review. |
@@ -266,10 +314,22 @@ metrics. Audit `unchanged` compares to its already-dirty baseline, not git HEAD.
 
 ## Remaining
 
-Establish a trusted pre-dispatch context census or a universal smaller output
-bound fitting the unchanged caps. Then implement private fresh version/hash
-receipt consumption, integrate the Windows writer process proof, run the real
-miniature canary and authorized Seguro mission with fresh other-vendor review.
-Build/install only in the sandbox, prove rollback/positive exactly-once Resume
-and measure real cost/RAM. The fresh clone, sandbox install and promotion were
-not created. PR #19 stays draft; pushed-head CI is recorded separately.
+Open items, in the order the real run needs them:
+
+1. **Issue receipts.** After each vendor's final live probes pass on the installed binary, map their rows to the five
+   probes (`loadout`, `native`, `stop`, `exposure`, `billing`) and call `qualification::issue` into
+   `<mission data dir>/qualification/<vendor>.json`. `billing` needs a fresh paid-fallback attestation that Claude's
+   rows still lack. A later CLI update closes the receipt by itself; requalify then.
+2. **R131 readings.** The next R88 boundary is 2026-10-15 01:58:09 local. Take fresh zero-turn readings for both
+   vendors first; admit only at 2 points or more under that day's cumulative line.
+3. **Drive a Writer through the new seam.** `prepare_launch` on its lease, `Engine::dispatch_mission_writer`, then
+   `Engine::worker_termination` and `Leases::settle_process` before any broker IO. This path has been exercised only
+   with a stand-in process and unit tests; it has never run against a real CLI because admission needs item 1.
+4. Real miniature canary and the authorized Seguro mission with fresh other-vendor review; sandbox build/install,
+   rollback and a positive exactly-once Resume; measure real cost and RAM. The fresh clone, sandbox install and
+   promotion were not created. PR #19 stays draft; pushed-head CI is recorded separately.
+
+Known gaps in this slice, not hidden: `Termination` still has public fields, so fixtures elsewhere can write a literal
+(only `from_retired` is derived from a real retirement); the receipt folder is fixed by the first `Engine` a process
+creates; a Claude CLI found only as an npm script launcher never qualifies; the macOS build of the new
+cfg-gated code was not compiled here (CI will).

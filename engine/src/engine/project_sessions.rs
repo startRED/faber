@@ -402,6 +402,19 @@ mod tests {
         assert!(e.local_build_admission().is_err());
         e.shutdown();
     }
+    /// The app drives these from spawned tasks: their futures must stay `Send` (no lock held across an await).
+    #[allow(dead_code)]
+    fn writer_futures_are_send(
+        e: &Engine,
+        journal: Journal,
+        request: crate::project::budget::Invocation,
+        leases: &mut crate::project::lease::Leases,
+        lease: &crate::project::Lease,
+    ) {
+        fn send<T: Send>(_: T) {}
+        send(e.dispatch_mission_writer(journal, request, leases, lease));
+        send(e.worker_termination("invocation"));
+    }
     #[tokio::test]
     async fn a_release_proof_needs_an_owned_tree_the_engine_started() {
         let data = tempfile::tempdir().unwrap();
