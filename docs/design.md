@@ -359,7 +359,10 @@ Every launch is sandboxed: a temporary home, an empty `PATH`, no provider variab
 CLI replays the recordings in `tests/fixtures/`). Each scenario is audited afterwards for leaked processes, writes outside
 the sandbox and a changed environment. The checks and the hooks that report them exist only in the test build
 (`--features test-hooks`, `vite build --mode test`); the production app and its `dist/` contain none of them. CI runs
-`cargo t --all` on all three systems and keeps the Windows screenshots as artifacts. Anything outside the page (tray,
+five jobs at once: lints with the `rust` and `ui` suites on Windows and macOS, and the `screen` suite on Windows in
+three parts (`cargo t --suite screen --shard 2/3`). The runner deals the scenarios so the parts take about the same
+time: the slowest first, each to the lightest part so far, using the CI seconds of the slowest few
+(`testkit/src/screen/mod.rs`, `SLOW`); any other counts as 5 s. CI keeps the Windows screenshots as artifacts. Anything outside the page (tray,
 notifications, installer, updates) is checked through the operating system's accessibility layer and file versions.
 
 Test launches also pass the browser engine switches that turn off crash reports and SmartScreen address lookups, and the
@@ -382,6 +385,7 @@ most once an hour (the `target/.faber-sweep` stamp), and prints a line only when
    same crate replaced. A crate's newest build stays however old it is. Measured on 2026-10-14, `debug/incremental` held
    52 folders for `faber_engine` alone, all but one dead.
 3. If `target` is still above 60 GB, whole worktree folders are removed, the least recently used first, until it fits.
+   A folder used in the last six hours belongs to a lane still at work and stays (a cold rebuild costs it ten minutes).
    The main checkout's own folders (`debug`, `release`, `faber-test`) and this run's own folder are never removed whole;
    if they alone exceed the cap, the runner says so.
 
@@ -389,6 +393,13 @@ A folder is in use while Cargo holds one of its lock files (`.cargo-lock`, `.car
 or, on Windows, while a program in one of its profiles runs (Windows refuses to open it for writing). In use, it is
 neither swept nor removed. The sweep holds the profile's locks while it deletes, so a build that starts meanwhile waits.
 sccache (user-wide, outside the repository) makes the rebuild of a swept dependency cheap.
+
+### Build slots
+
+Many lanes run `cargo t` on one PC; each run peaks near 8 GB. Before building, a run takes one of three slots
+(`testkit/src/slots.rs`): a locked file `target/.faber-slots/slot-<n>` of the main checkout, held until the run ends,
+crash included. With all three taken it prints one waiting line and waits. `FABER_BUILD_SLOTS` sets another count for
+another PC (R129, E3).
 
 ### UX sentinel
 
