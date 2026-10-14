@@ -92,6 +92,7 @@ fn resume(ctx: &mut Ctx) -> Result {
         faber_engine::project::budget::Grant {
             cap_micros: 2_000_000,
             worker_micros: 600_000,
+            kind_caps: Default::default(),
             vendors: std::collections::BTreeMap::from([(faber_engine::model::Vendor::Codex, 2_000_000)]),
             review_micros: 400_000,
             repair_micros: 700_000,

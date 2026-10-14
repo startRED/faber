@@ -168,6 +168,7 @@ mod tests {
         Grant {
             cap_micros: cap,
             worker_micros: cap,
+            kind_caps: BTreeMap::new(),
             vendors: BTreeMap::from([(Vendor::Codex, cap)]),
             review_micros: 20_000,
             repair_micros: 20_000,

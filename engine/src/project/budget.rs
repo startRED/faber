@@ -17,7 +17,7 @@ const WEEK: f64 = 7.0 * DAY;
 /// One percentage point covers rounded provider readings.
 const GUARD: f64 = 0.01;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Kind {
     Lead,
@@ -36,6 +36,9 @@ pub enum Kind {
 pub struct Grant {
     pub cap_micros: u64,
     pub worker_micros: u64,
+    /// Optional aggregate purpose limits survive retries and worker identity changes.
+    #[serde(default)]
+    pub kind_caps: BTreeMap<Kind, u64>,
     /// Vendor subgrants count inside the mission cap, never on top of it.
     pub vendors: BTreeMap<Vendor, u64>,
     pub review_micros: u64,
@@ -161,6 +164,33 @@ fn micros(cost: f64) -> Result<u64, &'static str> {
 /// Sources checked 2026-10-14: developers.openai.com/api/docs/models/gpt-6-luna and
 /// platform.claude.com/docs/en/models/overview. No supported universal smaller output cap is proven.
 pub fn complete_request_maximum(model: &str, context: Option<u64>, settled_micros: u64) -> Result<u64, &'static str> {
+    request_maximum(model, context, settled_micros, 128_000)
+}
+
+/// Requires the role launcher's version-bound control proof before dispatch.
+pub fn role_request_maximum(model: &str, role: super::Role, context: Option<u64>, settled_micros: u64) -> Result<u64, &'static str> {
+    let vendor = match model {
+        "gpt-6-luna" => Vendor::Codex,
+        "claude-haiku-5-5" => Vendor::Claude,
+        _ => return Err("reason.budget.exposure"),
+    };
+    let request = request_maximum(model, context, 0, super::policy::output_maximum(vendor, role))?;
+    let invocation = match vendor {
+        // Client budget is checked between requests, so reserve one entire overshooting request.
+        // The documented US data-residency premium is bounded at 10%; never assume the incoming geography.
+        Vendor::Claude => request
+            .checked_mul(11)
+            .and_then(|v| v.checked_add(9))
+            .map(|v| v / 10)
+            // Published worst/base Haiku prices differ by at most 5.5x, including US geography.
+            .and_then(|v| v.checked_add(27_500))
+            .ok_or("reason.budget.cost")?,
+        Vendor::Codex => request,
+    };
+    settled_micros.checked_add(invocation).ok_or("reason.budget.cost")
+}
+
+fn request_maximum(model: &str, context: Option<u64>, settled_micros: u64, output: u64) -> Result<u64, &'static str> {
     let window = match model {
         "gpt-6-luna" => 1_050_000,
         "claude-haiku-5-5" => 1_000_000,
@@ -170,7 +200,7 @@ pub fn complete_request_maximum(model: &str, context: Option<u64>, settled_micro
     if input > window {
         return Err("reason.budget.exposure");
     }
-    let cost = usage::api_price(model, input, 128_000, 0, 0, 0).ok_or("reason.budget.rate")?;
+    let cost = usage::api_price(model, input, output, 0, 0, 0).ok_or("reason.budget.rate")?;
     settled_micros.checked_add(micros(cost)?).ok_or("reason.budget.cost")
 }
 
@@ -290,6 +320,11 @@ impl Budget {
         if b.schema != SCHEMA || !b.last_at.is_finite() || b.last_at < 0.0 {
             return Err("error.store.corrupt");
         }
+        for grant in b.grants.values() {
+            if total(grant.kind_caps.values().copied()).map_err(|_| "error.store.corrupt")? > grant.cap_micros {
+                return Err("error.store.corrupt");
+            }
+        }
         for (id, r) in &b.invocations {
             if id != &r.request.id
                 || !valid_id(id)
@@ -399,6 +434,8 @@ impl Budget {
         self.account(ledger, r.vendor, Some(&r.model), now)?;
         let charge = total([self.charges(&r.mission, None, None, None)?, bound].into_iter())?;
         if charge > g.cap_micros
+            || total([self.charges(&r.mission, None, None, Some(r.kind))?, bound].into_iter())?
+                > if g.kind_caps.is_empty() { g.cap_micros } else { g.kind_caps.get(&r.kind).copied().unwrap_or(0) }
             || total([self.charges(&r.mission, Some(&r.worker), None, None)?, bound].into_iter())? > g.worker_micros
             || total([self.charges(&r.mission, None, Some(r.vendor), None)?, bound].into_iter())?
                 > g.vendors.get(&r.vendor).copied().unwrap_or(0)
@@ -435,6 +472,8 @@ impl Budget {
         }
         self.account(ledger, r.request.vendor, Some(&r.request.model), now)?;
         if self.charges(&r.request.mission, None, None, None)? > g.cap_micros
+            || self.charges(&r.request.mission, None, None, Some(r.request.kind))?
+                > if g.kind_caps.is_empty() { g.cap_micros } else { g.kind_caps.get(&r.request.kind).copied().unwrap_or(0) }
             || self.charges(&r.request.mission, Some(&r.request.worker), None, None)? > g.worker_micros
             || self.charges(&r.request.mission, None, Some(r.request.vendor), None)?
                 > g.vendors.get(&r.request.vendor).copied().unwrap_or(0)
@@ -489,6 +528,7 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
             if !valid_id(&mission)
                 || grant.vendors.is_empty()
                 || grant.worker_micros > grant.cap_micros
+                || total(grant.kind_caps.values().copied())? > grant.cap_micros
                 || total(grant.vendors.values().copied())? != grant.cap_micros
                 || total([grant.review_micros, grant.repair_micros, grant.canary_micros].into_iter())? > grant.cap_micros
             {

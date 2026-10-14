@@ -179,7 +179,9 @@ fn t13_every_role_gets_explicit_empty_strict_mcp_and_no_user_startup_integration
             assert!(args.windows(2).any(|pair| pair == ["--tools", ""]));
             let settings: Value = serde_json::from_str(&args[args.iter().position(|a| a == "--settings").unwrap() + 1]).unwrap();
             assert_eq!(settings["disableAllHooks"], true);
-            assert_eq!(settings["env"]["CLAUDE_CODE_MAX_OUTPUT_TOKENS"], "128000");
+            assert_eq!(settings["env"]["CLAUDE_CODE_MAX_OUTPUT_TOKENS"], if role == Role::Writer { "32000" } else { "8000" });
+            assert_eq!(after(&args, "--max-budget-usd"), "0.005");
+            assert_eq!(after(&args, "--max-turns"), "1");
         }
     }
 }
@@ -279,6 +281,14 @@ fn uncached_invocation_bound_disables_more_expensive_cache_writes_for_every_role
             let args = project_claude_args(&launch(resume), role).unwrap();
             let settings: Value = serde_json::from_str(after(&args, "--settings")).unwrap();
             assert_eq!(settings["env"]["DISABLE_PROMPT_CACHING"], "1");
+            for (name, value) in [
+                ("DISABLE_COMPACT", "1"),
+                ("CLAUDE_CODE_MAX_RETRIES", "0"),
+                ("CLAUDE_CODE_NONSTREAMING_TIMEOUT_RETRIES", "0"),
+                ("CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK", "1"),
+            ] {
+                assert_eq!(settings["env"][name], value, "{role:?}: {name}");
+            }
         }
     }
     let args = faber_engine::claude::claude_args(&launch(None));

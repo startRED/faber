@@ -24,6 +24,19 @@ fn role_events() -> (EventSink, tokio::sync::mpsc::Receiver<EngineEvent>, Arc<st
     (sink, rx, overflow)
 }
 
+fn role_invocation(request: &mut crate::project::budget::Invocation, role: ProjectRole) -> Result<(), String> {
+    // Dedicated role constructors always launch without resume; caller bases must not discount that fresh cost.
+    request.fresh = true;
+    request.session = Uuid::new_v4().to_string();
+    request.kind = match role {
+        ProjectRole::Lead => crate::project::budget::Kind::Lead,
+        ProjectRole::Reviewer => crate::project::budget::Kind::Review,
+        _ => crate::project::budget::Kind::Worker,
+    };
+    request.exposure_micros = Some(crate::project::budget::role_request_maximum(&request.model, role, None, 0).map_err(str::to_string)?);
+    Ok(())
+}
+
 impl Engine {
     /// Reserve quiet Chat admission for the entire build/canary/promotion attempt.
     pub fn local_build_admission(&self) -> Result<LocalBuildGuard, String> {
@@ -117,8 +130,8 @@ impl Engine {
         let mut runner = Runner::load(&journal).map_err(str::to_string)?;
         runner.admit(request.vendor).map_err(str::to_string)?;
         // No trusted pre-request context census yet: use the published window, never the caller's estimate.
-        request.exposure_micros = Some(crate::project::budget::complete_request_maximum(&request.model, None, 0).map_err(str::to_string)?);
         let worker = runner.workers.get(&request.worker).ok_or("error.wire.stale")?.clone();
+        role_invocation(&mut request, worker.brief.role)?;
         // The qualified writer launcher must supply T4's owned process identity before source can be unlocked.
         if worker.brief.role == ProjectRole::Writer {
             return Err("reason.project.processTreeUnproven".into());
@@ -269,6 +282,22 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fresh_role_invocations_cannot_use_a_callers_resume_base_or_purpose() {
+        let mut request: crate::project::budget::Invocation = serde_json::from_value(serde_json::json!({
+            "id":"dispatch_new", "mission":"mission", "worker":"reviewer", "kind":"worker", "vendor":"codex",
+            "model":"gpt-6-luna", "effort":"medium", "session":"caller_old", "fresh":false, "exposureMicros":1
+        }))
+        .unwrap();
+        let old = crate::usage::CostBase { session: request.session.clone(), total: 0.05 };
+        role_invocation(&mut request, ProjectRole::Reviewer).unwrap();
+        assert_eq!(crate::usage::settle(Some(&old), &request.session, request.fresh, Some(0.06)).cost, Some(0.06));
+        assert!(request.fresh);
+        assert_ne!(request.session, old.session);
+        assert!(Uuid::parse_str(&request.session).is_ok());
+        assert_eq!(request.kind, crate::project::budget::Kind::Review);
+        assert_eq!(request.exposure_micros, Some(306_000));
+    }
     #[tokio::test]
     async fn local_build_reserves_chat_admission_and_releases_on_unwind() {
         let data = tempfile::tempdir().unwrap();

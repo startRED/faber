@@ -14,6 +14,18 @@ const NOW: f64 = 2.0 * DAY + 3600.0;
 const MODEL: &str = "gpt-6.1-sol";
 
 #[test]
+fn purpose_caps_cannot_be_bypassed_by_switching_worker_identity() {
+    let mut l = ledger();
+    apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 1_000_000 }, NOW, 0).unwrap();
+    let mut value = serde_json::to_value(grant(1_000_000)).unwrap();
+    value["kindCaps"] = serde_json::json!({"worker":200_000});
+    let g: Grant = serde_json::from_value(value).unwrap();
+    apply(&mut l, Change::Grant { mission: "m1".into(), grant: g }, NOW, 0).unwrap();
+    let r = request("too-large", "m1", "different-worker", Kind::Worker, 250_000);
+    assert_eq!(Budget::load(&l).unwrap().can_admit(&l, &r, NOW), Err("reason.budget.cap"));
+}
+
+#[test]
 fn complete_request_maximum_prices_uncached_context_and_all_output_including_reasoning() {
     use faber_engine::project::budget::complete_request_maximum;
     assert_eq!(complete_request_maximum("gpt-6-luna", Some(44_915), 123), Ok(68_615));
@@ -23,6 +35,44 @@ fn complete_request_maximum_prices_uncached_context_and_all_output_including_rea
     assert!(complete_request_maximum("gpt-6-luna", Some(1_050_001), 0).is_err());
     assert!(complete_request_maximum("unpriced", None, 0).is_err());
     assert!(complete_request_maximum("gpt-6-luna", None, u64::MAX).is_err());
+}
+
+#[test]
+fn role_bounds_use_fixed_controls_and_leave_multiple_turns_inside_rebalanced_caps() {
+    use faber_engine::project::{Role, budget::role_request_maximum};
+    assert_eq!(role_request_maximum("claude-haiku-5-5", Role::Lead, None, 0), Ok(599_500));
+    assert_eq!(role_request_maximum("claude-haiku-5-5", Role::Writer, None, 0), Ok(665_500));
+    assert_eq!(role_request_maximum("claude-haiku-5-5", Role::Reviewer, Some(50_000), 0), Ok(37_400));
+    for role in [Role::Lead, Role::Writer, Role::Reviewer] {
+        assert_eq!(role_request_maximum("gpt-6-luna", role, None, 0), Ok(306_000));
+    }
+    assert!(role_request_maximum("unknown", Role::Writer, None, 0).is_err());
+    // R120: retain the full input envelope; only a verified role output control shrinks it.
+    for (vendor, model, role, cap) in [
+        (Vendor::Codex, "gpt-6-luna", Role::Lead, 400_000),
+        (Vendor::Claude, "claude-haiku-5-5", Role::Writer, 800_000),
+        (Vendor::Codex, "gpt-6-luna", Role::Reviewer, 400_000),
+    ] {
+        let mut l = ledger();
+        for span in &mut l.of_mut(vendor).spans {
+            span.model = model.into();
+        }
+        apply(&mut l, Change::Allocate { vendor, cap_micros: 1_000_000 }, NOW, 0).unwrap();
+        let mut g = grant(1_000_000);
+        g.worker_micros = cap;
+        g.vendors = BTreeMap::from([(vendor, 1_000_000)]);
+        apply(&mut l, Change::Grant { mission: "m1".into(), grant: g }, NOW, 0).unwrap();
+        for turn in 0..3 {
+            let id = format!("turn-{turn}");
+            let mut r = request(&id, "m1", "w1", Kind::Worker, role_request_maximum(model, role, None, 0).unwrap());
+            r.vendor = vendor;
+            r.model = model.into();
+            r.effort = "medium".into();
+            apply(&mut l, Change::Admit(r), NOW, 0).unwrap();
+            assert_eq!(report(&mut l, &id, Some(0.005), false, true), Status::Ready);
+        }
+        assert!(Budget::load(&l).unwrap().invocations.values().map(|r| r.paid_micros).sum::<u64>() <= cap);
+    }
 }
 
 #[test]
@@ -187,6 +237,7 @@ fn grant(cap: u64) -> Grant {
     Grant {
         cap_micros: cap,
         worker_micros: cap,
+        kind_caps: BTreeMap::new(),
         vendors: BTreeMap::from([(Vendor::Codex, cap)]),
         review_micros: 20_000,
         repair_micros: 20_000,

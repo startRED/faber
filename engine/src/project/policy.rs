@@ -57,6 +57,16 @@ pub fn admit(vendor: Vendor) -> Result<(), Blocker> {
     Err(blockers(vendor)[0])
 }
 
+/// Fixed role controls; these values are not an admission receipt.
+pub fn output_maximum(vendor: Vendor, role: Role) -> u64 {
+    match vendor {
+        Vendor::Claude if role == Role::Writer => 32_000,
+        Vendor::Claude => 8_000,
+        // The installed config/protocol has no model-output control.
+        Vendor::Codex => 128_000,
+    }
+}
+
 /// Reject every native permission request and fail closed if an ungranted tool reaches execution.
 pub async fn reject_native(
     stdin: &mut (dyn tokio::io::AsyncWrite + Send + Unpin),

@@ -90,6 +90,10 @@ fn run() -> io::Result<()> {
                 | "--live-claude-native"
                 | "--live-claude-stop"
                 | "--live-claude-context"
+                | "--live-claude-output-lead"
+                | "--live-claude-output-writer"
+                | "--live-claude-output-reviewer"
+                | "--live-claude-output-control"
                 | "--live-codex-stop"
                 | "--hidden-live"
         )

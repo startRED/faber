@@ -106,15 +106,22 @@ pub fn project_claude_args(launch: &ClaudeLaunch, role: crate::project::Role) ->
     restricted.instructions = Some(worker_contract(role));
     restricted.user_name = None;
     let mut args = claude_args(&restricted);
-    // The documented control covers most requests; the bound still covers the model's full output maximum.
     let settings = args.iter().position(|a| a == "--settings").expect("shared role exposure includes settings") + 1;
     // R117 prices input uncached; cache creation can cost more than that envelope.
-    args[settings] =
-        json!({"disableAllHooks":true,"env":{"CLAUDE_CODE_MAX_OUTPUT_TOKENS":"128000","DISABLE_PROMPT_CACHING":"1"}}).to_string();
+    args[settings] = json!({"disableAllHooks":true,"env":{
+        "CLAUDE_CODE_MAX_OUTPUT_TOKENS":policy::output_maximum(crate::model::Vendor::Claude,role).to_string(),
+        "DISABLE_PROMPT_CACHING":"1", "DISABLE_COMPACT":"1", "CLAUDE_CODE_MAX_RETRIES":"0",
+        "CLAUDE_CODE_NONSTREAMING_TIMEOUT_RETRIES":"0", "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK":"1"
+    }})
+    .to_string();
     // Unlike side questions, mission sessions may resume with the same fixed policy.
     args.retain(|a| a != "--no-session-persistence");
     for a in [
         "--restricted",
+        "--max-budget-usd",
+        "0.005",
+        "--max-turns",
+        "1",
         "--permission-mode",
         "dontAsk",
         "--disable-slash-commands",

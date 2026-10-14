@@ -155,6 +155,7 @@ pub fn screen_fixture(sandbox: &Path) -> Result {
         faber_engine::project::budget::Grant {
             cap_micros: 100_000,
             worker_micros: 50_000,
+            kind_caps: Default::default(),
             vendors: std::collections::BTreeMap::from([(faber_engine::model::Vendor::Codex, 100_000)]),
             review_micros: 20_000,
             repair_micros: 20_000,

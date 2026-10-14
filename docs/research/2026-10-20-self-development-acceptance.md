@@ -1,9 +1,18 @@
-# Task 13: R117 bounds implemented; authorized role caps reject admission
+# Task 13: R120 role bounds fit; acceptance remains incomplete
 
 Observed on 2026-10-14 in `selfdev-t13`, draft PR #19 into `selfdev`.
 Task 13 and R96 remain incomplete. R117 supersedes the interrupted-reserve route
 in [the archived metering report](2026-10-14-self-development-interrupted-metering-stop.md).
 No measured overshoot reserve or invented safety factor is used.
+
+The [R120 output-control continuation](2026-10-14-self-development-role-output-bounds.md)
+supersedes the historical role-sub-cap stop below. Supported smaller Claude
+request controls, a between-request estimate stop plus full overshoot bound,
+and aggregate role sub-caps fit inside the unchanged $2.00 mission cap. They
+do not yet prove receipt admission, daily quota calibration or the real mission.
+R119 authorizes continuing independent fixes without a CI wait between commits.
+The owner-installed v0.3.1 is the new stable-install baseline for the actual
+mission window; the earlier stable hash change was an owner action.
 
 After the orchestrator restarted, b942eef's Windows and macOS CI were confirmed
 green. The [context/caching continuation](2026-10-14-self-development-context-census.md)
@@ -12,7 +21,49 @@ creation for the uncached bound, a fresh zero-model-turn preflight and a support
 context-only count. That count omits the upcoming user prompt and cannot open
 admission. The authorized role-cap rejection and gate statuses below remain.
 
-## Result and stop
+## Current R120 allocation blocker
+
+The fresh zero-model-turn account probe in
+`C:/Users/Erick/AppData/Local/Faber/t13-exposure-20261014/r120-quota-preflight/qualification-preflight.json`
+reports Codex subscription/Pro, paid fallback false, and weekly use **0.31**.
+The legacy observation field is named `usedPercent`, but contains a fraction:
+this is **31%**, not 0.31%. Its reset is 2026-10-20 04:58:09 UTC. At the
+observation, the R88 cumulative daily line is **2/7 = 28.5714%**. Therefore
+current daily headroom is zero even before the one-point rounding guard.
+The next line boundary is **2026-10-15 04:58:09 UTC**, or 01:58:09 in the
+owner's UTC-3 time zone. Its next cumulative line is 3/7 = 42.8571%; it does
+not waive fresh readings, day-start evidence or calibration.
+
+Read-only inspection of Faber's own quota ledger also found no saved day
+baselines and zero measured conversion stretches for either vendor. The
+current implementation needs eight qualifying non-overlapping stretches per
+model/window. Existing token-price diagnostics do not supply that quota
+conversion. No baseline, empty day or dollar conversion was manufactured,
+and this run did not modify that owner ledger. New role caps do not authorize
+bypassing R88. The owner was asked about this separate allocation decision
+while independent local validation continued.
+
+No fresh mission clone, mission dispatch, real miniature mission, sandbox
+promotion or positive Resume has occurred. The remaining sequence cannot be
+represented as passed on scripted results or unissued qualification receipts.
+
+## Current local proofs
+
+The final R120 rerun completed all seven required commands at exit 0:
+`validation-r120-rechecked/proofs.json`, in the private evidence root above.
+`cargo t --all` passed **1,393 checks**, with **zero failed, zero not run and
+zero skipped**. The ten qualification-diagnostic self-checks also pass.
+Projects peaked at **221.9 MB**; the local git scenario finished in **35.8 s**.
+Its earlier timeout and successful focused repeat remain recorded, with no
+deadline increase. The full 300-second scripted update probation also passed.
+
+The [R120 continuation](2026-10-14-self-development-role-output-bounds.md)
+records the initial failures, regression-first corrections, supported controls
+and spending arithmetic. CI is checked against the pushed final head; the
+private `delivery-r120.json` records that later check. No CI result is invented
+in advance, and this report does not waive the pending real gates.
+
+## Historical R117 result and stop (superseded sub-caps)
 
 The latest cross-vendor review of `8a62018` is accepted: checks 1, 3, 4 and 5 are
 sound; check 2 identified a real gap. Before the fix, fake-wire tests of both
@@ -188,13 +239,13 @@ command log paths, calculated bounds, interruption metadata and accurate audit.
 
 | Gate | Status | Evidence / remaining |
 | --- | --- | --- |
-| G1 Authority | Not passed; partial native proof | Native denial/bytes and unknown-request stops pass. Final owner comparison changed with separate commit 913fdf9; receipt/writer integration pending. |
-| G2 Spending | Not passed; cap rejection | R117 calculated accounting tested; Lead/Writer exceed authorized subtotals. No reserve measurement required. |
+| G1 Authority | Not passed; partial native proof | Native denial/bytes and unknown-request stops pass. Fresh private receipt/writer integration pending. Earlier owner changes are outside any mission window. |
+| G2 Spending | Not passed; partial bound proof | R120 role bounds/sub-caps fit $2; full admission proof remains closed. Fresh Codex weekly use 31% exceeds today's R88 line 28.5714%; calibration/day baseline absent. |
 | G3 Scheduling | Not passed | No admitted live graph. |
 | G4 Acceptance | Not passed | Real fixture subprocess red/green proofs; no real candidate/review. |
 | G5 Recovery | Partial, scripted | Fixture recovery and once-only bound reconciliation; real rollback/public positive Resume pending. |
 | G6 Self-update | Not passed | Case 4 copies a prebuilt launcher/injects CanaryVerdict::Pass; actual build/miniature mission pending. |
-| G7 Resources | Partial, scripted | Hidden screen/RAM suite; live lifecycle absent. |
+| G7 Resources | Partial, scripted | RAM failure reproduced at 282.8 MB; native offscreen containment fixes it. Final required full suite passes at 221.9 MB Projects peak; real mission lifecycle absent. |
 | G8 Real use | Not passed | No fresh Seguro mission. |
 | G9 Kits | Partial | Zero inherited tools/active servers; Claude hook inventory and complete receipt absent. |
 | G10 Software bar | Not passed | No real software-bar acceptance. |
