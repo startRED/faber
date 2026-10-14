@@ -315,12 +315,12 @@ fn uncalibrated(used: f64, at: f64, zero_turn: bool) -> Ledger {
 }
 
 #[test]
-fn r130_requires_fresh_zero_turn_evidence_after_the_boundary_and_five_points_of_margin() {
+fn r131_requires_fresh_zero_turn_evidence_after_the_boundary_and_two_points_of_margin() {
     for (used, at, zero, allowed) in [
         (0.30, NOW, true, true),
-        (0.378, NOW, true, true),
-        (0.379, NOW, true, false),
-        (0.38, NOW, true, false),
+        (0.408, NOW, true, true),
+        (0.409, NOW, true, false),
+        (0.41, NOW, true, false),
         (0.30, 2.0 * DAY - 1.0, true, false),
         (0.30, NOW - 7.0 * 3600.0, true, false),
         (0.30, NOW + 1.0, true, false),
@@ -333,7 +333,7 @@ fn r130_requires_fresh_zero_turn_evidence_after_the_boundary_and_five_points_of_
             assert_eq!(l.codex.day_baselines["seven_day"].reading.used, used);
             assert_eq!(l.codex.day_baselines["seven_day"].reading.at, at);
             apply(&mut l, Change::Grant { mission: "m1".into(), grant: grant(2_000_000) }, NOW, 0).unwrap();
-            apply(&mut l, Change::Admit(request("r130", "m1", "w1", Kind::Worker, 100_000)), NOW, 0).unwrap();
+            apply(&mut l, Change::Admit(request("r131", "m1", "w1", Kind::Worker, 100_000)), NOW, 0).unwrap();
         } else {
             assert!(l.codex.day_baselines.is_empty());
         }
@@ -341,7 +341,7 @@ fn r130_requires_fresh_zero_turn_evidence_after_the_boundary_and_five_points_of_
 }
 
 #[test]
-fn r130_new_day_baseline_excludes_yesterdays_unknown_spend_atomically() {
+fn r131_new_day_baseline_excludes_yesterdays_unknown_spend_atomically() {
     let mut l = uncalibrated(0.30, NOW, true);
     apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 2_000_000 }, NOW, 0).unwrap();
     l.codex.spend(None, true, NOW + 60.0, 0);
@@ -358,7 +358,7 @@ fn r130_new_day_baseline_excludes_yesterdays_unknown_spend_atomically() {
 }
 
 #[test]
-fn r130_a_new_model_still_records_its_first_measured_stretch() {
+fn r131_a_new_model_still_records_its_first_measured_stretch() {
     let mut l = ledger();
     l.codex.record("seven_day", 0.25, RESET, NOW, 0);
     apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 400_000 }, NOW, 0).unwrap();
@@ -381,7 +381,7 @@ fn r130_a_new_model_still_records_its_first_measured_stretch() {
 }
 
 #[test]
-fn r130_a_selected_uncalibrated_model_can_allocate_without_another_models_day_baseline() {
+fn r131_a_selected_uncalibrated_model_can_allocate_without_another_models_day_baseline() {
     let mut l = ledger();
     l.codex.day_baselines.clear();
     l.codex.zero_turn_readings.insert("seven_day".into(), l.codex.readings["seven_day"]);
@@ -395,7 +395,7 @@ fn r130_a_selected_uncalibrated_model_can_allocate_without_another_models_day_ba
 }
 
 #[test]
-fn r130_never_raises_the_mission_cap_or_accepts_a_caller_claim() {
+fn r131_never_raises_the_mission_cap_or_accepts_a_caller_claim() {
     let mut l = uncalibrated(0.30, NOW, true);
     assert!(apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 2_000_001 }, NOW, 0).is_err());
     apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 2_000_000 }, NOW, 0).unwrap();
@@ -408,7 +408,7 @@ fn r130_never_raises_the_mission_cap_or_accepts_a_caller_claim() {
 }
 
 #[test]
-fn r130_checks_every_vendor_again_before_a_turn() {
+fn r131_checks_every_vendor_again_before_a_turn() {
     let mut l = uncalibrated(0.30, NOW, true);
     for vendor in Vendor::ALL {
         apply(&mut l, Change::Allocate { vendor, cap_micros: 2_000_000 }, NOW, 0).unwrap();
@@ -416,13 +416,13 @@ fn r130_checks_every_vendor_again_before_a_turn() {
     let mut g = grant(2_000_000);
     g.vendors = BTreeMap::from([(Vendor::Codex, 1_000_000), (Vendor::Claude, 1_000_000)]);
     apply(&mut l, Change::Grant { mission: "m1".into(), grant: g }, NOW, 0).unwrap();
-    l.claude.record("seven_day", 0.39, RESET, NOW, 0);
+    l.claude.record("seven_day", 0.41, RESET, NOW, 0);
     assert!(apply(&mut l, Change::Admit(request("blocked", "m1", "w1", Kind::Worker, 100_000)), NOW, 0).is_err());
     assert!(Budget::load(&l).unwrap().invocations.is_empty());
 }
 
 #[test]
-fn r130_records_only_observed_mission_movement_and_then_uses_normal_admission() {
+fn r131_records_only_observed_mission_movement_and_then_uses_normal_admission() {
     let mut l = uncalibrated(0.30, NOW, true);
     apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 2_000_000 }, NOW, 0).unwrap();
     apply(&mut l, Change::Grant { mission: "m1".into(), grant: grant(2_000_000) }, NOW, 0).unwrap();
@@ -451,7 +451,7 @@ fn r130_records_only_observed_mission_movement_and_then_uses_normal_admission() 
 }
 
 #[test]
-fn r130_does_not_invent_a_stretch_from_reserved_or_missing_usage() {
+fn r131_does_not_invent_a_stretch_from_reserved_or_missing_usage() {
     for settled in [false, true] {
         let mut l = uncalibrated(0.30, NOW, true);
         apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 2_000_000 }, NOW, 0).unwrap();
@@ -468,7 +468,7 @@ fn r130_does_not_invent_a_stretch_from_reserved_or_missing_usage() {
 }
 
 #[test]
-fn r130_keeps_the_first_actual_day_baseline_when_the_account_is_refreshed() {
+fn r131_keeps_the_first_actual_day_baseline_when_the_account_is_refreshed() {
     let mut l = uncalibrated(0.30, NOW, true);
     apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 1_000_000 }, NOW, 0).unwrap();
     l.codex.record("seven_day", 0.31, RESET, NOW + 60.0, 0);
@@ -482,7 +482,7 @@ fn r130_keeps_the_first_actual_day_baseline_when_the_account_is_refreshed() {
 }
 
 #[test]
-fn r130_plan_relearning_needs_a_reading_from_the_current_plan() {
+fn r131_plan_relearning_needs_a_reading_from_the_current_plan() {
     let mut l = uncalibrated(0.30, NOW, true);
     l.codex.since = NOW;
     l.codex.relearn_until = NOW + 48.0 * 3600.0;
@@ -494,7 +494,7 @@ fn r130_plan_relearning_needs_a_reading_from_the_current_plan() {
 }
 
 #[test]
-fn r130_known_prior_spend_does_not_raise_or_shrink_the_next_missions_two_dollar_cap() {
+fn r131_known_prior_spend_does_not_raise_or_shrink_the_next_missions_two_dollar_cap() {
     let mut l = uncalibrated(0.30, NOW, true);
     apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 2_000_000 }, NOW, 0).unwrap();
     apply(&mut l, Change::Grant { mission: "m1".into(), grant: grant(200_000) }, NOW, 0).unwrap();

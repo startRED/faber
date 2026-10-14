@@ -17,7 +17,8 @@ const WEEK: f64 = 7.0 * DAY;
 /// One percentage point covers rounded provider readings.
 const GUARD: f64 = 0.01;
 const BOOTSTRAP_CAP: u64 = 2_000_000;
-const BOOTSTRAP_MARGIN: f64 = 0.05;
+/// R131: two points under the day's cumulative line.
+const BOOTSTRAP_MARGIN: f64 = 0.02;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

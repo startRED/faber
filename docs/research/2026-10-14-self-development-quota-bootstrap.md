@@ -1,7 +1,7 @@
-# R130: measured readings before quota conversion exists
+# R131: measured readings before quota conversion exists
 
-Owner decision R130 permits a project mission with missing model/window conversion only after a fresh, zero-model-turn
-account reading after the current reset-relative daily boundary, with at least five percentage points below that day's
+Owner decision R131 (first recorded as R130) permits a project mission with missing model/window conversion only after a fresh, zero-model-turn
+account reading after the current reset-relative daily boundary, with at least two percentage points below that day's
 cumulative weekly line for every vendor used. The mission cap remains USD 2.00. This is permission to collect the first
 measurement, not a guessed dollar-to-quota conversion.
 
@@ -76,7 +76,7 @@ Private root: `C:/Users/Erick/AppData/Local/Faber/t13-exposure-20261014/`.
   marker bytes and hash unchanged; weekly usage 31%, reset 2026-10-20 08:00:00 UTC; paid fallback disabled.
 - `r130-engine-before/zero-turn-admission.json`: the real engine's account checks and shared allocation path, both vendors
   on subscription, both paid fallbacks false, no model turns. Claude weekly usage 31%; Codex 35%, reset
-  2026-10-20 04:58:09 UTC. At this reading both daily lines were 28.5714%, so both correctly refused R130 admission.
+  2026-10-20 04:58:09 UTC. At this reading both daily lines were 28.5714%, so both correctly refused admission (R131, first recorded as R130).
 
 These are observations before the requested 2026-10-15 04:58:09 UTC boundary. They are not substituted for the required
 fresh readings after it, not a real mission and not a conformance receipt. Receipt admission, writer retirement, real
