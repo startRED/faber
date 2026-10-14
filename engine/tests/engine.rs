@@ -665,7 +665,8 @@ async fn open_in_terminal_resumes_the_same_cli_session_in_the_conversation_folde
     let t = engine.terminal(&id).unwrap();
     assert_eq!(t.command, "claude");
     assert_eq!(t.args, ["--resume", "c5b9834c-dfc7-4086-beed-2212be93b722"]);
-    assert_eq!(t.cwd, dir.path().join("chat").join(&id));
+    // The folder is given in its resolved form (on macOS /var is /private/var).
+    assert_eq!(t.cwd.canonicalize().unwrap(), dir.path().join("chat").join(&id).canonicalize().unwrap());
     assert!(engine.terminal("missing").is_none());
 }
 
