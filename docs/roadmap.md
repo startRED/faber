@@ -116,6 +116,9 @@ name. Auto aims to pick a model that does the task well, without waste and quick
   never change (done, `engine/src/nudge.rs`).
 - **Still to build.** The table learns from what the user approves or redoes. The draft is routed at most twice per
   message while the user types; today it is routed at every pause.
+- **Still to build: quota pacing** ([spec](superpowers/specs/2026-10-11-auto-quota-pacing-design.md), draft). Auto
+  reads each window against its reset time, the weekday and the plan (detected at start and watched while open, on a
+  shared account), and spends quota that would expire on quality: one rung up when a vendor has spare quota.
 - The router is measured too: on the benchmark of real requests, its picks must match always using the strongest
   model while spending less quota.
 
