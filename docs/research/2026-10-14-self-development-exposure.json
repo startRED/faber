@@ -1,0 +1,171 @@
+{
+  "informationalOnly": true,
+  "measuredDate": "2026-10-14",
+  "privateEvidence": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014",
+  "initialReportedInheritedServers": 4,
+  "initialInheritedTools": 294,
+  "currentActiveInheritedServers": 0,
+  "currentInheritedTools": 0,
+  "codexDisabledRegistryEntries": 4,
+  "claudeBuiltinModules": 3,
+  "claudeObservedHooks": null,
+  "probes": {
+    "codex-loadout-full": {
+      "receipt": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\codex-loadout-full\\live-denial.json",
+      "state": "observed",
+      "modelTurns": 0,
+      "hash": "dd13bdb162a184fa04039488b234a8258ef9b76f84e926c505d5742b19249a6a",
+      "stopRule": null
+    },
+    "claude-loadout-settled": {
+      "receipt": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\claude-loadout-settled\\live-denial.json",
+      "state": "observed",
+      "modelTurns": 1,
+      "hash": "76de74f7694a5bdc03378a5f837c9e132827bf004c98c276bc4e9094ff06769a",
+      "stopRule": null
+    },
+    "claude-native": {
+      "receipt": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\claude-native\\live-denial.json",
+      "state": "observed",
+      "modelTurns": 1,
+      "hash": "76de74f7694a5bdc03378a5f837c9e132827bf004c98c276bc4e9094ff06769a",
+      "stopRule": null
+    },
+    "codex-native": {
+      "receipt": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\codex-native\\live-denial.json",
+      "state": "observed",
+      "modelTurns": 6,
+      "hash": "dd13bdb162a184fa04039488b234a8258ef9b76f84e926c505d5742b19249a6a",
+      "stopRule": null
+    },
+    "codex-role-tools": {
+      "receipt": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\codex-role-tools\\live-denial.json",
+      "state": "stopped",
+      "modelTurns": 1,
+      "hash": "dd13bdb162a184fa04039488b234a8258ef9b76f84e926c505d5742b19249a6a",
+      "stopRule": 1
+    }
+  },
+  "qualificationPassed": false,
+  "admissionClosed": true,
+  "failure": {
+    "reason": "native write bypassed Faber's patch authority",
+    "insideLease": true,
+    "outsideEscape": false,
+    "completedNativeFileChange": true,
+    "workspaceNativeWriteSucceeded": true,
+    "killWaitMs": 24
+  },
+  "cost": {
+    "requestedModelTurns": 10,
+    "knownApiEquivalentUsd": 0.00577606,
+    "complete": false,
+    "unsettledReceipts": [
+      "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\claude-loadout\\live-denial.json",
+      "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\codex-role-tools\\live-denial.json"
+    ],
+    "freshInputTokens": 28706,
+    "cacheReadTokens": 170496,
+    "cacheWriteTokens": 2325,
+    "cacheWrite1hTokens": 2325,
+    "outputTokens": 1471,
+    "realMission": null,
+    "measuredStopReserve": null
+  },
+  "ram": {
+    "realMission": null,
+    "previousScriptedProjectsPeakMb": 236.8,
+    "previousWarmFakeGuardMb": 1.1,
+    "previousWarmFakeTreeMb": 141.2,
+    "currentScriptedProjectsPeakMb": 221.7,
+    "currentWarmFakeGuardMb": 1.1,
+    "currentWarmFakeTreeMb": 140.9
+  },
+  "gates": {
+    "G1": "failed",
+    "G2": "not passed",
+    "G3": "not passed",
+    "G4": "not passed",
+    "G5": "not passed",
+    "G6": "not passed",
+    "G7": "not passed",
+    "G8": "not passed",
+    "G9": "failed",
+    "G10": "not passed",
+    "AS-1": "passed, scripted",
+    "AS-2": "passed, scripted",
+    "AS-3": "passed, scripted",
+    "AS-4": "passed, scripted",
+    "AS-5": "not passed",
+    "AS-6": "not passed",
+    "AS-7": "not passed",
+    "AS-8": "not passed",
+    "AS-9": "not passed"
+  },
+  "helperSha256AtSummary": "970b12d767e39ff06362bbafa794cd4426fedfe5282d56149a446e08b0bd9393",
+  "helperHashNote": "Captured after validation began; not claimed as a pre-run executable fingerprint.",
+  "measurementSourceNote": "The private source snapshot was taken after formatting and the generic parser/Clippy corrections; no byte-exact pre-build source capture is claimed.",
+  "validation": {
+    "commands": [
+      {
+        "command": "npm run lint",
+        "started": "2026-10-14T09:08:50.755Z",
+        "exit": 0,
+        "seconds": 0.528,
+        "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\validation-resumed\\proof-01.log"
+      },
+      {
+        "command": "npm run typecheck",
+        "started": "2026-10-14T09:08:51.285Z",
+        "exit": 0,
+        "seconds": 0.937,
+        "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\validation-resumed\\proof-02.log"
+      },
+      {
+        "command": "npm run build",
+        "started": "2026-10-14T09:08:52.223Z",
+        "exit": 0,
+        "seconds": 2.238,
+        "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\validation-resumed\\proof-03.log"
+      },
+      {
+        "command": "cargo fmt --all --check",
+        "started": "2026-10-14T09:08:54.462Z",
+        "exit": 0,
+        "seconds": 1.637,
+        "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\validation-resumed\\proof-04.log"
+      },
+      {
+        "command": "cargo clippy --workspace --all-targets -- -D warnings",
+        "started": "2026-10-14T09:08:56.100Z",
+        "exit": 0,
+        "seconds": 1.821,
+        "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\validation-resumed\\proof-05.log"
+      },
+      {
+        "command": "cargo clippy -p faber --features test-hooks -- -D warnings",
+        "started": "2026-10-14T09:08:57.922Z",
+        "exit": 0,
+        "seconds": 1.014,
+        "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\validation-resumed\\proof-06.log"
+      },
+      {
+        "command": "cargo t --all",
+        "started": "2026-10-14T09:08:58.937Z",
+        "exit": 0,
+        "seconds": 1233.601,
+        "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\validation-resumed\\proof-07.log"
+      }
+    ],
+    "fullSuite": {
+      "passed": 1373,
+      "failed": 0,
+      "notRun": 0,
+      "skipped": 0
+    },
+    "pureExampleTests": {
+      "passed": 8,
+      "failed": 0
+    }
+  }
+}

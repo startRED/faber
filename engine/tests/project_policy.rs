@@ -96,6 +96,42 @@ async fn review_1_codex_native_approvals_are_declined_and_malformed_requests_fai
 const ROLES: [Role; 5] = [Role::Lead, Role::Research, Role::TestProposal, Role::Writer, Role::Reviewer];
 
 #[test]
+fn t13_shared_exposure_discards_values_and_never_uses_missing_or_malformed_configuration() {
+    let entry: Value = serde_json::from_str(include_str!("../../tests/fixtures/projects/inherited-mcp.jsonl").trim()).unwrap();
+    for role in ROLES {
+        let (_, mut params) = project_thread_params(&thread(None), role).unwrap();
+        faber_engine::codex::thread_exposure(&mut params, &entry["msg"].to_string()).unwrap();
+        assert_eq!(params["config"]["mcp_servers"].as_object().unwrap().len(), 4);
+        assert!(!params.to_string().contains("synthetic"));
+        assert!(!params.to_string().contains("SYNTHETIC"));
+        assert_eq!(params["config"]["model_reasoning_effort"], "high");
+        for bad in [
+            "{}",
+            "not JSON",
+            r#"{"error":{"message":"SYNTHETIC"}}"#,
+            r#"{"result":{"config":{"mcp_servers":{"":{}}}}}"#,
+            r#"{"result":{"config":{"mcp_servers":[]}}}"#,
+        ] {
+            assert_eq!(faber_engine::codex::thread_exposure(&mut params, bad), Err(Blocker::Restrictions));
+        }
+    }
+}
+
+#[test]
+fn t13_every_role_gets_explicit_empty_strict_mcp_and_no_user_startup_integrations() {
+    for role in ROLES {
+        for resume in [None, Some("550e8400-e29b-41d4-a716-446655440000")] {
+            let args = project_claude_args(&launch(resume), role).unwrap();
+            assert!(args.windows(2).any(|pair| pair == ["--mcp-config", "{\"mcpServers\":{}}"]));
+            assert!(args.iter().any(|arg| arg == "--strict-mcp-config"));
+            assert!(args.iter().any(|arg| arg == "--safe-mode"));
+            assert!(args.windows(2).any(|pair| pair == ["--tools", ""]));
+            assert!(args.windows(2).any(|pair| pair == ["--settings", "{\"disableAllHooks\":true}"]));
+        }
+    }
+}
+
+#[test]
 fn opus_2_production_and_probe_use_the_same_pinned_provider() {
     assert!(project_codex_args(true).windows(2).any(|a| a == ["-c", "model_provider=\"openai\""]));
 }

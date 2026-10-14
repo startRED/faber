@@ -1,0 +1,1 @@
+{"dir":"out","msg":{"id":"faber-config-1","result":{"config":{"mcp_servers":{"Roblox_Studio":{"enabled":true,"command":"synthetic-program"},"node_repl":{"enabled":true,"env":{"TOKEN":"SYNTHETIC_DO_NOT_COPY"}},"rea":{"enabled":true,"url":"https://synthetic.invalid"},"ytlab":{"enabled":true,"args":["synthetic-argument"]}}}}}}

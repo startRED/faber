@@ -5,6 +5,9 @@ use std::path::Path;
 #[cfg(any(windows, test))]
 #[path = "project-qualification/live.rs"]
 mod live;
+#[cfg(any(windows, test))]
+#[path = "project-qualification/claude.rs"]
+mod live_claude;
 
 fn main() {
     if let Some(code) = faber_engine::proc::guard_mode() {
@@ -75,17 +78,36 @@ fn run() -> io::Result<()> {
         return Err(io::Error::other("expected --preflight PRIVATE_DATA"));
     };
     let data = std::path::PathBuf::from(directory);
-    if !data.is_absolute() || !matches!(mode.as_str(), "--preflight" | "--hidden-worker" | "--live-loadout" | "--hidden-live") {
+    if !data.is_absolute()
+        || !matches!(
+            mode.as_str(),
+            "--preflight"
+                | "--hidden-worker"
+                | "--live-loadout"
+                | "--live-native"
+                | "--live-role-tools"
+                | "--live-claude-loadout"
+                | "--live-claude-native"
+                | "--hidden-live"
+        )
+    {
         return Err(io::Error::other("invalid preflight arguments"));
     }
     if matches!(mode.as_str(), "--hidden-worker" | "--hidden-live") {
         if std::env::var("FABER_QUALIFICATION_HIDDEN").as_deref() != Ok("preflight") {
             return Err(io::Error::other("hidden runner required"));
         }
-        return tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()?
-            .block_on(async { if mode == "--hidden-live" { live::run(&data).await } else { worker(&data).await } });
+        return tokio::runtime::Builder::new_current_thread().enable_all().build()?.block_on(async {
+            if mode == "--hidden-live" {
+                if std::env::var("FABER_QUALIFICATION_PROBE").is_ok_and(|mode| mode.starts_with("--live-claude")) {
+                    live_claude::run(&data).await
+                } else {
+                    live::run(&data).await
+                }
+            } else {
+                worker(&data).await
+            }
+        });
     }
     if ["CI", "GITHUB_ACTIONS"].iter().any(|name| std::env::var(name).is_ok_and(|v| v.eq_ignore_ascii_case("true"))) {
         return Err(io::Error::other("manual preflight never runs in CI"));

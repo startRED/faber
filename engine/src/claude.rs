@@ -29,6 +29,13 @@ pub struct ClaudeLaunch {
 // inside its own workspace folder: file tools cannot leave it, edits there are accepted, and any command asks first.
 const CHAT_TOOLS: &str = "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch";
 
+/// Lean sessions and all worker roles share the same empty integration loadout.
+pub fn claude_exposure_args() -> Vec<String> {
+    ["--strict-mcp-config", "--mcp-config", "{\"mcpServers\":{}}", "--safe-mode", "--settings", "{\"disableAllHooks\":true}"]
+        .map(String::from)
+        .to_vec()
+}
+
 /// Arguments for one long-lived Claude Code process that takes many turns over stdin.
 /// Projects get the user's own setup (skills, MCP servers, plugins), like a direct session; the user's hooks stay
 /// off unless they turn them on, because hooks can rewrite answers. Permission prompts come back to Faber over stdio.
@@ -48,9 +55,10 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     .map(String::from)
     .to_vec();
     if let Some(instructions) = &launch.instructions {
-        for a in ["--system-prompt", instructions, "--tools", "", "--strict-mcp-config", "--no-session-persistence"] {
+        for a in ["--system-prompt", instructions, "--tools", "", "--no-session-persistence"] {
             args.push(a.into());
         }
+        args.extend(claude_exposure_args());
     } else if launch.area == Area::Chat {
         // Searching and reading pages never asks, like claude.ai.
         for a in [
@@ -102,14 +110,11 @@ pub fn project_claude_args(launch: &ClaudeLaunch, role: crate::project::Role) ->
     args.retain(|a| a != "--no-session-persistence");
     for a in [
         "--restricted",
-        "--safe-mode",
         "--permission-mode",
         "dontAsk",
         "--disable-slash-commands",
         "--disallowedTools",
         "Bash,Write,Edit,Read,Glob,Grep,Agent,Task,WebSearch,WebFetch,Bash(git push *),Bash(git reset *),Bash(git update-ref *)",
-        "--settings",
-        "{\"disableAllHooks\":true}",
     ] {
         args.push(a.into());
     }

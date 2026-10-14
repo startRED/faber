@@ -29,19 +29,55 @@ there when it helps, and mention the files you create.";
 pub fn codex_args(area: Area, windows: bool, user_hooks: bool) -> Vec<String> {
     let mut args = vec!["app-server".to_string()];
     let mut push = |a: &[&str]| args.extend(a.iter().map(|s| s.to_string()));
-    if !user_hooks {
+    if !user_hooks && area != Area::Chat {
         push(&["--disable", "hooks"]);
     }
     if windows {
         push(&["-c", "windows.sandbox=\"unelevated\""]);
     }
     if area == Area::Chat {
-        for feature in ["apps", "plugins", "computer_use", "browser_use"] {
-            push(&["--disable", feature]);
-        }
-        push(&["-c", "mcp_servers={}", "-c", "project_doc_max_bytes=0"]);
+        push(&["-c", "project_doc_max_bytes=0"]);
+        args.extend(codex_exposure_args(user_hooks));
     }
     args
+}
+
+/// An empty table alone merges with inherited configuration; thread exposure also disables every named server.
+pub fn codex_exposure_args(user_hooks: bool) -> Vec<String> {
+    let mut args = vec!["-c".into(), "mcp_servers={}".into()];
+    if !user_hooks {
+        args.extend(["--disable".into(), "hooks".into()]);
+    }
+    for feature in ["apps", "plugins", "computer_use", "browser_use", "skill_mcp_dependency_install"] {
+        args.extend(["--disable".into(), feature.into()]);
+    }
+    args
+}
+
+/// Retain names only: configuration values are ignored, never copied into requests or errors.
+pub fn thread_exposure(params: &mut Value, reply: &str) -> Result<(), crate::project::policy::Blocker> {
+    #[derive(serde::Deserialize)]
+    struct Reply {
+        result: Config,
+    }
+    #[derive(serde::Deserialize)]
+    struct Config {
+        config: Names,
+    }
+    #[derive(serde::Deserialize)]
+    struct Names {
+        #[serde(default)]
+        mcp_servers: HashMap<String, serde::de::IgnoredAny>,
+    }
+    let reply: Reply = serde_json::from_str(reply).map_err(|_| crate::project::policy::Blocker::Restrictions)?;
+    if reply.result.config.mcp_servers.len() > 1000
+        || reply.result.config.mcp_servers.keys().any(|name| name.is_empty() || name.len() > 256)
+    {
+        return Err(crate::project::policy::Blocker::Restrictions);
+    }
+    params["config"]["mcp_servers"] =
+        Value::Object(reply.result.config.mcp_servers.into_keys().map(|name| (name, json!({"enabled":false}))).collect());
+    Ok(())
 }
 
 /// Automatic roles omit customizations; manual Projects and Chat keep their existing launch policy.
@@ -476,6 +512,7 @@ async fn serve(
     // Opened before Codex finished starting, in order, so request ids stay predictable.
     let mut pending: Vec<u64> = Vec::new();
     let mut waiting: HashMap<u64, Waiting> = HashMap::new();
+    let mut exposure_pending = HashSet::new();
     let mut confirmed = VecDeque::new();
     let mut next_id = 0u64;
     let (mut ready, mut retired, mut stopping) = (false, false, false);
@@ -491,6 +528,20 @@ async fn serve(
         () => {{
             stopping = true;
             proc::stop(&mut *stdin, &mut child).await;
+        }};
+    }
+    macro_rules! open_thread {
+        ($key:expr, $t:expr) => {{
+            if role.is_some() {
+                exposure_pending.insert($key);
+                if proc::write_line(&mut *stdin, &json!({"id":format!("faber-config-{}", $key), "method":"config/read",
+                    "params":{"includeLayers":false,"cwd":$t.params.cwd}})).await.is_err() {
+                    stop!();
+                }
+            } else {
+                let (method, params) = thread_params(area, &$t.params);
+                request!(method, params, Waiting::Thread($key));
+            }
         }};
     }
 
@@ -531,6 +582,31 @@ async fn serve(
                 };
                 if line.trim().is_empty() {
                     continue;
+                }
+                // Parse the identity before any config values; malformed role output never reaches raw diagnostics.
+                #[derive(serde::Deserialize)]
+                struct Header { id: Option<Value> }
+                if let Some(role) = role {
+                    let header = serde_json::from_str::<Header>(&line);
+                    if line.len() > 4 * 1024 * 1024 || header.is_err() {
+                        for t in threads.values() { (t.sink)(EngineEvent::Error {message:crate::project::policy::Blocker::Restrictions.key().into(),fatal:true}); }
+                        stop!();
+                        continue;
+                    }
+                    if let Some(suffix) = header.ok().and_then(|h| h.id).and_then(|id| id.as_str()
+                        .and_then(|id| id.strip_prefix("faber-config-")).map(String::from)) {
+                        let Ok(key) = suffix.parse::<u64>() else { continue; };
+                        if !exposure_pending.remove(&key) { continue; }
+                        let Some(t) = threads.get(&key) else { continue; };
+                        let (method, mut params) = project_thread_params(&t.params, role).expect("validated role");
+                        if let Err(blocker) = thread_exposure(&mut params, &line) {
+                            (t.sink)(EngineEvent::Error {message:blocker.key().into(),fatal:true});
+                            stop!();
+                            continue;
+                        }
+                        request!(method, params, Waiting::Thread(key));
+                        continue;
+                    }
                 }
                 let Ok(msg) = serde_json::from_str::<Value>(&line) else {
                     let message = format!("Unexpected output from Codex: {}", line.chars().take(200).collect::<String>());
@@ -584,8 +660,7 @@ async fn serve(
                                 ready = true;
                                 for key in std::mem::take(&mut pending) {
                                     let Some(t) = threads.get(&key) else { continue };
-                                    let (method, params) = match role { Some(role) => project_thread_params(&t.params, role).expect("validated role"), None => thread_params(area, &t.params) };
-                                    request!(method, params, Waiting::Thread(key));
+                                    open_thread!(key, t);
                                 }
                             }
                             Waiting::Thread(key) => {
@@ -699,8 +774,7 @@ async fn serve(
                     let state = CodexTurnState::new(thread.resume.is_some());
                     let t = Thread { sink, params: thread, id: None, turn: None, queued: vec![], state, approvals: HashMap::new(), watch: proc::TurnWatch::default(), blocked: false, closing: false, early_completion: vec![] };
                     if ready {
-                        let (method, params) = match role { Some(role) => project_thread_params(&t.params, role).expect("validated role"), None => thread_params(area, &t.params) };
-                        request!(method, params, Waiting::Thread(key));
+                        open_thread!(key, t);
                     } else {
                         pending.push(key);
                     }
@@ -908,6 +982,71 @@ mod role_tests {
     use super::*;
     use tokio::io::AsyncWriteExt;
 
+    #[tokio::test]
+    async fn t13_every_role_disables_inherited_mcp_before_start_and_resume() {
+        use crate::project::Role;
+        for role in [Role::Lead, Role::Research, Role::TestProposal, Role::Writer, Role::Reviewer] {
+            for resume in [None, Some("thread".into())] {
+                let (stdin, input) = tokio::io::duplex(65536);
+                let (mut output, stdout) = tokio::io::duplex(65536);
+                let fake = Arc::new(std::sync::Mutex::new(Some(proc::Proc {
+                    stdin: Box::new(stdin),
+                    stdout: Box::new(stdout),
+                    stderr: None,
+                    child: None,
+                })));
+                let spawn: Spawner = Arc::new(move |_, _, _| Ok(fake.lock().unwrap().take().unwrap()));
+                let server = CodexServer::start_with_policy(
+                    CodexServerOptions {
+                        bin: "fake".into(),
+                        cwd: ".".into(),
+                        area: Area::Project,
+                        user_hooks: false,
+                        windows: false,
+                        spawn,
+                    },
+                    Some(role),
+                );
+                let mut lines = BufReader::new(input).lines();
+                lines.next_line().await.unwrap().unwrap();
+                if resume.is_some() {
+                    output.write_all(b"{\"id\":1,\"result\":{}}\n").await.unwrap();
+                    lines.next_line().await.unwrap().unwrap();
+                }
+                let session = server.open(
+                    CodexThread {
+                        cwd: ".".into(),
+                        model: Some("gpt-6-luna".into()),
+                        effort: Some("low".into()),
+                        resume: resume.clone(),
+                        instructions: None,
+                        user_name: None,
+                    },
+                    Arc::new(|_| {}),
+                );
+                if resume.is_none() {
+                    output.write_all(b"{\"id\":1,\"result\":{}}\n").await.unwrap();
+                    lines.next_line().await.unwrap().unwrap();
+                }
+                let query: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+                assert_eq!(query["method"], "config/read");
+                assert_eq!(query["params"]["includeLayers"], false);
+                let fixture: Value =
+                    serde_json::from_str(include_str!("../../tests/fixtures/projects/inherited-mcp.jsonl").trim()).unwrap();
+                output.write_all(format!("{}\n", fixture["msg"]).as_bytes()).await.unwrap();
+                let start: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+                assert_eq!(start["method"], if resume.is_some() { "thread/resume" } else { "thread/start" });
+                for name in ["Roblox_Studio", "node_repl", "rea", "ytlab"] {
+                    assert_eq!(start["params"]["config"]["mcp_servers"][name], json!({"enabled":false}));
+                }
+                assert!(!start.to_string().contains("SYNTHETIC"));
+                assert_eq!(start["params"]["config"]["web_search"], "disabled");
+                session.close();
+                server.retire();
+            }
+        }
+    }
+
     #[tokio::test(start_paused = true)]
     async fn role_loop_declines_every_native_request_and_disarms_a_failed_start() {
         let (stdin, input) = tokio::io::duplex(65536);
@@ -940,6 +1079,9 @@ mod role_tests {
         output.write_all(b"{\"id\":1,\"result\":{}}\n").await.unwrap();
         lines.next_line().await.unwrap().unwrap();
         lines.next_line().await.unwrap().unwrap();
+        output.write_all(b"{\"id\":\"faber-config-1\",\"result\":{\"config\":{\"mcp_servers\":{}}}}\n").await.unwrap();
+        let start: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+        assert_eq!(start["method"], "thread/start");
         output.write_all(b"{\"id\":2,\"result\":{\"thread\":{\"id\":\"t\"}}}\n").await.unwrap();
         assert!(matches!(rx.recv().await, Some(EngineEvent::Started { .. })));
         let mut denied = 0;
