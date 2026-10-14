@@ -27,7 +27,8 @@ export const vendorName = (vendor: Vendor) => VENDOR_NAME[vendor];
 
 // "claude-sonnet-5-5" -> "Sonnet 5.5", "gpt-6-luna" -> "GPT-6 Luna", "sonnet" -> "Sonnet".
 export function prettyModel(model: string | undefined): string {
-  if (!model) return t('model.default');
+  // "codex" is what the engine reports when the CLI named no model: that is no name to show.
+  if (!model || model === 'codex') return t('model.default');
   const claude = /^claude-([a-z]+)-(\d+)-(\d+)/.exec(model);
   if (claude) return `${cap(claude[1]!)} ${claude[2]}.${claude[3]}`;
   const gpt = /^gpt-([\d.]+)(?:-(.+))?$/.exec(model);

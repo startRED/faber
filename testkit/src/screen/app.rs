@@ -3,6 +3,7 @@
 use super::{Result, Scenario, ask, claude_chat, ensure, eventually, no_cli, pass_look, pause, same, start_settings, system_motion};
 use crate::app::{Ctx, Opened};
 use crate::page::{Page, css, role};
+use crate::sandbox::{CliSlot, Launch};
 use serde_json::json;
 use std::time::{Duration, Instant};
 
@@ -61,6 +62,14 @@ pub fn scenarios() -> Vec<Scenario> {
             run: thread_in_every_look,
         },
         Scenario { name: "a chat streams an answer with the model and the reason, and lands in the sidebar", run: streams_an_answer },
+        Scenario {
+            name: "with Auto, the answer names its model as soon as it starts, keeps the name to the end and after reopening",
+            run: names_the_model_while_streaming,
+        },
+        Scenario {
+            name: "with Auto on Codex, the answer names the model the CLI reports before the first word and keeps it to the end",
+            run: names_the_codex_model_while_streaming,
+        },
         Scenario { name: "editing a message sends it as a branch and keeps the original conversation", run: edits_as_a_branch },
         Scenario { name: "deleting a conversation asks once, then removes it", run: deletes_after_asking },
         Scenario { name: "the sidebar footer shows the name the person gave, above the accounts", run: shows_the_name },
@@ -192,6 +201,73 @@ fn streams_an_answer(ctx: &mut Ctx) -> Result {
     ensure(text.contains("at API prices"), || format!("the answer should show the price note: {text}"))?;
     page.wait_visible(&css(".list .item").has_text(QUESTION))?;
     ctx.shot(&mut app, "chat")
+}
+
+/// The whole answer header as text, and its height.
+const HEADER_ALL: &str = "(() => { const h = document.querySelector('article.ai .model'); return h && { text: h.innerText, height: h.getBoundingClientRect().height }; })()";
+
+/// The answer header's name slot and its height: what the person reads and where the line below sits.
+const HEADER: &str = "(() => { const h = document.querySelector('article.ai .model'); return h && { name: h.children[1].innerText, height: h.getBoundingClientRect().height }; })()";
+
+fn names_the_model_while_streaming(ctx: &mut Ctx) -> Result {
+    names_while_streaming(ctx, "claude", "Sunlight", "Haiku 5.5")
+}
+
+fn names_the_codex_model_while_streaming(ctx: &mut Ctx) -> Result {
+    names_while_streaming(ctx, "codex", "", "GPT-6 Luna")
+}
+
+/// With Auto and one vendor: the header says only that Auto is choosing, then names the model before the first word,
+/// keeps the name and the height to the end, and reads the same when the conversation is opened again. The recording
+/// stops after the first words of the answer until the scenario lets it go on.
+fn names_while_streaming(ctx: &mut Ctx, vendor: &str, first_words: &str, name: &str) -> Result {
+    start_settings(ctx, "en")?;
+    let fixtures = ctx.paths.fixtures.clone();
+    let launch = |recording: &str| {
+        let recording = Some(fixtures.join(format!("{vendor}/{recording}.jsonl")));
+        match vendor {
+            "claude" => Launch { claude: CliSlot::Fake, codex: CliSlot::Off, recording, ..Launch::default() },
+            _ => Launch { claude: CliSlot::Off, codex: CliSlot::Fake, recording, ..Launch::default() },
+        }
+    };
+    let mut app = ctx.launch(launch("chat-held"))?;
+    let page = &mut app.page;
+    ask(page, QUESTION)?;
+    // With two vendors Auto first waits for its router (the recorded CLI never answers it, so the wait runs to the end of
+    // the 30 s allowed) and the header says only that; with one vendor there is nothing to choose.
+    let choosing = if vendor == "claude" {
+        page.wait_for("the header of the answer", "!!document.querySelector('article.ai .model')")?;
+        let header = page.eval(HEADER_ALL)?;
+        let reason = page.text_of("reason.routing")?;
+        let text = header["text"].as_str().unwrap_or_default().split_whitespace().collect::<Vec<_>>().join(" ");
+        same(text, format!("Auto · {reason}"), "the header while Auto is choosing")?;
+        Some(header["height"].clone())
+    } else {
+        None
+    };
+    // The answer is held before its first word (Codex) or just after it (Claude): the name is there either way.
+    page.wait_for_within(
+        "the model's name in the header",
+        &format!(
+            "(() => {{ const h = document.querySelector('article.ai .model'); return h?.children[1]?.innerText === '{name}' && document.querySelector('article.ai .md').innerText.includes('{first_words}'); }})()"
+        ),
+        Duration::from_secs(60),
+    )?;
+    let during = page.eval(HEADER)?;
+    if let Some(height) = choosing {
+        same(during["height"].clone(), height, "the header's height once the name is there")?;
+    }
+    std::fs::write(ctx.sb.state.join("release"), "").map_err(|e| e.to_string())?;
+    let answer = page.named("article", "answer.label")?;
+    page.wait_visible(&answer.css(".actions"))?;
+    same(page.eval(HEADER)?, during.clone(), "the header at the end of the answer")?;
+    // A message saved and opened again reads the same.
+    ctx.close(app.id)?;
+    let mut app = ctx.launch(launch("chat"))?;
+    let page = &mut app.page;
+    page.click(&css(".list .item").has_text(QUESTION))?;
+    page.wait_visible(&css("article.ai .actions"))?;
+    same(page.eval(HEADER)?, during, "the header after reopening the conversation")
 }
 
 fn edits_as_a_branch(ctx: &mut Ctx) -> Result {
