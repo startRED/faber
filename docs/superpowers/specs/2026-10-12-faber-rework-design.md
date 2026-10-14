@@ -326,7 +326,7 @@ is bundled.
 | :--- | :--- | :--- | :--- |
 | Every code writer | ponytail (MIT) with Erick's cold-start prior for writers (E18), provisional (section 5.3) | — | caveman skill as the note style (section 5.2) |
 | Software process | superpowers (MIT): only `systematic-debugging` and `test-driven-development` as warm cards (section 7.3) | — | `using-superpowers` (conflicts with Faber's kit control) |
-| Frontend | Impeccable (Apache-2.0) and its detector; frontend-design (anthropics/skills, check LICENSE.txt); Playwright MCP (Apache-2.0) | — | Taste-Skill as default (overlaps Impeccable; offered as alternative) |
+| Frontend | Impeccable (Apache-2.0) and its detector; Taste-Skill v2 (MIT) for public web pages, as the base pass before Impeccable (Erick, R33 and E18; repo read 2026-10-14: it is art direction for landing and marketing pages only, with its own direction library, open-collection image search and browser inspector, while Impeccable covers app screens, native apps and refinement commands); frontend-design (anthropics/skills, check LICENSE.txt); Playwright MCP (Apache-2.0) | — | Taste-Skill on app screens or dashboards (its own scope excludes them); two Taste-Skill variants in one session (they conflict) |
 | Docs lookup | Context7 (MIT) after a one-time "sends your query and IP" notice | optional key | — |
 | Security | trailofbits/skills (CC-BY-SA-4.0, download only) as review lenses | — | Semgrep MCP (archived) |
 | Documents | — | docx, pdf, pptx, xlsx from anthropics/skills, once the person accepts their source-available license | — |
