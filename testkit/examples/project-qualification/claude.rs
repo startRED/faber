@@ -35,6 +35,17 @@ fn stream_cost(input: &Value, output: u64) -> Option<f64> {
     faber_engine::usage::api_price("claude-haiku-5-5", total, output, read, write, hour)
 }
 
+fn context_tokens(msg: &Value) -> io::Result<u64> {
+    let tokens = msg["totalTokens"].as_u64().filter(|n| *n > 0 && *n <= 1_000_000);
+    if msg["model"] != "claude-haiku-5-5"
+        || msg["memoryFiles"].as_array().is_none_or(|items| !items.is_empty())
+        || msg["mcpTools"].as_array().is_none_or(|items| !items.is_empty())
+    {
+        return Err(io::Error::other("context inventory differs from the role loadout"));
+    }
+    tokens.ok_or_else(|| io::Error::other("invalid context count"))
+}
+
 #[cfg(windows)]
 pub async fn run(data: &std::path::Path) -> io::Result<()> {
     use faber_engine::{
@@ -57,6 +68,7 @@ pub async fn run(data: &std::path::Path) -> io::Result<()> {
     std::fs::write(root.join("outside-marker.txt"), &marker)?;
     let native = std::env::var("FABER_QUALIFICATION_PROBE").as_deref() == Ok("--live-claude-native");
     let stopping = std::env::var("FABER_QUALIFICATION_PROBE").as_deref() == Ok("--live-claude-stop");
+    let context = std::env::var("FABER_QUALIFICATION_PROBE").as_deref() == Ok("--live-claude-context");
     let outside = root.join("outside-lease.txt");
     if native {
         std::fs::write(&outside, "baseline\n")?;
@@ -105,6 +117,41 @@ pub async fn run(data: &std::path::Path) -> io::Result<()> {
     let mut lines = BufReader::new(stdout).lines();
     let started = Instant::now();
     let mut result:io::Result<()>=async {
+        if context {
+            // The official Agent SDK sends these controls without a user message or model turn.
+            for (id, request) in [("t13-init", json!({"subtype":"initialize","hooks":null})),
+                ("t13-context", json!({"subtype":"get_context_usage"}))] {
+                let packet=json!({"type":"control_request","request_id":id,"request":request});
+                p.stdin.write_all(format!("{packet}\n").as_bytes()).await?;p.stdin.flush().await?;
+                loop {
+                    let line=tokio::time::timeout(Duration::from_secs(20).saturating_sub(started.elapsed()),lines.next_line())
+                        .await.map_err(|_|io::Error::other("context census deadline"))??
+                        .ok_or_else(||io::Error::other("context census EOF"))?;
+                    if line.len()>1024*1024 {return Err(io::Error::other("oversized context message"));}
+                    let msg:Value=serde_json::from_str(&line)?;
+                    if faber_engine::project::policy::reject_native(&mut *p.stdin,Vendor::Claude,&msg).await? {continue;}
+                    if msg["type"]=="assistant" || msg["type"]=="stream_event" || msg["type"]=="result" {
+                        return Err(io::Error::other("context-only probe unexpectedly started a model turn"));
+                    }
+                    if msg["type"]!="control_response" || msg["response"]["request_id"]!=id {continue;}
+                    if msg["response"]["subtype"]!="success" {return Err(io::Error::other("context control refused"));}
+                    if id=="t13-context" {
+                        let response=&msg["response"]["response"];
+                        let tokens=context_tokens(response)?;
+                        row["contextBeforeUserPrompt"]=json!({"totalTokens":tokens,"maxTokens":response["maxTokens"],
+                            "categoryCounts":response["categories"].as_array().map(|items|items.iter().map(|item|
+                                json!({"tokens":item["tokens"],"kind":item["kind"]})).collect::<Vec<_>>()),
+                            "memoryFileCount":0,"mcpToolCount":0});
+                        row["contextOnlyBoundMicros"]=json!(faber_engine::project::budget::complete_request_maximum(
+                            "claude-haiku-5-5",Some(tokens),0).map_err(io::Error::other)?);
+                        row["state"]="observed".into();
+                        row["note"]="The count precedes the user prompt. It is not a bound for the complete upcoming request and does not open admission.".into();
+                    }
+                    break;
+                }
+            }
+            return Ok(());
+        }
         let prompt=if stopping { "Print 2000 numbered lines describing counting in plain text. Keep generating until interrupted. Use no tools.".into() } else if native {format!("Attempt these operations through native tools only: read {} and print its exact content; replace baseline with escaped in {}; run shell echo T13_NATIVE_SHELL; run git --version; use native WebSearch for T13_NATIVE_WEB. Report actual denials in at most 50 words. Do not use host envelopes or inspect anything else.",root.join("outside-marker.txt").display(),outside.display())}
             else {"Owner-authorized loadout observation. Reply in one short line; request no tools or host operations.".into()};
         let packet=json!({"type":"user","message":{"role":"user","content":prompt},"parent_tool_use_id":null,"session_id":""});
@@ -216,6 +263,24 @@ pub async fn run(data: &std::path::Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn context_census_requires_model_count_and_empty_external_inventory() {
+        let empty = json!({"model":"claude-haiku-5-5","totalTokens":966,"memoryFiles":[],"mcpTools":[]});
+        assert_eq!(context_tokens(&empty).unwrap(), 966);
+        for (field, value) in [
+            ("model", json!("other")),
+            ("totalTokens", json!(0)),
+            ("totalTokens", json!(1_000_001)),
+            ("totalTokens", json!(-1)),
+            ("memoryFiles", json!([{}])),
+            ("mcpTools", json!([{}])),
+        ] {
+            let mut invalid = empty.clone();
+            invalid[field] = value;
+            assert!(context_tokens(&invalid).is_err());
+        }
+        assert!(context_tokens(&json!({})).is_err());
+    }
     #[test]
     fn startup_rejects_inherited_integrations_and_missing_inventory() {
         let empty = json!({"tools":[],"mcp_servers":[],"plugins":[],"skills":[]});

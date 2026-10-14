@@ -1,0 +1,190 @@
+{
+  "schema": 1,
+  "recordedAt": "2026-10-14T14:39:27.527Z",
+  "informationalOnly": true,
+  "qualificationPassed": false,
+  "realMissionExecuted": false,
+  "stopReason": "reason.budget.cap",
+  "capRaised": false,
+  "privateEvidence": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014",
+  "baselineCi": {
+    "head": "b942eef184adf901dbe6eb9b0320b076a2b1cbf9",
+    "url": "https://github.com/startRED/faber/actions/runs/38572893418",
+    "conclusion": "success",
+    "draft": true,
+    "privateReceipt": "delivery-r117.json"
+  },
+  "cacheControl": {
+    "name": "DISABLE_PROMPT_CACHING",
+    "value": "1",
+    "scope": "every project role start and resume",
+    "source": "https://code.claude.com/docs/en/env-vars",
+    "regression": {
+      "observedRed": true,
+      "shellExit": 1,
+      "test": "uncached_invocation_bound_disables_more_expensive_cache_writes_for_every_role",
+      "actual": null,
+      "expected": "1"
+    },
+    "streamedNoCacheCreationAttested": false
+  },
+  "installed": [
+    {
+      "vendor": "claude",
+      "version": "2.1.296 (Claude Code)",
+      "binaryHash": "76de74f7694a5bdc03378a5f837c9e132827bf004c98c276bc4e9094ff06769a",
+      "billing": "subscription",
+      "paidFallback": null
+    },
+    {
+      "vendor": "codex",
+      "version": "codex-cli 0.162.1",
+      "binaryHash": "dd13bdb162a184fa04039488b234a8258ef9b76f84e926c505d5742b19249a6a",
+      "billing": "subscription",
+      "paidFallback": false
+    }
+  ],
+  "contextOnly": {
+    "modelTurnsRequested": 0,
+    "model": "claude-haiku-5-5",
+    "reportedTokens": 253,
+    "categoryCounts": [
+      {
+        "kind": "used",
+        "tokens": 243
+      },
+      {
+        "kind": "used",
+        "tokens": 10
+      },
+      {
+        "kind": "buffer",
+        "tokens": 33000
+      },
+      {
+        "kind": "free",
+        "tokens": 966747
+      }
+    ],
+    "computedComparisonMicros": 64026,
+    "completeUpcomingPromptIncluded": false,
+    "usedForAdmission": false,
+    "elapsedMs": 2571,
+    "killWaitMs": 13,
+    "markerUnchanged": true,
+    "markerSha256": "e5ffb1462171f63d8ca4f4297006652d524fda82d12840c72a75a10afcddbbb7",
+    "raw": "r117-context-census/live-denial.json"
+  },
+  "roleBounds": [
+    {
+      "role": "lead",
+      "model": "gpt-6-luna",
+      "boundMicros": 306000,
+      "capMicros": 300000,
+      "fits": false
+    },
+    {
+      "role": "writer",
+      "model": "claude-haiku-5-5",
+      "boundMicros": 820000,
+      "capMicros": 600000,
+      "fits": false
+    },
+    {
+      "role": "reviewer",
+      "model": "gpt-6-luna",
+      "boundMicros": 306000,
+      "capMicros": 400000,
+      "fits": true
+    }
+  ],
+  "ownerAudit": {
+    "raw": "r117-context-owner-after-validation.json",
+    "unchanged": false,
+    "stableInstallUnchanged": true,
+    "changed": [
+      "files:docs/design.md",
+      "metadata:index"
+    ],
+    "addedTracked": [
+      ".claude/skills/faber-ui/SKILL.md",
+      ".claude/skills/second-opinion/SKILL.md"
+    ],
+    "skippedProtectedPaths": [
+      ".claude/skills/faber-ui/SKILL.md",
+      ".claude/skills/second-opinion/SKILL.md"
+    ],
+    "ownerHead": "913fdf9ae89c2807b10bf4103fb5deed60fb4d8d",
+    "attribution": "Unknown; the changed owner checkout contains a separate commit. No owner file was restored or modified by this task."
+  },
+  "validation": {
+    "commands": [
+      {
+        "command": "npm run lint",
+        "started": "2026-10-14T14:18:24.132Z",
+        "exit": 0,
+        "seconds": 0.764,
+        "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\validation-r117-context-caching\\proof-01.log"
+      },
+      {
+        "command": "npm run typecheck",
+        "started": "2026-10-14T14:18:24.897Z",
+        "exit": 0,
+        "seconds": 0.775,
+        "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\validation-r117-context-caching\\proof-02.log"
+      },
+      {
+        "command": "npm run build",
+        "started": "2026-10-14T14:18:25.674Z",
+        "exit": 0,
+        "seconds": 3.538,
+        "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\validation-r117-context-caching\\proof-03.log"
+      },
+      {
+        "command": "cargo fmt --all --check",
+        "started": "2026-10-14T14:18:29.213Z",
+        "exit": 0,
+        "seconds": 1.653,
+        "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\validation-r117-context-caching\\proof-04.log"
+      },
+      {
+        "command": "cargo clippy --workspace --all-targets -- -D warnings",
+        "started": "2026-10-14T14:18:30.867Z",
+        "exit": 0,
+        "seconds": 1.281,
+        "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\validation-r117-context-caching\\proof-05.log"
+      },
+      {
+        "command": "cargo clippy -p faber --features test-hooks -- -D warnings",
+        "started": "2026-10-14T14:18:32.150Z",
+        "exit": 0,
+        "seconds": 6.245,
+        "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\validation-r117-context-caching\\proof-06.log"
+      },
+      {
+        "command": "cargo t --all",
+        "started": "2026-10-14T14:18:38.396Z",
+        "exit": 0,
+        "seconds": 1160.252,
+        "log": "C:\\Users\\Erick\\AppData\\Local\\Faber\\t13-exposure-20261014\\validation-r117-context-caching\\proof-07.log"
+      }
+    ],
+    "passed": 1390,
+    "failed": 0,
+    "notRun": 0,
+    "skipped": 0,
+    "qualificationHelperTests": 9,
+    "scriptedProjectsPeakMb": 235.4,
+    "ownedTree": {
+      "stop": 4,
+      "drop": 4,
+      "crash": 4
+    }
+  },
+  "realRun": {
+    "executed": false,
+    "settledCost": null,
+    "peakRamMb": null
+  },
+  "noRefusedDeletes": true
+}

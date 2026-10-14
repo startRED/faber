@@ -108,7 +108,9 @@ pub fn project_claude_args(launch: &ClaudeLaunch, role: crate::project::Role) ->
     let mut args = claude_args(&restricted);
     // The documented control covers most requests; the bound still covers the model's full output maximum.
     let settings = args.iter().position(|a| a == "--settings").expect("shared role exposure includes settings") + 1;
-    args[settings] = json!({"disableAllHooks":true,"env":{"CLAUDE_CODE_MAX_OUTPUT_TOKENS":"128000"}}).to_string();
+    // R117 prices input uncached; cache creation can cost more than that envelope.
+    args[settings] =
+        json!({"disableAllHooks":true,"env":{"CLAUDE_CODE_MAX_OUTPUT_TOKENS":"128000","DISABLE_PROMPT_CACHING":"1"}}).to_string();
     // Unlike side questions, mission sessions may resume with the same fixed policy.
     args.retain(|a| a != "--no-session-persistence");
     for a in [

@@ -273,6 +273,19 @@ fn project_controls_are_explicit_on_launch_and_resume_without_changing_chat() {
 }
 
 #[test]
+fn uncached_invocation_bound_disables_more_expensive_cache_writes_for_every_role() {
+    for role in ROLES {
+        for resume in [None, Some("5e27c797-25b6-434d-a0a2-0e0e0c32ef9e")] {
+            let args = project_claude_args(&launch(resume), role).unwrap();
+            let settings: Value = serde_json::from_str(after(&args, "--settings")).unwrap();
+            assert_eq!(settings["env"]["DISABLE_PROMPT_CACHING"], "1");
+        }
+    }
+    let args = faber_engine::claude::claude_args(&launch(None));
+    assert!(!args.iter().any(|arg| arg.contains("DISABLE_PROMPT_CACHING")));
+}
+
+#[test]
 fn project_policy_rejects_hidden_defaults_and_side_question_policy() {
     for role in ROLES {
         for missing_model in [true, false] {

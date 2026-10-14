@@ -89,6 +89,7 @@ fn run() -> io::Result<()> {
                 | "--live-claude-loadout"
                 | "--live-claude-native"
                 | "--live-claude-stop"
+                | "--live-claude-context"
                 | "--live-codex-stop"
                 | "--hidden-live"
         )

@@ -5,6 +5,13 @@ Task 13 and R96 remain incomplete. R117 supersedes the interrupted-reserve route
 in [the archived metering report](2026-10-14-self-development-interrupted-metering-stop.md).
 No measured overshoot reserve or invented safety factor is used.
 
+After the orchestrator restarted, b942eef's Windows and macOS CI were confirmed
+green. The [context/caching continuation](2026-10-14-self-development-context-census.md)
+records a regression-first correction disabling more-expensive Claude cache
+creation for the uncached bound, a fresh zero-model-turn preflight and a supported
+context-only count. That count omits the upcoming user prompt and cannot open
+admission. The authorized role-cap rejection and gate statuses below remain.
+
 ## Result and stop
 
 The latest cross-vendor review of `8a62018` is accepted: checks 1, 3, 4 and 5 are
