@@ -228,6 +228,42 @@ parallel, each on what it does best, and the result must read as if one careful 
 
 **Decision list.** Every project keeps a decision list with authors. The AI's decisions show as "not reviewed".
 
+### Running many workers
+
+Taken from Claude Code Projects and pushed further (AI proposal, not reviewed; research in
+[projects-orchestration.md](research/2026-10-14/projects-orchestration.md)).
+
+- **The lead routes every message.** A quick question is answered in place; new work goes to a new worker or to the
+  worker already in that area; several tasks in one message become several workers. It can list suggested workers
+  with "start all".
+- **The lead never reads the whole history.** It works at low effort from worker reports, recent turns and the
+  `.faber/` memory, so a project can run for weeks.
+- **A brief in five parts** goes to every worker, written by Faber, not by the user: what the project is for, where
+  the work happens, how a worker checks its work, what to do when something is missing, and what needs approval.
+- **A new project starts with proposals.** Faber reads the recent work and proposes the first tasks; the first worker
+  only reads and proposes next steps.
+- **Missing-item gate.** A worker finishes through a report with required "assumed" and "could not reach" fields. A
+  missing login, tool, file or secret, or a stand-in (a mock, a fake key, an invented path), keeps the step waiting
+  with the missing item named, and "done" is refused. The user's answer goes into the brief, and every new brief is
+  checked against past gaps first. The reviewer from the other vendor checks "assumed" against the diff.
+- **A canary before a batch.** When the lead fans out similar workers (one per repository, file, chapter or
+  thumbnail), one runs first and passes its proof and a review from the other vendor; its mistakes become rules in
+  the brief, then the rest start in parallel. Batches of three or fewer, or with a very cheap proof, skip it.
+- **Workers leave a written state and exit.** A worker's lease renews only with evidence of progress. When it lapses
+  or the work ends, the worker writes its state (step, branch, next step, proof, files) to `.faber/` and its process
+  closes. A follow-up resumes the session while the one-hour cache is warm and starts a fresh one from that state when
+  it is cold, showing both token estimates. The same file serves vendor switches and crash recovery.
+- **Limits in plain words become real limits.** "At most two at a time" or "ask before starting" is stored as a
+  setting the engine enforces, not a hint for the model. New workers have a daily cap.
+- **After delivery the worker keeps watching.** A worker that opened a pull request fixes failing checks and review
+  comments until it lands. Its row offers the next step as a plain button ("Fix the failing check", "Publish"), and
+  publishing still follows guardrail 3.
+- **The progress view adds "Waiting on you" and "Landing"** (approved, waiting to merge), and a worker idle for a week
+  is resolved by itself.
+- **A library per project** lists the files the user added and the files workers produced.
+- **One question explains a stall:** for every worker, what it was asked, what it assumed, what it could not reach and
+  what it waits on.
+
 ### Toolbox
 
 | Tool | What it does |
@@ -536,7 +572,7 @@ each version, the benchmark measures it, and the version ships only with the mai
 | :-- | :--- | :--- |
 | 1 | New base | the FSL-1.1-ALv2 license and these documents, Faber's own Rust test runner, the design system and themes, the identity, the shell layout and running list, the tray number and notifications, the first run and tutorial, Settings, and the CLI download written straight to disk. No public release: it is checked in the live app and a local installer build |
 | 2 | Full Chat | the benchmark, visual answers, asking Faber about Faber, search, moving a chat to a project, Auto learning from approvals, the draft routed at most twice per message, reporting failed writes of conversation and project files, and closing the engine gaps of rules 2, 3, 5 and 6 |
-| 3 | Projects with the lead agent | the lead agent, toolbox, 15 powers, modes, guardrails and big-work rules, the progress view, the decision list, the catalog, learning and the `.faber/` folder, and rules 4 and 7 |
+| 3 | Projects with the lead agent | the lead agent, toolbox, 15 powers, modes, guardrails and big-work rules, the rules for running many workers, the progress view, the decision list, the catalog, learning and the `.faber/` folder, and rules 4 and 7 |
 | 4 | Excellent software, ending when Faber builds Faber | nightly CLI version tests and the live manifest, one shared copy of each MCP server per project, and a RAM budget for parallel workers |
 | 5 | First public version | |
 | 6 | Image and design | creative drafts, blind judging and comparison views |
