@@ -29,8 +29,26 @@ fn local_folder_with(saved: &str, remote_drive: &dyn Fn(char) -> bool) -> Result
     {
         return Err("error.folder.notLocal");
     }
-    // Walking down from the top without following anything: a link or junction on the way may lead to a share, and reading
-    // where it leads would already contact it, so it is refused as it is met.
+    #[cfg(windows)]
+    refuse_links(path)?;
+    // Nothing on the way is a link now; resolving only normalizes the form, and the result is checked again.
+    let real = std::fs::canonicalize(path).map_err(|_| "error.folder.missing")?;
+    if let Some(Component::Prefix(prefix)) = real.components().next()
+        && !matches!(prefix.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_))
+    {
+        return Err("error.folder.notLocal");
+    }
+    if !real.is_dir() {
+        return Err("error.folder.missing");
+    }
+    Ok(strip_verbatim(real))
+}
+
+/// Walking down from the top without following anything: a link or junction on the way may lead to a share, and reading
+/// where it leads would already contact it, so it is refused as it is met. Only Windows has shares reached through links;
+/// on macOS and Linux the system itself lives behind links (`/var`, `/tmp`), so they are followed there.
+#[cfg(windows)]
+fn refuse_links(path: &Path) -> Result<(), &'static str> {
     let mut walked = PathBuf::new();
     for part in path.components() {
         walked.push(part);
@@ -43,17 +61,7 @@ fn local_folder_with(saved: &str, remote_drive: &dyn Fn(char) -> bool) -> Result
             Err(_) => return Err("error.folder.missing"),
         }
     }
-    // Nothing on the way is a link now; resolving only normalizes the form, and the result is checked again.
-    let real = std::fs::canonicalize(path).map_err(|_| "error.folder.missing")?;
-    if let Some(Component::Prefix(prefix)) = real.components().next()
-        && !matches!(prefix.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_))
-    {
-        return Err("error.folder.notLocal");
-    }
-    if !real.is_dir() {
-        return Err("error.folder.missing");
-    }
-    Ok(strip_verbatim(real))
+    Ok(())
 }
 
 /// Whether Windows says this drive letter is a network drive. Other systems have no drive letters.
@@ -125,19 +133,18 @@ mod tests {
     }
 
     /// A folder, and a link to it made where the system lets a test make one (Windows needs a privilege for that).
+    #[cfg(windows)]
     fn linked() -> Option<(tempfile::TempDir, PathBuf)> {
         let dir = tempfile::tempdir().unwrap();
         let real = dir.path().join("real");
         std::fs::create_dir(&real).unwrap();
         let link = dir.path().join("link");
-        #[cfg(unix)]
-        let made = std::os::unix::fs::symlink(&real, &link);
-        #[cfg(windows)]
         let made = std::os::windows::fs::symlink_dir(&real, &link);
         made.ok().map(|()| (dir, link))
     }
 
     #[test]
+    #[cfg(windows)]
     fn a_link_is_refused_where_it_stands_and_so_is_anything_below_it() {
         let Some((_dir, link)) = linked() else { return };
         assert_eq!(local_folder(link.to_str().unwrap()), Err("error.folder.link"));
