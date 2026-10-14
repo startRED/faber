@@ -1,7 +1,7 @@
 //! The app scenarios: what a person sees and does in a chat, in settings, and how much memory the app uses.
 
 use super::{Result, Scenario, ask, claude_chat, ensure, eventually, no_cli, pass_look, pause, same, start_settings, system_motion};
-use crate::app::Ctx;
+use crate::app::{Ctx, Opened};
 use crate::page::{Page, css, role};
 use serde_json::json;
 use std::time::{Duration, Instant};
@@ -648,11 +648,53 @@ fn idle_memory_with(ctx: &mut Ctx, reduce: bool) -> Result {
     ensure(stopped.as_str().is_some_and(|all| all.contains("paused") && !all.contains("running")), || {
         format!("the dust should stop while the window is hidden, got {stopped}")
     })?;
+    glyph_field_cost(ctx, &mut app)?;
     pause(10.0);
     let motion = app.page.eval("document.documentElement.dataset.motion")?;
     let (mb, _) = ctx.memory_mb(app.id)?;
     ctx.notes.push(format!("idle on the new conversation with the dust ({} motion): {mb:.0} MB", motion.as_str().unwrap_or("?")));
     ensure(mb <= BUDGET_MB, || format!("{mb:.0} MB is over the {BUDGET_MB} MB budget"))
+}
+
+/// The glyph field animates only in a focused window. The hidden test window must never take focus from the person at
+/// the PC, so the page is told whether it has focus, and the processor time of the whole tree is read over a few seconds at
+/// rest, with the field shimmering, and with a ripple started every 400 ms.
+fn glyph_field_cost(ctx: &mut Ctx, app: &mut Opened) -> Result {
+    let live = "document.querySelector('canvas.amb-glyphs')?.dataset.live";
+    let focus = |page: &mut Page, on: bool| {
+        page.eval(&format!(
+            "(() => {{ document.hasFocus = () => {on}; window.dispatchEvent(new Event('{}')); }})()",
+            if on { "focus" } else { "blur" }
+        ))
+        .map(|_| ())
+    };
+    let window = |ctx: &mut Ctx, app: &mut Opened, seconds: f64| -> std::result::Result<(f64, f64), String> {
+        let before = ctx.cpu_ms(app.id)?;
+        pause(seconds);
+        let used = ctx.cpu_ms(app.id)? - before;
+        let (mb, _) = ctx.memory_mb(app.id)?;
+        Ok((used / (seconds * 10.0), mb))
+    };
+    // The beam and its dust are switched off for these readings, so the numbers are the field's own.
+    app.page.eval("document.documentElement.style.setProperty('--amb-beam', 'none')")?;
+    focus(&mut app.page, false)?;
+    same(app.page.eval(live)?.as_str(), Some("off"), "the glyph field rests in an unfocused window")?;
+    let (rest, rest_mb) = window(ctx, app, 6.0)?;
+    focus(&mut app.page, true)?;
+    app.page.wait_for("the glyph field to run in a focused window", &format!("{live} === 'on'"))?;
+    let (shimmer, shimmer_mb) = window(ctx, app, 6.0)?;
+    app.page.eval(
+        "(() => { const area = document.querySelector('.work'); const box = area.getBoundingClientRect(); window.__ripples = setInterval(() => area.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: box.left + 40, clientY: box.top + 40 })), 400); })()",
+    )?;
+    let (ripple, ripple_mb) = window(ctx, app, 6.0)?;
+    app.page.eval("clearInterval(window.__ripples)")?;
+    focus(&mut app.page, false)?;
+    same(app.page.eval(live)?.as_str(), Some("off"), "the glyph field stops when the window loses focus")?;
+    ctx.notes.push(format!(
+        "glyph field, processor of one core and memory: at rest {rest:.1}% {rest_mb:.0} MB, shimmering {shimmer:.1}% {shimmer_mb:.0} MB, rippling {ripple:.1}% {ripple_mb:.0} MB"
+    ));
+    app.page.eval("document.documentElement.style.removeProperty('--amb-beam')")?;
+    ensure(ripple_mb <= BUDGET_MB, || format!("{ripple_mb:.0} MB is over the {BUDGET_MB} MB budget while rippling"))
 }
 
 fn memory_after_every_look(ctx: &mut Ctx) -> Result {

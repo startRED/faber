@@ -1,13 +1,14 @@
 import { createEffect, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 import type { Vendor } from './api.ts';
-import { appliedLook } from './appearance.ts';
+import { appliedLook, motion, windowHidden } from './appearance.ts';
 import { t } from './i18n.ts';
 import { vendorName } from './models.ts';
 
 // The effects of the new conversation (docs/design.md, "Ambient"). Which one shows comes from the look: the tokens
-// --amb-beam, --amb-loom and --amb-flow are `none` for a theme that does not have it, and for every theme when the
-// ambient switch is off. Effects sit behind the greeting and never behind text the user reads. Nothing here runs a frame
-// loop: the beam and the dust are CSS, and the dust only twinkles (opacity of three layers, on the compositor).
+// --amb-beam, --amb-loom, --amb-flow and --amb-glyphs are `none` for a theme that does not have it, and for every theme
+// when the ambient switch is off. Effects sit behind the greeting and never behind text the user reads. The beam and the
+// dust are CSS, and the dust only twinkles (opacity of three layers, on the compositor); the glyph field is the one
+// canvas loop.
 
 const GRAINS = 72;
 const FADE = 28; // a grain fades to nothing within this many pixels of a text block
@@ -55,6 +56,187 @@ export function dustShadows(grains: Grain[], boxes: Box[], originX: number, colo
   return out.map((list) => list.join(','));
 }
 
+// The glyph field: a faint grid of letters and digits on one canvas. A few cells change every `TICK` ms, and a click on
+// an empty spot sends a ring that tints the cells it crosses with the accent. Only cells that change are repainted, the
+// loop sleeps between ticks, and it stops entirely when the window is hidden or unfocused or motion is not `full`.
+const CELL = 16;
+const CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789';
+const TICK = 140;
+// A ripple repaints at most this often: a ring moves less than a cell between two paints, and a 240 Hz screen would
+// otherwise composite the stage 240 times a second.
+const RIPPLE_STEP = 33;
+const [RIPPLE_MS, RIPPLE_SPEED, RIPPLE_BAND] = [1100, 0.34, 34];
+const RIPPLE_REACH = RIPPLE_MS * RIPPLE_SPEED + RIPPLE_BAND;
+// Clicks on these keep their own meaning and send no ripple.
+const BUSY = 'button, a, input, textarea, select, label, [contenteditable], .composer, .try, .resume, .runcol';
+
+/** How strongly a ripple tints a cell `d` px from the click, `age` ms after it: a band that travels out and fades, 0 to 1. */
+export function rippleTint(d: number, age: number): number {
+  if (age < 0 || age >= RIPPLE_MS) return 0;
+  const band = 1 - Math.abs(d - age * RIPPLE_SPEED) / RIPPLE_BAND;
+  return band <= 0 ? 0 : band * (1 - age / RIPPLE_MS) ** 2;
+}
+
+/** Whether the field animates: the effect is on, motion is full, and the window is shown and focused. */
+export const fieldRuns = (s: { on: boolean; motion: string; hidden: boolean; focused: boolean }) => s.on && s.motion === 'full' && !s.hidden && s.focused;
+
+type Ripple = { x: number; y: number; t: number };
+
+function GlyphField(props: { boxes: () => Box[] }) {
+  let canvas!: HTMLCanvasElement;
+  let ctx: CanvasRenderingContext2D | null = null;
+  let [cols, rows] = [0, 0];
+  let glyph = new Uint8Array(0);
+  let alpha = new Float32Array(0);
+  let clear = new Float32Array(0);
+  let tint = new Float32Array(0);
+  let [ink, accent] = ['', ''];
+  let ripples: Ripple[] = [];
+  let [raf, timer, last] = [0, 0, 0];
+  let seed = 11;
+  const random = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const [on, setOn] = createSignal(false);
+  const [focused, setFocused] = createSignal(document.hasFocus());
+  const live = () => fieldRuns({ on: on(), motion: motion(), hidden: windowHidden(), focused: focused() });
+
+  const cell = (i: number) => {
+    const [x, y] = [(i % cols) * CELL, Math.floor(i / cols) * CELL];
+    ctx!.clearRect(x, y, CELL, CELL);
+    const k = clear[i]!;
+    if (k <= 0) return;
+    const ch = CHARS[glyph[i]!]!;
+    ctx!.globalAlpha = alpha[i]! * k;
+    ctx!.fillStyle = ink;
+    ctx!.fillText(ch, x + CELL / 2, y + CELL / 2);
+    if (tint[i]! > 0.01) {
+      ctx!.globalAlpha = Math.min(1, tint[i]! * 0.9) * k;
+      ctx!.fillStyle = accent;
+      ctx!.fillText(ch, x + CELL / 2, y + CELL / 2);
+    }
+  };
+
+  // Size the canvas to the greeting area, read the colours of the look, and paint every cell once.
+  const layout = () => {
+    const box = canvas.parentElement?.getBoundingClientRect();
+    const style = getComputedStyle(canvas);
+    setOn(style.display !== 'none');
+    if (!box || !on()) return;
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    [cols, rows] = [Math.ceil(box.width / CELL), Math.ceil(box.height / CELL)];
+    canvas.width = Math.round(box.width * dpr);
+    canvas.height = Math.round(box.height * dpr);
+    [ink, accent] = [style.color, style.caretColor];
+    const n = cols * rows;
+    if (glyph.length !== n) {
+      glyph = Uint8Array.from({ length: n }, () => Math.floor(random() * CHARS.length));
+      alpha = Float32Array.from({ length: n }, () => 0.05 + random() * 0.17);
+      tint = new Float32Array(n);
+    }
+    const boxes = props.boxes();
+    // A glyph reaches half a cell's diagonal from its centre, so the fade starts that much further from the text.
+    const reach = CELL * 0.71;
+    clear = Float32Array.from({ length: n }, (_, i) => {
+      const room = clearance(boxes, (i % cols) * CELL + CELL / 2, Math.floor(i / cols) * CELL + CELL / 2) * FADE;
+      return Math.max(0, Math.min(1, (room - reach) / (FADE - reach)));
+    });
+    ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.font = `${CELL - 5}px ${style.fontFamily}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (let i = 0; i < n; i++) cell(i);
+  };
+
+  const shimmer = () => {
+    for (let j = Math.ceil((cols * rows) / 60); j > 0; j--) {
+      const i = Math.floor(random() * cols * rows);
+      glyph[i] = Math.floor(random() * CHARS.length);
+      alpha[i] = 0.05 + random() * 0.17;
+      cell(i);
+    }
+  };
+
+  // Repaint only the cells whose tint changed, inside the reach of every ripple still alive or just ended.
+  const spread = (now: number) => {
+    const ended = ripples.filter((r) => now - r.t >= RIPPLE_MS);
+    ripples = ripples.filter((r) => now - r.t < RIPPLE_MS);
+    for (const area of [...ripples, ...ended]) {
+      const [c0, c1] = [Math.max(0, Math.floor((area.x - RIPPLE_REACH) / CELL)), Math.min(cols - 1, Math.floor((area.x + RIPPLE_REACH) / CELL))];
+      const [r0, r1] = [Math.max(0, Math.floor((area.y - RIPPLE_REACH) / CELL)), Math.min(rows - 1, Math.floor((area.y + RIPPLE_REACH) / CELL))];
+      for (let r = r0; r <= r1; r++)
+        for (let c = c0; c <= c1; c++) {
+          const i = r * cols + c;
+          let k = 0;
+          for (const ring of ripples) k = Math.max(k, rippleTint(Math.hypot(c * CELL + CELL / 2 - ring.x, r * CELL + CELL / 2 - ring.y), now - ring.t));
+          if (Math.abs(k - tint[i]!) < 0.01) continue;
+          tint[i] = k;
+          cell(i);
+        }
+    }
+  };
+
+  const stop = () => {
+    cancelAnimationFrame(raf);
+    clearTimeout(timer);
+    [raf, timer] = [0, 0];
+  };
+  const frame = (now: number) => {
+    raf = 0;
+    if (!live() || !ctx) return;
+    if (now - last >= TICK) {
+      last = now;
+      shimmer();
+    }
+    spread(now);
+    schedule();
+  };
+  // The loop sleeps between paints: about 30 a second while a ripple runs, about seven for the shimmer alone.
+  const schedule = () => {
+    if (raf || timer || !live()) return;
+    timer = window.setTimeout(
+      () => {
+        timer = 0;
+        raf = requestAnimationFrame(frame);
+      },
+      ripples.length ? RIPPLE_STEP : TICK,
+    );
+  };
+
+  const press = (e: PointerEvent) => {
+    if (e.button !== 0 || !live() || (e.target as Element).closest?.(BUSY)) return;
+    const box = canvas.getBoundingClientRect();
+    ripples = [...ripples.slice(-3), { x: e.clientX - box.left, y: e.clientY - box.top, t: performance.now() }];
+    if (!raf) {
+      stop();
+      raf = requestAnimationFrame(frame);
+    }
+  };
+
+  onMount(() => {
+    const area = canvas.parentElement!.parentElement!;
+    const focus = () => setFocused(document.hasFocus());
+    window.addEventListener('focus', focus);
+    window.addEventListener('blur', focus);
+    area.addEventListener('pointerdown', press);
+    onCleanup(() => {
+      stop();
+      window.removeEventListener('focus', focus);
+      window.removeEventListener('blur', focus);
+      area.removeEventListener('pointerdown', press);
+    });
+  });
+
+  // Ambient measures the text blocks on every resize and look change; the field follows.
+  createEffect(() => {
+    props.boxes();
+    layout();
+  });
+  createEffect(() => (live() ? schedule() : stop()));
+
+  return <canvas ref={(el) => (canvas = el)} class="amb-glyphs" data-live={live() ? 'on' : 'off'} />;
+}
+
 const THROUGH_CLAUDE = 'M40 100H86Q102 100 102 84V58Q102 46 116 46H146M206 46H226Q240 46 240 60V86Q240 100 254 100H292';
 const THROUGH_CODEX = 'M40 100H86Q102 100 102 116V142Q102 154 116 154H146M206 154H226Q240 154 240 140V114Q240 100 254 100H292';
 const STRAIGHT = 'M40 100H292';
@@ -71,6 +253,7 @@ export function Ambient(props: { vendors: Vendor[]; avoid: () => Element[] }) {
   let color = '243,238,226';
   const grains = makeGrains();
   const [shadows, setShadows] = createSignal<string[]>(['', '', '']);
+  const [blocks, setBlocks] = createSignal<Box[]>([]);
 
   const paint = () => setShadows(dustShadows(grains, boxes, Math.min(width - BEAM_RIGHT, BEAM_MAX), color));
 
@@ -83,6 +266,7 @@ export function Ambient(props: { vendors: Vendor[]; avoid: () => Element[] }) {
       const r = e.getBoundingClientRect();
       return { l: r.left - area.left, t: r.top - area.top, r: r.right - area.left, b: r.bottom - area.top };
     });
+    setBlocks(boxes);
     paint();
   };
 
@@ -107,6 +291,7 @@ export function Ambient(props: { vendors: Vendor[]; avoid: () => Element[] }) {
 
   return (
     <div ref={(el) => (layer = el)} class="ambient" aria-hidden="true">
+      <GlyphField boxes={blocks} />
       <div class="amb amb-beam">
         <div class="beam">
           <i />
