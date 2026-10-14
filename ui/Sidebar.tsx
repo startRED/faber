@@ -1,5 +1,6 @@
 import { createEffect, createSignal, For, on, Show } from 'solid-js';
-import type { Area, Project, RunningItem, Summary, Vendor } from './api.ts';
+import { api, type Area, type Project, type RunningItem, type Summary, type Vendor } from './api.ts';
+import { openMenu } from './contextmenu.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { lang, t } from './i18n.ts';
 import { en, type Key } from './locales/en.ts';
@@ -8,6 +9,33 @@ import { animateList, keepForExit } from './motion.ts';
 import { vendorName } from './models.ts';
 import type { Place } from './running.ts';
 import { groupChats, matches, type Quotas, showsChats, tailOf, tightest } from './sidebar.ts';
+
+/** The name of a conversation while it is being renamed: Enter keeps it, Esc and leaving the box too when nothing changed. */
+function RenameBox(props: { title: string; onDone: (title?: string) => void }) {
+  let done = false;
+  const finish = (title?: string) => {
+    if (done) return;
+    done = true;
+    props.onDone(title);
+  };
+  return (
+    <input
+      class="rename"
+      value={props.title}
+      maxLength={120}
+      aria-label={t('menu.renameLabel')}
+      ref={(el) => queueMicrotask(() => (el.focus(), el.select()))}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && !e.isComposing) finish(e.currentTarget.value);
+        else if (e.key === 'Escape') finish();
+        else return;
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+      onBlur={(e) => finish(e.currentTarget.value)}
+    />
+  );
+}
 
 export function untilReset(resetsAt: number): string {
   const hours = (resetsAt * 1000 - Date.now()) / 3_600_000;
@@ -50,6 +78,7 @@ interface Props {
  * bottom Settings and the quota of each connected vendor. */
 export function Sidebar(props: Props) {
   const [confirming, setConfirming] = createSignal<string>();
+  const [renaming, setRenaming] = createSignal<string>();
   // The search box filters the titles on screen; it never leaves the window and nothing is asked of the engine.
   const [query, setQuery] = createSignal('');
   const searching = () => query().trim() !== '';
@@ -87,11 +116,32 @@ export function Sidebar(props: Props) {
   };
 
   const Row = (row: { c: Summary }) => (
-    <div class="crow">
-      <button class="item" aria-current={row.c.id === props.place.id} onClick={() => props.onOpen(row.c)}>
-        <span>{row.c.title}</span>
-        <Show when={props.running.find((r) => r.conversationId === row.c.id)?.waitUntil}>{(at) => <span class="waiting-label" title={t('run.waiting', { when: untilReset(at()) })}>{t('run.waiting', { when: untilReset(at()) })}</span>}</Show>
-      </button>
+    <div
+      class="crow"
+      onContextMenu={(e) =>
+        openMenu(e, [
+          { id: 'rename', label: t('menu.rename'), run: () => setRenaming(row.c.id) },
+          { id: 'delete', label: t('menu.delete'), danger: true, confirm: t('side.confirmDelete'), run: () => props.onRemove(row.c.id) },
+        ])
+      }
+    >
+      <Show
+        when={renaming() !== row.c.id}
+        fallback={
+          <RenameBox
+            title={row.c.title}
+            onDone={(title) => {
+              setRenaming(undefined);
+              if (title?.trim() && title.trim() !== row.c.title) void api.rename(row.c.id, title);
+            }}
+          />
+        }
+      >
+        <button class="item" aria-current={row.c.id === props.place.id} onClick={() => props.onOpen(row.c)}>
+          <span>{row.c.title}</span>
+          <Show when={props.running.find((r) => r.conversationId === row.c.id)?.waitUntil}>{(at) => <span class="waiting-label" title={t('run.waiting', { when: untilReset(at()) })}>{t('run.waiting', { when: untilReset(at()) })}</span>}</Show>
+        </button>
+      </Show>
       <button class="x" classList={{ confirm: confirming() === row.c.id }} aria-label={t('side.delete', { title: row.c.title })} onClick={() => remove(row.c.id)}>
         {confirming() === row.c.id ? t('side.confirmDelete') : '×'}
       </button>
@@ -144,7 +194,16 @@ export function Sidebar(props: Props) {
                 const shown = keepForExit(() => expanded(p));
                 return (
                   <div class="proj">
-                    <div class="prow">
+                    <div
+                      class="prow"
+                      onContextMenu={(e) =>
+                        openMenu(e, [
+                          { id: 'new', label: t('menu.newHere'), run: () => (toggle(p.id, true), props.onNewIn(p.id)) },
+                          { id: 'open', label: t('menu.openFolder'), run: () => void api.showProject(p.id) },
+                          { id: 'remove', label: t('menu.removeProject'), danger: true, confirm: t('menu.removeConfirm'), disabled: tail().running, run: () => void api.removeProject(p.id) },
+                        ])
+                      }
+                    >
                       <button
                         class="item"
                         aria-current={here() ? (props.place.id ? 'location' : 'true') : undefined}

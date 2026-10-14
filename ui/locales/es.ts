@@ -644,4 +644,31 @@ export const es: Messages = {
   "error.plan.overlap": "Escrituras no ordenadas se solapan en los mismos archivos fuente.",
   // Native speaker must translate (needs native review).
   "crumb.separator": "\u203a",
+  // Right-click menus (ui/ContextMenu.tsx).
+  // Native speaker must translate (needs native review).
+  "menu.label": "Acciones",
+  // Native speaker must translate (needs native review).
+  "menu.rename": "Cambiar el nombre",
+  // Native speaker must translate (needs native review).
+  "menu.renameLabel": "Nombre de la conversación",
+  // Native speaker must translate (needs native review).
+  "menu.delete": "Borrar",
+  // Native speaker must translate (needs native review).
+  "menu.newHere": "Conversación nueva en este proyecto",
+  // Native speaker must translate (needs native review).
+  "menu.openFolder": "Abrir carpeta",
+  // Native speaker must translate (needs native review).
+  "menu.removeProject": "Quitar de Faber",
+  // Native speaker must translate (needs native review).
+  "menu.removeConfirm": "¿Quitar?",
+  // Native speaker must translate (needs native review).
+  "menu.copy": "Copiar",
+  // Native speaker must translate (needs native review).
+  "menu.cut": "Cortar",
+  // Native speaker must translate (needs native review).
+  "menu.paste": "Pegar",
+  // Native speaker must translate (needs native review).
+  "menu.selectAll": "Seleccionar todo",
+  // Native speaker must translate (needs native review).
+  "menu.redo": "Rehacer",
 };

@@ -644,4 +644,22 @@ export const ptBR: Messages = {
   "error.plan.overlap": "Escritores não ordenados sobrepõem os mesmos arquivos fonte.",
   // Native speaker must translate (needs native review).
   "crumb.separator": "\u203a",
+  // Right-click menus (ui/ContextMenu.tsx).
+  // Native speaker must translate (needs native review).
+  "menu.label": "Ações",
+  "menu.rename": "Mudar o nome",
+  // Native speaker must translate (needs native review).
+  "menu.renameLabel": "Nome da conversa",
+  "menu.delete": "Apagar",
+  "menu.newHere": "Nova conversa neste projeto",
+  "menu.openFolder": "Abrir pasta",
+  "menu.removeProject": "Remover do Faber",
+  // Native speaker must translate (needs native review).
+  "menu.removeConfirm": "Remover?",
+  "menu.copy": "Copiar",
+  "menu.cut": "Recortar",
+  "menu.paste": "Colar",
+  "menu.selectAll": "Selecionar tudo",
+  // Native speaker must translate (needs native review).
+  "menu.redo": "Refazer",
 };

@@ -286,6 +286,13 @@ async fn show_file(app: AppHandle, faber: State<'_, Faber>, id: String, path: St
     app.opener().reveal_item_in_dir(source).map_err(|e| e.to_string())
 }
 
+/// Opens a project's folder in the file manager.
+#[tauri::command]
+async fn show_project(app: AppHandle, faber: State<'_, Faber>, id: String) -> Res<()> {
+    let project = faber.engine.project(&id)?;
+    app.opener().open_path(project.path, None::<&str>).map_err(|e| e.to_string())
+}
+
 /// An image from a chat workspace as a data URL, so the page never reads the disk itself.
 #[tauri::command]
 async fn read_image(faber: State<'_, Faber>, id: String, path: String) -> Res<Option<String>> {
@@ -750,6 +757,8 @@ fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Resul
         .inner_size(1280.0, 800.0)
         .min_inner_size(720.0, 480.0)
         .background_color(Color(r, g, b, 0xff))
+        // The "Paste" of the right-click menu reads the clipboard; without this WebView2 asks the person every time.
+        .enable_clipboard_access()
         // The page never leaves Faber; a web link that slips through opens in the browser instead.
         .on_navigation(move |url| {
             let inside = url.scheme() == "tauri"
@@ -933,6 +942,7 @@ fn main() {
             add_project,
             save_file,
             show_file,
+            show_project,
             read_image,
             open_terminal,
             open_link,

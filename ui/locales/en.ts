@@ -536,6 +536,20 @@ export const en = {
   "error.plan.readOnlyWrites": "A read-only task claims permission to write files.",
   "error.plan.overlap": "Unordered writers overlap the same source files.",
   "crumb.separator": "\u203a",
+  // Right-click menus (ui/ContextMenu.tsx).
+  "menu.label": "Actions",
+  "menu.rename": "Rename",
+  "menu.renameLabel": "Conversation name",
+  "menu.delete": "Delete",
+  "menu.newHere": "New conversation in this project",
+  "menu.openFolder": "Open folder",
+  "menu.removeProject": "Remove from Faber",
+  "menu.removeConfirm": "Remove?",
+  "menu.copy": "Copy",
+  "menu.cut": "Cut",
+  "menu.paste": "Paste",
+  "menu.selectAll": "Select all",
+  "menu.redo": "Redo",
 } as const;
 
 export type Key = keyof typeof en;
