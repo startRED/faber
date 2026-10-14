@@ -16,3 +16,6 @@ src-tauri/gen/
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
+
+# Impeccable keeps its detector config in git; its hook cache is local.
+/.impeccable/hook.cache.json
