@@ -494,6 +494,21 @@ async fn interrupting_a_running_conversation_drops_its_row() {
 }
 
 #[tokio::test]
+async fn the_engine_is_working_from_the_first_row_until_the_last_one_leaves() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "interrupt"));
+    let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], f.spawn.clone(), None);
+    assert!(!engine.is_working(), "nothing has been sent");
+    let id = engine.send(request(Area::Chat, None, "Write a 600-word essay about the history of bread.", "claude")).unwrap();
+    lists_until(&mut rx, WAIT, |rows| !rows.is_empty()).await;
+    assert!(engine.is_working());
+    engine.interrupt(&id);
+    lists_until(&mut rx, WAIT, |rows| rows.is_empty()).await;
+    assert!(!engine.is_working());
+    engine.shutdown();
+}
+
+#[tokio::test]
 async fn removing_a_running_conversation_drops_its_row() {
     let dir = tempfile::tempdir().unwrap();
     let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], fake(fixture("claude", "tools")).spawn, None);

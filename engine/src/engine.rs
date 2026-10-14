@@ -535,6 +535,11 @@ impl Engine {
             Some(TerminalCommand { command: cli.command, args, cwd: c.opts.data_dir.clone() })
         })
     }
+    /// Whether any answer is streaming or waits for the user: the running list is not empty. The shell uses it to hold back
+    /// anything that would end the process (installing an update).
+    pub fn is_working(&self) -> bool {
+        self.with(|c| !c.running.items.is_empty())
+    }
     pub fn shutdown(&self) {
         self.with(|c| {
             let active: Vec<_> = c.live.keys().cloned().collect();
@@ -931,9 +936,9 @@ impl Core {
                 if !c.messages.is_empty() {
                     self.save(conv);
                 }
-                // The turn's reply now names its model.
+                // The turn's reply now names its model: the screen hears it now, not with the first word.
                 self.refresh_running();
-                return;
+                return self.push(conv, turn_id.as_deref(), true);
             }
             EngineEvent::Break { final_answer } => {
                 if final_answer && self.live.get(conv).is_some_and(|l| !l.answer_started) {

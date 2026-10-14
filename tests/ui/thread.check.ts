@@ -4,6 +4,7 @@ import themes from '../../src-tauri/src/themes.json';
 import { Composer } from '../../ui/Composer.tsx';
 import { Thread } from '../../ui/Thread.tsx';
 import type { Message } from '../../ui/api.ts';
+import { t } from '../../ui/i18n.ts';
 import { check, equal, ok } from './check.ts';
 
 check('thread: ten tool steps and narration fold into one activity row above the final answer', async () => {
@@ -36,6 +37,55 @@ check('thread: ten tool steps and narration fold into one activity row above the
     // Older conversations without recorded boundaries keep their full text.
     setMessage({ ...message(), textBreaks: undefined, activityEnd: undefined });
     ok(root.querySelector('.ai > .md')!.textContent?.includes('Checking the files'));
+  } finally {
+    dispose();
+    root.remove();
+  }
+});
+
+check('thread: with Auto the model name shows as soon as it is chosen, while the answer streams, and stays the same at the end', () => {
+  const root = document.createElement('div');
+  document.body.append(root);
+  const [message, setMessage] = createSignal<Message>({ id: 'auto-name', role: 'assistant', at: 0, status: 'streaming', text: '', reason: 'reason.routing' });
+  const dispose = render(() => createComponent(Thread, {
+    get messages() { return [message()]; }, from: 0, conversationId: 'auto-name', options: [], onBranch: () => {},
+  }), root);
+  const header = () => root.querySelector<HTMLElement>('.model')!;
+  const name = () => header().children[1]!.textContent;
+  try {
+    equal(header().querySelector('b')!.textContent, 'Auto');
+    equal(header().querySelector('em')!.textContent, `· ${t('reason.routing')}`, 'while Auto is still choosing it says only that');
+    equal(header().children.length, 2, 'with no name slot yet');
+    const choosing = header().getBoundingClientRect().height;
+    setMessage({ ...message(), vendor: 'claude', model: 'claude-haiku-5-5', effort: 'medium' });
+    equal(name(), 'Haiku 5.5', 'the name shows before the first word');
+    equal(header().getBoundingClientRect().height, choosing, 'and the header keeps its height');
+    setMessage({ ...message(), text: 'Sunlight cont' });
+    equal(name(), 'Haiku 5.5', 'and stays while the words arrive');
+    setMessage({ ...message(), status: 'done' });
+    equal(name(), 'Haiku 5.5', 'and is the same when the answer ends');
+  } finally {
+    dispose();
+    root.remove();
+  }
+});
+
+check('thread: a model the CLI never named reads the same while streaming and at the end, and never as "Codex Codex"', () => {
+  const root = document.createElement('div');
+  document.body.append(root);
+  const [message, setMessage] = createSignal<Message>({ id: 'codex-name', role: 'assistant', at: 0, status: 'streaming', text: 'The', vendor: 'codex' });
+  const dispose = render(() => createComponent(Thread, {
+    get messages() { return [message()]; }, from: 0, conversationId: 'codex-name', options: [], onBranch: () => {},
+  }), root);
+  const name = () => root.querySelector<HTMLElement>('.model')!.children[1]!.textContent;
+  try {
+    equal(name(), t('model.default'));
+    setMessage({ ...message(), model: 'codex' });
+    equal(name(), t('model.default'), "the engine's stand-in id is no name");
+    setMessage({ ...message(), status: 'done' });
+    equal(name(), t('model.default'), 'and the end changes nothing');
+    setMessage({ ...message(), model: 'gpt-6-luna' });
+    equal(name(), 'GPT-6 Luna');
   } finally {
     dispose();
     root.remove();

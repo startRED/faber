@@ -1095,6 +1095,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "faber-engine",
+ "junction",
  "notify-rust",
  "serde",
  "serde_json",
@@ -1105,6 +1106,8 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
