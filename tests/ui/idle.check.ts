@@ -168,7 +168,8 @@ check('idle: a look with no effects of its own gets a drifting light, off with t
     await settle();
     const light = host.querySelector<HTMLElement>('.amb-drift')!;
     equal(getComputedStyle(light).display, 'block', 'a plain look has a light');
-    equal(getComputedStyle(light).animationName, 'drift');
+    // A system that asks for less motion caps the level, so the light stands still there (the reduced step below covers it).
+    if (!systemReduces.matches) equal(getComputedStyle(light).animationName, 'drift');
     await applyLook(bare('full', false));
     await settle();
     equal(getComputedStyle(light).display, 'none', 'the ambient switch turns it off');
