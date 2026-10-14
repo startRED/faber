@@ -535,6 +535,11 @@ impl Engine {
             Some(TerminalCommand { command: cli.command, args, cwd: c.opts.data_dir.clone() })
         })
     }
+    /// Whether any answer is streaming or waits for the user: the running list is not empty. The shell uses it to hold back
+    /// anything that would end the process (installing an update).
+    pub fn is_working(&self) -> bool {
+        self.with(|c| !c.running.items.is_empty())
+    }
     pub fn shutdown(&self) {
         self.with(|c| {
             let active: Vec<_> = c.live.keys().cloned().collect();
