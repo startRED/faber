@@ -7,8 +7,8 @@ use serde_json::json;
 use std::time::{Duration, Instant};
 
 /// What Faber may use with no CLI running, as Task Manager counts it (private working set of the app and its webview).
-/// The product limit is 500 MB when Faber is complete; the test keeps half of it as room for what is still to come.
-const BUDGET_MB: f64 = 250.0;
+/// The product limit is 500 MB when Faber is complete; this test fails at 400 MB (R125), a safety net and not a goal.
+const BUDGET_MB: f64 = 400.0;
 
 const QUESTION: &str = "In one sentence: why is the sky blue?";
 

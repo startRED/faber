@@ -120,6 +120,8 @@ function GlyphField(props: { boxes: () => Box[] }) {
     const box = canvas.parentElement?.getBoundingClientRect();
     const style = getComputedStyle(canvas);
     setOn(style.display !== 'none');
+    // A look without the field gives its pixels back.
+    if (!on()) canvas.width = canvas.height = 0;
     if (!box || !on()) return;
     const dpr = Math.min(devicePixelRatio || 1, 2);
     [cols, rows] = [Math.ceil(box.width / CELL), Math.ceil(box.height / CELL)];
