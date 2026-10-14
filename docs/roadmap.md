@@ -534,6 +534,11 @@ The program is `faber-test`, run as `cargo t`.
    processes and 3x less memory and CPU, with no ceiling; no test is weakened. Steps: one engine test program, the
    `rust-lld` linker, lighter debug info and below-normal priority (landed 2026-10-14), then event waits,
    parallel lanes, skipping unchanged builds and a shared running app for the screen scenarios.
+7. **The build folder has a budget** (R106). Every worktree builds into a folder of the main checkout's `target`, and
+   Cargo never deletes anything there, so it grew to 123 GB and once filled the disk. `cargo t` sweeps it at start, at
+   most once an hour: folders of removed worktrees and builds replaced more than a day ago go, and above 60 GB
+   the least recently used worktree folders go too. A folder in use is never touched
+   ([design](design.md#build-folder-budget)).
 
 ## Design and identity
 
@@ -567,6 +572,10 @@ belongs to them.
 - GitHub Releases on every tag, downloaded directly: an `.exe` (NSIS) installer for Windows, a universal `.dmg` for macOS,
   AppImage and `.deb` for Linux. Windows comes first, and macOS and Linux compatibility is kept from now on. arm64
   Windows and `.rpm` come later.
+- Every user-facing change ships by itself (R130). When CI goes green on `phase-1-base` and a `feat`, `fix` or `perf`
+  commit landed since the last tag, `auto-release.yml` tags the next patch version there and starts the release, so
+  installs update through the built-in updater without anyone asking. A finished area still gets its minor bump by hand.
+  The tag is the version; the release build writes it into `package.json`.
 - No paid signing for now. Windows shows a SmartScreen notice that the download page explains. The Microsoft Store and
   a code-signing certificate come back to the table when everything is complete.
 - macOS builds are not notarized, so users allow the app once in System Settings. Faber updates itself there too. If a

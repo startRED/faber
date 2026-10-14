@@ -680,6 +680,15 @@ fn idle_memory_reduced(ctx: &mut Ctx) -> Result {
     idle_memory_with(ctx, true)
 }
 
+/// Tells the page whether it has the focus: the hidden test window must never take it from the person at the PC.
+fn focus(page: &mut Page, on: bool) -> Result {
+    page.eval(&format!(
+        "(() => {{ document.hasFocus = () => {on}; window.dispatchEvent(new Event('{}')); }})()",
+        if on { "focus" } else { "blur" }
+    ))
+    .map(|_| ())
+}
+
 fn idle_memory_with(ctx: &mut Ctx, reduce: bool) -> Result {
     start_settings(ctx, "en")?;
     let launch = claude_chat(ctx);
@@ -694,36 +703,42 @@ fn idle_memory_with(ctx: &mut Ctx, reduce: bool) -> Result {
     let title = app.page.named("heading", "empty.chatTitle")?;
     app.page.wait_visible(&title)?;
     ensure(app.page.count(&css(".amb-beam .dust"))? == 1, || "the new conversation should show the dust".to_string())?;
-    // The memory below is only worth something while the dust really twinkles, and it stops with the window.
-    let states =
-        "[...document.querySelectorAll('.amb-beam .dust i')].flatMap((grain) => grain.getAnimations().map((a) => a.playState)).join()";
+    // The memory below is only worth something while the dust really twinkles, and it stops with the window or its focus.
+    let states = "document.querySelector('.amb-beam .dust').dataset.live";
+    let grain = "document.querySelector('.amb-beam .dust i').style.opacity";
     let hide = |page: &mut Page, on: bool| {
         page.eval(&format!(
             "(() => {{ Object.defineProperty(document, 'hidden', {{ configurable: true, get: () => {on} }}); document.dispatchEvent(new Event('visibilitychange')); }})()"
         ))
         .map(|_| ())
     };
-    // The native test window stays hidden; this scenario exercises both page visibility states explicitly.
+    // The native test window stays hidden and never takes the focus; this scenario sets both explicitly.
     hide(&mut app.page, false)?;
+    focus(&mut app.page, true)?;
     let moving = app.page.eval(states)?;
     if reduce {
         // Reduced motion keeps the dust on the page, still: no grain moves.
-        ensure(moving.as_str() == Some(""), || format!("the dust should not move under reduced motion, got {moving}"))?;
+        same(moving.as_str(), Some("off"), "the dust stands still under reduced motion")?;
         pause(10.0);
         let (mb, _) = ctx.memory_mb(app.id)?;
         ctx.notes.push(format!("idle on the new conversation with the dust (reduced motion): {mb:.0} MB"));
         return ensure(mb <= BUDGET_MB, || format!("{mb:.0} MB is over the {BUDGET_MB} MB budget"));
     }
-    ensure(moving.as_str().is_some_and(|all| all.contains("running") && !all.contains("paused")), || {
-        format!("the dust should twinkle while the window is visible, got {moving}")
+    same(moving.as_str(), Some("on"), "the dust twinkles in a visible, focused window")?;
+    let first = app.page.eval(grain)?;
+    pause(0.5);
+    let then = app.page.eval(grain)?;
+    ensure(then.as_str().is_some_and(|v| !v.is_empty()) && first != then, || {
+        format!("the dust should change its light over half a second, stayed at {then}")
     })?;
     hide(&mut app.page, true)?;
-    pause(0.4);
     let stopped = app.page.eval(states)?;
     hide(&mut app.page, false)?;
-    ensure(stopped.as_str().is_some_and(|all| all.contains("paused") && !all.contains("running")), || {
-        format!("the dust should stop while the window is hidden, got {stopped}")
-    })?;
+    same(stopped.as_str(), Some("off"), "the dust stops while the window is hidden")?;
+    focus(&mut app.page, false)?;
+    let blurred = app.page.eval(states)?;
+    focus(&mut app.page, true)?;
+    same(blurred.as_str(), Some("off"), "the dust stops while another app has the focus")?;
     glyph_field_cost(ctx, &mut app)?;
     pause(10.0);
     let motion = app.page.eval("document.documentElement.dataset.motion")?;
@@ -734,16 +749,9 @@ fn idle_memory_with(ctx: &mut Ctx, reduce: bool) -> Result {
 
 /// The glyph field animates only in a focused window. The hidden test window must never take focus from the person at
 /// the PC, so the page is told whether it has focus, and the processor time of the whole tree is read over a few seconds at
-/// rest, with the field shimmering, and with a ripple started every 400 ms.
+/// rest, with the field shimmering, and with a ripple started every 400 ms. The Dark Room beam is read first, on its own.
 fn glyph_field_cost(ctx: &mut Ctx, app: &mut Opened) -> Result {
     let live = "document.querySelector('canvas.amb-glyphs')?.dataset.live";
-    let focus = |page: &mut Page, on: bool| {
-        page.eval(&format!(
-            "(() => {{ document.hasFocus = () => {on}; window.dispatchEvent(new Event('{}')); }})()",
-            if on { "focus" } else { "blur" }
-        ))
-        .map(|_| ())
-    };
     let window = |ctx: &mut Ctx, app: &mut Opened, seconds: f64| -> std::result::Result<(f64, f64), String> {
         let before = ctx.cpu_ms(app.id)?;
         pause(seconds);
@@ -751,10 +759,17 @@ fn glyph_field_cost(ctx: &mut Ctx, app: &mut Opened) -> Result {
         let (mb, _) = ctx.memory_mb(app.id)?;
         Ok((used / (seconds * 10.0), mb))
     };
-    // The beam and its dust are switched off for these readings, so the numbers are the field's own.
-    app.page.eval("document.documentElement.style.setProperty('--amb-beam', 'none')")?;
+    // The Dark Room beam, its glow and its dust in a focused window, with the field switched off, then in an unfocused one.
+    app.page.eval("document.documentElement.style.setProperty('--amb-glyphs', 'none')")?;
+    focus(&mut app.page, true)?;
+    let (beam, _) = window(ctx, app, 6.0)?;
     focus(&mut app.page, false)?;
+    let (beam_away, _) = window(ctx, app, 6.0)?;
+    app.page.eval("document.documentElement.style.removeProperty('--amb-glyphs')")?;
+    ctx.notes.push(format!("Dark Room beam, glow and dust, processor of one core: focused {beam:.1}%, unfocused {beam_away:.1}%"));
     same(app.page.eval(live)?.as_str(), Some("off"), "the glyph field rests in an unfocused window")?;
+    // The beam and its dust are switched off for the field's readings, so the numbers are the field's own.
+    app.page.eval("document.documentElement.style.setProperty('--amb-beam', 'none')")?;
     let (rest, rest_mb) = window(ctx, app, 6.0)?;
     focus(&mut app.page, true)?;
     app.page.wait_for("the glyph field to run in a focused window", &format!("{live} === 'on'"))?;

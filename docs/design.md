@@ -116,9 +116,10 @@ own inks.
 
 ### Effects
 - Effects appear only on the new conversation screen, never behind text the user reads, and they stop when the window
-  is hidden.
-  - **Dark Room:** a static projector beam, a glow that breathes every 7 s and 72 dust grains (CSS shadows that twinkle on the compositor, no canvas loop) that fade
-    out near any text block.
+  is hidden or another app has the focus.
+  - **Dark Room:** a static projector beam, a glow that breathes every 7 s and 72 dust grains (CSS shadows) that fade
+    out near any text block. A timer sets the opacity of the glow and the three dust layers ten times a second, which
+    the compositor alone applies; as CSS animations they made a 240 Hz screen composite the stage on every frame.
   - **Workshop:** a loom at the bottom right whose shuttle crosses every 9 s, and paper grain.
   - **Workbench:** a flow line at the top right reading "Your idea → Claude and Codex → Done, with proof". It names only
     the vendors that are connected.
@@ -380,6 +381,27 @@ Nothing blocks the network at the operating system, and WebView2 has no document
 that bypasses the switches is not seen. The audit sees only requests that reach the fake release server.
 Known limit: the loopback-only rule is not enforced. Test processes get dead proxy variables and the switches above, but
 nothing stops a program from opening its own connection; blocking outbound traffic for test processes is deferred.
+
+### Build folder budget
+
+Each worktree builds into `target/<name>` of the main checkout (`faber-wt-projhome` into `target/projhome`), and Cargo
+never deletes old artifacts. The runner (`testkit/src/sweep.rs`, R106) sweeps that `target` before choosing the suites, at
+most once an hour (the `target/.faber-sweep` stamp), and prints a line only when it freed space:
+
+1. A `target/<name>` folder with a `CACHEDIR.TAG` whose worktree is gone (no `git worktree list` entry named `<name>` or
+   `*-<name>`) and that nothing used for a day is removed whole.
+2. In every build profile (a folder with `.fingerprint`, nested ones included), a file in `deps/` that a newer build of
+   the same crate and kind replaced more than a day ago is removed, and so is an `incremental/` folder a newer one of the
+   same crate replaced. A crate's newest build stays however old it is. Measured on 2026-10-14, `debug/incremental` held
+   52 folders for `faber_engine` alone, all but one dead.
+3. If `target` is still above 60 GB, whole worktree folders are removed, the least recently used first, until it fits.
+   The main checkout's own folders (`debug`, `release`, `faber-test`) and this run's own folder are never removed whole;
+   if they alone exceed the cap, the runner says so.
+
+A folder is in use while Cargo holds one of its lock files (`.cargo-lock`, `.cargo-build-lock`, `.cargo-artifact-lock`)
+or, on Windows, while a program in one of its profiles runs (Windows refuses to open it for writing). In use, it is
+neither swept nor removed. The sweep holds the profile's locks while it deletes, so a build that starts meanwhile waits.
+sccache (user-wide, outside the repository) makes the rebuild of a swept dependency cheap.
 
 ### UX sentinel
 

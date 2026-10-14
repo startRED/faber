@@ -5,12 +5,13 @@ use crate::checks;
 use crate::plan::{Options, Suite, changed_paths, jobs, parse_args, select};
 use crate::report::{Outcome, Status, exit_code, line, summary};
 use crate::screen;
+use crate::sweep;
 use crate::testbuild::{build_test_app, ensure_fake_cli};
 use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
 
-const USAGE: &str = "usage: cargo t [--all] [--suite rust|ui|screen] [--filter <text>]";
+const USAGE: &str = "usage: cargo t [--all] [--suite rust|ui|screen] [--filter <text>] [--shard <i/n>]";
 
 /// The result lines of `cargo test`: `test some::name ... ok`. Anything that is not a test line is ignored.
 pub fn parse_cargo_tests(output: &str) -> Vec<(String, bool)> {
@@ -65,6 +66,27 @@ fn run_rust(root: &Path, jobs: usize, filter: Option<&str>) -> Vec<Outcome> {
     outcomes
 }
 
+/// Keeps the main checkout's `target` under the cap (R106), at most once an hour. Prints a line only when it freed space.
+fn sweep_builds(paths: &Paths) {
+    let Ok(output) = Command::new("git").current_dir(&paths.root).args(["worktree", "list", "--porcelain"]).output() else { return };
+    let worktrees = sweep::worktrees(&String::from_utf8_lossy(&output.stdout));
+    let (Some(main), Some(own)) = (worktrees.first(), paths.target.parent()) else { return };
+    let target = main.join("target");
+    let now = std::time::SystemTime::now();
+    if !output.status.success() || !target.is_dir() || !sweep::due(&target, now) {
+        return;
+    }
+    let report = sweep::sweep(&target, own, &worktrees, now, sweep::CAP);
+    let gb = |bytes: u64| bytes as f64 / (1u64 << 30) as f64;
+    if report.after < report.before {
+        let removed = if report.removed.is_empty() { String::new() } else { format!(", removed {}", report.removed.join(", ")) };
+        println!("Build folder: {:.1} GB -> {:.1} GB{removed}", gb(report.before), gb(report.after));
+    }
+    if report.after > sweep::CAP {
+        println!("Build folder: {:.1} GB is above the {:.0} GB cap, and nothing else is idle to remove", gb(report.after), gb(sweep::CAP));
+    }
+}
+
 fn changed(root: &Path) -> Result<Vec<String>, String> {
     let output = Command::new("git")
         .current_dir(root)
@@ -104,6 +126,7 @@ pub fn run(args: &[String]) -> i32 {
             return 2;
         }
     };
+    sweep_builds(&paths);
     let changed = if opts.all || opts.suite.is_some() {
         Vec::new()
     } else {
@@ -159,7 +182,7 @@ pub fn run(args: &[String]) -> i32 {
                     }
                     if screen_runs {
                         // Each scenario is printed as it ends: the suite takes minutes.
-                        outcomes.extend(screen::run_all(&paths, filter, &mut |outcome| println!("{}", line(outcome))));
+                        outcomes.extend(screen::run_all(&paths, filter, opts.shard, &mut |outcome| println!("{}", line(outcome))));
                     }
                 }
             }
