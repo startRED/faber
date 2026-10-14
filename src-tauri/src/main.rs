@@ -12,6 +12,7 @@ mod look;
 mod setup;
 mod terminal;
 mod tray;
+mod update;
 
 #[cfg(not(windows))]
 use autostart::NoopAutostart;
@@ -38,13 +39,13 @@ use tauri::window::Color;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
-use tauri_plugin_updater::{Update, UpdaterExt};
+use tauri_plugin_updater::Update;
 
 pub(crate) struct Faber {
     pub(crate) engine: Engine,
     /// ChatGPT models this account can use; empty until the Codex CLI answers.
     pub(crate) models: Mutex<Vec<ModelInfo>>,
-    /// A newer version, already downloaded; it installs when Faber quits.
+    /// A newer version, already downloaded; it installs at the first idle moment (`update.rs`) or when Faber quits.
     pub(crate) update: Mutex<Option<(Update, Vec<u8>)>>,
     pub(crate) data_dir: PathBuf,
     pub(crate) hidden: bool,
@@ -332,11 +333,17 @@ fn detect_clis() -> BTreeMap<Vendor, Cli> {
     setup::detect_clis()
 }
 
+/// Under the config folder (Roaming on Windows), never next to a program: the per-user installer's own default folder is
+/// `%LOCALAPPDATA%\Faber`, so the data must not be there (`update.rs`).
+pub(crate) fn default_data_dir(config_dir: &Path) -> PathBuf {
+    config_dir.join("Faber")
+}
+
 /// Same folder the Electron versions used, so conversations carry over.
 fn data_dir(app: &AppHandle) -> tauri::Result<PathBuf> {
     match std::env::var_os("FABER_DATA_DIR") {
         Some(dir) => Ok(PathBuf::from(dir)),
-        None => Ok(app.path().config_dir()?.join("Faber")),
+        None => Ok(default_data_dir(&app.path().config_dir()?)),
     }
 }
 
@@ -358,16 +365,12 @@ pub(crate) fn load_models(app: &AppHandle, codex: Cli, cwd: PathBuf) {
     });
 }
 
-/// Looks for a newer release once per start and downloads it in the background, signed with Faber's own key.
-fn fetch_update(app: &AppHandle) {
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let Ok(updater) = app.updater() else { return };
-        let Ok(Some(update)) = updater.check().await else { return };
-        if let Ok(bytes) = update.download(|_, _| {}, || {}).await {
-            *lock(&app.state::<Faber>().update) = Some((update, bytes));
-        }
-    });
+/// What Quit does, and what the idle update install does before the installer ends the process.
+pub(crate) fn shut_down(app: &AppHandle) {
+    terminal::terminate_hidden();
+    let faber = app.state::<Faber>();
+    lock(&faber.awake).shutdown();
+    faber.engine.shutdown();
 }
 
 /// Brings the window back, building the screen again if it was closed to the tray.
@@ -587,7 +590,7 @@ fn main() {
             }
             // Only installed builds update themselves; source runs and test runs never do.
             if !hidden && !cfg!(debug_assertions) && std::env::var_os("FABER_DATA_DIR").is_none() {
-                fetch_update(app.handle());
+                update::keep_updated(app.handle());
             }
             Ok(())
         })
@@ -602,10 +605,8 @@ fn main() {
                 api.prevent_exit();
             }
             if let RunEvent::Exit = event {
-                terminal::terminate_hidden();
+                shut_down(app);
                 let faber = app.state::<Faber>();
-                lock(&faber.awake).shutdown();
-                faber.engine.shutdown();
                 // On Windows this starts the installer, which replaces Faber and needs it closed.
                 if let Some((update, bytes)) = lock(&faber.update).take() {
                     let _ = update.install(bytes);

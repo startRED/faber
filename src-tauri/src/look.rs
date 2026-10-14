@@ -520,7 +520,7 @@ pub fn look(a: &Appearance) -> Result<Look, Failure> {
         }
     }
     if !effects.ambient {
-        for key in ["amb-beam", "amb-loom", "amb-flow"] {
+        for key in ["amb-beam", "amb-loom", "amb-flow", "amb-glyphs"] {
             vars.insert(key.into(), "none".into());
         }
     }
@@ -891,6 +891,7 @@ mod tests {
         assert_eq!((v["grain"].as_str(), v["bench"].as_str()), ("0", "none"));
         assert_eq!(v["focus-light"], "0 0 0 0 transparent");
         assert_eq!((v["amb-beam"].as_str(), v["amb-loom"].as_str(), v["amb-flow"].as_str()), ("none", "none", "none"));
+        assert_eq!(v["amb-glyphs"], "none");
         assert_eq!(look.effects, Effects { ambient: false, texture: false, glow: false });
         let square = self::look(&Appearance { corners: Some(0.0), ..sala() }).unwrap().vars;
         assert_eq!((square["r-md"].as_str(), square["r-pill"].as_str()), ("0px", "0px"));

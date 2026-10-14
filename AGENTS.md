@@ -20,10 +20,13 @@ with the user's own subscriptions. Read [docs/roadmap.md](docs/roadmap.md) befor
   (`en.ts`) is the source, and a new language needs a native speaker to review it. The engine returns keys
   (`error.*`, `reason.*`) instead of sentences.
 - Memory is a feature: Faber with no CLI running stays under 500 MB when complete, and the end-to-end test fails above
-  250 MB today. Anything that keeps a process or a big DOM alive needs a reason and a measurement
-  ([docs/roadmap.md](docs/roadmap.md#architecture)).
+  400 MB (R125). The limit is a safety net, not the goal: every change aims at the lightest and most responsive result
+  it can reach and reports its memory and processor cost. Anything that keeps a process or a big DOM alive needs a
+  reason and a measurement ([docs/roadmap.md](docs/roadmap.md#architecture)).
 - Telemetry stays off by default.
-- One commit per coherent change, made as soon as the change is proven.
+- One commit per coherent change, made and pushed as soon as the change is proven, without waiting for other parts.
+  After pushing, fast-forward `main` to the newest `phase-1-base` commit whose CI is green (never force, never a red
+  commit), so `main` moves once per finished part (R126, R127).
 
 ## Stack
 

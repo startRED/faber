@@ -569,10 +569,12 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .coach p { margin: 0; color: var(--ink-2); line-height: 1.5; }
 .coach-act { display: flex; gap: 8px; margin-top: 8px; }
 
-/* The effects of the new conversation (ui/Ambient.tsx). The tokens --amb-beam, --amb-loom and --amb-flow are `none`
+/* The effects of the new conversation (ui/Ambient.tsx). The tokens --amb-beam, --amb-loom, --amb-flow and --amb-glyphs are `none`
    for a look that does not have the effect, and for every look when the ambient switch is off. */
 .ambient { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; container-type: inline-size; }
 .amb { position: absolute; pointer-events: none; }
+/* The glyph field (ui/Ambient.tsx) reads its ink from `color` and its ripple from `caret-color`. */
+.amb-glyphs { display: var(--amb-glyphs); position: absolute; inset: 0; width: 100%; height: 100%; color: var(--ink-3); caret-color: var(--accent); font-family: var(--font-mono); }
 .amb-beam { display: var(--amb-beam); left: calc(min(100% - 120px, 740px) - 380px); top: -80px; width: 760px; height: 680px; transform: rotate(22deg); transform-origin: 50% 0; }
 .amb-beam .beam { position: absolute; inset: 0; filter: blur(30px); opacity: 0.9; }
 .amb-beam .beam i { position: absolute; inset: 0; clip-path: polygon(44% 0, 56% 0, 86% 100%, 14% 100%); background: linear-gradient(180deg, var(--beam-color), transparent 92%); }

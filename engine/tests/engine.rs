@@ -84,6 +84,23 @@ async fn r121_a_codex_session_saved_with_the_host_command_tool_restarts_once_and
 }
 
 #[tokio::test]
+async fn codex_without_a_picked_model_names_the_one_it_reports_before_the_first_word() {
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, mut rx) = engine(dir.path(), Vendor::Codex, fake(fixture("codex", "chat")).spawn);
+    engine.send(ask(Area::Chat, SKY, choice("codex", None))).unwrap();
+    let mut heard = vec![];
+    finished(&mut rx, |m| {
+        if m.role == Role::Assistant {
+            heard.push((m.text.is_empty(), m.model.clone()));
+        }
+    })
+    .await;
+    assert!(heard.contains(&(true, Some("gpt-6-luna".into()))), "no update named the model before the first word: {heard:?}");
+    assert!(heard.iter().all(|(empty, model)| !*empty || model.is_none() || model.as_deref() == Some("gpt-6-luna")), "{heard:?}");
+    engine.shutdown();
+}
+
+#[tokio::test]
 async fn r121_any_folder_can_be_the_chat_working_folder_in_both_modes() {
     let dir = tempfile::tempdir().unwrap();
     let (engine, _) = engine(dir.path(), Vendor::Claude, fake(vec![]).spawn);
@@ -854,6 +871,12 @@ fn auto_picks_a_connected_vendor_and_says_why_a_missing_one_is_refused() {
     assert_eq!(pick_model(&auto, &[Vendor::Claude, Vendor::Codex], None).unwrap().vendor, Vendor::Claude);
     assert!(pick_model(&choice("claude", None), &[Vendor::Codex], None).is_none());
     assert!(pick_model(&auto, &[], None).is_none());
+}
+
+#[test]
+fn autos_default_names_the_full_model_id_so_the_name_does_not_change_when_the_cli_reports_it() {
+    let pick = pick_model(&choice("auto", None), &[Vendor::Claude], None).unwrap();
+    assert_eq!(pick.model.as_deref(), Some("claude-sonnet-5-5"));
 }
 
 #[test]

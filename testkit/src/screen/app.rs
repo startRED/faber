@@ -1,14 +1,15 @@
 //! The app scenarios: what a person sees and does in a chat, in settings, and how much memory the app uses.
 
 use super::{Result, Scenario, ask, claude_chat, ensure, eventually, no_cli, pass_look, pause, same, start_settings, system_motion};
-use crate::app::Ctx;
+use crate::app::{Ctx, Opened};
 use crate::page::{Page, css, role};
+use crate::sandbox::{CliSlot, Launch};
 use serde_json::json;
 use std::time::{Duration, Instant};
 
 /// What Faber may use with no CLI running, as Task Manager counts it (private working set of the app and its webview).
-/// The product limit is 500 MB when Faber is complete; the test keeps half of it as room for what is still to come.
-const BUDGET_MB: f64 = 250.0;
+/// The product limit is 500 MB when Faber is complete; this test fails at 400 MB (R125), a safety net and not a goal.
+const BUDGET_MB: f64 = 400.0;
 
 const QUESTION: &str = "In one sentence: why is the sky blue?";
 
@@ -61,6 +62,14 @@ pub fn scenarios() -> Vec<Scenario> {
             run: thread_in_every_look,
         },
         Scenario { name: "a chat streams an answer with the model and the reason, and lands in the sidebar", run: streams_an_answer },
+        Scenario {
+            name: "with Auto, the answer names its model as soon as it starts, keeps the name to the end and after reopening",
+            run: names_the_model_while_streaming,
+        },
+        Scenario {
+            name: "with Auto on Codex, the answer names the model the CLI reports before the first word and keeps it to the end",
+            run: names_the_codex_model_while_streaming,
+        },
         Scenario { name: "editing a message sends it as a branch and keeps the original conversation", run: edits_as_a_branch },
         Scenario { name: "deleting a conversation asks once, then removes it", run: deletes_after_asking },
         Scenario { name: "the sidebar footer shows the name the person gave, above the accounts", run: shows_the_name },
@@ -192,6 +201,73 @@ fn streams_an_answer(ctx: &mut Ctx) -> Result {
     ensure(text.contains("at API prices"), || format!("the answer should show the price note: {text}"))?;
     page.wait_visible(&css(".list .item").has_text(QUESTION))?;
     ctx.shot(&mut app, "chat")
+}
+
+/// The whole answer header as text, and its height.
+const HEADER_ALL: &str = "(() => { const h = document.querySelector('article.ai .model'); return h && { text: h.innerText, height: h.getBoundingClientRect().height }; })()";
+
+/// The answer header's name slot and its height: what the person reads and where the line below sits.
+const HEADER: &str = "(() => { const h = document.querySelector('article.ai .model'); return h && { name: h.children[1].innerText, height: h.getBoundingClientRect().height }; })()";
+
+fn names_the_model_while_streaming(ctx: &mut Ctx) -> Result {
+    names_while_streaming(ctx, "claude", "Sunlight", "Haiku 5.5")
+}
+
+fn names_the_codex_model_while_streaming(ctx: &mut Ctx) -> Result {
+    names_while_streaming(ctx, "codex", "", "GPT-6 Luna")
+}
+
+/// With Auto and one vendor: the header says only that Auto is choosing, then names the model before the first word,
+/// keeps the name and the height to the end, and reads the same when the conversation is opened again. The recording
+/// stops after the first words of the answer until the scenario lets it go on.
+fn names_while_streaming(ctx: &mut Ctx, vendor: &str, first_words: &str, name: &str) -> Result {
+    start_settings(ctx, "en")?;
+    let fixtures = ctx.paths.fixtures.clone();
+    let launch = |recording: &str| {
+        let recording = Some(fixtures.join(format!("{vendor}/{recording}.jsonl")));
+        match vendor {
+            "claude" => Launch { claude: CliSlot::Fake, codex: CliSlot::Off, recording, ..Launch::default() },
+            _ => Launch { claude: CliSlot::Off, codex: CliSlot::Fake, recording, ..Launch::default() },
+        }
+    };
+    let mut app = ctx.launch(launch("chat-held"))?;
+    let page = &mut app.page;
+    ask(page, QUESTION)?;
+    // With two vendors Auto first waits for its router (the recorded CLI never answers it, so the wait runs to the end of
+    // the 30 s allowed) and the header says only that; with one vendor there is nothing to choose.
+    let choosing = if vendor == "claude" {
+        page.wait_for("the header of the answer", "!!document.querySelector('article.ai .model')")?;
+        let header = page.eval(HEADER_ALL)?;
+        let reason = page.text_of("reason.routing")?;
+        let text = header["text"].as_str().unwrap_or_default().split_whitespace().collect::<Vec<_>>().join(" ");
+        same(text, format!("Auto · {reason}"), "the header while Auto is choosing")?;
+        Some(header["height"].clone())
+    } else {
+        None
+    };
+    // The answer is held before its first word (Codex) or just after it (Claude): the name is there either way.
+    page.wait_for_within(
+        "the model's name in the header",
+        &format!(
+            "(() => {{ const h = document.querySelector('article.ai .model'); return h?.children[1]?.innerText === '{name}' && document.querySelector('article.ai .md').innerText.includes('{first_words}'); }})()"
+        ),
+        Duration::from_secs(60),
+    )?;
+    let during = page.eval(HEADER)?;
+    if let Some(height) = choosing {
+        same(during["height"].clone(), height, "the header's height once the name is there")?;
+    }
+    std::fs::write(ctx.sb.state.join("release"), "").map_err(|e| e.to_string())?;
+    let answer = page.named("article", "answer.label")?;
+    page.wait_visible(&answer.css(".actions"))?;
+    same(page.eval(HEADER)?, during.clone(), "the header at the end of the answer")?;
+    // A message saved and opened again reads the same.
+    ctx.close(app.id)?;
+    let mut app = ctx.launch(launch("chat"))?;
+    let page = &mut app.page;
+    page.click(&css(".list .item").has_text(QUESTION))?;
+    page.wait_visible(&css("article.ai .actions"))?;
+    same(page.eval(HEADER)?, during, "the header after reopening the conversation")
 }
 
 fn edits_as_a_branch(ctx: &mut Ctx) -> Result {
@@ -648,11 +724,53 @@ fn idle_memory_with(ctx: &mut Ctx, reduce: bool) -> Result {
     ensure(stopped.as_str().is_some_and(|all| all.contains("paused") && !all.contains("running")), || {
         format!("the dust should stop while the window is hidden, got {stopped}")
     })?;
+    glyph_field_cost(ctx, &mut app)?;
     pause(10.0);
     let motion = app.page.eval("document.documentElement.dataset.motion")?;
     let (mb, _) = ctx.memory_mb(app.id)?;
     ctx.notes.push(format!("idle on the new conversation with the dust ({} motion): {mb:.0} MB", motion.as_str().unwrap_or("?")));
     ensure(mb <= BUDGET_MB, || format!("{mb:.0} MB is over the {BUDGET_MB} MB budget"))
+}
+
+/// The glyph field animates only in a focused window. The hidden test window must never take focus from the person at
+/// the PC, so the page is told whether it has focus, and the processor time of the whole tree is read over a few seconds at
+/// rest, with the field shimmering, and with a ripple started every 400 ms.
+fn glyph_field_cost(ctx: &mut Ctx, app: &mut Opened) -> Result {
+    let live = "document.querySelector('canvas.amb-glyphs')?.dataset.live";
+    let focus = |page: &mut Page, on: bool| {
+        page.eval(&format!(
+            "(() => {{ document.hasFocus = () => {on}; window.dispatchEvent(new Event('{}')); }})()",
+            if on { "focus" } else { "blur" }
+        ))
+        .map(|_| ())
+    };
+    let window = |ctx: &mut Ctx, app: &mut Opened, seconds: f64| -> std::result::Result<(f64, f64), String> {
+        let before = ctx.cpu_ms(app.id)?;
+        pause(seconds);
+        let used = ctx.cpu_ms(app.id)? - before;
+        let (mb, _) = ctx.memory_mb(app.id)?;
+        Ok((used / (seconds * 10.0), mb))
+    };
+    // The beam and its dust are switched off for these readings, so the numbers are the field's own.
+    app.page.eval("document.documentElement.style.setProperty('--amb-beam', 'none')")?;
+    focus(&mut app.page, false)?;
+    same(app.page.eval(live)?.as_str(), Some("off"), "the glyph field rests in an unfocused window")?;
+    let (rest, rest_mb) = window(ctx, app, 6.0)?;
+    focus(&mut app.page, true)?;
+    app.page.wait_for("the glyph field to run in a focused window", &format!("{live} === 'on'"))?;
+    let (shimmer, shimmer_mb) = window(ctx, app, 6.0)?;
+    app.page.eval(
+        "(() => { const area = document.querySelector('.work'); const box = area.getBoundingClientRect(); window.__ripples = setInterval(() => area.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: box.left + 40, clientY: box.top + 40 })), 400); })()",
+    )?;
+    let (ripple, ripple_mb) = window(ctx, app, 6.0)?;
+    app.page.eval("clearInterval(window.__ripples)")?;
+    focus(&mut app.page, false)?;
+    same(app.page.eval(live)?.as_str(), Some("off"), "the glyph field stops when the window loses focus")?;
+    ctx.notes.push(format!(
+        "glyph field, processor of one core and memory: at rest {rest:.1}% {rest_mb:.0} MB, shimmering {shimmer:.1}% {shimmer_mb:.0} MB, rippling {ripple:.1}% {ripple_mb:.0} MB"
+    ));
+    app.page.eval("document.documentElement.style.removeProperty('--amb-beam')")?;
+    ensure(ripple_mb <= BUDGET_MB, || format!("{ripple_mb:.0} MB is over the {BUDGET_MB} MB budget while rippling"))
 }
 
 fn memory_after_every_look(ctx: &mut Ctx) -> Result {

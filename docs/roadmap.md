@@ -49,7 +49,7 @@ Creative results are judged blind, shown as "A" and "B", and the answer is revea
 | Quota and tokens | tokens per approved task, priced at API rates (input, output, cache) | ≤ 70% of the plain CLI's cost for the same task |
 | Speed | time to first token with a warm session | ≤ 2 s |
 | Precision | corrections the user asks for after "done" | half of the plain CLI |
-| Efficiency | idle RAM without a CLI open; installer size; sessions broken by CLI updates | under 500 MB (the test fails above 250 MB today); ≤ 120 MB; 0 |
+| Efficiency | idle RAM without a CLI open; installer size; sessions broken by CLI updates | under 500 MB (the test fails above 400 MB, R125); ≤ 120 MB; 0 |
 
 ### Measuring without burning the user's quota
 
@@ -428,7 +428,8 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
   anything heavy on screen (terminal, 3D viewer, video) is tested on all three. The first Electron version stays
   tagged as `electron-f1`.
 - **A memory budget, enforced by a test.** Faber itself (window open, no CLI running) stays under 500 MB when it is
-  complete; the end-to-end test fails above 250 MB so there is room for what is still to come. Anything that keeps a
+  complete; the end-to-end test fails above 400 MB (R125). The limit is a safety net: each change still aims at the
+  lightest and most responsive result it can reach. Anything that keeps a
   process or a large DOM alive needs a reason and a measurement. Measured on 2026-10-10 as Task Manager counts it
   (private working set): 89 MB idle, 114 MB with a thousand-message conversation open (only the last 40 messages are
   drawn, more on scrolling up), 4 MB closed to the tray (the screen is freed; the engine keeps running and the window
