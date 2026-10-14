@@ -92,7 +92,7 @@ pub fn run(env: &Env, args: &[String], stdin: &mut dyn BufRead, stdout: &mut dyn
             writeln!(stdout, "{}", json!({ "loggedIn": true, "subscriptionType": "max", "authMethod": "claude.ai" }))?;
             return Ok(0);
         }
-        return session(Dispatch::new(load(&env.recording)?, None, false, true), false, stdin, stdout, stderr);
+        return session(Dispatch::new(load(&env.recording)?, None, false, true), env.state_dir.as_deref(), false, stdin, stdout, stderr);
     }
     let setup: Setup = serde_json::from_str(&std::fs::read_to_string(&env.recording)?).map_err(io::Error::other)?;
     let state = env.state_dir.as_deref().ok_or_else(|| io::Error::other("Setup replay requires an isolated FABER_FAKE_STATE_DIR"))?;
@@ -148,12 +148,28 @@ fn setup_run(
     }
     let dir = env.recording.parent().unwrap_or(Path::new("."));
     let models = setup.models.as_ref().map(|m| dir.join(m));
-    session(Dispatch::new(load(&dir.join(&setup.chat))?, models, !claude, marker.exists()), true, stdin, stdout, stderr)
+    session(Dispatch::new(load(&dir.join(&setup.chat))?, models, !claude, marker.exists()), Some(state), true, stdin, stdout, stderr)
+}
+
+/// A recorded line with this key is not sent: the replay stops there until the scenario creates `RELEASE` in the state
+/// folder (at most a minute), so a screen check can look at the app in the middle of an answer.
+const HOLD: &str = "faber_hold";
+const RELEASE: &str = "release";
+
+fn hold(state: Option<&Path>) {
+    let Some(file) = state.map(|s| s.join(RELEASE)) else { return };
+    for _ in 0..1200 {
+        if file.exists() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
 }
 
 /// Replays until stdin ends. A setup run exits 1 on a difference; a plain run only reports it on stderr.
 fn session(
     mut dispatch: Dispatch,
+    state: Option<&Path>,
     strict: bool,
     stdin: &mut dyn BufRead,
     stdout: &mut dyn Write,
@@ -165,7 +181,12 @@ fn session(
             continue;
         }
         for out in dispatch.feed(&line)? {
-            writeln!(stdout, "{out}")?;
+            if out.contains(HOLD) {
+                stdout.flush()?;
+                hold(state);
+            } else {
+                writeln!(stdout, "{out}")?;
+            }
         }
         stdout.flush()?;
     }
@@ -240,6 +261,26 @@ mod tests {
         assert_eq!(code.unwrap(), 0);
         assert!(out.is_empty());
         assert!(err.contains("sent user \"something else\""), "{err}");
+    }
+
+    #[test]
+    fn a_hold_marker_is_never_sent_and_waits_for_the_release_file() {
+        let held = fixtures().join("claude/chat-held.jsonl");
+        let first = load(&held).unwrap().into_iter().find(|e| e.input).unwrap().msg.to_string();
+        let state = tempfile::tempdir().unwrap();
+        std::fs::write(state.path().join(RELEASE), "").unwrap();
+        let (code, out, err) = drive(
+            held,
+            Some(state.path().to_path_buf()),
+            &[],
+            &format!(
+                "{first}
+"
+            ),
+        );
+        assert_eq!(code.unwrap(), 0);
+        assert!(out.contains("Rayleigh") && !out.contains(HOLD), "{out}");
+        assert!(err.is_empty(), "{err}");
     }
 
     #[test]

@@ -3,6 +3,7 @@
 use super::{Result, Scenario, ask, claude_chat, ensure, eventually, no_cli, pass_look, pause, same, start_settings, system_motion};
 use crate::app::Ctx;
 use crate::page::{Page, css, role};
+use crate::sandbox::Launch;
 use serde_json::json;
 use std::time::{Duration, Instant};
 
@@ -61,6 +62,10 @@ pub fn scenarios() -> Vec<Scenario> {
             run: thread_in_every_look,
         },
         Scenario { name: "a chat streams an answer with the model and the reason, and lands in the sidebar", run: streams_an_answer },
+        Scenario {
+            name: "with Auto, the answer names its model as soon as it starts, keeps the name to the end and after reopening",
+            run: names_the_model_while_streaming,
+        },
         Scenario { name: "editing a message sends it as a branch and keeps the original conversation", run: edits_as_a_branch },
         Scenario { name: "deleting a conversation asks once, then removes it", run: deletes_after_asking },
         Scenario { name: "the sidebar footer shows the name the person gave, above the accounts", run: shows_the_name },
@@ -192,6 +197,38 @@ fn streams_an_answer(ctx: &mut Ctx) -> Result {
     ensure(text.contains("at API prices"), || format!("the answer should show the price note: {text}"))?;
     page.wait_visible(&css(".list .item").has_text(QUESTION))?;
     ctx.shot(&mut app, "chat")
+}
+
+/// The answer header's name slot and its height: what the person reads and where the line below sits.
+const HEADER: &str = "(() => { const h = document.querySelector('article.ai .model'); return h && { name: h.children[1].innerText, height: h.getBoundingClientRect().height }; })()";
+
+fn names_the_model_while_streaming(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    // The recording stops after the first words of the answer until the scenario lets it go on.
+    let launch = Launch { recording: Some(ctx.paths.fixtures.join("claude/chat-held.jsonl")), ..claude_chat(ctx) };
+    let mut app = ctx.launch(launch)?;
+    let page = &mut app.page;
+    ask(page, QUESTION)?;
+    // Auto first waits for its router; the recorded CLI never answers it, so the wait runs to the end of the 30 s allowed.
+    page.wait_for_within(
+        "the first words of the answer",
+        "document.querySelector('article.ai .md')?.innerText.includes('Sunlight')",
+        Duration::from_secs(60),
+    )?;
+    let during = page.eval(HEADER)?;
+    ensure(during["name"] == "Haiku 5.5", || format!("the name must show while the answer is still being written: {during}"))?;
+    std::fs::write(ctx.sb.state.join("release"), "").map_err(|e| e.to_string())?;
+    let answer = page.named("article", "answer.label")?;
+    page.wait_visible(&answer.css(".actions"))?;
+    same(page.eval(HEADER)?, during.clone(), "the header at the end of the answer")?;
+    // A message saved and opened again reads the same.
+    ctx.close(app.id)?;
+    let launch = claude_chat(ctx);
+    let mut app = ctx.launch(launch)?;
+    let page = &mut app.page;
+    page.click(&css(".list .item").has_text(QUESTION))?;
+    page.wait_visible(&css("article.ai .actions"))?;
+    same(page.eval(HEADER)?, during, "the header after reopening the conversation")
 }
 
 fn edits_as_a_branch(ctx: &mut Ctx) -> Result {

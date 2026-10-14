@@ -841,6 +841,12 @@ fn auto_picks_a_connected_vendor_and_says_why_a_missing_one_is_refused() {
 }
 
 #[test]
+fn autos_default_names_the_full_model_id_so_the_name_does_not_change_when_the_cli_reports_it() {
+    let pick = pick_model(&choice("auto", None), &[Vendor::Claude], None).unwrap();
+    assert_eq!(pick.model.as_deref(), Some("claude-sonnet-5-5"));
+}
+
+#[test]
 fn chatgpt_without_a_model_runs_the_accounts_recommended_one_not_a_hand_set_cli_default() {
     let recommended = Some("gpt-6.1-sol");
     let model = |c: Choice| pick_model(&c, &[Vendor::Codex], recommended).unwrap().model;
