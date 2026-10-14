@@ -4,7 +4,8 @@
 //! 1. A worktree's folder whose worktree is gone, idle for a day, is removed whole.
 //! 2. In every build profile (`debug`, `release`, nested ones), an artifact in `deps/` or an `incremental/` folder that
 //!    a newer build of the same crate replaced more than a day ago is removed. A crate's newest build always stays.
-//! 3. If `target` is still above the cap, whole worktree folders go, the least recently used first.
+//! 3. If `target` is still above the cap, whole worktree folders go, the least recently used first. A folder built in
+//!    the last six hours belongs to a lane still at work and stays: a cold rebuild costs it ten minutes or more.
 //!
 //! A folder is never touched while Cargo holds its lock or one of its programs runs, and the main checkout's own
 //! folders (`debug`, `release`, `faber-test`) are only ever swept, never removed whole.
@@ -20,6 +21,8 @@ const DAY: Duration = Duration::from_secs(24 * 60 * 60);
 /// How long a replaced build stays, so a build that just moved on can still go back cheaply.
 const STALE: Duration = DAY;
 const EVERY: Duration = Duration::from_secs(60 * 60);
+/// Over the cap, a folder used more recently than this is a lane still at work, never evicted.
+const ACTIVE: Duration = Duration::from_secs(6 * 60 * 60);
 const STAMP: &str = ".faber-sweep";
 /// The main checkout's own build folders that carry a `CACHEDIR.TAG` of their own.
 const MAIN_FOLDERS: [&str; 1] = ["faber-test"];
@@ -198,7 +201,13 @@ pub fn sweep(target: &Path, own: &Path, worktrees: &[PathBuf], now: SystemTime, 
         report.after -= sweep_profile(&profile, now - STALE).min(report.after);
     }
     if report.after > cap {
-        let candidates = worktree_folders(&report).into_iter().map(|(name, dir)| (name, size(&dir), last_used(&dir), busy(&dir))).collect();
+        let candidates = worktree_folders(&report)
+            .into_iter()
+            .map(|(name, dir)| {
+                let used = last_used(&dir);
+                (name, size(&dir), used, used + ACTIVE > now || busy(&dir))
+            })
+            .collect();
         for name in over_budget(candidates, report.after, cap) {
             report.after -= remove(&target.join(&name)).min(report.after);
             report.removed.push(name);
@@ -325,6 +334,8 @@ mod tests {
 
         let today = sweep(&target, &target.join("mine"), &worktrees, SystemTime::now(), u64::MAX);
         assert!(today.removed.is_empty(), "a folder whose worktree is gone keeps a day of grace");
+        let active = sweep(&target, &target.join("mine"), &worktrees, SystemTime::now(), 0);
+        assert!(active.removed.is_empty(), "over the cap, a folder built in the last hours belongs to a lane at work");
 
         let later = SystemTime::now() + DAY * 2;
         let report = sweep(&target, &target.join("mine"), &worktrees, later, u64::MAX);
