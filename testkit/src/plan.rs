@@ -78,7 +78,7 @@ pub struct Options {
     pub all: bool,
     pub suite: Option<Suite>,
     pub filter: Option<String>,
-    /// `--shard 2/3`: run only every third screen scenario, starting with the second, so CI can split the suite.
+    /// `--shard 2/3`: run only the second of three even parts of the screen suite, so CI can split it.
     pub shard: Option<(usize, usize)>,
 }
 
@@ -110,9 +110,18 @@ fn shard(text: &str) -> Result<(usize, usize), String> {
     Ok((part, parts))
 }
 
-/// Whether the scenario at `index` belongs to the shard: scenarios are dealt round-robin, so slow ones spread out.
-pub fn in_shard(index: usize, shard: Option<(usize, usize)>) -> bool {
-    shard.is_none_or(|(part, parts)| index % parts == part - 1)
+/// The part (from 0) each item goes to: the costliest first, each to the lightest part so far. The same list gives the
+/// same parts on every machine, so CI's jobs together run each item exactly once.
+pub fn deal(costs: &[u32], parts: usize) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..costs.len()).collect();
+    order.sort_by_key(|&i| std::cmp::Reverse(costs[i]));
+    let (mut load, mut part) = (vec![0u32; parts.max(1)], vec![0; costs.len()]);
+    for i in order {
+        let lightest = (0..load.len()).min_by_key(|&p| load[p]).unwrap_or(0);
+        part[i] = lightest;
+        load[lightest] += costs[i];
+    }
+    part
 }
 
 /// `--suite` wins, then `--all`, then whatever the changed paths ask for.
@@ -230,12 +239,16 @@ mod tests {
     }
 
     #[test]
-    fn shards_deal_every_scenario_to_exactly_one_part() {
-        for index in 0..10 {
-            assert_eq!((1..=3).filter(|part| in_shard(index, Some((*part, 3)))).count(), 1);
-            assert!(in_shard(index, None));
-        }
-        assert!(in_shard(0, Some((1, 3))) && in_shard(4, Some((2, 3))) && in_shard(5, Some((3, 3))));
+    fn dealing_gives_every_item_one_part_and_evens_out_the_slow_ones() {
+        let costs = [5, 45, 5, 35, 27, 5, 15, 14, 5, 14, 5, 5];
+        let parts = deal(&costs, 3);
+        assert_eq!(parts.len(), costs.len());
+        let load = |p| costs.iter().zip(&parts).filter(|(_, q)| **q == p).map(|(c, _)| c).sum::<u32>();
+        let loads = [load(0), load(1), load(2)];
+        assert_eq!(loads.iter().sum::<u32>(), 180);
+        assert!(loads.iter().max().unwrap() - loads.iter().min().unwrap() <= 5, "within one cheap scenario: {loads:?}");
+        assert_eq!(deal(&costs, 3), parts, "the same list deals the same way every time");
+        assert_eq!(deal(&costs, 1), vec![0; costs.len()]);
     }
 
     #[test]

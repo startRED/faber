@@ -573,7 +573,8 @@ belongs to them.
   AppImage and `.deb` for Linux. Windows comes first, and macOS and Linux compatibility is kept from now on. arm64
   Windows and `.rpm` come later.
 - Every user-facing change ships by itself (R130). When CI goes green on `phase-1-base` and a `feat`, `fix` or `perf`
-  commit landed since the last tag, `auto-release.yml` tags the next patch version there and starts the release, so
+  commit that touches the shipped app (`ui/`, `engine/`, `src-tauri/`, `package.json`, `vite.config.ts`) landed since
+  the last tag, `auto-release.yml` tags the next patch version there and starts the release, so
   installs update through the built-in updater without anyone asking. A finished area still gets its minor bump by hand.
   The tag is the version; the release build writes it into `package.json`.
 - No paid signing for now. Windows shows a SmartScreen notice that the download page explains. The Microsoft Store and
