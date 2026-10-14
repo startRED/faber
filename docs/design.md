@@ -116,9 +116,10 @@ own inks.
 
 ### Effects
 - Effects appear only on the new conversation screen, never behind text the user reads, and they stop when the window
-  is hidden.
-  - **Dark Room:** a static projector beam, a glow that breathes every 7 s and 72 dust grains (CSS shadows that twinkle on the compositor, no canvas loop) that fade
-    out near any text block.
+  is hidden or another app has the focus.
+  - **Dark Room:** a static projector beam, a glow that breathes every 7 s and 72 dust grains (CSS shadows) that fade
+    out near any text block. A timer sets the opacity of the glow and the three dust layers ten times a second, which
+    the compositor alone applies; as CSS animations they made a 240 Hz screen composite the stage on every frame.
   - **Workshop:** a loom at the bottom right whose shuttle crosses every 9 s, and paper grain.
   - **Workbench:** a flow line at the top right reading "Your idea → Claude and Codex → Done, with proof". It names only
     the vendors that are connected.
