@@ -412,10 +412,10 @@ pub fn project_thread_params(
     use crate::project::policy;
     policy::invocation(crate::model::Vendor::Codex, t.model.as_deref(), t.effort.as_deref(), t.instructions.is_some())?;
     let (method, mut params) = thread_params(Area::Project, t);
-    params["approvalPolicy"] = "never".into();
-    params["sandbox"] = if role == crate::project::Role::Writer { "workspace-write" } else { "read-only" }.into();
+    params["approvalPolicy"] = "on-request".into();
+    params["sandbox"] = "read-only".into();
     params["baseInstructions"] = worker_contract(role).into();
-    params["config"] = json!({"model_reasoning_effort": t.effort, "web_search":"disabled", "sandbox_workspace_write": {
+    params["config"] = json!({"model_reasoning_effort": t.effort, "approvals_reviewer":"user", "web_search":"disabled", "sandbox_workspace_write": {
         "network_access":false, "exclude_tmpdir_env_var":true, "exclude_slash_tmp":true
     }});
     params.as_object_mut().expect("thread parameters").remove("developerInstructions");
@@ -620,7 +620,11 @@ async fn serve(
                 if role.is_some() {
                     match crate::project::policy::reject_native(&mut *stdin, crate::model::Vendor::Codex, &msg).await {
                         Ok(true) => continue,
-                        Err(_) => { proc::stop(&mut *stdin, &mut child).await; break; }
+                        Err(_) => {
+                            for t in threads.values() { (t.sink)(EngineEvent::Error {message:crate::project::policy::Blocker::Restrictions.key().into(),fatal:true}); }
+                            proc::stop(&mut *stdin, &mut child).await;
+                            break;
+                        }
                         Ok(false) => {}
                     }
                 }
@@ -1041,6 +1045,9 @@ mod role_tests {
                 }
                 assert!(!start.to_string().contains("SYNTHETIC"));
                 assert_eq!(start["params"]["config"]["web_search"], "disabled");
+                assert_eq!(start["params"]["sandbox"], "read-only");
+                assert_eq!(start["params"]["approvalPolicy"], "on-request");
+                assert_eq!(start["params"]["config"]["approvals_reviewer"], "user");
                 session.close();
                 server.retire();
             }
@@ -1108,6 +1115,13 @@ mod role_tests {
         session.send(UserTurn::text("next"));
         let next: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
         assert_eq!(next["method"], "turn/start");
+        let escaped: Value = serde_json::from_str(include_str!("../../tests/fixtures/projects/native-file-change.jsonl").trim()).unwrap();
+        output.write_all(format!("{}\n", escaped["msg"]).as_bytes()).await.unwrap();
+        let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv()).await;
+        assert!(
+            matches!(event, Ok(Some(EngineEvent::Error { fatal: true, ref message })) if message == crate::project::policy::Blocker::Restrictions.key()),
+            "completed native file change was accepted: {event:?}"
+        );
         session.close();
         server.retire();
     }

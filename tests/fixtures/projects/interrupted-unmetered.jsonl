@@ -1,0 +1,2 @@
+{"msg":{"method":"item/agentMessage/delta","params":{"threadId":"t","turnId":"one","itemId":"answer","delta":"1. Counting begins"}}}
+{"msg":{"method":"turn/completed","params":{"threadId":"t","turn":{"id":"one","status":"interrupted","items":[],"error":null}}}}

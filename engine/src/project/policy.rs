@@ -57,13 +57,34 @@ pub fn admit(vendor: Vendor) -> Result<(), Blocker> {
     Err(blockers(vendor)[0])
 }
 
-/// Reject every native permission request, including unknown tool names; this never parses command text.
+/// Reject every native permission request and fail closed if an ungranted tool reaches execution.
 pub async fn reject_native(
     stdin: &mut (dyn tokio::io::AsyncWrite + Send + Unpin),
     vendor: Vendor,
     msg: &serde_json::Value,
 ) -> std::io::Result<bool> {
     use serde_json::json;
+    let escaped = match vendor {
+        Vendor::Codex => {
+            msg["method"] == "item/completed"
+                && !matches!(
+                    msg["params"]["item"]["type"].as_str(),
+                    Some("userMessage" | "agentMessage" | "reasoning" | "plan" | "contextCompaction")
+                )
+                && msg["params"]["item"]["status"] != "failed"
+                && msg["params"]["item"]["status"] != "declined"
+        }
+        Vendor::Claude => {
+            (msg["type"] == "assistant"
+                && msg["message"]["content"].as_array().is_some_and(|items| items.iter().any(|item| item["type"] == "tool_use")))
+                || (msg["type"] == "stream_event"
+                    && msg["event"]["type"] == "content_block_start"
+                    && msg["event"]["content_block"]["type"] == "tool_use")
+        }
+    };
+    if escaped {
+        return Err(std::io::Error::other("ungranted native tool executed"));
+    }
     let reply = match vendor {
         Vendor::Claude if msg["type"] == "control_request" && msg["request"]["subtype"] == "can_use_tool" => {
             let id = msg["request_id"].as_str().ok_or_else(|| std::io::Error::other("missing request identity"))?;

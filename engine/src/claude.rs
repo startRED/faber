@@ -114,7 +114,7 @@ pub fn project_claude_args(launch: &ClaudeLaunch, role: crate::project::Role) ->
         "dontAsk",
         "--disable-slash-commands",
         "--disallowedTools",
-        "Bash,Write,Edit,Read,Glob,Grep,Agent,Task,WebSearch,WebFetch,Bash(git push *),Bash(git reset *),Bash(git update-ref *)",
+        "Bash,Write,Edit,NotebookEdit,Read,Glob,Grep,Agent,Task,WebSearch,WebFetch,Bash(git push *),Bash(git reset *),Bash(git update-ref *)",
     ] {
         args.push(a.into());
     }
@@ -302,7 +302,11 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                             if project {
                                 match crate::project::policy::reject_native(&mut *stdin, crate::model::Vendor::Claude, &msg).await {
                                     Ok(true) => continue,
-                                    Err(_) => { proc::stop(&mut *stdin, &mut child).await; break; }
+                                    Err(_) => {
+                                        on_event(EngineEvent::Error {message:crate::project::policy::Blocker::Restrictions.key().into(),fatal:true});
+                                        proc::stop(&mut *stdin, &mut child).await;
+                                        break;
+                                    }
                                     Ok(false) => {}
                                 }
                             }

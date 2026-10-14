@@ -14,6 +14,32 @@ const NOW: f64 = 2.0 * DAY + 3600.0;
 const MODEL: &str = "gpt-6.1-sol";
 
 #[test]
+fn the_installed_unmetered_interrupt_cannot_return_reserved_spend() {
+    let mut ledger = ready(200_000);
+    apply(&mut ledger, Change::Admit(request("i1", "m1", "w1", Kind::Worker, 100_000)), NOW, 0).unwrap();
+    let mut state = faber_engine::codex::CodexTurnState::default();
+    let mut done = None;
+    for line in include_str!("../../tests/fixtures/projects/interrupted-unmetered.jsonl").lines() {
+        let entry: serde_json::Value = serde_json::from_str(line).unwrap();
+        for event in faber_engine::codex::parse_codex_notification(&entry["msg"], &mut state) {
+            if matches!(event, EngineEvent::Done { .. }) {
+                done = Some(event);
+            }
+        }
+    }
+    let event = done.expect("fixture must finish the actual interrupted turn");
+    assert!(matches!(event, EngineEvent::Done { cost_total_usd: None, incomplete: true, .. }));
+    assert_eq!(
+        apply(&mut ledger, Change::Report { id: "i1".into(), event, terminated: true }, NOW, 0).unwrap(),
+        Status::Stop("reason.budget.unknown")
+    );
+    let budget = Budget::load(&ledger).unwrap();
+    assert!(!budget.invocations["i1"].settled);
+    assert_eq!(budget.cost_view("m1").own_micros, None);
+    assert!(apply(&mut ledger, Change::Continue { id: "i1".into() }, NOW, 0).is_err());
+}
+
+#[test]
 fn mission_screen_cost_reads_the_live_cap_and_never_calls_unsettled_exposure_measured_spend() {
     let mut b = Budget::default();
     let unknown = b.cost_view("m1");

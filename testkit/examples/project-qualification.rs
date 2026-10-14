@@ -88,6 +88,8 @@ fn run() -> io::Result<()> {
                 | "--live-role-tools"
                 | "--live-claude-loadout"
                 | "--live-claude-native"
+                | "--live-claude-stop"
+                | "--live-codex-stop"
                 | "--hidden-live"
         )
     {

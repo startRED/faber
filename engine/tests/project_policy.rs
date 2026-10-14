@@ -17,8 +17,8 @@ fn review_1_and_8_project_parameters_do_not_grant_admission_or_reach_a_fallback(
         assert_eq!(faber_engine::project::policy::admit(vendor), Err(Blocker::Restrictions));
     }
     let (_, params) = project_thread_params(&thread(None), Role::Writer).unwrap();
-    assert_eq!(params["approvalPolicy"], "never");
-    assert_eq!(params["sandbox"], "workspace-write");
+    assert_eq!(params["approvalPolicy"], "on-request");
+    assert_eq!(params["sandbox"], "read-only");
 }
 
 #[test]
@@ -94,6 +94,31 @@ async fn review_1_codex_native_approvals_are_declined_and_malformed_requests_fai
 }
 
 const ROLES: [Role; 5] = [Role::Lead, Role::Research, Role::TestProposal, Role::Writer, Role::Reviewer];
+
+#[tokio::test]
+async fn ungranted_native_completions_fail_closed_for_both_vendors() {
+    let (spawn, _, _) = support::controlled();
+    let mut process = spawn("fake", &[], ".".as_ref()).unwrap();
+    for kind in ["fileChange", "commandExecution", "webSearch", "mcpToolCall", "dynamicToolCall", "unknownFutureTool"] {
+        for status in ["completed", "failed", "declined"] {
+            let msg = json!({"method":"item/completed","params":{"item":{"type":kind,"status":status}}});
+            let result = faber_engine::project::policy::reject_native(&mut *process.stdin, Vendor::Codex, &msg).await;
+            assert_eq!(result.is_err(), status == "completed");
+        }
+    }
+    for msg in [
+        json!({"type":"assistant","message":{"content":[{"type":"tool_use","name":"NotebookEdit"}]}}),
+        json!({"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"tool_use","name":"Bash"}}}),
+    ] {
+        assert!(faber_engine::project::policy::reject_native(&mut *process.stdin, Vendor::Claude, &msg).await.is_err());
+    }
+    for (vendor, msg) in [
+        (Vendor::Codex, json!({"method":"item/completed","params":{"item":{"type":"agentMessage"}}})),
+        (Vendor::Claude, json!({"type":"assistant","message":{"content":[{"type":"text","text":"<Bash>literal text</Bash>"}]}})),
+    ] {
+        assert!(!faber_engine::project::policy::reject_native(&mut *process.stdin, vendor, &msg).await.unwrap());
+    }
+}
 
 #[test]
 fn t13_shared_exposure_discards_values_and_never_uses_missing_or_malformed_configuration() {
@@ -192,15 +217,25 @@ fn project_controls_are_explicit_on_launch_and_resume_without_changing_chat() {
             let settings: Value = serde_json::from_str(after(&args, "--settings")).unwrap();
             assert_eq!(settings["disableAllHooks"], true);
             let denied = after(&args, "--disallowedTools");
-            for tool in ["Bash", "Write", "Edit", "Agent", "Task", "Bash(git push *)", "Bash(git reset *)", "Bash(git update-ref *)"] {
+            for tool in [
+                "Bash",
+                "Write",
+                "Edit",
+                "NotebookEdit",
+                "Agent",
+                "Task",
+                "Bash(git push *)",
+                "Bash(git reset *)",
+                "Bash(git update-ref *)",
+            ] {
                 assert!(denied.split(',').any(|d| d == tool), "{tool}");
             }
             let (method, params) = project_thread_params(&thread(resume), role).unwrap();
             assert_eq!(method, if resume.is_some() { "thread/resume" } else { "thread/start" });
             assert_eq!(params["model"], "gpt-6");
             assert_eq!(params["config"]["model_reasoning_effort"], "high");
-            assert_eq!(params["approvalPolicy"], "never");
-            assert_eq!(params["sandbox"], if role == Role::Writer { "workspace-write" } else { "read-only" });
+            assert_eq!(params["approvalPolicy"], "on-request");
+            assert_eq!(params["sandbox"], "read-only");
             if let Some(id) = resume {
                 assert_eq!(after(&args, "--resume"), id);
                 assert_eq!(params["threadId"], id);
