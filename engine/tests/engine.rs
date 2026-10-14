@@ -1723,6 +1723,27 @@ async fn r124c_every_turn_rechecks_the_working_folder_also_when_the_process_is_r
     engine.shutdown();
 }
 
+/// R124d, item 2: the private folder a Chat gets by default is checked on every launch like a chosen folder: replaced by a link
+/// into a refused place while the CLI is closed, it is refused.
+#[tokio::test]
+async fn r124d_the_default_chat_folder_is_rechecked_at_every_launch() {
+    let dir = tempfile::tempdir().unwrap();
+    let forbidden = dir.path().join(".ssh").join("keys");
+    std::fs::create_dir_all(&forbidden).unwrap();
+    let f = fake(claude_turns(&[("first", true), ("second", true)]));
+    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let id = engine.send(ask(Area::Chat, "first", choice("claude", Some("haiku")))).unwrap();
+    finished(&mut rx, |_| {}).await;
+    // The CLI is closed (the person changed the mode and back), then the private folder becomes a link.
+    engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+    let scratch = dir.path().join("chat").join(&id);
+    std::fs::remove_dir_all(&scratch).unwrap();
+    link(&scratch, &forbidden);
+    let second = SendRequest { conversation_id: Some(id.clone()), ..ask(Area::Chat, "second", choice("claude", Some("haiku"))) };
+    assert_eq!(engine.send(second).unwrap_err(), "error.workingFolder");
+    engine.shutdown();
+}
+
 /// R124, item 3: switching to Ask must stop execution, not only the status. A command the CLI started is a child of the CLI;
 /// on Windows killing the CLI alone left it running and still changing files.
 #[cfg(windows)]

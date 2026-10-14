@@ -279,7 +279,7 @@ material you do not trust. The Settings text says exactly this.
   being absent is refused. R124c: a network path to an administrative share (a share name ending in `$`, any host) is refused,
   since aliases such as the PC's LAN address cannot all be recognised; the check also runs on every turn, also when the process of
   the earlier turn is reused (the process is started again if the folder now resolves elsewhere), and the CLI starts in the
-  resolved path that was checked (`permissions::checked_folder`). Between the check and the start the folder could still be swapped
+  resolved path that was checked (`permissions::checked_folder`; the `\?` prefix is dropped only if the shorter spelling resolves to the very same folder, since `safe.` would otherwise become `safe`; the default private Chat folder is checked like a chosen one, R124d). Between the check and the start the folder could still be swapped
   by someone with write access to its parents; that window is not closed. This protects the folder the person picks; it does not
   limit what a command run inside it can reach, and the Settings text says the blocking of those folders for commands is best effort.
 - Hooks: the Settings switch applies only to Ask before commands. With full access the person's hooks always run.

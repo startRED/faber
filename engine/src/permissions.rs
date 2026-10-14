@@ -495,16 +495,21 @@ fn administrative_share(path: &str) -> bool {
     path.strip_prefix("//").and_then(|rest| rest.split('/').nth(1)).is_some_and(|share| share.ends_with('$'))
 }
 
-/// The resolved path without the `\\?\` prefix `canonicalize` adds on Windows (the CLIs and their tools do not all accept it).
-fn plain(path: PathBuf) -> PathBuf {
-    let text = path.to_string_lossy();
-    if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
-        return PathBuf::from(format!(r"\\{unc}"));
-    }
-    match text.strip_prefix(r"\\?\") {
-        Some(local) if local.as_bytes().get(1) == Some(&b':') => PathBuf::from(local),
-        _ => path,
-    }
+/// The spelling the CLI is launched in: the resolved path without the `\\?\` prefix `canonicalize` adds on Windows (the CLIs and
+/// their tools do not all accept it). Stripping can change what a name means (`safe.` becomes `safe`, `CON` a device), so the
+/// stripped spelling is resolved again and used only if it names the very folder that was checked; otherwise the verbatim form,
+/// which Windows takes literally, is kept. A spelling that was not checked is never launched.
+fn plain(real: PathBuf) -> PathBuf {
+    let text = real.to_string_lossy();
+    let stripped = if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{unc}"))
+    } else {
+        match text.strip_prefix(r"\\?\") {
+            Some(local) if local.as_bytes().get(1) == Some(&b':') => PathBuf::from(local),
+            _ => return real,
+        }
+    };
+    if std::fs::canonicalize(&stripped).is_ok_and(|again| again == real) { stripped } else { real }
 }
 
 fn secret(path: &Path, reading: bool) -> bool {

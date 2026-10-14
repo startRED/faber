@@ -766,10 +766,9 @@ impl Core {
             let dir = self.workspace_of(&c.id);
             if c.working_folder.is_none() {
                 std::fs::create_dir_all(&dir).map_err(|_| "error.projectSandbox")?;
-                return Ok(dir);
             }
-            // The folder was fine when it was chosen; a link put there since may lead somewhere that is not. The CLI starts in
-            // the path that was checked.
+            // The private folder and a chosen one are checked alike on every launch: a link put there since may lead somewhere
+            // that is not allowed. The CLI starts in the path that was checked.
             return crate::permissions::checked_folder(&dir).ok_or_else(|| "error.workingFolder".to_string());
         }
         self.store

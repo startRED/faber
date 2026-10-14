@@ -527,6 +527,33 @@ fn junction(link: &std::path::Path, target: &std::path::Path) {
     assert!(made.status.success(), "the junction could not be made");
 }
 
+/// R124d, item 1: the launch spelling of a folder names the folder that was checked. A folder called `safe.` loses its dot when the
+/// verbatim prefix is stripped and then names `safe`, which can be a link into a refused folder.
+#[cfg(windows)]
+#[test]
+fn r124d_a_folder_whose_plain_spelling_would_name_another_folder_keeps_its_verbatim_form() {
+    use faber_engine::permissions::checked_folder;
+    use std::os::windows::process::CommandExt;
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().canonicalize().unwrap(); // verbatim
+    let refused = base.join(".ssh").join("keys");
+    std::fs::create_dir_all(&refused).unwrap();
+    let dotted = base.join("p").join("safe.");
+    std::fs::create_dir_all(&dotted).unwrap();
+    let made = std::process::Command::new("cmd.exe")
+        .args(["/c", "mklink", "/J"])
+        .arg(dir.path().join("p").join("safe"))
+        .arg(dir.path().join(".ssh").join("keys"))
+        .creation_flags(0x0800_0000)
+        .output()
+        .unwrap();
+    assert!(made.status.success(), "the junction could not be made");
+    let checked = checked_folder(&dotted).expect("the folder itself is allowed");
+    assert_eq!(checked.canonicalize().unwrap(), dotted.canonicalize().unwrap(), "launching in {checked:?} would open another folder");
+    assert!(checked.to_string_lossy().starts_with("\\\\?\\"), "the verbatim form is kept: {checked:?}");
+    std::fs::remove_dir(&dotted).unwrap();
+}
+
 /// R124c, item 4: the CLI is started in the path that was checked (the resolved one), not in the link the person typed.
 #[test]
 fn r124c_a_checked_folder_is_returned_in_its_resolved_form() {
