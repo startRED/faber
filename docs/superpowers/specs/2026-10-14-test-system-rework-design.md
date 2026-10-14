@@ -1,6 +1,6 @@
 # Test system rework: beat TL-ADE's suite by 5x
 
-Date: 2026-10-14. Status: approach approved by Erick (R113, option 1); this spec awaits his review.
+Date: 2026-10-14. Status: approach approved by Erick (R113, option 1); cold-run target R114 (Erick); this spec awaits his review.
 Research: TL-ADE mapping and process sources were read on 2026-10-14 (no code copied, AGENTS.md).
 
 ## 1. Goal
@@ -129,7 +129,7 @@ R113 is met when the benchmark tool reports, as medians of 3 runs:
 |---|---|
 | Whole suite, warm | at least 5x less wall time and processes, 3x less peak memory and CPU |
 | Each of the 8 matched scenarios | the same ratios |
-| Whole suite, cold | reported; target in section 7 |
+| Whole suite, cold | at least 2x less wall time (Faber compile plus suite against TL-ADE `npm ci` plus suite) |
 
 And: every Faber test that passed before still passes, with the same assertions; `cargo t --all` stays green on
 Windows, macOS and Linux in CI; a forced failure inside a shared scenario still fails that scenario and does not leak into
@@ -146,11 +146,11 @@ the next one (a test proves it).
 - **The 5x may not hold for the matched scenarios** where TL-ADE's test is already small (a pure function in a few
   milliseconds). Each pair's report shows both numbers; a pair under 5x is listed, not hidden.
 
-## 7. Open point for Erick
+## 7. Cold runs (R114, Erick)
 
 TL-ADE has no compile step, so a cold run is mostly Faber's handicap: about 3.5 minutes of Rust compilation before the
-first test. Recommendation: for cold runs, the target is to beat TL-ADE's cold run (`npm ci` plus its suite) by at least
-2x, and 5x only for warm runs and the matched scenarios.
+first test. Only developers meet it (the owner, the AI, self-development); installed apps arrive compiled. The cold
+target is 2x, reached mainly through 4.5; warm runs and the matched scenarios keep 5x.
 
 ## 8. Order
 
