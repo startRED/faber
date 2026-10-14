@@ -223,8 +223,9 @@ struct Core {
     pending: HashMap<String, String>,
     next_sid: u64,
     tick: u64,
-    /// The shared Codex processes, one per area and hooks choice.
-    codex: HashMap<(Area, bool), CodexServer>,
+    /// The shared Codex processes, one per area, hooks choice and permissions. Faber's internal questions (routing) use an
+    /// Isolated process of their own, so nothing the person's setting allows ever reaches them.
+    codex: HashMap<(Area, bool, Permissions), CodexServer>,
     /// The ChatGPT model the account recommends, once the CLI has listed the models.
     codex_recommended: Option<String>,
     /// Every model the account can run on Codex, once listed.
@@ -457,12 +458,8 @@ impl Engine {
         self.with(|c| {
             let folder = folder
                 .map(|p| {
-                    let root = crate::permissions::working_root(p).filter(|p| p.is_dir()).ok_or("error.chatFolder")?;
-                    if c.store.settings().permissions.unwrap_or_default() == Permissions::DontAsk {
-                        crate::permissions::unattended_root(&root).ok_or("error.workingFolder")
-                    } else {
-                        Ok(root)
-                    }
+                    // Any folder can be the working folder in both modes (R121).
+                    crate::permissions::working_root(p).filter(|p| p.is_dir()).ok_or("error.chatFolder")
                 })
                 .transpose()?
                 .map(|p| p.to_string_lossy().into_owned());
@@ -778,14 +775,13 @@ impl Core {
             self.restore_recovery(&mut c);
             self.convs.insert(id.to_string(), c);
         }
-        let guarded = self.store.settings().permissions.unwrap_or_default() == Permissions::DontAsk;
         let c = self.convs.get_mut(id)?;
-        if c.command_gate != guarded {
+        // A Codex session saved before R121 carries the isolated host command tool, which no mode the person can pick uses
+        // any more: it restarts once, with visible history, without it.
+        if c.command_gate {
             c.sessions.remove(&Vendor::Codex);
             c.cost_base.remove(&Vendor::Codex);
-            if !guarded {
-                c.command_gate = false;
-            }
+            c.command_gate = false;
         }
         Some(c)
     }
@@ -853,7 +849,9 @@ impl Core {
             autostart: patch.autostart.or(before.autostart),
         };
         self.store.save_settings(&settings).map_err(|_| "error.settings.saveFailed".to_string())?;
-        if before.permissions.unwrap_or_default() == Permissions::DontAsk && settings.permissions == Some(Permissions::Ask) {
+        // Turns started with full access keep it until they end, so going back to asking stops them (a turn that began with
+        // approval cards keeps asking; switching to "Do not ask" does not touch it).
+        if before.permissions.unwrap_or_default() == Permissions::FullAccess && settings.permissions == Some(Permissions::Ask) {
             let active: Vec<String> = self.live.iter().filter(|(_, live)| live.turn.is_some()).map(|(id, _)| id.clone()).collect();
             for id in active {
                 if let Some(live) = self.live.remove(&id) {
@@ -888,13 +886,17 @@ impl Core {
                     l.session.close();
                 }
             }
-            for area in [Area::Chat, Area::Project] {
-                if area == Area::Project || settings.permissions != before.permissions {
-                    for hooks in [false, true] {
-                        if let Some(server) = self.codex.remove(&(area, hooks)) {
-                            server.retire();
-                        }
-                    }
+            let stale: Vec<_> = self
+                .codex
+                .keys()
+                .filter(|(area, _, p)| {
+                    *p != Permissions::Isolated && (*area == Area::Project || settings.permissions != before.permissions)
+                })
+                .copied()
+                .collect();
+            for key in stale {
+                if let Some(server) = self.codex.remove(&key) {
+                    server.retire();
                 }
             }
         }
@@ -925,7 +927,7 @@ impl Core {
                 let Some(c) = self.convs.get_mut(conv) else { return };
                 c.sessions.insert(vendor, session_id);
                 if vendor == Vendor::Codex {
-                    c.command_gate = self.live.get(conv).is_some_and(|l| l.permissions == Permissions::DontAsk);
+                    c.command_gate = self.live.get(conv).is_some_and(|l| l.permissions == Permissions::Isolated);
                 }
                 // a draft is saved only once something is sent
                 if !c.messages.is_empty() {
@@ -1541,10 +1543,10 @@ impl Core {
         self.push(id, Some(reply_id), true);
     }
 
-    /// The shared Codex process for an area and hooks choice, started again if it died.
-    fn codex_server(&mut self, area: Area, user_hooks: bool, cli: &Cli) -> &CodexServer {
+    /// The shared Codex process for an area, hooks choice and permissions, started again if it died.
+    fn codex_server(&mut self, area: Area, user_hooks: bool, permissions: Permissions, cli: &Cli) -> &CodexServer {
         let opts = CodexServerOptions {
-            permissions: self.store.settings().permissions.unwrap_or_default(),
+            permissions,
             cli: cli.clone(),
             cwd: self.opts.data_dir.clone(),
             area,
@@ -1552,7 +1554,7 @@ impl Core {
             windows: self.opts.windows,
             spawn: spawner(&self.opts.spawn, cli),
         };
-        let server = self.codex.entry((area, user_hooks)).or_insert_with(|| CodexServer::start(opts.clone()));
+        let server = self.codex.entry((area, user_hooks, permissions)).or_insert_with(|| CodexServer::start(opts.clone()));
         if !server.is_alive() {
             *server = CodexServer::start(opts);
         }
@@ -1638,16 +1640,6 @@ impl Core {
         }
         let c = self.convs.get(conv).ok_or("error.conversationGone")?;
         let cwd = self.cwd_of(c)?;
-        let cwd = if permissions == Permissions::DontAsk {
-            if c.area == Area::Chat && c.working_folder.is_none() {
-                // Owned UUID scratch remains usable under Faber's AppData directory.
-                crate::permissions::working_root(&cwd).ok_or("error.projectSandbox")?
-            } else {
-                crate::permissions::unattended_root(&cwd).ok_or("error.workingFolder")?
-            }
-        } else {
-            cwd
-        };
         let cli = cli.ok_or("error.notConnected")?;
         let spawn = spawner(&self.opts.spawn, &cli);
         self.next_sid += 1;
@@ -1682,13 +1674,11 @@ impl Core {
                 core.lock().unwrap_or_else(|e| e.into_inner()).handle(&end.key, end.sid, e);
             }
         });
-        let user_hooks = self.store.settings().user_hooks == Some(true) && (c.area == Area::Project || permissions == Permissions::Ask);
+        // The hooks switch matters only while asking; with full access the person's hooks always run, as in the CLI itself.
+        let user_hooks = self.store.settings().user_hooks == Some(true) && permissions == Permissions::Ask;
         let resume = c.sessions.get(&pick.vendor).cloned();
         let resumed = resume.is_some();
         let area = c.area;
-        if permissions == Permissions::DontAsk && !crate::permissions::prepare_tmp(&cwd) {
-            return Err("error.projectSandbox".into());
-        }
         // The conversation's own name, fixed when it began: a rename in Settings never reaches a conversation under way.
         let user_name = c.user_name.clone();
         let (model, effort) = (pick.model.clone(), Some(pick.effort.clone()));
@@ -1704,7 +1694,7 @@ impl Core {
                 sink,
             ),
             Vendor::Codex => self
-                .codex_server(area, user_hooks, &cli)
+                .codex_server(area, user_hooks, permissions, &cli)
                 .open(CodexThread { cwd, model, effort, resume, instructions: None, user_name, permissions }, sink),
         };
         self.live.insert(

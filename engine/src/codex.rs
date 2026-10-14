@@ -21,42 +21,53 @@ const CHAT_INSTRUCTIONS: &str = "You are a helpful, precise assistant in a chat 
 Use Markdown when it helps. Your working folder belongs to this conversation: run code and create files \
 there when it helps, and mention the files you create.";
 
-/// Ask preserves the existing setup. Unattended servers disable integrations and require MXC on Windows.
+/// Ask preserves the existing setup. Isolated servers disable integrations and require MXC on Windows. Full access ("Do not
+/// ask", R121) starts the CLI as the person would: their MCP servers, plugins and hooks stay on, and no sandbox is configured.
 pub fn codex_args(area: Area, windows: bool, user_hooks: bool, permissions: Permissions) -> Vec<String> {
     let mut args = vec!["app-server".to_string()];
     let mut push = |a: &[&str]| args.extend(a.iter().map(|s| s.to_string()));
-    if !user_hooks || permissions == Permissions::DontAsk {
+    let isolated = permissions == Permissions::Isolated;
+    if isolated || (permissions == Permissions::Ask && !user_hooks) {
         push(&["--disable", "hooks"]);
     }
-    if windows {
-        push(&["-c", if permissions == Permissions::DontAsk { "windows.sandbox=\"mxc\"" } else { "windows.sandbox=\"unelevated\"" }]);
+    if windows && permissions != Permissions::FullAccess {
+        push(&["-c", if isolated { "windows.sandbox=\"mxc\"" } else { "windows.sandbox=\"unelevated\"" }]);
     }
-    if area == Area::Chat || permissions == Permissions::DontAsk {
+    if isolated || (area == Area::Chat && permissions == Permissions::Ask) {
         for feature in ["apps", "plugins", "computer_use", "browser_use"] {
             push(&["--disable", feature]);
         }
         push(&["-c", "mcp_servers={}"]);
-        if area == Area::Chat {
-            push(&["-c", "project_doc_max_bytes=0"]);
-        }
     }
-    if permissions == Permissions::DontAsk {
+    if area == Area::Chat && permissions != Permissions::FullAccess {
+        push(&["-c", "project_doc_max_bytes=0"]);
+    }
+    if isolated {
         push(&["--disable", "skill_mcp_dependency_install"]);
     }
     args
 }
 
-/// Parameters for thread/start and thread/resume. The sandbox keeps writes inside the working folder;
-/// anything beyond it asks in Ask mode and fails in Don't ask mode.
+/// Parameters for thread/start and thread/resume. Ask keeps writes inside the working folder and asks for anything beyond it.
+/// Full access runs without Codex's sandbox and never asks. Isolated runs Faber's own sandbox and fails what it does not allow.
+///
+/// Full access cannot keep Codex away from the credential folders: Codex's only filesystem deny rules live in a permission
+/// profile, and on Windows a profile that grants the whole disk and denies a few folders is refused when any drive letter is
+/// unreachable ("MXC cannot verify it does not alias a denied object") or needs the elevated sandbox. The same limit is
+/// written in docs/security-r97-review.md.
 pub fn codex_thread(area: Area, model: Option<&str>, permissions: Permissions) -> Map<String, Value> {
     let mut thread = Map::new();
     if let Some(model) = model {
         thread.insert("model".into(), model.into());
     }
-    thread.insert("sandbox".into(), "workspace-write".into());
-    let dont_ask = permissions == Permissions::DontAsk;
-    thread.insert("approvalPolicy".into(), if dont_ask { "never" } else { "on-request" }.into());
-    if dont_ask {
+    let (sandbox, approval) = match permissions {
+        Permissions::Ask => ("workspace-write", "on-request"),
+        Permissions::FullAccess => ("danger-full-access", "never"),
+        Permissions::Isolated => ("workspace-write", "never"),
+    };
+    thread.insert("sandbox".into(), sandbox.into());
+    thread.insert("approvalPolicy".into(), approval.into());
+    if permissions == Permissions::Isolated {
         thread.remove("sandbox");
         thread.insert("config".into(), crate::permissions::sandbox_config(Path::new("."), true).into());
         thread["config"]["features.shell_tool"] = false.into();
@@ -394,11 +405,11 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
         // Developer instructions sit beside Codex's own, so a project keeps its default prompt.
         params.insert("developerInstructions".into(), name_instructions(name).into());
     }
-    if t.permissions == Permissions::DontAsk && t.instructions.is_none() {
+    if t.permissions == Permissions::Isolated && t.instructions.is_none() {
         params.insert("config".into(), crate::permissions::sandbox_config(&t.cwd, true).into());
         params["config"]["features.shell_tool"] = false.into();
     }
-    if (t.permissions == Permissions::DontAsk || t.instructions.is_some()) && t.cwd.is_absolute() {
+    if (t.permissions == Permissions::Isolated || t.instructions.is_some()) && t.cwd.is_absolute() {
         params.insert("runtimeWorkspaceRoots".into(), json!([t.cwd]));
     }
     params.insert("cwd".into(), t.cwd.to_string_lossy().into_owned().into());
@@ -496,7 +507,7 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
     }
     macro_rules! open_thread {
         ($key:expr, $t:expr) => {{
-            if $t.params.permissions == Permissions::DontAsk || $t.params.instructions.is_some() {
+            if $t.params.permissions == Permissions::Isolated || $t.params.instructions.is_some() {
                 let _ = proc::write_line(&mut *stdin, &json!({"id":format!("faber-config-{}", $key), "method":"config/read",
                     "params":{"includeLayers":false,"cwd":$t.params.cwd}})).await;
             } else {
@@ -608,7 +619,7 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                         let thread = params["threadId"].as_str().and_then(|t| by_id.get(t)).and_then(|k| threads.get_mut(k));
                         if method == "item/tool/call" {
                             let mut accepted = false;
-                            if let Some(t) = thread && t.params.permissions == Permissions::DontAsk && t.params.instructions.is_none() && params["tool"] == "run_command" {
+                            if let Some(t) = thread && t.params.permissions == Permissions::Isolated && t.params.instructions.is_none() && params["tool"] == "run_command" {
                                 let input = &params["arguments"];
                                 if let Some(argv) = crate::permissions::command_argv(&t.params.cwd, "Bash", input, Some(&opts.cli), &crate::cli::find_cli) {
                                     let (spawn, cwd, tx, id) = (opts.spawn.clone(), t.params.cwd.clone(), command_tx.clone(), id.clone());
@@ -629,6 +640,14 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                             continue;
                         }
                         match (method.ends_with("requestApproval"), thread) {
+                            // Full access never shows a card. Codex does not ask under the "never" policy; if it still does, the answer is yes.
+                            (true, Some(t))
+                                if t.params.permissions == Permissions::FullAccess
+                                    && t.params.instructions.is_none()
+                                    && ["item/commandExecution/requestApproval", "item/fileChange/requestApproval"].contains(&method) =>
+                            {
+                                let _ = proc::write_line(&mut *stdin, &json!({ "id": id, "result": { "decision": "accept" } })).await;
+                            }
                             (true, Some(t)) if t.params.permissions == Permissions::Ask && t.params.instructions.is_none() => {
                                 let key = match id { Value::String(s) => s.clone(), other => other.to_string() };
                                 t.approvals.insert(key.clone(), id.clone());
@@ -770,7 +789,7 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
 /// turn. The answers are dressed as the notifications the server sends later and go through the same parser; the rest of
 /// them (the account's email and other details) is dropped unread. A failed reply does not discard the other reply's evidence.
 pub async fn read_codex_limits(bin: &str, cwd: &Path, windows: bool, spawn: Spawner, timeout: Duration) -> Vec<EngineEvent> {
-    let Ok(p) = spawn(bin, &codex_args(Area::Chat, windows, false, Permissions::DontAsk), cwd) else { return vec![] };
+    let Ok(p) = spawn(bin, &codex_args(Area::Chat, windows, false, Permissions::Isolated), cwd) else { return vec![] };
     let mut stdin = p.stdin;
     let mut child = p.child;
     let mut lines = BufReader::new(p.stdout).lines();
@@ -835,7 +854,7 @@ pub struct ModelInfo {
 /// Asks a short-lived `codex app-server` which models this account can use, so the picker shows the real list.
 /// Gives an empty list on any failure: the picker then offers just the account's default.
 pub async fn list_codex_models(bin: &str, cwd: &Path, windows: bool, spawn: Spawner, timeout: Duration) -> Vec<ModelInfo> {
-    let Ok(p) = spawn(bin, &codex_args(Area::Chat, windows, false, Permissions::DontAsk), cwd) else { return vec![] };
+    let Ok(p) = spawn(bin, &codex_args(Area::Chat, windows, false, Permissions::Isolated), cwd) else { return vec![] };
     let mut stdin = p.stdin;
     let mut child = p.child;
     let mut lines = BufReader::new(p.stdout).lines();

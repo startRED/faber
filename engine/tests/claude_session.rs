@@ -227,22 +227,69 @@ fn chat_is_lean_and_confined_to_its_workspace_projects_get_the_user_setup_withou
     assert!(!claude_args(&ClaudeLaunch { user_hooks: true, ..launch(Area::Project) }).contains(&"--settings".into()));
 }
 
+const CREDENTIAL_DENIES: [&str; 5] =
+    ["Read(~/.claude/**)", "Read(~/.codex/**)", "Read(~/.ssh/**)", "Read(~/.gemini/**)", "Read(~/.claude.json)"];
+
 #[test]
-fn r107_permissions_cover_chat_and_projects_and_keep_denies_with_user_hooks() {
+fn r121_full_access_bypasses_approvals_keeps_integrations_and_denies_only_the_credential_folders() {
+    for area in [Area::Chat, Area::Project] {
+        for hooks in [false, true] {
+            let args = claude_args(&ClaudeLaunch { permissions: Permissions::FullAccess, user_hooks: hooks, ..launch(area) });
+            assert!(args.windows(2).any(|a| a == ["--permission-mode", "bypassPermissions"]), "{area:?}");
+            // Deny rules still apply in bypassPermissions, so the credential folders stay out of reach of the file tools.
+            for rule in CREDENTIAL_DENIES {
+                assert!(args.contains(&rule.into()), "{area:?} {rule}");
+            }
+            assert!(args.contains(&"--disallowedTools".into()));
+            // Nothing that isolates: no sandbox, ask rules, folder confinement or scrubbed environment ...
+            assert!(!args.contains(&"--settings".into()), "{area:?} full access has no host settings: {args:?}");
+            // ... and nothing that turns the person's own integrations off.
+            for flag in ["--safe-mode", "--strict-mcp-config", "--setting-sources", "--restricted", "--bare"] {
+                assert!(!args.contains(&flag.into()), "{area:?} {flag}");
+            }
+        }
+    }
+    let chat = claude_args(&ClaudeLaunch { permissions: Permissions::FullAccess, ..launch(Area::Chat) });
+    assert!(
+        chat.windows(2).any(|a| a == ["--tools", "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch"]),
+        "Chat keeps its lean tool list"
+    );
+}
+
+#[test]
+fn r121_the_person_choosing_do_not_ask_never_reaches_the_isolated_arguments() {
+    // The old "Do not ask" arguments, now reachable only by naming Isolated.
+    for area in [Area::Chat, Area::Project] {
+        let full = claude_args(&ClaudeLaunch { permissions: Permissions::FullAccess, ..launch(area) });
+        let isolated = claude_args(&ClaudeLaunch { permissions: Permissions::Isolated, ..launch(area) });
+        assert_ne!(full, isolated);
+        assert!(isolated.contains(&"--safe-mode".into()) && isolated.contains(&"--strict-mcp-config".into()));
+    }
+    // The stored settings name only the two choices on screen; the isolated mode cannot be written or read back.
+    assert_eq!(serde_json::to_string(&Permissions::FullAccess).unwrap(), "\"dontAsk\"");
+    assert_eq!(serde_json::to_string(&Permissions::Ask).unwrap(), "\"ask\"");
+    assert_eq!(serde_json::from_str::<Permissions>("\"dontAsk\"").unwrap(), Permissions::FullAccess);
+    assert!(serde_json::from_str::<Permissions>("\"isolated\"").is_err());
+    assert!(serde_json::to_string(&Permissions::Isolated).is_err());
+    assert_eq!(Permissions::default(), Permissions::FullAccess);
+}
+
+#[test]
+fn r107_isolated_mode_covers_chat_and_projects_and_keeps_denies_with_user_hooks() {
     for hooks in [false, true] {
         let asking = ClaudeLaunch { user_hooks: hooks, ..launch(Area::Project) };
         let ask = claude_args(&asking);
         assert!(!ask.contains(&"--permission-mode".into()));
         assert!(!ask.contains(&"--disallowedTools".into()));
         assert!(ask.windows(2).any(|a| a == ["--permission-prompt-tool", "stdio"]));
-        let skip = claude_args(&ClaudeLaunch { permissions: Permissions::DontAsk, ..asking });
+        let skip = claude_args(&ClaudeLaunch { permissions: Permissions::Isolated, ..asking });
         assert!(skip.windows(2).any(|a| a == ["--permission-mode", "bypassPermissions"]));
         let config: serde_json::Value = serde_json::from_str(&skip[skip.iter().position(|a| a == "--settings").unwrap() + 1]).unwrap();
         assert_eq!(config["disableAllHooks"], true);
         assert_eq!(config["permissions"]["blockReadsOutsideWorkingDirectories"], true);
         assert!(skip.contains(&"Edit(//**/.git/**)".into()));
     }
-    let chat = claude_args(&ClaudeLaunch { permissions: Permissions::DontAsk, ..launch(Area::Chat) });
+    let chat = claude_args(&ClaudeLaunch { permissions: Permissions::Isolated, ..launch(Area::Chat) });
     assert!(!chat.contains(&"--restricted".into()), "restricted refuses bypassPermissions");
     assert!(chat.contains(&"--strict-mcp-config".into()));
     assert!(chat.windows(2).any(|a| a == ["--permission-mode", "bypassPermissions"]));
@@ -250,13 +297,74 @@ fn r107_permissions_cover_chat_and_projects_and_keep_denies_with_user_hooks() {
     assert_eq!(config["permissions"]["blockReadsOutsideWorkingDirectories"], true);
     assert!(chat.contains(&"--safe-mode".into()), "Chat excludes startup customizations");
     assert!(chat.windows(2).any(|a| a == ["--setting-sources", "user"]));
-    let side =
-        claude_args(&ClaudeLaunch { permissions: Permissions::DontAsk, instructions: Some("Route.".into()), ..launch(Area::Project) });
-    assert!(!side.contains(&"bypassPermissions".into()) && !side.contains(&"--disallowedTools".into()));
+    // A side question has instructions of its own and no tools, whatever the mode.
+    for permissions in [Permissions::Isolated, Permissions::FullAccess] {
+        let side = claude_args(&ClaudeLaunch { permissions, instructions: Some("Route.".into()), ..launch(Area::Project) });
+        assert!(!side.contains(&"bypassPermissions".into()) && !side.contains(&"--disallowedTools".into()));
+    }
 }
 
 #[tokio::test]
-async fn a_project_in_bypass_mode_declines_residual_prompts_without_emitting_a_card() {
+async fn r121_full_access_answers_whatever_the_cli_still_asks_with_yes_and_no_card() {
+    for area in [Area::Chat, Area::Project] {
+        let root = tempfile::tempdir().unwrap();
+        // The recording of the isolated policy denies three of its five requests; full access allows all of them.
+        let entries: Vec<Entry> = fixture("claude", "project-policy")
+            .into_iter()
+            .map(|mut e| {
+                if e.input && e.msg["type"] == "control_response" {
+                    e.msg["response"]["response"]["behavior"] = "allow".into();
+                }
+                e
+            })
+            .collect();
+        let f = fake(entries);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let session = start_claude(
+            ClaudeOptions {
+                bin: "claude".into(),
+                cwd: root.path().into(),
+                launch: ClaudeLaunch { permissions: Permissions::FullAccess, ..launch(area) },
+                spawn: f.spawn.clone(),
+                // No Codex sandbox runner either: full access never needs one.
+                sandbox: None,
+            },
+            Arc::new(move |e| {
+                let _ = tx.send(e);
+            }),
+        );
+        session.send(UserTurn::text("check policy"));
+        loop {
+            let e = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.unwrap().unwrap();
+            assert!(!matches!(e, EngineEvent::Permission { .. }), "full access never shows a card");
+            if matches!(e, EngineEvent::Done { .. }) {
+                break;
+            }
+        }
+        let responses: Vec<(String, String, bool)> = f
+            .wire
+            .messages()
+            .into_iter()
+            .filter(|m| m["type"] == "control_response")
+            .map(|m| {
+                let r = &m["response"]["response"];
+                // Allowed as asked: the command is not wrapped in a sandbox and the input is not rewritten.
+                let unchanged = r["updatedInput"].get("command").is_none_or(|c| !c.as_str().unwrap_or_default().contains("sandbox"));
+                (m["response"]["request_id"].as_str().unwrap().to_owned(), r["behavior"].as_str().unwrap().to_owned(), unchanged)
+            })
+            .collect();
+        assert_eq!(
+            responses,
+            ["write", "outside", "git", "delete", "question"].map(|id| (id.to_owned(), "allow".to_owned(), true)),
+            "{area:?}"
+        );
+        assert!(f.mismatches.lock().unwrap().is_empty(), "{:?}", f.mismatches.lock().unwrap());
+        session.close();
+    }
+}
+
+#[tokio::test]
+async fn the_isolated_mode_declines_residual_prompts_without_emitting_a_card() {
     for area in [Area::Chat, Area::Project] {
         let entries = support::claude_two_turns("req")
             .into_iter()
@@ -278,7 +386,7 @@ async fn a_project_in_bypass_mode_declines_residual_prompts_without_emitting_a_c
                     ClaudeOptions {
                         bin: "claude".into(),
                         cwd: ".".into(),
-                        launch: ClaudeLaunch { permissions: Permissions::DontAsk, ..launch(area) },
+                        launch: ClaudeLaunch { permissions: Permissions::Isolated, ..launch(area) },
                         spawn,
                         sandbox: None,
                     },
@@ -310,7 +418,7 @@ async fn an_undelivered_automatic_permission_response_ends_the_turn_instead_of_w
             bin: "claude".into(),
             cwd: ".".into(),
             spawn: f.spawn,
-            launch: ClaudeLaunch { permissions: Permissions::DontAsk, ..launch(Area::Project) },
+            launch: ClaudeLaunch { permissions: Permissions::Isolated, ..launch(Area::Project) },
             sandbox: None,
         },
         sink,
@@ -332,7 +440,7 @@ async fn l2_project_file_and_command_decisions_reach_stdio_without_permission_ca
             ClaudeOptions {
                 bin: "claude".into(),
                 cwd: root.path().into(),
-                launch: ClaudeLaunch { permissions: Permissions::DontAsk, ..launch(area) },
+                launch: ClaudeLaunch { permissions: Permissions::Isolated, ..launch(area) },
                 spawn: f.spawn.clone(),
                 sandbox: Some(faber_engine::cli::Cli { command: "C:/Tools/codex.exe".into(), prefix: vec![] }),
             },
@@ -390,7 +498,7 @@ async fn review2_h3_the_driver_sends_only_a_sandbox_wrapped_build_without_a_card
             ClaudeOptions {
                 bin: "claude".into(),
                 cwd: root.path().into(),
-                launch: ClaudeLaunch { permissions: Permissions::DontAsk, ..launch(area) },
+                launch: ClaudeLaunch { permissions: Permissions::Isolated, ..launch(area) },
                 spawn: f.spawn.clone(),
                 sandbox: Some(faber_engine::cli::Cli { command: "C:/Tools/codex.exe".into(), prefix: vec![] }),
             },

@@ -15,9 +15,9 @@ fn settings(args: &[String]) -> Value {
 fn review3_catch_all_routes_untrusted_tools_to_the_host_in_both_areas() {
     let root = tempfile::tempdir().unwrap();
     for area in [Area::Chat, Area::Project] {
-        let config = settings(&claude_args(&launch(area, Permissions::DontAsk)));
+        let config = settings(&claude_args(&launch(area, Permissions::Isolated)));
         assert!(config["permissions"]["ask"].as_array().unwrap().contains(&json!("*")));
-        let args = claude_args(&launch(area, Permissions::DontAsk));
+        let args = claude_args(&launch(area, Permissions::Isolated));
         for rule in ["Read(~/.claude/**)", "Read(~/.codex/**)"] {
             assert!(args.contains(&rule.into()));
         }
@@ -40,7 +40,7 @@ fn review3_codex_credential_denies_survive_in_both_areas_and_on_resume() {
                     resume,
                     instructions: None,
                     user_name: None,
-                    permissions: Permissions::DontAsk,
+                    permissions: Permissions::Isolated,
                 },
             );
             let config = &params["config"];
@@ -58,7 +58,7 @@ fn review3_codex_credential_denies_survive_in_both_areas_and_on_resume() {
 
 #[test]
 fn review3_codex_unattended_projects_disable_integrations_and_pin_mxc() {
-    let args = codex_args(Area::Project, true, false, Permissions::DontAsk);
+    let args = codex_args(Area::Project, true, false, Permissions::Isolated);
     for feature in ["apps", "plugins", "computer_use", "browser_use"] {
         assert!(args.windows(2).any(|pair| pair == ["--disable", feature]), "{feature}");
     }
@@ -70,12 +70,12 @@ fn review3_codex_unattended_projects_disable_integrations_and_pin_mxc() {
 #[test]
 fn review3_unattended_startup_cannot_run_integration_hooks_even_after_opt_in() {
     for area in [Area::Chat, Area::Project] {
-        let mut cli = launch(area, Permissions::DontAsk);
+        let mut cli = launch(area, Permissions::Isolated);
         cli.user_hooks = true;
         let args = claude_args(&cli);
         assert!(args.contains(&"--safe-mode".into()) && args.contains(&"--strict-mcp-config".into()));
         assert_eq!(settings(&args)["disableAllHooks"], true);
-        let args = codex_args(area, true, true, Permissions::DontAsk);
+        let args = codex_args(area, true, true, Permissions::Isolated);
         assert!(args.windows(2).any(|pair| pair == ["--disable", "hooks"]));
         assert!(args.windows(2).any(|pair| pair == ["--disable", "skill_mcp_dependency_install"]));
     }
@@ -93,7 +93,7 @@ fn review3_codex_shells_use_the_shared_git_gate_instead_of_native_execution() {
                 resume: None,
                 instructions: None,
                 user_name: None,
-                permissions: Permissions::DontAsk,
+                permissions: Permissions::Isolated,
             },
         );
         assert_eq!(params["config"]["features.shell_tool"], false);
@@ -181,7 +181,7 @@ fn review3_project_local_auth_files_are_unreadable_and_denied_in_the_profile() {
 
 #[test]
 fn c1_project_reads_are_confined_and_credentials_and_updater_keys_are_denied() {
-    let args = claude_args(&launch(Area::Project, Permissions::DontAsk));
+    let args = claude_args(&launch(Area::Project, Permissions::Isolated));
     let config = settings(&args);
     assert_eq!(config["permissions"]["blockReadsOutsideWorkingDirectories"], true);
     for rule in [
@@ -206,7 +206,7 @@ fn c1_h4_codex_network_is_off_on_start_and_resume_even_if_user_settings_enable_i
             resume,
             instructions: None,
             user_name: None,
-            permissions: Permissions::DontAsk,
+            permissions: Permissions::Isolated,
         };
         let (_, params) = thread_params(Area::Project, &t);
         assert_eq!(params["approvalPolicy"], "never");
@@ -217,7 +217,7 @@ fn c1_h4_codex_network_is_off_on_start_and_resume_even_if_user_settings_enable_i
 
 #[test]
 fn h2_h3_m1_file_writes_and_shell_commands_reach_the_host_policy() {
-    let args = claude_args(&launch(Area::Project, Permissions::DontAsk));
+    let args = claude_args(&launch(Area::Project, Permissions::Isolated));
     let config = settings(&args);
     for rule in ["Read(//**)", "Edit(//**)", "Bash", "PowerShell"] {
         assert!(config["permissions"]["ask"].as_array().unwrap().contains(&json!(rule)), "missing {rule}");
@@ -228,7 +228,7 @@ fn h2_h3_m1_file_writes_and_shell_commands_reach_the_host_policy() {
 
 #[test]
 fn m2_l1_native_denies_do_not_match_harmless_messages_or_environment_templates() {
-    let args = claude_args(&launch(Area::Project, Permissions::DontAsk));
+    let args = claude_args(&launch(Area::Project, Permissions::Isolated));
     for rule in ["Bash(git * push *)", "Bash(git * rebase *)", "Read(//**/.env.*)"] {
         assert!(!args.contains(&rule.into()), "overbroad {rule}");
     }
@@ -236,7 +236,7 @@ fn m2_l1_native_denies_do_not_match_harmless_messages_or_environment_templates()
 
 #[test]
 fn h4_remote_transports_and_github_tokens_are_disabled_for_project_children() {
-    let args = claude_args(&launch(Area::Project, Permissions::DontAsk));
+    let args = claude_args(&launch(Area::Project, Permissions::Isolated));
     let config = settings(&args);
     assert_eq!(config["env"]["GIT_ALLOW_PROTOCOL"], "");
     for token in ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"] {
@@ -249,9 +249,9 @@ fn h4_remote_transports_and_github_tokens_are_disabled_for_project_children() {
 
 #[test]
 fn review2_m2_child_git_parameters_cannot_override_host_configuration() {
-    let config = settings(&claude_args(&launch(Area::Project, Permissions::DontAsk)));
+    let config = settings(&claude_args(&launch(Area::Project, Permissions::Isolated)));
     assert_eq!(config["env"]["GIT_CONFIG_PARAMETERS"], "");
-    let args = claude_args(&launch(Area::Project, Permissions::DontAsk));
+    let args = claude_args(&launch(Area::Project, Permissions::Isolated));
     assert!(args.windows(2).any(|pair| pair == ["--setting-sources", "user"]));
 }
 
@@ -265,7 +265,7 @@ fn review2_h2_codex_selects_a_restricted_read_profile_on_start_and_resume() {
             resume,
             instructions: None,
             user_name: None,
-            permissions: Permissions::DontAsk,
+            permissions: Permissions::Isolated,
         };
         let (_, params) = thread_params(Area::Project, &t);
         assert!(params.get("sandbox").is_none(), "legacy workspace-write must not override restricted reads");
@@ -285,20 +285,20 @@ fn review2_h2_codex_selects_a_restricted_read_profile_on_start_and_resume() {
 
 #[test]
 fn m3_all_git_commands_reach_the_host_instead_of_only_named_destructive_forms() {
-    let config = settings(&claude_args(&launch(Area::Project, Permissions::DontAsk)));
+    let config = settings(&claude_args(&launch(Area::Project, Permissions::Isolated)));
     assert!(config["permissions"]["ask"].as_array().unwrap().contains(&json!("Bash")));
 }
 
 #[test]
-fn r107_chat_reuses_project_protections_and_existing_users_default_to_dont_ask() {
-    let chat = settings(&claude_args(&launch(Area::Chat, Permissions::DontAsk)));
-    let project = settings(&claude_args(&launch(Area::Project, Permissions::DontAsk)));
+fn r107_isolated_chat_reuses_project_protections_and_existing_users_default_to_full_access() {
+    let chat = settings(&claude_args(&launch(Area::Chat, Permissions::Isolated)));
+    let project = settings(&claude_args(&launch(Area::Project, Permissions::Isolated)));
     for key in ["permissions", "sandbox", "env"] {
         assert_eq!(chat[key], project[key], "shared protection {key}");
     }
     for old in [json!({}), json!({ "setup": "done" })] {
         let old: Settings = serde_json::from_value(old).unwrap();
-        assert_eq!(old.permissions.unwrap_or_default(), Permissions::DontAsk);
+        assert_eq!(old.permissions.unwrap_or_default(), Permissions::FullAccess);
     }
 }
 
@@ -311,7 +311,7 @@ fn m6_sandbox_failures_are_intended_and_writable_roots_must_not_expand_into_user
         resume: None,
         instructions: None,
         user_name: None,
-        permissions: Permissions::DontAsk,
+        permissions: Permissions::Isolated,
     };
     let (_, params) = thread_params(Area::Project, &t);
     assert!(params.get("sandbox").is_none());
@@ -333,7 +333,7 @@ fn m6_sandbox_failures_are_intended_and_writable_roots_must_not_expand_into_user
 #[test]
 fn r107_internal_questions_restrict_reads_and_never_grant_workspace_writes() {
     for area in [Area::Chat, Area::Project] {
-        for permissions in [Permissions::Ask, Permissions::DontAsk] {
+        for permissions in [Permissions::Ask, Permissions::Isolated, Permissions::FullAccess] {
             let (_, params) = thread_params(
                 area,
                 &CodexThread {
@@ -358,5 +358,35 @@ fn r107_internal_questions_restrict_reads_and_never_grant_workspace_writes() {
             assert_eq!(roots["."], "read");
             assert!(!roots.values().any(|permission| permission == "write"));
         }
+    }
+}
+
+/// The deny rules after `--disallowedTools`, up to the next flag.
+fn denied(args: &[String]) -> Vec<String> {
+    args.iter().skip_while(|a| *a != "--disallowedTools").skip(1).take_while(|a| !a.starts_with("--")).cloned().collect()
+}
+
+#[test]
+fn r121_full_access_denies_the_credential_folders_exactly_as_the_isolated_mode_does() {
+    for area in [Area::Chat, Area::Project] {
+        let full = denied(&claude_args(&launch(area, Permissions::FullAccess)));
+        assert_eq!(full, denied(&claude_args(&launch(area, Permissions::Isolated))), "{area:?}");
+        for rule in ["Read(~/.claude/**)", "Read(~/.codex/**)", "Read(~/.ssh/**)", "Read(~/.gemini/**)"] {
+            assert!(full.contains(&rule.to_string()), "{area:?} {rule}");
+        }
+    }
+    // Ask mode keeps its cards instead of deny rules, as before.
+    assert!(denied(&claude_args(&launch(Area::Project, Permissions::Ask))).is_empty());
+}
+
+#[test]
+fn r121_full_access_does_not_scrub_the_environment_so_git_and_the_github_cli_can_reach_the_network() {
+    for area in [Area::Chat, Area::Project] {
+        let isolated = settings(&claude_args(&launch(area, Permissions::Isolated)));
+        assert_eq!(isolated["env"]["GIT_ALLOW_PROTOCOL"], "");
+        assert_eq!(isolated["env"]["GH_TOKEN"], "");
+        let full = claude_args(&launch(area, Permissions::FullAccess));
+        assert!(!full.contains(&"--settings".into()), "no env override, no sandbox block, no ask rules");
+        assert!(!full.iter().any(|a| a.contains("GIT_ALLOW_PROTOCOL") || a.contains("GH_TOKEN") || a.contains("sandbox")));
     }
 }

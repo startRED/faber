@@ -55,52 +55,61 @@ fn ask(area: Area, text: &str, choice: Choice) -> SendRequest {
 }
 
 #[tokio::test]
-async fn review3_legacy_sessions_restart_with_history_and_gated_sessions_resume() {
+async fn r121_a_codex_session_saved_with_the_host_command_tool_restarts_once_and_every_other_one_resumes() {
     let dir = tempfile::tempdir().unwrap();
     let (first, mut rx) = engine(dir.path(), Vendor::Codex, fake(fixture("codex", "chat")).spawn);
     let id = first.send(ask(Area::Chat, SKY, choice("codex", None))).unwrap();
     finished(&mut rx, |_| {}).await;
     let saved = first.open(&id).unwrap();
-    assert!(saved.command_gate && saved.sessions.contains_key(&Vendor::Codex));
+    assert!(!saved.command_gate, "full access starts Codex without the isolated host command tool");
+    assert!(saved.sessions.contains_key(&Vendor::Codex));
     first.shutdown();
-    let (gated, _) = engine(dir.path(), Vendor::Codex, fake(vec![]).spawn);
-    assert_eq!(gated.open(&id).unwrap().sessions, saved.sessions);
-    gated.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
-    assert!(!gated.open(&id).unwrap().sessions.contains_key(&Vendor::Codex));
-    gated.shutdown();
+    // The same session resumes, and so does it after the person changes the mode: the thread carries no tool to lose.
+    let (same, _) = engine(dir.path(), Vendor::Codex, fake(vec![]).spawn);
+    assert_eq!(same.open(&id).unwrap().sessions, saved.sessions);
+    same.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+    assert_eq!(same.open(&id).unwrap().sessions, saved.sessions);
+    same.shutdown();
+    // A session an older Faber saved with the isolated host command tool restarts once, with the visible history.
     let path = dir.path().join("conversations").join(format!("{id}.json"));
-    let mut legacy = serde_json::to_value(&saved).unwrap();
-    legacy.as_object_mut().unwrap().remove("commandGate");
-    std::fs::write(path, serde_json::to_vec(&legacy).unwrap()).unwrap();
-    let (old, _) = engine(dir.path(), Vendor::Codex, fake(vec![]).spawn);
-    old.save_settings(Settings { permissions: Some(Permissions::DontAsk), ..Settings::default() }).unwrap();
-    let c = old.open(&id).unwrap();
+    let mut old = serde_json::to_value(&saved).unwrap();
+    old["commandGate"] = true.into();
+    std::fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
+    let (later, _) = engine(dir.path(), Vendor::Codex, fake(vec![]).spawn);
+    let c = later.open(&id).unwrap();
     assert!(!c.sessions.contains_key(&Vendor::Codex));
+    assert!(!c.command_gate);
     assert_eq!(c.messages, saved.messages, "visible history is preserved for the new thread");
-    old.shutdown();
+    later.shutdown();
 }
 
 #[tokio::test]
-async fn review3_sensitive_chat_roots_are_refused_only_without_prompts() {
+async fn r121_any_folder_can_be_the_chat_working_folder_in_both_modes() {
     let dir = tempfile::tempdir().unwrap();
     let (engine, _) = engine(dir.path(), Vendor::Claude, fake(vec![]).spawn);
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap();
-    assert_eq!(engine.chat_folder(None, Some(Path::new(&home))).unwrap_err(), "error.workingFolder");
+    // Before R121 the default mode answered error.workingFolder here.
+    assert!(engine.chat_folder(None, Some(Path::new(&home))).is_ok());
     engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
     assert!(engine.chat_folder(None, Some(Path::new(&home))).is_ok());
     engine.shutdown();
 }
 
 #[tokio::test]
-async fn review3_existing_sensitive_projects_cannot_start_without_prompts() {
+async fn r121_a_project_in_the_home_folder_starts_with_full_access() {
     let dir = tempfile::tempdir().unwrap();
     let f = fake(vec![]);
     let (engine, _) = engine(dir.path(), Vendor::Claude, f.spawn);
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap();
     let project = engine.add_project(&Path::new(&home).to_string_lossy());
     let request = SendRequest { project_id: Some(project.id), ..ask(Area::Project, "hello", choice("claude", Some("haiku"))) };
-    assert_eq!(engine.send(request).unwrap_err(), "error.workingFolder");
-    assert!(f.args.lock().unwrap().is_empty(), "no CLI may start in a refused folder");
+    // Before R121 the default mode refused this folder (error.workingFolder) and started no CLI.
+    assert!(engine.send(request).is_ok());
+    let args = f.args.lock().unwrap();
+    assert_eq!(args.len(), 1, "the CLI starts in the chosen folder");
+    assert!(args[0].windows(2).any(|a| a == ["--permission-mode", "bypassPermissions"]));
+    assert!(!args[0].contains(&"--settings".into()), "no sandbox, ask rules or folder confinement");
+    drop(args);
     engine.shutdown();
 }
 
@@ -220,6 +229,8 @@ async fn r107_private_chat_files_survive_turns_and_are_cleaned_with_the_conversa
         data.path(),
         Vendor::Claude,
         Arc::new(move |bin, args, dir| {
+            // A private folder made by an older Faber still holds its scratch folder; it is removed at the end of the turn.
+            std::fs::create_dir_all(dir.join(".faber/tmp")).unwrap();
             std::fs::write(dir.join(".faber/tmp/temporary.txt"), "temporary").unwrap();
             std::fs::write(dir.join("answer.txt"), "visible").unwrap();
             spawn(bin, args, dir)
@@ -237,19 +248,21 @@ async fn r107_private_chat_files_survive_turns_and_are_cleaned_with_the_conversa
 }
 
 #[tokio::test]
-async fn r107_project_hook_opt_in_does_not_enable_chat_startup_hooks() {
+async fn r121_full_access_leaves_the_persons_hooks_on_and_ask_keeps_them_off_until_the_switch_is_on() {
     let data = tempfile::tempdir().unwrap();
     let f = fake(fixture("codex", "chat"));
     let (engine, _) = engine(data.path(), Vendor::Codex, f.spawn.clone());
-    engine.save_settings(Settings { user_hooks: Some(true), ..Settings::default() }).unwrap();
-    engine.warm(WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: choice("codex", None) });
-    assert!(f.args.lock().unwrap()[0].windows(2).any(|args| args == ["--disable", "hooks"]));
+    let warm = || engine.warm(WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: choice("codex", None) });
+    let hooks_off = |at: usize| f.args.lock().unwrap()[at].windows(2).any(|args| args == ["--disable", "hooks"]);
+    warm();
+    assert!(!hooks_off(0), "full access, the default, runs the CLI as the person would");
     engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
-    engine.warm(WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: choice("codex", None) });
-    assert!(!f.args.lock().unwrap()[1].windows(2).any(|args| args == ["--disable", "hooks"]), "Ask retains its prior hook behavior");
-    engine.save_settings(Settings { permissions: Some(Permissions::DontAsk), ..Settings::default() }).unwrap();
-    engine.warm(WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: choice("codex", None) });
-    assert_eq!(f.args.lock().unwrap().len(), 3, "both cached hook configurations are retired on mode changes");
+    warm();
+    assert!(hooks_off(1), "Ask keeps hooks off until the switch is on");
+    engine.save_settings(Settings { permissions: Some(Permissions::FullAccess), ..Settings::default() }).unwrap();
+    warm();
+    assert!(!hooks_off(2), "back to full access, hooks run again");
+    assert_eq!(f.args.lock().unwrap().len(), 3, "each mode change retires the cached process");
     engine.shutdown();
 }
 
@@ -665,7 +678,7 @@ async fn permissions_default_without_a_migration_persist_and_restart_idle_projec
     let dir = project_folder();
     for settings in [serde_json::json!({}), serde_json::json!({ "language": "en", "userHooks": true })] {
         let old: Settings = serde_json::from_value(settings).unwrap();
-        assert_eq!(old.permissions.unwrap_or_default(), Permissions::DontAsk);
+        assert_eq!(old.permissions.unwrap_or_default(), Permissions::FullAccess);
     }
     let f = fake(fixture("claude", "chat"));
     let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
@@ -682,7 +695,7 @@ async fn permissions_default_without_a_migration_persist_and_restart_idle_projec
     engine.save_settings(Settings { language: Some("de".into()), ..Settings::default() }).unwrap();
     let saved: Settings = serde_json::from_value(read_json(&dir.path().join("settings.json"))).unwrap();
     assert_eq!(saved.permissions, Some(Permissions::Ask));
-    engine.save_settings(Settings { permissions: Some(Permissions::DontAsk), ..Settings::default() }).unwrap();
+    engine.save_settings(Settings { permissions: Some(Permissions::FullAccess), ..Settings::default() }).unwrap();
     engine.warm(warm());
     assert!(last_args().contains(&"bypassPermissions".into()));
     assert_eq!(f.args.lock().unwrap().len(), 3);

@@ -59,7 +59,7 @@ fn chat_with_cli(ctx: &Ctx, signed_in: bool) -> std::result::Result<Launch, Stri
 }
 
 fn open_settings(page: &mut Page) -> Result {
-    let settings = page.named("button", "settings.open")?;
+    let settings = page.named("button", "settings.open")?.exact();
     page.click(&settings)?;
     let heading = page.named("heading", "set.general")?;
     page.wait_visible(&heading)

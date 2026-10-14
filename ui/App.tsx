@@ -831,7 +831,10 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                         });
                       }}>
                         <Show when={area() === 'chat' || project()}>
-                          <p class="hint" role="status">{t(state().settings.permissions === 'ask' ? 'project.permissionsAsk' : 'project.permissionsDontAsk')}</p>
+                          <p class="hint" role="status">
+                            {t(state().settings.permissions === 'ask' ? 'project.permissionsAsk' : 'project.permissionsDontAsk')}{' '}
+                            <button type="button" onClick={() => openSettings('general')}>{t('project.permissionsDetails')}</button>
+                          </p>
                         </Show>
                         <Show
                           when={current()?.messages.length ? current() : undefined}

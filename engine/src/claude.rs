@@ -25,8 +25,8 @@ pub struct ClaudeLaunch {
     pub user_name: Option<String>,
 }
 
-// Chat stays lean, with a fixed tool list and no startup customizations or MCP servers. Both areas share the
-// unattended host policy; Ask mode retains Chat's restricted setup.
+// Chat stays lean: a fixed list of built-in tools. Ask keeps Chat restricted with no MCP servers; Isolated also drops every
+// startup customization; full access leaves the person's own integrations on.
 const CHAT_TOOLS: &str = "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch";
 
 // Deny rules apply in bypassPermissions too; command patterns are not an OS sandbox.
@@ -50,7 +50,8 @@ const TOOL_DENY: &[&str] = &[
 ];
 
 /// Arguments for one long-lived Claude Code process that takes many turns over stdin.
-/// Ask preserves Projects' setup. Don't ask disables startup integrations and routes tools to the shared policy.
+/// Ask preserves Projects' setup. Full access ("Do not ask") bypasses approvals, keeps the person's integrations and only denies
+/// the credential folders. Isolated disables startup integrations and routes tools to Faber's working-folder policy.
 pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     let mut args: Vec<String> = [
         "-p",
@@ -73,34 +74,49 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     } else {
         let mut settings = json!({});
         if launch.area == Area::Chat {
-            args.extend(["--strict-mcp-config".into(), "--tools".into(), CHAT_TOOLS.into()]);
-            if launch.permissions == Permissions::Ask {
-                args.extend([
+            args.extend(["--tools".into(), CHAT_TOOLS.into()]);
+            match launch.permissions {
+                Permissions::Ask => args.extend([
+                    "--strict-mcp-config".into(),
                     "--restricted".into(),
                     "--permission-mode".into(),
                     "acceptEdits".into(),
                     "--allowedTools".into(),
                     "WebSearch,WebFetch".into(),
-                ]);
-            } else {
-                args.push("--safe-mode".into());
+                ]),
+                Permissions::Isolated => args.extend(["--strict-mcp-config".into(), "--safe-mode".into()]),
+                // The person's own MCP servers, plugins, skills and hooks load as they do in the CLI itself.
+                Permissions::FullAccess => {}
             }
         }
-        if launch.permissions == Permissions::DontAsk {
-            if launch.area == Area::Project {
-                args.extend(["--safe-mode".into(), "--strict-mcp-config".into()]);
+        match launch.permissions {
+            Permissions::Isolated => {
+                if launch.area == Area::Project {
+                    args.extend(["--safe-mode".into(), "--strict-mcp-config".into()]);
+                }
+                // Restricted mode refuses bypassPermissions. Chat disables customizations with safe mode and
+                // keeps its lean tools/MCP setup, with the same host policy and sandbox as Projects.
+                args.extend(["--setting-sources".into(), "user".into()]);
+                args.extend(["--permission-mode".into(), "bypassPermissions".into(), "--disallowedTools".into()]);
+                args.extend(TOOL_DENY.iter().map(|rule| (*rule).into()));
+                settings["permissions"] = json!({ "blockReadsOutsideWorkingDirectories": true,
+                    "ask": ["Read(//**)", "Edit(//**)", "Bash", "PowerShell", "*"] });
+                settings["sandbox"] = json!({ "autoAllowBashIfSandboxed": false });
+                settings["env"] = crate::permissions::child_env(std::path::Path::new("."));
             }
-            // Restricted mode refuses bypassPermissions. Chat disables customizations with safe mode and
-            // keeps its lean tools/MCP setup, with the same host policy and sandbox as Projects.
-            args.extend(["--setting-sources".into(), "user".into()]);
-            args.extend(["--permission-mode".into(), "bypassPermissions".into(), "--disallowedTools".into()]);
-            args.extend(TOOL_DENY.iter().map(|rule| (*rule).into()));
-            settings["permissions"] = json!({ "blockReadsOutsideWorkingDirectories": true,
-                "ask": ["Read(//**)", "Edit(//**)", "Bash", "PowerShell", "*"] });
-            settings["sandbox"] = json!({ "autoAllowBashIfSandboxed": false });
-            settings["env"] = crate::permissions::child_env(std::path::Path::new("."));
+            // Full access (R121): no sandbox, no ask rules, network on. Deny rules still apply in bypassPermissions.
+            Permissions::FullAccess => {
+                args.extend(["--permission-mode".into(), "bypassPermissions".into(), "--disallowedTools".into()]);
+                args.extend(TOOL_DENY.iter().map(|rule| (*rule).into()));
+            }
+            Permissions::Ask => {}
         }
-        if launch.permissions == Permissions::DontAsk || (launch.area == Area::Project && !launch.user_hooks) {
+        let hooks_off = match launch.permissions {
+            Permissions::Isolated => true,
+            Permissions::FullAccess => false,
+            Permissions::Ask => launch.area == Area::Project && !launch.user_hooks,
+        };
+        if hooks_off {
             settings["disableAllHooks"] = true.into();
         }
         if settings.as_object().is_some_and(|s| !s.is_empty()) {
@@ -284,11 +300,14 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                             let finished = msg["type"] == "result";
                             for event in parse_claude_message(&msg) {
                                 if let EngineEvent::Permission { request_id, tool, input } = &event {
-                                    if opts.launch.permissions == Permissions::DontAsk {
+                                    if opts.launch.permissions != Permissions::Ask {
                                         let resolve = |name: &str| crate::cli::Cli::find_in(name, &std::env::var("PATH").unwrap_or_default(), cfg!(windows),
                                             &|key| std::env::var(key).ok(), &|path| std::path::Path::new(path).is_file(),
                                             &|path| std::fs::read_to_string(path).unwrap_or_default());
-                                        let response = if let Some(updated) = crate::permissions::checked_input(&opts.cwd, tool, input, opts.sandbox.as_ref(), &resolve) {
+                                        // Full access answers whatever the CLI still asks (protected folders and the like) with yes: no card.
+                                        let response = if opts.launch.permissions == Permissions::FullAccess {
+                                            json!({ "behavior": "allow", "updatedInput": input })
+                                        } else if let Some(updated) = crate::permissions::checked_input(&opts.cwd, tool, input, opts.sandbox.as_ref(), &resolve) {
                                             json!({ "behavior": "allow", "updatedInput": updated })
                                         } else {
                                             json!({ "behavior": "deny", "message": "This action is outside the working-folder policy, or its native sandbox runner is unavailable. Use sandboxed tools; never retry unsandboxed." })

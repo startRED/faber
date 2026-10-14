@@ -1,5 +1,8 @@
 # R97 security review verification
 
+> R121 (2026-10-14) made the user-facing "Don't ask" full access. Everything below describes the isolated mode that only Faber
+> uses now; the last section, "R121", says what changed, the new risk and what each CLI can still block.
+
 The review of `61a91ab` was checked against this worktree, Claude Code 2.1.296 (`--help`), Codex 0.162.1 (`--help` and its
 locally generated app-server schema), and primary documentation. No model session or credential file was opened.
 
@@ -203,3 +206,66 @@ Additional primary evidence: [installed config override order](https://github.co
 [installed table merging](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/config/src/merge.rs),
 [installed filesystem grammar](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/core/src/config/permissions.rs),
 [Node loader flags](https://nodejs.org/api/cli.html#--preserve-symlinks-main).
+
+## R121: "Don't ask" is full access (2026-10-14)
+
+Decision R121 replaces the user-facing sandbox of R97, R107 and R109. The owner chose it after the AI could not reach
+GitHub, saying that a mode called "Don't ask" that silently denies things is wrong. Everything above in this file now
+describes the **isolated mode** (`Permissions::Isolated`), which only Faber itself uses: the Codex model list and limits
+reading, the router and pulse questions, internal checks and the self-development mission roles. The person can pick only
+Ask before commands or Don't ask (full access). The stored setting still reads `dontAsk`, so nobody's choice changes name.
+
+### What full access gives, in plain words
+
+The AI works without asking. It runs commands outside any Faber sandbox, with the network and with the person's own
+sign-ins in the environment (for example the GitHub CLI's), it can use WebFetch and WebSearch, it can work in any folder
+(the home folder, a drive root, Windows or Program Files), and the person's own MCP servers, plugins and hooks load, as in
+the CLI itself.
+
+**The new risk.** A web page, a file, an email or a tool result that the AI reads can carry instructions that steer it.
+With full access nothing stops it from acting on them: it can change or delete files, run programs, use the network and
+use the person's own sign-ins for other services (GitHub, cloud tools), without asking first. The old mode contained
+this by denying the network and by writing only inside the working folder. Full access does not. Use Ask before commands
+for anything whose source you do not trust. The owner saw this risk and chose it.
+
+### What each CLI still blocks, and what it cannot
+
+| | Claude Code | Codex |
+|---|---|---|
+| Arguments | `--permission-mode bypassPermissions --disallowedTools <deny list>` (`claude_args`, engine/src/claude.rs). Nothing else: no `--settings`, `--safe-mode`, `--strict-mcp-config`, `--setting-sources`. Chat keeps its fixed tool list. | `codex app-server` with no flags (`codex_args`, engine/src/codex.rs). thread/start and thread/resume carry `sandbox: danger-full-access` and `approvalPolicy: never`, with no `config` and no dynamic tools (`codex_thread`). |
+| Credential folders | **Enforced** for Claude's own file tools: deny rules for `~/.claude`, `~/.codex`, `~/.gemini`, `~/.ssh`, `~/.aws`, `~/.claude.json`, `~/.git-credentials`, `~/.npmrc` and the GitHub CLI, Docker, Azure and Kube folders, and for updater keys. Deny rules apply in bypass mode. | **Not enforced.** Codex can read them. |
+| Commands (Bash, PowerShell) | **Not enforced.** A deny rule on the Read tool does not stop `cat ~/.ssh/id_ed25519` run through Bash. Command patterns are not an OS sandbox. | **Not enforced.** |
+| Network, integrations, hooks | On | On |
+
+Why Codex cannot block them: in Codex 0.162.1 the only filesystem deny rules live in a permission profile. On Windows, a
+profile that grants the whole disk and denies a few folders failed here in every backend that can be selected. The default
+Windows sandbox (`mxc`) refuses it ("MXC cannot verify it does not alias a denied object") as soon as one drive letter is
+unreachable; this PC has an unreachable `G:`, and any empty card reader or disconnected network drive would do the same.
+The unelevated backend answers "Restricted read-only access requires the elevated Windows sandbox backend", and the
+elevated one failed with "setup refresh had errors". Per-drive path keys such as `C:\` are rejected as "cannot be
+represented losslessly". These probes ran `codex sandbox` against a decoy folder in a scratch directory, never against a
+credential file. So full access sends no profile, and the Settings text says so. The deny list for Claude Code is a real
+but partial barrier: it keeps the file tools out, not a determined command.
+
+What this means for the person: for Claude Code the sign-in and key folders are protected from the file tools; for Codex
+they are not protected at all; for neither are they protected from a shell command. Do not keep secrets in folders you
+give the AI in this mode, and use Ask before commands for material you do not trust.
+
+### Changes that follow
+
+- The home folder, drive roots, Windows, Program Files and AppData are accepted as working folders in both modes, and the
+  `error.workingFolder` text is gone. `permissions::unattended_root` stays for the isolated mode's callers.
+- Hooks: the Settings switch applies only to Ask before commands. With full access the person's hooks always run.
+- Full access answers any request the CLI still raises (Claude's protected-folder prompts, Codex command or file-change
+  approvals) with yes and never shows a card. Fail-closed answers remain for the isolated mode and for side questions.
+- The router and the model list never use the person's mode. The router's Codex thread keeps its read-only profile and its
+  shell off in every mode, and it runs on a Codex process of its own started with the `Isolated` arguments (one extra idle
+  process once Auto routes through Codex; its memory cost was not measured here). Claude's router and pulse questions have
+  no tools.
+- Switching from Don't ask to Ask still stops running turns, which matters more now: a running full-access turn would
+  otherwise keep its access after the person asked for approvals. Switching to Don't ask does not touch a running turn.
+- A Codex session saved with the isolated host command tool (`commandGate`) restarts once, with its visible history,
+  because that tool no longer exists in any mode the person can choose.
+- Code that wants the old sandbox must say `Permissions::Isolated`. The variant `Permissions::DontAsk` no longer exists
+  (it is `FullAccess`, stored as `dontAsk`), so a branch that used it for the sandbox, such as the self-development
+  mission roles, fails to compile after the merge instead of silently getting full access.

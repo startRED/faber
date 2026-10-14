@@ -24,13 +24,15 @@ check('R107: Settings names Chat and Projects and discloses the shared default',
   ok(en['set.chatFolderHint'].includes('delete the conversation'));
 });
 
-check('review3: Settings discloses sandbox dependencies, integration limits and forbidden folders', () => {
-  const hint = en['project.permissionsDontAsk'];
-  ok(hint.includes('Codex CLI'));
-  ok(hint.includes('integrations'));
-  for (const folder of ['home', 'drive', 'Windows', 'Program Files', 'AppData']) ok(hint.includes(folder), folder);
-  ok(hint.includes('Ask before commands'));
-  ok('error.workingFolder' in en);
+check('R121: Do not ask is one calm line in the thread, with the risk and the credential limits spelled out in Settings', () => {
+  const line = en['project.permissionsDontAsk'];
+  ok(line.length < 60 && !/risk|danger|warning|error|denied|blocked/i.test(line), line);
+  ok(en['project.permissionsDetails'].includes('Settings'));
+  const body = en['set.permissionsDontAskBody'];
+  for (const word of ['internet', 'any folder', 'steer', 'Ask before commands', 'Claude Code', '.ssh', 'Codex cannot']) ok(body.includes(word), word);
+  ok(!/sandbox|too broad|disabled/i.test(body), 'full access no longer describes a sandbox or disabled integrations');
+  ok(en['set.permissionsAskBody'].includes('stops tasks that are running'));
+  ok(!('error.workingFolder' in en), 'no folder is refused any more');
 });
 
 const look = (over: Partial<Look> = {}): Look => ({
