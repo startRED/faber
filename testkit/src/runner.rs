@@ -11,7 +11,7 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
 
-const USAGE: &str = "usage: cargo t [--all] [--suite rust|ui|screen] [--filter <text>]";
+const USAGE: &str = "usage: cargo t [--all] [--suite rust|ui|screen] [--filter <text>] [--shard <i/n>]";
 
 /// The result lines of `cargo test`: `test some::name ... ok`. Anything that is not a test line is ignored.
 pub fn parse_cargo_tests(output: &str) -> Vec<(String, bool)> {
@@ -182,7 +182,7 @@ pub fn run(args: &[String]) -> i32 {
                     }
                     if screen_runs {
                         // Each scenario is printed as it ends: the suite takes minutes.
-                        outcomes.extend(screen::run_all(&paths, filter, &mut |outcome| println!("{}", line(outcome))));
+                        outcomes.extend(screen::run_all(&paths, filter, opts.shard, &mut |outcome| println!("{}", line(outcome))));
                     }
                 }
             }

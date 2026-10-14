@@ -14,7 +14,7 @@ pub mod shell;
 
 use crate::app::{Ctx, Paths};
 use crate::page::{Page, css};
-use crate::plan::Suite;
+use crate::plan::{Suite, in_shard};
 use crate::report::{Outcome, file_name};
 use crate::sandbox::{CliSlot, Launch};
 use std::fmt::Debug;
@@ -46,10 +46,11 @@ pub fn all() -> Vec<Scenario> {
 /// Runs each scenario (those whose name contains `filter`, if there is one) and audits it. A scenario fails if its own
 /// checks fail or if its audit finds a leaked process, an outside write or a changed environment. `done` hears of each
 /// outcome as soon as its scenario ends, so the runner can print it while the next one runs.
-pub fn run_all(paths: &Paths, filter: Option<&str>, done: &mut dyn FnMut(&Outcome)) -> Vec<Outcome> {
+pub fn run_all(paths: &Paths, filter: Option<&str>, shard: Option<(usize, usize)>, done: &mut dyn FnMut(&Outcome)) -> Vec<Outcome> {
     let mut outcomes = Vec::new();
-    for scenario in all().iter().filter(|s| filter.is_none_or(|f| s.name.contains(f))) {
-        let outcome = run_one(paths, scenario);
+    let chosen = all().into_iter().filter(|s| filter.is_none_or(|f| s.name.contains(f))).enumerate();
+    for (_, scenario) in chosen.filter(|(index, _)| in_shard(*index, shard)) {
+        let outcome = run_one(paths, &scenario);
         done(&outcome);
         outcomes.push(outcome);
     }

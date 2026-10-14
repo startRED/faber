@@ -5,12 +5,25 @@ on:
     branches: [main, 'phase-*']
   pull_request:
 
+# A newer push to the same pull request makes its older run pointless. Branch pushes keep every run, so main can follow
+# the newest green commit of phase-1-base (R127) even while pushes keep coming.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # The jobs run at once. The screen suite was 10 of Windows' 17 minutes, so it is dealt into three parts (R129, E2).
   check:
+    name: check (${{ matrix.os }}, ${{ matrix.part }}${{ matrix.shard && format(' {0}', matrix.shard) || '' }})
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        include:
+          - { os: windows-latest, part: lints rust ui }
+          - { os: macos-latest, part: lints rust ui }
+          - { os: windows-latest, part: screen, shard: 1/3 }
+          - { os: windows-latest, part: screen, shard: 2/3 }
+          - { os: windows-latest, part: screen, shard: 3/3 }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -23,17 +36,26 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - run: npm ci
-      - run: npm run lint
-      - run: npm run typecheck
       - run: npm run build
-      - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo clippy -p faber --features test-hooks -- -D warnings
+      # bash stops at the first failing line; PowerShell would only report the last one.
+      - if: contains(matrix.part, 'lints')
+        shell: bash
+        run: |
+          npm run lint
+          npm run typecheck
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo clippy -p faber --features test-hooks -- -D warnings
       # `rust` and `ui` run on every system; `screen` needs WebView2's DevTools port, so only Windows runs it.
-      - run: cargo t --all
+      - if: contains(matrix.part, 'rust')
+        run: cargo t --suite rust
+      - if: contains(matrix.part, 'ui')
+        run: cargo t --suite ui
+      - if: matrix.part == 'screen'
+        run: cargo t --suite screen --shard ${{ matrix.shard }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: screenshots-${{ runner.os }}
+          name: screenshots-${{ runner.os }}-${{ strategy.job-index }}
           path: target/faber-test/shots/
           if-no-files-found: ignore
