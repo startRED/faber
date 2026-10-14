@@ -1,0 +1,252 @@
+//! Manual, no-model qualification preflight. A stopped receipt never opens role admission.
+use std::io;
+#[cfg(any(windows, test))]
+use std::path::Path;
+
+fn main() {
+    if let Some(code) = faber_engine::proc::guard_mode() {
+        std::process::exit(code);
+    }
+    #[cfg(windows)]
+    let result = run();
+    #[cfg(not(windows))]
+    let result: io::Result<()> = Err(io::Error::other("requires the Windows hidden desktop"));
+    if let Err(error) = result {
+        eprintln!("Qualification preflight failed ({error}); no model turn was requested.");
+        std::process::exit(1);
+    }
+}
+
+#[cfg(any(windows, test))]
+fn protected(path: &Path) -> bool {
+    path.components().any(|part| {
+        part.as_os_str()
+            .to_str()
+            .is_some_and(|name| [".claude", ".codex", ".gemini"].iter().any(|blocked| name.eq_ignore_ascii_case(blocked)))
+    })
+}
+
+#[cfg(any(windows, test))]
+fn fingerprint(path: &Path) -> io::Result<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    if protected(path) {
+        return Err(io::Error::other("protected path"));
+    }
+    let path = std::fs::canonicalize(path)?;
+    if protected(&path) {
+        return Err(io::Error::other("protected resolved path"));
+    }
+    let mut file = std::fs::File::open(path)?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0; 16 * 1024];
+    loop {
+        let size = file.read(&mut buffer)?;
+        if size == 0 {
+            break;
+        }
+        digest.update(&buffer[..size]);
+    }
+    Ok(format!("{:x}", digest.finalize()))
+}
+
+#[cfg(any(windows, test))]
+fn version(text: &str) -> io::Result<&str> {
+    let text = text.trim();
+    if text.is_empty() || text.len() > 128 || !text.bytes().all(|c| c.is_ascii_graphic() || c == b' ') {
+        return Err(io::Error::other("invalid version output"));
+    }
+    Ok(text)
+}
+
+#[cfg(windows)]
+fn run() -> io::Result<()> {
+    use std::collections::BTreeMap;
+    use std::time::{Duration, Instant};
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    let [mode, directory] = args.as_slice() else {
+        return Err(io::Error::other("expected --preflight PRIVATE_DATA"));
+    };
+    let data = std::path::PathBuf::from(directory);
+    if !data.is_absolute() || !matches!(mode.as_str(), "--preflight" | "--hidden-worker") {
+        return Err(io::Error::other("invalid preflight arguments"));
+    }
+    if mode == "--hidden-worker" {
+        if std::env::var("FABER_QUALIFICATION_HIDDEN").as_deref() != Ok("preflight") {
+            return Err(io::Error::other("hidden runner required"));
+        }
+        return tokio::runtime::Builder::new_current_thread().enable_all().build()?.block_on(worker(&data));
+    }
+    if ["CI", "GITHUB_ACTIONS"].iter().any(|name| std::env::var(name).is_ok_and(|v| v.eq_ignore_ascii_case("true"))) {
+        return Err(io::Error::other("manual preflight never runs in CI"));
+    }
+    std::fs::create_dir_all(&data)?;
+    if data.join("qualification-preflight.json").exists() {
+        return Err(io::Error::other("receipt already exists; no automatic replay"));
+    }
+    let executable = std::env::current_exe()?;
+    let helper = executable.parent().and_then(Path::parent).ok_or_else(|| io::Error::other("missing debug folder"))?.join("fake-cli.exe");
+    let mut env = BTreeMap::new();
+    // Directory/runtime names only; no API keys, tokens, loader options or provider overrides.
+    for name in
+        ["PATH", "SystemRoot", "WINDIR", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "ProgramFiles", "ProgramFiles(x86)"]
+    {
+        if let Ok(value) = std::env::var(name) {
+            env.insert(name.to_string(), value);
+        }
+    }
+    env.insert("FABER_QUALIFICATION_HIDDEN".into(), "preflight".into());
+    if let Some(path) = env.get("PATH") {
+        let permitted: Vec<_> = std::env::split_paths(path).filter(|p| !protected(p)).collect();
+        env.insert("PATH".into(), std::env::join_paths(permitted).map_err(io::Error::other)?.to_string_lossy().into_owned());
+    }
+    let (owned, _, stderr) = faber_testkit::contain::Owned::start(
+        &executable,
+        &["--hidden-worker".into(), data.to_string_lossy().into_owned()],
+        &env,
+        &data,
+        &helper,
+    )?;
+    let diagnostics = std::thread::spawn(move || {
+        use std::io::Read;
+        let mut text = String::new();
+        if let Some(stderr) = stderr {
+            let _ = stderr.take(4096).read_to_string(&mut text);
+        }
+        text
+    });
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while owned.is_running() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let completed = !owned.is_running() && owned.status().as_deref() == Some("exit code: 0");
+    owned.terminate();
+    let diagnostics = diagnostics.join().unwrap_or_default();
+    if !completed {
+        return Err(io::Error::other(format!("bounded hidden worker did not complete: {diagnostics}")));
+    }
+    println!("Private no-model preflight receipt recorded. Qualification remains blocked.");
+    Ok(())
+}
+
+#[cfg(windows)]
+async fn worker(data: &Path) -> io::Result<()> {
+    use faber_engine::model::Vendor;
+    use serde_json::json;
+    use std::time::Duration;
+    use tokio::io::AsyncReadExt;
+    let spawn = faber_engine::proc::real_spawner();
+    let mut records = vec![];
+    for (name, vendor) in [("claude", Vendor::Claude), ("codex", Vendor::Codex)] {
+        let cli = faber_engine::cli::find_cli(name).ok_or_else(|| io::Error::other("CLI unavailable"))?;
+        let binary_hash = match fingerprint(Path::new(&cli.command)) {
+            Ok(hash) => hash,
+            Err(error) => {
+                records.push(json!({"vendor":vendor,"version":null,"binaryHash":null,
+                    "fingerprintError":error.to_string(),"qualificationPassed":false,"modelTurns":0}));
+                return record_stop(data, &records, "error.project.invocation");
+            }
+        };
+        let mut files = vec![json!({"path":cli.command,"sha256":binary_hash})];
+        for script in &cli.prefix {
+            files.push(json!({"path":script,"sha256":fingerprint(Path::new(script))?}));
+        }
+        let args: Vec<_> = cli.prefix.iter().cloned().chain(["--version".to_string()]).collect();
+        let p = spawn(&cli.command, &args, data)?;
+        drop(p.stdin);
+        drop(p.stderr);
+        let mut child = p.child;
+        let mut bytes = vec![];
+        let status = tokio::time::timeout(Duration::from_secs(10), async {
+            p.stdout.take(4097).read_to_end(&mut bytes).await?;
+            child.as_mut().ok_or_else(|| io::Error::other("missing owned child"))?.wait().await
+        })
+        .await
+        .map_err(|_| io::Error::other("version timeout"))??;
+        if !status.success() || bytes.len() > 4096 {
+            return Err(io::Error::other("version probe failed"));
+        }
+        let text = String::from_utf8(bytes).map_err(|_| io::Error::other("invalid version encoding"))?;
+        let installed_version = version(&text)?;
+        let account = faber_engine::account::check(vendor, &cli, &spawn, data, Duration::from_secs(10)).await;
+        let billing = if vendor == Vendor::Claude {
+            faber_engine::account::claude_account(&cli, &spawn, data, Duration::from_secs(10)).await.and_then(|s| s.billing).map(
+                |b| match b {
+                    faber_engine::budget::Billing::Subscription => "subscription",
+                    faber_engine::budget::Billing::UsageBilled => "usageBilled",
+                    faber_engine::budget::Billing::Unknown => "unknown",
+                },
+            )
+        } else {
+            None
+        };
+        let blockers: Vec<_> = faber_engine::project::policy::blockers(vendor).iter().map(|b| b.key()).collect();
+        records.push(json!({"vendor":vendor,"version":installed_version,"files":files,
+            "accountStatus":account,"billing":billing,"paidFallback":null,"blockers":blockers,
+            "restrictions":"unproven","sessionLoadout":"unobserved","invocationBoundMicros":null,
+            "modelTurns":0,"qualificationPassed":false}));
+    }
+    record_stop(data, &records, "reason.budget.exposure")
+}
+
+#[cfg(any(windows, test))]
+fn record_stop(data: &Path, records: &[serde_json::Value], reason: &str) -> io::Result<()> {
+    use serde_json::json;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(io::Error::other)?.as_secs();
+    let receipt = json!({"schema":1,"measuredAt":now,"state":"stopped","stopRule":2,
+        "reason":reason,"records":records,"qualificationPassed":false,"modelTurns":0,
+        "note":"Preflight did not establish a version-bound qualification or invocation bound. No model prompt, canary read, or role admission attempted."});
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new().create_new(true).write(true).open(data.join("qualification-preflight.json"))?;
+    file.write_all(&serde_json::to_vec_pretty(&receipt)?)?;
+    file.sync_all()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn version_output_is_bounded_and_single_line() {
+        assert_eq!(version("2.1.296 (Claude Code)\n").unwrap(), "2.1.296 (Claude Code)");
+        for text in ["", "one\ntwo", "\u{1b}secret", &"x".repeat(129)] {
+            assert!(version(text).is_err());
+        }
+    }
+    #[test]
+    fn fingerprint_tracks_bytes_and_refuses_credential_folders_before_io() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cli.exe");
+        std::fs::write(&path, b"version one").unwrap();
+        let first = fingerprint(&path).unwrap();
+        std::fs::write(&path, b"version two").unwrap();
+        assert_ne!(fingerprint(&path).unwrap(), first);
+        assert!(fingerprint(Path::new(".codex/never-opened")).is_err());
+        assert!(fingerprint(Path::new(".claude/never-opened")).is_err());
+        assert!(fingerprint(Path::new(".CODEX/never-opened")).is_err());
+        assert!(protected(Path::new("C:/fixture/.codex/packages/bin")));
+        assert!(!protected(Path::new("C:/fixture/installed/bin")));
+    }
+    #[test]
+    fn installed_binary_hardlink_is_read_through_its_permitted_install_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = dir.path().join(".claude");
+        std::fs::create_dir(&cache).unwrap();
+        let source = cache.join("cli.exe");
+        std::fs::write(&source, b"disposable binary fixture, no credentials").unwrap();
+        let installed = dir.path().join("cli.exe");
+        std::fs::hard_link(&source, &installed).unwrap();
+        assert!(fingerprint(&installed).is_ok());
+        assert!(fingerprint(&source).is_err());
+    }
+    #[test]
+    fn stopped_receipt_is_private_incomplete_and_cannot_be_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        record_stop(dir.path(), &[], "reason.budget.exposure").unwrap();
+        let receipt: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.path().join("qualification-preflight.json")).unwrap()).unwrap();
+        assert_eq!(receipt["state"], "stopped");
+        assert_eq!(receipt["qualificationPassed"], false);
+        assert_eq!(receipt["modelTurns"], 0);
+        assert!(record_stop(dir.path(), &[], "replacement").is_err());
+    }
+}
