@@ -24,7 +24,9 @@ with the user's own subscriptions. Read [docs/roadmap.md](docs/roadmap.md) befor
   it can reach and reports its memory and processor cost. Anything that keeps a process or a big DOM alive needs a
   reason and a measurement ([docs/roadmap.md](docs/roadmap.md#architecture)).
 - Telemetry stays off by default.
-- One commit per coherent change, made as soon as the change is proven.
+- One commit per coherent change, made and pushed as soon as the change is proven, without waiting for other parts.
+  After pushing, fast-forward `main` to the newest `phase-1-base` commit whose CI is green (never force, never a red
+  commit), so `main` moves once per finished part (R126, R127).
 
 ## Stack
 
