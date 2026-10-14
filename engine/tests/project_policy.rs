@@ -51,6 +51,32 @@ fn the_live_probe_writer_does_not_inherit_network_temp_roots_shell_or_subagents(
     }
 }
 
+#[test]
+fn every_codex_role_uses_a_closed_native_catalog_and_no_inherited_developer_instructions() {
+    let args = project_codex_args(true);
+    assert!(args.windows(2).any(|a| a[0] == "-c" && a[1].starts_with("model_catalog_json=")));
+    for feature in ["view_image", "request_permissions_tool", "code_mode", "code_mode_only", "token_budget"] {
+        assert!(args.windows(2).any(|a| a == ["--disable", feature]), "{feature}");
+    }
+    let catalog = faber_engine::codex::project_codex_catalog();
+    let models = catalog["models"].as_array().unwrap();
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0]["slug"], "gpt-6-luna");
+    assert_eq!(models[0]["shell_type"], "disabled");
+    assert!(models[0]["apply_patch_tool_type"].is_null());
+    assert_eq!(models[0]["experimental_supported_tools"], json!([]));
+    assert_eq!(models[0]["tool_mode"], "direct");
+    assert_eq!(models[0]["include_skills_usage_instructions"], false);
+    for role in ROLES {
+        for resume in [None, Some("thread")] {
+            let (_, params) = project_thread_params(&thread(resume), role).unwrap();
+            assert_eq!(params["developerInstructions"], "");
+            assert_eq!(params["config"]["tools"]["update_plan"]["enabled"], false);
+            assert_eq!(params["config"]["tools"]["experimental_request_user_input"]["enabled"], false);
+        }
+    }
+}
+
 #[tokio::test]
 async fn review_4_every_escape_request_receives_a_native_denial_on_the_fake_wire() {
     let entries = fixture("projects", "policy-escapes");

@@ -140,6 +140,10 @@ fn run() -> io::Result<()> {
         }
     }
     env.insert("FABER_QUALIFICATION_HIDDEN".into(), "preflight".into());
+    let temporary = data.join("temp");
+    std::fs::create_dir_all(&temporary)?;
+    env.insert("TEMP".into(), temporary.to_string_lossy().into_owned());
+    env.insert("TMP".into(), temporary.to_string_lossy().into_owned());
     env.insert("FABER_QUALIFICATION_PROBE".into(), mode.clone());
     env.insert(
         "FABER_QUALIFICATION_WORKSPACE".into(),
@@ -234,7 +238,7 @@ async fn worker(data: &Path) -> io::Result<()> {
             });
             rows.push(json!({"vendor":vendor,"billing":format!("{:?}",v.billing),"paidFallback":v.paid_fallback,
                 "readings":v.readings,"zeroTurnReadings":serialized["zero_turn_readings"],"line":line,
-                "margin":line.zip(weekly).map(|(line,r)|line-r.used),"r130Admitted":admitted.is_ok(),
+                "margin":line.zip(weekly).map(|(line,r)|line-r.used),"r131Admitted":admitted.is_ok(),
                 "reason":admitted.err(),"modelTurns":0}));
         }
         engine.shutdown();

@@ -12,6 +12,7 @@ fn empty_loadout(observed: &Value, disabled: &Value) -> io::Result<()> {
         rows.iter().any(|row| {
             let Some(name) = row["name"].as_str() else { return true };
             disabled[name]["enabled"] != false
+                || !row["toolsError"].is_null()
                 || row["tools"].as_object().is_none_or(|tools| !tools.is_empty())
                 || row["resources"].as_array().is_none_or(|resources| !resources.is_empty())
                 || row["resourceTemplates"].as_array().is_none_or(|resources| !resources.is_empty())
@@ -19,6 +20,108 @@ fn empty_loadout(observed: &Value, disabled: &Value) -> io::Result<()> {
     }) || !observed["nextCursor"].is_null()
     {
         return Err(io::Error::other("session loadout differs from the empty role loadout"));
+    }
+    Ok(())
+}
+
+fn loadout_census(method: &str, observed: &Value, cwd: &str) -> io::Result<()> {
+    let fail = |reason: &str| io::Error::other(format!("{method}: {reason}"));
+    match method {
+        "hooks/list" | "skills/list" => {
+            let rows = observed["data"]
+                .as_array()
+                .filter(|rows| rows.len() == 1)
+                .ok_or_else(|| fail("requested workspace inventory missing or ambiguous"))?;
+            let row = &rows[0];
+            let field = if method == "hooks/list" { "hooks" } else { "skills" };
+            if row["cwd"] != cwd || row["errors"].as_array().is_none_or(|errors| !errors.is_empty()) {
+                return Err(fail("requested workspace census missing or errored"));
+            }
+            if method == "hooks/list" && row["warnings"].as_array().is_none_or(|warnings| !warnings.is_empty()) {
+                return Err(fail("hook census warnings missing or nonempty"));
+            }
+            if row[field].as_array().is_none_or(|entries| entries.iter().any(|entry| entry["enabled"] != false)) {
+                return Err(fail("active or unreported integration"));
+            }
+        }
+        "plugin/list" => {
+            let marketplaces = observed["marketplaces"].as_array().ok_or_else(|| fail("plugin inventory missing"))?;
+            if observed.get("marketplaceLoadErrors").is_some_and(|errors| errors.as_array().is_none_or(|errors| !errors.is_empty())) {
+                return Err(fail("plugin catalog missing or errored"));
+            }
+            for marketplace in marketplaces {
+                if !marketplace["name"].as_str().is_some_and(|name| !name.is_empty()) {
+                    return Err(fail("plugin marketplace identity missing"));
+                }
+                let plugins = marketplace["plugins"].as_array().ok_or_else(|| fail("plugin marketplace inventory missing"))?;
+                for plugin in plugins {
+                    let installed = plugin["installed"].as_bool().ok_or_else(|| fail("plugin installation state missing"))?;
+                    let enabled = plugin["enabled"].as_bool().ok_or_else(|| fail("plugin enablement state missing"))?;
+                    if installed && enabled {
+                        return Err(fail("active installed plugin"));
+                    }
+                }
+            }
+        }
+        "experimentalFeature/list" => {
+            let features = observed["data"].as_array().ok_or_else(|| fail("feature inventory missing"))?;
+            if !observed["nextCursor"].is_null() {
+                return Err(fail("feature census truncated"));
+            }
+            for name in [
+                "hooks",
+                "apps",
+                "plugins",
+                "computer_use",
+                "browser_use",
+                "skill_mcp_dependency_install",
+                "shell_tool",
+                "multi_agent",
+                "multi_agent_v2",
+                "view_image",
+                "request_permissions_tool",
+                "code_mode",
+                "code_mode_only",
+                "code_mode_host",
+                "code_mode_tool_search",
+                "token_budget",
+                "deferred_executor",
+                "send_message_to_user_async",
+                "current_time_reminder",
+                "sleep_tool",
+                "image_generation",
+                "imagegenext",
+            ] {
+                let mut matches = features.iter().filter(|feature| feature["name"] == name);
+                if matches.next().is_none_or(|feature| feature["enabled"] != false) || matches.next().is_some() {
+                    return Err(fail("required disabled feature missing, enabled or ambiguous"));
+                }
+            }
+        }
+        _ => return Err(fail("unsupported loadout census")),
+    }
+    Ok(())
+}
+
+fn effective_policy(thread: &Value, cwd: &str) -> io::Result<()> {
+    if thread["model"] != "gpt-6-luna" || thread["modelProvider"] != "openai" || thread["reasoningEffort"] != "low" {
+        return Err(io::Error::other("model pin not acknowledged"));
+    }
+    if thread["cwd"] != cwd || thread["thread"]["cwd"] != cwd || thread["thread"]["id"].as_str().is_none_or(str::is_empty) {
+        return Err(io::Error::other("role workspace or thread identity not acknowledged"));
+    }
+    if thread["approvalPolicy"] != "on-request"
+        || thread["approvalsReviewer"] != "user"
+        || thread["sandbox"]["type"] != "readOnly"
+        || thread["sandbox"]["networkAccess"] != false
+    {
+        return Err(io::Error::other("role containment policy not acknowledged"));
+    }
+    if thread["instructionSources"].as_array().is_none_or(|sources| !sources.is_empty()) {
+        return Err(io::Error::other("role instruction inventory missing or nonempty"));
+    }
+    if thread["thread"]["ephemeral"] != true || thread["thread"]["cliVersion"] != "0.162.1" {
+        return Err(io::Error::other("ephemeral role or supported CLI version not acknowledged"));
     }
     Ok(())
 }
@@ -84,13 +187,29 @@ pub async fn run(data: &Path) -> io::Result<()> {
     }
     let cli = faber_engine::cli::find_cli("codex").ok_or_else(|| io::Error::other("CLI unavailable"))?;
     let identity = super::fingerprint(Path::new(&cli.command))?;
+    faber_engine::codex::prepare_project_codex_catalog()?;
     let args: Vec<_> = cli.prefix.iter().cloned().chain(faber_engine::codex::project_codex_args(true)).collect();
     let mut p = faber_engine::proc::real_spawner()(&cli.command, &args, &work)?;
-    if let Some(stderr) = p.stderr.take() {
+    let diagnostics = p.stderr.take().map(|stderr| {
         tokio::spawn(async move {
-            let _ = tokio::io::copy(&mut stderr.take(65536), &mut tokio::io::sink()).await;
-        });
-    }
+            let mut bytes = Vec::new();
+            let _ = stderr.take(65536).read_to_end(&mut bytes).await;
+            let text = String::from_utf8_lossy(&bytes);
+            // Emit only fixed schema-error classifications, never arbitrary CLI configuration or stderr.
+            [
+                "unknown feature",
+                "missing field",
+                "unknown variant",
+                "model_catalog_json",
+                "Access is denied",
+                "sharing violation",
+                "invalid type",
+            ]
+            .into_iter()
+            .filter(|needle| text.contains(needle))
+            .collect::<Vec<_>>()
+        })
+    });
     let stdout = std::mem::replace(&mut p.stdout, Box::new(tokio::io::empty()));
     let mut lines = BufReader::new(stdout).lines();
     let mut row = json!({"schema":1,"measuredAt":measured,"vendor":"codex","binaryHash":identity,
@@ -137,10 +256,7 @@ pub async fn run(data: &Path) -> io::Result<()> {
         packet(&mut p,json!({"id":4,"method":"thread/start","params":params})).await?;
         let thread = reply(&mut lines,4).await?;
         row["effectivePolicy"]=json!({"model":thread["model"],"provider":thread["modelProvider"],"effort":thread["reasoningEffort"],"sandbox":thread["sandbox"],"approvalPolicy":thread["approvalPolicy"]});
-        if thread["model"]!="gpt-6-luna" || thread["reasoningEffort"]!="low" || thread["modelProvider"]!="openai" { return Err(io::Error::other("model pin not acknowledged")); }
-        if thread["approvalPolicy"] != "on-request" || thread["sandbox"]["type"] != "readOnly" {
-            return Err(io::Error::other("role containment policy not acknowledged"));
-        }
+        effective_policy(&thread, &work.to_string_lossy())?;
         let id = thread["thread"]["id"].as_str().ok_or_else(||io::Error::other("thread identity missing"))?;
         {
             let mut loadout=serde_json::Map::new();
@@ -148,6 +264,8 @@ pub async fn run(data: &Path) -> io::Result<()> {
                 (10,"hooks/list",json!({"cwds":[work]})),
                 (11,"mcpServerStatus/list",json!({"threadId":id,"limit":100,"detail":"full"})),
                 (12,"plugin/list",json!({"cwds":[work]})),
+                (13,"skills/list",json!({"cwds":[work],"forceReload":true})),
+                (14,"experimentalFeature/list",json!({"threadId":id,"limit":1000})),
             ] {
                 row["currentLoadoutQuery"]=json!(method);
                 packet(&mut p,json!({"id":number,"method":method,"params":params})).await?;
@@ -158,6 +276,11 @@ pub async fn run(data: &Path) -> io::Result<()> {
                         row["stopRule"]=1.into();
                         return Err(io::Error::other("session loadout differs from the empty role loadout"));
                     }
+                }
+                if method!="mcpServerStatus/list"
+                    && let Err(error)=loadout_census(method,&observed,&work.to_string_lossy()) {
+                    row["stopRule"]=1.into();
+                    return Err(error);
                 }
                 if method=="hooks/list" {
                     row["hookMetadata"]=json!(observed["data"].as_array().map(|rows|rows.iter().map(|r|json!({"keys":r.as_object().map(|o|o.keys().collect::<Vec<_>>()),"hookCount":r["hooks"].as_array().map(Vec::len)})).collect::<Vec<_>>()));
@@ -291,6 +414,9 @@ pub async fn run(data: &Path) -> io::Result<()> {
         tokio::time::timeout(Duration::from_secs(3), child.wait()).await.map_err(|_| io::Error::other("owned tree kill timeout"))??;
     }
     row["killWaitMs"] = json!(killed.elapsed().as_millis() as u64);
+    if let Some(task) = diagnostics {
+        row["startupErrorClasses"] = json!(tokio::time::timeout(Duration::from_secs(2), task).await.ok().and_then(Result::ok));
+    }
     row["markerUnchanged"] = json!(std::fs::read(&canary)? == marker.as_bytes());
     row["markerSha256Before"] = json!(faber_engine::project::lease::hash(marker.as_bytes()));
     row["markerSha256After"] = json!(super::fingerprint(&canary)?);
@@ -339,6 +465,163 @@ mod tests {
             let mut observed = json!({"data":[{"name":"inherited","tools":{},"resources":[],"resourceTemplates":[]}],"nextCursor":null});
             observed["data"][0][field] = if field == "tools" { json!({"escape":{}}) } else { json!([{}]) };
             assert!(empty_loadout(&observed, &disabled).is_err());
+        }
+    }
+
+    #[test]
+    fn empty_mcp_catalog_does_not_hide_discovery_failure() {
+        let disabled = json!({"inherited":{"enabled":false}});
+        let observed = json!({"data":[{"name":"inherited","tools":{},"resources":[],
+            "resourceTemplates":[],"toolsError":"discovery failed"}],"nextCursor":null});
+        assert!(empty_loadout(&observed, &disabled).is_err());
+    }
+
+    #[test]
+    fn hook_and_skill_censuses_require_the_requested_workspace_and_disabled_entries() {
+        for (method, field) in [("hooks/list", "hooks"), ("skills/list", "skills")] {
+            let valid = json!({"data":[{"cwd":"workspace","errors":[],"warnings":[],field:[]}]});
+            assert!(loadout_census(method, &valid, "workspace").is_ok());
+            for invalid in [json!({}), json!({"data":null}), json!({"data":[]})] {
+                assert!(loadout_census(method, &invalid, "workspace").is_err());
+            }
+            for (key, value) in [
+                ("cwd", json!("another-workspace")),
+                ("errors", json!([{"message":"inventory unavailable"}])),
+                ("errors", Value::Null),
+                (field, Value::Null),
+                (field, json!([{"enabled":true}])),
+                (field, json!([{}])),
+            ] {
+                let mut invalid = valid.clone();
+                invalid["data"][0][key] = value;
+                assert!(loadout_census(method, &invalid, "workspace").is_err(), "{method}: {key}");
+            }
+            let mut missing = valid.clone();
+            missing["data"][0].as_object_mut().unwrap().remove(field);
+            assert!(loadout_census(method, &missing, "workspace").is_err());
+            let mut duplicate = valid.clone();
+            duplicate["data"].as_array_mut().unwrap().push(valid["data"][0].clone());
+            assert!(loadout_census(method, &duplicate, "workspace").is_err());
+            let mut disabled = valid.clone();
+            disabled["data"][0][field] = json!([{"enabled":false}]);
+            assert!(loadout_census(method, &disabled, "workspace").is_ok());
+        }
+        for warnings in [Value::Null, json!(["incomplete inventory"])] {
+            assert!(
+                loadout_census(
+                    "hooks/list",
+                    &json!({"data":[{"cwd":"workspace","errors":[],"hooks":[],"warnings":warnings}]}),
+                    "workspace"
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn plugin_census_distinguishes_catalog_entries_from_active_installed_plugins() {
+        for (installed, enabled) in [(false, false), (false, true), (true, false)] {
+            let observed = json!({"marketplaces":[{"name":"catalog","plugins":[
+                {"id":"plugin","name":"Plugin","installed":installed,"enabled":enabled}]}],
+                "marketplaceLoadErrors":[]});
+            assert!(loadout_census("plugin/list", &observed, "workspace").is_ok());
+        }
+        for invalid in [
+            json!({}),
+            json!({"marketplaces":null}),
+            json!({"marketplaces":[],"marketplaceLoadErrors":[{}]}),
+            json!({"marketplaces":[],"marketplaceLoadErrors":null}),
+            json!({"marketplaces":[{"name":"catalog","plugins":null}]}),
+            json!({"marketplaces":[{"name":"catalog","plugins":[
+                {"id":"plugin","name":"Plugin","installed":true,"enabled":true}]}]}),
+            json!({"marketplaces":[{"name":"catalog","plugins":[
+                {"id":"plugin","name":"Plugin","installed":true}]}]}),
+        ] {
+            assert!(loadout_census("plugin/list", &invalid, "workspace").is_err());
+        }
+        assert!(loadout_census("plugin/list", &json!({"marketplaces":[]}), "workspace").is_ok());
+    }
+
+    fn disabled_features() -> Value {
+        let data = [
+            "hooks",
+            "apps",
+            "plugins",
+            "computer_use",
+            "browser_use",
+            "skill_mcp_dependency_install",
+            "shell_tool",
+            "multi_agent",
+            "multi_agent_v2",
+            "view_image",
+            "request_permissions_tool",
+            "code_mode",
+            "code_mode_only",
+            "code_mode_host",
+            "code_mode_tool_search",
+            "token_budget",
+            "deferred_executor",
+            "send_message_to_user_async",
+            "current_time_reminder",
+            "sleep_tool",
+            "image_generation",
+            "imagegenext",
+        ]
+        .map(|name| json!({"name":name,"enabled":false}));
+        json!({"data":data,"nextCursor":null})
+    }
+
+    #[test]
+    fn disabled_features_require_explicit_complete_thread_observations() {
+        let valid = disabled_features();
+        assert!(loadout_census("experimentalFeature/list", &valid, "workspace").is_ok());
+        for invalid in [json!({}), json!({"data":[]}), json!({"data":null})] {
+            assert!(loadout_census("experimentalFeature/list", &invalid, "workspace").is_err());
+        }
+        let mut truncated = valid.clone();
+        truncated["nextCursor"] = "another-page".into();
+        assert!(loadout_census("experimentalFeature/list", &truncated, "workspace").is_err());
+        for index in 0..valid["data"].as_array().unwrap().len() {
+            let mut enabled = valid.clone();
+            enabled["data"][index]["enabled"] = true.into();
+            assert!(loadout_census("experimentalFeature/list", &enabled, "workspace").is_err());
+            let mut missing = valid.clone();
+            missing["data"].as_array_mut().unwrap().remove(index);
+            assert!(loadout_census("experimentalFeature/list", &missing, "workspace").is_err());
+            let mut unknown = valid.clone();
+            unknown["data"][index].as_object_mut().unwrap().remove("enabled");
+            assert!(loadout_census("experimentalFeature/list", &unknown, "workspace").is_err());
+        }
+    }
+
+    #[test]
+    fn effective_policy_requires_acknowledged_pins_and_empty_instruction_sources() {
+        let valid = json!({"model":"gpt-6-luna","modelProvider":"openai","reasoningEffort":"low",
+            "approvalPolicy":"on-request","approvalsReviewer":"user","cwd":"workspace",
+            "sandbox":{"type":"readOnly","networkAccess":false},"instructionSources":[],
+            "thread":{"id":"owned-thread","cwd":"workspace","ephemeral":true,"cliVersion":"0.162.1"}});
+        assert!(effective_policy(&valid, "workspace").is_ok());
+        for (field, value) in [
+            ("model", json!("another-model")),
+            ("modelProvider", json!("other")),
+            ("reasoningEffort", Value::Null),
+            ("approvalPolicy", json!("never")),
+            ("approvalsReviewer", json!("auto_review")),
+            ("cwd", json!("another-workspace")),
+            ("sandbox", json!({"type":"readOnly","networkAccess":true})),
+            ("instructionSources", json!(["inherited"])),
+            ("instructionSources", Value::Null),
+        ] {
+            let mut invalid = valid.clone();
+            invalid[field] = value;
+            assert!(effective_policy(&invalid, "workspace").is_err(), "{field}");
+        }
+        for (field, value) in
+            [("id", json!("")), ("cwd", json!("another-workspace")), ("ephemeral", json!(false)), ("cliVersion", json!("0.163.0"))]
+        {
+            let mut invalid = valid.clone();
+            invalid["thread"][field] = value;
+            assert!(effective_policy(&invalid, "workspace").is_err(), "thread.{field}");
         }
     }
 }

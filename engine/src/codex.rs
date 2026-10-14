@@ -84,10 +84,88 @@ pub fn thread_exposure(params: &mut Value, reply: &str) -> Result<(), crate::pro
 pub fn project_codex_args(windows: bool) -> Vec<String> {
     let mut args = codex_args(Area::Chat, windows, false);
     args.extend(["-c".into(), "model_provider=\"openai\"".into()]);
-    for feature in ["shell_tool", "multi_agent", "multi_agent_v2"] {
+    args.extend(["-c".into(), format!("model_catalog_json={}", json!(project_catalog_path().to_string_lossy()))]);
+    for setting in [
+        "developer_instructions=\"\"",
+        "skills.include_instructions=false",
+        "skills.bundled.enabled=false",
+        "tools.update_plan.enabled=false",
+        "tools.experimental_request_user_input.enabled=false",
+    ] {
+        args.extend(["-c".into(), setting.into()]);
+    }
+    for feature in [
+        "shell_tool",
+        "multi_agent",
+        "multi_agent_v2",
+        "view_image",
+        "request_permissions_tool",
+        "code_mode",
+        "code_mode_only",
+        "code_mode_host",
+        "code_mode_tool_search",
+        "token_budget",
+        "deferred_executor",
+        "send_message_to_user_async",
+        "current_time_reminder",
+        "sleep_tool",
+        "image_generation",
+        "imagegenext",
+    ] {
         args.extend(["--disable".into(), feature.into()]);
     }
     args
+}
+
+fn project_catalog_path() -> &'static Path {
+    static PATH: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    PATH.get_or_init(|| std::env::temp_dir().join(format!("faber-role-model-{}.json", uuid::Uuid::new_v4())))
+}
+
+/// Original client metadata for the qualified MVP model; it grants no native tool or model delegation.
+/// The installed startup-only model_catalog_json control consumes ModelInfo from the published protocol.
+pub fn project_codex_catalog() -> Value {
+    json!({"models":[{
+        "slug":"gpt-6-luna", "display_name":"Project worker", "description":null,
+        "default_reasoning_level":"medium",
+        "supported_reasoning_levels":[
+            {"effort":"low","description":"Low"}, {"effort":"medium","description":"Medium"},
+            {"effort":"high","description":"High"}, {"effort":"xhigh","description":"Extra high"},
+            {"effort":"max","description":"Maximum"}],
+        "shell_type":"disabled", "visibility":"list", "supported_in_api":true, "priority":0,
+        "support_verbosity":false, "apply_patch_tool_type":null,
+        "truncation_policy":{"mode":"tokens","limit":10000},
+        "context_window":1050000, "max_context_window":1050000,
+        "experimental_supported_tools":[], "input_modalities":["text"],
+        "include_skills_usage_instructions":false, "include_apps_usage_instructions":false,
+        "include_plugin_usage_instructions":false, "node_repl_disabled":true,
+        "supports_search_tool":false, "supports_experimental_context":false,
+        "tool_mode":"direct", "multi_agent_version":null
+    }]})
+}
+
+/// Writes only a generated temporary control file, never the CLI's configuration or credentials.
+#[cfg(windows)]
+pub fn prepare_project_codex_catalog() -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::windows::fs::OpenOptionsExt;
+    static FILE: std::sync::OnceLock<std::io::Result<std::fs::File>> = std::sync::OnceLock::new();
+    FILE.get_or_init(|| {
+        // The held handle denies writes; Windows removes this exact created file on process exit.
+        let mut file = std::fs::OpenOptions::new()
+            .create_new(true)
+            .read(true)
+            .write(true)
+            .share_mode(0x0000_0001 | 0x0000_0004)
+            .custom_flags(0x0400_0000)
+            .open(project_catalog_path())?;
+        file.write_all(&serde_json::to_vec(&project_codex_catalog())?)?;
+        file.sync_all()?;
+        Ok(file)
+    })
+    .as_ref()
+    .map(|_| ())
+    .map_err(std::io::Error::other)
 }
 
 /// Parameters for thread/start and thread/resume. The sandbox keeps writes inside the working folder;
@@ -418,7 +496,8 @@ pub fn project_thread_params(
     params["config"] = json!({"model_reasoning_effort": t.effort, "service_tier":"default", "approvals_reviewer":"user", "web_search":"disabled", "sandbox_workspace_write": {
         "network_access":false, "exclude_tmpdir_env_var":true, "exclude_slash_tmp":true
     }});
-    params.as_object_mut().expect("thread parameters").remove("developerInstructions");
+    params["developerInstructions"] = "".into();
+    params["config"]["tools"] = json!({"update_plan":{"enabled":false}, "experimental_request_user_input":{"enabled":false}});
     Ok((method, params))
 }
 
@@ -442,6 +521,10 @@ impl CodexServer {
             return Err(crate::project::policy::Blocker::Invocation);
         }
         project_thread_params(&thread, role)?;
+        #[cfg(windows)]
+        if crate::project::policy::admit(crate::model::Vendor::Codex).is_ok() {
+            prepare_project_codex_catalog().map_err(|_| crate::project::policy::Blocker::Restrictions)?;
+        }
         crate::project::policy::admit(crate::model::Vendor::Codex).map(|()| {
             let server = Self::start_with_policy(opts, Some(role));
             let session = server.open(thread, sink);
