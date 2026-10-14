@@ -332,7 +332,7 @@ fn switches_language(ctx: &mut Ctx) -> Result {
     same(page.eval("document.documentElement.lang")?.as_str(), Some("pt-BR"), "the page language")?;
     ctx.shot(&mut app, "home-pt-BR")?;
     let page = &mut app.page;
-    let open = page.named_in("button", "settings.open", "pt-BR")?;
+    let open = page.named_in("button", "settings.open", "pt-BR")?.exact();
     page.click(&open)?;
     let language = crate::page::label(&page.text_in("set.language", "pt-BR")?);
     page.select_option(&language, "es")?;
@@ -342,7 +342,7 @@ fn switches_language(ctx: &mut Ctx) -> Result {
 }
 
 fn open_appearance(page: &mut Page) -> Result {
-    let settings = page.named("button", "settings.open")?;
+    let settings = page.named("button", "settings.open")?.exact();
     page.click(&settings)?;
     let appearance = page.named("button", "set.appearance")?;
     page.click(&appearance)?;

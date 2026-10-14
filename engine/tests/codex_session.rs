@@ -2,7 +2,7 @@ use crate::support;
 
 use faber_engine::codex::{
     CodexServer, CodexServerOptions, CodexThread, CodexTurnState, codex_args, codex_thread, list_codex_models, parse_codex_notification,
-    thread_params,
+    read_codex_limits, thread_params,
 };
 use faber_engine::events::{Delivery, EngineEvent, Session, UserTurn};
 use faber_engine::model::{Area, Permissions};
@@ -126,6 +126,30 @@ async fn codex_permissions_the_first_command_is_allowed_and_the_second_declined(
         .filter_map(|e| if let EngineEvent::ToolResult { ok, declined, .. } = e { Some((*ok, *declined)) } else { None })
         .collect();
     assert_eq!(results, [(true, false), (false, true)], "a refused approval is declined, not a failure");
+}
+
+/// R124b, item 5: the request names only `auth.json`; the command's folder is what says it is the sign-in. The driver refuses it
+/// itself (a refusal is always safe, so nothing races a mode switch) and the person is asked only about the other command.
+#[tokio::test]
+async fn r124b_a_command_run_inside_a_credential_folder_is_refused_without_a_card() {
+    let mut entries = fixture("codex", "tools");
+    let at = entries.iter().position(|e| !e.input && e.msg["method"] == "item/commandExecution/requestApproval").unwrap();
+    entries[at].msg["params"]["cwd"] = "C:\\Users\\me\\.codex".into();
+    entries[at].msg["params"]["command"] = "type auth.json".into();
+    entries[at + 1].msg["result"]["decision"] = "decline".into();
+    let mut asks = Vec::new();
+    let (_, mismatches) =
+        run(entries, "Create a.txt containing one. Then create b.txt containing two. Make each file in a separate step.", None, |e, s| {
+            if let EngineEvent::Permission { request_id, input, .. } = e {
+                asks.push(input.to_string());
+                drop(s.answer(request_id, false));
+            }
+            matches!(e, EngineEvent::Done { .. })
+        })
+        .await;
+    assert_eq!(mismatches, Vec::<String>::new());
+    assert_eq!(asks.len(), 1, "only the second command is asked: {asks:?}");
+    assert!(!asks[0].contains("auth.json"));
 }
 
 #[tokio::test]
@@ -276,7 +300,9 @@ fn codex_chat_is_lean_and_sandboxed_projects_keep_the_user_setup_without_hooks()
     assert!(!codex_args(Area::Project, false, true, Permissions::Ask).join(" ").contains("hooks"));
     for area in [Area::Chat, Area::Project] {
         assert_eq!(codex_thread(area, None, Permissions::Ask)["sandbox"], "workspace-write");
-        assert_eq!(codex_thread(area, None, Permissions::Ask)["approvalPolicy"], "on-request");
+        // "untrusted" asks before every command that is not a plain read and before every file change, inside the folder too
+        // (checked against the installed Codex: "on-request" let sandboxed commands in the folder run unasked).
+        assert_eq!(codex_thread(area, None, Permissions::Ask)["approvalPolicy"], "untrusted");
     }
     assert!(codex_thread(Area::Chat, None, Permissions::Ask).contains_key("baseInstructions"));
 }
@@ -301,7 +327,7 @@ async fn review3_user_mcp_servers_are_disabled_before_start_and_resume_without_c
             let f = fake(entries);
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
             let server = CodexServer::start(CodexServerOptions {
-                permissions: Permissions::DontAsk,
+                permissions: Permissions::Isolated,
                 cli: faber_engine::cli::Cli { command: "codex".into(), prefix: vec![] },
                 cwd: ".".into(),
                 area,
@@ -317,7 +343,7 @@ async fn review3_user_mcp_servers_are_disabled_before_start_and_resume_without_c
                     resume,
                     instructions: None,
                     user_name: None,
-                    permissions: Permissions::DontAsk,
+                    permissions: Permissions::Isolated,
                 },
                 Arc::new(move |e| drop(tx.send(e))),
             );
@@ -420,7 +446,7 @@ fn a_side_question_thread_has_its_own_instructions_restricted_reads_no_writes_an
 #[test]
 fn permissions_keep_the_workspace_sandbox_and_disable_project_network_without_approvals() {
     for area in [Area::Chat, Area::Project] {
-        for permissions in [Permissions::DontAsk, Permissions::Ask] {
+        for permissions in [Permissions::Isolated, Permissions::Ask, Permissions::FullAccess] {
             for resume in [None, Some("thread-id".into())] {
                 let t = CodexThread {
                     cwd: "project".into(),
@@ -435,13 +461,16 @@ fn permissions_keep_the_workspace_sandbox_and_disable_project_network_without_ap
                 assert_eq!(method, if t.resume.is_some() { "thread/resume" } else { "thread/start" });
                 assert_eq!(params["cwd"], "project");
                 assert_eq!(params["model"], "model");
-                if permissions == Permissions::DontAsk {
+                if permissions == Permissions::Isolated {
                     assert!(params.get("sandbox").is_none());
                     assert_eq!(params["approvalPolicy"], "never");
                     assert_eq!(params["config"]["sandbox_workspace_write.network_access"], false);
+                } else if permissions == Permissions::FullAccess {
+                    assert_eq!((&params["sandbox"], &params["approvalPolicy"]), (&"danger-full-access".into(), &"never".into()));
+                    assert!(params.get("config").is_none() && params.get("dynamicTools").is_none());
                 } else {
                     assert_eq!(params["sandbox"], "workspace-write");
-                    assert_eq!(params["approvalPolicy"], "on-request");
+                    assert_eq!(params["approvalPolicy"], "untrusted");
                     assert!(params.get("config").is_none());
                 }
                 assert_eq!(params.get("baseInstructions").is_some(), area == Area::Chat);
@@ -478,7 +507,7 @@ async fn l2_serialized_start_and_resume_carry_the_no_approval_offline_policy() {
                     resume: resume.then(|| "thread-id".into()),
                     instructions: None,
                     user_name: None,
-                    permissions: Permissions::DontAsk,
+                    permissions: Permissions::Isolated,
                 },
                 Arc::new(move |e| {
                     let _ = tx.send(e);
@@ -535,7 +564,7 @@ async fn a_project_with_no_approvals_declines_a_residual_request_without_emittin
                         resume: None,
                         instructions: None,
                         user_name: None,
-                        permissions: Permissions::DontAsk,
+                        permissions: Permissions::Isolated,
                     },
                     sink,
                 )
@@ -696,6 +725,7 @@ async fn review3_command_gate_declines_git_mutations_and_runs_builds_only_in_the
                 stdout: Box::new(std::io::Cursor::new(b"build completed".to_vec())),
                 stderr: None,
                 child: None,
+                contained: None,
             })
         });
         let server = CodexServer::start(CodexServerOptions {
@@ -704,7 +734,7 @@ async fn review3_command_gate_declines_git_mutations_and_runs_builds_only_in_the
             area,
             user_hooks: false,
             windows: true,
-            permissions: Permissions::DontAsk,
+            permissions: Permissions::Isolated,
             spawn,
         });
         let session = server.open(
@@ -715,7 +745,7 @@ async fn review3_command_gate_declines_git_mutations_and_runs_builds_only_in_the
                 resume: None,
                 instructions: None,
                 user_name: None,
-                permissions: Permissions::DontAsk,
+                permissions: Permissions::Isolated,
             },
             Arc::new(|_| {}),
         );
@@ -755,4 +785,184 @@ fn only_a_user_message_after_the_first_of_a_turn_counts_as_taken_in() {
     // A new turn starts counting again.
     parse_codex_notification(&json!({ "method": "turn/started", "params": { "turn": { "id": "t2" } } }), &mut state);
     assert!(parse_codex_notification(&started(json!(null)), &mut state).is_empty());
+}
+
+#[test]
+fn r121_full_access_starts_codex_as_the_person_would_and_isolated_keeps_every_restriction() {
+    for area in [Area::Chat, Area::Project] {
+        for user_hooks in [false, true] {
+            // Nothing disabled, no sandbox choice, no emptied MCP list, no cut-off project instructions.
+            assert_eq!(codex_args(area, true, user_hooks, Permissions::FullAccess), ["app-server"], "{area:?}");
+        }
+        let isolated = codex_args(area, true, true, Permissions::Isolated);
+        for feature in ["apps", "plugins", "computer_use", "browser_use", "hooks", "skill_mcp_dependency_install"] {
+            assert!(isolated.windows(2).any(|pair| pair == ["--disable", feature]), "{area:?} {feature}");
+        }
+        assert!(isolated.contains(&"mcp_servers={}".into()) && isolated.contains(&"windows.sandbox=\"mxc\"".into()));
+    }
+}
+
+/// Codex's only filesystem deny rules live in a permission profile. On Windows a profile that grants the whole disk and denies
+/// the credential folders is refused ("MXC cannot verify it does not alias a denied object" when a drive letter is unreachable,
+/// "requires the elevated Windows sandbox" otherwise), so full access sends no profile and no credential block exists for Codex.
+/// This test states that limit; docs/security-r97-review.md and the Settings text say it to the person.
+#[test]
+fn r121_codex_full_access_has_no_sandbox_no_approvals_and_no_host_command_tool() {
+    for area in [Area::Chat, Area::Project] {
+        for resume in [None, Some("thread".into())] {
+            let t = CodexThread {
+                cwd: "project".into(),
+                model: None,
+                effort: None,
+                resume,
+                instructions: None,
+                user_name: None,
+                permissions: Permissions::FullAccess,
+            };
+            let (_, params) = thread_params(area, &t);
+            assert_eq!((&params["sandbox"], &params["approvalPolicy"]), (&"danger-full-access".into(), &"never".into()), "{area:?}");
+            for key in ["config", "dynamicTools", "runtimeWorkspaceRoots"] {
+                assert!(params.get(key).is_none(), "{area:?} {key}: full access sends no profile, no tool override and no workspace roots");
+            }
+        }
+    }
+}
+
+#[test]
+fn r121_a_side_question_stays_isolated_whatever_mode_the_person_chose() {
+    for permissions in [Permissions::FullAccess, Permissions::Ask, Permissions::Isolated] {
+        let t = CodexThread {
+            cwd: ".".into(),
+            model: None,
+            effort: None,
+            resume: None,
+            instructions: Some("Route.".into()),
+            user_name: None,
+            permissions,
+        };
+        let (_, params) = thread_params(Area::Chat, &t);
+        assert!(params.get("sandbox").is_none() && params.get("dynamicTools").is_none(), "{permissions:?}");
+        assert_eq!(params["approvalPolicy"], "never");
+        assert_eq!(params["ephemeral"], true);
+        assert_eq!(params["config"]["features.shell_tool"], false, "{permissions:?}");
+        let id = params["config"]["default_permissions"].as_str().unwrap();
+        let profile = &params["config"][format!("permissions.{id}")];
+        assert_eq!(profile["network"]["enabled"], false, "{permissions:?}");
+        assert_eq!(profile["filesystem"][":workspace_roots"]["."], "read");
+        assert_eq!(profile["filesystem"]["~/.codex"], "deny");
+    }
+}
+
+#[tokio::test]
+async fn r121_the_model_list_and_the_limits_reading_start_an_isolated_server() {
+    let f = fake(vec![]);
+    let _ = list_codex_models("codex", ".".as_ref(), true, f.spawn.clone(), Duration::from_millis(50)).await;
+    let _ = read_codex_limits("codex", ".".as_ref(), true, f.spawn.clone(), Duration::from_millis(50)).await;
+    let args = f.args.lock().unwrap();
+    assert_eq!(args.len(), 2);
+    for started in args.iter() {
+        assert_eq!(*started, codex_args(Area::Chat, true, false, Permissions::Isolated));
+        assert!(started.contains(&"mcp_servers={}".into()) && started.contains(&"windows.sandbox=\"mxc\"".into()));
+    }
+}
+
+#[tokio::test]
+async fn r121_a_full_access_thread_keeps_the_persons_mcp_servers_and_starts_without_a_sandbox() {
+    for resume in [None, Some("thread".to_string())] {
+        let method = if resume.is_some() { "thread/resume" } else { "thread/start" };
+        let entries = vec![
+            Entry { input: true, msg: json!({"id":1,"method":"initialize"}) },
+            Entry { input: false, msg: json!({"id":1,"result":{}}) },
+            Entry { input: true, msg: json!({"method":"initialized"}) },
+            Entry { input: true, msg: json!({"id":2,"method":method}) },
+            Entry { input: false, msg: json!({"id":2,"result":{"thread":{"id":"thread","model":"model"}}}) },
+        ];
+        let f = fake(entries);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let server = CodexServer::start(CodexServerOptions {
+            permissions: Permissions::FullAccess,
+            cli: faber_engine::cli::Cli { command: "codex".into(), prefix: vec![] },
+            cwd: ".".into(),
+            area: Area::Chat,
+            user_hooks: false,
+            windows: true,
+            spawn: f.spawn.clone(),
+        });
+        let session = server.open(
+            CodexThread {
+                cwd: ".".into(),
+                model: None,
+                effort: None,
+                resume,
+                instructions: None,
+                user_name: None,
+                permissions: Permissions::FullAccess,
+            },
+            Arc::new(move |e| drop(tx.send(e))),
+        );
+        tokio::time::timeout(Duration::from_secs(3), async { while !matches!(rx.recv().await, Some(EngineEvent::Started { .. })) {} })
+            .await
+            .unwrap();
+        assert_eq!(f.wire.lines_with("config/read"), 0, "the MCP servers are not listed in order to be switched off");
+        assert_eq!(f.args.lock().unwrap()[0], ["app-server"]);
+        let messages = f.wire.messages();
+        let thread = messages.iter().find(|msg| msg["method"] == method).unwrap();
+        assert_eq!(thread["params"]["sandbox"], "danger-full-access");
+        assert!(thread["params"].get("config").is_none());
+        assert!(f.mismatches.lock().unwrap().is_empty());
+        session.close();
+        server.retire();
+    }
+}
+
+#[tokio::test]
+async fn r124_a_full_access_thread_hands_a_residual_approval_to_the_engine_and_never_answers_it_alone() {
+    for area in [Area::Chat, Area::Project] {
+        let entries = fixture("codex", "tools")
+            .into_iter()
+            .map(|mut e| {
+                if e.input && e.msg.get("result").is_some() && e.msg["result"].get("decision").is_some() {
+                    e.msg["result"]["decision"] = "accept".into();
+                }
+                e
+            })
+            .collect();
+        let (events, mismatches) = drive(
+            entries,
+            |spawn, sink| {
+                let server = CodexServer::start(CodexServerOptions {
+                    permissions: Permissions::FullAccess,
+                    cli: faber_engine::cli::Cli { command: "codex".into(), prefix: vec![] },
+                    cwd: ".".into(),
+                    area,
+                    user_hooks: false,
+                    windows: false,
+                    spawn,
+                });
+                server.open(
+                    CodexThread {
+                        cwd: ".".into(),
+                        model: None,
+                        effort: None,
+                        resume: None,
+                        instructions: None,
+                        user_name: None,
+                        permissions: Permissions::FullAccess,
+                    },
+                    sink,
+                )
+            },
+            "Create a.txt containing one. Then create b.txt containing two. Make each file in a separate step.",
+            |event, session| {
+                // What the engine does for full access: it answers yes at once. The driver itself writes nothing before.
+                if let EngineEvent::Permission { request_id, .. } = event {
+                    drop(session.answer(request_id, true));
+                }
+                matches!(event, EngineEvent::Done { .. })
+            },
+        )
+        .await;
+        assert!(mismatches.is_empty(), "{mismatches:?}");
+        assert!(events.iter().any(|e| matches!(e, EngineEvent::Permission { .. })), "the request reaches the engine, which decides");
+    }
 }

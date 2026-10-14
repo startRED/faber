@@ -51,3 +51,22 @@ check('i18n: the shell texts reach the tray with {n} and {title} intact, in ever
     ok(templates('tray.notify', code).other.includes('{title}'), `${code} tray.notify lost {title}`);
   }
 });
+
+// An encoding slip once turned the accented letters of pt-BR, es, fr and de into "?" ("Permiss?es", "aprova??o", "bac ? sable").
+// A real question mark ends a sentence or follows a space before a capital; it never sits inside a word.
+const damaged = (text: string) => /\p{L}\?+\p{L}/u.test(text.replace(/https?:\/\/\S+/g, '')) || /\p{L} \?+ \p{Ll}/u.test(text);
+
+check('i18n: no text has a "?" where an accented letter was lost', () => {
+  const found: string[] = [];
+  for (const { code, messages } of LANGUAGES) {
+    for (const [key, entry] of Object.entries(messages) as Array<[string, string | { one: string; other: string }]>) {
+      for (const text of forms(entry)) if (damaged(text)) found.push(`${code} ${key}: ${text.slice(0, 60)}`);
+    }
+  }
+  ok(found.length === 0, found.slice(0, 5).join('; '));
+});
+
+check('i18n: the "?" check finds the damage it was written for and leaves real questions alone', () => {
+  for (const bad of ['Permiss?es no Chat', 'aprova??o antes', 'Faber n?a pas pu', 'le bac ? sable', 'Passer ? ce mode']) ok(damaged(bad), bad);
+  for (const fine of ['Ça va ? Oui.', 'Delete this chat?', 'Wirklich löschen?', '¿Seguro?', 'Quoi ?', 'https://example.com/a?b=c']) ok(!damaged(fine), fine);
+});

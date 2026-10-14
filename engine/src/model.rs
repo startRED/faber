@@ -417,12 +417,22 @@ pub enum Experience {
     Experienced,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+/// How a CLI session may act. `Ask` and `FullAccess` are the two choices on screen (R121); `Isolated` exists only inside Faber.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Permissions {
-    #[default]
-    DontAsk,
+    /// Commands and file changes wait for a card the person answers.
+    #[serde(rename = "ask")]
     Ask,
+    /// "Do not ask": no cards, no sandbox around commands, network and the person's own integrations on. Only the CLI
+    /// credential folders stay blocked, where the CLI can enforce it. Stored as `dontAsk`.
+    #[default]
+    #[serde(rename = "dontAsk")]
+    FullAccess,
+    /// Faber's own isolated mode (R97, R107, R109): commands run in a native sandbox with no network, only the working
+    /// folder writable, integrations off and sensitive folders refused. For the model list, the router, internal checks and
+    /// the self-development roles. Never stored, never chosen by the person.
+    #[serde(skip)]
+    Isolated,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

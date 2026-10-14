@@ -228,7 +228,7 @@ pub fn replay(entries: Vec<Entry>, mismatches: Mismatches) -> Proc {
         }
         // stdin closed: the process exits, so its output ends
     });
-    Proc { stdin: Box::new(driver_in), stdout: Box::new(driver_out), stderr: None, child: None }
+    Proc { stdin: Box::new(driver_in), stdout: Box::new(driver_out), stderr: None, child: None, contained: None }
 }
 
 /// A spawner that replays `entries` each time it is called, recording the arguments it got and every line written.
@@ -287,4 +287,81 @@ pub async fn drive(
     session.close();
     let mismatches = fake.mismatches.lock().unwrap().clone();
     (events, mismatches)
+}
+
+/// A fake CLI process the test drives by hand: it writes the CLI's output lines itself, whenever it likes, and reads
+/// everything the driver wrote to the process.
+pub struct Pipe {
+    pub out: tokio::io::DuplexStream,
+    pub lines: Arc<Mutex<Vec<Value>>>,
+    /// The driver closed the process's input (the end of a session).
+    pub closed: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Pipe {
+    pub async fn say(&mut self, msg: Value) {
+        self.out.write_all(format!("{msg}\n").as_bytes()).await.unwrap();
+    }
+
+    /// The answers (request id, behavior) written so far.
+    pub fn answers(&self) -> Vec<(String, String)> {
+        self.lines
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|m| m["type"] == "control_response")
+            .map(|m| {
+                (
+                    m["response"]["request_id"].as_str().unwrap().to_owned(),
+                    m["response"]["response"]["behavior"].as_str().unwrap().to_owned(),
+                )
+            })
+            .collect()
+    }
+}
+
+/// A spawner whose processes are driven by hand. Every process it starts is queued for `next_pipe`.
+pub fn pipes() -> (Spawner, Arc<Mutex<Vec<Pipe>>>) {
+    let made: Arc<Mutex<Vec<Pipe>>> = Arc::default();
+    let queue = made.clone();
+    let spawn: Spawner = Arc::new(move |_bin, _argv, _cwd| {
+        let (driver_in, fake_in) = tokio::io::duplex(1 << 20);
+        let (fake_out, driver_out) = tokio::io::duplex(1 << 20);
+        let lines: Arc<Mutex<Vec<Value>>> = Arc::default();
+        let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (seen, done) = (lines.clone(), closed.clone());
+        tokio::spawn(async move {
+            let mut input = BufReader::new(fake_in).lines();
+            while let Ok(Some(line)) = input.next_line().await {
+                if let Ok(msg) = serde_json::from_str::<Value>(&line) {
+                    seen.lock().unwrap().push(msg);
+                }
+            }
+            done.store(true, Ordering::SeqCst);
+        });
+        queue.lock().unwrap().push(Pipe { out: fake_out, lines, closed });
+        Ok(Proc { stdin: Box::new(driver_in), stdout: Box::new(driver_out), stderr: None, child: None, contained: None })
+    });
+    (spawn, made)
+}
+
+/// The first process a `pipes` spawner started, once it exists.
+pub async fn next_pipe(made: &Arc<Mutex<Vec<Pipe>>>) -> Pipe {
+    for _ in 0..300 {
+        if !made.lock().unwrap().is_empty() {
+            return made.lock().unwrap().remove(0);
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("no process was started");
+}
+
+/// What Faber's own Claude requests (the router, the pulse) must start with whatever mode the person chose: no hooks, no settings
+/// files, no MCP servers, no plugins. A hook that fired on every background request would run the person's commands unasked.
+pub fn assert_no_user_customizations(args: &[String]) {
+    let after = |flag: &str| args[args.iter().position(|a| a == flag).unwrap_or_else(|| panic!("{flag} missing in {args:?}")) + 1].clone();
+    assert!(args.contains(&"--safe-mode".into()) && args.contains(&"--strict-mcp-config".into()), "{args:?}");
+    assert_eq!(after("--setting-sources"), "", "{args:?}");
+    let settings: Value = serde_json::from_str(&after("--settings")).unwrap();
+    assert_eq!(settings["disableAllHooks"], true, "{args:?}");
 }

@@ -260,8 +260,8 @@ impl Core {
         let (cwd, instructions) = (self.opts.data_dir.clone(), Some(instructions.to_string()));
         let (model, effort) = (Some(model.to_string()), Some(effort.to_string()));
         let session = match vendor {
-            Vendor::Codex => self.codex_server(Area::Chat, false, &cli).open(
-                CodexThread { cwd, model, effort, resume: None, instructions, user_name: None, permissions: Permissions::DontAsk },
+            Vendor::Codex => self.codex_server(Area::Chat, false, Permissions::Isolated, &cli).open(
+                CodexThread { cwd, model, effort, resume: None, instructions, user_name: None, permissions: Permissions::Isolated },
                 sink,
             ),
             Vendor::Claude => start_claude(
@@ -274,7 +274,7 @@ impl Core {
                         effort,
                         resume: None,
                         user_hooks: false,
-                        permissions: Permissions::DontAsk,
+                        permissions: Permissions::Isolated,
                         instructions,
                         user_name: None,
                     },
@@ -350,7 +350,7 @@ impl Core {
         }
         let codex = self.opts.clis.get(&Vendor::Codex).cloned().filter(|_| self.codex_models.iter().any(|m| m == ROUTER[0].1));
         if let Some(cli) = codex {
-            self.codex_server(Area::Chat, false, &cli);
+            self.codex_server(Area::Chat, false, Permissions::Isolated, &cli);
             return;
         }
         let Some(spare) = self.open_router().filter(|s| s.vendor == Vendor::Claude) else { return };

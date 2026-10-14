@@ -24,13 +24,19 @@ check('R107: Settings names Chat and Projects and discloses the shared default',
   ok(en['set.chatFolderHint'].includes('delete the conversation'));
 });
 
-check('review3: Settings discloses sandbox dependencies, integration limits and forbidden folders', () => {
-  const hint = en['project.permissionsDontAsk'];
-  ok(hint.includes('Codex CLI'));
-  ok(hint.includes('integrations'));
-  for (const folder of ['home', 'drive', 'Windows', 'Program Files', 'AppData']) ok(hint.includes(folder), folder);
-  ok(hint.includes('Ask before commands'));
-  ok('error.workingFolder' in en);
+check('R121: Do not ask is one calm line in the thread, with the risk and the credential limits spelled out in Settings', () => {
+  const line = en['project.permissionsDontAsk'];
+  ok(line.length < 60 && !/risk|danger|warning|error|denied|blocked/i.test(line), line);
+  ok(en['project.permissionsDetails'].includes('Settings'));
+  const body = en['set.permissionsDontAskBody'];
+  for (const word of ['internet', 'any folder', 'steer', 'Ask before commands', '.ssh', 'Codex can read', 'directly', 'Claude Code can through commands', 'best effort', 'Stop asks the tools to stop']) ok(body.includes(word), word);
+  ok(!/is kept out|cannot be kept out|Codex cannot/.test(body), 'no claim that one tool is kept away from the sign-in folders');
+  ok(body.split('. ').length <= 5, 'one short paragraph');
+  ok(!/sandbox|too broad|disabled/i.test(body), 'full access no longer describes a sandbox or disabled integrations');
+  const ask = en['set.permissionsAskBody'];
+  ok(ask.includes('ask the tools to stop and end the programs they started') && ask.includes('before changing a file') && ask.includes('plain reading commands'), ask);
+  ok(ask.includes('except the ones you already allowed in the tool\x27s own settings'), 'Ask names what the tools\x27 own settings can pre-approve');
+  ok(en['error.workingFolder'].includes('system files') && en['error.workingFolder'].includes('sign-in keys'));
 });
 
 const look = (over: Partial<Look> = {}): Look => ({

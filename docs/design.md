@@ -259,11 +259,24 @@ inside its own area.
   Usage limits, and Esc or Back closes it.
 - General has the language, name, CLI hooks switch and Permissions choice. "Don't ask" is the default for new and
   existing settings; "Ask before commands" preserves the previous behavior. Choices save at once and stay at the saved
-  value if the save fails. R107 applies the same default and protections to Chat. Chat uses its chosen canonical folder
+  value if the save fails. R107 applies the same default to Chat. Chat uses its chosen canonical folder
   (fixed before the first message), or private per-conversation scratch; deletion/draft cleanup never removes a chosen
   folder. General explains the rule and offers the folder choice.
-- R97/R107: Chat and Projects use bypass permissions with native deny rules for `.git` edits, credential directories and key files;
-  Codex uses `never` approvals with a workspace-only permission profile and sandbox network access disabled.
+- R121 (it replaces the next item for the two choices on screen): "Don't ask" is full access. No approval cards, commands
+  run without Faber's sandbox and with network, WebFetch and WebSearch work, any folder can be the working folder, and the
+  person's own MCP servers, plugins and hooks stay on, as in the CLI itself. Claude Code runs in bypass mode with Read and
+  Edit deny rules for the credential folders (`.claude`, `.codex`, `.gemini`, `.ssh` and the other key files, and where a
+  documented variable moved them), which apply in bypass mode to its file tools but not to arbitrary commands. Codex runs with
+  `danger-full-access` and `never` approvals and has no way to block reads of the credential folders in that mode (see the
+  R121 section of [the R97 security review](security-r97-review.md)). Ask names its modes (Claude `default`, Codex
+  `untrusted`) and carries the same credential denies and the same refusal of forwarded credential requests; it asks except for
+  what the person pre-allowed in the tool's own settings. The system and credential folders are refused as working folders, judged
+  by their resolved path (R124, R124b), and Faber's own requests never run the person's hooks. A CLI and everything it started
+  end together (a Windows job object made before the CLI runs, failing closed; R124b, R124c). Settings shows the
+  details; the thread shows one calm line with a link to them. The isolated mode below is `Permissions::Isolated`: Faber's
+  own model list, router, internal checks and self-development roles use it, and the person cannot pick it.
+- R97/R107 (now the isolated mode only): bypass permissions with native deny rules for `.git` edits, credential directories
+  and key files; Codex uses `never` approvals with a workspace-only permission profile and sandbox network access disabled.
   Native deny rules [apply even in bypass mode](https://code.claude.com/docs/en/permission-modes#available-modes), but
   [command patterns are not an OS sandbox](https://code.claude.com/docs/en/permissions#what-a-bash-rule-doesnt-match).
   Explicit ask rules [still prompt in bypass mode](https://code.claude.com/docs/en/permission-modes#actions-no-mode-auto-approves)

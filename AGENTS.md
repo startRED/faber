@@ -33,6 +33,7 @@ with the user's own subscriptions. Read [docs/roadmap.md](docs/roadmap.md) befor
 - `engine/`: the engine in Rust (tokio). It drives the CLIs, keeps conversations as JSON files and knows nothing
   about windows.
 - `src-tauri/`: the Tauri 2 shell. One window, a tray icon, and the fixed list of commands the screen may call.
+- `winproc/`: the one unsafe call (resuming a process created suspended, so it joins its job before it runs). Everything else forbids unsafe code.
 - `ui/`: the screen in SolidJS + TypeScript, built by Vite into `dist/`.
 - `tests/`: the screen's checks (`tests/ui/*.check.ts`, run inside a hidden test build) and the recordings the fake CLI
   replays (`tests/fixtures/`). The engine's own tests replay the same fixtures (`engine/tests/`).

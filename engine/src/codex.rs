@@ -21,42 +21,55 @@ const CHAT_INSTRUCTIONS: &str = "You are a helpful, precise assistant in a chat 
 Use Markdown when it helps. Your working folder belongs to this conversation: run code and create files \
 there when it helps, and mention the files you create.";
 
-/// Ask preserves the existing setup. Unattended servers disable integrations and require MXC on Windows.
+/// Ask preserves the existing setup. Isolated servers disable integrations and require MXC on Windows. Full access ("Do not
+/// ask", R121) starts the CLI as the person would: their MCP servers, plugins and hooks stay on, and no sandbox is configured.
 pub fn codex_args(area: Area, windows: bool, user_hooks: bool, permissions: Permissions) -> Vec<String> {
     let mut args = vec!["app-server".to_string()];
     let mut push = |a: &[&str]| args.extend(a.iter().map(|s| s.to_string()));
-    if !user_hooks || permissions == Permissions::DontAsk {
+    let isolated = permissions == Permissions::Isolated;
+    if isolated || (permissions == Permissions::Ask && !user_hooks) {
         push(&["--disable", "hooks"]);
     }
-    if windows {
-        push(&["-c", if permissions == Permissions::DontAsk { "windows.sandbox=\"mxc\"" } else { "windows.sandbox=\"unelevated\"" }]);
+    if windows && permissions != Permissions::FullAccess {
+        push(&["-c", if isolated { "windows.sandbox=\"mxc\"" } else { "windows.sandbox=\"unelevated\"" }]);
     }
-    if area == Area::Chat || permissions == Permissions::DontAsk {
+    if isolated || (area == Area::Chat && permissions == Permissions::Ask) {
         for feature in ["apps", "plugins", "computer_use", "browser_use"] {
             push(&["--disable", feature]);
         }
         push(&["-c", "mcp_servers={}"]);
-        if area == Area::Chat {
-            push(&["-c", "project_doc_max_bytes=0"]);
-        }
     }
-    if permissions == Permissions::DontAsk {
+    if area == Area::Chat && permissions != Permissions::FullAccess {
+        push(&["-c", "project_doc_max_bytes=0"]);
+    }
+    if isolated {
         push(&["--disable", "skill_mcp_dependency_install"]);
     }
     args
 }
 
-/// Parameters for thread/start and thread/resume. The sandbox keeps writes inside the working folder;
-/// anything beyond it asks in Ask mode and fails in Don't ask mode.
+/// Parameters for thread/start and thread/resume. Ask keeps writes inside the working folder and asks before every command that
+/// is not a plain read and before every file change, inside that folder too.
+/// Full access runs without Codex's sandbox and never asks. Isolated runs Faber's own sandbox and fails what it does not allow.
+///
+/// Full access cannot keep Codex away from the credential folders: Codex's only filesystem deny rules live in a permission
+/// profile, and on Windows a profile that grants the whole disk and denies a few folders is refused when any drive letter is
+/// unreachable ("MXC cannot verify it does not alias a denied object") or needs the elevated sandbox. The same limit is
+/// written in docs/security-r97-review.md.
 pub fn codex_thread(area: Area, model: Option<&str>, permissions: Permissions) -> Map<String, Value> {
     let mut thread = Map::new();
     if let Some(model) = model {
         thread.insert("model".into(), model.into());
     }
-    thread.insert("sandbox".into(), "workspace-write".into());
-    let dont_ask = permissions == Permissions::DontAsk;
-    thread.insert("approvalPolicy".into(), if dont_ask { "never" } else { "on-request" }.into());
-    if dont_ask {
+    let (sandbox, approval) = match permissions {
+        // "untrusted": everything but a short list of plain reads asks first, file changes inside the working folder included.
+        Permissions::Ask => ("workspace-write", "untrusted"),
+        Permissions::FullAccess => ("danger-full-access", "never"),
+        Permissions::Isolated => ("workspace-write", "never"),
+    };
+    thread.insert("sandbox".into(), sandbox.into());
+    thread.insert("approvalPolicy".into(), approval.into());
+    if permissions == Permissions::Isolated {
         thread.remove("sandbox");
         thread.insert("config".into(), crate::permissions::sandbox_config(Path::new("."), true).into());
         thread["config"]["features.shell_tool"] = false.into();
@@ -394,11 +407,11 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
         // Developer instructions sit beside Codex's own, so a project keeps its default prompt.
         params.insert("developerInstructions".into(), name_instructions(name).into());
     }
-    if t.permissions == Permissions::DontAsk && t.instructions.is_none() {
+    if t.permissions == Permissions::Isolated && t.instructions.is_none() {
         params.insert("config".into(), crate::permissions::sandbox_config(&t.cwd, true).into());
         params["config"]["features.shell_tool"] = false.into();
     }
-    if (t.permissions == Permissions::DontAsk || t.instructions.is_some()) && t.cwd.is_absolute() {
+    if (t.permissions == Permissions::Isolated || t.instructions.is_some()) && t.cwd.is_absolute() {
         params.insert("runtimeWorkspaceRoots".into(), json!([t.cwd]));
     }
     params.insert("cwd".into(), t.cwd.to_string_lossy().into_owned().into());
@@ -472,6 +485,7 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
     let mut lines = BufReader::new(p.stdout).lines();
     let mut stdin = p.stdin;
     let mut child = p.child;
+    let mut job = p.contained;
     let mut threads: HashMap<u64, Thread> = HashMap::new();
     let mut by_id: HashMap<String, u64> = HashMap::new();
     // Opened before Codex finished starting, in order, so request ids stay predictable.
@@ -491,12 +505,12 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
     macro_rules! stop {
         () => {{
             stopping = true;
-            proc::stop(&mut *stdin, &mut child).await;
+            proc::stop(&mut *stdin, &mut child, &mut job).await;
         }};
     }
     macro_rules! open_thread {
         ($key:expr, $t:expr) => {{
-            if $t.params.permissions == Permissions::DontAsk || $t.params.instructions.is_some() {
+            if $t.params.permissions == Permissions::Isolated || $t.params.instructions.is_some() {
                 let _ = proc::write_line(&mut *stdin, &json!({"id":format!("faber-config-{}", $key), "method":"config/read",
                     "params":{"includeLayers":false,"cwd":$t.params.cwd}})).await;
             } else {
@@ -608,7 +622,7 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                         let thread = params["threadId"].as_str().and_then(|t| by_id.get(t)).and_then(|k| threads.get_mut(k));
                         if method == "item/tool/call" {
                             let mut accepted = false;
-                            if let Some(t) = thread && t.params.permissions == Permissions::DontAsk && t.params.instructions.is_none() && params["tool"] == "run_command" {
+                            if let Some(t) = thread && t.params.permissions == Permissions::Isolated && t.params.instructions.is_none() && params["tool"] == "run_command" {
                                 let input = &params["arguments"];
                                 if let Some(argv) = crate::permissions::command_argv(&t.params.cwd, "Bash", input, Some(&opts.cli), &crate::cli::find_cli) {
                                     let (spawn, cwd, tx, id) = (opts.spawn.clone(), t.params.cwd.clone(), command_tx.clone(), id.clone());
@@ -629,11 +643,26 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                             continue;
                         }
                         match (method.ends_with("requestApproval"), thread) {
-                            (true, Some(t)) if t.params.permissions == Permissions::Ask && t.params.instructions.is_none() => {
+                            // Full access never shows a card: Codex does not ask under the "never" policy, and if it still does, the
+                            // engine answers (yes, unless the request touches a credential folder) with the mode in force at that
+                            // moment, so a switch to Ask is never raced. Ask shows the card.
+                            (true, Some(t))
+                                if t.params.instructions.is_none()
+                                    && (t.params.permissions == Permissions::Ask
+                                        || (t.params.permissions == Permissions::FullAccess
+                                            && ["item/commandExecution/requestApproval", "item/fileChange/requestApproval"].contains(&method))) =>
+                            {
                                 let key = match id { Value::String(s) => s.clone(), other => other.to_string() };
                                 t.approvals.insert(key.clone(), id.clone());
                                 let tool = params["kind"].as_str().unwrap_or(method).to_string();
                                 let input = [&params["command"], &params["changes"]].into_iter().find(|v| !v.is_null()).unwrap_or(params).clone();
+                                // The request carries the folder the command runs in; `auth.json` alone says nothing without it. A
+                                // refusal is always safe, so it is written here instead of racing the engine's mode.
+                                if crate::permissions::touches_credentials(&input, params["cwd"].as_str(), &|name| std::env::var(name).ok()) {
+                                    t.approvals.remove(&key);
+                                    let _ = proc::write_line(&mut *stdin, &json!({ "id": id, "result": { "decision": "decline" } })).await;
+                                    continue;
+                                }
                                 (t.sink)(EngineEvent::Permission { request_id: key, tool, input });
                             }
                             // No live conversation or approvals disabled: fail closed without a card.
@@ -717,7 +746,7 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                                         // A half-written or unflushed line cannot be sent again: end the process, and the
                                         // end of its output tells the engine.
                                         if e.torn {
-                                            proc::stop(&mut *stdin, &mut child).await;
+                                            proc::stop(&mut *stdin, &mut child, &mut job).await;
                                         }
                                         Delivery::WriteFailed
                                     }
@@ -770,9 +799,10 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
 /// turn. The answers are dressed as the notifications the server sends later and go through the same parser; the rest of
 /// them (the account's email and other details) is dropped unread. A failed reply does not discard the other reply's evidence.
 pub async fn read_codex_limits(bin: &str, cwd: &Path, windows: bool, spawn: Spawner, timeout: Duration) -> Vec<EngineEvent> {
-    let Ok(p) = spawn(bin, &codex_args(Area::Chat, windows, false, Permissions::DontAsk), cwd) else { return vec![] };
+    let Ok(p) = spawn(bin, &codex_args(Area::Chat, windows, false, Permissions::Isolated), cwd) else { return vec![] };
     let mut stdin = p.stdin;
     let mut child = p.child;
+    let mut job = p.contained;
     let mut lines = BufReader::new(p.stdout).lines();
     let mut events = vec![];
     let ask = async {
@@ -818,7 +848,7 @@ pub async fn read_codex_limits(bin: &str, cwd: &Path, windows: bool, spawn: Spaw
         }
     };
     let _ = tokio::time::timeout(timeout, ask).await;
-    proc::stop(&mut *stdin, &mut child).await;
+    proc::stop(&mut *stdin, &mut child, &mut job).await;
     events
 }
 
@@ -835,9 +865,10 @@ pub struct ModelInfo {
 /// Asks a short-lived `codex app-server` which models this account can use, so the picker shows the real list.
 /// Gives an empty list on any failure: the picker then offers just the account's default.
 pub async fn list_codex_models(bin: &str, cwd: &Path, windows: bool, spawn: Spawner, timeout: Duration) -> Vec<ModelInfo> {
-    let Ok(p) = spawn(bin, &codex_args(Area::Chat, windows, false, Permissions::DontAsk), cwd) else { return vec![] };
+    let Ok(p) = spawn(bin, &codex_args(Area::Chat, windows, false, Permissions::Isolated), cwd) else { return vec![] };
     let mut stdin = p.stdin;
     let mut child = p.child;
+    let mut job = p.contained;
     let mut lines = BufReader::new(p.stdout).lines();
     let ask = async {
         let init = json!({ "id": 1, "method": "initialize", "params": { "clientInfo": { "name": "faber", "title": "Faber", "version": "0.0.0" } } });
@@ -865,6 +896,6 @@ pub async fn list_codex_models(bin: &str, cwd: &Path, windows: bool, spawn: Spaw
         vec![]
     };
     let models = tokio::time::timeout(timeout, ask).await.unwrap_or_default();
-    proc::stop(&mut *stdin, &mut child).await;
+    proc::stop(&mut *stdin, &mut child, &mut job).await;
     models
 }

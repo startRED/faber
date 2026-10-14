@@ -156,6 +156,9 @@ export function Settings(props: Props) {
               ]}
               onPick={(permissions) => void props.onSave({ permissions })}
             />
+            <p class="hint" role="status">
+              {t(props.saved.permissions === 'ask' ? 'set.permissionsAskBody' : 'set.permissionsDontAskBody')}
+            </p>
             <Row label={t('set.chatFolder')}>
               <p class="hint">{t('set.chatFolderHint')}</p>
               <Show when={props.onChatFolder}>
