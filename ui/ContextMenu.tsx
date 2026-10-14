@@ -1,11 +1,16 @@
 import { createEffect, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
-import { closeMenu, type MenuItem, menu, type OpenMenu } from './contextmenu.ts';
+import { closeMenu, type MenuItem, menu, type OpenMenu, unavailable } from './contextmenu.ts';
 import { t } from './i18n.ts';
 import { keepForExit } from './motion.ts';
+
+/** The time after arming an item in which a second activation still belongs to the same gesture (the system's double-click
+ * interval): the confirming activation must be a separate, deliberate one. */
+const SAME_GESTURE = 500;
 
 function Panel(props: { m: OpenMenu; leaving: boolean }) {
   const [armed, setArmed] = createSignal<string>();
   let menuEl: HTMLDivElement | undefined;
+  let armedAt = 0;
   const buttons = () => [...(menuEl?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])];
   onMount(() => {
     const el = menuEl!;
@@ -24,7 +29,12 @@ function Panel(props: { m: OpenMenu; leaving: boolean }) {
     all[to(all, all.indexOf(document.activeElement as HTMLButtonElement))]?.focus();
   };
   const choose = (item: MenuItem) => {
-    if (item.confirm && armed() !== item.id) return setArmed(item.id);
+    if (unavailable(item)) return;
+    if (item.confirm && armed() !== item.id) {
+      armedAt = performance.now();
+      return setArmed(item.id);
+    }
+    if (item.confirm && performance.now() - armedAt < SAME_GESTURE) return;
     closeMenu(true);
     item.run();
   };
@@ -56,7 +66,7 @@ function Panel(props: { m: OpenMenu; leaving: boolean }) {
             class="cm-item"
             classList={{ danger: item.danger, armed: armed() === item.id }}
             tabindex="-1"
-            disabled={item.disabled}
+            disabled={unavailable(item)}
             onFocusOut={() => armed() === item.id && setArmed(undefined)}
             onClick={() => choose(item)}
           >

@@ -671,4 +671,10 @@ export const es: Messages = {
   "menu.selectAll": "Seleccionar todo",
   // Native speaker must translate (needs native review).
   "menu.redo": "Rehacer",
+  // Native speaker must translate (needs native review).
+  "error.project.busy": "Todavía hay algo trabajando en este proyecto. Deténlo primero y luego quita el proyecto.",
+  // Native speaker must translate (needs native review).
+  "error.folder.notLocal": "Esa carpeta no está en este equipo, así que Faber no la abrirá.",
+  // Native speaker must translate (needs native review).
+  "error.folder.missing": "Esa carpeta ya no existe.",
 };

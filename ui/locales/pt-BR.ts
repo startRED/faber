@@ -662,4 +662,10 @@ export const ptBR: Messages = {
   "menu.selectAll": "Selecionar tudo",
   // Native speaker must translate (needs native review).
   "menu.redo": "Refazer",
+  // Native speaker must translate (needs native review).
+  "error.project.busy": "Ainda tem algo trabalhando neste projeto. Pare primeiro e depois remova o projeto.",
+  // Native speaker must translate (needs native review).
+  "error.folder.notLocal": "Essa pasta não está neste computador, então o Faber não vai abri-la.",
+  // Native speaker must translate (needs native review).
+  "error.folder.missing": "Essa pasta não existe mais.",
 };

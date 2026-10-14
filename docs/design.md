@@ -481,7 +481,7 @@ screen, which owns the locale files.
   conversation in this project, Open folder, Remove from Faber), a message (Copy; Edit on yours; Redo on an answer),
   selected text (Copy) and a text field (Cut, Copy, Paste, Select all, with the ones that cannot apply disabled); anywhere
   else nothing opens. Each menu has at most four items, only actions that already exist on screen, and a destructive one
-  goes last in the danger colour and asks twice by changing its own text. The menu opens at the pointer, or by the Menu key
+  goes last in the danger colour and asks twice by changing its own text; the second activation must be a separate gesture (one that follows within half a second is ignored). The engine refuses to remove a project while a conversation or a mission works in it, and "Open folder" only reveals a folder that exists on this computer (never a program, address or network share). The menu opens at the pointer, or by the Menu key
   and Shift+F10 on a focused row; arrows move, Enter chooses, Esc and a click outside close it, and it stays inside the
   window. It uses the normal entrance and exit and is instant in reduced and no motion.
 - Every overlay (the first-run steps, the tutorial cards, the narrow-window sidebar, the overlay running column) says

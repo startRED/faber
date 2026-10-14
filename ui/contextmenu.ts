@@ -8,7 +8,8 @@ export interface MenuItem {
   id: string;
   label: string;
   run: () => void;
-  disabled?: boolean;
+  /** Read again at the moment of choosing, so an item that became unavailable while the menu was open does nothing. */
+  disabled?: boolean | (() => boolean);
   /** A destructive action: it goes last, in the danger colour. */
   danger?: boolean;
   /** The first activation only arms the item and shows this text instead; the second one runs it. */
@@ -49,6 +50,9 @@ export function openMenu(e: MouseEvent, items: MenuItem[], focus: HTMLElement | 
   }
   setMenu({ x, y, items, focus, keyboard });
 }
+
+/** Whether an item cannot be chosen right now. */
+export const unavailable = (item: MenuItem): boolean => (typeof item.disabled === 'function' ? item.disabled() : (item.disabled ?? false));
 
 export const copyItem = (text: string): MenuItem => ({ id: 'copy', label: t('menu.copy'), disabled: !text, run: () => void navigator.clipboard.writeText(text) });
 

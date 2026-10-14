@@ -671,4 +671,10 @@ export const de: Messages = {
   "menu.selectAll": "Alles auswählen",
   // Native speaker must translate (needs native review).
   "menu.redo": "Wiederholen",
+  // Native speaker must translate (needs native review).
+  "error.project.busy": "In diesem Projekt arbeitet noch etwas. Beende es zuerst und entferne dann das Projekt.",
+  // Native speaker must translate (needs native review).
+  "error.folder.notLocal": "Dieser Ordner liegt nicht auf diesem Computer, deshalb öffnet Faber ihn nicht.",
+  // Native speaker must translate (needs native review).
+  "error.folder.missing": "Dieser Ordner ist nicht mehr da.",
 };

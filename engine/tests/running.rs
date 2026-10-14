@@ -344,8 +344,10 @@ async fn a_start_that_fails_after_the_pick_ends_the_reply_with_an_error_and_drop
     let project = engine.add_project(&dir.path().to_string_lossy());
     let id = engine.send(request(Area::Project, Some(&project.id), SKY, "auto")).unwrap();
     assert_eq!(engine.state().running.items.len(), 1);
-    // The folder leaves the app while Auto chooses, so the answer has nowhere to run.
-    engine.remove_project(&project.id);
+    // Faber itself will not remove a project that is answering; the folder leaves the list by another way (the file is
+    // edited) while Auto chooses, so the answer has nowhere to run.
+    assert_eq!(engine.remove_project(&project.id), Err("error.project.busy".to_string()));
+    std::fs::write(dir.path().join("projects.json"), "[]").unwrap();
     lists_until(&mut rx, WAIT, |items| items.is_empty()).await;
     let reply = engine.open(&id).unwrap().messages[1].clone();
     assert_eq!((reply.status, reply.error.as_deref()), (Some(Status::Error), Some("error.projectGone")));
@@ -540,4 +542,49 @@ async fn a_driver_panic_removes_only_its_run_from_overlapping_chat_and_project_w
         engine.shutdown();
         assert!(engine.state().running.items.is_empty());
     }
+}
+
+/// A project with one mission record in the given state, under the folder and the data directory the engine uses.
+fn mission_in(engine: &Engine, data: &Path, repo: &Path, state: faber_engine::project::MissionState) -> String {
+    use faber_engine::project::{Mission, run::Runner, store::Journal};
+    let project = engine.add_project(&repo.to_string_lossy());
+    let journal = Journal::open(repo, data, "m1").unwrap();
+    let mut runner = Runner::create(&journal, Mission::new("m1", &project.id, "repo", "Fix", &"1".repeat(40), 3, 1)).unwrap();
+    runner.mission.state = state;
+    runner.save(&journal).unwrap();
+    project.id
+}
+
+#[tokio::test]
+async fn a_project_with_a_planning_or_running_mission_cannot_be_removed_until_it_stops() {
+    use faber_engine::project::MissionState::{Done, Paused, Planning, Running};
+    for (state, removable) in [(Planning, false), (Running, false), (Paused, true), (Done, true)] {
+        let (data, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (engine, _rx) = engine(data.path(), &[Vendor::Codex], fake(fixture("codex", "chat")).spawn, None);
+        let id = mission_in(&engine, data.path(), repo.path(), state);
+        let result = engine.remove_project(&id);
+        if removable {
+            assert_eq!(result, Ok(()), "{state:?}");
+            assert!(engine.state().projects.is_empty(), "{state:?}");
+        } else {
+            assert_eq!(result, Err("error.project.busy".to_string()), "{state:?}");
+            assert_eq!(engine.state().projects.len(), 1, "{state:?} stays in the list");
+        }
+        engine.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn a_renamed_conversation_never_keeps_control_or_invisible_characters() {
+    let dir = tempfile::tempdir().unwrap();
+    let ask = router(Some(Duration::from_millis(200)));
+    let (engine, _rx) = engine(dir.path(), &[Vendor::Codex], fake(fixture("codex", "chat")).spawn, Some(ask));
+    let id = engine.send(request(Area::Chat, None, SKY, "auto")).unwrap();
+    let before = engine.open(&id).unwrap().title;
+    engine.rename(&id, "  A\u{7}B\u{202e}C\u{200b}D\u{2028}E\n ");
+    assert_eq!(engine.open(&id).unwrap().title, "ABCDE");
+    engine.rename(&id, "\u{7}\u{200b} \u{202e}");
+    assert_eq!(engine.open(&id).unwrap().title, "ABCDE", "a name with nothing visible changes nothing");
+    assert_ne!(before, "ABCDE");
+    engine.shutdown();
 }

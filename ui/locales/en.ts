@@ -550,6 +550,9 @@ export const en = {
   "menu.paste": "Paste",
   "menu.selectAll": "Select all",
   "menu.redo": "Redo",
+  "error.project.busy": "Something is still working in this project. Stop it first, then remove the project.",
+  "error.folder.notLocal": "That folder is not on this computer, so Faber will not open it.",
+  "error.folder.missing": "That folder is not there any more.",
 } as const;
 
 export type Key = keyof typeof en;

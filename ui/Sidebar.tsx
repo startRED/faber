@@ -13,10 +13,14 @@ import { groupChats, matches, type Quotas, showsChats, tailOf, tightest } from '
 /** The name of a conversation while it is being renamed: Enter keeps it, Esc and leaving the box too when nothing changed. */
 function RenameBox(props: { title: string; onDone: (title?: string) => void }) {
   let done = false;
-  const finish = (title?: string) => {
+  let box: HTMLInputElement | undefined;
+  // Enter and Esc give focus back to the row; leaving the box by a click leaves focus where the click put it.
+  const finish = (title?: string, refocus = false) => {
     if (done) return;
     done = true;
+    const row = box?.closest('.crow');
     props.onDone(title);
+    if (refocus) queueMicrotask(() => row?.querySelector<HTMLElement>('.item')?.focus());
   };
   return (
     <input
@@ -24,10 +28,10 @@ function RenameBox(props: { title: string; onDone: (title?: string) => void }) {
       value={props.title}
       maxLength={120}
       aria-label={t('menu.renameLabel')}
-      ref={(el) => queueMicrotask(() => (el.focus(), el.select()))}
+      ref={(el) => ((box = el), queueMicrotask(() => (el.focus(), el.select())))}
       onKeyDown={(e) => {
-        if (e.key === 'Enter' && !e.isComposing) finish(e.currentTarget.value);
-        else if (e.key === 'Escape') finish();
+        if (e.key === 'Enter' && !e.isComposing) finish(e.currentTarget.value, true);
+        else if (e.key === 'Escape') finish(undefined, true);
         else return;
         e.preventDefault();
         e.stopPropagation();
@@ -72,6 +76,8 @@ interface Props {
   onRemove: (id: string) => void;
   /** Opens Settings; the quota of a vendor opens it at the usage limits. */
   onSettings: (section?: 'usage') => void;
+  /** Something a menu asked for was refused (a folder that is gone, a project still working). */
+  onError?: (err: unknown) => void;
 }
 
 /** The sidebar: new conversation, the two areas, the projects with their conversations, the chats by day, and at the
@@ -132,7 +138,7 @@ export function Sidebar(props: Props) {
             title={row.c.title}
             onDone={(title) => {
               setRenaming(undefined);
-              if (title?.trim() && title.trim() !== row.c.title) void api.rename(row.c.id, title);
+              if (title?.trim() && title.trim() !== row.c.title) void api.rename(row.c.id, title).catch((err) => props.onError?.(err));
             }}
           />
         }
@@ -199,8 +205,8 @@ export function Sidebar(props: Props) {
                       onContextMenu={(e) =>
                         openMenu(e, [
                           { id: 'new', label: t('menu.newHere'), run: () => (toggle(p.id, true), props.onNewIn(p.id)) },
-                          { id: 'open', label: t('menu.openFolder'), run: () => void api.showProject(p.id) },
-                          { id: 'remove', label: t('menu.removeProject'), danger: true, confirm: t('menu.removeConfirm'), disabled: tail().running, run: () => void api.removeProject(p.id) },
+                          { id: 'open', label: t('menu.openFolder'), run: () => void api.showProject(p.id).catch((err) => props.onError?.(err)) },
+                          { id: 'remove', label: t('menu.removeProject'), danger: true, confirm: t('menu.removeConfirm'), disabled: () => tail().running, run: () => void api.removeProject(p.id).catch((err) => props.onError?.(err)) },
                         ])
                       }
                     >

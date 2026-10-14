@@ -1,7 +1,7 @@
-import { createComponent } from 'solid-js';
+import { type Accessor, createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
-import { api, type Message, type Project, type Summary } from '../../ui/api.ts';
+import { api, type Message, type Project, type RunningItem, type Summary } from '../../ui/api.ts';
 import { ContextMenuHost } from '../../ui/ContextMenu.tsx';
 import { installContextMenu } from '../../ui/contextmenu.ts';
 import { Sidebar } from '../../ui/Sidebar.tsx';
@@ -10,6 +10,8 @@ import { Thread } from '../../ui/Thread.tsx';
 import { check, deepEqual, equal, ok } from './check.ts';
 
 const settle = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
+/** Longer than the time in which a second click still belongs to the gesture that armed an item. */
+const deliberate = () => settle(560);
 
 /** A right-click on `el`; false means the page stopped the browser's own menu. */
 function rightClick(el: Element, x = 40, y = 40): boolean {
@@ -44,11 +46,15 @@ const restoreClipboard = () => delete (navigator as { clipboard?: unknown }).cli
 const chats: Summary[] = [{ id: 'c1', title: 'Plan the trip', area: 'chat', updatedAt: Date.now() }];
 const projects: Project[] = [{ id: 'p1', name: 'Garden', path: 'X:/garden' }];
 
-function sidebar(root: HTMLElement, calls: string[]) {
+const working = (projectId: string): RunningItem => ({
+  conversationId: 'w1', turnId: 't1', title: 'Busy', area: 'project', projectId, state: 'working', since: 0, permissions: [],
+});
+
+function sidebar(root: HTMLElement, calls: string[], running: Accessor<RunningItem[]> = () => [], onError: (err: unknown) => void = () => {}) {
   return render(
     () => [
       createComponent(Sidebar, {
-        conversations: chats, projects, vendors: [], version: '0', place: { area: 'chat' }, running: [], quotas: {}, now: Date.now(),
+        conversations: chats, projects, vendors: [], version: '0', place: { area: 'chat' }, get running() { return running(); }, quotas: {}, now: Date.now(), onError,
         onNew: () => {}, onArea: () => {}, onProject: () => {}, onNewIn: (id: string) => calls.push(`new ${id}`), onAddProject: () => {}, onOpen: () => {},
         onRemove: (id: string) => calls.push(`remove ${id}`), onSettings: () => {},
       }),
@@ -101,6 +107,7 @@ check('right-click: a chat offers Rename and Delete, Delete asks twice, Rename e
     equal(menus().length, 1, 'the first click only asks');
     equal(entry(t('side.confirmDelete')).textContent, t('side.confirmDelete'));
     deepEqual(calls, []);
+    await deliberate();
     entry(t('side.confirmDelete')).click();
     await settle();
     deepEqual(calls, ['remove c1']);
@@ -162,6 +169,7 @@ check('right-click: a project offers a new conversation, its folder and removal,
     await settle();
     equal(entry(t('menu.removeConfirm')).textContent, t('menu.removeConfirm'));
     deepEqual(calls, ['new p1', 'folder p1']);
+    await deliberate();
     entry(t('menu.removeConfirm')).click();
     await settle();
     deepEqual(calls, ['new p1', 'folder p1', 'removeProject p1']);
@@ -350,6 +358,137 @@ check('right-click: your message offers Copy and Edit, an answer offers Copy and
     deepEqual(labels(), [t('menu.copy')]);
   } finally {
     restoreClipboard();
+    dispose();
+    root.remove();
+  }
+});
+
+check('right-click: a double click on Delete or Remove arms the item but never confirms it', async () => {
+  const root = stage();
+  const calls: string[] = [];
+  const original = api.removeProject;
+  api.removeProject = async (id) => void calls.push(`removeProject ${id}`);
+  const dispose = sidebar(root, calls);
+  try {
+    const open = async (el: Element, first: string) => {
+      rightClick(el);
+      await settle();
+      const button = entry(first);
+      button.click();
+      button.click();
+      await settle();
+    };
+    await open([...root.querySelectorAll('.crow')][0]!, t('menu.delete'));
+    deepEqual(calls, [], 'two quick clicks do not delete');
+    equal(menus().length, 1);
+    equal(entry(t('side.confirmDelete')).textContent, t('side.confirmDelete'), 'it waits armed for a deliberate click');
+    await deliberate();
+    entry(t('side.confirmDelete')).click();
+    await settle();
+    deepEqual(calls, ['remove c1'], 'a later click does');
+
+    await open(root.querySelector('.prow')!, t('menu.removeProject'));
+    deepEqual(calls, ['remove c1'], 'two quick clicks do not remove the project');
+    equal(menus().length, 1);
+  } finally {
+    api.removeProject = original;
+    dispose();
+    root.remove();
+  }
+});
+
+check('right-click: a project with work running cannot be removed, also when the work starts while the menu is open', async () => {
+  const root = stage();
+  const calls: string[] = [];
+  const original = api.removeProject;
+  api.removeProject = async (id) => void calls.push(`removeProject ${id}`);
+  const [running, setRunning] = createSignal<RunningItem[]>([working('p1')]);
+  const dispose = sidebar(root, calls, running);
+  try {
+    const row = root.querySelector('.prow')!;
+    rightClick(row);
+    await settle();
+    ok(entry(t('menu.removeProject')).disabled, 'Remove is off while the project runs something');
+    entry(t('menu.removeProject')).click();
+    await deliberate();
+    entry(t('menu.removeProject')).click();
+    await settle();
+    deepEqual(calls, []);
+    clickOutside();
+    await settle(260);
+
+    // Idle when the menu opens, busy by the time it is confirmed.
+    setRunning([]);
+    rightClick(row);
+    await settle();
+    ok(!entry(t('menu.removeProject')).disabled);
+    entry(t('menu.removeProject')).click();
+    await settle();
+    setRunning([working('p1')]);
+    await deliberate();
+    ok(entry(t('menu.removeConfirm')).disabled, 'the item went off while the menu was open');
+    entry(t('menu.removeConfirm')).click();
+    await settle();
+    deepEqual(calls, [], 'a confirmation that arrives after the work started does nothing');
+  } finally {
+    api.removeProject = original;
+    dispose();
+    root.remove();
+  }
+});
+
+check('right-click: what the engine refuses (a project still working, a folder that is gone) reaches the screen', async () => {
+  const root = stage();
+  const refused: unknown[] = [];
+  const original = { remove: api.removeProject, show: api.showProject };
+  api.removeProject = async () => Promise.reject('error.project.busy');
+  api.showProject = async () => Promise.reject('error.folder.missing');
+  const dispose = sidebar(root, [], () => [], (err) => refused.push(err));
+  try {
+    const row = root.querySelector('.prow')!;
+    rightClick(row);
+    await settle();
+    entry(t('menu.openFolder')).click();
+    await settle();
+    rightClick(row);
+    await settle();
+    entry(t('menu.removeProject')).click();
+    await deliberate();
+    entry(t('menu.removeConfirm')).click();
+    await settle();
+    deepEqual(refused, ['error.folder.missing', 'error.project.busy']);
+  } finally {
+    api.removeProject = original.remove;
+    api.showProject = original.show;
+    dispose();
+    root.remove();
+  }
+});
+
+check('right-click: after Rename from the keyboard, Enter and Esc both give focus back to the row', async () => {
+  const root = stage();
+  const original = api.rename;
+  api.rename = async () => {};
+  const dispose = sidebar(root, []);
+  try {
+    const item = root.querySelector<HTMLButtonElement>('.crow .item')!;
+    for (const finish of ['Escape', 'Enter']) {
+      const row = root.querySelector<HTMLButtonElement>('.crow .item')!;
+      row.focus();
+      key(row, { key: 'F10', shiftKey: true });
+      await settle();
+      entry(t('menu.rename')).click();
+      await settle();
+      const box = root.querySelector<HTMLInputElement>('input.rename')!;
+      equal(document.activeElement, box);
+      key(box, { key: finish });
+      await settle();
+      equal(root.querySelector('input.rename'), null);
+      equal(document.activeElement?.className, item.className, `${finish} leaves focus on the row`);
+      ok(document.activeElement?.closest('.crow'), `${finish} leaves focus in the row`);
+    }
+  } finally {
+    api.rename = original;
     dispose();
     root.remove();
   }

@@ -510,12 +510,19 @@ impl Engine {
             }
         })
     }
-    pub fn remove_project(&self, id: &str) {
+    /// Takes a project out of the list. Anything still working in it (a conversation answering, a mission planning or
+    /// running) stops the removal with `error.project.busy`: the person stops it first. Nothing on disk is deleted.
+    pub fn remove_project(&self, id: &str) -> Result<(), String> {
         self.with(|c| {
-            let projects: Vec<Project> = c.store.projects().into_iter().filter(|p| p.id != id).collect();
-            if c.store.save_projects(&projects).is_ok() {
-                c.list_changed();
+            let Some(project) = c.store.projects().into_iter().find(|p| p.id == id) else { return Err("error.project.notFound".into()) };
+            let answering = c.convs.values().any(|conv| conv.project_id.as_deref() == Some(id) && running_item(conv).is_some());
+            if answering || crate::project::has_active_mission(Path::new(&project.path), &c.opts.data_dir, id) {
+                return Err("error.project.busy".into());
             }
+            let projects: Vec<Project> = c.store.projects().into_iter().filter(|p| p.id != id).collect();
+            c.store.save_projects(&projects).map_err(|_| "error.store.write".to_string())?;
+            c.list_changed();
+            Ok(())
         })
     }
     /// Swaps the CLIs in use, for example after one was installed or signed in to. Idle processes of a changed CLI
@@ -1911,7 +1918,7 @@ impl Core {
 
     fn rename(&mut self, id: &str, title: &str) {
         let Some(c) = self.load(id) else { return };
-        let title: String = title.trim().chars().take(120).collect();
+        let title: String = title.chars().filter(|ch| !unseen(*ch)).collect::<String>().trim().chars().take(120).collect();
         if !title.is_empty() {
             c.title = title;
         }
@@ -1978,6 +1985,16 @@ fn same_as_before(c: &Conversation, live: Option<&Live>) -> Option<Pick> {
         live.filter(|l| l.vendor == vendor).map_or_else(|| last.effort.clone().unwrap_or_else(|| "medium".into()), |l| l.effort.clone());
     let reason = last.reason.clone().filter(|r| r != "reason.routing").unwrap_or_else(|| "reason.autoDefault".into());
     Some(Pick { vendor, model: last.model.clone(), effort, reason, pace: None })
+}
+
+/// A control character or an invisible formatting one (zero-width, direction overrides, line separators): nothing a person
+/// can see, so a title never keeps one.
+fn unseen(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{ad}' | '\u{61c}' | '\u{180e}' | '\u{200b}'..='\u{200f}' | '\u{2028}'..='\u{202e}' | '\u{2060}'..='\u{206f}' | '\u{feff}' | '\u{fff9}'..='\u{fffb}'
+        )
 }
 
 /// The row of the running list for a conversation, if its latest reply is streaming or has unanswered permissions.
