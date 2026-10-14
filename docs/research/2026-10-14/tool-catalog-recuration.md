@@ -44,13 +44,14 @@ now follows this document.
 - **railwayapp/railway-skills:** the area agent said "on demand". Its skill tells the agent to create accounts, which
   Faber never does, so it is **not recommended**; Render and Heroku MCP cover the same deploy need.
 
-## Questions for Erick (legal)
+## Question for Erick (legal), answered
 
 - **Anthropic docx, pdf, pptx, xlsx skills.** Their licence forbids keeping copies outside Anthropic's services and
   making derivative works. Faber's store would keep copies outside the CLI. Section 3.3 now lists them as not
   recommended, with OfficeCLI (Apache-2.0), MarkItDown, Pandoc and Typst covering documents. Whether a person may install
   them inside Claude Code's own plugin system (where the licence's "Services" might apply) is a legal reading, so it
-  stays his call; default if unanswered: not recommended.
+  stays his call. **Answer (Erick, 2026-10-14):** allowed only inside Claude Code's plugin system, never copied
+  into Faber's store and never on Codex.
 
 ## Summary of verdicts
 
