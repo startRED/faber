@@ -45,6 +45,7 @@ fn the_live_probe_writer_does_not_inherit_network_temp_roots_shell_or_subagents(
     assert_eq!(params["config"]["sandbox_workspace_write"]["network_access"], false);
     assert_eq!(params["config"]["sandbox_workspace_write"]["exclude_tmpdir_env_var"], true);
     assert_eq!(params["config"]["sandbox_workspace_write"]["exclude_slash_tmp"], true);
+    assert_eq!(params["config"]["service_tier"], "default");
     for feature in ["shell_tool", "multi_agent", "multi_agent_v2"] {
         assert!(project_codex_args(true).windows(2).any(|a| a == ["--disable", feature]));
     }
@@ -94,6 +95,31 @@ async fn review_1_codex_native_approvals_are_declined_and_malformed_requests_fai
 }
 
 const ROLES: [Role; 5] = [Role::Lead, Role::Research, Role::TestProposal, Role::Writer, Role::Reviewer];
+
+#[tokio::test]
+async fn unknown_permission_requests_stop_instead_of_hanging_or_guessing_a_decline() {
+    let (spawn, _, _) = support::controlled();
+    let mut process = spawn("fake", &[], ".".as_ref()).unwrap();
+    for line in include_str!("../../tests/fixtures/projects/unknown-permissions.jsonl").lines() {
+        let entry: Value = serde_json::from_str(line).unwrap();
+        let vendor = if entry["vendor"] == "codex" { Vendor::Codex } else { Vendor::Claude };
+        assert!(faber_engine::project::policy::reject_native(&mut *process.stdin, vendor, &entry["msg"]).await.is_err(), "{entry}");
+    }
+}
+
+#[tokio::test]
+async fn known_permission_and_elicitation_denials_use_their_protocol_forms() {
+    for (method, result) in [
+        ("item/permissions/requestApproval", json!({"permissions":{},"scope":"turn"})),
+        ("mcpServer/elicitation/request", json!({"action":"decline","content":null})),
+    ] {
+        let (spawn, mut cli, _) = support::controlled();
+        let mut process = spawn("fake", &[], ".".as_ref()).unwrap();
+        let request = json!({"id":"deny","method":method,"params":{"threadId":"t"}});
+        assert!(faber_engine::project::policy::reject_native(&mut *process.stdin, Vendor::Codex, &request).await.unwrap());
+        assert_eq!(support::read_message(&mut cli).await, json!({"id":"deny","result":result}));
+    }
+}
 
 #[tokio::test]
 async fn ungranted_native_completions_fail_closed_for_both_vendors() {
@@ -151,7 +177,9 @@ fn t13_every_role_gets_explicit_empty_strict_mcp_and_no_user_startup_integration
             assert!(args.iter().any(|arg| arg == "--strict-mcp-config"));
             assert!(args.iter().any(|arg| arg == "--safe-mode"));
             assert!(args.windows(2).any(|pair| pair == ["--tools", ""]));
-            assert!(args.windows(2).any(|pair| pair == ["--settings", "{\"disableAllHooks\":true}"]));
+            let settings: Value = serde_json::from_str(&args[args.iter().position(|a| a == "--settings").unwrap() + 1]).unwrap();
+            assert_eq!(settings["disableAllHooks"], true);
+            assert_eq!(settings["env"]["CLAUDE_CODE_MAX_OUTPUT_TOKENS"], "128000");
         }
     }
 }

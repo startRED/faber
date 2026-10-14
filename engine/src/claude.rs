@@ -106,6 +106,9 @@ pub fn project_claude_args(launch: &ClaudeLaunch, role: crate::project::Role) ->
     restricted.instructions = Some(worker_contract(role));
     restricted.user_name = None;
     let mut args = claude_args(&restricted);
+    // The documented control covers most requests; the bound still covers the model's full output maximum.
+    let settings = args.iter().position(|a| a == "--settings").expect("shared role exposure includes settings") + 1;
+    args[settings] = json!({"disableAllHooks":true,"env":{"CLAUDE_CODE_MAX_OUTPUT_TOKENS":"128000"}}).to_string();
     // Unlike side questions, mission sessions may resume with the same fixed policy.
     args.retain(|a| a != "--no-session-persistence");
     for a in [
@@ -424,6 +427,15 @@ mod role_tests {
 
     #[tokio::test(start_paused = true)]
     async fn automated_loop_denies_every_fixture_tool_and_keeps_a_bounded_silence_watch() {
+        role_loop_rejects(false).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn role_loop_stops_an_unknown_permission_request_immediately() {
+        role_loop_rejects(true).await;
+    }
+
+    async fn role_loop_rejects(unknown: bool) {
         let (stdin, input) = tokio::io::duplex(65536);
         let (mut output, stdout) = tokio::io::duplex(65536);
         let fake = Arc::new(std::sync::Mutex::new(Some(proc::Proc {
@@ -465,6 +477,18 @@ mod role_tests {
             denied += 1;
         }
         assert_eq!(denied, 9);
+        if unknown {
+            let entry: Value =
+                serde_json::from_str(include_str!("../../tests/fixtures/projects/unknown-permissions.jsonl").lines().last().unwrap())
+                    .unwrap();
+            output.write_all(format!("{}\n", entry["msg"]).as_bytes()).await.unwrap();
+            let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv()).await;
+            assert!(
+                matches!(event, Ok(Some(EngineEvent::Error {fatal:true,ref message})) if message == crate::project::policy::Blocker::Restrictions.key()),
+                "{event:?}"
+            );
+            return;
+        }
         tokio::time::advance(std::time::Duration::from_secs(120)).await;
         let interrupt: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
         assert_eq!(interrupt["request"]["subtype"], "interrupt");

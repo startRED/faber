@@ -415,7 +415,7 @@ pub fn project_thread_params(
     params["approvalPolicy"] = "on-request".into();
     params["sandbox"] = "read-only".into();
     params["baseInstructions"] = worker_contract(role).into();
-    params["config"] = json!({"model_reasoning_effort": t.effort, "approvals_reviewer":"user", "web_search":"disabled", "sandbox_workspace_write": {
+    params["config"] = json!({"model_reasoning_effort": t.effort, "service_tier":"default", "approvals_reviewer":"user", "web_search":"disabled", "sandbox_workspace_write": {
         "network_access":false, "exclude_tmpdir_env_var":true, "exclude_slash_tmp":true
     }});
     params.as_object_mut().expect("thread parameters").remove("developerInstructions");
@@ -585,7 +585,11 @@ async fn serve(
                 }
                 // Parse the identity before any config values; malformed role output never reaches raw diagnostics.
                 #[derive(serde::Deserialize)]
-                struct Header { id: Option<Value> }
+                struct Header {
+                    id: Option<Value>,
+                    #[serde(flatten)]
+                    other: HashMap<String, serde::de::IgnoredAny>,
+                }
                 if let Some(role) = role {
                     let header = serde_json::from_str::<Header>(&line);
                     if line.len() > 4 * 1024 * 1024 || header.is_err() {
@@ -593,7 +597,7 @@ async fn serve(
                         stop!();
                         continue;
                     }
-                    if let Some(suffix) = header.ok().and_then(|h| h.id).and_then(|id| id.as_str()
+                    if let Some(suffix) = header.ok().filter(|h| !h.other.contains_key("method")).and_then(|h| h.id).and_then(|id| id.as_str()
                         .and_then(|id| id.strip_prefix("faber-config-")).map(String::from)) {
                         let Ok(key) = suffix.parse::<u64>() else { continue; };
                         if !exposure_pending.remove(&key) { continue; }
@@ -1056,6 +1060,20 @@ mod role_tests {
 
     #[tokio::test(start_paused = true)]
     async fn role_loop_declines_every_native_request_and_disarms_a_failed_start() {
+        role_loop_rejects(false, false).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn role_loop_stops_an_unknown_permission_request_immediately() {
+        role_loop_rejects(true, false).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn role_loop_does_not_confuse_an_unknown_request_with_a_configuration_response() {
+        role_loop_rejects(true, true).await;
+    }
+
+    async fn role_loop_rejects(unknown: bool, config_id: bool) {
         let (stdin, input) = tokio::io::duplex(65536);
         let (mut output, stdout) = tokio::io::duplex(65536);
         let fake = Arc::new(std::sync::Mutex::new(Some(proc::Proc {
@@ -1115,7 +1133,15 @@ mod role_tests {
         session.send(UserTurn::text("next"));
         let next: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
         assert_eq!(next["method"], "turn/start");
-        let escaped: Value = serde_json::from_str(include_str!("../../tests/fixtures/projects/native-file-change.jsonl").trim()).unwrap();
+        let line = if unknown {
+            include_str!("../../tests/fixtures/projects/unknown-permissions.jsonl").lines().next().unwrap()
+        } else {
+            include_str!("../../tests/fixtures/projects/native-file-change.jsonl").trim()
+        };
+        let mut escaped: Value = serde_json::from_str(line).unwrap();
+        if config_id {
+            escaped["msg"]["id"] = "faber-config-future".into();
+        }
         output.write_all(format!("{}\n", escaped["msg"]).as_bytes()).await.unwrap();
         let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv()).await;
         assert!(

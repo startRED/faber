@@ -91,12 +91,30 @@ pub async fn reject_native(
             json!({"type":"control_response", "response":{"subtype":"success", "request_id":id,
                 "response":{"behavior":"deny", "message":"Native tools are disabled for project roles."}}})
         }
-        Vendor::Codex if msg["method"].as_str().is_some_and(|m| m.ends_with("requestApproval")) => {
+        Vendor::Codex
+            if matches!(msg["method"].as_str(), Some("item/commandExecution/requestApproval" | "item/fileChange/requestApproval")) =>
+        {
             let id = msg
                 .get("id")
                 .filter(|id| id.is_string() || id.is_number())
                 .ok_or_else(|| std::io::Error::other("missing request identity"))?;
             json!({"id":id,"result":{"decision":"decline"}})
+        }
+        Vendor::Codex if matches!(msg["method"].as_str(), Some("item/permissions/requestApproval" | "mcpServer/elicitation/request")) => {
+            let id = msg
+                .get("id")
+                .filter(|id| id.is_string() || id.is_number())
+                .ok_or_else(|| std::io::Error::other("missing request identity"))?;
+            let result = if msg["method"] == "item/permissions/requestApproval" {
+                json!({"permissions":{},"scope":"turn"})
+            } else {
+                json!({"action":"decline","content":null})
+            };
+            json!({"id":id,"result":result})
+        }
+        Vendor::Claude if msg["type"] == "control_request" => return Err(std::io::Error::other("ungranted server request")),
+        Vendor::Codex if msg.get("method").is_some() && msg.get("id").is_some() => {
+            return Err(std::io::Error::other("ungranted server request"));
         }
         _ => return Ok(false),
     };
