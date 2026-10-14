@@ -1,5 +1,9 @@
 # Task 13 acceptance: stopped, not accepted
 
+Continuation on 2026-10-14 under R112: executable hashing succeeds, but the installed
+role's MCP loadout fails the empty-set check. See the
+[new measured acceptance report](2026-10-20-self-development-acceptance.md).
+
 Initial measurements: 2026-10-13, America/Fortaleza (UTC−03:00). Baseline `dc46d45`;
 branch `selfdev-t13`. Repeated validation may cross into 2026-10-14; this file names the initial
 measurement date. **Task 13, G8 and R96 remain incomplete.** October 22 is an internal milestone,

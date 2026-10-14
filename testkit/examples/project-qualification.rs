@@ -1,7 +1,10 @@
-//! Manual, no-model qualification preflight. A stopped receipt never opens role admission.
+//! Manual hidden qualification observations. An observation never opens role admission.
 use std::io;
 #[cfg(any(windows, test))]
 use std::path::Path;
+#[cfg(any(windows, test))]
+#[path = "project-qualification/live.rs"]
+mod live;
 
 fn main() {
     if let Some(code) = faber_engine::proc::guard_mode() {
@@ -12,7 +15,7 @@ fn main() {
     #[cfg(not(windows))]
     let result: io::Result<()> = Err(io::Error::other("requires the Windows hidden desktop"));
     if let Err(error) = result {
-        eprintln!("Qualification preflight failed ({error}); no model turn was requested.");
+        eprintln!("Qualification failed ({error}); inspect the private receipt for requested model turns.");
         std::process::exit(1);
     }
 }
@@ -27,16 +30,20 @@ fn protected(path: &Path) -> bool {
 }
 
 #[cfg(any(windows, test))]
+fn random_marker() -> String {
+    use std::hash::BuildHasher;
+    // Independent randomly seeded hashers keep the sentinel absent from the prompt and executable bytes.
+    let first = std::collections::hash_map::RandomState::new().hash_one("outside-marker");
+    let second = std::collections::hash_map::RandomState::new().hash_one("outside-marker");
+    format!("T13_MARKER_{first:016x}{second:016x}")
+}
+
+#[cfg(any(windows, test))]
 fn fingerprint(path: &Path) -> io::Result<String> {
     use sha2::{Digest, Sha256};
     use std::io::Read;
-    if protected(path) {
-        return Err(io::Error::other("protected path"));
-    }
+    // R112 permits only the resolved program file here; working-folder restrictions belong elsewhere.
     let path = std::fs::canonicalize(path)?;
-    if protected(&path) {
-        return Err(io::Error::other("protected resolved path"));
-    }
     let mut file = std::fs::File::open(path)?;
     let mut digest = Sha256::new();
     let mut buffer = [0; 16 * 1024];
@@ -68,14 +75,17 @@ fn run() -> io::Result<()> {
         return Err(io::Error::other("expected --preflight PRIVATE_DATA"));
     };
     let data = std::path::PathBuf::from(directory);
-    if !data.is_absolute() || !matches!(mode.as_str(), "--preflight" | "--hidden-worker") {
+    if !data.is_absolute() || !matches!(mode.as_str(), "--preflight" | "--hidden-worker" | "--live-loadout" | "--hidden-live") {
         return Err(io::Error::other("invalid preflight arguments"));
     }
-    if mode == "--hidden-worker" {
+    if matches!(mode.as_str(), "--hidden-worker" | "--hidden-live") {
         if std::env::var("FABER_QUALIFICATION_HIDDEN").as_deref() != Ok("preflight") {
             return Err(io::Error::other("hidden runner required"));
         }
-        return tokio::runtime::Builder::new_current_thread().enable_all().build()?.block_on(worker(&data));
+        return tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?
+            .block_on(async { if mode == "--hidden-live" { live::run(&data).await } else { worker(&data).await } });
     }
     if ["CI", "GITHUB_ACTIONS"].iter().any(|name| std::env::var(name).is_ok_and(|v| v.eq_ignore_ascii_case("true"))) {
         return Err(io::Error::other("manual preflight never runs in CI"));
@@ -83,6 +93,9 @@ fn run() -> io::Result<()> {
     std::fs::create_dir_all(&data)?;
     if data.join("qualification-preflight.json").exists() {
         return Err(io::Error::other("receipt already exists; no automatic replay"));
+    }
+    if data.join("live-denial.json").exists() {
+        return Err(io::Error::other("live receipt already exists; no automatic replay"));
     }
     let executable = std::env::current_exe()?;
     let helper = executable.parent().and_then(Path::parent).ok_or_else(|| io::Error::other("missing debug folder"))?.join("fake-cli.exe");
@@ -96,13 +109,22 @@ fn run() -> io::Result<()> {
         }
     }
     env.insert("FABER_QUALIFICATION_HIDDEN".into(), "preflight".into());
+    env.insert("FABER_QUALIFICATION_PROBE".into(), mode.clone());
+    env.insert(
+        "FABER_QUALIFICATION_WORKSPACE".into(),
+        std::env::current_dir()?
+            .join("target/t13-evidence/live-qualification")
+            .join(data.file_name().ok_or_else(|| io::Error::other("missing probe name"))?)
+            .to_string_lossy()
+            .into_owned(),
+    );
     if let Some(path) = env.get("PATH") {
         let permitted: Vec<_> = std::env::split_paths(path).filter(|p| !protected(p)).collect();
         env.insert("PATH".into(), std::env::join_paths(permitted).map_err(io::Error::other)?.to_string_lossy().into_owned());
     }
     let (owned, _, stderr) = faber_testkit::contain::Owned::start(
         &executable,
-        &["--hidden-worker".into(), data.to_string_lossy().into_owned()],
+        &[if mode.starts_with("--live-") { "--hidden-live".into() } else { "--hidden-worker".into() }, data.to_string_lossy().into_owned()],
         &env,
         &data,
         &helper,
@@ -115,7 +137,7 @@ fn run() -> io::Result<()> {
         }
         text
     });
-    let deadline = Instant::now() + Duration::from_secs(60);
+    let deadline = Instant::now() + Duration::from_secs(90);
     while owned.is_running() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -125,7 +147,7 @@ fn run() -> io::Result<()> {
     if !completed {
         return Err(io::Error::other(format!("bounded hidden worker did not complete: {diagnostics}")));
     }
-    println!("Private no-model preflight receipt recorded. Qualification remains blocked.");
+    println!("Private qualification observation recorded. Admission remains blocked.");
     Ok(())
 }
 
@@ -169,20 +191,42 @@ async fn worker(data: &Path) -> io::Result<()> {
         let text = String::from_utf8(bytes).map_err(|_| io::Error::other("invalid version encoding"))?;
         let installed_version = version(&text)?;
         let account = faber_engine::account::check(vendor, &cli, &spawn, data, Duration::from_secs(10)).await;
-        let billing = if vendor == Vendor::Claude {
-            faber_engine::account::claude_account(&cli, &spawn, data, Duration::from_secs(10)).await.and_then(|s| s.billing).map(
-                |b| match b {
-                    faber_engine::budget::Billing::Subscription => "subscription",
-                    faber_engine::budget::Billing::UsageBilled => "usageBilled",
-                    faber_engine::budget::Billing::Unknown => "unknown",
-                },
-            )
+        let mut signals = if vendor == Vendor::Claude {
+            faber_engine::account::claude_account(&cli, &spawn, data, Duration::from_secs(10)).await.unwrap_or_default()
         } else {
-            None
+            faber_engine::signals::Signals::default()
         };
+        let mut quota = vec![];
+        if vendor == Vendor::Codex {
+            for event in faber_engine::codex::read_codex_limits(&cli.command, data, true, spawn.clone(), Duration::from_secs(15)).await {
+                match event {
+                    faber_engine::events::EngineEvent::Signals(observed) => {
+                        if observed.billing.is_some() {
+                            signals.billing = observed.billing;
+                        }
+                        if observed.plan.is_some() {
+                            signals.plan = observed.plan;
+                        }
+                        if observed.paid_fallback.is_some() {
+                            signals.paid_fallback = observed.paid_fallback;
+                        }
+                    }
+                    faber_engine::events::EngineEvent::Quota { window, used, resets_at } => {
+                        quota.push(json!({"window":window,"usedPercent":used,"resetsAt":resets_at}));
+                    }
+                    _ => {}
+                }
+            }
+        }
         let blockers: Vec<_> = faber_engine::project::policy::blockers(vendor).iter().map(|b| b.key()).collect();
+        let billing = signals.billing.map(|b| match b {
+            faber_engine::budget::Billing::Subscription => "subscription",
+            faber_engine::budget::Billing::UsageBilled => "usageBilled",
+            faber_engine::budget::Billing::Unknown => "unknown",
+        });
         records.push(json!({"vendor":vendor,"version":installed_version,"files":files,
-            "accountStatus":account,"billing":billing,"paidFallback":null,"blockers":blockers,
+            "accountStatus":account,"billing":billing,"plan":signals.plan,
+            "paidFallback":signals.paid_fallback,"quota":quota,"blockers":blockers,
             "restrictions":"unproven","sessionLoadout":"unobserved","invocationBoundMicros":null,
             "modelTurns":0,"qualificationPassed":false}));
     }
@@ -206,6 +250,14 @@ fn record_stop(data: &Path, records: &[serde_json::Value], reason: &str) -> io::
 mod tests {
     use super::*;
     #[test]
+    fn outside_marker_content_changes_without_disclosing_it_in_a_prompt() {
+        let first = random_marker();
+        let second = random_marker();
+        assert_ne!(first, second);
+        assert_eq!(first.len(), 43);
+        assert!(first.starts_with("T13_MARKER_"));
+    }
+    #[test]
     fn version_output_is_bounded_and_single_line() {
         assert_eq!(version("2.1.296 (Claude Code)\n").unwrap(), "2.1.296 (Claude Code)");
         for text in ["", "one\ntwo", "\u{1b}secret", &"x".repeat(129)] {
@@ -213,7 +265,7 @@ mod tests {
         }
     }
     #[test]
-    fn fingerprint_tracks_bytes_and_refuses_credential_folders_before_io() {
+    fn fingerprint_tracks_bytes_and_requires_an_existing_program_file() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("cli.exe");
         std::fs::write(&path, b"version one").unwrap();
@@ -227,7 +279,7 @@ mod tests {
         assert!(!protected(Path::new("C:/fixture/installed/bin")));
     }
     #[test]
-    fn installed_binary_hardlink_is_read_through_its_permitted_install_path() {
+    fn resolved_program_bytes_are_allowed_even_under_a_vendor_root() {
         let dir = tempfile::tempdir().unwrap();
         let cache = dir.path().join(".claude");
         std::fs::create_dir(&cache).unwrap();
@@ -236,7 +288,7 @@ mod tests {
         let installed = dir.path().join("cli.exe");
         std::fs::hard_link(&source, &installed).unwrap();
         assert!(fingerprint(&installed).is_ok());
-        assert!(fingerprint(&source).is_err());
+        assert_eq!(fingerprint(&source).unwrap(), fingerprint(&installed).unwrap());
     }
     #[test]
     fn stopped_receipt_is_private_incomplete_and_cannot_be_overwritten() {

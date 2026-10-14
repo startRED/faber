@@ -1,5 +1,9 @@
 # Task 13: qualification stopped
 
+Historical pre-R112 disposition. The 2026-10-14 continuation hashes both executables
+and observes an actual installed MCP loadout mismatch. See the
+[new measured acceptance report](2026-10-20-self-development-acceptance.md).
+
 Measured on 2026-10-13 (America/Fortaleza). This is a failed preflight, not a qualification pass.
 The repository JSON is an informational copy. Authoritative diagnostic evidence is in
 `%LOCALAPPDATA%/Faber/t13-acceptance-2026-10-13/`:
