@@ -79,6 +79,27 @@ Each round is one working day, or about six merged chunks, whichever comes first
 Round 1 runs E1 and E2 (cheap, reversible). Round 2 runs E3, E4 and E5. Round 3 runs E6 and E7. After that the
 order comes from the numbers.
 
+## Rounds so far
+
+The numbers of each round are in `faber-notas/parallel-rounds.jsonl`; `faber-notas/parallel-report.mjs [since]` collects
+M3 (CI), M4 and the fixed prompt size from Claude Code's local transcripts and GitHub.
+
+| Round | Date | Changed | Result |
+|---|---|---|---|
+| 1 | 2026-10-14 | E2 CI in five parallel jobs; sweep spares folders used in the last 6 h | CI 17-28 min to 7.6 min, green; two lanes had lost a warm build to the sweep before the fix |
+| 2 | 2026-10-14 | E3 build slots; screen parts dealt by CI time; E4 lean prompt for the owner checkout; E5, E6, E10 handed to the lead session as lane rules | Proofs green (853 tests). First CI run 11.3 min: one slow Windows runner (its part ran 318 s of scenarios against 181 and 205 s, one scenario 63 s instead of 8 s), so the dealing is judged by the median of the next runs. E4 and E5 need a day of sessions |
+
+Waiting, and on what:
+
+- E1: the stacked branches merge in the lead session's order once each passes its review (security reviews for #23 and #24).
+- E4, E5: compare `first_prompt_tokens_median` (87.7k on 2026-10-14), the cache-write share (42%) and US$ per request
+  (0.06) after a day of sessions.
+- E6, E8: every vendor was ahead of its weekly pace on 2026-10-14 (Claude 31/21, Codex 34/23, Antigravity's Claude/GPT
+  bucket 98%). More lanes would only end the week earlier, so the test system rework (E8) starts when one vendor is
+  back under its pace.
+- E7: cloud lanes need a cloud environment for this repository, set up by Erick.
+- E9: sccache is already in place user-wide; revisit only if build slots show long waits.
+
 ## Problems to look for while running
 
 - Two lanes editing the same file or the same locale keys.
