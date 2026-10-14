@@ -4,6 +4,11 @@ use crate::project::budget::{self, Budget, Change, Invocation, Status};
 use crate::route::{Asked, Routed};
 
 impl Engine {
+    /// The host calls this after retirement; both endpoints come from no-model CLI account checks.
+    pub async fn calibrate_mission(&self, mission: &str) -> Result<Status, String> {
+        self.check_plans(Duration::from_secs(20)).await;
+        self.mission_budget(Change::Calibrate { mission: mission.into() })
+    }
     pub fn new_mission(&self, project: &Project, goal: &str, base: &str) -> Result<crate::project::Mission, String> {
         let repo = project.repo.as_ref().ok_or("reason.grant.otherRepo")?;
         let grant = project.grant.as_ref().ok_or("reason.grant.none")?;
@@ -64,8 +69,10 @@ impl Engine {
                             let room = v.day_baselines.get(name).and_then(|base| {
                                 let start = crate::budget::daily_start(r.resets_at, now)?;
                                 (base.reading.resets_at == r.resets_at
-                                    && base.reading.at <= start
-                                    && start - base.reading.at <= crate::budget::STALE_SECS)
+                                    && ((base.reading.at <= start && start - base.reading.at <= crate::budget::STALE_SECS)
+                                        || (base.extra.get("bootstrap") == Some(&serde_json::json!(true))
+                                            && base.reading.at > start
+                                            && base.reading.at <= now)))
                                     .then(|| crate::budget::daily_room(base.reading.used, r.used, r.resets_at, now))
                                     .flatten()
                             });
@@ -207,6 +214,71 @@ mod tests {
             },
             Arc::new(|_| {}),
         )
+    }
+
+    #[tokio::test]
+    async fn r130_only_the_no_model_account_check_stamps_zero_turn_evidence() {
+        let root = tempfile::tempdir().unwrap();
+        let e = new_engine(root.path());
+        e.set_time_source(Arc::new(|| NOW));
+        let quota = EngineEvent::Quota { window: "seven_day".into(), used: 0.30, resets_at: 7.0 * DAY };
+        e.note_account_events(
+            Vendor::Codex,
+            vec![
+                quota.clone(),
+                EngineEvent::Signals(Signals { billing: Some(Billing::Subscription), paid_fallback: Some(false), ..Default::default() }),
+            ],
+        );
+        assert!(e.ledger().codex.zero_turn_readings.is_empty());
+        assert!(e.mission_budget(Change::Allocate { vendor: Vendor::Codex, cap_micros: 2_000_000 }).is_err());
+        e.with(|c| c.zero_turn_checked(Vendor::Codex, vec![quota]));
+        assert!(e.mission_budget(Change::Allocate { vendor: Vendor::Codex, cap_micros: 2_000_000 }).is_ok());
+        assert_eq!(e.ledger().codex.zero_turn_readings["seven_day"].read_at, NOW);
+        e.with(|c| {
+            c.zero_turn_checked(
+                Vendor::Codex,
+                vec![EngineEvent::Quota { window: "seven_day".into(), used: f64::NAN, resets_at: 7.0 * DAY }],
+            )
+        });
+        assert_eq!(e.ledger().codex.zero_turn_readings["seven_day"].used, 0.30);
+        e.shutdown();
+    }
+
+    #[tokio::test]
+    async fn a_slow_quota_query_does_not_delay_the_completed_subscription_check() {
+        let root = tempfile::tempdir().unwrap();
+        let e = new_engine(root.path());
+        let (writer, reader) = tokio::io::duplex(64);
+        let reader = Arc::new(Mutex::new(Some(reader)));
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let started = Arc::new(Mutex::new(Some(started)));
+        e.with(|c| {
+            c.opts.clis = BTreeMap::from([
+                (Vendor::Claude, Cli { command: "account-fixture".into(), prefix: vec![] }),
+                (Vendor::Codex, Cli { command: "limits-fixture".into(), prefix: vec![] }),
+            ]);
+            c.opts.spawn = Arc::new(move |bin, args, _| {
+                let stdout: Box<dyn tokio::io::AsyncRead + Send + Unpin> = if args == ["auth", "status"] {
+                    Box::new(std::io::Cursor::new(br#"{"loggedIn":true,"subscriptionType":"max","authMethod":"claude.ai"}"#.to_vec()))
+                } else if bin == "limits-fixture" {
+                    Box::new(std::io::Cursor::new(b"{\"id\":1,\"result\":{}}\n{\"id\":2,\"result\":{\"rateLimits\":null}}\n{\"id\":3,\"result\":{\"account\":{\"type\":\"chatgpt\",\"planType\":\"pro\"}}}\n".to_vec()))
+                } else {
+                    let _ = started.lock().unwrap().take().unwrap().send(());
+                    Box::new(reader.lock().unwrap().take().unwrap())
+                };
+                Ok(crate::proc::Proc { stdin: Box::new(tokio::io::sink()), stdout, stderr: None, child: None })
+            });
+        });
+        let checking = e.clone();
+        let task = tokio::spawn(async move {
+            checking.check_plans(Duration::from_secs(1)).await;
+        });
+        ready.await.unwrap();
+        assert_eq!(e.ledger().claude.billing, Billing::Subscription);
+        assert_eq!(e.ledger().codex.billing, Billing::Subscription);
+        drop(writer);
+        task.await.unwrap();
+        e.shutdown();
     }
     fn engine(root: &Path) -> Engine {
         let e = new_engine(root);

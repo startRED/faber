@@ -16,6 +16,8 @@ const DAY: f64 = 86_400.0;
 const WEEK: f64 = 7.0 * DAY;
 /// One percentage point covers rounded provider readings.
 const GUARD: f64 = 0.01;
+const BOOTSTRAP_CAP: u64 = 2_000_000;
+const BOOTSTRAP_MARGIN: f64 = 0.05;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -101,6 +103,13 @@ pub struct Allocation {
     pub extra: Extra,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Calibration {
+    pub before: BTreeMap<String, crate::learn::Point>,
+    pub after: BTreeMap<String, crate::learn::Point>,
+    pub costs: BTreeMap<String, u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Budget {
@@ -115,6 +124,8 @@ pub struct Budget {
     #[serde(default)]
     pub unbounded_at: BTreeMap<Vendor, f64>,
     pub last_at: f64,
+    #[serde(default)]
+    pub calibrations: BTreeMap<String, BTreeMap<Vendor, Calibration>>,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -131,6 +142,7 @@ impl Default for Budget {
             unbounded: BTreeMap::new(),
             unbounded_at: BTreeMap::new(),
             last_at: 0.0,
+            calibrations: BTreeMap::new(),
             extra: Extra::new(),
         }
     }
@@ -138,11 +150,13 @@ impl Default for Budget {
 
 pub enum Change {
     Allocate { vendor: Vendor, cap_micros: u64 },
+    AllocateModel { vendor: Vendor, model: String, cap_micros: u64 },
     Grant { mission: String, grant: Grant },
     Admit(Invocation),
     Continue { id: String },
     Report { id: String, event: EngineEvent, terminated: bool },
     Pause { mission: String, paused: bool },
+    Calibrate { mission: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -219,7 +233,7 @@ fn driver(r: &Invocation) -> String {
 /// The lower measured cost-per-point bound, using the existing complete, non-overlapping stretches.
 fn conversion(ledger: &Ledger, vendor: Vendor, window: &str, model: Option<&str>) -> Result<f64, &'static str> {
     let v = ledger.of(vendor);
-    let points = v.history.get(window).ok_or("reason.budget.calibration")?;
+    let points = v.history.get(window).map(Vec::as_slice).unwrap_or(&[]);
     // Each stretch stays within its own reset; the same plan's measured capacity survives renewal.
     let current: Vec<_> = points.iter().filter(|p| p.at >= v.since).copied().collect();
     let measured = stretches(&current, &v.spans);
@@ -229,7 +243,31 @@ fn conversion(ledger: &Ledger, vendor: Vendor, window: &str, model: Option<&str>
             samples.entry(&s.model).or_default().push(s.ppd);
         }
     }
-    samples.values().filter(|v| v.len() >= ENOUGH).flatten().copied().reduce(f64::max).ok_or("reason.budget.calibration")
+    let normal = samples.values().filter(|v| v.len() >= ENOUGH).flatten().copied().reduce(f64::max);
+    let bootstrap = Budget::load(ledger)?
+        .calibrations
+        .values()
+        .filter_map(|vendors| {
+            let sample = vendors.get(&vendor)?;
+            if sample.costs.len() != 1 {
+                return None;
+            }
+            let (name, cost) = sample.costs.first_key_value()?;
+            let a = sample.before.get(window)?;
+            let b = sample.after.get(window)?;
+            if model.is_some_and(|m| m != name)
+                || *cost == 0
+                || a.at < v.since
+                || a.resets_at != b.resets_at
+                || b.at <= a.at
+                || b.used <= a.used
+            {
+                return None;
+            }
+            Some((b.used - a.used) * 100.0 / (*cost as f64 / 1e6))
+        })
+        .reduce(f64::max);
+    normal.into_iter().chain(bootstrap).reduce(f64::max).ok_or("reason.budget.calibration")
 }
 
 fn weekly(ledger: &Ledger, vendor: Vendor, now: f64) -> Result<(&str, f64, f64), &'static str> {
@@ -243,22 +281,66 @@ fn weekly(ledger: &Ledger, vendor: Vendor, now: f64) -> Result<(&str, f64, f64),
     Ok((name, reading.resets_at, start))
 }
 
+fn bootstrap(ledger: &Ledger, vendor: Vendor, model: Option<&str>, now: f64) -> Result<bool, &'static str> {
+    let v = ledger.of(vendor);
+    let (week, reset, start) = weekly(ledger, vendor, now)?;
+    let missing = v.readings.iter().any(|(name, r)| {
+        r.resets_at > now
+            && (vendor_wide(name) || model.and_then(family_of).is_some_and(|f| family_of(name) == Some(f)))
+            && conversion(ledger, vendor, name, model).is_err()
+    });
+    if !missing {
+        return Ok(false);
+    }
+    let first = v.zero_turn_readings.get(week).ok_or("reason.budget.calibration")?;
+    let latest = &v.readings[week];
+    let line = (start + DAY - (reset - WEEK)) / WEEK;
+    if first.resets_at != reset
+        || first.read_at <= start
+        || first.read_at < v.since.round()
+        || !(0.0..=STALE_SECS).contains(&(now - first.read_at))
+        || !(0.0..=STALE_SECS).contains(&(now - latest.read_at))
+        || !(0.0..=1.0).contains(&first.used)
+        || !(first.used..=1.0).contains(&latest.used)
+        || line - first.used + f64::EPSILON < BOOTSTRAP_MARGIN
+        || line - latest.used + f64::EPSILON < BOOTSTRAP_MARGIN
+    {
+        return Err("reason.budget.calibration");
+    }
+    Ok(true)
+}
+
 fn headroom(ledger: &Ledger, vendor: Vendor, model: Option<&str>, now: f64) -> Result<u64, &'static str> {
     let v = ledger.of(vendor);
     let snap = v.snap(now);
     gate(&snap, model.and_then(family_of), Purpose::UserTurn { by_hand: false }, false, now).map_err(|_| "reason.budget.quota")?;
     // Unlike a hand-picked Chat turn, automated roles must be unable to fall back to paid use.
-    if v.paid_fallback != Some(false) || v.paid_fallback_at.is_none_or(|at| !(0.0..=STALE_SECS).contains(&(now - at))) || snap.relearning {
+    if v.paid_fallback != Some(false) || v.paid_fallback_at.is_none_or(|at| !(0.0..=STALE_SECS).contains(&(now - at))) {
         return Err("reason.budget.billing");
     }
     let (week, reset, start) = weekly(ledger, vendor, now)?;
-    let baseline = &v.day_baselines.get(week).ok_or("reason.budget.day")?.reading;
-    if baseline.resets_at != reset || baseline.at > start || !(0.0..=STALE_SECS).contains(&(start - baseline.at)) {
-        return Err("reason.budget.day");
+    let bootstrapping = bootstrap(ledger, vendor, model, now)?;
+    if snap.relearning && !bootstrapping {
+        return Err("reason.budget.calibration");
     }
-    let latest = &v.readings[week];
-    let room = crate::budget::daily_room(baseline.used, latest.used, reset, now).ok_or("reason.budget.day")? - GUARD;
-    let mut dollars = (room.max(0.0) * 100.0) / conversion(ledger, vendor, week, model)?;
+    let mut dollars = if let Ok(rate) = conversion(ledger, vendor, week, model) {
+        let sample = v.day_baselines.get(week).ok_or("reason.budget.day")?;
+        let baseline = &sample.reading;
+        let bootstrap_baseline =
+            sample.extra.get("bootstrap") == Some(&serde_json::json!(true)) && baseline.at > start && baseline.at <= now;
+        if baseline.resets_at != reset
+            || (!bootstrap_baseline && (baseline.at > start || !(0.0..=STALE_SECS).contains(&(start - baseline.at))))
+        {
+            return Err("reason.budget.day");
+        }
+        let room = crate::budget::daily_room(baseline.used, v.readings[week].used, reset, now).ok_or("reason.budget.day")? - GUARD;
+        (room.max(0.0) * 100.0) / rate
+    } else {
+        BOOTSTRAP_CAP as f64 / 1e6
+    };
+    if bootstrapping {
+        dollars = dollars.min(BOOTSTRAP_CAP as f64 / 1e6);
+    }
     for (name, r) in &v.readings {
         if r.resets_at <= now {
             continue;
@@ -270,26 +352,40 @@ fn headroom(ledger: &Ledger, vendor: Vendor, model: Option<&str>, now: f64) -> R
         if !(0.0..=STALE_SECS).contains(&(now - r.read_at)) {
             return Err("reason.budget.stale");
         }
-        if name != week {
-            let rate = conversion(ledger, vendor, name, model)?;
+        if name != week
+            && let Ok(rate) = conversion(ledger, vendor, name, model)
+        {
             dollars = dollars.min((crate::budget::ADMIT_LIMIT - r.used - GUARD).max(0.0) * 100.0 / rate);
         }
     }
     // Flooring headroom and ceiling spend cannot manufacture fractional room.
-    Ok(micros(dollars)?.saturating_sub(1))
+    Ok(if dollars == BOOTSTRAP_CAP as f64 / 1e6 && bootstrapping { BOOTSTRAP_CAP } else { micros(dollars)?.saturating_sub(1) })
 }
 
 fn own_today(ledger: &Ledger, vendor: Vendor, week: &str, start: f64, now: f64) -> Result<u64, &'static str> {
     let v = ledger.of(vendor);
     let first = ((start - 14.0 * 3600.0) / DAY).floor() as i64;
     let last = ((now + 14.0 * 3600.0) / DAY).floor() as i64;
-    let sample = v.day_baselines.get(week).ok_or("reason.budget.day")?;
+    let sample = v
+        .day_baselines
+        .get(week)
+        .or_else(|| {
+            v.daily_samples.get(week).filter(|sample| {
+                v.zero_turn_readings.get(week).is_some_and(|r| {
+                    r.read_at > start
+                        && r.read_at == sample.reading.at
+                        && r.used == sample.reading.used
+                        && r.resets_at == sample.reading.resets_at
+                })
+            })
+        })
+        .ok_or("reason.budget.day")?;
     if v.unmetered.iter().any(|(day, n)| *n > sample.unmetered.get(day).copied().unwrap_or(0))
         || sample.unmetered.range(first..=last).any(|(day, n)| *n > v.unmetered.get(day).copied().unwrap_or(0))
     {
         return Err("reason.budget.unknown");
     }
-    let baseline = &v.day_baselines.get(week).ok_or("reason.budget.day")?.own_spend;
+    let baseline = &sample.own_spend;
     if baseline.iter().any(|(day, cost)| v.own_spend.get(day).is_some_and(|current| current < cost))
         || baseline.range(first..=last).any(|(day, cost)| *cost > 0.0 && !v.own_spend.contains_key(day))
     {
@@ -323,6 +419,25 @@ impl Budget {
         for grant in b.grants.values() {
             if total(grant.kind_caps.values().copied()).map_err(|_| "error.store.corrupt")? > grant.cap_micros {
                 return Err("error.store.corrupt");
+            }
+        }
+        for (mission, vendors) in &b.calibrations {
+            if !b.grants.contains_key(mission) {
+                return Err("error.store.corrupt");
+            }
+            for sample in vendors.values() {
+                if sample.before.is_empty()
+                    || sample.after.keys().any(|window| !sample.before.contains_key(window))
+                    || sample.before.values().chain(sample.after.values()).any(|p| {
+                        !(0.0..=1.0).contains(&p.used) || !p.at.is_finite() || p.at < 0.0 || !p.resets_at.is_finite() || p.resets_at <= p.at
+                    })
+                    || sample.after.iter().any(|(name, p)| {
+                        p.at <= sample.before[name].at || p.resets_at != sample.before[name].resets_at || p.used < sample.before[name].used
+                    })
+                    || total(sample.costs.values().copied()).is_err()
+                {
+                    return Err("error.store.corrupt");
+                }
             }
         }
         for (id, r) in &b.invocations {
@@ -431,7 +546,13 @@ impl Budget {
         {
             return Err("reason.budget.rate");
         }
+        if bootstrap(ledger, r.vendor, Some(&r.model), now)? && g.cap_micros > BOOTSTRAP_CAP {
+            return Err("reason.budget.cap");
+        }
         self.account(ledger, r.vendor, Some(&r.model), now)?;
+        for vendor in g.vendors.keys().copied().filter(|v| *v != r.vendor) {
+            self.account(ledger, vendor, None, now)?;
+        }
         let charge = total([self.charges(&r.mission, None, None, None)?, bound].into_iter())?;
         if charge > g.cap_micros
             || total([self.charges(&r.mission, None, None, Some(r.kind))?, bound].into_iter())?
@@ -486,7 +607,17 @@ impl Budget {
 
 /// Applies one change to a snapshot; the engine saves it atomically under its existing shared lock before effects.
 pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Result<Status, &'static str> {
+    let (change, allocation_model) = match change {
+        Change::AllocateModel { vendor, model, cap_micros } => {
+            if !crate::route::PROFILES.iter().any(|p| p.vendor == vendor && p.model == model) {
+                return Err("reason.budget.rate");
+            }
+            (Change::Allocate { vendor, cap_micros }, Some(model))
+        }
+        change => (change, None),
+    };
     let mut reconciled = None;
+    let mut baseline = None;
     let mut b = Budget::load(ledger)?;
     // Reconciliation still records late spend after a clock reversal; it grants no new work.
     if !matches!(change, Change::Report { .. } | Change::Pause { .. }) {
@@ -496,7 +627,7 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
         return Err("reason.budget.clock");
     }
     let mut status = Status::Ready;
-    let admits = !matches!(change, Change::Report { .. } | Change::Pause { .. });
+    let admits = !matches!(change, Change::Report { .. } | Change::Pause { .. } | Change::Calibrate { .. });
     match change {
         Change::Allocate { vendor, cap_micros }
             if b.allocations
@@ -507,8 +638,24 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
         }
         Change::Allocate { vendor, cap_micros } => {
             let (week, reset, starts_at) = weekly(ledger, vendor, now)?;
-            let room = headroom(ledger, vendor, None, now)?;
-            let own = own_today(ledger, vendor, week, starts_at, now)?;
+            let mut current = ledger.clone();
+            if bootstrap(ledger, vendor, allocation_model.as_deref(), now)? {
+                let v = ledger.of(vendor);
+                let sample = v.daily_samples.get(week).ok_or("reason.budget.day")?;
+                let first = &v.zero_turn_readings[week];
+                if sample.reading.at != first.read_at || sample.reading.used != first.used || sample.reading.resets_at != reset {
+                    return Err("reason.budget.calibration");
+                }
+                let mut sample = sample.clone();
+                sample.extra.insert("bootstrap".into(), serde_json::json!(true));
+                if ledger.of(vendor).day_baselines.get(week).is_none_or(|old| old.reading.resets_at != reset || old.reading.at < starts_at)
+                {
+                    current.of_mut(vendor).day_baselines.insert(week.to_string(), sample.clone());
+                    baseline = Some((vendor, week.to_string(), sample));
+                }
+            }
+            let room = headroom(&current, vendor, allocation_model.as_deref(), now)?;
+            let own = own_today(&current, vendor, week, starts_at, now)?;
             if cap_micros == 0 || cap_micros > total([own, room].into_iter())? || b.unbounded.get(&vendor).copied().unwrap_or(0) > 0 {
                 return Err("reason.budget.daily");
             }
@@ -522,7 +669,7 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
                     extra: b.allocations.get(&vendor).map(|a| a.extra.clone()).unwrap_or_default(),
                 },
             );
-            b.account(ledger, vendor, None, now)?;
+            b.account(&current, vendor, allocation_model.as_deref(), now)?;
         }
         Change::Grant { mission, mut grant } => {
             if !valid_id(&mission)
@@ -533,6 +680,35 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
                 || total([grant.review_micros, grant.repair_micros, grant.canary_micros].into_iter())? > grant.cap_micros
             {
                 return Err("reason.budget.grant");
+            }
+            if grant.cap_micros > BOOTSTRAP_CAP && grant.vendors.keys().any(|v| bootstrap(ledger, *v, None, now).unwrap_or(true)) {
+                return Err("reason.budget.cap");
+            }
+            if !b.grants.contains_key(&mission) {
+                let mut samples = BTreeMap::new();
+                for vendor in grant.vendors.keys().copied() {
+                    let needs_sample = bootstrap(ledger, vendor, None, now)?;
+                    let start = weekly(ledger, vendor, now)?.2;
+                    let fresh_sample = ledger
+                        .of(vendor)
+                        .zero_turn_readings
+                        .values()
+                        .any(|r| r.read_at > start && (0.0..=STALE_SECS).contains(&(now - r.read_at)) && r.resets_at > now);
+                    // A grant precedes model selection; preserve real endpoints for a new model too.
+                    if needs_sample || fresh_sample {
+                        let v = ledger.of(vendor);
+                        let before = v
+                            .zero_turn_readings
+                            .iter()
+                            .filter(|(_, r)| r.read_at > start && (0.0..=STALE_SECS).contains(&(now - r.read_at)) && r.resets_at > now)
+                            .map(|(name, r)| (name.clone(), crate::learn::Point { at: r.read_at, used: r.used, resets_at: r.resets_at }))
+                            .collect();
+                        samples.insert(vendor, Calibration { before, ..Default::default() });
+                    }
+                }
+                if !samples.is_empty() {
+                    b.calibrations.insert(mission.clone(), samples);
+                }
             }
             if let Some(old) = b.grants.get(&mission) {
                 let increased: Vec<_> =
@@ -554,6 +730,22 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
         }
         Change::Admit(request) => {
             b.can_admit(ledger, &request, now)?;
+            if bootstrap(ledger, request.vendor, Some(&request.model), now)?
+                && !b.calibrations.get(&request.mission).is_some_and(|samples| samples.contains_key(&request.vendor))
+            {
+                let start = weekly(ledger, request.vendor, now)?.2;
+                let before = ledger
+                    .of(request.vendor)
+                    .zero_turn_readings
+                    .iter()
+                    .filter(|(_, r)| r.read_at > start && (0.0..=STALE_SECS).contains(&(now - r.read_at)) && r.resets_at > now)
+                    .map(|(name, r)| (name.clone(), crate::learn::Point { at: r.read_at, used: r.used, resets_at: r.resets_at }))
+                    .collect();
+                b.calibrations
+                    .entry(request.mission.clone())
+                    .or_default()
+                    .insert(request.vendor, Calibration { before, ..Default::default() });
+            }
             let base = b.bases.get(&session_key(&request)).cloned();
             b.invocations.insert(
                 request.id.clone(),
@@ -573,6 +765,51 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
         Change::Continue { id } => b.continuing(ledger, &id, now)?,
         Change::Pause { mission, paused } => {
             b.grants.get_mut(&mission).ok_or("reason.budget.grant")?.paused = paused;
+        }
+        Change::Calibrate { mission } => {
+            let samples = b.calibrations.get_mut(&mission).ok_or("reason.budget.calibration")?;
+            for (vendor, sample) in samples {
+                if !sample.after.is_empty() {
+                    continue;
+                }
+                let receipts: Vec<_> =
+                    b.invocations.values().filter(|r| r.request.mission == mission && r.request.vendor == *vendor).collect();
+                if receipts.is_empty() || receipts.iter().any(|r| !r.settled || !r.terminated || r.bounded) {
+                    return Err("reason.budget.unknown");
+                }
+                let v = ledger.of(*vendor);
+                let end = receipts.iter().try_fold(0.0_f64, |end, r| {
+                    let span = v
+                        .spans
+                        .iter()
+                        .find(|s| {
+                            s.start == r.started_at.round()
+                                && s.model == r.request.model
+                                && !s.incomplete
+                                && s.cost == Some(r.paid_micros as f64 / 1e6)
+                        })
+                        .ok_or("reason.budget.calibration")?;
+                    Ok::<_, &'static str>(end.max(span.end))
+                })?;
+                for (name, before) in &sample.before {
+                    let after = v.zero_turn_readings.get(name).ok_or("reason.budget.calibration")?;
+                    if after.read_at < end
+                        || after.read_at <= before.at
+                        || !(0.0..=STALE_SECS).contains(&(now - after.read_at))
+                        || after.resets_at != before.resets_at
+                        || !(before.used..=1.0).contains(&after.used)
+                    {
+                        return Err("reason.budget.calibration");
+                    }
+                    sample
+                        .after
+                        .insert(name.clone(), crate::learn::Point { at: after.read_at, used: after.used, resets_at: after.resets_at });
+                }
+                for r in receipts {
+                    let cost = sample.costs.entry(r.request.model.clone()).or_default();
+                    *cost = cost.checked_add(r.paid_micros).ok_or("reason.budget.cost")?;
+                }
+            }
         }
         Change::Report { id, event, terminated } => {
             let r = b.invocations.get_mut(&id).ok_or("reason.budget.identity")?;
@@ -675,6 +912,7 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
                 }
             }
         }
+        Change::AllocateModel { .. } => unreachable!("normalized allocation"),
     }
     if admits {
         b.last_at = b.last_at.max(now);
@@ -682,6 +920,9 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
     let value = serde_json::to_value(&b).map_err(|_| "error.store.corrupt")?;
     if let Some((vendor, v)) = reconciled {
         *ledger.of_mut(vendor) = v;
+    }
+    if let Some((vendor, week, sample)) = baseline {
+        ledger.of_mut(vendor).day_baselines.insert(week, sample);
     }
     ledger.extra.insert(KEY.into(), value);
     Ok(status)

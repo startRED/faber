@@ -80,6 +80,7 @@ pub async fn run(data: &std::path::Path) -> io::Result<()> {
     let native = std::env::var("FABER_QUALIFICATION_PROBE").as_deref() == Ok("--live-claude-native");
     let stopping = std::env::var("FABER_QUALIFICATION_PROBE").as_deref() == Ok("--live-claude-stop");
     let context = std::env::var("FABER_QUALIFICATION_PROBE").as_deref() == Ok("--live-claude-context");
+    let quota = std::env::var("FABER_QUALIFICATION_PROBE").as_deref() == Ok("--live-claude-quota");
     let mode = std::env::var("FABER_QUALIFICATION_PROBE").unwrap_or_default();
     let output_control = mode == "--live-claude-output-control";
     let role = match mode.as_str() {
@@ -121,6 +122,9 @@ pub async fn run(data: &std::path::Path) -> io::Result<()> {
         role,
     )
     .map_err(|_| io::Error::other("invalid invocation"))?;
+    if quota {
+        args.retain(|arg| arg != "--disable-slash-commands");
+    }
     if output_control {
         let settings = args.iter().position(|a| a == "--settings").unwrap() + 1;
         let mut env: Value = serde_json::from_str(&args[settings])?;
@@ -149,6 +153,31 @@ pub async fn run(data: &std::path::Path) -> io::Result<()> {
     let mut lines = BufReader::new(stdout).lines();
     let started = Instant::now();
     let mut result:io::Result<()>=async {
+        if quota {
+            let packet=json!({"type":"user","message":{"role":"user","content":"/usage"},"parent_tool_use_id":null,"session_id":""});
+            p.stdin.write_all(format!("{packet}\n").as_bytes()).await?;p.stdin.flush().await?;
+            let mut report = None;
+            loop {
+                let line=tokio::time::timeout(Duration::from_secs(20).saturating_sub(started.elapsed()),lines.next_line()).await
+                    .map_err(|_|io::Error::other("quota-only deadline"))??.ok_or_else(||io::Error::other("quota-only EOF"))?;
+                if line.len()>1024*1024 {return Err(io::Error::other("oversized quota message"));}
+                let msg:Value=serde_json::from_str(&line)?;
+                if msg["type"]=="stream_event" || (msg["type"]=="assistant" && msg["usage_report"].is_null()) {
+                    return Err(io::Error::other("quota-only command unexpectedly entered the model loop"));
+                }
+                if !msg["usage_report"].is_null() { report=Some(msg["usage_report"].clone()); }
+                if msg["type"]=="result" {
+                    if msg["local_command"]!="usage" || msg["total_cost_usd"]!=0 || report.is_none() {
+                        return Err(io::Error::other("zero-turn usage command not proved"));
+                    }
+                    let report=report.unwrap();
+                    row["quotaReport"]=report["rate_limits"].clone();
+                    row["apiEquivalentUsd"]=0.into();row["state"]="observed".into();
+                    row["zeroTurnVerified"]=true.into();
+                    return Ok(());
+                }
+            }
+        }
         if context {
             // The official Agent SDK sends these controls without a user message or model turn.
             for (id, request) in [("t13-init", json!({"subtype":"initialize","hooks":null})),

@@ -357,14 +357,19 @@ impl Engine {
         let jobs: Vec<Job> = self.with(|c| {
             c.opts.clis.iter().map(|(v, cli)| (*v, cli.clone(), c.opts.spawn.clone(), c.opts.data_dir.clone(), c.opts.windows)).collect()
         });
+        let mut claude_quota = None;
         for (vendor, cli, spawn, cwd, windows) in jobs {
             match vendor {
                 Vendor::Claude => {
                     let found = account::claude_account(&cli, &spawn, &cwd, timeout).await;
+                    let subscription = found.as_ref().is_some_and(|s| s.billing == Some(Billing::Subscription));
                     self.with(|c| {
                         c.claude_plan_checked(found);
                         c.emit_usage();
                     });
+                    if subscription {
+                        claude_quota = Some((cli, spawn, cwd));
+                    }
                 }
                 Vendor::Codex => {
                     let events = read_codex_limits(&cli.command, &cwd, windows, spawner(&spawn, &cli), timeout).await;
@@ -374,6 +379,14 @@ impl Engine {
                     });
                 }
             }
+        }
+        // Optional quota work cannot hold up either vendor's completed account check.
+        if let Some((cli, spawn, cwd)) = claude_quota {
+            let events = account::claude_limits(&cli, &spawn, &cwd, timeout).await;
+            self.with(|c| {
+                c.zero_turn_checked(Vendor::Claude, events);
+                c.emit_usage();
+            });
         }
     }
     /// Checks the plans once the screen supplies its local offset, then every quarter of an hour. The shell starts it once.
@@ -726,10 +739,30 @@ impl Core {
         if events.is_empty() {
             return self.ledger.codex.plan_failed();
         }
-        events.into_iter().for_each(|e| self.note_account_event(Vendor::Codex, e));
+        self.zero_turn_checked(Vendor::Codex, events);
         if self.ledger.codex.plan.is_none() && self.ledger.codex.billing != Billing::UsageBilled {
             self.ledger.codex.plan_missing();
         }
+    }
+
+    fn zero_turn_checked(&mut self, vendor: Vendor, events: Vec<EngineEvent>) {
+        for event in events {
+            if let EngineEvent::Quota { window, used, resets_at } = &event {
+                let now = self.secs();
+                if plausible(*used, *resets_at) && *resets_at > now {
+                    self.ledger.of_mut(vendor).zero_turn_readings.insert(
+                        window.clone(),
+                        crate::ledger::Reading {
+                            used: (used * 1000.0).round() / 1000.0,
+                            resets_at: resets_at.round(),
+                            read_at: now.round(),
+                        },
+                    );
+                }
+            }
+            self.note_account_event(vendor, event);
+        }
+        self.save_ledger(true);
     }
 
     fn note_account_event(&mut self, vendor: Vendor, event: EngineEvent) {

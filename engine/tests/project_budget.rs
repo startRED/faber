@@ -288,6 +288,229 @@ fn report(l: &mut Ledger, id: &str, cost: Option<f64>, incomplete: bool, termina
     apply(l, Change::Report { id: id.into(), event: done(cost, incomplete), terminated }, NOW, 0).unwrap()
 }
 
+fn uncalibrated(used: f64, at: f64, zero_turn: bool) -> Ledger {
+    let mut l = ledger();
+    for vendor in Vendor::ALL {
+        let v = l.of_mut(vendor);
+        v.history.clear();
+        v.spans.clear();
+        v.day_baselines.clear();
+        v.daily_samples.clear();
+        v.record("seven_day", used, RESET, at, 0);
+    }
+    // Reproduce trusted persisted account-check evidence, never invocation metadata.
+    let mut value = serde_json::to_value(&l).unwrap();
+    if zero_turn {
+        for vendor in Vendor::ALL {
+            value[vendor.name()]["zero_turn_readings"] = serde_json::json!({"seven_day":{
+                "used":used,"resets_at":RESET,"read_at":at
+            }});
+        }
+    }
+    let mut l: Ledger = serde_json::from_value(value).unwrap();
+    for vendor in Vendor::ALL {
+        l.of_mut(vendor).billing = Billing::Subscription;
+    }
+    l
+}
+
+#[test]
+fn r130_requires_fresh_zero_turn_evidence_after_the_boundary_and_five_points_of_margin() {
+    for (used, at, zero, allowed) in [
+        (0.30, NOW, true, true),
+        (0.378, NOW, true, true),
+        (0.379, NOW, true, false),
+        (0.38, NOW, true, false),
+        (0.30, 2.0 * DAY - 1.0, true, false),
+        (0.30, NOW - 7.0 * 3600.0, true, false),
+        (0.30, NOW + 1.0, true, false),
+        (0.30, NOW, false, false),
+    ] {
+        let mut l = uncalibrated(used, at, zero);
+        let result = apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 2_000_000 }, NOW, 0);
+        assert_eq!(result.is_ok(), allowed, "used={used} at={at} zero={zero}: {result:?}");
+        if allowed {
+            assert_eq!(l.codex.day_baselines["seven_day"].reading.used, used);
+            assert_eq!(l.codex.day_baselines["seven_day"].reading.at, at);
+            apply(&mut l, Change::Grant { mission: "m1".into(), grant: grant(2_000_000) }, NOW, 0).unwrap();
+            apply(&mut l, Change::Admit(request("r130", "m1", "w1", Kind::Worker, 100_000)), NOW, 0).unwrap();
+        } else {
+            assert!(l.codex.day_baselines.is_empty());
+        }
+    }
+}
+
+#[test]
+fn r130_new_day_baseline_excludes_yesterdays_unknown_spend_atomically() {
+    let mut l = uncalibrated(0.30, NOW, true);
+    apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 2_000_000 }, NOW, 0).unwrap();
+    l.codex.spend(None, true, NOW + 60.0, 0);
+    let later = NOW + DAY;
+    l.codex.record("seven_day", 0.31, RESET, later, 0);
+    l.codex.paid_fallback_at = Some(later);
+    l.codex.zero_turn_readings.insert("seven_day".into(), l.codex.readings["seven_day"]);
+    let before = serde_json::to_value(&l).unwrap();
+    assert!(apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 2_000_001 }, later, 0).is_err());
+    assert_eq!(serde_json::to_value(&l).unwrap(), before);
+    apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 2_000_000 }, later, 0).unwrap();
+    assert_eq!(l.codex.day_baselines["seven_day"].reading.at, later);
+    assert_eq!(l.codex.day_baselines["seven_day"].unmetered, l.codex.unmetered);
+}
+
+#[test]
+fn r130_a_new_model_still_records_its_first_measured_stretch() {
+    let mut l = ledger();
+    l.codex.record("seven_day", 0.25, RESET, NOW, 0);
+    apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 400_000 }, NOW, 0).unwrap();
+    apply(&mut l, Change::Grant { mission: "new-model".into(), grant: grant(200_000) }, NOW, 0).unwrap();
+    l.codex.zero_turn_readings.insert("seven_day".into(), l.codex.readings["seven_day"]);
+    let mut r = request("new-model-turn", "new-model", "w1", Kind::Worker, 100_000);
+    r.model = "gpt-6-luna".into();
+    let mut oversized = Budget::load(&l).unwrap();
+    oversized.grants.get_mut("new-model").unwrap().cap_micros = 2_000_001;
+    assert_eq!(oversized.can_admit(&l, &r, NOW), Err("reason.budget.cap"));
+    apply(&mut l, Change::Admit(r), NOW, 0).unwrap();
+    report(&mut l, "new-model-turn", Some(0.05), false, true);
+    let later = NOW + 60.0;
+    l.codex.record("seven_day", 0.26, RESET, later, 0);
+    l.codex.zero_turn_readings.insert("seven_day".into(), l.codex.readings["seven_day"]);
+    apply(&mut l, Change::Calibrate { mission: "new-model".into() }, later, 0).unwrap();
+    let b = Budget::load(&l).unwrap();
+    assert_eq!(b.calibrations["new-model"][&Vendor::Codex].costs["gpt-6-luna"], 50_000);
+    assert_eq!(b.calibrations["new-model"][&Vendor::Codex].before["seven_day"].used, 0.25);
+}
+
+#[test]
+fn r130_a_selected_uncalibrated_model_can_allocate_without_another_models_day_baseline() {
+    let mut l = ledger();
+    l.codex.day_baselines.clear();
+    l.codex.zero_turn_readings.insert("seven_day".into(), l.codex.readings["seven_day"]);
+    assert!(apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 400_000 }, NOW, 0).is_err());
+    apply(&mut l, Change::AllocateModel { vendor: Vendor::Codex, model: "gpt-6-luna".into(), cap_micros: 400_000 }, NOW, 0).unwrap();
+    assert_eq!(l.codex.day_baselines["seven_day"].reading.at, NOW);
+    apply(&mut l, Change::Grant { mission: "new-model".into(), grant: grant(200_000) }, NOW, 0).unwrap();
+    let mut r = request("new-model-turn", "new-model", "w1", Kind::Worker, 100_000);
+    r.model = "gpt-6-luna".into();
+    apply(&mut l, Change::Admit(r), NOW, 0).unwrap();
+}
+
+#[test]
+fn r130_never_raises_the_mission_cap_or_accepts_a_caller_claim() {
+    let mut l = uncalibrated(0.30, NOW, true);
+    assert!(apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 2_000_001 }, NOW, 0).is_err());
+    apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 2_000_000 }, NOW, 0).unwrap();
+    assert!(apply(&mut l, Change::Grant { mission: "m1".into(), grant: grant(2_000_001) }, NOW, 0).is_err());
+    let mut l = uncalibrated(0.30, NOW, false);
+    let mut claimed = request("claim", "m1", "w1", Kind::Worker, 1);
+    claimed.extra.insert("zeroTurn".into(), serde_json::json!(true));
+    assert!(Budget::load(&l).unwrap().can_admit(&l, &claimed, NOW).is_err());
+    assert!(apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 1 }, NOW, 0).is_err());
+}
+
+#[test]
+fn r130_checks_every_vendor_again_before_a_turn() {
+    let mut l = uncalibrated(0.30, NOW, true);
+    for vendor in Vendor::ALL {
+        apply(&mut l, Change::Allocate { vendor, cap_micros: 2_000_000 }, NOW, 0).unwrap();
+    }
+    let mut g = grant(2_000_000);
+    g.vendors = BTreeMap::from([(Vendor::Codex, 1_000_000), (Vendor::Claude, 1_000_000)]);
+    apply(&mut l, Change::Grant { mission: "m1".into(), grant: g }, NOW, 0).unwrap();
+    l.claude.record("seven_day", 0.39, RESET, NOW, 0);
+    assert!(apply(&mut l, Change::Admit(request("blocked", "m1", "w1", Kind::Worker, 100_000)), NOW, 0).is_err());
+    assert!(Budget::load(&l).unwrap().invocations.is_empty());
+}
+
+#[test]
+fn r130_records_only_observed_mission_movement_and_then_uses_normal_admission() {
+    let mut l = uncalibrated(0.30, NOW, true);
+    apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 2_000_000 }, NOW, 0).unwrap();
+    apply(&mut l, Change::Grant { mission: "m1".into(), grant: grant(2_000_000) }, NOW, 0).unwrap();
+    apply(&mut l, Change::Admit(request("sample", "m1", "w1", Kind::Worker, 100_000)), NOW, 0).unwrap();
+    apply(&mut l, Change::Report { id: "sample".into(), event: done(Some(0.05), false), terminated: true }, NOW + 30.0, 0).unwrap();
+    let mut value = serde_json::to_value(&l).unwrap();
+    value["codex"]["zero_turn_readings"]["seven_day"] = serde_json::json!({"used":0.31,"resets_at":RESET,"read_at":NOW+60.0});
+    let mut l: Ledger = serde_json::from_value(value).unwrap();
+    l.codex.billing = Billing::Subscription;
+    l.codex.record("seven_day", 0.31, RESET, NOW + 60.0, 0);
+    apply(&mut l, Change::Calibrate { mission: "m1".into() }, NOW + 60.0, 0).unwrap();
+    let b = Budget::load(&l).unwrap();
+    let sample = &b.calibrations["m1"][&Vendor::Codex];
+    assert_eq!(sample.before["seven_day"].used, 0.30);
+    assert_eq!(sample.after["seven_day"].used, 0.31);
+    assert_eq!(sample.costs[MODEL], 50_000);
+    assert_eq!(l.codex.day_baselines["seven_day"].reading.at, NOW);
+    // Measured 20 points per USD: the remaining 10.857 points cover < $0.543, not $2.
+    assert!(b.can_admit(&l, &request("next", "m1", "w2", Kind::Worker, 1), NOW + 60.0).is_err());
+    let mut ended = grant(0);
+    ended.review_micros = 0;
+    ended.repair_micros = 0;
+    ended.canary_micros = 0;
+    apply(&mut l, Change::Grant { mission: "m1".into(), grant: ended }, NOW + 60.0, 0).unwrap();
+    assert_eq!(Budget::load(&l).unwrap().calibrations["m1"][&Vendor::Codex].costs[MODEL], 50_000);
+}
+
+#[test]
+fn r130_does_not_invent_a_stretch_from_reserved_or_missing_usage() {
+    for settled in [false, true] {
+        let mut l = uncalibrated(0.30, NOW, true);
+        apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 2_000_000 }, NOW, 0).unwrap();
+        apply(&mut l, Change::Grant { mission: "m1".into(), grant: grant(2_000_000) }, NOW, 0).unwrap();
+        apply(&mut l, Change::Admit(request("unknown", "m1", "w1", Kind::Worker, 100_000)), NOW, 0).unwrap();
+        if settled {
+            report(&mut l, "unknown", None, true, true);
+        }
+        assert!(apply(&mut l, Change::Calibrate { mission: "m1".into() }, NOW + 60.0, 0).is_err());
+        let b = Budget::load(&l).unwrap();
+        assert!(b.calibrations["m1"][&Vendor::Codex].after.is_empty());
+        assert!(b.calibrations["m1"][&Vendor::Codex].costs.is_empty());
+    }
+}
+
+#[test]
+fn r130_keeps_the_first_actual_day_baseline_when_the_account_is_refreshed() {
+    let mut l = uncalibrated(0.30, NOW, true);
+    apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 1_000_000 }, NOW, 0).unwrap();
+    l.codex.record("seven_day", 0.31, RESET, NOW + 60.0, 0);
+    let mut value = serde_json::to_value(&l).unwrap();
+    value["codex"]["zero_turn_readings"]["seven_day"] = serde_json::json!({"used":0.31,"resets_at":RESET,"read_at":NOW+60.0});
+    let mut l: Ledger = serde_json::from_value(value).unwrap();
+    l.codex.billing = Billing::Subscription;
+    apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 2_000_000 }, NOW + 60.0, 0).unwrap();
+    assert_eq!(l.codex.day_baselines["seven_day"].reading.at, NOW);
+    assert_eq!(l.codex.day_baselines["seven_day"].reading.used, 0.30);
+}
+
+#[test]
+fn r130_plan_relearning_needs_a_reading_from_the_current_plan() {
+    let mut l = uncalibrated(0.30, NOW, true);
+    l.codex.since = NOW;
+    l.codex.relearn_until = NOW + 48.0 * 3600.0;
+    assert!(apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 2_000_000 }, NOW, 0).is_ok());
+    let mut l = uncalibrated(0.30, NOW, true);
+    l.codex.since = NOW + 60.0;
+    l.codex.relearn_until = NOW + 48.0 * 3600.0;
+    assert!(apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 2_000_000 }, NOW + 60.0, 0).is_err());
+}
+
+#[test]
+fn r130_known_prior_spend_does_not_raise_or_shrink_the_next_missions_two_dollar_cap() {
+    let mut l = uncalibrated(0.30, NOW, true);
+    apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 2_000_000 }, NOW, 0).unwrap();
+    apply(&mut l, Change::Grant { mission: "m1".into(), grant: grant(200_000) }, NOW, 0).unwrap();
+    apply(&mut l, Change::Admit(request("prior", "m1", "w1", Kind::Worker, 100_000)), NOW, 0).unwrap();
+    report(&mut l, "prior", Some(0.05), false, true);
+    let mut ended = grant(0);
+    ended.review_micros = 0;
+    ended.repair_micros = 0;
+    ended.canary_micros = 0;
+    apply(&mut l, Change::Grant { mission: "m1".into(), grant: ended }, NOW, 0).unwrap();
+    apply(&mut l, Change::Allocate { vendor: Vendor::Codex, cap_micros: 2_050_000 }, NOW, 0).unwrap();
+    apply(&mut l, Change::Grant { mission: "m2".into(), grant: grant(2_000_000) }, NOW, 0).unwrap();
+    assert_eq!(Budget::load(&l).unwrap().grants["m2"].cap_micros, 2_000_000);
+    assert!(apply(&mut l, Change::Grant { mission: "too-big".into(), grant: grant(2_000_001) }, NOW, 0).is_err());
+}
+
 #[test]
 fn successive_mission_grants_cannot_overbook_the_shared_daily_allocation() {
     let mut l = ready(250_000);

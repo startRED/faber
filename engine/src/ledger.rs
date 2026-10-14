@@ -52,6 +52,8 @@ pub struct VendorLedger {
     pub day_baselines: BTreeMap<String, DailySample>,
     /// Last weekly sample, so a reading just before a boundary is evidence rather than an invented empty day.
     pub daily_samples: BTreeMap<String, DailySample>,
+    /// Only the engine's no-model account check stamps this evidence; ordinary quota events do not.
+    pub zero_turn_readings: BTreeMap<String, Reading>,
     pub spans: Vec<Span>,
     /// Own API-equivalent USD per local day, independent of account percentages.
     pub own_spend: BTreeMap<i64, f64>,

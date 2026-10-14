@@ -82,6 +82,7 @@ fn run() -> io::Result<()> {
         || !matches!(
             mode.as_str(),
             "--preflight"
+                | "--zero-turn-admission"
                 | "--hidden-worker"
                 | "--live-loadout"
                 | "--live-native"
@@ -90,6 +91,7 @@ fn run() -> io::Result<()> {
                 | "--live-claude-native"
                 | "--live-claude-stop"
                 | "--live-claude-context"
+                | "--live-claude-quota"
                 | "--live-claude-output-lead"
                 | "--live-claude-output-writer"
                 | "--live-claude-output-reviewer"
@@ -186,6 +188,62 @@ async fn worker(data: &Path) -> io::Result<()> {
     use serde_json::json;
     use std::time::Duration;
     use tokio::io::AsyncReadExt;
+    if std::env::var("FABER_QUALIFICATION_PROBE").as_deref() == Ok("--zero-turn-admission") {
+        let clis = [(Vendor::Claude, "claude"), (Vendor::Codex, "codex")]
+            .into_iter()
+            .map(|(vendor, name)| {
+                faber_engine::cli::find_cli(name).map(|cli| (vendor, cli)).ok_or_else(|| io::Error::other("CLI unavailable"))
+            })
+            .collect::<io::Result<std::collections::BTreeMap<_, _>>>()?;
+        let engine = faber_engine::engine::Engine::new(
+            faber_engine::engine::EngineOptions {
+                data_dir: data.join("engine"),
+                clis,
+                spawn: faber_engine::proc::real_spawner(),
+                windows: true,
+                claude_env_billed: false,
+                max_warm: 1,
+                idle: Duration::from_secs(30),
+                runtime: tokio::runtime::Handle::current(),
+                ask: None,
+            },
+            std::sync::Arc::new(|_| {}),
+        );
+        engine.check_plans(Duration::from_secs(20)).await;
+        let mut rows = vec![];
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(io::Error::other)?.as_secs_f64();
+        for vendor in Vendor::ALL {
+            let l = engine.ledger();
+            let v = l.of(vendor);
+            if !v.spans.is_empty() {
+                return Err(io::Error::other("no-model account check recorded a model span"));
+            }
+            let model = match vendor {
+                Vendor::Claude => "claude-haiku-5-5",
+                Vendor::Codex => "gpt-6-luna",
+            };
+            let admitted = engine.mission_budget(faber_engine::project::budget::Change::AllocateModel {
+                vendor,
+                model: model.into(),
+                cap_micros: 2_000_000,
+            });
+            let serialized = serde_json::to_value(v)?;
+            let weekly = v.readings.get("seven_day");
+            let line = weekly.and_then(|r| {
+                faber_engine::budget::daily_start(r.resets_at, now).map(|start| (start + 86400.0 - (r.resets_at - 604800.0)) / 604800.0)
+            });
+            rows.push(json!({"vendor":vendor,"billing":format!("{:?}",v.billing),"paidFallback":v.paid_fallback,
+                "readings":v.readings,"zeroTurnReadings":serialized["zero_turn_readings"],"line":line,
+                "margin":line.zip(weekly).map(|(line,r)|line-r.used),"r130Admitted":admitted.is_ok(),
+                "reason":admitted.err(),"modelTurns":0}));
+        }
+        engine.shutdown();
+        let mut file = std::fs::OpenOptions::new().create_new(true).write(true).open(data.join("zero-turn-admission.json"))?;
+        use std::io::Write;
+        file.write_all(&serde_json::to_vec_pretty(&json!({"schema":1,"measuredAt":now,"missionCapMicros":2_000_000,"records":rows}))?)?;
+        file.sync_all()?;
+        return Ok(());
+    }
     let spawn = faber_engine::proc::real_spawner();
     let mut records = vec![];
     for (name, vendor) in [("claude", Vendor::Claude), ("codex", Vendor::Codex)] {

@@ -85,7 +85,12 @@ async fn the_plan_comes_from_the_status_command_and_nothing_else_of_it_is_kept()
     let claude = engine.ledger().claude;
     assert_eq!((claude.plan.as_deref(), claude.billing), (Some("max"), Billing::Subscription));
     assert!(claude.plan_ok(WHEN as f64));
-    assert_eq!(*calls.lock().unwrap(), [("claude".to_string(), vec!["auth".to_string(), "status".to_string()])]);
+    let statuses: Vec<_> = calls.lock().unwrap().iter().filter(|(_, args)| args == &["auth", "status"]).cloned().collect();
+    assert_eq!(statuses, [("claude".to_string(), vec!["auth".to_string(), "status".to_string()])]);
+    assert!(
+        claude.zero_turn_readings.is_empty() && claude.spans.is_empty() && claude.own_spend.is_empty(),
+        "an auth-status payload cannot become quota evidence or measured model use"
+    );
     engine.shutdown();
     let saved = std::fs::read_to_string(dir.path().join("budget.json")).unwrap();
     assert!(!saved.contains("someone@example.com") && !saved.contains("Acme"));
@@ -190,7 +195,11 @@ async fn watching_the_accounts_checks_at_once() {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     assert_eq!(engine.ledger().claude.plan.as_deref(), Some("max"));
-    assert_eq!(calls.lock().unwrap().len(), 1, "once now, then every quarter of an hour");
+    assert_eq!(
+        calls.lock().unwrap().iter().filter(|(_, args)| args == &["auth", "status"]).count(),
+        1,
+        "one account check now, then every quarter of an hour; optional quota work is separate"
+    );
     engine.shutdown();
 }
 
