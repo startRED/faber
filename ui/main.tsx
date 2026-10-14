@@ -3,6 +3,8 @@ import './fonts.css';
 import './styles.css';
 import { type AppEvent, api } from './api.ts';
 import { App } from './App.tsx';
+import { ContextMenuHost } from './ContextMenu.tsx';
+import { installContextMenu } from './contextmenu.ts';
 import { applyLook } from './appearance.ts';
 import { createInbox } from './inbox.ts';
 import { store } from './running.ts';
@@ -29,4 +31,15 @@ store.offer(state.running);
 // The look is on the page before anything is drawn, so the first frame already has the theme's colours.
 applyLook(state.look);
 
-render(() => <App initial={state} inbox={inbox} />, document.getElementById('root')!);
+// Right-click is Faber's own (ui/contextmenu.ts): the browser's menu and its reload and print shortcuts never reach the person.
+installContextMenu();
+
+render(
+  () => (
+    <>
+      <App initial={state} inbox={inbox} />
+      <ContextMenuHost />
+    </>
+  ),
+  document.getElementById('root')!,
+);

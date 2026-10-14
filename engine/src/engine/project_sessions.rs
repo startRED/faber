@@ -96,12 +96,18 @@ impl Engine {
                 for session in &sessions {
                     session.close();
                 }
-                self.with(|c| c.mission_sessions.remove(&runner.mission.id));
+                self.with(|c| {
+                    c.mission_sessions.remove(&runner.mission.id);
+                    c.mission_projects.remove(&runner.mission.id);
+                });
                 paused?;
             } else if runner.mission.state != crate::project::MissionState::Paused || !self.mission_sessions(&runner.mission.id).is_empty()
             {
                 runner.stop(&journal, self).await?;
-                self.with(|c| c.mission_sessions.remove(&runner.mission.id));
+                self.with(|c| {
+                    c.mission_sessions.remove(&runner.mission.id);
+                    c.mission_projects.remove(&runner.mission.id);
+                });
             }
         }
         Ok(())
@@ -205,7 +211,10 @@ impl Engine {
             session.close();
             return Err("error.project.invocation".into());
         }
-        self.with(|c| c.mission_sessions.entry(runner.mission.id.clone()).or_default().push(session.clone()));
+        self.with(|c| {
+            c.mission_sessions.entry(runner.mission.id.clone()).or_default().push(session.clone());
+            c.mission_projects.insert(runner.mission.id.clone(), runner.mission.project_id.clone());
+        });
         session.send(UserTurn::text(prompt));
         Ok(())
     }

@@ -549,6 +549,24 @@ export const en = {
   "error.plan.readOnlyWrites": "A read-only task claims permission to write files.",
   "error.plan.overlap": "Unordered writers overlap the same source files.",
   "crumb.separator": "\u203a",
+  // Right-click menus (ui/ContextMenu.tsx).
+  "menu.label": "Actions",
+  "menu.rename": "Rename",
+  "menu.renameLabel": "Conversation name",
+  "menu.delete": "Delete",
+  "menu.newHere": "New conversation in this project",
+  "menu.openFolder": "Open folder",
+  "menu.removeProject": "Remove from Faber",
+  "menu.removeConfirm": "Remove?",
+  "menu.copy": "Copy",
+  "menu.cut": "Cut",
+  "menu.paste": "Paste",
+  "menu.selectAll": "Select all",
+  "menu.redo": "Redo",
+  "error.project.busy": "Something is still working in this project. Stop it first, then remove the project.",
+  "error.folder.notLocal": "That folder is not on this computer, so Faber will not open it.",
+  "error.folder.missing": "That folder is not there any more.",
+  "error.folder.link": "That folder is a link to somewhere else, so Faber will not open it. Open the real folder from the file manager.",
 } as const;
 
 export type Key = keyof typeof en;

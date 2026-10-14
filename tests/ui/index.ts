@@ -16,6 +16,7 @@ import { crash, report } from './crash.ts';
 import './appearance.check.ts';
 import './check.check.ts';
 import './composer.check.ts';
+import './contextmenu.check.ts';
 import './effort.check.ts';
 import './idle.check.ts';
 import './i18n.check.ts';

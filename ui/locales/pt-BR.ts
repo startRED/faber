@@ -657,4 +657,30 @@ export const ptBR: Messages = {
   "error.plan.overlap": "Escritores não ordenados sobrepõem os mesmos arquivos fonte.",
   // Native speaker must translate (needs native review).
   "crumb.separator": "\u203a",
+  // Right-click menus (ui/ContextMenu.tsx).
+  // Native speaker must translate (needs native review).
+  "menu.label": "Ações",
+  "menu.rename": "Mudar o nome",
+  // Native speaker must translate (needs native review).
+  "menu.renameLabel": "Nome da conversa",
+  "menu.delete": "Apagar",
+  "menu.newHere": "Nova conversa neste projeto",
+  "menu.openFolder": "Abrir pasta",
+  "menu.removeProject": "Remover do Faber",
+  // Native speaker must translate (needs native review).
+  "menu.removeConfirm": "Remover?",
+  "menu.copy": "Copiar",
+  "menu.cut": "Recortar",
+  "menu.paste": "Colar",
+  "menu.selectAll": "Selecionar tudo",
+  // Native speaker must translate (needs native review).
+  "menu.redo": "Refazer",
+  // Native speaker must translate (needs native review).
+  "error.project.busy": "Ainda tem algo trabalhando neste projeto. Pare primeiro e depois remova o projeto.",
+  // Native speaker must translate (needs native review).
+  "error.folder.notLocal": "Essa pasta não está neste computador, então o Faber não vai abri-la.",
+  // Native speaker must translate (needs native review).
+  "error.folder.missing": "Essa pasta não existe mais.",
+  // Native speaker must translate (needs native review).
+  "error.folder.link": "Essa pasta é um atalho para outro lugar, então o Faber não vai abri-la. Abra a pasta de verdade pelo gerenciador de arquivos.",
 };

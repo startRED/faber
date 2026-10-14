@@ -8,6 +8,7 @@ pub mod first_run;
 pub mod homes;
 #[cfg(windows)]
 pub mod local_update;
+pub mod menus;
 pub mod permissions;
 pub mod projects;
 pub mod projects_ui;
@@ -47,6 +48,7 @@ pub fn all() -> Vec<Scenario> {
         .chain(setup::scenarios())
         .chain(first_run::scenarios())
         .chain(homes::scenarios())
+        .chain(menus::scenarios())
         .chain(sentinel::scenarios());
     #[cfg(windows)]
     let all = all.chain(containment::scenarios());
