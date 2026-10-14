@@ -178,6 +178,38 @@ fn opus_m2_heavy_lane_spans_candidates() {
 }
 
 #[test]
+fn proof_receipt_write_failure_releases_mission_power() {
+    use faber_engine::project::{
+        Mission, MissionState,
+        run::Runner,
+        store::{Journal, observe_missions},
+    };
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    let (repo, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let j = Journal::open(repo.path(), data.path(), "m1").unwrap();
+    let mut r = Runner::create(&j, Mission::new("m1", "p1", "repo", "Fix", &"1".repeat(40), 3, 1)).unwrap();
+    let awake = Arc::new(AtomicBool::new(false));
+    let owner = awake.clone();
+    let _events = observe_missions(
+        data.path(),
+        Arc::new(move |mission| {
+            owner.store(matches!(mission.state, MissionState::Running | MissionState::Planning), Ordering::SeqCst);
+        }),
+    )
+    .unwrap();
+    r.mission.state = MissionState::Running;
+    let mut proof = ProofSet::new("1".repeat(40), "input".into(), vec![definition()], vec![]).unwrap();
+    let receipt = r.start_proof(&j, "a", "rust", &mut proof).unwrap();
+    assert!(awake.load(Ordering::SeqCst));
+    std::fs::create_dir_all(j.private().join("checks").join(format!("{receipt}.json.tmp"))).unwrap();
+    assert_eq!(r.finish_proof(&j, "a", &mut proof, &receipt, "rust", observation()), Err("error.store.write"));
+    assert!(!awake.load(Ordering::SeqCst), "proof receipt write failure leaked mission power");
+}
+
+#[test]
 fn opus_m2_known_proof_receipt_recovers_after_checkpoint_fault() {
     let (repo, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let j = faber_engine::project::store::Journal::open(repo.path(), data.path(), "m1").unwrap();

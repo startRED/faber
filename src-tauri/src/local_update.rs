@@ -729,6 +729,87 @@ pub struct Stage<'a> {
 }
 
 impl Development {
+    /// Consume durable landing requests, including ones saved before a restart.
+    pub fn service_landed_missions<R: Runner>(
+        &self,
+        engine: &faber_engine::Engine,
+        active_window: bool,
+        git: &mut impl Executor,
+        mut make_runner: impl FnMut(&str, &Path) -> Result<R>,
+    ) -> Result<bool> {
+        let _chat = engine.local_build_admission().map_err(|_| UpdateError::ActiveOperations)?;
+        self.layout.missions_quiescent()?;
+        let projects = engine.projects_checked().map_err(|_| invalid("invalid project grants"))?;
+        let root = self.data().join("missions");
+        if !root.exists() {
+            return Ok(false);
+        }
+        let mut pending = vec![];
+        for entry in fs::read_dir(&root).map_err(io_error)? {
+            let path = real_path(&entry.map_err(io_error)?.path())?;
+            let Some((bytes, _)) = ScopedFile::new(&path.join("run.json"), false)?.read_limited(16 * 1024 * 1024)? else { continue };
+            let run: faber_engine::project::run::Runner =
+                serde_json::from_slice(&bytes).map_err(|_| invalid("corrupt mission checkpoint"))?;
+            if path.file_name().and_then(|n| n.to_str()) != Some(&run.mission.id) {
+                return Err(invalid("mission checkpoint mismatch"));
+            }
+            if run.promotion_pending && run.mission.state == faber_engine::project::MissionState::Done {
+                pending.push(run);
+            }
+        }
+        pending.sort_by_key(|r| r.landings.last().map_or(0, |l| l.at));
+        let Some(recorded) = pending.pop() else { return Ok(false) };
+        let project = projects.iter().find(|p| p.id == recorded.mission.project_id).ok_or(invalid("mission project missing"))?;
+        let repo = project.repo.as_ref().filter(|r| r.common_dir == recorded.mission.repo).ok_or(invalid("mission repository changed"))?;
+        let grant = project.grant.as_ref().ok_or(UpdateError::Grant("reason.grant.none"))?;
+        let journal = faber_engine::project::store::Journal::open(Path::new(&project.path), &self.data(), &recorded.mission.id)
+            .map_err(|_| invalid("invalid private mission ledger"))?;
+        let mut run = faber_engine::project::run::Runner::load(&journal).map_err(|_| invalid("invalid private mission checkpoint"))?;
+        let landing = run.landings.last().ok_or(invalid("missing accepted landing"))?;
+        let receipt = journal
+            .effect_receipt(&landing.commit_intent)
+            .map_err(|_| invalid("invalid private landing receipt"))?
+            .ok_or(invalid("missing private landing receipt"))?;
+        let commit = receipt.evidence.get("head").ok_or(invalid("missing landed commit"))?;
+        let tree = &landing.candidate.tree;
+        let result = (|| {
+            let mut runner = make_runner(&run.mission.id, Path::new(&project.path))?;
+            self.stage_landed_mission(repo, grant, commit, tree, run.mission.grant_revision, git, &mut runner)?;
+            if self.manager()?.manifest()?.is_some_and(|m| matches!(m.state, UpdateState::Ready { .. })) {
+                runner.accepted(repo, commit, tree, &self.build_dir().join("source"))?;
+                let manifest = self.manager()?.manifest()?.ok_or(invalid("missing manifest"))?;
+                let payload = read_payload(&self.binary(manifest.active_slot.other()))?;
+                self.transition(
+                    grant,
+                    repo,
+                    run.mission.grant_revision,
+                    SwapCheck { payload: &payload, active_window, active_operations: false },
+                    now(),
+                )?;
+            }
+            Ok(())
+        })();
+        if matches!(result, Err(UpdateError::ActiveOperations)) {
+            return result.map(|()| true);
+        }
+        run.promotion_pending = false;
+        if let Err(error) = &result {
+            run.mission.reason = Some(error.key().into());
+        }
+        run.save(&journal).map_err(|_| invalid("failed to settle landing request"))?;
+        for mut older in pending.into_iter().filter(|r| r.mission.repo == run.mission.repo) {
+            let owner = projects.iter().find(|p| p.id == older.mission.project_id).ok_or(invalid("obsolete mission project missing"))?;
+            if owner.repo.as_ref().is_none_or(|repo| repo.common_dir != older.mission.repo) {
+                return Err(invalid("obsolete mission repository changed"));
+            }
+            let journal = faber_engine::project::store::Journal::open(Path::new(&owner.path), &self.data(), &older.mission.id)
+                .map_err(|_| invalid("invalid obsolete landing ledger"))?;
+            older.promotion_pending = false;
+            older.save(&journal).map_err(|_| invalid("failed to coalesce obsolete landing"))?;
+        }
+        result.map(|()| true)
+    }
+
     /// Baseline enrollment is explicit; never copy an installed release or a running slot.
     pub fn adopt(&self, tree: ExactTree, executable: &Path, helper: &Path, time: u64) -> Result<()> {
         let _lock = self.lock()?;
@@ -762,6 +843,7 @@ impl Development {
     pub fn stage(&self, request: Stage<'_>, git_executor: &mut impl Executor, runner: &mut impl Runner) -> Result<Slot> {
         let _lock = self.lock()?;
         request.grant.allows(request.repo, request.revision, Effect::SelfUpdate).map_err(UpdateError::Grant)?;
+        self.layout.missions_quiescent()?;
         if !valid_oid(request.commit) || !valid_oid(request.tree) {
             return Err(invalid("invalid accepted source identity"));
         }
@@ -791,22 +873,6 @@ impl Development {
             return Err(invalid("accepted tree changed"));
         }
         self.begin_build_output()?;
-        if let UpdateState::PreparingNext { slot, ref tree } | UpdateState::CanaryPending { slot, ref tree } = manifest.state
-            && tree.commit_oid == request.commit
-            && tree.tree_oid == request.tree
-            && manifest.candidate_repo.as_ref() == Some(&request.repo.common_dir)
-            && self.verify_slot(slot, tree).is_ok()
-            && self.slot_helper(slot).is_ok_and(|helper| helper.is_some())
-        {
-            let result = (|| {
-                let compatibility = self.build_dir().join("compatibility");
-                copy_saved_data(&self.data(), &compatibility)?;
-                runner.compatible(&self.binary(manifest.active_slot), &self.binary(slot), &compatibility)?;
-                self.run_canary(slot, tree, runner)
-            })();
-            self.clean_build_output()?;
-            return result.map(|()| slot);
-        }
         let snapshot = self.build_dir().join("source");
         let result = (|| {
             let entries = snapshot_entries(&git(git_executor, &source, &["ls-tree", "-rz", request.tree])?, &snapshot)?;
@@ -826,6 +892,26 @@ impl Development {
             }
             if source_inventory(&snapshot)? != frozen {
                 return Err(invalid("proof modified accepted source"));
+            }
+            if let UpdateState::PreparingNext { slot, ref tree }
+            | UpdateState::CanaryPending { slot, ref tree }
+            | UpdateState::Ready { slot, ref tree, .. } = manifest.state
+                && tree.commit_oid == request.commit
+                && tree.tree_oid == request.tree
+                && manifest.candidate_repo.as_ref() == Some(&request.repo.common_dir)
+                && self.verify_slot(slot, tree).is_ok()
+                && self.slot_helper(slot).is_ok_and(|helper| helper.is_some())
+            {
+                if tree.extra.get("proofReceipt").and_then(Value::as_str) != Some(&proof) {
+                    return Err(invalid("accepted proof changed"));
+                }
+                if !matches!(manifest.state, UpdateState::Ready { .. }) {
+                    let compatibility = self.build_dir().join("compatibility");
+                    copy_saved_data(&self.data(), &compatibility)?;
+                    runner.compatible(&self.binary(manifest.active_slot), &self.binary(slot), &compatibility)?;
+                    self.run_canary(slot, tree, runner)?;
+                }
+                return Ok(slot);
             }
             let target = self.build_dir().join("target");
             let (executable, helper) = runner.build(&snapshot, &target)?;
@@ -914,7 +1000,9 @@ impl Development {
         ] {
             ScopedFile::new(&canary.join(name), true)?.write(bytes, None)?;
         }
-        let verdict = runner.canary(&self.binary(slot), tree, &canary)?;
+        let verdict = runner
+            .canary(&self.binary(slot), tree, &canary)
+            .unwrap_or_else(|_| CanaryVerdict::Fail { at: now(), reason: "error.update.canaryFailed".into() });
         if verdict == CanaryVerdict::NotRun {
             self.manager()?.wait_for_canary(now())?;
             return Ok(());
@@ -1025,63 +1113,119 @@ pub struct ProductionRunner {
     pub node: PathBuf,
     pub cargo: PathBuf,
     pub canary_available: bool,
+    pub data: PathBuf,
+    pub mission: String,
+    _power: Option<crate::awake::MissionAwakeGuard>,
 }
 
 impl ProductionRunner {
-    pub fn new(dependencies: PathBuf, node: PathBuf, cargo: PathBuf) -> Self {
-        Self { dependencies, node, cargo, canary_available: true }
+    pub fn new(dependencies: PathBuf, node: PathBuf, cargo: PathBuf, data: PathBuf, mission: String) -> Self {
+        Self { dependencies, node, cargo, canary_available: true, data, mission, _power: None }
     }
+
+    pub fn with_awake(mut self, awake: std::sync::Arc<std::sync::Mutex<crate::awake::CountedAwake>>) -> Self {
+        self._power = Some(crate::awake::MissionAwakeGuard::new(awake, "local-update"));
+        self
+    }
+
+    pub fn for_mission(repo: &Path, data: &Path, mission: &str) -> Result<Self> {
+        let native = |name| {
+            let cli =
+                faber_engine::cli::find_cli(name).filter(|cli| cli.prefix.is_empty()).ok_or(invalid("native build tool unavailable"))?;
+            Ok::<_, UpdateError>(PathBuf::from(cli.command))
+        };
+        Ok(Self::new(repo.join("node_modules"), native("node")?, native("cargo")?, data.into(), mission.into()))
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CanaryHandshake {
+    pub nonce: String,
+    pub build_hash: String,
+    pub schema: u32,
+    pub receipt: String,
+    pub verdict: CanaryVerdict,
+}
+
+/// This bounded headless operation runs inside the candidate before any GUI runtime or account discovery.
+pub fn probe_canary(data: &Path, nonce: &str, output: &Path) -> Result<()> {
+    if !faber_engine::project::valid_id(nonce) || !output.starts_with(data) {
+        return Err(invalid("invalid canary challenge"));
+    }
+    for (name, expected) in [
+        ("goal.json", include_bytes!("../../tests/fixtures/projects/canary/goal.json").as_slice()),
+        ("src/lib.rs", include_bytes!("../../tests/fixtures/projects/canary/src/lib.rs").as_slice()),
+    ] {
+        let bytes = ScopedFile::new(&data.join(name), false)?.read_limited(64 * 1024)?.ok_or(invalid("missing canary fixture"))?.0;
+        if bytes != expected {
+            return Err(invalid("canary fixture changed"));
+        }
+    }
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(io_error)?;
+    let engine = faber_engine::Engine::new(
+        faber_engine::EngineOptions {
+            data_dir: data.join("data"),
+            clis: Default::default(),
+            spawn: faber_engine::proc::real_spawner(),
+            windows: cfg!(windows),
+            claude_env_billed: false,
+            max_warm: 0,
+            idle: std::time::Duration::from_secs(30),
+            runtime: runtime.handle().clone(),
+            ask: None,
+        },
+        std::sync::Arc::new(|_| {}),
+    );
+    validate_saved_data(&data.join("data"))?;
+    let _state = engine.state();
+    engine.shutdown();
+    let executable = std::env::current_exe().map_err(io_error)?;
+    let handshake = CanaryHandshake {
+        nonce: nonce.into(),
+        build_hash: ExactTree::compute_build_hash(&read_payload(&executable)?),
+        schema: SCHEMA,
+        receipt: nonce.into(),
+        // shortcut: T2/T5 still deny production writer dispatch, require a separately granted completed tiny mission before Pass.
+        verdict: CanaryVerdict::NotRun,
+    };
+    ScopedFile::new(output, true)?.write(&serde_json::to_vec(&handshake).expect("plain data serializes"), None)?;
+    Ok(())
+}
+
+pub fn verify_canary_handshake(handshake: &CanaryHandshake, nonce: &str, tree: &ExactTree) -> Result<CanaryVerdict> {
+    if handshake.nonce != nonce
+        || handshake.receipt != nonce
+        || handshake.build_hash != tree.build_hash
+        || handshake.schema != tree.schema_version
+    {
+        return Err(invalid("canary handshake mismatch"));
+    }
+    // A startup acknowledgement cannot substitute for the mandatory writer/proof/other-vendor miniature mission.
+    if handshake.verdict != CanaryVerdict::NotRun {
+        return Err(invalid("missing private miniature mission receipt"));
+    }
+    Ok(handshake.verdict.clone())
 }
 
 impl Runner for ProductionRunner {
     fn accepted(&mut self, repo: &RepoIdentity, commit: &str, tree: &str, _snapshot: &Path) -> Result<String> {
-        let missions_dir = Path::new(&repo.root).join(".faber").join("missions");
-        if missions_dir.is_dir()
-            && let Ok(entries) = fs::read_dir(&missions_dir)
-        {
-            for mission_entry in entries.flatten() {
-                let receipts_dir = mission_entry.path().join("receipts");
-                if receipts_dir.is_dir()
-                    && let Ok(receipt_files) = fs::read_dir(&receipts_dir)
-                {
-                    for file in receipt_files.flatten() {
-                        if let Ok(bytes) = fs::read(file.path())
-                            && let Ok(val) = serde_json::from_slice::<Value>(&bytes)
-                        {
-                            let matches_evidence = |evidence: &Value| -> bool {
-                                evidence.get("head").and_then(Value::as_str) == Some(commit)
-                                    && evidence.get("tree").and_then(Value::as_str) == Some(tree)
-                            };
-                            if let Some(receipt) = val.get("receipt") {
-                                let outcome = receipt.get("outcome").and_then(Value::as_str);
-                                if (outcome == Some("done") || outcome == Some("Done"))
-                                    && receipt.get("evidence").is_some_and(matches_evidence)
-                                    && let Some(id) = val.get("intent").and_then(|i| i.get("id")).and_then(Value::as_str)
-                                {
-                                    return Ok(id.to_string());
-                                }
-                            } else if let Some(evidence) = val.get("evidence") {
-                                let outcome = val.get("outcome").and_then(Value::as_str);
-                                if (outcome == Some("done") || outcome == Some("Done"))
-                                    && matches_evidence(evidence)
-                                    && let Some(intent) = val.get("intent").and_then(Value::as_str)
-                                {
-                                    return Ok(intent.to_string());
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        let journal = faber_engine::project::store::Journal::open(Path::new(&repo.root), &self.data, &self.mission)
+            .map_err(|_| invalid("invalid private mission ledger"))?;
+        let runner = faber_engine::project::run::Runner::load(&journal).map_err(|_| invalid("invalid private mission checkpoint"))?;
+        if runner.mission.repo != repo.common_dir || runner.mission.state != faber_engine::project::MissionState::Done {
+            return Err(invalid("mission is not accepted for this repository"));
         }
-        Err(invalid("no accepted receipt found for commit and tree"))
+        let landing =
+            runner.accepted_landing(&journal, commit, tree).map_err(|_| invalid("missing private exact-tree proof and review"))?;
+        Ok(format!("{}-{}-{}", runner.mission.id, landing.commit_intent, landing.forward_intent))
     }
 
     fn build(&mut self, snapshot: &Path, target: &Path) -> Result<(PathBuf, PathBuf)> {
         native_build(snapshot, target, &self.dependencies, &self.node, &self.cargo)
     }
 
-    fn canary(&mut self, executable: &Path, tree: &ExactTree, _data: &Path) -> Result<CanaryVerdict> {
+    fn canary(&mut self, executable: &Path, tree: &ExactTree, data: &Path) -> Result<CanaryVerdict> {
         if !self.canary_available {
             return Ok(CanaryVerdict::NotRun);
         }
@@ -1089,13 +1233,43 @@ impl Runner for ProductionRunner {
         if ExactTree::compute_build_hash(&bytes) != tree.build_hash {
             return Ok(CanaryVerdict::Fail { at: now(), reason: "error.update.payloadMismatch".into() });
         }
-        Ok(CanaryVerdict::Pass {
-            verified_at: now(),
-            receipt_id: format!("canary-{}", now()),
-            tree: tree.clone(),
-            proof_receipt: tree.extra.get("proofReceipt").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            compatible_schemas: vec![SCHEMA],
-        })
+        let native = if cfg!(windows) {
+            bytes.starts_with(b"MZ")
+        } else {
+            bytes.starts_with(b"\x7fELF")
+                || matches!(
+                    bytes.get(..4),
+                    Some(
+                        [0xfe, 0xed, 0xfa, 0xce]
+                            | [0xfe, 0xed, 0xfa, 0xcf]
+                            | [0xce, 0xfa, 0xed, 0xfe]
+                            | [0xcf, 0xfa, 0xed, 0xfe]
+                            | [0xca, 0xfe, 0xba, 0xbe]
+                            | [0xca, 0xfe, 0xba, 0xbf]
+                            | [0xbe, 0xba, 0xfe, 0xca]
+                            | [0xbf, 0xba, 0xfe, 0xca]
+                    )
+                )
+        };
+        if !native {
+            return Err(invalid("native canary executable required"));
+        }
+        let nonce = format!(
+            "{}-{}",
+            std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).map_err(|_| invalid("canary clock unavailable"))?.as_nanos()
+        );
+        let output = data.join(format!("handshake-{nonce}.json"));
+        let mut command = NativeCommand::new(executable.into(), data.into());
+        command.args =
+            vec!["--faber-local-canary".into(), data.to_string_lossy().into_owned(), nonce.clone(), output.to_string_lossy().into_owned()];
+        run_bounded(&command, std::time::Duration::from_secs(30))?;
+        let bytes = ScopedFile::new(&output, false)?.read_limited(64 * 1024)?.ok_or(invalid("canary did not acknowledge startup"))?.0;
+        let handshake: CanaryHandshake = serde_json::from_slice(&bytes).map_err(|_| invalid("corrupt canary handshake"))?;
+        let verdict = verify_canary_handshake(&handshake, &nonce, tree)?;
+        let receipt = self.data.join("missions").join(&self.mission).join(format!("canary-{nonce}.json"));
+        ScopedFile::new(&receipt, true)?.write(&bytes, None)?;
+        Ok(verdict)
     }
 }
 
@@ -1405,7 +1579,8 @@ fn copy_saved_data(root: &Path, target: &Path) -> Result<()> {
     }
     for entry in fs::read_dir(root).map_err(io_error)? {
         let entry = entry.map_err(io_error)?;
-        if entry.file_name() == "webview" || entry.file_name() == "workspaces" {
+        // Process ownership locks are not saved application data.
+        if entry.file_name() == "webview" || entry.file_name() == "workspaces" || entry.file_name() == "budget.lock" {
             continue;
         }
         let path = real_path(&entry.path())?;

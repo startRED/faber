@@ -1040,7 +1040,35 @@ fn stage_landed_mission_stages_when_self_update_is_true() {
 }
 
 #[test]
-fn production_runner_accepted_checks_landing_receipts() {
+fn landed_build_waits_for_running_missions_before_any_build_effect() {
+    let dir = area();
+    let dev = config(dir.path());
+    dev.manager().unwrap();
+    fs::write(dev.binary(Slot::A), b"old").unwrap();
+    dev.manager().unwrap().adopt_baseline(Slot::A, tree(b"old"), b"old", now()).unwrap();
+    let checkout = dir.path().join("checkout");
+    fs::create_dir(&checkout).unwrap();
+    let repo = RepoIdentity::new("repo", &checkout.to_string_lossy());
+    let mut grant = Grant::new("repo", GitMode::Seguro, 1, now());
+    grant.self_update = true;
+    let j = faber_engine::project::store::Journal::open(&checkout, &dev.data(), "m1").unwrap();
+    let mut active = faber_engine::project::run::Runner::create(
+        &j,
+        faber_engine::project::Mission::new("m1", "p1", "repo", "Active", &"1".repeat(40), 1, now()),
+    )
+    .unwrap();
+    active.mission.state = faber_engine::project::MissionState::Running;
+    active.save(&j).unwrap();
+    let mut source = Source { calls: 0, tree: "2".repeat(40) };
+    let mut runner = Gates { fail: "canary-unavailable", built: false };
+    assert!(dev.stage_landed_mission(&repo, &grant, &"1".repeat(40), &"2".repeat(40), 1, &mut source, &mut runner).is_err());
+    assert!(!runner.built);
+    assert_eq!(source.calls, 0);
+    assert_eq!(fs::read(dev.binary(Slot::A)).unwrap(), b"old");
+}
+
+#[test]
+fn production_approval_rejects_forged_repository_receipts() {
     let dir = area();
     let repo_dir = dir.path().join("repo");
     let receipts_dir = repo_dir.join(".faber/missions/m1/receipts");
@@ -1061,22 +1089,282 @@ fn production_runner_accepted_checks_landing_receipts() {
     let repo = RepoIdentity::new("repo", &repo_dir.to_string_lossy());
     let snapshot = dir.path().join("snapshot");
     fs::create_dir(&snapshot).unwrap();
-    let mut runner = ProductionRunner::new(dir.path().join("node_modules"), dir.path().join("node.exe"), dir.path().join("cargo.exe"));
-    let accepted = runner.accepted(&repo, &commit, &tree_oid, &snapshot).unwrap();
-    assert_eq!(accepted, "commit-123");
+    let mut runner = ProductionRunner::new(
+        dir.path().join("node_modules"),
+        dir.path().join("node.exe"),
+        dir.path().join("cargo.exe"),
+        dir.path().join("private"),
+        "m1".into(),
+    );
+    assert!(runner.accepted(&repo, &commit, &tree_oid, &snapshot).is_err());
     let unaccepted = runner.accepted(&repo, &"9".repeat(40), &tree_oid, &snapshot);
     assert!(unaccepted.is_err());
 }
 
 #[test]
-fn production_runner_canary_checks_payload_and_handles_availability() {
+fn production_runner_releases_power_after_error_or_panic() {
+    use faber::awake::{CountedAwake, PowerKeepAwake};
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    };
+    struct Power(Arc<AtomicBool>);
+    impl PowerKeepAwake for Power {
+        fn set_awake(&self, awake: bool) -> Result<(), String> {
+            self.0.store(awake, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+    let dir = area();
+    let held = Arc::new(AtomicBool::new(false));
+    let awake = Arc::new(Mutex::new(CountedAwake::new(Box::new(Power(held.clone())), true).unwrap()));
+    for panic in [false, true] {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut runner = ProductionRunner::new(
+                dir.path().join("node_modules"),
+                dir.path().join("node"),
+                dir.path().join("cargo"),
+                dir.path().join("private"),
+                "m1".into(),
+            )
+            .with_awake(awake.clone());
+            assert!(held.load(Ordering::SeqCst));
+            if panic {
+                panic!("build worker crashed");
+            }
+            assert!(runner.canary(&dir.path().join("missing"), &tree(b"payload"), dir.path()).is_err());
+        }));
+        assert_eq!(result.is_err(), panic);
+        assert!(!held.load(Ordering::SeqCst), "production runner leaked power");
+    }
+}
+
+#[test]
+fn production_canary_rejects_a_non_executable_payload() {
     let dir = area();
     let exe = dir.path().join(format!("faber{}", std::env::consts::EXE_SUFFIX));
     fs::write(&exe, b"payload").unwrap();
     let tree_obj = tree(b"payload");
-    let mut runner = ProductionRunner::new(dir.path().join("node_modules"), dir.path().join("node.exe"), dir.path().join("cargo.exe"));
+    let mut runner = ProductionRunner::new(
+        dir.path().join("node_modules"),
+        dir.path().join("node.exe"),
+        dir.path().join("cargo.exe"),
+        dir.path().join("private"),
+        "m1".into(),
+    );
     runner.canary_available = false;
     assert_eq!(runner.canary(&exe, &tree_obj, dir.path()).unwrap(), CanaryVerdict::NotRun);
     runner.canary_available = true;
-    assert!(matches!(runner.canary(&exe, &tree_obj, dir.path()).unwrap(), CanaryVerdict::Pass { .. }));
+    assert!(runner.canary(&exe, &tree_obj, dir.path()).is_err());
+}
+
+#[test]
+fn canary_handshake_rejects_replay_hash_schema_and_fabricated_pass() {
+    let candidate = tree(b"candidate");
+    let mut response = CanaryHandshake {
+        nonce: "challenge".into(),
+        receipt: "challenge".into(),
+        build_hash: candidate.build_hash.clone(),
+        schema: SCHEMA,
+        verdict: CanaryVerdict::NotRun,
+    };
+    assert_eq!(verify_canary_handshake(&response, "challenge", &candidate).unwrap(), CanaryVerdict::NotRun);
+    assert!(verify_canary_handshake(&response, "previous", &candidate).is_err());
+    response.build_hash = "0".repeat(64);
+    assert!(verify_canary_handshake(&response, "challenge", &candidate).is_err());
+    response.build_hash = candidate.build_hash.clone();
+    response.schema += 1;
+    assert!(verify_canary_handshake(&response, "challenge", &candidate).is_err());
+    response.schema = SCHEMA;
+    response.verdict = CanaryVerdict::Pass {
+        verified_at: now(),
+        receipt_id: "made-up".into(),
+        tree: candidate.clone(),
+        proof_receipt: "made-up".into(),
+        compatible_schemas: vec![SCHEMA],
+    };
+    assert!(verify_canary_handshake(&response, "challenge", &candidate).is_err());
+}
+
+fn accepted_mission(
+    dev: &Development,
+    checkout: &std::path::Path,
+) -> (faber_engine::Engine, faber_engine::project::store::Journal, RepoIdentity) {
+    use faber_engine::project::proof::{Definition, Observation, ProofSet};
+    use faber_engine::project::queue::{Candidate, Queue, Review};
+    use faber_engine::project::{Intent, IntentKind, Mission, MissionState, Outcome, Receipt};
+    let runtime = tokio::runtime::Handle::current();
+    let engine = faber_engine::Engine::new(
+        faber_engine::EngineOptions {
+            data_dir: dev.data(),
+            clis: Default::default(),
+            spawn: std::sync::Arc::new(|_, _, _| panic!("unit test spawned a process")),
+            windows: false,
+            claude_env_billed: false,
+            max_warm: 0,
+            idle: std::time::Duration::from_secs(30),
+            runtime,
+            ask: None,
+        },
+        std::sync::Arc::new(|_| {}),
+    );
+    let repo = RepoIdentity::new("repo", &checkout.to_string_lossy());
+    let mut project = engine.add_project(&checkout.to_string_lossy());
+    let before = project.clone();
+    project.repo = Some(repo.clone());
+    let mut grant = Grant::new("repo", GitMode::Seguro, 1, now());
+    grant.self_update = true;
+    project.grant = Some(grant);
+    engine.update_project(&before, &project).unwrap();
+    let journal = faber_engine::project::store::Journal::open(checkout, &dev.data(), "m1").unwrap();
+    let mut run =
+        faber_engine::project::run::Runner::create(&journal, Mission::new("m1", &project.id, "repo", "Fix", &"3".repeat(40), 1, now()))
+            .unwrap();
+    let definition = Definition {
+        id: "rust".into(),
+        version: 1,
+        program: std::env::temp_dir().join("cargo"),
+        argv: vec!["test".into()],
+        checks: vec!["C1".into()],
+        toolchain: "rust".into(),
+        dependencies: "deps".into(),
+        environment: Default::default(),
+        heavy: true,
+    };
+    let mut proof = ProofSet::new("2".repeat(40), "input".into(), vec![definition], vec!["src/accepted.rs".into()]).unwrap();
+    proof
+        .record(
+            "proof",
+            "rust",
+            Observation {
+                exit: Some(0),
+                stdout: b"pass".to_vec(),
+                stderr: vec![],
+                evidence: faber_engine::project::wire::ArtifactRef {
+                    path: "proof.log".into(),
+                    sha256: faber_engine::project::lease::hash(b"pass"),
+                },
+            },
+        )
+        .unwrap();
+    let candidate = Candidate::new(
+        "w1",
+        "3".repeat(40),
+        "2".repeat(40),
+        1,
+        faber_engine::model::Vendor::Codex,
+        "input".into(),
+        vec!["src/accepted.rs".into()],
+        proof.definitions().to_vec(),
+    )
+    .unwrap();
+    let mut queue = Queue::default();
+    queue.enqueue(candidate).unwrap();
+    queue.prove("w1", proof.clone()).unwrap();
+    queue
+        .review(
+            "w1",
+            Review {
+                vendor: faber_engine::model::Vendor::Claude,
+                tree: "2".repeat(40),
+                proof_digest: proof.digest(),
+                session: "fresh".into(),
+                fresh: true,
+                accepted: true,
+                findings: vec![],
+            },
+        )
+        .unwrap();
+    run.landings.push(faber_engine::project::run::Landing {
+        candidate: queue.get("w1").unwrap().clone(),
+        commit_intent: "commit".into(),
+        forward_intent: "forward".into(),
+        at: now(),
+    });
+    for (id, kind, evidence) in [
+        ("commit", IntentKind::Commit, vec![("head", "1".repeat(40)), ("tree", "2".repeat(40)), ("parent", "3".repeat(40))]),
+        ("forward", IntentKind::FastForward, vec![("new", "1".repeat(40)), ("old", "3".repeat(40))]),
+    ] {
+        journal.record_intent(&Intent::new(id, "m1", kind, 1, now())).unwrap();
+        let mut receipt = Receipt::new(id, Outcome::Done, now());
+        receipt.evidence = evidence.into_iter().map(|(k, v)| (k.into(), v)).collect();
+        journal.record_receipt(&receipt).unwrap();
+    }
+    run.mission.state = MissionState::Done;
+    run.promotion_pending = true;
+    run.save(&journal).unwrap();
+    (engine, journal, repo)
+}
+
+#[tokio::test]
+async fn production_approval_requires_private_proof_review_commit_and_forward() {
+    let dir = area();
+    let dev = config(dir.path());
+    dev.manager().unwrap();
+    let checkout = dir.path().join("checkout");
+    fs::create_dir(&checkout).unwrap();
+    let (engine, journal, repo) = accepted_mission(&dev, &checkout);
+    let mut runner = ProductionRunner::new(
+        checkout.join("node_modules"),
+        dir.path().join("node.exe"),
+        dir.path().join("cargo.exe"),
+        dev.data(),
+        "m1".into(),
+    );
+    let accepted = runner.accepted(&repo, &"1".repeat(40), &"2".repeat(40), dir.path()).unwrap();
+    assert_eq!(accepted, "m1-commit-forward");
+    fs::remove_dir_all(journal.records().join("receipts")).unwrap();
+    assert_eq!(runner.accepted(&repo, &"1".repeat(40), &"2".repeat(40), dir.path()).unwrap(), accepted);
+    assert!(runner.accepted(&repo, &"9".repeat(40), &"2".repeat(40), dir.path()).is_err());
+    let mut raw: serde_json::Value = serde_json::from_slice(&fs::read(journal.private().join("run.json")).unwrap()).unwrap();
+    raw["landings"][0]["candidate"]["review"]["accepted"] = false.into();
+    fs::write(journal.private().join("run.json"), serde_json::to_vec(&raw).unwrap()).unwrap();
+    assert!(runner.accepted(&repo, &"1".repeat(40), &"2".repeat(40), dir.path()).is_err());
+    engine.shutdown();
+}
+
+#[tokio::test]
+async fn landed_checkpoint_drives_exact_tree_staging_at_quiescence() {
+    let dir = area();
+    let dev = config(dir.path());
+    dev.manager().unwrap();
+    fs::write(dev.binary(Slot::A), b"old").unwrap();
+    dev.manager().unwrap().adopt_baseline(Slot::A, tree(b"old"), b"old", now()).unwrap();
+    let checkout = dir.path().join("checkout");
+    fs::create_dir(&checkout).unwrap();
+    let (engine, journal, _repo) = accepted_mission(&dev, &checkout);
+    let older_checkout = dir.path().join("older-checkout");
+    fs::create_dir(&older_checkout).unwrap();
+    let mut older_project = engine.add_project(&older_checkout.to_string_lossy());
+    let before = older_project.clone();
+    older_project.repo = Some(RepoIdentity::new("repo", &older_checkout.to_string_lossy()));
+    engine.update_project(&before, &older_project).unwrap();
+    let older_journal = faber_engine::project::store::Journal::open(&older_checkout, &dev.data(), "m0").unwrap();
+    let mut older = faber_engine::project::run::Runner::create(
+        &older_journal,
+        faber_engine::project::Mission::new("m0", &older_project.id, "repo", "Older", &"3".repeat(40), 1, 1),
+    )
+    .unwrap();
+    older.mission.state = faber_engine::project::MissionState::Done;
+    older.promotion_pending = true;
+    older.save(&older_journal).unwrap();
+    let mut source = Source { calls: 0, tree: "2".repeat(40) };
+    assert!(
+        dev.service_landed_missions(&engine, true, &mut source, |mission, repo| {
+            assert_eq!(mission, "m1");
+            assert_eq!(repo, checkout);
+            Ok(Gates { fail: "canary-unavailable", built: false })
+        })
+        .unwrap()
+    );
+    let manifest = dev.manager().unwrap().manifest().unwrap().unwrap();
+    let next = manifest.staged_tree.unwrap();
+    assert_eq!(next.commit_oid, "1".repeat(40));
+    assert_eq!(next.tree_oid, "2".repeat(40));
+    assert_eq!(fs::read(dev.binary(Slot::A)).unwrap(), b"old");
+    assert!(!faber_engine::project::run::Runner::load(&journal).unwrap().promotion_pending);
+    assert!(!faber_engine::project::run::Runner::load(&older_journal).unwrap().promotion_pending);
+    assert!(!checkout.join(".faber/missions/m0").exists(), "coalescing wrote the other project's mirror into this checkout");
+    assert!(!dev.service_landed_missions::<Gates>(&engine, true, &mut source, |_, _| panic!("request replayed")).unwrap());
+    engine.shutdown();
 }

@@ -6,6 +6,73 @@ use faber_engine::project::wire::{FileOp, WriteOp};
 use faber_engine::project::{Author, GitMode, Grant, Lease, RepoIdentity};
 use std::collections::VecDeque;
 const BASE: &str = "1111111111111111111111111111111111111111";
+const HEAD: &str = "4444444444444444444444444444444444444444";
+
+#[test]
+fn report_stays_running_until_all_tasks_retire_and_keeps_each_landing() {
+    use faber_engine::project::{MissionState, Task, TaskKind};
+    let (_repo, _data, mut b, g, l, _root) = setup(&[HEAD, "", HEAD, ""]);
+    let mut r = runner(&b);
+    let mut second = r.queue.get("w1").unwrap().clone();
+    second.id = "w2".into();
+    second.base = HEAD.into();
+    second.extra.insert("commitIntent".into(), "commit-2".into());
+    second.extra.insert("forwardIntent".into(), "forward-2".into());
+    landed_receipts(&b, &mut r);
+    let mut plan = b.journal().plan().unwrap().unwrap();
+    plan.tasks.push(Task::new("w2", "Next", TaskKind::Writer));
+    b.journal().save_plan(&plan).unwrap();
+    r.land(&mut b, "w1", &l, || Ok(Some(g.clone())), "Fix", Termination { process: None, tree_dead: true, cost_settled: true }, |_| Ok(()))
+        .unwrap();
+    assert_eq!(r.mission.state, MissionState::Running);
+    let report = b.journal().report().unwrap().unwrap();
+    assert_eq!(report.state, "running");
+    let json = serde_json::to_value(report).unwrap();
+    assert_eq!(json["tasks"]["w1"]["commitReceipt"]["head"], HEAD);
+    r.queue.enqueue(second).unwrap();
+    let next = b.leases().acquire(Lease::new(&g.repo, "m1", "w2", 2, vec!["src".into()], HEAD, &"a".repeat(64), 1)).unwrap();
+    let root = b.journal().private().join("writer-2");
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("src/a.rs"), "after").unwrap();
+    b.leases().bind(&next, &root).unwrap();
+    for (id, kind, evidence) in [
+        ("commit-2", faber_engine::project::IntentKind::Commit, vec![("head", HEAD), ("parent", HEAD), ("tree", TREE)]),
+        ("forward-2", faber_engine::project::IntentKind::FastForward, vec![("old", HEAD), ("new", HEAD)]),
+    ] {
+        b.journal().record_intent(&faber_engine::project::Intent::new(id, "m1", kind, 3, 1)).unwrap();
+        let mut receipt = faber_engine::project::Receipt::new(id, faber_engine::project::Outcome::Done, 2);
+        receipt.evidence = evidence.into_iter().map(|(k, v)| (k.into(), v.into())).collect();
+        b.journal().record_receipt(&receipt).unwrap();
+    }
+    r.land(
+        &mut b,
+        "w2",
+        &next,
+        || Ok(Some(g.clone())),
+        "Next",
+        Termination { process: None, tree_dead: true, cost_settled: true },
+        |_| Ok(()),
+    )
+    .unwrap();
+    assert_eq!(r.mission.state, MissionState::Done);
+    let report = b.journal().report().unwrap().unwrap();
+    assert_eq!(report.state, "done");
+    assert_eq!(report.tasks.len(), 2);
+    assert_eq!(report.tasks["w1"].commit_receipt.intent, "commit");
+    assert_eq!(report.tasks["w2"].commit_receipt.intent, "commit-2");
+}
+
+#[test]
+fn report_never_trusts_forged_repository_checks() {
+    let (_repo, _data, mut b, g, l, _root) = setup(&[HEAD, ""]);
+    let mut r = runner(&b);
+    landed_receipts(&b, &mut r);
+    std::fs::create_dir_all(b.journal().records().join("checks")).unwrap();
+    std::fs::write(b.journal().records().join("checks/forged.json"), b"broken editable check").unwrap();
+    r.land(&mut b, "w1", &l, || Ok(Some(g.clone())), "Fix", Termination { process: None, tree_dead: true, cost_settled: true }, |_| Ok(()))
+        .unwrap();
+    assert_eq!(b.journal().report().unwrap().unwrap().checks[0].result, "unknown");
+}
 const TREE: &str = "2222222222222222222222222222222222222222";
 struct Fake {
     outputs: VecDeque<String>,
@@ -210,8 +277,8 @@ fn landed_receipts(b: &Broker<Fake>, r: &mut faber_engine::project::run::Runner)
     raw["queue"]["entries"][0]["forwardIntent"] = "forward".into();
     *r = serde_json::from_value(raw).unwrap();
     for (id, kind, evidence) in [
-        ("commit", IntentKind::Commit, vec![("tree", TREE), ("parent", BASE), ("head", TREE)]),
-        ("forward", IntentKind::FastForward, vec![("old", BASE), ("new", TREE)]),
+        ("commit", IntentKind::Commit, vec![("tree", TREE), ("parent", BASE), ("head", HEAD)]),
+        ("forward", IntentKind::FastForward, vec![("old", BASE), ("new", HEAD)]),
     ] {
         b.journal().record_intent(&Intent::new(id, "m1", kind, 3, 1)).unwrap();
         let mut receipt = Receipt::new(id, Outcome::Done, 2);
@@ -243,7 +310,7 @@ fn opus_h3_landing_checkpoint_recovers_without_requeued_retirement() {
         }
     }
     let disk = Arc::new(Crash(AtomicUsize::new(0), AtomicUsize::new(0)));
-    let (repo, data, mut b, g, l, root) = setup_with(&[TREE, ""], disk.clone());
+    let (repo, data, mut b, g, l, root) = setup_with(&[HEAD, ""], disk.clone());
     let mut r = runner(&b);
     landed_receipts(&b, &mut r);
     disk.0.store(3, Ordering::SeqCst);
@@ -422,7 +489,7 @@ fn landing_checkpoint_retains_cleanup_after_the_candidate_is_popped() {
         }
     }
     let fault = Arc::new(Crash(AtomicBool::new(false)));
-    let (repo, data, mut b, g, l, root) = setup_with(&[TREE], fault.clone());
+    let (repo, data, mut b, g, l, root) = setup_with(&[HEAD], fault.clone());
     let mut r = runner(&b);
     landed_receipts(&b, &mut r);
     fault.0.store(true, Ordering::SeqCst);
@@ -539,7 +606,7 @@ fn resume_distinguishes_archived_dead_processes_from_live_quarantine_without_res
 
 #[test]
 fn landing_sets_promotion_pending_when_grant_has_self_update() {
-    let (_repo, _data, mut b, mut g, l, _root) = setup(&[TREE, ""]);
+    let (_repo, _data, mut b, mut g, l, _root) = setup(&[HEAD, ""]);
     g.self_update = true;
     let mut r = runner(&b);
     landed_receipts(&b, &mut r);
@@ -554,14 +621,24 @@ fn landing_sets_promotion_pending_when_grant_has_self_update() {
             |_| Ok(()),
         )
         .unwrap();
-    assert_eq!(head, TREE);
+    assert_eq!(head, HEAD);
     assert!(r.promotion_pending, "landing with self_update must set promotion_pending");
+    assert!(r.accepted_landing(b.journal(), HEAD, TREE).is_ok());
+    std::fs::remove_dir_all(b.journal().records().join("receipts")).unwrap();
+    assert!(r.accepted_landing(b.journal(), HEAD, TREE).is_ok(), "repository receipts cannot grant or revoke approval");
+    let mut forged = r.clone();
+    let mut raw = serde_json::to_value(&forged).unwrap();
+    raw["landings"][0]["candidate"]["review"]["accepted"] = false.into();
+    forged = serde_json::from_value(raw).unwrap();
+    assert!(forged.accepted_landing(b.journal(), HEAD, TREE).is_err());
+    std::fs::write(b.journal().private().join("effects.json"), b"broken").unwrap();
+    assert!(r.accepted_landing(b.journal(), HEAD, TREE).is_err());
 }
 
 #[test]
 fn landing_writes_mission_report_with_tokens_checks_receipts_and_timings() {
     use faber_engine::project::report::UnknownOr;
-    let (_repo, _data, mut b, g, l, _root) = setup(&[TREE, ""]);
+    let (_repo, _data, mut b, g, l, _root) = setup(&[HEAD, ""]);
     let mut r = runner(&b);
     landed_receipts(&b, &mut r);
     r.record_tokens("writer", Some(500), Some(200), Some(50), Some(100));
@@ -576,7 +653,7 @@ fn landing_writes_mission_report_with_tokens_checks_receipts_and_timings() {
             |_| Ok(()),
         )
         .unwrap();
-    assert_eq!(head, TREE);
+    assert_eq!(head, HEAD);
 
     let report_file = b.journal().records().join("report.json");
     assert!(report_file.exists(), "report.json must be written upon landing");
@@ -601,17 +678,17 @@ fn landing_writes_mission_report_with_tokens_checks_receipts_and_timings() {
     // Checks
     assert!(!report.checks.is_empty(), "checks must be reported");
     assert_eq!(report.checks[0].id, "C1");
-    assert_eq!(report.checks[0].result, "pass");
+    assert_eq!(report.checks[0].result, "unknown");
 
     // Commit and tree receipts
     let commit = report.commit_receipt.expect("commit receipt must be present");
-    assert_eq!(commit.head, UnknownOr::Known(TREE.into()));
+    assert_eq!(commit.head, UnknownOr::Known(HEAD.into()));
     assert_eq!(commit.tree, UnknownOr::Known(TREE.into()));
     assert_eq!(commit.parent, UnknownOr::Known(BASE.into()));
 
     let forward = report.tree_receipt.expect("tree receipt must be present");
     assert_eq!(forward.old_head, UnknownOr::Known(BASE.into()));
-    assert_eq!(forward.new_head, UnknownOr::Known(TREE.into()));
+    assert_eq!(forward.new_head, UnknownOr::Known(HEAD.into()));
     assert_eq!(forward.tree, UnknownOr::Known(TREE.into()));
 
     // Timings

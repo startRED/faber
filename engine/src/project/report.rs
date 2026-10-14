@@ -77,6 +77,8 @@ pub struct MissionReport {
     pub state: String,
     pub tokens_per_role: BTreeMap<String, RoleTokens>,
     pub checks: Vec<CheckReport>,
+    #[serde(default)]
+    pub tasks: BTreeMap<String, TaskReport>,
     pub commit_receipt: Option<CommitReceiptReport>,
     pub tree_receipt: Option<TreeReceiptReport>,
     pub timings: ReportTimings,
@@ -93,10 +95,20 @@ impl MissionReport {
             state: state.into(),
             tokens_per_role: BTreeMap::new(),
             checks: Vec::new(),
+            tasks: BTreeMap::new(),
             commit_receipt: None,
             tree_receipt: None,
             timings: ReportTimings::default(),
             extra: Extra::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskReport {
+    pub checks: Vec<CheckReport>,
+    pub commit_receipt: CommitReceiptReport,
+    pub tree_receipt: TreeReceiptReport,
+    pub landed_at: u64,
 }

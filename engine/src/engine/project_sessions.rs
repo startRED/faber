@@ -2,6 +2,13 @@
 use super::*;
 use crate::project::{Role as ProjectRole, run::Runner, store::Journal};
 
+pub struct LocalBuildGuard(Engine);
+impl Drop for LocalBuildGuard {
+    fn drop(&mut self) {
+        self.0.with(|c| c.local_build = false);
+    }
+}
+
 fn role_events() -> (EventSink, tokio::sync::mpsc::Receiver<EngineEvent>, Arc<std::sync::atomic::AtomicBool>) {
     let (tx, rx) = tokio::sync::mpsc::channel(64);
     let overflow = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -18,6 +25,16 @@ fn role_events() -> (EventSink, tokio::sync::mpsc::Receiver<EngineEvent>, Arc<st
 }
 
 impl Engine {
+    /// Reserve quiet Chat admission for the entire build/canary/promotion attempt.
+    pub fn local_build_admission(&self) -> Result<LocalBuildGuard, String> {
+        self.with(|c| {
+            if c.local_build || !c.running_items().is_empty() || c.convs.values().any(|v| !v.queued.is_empty()) {
+                return Err("error.update.activeOperations".into());
+            }
+            c.local_build = true;
+            Ok(LocalBuildGuard(self.clone()))
+        })
+    }
     pub fn set_local_update(&self, layout: crate::project::update::SlotLayout) {
         self.with(|c| c.local_update = Some(layout));
     }
@@ -246,6 +263,51 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn local_build_reserves_chat_admission_and_releases_on_unwind() {
+        let data = tempfile::tempdir().unwrap();
+        let e = Engine::new(
+            EngineOptions {
+                data_dir: data.path().into(),
+                clis: Default::default(),
+                spawn: Arc::new(|_, _, _| panic!("build admission must not spawn")),
+                windows: false,
+                claude_env_billed: false,
+                max_warm: 0,
+                idle: Duration::from_secs(30),
+                runtime: tokio::runtime::Handle::current(),
+                ask: None,
+            },
+            Arc::new(|_| {}),
+        );
+        let request = || SendRequest {
+            conversation_id: None,
+            area: Area::Chat,
+            project_id: None,
+            text: "Hi".into(),
+            images: vec![],
+            files: vec![],
+            choice: crate::router::Choice { vendor: "auto".into(), model: None, effort: None },
+        };
+        let build = e.local_build_admission().unwrap();
+        assert!(e.local_build_admission().is_err());
+        assert_eq!(e.send(request()), Err("error.update.activeOperations".into()));
+        drop(build);
+        assert_eq!(e.send(request()), Err("error.noSubscription".into()));
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _build = e.local_build_admission().unwrap();
+            panic!("build worker crashed");
+        }));
+        assert!(e.local_build_admission().is_ok());
+        let mut message = crate::model::Message::new("turn".into(), crate::model::Role::Assistant, "".into(), 1);
+        message.status = Some(crate::model::Status::Streaming);
+        e.with(|core| {
+            let id = core.blank(Area::Chat, None);
+            core.convs.get_mut(&id).unwrap().messages.push(message);
+        });
+        assert!(e.local_build_admission().is_err());
+        e.shutdown();
+    }
     #[test]
     fn role_event_order_and_bounds_preserve_unknown_reservations() {
         let (send, mut receive, overflow) = role_events();

@@ -16,6 +16,35 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+type MissionSink = dyn Fn(&Mission) + Send + Sync;
+type Observers = BTreeMap<PathBuf, std::sync::Weak<MissionSink>>;
+static MISSION_OBSERVERS: std::sync::OnceLock<std::sync::Mutex<Observers>> = std::sync::OnceLock::new();
+
+/// One shell owner observes private checkpoints; workers cannot publish lifecycle events.
+pub struct MissionSubscription {
+    root: PathBuf,
+    sink: Arc<MissionSink>,
+}
+
+impl Drop for MissionSubscription {
+    fn drop(&mut self) {
+        let mut observers = MISSION_OBSERVERS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+        if observers.get(&self.root).is_some_and(|sink| sink.ptr_eq(&Arc::downgrade(&self.sink))) {
+            observers.remove(&self.root);
+        }
+    }
+}
+
+pub fn observe_missions(data: &Path, sink: Arc<MissionSink>) -> Result<MissionSubscription, JournalError> {
+    let root = super::lease::real_path(&data.join("missions")).map_err(|_| Fault::Read)?;
+    let mut observers = MISSION_OBSERVERS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    if observers.get(&root).is_some_and(|old| old.upgrade().is_some()) {
+        return Err(JournalError::Mismatch);
+    }
+    observers.insert(root.clone(), Arc::downgrade(&sink));
+    Ok(MissionSubscription { root, sink })
+}
+
 /// Why the journal refused, as a key the screen translates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JournalError {
@@ -159,6 +188,14 @@ mod pending_path_tests {
 }
 
 impl Journal {
+    pub(crate) fn mission_checkpointed(&self, mission: &Mission) {
+        let sink = self.private.parent().and_then(|root| super::lease::real_path(root).ok()).and_then(|root| {
+            MISSION_OBSERVERS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner()).get(&root).and_then(|s| s.upgrade())
+        });
+        if let Some(sink) = sink {
+            sink(mission);
+        }
+    }
     /// The journal of mission `mission` for the repository whose working folder is `repo`, with its private sidecar
     /// under `data_dir`. Creates both folders.
     pub fn open(repo: &Path, data_dir: &Path, mission: &str) -> Result<Journal, JournalError> {
@@ -218,7 +255,11 @@ impl Journal {
 
     /// Every record in `folder`, by file name. One damaged record fails the whole list.
     fn list<T: DeserializeOwned + Record>(&self, folder: &str) -> Result<Vec<T>, JournalError> {
-        let entries = match fs::read_dir(self.records.join(folder)) {
+        self.list_at(&self.records.join(folder))
+    }
+
+    fn list_at<T: DeserializeOwned + Record>(&self, folder: &Path) -> Result<Vec<T>, JournalError> {
+        let entries = match fs::read_dir(folder) {
             Ok(entries) => entries,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(vec![]),
             Err(_) => return Err(Fault::Read.into()),
@@ -636,7 +677,7 @@ impl Journal {
     }
 
     pub fn list_checks(&self) -> Result<Vec<super::wire::CheckReceipt>, JournalError> {
-        self.list::<super::wire::CheckReceipt>("checks")
+        self.list_at(&self.private.join("checks"))
     }
 
     pub fn save_compile_receipt(&self, receipt: &super::wire::CompileReceipt) -> Result<(), JournalError> {

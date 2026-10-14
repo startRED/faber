@@ -6,7 +6,6 @@
 #[cfg(all(feature = "test-hooks", not(debug_assertions)))]
 compile_error!("the `test-hooks` feature is for debug test builds only; it must not be enabled in a release build");
 
-mod awake;
 mod look;
 mod project_commands;
 mod setup;
@@ -22,6 +21,7 @@ use faber::autostart::NoopAutostart;
 #[cfg(windows)]
 use faber::autostart::WindowsAutostart;
 use faber::autostart::{self, AutostartKeeper, FakeAutostart, creates_window};
+use faber::awake;
 use faber::local_update::{self, Development};
 use faber_engine::cli::Cli;
 use faber_engine::codex::{ModelInfo, list_codex_models, read_codex_limits};
@@ -58,6 +58,7 @@ pub(crate) struct Faber {
     missions: Arc<tauri::async_runtime::Mutex<()>>,
     local: Option<Development>,
     pub(crate) awake: Arc<Mutex<CountedAwake>>,
+    _mission_events: faber_engine::project::store::MissionSubscription,
     pub(crate) autostart: Mutex<Arc<dyn AutostartKeeper>>,
 }
 
@@ -403,17 +404,27 @@ fn restore_mission_notices(app: &AppHandle) -> Res<()> {
         let entries = match std::fs::read_dir(Path::new(&project.path).join(".faber/missions")) {
             Ok(entries) => entries,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(_) => return Err("error.store.read".into()),
+            Err(_) => continue,
         };
         for entry in entries {
-            let entry = entry.map_err(|_| "error.store.read")?;
+            let Ok(entry) = entry else { continue };
             let id = entry.file_name().to_string_lossy().into_owned();
             if !faber_engine::project::valid_id(&id) {
                 continue;
             }
-            let (owner, journal, mission) = find_mission_and_journal(&faber, &id)?;
-            let grant = owner.grant.ok_or("reason.grant.none")?;
-            let view = build_mission_view(&faber, &mission, &journal, &grant)?;
+            let (owner, journal, _) = match find_mission_and_journal(&faber, &id) {
+                Ok(found) => found,
+                Err(_) => continue,
+            };
+            let mission = match awake::restore_mission(&faber.awake, &journal) {
+                Ok(runner) => runner.mission,
+                Err(error) => {
+                    eprintln!("faber: mission recovery failed: {error}");
+                    continue;
+                }
+            };
+            let Some(grant) = owner.grant else { continue };
+            let Ok(view) = build_mission_view(&faber, &mission, &journal, &grant) else { continue };
             tray::on_mission(app, &view);
             sync_mission_awake(&faber, &mission.id, mission.state);
         }
@@ -423,7 +434,10 @@ fn restore_mission_notices(app: &AppHandle) -> Res<()> {
 
 fn sync_mission_awake(faber: &Faber, mission_id: &str, state: faber_engine::project::MissionState) {
     let mut awake = lock(&faber.awake);
-    awake.set_mission_awake(mission_id, state == faber_engine::project::MissionState::Running);
+    awake.set_mission_awake(
+        mission_id,
+        matches!(state, faber_engine::project::MissionState::Running | faber_engine::project::MissionState::Planning),
+    );
 }
 
 #[tauri::command]
@@ -547,7 +561,7 @@ async fn mission_stop(app: AppHandle, faber: State<'_, Faber>, mission_id: Strin
     let (project, journal, mission) = find_mission_and_journal(&faber, &mission_id)?;
     project_commands::editable(&mission)?;
     let mut runner = Runner::load(&journal).map_err(str::to_string)?;
-    runner.stop(&journal, &faber.engine).await?;
+    awake::stop_mission(&faber.awake, &mut runner, &journal, &faber.engine).await?;
     let mission = runner.mission;
     sync_mission_awake(&faber, &mission.id, mission.state);
     let grant = project.grant.unwrap_or_else(|| Grant::new(&mission.repo, GitMode::Seguro, mission.grant_revision, mission.created_at));
@@ -597,6 +611,23 @@ async fn mission_answer(
     let _ = app.emit("mission", &view);
     tray::on_mission(&app, &view);
     Ok(view)
+}
+
+#[cfg(feature = "test-hooks")]
+#[tauri::command]
+async fn probe_mission_power(
+    faber: State<'_, Faber>,
+    mission_id: String,
+    state: Option<faber_engine::project::MissionState>,
+) -> Res<Value> {
+    let _turn = faber.missions.lock().await;
+    let (_, journal, _) = find_mission_and_journal(&faber, &mission_id)?;
+    let mut runner = Runner::load(&journal).map_err(str::to_string)?;
+    if let Some(state) = state {
+        runner.mission.state = state;
+        runner.save(&journal).map_err(str::to_string)?;
+    }
+    Ok(serde_json::json!({"awake": lock(&faber.awake).is_awake(), "state": runner.mission.state}))
 }
 
 #[cfg(feature = "test-hooks")]
@@ -779,6 +810,17 @@ fn main() {
         std::process::exit(code);
     }
     let args: Vec<_> = std::env::args_os().skip(1).collect();
+    if let [mode, data, nonce, output] = args.as_slice()
+        && mode == "--faber-local-canary"
+    {
+        std::process::exit(
+            if nonce.to_str().is_some_and(|nonce| local_update::probe_canary(Path::new(data), nonce, Path::new(output)).is_ok()) {
+                0
+            } else {
+                1
+            },
+        );
+    }
     if let [mode, data, output] = args.as_slice()
         && mode == "--faber-local-check-data"
     {
@@ -911,6 +953,8 @@ fn main() {
             #[cfg(feature = "test-hooks")]
             probe_mission_attention,
             #[cfg(feature = "test-hooks")]
+            probe_mission_power,
+            #[cfg(feature = "test-hooks")]
             report_checks
         ])
         .setup(move |app| {
@@ -946,11 +990,30 @@ fn main() {
             };
             let keep_awake = faber_engine::store::Store::new(&data_dir).settings().keep_awake.unwrap_or(true);
             let awake = Arc::new(Mutex::new(CountedAwake::new(power, keep_awake)?));
+            let update_requests = Arc::new(std::sync::atomic::AtomicBool::new(true));
+            let mission_updates = update_requests.clone();
+            let mission_power = awake.clone();
+            let mission_events = faber_engine::project::store::observe_missions(
+                &data_dir,
+                Arc::new(move |mission| {
+                    lock(&mission_power).set_mission_awake(
+                        &mission.id,
+                        matches!(
+                            mission.state,
+                            faber_engine::project::MissionState::Running | faber_engine::project::MissionState::Planning
+                        ),
+                    );
+                    mission_updates.store(true, std::sync::atomic::Ordering::Release);
+                }),
+            )
+            .map_err(|e| std::io::Error::other(e.key()))?;
             let awake_for_emit = awake.clone();
+            let chat_updates = update_requests.clone();
             let emit = Arc::new(move |e: AppEvent| {
                 // The engine calls this with its lock held, and the tray waits for the main thread, which can be waiting
                 // for that lock. So the tray works on its own thread; it keeps the newest list, whatever the order.
                 if let AppEvent::Running { revision, items } = &e {
+                    chat_updates.store(true, std::sync::atomic::Ordering::Release);
                     let active_turns: HashSet<String> = items.iter().map(|i| i.turn_id.clone()).collect();
                     lock(&awake_for_emit).sync_runs(active_turns);
                     if !hidden {
@@ -985,8 +1048,17 @@ fn main() {
                 missions,
                 local: local.clone(),
                 awake,
+                _mission_events: mission_events,
                 autostart: Mutex::new(autostart_keeper),
             });
+            if hidden {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    if let Err(error) = restore_mission_notices(&handle) {
+                        eprintln!("faber: interrupted missions could not restore ({error})");
+                    }
+                });
+            }
             app.state::<Faber>().engine.watch_accounts();
             if let Some(codex) = clis.get(&Vendor::Codex) {
                 load_models(app.handle(), codex.clone(), data_dir.clone());
@@ -1016,6 +1088,15 @@ fn main() {
                 tauri::async_runtime::spawn(async move {
                     loop {
                         let engine = handle.state::<Faber>().engine.clone();
+                        if update_requests.swap(false, std::sync::atomic::Ordering::AcqRel) {
+                            let awake = handle.state::<Faber>().awake.clone();
+                            if matches!(
+                                service_local_landing(dev.clone(), engine.clone(), awake, main_window(&handle).is_some()).await,
+                                Err(faber_engine::project::update::UpdateError::ActiveOperations)
+                            ) {
+                                update_requests.store(true, std::sync::atomic::Ordering::Release);
+                            }
+                        }
                         if dev.service_quiescence(&engine).await.is_ok()
                             && std::env::current_exe().is_ok_and(|exe| dev.leaving_slot(&exe).unwrap_or(false))
                             && dev.ensure_missions_quiescent().is_ok()
@@ -1065,6 +1146,24 @@ fn main() {
         });
 }
 
+async fn service_local_landing(
+    dev: Development,
+    engine: Engine,
+    awake: Arc<Mutex<CountedAwake>>,
+    active_window: bool,
+) -> Result<bool, faber_engine::project::update::UpdateError> {
+    let _turn = engine.mission_lock().lock_owned().await;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut git = Process::find().map_err(|_| faber_engine::project::update::UpdateError::InvalidState("git unavailable"))?;
+        let data = dev.data();
+        dev.service_landed_missions(&engine, active_window, &mut git, |mission, repo| {
+            Ok(local_update::ProductionRunner::for_mission(repo, &data, mission)?.with_awake(awake.clone()))
+        })
+    })
+    .await
+    .map_err(|_| faber_engine::project::update::UpdateError::InvalidState("local build worker failed"))?
+}
+
 fn headless_start(dev: &Development) -> Result<bool, faber_engine::project::update::UpdateError> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -1073,6 +1172,35 @@ fn headless_start(dev: &Development) -> Result<bool, faber_engine::project::upda
         .map_err(|_| faber_engine::project::update::UpdateError::InvalidState("headless runtime failed"))?;
     let _entered = runtime.enter();
     local_update::validate_saved_data(&dev.data())?;
+    let power: Box<dyn PowerKeepAwake> = {
+        #[cfg(windows)]
+        {
+            Box::new(WindowsPower)
+        }
+        #[cfg(not(windows))]
+        {
+            Box::new(NoopPower)
+        }
+    };
+    let keep_awake = faber_engine::store::Store::new(&dev.data()).settings().keep_awake.unwrap_or(true);
+    let awake = Arc::new(Mutex::new(
+        CountedAwake::new(power, keep_awake)
+            .map_err(|_| faber_engine::project::update::UpdateError::InvalidState("power owner unavailable"))?,
+    ));
+    let update_requests = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let mission_power = awake.clone();
+    let mission_updates = update_requests.clone();
+    let _events = faber_engine::project::store::observe_missions(
+        &dev.data(),
+        Arc::new(move |mission| {
+            lock(&mission_power).set_mission_awake(
+                &mission.id,
+                matches!(mission.state, faber_engine::project::MissionState::Running | faber_engine::project::MissionState::Planning),
+            );
+            mission_updates.store(true, std::sync::atomic::Ordering::Release);
+        }),
+    )
+    .map_err(|_| faber_engine::project::update::UpdateError::InvalidState("mission observer unavailable"))?;
     let _ = dev.cleanup_obsolete();
     let engine = Engine::new(
         EngineOptions {
@@ -1093,7 +1221,16 @@ fn headless_start(dev: &Development) -> Result<bool, faber_engine::project::upda
         &std::env::current_exe().map_err(|_| faber_engine::project::update::UpdateError::InvalidState("startup executable missing"))?,
     )?;
     let result = runtime.block_on(async {
+        engine.pause_missions_for_update().await.map_err(|_| faber_engine::project::update::UpdateError::ActiveOperations)?;
         loop {
+            if update_requests.swap(false, std::sync::atomic::Ordering::AcqRel)
+                && matches!(
+                    service_local_landing(dev.clone(), engine.clone(), awake.clone(), false).await,
+                    Err(faber_engine::project::update::UpdateError::ActiveOperations)
+                )
+            {
+                update_requests.store(true, std::sync::atomic::Ordering::Release);
+            }
             dev.service_quiescence(&engine).await?;
             #[cfg(feature = "test-hooks")]
             if dev.data().join("test-mission-admission").exists() {
@@ -1131,5 +1268,6 @@ fn headless_start(dev: &Development) -> Result<bool, faber_engine::project::upda
         }
     });
     engine.shutdown();
+    lock(&awake).shutdown();
     result
 }
