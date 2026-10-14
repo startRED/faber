@@ -217,6 +217,7 @@ struct Core {
     mission_sessions: HashMap<String, Vec<Session>>,
     mission_lock: Arc<tokio::sync::Mutex<()>>,
     local_update: Option<crate::project::update::SlotLayout>,
+    local_build: bool,
     /// A new conversation still being typed: its CLI starts before the first message is sent.
     draft: Option<String>,
     /// Streaming text goes to the screen at most ~30 times a second; the message waiting per conversation.
@@ -287,6 +288,7 @@ impl Engine {
                 mission_sessions: HashMap::new(),
                 mission_lock: Arc::new(tokio::sync::Mutex::new(())),
                 local_update: None,
+                local_build: false,
                 draft: None,
                 pending: HashMap::new(),
                 next_sid: 0,
@@ -1359,6 +1361,10 @@ impl Core {
     /// Starts a queued message as a turn. If nothing can answer it, it goes back to the front of the queue, so no message is
     /// lost; once the turn exists, a failure shows on that turn's reply like any other.
     fn dispatch_queued(&mut self, id: &str, item: QueuedTurn) -> Result<(), String> {
+        if self.local_build {
+            self.requeue(id, item);
+            return Err("error.update.activeOperations".into());
+        }
         let Some(fallback) = pick_model(&item.choice, &self.vendors(), self.codex_recommended.as_deref()) else {
             self.requeue(id, item);
             return Err("error.noSubscription".into());
@@ -1698,6 +1704,9 @@ impl Core {
     }
 
     fn send(&mut self, req: SendRequest) -> Result<String, String> {
+        if self.local_build {
+            return Err("error.update.activeOperations".into());
+        }
         let fallback = pick_model(&req.choice, &self.vendors(), self.codex_recommended.as_deref()).ok_or("error.noSubscription")?;
         let existing = req.conversation_id.as_deref().and_then(|id| self.load(id).map(|c| c.id.clone()));
         if let Some(id) = &existing
@@ -1810,6 +1819,9 @@ impl Core {
     // Edit a message or redo an answer with another model: a new conversation keeps everything before that message,
     // with the chat workspace copied, and sends the new text. The original stays as it was.
     fn branch(&mut self, req: BranchRequest) -> Result<String, String> {
+        if self.local_build {
+            return Err("error.update.activeOperations".into());
+        }
         let source = self.load(&req.conversation_id).cloned().ok_or("error.messageGone")?;
         let at = source.messages.iter().position(|m| m.id == req.message_id).ok_or("error.messageGone")?;
         let id = self.blank(source.area, source.project_id.clone());
@@ -1843,6 +1855,9 @@ impl Core {
 
     // Starts the CLI before the user finishes typing, so the first word arrives sooner.
     fn warm(&mut self, req: WarmRequest) {
+        if self.local_build {
+            return;
+        }
         let Some(fallback) = pick_model(&req.choice, &self.vendors(), self.codex_recommended.as_deref()) else { return };
         let id = self.draft_for(&req);
         if self.live.get(&id).is_some_and(|l| l.turn.is_some()) {

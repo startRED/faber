@@ -13,6 +13,7 @@ const view = (revision = 1): MissionView => ({ missionId: 'review-mission', revi
 
 async function withProjects(run: (root: HTMLElement, emit: (v: MissionView) => void, change: (p: Project) => void) => Promise<void>) {
   const originals = { ...api };
+  useLanguage('en');
   Object.assign(api, { localUpdateState: async () => null });
   let listener: (v: MissionView) => void = () => {};
   api.projectEnroll = async (id) => ({ projectId: id, repo: demo.path, base: 'base', mode: 'seguro', revision: 1, selfUpdate: false });
@@ -28,7 +29,7 @@ async function withProjects(run: (root: HTMLElement, emit: (v: MissionView) => v
   const [project, setProject] = createSignal(demo);
   const dispose = render(() => createComponent(Projects, { get project() { return project(); }, vendors: [], now: Date.now() }), root);
   try { await settle(); await run(root, (v) => listener(v), setProject); }
-  finally { dispose(); root.remove(); Object.assign(api, originals); saveGoal(demo.id, ''); localStorage.removeItem('faber.project.mission.' + demo.id); }
+  finally { dispose(); root.remove(); Object.assign(api, originals); saveGoal(demo.id, ''); localStorage.removeItem('faber.project.mission.' + demo.id); useLanguage('en'); }
 }
 
 check('projects: local build status uses the read-only channel view before a mission exists', () => withProjects(async (root) => {
@@ -40,6 +41,56 @@ check('projects: local build status uses the read-only channel view before a mis
   ok(card, 'development status must be available without starting a mission');
   ok(card!.textContent?.includes('slot-b'), 'current slot must come from local_update_state');
   ok(card!.textContent?.includes('slot-a'), 'next slot must come from local_update_state');
+}));
+
+check('projects: build card displays live slot status and explains why promotion waits', () => withProjects(async (root, emit) => {
+  useLanguage('en');
+  let callCount = 0;
+  let status = {
+    current: 'A · 111122223333',
+    next: 'B · 444455556666',
+    lastGood: 'A · 111122223333',
+    waiting: 'reason.update.quiescence',
+  };
+  api.localUpdateState = async () => {
+    callCount++;
+    return status;
+  };
+  window.dispatchEvent(new Event('focus'));
+  await settle();
+
+  const card = root.querySelector('[data-testid="local-build"]');
+  ok(card, 'build card must be rendered');
+  ok(card!.textContent?.includes('A · 111122223333'), 'current slot is displayed');
+  ok(card!.textContent?.includes('B · 444455556666'), 'next slot is displayed');
+  ok(card!.textContent?.includes('Waiting for:'), 'waiting label is displayed');
+  ok(card!.textContent?.includes('Promotion waits for active operations'), 'quiescence waiting reason is displayed');
+
+  // Verify hand-written pt-BR localization
+  useLanguage('pt-BR');
+  await settle();
+  ok(card!.textContent?.includes('Aguardando:'), 'pt-BR waiting label is displayed');
+  ok(card!.textContent?.includes('A promoção aguarda'), 'pt-BR quiescence reason is displayed');
+  useLanguage('en');
+  await settle();
+
+  // Start mission and verify live refresh
+  await start(root);
+  const initialCalls = callCount;
+  status = {
+    current: 'A · 111122223333',
+    next: 'B · 777788889999',
+    lastGood: 'A · 111122223333',
+    waiting: 'projects.state.running',
+  };
+  emit({ ...view(2), state: 'running' });
+  await settle();
+
+  ok(callCount > initialCalls, 'mission updates trigger a live local update refresh');
+  const activeCard = root.querySelector('.cost-pace-panel [data-testid="local-build"]');
+  ok(activeCard, 'active mission displays build card in side panel');
+  ok(activeCard!.textContent?.includes('B · 777788889999'), 'live slot update reflects new next slot');
+  ok(activeCard!.textContent?.includes('Running'), 'live waiting reason reflects running state');
 }));
 
 async function start(root: HTMLElement) {

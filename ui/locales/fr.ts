@@ -501,17 +501,17 @@ export const fr: Messages = {
   // Native speaker must translate (needs native review).
   "projects.pace.room": "daily room",
   // Native speaker must translate (needs native review).
-  "projects.build.title": "Local build",
+  "projects.build.title": "Build local",
   // Native speaker must translate (needs native review).
-  "projects.build.current": "Current",
+  "projects.build.current": "Actuel",
   // Native speaker must translate (needs native review).
-  "projects.build.next": "Next",
+  "projects.build.next": "Suivant",
   // Native speaker must translate (needs native review).
-  "projects.build.lastGood": "Last good",
+  "projects.build.lastGood": "Dernier stable",
   // Native speaker must translate (needs native review).
-  "projects.build.waiting": "Waiting for",
+  "projects.build.waiting": "En attente de",
   // Native speaker must translate (needs native review).
-  "reason.task.waiting": "Waiting for dependencies",
+  "reason.task.waiting": "En attente des dépendances",
   // Native speaker must translate (needs native review).
   "error.project.notFound": "Project not found",
   // Native speaker must translate (needs native review).
@@ -575,7 +575,9 @@ export const fr: Messages = {
   // Native speaker must translate (needs native review).
   "error.decision.person": "This decision needs your answer.",
   // Native speaker must translate (needs native review).
-  "reason.build.unavailable": "Local build slots have not been initialized.",
+  "reason.build.unavailable": "Les emplacements de build local n'ont pas été initialisés.",
+  // Native speaker must translate (needs native review).
+  "reason.update.quiescence": "La promotion attend la fin des opérations actives et la fermeture de la fenêtre.",
   // Native speaker must translate (needs native review).
   "reason.git.repository": "Choose a folder that belongs to a Git repository.",
   // Native speaker must translate (needs native review).

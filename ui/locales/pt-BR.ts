@@ -501,17 +501,17 @@ export const ptBR: Messages = {
   // Native speaker must translate (needs native review).
   "projects.pace.room": "daily room",
   // Native speaker must translate (needs native review).
-  "projects.build.title": "Local build",
+  "projects.build.title": "Compilação local",
   // Native speaker must translate (needs native review).
-  "projects.build.current": "Current",
+  "projects.build.current": "Atual",
   // Native speaker must translate (needs native review).
-  "projects.build.next": "Next",
+  "projects.build.next": "Próximo",
   // Native speaker must translate (needs native review).
-  "projects.build.lastGood": "Last good",
+  "projects.build.lastGood": "Último estável",
   // Native speaker must translate (needs native review).
-  "projects.build.waiting": "Waiting for",
+  "projects.build.waiting": "Aguardando",
   // Native speaker must translate (needs native review).
-  "reason.task.waiting": "Waiting for dependencies",
+  "reason.task.waiting": "Aguardando dependências",
   // Native speaker must translate (needs native review).
   "error.project.notFound": "Project not found",
   // Native speaker must translate (needs native review).
@@ -575,7 +575,9 @@ export const ptBR: Messages = {
   // Native speaker must translate (needs native review).
   "error.decision.person": "This decision needs your answer.",
   // Native speaker must translate (needs native review).
-  "reason.build.unavailable": "Local build slots have not been initialized.",
+  "reason.build.unavailable": "Os slots de compilação local não foram inicializados.",
+  // Native speaker must translate (needs native review).
+  "reason.update.quiescence": "A promoção aguarda o término das operações ativas e o fechamento da janela.",
   // Native speaker must translate (needs native review).
   "reason.git.repository": "Choose a folder that belongs to a Git repository.",
   // Native speaker must translate (needs native review).

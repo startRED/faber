@@ -130,7 +130,11 @@ pub struct Runner {
     pub queue: Queue,
     pub quota_wake: Option<u64>,
     pub promotion_pending: bool,
+    #[serde(default)]
+    pub landings: Vec<Landing>,
     halted: bool,
+    #[serde(default)]
+    pub role_tokens: BTreeMap<String, super::report::RoleTokens>,
     #[serde(default)]
     retirements: BTreeMap<String, Retirement>,
     #[serde(default)]
@@ -143,7 +147,62 @@ impl Record for Runner {
         self.schema
     }
 }
+
+/// Accepted evidence retained in the private checkpoint after queue retirement.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Landing {
+    pub candidate: super::queue::Candidate,
+    pub commit_intent: String,
+    pub forward_intent: String,
+    pub at: u64,
+}
 impl Runner {
+    pub fn accepted_landing(&self, j: &Journal, commit: &str, tree: &str) -> Result<&Landing, &'static str> {
+        for landing in &self.landings {
+            let candidate = &landing.candidate;
+            if candidate.tree != tree || candidate.grant_revision != self.mission.grant_revision {
+                continue;
+            }
+            let committed = j.effect_receipt(&landing.commit_intent).map_err(|e| e.key())?.ok_or("reason.receipt.missing")?;
+            let forwarded = j.effect_receipt(&landing.forward_intent).map_err(|e| e.key())?.ok_or("reason.receipt.missing")?;
+            if committed.outcome != super::Outcome::Done
+                || forwarded.outcome != super::Outcome::Done
+                || committed.evidence.get("head").map(String::as_str) != Some(commit)
+                || committed.evidence.get("tree").map(String::as_str) != Some(tree)
+                || committed.evidence.get("parent") != Some(&candidate.base)
+                || forwarded.evidence.get("old") != Some(&candidate.base)
+                || forwarded.evidence.get("new").map(String::as_str) != Some(commit)
+            {
+                continue;
+            }
+            let mut queue = Queue::default();
+            queue.enqueue(candidate.clone())?;
+            queue.accepted(&candidate.id, &candidate.base, candidate.grant_revision)?;
+            return Ok(landing);
+        }
+        Err("reason.receipt.missing")
+    }
+    pub fn record_tokens(
+        &mut self,
+        role: &str,
+        input: Option<u64>,
+        cache_read: Option<u64>,
+        cache_write: Option<u64>,
+        output: Option<u64>,
+    ) {
+        use super::report::{RoleTokens, UnknownOr};
+        let to_metric = |opt: Option<u64>| opt.map_or(UnknownOr::Unknown("unknown".into()), UnknownOr::Known);
+        self.role_tokens.insert(
+            role.to_lowercase(),
+            RoleTokens {
+                input: to_metric(input),
+                cache_read: to_metric(cache_read),
+                cache_write: to_metric(cache_write),
+                output: to_metric(output),
+            },
+        );
+    }
     pub fn update_quiescent(&self) -> Result<(), &'static str> {
         if !matches!(self.mission.state, MissionState::Paused | MissionState::Done)
             || self.heavy_proof.is_some()
@@ -161,7 +220,9 @@ impl Runner {
             queue: Queue::default(),
             quota_wake: None,
             promotion_pending: false,
+            landings: Vec::new(),
             halted: false,
+            role_tokens: BTreeMap::new(),
             retirements: BTreeMap::new(),
             heavy_proof: None,
             extra: Extra::new(),
@@ -255,12 +316,20 @@ impl Runner {
         if self.halted {
             return Err("error.store.write");
         }
-        let result = j.put(&j.private().join("run.json"), self).and_then(|()| j.save_mission(&self.mission));
+        let result =
+            j.put(&j.private().join("run.json"), self).and_then(|()| j.save_mission(&self.mission)).and_then(|()| self.write_report(j));
         if let Err(e) = result {
-            self.halted = true;
+            self.halt(j);
             return Err(e.key());
         }
+        j.mission_checkpointed(&self.mission);
         Ok(())
+    }
+    fn halt(&mut self, j: &Journal) {
+        self.halted = true;
+        let mut interrupted = self.mission.clone();
+        interrupted.state = MissionState::Paused;
+        j.mission_checkpointed(&interrupted);
     }
     pub fn pause(&mut self, j: &Journal) -> Result<(), &'static str> {
         self.mission.state = MissionState::Paused;
@@ -409,7 +478,7 @@ impl Runner {
         let mut receipt = proof.record(receipt, id, observation)?;
         receipt.task = task.into();
         if let Err(e) = j.record_check(&receipt) {
-            self.halted = true;
+            self.halt(j);
             return Err(e.key());
         }
         if heavy {
@@ -509,7 +578,7 @@ impl Runner {
         let mut decision = j.decision(id).map_err(|e| e.key())?.ok_or("error.decision.option")?;
         decision.answer(super::DecidedBy::Person, answer, at)?;
         if let Err(e) = j.save_decision(&decision) {
-            self.halted = true;
+            self.halt(j);
             return Err(e.key());
         }
         self.save(j)
@@ -551,7 +620,7 @@ impl Runner {
         }
         let plan = super::lead::accept(plan, &j.contracts().map_err(|e| e.key())?, compile)?;
         if let Err(e) = j.save_plan(&plan) {
-            self.halted = true;
+            self.halt(j);
             return Err(e.key());
         }
         self.mission.state = MissionState::Running;
@@ -702,12 +771,95 @@ impl Runner {
         let row = plan.tasks.iter_mut().find(|t| t.id == task).ok_or("error.wire.stale")?;
         row.state = TaskState::Done;
         row.reason = None;
+        if !self.landings.iter().any(|l| l.candidate.id == task) {
+            self.landings.push(Landing {
+                candidate: candidate.clone(),
+                commit_intent: commit_id.clone(),
+                forward_intent: forward_id.clone(),
+                at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()),
+            });
+        }
         row.extra.insert("commitReceipt".into(), commit_id.into());
         row.extra.insert("landingReceipt".into(), forward_id.into());
         broker.journal().save_plan(&plan).map_err(|e| e.key())?;
-        self.queue_retirement(broker.journal(), lease, termination, false)?;
+        self.queue_retirement(broker.journal(), lease, termination, false, current.self_update)?;
         self.recover_retirements(broker, &mut grant)?;
         Ok(head)
+    }
+
+    fn write_report(&self, j: &Journal) -> Result<(), super::store::JournalError> {
+        use super::report::{
+            CheckReport, CommitReceiptReport, MissionReport, ReportTimings, RoleTokens, TaskReport, TreeReceiptReport, UnknownOr,
+        };
+        let Some(latest) = self.landings.last() else { return Ok(()) };
+        let mut report = MissionReport::new(&self.mission.id, &self.mission.goal, &format!("{:?}", self.mission.state).to_lowercase());
+        for role in ["lead", "writer", "reviewer", "repair", "canary"] {
+            report.tokens_per_role.insert(role.into(), self.role_tokens.get(role).cloned().unwrap_or_else(RoleTokens::default));
+        }
+        let checks = j.list_checks()?;
+        for landing in &self.landings {
+            let candidate = &landing.candidate;
+            let mut task_checks = vec![];
+            for receipt in checks.iter().filter(|r| {
+                r.task == candidate.id
+                    && r.candidate == candidate.tree
+                    && r.extra.get("input").and_then(serde_json::Value::as_str) == Some(&candidate.input)
+            }) {
+                for check in &receipt.checks {
+                    check.validate().map_err(|_| super::store::JournalError::Mismatch)?;
+                    task_checks.push(CheckReport {
+                        id: check.id.clone(),
+                        result: format!("{:?}", check.result).to_lowercase(),
+                        reason: check.reason.clone(),
+                        evidence: check.evidence.iter().map(|e| e.path.clone()).collect(),
+                    });
+                }
+            }
+            for definition in candidate.definitions() {
+                for id in &definition.checks {
+                    if !task_checks.iter().any(|c| &c.id == id) {
+                        task_checks.push(CheckReport { id: id.clone(), result: "unknown".into(), reason: None, evidence: vec![] });
+                    }
+                }
+            }
+            let commit = j.effect_receipt(&landing.commit_intent)?;
+            let forward = j.effect_receipt(&landing.forward_intent)?;
+            let evidence = |receipt: &Option<super::Receipt>, key: &str| {
+                receipt.as_ref().and_then(|r| r.evidence.get(key)).cloned().map_or_else(UnknownOr::default, UnknownOr::Known)
+            };
+            let commit_receipt = CommitReceiptReport {
+                intent: landing.commit_intent.clone(),
+                head: evidence(&commit, "head"),
+                tree: evidence(&commit, "tree"),
+                parent: evidence(&commit, "parent"),
+                outcome: commit.as_ref().map(|r| format!("{:?}", r.outcome).to_lowercase()),
+            };
+            let tree_receipt = TreeReceiptReport {
+                intent: landing.forward_intent.clone(),
+                old_head: evidence(&forward, "old"),
+                new_head: evidence(&forward, "new"),
+                tree: evidence(&commit, "tree"),
+                outcome: forward.as_ref().map(|r| format!("{:?}", r.outcome).to_lowercase()),
+            };
+            report.checks.extend(task_checks.clone());
+            if candidate.id == latest.candidate.id {
+                report.commit_receipt = Some(commit_receipt.clone());
+                report.tree_receipt = Some(tree_receipt.clone());
+            }
+            report
+                .tasks
+                .insert(candidate.id.clone(), TaskReport { checks: task_checks, commit_receipt, tree_receipt, landed_at: landing.at });
+        }
+        report.timings = ReportTimings {
+            started_at: if self.mission.created_at > 0 { UnknownOr::Known(self.mission.created_at) } else { UnknownOr::default() },
+            landed_at: UnknownOr::Known(latest.at),
+            duration_seconds: if self.mission.created_at > 0 && latest.at >= self.mission.created_at {
+                UnknownOr::Known(latest.at - self.mission.created_at)
+            } else {
+                UnknownOr::default()
+            },
+        };
+        j.save_report(&report)
     }
 
     fn queue_retirement(
@@ -716,8 +868,10 @@ impl Runner {
         lease: &super::Lease,
         proof: super::lease::Termination,
         abandoned: bool,
+        self_update: bool,
     ) -> Result<(), &'static str> {
         if !proof.tree_dead || !proof.cost_settled || !j.pending().map_err(|e| e.key())?.is_empty() {
+            self.save(j)?;
             return Err("reason.disk.needed");
         }
         if let Some(old) = self.retirements.get(&lease.task) {
@@ -741,7 +895,7 @@ impl Runner {
             if plan.tasks.iter().all(|t| t.state == TaskState::Done) {
                 self.mission.state = MissionState::Done;
                 self.quota_wake = None;
-                self.promotion_pending = false;
+                self.promotion_pending = self_update;
             }
         }
         self.save(j)
@@ -755,7 +909,7 @@ impl Runner {
         proof: super::lease::Termination,
         grant: impl FnMut() -> Result<Option<super::Grant>, super::git::GitError>,
     ) -> Result<(), &'static str> {
-        self.queue_retirement(broker.journal(), lease, proof, true)?;
+        self.queue_retirement(broker.journal(), lease, proof, true, false)?;
         self.recover_retirements(broker, grant)
     }
 

@@ -8,6 +8,7 @@ use std::path::Path;
 
 pub fn scenarios() -> Vec<Scenario> {
     vec![
+        Scenario { name: "projects screen: private checkpoints release mission power and restart never reacquires it", run: power },
         Scenario { name: "projects screen: fixed IPC rejects invalid identities, stale grants and fake execution", run: commands },
         Scenario { name: "projects T5: mode, answer and Stop use the authoritative runner", run: controls },
         Scenario { name: "projects screen: checkpoint, decisions, task evidence, six looks, widths and memory", run: board },
@@ -16,6 +17,25 @@ pub fn scenarios() -> Vec<Scenario> {
             run: notifications,
         },
     ]
+}
+
+fn power(ctx: &mut Ctx) -> Result {
+    let launch = fixture(ctx)?;
+    let mut app = ctx.launch(launch.clone())?;
+    for state in ["done", "paused", "blocked"] {
+        let running = invoke(&mut app.page, "probe_mission_power", json!({"missionId":"screen_mission", "state":"running"}))?;
+        ensure(running["ok"] == true && running["value"]["awake"] == true, || format!("Running did not hold power: {running}"))?;
+        let stopped = invoke(&mut app.page, "probe_mission_power", json!({"missionId":"screen_mission", "state":state}))?;
+        ensure(stopped["ok"] == true && stopped["value"]["awake"] == false, || format!("{state} leaked power: {stopped}"))?;
+    }
+    invoke(&mut app.page, "probe_mission_power", json!({"missionId":"screen_mission", "state":"running"}))?;
+    ctx.close(app.id)?;
+    let mut reopened = ctx.launch(launch)?;
+    let restored = invoke(&mut reopened.page, "probe_mission_power", json!({"missionId":"screen_mission"}))?;
+    ensure(restored["ok"] == true && restored["value"]["awake"] == false && restored["value"]["state"] == "paused", || {
+        format!("restart reacquired interrupted power: {restored}")
+    })?;
+    Ok(())
 }
 
 fn fixture(ctx: &mut Ctx) -> Result<Launch> {

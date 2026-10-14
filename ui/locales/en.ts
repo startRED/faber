@@ -489,6 +489,7 @@ export const en = {
   "error.decision.person": "This decision needs your answer.",
 
   "reason.build.unavailable": "Local build slots have not been initialized.",
+  "reason.update.quiescence": "Promotion waits for active operations to finish and the window to close.",
   "reason.git.repository": "Choose a folder that belongs to a Git repository.",
   "reason.git.base": "The starting Git revision could not be resolved.",
   "reason.git.ref": "The mission branch reference is invalid.",

@@ -10,6 +10,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub fn scenarios() -> Vec<Scenario> {
     vec![
+        Scenario { name: "local_update: candidate starts hidden and returns a real canary handshake without inventing Pass", run: canary },
         Scenario { name: "local_update: independent helper restores an early crash headlessly without changing saved grants", run: crash },
         Scenario { name: "local_update: trusted launcher recovers before a broken candidate can enter main", run: interrupted },
         Scenario {
@@ -22,6 +23,55 @@ pub fn scenarios() -> Vec<Scenario> {
             run: handoff,
         },
     ]
+}
+
+fn canary(ctx: &mut Ctx) -> Result {
+    let root = ctx.sb.sandbox.join("canary-dev");
+    let data = root.join("data");
+    let layout = SlotLayout::new(&root, &ctx.sb.data, &ctx.sb.release).map_err(|e| e.key())?;
+    let manager = UpdateManager::new(layout).map_err(|e| e.key())?;
+    let bytes = fs::read(&ctx.paths.app).map_err(|e| e.to_string())?;
+    let candidate =
+        ExactTree::new(&"1".repeat(40), &"2".repeat(40), &ExactTree::compute_build_hash(&bytes), SCHEMA).map_err(|e| e.key())?;
+    let helper = ctx.paths.app.parent().ok_or("missing test build")?.join("faber-local.exe");
+    let launcher = root.join("faber-local.exe");
+    fs::copy(&helper, &launcher).map_err(|e| e.to_string())?;
+    fs::copy(&ctx.paths.app, root.join("slots/a/faber.exe")).map_err(|e| e.to_string())?;
+    let time = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| e.to_string())?.as_secs();
+    manager.adopt_baseline(Slot::A, candidate, &bytes, time).map_err(|e| e.key())?;
+    let mut env = child_env(&std::env::vars().collect::<Vec<_>>(), &ctx.sb, &Default::default(), &ctx.paths.fake_cli);
+    env.extend([
+        ("FABER_CHANNEL".into(), "development".into()),
+        ("FABER_DEV_ROOT".into(), root.to_string_lossy().into_owned()),
+        ("FABER_INSTALLED_DATA".into(), ctx.sb.data.to_string_lossy().into_owned()),
+        ("FABER_INSTALLED_RELEASE".into(), ctx.sb.release.to_string_lossy().into_owned()),
+    ]);
+    let (host, _, _) =
+        Owned::start(&launcher, &["--test-canary".into()], &env, &ctx.sb.sandbox, &ctx.paths.fake_cli).map_err(|e| e.to_string())?;
+    let result = (|| {
+        eventually("candidate canary receipt", Duration::from_secs(40), || !host.is_running())?;
+        ensure(host.status().is_some_and(|s| s.contains('0')), || "candidate canary failed".into())?;
+        let verdict: CanaryVerdict = serde_json::from_slice(&fs::read(data.join("test-canary-result.json")).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?;
+        ensure(verdict == CanaryVerdict::NotRun, || "startup fabricated miniature mission acceptance".into())?;
+        let receipt = fs::read_dir(data.join("missions/canary"))
+            .map_err(|e| e.to_string())?
+            .next()
+            .ok_or("missing private canary receipt")?
+            .map_err(|e| e.to_string())?
+            .path();
+        let handshake: serde_json::Value =
+            serde_json::from_slice(&fs::read(receipt).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        ensure(handshake["buildHash"] == ExactTree::compute_build_hash(&bytes) && handshake["nonce"] == handshake["receipt"], || {
+            "wrong candidate handshake".into()
+        })?;
+        assert_hidden(ctx, &[&host], &env)
+    })();
+    host.terminate();
+    ctx.notes.push(
+        "candidate Engine startup; challenge, executable hash, schema and private receipt; no fake/live miniature mission Pass".into(),
+    );
+    result
 }
 
 fn crash(ctx: &mut Ctx) -> Result {
@@ -130,9 +180,11 @@ fn handoff(ctx: &mut Ctx) -> Result {
     rejected.terminate();
     blocked?;
     ensure(status.is_some_and(|s| s.contains('1')), || "running mission admitted promotion".into())?;
-    ensure(matches!(manager.manifest().map_err(|e| e.key())?.ok_or("missing ready build")?.state, UpdateState::Ready { .. }), || {
-        "refused promotion changed build slots".into()
-    })?;
+    let manifest = manager.manifest().map_err(|e| e.key())?.ok_or("missing ready build")?;
+    ensure(matches!(manifest.state, UpdateState::Ready { .. }), || "refused promotion changed build slots".into())?;
+    ensure(manifest.current_good.as_ref().is_some_and(|g| g.slot == Slot::A), || "current slot must be Slot::A".into())?;
+    ensure(manifest.staged_tree.is_some(), || "next staged build slot must be present".into())?;
+    ensure(manifest.last_good.as_ref().is_some_and(|g| g.slot == Slot::A), || "last good slot is Slot::A".into())?;
     let baseline = start("--launch")?;
     let paused = eventually("old engine services pause before promotion", Duration::from_secs(15), || {
         faber_engine::project::run::Runner::load(&journal).is_ok_and(|r| r.mission.state == faber_engine::project::MissionState::Paused)
