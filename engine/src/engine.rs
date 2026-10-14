@@ -931,9 +931,9 @@ impl Core {
                 if !c.messages.is_empty() {
                     self.save(conv);
                 }
-                // The turn's reply now names its model.
+                // The turn's reply now names its model: the screen hears it now, not with the first word.
                 self.refresh_running();
-                return;
+                return self.push(conv, turn_id.as_deref(), true);
             }
             EngineEvent::Break { final_answer } => {
                 if final_answer && self.live.get(conv).is_some_and(|l| !l.answer_started) {

@@ -156,6 +156,11 @@ fn setup_run(
 const HOLD: &str = "faber_hold";
 const RELEASE: &str = "release";
 
+/// Whether a recorded line is the hold marker itself: its own field, not a mention of it inside some text.
+fn is_hold(line: &str) -> bool {
+    serde_json::from_str::<Value>(line).is_ok_and(|v| v.get(HOLD).is_some())
+}
+
 fn hold(state: Option<&Path>) {
     let Some(file) = state.map(|s| s.join(RELEASE)) else { return };
     for _ in 0..1200 {
@@ -181,7 +186,7 @@ fn session(
             continue;
         }
         for out in dispatch.feed(&line)? {
-            if out.contains(HOLD) {
+            if is_hold(&out) {
                 stdout.flush()?;
                 hold(state);
             } else {
@@ -280,6 +285,8 @@ mod tests {
         );
         assert_eq!(code.unwrap(), 0);
         assert!(out.contains("Rayleigh") && !out.contains(HOLD), "{out}");
+        assert!(is_hold(r#"{"faber_hold":true}"#));
+        assert!(!is_hold(r#"{"type":"assistant","text":"the faber_hold marker"}"#));
         assert!(err.is_empty(), "{err}");
     }
 

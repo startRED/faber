@@ -45,7 +45,7 @@ pub struct Pick {
 const EFFORT: &str = "medium";
 
 /// The picker's aliases ("sonnet") as the same full IDs as Auto's measured table, so the name an answer shows when it
-/// starts is the one the CLI reports a moment later.
+/// starts is the one the CLI reports a moment later. New models enter through that table, which changes with each Faber release.
 fn pinned(vendor: Vendor, model: &str) -> &str {
     crate::route::PROFILES
         .iter()

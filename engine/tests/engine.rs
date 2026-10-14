@@ -81,6 +81,23 @@ async fn review3_legacy_sessions_restart_with_history_and_gated_sessions_resume(
 }
 
 #[tokio::test]
+async fn codex_without_a_picked_model_names_the_one_it_reports_before_the_first_word() {
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, mut rx) = engine(dir.path(), Vendor::Codex, fake(fixture("codex", "chat")).spawn);
+    engine.send(ask(Area::Chat, SKY, choice("codex", None))).unwrap();
+    let mut heard = vec![];
+    finished(&mut rx, |m| {
+        if m.role == Role::Assistant {
+            heard.push((m.text.is_empty(), m.model.clone()));
+        }
+    })
+    .await;
+    assert!(heard.contains(&(true, Some("gpt-6-luna".into()))), "no update named the model before the first word: {heard:?}");
+    assert!(heard.iter().all(|(empty, model)| !*empty || model.is_none() || model.as_deref() == Some("gpt-6-luna")), "{heard:?}");
+    engine.shutdown();
+}
+
+#[tokio::test]
 async fn review3_sensitive_chat_roots_are_refused_only_without_prompts() {
     let dir = tempfile::tempdir().unwrap();
     let (engine, _) = engine(dir.path(), Vendor::Claude, fake(vec![]).spawn);
