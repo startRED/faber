@@ -48,7 +48,7 @@
         "https://github.com/startRED/faber/releases/latest/download/latest.json"
       ],
       "windows": {
-        "installMode": "passive"
+        "installMode": "quiet"
       }
     }
   }
