@@ -110,12 +110,14 @@ impl Engine {
         self.with(|c| c.mission_lock.clone())
     }
 
-    pub async fn dispatch_mission_worker(&self, journal: Journal, request: crate::project::budget::Invocation) -> Result<(), String> {
+    pub async fn dispatch_mission_worker(&self, journal: Journal, mut request: crate::project::budget::Invocation) -> Result<(), String> {
         let coordinator = self.mission_lock();
         let _turn = coordinator.lock().await;
         let _update = self.mission_update_admission()?;
         let mut runner = Runner::load(&journal).map_err(str::to_string)?;
         runner.admit(request.vendor).map_err(str::to_string)?;
+        // No trusted pre-request context census yet: use the published window, never the caller's estimate.
+        request.exposure_micros = Some(crate::project::budget::complete_request_maximum(&request.model, None, 0).map_err(str::to_string)?);
         let worker = runner.workers.get(&request.worker).ok_or("error.wire.stale")?.clone();
         // The qualified writer launcher must supply T4's owned process identity before source can be unlocked.
         if worker.brief.role == ProjectRole::Writer {
@@ -248,6 +250,10 @@ impl Engine {
                 }
                 if let crate::project::budget::Status::Stop(key) = stopped {
                     return Err(key.into());
+                }
+                if let EngineEvent::Error { message, fatal: true } = &event {
+                    let restrictions = crate::project::policy::Blocker::Restrictions.key();
+                    return Err(if message == restrictions { message.clone() } else { "error.project.invocation".into() });
                 }
                 if matches!(event, EngineEvent::Done { .. }) && runner.mission.state != crate::project::MissionState::Paused {
                     let output = std::mem::take(text);

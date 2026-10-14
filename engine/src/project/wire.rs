@@ -647,6 +647,9 @@ pub struct TaskDetail {
 #[serde(rename_all = "camelCase")]
 pub struct CostView {
     pub own_micros: Option<u64>,
+    /// Conservative total charge when any invocation ended without settled counters.
+    #[serde(default)]
+    pub bound_micros: Option<u64>,
     pub cap_micros: Option<u64>,
     pub complete: bool,
 }

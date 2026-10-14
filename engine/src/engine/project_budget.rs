@@ -452,7 +452,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn opus_h2_native_start_closes_dispatch_but_unknown_spend_stays_parked() {
+    async fn opus_h2_native_start_closes_dispatch_and_interrupt_accounts_a_bound() {
         let (dir, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let e = engine(dir.path());
         let (j, mut r) = runner_fixture(&e, repo.path());
@@ -499,8 +499,11 @@ mod tests {
         .unwrap();
         r.pause(&j).unwrap();
         e.pause_mission_budget("m1").unwrap();
-        assert_eq!(r.resume_authorized(&j, &e), Err("reason.project.reconcile".into()));
-        assert!(Budget::load(&e.ledger()).unwrap().grants["m1"].paused);
+        r.resume_authorized(&j, &e).unwrap();
+        let budget = Budget::load(&e.ledger()).unwrap();
+        assert!(!budget.grants["m1"].paused);
+        assert!(budget.invocations["i1"].bounded);
+        assert_eq!(budget.invocations["i1"].paid_micros, 100_000);
         e.shutdown();
     }
 
@@ -513,6 +516,23 @@ mod tests {
         assert!(j.pending().unwrap().is_empty());
         assert!(Budget::load(&e.ledger()).unwrap().invocations.is_empty());
         assert!(e.mission_sessions(&r.mission.id).is_empty());
+        e.shutdown();
+    }
+
+    #[tokio::test]
+    async fn a_role_policy_failure_reaches_the_coordinator_without_waiting_for_cost_settlement() {
+        let (dir, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let e = engine(dir.path());
+        let (j, _) = runner_fixture(&e, repo.path());
+        e.mission_budget(Change::Admit(request())).unwrap();
+        let intent = crate::project::Intent::new("i1", "m1", crate::project::IntentKind::Dispatch, 3, 1);
+        j.record_intent(&intent).unwrap();
+        let key = crate::project::policy::Blocker::Restrictions.key();
+        for (message, expected) in [(key, key), ("untrusted CLI diagnostics", "error.project.invocation")] {
+            let event = EngineEvent::Error { message: message.into(), fatal: true };
+            assert_eq!(e.mission_event(&j, "i1", "w1", &mut String::new(), event), Err(expected.into()));
+        }
+        assert!(!Budget::load(&e.ledger()).unwrap().invocations["i1"].settled, "an error is not an owned-job retirement proof");
         e.shutdown();
     }
 

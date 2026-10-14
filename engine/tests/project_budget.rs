@@ -14,6 +14,103 @@ const NOW: f64 = 2.0 * DAY + 3600.0;
 const MODEL: &str = "gpt-6.1-sol";
 
 #[test]
+fn complete_request_maximum_prices_uncached_context_and_all_output_including_reasoning() {
+    use faber_engine::project::budget::complete_request_maximum;
+    assert_eq!(complete_request_maximum("gpt-6-luna", Some(44_915), 123), Ok(68_615));
+    assert_eq!(complete_request_maximum("gpt-6-luna", None, 0), Ok(306_000));
+    assert_eq!(complete_request_maximum("claude-haiku-5-5", Some(1196), 0), Ok(64_120));
+    assert_eq!(complete_request_maximum("claude-haiku-5-5", None, 0), Ok(820_000));
+    assert!(complete_request_maximum("gpt-6-luna", Some(1_050_001), 0).is_err());
+    assert!(complete_request_maximum("unpriced", None, 0).is_err());
+    assert!(complete_request_maximum("gpt-6-luna", None, u64::MAX).is_err());
+}
+
+#[test]
+fn interrupt_is_charged_once_as_a_bound_and_never_becomes_measured_cost() {
+    let mut l = ready(200_000);
+    apply(&mut l, Change::Admit(request("bounded", "m1", "w1", Kind::Worker, 100_000)), NOW, 0).unwrap();
+    assert_eq!(report(&mut l, "bounded", None, true, true), Status::Ready);
+    assert_eq!(report(&mut l, "bounded", None, true, true), Status::Ready);
+    let b = Budget::load(&l).unwrap();
+    assert_eq!(serde_json::to_value(&b.invocations["bounded"]).unwrap()["bounded"], true);
+    assert_eq!(b.cost_view("m1").own_micros, None);
+    assert_eq!(serde_json::to_value(b.cost_view("m1")).unwrap()["boundMicros"], 100_000);
+    assert!((l.codex.own_spend[&2] - 0.1).abs() < 1e-9);
+    assert_eq!(l.codex.spans.len(), 8, "a bound is never a calibration sample");
+    assert!(apply(&mut l, Change::Continue { id: "bounded".into() }, NOW, 0).is_err());
+}
+
+#[test]
+fn admission_keeps_the_documented_bound_inside_each_authorized_role_cap() {
+    use faber_engine::project::budget::complete_request_maximum;
+    for (vendor, model, cap) in [(Vendor::Codex, "gpt-6-luna", 300_000), (Vendor::Claude, "claude-haiku-5-5", 600_000)] {
+        let mut l = ledger();
+        for span in &mut l.of_mut(vendor).spans {
+            span.model = model.into();
+        }
+        apply(&mut l, Change::Allocate { vendor, cap_micros: 1_000_000 }, NOW, 0).unwrap();
+        let mut g = grant(1_000_000);
+        g.worker_micros = cap;
+        g.vendors = BTreeMap::from([(vendor, 1_000_000)]);
+        apply(&mut l, Change::Grant { mission: "m1".into(), grant: g }, NOW, 0).unwrap();
+        let mut r = request("limited", "m1", "w1", Kind::Worker, complete_request_maximum(model, None, 0).unwrap());
+        r.vendor = vendor;
+        r.model = model.into();
+        r.effort = "medium".into();
+        assert_eq!(Budget::load(&l).unwrap().can_admit(&l, &r, NOW), Err("reason.budget.cap"));
+        r.exposure_micros = Some(complete_request_maximum(model, Some(50_000), 0).unwrap());
+        assert!(Budget::load(&l).unwrap().can_admit(&l, &r, NOW).is_ok());
+    }
+}
+
+#[test]
+fn interrupted_bound_preserves_last_settled_usage_and_rejects_counter_reset_reuse() {
+    let mut l = ready(200_000);
+    apply(&mut l, Change::Admit(request("i1", "m1", "w1", Kind::Worker, 100_000)), NOW, 0).unwrap();
+    assert_eq!(report(&mut l, "i1", Some(0.01), false, false), Status::Ready);
+    assert_eq!(report(&mut l, "i1", None, true, true), Status::Stop("reason.budget.breach"));
+    assert_eq!(Budget::load(&l).unwrap().invocations["i1"].paid_micros, 110_000);
+    assert!((l.codex.own_spend[&2] - 0.11).abs() < 1e-9);
+    let mut retry = request("i2", "m1", "w1", Kind::Worker, 10_000);
+    retry.session = "s-i1".into();
+    assert_eq!(Budget::load(&l).unwrap().can_admit(&l, &retry, NOW), Err("reason.budget.unknown"));
+}
+
+#[test]
+fn corrupt_bound_flags_cannot_free_a_reservation() {
+    let mut l = ready(200_000);
+    apply(&mut l, Change::Admit(request("i1", "m1", "w1", Kind::Worker, 100_000)), NOW, 0).unwrap();
+    for case in 0..3 {
+        let mut damaged = l.clone();
+        let r = &mut damaged.extra.get_mut("missionBudget").unwrap()["invocations"]["i1"];
+        r["bounded"] = true.into();
+        r["settled"] = (case != 0).into();
+        r["terminated"] = (case != 1).into();
+        r["paidMicros"] = if case == 2 { 99_999 } else { 100_000 }.into();
+        assert_eq!(Budget::load(&damaged).unwrap_err(), "error.store.corrupt");
+    }
+}
+
+#[test]
+fn late_cumulative_usage_after_an_interrupt_cannot_charge_an_earlier_turn_again() {
+    let mut l = ledger();
+    apply(&mut l, Change::Allocate { vendor: Vendor::Claude, cap_micros: 400_000 }, NOW, 0).unwrap();
+    let mut g = grant(200_000);
+    g.vendors = BTreeMap::from([(Vendor::Claude, 200_000)]);
+    apply(&mut l, Change::Grant { mission: "m1".into(), grant: g }, NOW, 0).unwrap();
+    l.extra.get_mut("missionBudget").unwrap()["bases"]["claude:s-i1"] = serde_json::json!({"session":"s-i1","total":0.5});
+    let mut r = request("i1", "m1", "w1", Kind::Worker, 100_000);
+    r.vendor = Vendor::Claude;
+    r.model = "claude-sonnet-5-5".into();
+    r.fresh = false;
+    apply(&mut l, Change::Admit(r), NOW, 0).unwrap();
+    assert_eq!(report(&mut l, "i1", None, true, true), Status::Ready);
+    assert_eq!(report(&mut l, "i1", Some(0.51), false, true), Status::Ready);
+    assert_eq!(Budget::load(&l).unwrap().invocations["i1"].paid_micros, 100_000);
+    assert!((l.claude.own_spend[&2] - 0.1).abs() < 1e-9);
+}
+
+#[test]
 fn the_installed_unmetered_interrupt_cannot_return_reserved_spend() {
     let mut ledger = ready(200_000);
     apply(&mut ledger, Change::Admit(request("i1", "m1", "w1", Kind::Worker, 100_000)), NOW, 0).unwrap();
@@ -29,12 +126,9 @@ fn the_installed_unmetered_interrupt_cannot_return_reserved_spend() {
     }
     let event = done.expect("fixture must finish the actual interrupted turn");
     assert!(matches!(event, EngineEvent::Done { cost_total_usd: None, incomplete: true, .. }));
-    assert_eq!(
-        apply(&mut ledger, Change::Report { id: "i1".into(), event, terminated: true }, NOW, 0).unwrap(),
-        Status::Stop("reason.budget.unknown")
-    );
+    assert_eq!(apply(&mut ledger, Change::Report { id: "i1".into(), event, terminated: true }, NOW, 0).unwrap(), Status::Ready);
     let budget = Budget::load(&ledger).unwrap();
-    assert!(!budget.invocations["i1"].settled);
+    assert!(budget.invocations["i1"].bounded);
     assert_eq!(budget.cost_view("m1").own_micros, None);
     assert!(apply(&mut ledger, Change::Continue { id: "i1".into() }, NOW, 0).is_err());
 }
@@ -55,6 +149,7 @@ fn mission_screen_cost_reads_the_live_cap_and_never_calls_unsettled_exposure_mea
             rates: "date".into(),
             paid_micros: 12_345,
             settled: true,
+            bounded: false,
             terminated: true,
             extra: Extra::new(),
         },
@@ -199,7 +294,7 @@ fn late_unknown_and_live_cost_stay_reserved_across_stop_and_restart() {
     let store = Store::new(dir.path());
     store.save_ledger(&l).unwrap();
     let mut restored = store.ledger_checked().unwrap();
-    assert!(!Budget::load(&restored).unwrap().invocations["i1"].settled);
+    assert!(Budget::load(&restored).unwrap().invocations["i1"].bounded);
     assert_eq!(Budget::load(&restored).unwrap().invocations["i1"].request.exposure_micros, Some(140_000));
     assert!(apply(&mut restored, Change::Continue { id: "i1".into() }, NOW, 0).is_err());
     restored.codex.billing = Billing::Subscription;
@@ -210,10 +305,10 @@ fn late_unknown_and_live_cost_stay_reserved_across_stop_and_restart() {
     apply(&mut restored, Change::Grant { mission: "m1".into(), grant: smaller }, NOW, 0).unwrap();
     assert!(apply(&mut restored, Change::Grant { mission: "m2".into(), grant: grant(300_000) }, NOW, 0).is_err());
     report(&mut restored, "i1", Some(0.01), false, false);
-    assert!(!Budget::load(&restored).unwrap().invocations["i1"].settled, "cost alone cannot free a live process");
+    assert!(Budget::load(&restored).unwrap().invocations["i1"].bounded, "late cost cannot erase the bound");
     report(&mut restored, "i1", Some(0.01), false, true);
     assert!(Budget::load(&restored).unwrap().invocations["i1"].settled);
-    assert!((restored.codex.own_spend[&2] - 0.01).abs() < 1e-9);
+    assert!((restored.codex.own_spend[&2] - 0.14).abs() < 1e-9);
 }
 
 #[test]
@@ -494,13 +589,10 @@ fn an_error_records_termination_without_freeing_unknown_exposure() {
     let mut l = ready(200_000);
     apply(&mut l, Change::Admit(request("i1", "m1", "w1", Kind::Worker, 10_000)), NOW, 0).unwrap();
     let event = EngineEvent::Error { message: "error.cli.interruptTimeout".into(), fatal: true };
-    assert_eq!(
-        apply(&mut l, Change::Report { id: "i1".into(), event, terminated: true }, NOW, 0).unwrap(),
-        Status::Stop("reason.budget.unknown")
-    );
+    assert_eq!(apply(&mut l, Change::Report { id: "i1".into(), event, terminated: true }, NOW, 0).unwrap(), Status::Ready);
     let b = Budget::load(&l).unwrap();
     assert!(b.invocations["i1"].terminated);
-    assert!(!b.invocations["i1"].settled);
+    assert!(b.invocations["i1"].bounded);
     assert!(apply(&mut l, Change::Continue { id: "i1".into() }, NOW, 0).is_err());
 }
 
@@ -510,7 +602,7 @@ fn known_live_cost_holds_exposure_without_claiming_it_is_unknown() {
     apply(&mut l, Change::Admit(request("i1", "m1", "w1", Kind::Worker, 10_000)), NOW, 0).unwrap();
     assert_eq!(report(&mut l, "i1", Some(0.005), false, false), Status::Ready);
     assert!(!Budget::load(&l).unwrap().invocations["i1"].settled);
-    assert_eq!(report(&mut l, "i1", None, true, false), Status::Stop("reason.budget.unknown"));
+    assert_eq!(report(&mut l, "i1", None, true, false), Status::Ready);
 }
 
 #[test]
@@ -625,9 +717,9 @@ fn a_resumed_session_without_its_cost_base_keeps_the_full_reservation() {
     r.model = "claude-sonnet-5-5".into();
     r.fresh = false;
     apply(&mut l, Change::Admit(r), NOW, 0).unwrap();
-    assert_eq!(report(&mut l, "i1", Some(5.0), true, true), Status::Stop("reason.budget.unknown"));
-    assert!(!Budget::load(&l).unwrap().invocations["i1"].settled);
-    assert_eq!(Budget::load(&l).unwrap().invocations["i1"].paid_micros, 0);
+    assert_eq!(report(&mut l, "i1", Some(5.0), true, true), Status::Ready);
+    assert!(Budget::load(&l).unwrap().invocations["i1"].bounded);
+    assert_eq!(Budget::load(&l).unwrap().invocations["i1"].paid_micros, 140_000);
 }
 
 #[test]
@@ -653,7 +745,7 @@ fn an_unknown_terminal_cost_cannot_reuse_the_same_invocation_allowance() {
     apply(&mut l, Change::Admit(request("i1", "m1", "w1", Kind::Worker, 100_000)), NOW, 0).unwrap();
     report(&mut l, "i1", None, true, true);
     assert!(apply(&mut l, Change::Continue { id: "i1".into() }, NOW, 0).is_err());
-    assert!(!Budget::load(&l).unwrap().invocations["i1"].settled);
+    assert!(Budget::load(&l).unwrap().invocations["i1"].bounded);
 }
 
 #[test]

@@ -1,178 +1,217 @@
-# Task 13: native authority repaired; interrupted spending qualification failed
+# Task 13: R117 bounds implemented; authorized role caps reject admission
 
-Measured on 2026-10-14, branch `selfdev-t13`, draft PR #19 into `selfdev`.
-Task 13 and R96 remain incomplete. This report supersedes the earlier native-write
-stop, preserved in [the previous observation](2026-10-14-self-development-native-write-stop.md).
+Observed on 2026-10-14 in `selfdev-t13`, draft PR #19 into `selfdev`.
+Task 13 and R96 remain incomplete. R117 supersedes the interrupted-reserve route
+in [the archived metering report](2026-10-14-self-development-interrupted-metering-stop.md).
+No measured overshoot reserve or invented safety factor is used.
 
-## Current result and stop
+## Result and stop
 
-The G1 root cause is fixed in the shared Codex project thread builder: all five
-roles use `read-only`, `approvalPolicy: on-request`, and `approvals_reviewer: user`
-for both start and resume. Faber declines every native approval request. The former
-Writer `workspace-write`/`never` pair allowed native `apply_patch` to bypass the
-engine's hash-checked patches. The new fake-wire regression first reproduced an
-accepted `ToolResult { ok: true }` for a completed native file change; it now
-produces a fatal restrictions blocker and stops the owned session. Completed
-unknown native tool types also fail closed. Claude uses an empty native tool list
-and explicit Edit/Write/NotebookEdit/Bash denials; emitted native tool calls stop
-its role loop. Manual Chat/Projects keep their existing thread policies.
+The latest cross-vendor review of `8a62018` is accepted: checks 1, 3, 4 and 5 are
+sound; check 2 identified a real gap. Before the fix, fake-wire tests of both
+actual role loops timed out on unknown permission requests. Known command/file
+approvals now receive `decision: decline`; permission approvals get an empty
+permission grant scoped to the turn; MCP elicitation gets `action: decline`.
+Claude's `can_use_tool` gets `behavior: deny`. Every other server request ends
+the owned role immediately with fatal `reason.project.restrictionsUnproven`.
+Future names ending in `requestApproval` do not get a guessed response shape.
+Manual sessions keep their existing handling. No finding in this latest review
+is rejected.
 
-The installed Codex genuinely attempted an inside-workspace native patch, requested
-approval, received `decline`, and reported `fileChange: declined`. Before and after
-bytes are both `baseline\n`. The outside direct attempt also requested approval
-and was declined. Neither vendor changed the external disposable file or recovered
-the marker. Exact marker hashes are checked again after the owned job ends. This
-proves unchanged bytes and no marker disclosure, not an OS audit of every read.
-The junction attempt returned an answer without a tool event; no new enforced
-junction-denial proof is claimed from that answer alone.
+The coordinator also propagates fatal role failures even while cost is unsettled;
+R117's nonterminal accounting cannot swallow a security failure. Its regression
+first returned `Ok(())` instead of the restrictions key. Other fatal diagnostics
+map to the fixed invocation error key. Accounting still requires an owned-job
+retirement proof before it marks termination; an error alone never releases it.
 
-The next spending experiment exposed a real failure of the current metering
-strategy. Codex emitted response deltas but no `thread/tokenUsage/updated` before
-interruption. It confirmed `turn.status: interrupted`; no usage counters arrived
-in the following five-second settlement drain either. The first observation lacked
-that drain, so a fresh repeat explicitly checked delayed notification ordering.
-Both receipts have unknown final tokens/cost. The drained repeat stopped after
-131 response bytes, with zero further text bytes observed before completion,
-waited 5005 ms for settlement notifications (none), then ended its owned job in
-15 ms. Text bytes are not tokens and are not a monetary reserve.
+R117 charges an interrupted invocation without settled counters at a **computed
+bound**: last settled usage plus one uncached request at the current context and
+the documented output maximum. Overflow and unqualified model IDs fail closed.
+Unknown CLI-built context uses the full documented window; an earlier turn's
+input count is not a census of the next request. The production dispatcher
+replaces caller exposure with this conservative calculation before spending
+admission. Public role admission stays closed; a parameter cannot unlock it.
 
-The receipt's historical `stopToResultMs: 5007` includes the settlement drain;
-this is not a claim of 5007 ms interrupt acknowledgement latency. The helper now
-records acknowledgement and drain-end times separately. No additional model turn
-was run after confirming this failure. Three stops were planned for Codex; that
-series stopped at its first failed measurement. Claude interruption measurements
-were not started. No maximum token overshoot or safety-factor reserve is invented.
-`Budget::can_admit` has no newly measured bound; public role admission remains
-closed and non-configurable. The captured unmetered interruption is replayed
-through the production parser/ledger to prove its reservation stays unsettled,
-measured spend stays unknown, and continuation cannot return/reuse the allowance.
+The ledger marks bound attribution separately from measured cost, charges the
+terminated invocation once, retains the charge across restart and late results,
+and excludes it from calibration. Late cumulative Claude results subtract the
+saved session base. An interrupted/bounded session cannot reuse the allowance.
+Incomplete nonterminal accounting does not itself trigger a budget interrupt;
+owner/deadline/policy stops remain available. Spend above the admitted amount
+records the larger charge and closes the driver.
 
-## Installed identity and native controls
+A new live Claude interruption also lacked settled final counters: its error
+result had zero token categories despite earlier streaming usage. It acknowledged
+Stop in **7 ms**, emitted zero further text deltas, and closed the owned job in
+**17 ms**. These observations are not a monetary reserve. Its tools/MCP/skills
+were empty, plugins were builtin-only metadata, and marker bytes/hash matched.
+No new Codex interruption or model turn was requested under R117.
 
-| Vendor | Version | Resolved executable SHA-256 |
+The new stop is **`reason.budget.cap` for the runbook's authorized role split**.
+There is no trusted pre-dispatch census of the CLI's complete prompt yet. The
+resulting conservative bounds exceed Lead's $0.30 and Writer's $0.60. Regression
+tests exercise the actual `Budget::can_admit` and require both rejections; a
+certified 50K context fits those same tests. No cap was raised or repartitioned,
+and no real mission was dispatched.
+
+## Supported controls and dollars
+
+Codex's installed executable generated its JSON schemas on an owned hidden
+desktop. `ThreadStartParams` and `TurnStartParams` expose no output-token maximum;
+the [version-matched config schema](https://raw.githubusercontent.com/openai/codex/rust-v0.162.1/codex-rs/core/config.schema.json)
+has none either. No key was guessed. The new project start/resume override pins
+the supported `service_tier: default`, matching standard prices. That override
+has regression proof, not a new live attestation. Luna's documented output
+maximum is 128,000 tokens including reasoning; its context envelope is 1,050,000.
+Above 272K input, standard prices are $0.20 input / $0.75 output per million.
+[Model limits and prices](https://developers.openai.com/api/docs/models/gpt-6-luna).
+
+Claude's supported `CLAUDE_CODE_MAX_OUTPUT_TOKENS` is set to `128000` in shared
+project settings for all roles/resumes. Documentation says "most requests", so
+it is not claimed as a universal smaller cap. Exceptions remain covered by the
+model's 128K maximum. Haiku has a 1M context envelope; above 100K input it costs
+$0.50 input / $2.50 output per million; smaller context costs $0.10 / $0.50.
+Sources: [supported control](https://code.claude.com/docs/en/env-vars),
+[model limits](https://platform.claude.com/docs/en/models/overview),
+[prices](https://platform.claude.com/docs/en/about-claude/pricing).
+
+Every amount below is a **bound**, initially with zero last-settled spend.
+Additional settled spend is added. Diagnostic effort was low; curated mission
+profiles use medium for these models. The maximum output covers both.
+
+| Role / model | Pre-dispatch context | Bound USD | Authorized cap USD | Result |
+| --- | --- | ---: | ---: | --- |
+| Lead / `gpt-6-luna` | Unknown; 1,050,000 envelope | 0.306000 | 0.30 | Reject |
+| Writer / `claude-haiku-5-5` | Unknown; 1,000,000 envelope | 0.820000 | 0.60 | Reject |
+| Reviewer / `gpt-6-luna` | Unknown; 1,050,000 envelope | 0.306000 | 0.40 | Fits this cap; role admission closed |
+| Canary/repair using Luna | Same unknown envelope | 0.306000 per request | 0.70 combined | Two fit; no canary ran |
+| Canary/repair using Haiku | Same unknown envelope | 0.820000 per request | 0.70 combined | Reject |
+
+One Lead + Writer + Reviewer sums to **$1.432000**, below $2.00. Holding all three
+at once plus the untouched $0.70 canary/repair buffer needs **$2.132000**. Settled
+sequential turns can release unused reservations; that concurrent sum does not
+mean every $2 mission is impossible. The authorized split still fails before a
+useful mission starts: Lead is $0.006 over its cap and Writer is $0.22 over.
+
+For comparison only, a certified 50K context gives $0.069000 for either model.
+Claude's observed streaming input here is 966 tokens, which would calculate to
+$0.064097, rounded to microdollars. That request was already in flight; it is not
+pre-dispatch evidence for the next turn. The immutable manual receipt uses the
+more conservative $0.820000 envelope. Historical unknown turns are not given
+invented token counts or retrospectively labeled measured.
+
+## Installed identity and boundaries
+
+| Vendor | Fresh version | Exact resolved executable SHA-256 |
 | --- | --- | --- |
 | Claude Code | 2.1.296 | `76de74f7694a5bdc03378a5f837c9e132827bf004c98c276bc4e9094ff06769a` |
 | Codex | 0.162.1 | `dd13bdb162a184fa04039488b234a8258ef9b76f84e926c505d5742b19249a6a` |
 
-The fresh preflight confirmed subscription billing. Codex paid fallback was false;
-the completed Claude native turn reported overage inactive and paid fallback false.
-Only resolved executable files were hashed under R112. No CLI credential or user
-configuration file was opened directly. The official `config/read` reply retains
-MCP names only through `IgnoredAny`; values are neither copied nor recorded.
+Fresh preflight reports subscription billing for both and paid fallback false
+for Codex. Claude's interruption has subscription metadata but no fresh
+overage/paid-fallback attestation. No paid use is observed or claimed impossible.
+Only exact resolved programs were hashed under R112. User CLI configuration
+and credential files were never directly opened.
 
-Codex's [version-matched configuration schema](https://raw.githubusercontent.com/openai/codex/rust-v0.162.1/codex-rs/core/config.schema.json)
-was inspected. Its native tools table does not establish an `apply_patch` removal
-control. The `apply_patch_freeform` feature exists, but was not treated as a verified
-removal guarantee or replaced with a guessed key. The installed patch tool remains
-offered; its real writes are approval-gated and declined. The
-[app-server protocol](https://developers.openai.com/codex/app-server) documents the
-thread sandbox/approval controls; installed behavior is the conformance evidence.
-
-Both vendors report zero inherited tools and zero active inherited MCP servers.
-Codex still reports four explicitly disabled registry entries, each with zero tools,
-resources and templates; hooks count is zero and plugin inventories are empty.
-Claude reports empty tools/MCP/skills and zero user plugins. Its three expected
-embedded modules remain metadata. Claude startup does not report a hook inventory;
-that observed count remains unknown despite the fixed hook-disable settings.
-No complete private admission receipt is claimed from these partial observations.
-
-## Cross-vendor review disposition
-
-| Finding | Verified result and action |
-| --- | --- |
-| 1. Red check bypasses dispatch | Accepted and fixed. The in-memory verify closure is removed. The hidden fixture invokes `Runner::run_proof` and `proof::execute`, starts the first-party checker in an owned subprocess with recorded isolated environment, and verifies real red exit 1 / green exit 0. Spawn failure is persisted as `NotRun` and cannot verify a tree. Private logs are bound to the receipt. |
-| 2. Scripted build/canary | Accepted scope limitation, already labeled scripted; made explicit again. Case 4 copies the prebuilt test launcher and injects `CanaryVerdict::Pass`. It proves the fixture lifecycle, not candidate compilation or the mandatory miniature mission. No real build/canary ran after the spending stop. |
-| 3. Resume consumption | Accepted missing positive proof. Case 6 currently proves denial twice and preservation of the fixture grant. A successful Resume consuming the grant exactly once requires valid receipt admission; it remains pending after G2, with no gate bypass. |
-| 4. Dummy stable hash | Accepted limitation. Case 7 still concerns disposable fixtures only. Separate read-only before/after manifests now hash the actual owner's 291 tracked files, HEAD/index/packed-refs, and both real install files. All compared bytes match across the live probes. Untracked files and build outputs are excluded. A final post-validation audit is recorded separately. |
-| 5. Marker and receipt consumer | Marker readback fixed: both vendors compare exact bytes and before/after SHA-256 after shutdown. The no-receipt-consumer finding is accepted; fresh version/hash-bound admission remains unimplemented and closed after G2. |
-| 6. Known literal unknown collision | Rejected as a defect in this existing format; documented and covered explicitly. The scalar string `unknown` is reserved for missing evidence. Known string metrics are validated git object IDs, which cannot equal that marker; token/time metrics are numbers. Arbitrary free-text known metrics would require a format change. |
-| 7. Dirty owner files contradict unchanged | Rejected after inspecting the preserved pre-run manifest: `.gitignore` and `docs/roadmap.md` were already dirty before that run. `unchanged` compares against that dirty baseline, not git HEAD. The original audit now includes baseline status, evidence path and that meaning. No owner file was restored or modified. |
-
-The red/green dispatch still uses first-party fixture candidate content and scripted
-review records. Its real subprocess does not turn the fixture into live acceptance.
-Cases 4-6 use fixture canary evidence and a prebuilt launcher. Successful real
-Resume, real candidate compilation and a writer/proof/other-vendor miniature
-canary must still be exercised in the eventual real run.
+The same hashes preserve the scope of earlier G1 observations: actual Codex
+inside/outside native patches received decline and kept baseline bytes. All
+five roles start/resume read-only with on-request approval. Claude grants no
+Edit/Write/NotebookEdit/Bash. Both reported zero inherited tools/active MCP
+servers. Codex's four disabled entries each expose zero tools/resources/templates,
+with empty hooks/plugins. Claude hooks inventory remains unreported. Marker
+readback proves unchanged bytes and no disclosure, not an OS audit of all reads.
 
 ## Evidence and validation
 
-Authoritative private evidence root:
-`C:/Users/Erick/AppData/Local/Faber/t13-exposure-20261014/`.
+Private root: `C:/Users/Erick/AppData/Local/Faber/t13-exposure-20261014/`.
 
-- `red-native-completion.log`: pre-fix accepted completed native file change.
-- `red-proof-dispatch.log`: missing production dispatch coordinator before implementation.
-- `g1-preflight/qualification-preflight.json`: fresh installed versions/hashes and billing metadata; zero model turns.
-- `g1-codex-role-tools/live-denial.json`: real approval/decline, exact before/after inside-workspace bytes, marker hashes.
-- `g1-codex-native/live-denial.json`: six native checks, loadout metadata, unchanged outside/marker hashes, settled counters.
-- `g1-claude-native/live-denial.json`: empty tools, native checks, exact external bytes/marker hashes, settled counters.
-- `g2-codex-stop/live-denial.json`: first unmetered interruption, no delayed-settlement claim.
-- `g2-codex-stop-drained/live-denial.json`: repeated unmetered interruption with five-second drain; stop rule 2.
-- `g1-owner-before.json`, `g1-owner-after-probes.json`: actual tracked-owner and install hash inventories, equal bytes.
-- validation-native-authority/proofs.json and proof-01.log through proof-07.log: all required commands exit 0. g1-owner-after-validation.json: actual owner/install hashes still match. summary-native-authority.json: reduced measured summary; delivery/CI are recorded separately.
+- `r117-preflight/qualification-preflight.json`: fresh hashes/versions/accounts;
+  zero model turns. `r117-preflight/codex-protocol/`: installed schemas, including
+  request parameters and verified permission/elicitation decline forms.
+- `r117-claude-interrupt/live-denial.json`: one real interrupt, loadout, streamed
+  partial counters, zero settled counters, computed bound, timings and marker
+  hashes; informational only, never an admission receipt.
+- `r117-owner-before.json` and `r117-owner-after-probe.json`: all 291 tracked
+  owner files, HEAD/index/packed-refs and two install files match. Untracked
+  files and build outputs are excluded.
+- `r117-owner-after-validation.json`: final comparison is **not unchanged**.
+  The owner checkout now has separate commit `913fdf9`, changed `docs/design.md`
+  and its index, and added `.claude/skills/faber-ui/SKILL.md` and
+  `.claude/skills/second-opinion/SKILL.md`. The original auditor refused before
+  opening either protected path. A baseline-only read-only rehash records names
+  of added paths without opening them. Attribution is unknown; this task did not
+  restore or modify owner files. Both stable install hashes still match.
+- `validation-r117-coordinator-final/proofs.json` and `proof-01.log` through `proof-07.log`: all
+  seven required commands; final counts are inserted after the suite completes.
+- Earlier byte/marker proofs: `g1-codex-role-tools`, `g1-codex-native`,
+  `g1-claude-native`. Earlier unmetered Codex observations: `g2-codex-stop` and
+  `g2-codex-stop-drained`.
+
+Regression-first failures reproduced both unknown-request timeouts, missing
+output setting/calculation, malformed bound records freeing accounting and late
+cumulative double-charging. Production parsers/ledger and fixtures cover both
+vendors. The unit-only authorized Resume seam accepting an accounted bound is
+not a valid-receipt positive public Resume proof.
+
+The immutable Claude observation predates the final helper adjustment. Its
+historical `reservationMicros: 30000` field was the CLI's estimated cap, not a
+proven hard bound. The helper now records the computed reservation separately
+from that CLI estimate and no longer performs a stream-cost budget interruption.
+No further live turn was requested after cap rejection.
 
 ## Cost and RAM
 
-This continuation requested 10 tiny model turns: seven Codex native checks, one
-Claude native check and two Codex interrupted metering turns. The eight completed
-native turns have measured API-equivalent subtotal **$0.00721924**. The interrupted
-turns are unpriced; this subtotal is not the total cost. The previous continuation
-had known subtotal $0.00577606 and two additional unsettled turns. Combined known
-subtotal is **$0.01299530**, with four unsettled turns; total spend remains unknown.
-These are API-equivalent token accounts on subscriptions, not a cash API invoice.
+The real acceptance mission did not run; its cost and RAM are unknown. This
+continuation requested **one** tiny Claude turn; its envelope is **$0.820000,
+computed**, with settled cost unknown. Partial streaming usage priced to
+$0.000197, which is not the final charge. Live CLI peak RAM was not sampled.
+The previous combined settled diagnostic subtotal remains **$0.01299530**;
+four earlier unknown turns plus this one leave historical total spend unknown.
+These are subscription API-equivalent accounts, not a cash API invoice.
 
-The real acceptance mission never ran; its cost and RAM are unknown. No peak live
-CLI RAM was sampled for these tiny probes. Previous scripted Projects peak was
-221.7 MB and warm fixture app/tree was 1.1/140.9 MB; these are not real-mission RAM.
-Fresh suite totals and scripted RAM are recorded only after the required run ends.
+All seven required local commands exit 0. The final suite has **1389 passed,
+0 failed, 0 not run, 0 skipped**, in **1203.267 seconds**; the eight separate
+qualification-helper checks also pass. Scripted Projects peak is **219.2 MB**,
+idle full/reduced-motion is **114/112 MB**, and warm fake guard/whole tree is
+**1.1/142.6 MB**. These are scripted measurements, never real-mission RAM.
+The [reduced evidence](2026-10-14-self-development-r117.json) records the raw
+command log paths, calculated bounds, interruption metadata and accurate audit.
 
-## Gate table
+## Gates
 
-| Gate | Result | Evidence / remaining work |
+| Gate | Status | Evidence / remaining |
 | --- | --- | --- |
-| G1 Authority | Partial; former breach fixed | All-role/start/resume controls and native denial/byte proofs pass; matching admission receipt and writer integration pending. |
-| G2 Spending | **Failed for current metering strategy** | Two genuinely interrupted Codex turns remain unmetered, including delayed drain. No measured reserve. |
-| G3 Scheduling | Not passed | No admitted live mission graph. |
-| G4 Acceptance | Not passed | Real fixture subprocess proofs; no real accepted candidate/review. |
-| G5 Recovery | Not passed | Fixture rollback/Resume denial only; successful real Resume pending. |
-| G6 Self-update | Not passed | Prebuilt/injected fixture only; miniature mission and real build pending. |
-| G7 Screen/resources | Not passed | Scripted screen/RAM evidence only; complete live lifecycle absent. |
-| G8 Real use | Not passed | Fresh Seguro target mission not dispatched. |
-| G9 Kits | Partial | Zero inherited tools; ungranted native write blocked; full receipt/canary and hook attestation pending. |
-| G10 Software bar | Not passed | Full real acceptance absent. |
-| AS-1 Motion | Passed, scripted | Hidden fixture frame checks only. |
-| AS-2 Composer | Passed, scripted | Hidden fixture growth/cap/scroll/shrink checks. |
+| G1 Authority | Not passed; partial native proof | Native denial/bytes and unknown-request stops pass. Final owner comparison changed with separate commit 913fdf9; receipt/writer integration pending. |
+| G2 Spending | Not passed; cap rejection | R117 calculated accounting tested; Lead/Writer exceed authorized subtotals. No reserve measurement required. |
+| G3 Scheduling | Not passed | No admitted live graph. |
+| G4 Acceptance | Not passed | Real fixture subprocess red/green proofs; no real candidate/review. |
+| G5 Recovery | Partial, scripted | Fixture recovery and once-only bound reconciliation; real rollback/public positive Resume pending. |
+| G6 Self-update | Not passed | Case 4 copies a prebuilt launcher/injects CanaryVerdict::Pass; actual build/miniature mission pending. |
+| G7 Resources | Partial, scripted | Hidden screen/RAM suite; live lifecycle absent. |
+| G8 Real use | Not passed | No fresh Seguro mission. |
+| G9 Kits | Partial | Zero inherited tools/active servers; Claude hook inventory and complete receipt absent. |
+| G10 Software bar | Not passed | No real software-bar acceptance. |
+| AS-1 Motion | Passed, scripted | Hidden frame/reduced-motion checks. |
+| AS-2 Composer | Passed, scripted | Hidden growth/cap/scroll/shrink checks. |
 | AS-3 Breadcrumbs | Passed, scripted | Hidden five-locale checks; no new native-speaker review. |
-| AS-4 Gap | Passed, scripted | Hidden 64 px fixture checks. |
-| AS-5 Window audit | Partial | Owned hidden jobs used; complete mission/update audit absent. |
-| AS-6 Disk | Not passed | No real promotion/cleanup; evidence retained. |
-| AS-7 Specific plan | Not passed | No admitted real helper plan. |
-| AS-8 Dual vendors | Not passed | Both native probes ran; no real cross-vendor review/miniature canary. |
-| AS-9 Only needed questions | Not passed | No real lead question log. |
+| AS-4 Gap | Passed, scripted | Hidden 64 px checks. |
+| AS-5 Windows | Partial | Owned hidden jobs; complete real mission/update audit absent. |
+| AS-6 Disk | Not passed | No real promotion/cleanup; evidence retained, no refused deletion. |
+| AS-7 Specific plan | Not passed | No admitted real plan. |
+| AS-8 Dual vendors | Not passed | Code reviews/native probes are not a fresh candidate-review receipt. |
+| AS-9 Questions | Not passed | No real lead question log. |
 
-## Remaining sequence
+Earlier seven-point review disposition stays in the archived report. Proof
+dispatch, marker readback and the dirty-owner baseline were addressed. Reserved
+scalar `unknown` is documented and not a defect for validated numeric/git-ID
+metrics. Audit `unchanged` compares to its already-dirty baseline, not git HEAD.
 
-Repair/enforce interrupted spending metering or a complete invocation maximum,
-then measure several safe stops per vendor and consume the maximum with a safety
-factor in `Budget::can_admit`. Only then implement private fresh version/hash-bound
-receipt admission, integrate the Windows owned-process proof into writer dispatch,
-run the miniature canary, and execute the runbook's $2 Seguro helper mission in the
-fresh target clone with the other vendor reviewing. Build/install only in the
-approved sandbox, exercise rollback and successful exactly-once Resume, measure
-cost/RAM and write the real acceptance report. No real clone, install or promotion
-was attempted after the spending failure. Existing admission stays fail closed.
+## Remaining
 
-## Final local verification
-
-All seven required commands exit 0 before committing the two independently staged
-steps. No implementation changes follow this verification. The full suite reports
-**1377 passed, 0 failed, 0 not run, 0 skipped**, in 1202.186 seconds.
-The eight pure qualification-helper tests also pass. Scripted Projects peak is
-**224.8 MB**, with warm fake guard / whole tree **1.1 / 144.5 MB**. These are
-fixture measurements; real mission and live-probe RAM remain unknown. The final
-read-only audit still matches all 291 tracked owner files, HEAD/index/packed-refs,
-and both stable install files. The checked-in API-equivalent rate date is 2026-10-12.
-
-The accompanying [reduced native-authority evidence](2026-10-14-self-development-native-authority.json)
-records command exits, timing, settled token counters and unknown interruption cost.
-The PR remains a draft. Final pushed-head and CI status are recorded separately in
-private delivery-native-authority.json; CI success is never inferred from local tests.
+Establish a trusted pre-dispatch context census or a universal smaller output
+bound fitting the unchanged caps. Then implement private fresh version/hash
+receipt consumption, integrate the Windows writer process proof, run the real
+miniature canary and authorized Seguro mission with fresh other-vendor review.
+Build/install only in the sandbox, prove rollback/positive exactly-once Resume
+and measure real cost/RAM. The fresh clone, sandbox install and promotion were
+not created. PR #19 stays draft; pushed-head CI is recorded separately.

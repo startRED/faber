@@ -65,7 +65,8 @@ pub async fn run(data: &std::path::Path) -> io::Result<()> {
     let spawn = faber_engine::proc::real_spawner();
     let account = faber_engine::account::claude_account(&cli, &spawn, &work, Duration::from_secs(10)).await.unwrap_or_default();
     let mut row = json!({"schema":1,"measuredAt":measured,"vendor":"claude","binaryHash":super::fingerprint(Path::new(&cli.command))?,
-        "qualificationPassed":false,"modelTurns":0,"reservationMicros":30000,"measuredStopReserveMicros":null,
+        "qualificationPassed":false,"modelTurns":0,"reservationMicros":faber_engine::project::budget::complete_request_maximum("claude-haiku-5-5",None,0).map_err(io::Error::other)?,
+        "cliEstimateStopMicros":30000,"measuredStopReserveMicros":null,
         "billing":if account.billing==Some(Billing::Subscription){"subscription"}else{"unknownOrPaid"}});
     if account.billing != Some(Billing::Subscription) {
         row["state"] = "stopped".into();
@@ -156,7 +157,6 @@ pub async fn run(data: &std::path::Path) -> io::Result<()> {
                 if !input.is_null() {
                     let cost=stream_cost(&input,output).ok_or_else(||io::Error::other("stream usage cannot be priced"))?;
                     row["streamUsage"]=json!({"input":input,"outputTokens":output,"apiEquivalentUsd":cost});
-                    if cost>=0.03 {row["reservationKill"]=true.into();return Err(io::Error::other("reservation reached"));}
                 }
             }
             if msg["type"]=="result" {
@@ -168,9 +168,15 @@ pub async fn run(data: &std::path::Path) -> io::Result<()> {
                     let settled=faber_engine::claude::parse_claude_message(&msg).iter().any(|event| matches!(event,
                         faber_engine::events::EngineEvent::Done { cost_total_usd:Some(_),.. }));
                     row["settledAfterInterrupt"]=json!(settled);
-                    if stopped_at.is_none() || !settled {row["stopRule"]=2.into();return Err(io::Error::other("interrupted turn has no settled usage; overshoot cannot be measured"));}
-                    let final_output=msg["usage"]["output_tokens"].as_u64().ok_or_else(||io::Error::other("final output usage missing"))?;
-                    row["reportedOutputAfterStop"]=json!(final_output.saturating_sub(row["usageAtStop"]["outputTokens"].as_u64().unwrap_or(0)));
+                    if stopped_at.is_none() {return Err(io::Error::other("turn completed before interruption"));}
+                    row["costSource"]=json!(if settled {"settledCounters"} else {"computedBound"});
+                    if settled {
+                        let final_output=msg["usage"]["output_tokens"].as_u64().ok_or_else(||io::Error::other("final output usage missing"))?;
+                        row["reportedOutputAfterStop"]=json!(final_output.saturating_sub(row["usageAtStop"]["outputTokens"].as_u64().unwrap_or(0)));
+                    } else {
+                        row["apiEquivalentUsd"]=Value::Null;
+                        row["computedBoundMicros"]=json!(faber_engine::project::budget::complete_request_maximum("claude-haiku-5-5",None,0).map_err(io::Error::other)?);
+                    }
                 }
                 if !initialized||(!stopping&&msg["is_error"]==true) {return Err(io::Error::other("loadout turn failed"));}
                 if native {row["outsideWriteSucceeded"]=false.into();row["markerRecovered"]=false.into();row["nativeChecksRequested"]=json!(["marker","outside-write","shell","git","web"]);}

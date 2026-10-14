@@ -58,7 +58,7 @@ pub struct Invocation {
     pub effort: String,
     pub session: String,
     pub fresh: bool,
-    /// Verified invocation maximum, including nested calls and measured stop latency; None denies admission.
+    /// Complete invocation maximum at API-equivalent prices; None denies admission.
     pub exposure_micros: Option<u64>,
     #[serde(flatten)]
     pub extra: Extra,
@@ -73,6 +73,9 @@ pub struct Reservation {
     pub rates: String,
     pub paid_micros: u64,
     pub settled: bool,
+    /// Accounted at an upper bound rather than settled vendor counters; never a calibration sample.
+    #[serde(default)]
+    pub bounded: bool,
     pub terminated: bool,
     #[serde(flatten)]
     pub extra: Extra,
@@ -151,6 +154,24 @@ fn micros(cost: f64) -> Result<u64, &'static str> {
         return Err("reason.budget.cost");
     }
     Ok(value as u64)
+}
+
+/// R117: last settled usage plus one uncached request and the documented maximum output.
+/// Unknown CLI-built context uses the entire documented window, never an earlier turn's input count.
+/// Sources checked 2026-10-14: developers.openai.com/api/docs/models/gpt-6-luna and
+/// platform.claude.com/docs/en/models/overview. No supported universal smaller output cap is proven.
+pub fn complete_request_maximum(model: &str, context: Option<u64>, settled_micros: u64) -> Result<u64, &'static str> {
+    let window = match model {
+        "gpt-6-luna" => 1_050_000,
+        "claude-haiku-5-5" => 1_000_000,
+        _ => return Err("reason.budget.exposure"),
+    };
+    let input = context.unwrap_or(window);
+    if input > window {
+        return Err("reason.budget.exposure");
+    }
+    let cost = usage::api_price(model, input, 128_000, 0, 0, 0).ok_or("reason.budget.rate")?;
+    settled_micros.checked_add(micros(cost)?).ok_or("reason.budget.cost")
 }
 
 fn total(mut values: impl Iterator<Item = u64>) -> Result<u64, &'static str> {
@@ -251,9 +272,16 @@ fn own_today(ledger: &Ledger, vendor: Vendor, week: &str, start: f64, now: f64) 
 impl Budget {
     pub fn cost_view(&self, mission: &str) -> super::wire::CostView {
         let receipts: Vec<_> = self.invocations.values().filter(|r| r.request.mission == mission).collect();
-        let complete = !receipts.is_empty() && receipts.iter().all(|r| r.settled && r.terminated);
+        let complete = !receipts.is_empty() && receipts.iter().all(|r| r.settled && r.terminated && !r.bounded);
         let own_micros = complete.then(|| receipts.iter().try_fold(0u64, |sum, r| sum.checked_add(r.paid_micros))).flatten();
-        super::wire::CostView { own_micros, cap_micros: self.grants.get(mission).map(|g| g.cap_micros), complete: own_micros.is_some() }
+        let bound_micros =
+            receipts.iter().any(|r| r.bounded).then(|| receipts.iter().try_fold(0u64, |sum, r| sum.checked_add(r.charge()))).flatten();
+        super::wire::CostView {
+            own_micros,
+            bound_micros,
+            cap_micros: self.grants.get(mission).map(|g| g.cap_micros),
+            complete: own_micros.is_some(),
+        }
     }
 
     pub fn load(ledger: &Ledger) -> Result<Self, &'static str> {
@@ -266,6 +294,7 @@ impl Budget {
             if id != &r.request.id
                 || !valid_id(id)
                 || r.request.exposure_micros.is_none_or(|n| n == 0)
+                || (r.bounded && (!r.settled || !r.terminated || r.paid_micros < r.request.exposure_micros.unwrap_or(0)))
                 || !r.started_at.is_finite()
                 || r.started_at < 0.0
                 || !b.grants.contains_key(&r.request.mission)
@@ -351,7 +380,7 @@ impl Budget {
         if self.invocations.len() >= 4096 {
             return Err("reason.budget.history");
         }
-        if self.invocations.values().any(|old| !old.settled && session_key(&old.request) == session_key(r)) {
+        if self.invocations.values().any(|old| (!old.settled || old.bounded) && session_key(&old.request) == session_key(r)) {
             return Err("reason.budget.unknown");
         }
         let g = self.grants.get(&r.mission).ok_or("reason.budget.grant")?;
@@ -495,6 +524,7 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
                     started_at: now,
                     paid_micros: 0,
                     settled: false,
+                    bounded: false,
                     terminated: false,
                     extra: Extra::new(),
                 },
@@ -511,6 +541,29 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
             }
             let was_settled = r.settled;
             r.terminated |= terminated;
+            let trusted = ledger.of(r.request.vendor).readings.values().map(|r| r.read_at).fold(b.last_at.max(r.started_at), f64::max);
+            let at = now.max(b.last_at).max(r.started_at).min(trusted + STALE_SECS);
+            if r.bounded {
+                // A late or duplicate result cannot turn a conservative charge into measured spend.
+                let late = match &event {
+                    EngineEvent::Done { cost_total_usd: Some(total), .. } if r.request.vendor == Vendor::Claude => {
+                        usage::settle(r.base.as_ref(), &r.request.session, r.request.fresh, Some(*total)).cost
+                    }
+                    _ => usage::fresh_price(&event, &r.request.model).0,
+                };
+                if let Some(cost) = late {
+                    let paid = micros(cost)?;
+                    if paid > r.paid_micros {
+                        ledger.of_mut(r.request.vendor).spend(Some((paid - r.paid_micros) as f64 / 1e6), false, at, offset);
+                        r.paid_micros = paid;
+                        b.disabled.insert(driver(&r.request));
+                        status = Status::Stop("reason.budget.breach");
+                    }
+                }
+                let value = serde_json::to_value(&b).map_err(|_| "error.store.corrupt")?;
+                ledger.extra.insert(KEY.into(), value);
+                return Ok(status);
+            }
             let cost_total_usd = match &event {
                 EngineEvent::Done { cost_total_usd, .. } => *cost_total_usd,
                 EngineEvent::Error { .. } => None,
@@ -542,9 +595,6 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
                 } else {
                     let delta = paid - r.paid_micros;
                     // Fresh quota extends trusted time for delayed receipts; a clock glitch alone cannot.
-                    let trusted =
-                        ledger.of(r.request.vendor).readings.values().map(|r| r.read_at).fold(b.last_at.max(r.started_at), f64::max);
-                    let at = now.max(b.last_at).max(r.started_at).min(trusted + STALE_SECS);
                     let v = reconciled.get_or_insert_with(|| (r.request.vendor, ledger.of(r.request.vendor).clone()));
                     v.1.spend(Some(delta as f64 / 1e6), false, at, offset);
                     r.paid_micros = paid;
@@ -570,8 +620,19 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
             if r.paid_micros > r.request.exposure_micros.unwrap_or(0) || b.disabled.contains(&driver(&r.request)) {
                 b.disabled.insert(driver(&r.request));
                 status = Status::Stop("reason.budget.breach");
-            } else if !r.settled && (incomplete || r.terminated) && status == Status::Ready {
-                status = Status::Stop("reason.budget.unknown");
+            } else if !r.settled && r.terminated && status == Status::Ready {
+                let charge =
+                    r.paid_micros.checked_add(r.request.exposure_micros.ok_or("reason.budget.exposure")?).ok_or("reason.budget.cost")?;
+                let delta = charge - r.paid_micros;
+                let v = reconciled.get_or_insert_with(|| (r.request.vendor, ledger.of(r.request.vendor).clone()));
+                v.1.spend(Some(delta as f64 / 1e6), false, at, offset);
+                r.paid_micros = charge;
+                r.bounded = true;
+                r.settled = true;
+                if charge > r.request.exposure_micros.unwrap_or(0) {
+                    b.disabled.insert(driver(&r.request));
+                    status = Status::Stop("reason.budget.breach");
+                }
             }
         }
     }

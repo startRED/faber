@@ -214,6 +214,31 @@ async fn worker(data: &Path) -> io::Result<()> {
         }
         let text = String::from_utf8(bytes).map_err(|_| io::Error::other("invalid version encoding"))?;
         let installed_version = version(&text)?;
+        if vendor == Vendor::Codex {
+            // The installed binary generates its own protocol; no user configuration file is inspected.
+            let directory = data.join("codex-protocol");
+            std::fs::create_dir(&directory)?;
+            let args: Vec<_> = cli
+                .prefix
+                .iter()
+                .cloned()
+                .chain(["app-server".into(), "generate-json-schema".into(), "--out".into(), directory.to_string_lossy().into_owned()])
+                .collect();
+            let p = spawn(&cli.command, &args, data)?;
+            drop(p.stdin);
+            drop(p.stderr);
+            let mut child = p.child;
+            let mut output = vec![];
+            let status = tokio::time::timeout(Duration::from_secs(10), async {
+                p.stdout.take(4097).read_to_end(&mut output).await?;
+                child.as_mut().ok_or_else(|| io::Error::other("missing owned child"))?.wait().await
+            })
+            .await
+            .map_err(|_| io::Error::other("protocol generation timeout"))??;
+            if !status.success() || output.len() > 4096 {
+                return Err(io::Error::other("installed protocol generation failed"));
+            }
+        }
         let account = faber_engine::account::check(vendor, &cli, &spawn, data, Duration::from_secs(10)).await;
         let mut signals = if vendor == Vendor::Claude {
             faber_engine::account::claude_account(&cli, &spawn, data, Duration::from_secs(10)).await.unwrap_or_default()
