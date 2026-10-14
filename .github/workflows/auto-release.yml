@@ -37,7 +37,8 @@ jobs:
           if [ -z "$sha" ] || [ "$(git rev-parse "$last^{commit}")" = "$sha" ] || ! git merge-base --is-ancestor "$last" "$sha"; then
             echo "No green commit after $last."; exit 0
           fi
-          if ! git log --no-merges --format=%s "$last..$sha" | grep -qE '^(feat|fix|perf)(\(|!|:)'; then
+          # Only commits that touch what ships count; a fix to the test runner changes nothing for the user.
+          if ! git log --no-merges --format=%s "$last..$sha" -- ui engine src-tauri package.json vite.config.ts | grep -qE '^(feat|fix|perf)(\(|!|:)'; then
             echo "Nothing user-facing since $last."; exit 0
           fi
           IFS=. read -r major minor patch <<< "${last#v}"
