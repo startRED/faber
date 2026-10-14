@@ -222,6 +222,9 @@ async fn with_only_claude_the_router_process_starts_while_the_user_types() {
         choice: Choice { vendor: "auto".into(), model: None, effort: None },
     });
     assert_eq!(routers(), 1, "a cold Claude takes about 9 s, so the router starts at the first keystroke");
+    // R124: the router is Faber's own request. It runs without the person's hooks, settings files and MCP servers.
+    let router = f.args.lock().unwrap().iter().find(|a| a.contains(&"--system-prompt".to_string())).cloned().unwrap();
+    crate::support::assert_no_user_customizations(&router);
     engine.send(auto(SKY)).unwrap();
     engine.shutdown();
     assert_eq!(routers(), 1, "the question goes to the router that was already waiting");

@@ -208,8 +208,8 @@ export const fr: Messages = {
   "project.permissionsAsk": "Faber demande avant d’exécuter des commandes.",
   // R121: handwritten wording; native-speaker review pending (English is the source).
   "project.permissionsDetails": "Détails dans Réglages",
-  "set.permissionsDontAskBody": "Le Chat et les Projets exécutent des commandes et modifient des fichiers sans demander, avec accès à internet, dans n’importe quel dossier que vous choisissez. Vos propres outils connectés et hooks restent actifs. Une page ou un fichier lu par l’IA peut l’amener à modifier des fichiers ou à utiliser le réseau sans demander ; pour ce qui n’est pas fiable, choisissez Demander avant d’exécuter des commandes. Claude Code ne peut pas lire vos dossiers de connexion et de clés (.claude, .codex, .ssh). Codex ne peut pas en être empêché dans ce mode.",
-  "set.permissionsAskBody": "Le Chat et les Projets demandent avant chaque commande ou modification de fichier. Passer à ce mode arrête les tâches en cours.",
+  "set.permissionsDontAskBody": "Le Chat et les Projets exécutent des commandes et modifient des fichiers sans demander, avec accès à internet, dans n’importe quel dossier que vous choisissez, sauf les dossiers système et de connexion. Vos propres outils connectés et hooks restent actifs. Une page ou un fichier lu par l’IA peut l’amener à modifier des fichiers ou à utiliser le réseau sans demander. Les deux outils peuvent encore atteindre vos dossiers de connexion et de clés (.claude, .codex, .ssh) par des commandes ; choisissez donc Demander avant d’exécuter des commandes pour ce qui n’est pas fiable.",
+  "set.permissionsAskBody": "Le Chat et les Projets demandent avant de modifier un fichier et avant d’exécuter des commandes. Claude Code laisse passer quelques commandes de lecture simples, comme lister un dossier. Passer à ce mode arrête les tâches en cours.",
   'set.permissions.dontAsk': "Ne pas demander",
   'set.permissions.ask': 'Demander avant d’exécuter des commandes',
   "set.chatFolder": "Dossier de travail du Chat",
@@ -218,6 +218,7 @@ export const fr: Messages = {
   "set.privateFolder": "Dossier privé",
   "error.chatFolderLocked": "Choisissez le dossier de travail avant le premier message. Commencez une nouvelle conversation pour utiliser un autre dossier.",
   "error.chatFolder": "Faber n’a pas pu utiliser ce dossier. Choisissez un dossier local dans lequel vous pouvez écrire.",
+  "error.workingFolder": "Ce dossier contient des fichiers système ou vos clés de connexion ; Faber n’y travaille donc pas. Choisissez un autre dossier.",
   'set.hooks': 'Vos hooks de la CLI',
   'set.hooksBody': 'Les projets exécutent mes propres hooks de la CLI',
   // R107 security review: handwritten wording; native-speaker review pending.

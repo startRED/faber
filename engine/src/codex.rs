@@ -48,7 +48,8 @@ pub fn codex_args(area: Area, windows: bool, user_hooks: bool, permissions: Perm
     args
 }
 
-/// Parameters for thread/start and thread/resume. Ask keeps writes inside the working folder and asks for anything beyond it.
+/// Parameters for thread/start and thread/resume. Ask keeps writes inside the working folder and asks before every command that
+/// is not a plain read and before every file change, inside that folder too.
 /// Full access runs without Codex's sandbox and never asks. Isolated runs Faber's own sandbox and fails what it does not allow.
 ///
 /// Full access cannot keep Codex away from the credential folders: Codex's only filesystem deny rules live in a permission
@@ -61,7 +62,8 @@ pub fn codex_thread(area: Area, model: Option<&str>, permissions: Permissions) -
         thread.insert("model".into(), model.into());
     }
     let (sandbox, approval) = match permissions {
-        Permissions::Ask => ("workspace-write", "on-request"),
+        // "untrusted": everything but a short list of plain reads asks first, file changes inside the working folder included.
+        Permissions::Ask => ("workspace-write", "untrusted"),
         Permissions::FullAccess => ("danger-full-access", "never"),
         Permissions::Isolated => ("workspace-write", "never"),
     };
@@ -640,15 +642,15 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                             continue;
                         }
                         match (method.ends_with("requestApproval"), thread) {
-                            // Full access never shows a card. Codex does not ask under the "never" policy; if it still does, the answer is yes.
+                            // Full access never shows a card: Codex does not ask under the "never" policy, and if it still does, the
+                            // engine answers (yes, unless the request touches a credential folder) with the mode in force at that
+                            // moment, so a switch to Ask is never raced. Ask shows the card.
                             (true, Some(t))
-                                if t.params.permissions == Permissions::FullAccess
-                                    && t.params.instructions.is_none()
-                                    && ["item/commandExecution/requestApproval", "item/fileChange/requestApproval"].contains(&method) =>
+                                if t.params.instructions.is_none()
+                                    && (t.params.permissions == Permissions::Ask
+                                        || (t.params.permissions == Permissions::FullAccess
+                                            && ["item/commandExecution/requestApproval", "item/fileChange/requestApproval"].contains(&method))) =>
                             {
-                                let _ = proc::write_line(&mut *stdin, &json!({ "id": id, "result": { "decision": "accept" } })).await;
-                            }
-                            (true, Some(t)) if t.params.permissions == Permissions::Ask && t.params.instructions.is_none() => {
                                 let key = match id { Value::String(s) => s.clone(), other => other.to_string() };
                                 t.approvals.insert(key.clone(), id.clone());
                                 let tool = params["kind"].as_str().unwrap_or(method).to_string();

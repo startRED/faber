@@ -259,10 +259,13 @@ inside its own area.
   folder. General explains the rule and offers the folder choice.
 - R121 (it replaces the next item for the two choices on screen): "Don't ask" is full access. No approval cards, commands
   run without Faber's sandbox and with network, WebFetch and WebSearch work, any folder can be the working folder, and the
-  person's own MCP servers, plugins and hooks stay on, as in the CLI itself. Claude Code runs in bypass mode with deny rules
-  for the credential folders (`.claude`, `.codex`, `.gemini`, `.ssh` and the other key files), which apply in bypass
-  mode. Codex runs with `danger-full-access` and `never` approvals and has no way to block reads of the credential
-  folders in that mode (see the R121 section of [the R97 security review](security-r97-review.md)). Settings shows the
+  person's own MCP servers, plugins and hooks stay on, as in the CLI itself. Claude Code runs in bypass mode with Read and
+  Edit deny rules for the credential folders (`.claude`, `.codex`, `.gemini`, `.ssh` and the other key files, and where a
+  documented variable moved them), which apply in bypass mode to its file tools but not to arbitrary commands. Codex runs with
+  `danger-full-access` and `never` approvals and has no way to block reads of the credential folders in that mode (see the
+  R121 section of [the R97 security review](security-r97-review.md)). Ask names its modes (Claude `default`, Codex
+  `untrusted`), the system and credential folders are refused as working folders (R124), and Faber's own requests never run
+  the person's hooks. Settings shows the
   details; the thread shows one calm line with a link to them. The isolated mode below is `Permissions::Isolated`: Faber's
   own model list, router, internal checks and self-development roles use it, and the person cannot pick it.
 - R97/R107 (now the isolated mode only): bypass permissions with native deny rules for `.git` edits, credential directories

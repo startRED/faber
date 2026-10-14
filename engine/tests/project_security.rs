@@ -19,7 +19,7 @@ fn review3_catch_all_routes_untrusted_tools_to_the_host_in_both_areas() {
         assert!(config["permissions"]["ask"].as_array().unwrap().contains(&json!("*")));
         let args = claude_args(&launch(area, Permissions::Isolated));
         for rule in ["Read(~/.claude/**)", "Read(~/.codex/**)"] {
-            assert!(args.contains(&rule.into()));
+            assert!(denied(&args).contains(&rule.to_string()));
         }
         for tool in ["WebFetch", "Agent", "Skill", "mcp__github__push"] {
             assert!(!faber_engine::permissions::allows(root.path(), tool, &json!({"url":"https://example.invalid"})), "{tool}");
@@ -185,14 +185,14 @@ fn c1_project_reads_are_confined_and_credentials_and_updater_keys_are_denied() {
     let config = settings(&args);
     assert_eq!(config["permissions"]["blockReadsOutsideWorkingDirectories"], true);
     for rule in [
-        "Read(~/.claude.json)",
+        "Read(~/.claude.json*)",
         "Read(~/.git-credentials)",
         "Read(~/.npmrc)",
         "Read(~/AppData/Roaming/GitHub CLI/**)",
         "Read(~/.config/gh/**)",
         "Read(//**/*updater.key*)",
     ] {
-        assert!(args.contains(&rule.into()), "missing {rule}");
+        assert!(denied(&args).contains(&rule.to_string()), "missing {rule}");
     }
 }
 
@@ -222,7 +222,7 @@ fn h2_h3_m1_file_writes_and_shell_commands_reach_the_host_policy() {
     for rule in ["Read(//**)", "Edit(//**)", "Bash", "PowerShell"] {
         assert!(config["permissions"]["ask"].as_array().unwrap().contains(&json!(rule)), "missing {rule}");
     }
-    assert!(args.contains(&"Edit(//**/.git/**)".into()));
+    assert!(denied(&args).contains(&"Edit(//**/.git/**)".to_string()));
     assert!(!args.contains(&"Bash(rm *)".into()), "local deletion must reach the policy instead of a blanket deny");
 }
 
@@ -361,9 +361,11 @@ fn r107_internal_questions_restrict_reads_and_never_grant_workspace_writes() {
     }
 }
 
-/// The deny rules after `--disallowedTools`, up to the next flag.
+/// The deny rules, which travel in the settings JSON (no command-line flag splits them at a space).
 fn denied(args: &[String]) -> Vec<String> {
-    args.iter().skip_while(|a| *a != "--disallowedTools").skip(1).take_while(|a| !a.starts_with("--")).cloned().collect()
+    let Some(at) = args.iter().position(|a| a == "--settings") else { return vec![] };
+    let config: Value = serde_json::from_str(&args[at + 1]).unwrap();
+    config["permissions"]["deny"].as_array().map(|rules| rules.iter().map(|r| r.as_str().unwrap().to_owned()).collect()).unwrap_or_default()
 }
 
 #[test]
@@ -386,7 +388,70 @@ fn r121_full_access_does_not_scrub_the_environment_so_git_and_the_github_cli_can
         assert_eq!(isolated["env"]["GIT_ALLOW_PROTOCOL"], "");
         assert_eq!(isolated["env"]["GH_TOKEN"], "");
         let full = claude_args(&launch(area, Permissions::FullAccess));
-        assert!(!full.contains(&"--settings".into()), "no env override, no sandbox block, no ask rules");
+        let config = settings(&full);
+        assert!(config.get("env").is_none() && config.get("sandbox").is_none(), "no env override, no sandbox block");
+        assert!(config["permissions"].get("ask").is_none(), "no ask rules");
         assert!(!full.iter().any(|a| a.contains("GIT_ALLOW_PROTOCOL") || a.contains("GH_TOKEN") || a.contains("sandbox")));
+    }
+}
+
+/// R124, item E: what a request names is cut into path pieces and compared by name, so a spelling cannot slip by.
+#[test]
+fn r124_a_request_naming_a_credential_folder_is_recognised_in_every_spelling_and_others_pass() {
+    use faber_engine::permissions::touches_credentials;
+    let bs = char::from(92);
+    let none = |_: &str| None;
+    for refused in [
+        json!({ "file_path": format!("C:{bs}Users{bs}me{bs}.SSH{bs}id_rsa") }),
+        json!({ "file_path": "C:/Users/me/.claude/settings.json" }),
+        json!({ "command": "cat ~/.ssh/id_ed25519" }),
+        json!({ "command": "cd ~/.codex && cat auth.json" }),
+        json!({ "command": format!("type %USERPROFILE%{bs}.gemini{bs}oauth_creds.json") }),
+        json!({ "command": "cp ~/.git-credentials /tmp/x" }),
+        json!({ "changes": [{ "path": "/home/me/.aws/credentials", "kind": "update" }] }),
+        json!({ "file_path": "/home/me/.claude.json.backup" }),
+        json!({ "file_path": "keys/release.updater.key" }),
+    ] {
+        assert!(touches_credentials(&refused, &none), "{refused}");
+    }
+    for allowed in [
+        json!({ "file_path": "src/main.rs" }),
+        json!({ "command": "git status" }),
+        json!({ "command": "echo ssh and claude are words" }),
+        json!({ "file_path": "docs/my.ssh.notes.txt" }),
+        json!({ "command": "ls -la" }),
+    ] {
+        assert!(!touches_credentials(&allowed, &none), "{allowed}");
+    }
+    // A moved folder is recognised by where it now is.
+    let moved = |name: &str| (name == "CLAUDE_CONFIG_DIR").then(|| format!("E:{bs}Accounts{bs}work"));
+    assert!(touches_credentials(&json!({ "file_path": "E:/Accounts/work/.credentials.json" }), &moved));
+    assert!(!touches_credentials(&json!({ "file_path": "E:/Accounts/other/notes.txt" }), &moved));
+}
+
+/// R124, item F: the refusal covers the system folders and anything in or under a credential folder; the home folder, a drive
+/// root and ordinary folders pass.
+#[test]
+fn r124_forbidden_folders_are_the_system_ones_and_the_credential_ones() {
+    use faber_engine::permissions::forbidden_folder;
+    use std::path::Path;
+    for refused in ["/home/me/.ssh", "/home/me/.ssh/keys/deep", "/home/me/.CLAUDE", "/home/me/.codex", "/home/me/.gemini/antigravity-cli"] {
+        assert!(forbidden_folder(Path::new(refused)), "{refused}");
+    }
+    for allowed in ["/home/me", "/home/me/code/app", "/tmp/work", "/"] {
+        assert!(!forbidden_folder(Path::new(allowed)), "{allowed}");
+    }
+    #[cfg(windows)]
+    {
+        for refused in [
+            std::env::var("SystemRoot").unwrap(),
+            format!("{}\\System32", std::env::var("SystemRoot").unwrap()),
+            std::env::var("ProgramFiles").unwrap(),
+        ] {
+            assert!(forbidden_folder(Path::new(&refused)), "{refused}");
+        }
+        for allowed in [format!("{}\\", std::env::var("SystemDrive").unwrap()), std::env::var("USERPROFILE").unwrap()] {
+            assert!(!forbidden_folder(Path::new(&allowed)), "{allowed}");
+        }
     }
 }

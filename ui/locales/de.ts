@@ -208,8 +208,8 @@ export const de: Messages = {
   "project.permissionsAsk": "Faber fragt vor dem Ausführen von Befehlen nach.",
   // R121: handwritten wording; native-speaker review pending (English is the source).
   "project.permissionsDetails": "Details in den Einstellungen",
-  "set.permissionsDontAskBody": "Chat und Projekte führen Befehle aus und ändern Dateien, ohne nachzufragen, mit Internetzugang und in jedem Ordner, den du wählst. Deine eigenen verbundenen Werkzeuge und Hooks bleiben aktiv. Eine Seite oder Datei, die die KI liest, kann sie dazu bringen, Dateien zu ändern oder das Netz zu nutzen, ohne nachzufragen; wähle für nicht vertrauenswürdige Quellen Vor Befehlen nachfragen. Claude Code darf deine Anmelde- und Schlüsselordner (.claude, .codex, .ssh) nicht lesen. Bei Codex lässt sich das in diesem Modus nicht verhindern.",
-  "set.permissionsAskBody": "Chat und Projekte fragen vor jedem Befehl und jeder Dateiänderung nach. Beim Wechsel in diesen Modus werden laufende Aufgaben gestoppt.",
+  "set.permissionsDontAskBody": "Chat und Projekte führen Befehle aus und ändern Dateien, ohne nachzufragen, mit Internetzugang und in jedem Ordner, den du wählst, außer System- und Anmeldeordnern. Deine eigenen verbundenen Werkzeuge und Hooks bleiben aktiv. Eine Seite oder Datei, die die KI liest, kann sie dazu bringen, Dateien zu ändern oder das Netz zu nutzen, ohne nachzufragen. Beide Werkzeuge können deine Anmelde- und Schlüsselordner (.claude, .codex, .ssh) weiterhin über Befehle erreichen; wähle deshalb für nicht vertrauenswürdige Quellen Vor Befehlen nachfragen.",
+  "set.permissionsAskBody": "Chat und Projekte fragen nach, bevor sie eine Datei ändern oder Befehle ausführen. Claude Code lässt einige einfache Lesebefehle, etwa das Auflisten eines Ordners, ohne Nachfrage durch. Beim Wechsel in diesen Modus werden laufende Aufgaben gestoppt.",
   'set.permissions.dontAsk': "Nicht nachfragen",
   'set.permissions.ask': 'Vor Befehlen nachfragen',
   "set.chatFolder": "Arbeitsordner für den Chat",
@@ -218,6 +218,7 @@ export const de: Messages = {
   "set.privateFolder": "Privater Ordner",
   "error.chatFolderLocked": "Wähle den Arbeitsordner vor der ersten Nachricht. Beginne eine neue Unterhaltung, um einen anderen Ordner zu nutzen.",
   "error.chatFolder": "Faber konnte diesen Ordner nicht verwenden. Wähle einen lokalen Ordner, in den du schreiben kannst.",
+  "error.workingFolder": "Dieser Ordner enthält Systemdateien oder deine Anmeldeschlüssel, deshalb arbeitet Faber nicht darin. Wähle einen anderen Ordner.",
   'set.hooks': 'Deine CLI-Hooks',
   'set.hooksBody': 'Projekte führen meine eigenen CLI-Hooks aus',
   // R107 security review: handwritten wording; native-speaker review pending.

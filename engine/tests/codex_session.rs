@@ -276,7 +276,9 @@ fn codex_chat_is_lean_and_sandboxed_projects_keep_the_user_setup_without_hooks()
     assert!(!codex_args(Area::Project, false, true, Permissions::Ask).join(" ").contains("hooks"));
     for area in [Area::Chat, Area::Project] {
         assert_eq!(codex_thread(area, None, Permissions::Ask)["sandbox"], "workspace-write");
-        assert_eq!(codex_thread(area, None, Permissions::Ask)["approvalPolicy"], "on-request");
+        // "untrusted" asks before every command that is not a plain read and before every file change, inside the folder too
+        // (checked against the installed Codex: "on-request" let sandboxed commands in the folder run unasked).
+        assert_eq!(codex_thread(area, None, Permissions::Ask)["approvalPolicy"], "untrusted");
     }
     assert!(codex_thread(Area::Chat, None, Permissions::Ask).contains_key("baseInstructions"));
 }
@@ -444,7 +446,7 @@ fn permissions_keep_the_workspace_sandbox_and_disable_project_network_without_ap
                     assert!(params.get("config").is_none() && params.get("dynamicTools").is_none());
                 } else {
                     assert_eq!(params["sandbox"], "workspace-write");
-                    assert_eq!(params["approvalPolicy"], "on-request");
+                    assert_eq!(params["approvalPolicy"], "untrusted");
                     assert!(params.get("config").is_none());
                 }
                 assert_eq!(params.get("baseInstructions").is_some(), area == Area::Chat);
@@ -889,7 +891,7 @@ async fn r121_a_full_access_thread_keeps_the_persons_mcp_servers_and_starts_with
 }
 
 #[tokio::test]
-async fn r121_a_full_access_thread_accepts_a_residual_approval_without_a_card() {
+async fn r124_a_full_access_thread_hands_a_residual_approval_to_the_engine_and_never_answers_it_alone() {
     for area in [Area::Chat, Area::Project] {
         let entries = fixture("codex", "tools")
             .into_iter()
@@ -926,10 +928,16 @@ async fn r121_a_full_access_thread_accepts_a_residual_approval_without_a_card() 
                 )
             },
             "Create a.txt containing one. Then create b.txt containing two. Make each file in a separate step.",
-            |event, _| matches!(event, EngineEvent::Done { .. }),
+            |event, session| {
+                // What the engine does for full access: it answers yes at once. The driver itself writes nothing before.
+                if let EngineEvent::Permission { request_id, .. } = event {
+                    drop(session.answer(request_id, true));
+                }
+                matches!(event, EngineEvent::Done { .. })
+            },
         )
         .await;
         assert!(mismatches.is_empty(), "{mismatches:?}");
-        assert!(!events.iter().any(|e| matches!(e, EngineEvent::Permission { .. })), "no card");
+        assert!(events.iter().any(|e| matches!(e, EngineEvent::Permission { .. })), "the request reaches the engine, which decides");
     }
 }

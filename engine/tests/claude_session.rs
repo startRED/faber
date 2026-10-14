@@ -218,7 +218,7 @@ fn chat_is_lean_and_confined_to_its_workspace_projects_get_the_user_setup_withou
     let chat = claude_args(&ClaudeLaunch { resume: Some("abc".into()), model: Some("haiku".into()), ..launch(Area::Chat) });
     assert!(chat.contains(&"--restricted".into()) && chat.contains(&"--strict-mcp-config".into()));
     assert_eq!(after(&chat, "--tools"), "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch");
-    assert_eq!(after(&chat, "--permission-mode"), "acceptEdits");
+    assert_eq!(after(&chat, "--permission-mode"), "default", "Ask names its mode, so a CLI default can never pick a looser one");
     assert_eq!(after(&chat, "--resume"), "abc");
     assert_eq!(after(&chat, "--model"), "haiku");
     let project = claude_args(&launch(Area::Project));
@@ -228,7 +228,16 @@ fn chat_is_lean_and_confined_to_its_workspace_projects_get_the_user_setup_withou
 }
 
 const CREDENTIAL_DENIES: [&str; 5] =
-    ["Read(~/.claude/**)", "Read(~/.codex/**)", "Read(~/.ssh/**)", "Read(~/.gemini/**)", "Read(~/.claude.json)"];
+    ["Read(~/.claude/**)", "Read(~/.codex/**)", "Read(~/.ssh/**)", "Read(~/.gemini/**)", "Read(~/.claude.json*)"];
+
+/// The settings JSON of a launch: where the deny rules travel (the command line would split a rule at its spaces).
+fn settings_of(args: &[String]) -> serde_json::Value {
+    serde_json::from_str(&args[args.iter().position(|a| a == "--settings").expect("settings") + 1]).unwrap()
+}
+
+fn deny_rules(args: &[String]) -> Vec<String> {
+    settings_of(args)["permissions"]["deny"].as_array().expect("deny rules").iter().map(|r| r.as_str().unwrap().to_owned()).collect()
+}
 
 #[test]
 fn r121_full_access_bypasses_approvals_keeps_integrations_and_denies_only_the_credential_folders() {
@@ -237,12 +246,17 @@ fn r121_full_access_bypasses_approvals_keeps_integrations_and_denies_only_the_cr
             let args = claude_args(&ClaudeLaunch { permissions: Permissions::FullAccess, user_hooks: hooks, ..launch(area) });
             assert!(args.windows(2).any(|a| a == ["--permission-mode", "bypassPermissions"]), "{area:?}");
             // Deny rules still apply in bypassPermissions, so the credential folders stay out of reach of the file tools.
+            let deny = deny_rules(&args);
             for rule in CREDENTIAL_DENIES {
-                assert!(args.contains(&rule.into()), "{area:?} {rule}");
+                assert!(deny.contains(&rule.to_string()), "{area:?} {rule}");
             }
-            assert!(args.contains(&"--disallowedTools".into()));
+            assert!(!args.contains(&"--disallowedTools".into()), "the rules travel in the settings JSON");
             // Nothing that isolates: no sandbox, ask rules, folder confinement or scrubbed environment ...
-            assert!(!args.contains(&"--settings".into()), "{area:?} full access has no host settings: {args:?}");
+            let config = settings_of(&args);
+            assert!(config.get("sandbox").is_none() && config.get("env").is_none(), "{area:?}: {config}");
+            assert!(
+                config["permissions"].get("ask").is_none() && config["permissions"].get("blockReadsOutsideWorkingDirectories").is_none()
+            );
             // ... and nothing that turns the person's own integrations off.
             for flag in ["--safe-mode", "--strict-mcp-config", "--setting-sources", "--restricted", "--bare"] {
                 assert!(!args.contains(&flag.into()), "{area:?} {flag}");
@@ -279,7 +293,7 @@ fn r107_isolated_mode_covers_chat_and_projects_and_keeps_denies_with_user_hooks(
     for hooks in [false, true] {
         let asking = ClaudeLaunch { user_hooks: hooks, ..launch(Area::Project) };
         let ask = claude_args(&asking);
-        assert!(!ask.contains(&"--permission-mode".into()));
+        assert!(ask.windows(2).any(|a| a == ["--permission-mode", "default"]));
         assert!(!ask.contains(&"--disallowedTools".into()));
         assert!(ask.windows(2).any(|a| a == ["--permission-prompt-tool", "stdio"]));
         let skip = claude_args(&ClaudeLaunch { permissions: Permissions::Isolated, ..asking });
@@ -287,7 +301,7 @@ fn r107_isolated_mode_covers_chat_and_projects_and_keeps_denies_with_user_hooks(
         let config: serde_json::Value = serde_json::from_str(&skip[skip.iter().position(|a| a == "--settings").unwrap() + 1]).unwrap();
         assert_eq!(config["disableAllHooks"], true);
         assert_eq!(config["permissions"]["blockReadsOutsideWorkingDirectories"], true);
-        assert!(skip.contains(&"Edit(//**/.git/**)".into()));
+        assert!(deny_rules(&skip).contains(&"Edit(//**/.git/**)".to_string()));
     }
     let chat = claude_args(&ClaudeLaunch { permissions: Permissions::Isolated, ..launch(Area::Chat) });
     assert!(!chat.contains(&"--restricted".into()), "restricted refuses bypassPermissions");
@@ -305,20 +319,12 @@ fn r107_isolated_mode_covers_chat_and_projects_and_keeps_denies_with_user_hooks(
 }
 
 #[tokio::test]
-async fn r121_full_access_answers_whatever_the_cli_still_asks_with_yes_and_no_card() {
+async fn r124_full_access_hands_every_request_to_the_engine_and_writes_no_answer_itself() {
+    // The engine decides with the mode in force at that moment (see engine.rs), so a switch to Ask can never be raced by an
+    // answer the driver already wrote. The driver of the isolated mode still answers for itself.
     for area in [Area::Chat, Area::Project] {
         let root = tempfile::tempdir().unwrap();
-        // The recording of the isolated policy denies three of its five requests; full access allows all of them.
-        let entries: Vec<Entry> = fixture("claude", "project-policy")
-            .into_iter()
-            .map(|mut e| {
-                if e.input && e.msg["type"] == "control_response" {
-                    e.msg["response"]["response"]["behavior"] = "allow".into();
-                }
-                e
-            })
-            .collect();
-        let f = fake(entries);
+        let f = fake(fixture("claude", "project-policy"));
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let session = start_claude(
             ClaudeOptions {
@@ -326,7 +332,6 @@ async fn r121_full_access_answers_whatever_the_cli_still_asks_with_yes_and_no_ca
                 cwd: root.path().into(),
                 launch: ClaudeLaunch { permissions: Permissions::FullAccess, ..launch(area) },
                 spawn: f.spawn.clone(),
-                // No Codex sandbox runner either: full access never needs one.
                 sandbox: None,
             },
             Arc::new(move |e| {
@@ -334,31 +339,9 @@ async fn r121_full_access_answers_whatever_the_cli_still_asks_with_yes_and_no_ca
             }),
         );
         session.send(UserTurn::text("check policy"));
-        loop {
-            let e = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.unwrap().unwrap();
-            assert!(!matches!(e, EngineEvent::Permission { .. }), "full access never shows a card");
-            if matches!(e, EngineEvent::Done { .. }) {
-                break;
-            }
-        }
-        let responses: Vec<(String, String, bool)> = f
-            .wire
-            .messages()
-            .into_iter()
-            .filter(|m| m["type"] == "control_response")
-            .map(|m| {
-                let r = &m["response"]["response"];
-                // Allowed as asked: the command is not wrapped in a sandbox and the input is not rewritten.
-                let unchanged = r["updatedInput"].get("command").is_none_or(|c| !c.as_str().unwrap_or_default().contains("sandbox"));
-                (m["response"]["request_id"].as_str().unwrap().to_owned(), r["behavior"].as_str().unwrap().to_owned(), unchanged)
-            })
-            .collect();
-        assert_eq!(
-            responses,
-            ["write", "outside", "git", "delete", "question"].map(|id| (id.to_owned(), "allow".to_owned(), true)),
-            "{area:?}"
-        );
-        assert!(f.mismatches.lock().unwrap().is_empty(), "{:?}", f.mismatches.lock().unwrap());
+        assert_eq!(next_permission(&mut rx).await, "write", "{area:?}");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(f.wire.lines_with("control_response"), 0, "{area:?}: the driver answered by itself");
         session.close();
     }
 }
@@ -484,7 +467,7 @@ fn a_side_question_gets_its_own_instructions_no_tools_and_no_saved_session() {
     let args = claude_args(&ClaudeLaunch { instructions: Some("Route.".into()), ..launch(Area::Project) });
     assert_eq!(after(&args, "--system-prompt"), "Route.");
     assert_eq!(after(&args, "--tools"), "");
-    assert!(args.contains(&"--strict-mcp-config".into()) && !args.contains(&"--settings".into()));
+    assert!(args.contains(&"--strict-mcp-config".into()) && args.contains(&"--safe-mode".into()));
     assert!(args.contains(&"--no-session-persistence".into()), "it stays out of the user's Claude history");
 }
 
@@ -597,4 +580,108 @@ fn a_line_written_during_a_tool_turn_is_folded_into_it_and_the_turn_has_one_resu
     let dones = events.iter().filter(|e| matches!(e, EngineEvent::Done { .. })).count();
     assert_eq!(dones, 1, "Faber would take the first result for the end of the turn and lose what follows");
     assert!(text_of(&events).trim_end().ends_with("pong"), "{:?}", text_of(&events));
+}
+
+/// R124: the router, the pulse and every side question start a Claude with instructions of their own. Whatever the person
+/// chose, they run with no hooks, no settings files, no MCP servers, no plugins and no tools.
+#[test]
+fn r124_every_internal_claude_request_runs_without_user_hooks_settings_or_mcp() {
+    let after = |args: &[String], flag: &str| args[args.iter().position(|a| a == flag).unwrap() + 1].clone();
+    for permissions in [Permissions::Ask, Permissions::FullAccess, Permissions::Isolated] {
+        for area in [Area::Chat, Area::Project] {
+            for user_hooks in [false, true] {
+                let args = claude_args(&ClaudeLaunch { permissions, user_hooks, instructions: Some("Route.".into()), ..launch(area) });
+                let why = format!("{permissions:?} {area:?} hooks={user_hooks}: {args:?}");
+                assert!(args.contains(&"--safe-mode".into()), "{why}");
+                assert!(args.contains(&"--strict-mcp-config".into()), "{why}");
+                assert_eq!(after(&args, "--setting-sources"), "", "no user, project or local settings file: {why}");
+                assert_eq!(after(&args, "--tools"), "", "{why}");
+                assert_eq!(settings_of(&args)["disableAllHooks"], true, "{why}");
+            }
+        }
+    }
+}
+
+/// R124: Ask names the CLI's own asking mode in both areas, so a person's CLI configuration (defaultMode: bypassPermissions) or
+/// a looser mode can never win, and Chat no longer auto-accepts edits.
+#[test]
+fn r124_ask_names_its_permission_mode_in_both_areas_so_a_cli_default_never_wins() {
+    for area in [Area::Chat, Area::Project] {
+        for hooks in [false, true] {
+            let args = claude_args(&ClaudeLaunch { user_hooks: hooks, ..launch(area) });
+            let at =
+                args.iter().position(|a| a == "--permission-mode").unwrap_or_else(|| panic!("{area:?}: no permission mode in {args:?}"));
+            assert_eq!(args[at + 1], "default", "{area:?}");
+            assert!(!args.iter().any(|a| a == "bypassPermissions" || a == "acceptEdits" || a == "auto"), "{area:?}");
+        }
+    }
+}
+
+/// R124: the deny rules are one JSON string each. A rule with a space (the GitHub CLI folder) cannot be split in two, and every
+/// credential folder is denied for the Edit tool (which Write follows) as well as for Read.
+#[test]
+fn r124_the_deny_rules_travel_in_the_settings_json_each_one_intact_and_cover_edits_too() {
+    for permissions in [Permissions::FullAccess, Permissions::Isolated] {
+        for area in [Area::Chat, Area::Project] {
+            let args = claude_args(&ClaudeLaunch { permissions, ..launch(area) });
+            assert!(
+                !args.contains(&"--disallowedTools".into()),
+                "{permissions:?} {area:?}: the command line would split a rule at a space"
+            );
+            let deny = deny_rules(&args);
+            for folder in [
+                "~/.claude",
+                "~/.codex",
+                "~/.gemini",
+                "~/.ssh",
+                "~/.aws",
+                "~/.docker",
+                "~/.azure",
+                "~/.kube",
+                "~/.config/gh",
+                "~/AppData/Roaming/GitHub CLI",
+            ] {
+                for tool in ["Read", "Edit"] {
+                    assert!(deny.contains(&format!("{tool}({folder}/**)")), "{permissions:?} {area:?} {tool} {folder}");
+                }
+            }
+            for file in ["~/.claude.json*", "~/.git-credentials", "~/.npmrc"] {
+                for tool in ["Read", "Edit"] {
+                    assert!(deny.contains(&format!("{tool}({file})")), "{tool} {file}");
+                }
+            }
+            assert!(deny.contains(&"Read(//**/*updater.key*)".to_string()) && deny.contains(&"Edit(//**/*updater.key*)".to_string()));
+            assert!(deny.contains(&"Edit(//**/.git/**)".to_string()));
+            for rule in &deny {
+                let (tool, rest) = rule.split_once('(').unwrap();
+                assert!(["Read", "Edit"].contains(&tool) && rest.ends_with(')') && rest.matches('(').count() == 0, "a broken rule: {rule}");
+            }
+        }
+    }
+}
+
+/// R124: a sign-in folder the person moved with a documented variable is denied where it now is.
+#[test]
+fn r124_a_moved_sign_in_folder_is_denied_where_it_now_is() {
+    use faber_engine::claude::tool_deny;
+    let bs = char::from(92);
+    let moved = format!("E:{bs}Accounts{bs}work{bs}");
+    let env = |name: &str| match name {
+        "CLAUDE_CONFIG_DIR" => Some(moved.clone()),
+        "CODEX_HOME" => Some("/home/me/codex-home".to_string()),
+        "AWS_SHARED_CREDENTIALS_FILE" => Some("/srv/aws/credentials".to_string()),
+        "GEMINI_CLI_HOME" => Some("/home/me/gem".to_string()),
+        "DOCKER_CONFIG" => Some("relative/docker".to_string()),
+        _ => None,
+    };
+    let rules = tool_deny(&env);
+    for tool in ["Read", "Edit"] {
+        for expected in ["//e/Accounts/work/**", "//home/me/codex-home/**", "//srv/aws/credentials", "//home/me/gem/.gemini/**"] {
+            assert!(rules.contains(&format!("{tool}({expected})")), "{tool} {expected}: {rules:?}");
+        }
+    }
+    assert!(!rules.iter().any(|r| r.contains("relative")), "a relative value names nothing fixed");
+    let unset = tool_deny(&|_| None);
+    assert!(!unset.iter().any(|r| r.contains("Accounts") || r.contains("codex-home")));
+    assert_eq!(unset.len(), tool_deny(&|_| None).len());
 }

@@ -232,10 +232,18 @@ for anything whose source you do not trust. The owner saw this risk and chose it
 
 | | Claude Code | Codex |
 |---|---|---|
-| Arguments | `--permission-mode bypassPermissions --disallowedTools <deny list>` (`claude_args`, engine/src/claude.rs). Nothing else: no `--settings`, `--safe-mode`, `--strict-mcp-config`, `--setting-sources`. Chat keeps its fixed tool list. | `codex app-server` with no flags (`codex_args`, engine/src/codex.rs). thread/start and thread/resume carry `sandbox: danger-full-access` and `approvalPolicy: never`, with no `config` and no dynamic tools (`codex_thread`). |
-| Credential folders | **Enforced** for Claude's own file tools: deny rules for `~/.claude`, `~/.codex`, `~/.gemini`, `~/.ssh`, `~/.aws`, `~/.claude.json`, `~/.git-credentials`, `~/.npmrc` and the GitHub CLI, Docker, Azure and Kube folders, and for updater keys. Deny rules apply in bypass mode. | **Not enforced.** Codex can read them. |
-| Commands (Bash, PowerShell) | **Not enforced.** A deny rule on the Read tool does not stop `cat ~/.ssh/id_ed25519` run through Bash. Command patterns are not an OS sandbox. | **Not enforced.** |
+| Arguments | `--permission-mode bypassPermissions` and a settings JSON that carries only the deny rules (`claude_args`, engine/src/claude.rs). No `--safe-mode`, `--strict-mcp-config` or `--setting-sources`. Chat keeps its fixed tool list. | `codex app-server` with no flags (`codex_args`, engine/src/codex.rs). thread/start and thread/resume carry `sandbox: danger-full-access` and `approvalPolicy: never`, with no `config` and no dynamic tools (`codex_thread`). |
+| Credential folders | **Enforced for Claude's file tools**: Read and Edit deny rules (Write follows Edit) for `~/.claude`, `~/.codex`, `~/.gemini` (the Antigravity CLI keeps its state in `~/.gemini/antigravity-cli`), `~/.ssh`, `~/.aws`, `~/.docker`, `~/.azure`, `~/.kube`, the GitHub CLI folders, `~/.claude.json*`, `~/.git-credentials`, `~/.npmrc` and updater keys. A folder moved with CLAUDE_CONFIG_DIR, CODEX_HOME, GEMINI_CLI_HOME, GH_CONFIG_DIR, DOCKER_CONFIG, AZURE_CONFIG_DIR or an AWS file variable is denied where it now is. | **Not enforced.** Codex can read them. |
+| Commands (Bash, PowerShell) | **Partly.** Claude Code applies the same rules to the plain file commands it recognises (`cat`, `head`, `tail`, `sed`, `tee`, redirections), and not to a script or program that opens files itself. | **Not enforced.** |
+| Requests the CLI still forwards | Answered by the engine: yes, except a request that names a credential folder or file in any spelling (case, slashes, `~`, `%USERPROFILE%`), which is refused. | The same. |
 | Network, integrations, hooks | On | On |
+
+The deny rules travel in the settings JSON (`permissions.deny`), one string each, not after `--disallowedTools`. The installed
+CLI (2.1.296) kept a rule with a space intact on the command line too, so the claim that it splits was not reproduced; the
+JSON array still removes the doubt and a test checks every rule. Matching on Windows was checked against the installed CLI
+with decoy folders: a backslash path, a lower-case spelling of a folder, a relative path from inside the folder and a `~`
+rule were all refused, so one rule form per folder is enough. The docs say Windows paths are normalised to `/c/Users/...`
+and do not mention case; the checks above are the evidence.
 
 Why Codex cannot block them: in Codex 0.162.1 the only filesystem deny rules live in a permission profile. On Windows, a
 profile that grants the whole disk and denies a few folders failed here in every backend that can be selected. The default
@@ -244,26 +252,36 @@ unreachable; this PC has an unreachable `G:`, and any empty card reader or disco
 The unelevated backend answers "Restricted read-only access requires the elevated Windows sandbox backend", and the
 elevated one failed with "setup refresh had errors". Per-drive path keys such as `C:\` are rejected as "cannot be
 represented losslessly". These probes ran `codex sandbox` against a decoy folder in a scratch directory, never against a
-credential file. So full access sends no profile, and the Settings text says so. The deny list for Claude Code is a real
-but partial barrier: it keeps the file tools out, not a determined command.
+credential file. So full access sends no profile, and the Settings text says so.
 
-What this means for the person: for Claude Code the sign-in and key folders are protected from the file tools; for Codex
-they are not protected at all; for neither are they protected from a shell command. Do not keep secrets in folders you
-give the AI in this mode, and use Ask before commands for material you do not trust.
+What this means for the person: in full access both tools can still reach the sign-in and key folders through commands, and
+Codex can read them directly. Do not keep secrets in folders you give the AI in this mode, and use Ask before commands for
+material you do not trust. The Settings text says exactly this.
 
 ### Changes that follow
 
-- The home folder, drive roots, Windows, Program Files and AppData are accepted as working folders in both modes, and the
-  `error.workingFolder` text is gone. `permissions::unattended_root` stays for the isolated mode's callers.
+- Working folders: the home folder and drive roots stay allowed in both modes. Refused with a calm message
+  (`error.workingFolder`, `permissions::forbidden_folder`): the Windows folder, Program Files, a credential folder and any
+  folder inside one (R124). The check runs when a project is added, when a Chat folder is chosen and again when a turn starts.
 - Hooks: the Settings switch applies only to Ask before commands. With full access the person's hooks always run.
-- Full access answers any request the CLI still raises (Claude's protected-folder prompts, Codex command or file-change
-  approvals) with yes and never shows a card. Fail-closed answers remain for the isolated mode and for side questions.
+- Faber's own requests (the router, the pulse, any side question) start Claude with `--safe-mode`, `--setting-sources ""`,
+  `--strict-mcp-config`, no tools and `disableAllHooks`, whatever mode the person chose. Before this a user hook ran during
+  background routing (checked against the installed CLI with a decoy project hook).
+- Ask names its mode. Claude Code gets `--permission-mode default` in Chat and in Projects, so a `defaultMode` in the person's
+  CLI settings can no longer loosen it, and Chat no longer auto-accepts edits. Codex gets `approvalPolicy: untrusted` with the
+  workspace-write sandbox, which asks before every command that is not a plain read and before every file change inside the
+  working folder (checked against the installed Codex; `on-request` let commands inside the folder run unasked). Both tools
+  may skip a short list of plain reading commands, and the Ask text says so.
+- Full access never shows a card. A request the CLI still forwards goes to the engine, which answers with the mode in force
+  at that moment, under the lock that also saves the mode. A request that was on its way when the person switched to Ask finds
+  the session gone and is never accepted. Fail-closed answers remain for the isolated mode and for side questions.
 - The router and the model list never use the person's mode. The router's Codex thread keeps its read-only profile and its
   shell off in every mode, and it runs on a Codex process of its own started with the `Isolated` arguments (one extra idle
-  process once Auto routes through Codex; its memory cost was not measured here). Claude's router and pulse questions have
-  no tools.
-- Switching from Don't ask to Ask still stops running turns, which matters more now: a running full-access turn would
-  otherwise keep its access after the person asked for approvals. Switching to Don't ask does not touch a running turn.
+  process once Auto routes through Codex; its memory cost was not measured here).
+- Switching from Don't ask to Ask stops running turns, and stopping a CLI now ends the whole process tree on Windows
+  (`taskkill /T`, run directly, never through a shell), so a command the CLI started cannot keep changing files. Elsewhere only
+  the CLI itself is ended; a job object or process group would be the next step. Switching to Don't ask does not touch a
+  running turn.
 - A Codex session saved with the isolated host command tool (`commandGate`) restarts once, with its visible history,
   because that tool no longer exists in any mode the person can choose.
 - Code that wants the old sandbox must say `Permissions::Isolated`. The variant `Permissions::DontAsk` no longer exists

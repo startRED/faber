@@ -103,13 +103,34 @@ pub(crate) async fn write_line(stdin: &mut (dyn AsyncWrite + Send + Unpin), msg:
     stdin.flush().await.map_err(|_| WriteError { torn: true })
 }
 
-/// Ends a process: closes its input, then kills it. Returns its exit code when it had one.
+/// Ends a process: closes its input, then kills it and everything it started.
 pub(crate) async fn stop(stdin: &mut (dyn AsyncWrite + Send + Unpin), child: &mut Option<Child>) {
     let _ = stdin.shutdown().await;
     if let Some(child) = child {
+        kill_tree(child.id()).await;
         let _ = child.start_kill();
     }
 }
+
+/// Killing only the CLI leaves a command it started (a build, a script) running, and in full access that command can keep
+/// changing files after the person switched to asking. On Windows `taskkill /T` ends the whole tree while its root is still
+/// alive (the tree is found through the parent links, which a dead root no longer has). It is run directly, never through a
+/// shell. Elsewhere only the CLI itself is ended.
+#[cfg(windows)]
+async fn kill_tree(pid: Option<u32>) {
+    let Some(pid) = pid else { return };
+    let exe = std::env::var_os("SystemRoot")
+        .map(|root| std::path::PathBuf::from(root).join("System32").join("taskkill.exe"))
+        .filter(|path| path.is_file())
+        .unwrap_or_else(|| "taskkill".into());
+    let mut cmd = Command::new(exe);
+    cmd.args(["/PID", &pid.to_string(), "/T", "/F"]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), cmd.status()).await;
+}
+
+#[cfg(not(windows))]
+async fn kill_tree(_pid: Option<u32>) {}
 
 pub(crate) async fn exit_code(child: &mut Option<Child>) -> String {
     match child {

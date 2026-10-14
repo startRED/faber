@@ -458,7 +458,11 @@ impl Engine {
         self.with(|c| {
             let folder = folder
                 .map(|p| {
-                    // Any folder can be the working folder in both modes (R121).
+                    // Any folder can be the working folder in both modes (R121), except the system folders and the ones that hold
+                    // sign-ins and keys (R124).
+                    if crate::permissions::forbidden_folder(p) {
+                        return Err("error.workingFolder");
+                    }
                     crate::permissions::working_root(p).filter(|p| p.is_dir()).ok_or("error.chatFolder")
                 })
                 .transpose()?
@@ -764,6 +768,7 @@ impl Core {
             .find(|p| Some(&p.id) == c.project_id.as_ref())
             .map(|p| PathBuf::from(p.path))
             .ok_or_else(|| "error.projectGone".to_string())
+            .and_then(|path| if crate::permissions::forbidden_folder(&path) { Err("error.workingFolder".to_string()) } else { Ok(path) })
     }
 
     fn load(&mut self, id: &str) -> Option<&mut Conversation> {
@@ -995,6 +1000,16 @@ impl Core {
                 }
             }
             EngineEvent::Permission { request_id, tool, input } => {
+                // Full access never shows a card. The answer is decided here, under the lock that also saves the mode, so a
+                // request that was already on its way when the person switched to Ask finds the session gone (and is never
+                // accepted). A request that touches a credential folder is refused.
+                if let Some(l) = self.live.get(conv).filter(|l| l.permissions == Permissions::FullAccess) {
+                    if crate::permissions::touches_credentials(&input, &|name| std::env::var(name).ok()) {
+                        drop(l.session.answer(&request_id, false));
+                        return;
+                    }
+                    return self.auto_answer(conv, vec![Permission { request_id, tool, input }]);
+                }
                 let allowed = self.convs.get(conv).and_then(|c| c.allow_always.as_ref()).is_some_and(|a| a.contains(&tool));
                 if allowed {
                     return self.auto_answer(conv, vec![Permission { request_id, tool, input }]);

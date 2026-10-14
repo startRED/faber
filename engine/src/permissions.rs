@@ -277,6 +277,103 @@ pub fn child_env(root: &Path) -> Value {
     })
 }
 
+/// Folders that hold the sign-ins of the CLIs and the keys of the person's other tools. Only their names are used here:
+/// nothing in Faber ever opens what is inside them.
+const CREDENTIAL_FOLDERS: [&str; 8] = [".ssh", ".aws", ".claude", ".codex", ".gemini", ".docker", ".azure", ".kube"];
+const CREDENTIAL_FILES: [&str; 5] = [".claude.json", ".credentials.json", ".git-credentials", ".npmrc", "hosts.yml"];
+
+/// A variable the CLIs document for moving their sign-in somewhere else: the variable, whether it names a file, and the
+/// folder inside its value that holds the sign-in.
+const RELOCATED: [(&str, bool, &str); 8] = [
+    ("CLAUDE_CONFIG_DIR", false, ""),
+    ("CODEX_HOME", false, ""),
+    ("GEMINI_CLI_HOME", false, ".gemini"),
+    ("GH_CONFIG_DIR", false, ""),
+    ("DOCKER_CONFIG", false, ""),
+    ("AZURE_CONFIG_DIR", false, ""),
+    ("AWS_SHARED_CREDENTIALS_FILE", true, ""),
+    ("AWS_CONFIG_FILE", true, ""),
+];
+
+fn absolute(path: &str) -> bool {
+    let b = path.as_bytes();
+    path.starts_with('/') || (b.len() > 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/'))
+}
+
+/// Where the documented variables send the CLIs' sign-ins right now: absolute paths with forward slashes, and whether each
+/// is a file. A relative value names nothing fixed, so it is left out. Only the variable's value is read, never a file.
+pub fn relocated_credentials(var: &dyn Fn(&str) -> Option<String>) -> Vec<(String, bool)> {
+    RELOCATED
+        .iter()
+        .filter_map(|(name, is_file, inside)| {
+            let value = var(name)?.replace('\\', "/");
+            let value = value.strip_prefix("//?/").unwrap_or(&value).trim_end_matches('/').to_string();
+            if !absolute(&value) || value.starts_with("//") {
+                return None;
+            }
+            Some((if inside.is_empty() { value } else { format!("{value}/{inside}") }, *is_file))
+        })
+        .collect()
+}
+
+/// The path as a Claude Code permission rule writes an absolute one: `//c/Users/me/x` on Windows, `//home/me/x` elsewhere.
+/// Windows matching ignores case and slash direction (checked against the installed CLI), so one form is enough.
+pub fn claude_rule_path(absolute_path: &str) -> String {
+    let p = absolute_path.replace('\\', "/");
+    let b = p.as_bytes();
+    if b.len() > 2 && b[0].is_ascii_alphabetic() && b[1] == b':' {
+        format!("//{}{}", (b[0] as char).to_ascii_lowercase(), &p[2..])
+    } else {
+        format!("/{p}")
+    }
+}
+
+/// Does this request name a credential folder or file, wherever it sits in the input (a path, a command line)? Full access
+/// answers the questions the CLI still asks with yes, except these. A request is cut into path pieces and compared by name,
+/// so `cat ~/.ssh/id_ed25519`, `C:\Users\me\.SSH\id_rsa` and `type %USERPROFILE%\.codex\auth.json` all match.
+pub fn touches_credentials(input: &Value, var: &dyn Fn(&str) -> Option<String>) -> bool {
+    fn strings<'a>(value: &'a Value, out: &mut Vec<&'a str>) {
+        match value {
+            Value::String(s) => out.push(s),
+            Value::Array(items) => items.iter().for_each(|v| strings(v, out)),
+            Value::Object(map) => map.values().for_each(|v| strings(v, out)),
+            _ => {}
+        }
+    }
+    let mut texts = Vec::new();
+    strings(input, &mut texts);
+    let moved: Vec<String> = relocated_credentials(var).into_iter().map(|(p, _)| p.to_ascii_lowercase()).collect();
+    texts.iter().any(|text| {
+        let text = text.replace('\\', "/").to_ascii_lowercase();
+        moved.iter().any(|dir| text.contains(dir.as_str()))
+            || text.split(|c: char| c == '/' || c.is_whitespace() || "\"'`;|&<>()=,".contains(c)).any(|piece| {
+                let piece = piece.trim_end_matches(['.', ' ']);
+                CREDENTIAL_FOLDERS.contains(&piece)
+                    || CREDENTIAL_FILES.contains(&piece)
+                    || piece.starts_with(".claude.json")
+                    || piece.contains("updater.key")
+            })
+    })
+}
+
+/// A working folder Faber refuses with a calm message even in full access (R124): the Windows folder, Program Files, and a
+/// credential folder or any folder inside one. A drive root and the home folder stay allowed, as R121 says.
+pub fn forbidden_folder(root: &Path) -> bool {
+    let same = |a: &Path, b: &Path| {
+        a.to_string_lossy().trim_start_matches("\\\\?\\").eq_ignore_ascii_case(b.to_string_lossy().trim_start_matches("\\\\?\\"))
+    };
+    let system: Vec<PathBuf> = ["SystemRoot", "windir", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"]
+        .into_iter()
+        .filter_map(std::env::var_os)
+        .map(PathBuf::from)
+        .collect();
+    let moved = relocated_credentials(&|name| std::env::var(name).ok());
+    root.components()
+        .any(|c| CREDENTIAL_FOLDERS.contains(&c.as_os_str().to_string_lossy().trim_end_matches(['.', ' ']).to_ascii_lowercase().as_str()))
+        || (cfg!(windows) && system.iter().any(|dir| root.ancestors().any(|a| same(a, dir))))
+        || moved.iter().filter(|(_, file)| !file).any(|(dir, _)| root.ancestors().any(|a| same(a, Path::new(dir))))
+}
+
 fn secret(path: &Path, reading: bool) -> bool {
     let names: Vec<String> =
         path.components().map(|p| p.as_os_str().to_string_lossy().trim_end_matches(['.', ' ']).to_ascii_lowercase()).collect();

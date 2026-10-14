@@ -288,6 +288,8 @@ async fn typing_in_auto_asks_for_a_fresh_reading_only_when_the_one_held_is_old()
     let args = f.args.lock().unwrap().clone();
     assert_eq!(args.len(), 1);
     assert!(args[0].contains(&"claude-haiku-5-5".to_string()) && args[0].contains(&"--system-prompt".to_string()));
+    // R124: the pulse is Faber's own request. It runs without the person's hooks, settings files and MCP servers.
+    crate::support::assert_no_user_customizations(&args[0]);
     assert_eq!(*f.mismatches.lock().unwrap(), Vec::<String>::new());
     assert_eq!(engine.ledger().claude.spans.len(), 1, "the pulse is Faber's own request, so the learning knows when it ran");
 

@@ -208,8 +208,8 @@ export const ptBR: Messages = {
   "project.permissionsAsk": "O Faber pergunta antes de executar comandos.",
   // R121: handwritten wording; native-speaker review pending (English is the source).
   "project.permissionsDetails": "Detalhes em Configurações",
-  "set.permissionsDontAskBody": "O Chat e os Projetos executam comandos e alteram arquivos sem pedir, com acesso à internet, em qualquer pasta que você escolher. Suas próprias ferramentas conectadas e hooks continuam ativos. Uma página ou arquivo que a IA lê pode induzi-la a alterar arquivos ou usar a rede sem perguntar; para o que não for de confiança, use Perguntar antes de executar comandos. O Claude Code fica impedido de ler suas pastas de login e de chaves (.claude, .codex, .ssh). O Codex não pode ser impedido neste modo.",
-  "set.permissionsAskBody": "O Chat e os Projetos perguntam antes de cada comando ou alteração de arquivo. Mudar para este modo interrompe as tarefas em andamento.",
+  "set.permissionsDontAskBody": "O Chat e os Projetos executam comandos e alteram arquivos sem pedir, com acesso à internet, em qualquer pasta que você escolher, exceto pastas do sistema e de login. Suas próprias ferramentas conectadas e hooks continuam ativos. Uma página ou arquivo que a IA lê pode induzi-la a alterar arquivos ou usar a rede sem perguntar. As duas ferramentas ainda alcançam suas pastas de login e de chaves (.claude, .codex, .ssh) por meio de comandos; por isso, use Perguntar antes de executar comandos para o que não for de confiança.",
+  "set.permissionsAskBody": "O Chat e os Projetos perguntam antes de alterar um arquivo e antes de executar comandos. O Claude Code deixa passar alguns comandos de leitura simples, como listar uma pasta. Mudar para este modo interrompe as tarefas em andamento.",
   'set.permissions.dontAsk': "Não perguntar",
   'set.permissions.ask': 'Perguntar antes de executar comandos',
   "set.chatFolder": "Pasta de trabalho do Chat",
@@ -218,6 +218,7 @@ export const ptBR: Messages = {
   "set.privateFolder": "Pasta privada",
   "error.chatFolderLocked": "Escolha a pasta de trabalho antes da primeira mensagem. Inicie uma nova conversa para usar outra pasta.",
   "error.chatFolder": "O Faber não conseguiu usar esta pasta. Escolha uma pasta local em que você possa gravar.",
+  "error.workingFolder": "Esta pasta guarda arquivos do sistema ou suas chaves de login, então o Faber não trabalha nela. Escolha outra pasta.",
   'set.hooks': 'Seus hooks da CLI',
   'set.hooksBody': 'Os projetos rodam os meus próprios hooks da CLI',
   // R107 security review: handwritten wording; native-speaker review pending.

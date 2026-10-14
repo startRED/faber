@@ -208,8 +208,8 @@ export const es: Messages = {
   "project.permissionsAsk": "Faber pregunta antes de ejecutar comandos.",
   // R121: handwritten wording; native-speaker review pending (English is the source).
   "project.permissionsDetails": "Detalles en Ajustes",
-  "set.permissionsDontAskBody": "Chat y Proyectos ejecutan comandos y cambian archivos sin preguntar, con acceso a internet, en cualquier carpeta que elijas. Tus propias herramientas conectadas y hooks siguen activos. Una página o un archivo que lee la IA puede llevarla a cambiar archivos o usar la red sin preguntar; para lo que no sea de confianza, elige Preguntar antes de ejecutar comandos. Claude Code no puede leer tus carpetas de inicio de sesión ni de claves (.claude, .codex, .ssh). A Codex no se le puede impedir en este modo.",
-  "set.permissionsAskBody": "Chat y Proyectos preguntan antes de cada comando o cambio de archivo. Cambiar a este modo detiene las tareas en curso.",
+  "set.permissionsDontAskBody": "Chat y Proyectos ejecutan comandos y cambian archivos sin preguntar, con acceso a internet, en cualquier carpeta que elijas, salvo carpetas del sistema y de inicio de sesión. Tus propias herramientas conectadas y hooks siguen activos. Una página o un archivo que lee la IA puede llevarla a cambiar archivos o usar la red sin preguntar. Las dos herramientas aún pueden llegar a tus carpetas de inicio de sesión y de claves (.claude, .codex, .ssh) mediante comandos; por eso, elige Preguntar antes de ejecutar comandos para lo que no sea de confianza.",
+  "set.permissionsAskBody": "Chat y Proyectos preguntan antes de cambiar un archivo y antes de ejecutar comandos. Claude Code deja pasar algunos comandos de lectura simples, como listar una carpeta. Cambiar a este modo detiene las tareas en curso.",
   'set.permissions.dontAsk': "No preguntar",
   'set.permissions.ask': 'Preguntar antes de ejecutar comandos',
   "set.chatFolder": "Carpeta de trabajo del Chat",
@@ -218,6 +218,7 @@ export const es: Messages = {
   "set.privateFolder": "Carpeta privada",
   "error.chatFolderLocked": "Elige la carpeta de trabajo antes del primer mensaje. Inicia una nueva conversación para usar otra carpeta.",
   "error.chatFolder": "Faber no pudo usar esta carpeta. Elige una carpeta local en la que puedas escribir.",
+  "error.workingFolder": "Esta carpeta guarda archivos del sistema o tus claves de inicio de sesión, así que Faber no trabaja en ella. Elige otra carpeta.",
   'set.hooks': 'Tus hooks de la CLI',
   'set.hooksBody': 'Los proyectos ejecutan mis propios hooks de la CLI',
   // R107 security review: handwritten wording; native-speaker review pending.
