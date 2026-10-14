@@ -128,6 +128,30 @@ async fn codex_permissions_the_first_command_is_allowed_and_the_second_declined(
     assert_eq!(results, [(true, false), (false, true)], "a refused approval is declined, not a failure");
 }
 
+/// R124b, item 5: the request names only `auth.json`; the command's folder is what says it is the sign-in. The driver refuses it
+/// itself (a refusal is always safe, so nothing races a mode switch) and the person is asked only about the other command.
+#[tokio::test]
+async fn r124b_a_command_run_inside_a_credential_folder_is_refused_without_a_card() {
+    let mut entries = fixture("codex", "tools");
+    let at = entries.iter().position(|e| !e.input && e.msg["method"] == "item/commandExecution/requestApproval").unwrap();
+    entries[at].msg["params"]["cwd"] = "C:\\Users\\me\\.codex".into();
+    entries[at].msg["params"]["command"] = "type auth.json".into();
+    entries[at + 1].msg["result"]["decision"] = "decline".into();
+    let mut asks = Vec::new();
+    let (_, mismatches) =
+        run(entries, "Create a.txt containing one. Then create b.txt containing two. Make each file in a separate step.", None, |e, s| {
+            if let EngineEvent::Permission { request_id, input, .. } = e {
+                asks.push(input.to_string());
+                drop(s.answer(request_id, false));
+            }
+            matches!(e, EngineEvent::Done { .. })
+        })
+        .await;
+    assert_eq!(mismatches, Vec::<String>::new());
+    assert_eq!(asks.len(), 1, "only the second command is asked: {asks:?}");
+    assert!(!asks[0].contains("auth.json"));
+}
+
 #[tokio::test]
 async fn codex_an_answer_that_fails_to_write_keeps_the_approval_and_the_retry_is_written_once() {
     let f = fake(fixture("codex", "tools"));

@@ -369,7 +369,7 @@ fn denied(args: &[String]) -> Vec<String> {
 }
 
 #[test]
-fn r121_full_access_denies_the_credential_folders_exactly_as_the_isolated_mode_does() {
+fn r121_full_access_and_ask_deny_the_credential_folders_exactly_as_the_isolated_mode_does() {
     for area in [Area::Chat, Area::Project] {
         let full = denied(&claude_args(&launch(area, Permissions::FullAccess)));
         assert_eq!(full, denied(&claude_args(&launch(area, Permissions::Isolated))), "{area:?}");
@@ -377,8 +377,14 @@ fn r121_full_access_denies_the_credential_folders_exactly_as_the_isolated_mode_d
             assert!(full.contains(&rule.to_string()), "{area:?} {rule}");
         }
     }
-    // Ask mode keeps its cards instead of deny rules, as before.
-    assert!(denied(&claude_args(&launch(Area::Project, Permissions::Ask))).is_empty());
+    // Ask asks as well, and carries the same credential denies (R124b).
+    for area in [Area::Chat, Area::Project] {
+        assert_eq!(
+            denied(&claude_args(&launch(area, Permissions::Ask))),
+            denied(&claude_args(&launch(area, Permissions::FullAccess))),
+            "{area:?}"
+        );
+    }
 }
 
 #[test]
@@ -412,7 +418,7 @@ fn r124_a_request_naming_a_credential_folder_is_recognised_in_every_spelling_and
         json!({ "file_path": "/home/me/.claude.json.backup" }),
         json!({ "file_path": "keys/release.updater.key" }),
     ] {
-        assert!(touches_credentials(&refused, &none), "{refused}");
+        assert!(touches_credentials(&refused, None, &none), "{refused}");
     }
     for allowed in [
         json!({ "file_path": "src/main.rs" }),
@@ -421,12 +427,104 @@ fn r124_a_request_naming_a_credential_folder_is_recognised_in_every_spelling_and
         json!({ "file_path": "docs/my.ssh.notes.txt" }),
         json!({ "command": "ls -la" }),
     ] {
-        assert!(!touches_credentials(&allowed, &none), "{allowed}");
+        assert!(!touches_credentials(&allowed, None, &none), "{allowed}");
     }
     // A moved folder is recognised by where it now is.
     let moved = |name: &str| (name == "CLAUDE_CONFIG_DIR").then(|| format!("E:{bs}Accounts{bs}work"));
-    assert!(touches_credentials(&json!({ "file_path": "E:/Accounts/work/.credentials.json" }), &moved));
-    assert!(!touches_credentials(&json!({ "file_path": "E:/Accounts/other/notes.txt" }), &moved));
+    assert!(touches_credentials(&json!({ "file_path": "E:/Accounts/work/.credentials.json" }), None, &moved));
+    assert!(!touches_credentials(&json!({ "file_path": "E:/Accounts/other/notes.txt" }), None, &moved));
+}
+
+/// R124b, item 5: a command can name a file with no folder in it; the folder it runs in (or a relative path from there) is what
+/// says it is a credential. Matching a command line stays best effort: quote splicing and variables can hide a name.
+#[test]
+fn r124b_a_command_is_judged_with_the_folder_it_runs_in() {
+    use faber_engine::permissions::touches_credentials;
+    let none = |_: &str| None;
+    let cat = json!({ "command": "cat auth.json" });
+    assert!(touches_credentials(&cat, Some("/home/me/.codex"), &none));
+    assert!(touches_credentials(&cat, Some("/home/me/.codex/sessions"), &none));
+    assert!(touches_credentials(&json!({ "command": "type auth.json" }), Some("C:\\Users\\me\\.CODEX"), &none));
+    assert!(!touches_credentials(&cat, Some("/home/me/project"), &none));
+    assert!(!touches_credentials(&cat, None, &none));
+    let moved = |name: &str| (name == "CODEX_HOME").then(|| "E:/work/cred".to_string());
+    assert!(touches_credentials(&json!({ "command": "cat cred/auth.json" }), Some("E:/work"), &moved));
+    assert!(touches_credentials(&json!({ "command": "cat ../cred/auth.json" }), Some("E:/work/sub"), &moved));
+    assert!(touches_credentials(&json!({ "command": "cat auth.json" }), Some("E:/work/cred"), &moved));
+    assert!(!touches_credentials(&json!({ "command": "cat notes.txt" }), Some("E:/work/sub"), &moved));
+}
+
+/// R124b, item 4: a sign-in folder moved to a network share is denied where it now is (and a relative value still names nothing).
+#[test]
+fn r124b_a_sign_in_folder_on_a_network_share_is_recognised() {
+    use faber_engine::claude::tool_deny;
+    use faber_engine::permissions::{relocated_credentials, touches_credentials};
+    let bs = char::from(92);
+    let env = |name: &str| match name {
+        "CLAUDE_CONFIG_DIR" => Some(format!("{bs}{bs}fileserver{bs}home{bs}me{bs}claude")),
+        "CODEX_HOME" => Some(format!("{bs}{bs}?{bs}UNC{bs}nas{bs}share{bs}codex")),
+        "DOCKER_CONFIG" => Some("docker".to_string()),
+        _ => None,
+    };
+    let moved: Vec<String> = relocated_credentials(&env).into_iter().map(|(p, _)| p).collect();
+    assert_eq!(moved, ["//fileserver/home/me/claude", "//nas/share/codex"]);
+    let rules = tool_deny(&env);
+    for tool in ["Read", "Edit"] {
+        assert!(rules.contains(&format!("{tool}(//fileserver/home/me/claude/**)")), "{rules:?}");
+        assert!(rules.contains(&format!("{tool}(//nas/share/codex/**)")), "{rules:?}");
+    }
+    assert!(touches_credentials(&json!({ "file_path": format!("{bs}{bs}NAS{bs}share{bs}codex{bs}auth.json") }), None, &env));
+}
+
+/// R124b, item 3: a folder is judged by where it really is. Links, other spellings of the same place and the short names of the
+/// system folders do not get past the refusal.
+#[test]
+fn r124b_a_folder_is_judged_by_its_resolved_path() {
+    use faber_engine::permissions::forbidden_folder;
+    let dir = tempfile::tempdir().unwrap();
+    let keys = dir.path().join(".ssh").join("keys");
+    std::fs::create_dir_all(&keys).unwrap();
+    let plain = dir.path().join("work");
+    std::fs::create_dir_all(&plain).unwrap();
+    assert!(!forbidden_folder(&plain));
+    let link = dir.path().join("looks-innocent");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(dir.path().join(".ssh"), &link).unwrap();
+    #[cfg(windows)]
+    junction(&link, &dir.path().join(".ssh"));
+    assert!(forbidden_folder(&link), "a link into a sign-in folder");
+    assert!(forbidden_folder(&link.join("keys")), "a folder below that link");
+    // A folder that is absent is judged by its name.
+    assert!(!forbidden_folder(&dir.path().join("not-yet")));
+    assert!(forbidden_folder(&dir.path().join(".SSH").join("new")));
+    #[cfg(windows)]
+    {
+        use std::path::Path;
+        let root = std::env::var("SystemRoot").unwrap();
+        let program_files = std::env::var("ProgramFiles").unwrap();
+        let sys_link = dir.path().join("windir");
+        junction(&sys_link, Path::new(&root));
+        assert!(forbidden_folder(&sys_link), "a junction to the Windows folder");
+        assert!(forbidden_folder(&sys_link.join("System32")));
+        assert!(forbidden_folder(Path::new(&program_files.to_uppercase().replace('\\', "/"))), "another case and slash");
+        assert!(forbidden_folder(Path::new("C:\\PROGRA~1")), "the short name of Program Files");
+        assert!(forbidden_folder(Path::new(&format!("\\\\?\\{root}\\System32"))), "the verbatim form");
+        assert!(forbidden_folder(Path::new("\\\\localhost\\C$\\Windows")), "the same folder through an administrative share");
+        assert!(forbidden_folder(Path::new("\\\\?\\UNC\\localhost\\C$\\Windows\\System32")));
+    }
+}
+
+#[cfg(windows)]
+fn junction(link: &std::path::Path, target: &std::path::Path) {
+    use std::os::windows::process::CommandExt;
+    let made = std::process::Command::new("cmd.exe")
+        .args(["/c", "mklink", "/J"])
+        .arg(link)
+        .arg(target)
+        .creation_flags(0x0800_0000)
+        .output()
+        .unwrap();
+    assert!(made.status.success(), "the junction could not be made");
 }
 
 /// R124, item F: the refusal covers the system folders and anything in or under a credential folder; the home folder, a drive

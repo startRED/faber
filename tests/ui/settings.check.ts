@@ -29,12 +29,13 @@ check('R121: Do not ask is one calm line in the thread, with the risk and the cr
   ok(line.length < 60 && !/risk|danger|warning|error|denied|blocked/i.test(line), line);
   ok(en['project.permissionsDetails'].includes('Settings'));
   const body = en['set.permissionsDontAskBody'];
-  for (const word of ['internet', 'any folder', 'steer', 'Ask before commands', '.ssh', 'Both tools can still reach', 'through commands']) ok(body.includes(word), word);
+  for (const word of ['internet', 'any folder', 'steer', 'Ask before commands', '.ssh', 'Codex can read', 'directly', 'Claude Code can through commands']) ok(body.includes(word), word);
   ok(!/is kept out|cannot be kept out|Codex cannot/.test(body), 'no claim that one tool is kept away from the sign-in folders');
   ok(body.split('. ').length <= 5, 'one short paragraph');
   ok(!/sandbox|too broad|disabled/i.test(body), 'full access no longer describes a sandbox or disabled integrations');
   const ask = en['set.permissionsAskBody'];
   ok(ask.includes('stops tasks that are running') && ask.includes('before changing a file') && ask.includes('plain reading commands'), ask);
+  ok(ask.includes('except the ones you already allowed in the tool\x27s own settings'), 'Ask names what the tools\x27 own settings can pre-approve');
   ok(en['error.workingFolder'].includes('system files') && en['error.workingFolder'].includes('sign-in keys'));
 });
 

@@ -1526,6 +1526,37 @@ async fn r124_full_access_answers_yes_except_to_a_request_that_touches_a_credent
     engine.shutdown();
 }
 
+/// R124b, item 1: Ask refuses a request that names a credential folder the same way full access does, with no card, and still
+/// shows a card for every other request.
+#[tokio::test]
+async fn r124b_ask_refuses_a_credential_request_without_a_card_and_asks_for_the_rest() {
+    let dir = tempfile::tempdir().unwrap();
+    let (spawn, made) = pipes();
+    let (engine, _rx) = engine(dir.path(), Vendor::Claude, spawn);
+    engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+    let id = engine.send(ask(Area::Chat, "work", choice("claude", Some("haiku")))).unwrap();
+    let mut pipe = next_pipe(&made).await;
+    pipe.say(json!({ "type": "system", "subtype": "init", "session_id": "s", "model": "haiku" })).await;
+    pipe.say(can_use("key", "Bash", json!({ "command": "cat ~/.codex/auth.json" }))).await;
+    pipe.say(can_use("ok", "Write", json!({ "file_path": "notes.txt", "content": "x" }))).await;
+    let cards = |engine: &Engine| -> Vec<String> {
+        engine
+            .open(&id)
+            .map(|c| c.messages.iter().flat_map(|m| m.permissions.clone().unwrap_or_default()).map(|p| p.request_id).collect())
+            .unwrap_or_default()
+    };
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while pipe.answers().is_empty() || cards(&engine).is_empty() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the credential request is refused and the other one waits for the person");
+    assert_eq!(pipe.answers(), vec![("key".to_string(), "deny".to_string())]);
+    assert_eq!(cards(&engine), vec!["ok".to_string()]);
+    engine.shutdown();
+}
+
 /// R124, item E for Codex: with full access an approval Codex still raises is answered by the engine, with no card.
 #[tokio::test]
 async fn r124_codex_full_access_answers_an_approval_without_a_card() {
@@ -1584,11 +1615,10 @@ async fn r124_system_and_credential_folders_are_refused_as_working_folders_but_h
     engine.shutdown();
 }
 
-/// R124, item 3: switching to Ask must stop execution, not only the status. A command the CLI started is a child of the CLI;
-/// on Windows killing the CLI alone left it running and still changing files.
+/// Starts a "CLI" from `parent_script` (which starts a worker that keeps writing), stops the session and checks the worker
+/// stopped too.
 #[cfg(windows)]
-#[tokio::test]
-async fn r124_stopping_a_cli_also_stops_the_command_it_started() {
+async fn stop_leaves_no_worker(parent_script: &str, why: &str) {
     use faber_engine::claude::{ClaudeLaunch, ClaudeOptions, start_claude};
     use faber_engine::proc::Proc;
     use std::process::Stdio;
@@ -1597,7 +1627,7 @@ async fn r124_stopping_a_cli_also_stops_the_command_it_started() {
     let parent = dir.path().join("parent.cmd");
     let out = dir.path().join("out.txt");
     std::fs::write(&worker, "@echo off\r\n:loop\r\necho x>> %1\r\nping -n 2 127.0.0.1 >nul\r\ngoto loop\r\n").unwrap();
-    std::fs::write(&parent, "@echo off\r\nstart /b cmd /c %~dp0worker.cmd %~dp0out.txt\r\nping -n 120 127.0.0.1 >nul\r\n").unwrap();
+    std::fs::write(&parent, parent_script).unwrap();
     let script = parent.to_string_lossy().into_owned();
     // The "CLI" is a batch file that starts a worker and waits, the way a CLI waits for the command it started.
     let spawn: Spawner = Arc::new(move |_bin, _args, cwd| {
@@ -1639,9 +1669,34 @@ async fn r124_stopping_a_cli_also_stops_the_command_it_started() {
     })
     .await
     .expect("the worker started");
+    tokio::time::sleep(Duration::from_millis(3000)).await;
     session.close();
     tokio::time::sleep(Duration::from_millis(2500)).await;
     let at_stop = lines(&out);
     tokio::time::sleep(Duration::from_millis(3500)).await;
-    assert_eq!(lines(&out), at_stop, "the command the CLI started kept running after the CLI was stopped");
+    assert_eq!(lines(&out), at_stop, "{why}");
+}
+
+/// R124, item 3: switching to Ask must stop execution, not only the status. A command the CLI started is a child of the CLI;
+/// on Windows killing the CLI alone left it running and still changing files.
+#[cfg(windows)]
+#[tokio::test]
+async fn r124_stopping_a_cli_also_stops_the_command_it_started() {
+    stop_leaves_no_worker(
+        "@echo off\r\nstart /b cmd /c %~dp0worker.cmd %~dp0out.txt\r\nping -n 120 127.0.0.1 >nul\r\n",
+        "the command the CLI started kept running after the CLI was stopped",
+    )
+    .await;
+}
+
+/// R124b, item 6: a CLI that is already gone when the tree is killed (it quit on its own or when its input closed) left its worker
+/// running with no parent link to follow. The job object the CLI runs in ends the worker whatever the parent did.
+#[cfg(windows)]
+#[tokio::test]
+async fn r124b_a_worker_of_a_cli_that_already_exited_is_stopped_too() {
+    stop_leaves_no_worker(
+        "@echo off\r\nstart /b cmd /c %~dp0worker.cmd %~dp0out.txt\r\nping -n 4 127.0.0.1 >nul\r\nexit /b 0\r\n",
+        "the worker of a CLI that had already exited kept running",
+    )
+    .await;
 }

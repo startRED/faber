@@ -223,8 +223,12 @@ fn chat_is_lean_and_confined_to_its_workspace_projects_get_the_user_setup_withou
     assert_eq!(after(&chat, "--model"), "haiku");
     let project = claude_args(&launch(Area::Project));
     assert!(!project.contains(&"--restricted".into()) && !project.contains(&"--strict-mcp-config".into()));
-    assert_eq!(after(&project, "--settings"), r#"{"disableAllHooks":true}"#);
-    assert!(!claude_args(&ClaudeLaunch { user_hooks: true, ..launch(Area::Project) }).contains(&"--settings".into()));
+    // Hooks stay off until the switch is on; the settings carry the credential denies in every case (R124b).
+    let off = settings_of(&project);
+    assert_eq!(off["disableAllHooks"], true);
+    assert!(deny_rules(&project).contains(&"Read(~/.ssh/**)".to_string()));
+    let on = settings_of(&claude_args(&ClaudeLaunch { user_hooks: true, ..launch(Area::Project) }));
+    assert!(on.get("disableAllHooks").is_none() && on["permissions"]["deny"].is_array());
 }
 
 const CREDENTIAL_DENIES: [&str; 5] =
@@ -621,7 +625,7 @@ fn r124_ask_names_its_permission_mode_in_both_areas_so_a_cli_default_never_wins(
 /// credential folder is denied for the Edit tool (which Write follows) as well as for Read.
 #[test]
 fn r124_the_deny_rules_travel_in_the_settings_json_each_one_intact_and_cover_edits_too() {
-    for permissions in [Permissions::FullAccess, Permissions::Isolated] {
+    for permissions in [Permissions::FullAccess, Permissions::Isolated, Permissions::Ask] {
         for area in [Area::Chat, Area::Project] {
             let args = claude_args(&ClaudeLaunch { permissions, ..launch(area) });
             assert!(

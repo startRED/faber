@@ -764,6 +764,9 @@ impl Core {
             let dir = self.workspace_of(&c.id);
             if c.working_folder.is_none() {
                 std::fs::create_dir_all(&dir).map_err(|_| "error.projectSandbox")?;
+            } else if crate::permissions::forbidden_folder(&dir) {
+                // The folder was fine when it was chosen; a link put there since may lead somewhere that is not.
+                return Err("error.workingFolder".into());
             }
             return Ok(dir);
         }
@@ -1005,14 +1008,20 @@ impl Core {
                 }
             }
             EngineEvent::Permission { request_id, tool, input } => {
-                // Full access never shows a card. The answer is decided here, under the lock that also saves the mode, so a
-                // request that was already on its way when the person switched to Ask finds the session gone (and is never
-                // accepted). A request that touches a credential folder is refused.
-                if let Some(l) = self.live.get(conv).filter(|l| l.permissions == Permissions::FullAccess) {
-                    if crate::permissions::touches_credentials(&input, &|name| std::env::var(name).ok()) {
-                        drop(l.session.answer(&request_id, false));
-                        return;
-                    }
+                // A request that touches a credential folder is refused in both modes, with no card (best effort for a command
+                // line: see `touches_credentials`). Full access never shows a card. The answer is decided here, under the lock
+                // that also saves the mode, so a request that was already on its way when the person switched to Ask finds the
+                // session gone (and is never accepted).
+                let cwd = self.convs.get(conv).and_then(|c| self.cwd_of(c).ok());
+                if let Some(l) = self.live.get(conv)
+                    && crate::permissions::touches_credentials(&input, cwd.as_deref().and_then(Path::to_str), &|name| {
+                        std::env::var(name).ok()
+                    })
+                {
+                    drop(l.session.answer(&request_id, false));
+                    return;
+                }
+                if self.live.get(conv).is_some_and(|l| l.permissions == Permissions::FullAccess) {
                     return self.auto_answer(conv, vec![Permission { request_id, tool, input }]);
                 }
                 let allowed = self.convs.get(conv).and_then(|c| c.allow_always.as_ref()).is_some_and(|a| a.contains(&tool));

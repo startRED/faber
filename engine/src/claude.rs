@@ -54,9 +54,14 @@ pub fn tool_deny(var: &dyn Fn(&str) -> Option<String>) -> Vec<String> {
     let moved = crate::permissions::relocated_credentials(var);
     let dirs = CREDENTIAL_DIRS.iter().map(|d| format!("{d}/**"));
     let files = CREDENTIAL_FILES.iter().map(|f| (*f).to_string());
-    let moved = moved.into_iter().map(|(p, file)| {
-        let rule = crate::permissions::claude_rule_path(&p);
-        if file { rule } else { format!("{rule}/**") }
+    // A network path is written with two slashes as well: how the CLI spells one in a rule could not be checked.
+    let moved = moved.into_iter().flat_map(|(p, file)| {
+        let forms = if p.starts_with("//") {
+            vec![p.clone(), crate::permissions::claude_rule_path(&p)]
+        } else {
+            vec![crate::permissions::claude_rule_path(&p)]
+        };
+        forms.into_iter().map(move |rule| if file { rule } else { format!("{rule}/**") })
     });
     for path in dirs.chain(files).chain(moved) {
         rules.push(format!("Read({path})"));
@@ -136,7 +141,11 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
                 args.extend(["--permission-mode".into(), "bypassPermissions".into()]);
                 settings["permissions"] = json!({ "deny": tool_deny(&env) });
             }
-            Permissions::Ask => args.extend(["--permission-mode".into(), "default".into()]),
+            // Ask carries the same credential denies as full access: a person's own rule or an approval card must not open them.
+            Permissions::Ask => {
+                args.extend(["--permission-mode".into(), "default".into()]);
+                settings["permissions"] = json!({ "deny": tool_deny(&env) });
+            }
         }
         let hooks_off = match launch.permissions {
             Permissions::Isolated => true,
@@ -303,6 +312,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
         let mut lines = BufReader::new(p.stdout).lines();
         let mut stdin = p.stdin;
         let mut child = p.child;
+        let mut job = proc::contain(&child);
         let mut pending: HashMap<String, Value> = HashMap::new();
         let mut closed = false;
         let mut control_id = 0u32;
@@ -342,7 +352,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                                             "response": response } });
                                         if proc::write_line(&mut *stdin, &msg).await.is_err() {
                                             on_event(EngineEvent::Error { message: "error.permission.undelivered".into(), fatal: true });
-                                            proc::stop(&mut *stdin, &mut child).await;
+                                            proc::stop(&mut *stdin, &mut child, &mut job).await;
                                             return;
                                         }
                                         continue;
@@ -383,7 +393,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                                         // A half-written or unflushed line cannot be sent again: end the process, and the
                                         // end of its output tells the engine.
                                         if e.torn {
-                                            proc::stop(&mut *stdin, &mut child).await;
+                                            proc::stop(&mut *stdin, &mut child, &mut job).await;
                                         }
                                         Delivery::WriteFailed
                                     }
@@ -399,7 +409,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                     }
                     Some(SessionCommand::Close) | None => {
                         closed = true;
-                        proc::stop(&mut *stdin, &mut child).await;
+                        proc::stop(&mut *stdin, &mut child, &mut job).await;
                     }
                 }
             }

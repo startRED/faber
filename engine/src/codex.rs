@@ -485,6 +485,7 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
     let mut lines = BufReader::new(p.stdout).lines();
     let mut stdin = p.stdin;
     let mut child = p.child;
+    let mut job = proc::contain(&child);
     let mut threads: HashMap<u64, Thread> = HashMap::new();
     let mut by_id: HashMap<String, u64> = HashMap::new();
     // Opened before Codex finished starting, in order, so request ids stay predictable.
@@ -504,7 +505,7 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
     macro_rules! stop {
         () => {{
             stopping = true;
-            proc::stop(&mut *stdin, &mut child).await;
+            proc::stop(&mut *stdin, &mut child, &mut job).await;
         }};
     }
     macro_rules! open_thread {
@@ -655,6 +656,13 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                                 t.approvals.insert(key.clone(), id.clone());
                                 let tool = params["kind"].as_str().unwrap_or(method).to_string();
                                 let input = [&params["command"], &params["changes"]].into_iter().find(|v| !v.is_null()).unwrap_or(params).clone();
+                                // The request carries the folder the command runs in; `auth.json` alone says nothing without it. A
+                                // refusal is always safe, so it is written here instead of racing the engine's mode.
+                                if crate::permissions::touches_credentials(&input, params["cwd"].as_str(), &|name| std::env::var(name).ok()) {
+                                    t.approvals.remove(&key);
+                                    let _ = proc::write_line(&mut *stdin, &json!({ "id": id, "result": { "decision": "decline" } })).await;
+                                    continue;
+                                }
                                 (t.sink)(EngineEvent::Permission { request_id: key, tool, input });
                             }
                             // No live conversation or approvals disabled: fail closed without a card.
@@ -738,7 +746,7 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                                         // A half-written or unflushed line cannot be sent again: end the process, and the
                                         // end of its output tells the engine.
                                         if e.torn {
-                                            proc::stop(&mut *stdin, &mut child).await;
+                                            proc::stop(&mut *stdin, &mut child, &mut job).await;
                                         }
                                         Delivery::WriteFailed
                                     }
@@ -794,6 +802,7 @@ pub async fn read_codex_limits(bin: &str, cwd: &Path, windows: bool, spawn: Spaw
     let Ok(p) = spawn(bin, &codex_args(Area::Chat, windows, false, Permissions::Isolated), cwd) else { return vec![] };
     let mut stdin = p.stdin;
     let mut child = p.child;
+    let mut job = proc::contain(&child);
     let mut lines = BufReader::new(p.stdout).lines();
     let mut events = vec![];
     let ask = async {
@@ -839,7 +848,7 @@ pub async fn read_codex_limits(bin: &str, cwd: &Path, windows: bool, spawn: Spaw
         }
     };
     let _ = tokio::time::timeout(timeout, ask).await;
-    proc::stop(&mut *stdin, &mut child).await;
+    proc::stop(&mut *stdin, &mut child, &mut job).await;
     events
 }
 
@@ -859,6 +868,7 @@ pub async fn list_codex_models(bin: &str, cwd: &Path, windows: bool, spawn: Spaw
     let Ok(p) = spawn(bin, &codex_args(Area::Chat, windows, false, Permissions::Isolated), cwd) else { return vec![] };
     let mut stdin = p.stdin;
     let mut child = p.child;
+    let mut job = proc::contain(&child);
     let mut lines = BufReader::new(p.stdout).lines();
     let ask = async {
         let init = json!({ "id": 1, "method": "initialize", "params": { "clientInfo": { "name": "faber", "title": "Faber", "version": "0.0.0" } } });
@@ -886,6 +896,6 @@ pub async fn list_codex_models(bin: &str, cwd: &Path, windows: bool, spawn: Spaw
         vec![]
     };
     let models = tokio::time::timeout(timeout, ask).await.unwrap_or_default();
-    proc::stop(&mut *stdin, &mut child).await;
+    proc::stop(&mut *stdin, &mut child, &mut job).await;
     models
 }

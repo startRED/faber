@@ -300,15 +300,54 @@ fn absolute(path: &str) -> bool {
     path.starts_with('/') || (b.len() > 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/'))
 }
 
-/// Where the documented variables send the CLIs' sign-ins right now: absolute paths with forward slashes, and whether each
-/// is a file. A relative value names nothing fixed, so it is left out. Only the variable's value is read, never a file.
+/// One spelling of a path: forward slashes and no `\\?\` or `\\.\` prefix (`\\?\UNC\host\share` is `//host/share`). A network name
+/// that points back at this PC (`\\localhost\C$\Windows`) is the local path (`C:/Windows`).
+fn unified(path: &str) -> String {
+    let p = path.replace('\\', "/");
+    let p = match p.strip_prefix("//?/").or_else(|| p.strip_prefix("//./")) {
+        Some(rest) => match rest.get(..4).filter(|head| head.eq_ignore_ascii_case("unc/")) {
+            Some(_) => format!("//{}", &rest[4..]),
+            None => rest.to_string(),
+        },
+        None => p,
+    };
+    if let Some(rest) = p.strip_prefix("//") {
+        let (host, tail) = rest.split_once('/').unwrap_or((rest, ""));
+        let this_pc = std::env::var("COMPUTERNAME").unwrap_or_default();
+        let local = ["localhost", "127.0.0.1", "::1", "[::1]"].contains(&host.to_ascii_lowercase().as_str())
+            || (!this_pc.is_empty() && host.eq_ignore_ascii_case(&this_pc));
+        let (share, below) = tail.split_once('/').unwrap_or((tail, ""));
+        let sb = share.as_bytes();
+        if local && sb.len() == 2 && sb[0].is_ascii_alphabetic() && sb[1] == b'$' {
+            return format!("{}:/{below}", sb[0] as char);
+        }
+    }
+    p
+}
+
+/// The form two paths are compared in: `unified`, lower case (Windows ignores case, and elsewhere the worst case is refusing
+/// a folder that differs only by case), no trailing slash except on a root.
+fn normal(path: &str) -> String {
+    let p = unified(path).to_lowercase();
+    if p.len() > 3 { p.trim_end_matches('/').to_string() } else { p }
+}
+
+/// Is `path` the folder `dir` or inside it? Both are in the normal form.
+fn inside(path: &str, dir: &str) -> bool {
+    let dir = dir.trim_end_matches('/');
+    path == dir || path.strip_prefix(dir).is_some_and(|rest| rest.starts_with('/'))
+}
+
+/// Where the documented variables send the CLIs' sign-ins right now: absolute paths (a drive or a network share) with
+/// forward slashes, and whether each is a file. A relative value names nothing fixed, so it is left out. Only the variable's
+/// value is read, never a file.
 pub fn relocated_credentials(var: &dyn Fn(&str) -> Option<String>) -> Vec<(String, bool)> {
     RELOCATED
         .iter()
         .filter_map(|(name, is_file, inside)| {
-            let value = var(name)?.replace('\\', "/");
-            let value = value.strip_prefix("//?/").unwrap_or(&value).trim_end_matches('/').to_string();
-            if !absolute(&value) || value.starts_with("//") {
+            let value = unified(&var(name)?);
+            let value = value.trim_end_matches('/').to_string();
+            if !absolute(&value) {
                 return None;
             }
             Some((if inside.is_empty() { value } else { format!("{value}/{inside}") }, *is_file))
@@ -317,7 +356,9 @@ pub fn relocated_credentials(var: &dyn Fn(&str) -> Option<String>) -> Vec<(Strin
 }
 
 /// The path as a Claude Code permission rule writes an absolute one: `//c/Users/me/x` on Windows, `//home/me/x` elsewhere.
-/// Windows matching ignores case and slash direction (checked against the installed CLI), so one form is enough.
+/// Windows matching ignores case and slash direction (checked against the installed CLI), so one form is enough. A network
+/// path (`//host/share/x`) keeps its two slashes; the CLI's spelling of it could not be checked, so the caller adds that
+/// form as well as the one with the extra slash.
 pub fn claude_rule_path(absolute_path: &str) -> String {
     let p = absolute_path.replace('\\', "/");
     let b = p.as_bytes();
@@ -328,10 +369,15 @@ pub fn claude_rule_path(absolute_path: &str) -> String {
     }
 }
 
-/// Does this request name a credential folder or file, wherever it sits in the input (a path, a command line)? Full access
-/// answers the questions the CLI still asks with yes, except these. A request is cut into path pieces and compared by name,
-/// so `cat ~/.ssh/id_ed25519`, `C:\Users\me\.SSH\id_rsa` and `type %USERPROFILE%\.codex\auth.json` all match.
-pub fn touches_credentials(input: &Value, var: &dyn Fn(&str) -> Option<String>) -> bool {
+/// Does this request name a credential folder or file, wherever it sits in the input (a path, a command line)? Both modes
+/// refuse such a request without a card. A request is cut into path pieces and compared by name, so `cat ~/.ssh/id_ed25519`,
+/// `C:\Users\me\.SSH\id_rsa` and `type %USERPROFILE%\.codex\auth.json` all match. `cwd` is the folder the command runs in:
+/// inside a credential folder any command counts (it can name `auth.json` with no folder), and a relative path is resolved from it.
+///
+/// Best effort, and only for a command line: a shell can build a name from pieces (`cat .co""dex/auth.json`, a variable, a
+/// glob) that no text match can follow. The folders themselves are protected where the CLI can enforce it (Claude's deny
+/// rules); for the rest this is a net, and nothing on screen claims more.
+pub fn touches_credentials(input: &Value, cwd: Option<&str>, var: &dyn Fn(&str) -> Option<String>) -> bool {
     fn strings<'a>(value: &'a Value, out: &mut Vec<&'a str>) {
         match value {
             Value::String(s) => out.push(s),
@@ -342,36 +388,92 @@ pub fn touches_credentials(input: &Value, var: &dyn Fn(&str) -> Option<String>) 
     }
     let mut texts = Vec::new();
     strings(input, &mut texts);
-    let moved: Vec<String> = relocated_credentials(var).into_iter().map(|(p, _)| p.to_ascii_lowercase()).collect();
+    let moved: Vec<String> = relocated_credentials(var).into_iter().map(|(p, _)| normal(&p)).collect();
+    let credential_piece = |piece: &str| {
+        let piece = piece.trim_end_matches(['.', ' ']);
+        CREDENTIAL_FOLDERS.contains(&piece)
+            || CREDENTIAL_FILES.contains(&piece)
+            || piece.starts_with(".claude.json")
+            || piece.contains("updater.key")
+    };
+    // A path is a credential when a piece of it is a credential name or it is inside a moved sign-in folder.
+    let names_credential = |path: &str| inside_any(path, &moved) || path.split('/').any(credential_piece);
+    let cwd = cwd.map(|c| normal(&std::fs::canonicalize(c).map_or_else(|_| c.to_string(), |p| p.to_string_lossy().into_owned())));
+    if cwd.as_deref().is_some_and(|c| inside_any(c, &moved) || c.split('/').any(credential_piece)) {
+        return true;
+    }
     texts.iter().any(|text| {
-        let text = text.replace('\\', "/").to_ascii_lowercase();
-        moved.iter().any(|dir| text.contains(dir.as_str()))
-            || text.split(|c: char| c == '/' || c.is_whitespace() || "\"'`;|&<>()=,".contains(c)).any(|piece| {
-                let piece = piece.trim_end_matches(['.', ' ']);
-                CREDENTIAL_FOLDERS.contains(&piece)
-                    || CREDENTIAL_FILES.contains(&piece)
-                    || piece.starts_with(".claude.json")
-                    || piece.contains("updater.key")
+        let text = normal(text);
+        inside_any_text(&text, &moved)
+            || text.split(|c: char| c == '/' || c.is_whitespace() || "\"'`;|&<>()=,".contains(c)).any(credential_piece)
+            || cwd.as_deref().is_some_and(|cwd| {
+                text.split(|c: char| c.is_whitespace() || "\"'`;|&<>()=,".contains(c))
+                    .filter(|token| !token.is_empty() && !absolute(token) && !token.starts_with(['~', '$', '%']))
+                    .any(|token| names_credential(&resolve(cwd, token)))
             })
     })
 }
 
+fn inside_any(path: &str, dirs: &[String]) -> bool {
+    dirs.iter().any(|dir| inside(path, dir))
+}
+
+/// A moved folder named anywhere in a command line (the text may hold it in the middle).
+fn inside_any_text(text: &str, dirs: &[String]) -> bool {
+    dirs.iter().any(|dir| text.contains(dir.as_str()))
+}
+
+/// `token` as a path from `cwd`, with `.` and `..` folded away. Plain text work: nothing is opened.
+fn resolve(cwd: &str, token: &str) -> String {
+    let mut parts: Vec<&str> = cwd.split('/').collect();
+    for part in token.split('/') {
+        match part {
+            "" | "." => {}
+            ".." if parts.len() > 1 => {
+                parts.pop();
+            }
+            ".." => {}
+            other => parts.push(other),
+        }
+    }
+    parts.join("/")
+}
+
 /// A working folder Faber refuses with a calm message even in full access (R124): the Windows folder, Program Files, and a
 /// credential folder or any folder inside one. A drive root and the home folder stay allowed, as R121 says.
+///
+/// The folder is resolved first (links, junctions, short names and verbatim prefixes all end up as the real path) and judged in
+/// one normal form, both as written and as resolved. A folder that cannot be resolved for a reason other than being absent is
+/// refused; an absent one is judged by its name (nothing can run in it, and the turn checks again when it starts).
 pub fn forbidden_folder(root: &Path) -> bool {
-    let same = |a: &Path, b: &Path| {
-        a.to_string_lossy().trim_start_matches("\\\\?\\").eq_ignore_ascii_case(b.to_string_lossy().trim_start_matches("\\\\?\\"))
+    let real = match std::fs::canonicalize(root) {
+        Ok(real) => Some(real),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(_) => return true,
     };
-    let system: Vec<PathBuf> = ["SystemRoot", "windir", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"]
+    // Each place is judged under the name it is written with and the real one it resolves to.
+    let spellings = |path: &Path| {
+        let written = normal(&path.to_string_lossy());
+        let resolved = std::fs::canonicalize(path).map(|p| normal(&p.to_string_lossy())).ok();
+        std::iter::once(written).chain(resolved).collect::<Vec<_>>()
+    };
+    let system: Vec<String> = ["SystemRoot", "windir", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"]
         .into_iter()
         .filter_map(std::env::var_os)
-        .map(PathBuf::from)
+        .flat_map(|dir| spellings(Path::new(&dir)))
         .collect();
-    let moved = relocated_credentials(&|name| std::env::var(name).ok());
-    root.components()
-        .any(|c| CREDENTIAL_FOLDERS.contains(&c.as_os_str().to_string_lossy().trim_end_matches(['.', ' ']).to_ascii_lowercase().as_str()))
-        || (cfg!(windows) && system.iter().any(|dir| root.ancestors().any(|a| same(a, dir))))
-        || moved.iter().filter(|(_, file)| !file).any(|(dir, _)| root.ancestors().any(|a| same(a, Path::new(dir))))
+    let moved: Vec<String> = relocated_credentials(&|name| std::env::var(name).ok())
+        .into_iter()
+        .filter(|(_, file)| !file)
+        .flat_map(|(dir, _)| spellings(Path::new(&dir)))
+        .collect();
+    let mut here = vec![normal(&root.to_string_lossy())];
+    here.extend(real.map(|r| normal(&r.to_string_lossy())));
+    here.iter().any(|path| {
+        path.split('/').any(|piece| CREDENTIAL_FOLDERS.contains(&piece.trim_end_matches(['.', ' '])))
+            || (cfg!(windows) && inside_any(path, &system))
+            || inside_any(path, &moved)
+    })
 }
 
 fn secret(path: &Path, reading: bool) -> bool {

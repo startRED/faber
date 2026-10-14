@@ -103,19 +103,56 @@ pub(crate) async fn write_line(stdin: &mut (dyn AsyncWrite + Send + Unpin), msg:
     stdin.flush().await.map_err(|_| WriteError { torn: true })
 }
 
-/// Ends a process: closes its input, then kills it and everything it started.
-pub(crate) async fn stop(stdin: &mut (dyn AsyncWrite + Send + Unpin), child: &mut Option<Child>) {
-    let _ = stdin.shutdown().await;
-    if let Some(child) = child {
-        kill_tree(child.id()).await;
-        let _ = child.start_kill();
+/// Everything a CLI starts, held so it can all be ended together. On Windows this is a job object with kill-on-close and no
+/// breakaway: every process the CLI starts joins the job, and ending the job ends them all, whether or not the CLI is still
+/// alive (a process tree found through parent links is lost as soon as the parent exits). Dropping it ends the processes
+/// too, so a CLI that quits on its own leaves no worker behind. Elsewhere there is no job and only the CLI itself is ended.
+pub(crate) struct Containment {
+    #[cfg(windows)]
+    _job: win32job::Job,
+}
+
+/// Puts a freshly spawned CLI in its own job. Returns `None` for a replayed recording, off Windows, and when the system
+/// refuses (logged); `stop` then falls back to `taskkill`. A process the CLI started in the instant between its spawn and
+/// this call is not in the job, which is why the fallback stays.
+#[cfg(windows)]
+pub(crate) fn contain(child: &Option<Child>) -> Option<Containment> {
+    let handle = child.as_ref()?.raw_handle()?;
+    let mut limits = win32job::ExtendedLimitInfo::new();
+    limits.limit_kill_on_job_close();
+    let made = win32job::Job::create_with_limit_info(&limits).and_then(|job| job.assign_process(handle as isize).map(|()| job));
+    match made {
+        Ok(job) => Some(Containment { _job: job }),
+        Err(e) => {
+            eprintln!("faber: could not put the CLI in a job object: {e}");
+            None
+        }
     }
 }
 
-/// Killing only the CLI leaves a command it started (a build, a script) running, and in full access that command can keep
-/// changing files after the person switched to asking. On Windows `taskkill /T` ends the whole tree while its root is still
-/// alive (the tree is found through the parent links, which a dead root no longer has). It is run directly, never through a
-/// shell. Elsewhere only the CLI itself is ended.
+#[cfg(not(windows))]
+pub(crate) fn contain(_child: &Option<Child>) -> Option<Containment> {
+    None
+}
+
+/// Ends a process and everything it started, then closes its input. The processes go first: a CLI that quits when its input
+/// closes would otherwise be gone before the tree could be found, and its workers would keep running.
+pub(crate) async fn stop(stdin: &mut (dyn AsyncWrite + Send + Unpin), child: &mut Option<Child>, contained: &mut Option<Containment>) {
+    // Closing the last handle of the job ends every process in it.
+    let jobbed = contained.take().is_some();
+    if let Some(child) = child {
+        if !jobbed {
+            kill_tree(child.id()).await;
+        }
+        let _ = child.start_kill();
+    }
+    let _ = stdin.shutdown().await;
+}
+
+/// Fallback when the CLI could not be put in a job. Killing only the CLI leaves a command it started (a build, a script)
+/// running, and in full access that command can keep changing files after the person switched to asking. On Windows
+/// `taskkill /T` ends the whole tree while its root is still alive. It is run directly, never through a shell, and a failure
+/// is logged. Elsewhere only the CLI itself is ended.
 #[cfg(windows)]
 async fn kill_tree(pid: Option<u32>) {
     let Some(pid) = pid else { return };
@@ -126,7 +163,11 @@ async fn kill_tree(pid: Option<u32>) {
     let mut cmd = Command::new(exe);
     cmd.args(["/PID", &pid.to_string(), "/T", "/F"]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), cmd.status()).await;
+    match tokio::time::timeout(std::time::Duration::from_secs(5), cmd.status()).await {
+        Ok(Ok(status)) if status.success() => {}
+        // The CLI having already exited is the usual reason; either way the process is ended next.
+        other => eprintln!("faber: taskkill did not end the process tree of {pid}: {other:?}"),
+    }
 }
 
 #[cfg(not(windows))]

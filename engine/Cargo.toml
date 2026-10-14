@@ -22,6 +22,8 @@ zip = { version = "4", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.56"
+# Job objects (a CLI and everything it starts are ended together); the safe wrapper keeps this crate free of unsafe code.
+win32job = "2"
 
 [dev-dependencies]
 # Reads the resident memory of the test's own process (install_memory.rs); the workspace forbids the unsafe code a counting allocator needs.
