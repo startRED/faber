@@ -32,6 +32,8 @@ export const es: Messages = {
   'tray.running': { one: 'Faber: {n} en curso', other: 'Faber: {n} en curso' },
   'tray.needsYou': { one: ', {n} te necesita', other: ', {n} te necesitan' },
   'tray.notify': '{title} te necesita',
+  // Handwritten wording; native-speaker review pending (English is the source).
+  'tray.notifyMany': '{title}: {n} solicitudes te necesitan',
   'toast.dismiss': 'Descartar',
   'side.addProject': 'Añadir carpeta de proyecto',
   'side.noAi': 'Ninguna IA conectada',
@@ -129,6 +131,11 @@ export const es: Messages = {
   // Handwritten wording; native-speaker review pending (English is the source).
   'ask.parked': 'Retenido: no había nadie para responder',
   'ask.parkedHint': 'No se hizo. Hazlo tú, o cambia en Ajustes a "Preguntar antes de ejecutar comandos" y pídelo de nuevo.',
+  'parked.command': 'Un comando',
+  'parked.file': 'Un archivo',
+  'parked.page': 'Una página',
+  'parked.other': '{tool}',
+  'parked.more': '+{n} más',
   'answer.label': 'Respuesta',
   'answer.thinking': 'Razonamiento',
   'activity.working': 'En curso · {steps} · {commands}',

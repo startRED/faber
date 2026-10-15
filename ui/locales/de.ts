@@ -32,6 +32,8 @@ export const de: Messages = {
   'tray.running': { one: 'Faber: {n} läuft', other: 'Faber: {n} laufen' },
   'tray.needsYou': { one: ', {n} braucht dich', other: ', {n} brauchen dich' },
   'tray.notify': '{title} braucht dich',
+  // Handwritten wording; native-speaker review pending (English is the source).
+  'tray.notifyMany': '{title}: {n} Anfragen brauchen dich',
   'toast.dismiss': 'Ausblenden',
   'side.addProject': 'Projektordner hinzufügen',
   'side.noAi': 'Keine KI verbunden',
@@ -129,6 +131,11 @@ export const de: Messages = {
   // Handwritten wording; native-speaker review pending (English is the source).
   'ask.parked': 'Zurückgehalten: niemand war da, um zu antworten',
   'ask.parkedHint': 'Es wurde nicht ausgeführt. Mach es selbst, oder stelle in den Einstellungen auf „Vor Befehlen nachfragen“ um und frage erneut.',
+  'parked.command': 'Ein Befehl',
+  'parked.file': 'Eine Datei',
+  'parked.page': 'Eine Seite',
+  'parked.other': '{tool}',
+  'parked.more': '+{n} weitere',
   'answer.label': 'Antwort',
   'answer.thinking': 'Denkprozess',
   'activity.working': 'In Arbeit · {steps} · {commands}',

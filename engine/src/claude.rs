@@ -38,9 +38,24 @@ pub struct ClaudeFlags {
 }
 
 impl ClaudeFlags {
+    /// Only an option line counts: indented, starting with the flag (after an optional short alias) and followed by its value
+    /// placeholder or the gap before its description. The flag named in a sentence, an error or a description is no support.
     pub fn from_help(help: &str) -> Self {
-        let lists = |flag: &str| help.split(|c: char| c.is_whitespace() || c == ',' || c == '<').any(|word| word == flag);
-        ClaudeFlags { autocompact: lists("--autocompact"), permission_prompts: lists("--permission-prompts") }
+        let declares = |flag: &str| {
+            help.lines().any(|line| {
+                if !line.starts_with([' ', '\t']) {
+                    return false;
+                }
+                let mut rest = line.trim_start();
+                if rest.starts_with('-') && !rest.starts_with("--") {
+                    rest = rest.split_once(", ").map_or(rest, |(_, after)| after.trim_start());
+                }
+                rest.strip_prefix(flag).is_some_and(|tail| {
+                    tail.is_empty() || tail.starts_with("  ") || tail.starts_with('\t') || tail.trim_start().starts_with(['<', '['])
+                })
+            })
+        };
+        ClaudeFlags { autocompact: declares("--autocompact"), permission_prompts: declares("--permission-prompts") }
     }
 }
 
@@ -305,7 +320,7 @@ fn result_events(msg: &Value) -> Vec<EngineEvent> {
     // An aborted turn reports a total of 0 and an empty usage: no counters, which is not a cost of 0.
     let total = msg["total_cost_usd"].as_f64();
     let counters = total.is_some_and(|t| t > 0.0) || prompt + n("output_tokens") > 0;
-    let warm = cache_warm_secs(u).map(|secs| EngineEvent::CacheWarm { secs });
+    let warm = cache_warm_secs(u).map(|secs| EngineEvent::CacheWarm { secs, started_ms: None });
     // A request the CLI denied for want of anyone to answer it; each is kept for the person, never allowed on its own.
     let parked = items(&msg["permission_denials"]).map(|d| EngineEvent::Parked {
         tool_use_id: s(&d["tool_use_id"]),
@@ -349,6 +364,10 @@ fn items(v: &Value) -> impl Iterator<Item = &Value> {
     v.as_array().into_iter().flatten()
 }
 
+fn unix_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
+}
+
 pub type EventSink = Arc<dyn Fn(EngineEvent) + Send + Sync>;
 
 pub struct ClaudeOptions {
@@ -381,6 +400,8 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
         let mut closed = false;
         let mut control_id = 0u32;
         let mut quota_seen = false;
+        // When the latest request of the running turn began: the cache lifetime counts from it, not from the result.
+        let mut request_began: Option<u64> = None;
         loop {
             tokio::select! {
                 line = lines.next_line() => {
@@ -398,10 +419,18 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                     match serde_json::from_str::<Value>(&line) {
                         Ok(msg) => {
                             quota_seen |= msg["type"] == "rate_limit_event";
+                            if msg["type"] == "stream_event" && msg["event"]["type"] == "message_start" && msg["parent_tool_use_id"].is_null() {
+                                request_began = Some(unix_ms());
+                            }
                             let finished = msg["type"] == "result";
-                            for event in parse_claude_message(&msg) {
+                            for mut event in parse_claude_message(&msg) {
                                 if matches!(event, EngineEvent::Parked { .. }) && !parking {
                                     continue;
+                                }
+                                if let EngineEvent::CacheWarm { secs, .. } = event {
+                                    // A turn whose request start was never seen has no trustworthy expiry: nothing is shown.
+                                    let Some(began) = request_began.take() else { continue };
+                                    event = EngineEvent::CacheWarm { secs, started_ms: Some(began) };
                                 }
                                 if let EngineEvent::Permission { request_id, tool, input } = &event {
                                     // Only the isolated mode answers for itself. Full access hands the request to the engine, which
@@ -438,6 +467,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                 cmd = rx.recv(), if !closed => match cmd {
                     Some(SessionCommand::Send(turn)) => {
                         quota_seen = false;
+                        request_began = None;
                         let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
                     }
                     // A line written mid-turn is folded into a turn that uses tools (one result for both) and becomes a turn of

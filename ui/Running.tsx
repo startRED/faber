@@ -90,8 +90,8 @@ export function Running(props: {
                         <Show when={item.permissions.length > 0}>
                           <Asks conversationId={item.conversationId} turnId={item.turnId} permissions={item.permissions} />
                         </Show>
-                        <Show when={item.parked?.length}>
-                          <Parkeds parked={item.parked!} />
+                        <Show when={item.parked?.length || item.parkedMore}>
+                          <Parkeds parked={item.parked ?? []} more={item.parkedMore} />
                         </Show>
                       </li>
                     )}

@@ -26,7 +26,11 @@ export interface Permission {
 export interface Parked {
   toolUseId: string;
   tool: string;
-  input: unknown;
+  /** "command", "file", "page" or "other": the request itself is never kept. */
+  kind: "command" | "file" | "page" | "other";
+  /** A file path, or the host of a page; empty otherwise. */
+  label: string;
+  at: number;
 }
 export interface Message {
   id: string;
@@ -57,6 +61,8 @@ export interface Message {
   cacheWarmUntil?: number;
   /** Requests the CLI denied in this reply because nobody could answer them; they were not done. */
   parked?: Parked[];
+  /** How many more were denied beyond the few kept. */
+  parkedMore?: number;
   incomplete?: boolean;
   pace?: { kind: 'step' | 'low'; vendor: Vendor };
   waitUntil?: number;
@@ -191,6 +197,8 @@ export interface RunningItem {
   since: number;
   permissions: Permission[];
   parked?: Parked[];
+  /** How many more were denied beyond the few kept. */
+  parkedMore?: number;
   waitUntil?: number;
 }
 /** The running list in the engine's order, with a revision that grows by one with every list the engine sends. */
@@ -283,6 +291,7 @@ export interface ShellTexts {
   running: Plural;
   needsYou: Plural;
   notify: string;
+  notifyMany: string;
 }
 
 // Typed calls into the engine (the commands in src-tauri/src/lib.rs).

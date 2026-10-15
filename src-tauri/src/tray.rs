@@ -10,7 +10,7 @@ mod sound;
 
 use badge::{glyph, tray_png, tray_side, with_badge};
 pub(crate) use decide::ShellTexts;
-use decide::{Counts, Shown, Watch, delivery, notice_text, tooltip};
+use decide::{Counts, Shown, Watch, delivery, notice_text, parked_notice_text, tooltip};
 use faber_engine::model::RunningItem;
 use std::sync::Mutex;
 use tauri::image::Image;
@@ -166,7 +166,13 @@ pub(crate) fn on_running(app: &AppHandle, revision: u64, items: &[RunningItem]) 
         s.counts = update.counts;
         show_counts(app, &s, side);
     }
-    for title in &update.notices {
+    let words: Vec<String> = update
+        .notices
+        .iter()
+        .map(|title| notice_text(&s.texts, title))
+        .chain(update.parked_notices.iter().map(|(title, n)| parked_notice_text(&s.texts, title, *n)))
+        .collect();
+    for text in &words {
         // Recheck focus at delivery, in case the user returned while the tray picture was updating.
         let focused = crate::main_window(app).is_some_and(|w| w.is_focused().unwrap_or(false));
         #[cfg(windows)]
@@ -199,11 +205,11 @@ pub(crate) fn on_running(app: &AppHandle, revision: u64, items: &[RunningItem]) 
         // plugin by notify-rust (already in Cargo.lock) if hand checks show a silent failure.
         #[cfg(not(target_os = "linux"))]
         // With no sound name, these backends use WinRT audio silent=true and macOS sound=None.
-        let result = app.notification().builder().title(notice_text(&s.texts, title)).show().map_err(|e| e.to_string());
+        let result = app.notification().builder().title(text).show().map_err(|e| e.to_string());
         // The Linux plugin cannot pass SuppressSound; keep desktop sounds off so the sound switch also means silence.
         #[cfg(target_os = "linux")]
         let result = notify_rust::Notification::new()
-            .summary(&notice_text(&s.texts, title))
+            .summary(text)
             .hint(notify_rust::Hint::SuppressSound(true))
             .show()
             .map(|_| ())

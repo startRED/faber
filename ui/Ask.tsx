@@ -85,20 +85,22 @@ export function Asks(props: { conversationId: string; turnId: string; permission
 
 /** Requests the CLI denied because nobody could answer them. No buttons: the CLI is past them, and what was held back was not
  * done. The words say so and what the person can do. */
-export function Parkeds(props: { parked: Parked[]; surface?: string }) {
+export function Parkeds(props: { parked: Parked[]; more?: number; surface?: string }) {
   return (
-    <For each={props.parked}>
-      {(p) => {
-        const d = () => describe(p.tool, p.input);
-        return (
-          <div class="ask parked" data-surface={props.surface} role="status">
-            <b>{t('ask.parked')}</b>
-            <span class="note">{d().title}</span>
-            <pre>{d().body}</pre>
-            <span class="note">{t('ask.parkedHint')}</span>
-          </div>
-        );
-      }}
-    </For>
+    <Show when={props.parked.length > 0 || (props.more ?? 0) > 0}>
+      <div class="ask parked" data-surface={props.surface} role="status">
+        <b>{t('ask.parked')}</b>
+        <For each={props.parked}>
+          {(p) => (
+            <span class="note">
+              {t(`parked.${p.kind}`, { tool: p.tool })}
+              {p.label ? ` ${p.label}` : ''}
+            </span>
+          )}
+        </For>
+        <Show when={props.more}>{(n) => <span class="note">{t('parked.more', { n: n() })}</span>}</Show>
+        <span class="note">{t('ask.parkedHint')}</span>
+      </div>
+    </Show>
   );
 }

@@ -181,7 +181,7 @@ check('cache warmth: shown while the lifetime lasts, hidden when unknown or cold
 });
 
 check('running: a parked request needs the person and counts like a question', () => {
-  const parked = [{ toolUseId: 'toolu_1', tool: 'Bash', input: { command: 'git push' } }];
+  const parked = [{ toolUseId: 'toolu_1', tool: 'Bash', kind: 'command' as const, label: '', at: 1 }];
   const row = item({ state: 'needsYou', parked });
   equal(blocksOf([row])[0]!.needs, 1);
   equal(row.permissions.length, 0, 'there is no card to answer');

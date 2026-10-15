@@ -43,6 +43,10 @@ pub enum EngineEvent {
     /// the 1-hour bucket, five minutes for the 5-minute one). Sent before `Done`; absent when the CLI names no bucket.
     CacheWarm {
         secs: u64,
+        /// When the last request of the turn began (the start of its assistant message in the stream), in milliseconds: the
+        /// lifetime counts from the request, not from the result. The parser leaves it empty; the driver fills it in and drops
+        /// the event when it never saw that start.
+        started_ms: Option<u64>,
     },
     /// A request the CLI denied because nobody could answer it (`--permission-prompts none`): not done, and kept for the
     /// person. Sent before `Done`, one per denial.

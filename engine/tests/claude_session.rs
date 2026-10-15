@@ -806,7 +806,7 @@ fn result_with(usage: serde_json::Value, denials: serde_json::Value) -> serde_js
 fn the_cache_buckets_of_a_result_say_how_long_the_cache_stays_warm() {
     let warm = |usage: serde_json::Value| {
         parse_claude_message(&result_with(usage, json!([]))).into_iter().find_map(|e| match e {
-            EngineEvent::CacheWarm { secs } => Some(secs),
+            EngineEvent::CacheWarm { secs, .. } => Some(secs),
             _ => None,
         })
     };
@@ -829,7 +829,7 @@ fn the_cache_buckets_of_a_result_say_how_long_the_cache_stays_warm() {
         .collect();
     assert_eq!(results.len(), 1);
     let events = parse_claude_message(&results[0]);
-    assert!(matches!(events.as_slice(), [EngineEvent::CacheWarm { secs: 3600 }, EngineEvent::Done { .. }]), "{events:?}");
+    assert!(matches!(events.as_slice(), [EngineEvent::CacheWarm { secs: 3600, .. }, EngineEvent::Done { .. }]), "{events:?}");
 }
 
 #[test]
@@ -876,4 +876,78 @@ async fn a_denial_is_parked_only_when_the_cli_ran_with_no_prompts() {
     assert_eq!(parked.len(), 1, "{events:?}");
     let at = |f: fn(&EngineEvent) -> bool| events.iter().position(f).unwrap();
     assert!(at(|e| matches!(e, EngineEvent::Parked { .. })) < at(|e| matches!(e, EngineEvent::Done { .. })));
+}
+
+#[test]
+fn a_flag_named_in_a_diagnostic_or_a_description_is_no_support() {
+    let none = ClaudeFlags::default();
+    for text in [
+        "error: --permission-prompts is unavailable in this build\n",
+        "  --permission-prompts is unavailable in this build\n",
+        "Warning: --autocompact <auto|tokens> was removed\n",
+        "  --other-flag   Same as --permission-prompts <target> and --autocompact <x>\n",
+        "  --permission-prompts-extra <x>  Not the flag\n",
+        "--autocompact <x> at the start of the text, not indented\n",
+    ] {
+        assert_eq!(ClaudeFlags::from_help(text), none, "{text}");
+    }
+    // An option line with a short alias, and one with no value, still declare.
+    assert!(ClaudeFlags::from_help("  -a, --autocompact <auto|tokens>  Window\n").autocompact);
+    assert!(ClaudeFlags::from_help("  --permission-prompts\n").permission_prompts);
+    assert!(ClaudeFlags::from_help("\t--permission-prompts [target]\tWho\n").permission_prompts);
+}
+
+/// A real hidden run on Claude Code 2.1.296 (tests/fixtures/claude/deny-wins.jsonl): `--permission-mode bypassPermissions
+/// --permission-prompts none --safe-mode --tools Read` in a temp folder, with a synthetic file in a folder that a
+/// `Read(...)` deny rule covers, asked to be read. The CLI denied the read itself, and the file's text never reached the stream.
+#[tokio::test]
+async fn deny_wins_in_the_no_stdio_path_a_real_recording_of_a_denied_credential_read() {
+    let launch = ClaudeLaunch { permissions: Permissions::FullAccess, flags: NEWER, ..launch(Area::Project) };
+    let args = claude_args(&launch);
+    assert!(args.windows(2).any(|a| a == ["--permission-prompts", "none"]) && !args.contains(&"--permission-prompt-tool".into()));
+    assert!(args.windows(2).any(|a| a == ["--permission-mode", "bypassPermissions"]));
+    assert!(deny_rules(&args).contains(&"Read(~/.ssh/**)".to_string()), "the same kind of rule as the recording's");
+
+    let entries = fixture("claude", "deny-wins");
+    let recorded = serde_json::to_string(&entries.iter().map(|e| e.msg.clone()).collect::<Vec<_>>()).unwrap();
+    assert!(!recorded.contains("SYNTHETIC-CREDENTIAL"), "the recording never holds the file's text");
+    let question = entries[0].msg["message"]["content"].as_str().unwrap().to_string();
+    assert!(question.contains("id_synthetic"));
+    let (events, mismatches) = run_with(launch, entries, &question, |e, _| matches!(e, EngineEvent::Done { .. })).await;
+    assert_eq!(mismatches, Vec::<String>::new());
+    assert!(!events.iter().any(|e| matches!(e, EngineEvent::Permission { .. })), "nobody was asked");
+    let denied: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e {
+            EngineEvent::ToolResult { ok: false, text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(denied.len(), 1);
+    assert!(denied[0].contains("denied by your permission settings"), "{denied:?}");
+    assert!(!format!("{events:?}").contains("SYNTHETIC-CREDENTIAL"));
+    // The CLI also lists the refusal in the result; the engine drops it, because it names a credential folder.
+    let Some(EngineEvent::Parked { input, .. }) = events.iter().find(|e| matches!(e, EngineEvent::Parked { .. })) else {
+        panic!("the recorded result lists the denial: {events:?}")
+    };
+    assert!(faber_engine::permissions::touches_credentials(input, None, &|_| None), "{input}");
+}
+
+#[tokio::test]
+async fn the_cache_lifetime_starts_at_the_assistant_message_start_and_is_dropped_when_that_is_unknown() {
+    let started = |e: &EngineEvent| match e {
+        EngineEvent::CacheWarm { started_ms, .. } => Some(*started_ms),
+        _ => None,
+    };
+    let clock = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+    let before = clock();
+    let (events, _) =
+        run(fixture("claude", "chat"), "In one sentence: why is the sky blue?", |e, _| matches!(e, EngineEvent::Done { .. })).await;
+    let after = clock();
+    let seen: Vec<_> = events.iter().filter_map(started).collect();
+    assert!(matches!(seen.as_slice(), [Some(ms)] if (before..=after).contains(ms)), "{seen:?}");
+    // The same recording with the start of its assistant message removed: no expiry can be trusted, so none is sent.
+    let without: Vec<_> = fixture("claude", "chat").into_iter().filter(|e| e.msg["event"]["type"] != "message_start").collect();
+    let (events, _) = run(without, "In one sentence: why is the sky blue?", |e, _| matches!(e, EngineEvent::Done { .. })).await;
+    assert!(events.iter().all(|e| started(e).is_none()), "{events:?}");
 }

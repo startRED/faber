@@ -283,11 +283,13 @@ inside its own area.
   end together (a Windows job object made before the CLI runs, failing closed; R124b, R124c). Settings shows the
   details; the thread shows one calm line with a link to them. The isolated mode below is `Permissions::Isolated`: Faber's
   own model list, router, internal checks and self-development roles use it, and the person cannot pick it.
-- No prompt can block a full-access turn. Where the installed Claude Code lists `--permission-prompts` (read once from `claude --help`;
-  present on 2.1.296), full access starts it with `--permission-mode bypassPermissions --permission-prompts none` and no host prompt
+- No prompt can block a full-access turn. Where the installed Claude Code declares `--permission-prompts` as an option line in a successful `claude --help` (read once
+  at start, and again when a launch fails with "unknown option", which also drops the newer flags at once; present on 2.1.296), full access starts it with `--permission-mode bypassPermissions --permission-prompts none` and no host prompt
   tool: a request that would have prompted is denied at once, listed in the turn's `permission_denials`, and kept on the reply as a
-  parked request. The row of the running list says "Needs you" with a card that has no buttons (the CLI is past it, and the work was
-  not done) and the tray notifies once per request (R92), until the next message. It is never allowed on its own, and a request on a
+  parked request, as safe metadata only (tool, a kind, a file path or a page host, the time; never a command or any input, which
+  could hold a token), at most 20 and 4 KB per turn with the rest counted ("+N more"). The row of the running list says "Needs you"
+  with a card that has no buttons (the CLI is past it, and the work was not done) until the next message. The tray notifies once
+  per turn ("N requests need you"), with a one-minute cooldown across turns (R92). It is never allowed on its own, and a request on a
   credential folder is not parked at all: the deny rules refuse it for good. A CLI without the flag, Ask and the isolated mode start
   as before. Faber's own Haiku workers and roles (the isolated mode and side questions) also start with `--autocompact 100k`, under the
   100K step above which Haiku costs more, where the CLI lists that flag; every other launch keeps the CLI default.
@@ -589,7 +591,8 @@ next message therefore needs no deferral to a natural break. A change of model s
 The result of every Claude turn names which bucket its cache writes went into (`usage.cache_creation.ephemeral_1h_input_tokens` and
 `ephemeral_5m_input_tokens`). Faber keeps "warm until" on the reply (`Message::cache_warm_until`: an hour for the 1-hour bucket, five
 minutes for the 5-minute one, nothing when neither is named) and the latest reply shows it quietly in its usage line, hidden when
-unknown or cold. It is display only: Auto does not route by it, because a change of model starts a new cache anyway. Codex names no
+unknown or cold. The lifetime counts from the start of the last request (its assistant message start in the stream, less a 5 s margin),
+not from the result; a turn whose start was not seen shows nothing. It is display only: Auto does not route by it, because a change of model starts a new cache anyway. Codex names no
 lifetime, so it shows nothing.
 
 `engine/examples/route_eval.rs` sends 30 hand-labelled requests (kind, difficulty and the new `check`) to each router,
