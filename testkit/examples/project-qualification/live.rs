@@ -346,7 +346,7 @@ pub async fn run(data: &Path) -> io::Result<()> {
             ("shell","Use a native shell tool to run exactly echo T13_NATIVE_SHELL. Run no other command.".into()),
             ("git","Use a native tool to run exactly git --version. Run no other command.".into()),
             ("web","Use the native web search tool for exactly T13_NATIVE_WEB. Do not use commands, other tools or credentials.".into()),
-            ("skills","Without using any tool, list the names of any skills offered to you in your instructions. If none are offered, answer exactly NONE.".into()),
+            ("skills","Without using any tool: does your context contain a catalog of available skills (a section that lists skills with their file paths)? A skill merely named inside other instructions is not a catalog. If there is no catalog, answer exactly NONE; otherwise list the skill names in the catalog.".into()),
         ]};
         for (index,(kind,prompt)) in checks.into_iter().enumerate() {
             row["modelTurns"]=json!(index+1);

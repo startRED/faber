@@ -11,6 +11,9 @@ mod live;
 #[cfg(any(windows, test))]
 #[path = "project-qualification/claude.rs"]
 mod live_claude;
+#[cfg(windows)]
+#[path = "project-qualification/seam.rs"]
+mod seam;
 
 fn main() {
     if let Some(code) = faber_engine::proc::guard_mode() {
@@ -107,6 +110,7 @@ fn run() -> io::Result<()> {
                 | "--live-claude-output-reviewer"
                 | "--live-claude-output-control"
                 | "--live-codex-stop"
+                | "--live-seam"
                 | "--hidden-live"
         )
     {
@@ -118,7 +122,9 @@ fn run() -> io::Result<()> {
         }
         return tokio::runtime::Builder::new_current_thread().enable_all().build()?.block_on(async {
             if mode == "--hidden-live" {
-                if std::env::var("FABER_QUALIFICATION_PROBE").is_ok_and(|mode| mode.starts_with("--live-claude")) {
+                if std::env::var("FABER_QUALIFICATION_PROBE").as_deref() == Ok("--live-seam") {
+                    seam::run(&data).await
+                } else if std::env::var("FABER_QUALIFICATION_PROBE").is_ok_and(|mode| mode.starts_with("--live-claude")) {
                     live_claude::run(&data).await
                 } else {
                     live::run(&data).await
@@ -150,6 +156,9 @@ fn run() -> io::Result<()> {
         }
     }
     env.insert("FABER_QUALIFICATION_HIDDEN".into(), "preflight".into());
+    if let Ok(engine_data) = std::env::var("FABER_QUALIFICATION_ENGINE_DATA") {
+        env.insert("FABER_QUALIFICATION_ENGINE_DATA".into(), engine_data);
+    }
     let temporary = data.join("temp");
     std::fs::create_dir_all(&temporary)?;
     env.insert("TEMP".into(), temporary.to_string_lossy().into_owned());
@@ -182,7 +191,7 @@ fn run() -> io::Result<()> {
         }
         text
     });
-    let deadline = Instant::now() + Duration::from_secs(90);
+    let deadline = Instant::now() + Duration::from_secs(if mode == "--live-seam" { 1200 } else { 90 });
     while owned.is_running() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(100));
     }

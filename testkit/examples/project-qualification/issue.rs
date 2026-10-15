@@ -11,6 +11,10 @@ use std::path::Path;
 
 /// Rows older than this are not part of the same run.
 const MAX_ROW_AGE_SECS: u64 = 6 * 3600;
+/// Codex text already in flight when the interrupt is requested can still arrive before the server acknowledges it.
+/// That is bounded and discarded with the turn; anything after the acknowledgement, or a slow acknowledgement, fails.
+const IN_FLIGHT_TEXT_MAX: u64 = 1024;
+const STOP_ACK_MAX_MS: u64 = 2000;
 
 pub struct Rows {
     pub loadout: Value,
@@ -86,7 +90,13 @@ pub fn judge(vendor: Vendor, rows: &Rows, hash: &str, now: u64) -> BTreeMap<Stri
             Vendor::Codex => {
                 let t = turns(s);
                 !t.is_empty()
-                    && t.iter().all(|t| t["turnStatus"] == "interrupted" && t["textBytesAfterStop"] == 0 && t["costSource"].is_string())
+                    && t.iter().all(|t| {
+                        t["turnStatus"] == "interrupted"
+                            && t["textBytesAfterStop"].as_u64().is_some_and(|b| b <= IN_FLIGHT_TEXT_MAX)
+                            && t["postCompletionNotifications"].as_array().is_some_and(Vec::is_empty)
+                            && t["stopToResultMs"].as_u64().is_some_and(|ms| ms <= STOP_ACK_MAX_MS)
+                            && t["costSource"].is_string()
+                    })
             }
         };
     let billing = match vendor {
@@ -214,7 +224,10 @@ mod tests {
                     "paidFallback":false,"loadoutQueries":queries}),
             ),
             native: merge(base(), json!({"nativeTurns":kinds.iter().map(|k|turn(k)).collect::<Vec<_>>()})),
-            stop: merge(base(), json!({"nativeTurns":[{"turnStatus":"interrupted","textBytesAfterStop":0,"costSource":"computedBound"}]})),
+            stop: merge(
+                base(),
+                json!({"nativeTurns":[{"turnStatus":"interrupted","textBytesAfterStop":144,"postCompletionNotifications":[],"stopToResultMs":4,"costSource":"computedBound"}]}),
+            ),
             quota: None,
         };
         assert!(failed(&judge(Vendor::Codex, &rows, HASH, NOW)).is_empty());
@@ -227,7 +240,10 @@ mod tests {
         bad.native["nativeTurns"][6]["answer"] = "Skills: adhd".into();
         assert_eq!(failed(&judge(Vendor::Codex, &bad, HASH, NOW)), ["native"]);
         let mut bad = copy();
-        bad.stop["nativeTurns"][0]["textBytesAfterStop"] = 9.into();
+        bad.stop["nativeTurns"][0]["textBytesAfterStop"] = 5000.into();
+        assert_eq!(failed(&judge(Vendor::Codex, &bad, HASH, NOW)), ["stop"]);
+        let mut bad = copy();
+        bad.stop["nativeTurns"][0]["postCompletionNotifications"] = json!([{"method":"item/agentMessage/delta"}]);
         assert_eq!(failed(&judge(Vendor::Codex, &bad, HASH, NOW)), ["stop"]);
         let mut bad = copy();
         bad.loadout["paidFallback"] = true.into();

@@ -1,6 +1,57 @@
-# Task 13: qualification remains incomplete; no admission receipt issued
+# Task 13: self-development acceptance
 
-## Latest result: R132 continuation (2026-10-15 UTC)
+## T13 takeover result (2026-10-15 UTC): receipts and a real seam mission pass; canary, install, rollback and Resume are blocked
+
+Decisions R133 and R134 (`faber-notas/decisoes.md`) set the rules for this run. Everything below was observed on the
+installed Claude Code 2.1.296 and Codex 0.162.1 binaries, hidden, with no visible window and no shell.
+
+**What passed for real**
+
+- **Qualification receipts.** Fresh live probes (`t13-run1/`, rows under 6 hours old) issued `claude.json` and
+  `codex.json` with all five checks true. Claude's hooks are off by launch flags (`--safe-mode`,
+  `--setting-sources ""`, `disableAllHooks`), recorded in the receipt, and no managed policy exists. Codex's one
+  instruction source is the user's global file, recorded by path and SHA-256. A launch without the Claude flags and
+  any other Codex source both fail in tests.
+- **A tiny mission through the engine's own role machinery** (`--live-seam`, a throwaway repository, R132 waiver
+  single-use with its marker). Claude Haiku wrote `src/add.js` as a patch envelope on a lease; the engine applied it,
+  ran `check.js` itself (red exit 1 at the base, green exit 0 on the exact tree), a fresh Codex Luna session reviewed
+  the exact candidate and passed it, and the engine landed tree `7a2d5672...` on `faber/<mission>` with the owner
+  branch untouched and `report.json` written. Both invocations settled: Haiku 594 and Luna 780 millionths, **US$0.001374**
+  API-equivalent on the subscriptions; `calibrate_mission` returned Ready. The Writer's owned process tree was
+  retired by `worker_termination` and its lease settled before any broker IO.
+- **RAM.** The hidden harness tree (engine plus the live CLI) idled at 2 MB and peaked at **125 MB** with the Claude
+  Writer running (29 MB with the Codex Reviewer). This is not the full app with its window.
+
+**What this is not.** No production coordinator exists: nothing reads a worker reply and drives the next step. The
+harness (`testkit/examples/project-qualification/seam.rs`) plays the Lead and the coordinator, scripted; every model
+turn, spend, lease, proof, tree and landing goes through the engine calls a coordinator would make. The run is a
+proof of the seam, not an autonomous mission.
+
+**What is blocked, and why**
+
+- **Canary.** `probe_canary` returns `CanaryVerdict::NotRun` by design, and no production code produces `Pass`.
+  Building and running a candidate that runs its own miniature mission needs the coordinator first.
+- **Install, rollback, positive Resume.** All three need a canary pass on a built candidate. The existing tests that
+  cover them copy a prebuilt launcher and inject `CanaryVerdict::Pass`; they stay "simulated".
+
+**Defects found and fixed on the way** (each with a regression test)
+
+- A Writer's own session close produced a fatal "stopped" event that paused the whole mission after a good turn.
+- No role could end except a Writer: read-only roles never settled. `Engine::finish_role` now does it.
+- Replies were discarded. An accepted envelope and the key of a refused turn are now kept in the journal.
+- The worker contract had no envelope grammar and the header showed `lease: null`; both roles invented keys until
+  the contract named the exact keys. Haiku and Luna then answered in the strict format.
+- The Codex stop probe demanded zero bytes of text in flight at the moment of interrupt, a race the pipe cannot
+  win; the skills question was answered by a skill name in the global instruction file. Both are corrected in R134.
+
+**Flakes seen, not hidden.** A provider reading stamped to the whole second can be "from the future" for a tick;
+the harness waits 2 seconds. Two Codex native probes failed before the skills question was fixed (a 20-second
+model turn deadline, then the skills answer); sixteen seam attempts failed on the points above before the final
+one passed. Their ledgers are kept under `aborted-attempts/`; all seventeen ledgers sum to US$0.0131 (Claude
+0.0086, Codex 0.0046). The cap of US$2.00 was never approached.
+
+
+## Earlier result: R132 continuation (2026-10-15 UTC, superseded by the takeover result above)
 
 The owner's R132 exception removes the quota-line obstacle for one US$2.00 mission; it does not waive boundary
 qualification. The fresh zero-turn readings are Claude **36%** and Codex **44%** weekly, both subscription billing
@@ -357,25 +408,25 @@ command log paths, calculated bounds, interruption metadata and accurate audit.
 
 | Gate | Status | Evidence / remaining |
 | --- | --- | --- |
-| G1 Authority | Not passed; partial native proof | Native denial/bytes and unknown-request stops pass. Receipt admission (version + binary hash) and the owned writer process proof are implemented and tested, but no receipt has been issued and no real Writer has run. Earlier owner changes are outside any mission window. |
-| G2 Spending | Not passed; partial bound proof | R120 bounds/sub-caps fit $2. Fresh zero-turn billing passes for both; Claude weekly 36%, Codex 44%. R132 is authorized but unused; no mission accounting or calibration exists. |
-| G3 Scheduling | Not passed | No admitted live graph. |
-| G4 Acceptance | Not passed | Real fixture subprocess red/green proofs; no real candidate/review. |
-| G5 Recovery | Partial, scripted | Fixture recovery and once-only bound reconciliation; real rollback/public positive Resume pending. |
-| G6 Self-update | Not passed | Case 4 copies a prebuilt launcher/injects CanaryVerdict::Pass; actual build/miniature mission pending. |
-| G7 Resources | Partial, scripted | RAM failure reproduced at 282.8 MB; native offscreen containment fixes it. Latest hidden Projects scenario passes at 220.4 MB peak; real mission lifecycle absent. |
-| G8 Real use | Not passed | No fresh Seguro mission. |
-| G9 Kits | Not passed; incomplete live qualification | Claude reports zero MCP tools/memory files but no hooks census; Codex reports one instruction source. No receipt issued. |
+| G1 Authority | Passed real for the seam; autonomous mission not run | Receipts issued for both vendors; a real Claude Writer ran under a lease with an owned process tree, retired by `worker_termination` before any broker IO; native denial and stop probes pass. No coordinator drives roles in production. |
+| G2 Spending | Passed real for the seam | R132 single-use waiver (marker retained), caps and grant admitted, both invocations settled at US$0.001374, `calibrate_mission` Ready. All 17 attempts sum to US$0.0131. No second mission or normal-R88 admission tested. |
+| G3 Scheduling | Not passed | One scripted task; no scheduler or live graph. |
+| G4 Acceptance | Passed real for the seam | Engine-run red (exit 1) then green (exit 0) proof on the exact tree, fresh other-vendor review of that tree, landing on the mission ref, `report.json` written. Tokens per role are `unknown` because no coordinator recorded them. |
+| G5 Recovery | Simulated only | Fixture recovery and once-only bound reconciliation; real rollback and public positive Resume are blocked behind the canary. |
+| G6 Self-update | Blocked | `probe_canary` returns `NotRun` by design and no code produces `Pass`; the install/rollback tests inject the verdict and copy a prebuilt launcher (simulated). Needs the production coordinator first. |
+| G7 Resources | Partial real | Hidden harness tree (engine plus live CLI) idle 2 MB, peak 125 MB with the Writer running, 29 MB with the Reviewer. The full app with its window was not measured in a real mission; scripted scenarios peak at 220 MB. |
+| G8 Real use | Not passed | The mission ran on a throwaway repository from a harness, not a Seguro mission started from the product. |
+| G9 Kits | Partial real | Qualification passed for both vendors (Claude hooks by flags, Codex sources by path and hash). Kits were assembled with an empty inventory; no real tool kit ran. |
 | G10 Software bar | Not passed | No real software-bar acceptance. |
 | AS-1 Motion | Passed, scripted | Hidden frame/reduced-motion checks. |
 | AS-2 Composer | Passed, scripted | Hidden growth/cap/scroll/shrink checks. |
 | AS-3 Breadcrumbs | Passed, scripted | Hidden five-locale checks; no new native-speaker review. |
 | AS-4 Gap | Passed, scripted | Hidden 64 px checks. |
-| AS-5 Windows | Partial | Owned hidden jobs; complete real mission/update audit absent. |
-| AS-6 Disk | Not passed | No real promotion/cleanup; evidence retained, no refused deletion. |
-| AS-7 Specific plan | Not passed | No admitted real plan. |
-| AS-8 Dual vendors | Not passed | Code reviews/native probes are not a fresh candidate-review receipt. |
-| AS-9 Questions | Not passed | No real lead question log. |
+| AS-5 Windows | Partial real | All live work ran in owned hidden jobs with no window, no shell and sanitized environment; no real install or update audit. |
+| AS-6 Disk | Not passed | The throwaway worktree and records are retained as evidence; no real promotion or cleanup run. |
+| AS-7 Specific plan | Not passed | The plan was written by the harness, not by a Lead. |
+| AS-8 Dual vendors | Passed real for the seam | Writer on Claude Haiku, fresh Reviewer on Codex Luna, each with its own settled receipt. |
+| AS-9 Questions | Not passed | No Lead ran, so no question log. |
 
 Earlier seven-point review disposition stays in the archived report. Proof
 dispatch, marker readback and the dirty-owner baseline were addressed. Reserved
@@ -384,25 +435,19 @@ metrics. Audit `unchanged` compares to its already-dirty baseline, not git HEAD.
 
 ## Remaining
 
-Open items, in the order the real run needs them:
+Open items, in the order a real autonomous run needs them:
 
-1. **Finish loadout qualification before issuing receipts.** Claude's effective managed hooks remain unreported;
-   Codex's strict instruction inventory is nonempty. Do not turn either unknown into a pass. After each vendor's
-   final live probes pass on the installed binary, map their rows to the five
-   probes (`loadout`, `native`, `stop`, `exposure`, `billing`) and call `qualification::issue` into
-   `<mission data dir>/qualification/<vendor>.json`. Fresh zero-turn paid-fallback false is now observed for both.
-   A later CLI update closes the receipt by itself; requalify then.
-2. **R132 harness-only admission.** Once qualification passes, implement and test the explicit single-use US$2.00
-   exception in the qualification harness, record its consumption and actual before/after quota readings, and retain
-   R131 enforcement in the shipped product. Save only actual calibration, with the provider counter lag noted.
-3. **Drive a Writer through the new seam.** `prepare_launch` on its lease, `Engine::dispatch_mission_writer`, then
-   `Engine::worker_termination` and `Leases::settle_process` before any broker IO. This path has been exercised only
-   with a stand-in process and unit tests; it has never run against a real CLI because admission needs item 1.
-4. Real miniature canary and the authorized Seguro mission with fresh other-vendor review; sandbox build/install,
-   rollback and a positive exactly-once Resume; measure real cost and RAM. The fresh clone, sandbox install and
-   promotion were not created. PR #19 stays draft; pushed-head CI is recorded separately.
+1. **A production coordinator.** Something must read the kept replies (\`Journal::reply\`, \`Journal::refusal\`), apply
+   patches under the lease, run the named proofs, choose the next role and record tokens per role. The seam harness
+   shows each engine call it makes, in order.
+2. **A canary that can pass.** The candidate must run its own miniature mission and write a receipt that
+   \`verify_canary_handshake\` accepts; today it only acknowledges startup. Then a sandbox build, install, rollback and a
+   positive exactly-once Resume can be proven for real.
+3. **Account readings.** Provider readings are stamped to the whole second and R131 rejects one from the future
+   within the same second; harmless in practice, worth rounding.
+4. PR #19 stays draft; pushed-head CI is recorded in the final report.
 
-Known gaps in this slice, not hidden: `Termination` still has public fields, so fixtures elsewhere can write a literal
-(only `from_retired` is derived from a real retirement); the receipt folder is fixed by the first `Engine` a process
-creates; a Claude CLI found only as an npm script launcher never qualifies; the macOS build of the new
-cfg-gated code was not compiled here (CI will).
+Known gaps in this slice, not hidden: \`Termination\` still has public fields, so fixtures elsewhere can write a literal
+(only \`from_retired\` is derived from a real retirement); the receipt folder is fixed by the first \`Engine\` a process
+creates; a Claude CLI found only as an npm script launcher never qualifies; the macOS build of the new cfg-gated code
+was not compiled here (CI will).
