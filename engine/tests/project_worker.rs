@@ -180,3 +180,31 @@ fn worker_uses_only_its_frozen_kit_receipt_and_keeps_role_controls() {
     stale.kit.effort = "high".into();
     assert!(w.kit_prompt(&stale, &[]).is_err());
 }
+
+#[test]
+fn every_role_prompt_names_the_exact_envelope_grammar_and_the_header_shows_the_lease() {
+    for role in [Role::Lead, Role::Research, Role::TestProposal, Role::Writer, Role::Reviewer] {
+        let contract = faber_engine::persona::worker_contract(role);
+        // The strict wire format: bare object, the closed key list, one action key, the contract as a plain digest string.
+        for needle in [
+            "one bare JSON object, with no prose and no code fence",
+            "schema (2), task, attempt, base, contract (the digest string), lease, action, ping, requires, checks, quotes and note",
+            "any other key is refused",
+            "The action is an object with exactly one key, one of read, plan, amend, patch, proof, decision or complete",
+        ] {
+            assert!(contract.contains(needle), "{role:?} contract lacks: {needle}");
+        }
+    }
+    // A header always shows the lease number: the writer's own, and 0 for a role that holds none.
+    let header = |text: &str| -> serde_json::Value {
+        let line = text.lines().find(|l| l.starts_with('{') && l.contains("\"grantMicros\"")).expect("header line");
+        serde_json::from_str(line).unwrap()
+    };
+    assert_eq!(header(&render(&brief()).unwrap())["lease"], 1);
+    let mut reader = brief();
+    reader.role = Role::Reviewer;
+    reader.writes.clear();
+    reader.lease = None;
+    assert_eq!(header(&render(&reader).unwrap())["lease"], 0);
+    assert_eq!(header(&render(&reader).unwrap())["contract"]["digest"], "a".repeat(64));
+}

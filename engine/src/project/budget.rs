@@ -608,6 +608,34 @@ impl Budget {
 
 /// Applies one change to a snapshot; the engine saves it atomically under its existing shared lock before effects.
 pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Result<Status, &'static str> {
+    #[cfg(feature = "r132-harness")]
+    {
+        // The R132 exception is scoped to the mission a change belongs to.
+        let (context, calibrating) = match &change {
+            Change::Allocate { .. } | Change::AllocateModel { .. } => (r132::Context::Allocation, None),
+            Change::Grant { mission, .. } | Change::Pause { mission, .. } => (r132::Context::Mission(mission.clone()), None),
+            Change::Calibrate { mission } => (r132::Context::Mission(mission.clone()), Some(mission.clone())),
+            Change::Admit(request) => (r132::Context::Mission(request.mission.clone()), None),
+            Change::Continue { id } | Change::Report { id, .. } => (
+                Budget::load(ledger)
+                    .ok()
+                    .and_then(|b| b.invocations.get(id).map(|r| r.request.mission.clone()))
+                    .map_or(r132::Context::Other, r132::Context::Mission),
+                None,
+            ),
+        };
+        let _scope = r132::scope(context);
+        let status = apply_inner(ledger, change, now, offset)?;
+        if let (Some(mission), Status::Ready) = (calibrating, status) {
+            r132::consume(&mission);
+        }
+        Ok(status)
+    }
+    #[cfg(not(feature = "r132-harness"))]
+    apply_inner(ledger, change, now, offset)
+}
+
+fn apply_inner(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Result<Status, &'static str> {
     let (change, allocation_model) = match change {
         Change::AllocateModel { vendor, model, cap_micros } => {
             if !crate::route::PROFILES.iter().any(|p| p.vendor == vendor && p.model == model) {
@@ -976,38 +1004,100 @@ pub fn recover_unbounded(ledger: &mut Ledger) -> Result<bool, &'static str> {
     Ok(changed)
 }
 
-/// R132: a one-time exception to R88/R131 for the first real self-development mission. The shipped app never calls
-/// it and the feature is on only for the qualification harness (`testkit`). It waives exactly one thing: the two-point
+/// R132: a one-time exception to R88/R131 for one named self-development mission. The shipped app never calls it and
+/// the feature is on only for the qualification harness (`testkit`). It waives exactly one thing: the two-point
 /// margin under the day's cumulative line. Fresh zero-turn evidence, the weekly window, billing and the US$2.00 mission
-/// cap all still apply. It opens once: the marker file is created with `create_new`, so a second use, in this process
-/// or any later one, is refused.
+/// cap all still apply. It opens once per process and for one mission id: the margin is waived only inside a budget
+/// change that belongs to that mission (or a vendor/model allocation, which names no mission), never anywhere else,
+/// and the first successful calibration of the mission spends it for good. The marker file is created with
+/// `create_new` as the durable record, and the in-process state does not reopen when the marker is deleted.
 #[cfg(feature = "r132-harness")]
 pub mod r132 {
+    use std::cell::RefCell;
     use std::path::Path;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Mutex;
 
-    static WAIVED: AtomicBool = AtomicBool::new(false);
+    #[derive(Clone, PartialEq)]
+    pub(super) enum Context {
+        Allocation,
+        Mission(String),
+        Other,
+    }
 
-    /// Writes the evidence marker (what was waived, the readings, when) and opens the waiver for this process.
-    pub fn waive(marker: &Path, evidence: &serde_json::Value) -> std::io::Result<()> {
+    #[derive(Clone, PartialEq)]
+    enum State {
+        Unused,
+        Open(String),
+        Spent,
+    }
+
+    static WAIVER: Mutex<State> = Mutex::new(State::Unused);
+    thread_local! {
+        static CONTEXT: RefCell<Context> = const { RefCell::new(Context::Other) };
+    }
+
+    pub(super) struct Scope(Context);
+    impl Drop for Scope {
+        fn drop(&mut self) {
+            CONTEXT.with(|c| *c.borrow_mut() = std::mem::replace(&mut self.0, Context::Other));
+        }
+    }
+    pub(super) fn scope(context: Context) -> Scope {
+        Scope(CONTEXT.with(|c| c.replace(context)))
+    }
+
+    /// Writes the evidence marker (what was waived, for which mission, the readings, when) and opens the waiver for this
+    /// process and this mission. A second call, in this process or against an existing marker, is refused.
+    pub fn waive(marker: &Path, mission: &str, evidence: &serde_json::Value) -> std::io::Result<()> {
         use std::io::Write;
+        if !super::valid_id(mission) {
+            return Err(std::io::Error::other("the waiver needs a mission id"));
+        }
+        let mut state = WAIVER.lock().unwrap();
+        if *state != State::Unused {
+            return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "the R132 waiver was already used in this process"));
+        }
         let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(marker)?;
         file.write_all(&serde_json::to_vec_pretty(&serde_json::json!({
             "exception": "R132", "waives": "R131 two-point margin under the day line", "singleUse": true,
-            "missionCapMicros": super::BOOTSTRAP_CAP, "evidence": evidence,
+            "mission": mission, "missionCapMicros": super::BOOTSTRAP_CAP, "evidence": evidence,
         }))?)?;
         file.sync_all()?;
-        WAIVED.store(true, Ordering::SeqCst);
+        *state = State::Open(mission.into());
         Ok(())
+    }
+
+    /// The mission's calibration is done: the exception is spent and cannot be opened again.
+    pub fn consume(mission: &str) {
+        let mut state = WAIVER.lock().unwrap();
+        if *state == State::Open(mission.into()) {
+            *state = State::Spent;
+        }
     }
 
     /// Ends the exception. The marker stays, so it cannot be opened again.
     pub fn close() {
-        WAIVED.store(false, Ordering::SeqCst);
+        let mut state = WAIVER.lock().unwrap();
+        if matches!(*state, State::Open(_)) {
+            *state = State::Spent;
+        }
+    }
+
+    /// Whether a budget change of this mission (`None`: a vendor or model allocation) would have its margin waived.
+    pub fn admits(mission: Option<&str>) -> bool {
+        match (&*WAIVER.lock().unwrap(), mission) {
+            (State::Open(_), None) => true,
+            (State::Open(open), Some(m)) => open == m,
+            _ => false,
+        }
     }
 
     pub(super) fn active() -> bool {
-        WAIVED.load(Ordering::SeqCst)
+        match CONTEXT.with(|c| c.borrow().clone()) {
+            Context::Allocation => admits(None),
+            Context::Mission(m) => admits(Some(&m)),
+            Context::Other => false,
+        }
     }
 }
 

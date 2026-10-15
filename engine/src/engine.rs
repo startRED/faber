@@ -218,6 +218,10 @@ struct Core {
     /// Owned process trees of writer roles by invocation id, and the terminal event each role reported.
     worker_trees: HashMap<String, crate::proc::OwnedTree>,
     worker_terminals: HashMap<String, EngineEvent>,
+    /// Role invocations the engine itself is closing: what their processes report from then on is the shutdown.
+    worker_closing: HashSet<String>,
+    /// Woken when a role turn ends or a mission stops, so a coordinator reads the journal exactly then.
+    mission_wake: Arc<tokio::sync::Notify>,
     /// The project each mission in `mission_sessions` belongs to, so a project can be asked whether a worker is alive in it.
     mission_projects: HashMap<String, String>,
     mission_lock: Arc<tokio::sync::Mutex<()>>,
@@ -294,6 +298,8 @@ impl Engine {
                 mission_sessions: HashMap::new(),
                 worker_trees: HashMap::new(),
                 worker_terminals: HashMap::new(),
+                worker_closing: HashSet::new(),
+                mission_wake: Arc::new(tokio::sync::Notify::new()),
                 mission_projects: HashMap::new(),
                 mission_lock: Arc::new(tokio::sync::Mutex::new(())),
                 local_update: None,

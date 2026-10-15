@@ -81,8 +81,11 @@ pub enum Reject {
     Version,
     Binary,
     Unobserved,
-    /// A declared instruction file that is neither the mission clone's own rules nor the user's global file.
+    /// A declared instruction file that is neither the mission clone's own rules nor the user's global file, one whose
+    /// bytes or set changed since the receipt was issued, or one that cannot be read safely.
     Source,
+    /// A managed Claude Code policy exists, or its absence could not be proven.
+    Policy,
 }
 
 static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
@@ -107,6 +110,57 @@ pub fn fingerprint(path: &Path) -> io::Result<String> {
             break;
         }
         digest.update(&buffer[..size]);
+    }
+    Ok(format!("{:x}", digest.finalize()))
+}
+
+/// The largest instruction file that is hashed.
+const MAX_SOURCE: u64 = 4 * 1024 * 1024;
+
+/// Hashes one instruction file through the very handle that was checked. The last path component is never followed
+/// (a link or reparse point is refused at open and again on the handle), the file must be a plain regular file, and
+/// the bytes come from that handle: there is no second resolution of the path between the check and the read.
+pub fn fingerprint_source(path: &Path) -> io::Result<String> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // FILE_FLAG_OPEN_REPARSE_POINT: open a link itself instead of what it points to.
+        options.custom_flags(0x0020_0000);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32);
+    }
+    let file = options.open(path)?;
+    let meta = file.metadata()?;
+    #[cfg(windows)]
+    let linked = {
+        use std::os::windows::fs::MetadataExt;
+        // FILE_ATTRIBUTE_REPARSE_POINT
+        meta.file_attributes() & 0x400 != 0
+    };
+    #[cfg(not(windows))]
+    let linked = meta.file_type().is_symlink();
+    if linked || !meta.is_file() || meta.len() > MAX_SOURCE {
+        return Err(io::Error::other("an instruction source must be a plain regular file"));
+    }
+    let mut digest = Sha256::new();
+    let mut buffer = [0; 16 * 1024];
+    let mut reader = file.take(MAX_SOURCE + 1);
+    let mut total = 0;
+    loop {
+        let size = reader.read(&mut buffer)?;
+        if size == 0 {
+            break;
+        }
+        total += size as u64;
+        digest.update(&buffer[..size]);
+    }
+    if total > MAX_SOURCE {
+        return Err(io::Error::other("an instruction source grew while it was read"));
     }
     Ok(format!("{:x}", digest.finalize()))
 }
@@ -191,6 +245,11 @@ fn hash_shaped(hash: &str) -> bool {
 /// and names the version and executable bytes that `observe` reports now. `observe` runs last: an unqualified
 /// vendor costs a file read, not a process.
 pub fn verify(dir: &Path, vendor: Vendor, now: u64, observe: &dyn Fn() -> io::Result<Identity>) -> Result<(), Reject> {
+    verify_receipt(dir, vendor, now, observe).map(|_| ())
+}
+
+/// `verify`, handing back the receipt that matched.
+pub fn verify_receipt(dir: &Path, vendor: Vendor, now: u64, observe: &dyn Fn() -> io::Result<Identity>) -> Result<Receipt, Reject> {
     let receipt = read(dir, vendor)?;
     if receipt.schema != SCHEMA || receipt.vendor != vendor {
         return Err(Reject::Vendor);
@@ -212,7 +271,110 @@ pub fn verify(dir: &Path, vendor: Vendor, now: u64, observe: &dyn Fn() -> io::Re
     if actual.binary_hash != receipt.binary_hash {
         return Err(Reject::Binary);
     }
+    Ok(receipt)
+}
+
+/// Whether a thing the receipt relies on exists right now. Anything that cannot be inspected is `Unproven`, which
+/// never counts as absent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Presence {
+    Absent,
+    Present,
+    Unproven,
+}
+
+pub fn path_presence(path: &str) -> Presence {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => Presence::Present,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Presence::Absent,
+        Err(_) => Presence::Unproven,
+    }
+}
+
+#[cfg(windows)]
+pub fn registry_presence(key: &str) -> Presence {
+    use winreg::{RegKey, enums::*};
+    let (hive, sub) = match key.split_once('\\') {
+        Some(("HKLM", sub)) => (HKEY_LOCAL_MACHINE, sub),
+        Some(("HKCU", sub)) => (HKEY_CURRENT_USER, sub),
+        _ => return Presence::Unproven,
+    };
+    match RegKey::predef(hive).open_subkey_with_flags(sub, KEY_READ) {
+        Ok(_) => Presence::Present,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Presence::Absent,
+        Err(_) => Presence::Unproven,
+    }
+}
+
+#[cfg(not(windows))]
+pub fn registry_presence(_key: &str) -> Presence {
+    Presence::Unproven
+}
+
+/// The two registry keys of Claude Code managed settings.
+pub const MANAGED_POLICY_KEYS: [&str; 2] = [r"HKLM\SOFTWARE\Policies\ClaudeCode", r"HKCU\SOFTWARE\Policies\ClaudeCode"];
+
+/// Managed-policy hooks are the one hooks source the launch flags cannot switch off, so every location must be
+/// confirmed absent: a location that exists, or that cannot be inspected, refuses.
+pub fn managed_policy_clear(path: &dyn Fn(&str) -> Presence, registry: &dyn Fn(&str) -> Presence) -> Result<(), Reject> {
+    let all_absent = MANAGED_POLICY_PATHS.iter().all(|p| path(p) == Presence::Absent)
+        && MANAGED_POLICY_KEYS.iter().all(|k| registry(k) == Presence::Absent);
+    if all_absent { Ok(()) } else { Err(Reject::Policy) }
+}
+
+/// Every instruction file the receipt recorded still has the recorded bytes.
+pub fn sources_unchanged(recorded: &[Source]) -> Result<(), Reject> {
+    for source in recorded {
+        let now = fingerprint_source(Path::new(&source.path)).map_err(|_| Reject::Source)?;
+        if now != source.sha256 {
+            return Err(Reject::Source);
+        }
+    }
     Ok(())
+}
+
+fn canonical(path: &str) -> Option<PathBuf> {
+    std::fs::canonicalize(path).ok()
+}
+
+/// The instruction files a session declares are exactly the ones the receipt recorded (same files, so none added).
+pub fn session_sources(declared: &[String], recorded: &[Source]) -> Result<(), Reject> {
+    let mut seen = declared.iter().map(|p| canonical(p).ok_or(Reject::Source)).collect::<Result<Vec<_>, _>>()?;
+    let mut known = recorded.iter().map(|s| canonical(&s.path).ok_or(Reject::Source)).collect::<Result<Vec<_>, _>>()?;
+    seen.sort();
+    seen.dedup();
+    known.sort();
+    known.dedup();
+    if seen == known { Ok(()) } else { Err(Reject::Source) }
+}
+
+/// A matching receipt is still not enough: what it relied on must be what is there now.
+pub fn verify_current(
+    dir: &Path,
+    vendor: Vendor,
+    now: u64,
+    observe: &dyn Fn() -> io::Result<Identity>,
+    managed: &dyn Fn() -> Result<(), Reject>,
+) -> Result<(), Reject> {
+    let receipt = verify_receipt(dir, vendor, now, observe)?;
+    match vendor {
+        Vendor::Claude => managed(),
+        Vendor::Codex => sources_unchanged(&receipt.proof.instruction_sources),
+    }
+}
+
+/// Unit tests of the role loops stand in for a stored receipt with this list.
+#[cfg(test)]
+pub(crate) static TEST_RECORDED: std::sync::Mutex<Option<Vec<Source>>> = std::sync::Mutex::new(None);
+
+/// The instruction files the stored receipt of a vendor recorded, for the comparison with a session's own inventory.
+pub(crate) fn recorded_sources(vendor: Vendor) -> Result<Vec<Source>, Reject> {
+    #[cfg(test)]
+    if let Some(fixed) = TEST_RECORDED.lock().unwrap().clone() {
+        return Ok(fixed);
+    }
+    let dir = DIR.get().ok_or(Reject::Missing)?;
+    Ok(read(dir, vendor)?.proof.instruction_sources)
 }
 
 /// Writes (or atomically replaces) a vendor's receipt. Refuses an incomplete set of passed probes, so a harness
@@ -262,7 +424,9 @@ pub(crate) fn admitted(vendor: Vendor, bin: &dyn Fn() -> Option<String>) -> Resu
     }
     let dir = DIR.get().ok_or(Reject::Missing)?;
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    verify(dir, vendor, now, &|| observe(&bin().ok_or_else(|| io::Error::other("CLI not found"))?, &[]))
+    verify_current(dir, vendor, now, &|| observe(&bin().ok_or_else(|| io::Error::other("CLI not found"))?, &[]), &|| {
+        managed_policy_clear(&path_presence, &registry_presence)
+    })
 }
 
 /// Claude Code reports no effective-hooks census, so hooks are off by construction: safe mode, no settings source
@@ -321,7 +485,11 @@ pub fn identify_sources(declared: &[String], work: &Path, clone_root: &Path, glo
         .map(|path| {
             let real = canon(Path::new(path)).ok_or(Reject::Source)?;
             let (_, kind) = allowed.iter().find(|(candidate, _)| *candidate == real).ok_or(Reject::Source)?;
-            let sha256 = fingerprint(&real).map_err(|_| Reject::Source)?;
+            let sha256 = fingerprint_source(&real).map_err(|_| Reject::Source)?;
+            // The path must still lead to the accepted file after the read: a swap in between refuses.
+            if canon(&real).as_deref() != Some(real.as_path()) {
+                return Err(Reject::Source);
+            }
             Ok(Source { path: path.clone(), sha256, kind: *kind })
         })
         .collect()

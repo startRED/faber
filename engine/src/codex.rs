@@ -483,6 +483,16 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
     (method, Value::Object(params))
 }
 
+/// The instruction files a started role thread declares against the stored receipt. A missing inventory, an
+/// unreadable receipt, an added file or a removed one all refuse.
+pub(crate) fn project_sources_match(result: &Value) -> Result<(), &'static str> {
+    let key = crate::project::policy::Blocker::Restrictions.key();
+    let declared: Vec<String> =
+        result["instructionSources"].as_array().and_then(|list| list.iter().map(|s| s.as_str().map(String::from)).collect()).ok_or(key)?;
+    let recorded = crate::project::qualification::recorded_sources(crate::model::Vendor::Codex).map_err(|_| key)?;
+    crate::project::qualification::session_sources(&declared, &recorded).map_err(|_| key)
+}
+
 /// Candidate controls, not a claim that native command/read tools are disabled by a sandbox.
 pub fn project_thread_params(
     t: &CodexThread,
@@ -756,6 +766,13 @@ async fn serve(
                             }
                             Waiting::Thread(key) => {
                                 let Some(t) = threads.get_mut(&key) else { continue };
+                                // A role's own inventory of instruction files must be the very set its receipt recorded.
+                                if role.is_some() && let Err(key) = project_sources_match(&msg["result"]) {
+                                    (t.sink)(EngineEvent::Error { message: key.into(), fatal: true });
+                                    t.blocked = true;
+                                    t.queued.clear();
+                                    continue;
+                                }
                                 let thread = &msg["result"]["thread"];
                                 let id = s(&thread["id"]);
                                 let shown = thread["model"].as_str().map(String::from).or_else(|| t.params.model.clone()).unwrap_or_else(|| "codex".into());
@@ -1156,7 +1173,63 @@ mod role_tests {
         role_loop_rejects(true, true).await;
     }
 
+    /// A role thread whose own inventory differs from the receipt (a file added, or no inventory at all) never gets a turn.
+    #[tokio::test(start_paused = true)]
+    async fn a_role_thread_with_another_instruction_inventory_than_its_receipt_never_starts() {
+        for reply in [
+            r#"{"id":2,"result":{"instructionSources":["C:/Users/x/.codex/AGENTS.md"],"thread":{"id":"t"}}}"#,
+            r#"{"id":2,"result":{"thread":{"id":"t"}}}"#,
+            r#"{"id":2,"result":{"instructionSources":[7],"thread":{"id":"t"}}}"#,
+        ] {
+            *crate::project::qualification::TEST_RECORDED.lock().unwrap() = Some(vec![]);
+            let (stdin, input) = tokio::io::duplex(65536);
+            let (mut output, stdout) = tokio::io::duplex(65536);
+            let fake = Arc::new(std::sync::Mutex::new(Some(proc::Proc {
+                stdin: Box::new(stdin),
+                stdout: Box::new(stdout),
+                stderr: None,
+                child: None,
+            })));
+            let spawn: Spawner = Arc::new(move |_, _, _| Ok(fake.lock().unwrap().take().unwrap()));
+            let server = CodexServer::start_with_policy(
+                CodexServerOptions { bin: "fake".into(), cwd: ".".into(), area: Area::Project, user_hooks: false, windows: false, spawn },
+                Some(crate::project::Role::Reviewer),
+            );
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            let session = server.open(
+                CodexThread {
+                    cwd: ".".into(),
+                    model: Some("gpt-6-luna".into()),
+                    effort: Some("low".into()),
+                    resume: None,
+                    instructions: None,
+                    user_name: None,
+                },
+                Arc::new(move |e| drop(tx.send(e))),
+            );
+            session.send(UserTurn::text("review"));
+            let mut lines = BufReader::new(input).lines();
+            lines.next_line().await.unwrap().unwrap();
+            output.write_all(b"{\"id\":1,\"result\":{}}\n").await.unwrap();
+            lines.next_line().await.unwrap().unwrap();
+            lines.next_line().await.unwrap().unwrap();
+            output.write_all(b"{\"id\":\"faber-config-1\",\"result\":{\"config\":{\"mcp_servers\":{}}}}\n").await.unwrap();
+            lines.next_line().await.unwrap().unwrap();
+            output.write_all(format!("{reply}\n").as_bytes()).await.unwrap();
+            let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv()).await;
+            assert!(
+                matches!(event, Ok(Some(EngineEvent::Error { fatal: true, ref message })) if message == crate::project::policy::Blocker::Restrictions.key()),
+                "{reply}: {event:?}"
+            );
+            let turn = tokio::time::timeout(std::time::Duration::from_millis(200), lines.next_line()).await;
+            assert!(turn.is_err() || !matches!(turn, Ok(Ok(Some(ref l))) if l.contains("turn/start")), "{reply}: a turn was sent");
+            session.close();
+            server.retire();
+        }
+    }
+
     async fn role_loop_rejects(unknown: bool, config_id: bool) {
+        *crate::project::qualification::TEST_RECORDED.lock().unwrap() = Some(vec![]);
         let (stdin, input) = tokio::io::duplex(65536);
         let (mut output, stdout) = tokio::io::duplex(65536);
         let fake = Arc::new(std::sync::Mutex::new(Some(proc::Proc {
@@ -1190,7 +1263,7 @@ mod role_tests {
         output.write_all(b"{\"id\":\"faber-config-1\",\"result\":{\"config\":{\"mcp_servers\":{}}}}\n").await.unwrap();
         let start: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
         assert_eq!(start["method"], "thread/start");
-        output.write_all(b"{\"id\":2,\"result\":{\"thread\":{\"id\":\"t\"}}}\n").await.unwrap();
+        output.write_all(b"{\"id\":2,\"result\":{\"instructionSources\":[],\"thread\":{\"id\":\"t\"}}}\n").await.unwrap();
         assert!(matches!(rx.recv().await, Some(EngineEvent::Started { .. })));
         let mut denied = 0;
         for line in include_str!("../../tests/fixtures/projects/policy-escapes.jsonl").lines() {

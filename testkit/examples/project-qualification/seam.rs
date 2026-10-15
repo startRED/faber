@@ -240,15 +240,15 @@ async fn drive(data: &Path, log: &mut Log) -> io::Result<()> {
     let readings: Value =
         Vendor::ALL.iter().map(|v| (v.name().to_string(), serde_json::to_value(ledger.of(*v)).unwrap_or(Value::Null))).collect();
     log.step("account-checks", readings.clone());
-    faber_engine::project::budget::r132::waive(&data.join("r132-waiver.json"), &readings)?;
+    let mission = engine.new_mission(&project, "Add src/add.js so check.js passes", &base).map_err(fail)?;
+    let mid = mission.id.clone();
+    faber_engine::project::budget::r132::waive(&data.join("r132-waiver.json"), &mid, &readings)?;
     let models = [(Vendor::Claude, "claude-haiku-5-5"), (Vendor::Codex, "gpt-6-luna")];
     for (vendor, model) in models {
         engine
             .mission_budget(Change::AllocateModel { vendor, model: model.into(), cap_micros: 1_000_000 })
             .map_err(|e| fail(format!("allocate {model}: {e}")))?;
     }
-    let mission = engine.new_mission(&project, "Add src/add.js so check.js passes", &base).map_err(fail)?;
-    let mid = mission.id.clone();
     let budget = Budgeted {
         cap_micros: 2_000_000,
         worker_micros: 800_000,
@@ -401,7 +401,7 @@ async fn drive(data: &Path, log: &mut Log) -> io::Result<()> {
         .map_err(|e| fail(format!("dispatch reviewer: {e}")))?;
     log.step("reviewer-dispatched", json!({"vendor": "codex", "model": "gpt-6-luna"}));
     let review = await_reply(&journal, log, "inv-reviewer", 300).await;
-    engine.finish_role("inv-reviewer").map_err(|e| fail(format!("reviewer end: {e}")))?;
+    engine.finish_role("inv-reviewer").await.map_err(|e| fail(format!("reviewer end: {e}")))?;
     let review = review.map_err(|why| fail(format!("Reviewer: {why}")))?;
     let Action::Complete(done) = &review.action else {
         return Err(fail("the Reviewer's accepted envelope is not a completion"));
@@ -453,6 +453,9 @@ async fn drive(data: &Path, log: &mut Log) -> io::Result<()> {
     // Settlement and calibration, then the spend.
     let calibration = engine.calibrate_mission(&mid).await;
     log.step("calibration", json!({"status": format!("{calibration:?}")}));
+    if !matches!(calibration, Ok(faber_engine::project::budget::Status::Ready)) {
+        return Err(fail(format!("calibration did not complete: {calibration:?}")));
+    }
     let spent = Budget::load(&engine.ledger()).map_err(fail)?;
     let invocations: Value = spent
         .invocations

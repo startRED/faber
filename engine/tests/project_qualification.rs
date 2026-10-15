@@ -1,8 +1,9 @@
 //! A receipt opens a role gate only while it is private, fresh and bound to the installed version and bytes.
 use faber_engine::model::Vendor;
 use faber_engine::project::qualification::{
-    CHECKS, Identity, MAX_AGE_SECS, Proof, Receipt, Reject, SourceKind, fingerprint, hook_flags, identify_sources, issue, parse_version,
-    verify,
+    CHECKS, Identity, MAX_AGE_SECS, Presence, Proof, Receipt, Reject, SourceKind, fingerprint, fingerprint_source, hook_flags,
+    identify_sources, issue, managed_policy_clear, parse_version, path_presence, session_sources, sources_unchanged, verify,
+    verify_current,
 };
 use std::collections::BTreeMap;
 use std::io;
@@ -305,4 +306,117 @@ fn any_other_codex_instruction_source_refuses() {
     std::fs::write(clone.join("AGENTS.md"), "ok").unwrap();
     let mixed = [clone.join("AGENTS.md"), other].map(|p| p.to_string_lossy().into_owned());
     assert_eq!(identify_sources(&mixed, &lease, &clone, &global), Err(Reject::Source));
+}
+
+fn codex_receipt_with(dir: &Path, sources: Vec<faber_engine::project::qualification::Source>) {
+    let with = Proof { hook_flags: vec![], instruction_sources: sources };
+    issue(dir, Vendor::Codex, &identity(), passed(), with, NOW).unwrap();
+}
+
+fn current(dir: &Path, vendor: Vendor, managed: Result<(), Reject>) -> Result<(), Reject> {
+    verify_current(dir, vendor, NOW, &|| Ok(identity()), &|| managed)
+}
+
+#[test]
+fn a_changed_or_vanished_instruction_file_closes_a_receipt_that_recorded_it() {
+    let (_tmp, clone, global) = sources_fixture();
+    std::fs::write(global.join("AGENTS.md"), "my rules").unwrap();
+    let declared = [global.join("AGENTS.md").to_string_lossy().into_owned()];
+    let found = identify_sources(&declared, &clone.join("lease"), &clone, &global).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    codex_receipt_with(dir.path(), found.clone());
+    assert_eq!(current(dir.path(), Vendor::Codex, Ok(())), Ok(()));
+    assert_eq!(sources_unchanged(&found), Ok(()));
+    std::fs::write(global.join("AGENTS.md"), "my rules, now with a new hook-like instruction").unwrap();
+    assert_eq!(current(dir.path(), Vendor::Codex, Ok(())), Err(Reject::Source));
+    std::fs::write(global.join("AGENTS.md"), "my rules").unwrap();
+    assert_eq!(current(dir.path(), Vendor::Codex, Ok(())), Ok(()));
+    std::fs::remove_file(global.join("AGENTS.md")).unwrap();
+    assert_eq!(current(dir.path(), Vendor::Codex, Ok(())), Err(Reject::Source));
+}
+
+#[test]
+fn a_session_that_declares_another_instruction_source_than_the_receipt_is_refused() {
+    let (_tmp, clone, global) = sources_fixture();
+    std::fs::write(global.join("AGENTS.md"), "my rules").unwrap();
+    std::fs::write(clone.join("AGENTS.md"), "project rules").unwrap();
+    let both = [global.join("AGENTS.md"), clone.join("AGENTS.md")].map(|p| p.to_string_lossy().into_owned());
+    let only_global = [both[0].clone()];
+    let recorded = identify_sources(&only_global, &clone.join("lease"), &clone, &global).unwrap();
+    assert_eq!(session_sources(&only_global, &recorded), Ok(()));
+    // A source added after issuance, or one the receipt never recorded, refuses; so does a removed one.
+    assert_eq!(session_sources(&both, &recorded), Err(Reject::Source));
+    assert_eq!(session_sources(&[], &recorded), Err(Reject::Source));
+    assert_eq!(session_sources(&["Z:/does/not/exist/AGENTS.md".to_string()], &recorded), Err(Reject::Source));
+}
+
+#[test]
+fn managed_policy_must_be_confirmed_absent_everywhere_and_uncertainty_refuses() {
+    let absent = |_: &str| Presence::Absent;
+    assert_eq!(managed_policy_clear(&absent, &absent), Ok(()));
+    for bad in [Presence::Present, Presence::Unproven] {
+        let one_path = |p: &str| if p.ends_with("managed-settings.d") { bad } else { Presence::Absent };
+        assert_eq!(managed_policy_clear(&one_path, &absent), Err(Reject::Policy), "{bad:?}");
+        let one_key = |k: &str| if k.starts_with("HKCU") { bad } else { Presence::Absent };
+        assert_eq!(managed_policy_clear(&absent, &one_key), Err(Reject::Policy), "{bad:?}");
+    }
+    // A Claude receipt closes the moment a policy appears, however fresh it is.
+    let dir = tempfile::tempdir().unwrap();
+    issued(dir.path(), Vendor::Claude);
+    assert_eq!(current(dir.path(), Vendor::Claude, Ok(())), Ok(()));
+    assert_eq!(current(dir.path(), Vendor::Claude, Err(Reject::Policy)), Err(Reject::Policy));
+    // Real inspection: a missing path is absent, an existing one present.
+    let tmp = tempfile::tempdir().unwrap();
+    assert_eq!(path_presence(&tmp.path().join("nothing").to_string_lossy()), Presence::Absent);
+    assert_eq!(path_presence(&tmp.path().to_string_lossy()), Presence::Present);
+}
+
+#[test]
+fn an_instruction_file_is_hashed_through_one_handle_and_never_through_a_link() {
+    let tmp = tempfile::tempdir().unwrap();
+    let file = tmp.path().join("AGENTS.md");
+    std::fs::write(&file, "rules").unwrap();
+    let hash = fingerprint_source(&file).unwrap();
+    assert_eq!(hash, fingerprint(&file).unwrap());
+    assert!(fingerprint_source(tmp.path()).is_err(), "a folder is not an instruction file");
+    assert!(fingerprint_source(&tmp.path().join("missing")).is_err());
+    std::fs::write(tmp.path().join("big.md"), vec![b'x'; 4 * 1024 * 1024 + 1]).unwrap();
+    assert!(fingerprint_source(&tmp.path().join("big.md")).is_err(), "an oversized file is refused");
+    // A link to a file outside is refused even though its target is a plain file (needs a privilege on some machines).
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("secret.md"), "outside").unwrap();
+    let link = tmp.path().join("link.md");
+    #[cfg(unix)]
+    let linked = std::os::unix::fs::symlink(outside.path().join("secret.md"), &link).is_ok();
+    #[cfg(windows)]
+    let linked = std::os::windows::fs::symlink_file(outside.path().join("secret.md"), &link).is_ok();
+    if linked {
+        assert!(fingerprint_source(&link).is_err());
+        // The same link planted as the clone's own rules file is not hashed through: identify refuses it.
+        let (_t, clone, global) = sources_fixture();
+        std::fs::remove_dir_all(&clone).unwrap();
+        std::fs::create_dir_all(clone.join("lease")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(outside.path().join("secret.md"), clone.join("AGENTS.md")).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file(outside.path().join("secret.md"), clone.join("AGENTS.md")).unwrap();
+        let declared = [clone.join("AGENTS.md").to_string_lossy().into_owned()];
+        assert_eq!(identify_sources(&declared, &clone.join("lease"), &clone, &global), Err(Reject::Source));
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn instruction_sources_match_by_the_real_path_whatever_the_case_or_prefix_of_the_declared_one() {
+    let (_tmp, clone, global) = sources_fixture();
+    std::fs::write(global.join("AGENTS.md"), "my rules").unwrap();
+    let real = std::fs::canonicalize(global.join("AGENTS.md")).unwrap();
+    let shown = real.to_string_lossy().into_owned();
+    let plain = shown.trim_start_matches(r"\\?\").to_string();
+    for declared in [shown.clone(), plain.clone(), plain.to_uppercase(), plain.replace('\\', "/")] {
+        let found = identify_sources(std::slice::from_ref(&declared), &clone.join("lease"), &clone, &global)
+            .unwrap_or_else(|e| panic!("{declared}: {e:?}"));
+        assert_eq!(found[0].kind, SourceKind::Global);
+        assert_eq!(session_sources(&[declared], &found), Ok(()));
+    }
 }

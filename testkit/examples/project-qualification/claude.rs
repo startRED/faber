@@ -29,29 +29,12 @@ fn empty_init(msg: &Value) -> io::Result<()> {
     empty_integrations(msg)
 }
 
-/// Managed-policy settings are the one hooks source the launch flags cannot switch off. They must not exist.
+/// Managed-policy settings are the one hooks source the launch flags cannot switch off. They must be confirmed absent;
+/// a location that cannot be inspected counts as present (the same check the engine repeats at every admission).
 fn managed_policy_absent() -> io::Result<()> {
-    use faber_engine::project::qualification::MANAGED_POLICY_PATHS;
-    if MANAGED_POLICY_PATHS.iter().any(|p| std::path::Path::new(p).exists()) {
-        return Err(io::Error::other("managed Claude Code settings exist"));
-    }
-    for hive in ["HKLM", "HKCU"] {
-        let mut query = std::process::Command::new("reg.exe");
-        query.args(["query", &format!(r"{hive}\SOFTWARE\Policies\ClaudeCode")]);
-        query.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            query.creation_flags(0x0800_0000);
-        }
-        // Exit code 1 means the key does not exist; 0 means a policy is there; anything else is unproven.
-        match query.status()?.code() {
-            Some(1) => {}
-            Some(0) => return Err(io::Error::other("managed Claude Code registry policy exists")),
-            _ => return Err(io::Error::other("managed registry policy unproven")),
-        }
-    }
-    Ok(())
+    use faber_engine::project::qualification::{managed_policy_clear, path_presence, registry_presence};
+    managed_policy_clear(&path_presence, &registry_presence)
+        .map_err(|_| io::Error::other("managed Claude Code policy exists or is unproven"))
 }
 
 fn stream_cost(input: &Value, output: u64) -> Option<f64> {

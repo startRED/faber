@@ -56,25 +56,39 @@ fn allocate(l: &mut Ledger) -> Result<(), &'static str> {
 }
 
 #[test]
-fn the_waiver_is_explicit_single_use_recorded_and_only_moves_the_margin() {
+fn the_waiver_is_explicit_single_use_recorded_bound_to_one_mission_and_only_moves_the_margin() {
     let dir = tempfile::tempdir().unwrap();
     let marker = dir.path().join("r132.json");
     // Over the line: refused without the waiver, as R131 requires.
     assert!(allocate(&mut uncalibrated(0.45)).is_err());
-    r132::waive(&marker, &serde_json::json!({"codexWeeklyUsed":0.45})).unwrap();
+    assert!(!r132::admits(None) && !r132::admits(Some("m1")));
+    assert!(r132::waive(&marker, "not a valid id!", &serde_json::json!({})).is_err(), "it names a mission");
+    r132::waive(&marker, "m1", &serde_json::json!({"codexWeeklyUsed":0.45})).unwrap();
     let first = allocate(&mut uncalibrated(0.45));
     assert!(first.is_ok(), "the waived margin admits the first mission: {first:?}");
+    // It belongs to that mission alone: another mission's changes keep the R131 margin.
+    assert!(r132::admits(Some("m1")) && r132::admits(None));
+    assert!(!r132::admits(Some("m2")), "another mission is not waived");
     // The mission cap, fresh zero-turn evidence and a valid reading still apply.
     assert!(apply(&mut uncalibrated(0.45), Change::Allocate { vendor: Vendor::Codex, cap_micros: 2_000_001 }, NOW, 0).is_err());
     let mut stale = uncalibrated(0.45);
     stale.of_mut(Vendor::Codex).zero_turn_readings.clear();
     assert!(allocate(&mut stale).is_err());
     assert!(allocate(&mut uncalibrated(1.01)).is_err());
-    // The record names the exception; a second opening is refused even after the first closed.
+    // The record names the exception and the mission; the marker file cannot be written twice.
     let text = std::fs::read_to_string(&marker).unwrap();
-    assert!(text.contains("R132") && text.contains("codexWeeklyUsed"));
-    assert!(r132::waive(&marker, &serde_json::json!({})).is_err(), "single use");
+    assert!(text.contains("R132") && text.contains("codexWeeklyUsed") && text.contains("\"m1\""));
+    assert!(r132::waive(&marker, "m1", &serde_json::json!({})).is_err(), "single use");
+    // Deleting the marker, or choosing another path, does not reopen it while it is open or after it is spent.
+    std::fs::remove_file(&marker).unwrap();
+    assert!(r132::waive(&marker, "m1", &serde_json::json!({})).is_err(), "a deleted marker does not reopen it");
+    assert!(r132::waive(&dir.path().join("other.json"), "m2", &serde_json::json!({})).is_err(), "another path does not either");
+    // Another mission finishing its calibration does not spend it; the waived mission's does.
+    r132::consume("m2");
+    assert!(allocate(&mut uncalibrated(0.45)).is_ok());
+    r132::consume("m1");
+    assert!(allocate(&mut uncalibrated(0.45)).is_err(), "spent");
+    assert!(!r132::admits(Some("m1")) && !r132::admits(None));
+    assert!(r132::waive(&dir.path().join("third.json"), "m1", &serde_json::json!({})).is_err(), "single use survives being spent");
     r132::close();
-    assert!(allocate(&mut uncalibrated(0.45)).is_err(), "closed again");
-    assert!(r132::waive(&marker, &serde_json::json!({})).is_err(), "single use survives close");
 }

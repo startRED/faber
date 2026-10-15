@@ -24,6 +24,11 @@ fn role_events() -> (EventSink, tokio::sync::mpsc::Receiver<EngineEvent>, Arc<st
     (sink, rx, overflow)
 }
 
+/// The notice a CLI process gives when it exits cleanly after its turn.
+fn clean_exit_notice(message: &str) -> bool {
+    message == "Codex stopped." || message.starts_with("Claude Code stopped (exit 0)") || message.starts_with("Codex stopped (exit 0)")
+}
+
 fn role_invocation(request: &mut crate::project::budget::Invocation, role: ProjectRole) -> Result<(), String> {
     // Dedicated role constructors always launch without resume; caller bases must not discount that fresh cost.
     request.fresh = true;
@@ -251,22 +256,24 @@ impl Engine {
             session.close();
             return Err("error.project.invocation".into());
         }
-        if let Some((leases, lease)) = launcher {
-            let attached = match session.tree() {
-                Some(tree) => leases.attach_process(lease, tree.identity()).map(|()| tree).map_err(|e| e.key().to_string()),
-                None => Err("reason.project.processTreeUnproven".to_string()),
-            };
-            match attached {
-                Ok(tree) => self.with(|c| c.worker_trees.insert(request.id.clone(), tree)),
-                Err(key) => {
-                    session.close();
-                    if let Some(tree) = session.tree() {
-                        let _ = tree.retire().await;
-                    }
-                    return Err(key);
+        // Every role must run inside a tree the engine owns: its end is only ever confirmed by retiring that tree.
+        let attached = match (session.tree(), launcher) {
+            (Some(tree), Some((leases, lease))) => {
+                leases.attach_process(lease, tree.identity()).map(|()| tree).map_err(|e| e.key().to_string())
+            }
+            (Some(tree), None) => Ok(tree),
+            (None, _) => Err("reason.project.processTreeUnproven".to_string()),
+        };
+        match attached {
+            Ok(tree) => self.with(|c| c.worker_trees.insert(request.id.clone(), tree)),
+            Err(key) => {
+                session.close();
+                if let Some(tree) = session.tree() {
+                    let _ = tree.retire().await;
                 }
-            };
-        }
+                return Err(key);
+            }
+        };
         self.with(|c| {
             c.mission_sessions.entry(runner.mission.id.clone()).or_default().push(session.clone());
             c.mission_projects.insert(runner.mission.id.clone(), runner.mission.project_id.clone());
@@ -275,13 +282,19 @@ impl Engine {
         Ok(())
     }
 
-    /// The release proof of a Writer launched through `dispatch_mission_writer`: its owned tree is closed and reaped
-    /// here, the invocation's spending settles against what it reported (or its computed bound if it reported
-    /// nothing), and only then is a `Termination` built. An unknown invocation, a recording or a platform without
-    /// the job yields no proof.
-    pub async fn worker_termination(&self, invocation: &str) -> Result<crate::project::lease::Termination, String> {
+    /// The end of any role: its sessions are closed, its owned process tree is closed and reaped, and only then does
+    /// the invocation's spending settle against what it reported (or its computed bound if it reported nothing). An
+    /// unknown invocation, a recording or a platform without the job has no tree, so it has no proof and settles nothing.
+    async fn end_role(&self, invocation: &str) -> Result<crate::project::lease::Termination, String> {
         let (tree, terminal) = self.with(|c| (c.worker_trees.get(invocation).cloned(), c.worker_terminals.get(invocation).cloned()));
         let tree = tree.ok_or("reason.project.processTreeUnproven")?;
+        let mission = self.mission_reservation(invocation)?.request.mission;
+        // From here on whatever the processes report is their shutdown, not a new failure of a finished turn.
+        self.with(|c| c.worker_closing.insert(invocation.into()));
+        for session in self.mission_sessions(&mission) {
+            session.close();
+        }
+        self.with(|c| c.mission_sessions.remove(&mission));
         let retired = tree.retire().await.map_err(|_| "reason.project.processTreeUnproven".to_string())?;
         let event = terminal.unwrap_or(EngineEvent::Error { message: "reason.interrupted".into(), fatal: true });
         self.mission_budget(crate::project::budget::Change::Report { id: invocation.into(), event, terminated: true })?;
@@ -289,24 +302,38 @@ impl Engine {
         Ok(crate::project::lease::Termination::from_retired(&retired, settled))
     }
 
-    /// The end of a read-only role: the mission's role sessions are closed and the invocation settles against what it
-    /// reported (or its computed bound if it reported nothing). A Writer ends through `worker_termination` instead,
-    /// which needs the owned process tree; refuses here so source access never settles without that proof.
-    pub fn finish_role(&self, invocation: &str) -> Result<(), String> {
-        let (tree, terminal) = self.with(|c| (c.worker_trees.get(invocation).cloned(), c.worker_terminals.get(invocation).cloned()));
-        let mission = self.mission_reservation(invocation)?.request.mission;
-        if tree.is_some() {
-            return Err("reason.project.processTreeUnproven".into());
-        }
-        for session in self.mission_sessions(&mission) {
-            session.close();
-        }
-        self.with(|c| c.mission_sessions.remove(&mission));
-        let event = terminal.unwrap_or(EngineEvent::Error { message: "reason.interrupted".into(), fatal: true });
-        self.mission_budget(crate::project::budget::Change::Report { id: invocation.into(), event, terminated: true }).map(|_| ())
+    /// The release proof of a Writer launched through `dispatch_mission_writer`.
+    pub async fn worker_termination(&self, invocation: &str) -> Result<crate::project::lease::Termination, String> {
+        self.end_role(invocation).await
+    }
+
+    /// The end of a read-only role. It settles only after its process tree is confirmed gone, exactly like a Writer.
+    pub async fn finish_role(&self, invocation: &str) -> Result<(), String> {
+        self.end_role(invocation).await.map(|_| ())
+    }
+
+    /// Wakes when a role turn ends or a mission stops. A coordinator reads the journal when this fires, never on a timer.
+    pub fn mission_wake(&self) -> Arc<tokio::sync::Notify> {
+        self.with(|c| c.mission_wake.clone())
     }
 
     pub(super) fn mission_event(
+        &self,
+        journal: &Journal,
+        invocation: &str,
+        task: &str,
+        text: &mut String,
+        event: EngineEvent,
+    ) -> Result<(), String> {
+        let ends = matches!(event, EngineEvent::Done { .. } | EngineEvent::Error { .. });
+        let result = self.mission_event_inner(journal, invocation, task, text, event);
+        if ends || result.is_err() {
+            self.mission_wake().notify_one();
+        }
+        result
+    }
+
+    fn mission_event_inner(
         &self,
         journal: &Journal,
         invocation: &str,
@@ -336,7 +363,6 @@ impl Engine {
                 text.push_str(&delta);
             }
             event @ (EngineEvent::Done { .. } | EngineEvent::Error { .. }) => {
-                // What follows a completed turn is the engine closing the session, never a new failure.
                 let completed = self.with(|c| {
                     let done = matches!(c.worker_terminals.get(invocation), Some(EngineEvent::Done { .. }));
                     if !done {
@@ -345,7 +371,22 @@ impl Engine {
                     done
                 });
                 if completed {
-                    return Ok(());
+                    // Only the shutdown of a finished turn is expected: the process exiting cleanly, or anything at all
+                    // once the engine is closing it. A security failure or any other fatal error still stops the mission.
+                    let closing = self.with(|c| c.worker_closing.contains(invocation));
+                    return match &event {
+                        EngineEvent::Error { message, fatal: true } => {
+                            let restrictions = crate::project::policy::Blocker::Restrictions.key();
+                            if message == restrictions {
+                                Err(message.clone())
+                            } else if closing || clean_exit_notice(message) {
+                                Ok(())
+                            } else {
+                                Err("error.project.invocation".into())
+                            }
+                        }
+                        _ => Ok(()),
+                    };
                 }
                 let stopped = self.mission_budget(crate::project::budget::Change::Report {
                     id: invocation.into(),

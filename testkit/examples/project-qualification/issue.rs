@@ -242,6 +242,15 @@ mod tests {
         let mut bad = copy();
         bad.stop["nativeTurns"][0]["textBytesAfterStop"] = 5000.into();
         assert_eq!(failed(&judge(Vendor::Codex, &bad, HASH, NOW)), ["stop"]);
+        // The tolerance has exact edges: 1,024 bytes and 2,000 ms pass, one more of either fails.
+        for (field, edge) in [("textBytesAfterStop", 1024), ("stopToResultMs", 2000)] {
+            let mut at_edge = copy();
+            at_edge.stop["nativeTurns"][0][field] = edge.into();
+            assert!(failed(&judge(Vendor::Codex, &at_edge, HASH, NOW)).is_empty(), "{field} at {edge}");
+            let mut over = copy();
+            over.stop["nativeTurns"][0][field] = (edge + 1).into();
+            assert_eq!(failed(&judge(Vendor::Codex, &over, HASH, NOW)), ["stop"], "{field} over {edge}");
+        }
         let mut bad = copy();
         bad.stop["nativeTurns"][0]["postCompletionNotifications"] = json!([{"method":"item/agentMessage/delta"}]);
         assert_eq!(failed(&judge(Vendor::Codex, &bad, HASH, NOW)), ["stop"]);

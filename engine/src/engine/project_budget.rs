@@ -654,15 +654,28 @@ mod tests {
         // The same invocation cannot be recorded twice, and an unparsable turn leaves no record.
         assert!(j.record_reply("i1", &kept).is_err());
         assert!(j.reply("i2").unwrap().is_none());
-        // A refused or stalled turn keeps its key, never its text, and still leaves no envelope.
-        j.record_refusal("i2", "error.wire.malformed").unwrap();
+        // A refused turn keeps its key, never its text, and leaves no envelope: the engine itself records it from the
+        // turn it received (a second invocation of the same worker, whose reply is not an envelope at all).
+        e.mission_budget(Change::Report { id: "i1".into(), event: done(), terminated: true }).unwrap();
+        let mut second = request();
+        second.id = "i2".into();
+        e.mission_budget(Change::Admit(second)).unwrap();
+        let mut intent = crate::project::Intent::new("i2", "m1", crate::project::IntentKind::Dispatch, 3, 1);
+        intent.task = Some("w1".into());
+        intent.expected.insert("invocation".into(), "i2".into());
+        j.record_intent(&intent).unwrap();
+        let mut text = String::new();
+        e.mission_event(&j, "i2", "w1", &mut text, EngineEvent::Started { session_id: "s2".into(), model: "gpt-6.1-sol".into() }).unwrap();
+        e.mission_event(&j, "i2", "w1", &mut text, EngineEvent::Text("I will gladly help with that!".into())).unwrap();
+        e.mission_event(&j, "i2", "w1", &mut text, done()).unwrap();
         assert_eq!(j.refusal("i2").unwrap().as_deref(), Some("error.wire.malformed"));
         assert!(j.reply("i2").unwrap().is_none());
+        assert!(!std::fs::read_to_string(j.private().join("run.json")).unwrap().contains("gladly"), "the reply text is never kept");
         e.shutdown();
     }
 
     #[tokio::test]
-    async fn a_read_only_role_ends_by_closing_its_session_and_settling_its_reservation() {
+    async fn a_role_settles_only_after_its_process_tree_is_confirmed_gone_and_a_security_failure_after_done_still_stops() {
         let (dir, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let e = engine(dir.path());
         let (j, mut r) = runner_fixture(&e, repo.path());
@@ -721,13 +734,27 @@ mod tests {
         let closed = EngineEvent::Error { message: "Claude Code stopped (exit 0).".into(), fatal: true };
         e.mission_event(&j, "i1", "w1", &mut text, closed).unwrap();
         assert!(!Budget::load(&e.ledger()).unwrap().invocations["i1"].terminated);
-        e.finish_role("i1").unwrap();
+        // A role with no owned tree (a recording, or a platform without the job) cannot be confirmed gone: nothing
+        // closes, nothing settles, and the invocation stays reserved at its bound.
+        assert_eq!(e.finish_role("i1").await, Err("reason.project.processTreeUnproven".into()));
         let after = Budget::load(&e.ledger()).unwrap().invocations["i1"].clone();
-        assert!(after.terminated && after.settled);
-        assert_eq!(*commands.lock().unwrap(), ["close"]);
-        assert!(e.mission_sessions("m1").is_empty());
-        // A Writer's invocation has an owned tree and ends only through its proof.
-        assert_eq!(e.finish_role("unknown"), Err("reason.budget.identity".into()));
+        assert!(!after.terminated && !after.settled);
+        assert!(commands.lock().unwrap().is_empty());
+        assert_eq!(e.mission_sessions("m1").len(), 1);
+        assert_eq!(e.finish_role("unknown").await, Err("reason.project.processTreeUnproven".into()));
+        // What a finished turn reports afterwards is only excused when it is the clean exit or the engine closing it.
+        let key = crate::project::policy::Blocker::Restrictions.key();
+        let fatal = |m: &str| EngineEvent::Error { message: m.into(), fatal: true };
+        assert_eq!(e.mission_event(&j, "i1", "w1", &mut text, fatal(key)), Err(key.into()));
+        assert_eq!(
+            e.mission_event(&j, "i1", "w1", &mut text, fatal("Codex stopped (exit 1). boom")),
+            Err("error.project.invocation".into())
+        );
+        assert_eq!(e.mission_event(&j, "i1", "w1", &mut text, fatal("some other fatal error")), Err("error.project.invocation".into()));
+        assert_eq!(e.mission_event(&j, "i1", "w1", &mut text, EngineEvent::Error { message: "x".into(), fatal: false }), Ok(()));
+        e.with(|c| c.worker_closing.insert("i1".into()));
+        assert_eq!(e.mission_event(&j, "i1", "w1", &mut text, fatal("Codex stopped (exit 1). killed")), Ok(()));
+        assert_eq!(e.mission_event(&j, "i1", "w1", &mut text, fatal(key)), Err(key.into()), "shutdown never excuses a policy failure");
         e.shutdown();
     }
 
