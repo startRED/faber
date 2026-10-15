@@ -966,3 +966,19 @@ async fn r124_a_full_access_thread_hands_a_residual_approval_to_the_engine_and_n
         assert!(events.iter().any(|e| matches!(e, EngineEvent::Permission { .. })), "the request reaches the engine, which decides");
     }
 }
+
+#[test]
+fn codex_work_log_items_from_a_recorded_turn_keep_their_raw_shape_for_the_screen_to_tidy() {
+    let mut state = CodexTurnState::default();
+    let events: Vec<EngineEvent> = fixture("codex", "worklog").iter().flat_map(|e| parse_codex_notification(&e.msg, &mut state)).collect();
+    let thinking: String = events.iter().filter_map(|e| if let EngineEvent::Thinking(t) = e { Some(t.as_str()) } else { None }).collect();
+    assert_eq!(thinking, "**Minimizing output verbosity****Assessing time budget and test approach****Preparing for final retry**");
+    let tool = events.iter().find_map(|e| if let EngineEvent::Tool { name, input, .. } = e { Some((name, input)) } else { None });
+    let (name, input) = tool.expect("the command item becomes a tool step");
+    assert_eq!(name, "commandExecution");
+    let command = input.as_str().expect("a command is a string");
+    assert!(command.starts_with("\"C:\\\\WINDOWS\\\\System32\\\\WindowsPowerShell"), "{command}");
+    assert!(command.contains("Set-Content -LiteralPath 'a.txt'"), "{command}");
+    let text: String = events.iter().filter_map(|e| if let EngineEvent::Text(t) = e { Some(t.as_str()) } else { None }).collect();
+    assert_eq!(text.matches("The window control did not connect.").count(), 2, "the engine keeps both; the screen shows it once");
+}

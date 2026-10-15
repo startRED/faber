@@ -132,3 +132,41 @@ check('thread: the last answer and its actions leave at least 48px above either 
     }
   }
 });
+
+check('thread: a Codex work log reads cleanly: titles on their own lines, tidy command rows, the status sentence once', () => {
+  const root = document.createElement('div');
+  document.body.append(root);
+  const status = 'The window control did not connect.';
+  const exe = '"C:\\\\WINDOWS\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe"';
+  const inner = "Set-Content -LiteralPath 'a.txt' -Value 'one' -NoNewline";
+  const [message, setMessage] = createSignal<Message>({
+    id: 'worklog', role: 'assistant', at: 0, status: 'streaming', text: `${status}\n\n${status}\n\nI checked the files instead.`,
+    textBreaks: [status.length + 2], activityEnd: status.length + 2,
+    thinking: '**Minimizing output verbosity****Assessing time budget and test approach****Preparing for final retry**',
+    tools: [{ id: 'c1', name: 'commandExecution', input: `${exe} -Command "${inner}"`, ok: true }],
+  });
+  const dispose = render(() => createComponent(Thread, {
+    get messages() { return [message()]; }, from: 0, conversationId: 'worklog', options: [], onBranch: () => {},
+  }), root);
+  try {
+    const group = root.querySelector<HTMLDetailsElement>('.activity')!;
+    group.open = true;
+    const shown = () => root.textContent ?? '';
+    ok(!shown().includes('**'), 'no raw bold markers');
+    ok(!shown().includes('commandExecution'), 'no internal kind name');
+    ok(!shown().includes('\\\\'), 'no doubled backslashes');
+    const titles = [...group.querySelectorAll('.activity-thinking p')].map((p) => p.textContent);
+    equal(titles.join('|'), 'Minimizing output verbosity|Assessing time budget and test approach|Preparing for final retry');
+    const row = group.querySelector<HTMLElement>('.tools > span')!;
+    equal(row.querySelector('b')!.textContent, 'PowerShell');
+    equal(row.querySelector('i')!.textContent, inner);
+    equal(row.title, inner, 'the full command is the tooltip');
+    equal(shown().split(status).length - 1, 1, 'the status sentence shows once while streaming');
+    equal(root.querySelector('.activity-latest'), null, 'no status line under a visible answer');
+    setMessage({ ...message(), status: 'done' });
+    equal((root.textContent ?? '').split(status).length - 1, 1, 'and once when done');
+  } finally {
+    dispose();
+    root.remove();
+  }
+});
