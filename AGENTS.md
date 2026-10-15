@@ -25,8 +25,9 @@ with the user's own subscriptions. Read [docs/roadmap.md](docs/roadmap.md) befor
   reason and a measurement ([docs/roadmap.md](docs/roadmap.md#architecture)).
 - Telemetry stays off by default.
 - One commit per coherent change, made and pushed as soon as the change is proven, without waiting for other parts.
-  After pushing, fast-forward `main` to the newest `phase-1-base` commit whose CI is green (never force, never a red
-  commit), so `main` moves once per finished part (R126, R127).
+  Keep commits small and frequent: every proven step goes to `phase-1-base` at once, never batched into one big
+  commit. CI fast-forwards `main` to each green `phase-1-base` commit by itself (never force, never a red commit), so
+  `main` moves after every proven step (R126, R127, R131). Never leave proven work unpushed.
 
 ## Stack
 
