@@ -126,6 +126,9 @@ export const es: Messages = {
   'ask.always': 'Permitir siempre en esta conversación',
   'ask.deny': 'Denegar',
   'ask.moreWaiting': { one: '1 más en espera', other: '{n} más en espera' },
+  // Handwritten wording; native-speaker review pending (English is the source).
+  'ask.parked': 'Retenido: no había nadie para responder',
+  'ask.parkedHint': 'No se hizo. Hazlo tú, o cambia en Ajustes a "Preguntar antes de ejecutar comandos" y pídelo de nuevo.',
   'answer.label': 'Respuesta',
   'answer.thinking': 'Razonamiento',
   'activity.working': 'En curso · {steps} · {commands}',
@@ -143,6 +146,8 @@ export const es: Messages = {
   'nudge.noCheck': 'El código cambió, pero nada lo comprobó. Repite este mensaje con {to}.',
   'answer.cost': '{cost} US$ a precio de API',
   'answer.tokens': '{input} mil de entrada · {output} de salida',
+  // Handwritten wording; native-speaker review pending (English is the source).
+  'answer.cacheWarm': 'caché caliente hasta las {time}',
   'files.label': 'Archivos',
   'files.save': 'Guardar…',
   'files.show': 'Mostrar',

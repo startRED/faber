@@ -22,6 +22,12 @@ export interface Permission {
   tool: string;
   input: unknown;
 }
+/** A request the CLI denied for want of anyone to answer it. */
+export interface Parked {
+  toolUseId: string;
+  tool: string;
+  input: unknown;
+}
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
@@ -47,6 +53,10 @@ export interface Message {
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
   cacheWrite1hTokens?: number;
+  /** When the prompt cache of this reply goes cold, in milliseconds. Claude only; absent when unknown. */
+  cacheWarmUntil?: number;
+  /** Requests the CLI denied in this reply because nobody could answer them; they were not done. */
+  parked?: Parked[];
   incomplete?: boolean;
   pace?: { kind: 'step' | 'low'; vendor: Vendor };
   waitUntil?: number;
@@ -180,6 +190,7 @@ export interface RunningItem {
   /** The `at` of the turn's reply message, in milliseconds. */
   since: number;
   permissions: Permission[];
+  parked?: Parked[];
   waitUntil?: number;
 }
 /** The running list in the engine's order, with a revision that grows by one with every list the engine sends. */

@@ -1,6 +1,6 @@
 import { createSignal, For, onCleanup, Show } from 'solid-js';
 import type { Project, RunningItem } from './api.ts';
-import { Asks } from './Ask.tsx';
+import { Asks, Parkeds } from './Ask.tsx';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 import { Peek } from './Mark.tsx';
@@ -89,6 +89,9 @@ export function Running(props: {
                         </button>
                         <Show when={item.permissions.length > 0}>
                           <Asks conversationId={item.conversationId} turnId={item.turnId} permissions={item.permissions} />
+                        </Show>
+                        <Show when={item.parked?.length}>
+                          <Parkeds parked={item.parked!} />
                         </Show>
                       </li>
                     )}

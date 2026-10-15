@@ -1,6 +1,6 @@
 import type { QuotaReading, RunningItem } from '../../ui/api.ts';
 import { widthClass } from '../../ui/layout.ts';
-import { answerOutcome, askKey, blocksOf, createAutoOpen, createRunningStore, elapsed, newest, openPlace, pickUp, placeOfRunning, QUIET_MS, waitingKeys } from '../../ui/running.ts';
+import { answerOutcome, askKey, blocksOf, createAutoOpen, createRunningStore, elapsed, newest, openPlace, pickUp, placeOfRunning, QUIET_MS, waitingKeys, warmLeft } from '../../ui/running.ts';
 import { greetingParts } from '../../ui/greeting.ts';
 import { groupChats, seedQuotas, showsChats, tailOf, tightest, withQuota } from '../../ui/sidebar.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
@@ -170,4 +170,19 @@ check('new conversation: the greeting sets the name apart, and without one the l
   deepEqual(greetingParts('Par où commençons-nous, Léa ?', 'Léa'), ['Par où commençons-nous,', 'Léa ?']);
   deepEqual(greetingParts('Por onde começamos?'), ['Por onde', 'começamos?']);
   deepEqual(greetingParts('Hello'), ['Hello', '']);
+});
+
+check('cache warmth: shown while the lifetime lasts, hidden when unknown or cold', () => {
+  equal(warmLeft(undefined, 1_000), undefined, 'unknown (Codex, an older CLI, a turn that wrote nothing)');
+  equal(warmLeft(61_000, 1_000), 60_000);
+  equal(warmLeft(1_000, 1_000), undefined, 'cold at the very moment');
+  equal(warmLeft(500, 1_000), undefined, 'expired');
+  equal(warmLeft(1_000 + 3_600_000, 1_000 + 3_599_999), 1);
+});
+
+check('running: a parked request needs the person and counts like a question', () => {
+  const parked = [{ toolUseId: 'toolu_1', tool: 'Bash', input: { command: 'git push' } }];
+  const row = item({ state: 'needsYou', parked });
+  equal(blocksOf([row])[0]!.needs, 1);
+  equal(row.permissions.length, 0, 'there is no card to answer');
 });
