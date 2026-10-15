@@ -25,6 +25,12 @@ const BRIGHT = 1.15;
 /** Words keep the scene this far off at the least, and it is dimmed up to this far around them. */
 const [CLEAR, CALM] = [48, 240];
 
+// The entrance, in ms: Curioso rises and leans toward the hole (styles.css, "wake"), a spark leaves his eyes and lands in
+// the shadow, and the scene lights up from there outward at SPEED px/ms, each character scrambling in the accent before
+// it settles. It plays once, when a new session opens in a shown and focused window with full motion.
+const [SPARK_AT, SPARK_MS, SPEED, JITTER, SCRAMBLE, INTRO_STEP] = [700, 650, 1.4, 120, 240, 33];
+const NOISE = '#@%*+=-:/|\\';
+
 // Tones, in the order of --hole-colors: star, dust, five steps of disk from hot to ember, glow, arc, planet rim.
 export const STAR = 0;
 export const DUST = 1;
@@ -148,6 +154,9 @@ export function rippleTint(dist: number, age: number): number {
   return band <= 0 ? 0 : band * (1 - age / RIPPLE_MS) ** 1.5;
 }
 
+/** When the cell `dist` px from the shadow's centre lights up, in ms after the entrance starts. */
+export const bornAt = (dist: number, i: number) => SPARK_AT + SPARK_MS + dist / SPEED + hash(i + 51) * JITTER;
+
 /** Whether the scene animates: the look has it, motion is full, and the window is shown and focused. */
 export const holeRuns = (s: { on: boolean; motion: string; hidden: boolean; focused: boolean }) => s.on && s.motion === 'full' && !s.hidden && s.focused;
 
@@ -176,6 +185,13 @@ export function Hole(props: { avoid: () => Element[] }) {
   let seed = 11;
   const random = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   const cell: Cell = { d: 0, tone: STAR, dir: NONE };
+  // The entrance: when it started, when each cell lights up, the lit cells in that order, the spark's trail.
+  let [introAt, from, last, decided, introTimer] = [0, 0, 0, false, 0];
+  let born: Float32Array | null = null;
+  let order: number[] = [];
+  let eye = { x: 0, y: 0 };
+  let trail = new Map<number, number>();
+  const [intro, setIntro] = createSignal(false);
   const [on, setOn] = createSignal(false);
   const live = () => holeRuns({ on: on(), motion: motion(), hidden: windowHidden(), focused: windowFocused() });
   const clock = () => performance.now() / 1000;
@@ -231,17 +247,26 @@ export function Hole(props: { avoid: () => Element[] }) {
     ctx.clearRect(x, y, CELL, CELL);
     const d = light[i]!;
     let ch = glyph[i]!;
-    if (d >= 0.05) {
+    // During the entrance a cell stays dark until its moment, then scrambles in the accent while it fades into its own glyph.
+    const age = born ? now - introAt - born[i]! : Infinity;
+    if (d >= 0.05 && age >= 0) {
       const flicker = tone[i] === STAR ? 0.55 + 0.45 * hash(i + Math.floor(now / TWINKLE)) : 1;
       const base = tone[i]! >= DISK && tone[i] !== GLOW ? 0.15 + 0.47 * Math.sqrt(d) : 0.12 + 0.78 * d;
-      ctx.globalAlpha = Math.min(1, BRIGHT * base) * flicker;
+      const settled = Math.min(1, age / SCRAMBLE);
+      if (settled < 1) {
+        ctx.globalAlpha = (1 - settled) * Math.min(1, 0.45 + d);
+        ctx.fillStyle = accent;
+        ctx.fillText(NOISE[Math.floor(random() * NOISE.length)]!, x + CELL / 2, y + CELL / 2);
+      }
+      ctx.globalAlpha = Math.min(1, BRIGHT * base) * flicker * settled;
       ctx.fillStyle = colors[tone[i]!] ?? '';
       ctx.fillText(ch, x + CELL / 2, y + CELL / 2);
     }
     const k = tint[i]!;
     if (k > 0.02) {
-      if (ch === ' ') ch = RAMP[2 + Math.floor(k * 7)]!;
-      ctx.globalAlpha = Math.min(1, k) * clear[i]!;
+      if (ch === ' ' || age < 0) ch = k > 0.93 ? '*' : RAMP[2 + Math.floor(k * 7)]!;
+      // The spark may cross the ledge Curioso stands on; a ripple keeps off the words.
+      ctx.globalAlpha = Math.min(1, k) * (trail.has(i) ? 1 : clear[i]!);
       ctx.fillStyle = accent;
       ctx.fillText(ch, x + CELL / 2, y + CELL / 2);
     }
@@ -270,13 +295,24 @@ export function Hole(props: { avoid: () => Element[] }) {
     glyph = Array.from({ length: n }, () => ' ');
     // Lines of text count by their glyphs, not their box, which may run the full column; the mark and the composer count whole.
     const range = document.createRange();
-    const words: Box[] = props.avoid().map((e) => {
+    const els = props.avoid();
+    const words: Box[] = els.map((e) => {
       if (!e.matches('.peek, .composer')) range.selectNodeContents(e);
       const r = e.matches('.peek, .composer') ? e.getBoundingClientRect() : range.getBoundingClientRect();
       return { l: r.left - box.left, t: r.top - box.top, r: r.right - box.left, b: r.bottom - box.top };
     });
     // The words that set the frame: everything but the composer at the bottom.
     place = frame(w, h, Math.max(0, ...words.filter((b) => b.t < 0.7 * h).map((b) => b.r)));
+    // Curioso's eyes, where the spark of the entrance leaves from: 38 px into the drawing, 27 px down.
+    const mark = words[els.findIndex((e) => e.matches('.peek'))];
+    eye = mark ? { x: mark.l + 38, y: mark.t + 27 } : { x: place.cx, y: place.cy };
+    if (!decided) {
+      decided = true;
+      if (live()) [introAt, last] = [performance.now(), 0];
+      setIntro(live());
+    }
+    born = intro() ? new Float32Array(n) : null;
+    for (let i = 0; born && i < n; i++) born[i] = bornAt(Math.hypot((i % cols) * CELL + CELL / 2 - place.cx, Math.floor(i / cols) * CELL + CELL / 2 - place.cy), i);
     clear = new Float32Array(n);
     calm = new Float32Array(n);
     for (let i = 0; i < n; i++) {
@@ -307,6 +343,71 @@ export function Hole(props: { avoid: () => Element[] }) {
     const now = performance.now();
     ctx.clearRect(0, 0, w, h);
     for (let i = 0; i < n; i++) paint(i, now);
+    if (born) {
+      const at = born;
+      order = [];
+      for (let i = 0; i < n; i++) if (light[i]! >= 0.05) order.push(i);
+      order.sort((a, b) => at[a]! - at[b]!);
+      from = 0;
+      if (!introTimer) introTimer = window.setTimeout(play, INTRO_STEP);
+    }
+  };
+
+  // One frame of the entrance, about 30 a second: the spark and its fading trail on a curve from Curioso's eyes to the
+  // shadow, then every cell that is lighting up or has just settled.
+  const play = () => {
+    introTimer = 0;
+    if (!born) return;
+    const now = performance.now();
+    const since = now - introAt;
+    const s = (since - SPARK_AT) / SPARK_MS;
+    const next = new Map<number, number>();
+    if (s > 0 && s < 1.4) {
+      const [ex, ey, cx, cy] = [eye.x, eye.y, place.cx, place.cy];
+      const [mx, my] = [(ex + cx) / 2, Math.max(CELL, Math.min(ey, cy) - 0.3 * Math.hypot(cx - ex, cy - ey))];
+      for (let p = 0; p <= Math.min(1, s); p += 0.005) {
+        const k = 1 - (s - p) / 0.35;
+        if (k <= 0) continue;
+        const q = 1 - p;
+        const [x, y] = [q * q * ex + 2 * q * p * mx + p * p * cx, q * q * ey + 2 * q * p * my + p * p * cy];
+        const i = Math.floor(y / CELL) * cols + Math.floor(x / CELL);
+        if (x >= 0 && x < w && i >= 0 && i < light.length) next.set(i, Math.max(next.get(i) ?? 0, k));
+        // The head glows into the cells around it.
+        if (k > 0.97) for (const j of [i - 1, i + 1, i - cols, i + cols]) if (j >= 0 && j < light.length) next.set(j, Math.max(next.get(j) ?? 0, 0.55));
+      }
+    }
+    const old = trail;
+    trail = next;
+    for (const i of old.keys())
+      if (!next.has(i)) {
+        tint[i] = 0;
+        paint(i, now);
+      }
+    for (const [i, k] of next) {
+      tint[i] = k;
+      paint(i, now);
+    }
+    const at = born;
+    while (from < order.length && at[order[from]!]! + SCRAMBLE < last) from++;
+    for (let j = from; j < order.length && at[order[j]!]! <= since; j++) paint(order[j]!, now);
+    last = since;
+    if (s < 1.4 || from < order.length) introTimer = window.setTimeout(() => requestAnimationFrame(play), INTRO_STEP);
+    else finish();
+  };
+
+  /** The entrance ends, or is cut short when the window loses focus or hides: everything shows as it is. */
+  const finish = () => {
+    clearTimeout(introTimer);
+    introTimer = 0;
+    if (!born) return;
+    [born, order] = [null, []];
+    for (const i of trail.keys()) tint[i] = 0;
+    trail = new Map();
+    setIntro(false);
+    if (!ctx) return;
+    const now = performance.now();
+    ctx.clearRect(0, 0, w, h);
+    for (let i = 0; i < cols * rows; i++) paint(i, now);
   };
 
   const step = () => {
@@ -361,6 +462,7 @@ export function Hole(props: { avoid: () => Element[] }) {
   };
 
   const stop = () => {
+    finish();
     clearInterval(tick);
     clearTimeout(rippling);
     cancelAnimationFrame(raf);
@@ -393,7 +495,7 @@ export function Hole(props: { avoid: () => Element[] }) {
 
   return (
     <div class="ambient" aria-hidden="true">
-      <canvas ref={(el) => (canvas = el)} class="amb-hole" data-live={live() ? 'on' : 'off'} />
+      <canvas ref={(el) => (canvas = el)} class="amb-hole" data-live={live() ? 'on' : 'off'} data-intro={intro() ? 'on' : undefined} />
     </div>
   );
 }

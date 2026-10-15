@@ -131,6 +131,10 @@ own inks.
   Ten times a second it works out again only the cells the hole can reach and repaints those that changed; stars
   twinkle every 700 ms and now and then one shoots across. A click on an empty spot sends a ring of the accent for
   1.3 s. It stops when the window is hidden or unfocused; reduced or no motion draws one still frame and no ripple.
+  It opens with an entrance of about 2.8 s, once per new session, only with full motion in a shown, focused window:
+  Curioso rises from behind his ledge and leans toward the hole, a spark leaves his eyes and flies a curve into the
+  shadow, and the scene lights up from there outward, each character scrambling in the accent for 240 ms before it
+  settles. Losing focus or hiding the window ends it at once.
 - The texture switch controls grain and the dot grid. The glow switch controls the focus light and the amber light,
   which exist only in Dark Room and Cobalt; the other themes use borders.
 
@@ -157,7 +161,7 @@ own inks.
 - **Inside the app** the mark and the lockup always use the ink colour, never lime, because lime sits too close to
   amber for the colour validator. The titlebar shows the lockup in every theme.
 - **Empty states and the tutorial** use Curioso, static, for example peeking into an empty screen. The new conversation
-  screen has none. Curioso does not animate yet. He is 64 px, in the third ink, peeking over a hairline: only his top 44 px
+  screen has none. He moves only in the entrance of a new project session in Dark Room (below). He is 64 px, in the third ink, peeking over a hairline: only his top 44 px
   show, eyes included (`Peek` in `ui/Mark.tsx`). Today he is in the two Projects empty states.
 - **The wordmark** is "Faber" in Rubik Bold, converted to outlines. No font file ships.
 

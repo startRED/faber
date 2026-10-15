@@ -1,5 +1,5 @@
 import themes from '../../src-tauri/src/themes.json';
-import { ARC, type Cell, DISK, frame, hole, holeRuns, RIM, rippleTint, STAR } from '../../ui/Hole.tsx';
+import { ARC, bornAt, type Cell, DISK, frame, hole, holeRuns, RIM, rippleTint, STAR } from '../../ui/Hole.tsx';
 import { check, equal, ok } from './check.ts';
 
 const [W, H] = [1600, 1000];
@@ -61,4 +61,10 @@ check('hole: only Dark Room shows it, and it has a colour for each of its ten to
   equal(themes.css.base['hole-colors'].split(' ').length, 10);
   for (const [name, vars] of Object.entries({ ...themes.css.themes, ...themes.css.presets }))
     if (name !== 'sala') equal((vars as Record<string, string>)['amb-hole'], 'none', `${name} should not show the hole`);
+});
+
+check('hole: the entrance lights the scene from the shadow outward, after the spark, within three seconds', () => {
+  ok(bornAt(0, 1) >= 1300, 'nothing lights before the spark lands');
+  ok(bornAt(400, 1) < bornAt(900, 1), 'farther cells light later');
+  ok(bornAt(2200, 7) < 3000, 'a cell across a wide window lights within three seconds');
 });

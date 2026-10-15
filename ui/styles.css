@@ -140,6 +140,17 @@ input, textarea { caret-color: var(--accent); }
 /* Curioso peeks over a ledge: only the top 44 of his 64 px show, with both eyes, above a hairline. */
 .peek { width: min(100%, 44ch); height: 45px; overflow: hidden; color: var(--ink-3); border-bottom: 1px solid var(--line-2); }
 .peek svg { display: block; margin-left: -2px; } /* the drawing has 2 px of room on its left; his edge lines up with the heading */
+/* The entrance of a new project session (ui/Hole.tsx): he rises from behind the ledge and leans toward the hole as the
+   spark leaves his eyes. It plays only while the canvas marks the entrance, which needs full motion. */
+.work:has(.amb-hole[data-intro]) .peek svg { transform-origin: 50% 100%; animation: wake 1100ms var(--ease) both; }
+@keyframes wake {
+  0% { transform: translateY(46px); }
+  38% { transform: translateY(-4px); }
+  50% { transform: translateY(0); }
+  64% { transform: rotate(8deg) translateX(3px); }
+  82% { transform: rotate(-2deg); }
+  100% { transform: none; }
+}
 
 /* The column over the stage must not cover the greeting's composer: the greeting makes room for it on its left, at once:
    padding is layout, so it is never animated (the column itself slides in over it). */
@@ -642,7 +653,7 @@ html.resizing :is(.shell, .main, .side, .fold, .tour-ring) { transition: none !i
   select option:is(:hover, :focus-visible, :checked) { background: var(--s3); color: var(--ink); }
   @starting-style { select:open::picker(select) { opacity: 0; transform: translateY(var(--motion-rise)) scale(var(--motion-scale)); } }
 }
-:is([data-motion='reduced'], [data-motion='none']) :is(.cursor, .live, .live::after, .run-dot, .loom-row, .loom-shuttle, .flow-trace) { animation: none !important; }
+:is([data-motion='reduced'], [data-motion='none']) :is(.cursor, .live, .live::after, .run-dot, .loom-row, .loom-shuttle, .flow-trace, .peek svg) { animation: none !important; }
 :is([data-motion='reduced'], [data-motion='none']) :is(.loom-shuttle, .flow-trace) { opacity: 0; }
 [data-motion='reduced'] { --arrive-y: 0px; }
 /* Reduced and none are instant, including native pickers and theme snapshots. */

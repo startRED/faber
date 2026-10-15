@@ -775,10 +775,6 @@ fn black_hole_in_a_project(ctx: &mut Ctx) -> Result {
     let launch = claude_chat(ctx);
     let mut app = ctx.launch(launch)?;
     system_motion(&mut app.page, false)?;
-    let demo = css(".prow .item").has_text("Demo");
-    app.page.wait_visible(&demo)?;
-    app.page.click(&demo)?;
-    app.page.wait_visible(&css(".empty h1").has_text("Demo"))?;
     let live = "document.querySelector('canvas.amb-hole')?.dataset.live";
     let hide = |page: &mut Page, on: bool| {
         page.eval(&format!(
@@ -788,7 +784,21 @@ fn black_hole_in_a_project(ctx: &mut Ctx) -> Result {
     };
     hide(&mut app.page, false)?;
     focus(&mut app.page, true)?;
+    let demo = css(".prow .item").has_text("Demo");
+    app.page.wait_visible(&demo)?;
+    app.page.click(&demo)?;
+    app.page.wait_visible(&css(".empty h1").has_text("Demo"))?;
     app.page.wait_for("the black hole to run in a shown, focused window", &format!("{live} === 'on'"))?;
+    // The entrance plays once: Curioso wakes, the spark flies, the scene lights up from the hole, and then it ends.
+    let intro = "document.querySelector('canvas.amb-hole')?.dataset.intro";
+    same(app.page.eval(intro)?.as_str(), Some("on"), "a new session opens with the entrance")?;
+    let wakes = app.page.eval("getComputedStyle(document.querySelector('.peek svg')).animationName")?;
+    same(wakes.as_str(), Some("wake"), "Curioso wakes during the entrance")?;
+    std::thread::sleep(std::time::Duration::from_millis(950));
+    ctx.shot(&mut app, "project-hole-spark")?;
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    ctx.shot(&mut app, "project-hole-entrance")?;
+    app.page.wait_for("the entrance to end", &format!("{intro} === undefined"))?;
     // Something is drawn: the canvas has lit pixels near the top of the hole.
     let lit = "(() => { const c = document.querySelector('canvas.amb-hole'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 20) n++; return n; })()";
     let pixels = app.page.eval(lit)?.as_u64().unwrap_or(0);
