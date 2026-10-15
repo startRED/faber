@@ -82,7 +82,37 @@ impl Engine {
     }
 }
 
+pub(super) fn session_lost(message: &str) -> bool {
+    let m = message.to_ascii_lowercase();
+    // Codex: `thread/resume` of a thread with no rollout file. Claude Code: `--resume` of a session it never saved.
+    m.contains("no rollout found") || m.contains("no conversation found")
+}
+
 impl Core {
+    /// Whether this CLI already answered anything in the conversation, other than the turn now running: then a lost session
+    /// loses real context, and that must be shown, never papered over.
+    pub(super) fn said_on(&self, conv: &str, vendor: Vendor, turn: Option<&str>) -> bool {
+        self.convs.get(conv).is_some_and(|c| {
+            c.messages.iter().any(|m| {
+                m.role == Role::Assistant && m.vendor == Some(vendor) && m.status != Some(Status::Error) && Some(m.id.as_str()) != turn
+            })
+        })
+    }
+
+    /// Runs the turn again on a new session of the same CLI with the same settings (the lost one is already forgotten). The
+    /// messages before this turn go along as text when other assistants spoke in the conversation.
+    pub(super) fn rerun_fresh(&mut self, conv: &str, turn: Option<&str>) -> bool {
+        let Some(t) = self.transfers.get(conv).filter(|t| Some(t.reply.as_str()) == turn).cloned() else { return false };
+        let Some(c) = self.convs.get(conv) else { return false };
+        let at = c.messages.iter().position(|m| m.id == t.reply).unwrap_or(0);
+        let history = &c.messages[..at.saturating_sub(1)];
+        let text = if history.is_empty() { t.text.clone() } else { with_history(history, &t.text) };
+        if let Some(l) = self.live.remove(conv) {
+            l.session.close();
+        }
+        self.dispatch(conv, &t.reply, &t.pick, text, t.images, t.by_hand).is_ok()
+    }
+
     pub(super) fn restore_recovery(&mut self, c: &mut Conversation) {
         let Some(m) = c.messages.last() else { return };
         if m.status != Some(Status::Error) || !matches!(m.error.as_deref(), Some("error.quotaOut" | "error.quotaWait")) {
@@ -396,7 +426,14 @@ impl Core {
 
 #[cfg(test)]
 mod tests {
-    use super::plan_limit;
+    use super::{plan_limit, session_lost};
+    #[test]
+    fn a_lost_session_is_told_from_other_failures() {
+        assert!(session_lost("Codex thread failed: no rollout found for thread id 01a1"));
+        assert!(session_lost("Claude Code stopped (exit 1). No conversation found with session ID: abc"));
+        assert!(!session_lost("Codex thread failed: unauthorized"));
+    }
+
     #[test]
     fn only_plan_limits_trigger_a_handover() {
         assert!(plan_limit("You've hit your limit. Try again tomorrow."));

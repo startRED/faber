@@ -160,6 +160,9 @@ struct Live {
     served: bool,
     /// Queued messages handed to the running turn (Codex) and not yet taken in, oldest first.
     steering: Vec<String>,
+    /// The session id the CLI reported at start, kept out of the conversation until a turn really ran on it: a CLI saves a
+    /// session only once it has had a turn, so an id from a warm-up that never ran must not be resumed by a later launch.
+    unsaved_session: Option<String>,
 }
 
 /// Messages waiting behind a running turn. Each may carry images, which stay in memory and go out with every queue event.
@@ -1055,6 +1058,20 @@ impl Core {
         }
         let vendor = entry.vendor;
         let turn_id = entry.turn.clone();
+        // A turn ran on the session: from here on it is the conversation's session for this vendor.
+        if !matches!(event, EngineEvent::Started { .. } | EngineEvent::Quota { .. } | EngineEvent::Signals(_) | EngineEvent::Error { .. })
+            && let Some(id) = self.live.get_mut(conv).and_then(|l| l.unsaved_session.take())
+            && let Some(c) = self.convs.get_mut(conv)
+        {
+            c.sessions.insert(vendor, id);
+            if vendor == Vendor::Codex {
+                c.command_gate = self.live.get(conv).is_some_and(|l| l.permissions == Permissions::Isolated);
+            }
+            // a draft is saved only once something is sent
+            if !c.messages.is_empty() {
+                self.save(conv);
+            }
+        }
         match event {
             EngineEvent::Started { session_id, model } => {
                 // A CLI started while the user typed reports its model before any answer exists; later answers use it too.
@@ -1064,14 +1081,9 @@ impl Core {
                 if let Some(m) = self.turn(conv) {
                     m.model = Some(model);
                 }
-                let Some(c) = self.convs.get_mut(conv) else { return };
-                c.sessions.insert(vendor, session_id);
-                if vendor == Vendor::Codex {
-                    c.command_gate = self.live.get(conv).is_some_and(|l| l.permissions == Permissions::Isolated);
-                }
-                // a draft is saved only once something is sent
-                if !c.messages.is_empty() {
-                    self.save(conv);
+                // Not saved yet: the id becomes resumable with the first sign that a turn ran on it (above).
+                if let Some(l) = self.live.get_mut(conv) {
+                    l.unsaved_session = Some(session_id);
                 }
                 // The turn's reply now names its model: the screen hears it now, not with the first word.
                 self.refresh_running();
@@ -1258,6 +1270,19 @@ impl Core {
                 return self.finish(conv, turn_id);
             }
             EngineEvent::Error { message, fatal } => {
+                // The CLI no longer has the session this launch resumed (a warm-up that never ran a turn, or a cleaned-up history).
+                let mut message = message;
+                if fatal && recovery::session_lost(&message) {
+                    if let Some(c) = self.convs.get_mut(conv) {
+                        c.sessions.remove(&vendor);
+                    }
+                    // Nothing was ever said on that session, so a new one with the same settings runs this turn once.
+                    if !self.said_on(conv, vendor, turn_id.as_deref()) && self.rerun_fresh(conv, turn_id.as_deref()) {
+                        return;
+                    }
+                    // Turns did run there: say so, and let the next message start a session that is given the visible history.
+                    message = "error.sessionLost".into();
+                }
                 // A CLI that refuses a flag Faber passed (it was changed under a running Faber): forget the newer flags at once, so the
                 // next launch is the old one, and read the new help.
                 if fatal && recovery::flag_rejected(&message) && self.claude_flags != Default::default() {
@@ -1910,6 +1935,7 @@ impl Core {
                 started: 0.0,
                 served: false,
                 steering: vec![],
+                unsaved_session: None,
             },
         );
         // ponytail: count-based limit on idle Claude processes; a RAM budget across all CLIs comes with parallel workers.

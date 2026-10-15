@@ -184,6 +184,7 @@ export const en = {
   'error.settings.saveFailed': 'Faber could not save your settings. Nothing was changed.',
   'error.settings.autostartFailed': 'Faber could not change startup at sign-in. Your settings were not changed.',
   'error.driverStopped': 'The CLI session stopped unexpectedly. Try sending your message again.',
+  'error.sessionLost': 'The CLI no longer has this conversation’s earlier session. Send your message again: it starts a new session and is given the conversation so far.',
   'set.back': '← Back',
   'set.label': 'Settings',
   'set.general': 'General',
