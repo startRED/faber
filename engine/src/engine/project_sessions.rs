@@ -338,7 +338,12 @@ impl Engine {
                 }
                 if matches!(event, EngineEvent::Done { .. }) && runner.mission.state != crate::project::MissionState::Paused {
                     let output = std::mem::take(text);
-                    runner.receive(journal, task, &output).map_err(str::to_string)?;
+                    match runner.receive(journal, task, &output).map_err(str::to_string)? {
+                        crate::project::worker::Reply::Accepted(envelope) | crate::project::worker::Reply::Proposal(envelope) => {
+                            journal.record_reply(invocation, &envelope).map_err(|e| e.key().to_string())?;
+                        }
+                        _ => {}
+                    }
                 }
             }
             _ => {}

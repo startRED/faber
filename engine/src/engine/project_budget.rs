@@ -600,6 +600,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_accepted_turn_keeps_its_envelope_for_the_coordinator() {
+        let (dir, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let e = engine(dir.path());
+        let (j, mut r) = runner_fixture(&e, repo.path());
+        let mut brief = crate::project::Brief::new(
+            "w1",
+            1,
+            crate::project::Role::Research,
+            "Read",
+            &"1".repeat(40),
+            crate::project::ContractPin { id: "c1".into(), digest: "a".repeat(64) },
+        );
+        brief.grant_micros = Some(100_000);
+        brief.stop = "Done or blocked".into();
+        brief.scope = vec!["fixture".into()];
+        let pin = crate::project::worker::ModelPin {
+            vendor: Vendor::Codex,
+            model: "gpt-6.1-sol".into(),
+            effort: "medium".into(),
+            cli_version: "0.162.1".into(),
+        };
+        r.workers.insert("w1".into(), crate::project::worker::Worker::new(brief, pin, 3).unwrap());
+        r.save(&j).unwrap();
+        e.mission_budget(Change::Admit(request())).unwrap();
+        let mut intent = crate::project::Intent::new("i1", "m1", crate::project::IntentKind::Dispatch, 3, 1);
+        intent.task = Some("w1".into());
+        intent.expected.insert("invocation".into(), "i1".into());
+        j.record_intent(&intent).unwrap();
+        let done = || EngineEvent::Done {
+            ok: true,
+            reason: "completed".into(),
+            cost_total_usd: None,
+            input_tokens: 1000,
+            output_tokens: 100,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            cache_write_1h_tokens: 0,
+            incomplete: false,
+        };
+        let mut text = String::new();
+        e.mission_event(&j, "i1", "w1", &mut text, EngineEvent::Started { session_id: "s1".into(), model: "gpt-6.1-sol".into() }).unwrap();
+        let envelope = format!(
+            r#"{{"schema":{},"task":"w1","attempt":1,"base":"{}","contract":"{}","lease":0,"action":{{"read":{{"paths":["fixture/a.txt"],"callers":[]}}}}}}"#,
+            crate::project::wire::SCHEMA,
+            "1".repeat(40),
+            "a".repeat(64)
+        );
+        e.mission_event(&j, "i1", "w1", &mut text, EngineEvent::Text(envelope)).unwrap();
+        e.mission_event(&j, "i1", "w1", &mut text, done()).unwrap();
+        let kept = j.reply("i1").unwrap().expect("the accepted envelope is kept");
+        assert!(matches!(kept.action, crate::project::wire::Action::Read(ref read) if read.paths == ["fixture/a.txt"]));
+        // The same invocation cannot be recorded twice, and an unparsable turn leaves no record.
+        assert!(j.record_reply("i1", &kept).is_err());
+        assert!(j.reply("i2").unwrap().is_none());
+        e.shutdown();
+    }
+
+    #[tokio::test]
     async fn screen_dispatch_uses_t2_before_any_session_or_spend() {
         let (dir, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let e = engine(dir.path());

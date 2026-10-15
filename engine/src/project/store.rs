@@ -884,3 +884,33 @@ mod kit_path_tests {
         }
     }
 }
+
+/// The envelope a role's turn was accepted with, kept so the coordinator that acts on it (read, patch, proof,
+/// complete) can come back for it. Written once per invocation; the raw model text is never stored.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplyRecord {
+    pub schema: u32,
+    pub invocation: String,
+    pub envelope: super::wire::Envelope,
+}
+impl Record for ReplyRecord {
+    fn schema(&self) -> u32 {
+        self.schema
+    }
+}
+
+impl Journal {
+    /// Keeps the accepted envelope of one invocation. A second write for the same invocation is refused.
+    pub fn record_reply(&self, invocation: &str, envelope: &super::wire::Envelope) -> Result<(), JournalError> {
+        let path = self.named("replies", invocation)?;
+        if self.get::<ReplyRecord>(&path)?.is_some() {
+            return Err(JournalError::ReceiptExists);
+        }
+        self.put(&path, &ReplyRecord { schema: SCHEMA, invocation: invocation.into(), envelope: envelope.clone() })
+    }
+
+    pub fn reply(&self, invocation: &str) -> Result<Option<super::wire::Envelope>, JournalError> {
+        Ok(self.get::<ReplyRecord>(&self.named("replies", invocation)?)?.map(|r| r.envelope))
+    }
+}
