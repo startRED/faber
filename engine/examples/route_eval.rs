@@ -110,6 +110,7 @@ impl Router {
                     user_hooks: false,
                     instructions,
                     user_name: None,
+                    flags: Default::default(),
                     permissions: Permissions::Ask,
                 };
                 start_claude(

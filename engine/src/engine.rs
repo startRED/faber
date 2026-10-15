@@ -30,6 +30,7 @@ use uuid::Uuid;
 
 mod answer;
 mod auto;
+mod parked;
 mod quota_watch;
 mod recovery;
 mod usage_view;
@@ -253,6 +254,8 @@ struct Core {
     closing: bool,
     /// `/usage` turned out to ask a model: Claude's quota is then read from its own answers only.
     usage_command_spent: bool,
+    /// The newer flags the installed Claude Code takes; none until `detect_claude_flags` has read them.
+    claude_flags: crate::claude::ClaudeFlags,
     /// When a failed Codex read last counted against the plan check.
     codex_failed_at: f64,
     /// The PC's offset from UTC in seconds, as the screen reports it.
@@ -317,6 +320,7 @@ impl Engine {
                 watching: false,
                 closing: false,
                 usage_command_spent: false,
+                claude_flags: Default::default(),
                 codex_failed_at: f64::MIN,
                 utc_offset: 0,
                 offset_known: false,
@@ -394,6 +398,22 @@ impl Engine {
             c.emit_usage();
         });
     }
+    /// Reads once which newer flags the installed Claude Code lists in `--help` (`autocompact`, `permission-prompts`). Until it
+    /// answers, and if it never does, every Claude process starts as it did before those flags existed. The shell starts it once.
+    pub fn detect_claude_flags(&self) {
+        let Some((me, cli, spawn, cwd)) =
+            self.with(|c| Some((c.me.clone(), c.opts.clis.get(&Vendor::Claude)?.clone(), c.opts.spawn.clone(), c.opts.data_dir.clone())))
+        else {
+            return;
+        };
+        self.runtime.spawn(async move {
+            let Some(flags) = account::claude_flags(&cli, &spawn, &cwd, Duration::from_secs(20)).await else { return };
+            if let Some(core) = me.upgrade() {
+                core.lock().unwrap_or_else(|e| e.into_inner()).claude_flags = flags;
+            }
+        });
+    }
+
     /// Once the screen supplies its local offset: checks Claude's plan every quarter of an hour, and reads both quotas on the
     /// schedule in `cadence.rs` (at start, every few minutes, after a wake). The shell starts it once.
     pub fn watch_accounts(&self) {
@@ -1073,6 +1093,12 @@ impl Core {
                 }
                 return self.push(conv, turn_id.as_deref(), true);
             }
+            EngineEvent::CacheWarm { secs } => {
+                if let Some(m) = self.turn(conv) {
+                    m.cache_warm_until = Some(now().saturating_add(secs.saturating_mul(1000)));
+                }
+            }
+            EngineEvent::Parked { tool_use_id, tool, input } => self.park(conv, Parked { tool_use_id, tool, input }),
             EngineEvent::Injected { tag } => return self.taken_in(conv, tag),
             EngineEvent::SteerFailed { tag } => return self.steer_failed(conv, &tag),
             EngineEvent::Quota { window, used, resets_at } => return self.note_quota(vendor, &window, used, resets_at),
@@ -1768,7 +1794,17 @@ impl Core {
                 ClaudeOptions {
                     bin: cli.command.clone(),
                     cwd,
-                    launch: ClaudeLaunch { area, model, effort, resume, user_hooks, permissions, instructions: None, user_name },
+                    launch: ClaudeLaunch {
+                        area,
+                        model,
+                        effort,
+                        resume,
+                        user_hooks,
+                        permissions,
+                        instructions: None,
+                        user_name,
+                        flags: self.claude_flags,
+                    },
                     spawn,
                     sandbox: self.opts.clis.get(&Vendor::Codex).cloned(),
                 },
@@ -2144,11 +2180,14 @@ fn same_as_before(c: &Conversation, live: Option<&Live>) -> Option<Pick> {
     Some(Pick { vendor, model: last.model.clone(), effort, reason, pace: None })
 }
 
-/// The row of the running list for a conversation, if its latest reply is streaming or has unanswered permissions.
+/// The row of the running list for a conversation, if its latest reply is streaming, has unanswered permissions or has parked
+/// requests (denied for want of anyone to answer; they wait for the person until the next message, and count as "needs you").
+/// Cache warmth is not here: it is a quiet note on the reply itself.
 fn running_item(c: &Conversation) -> Option<RunningItem> {
     let reply = c.messages.last().filter(|m| m.role == Role::Assistant)?;
     let permissions = reply.permissions.clone().unwrap_or_default();
-    if reply.status != Some(Status::Streaming) && permissions.is_empty() {
+    let parked = reply.parked.clone().unwrap_or_default();
+    if reply.status != Some(Status::Streaming) && permissions.is_empty() && parked.is_empty() {
         return None;
     }
     Some(RunningItem {
@@ -2159,9 +2198,10 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
         project_id: c.project_id.clone(),
         vendor: reply.vendor,
         model: reply.model.clone(),
-        state: if permissions.is_empty() { RunState::Working } else { RunState::NeedsYou },
+        state: if permissions.is_empty() && parked.is_empty() { RunState::Working } else { RunState::NeedsYou },
         since: reply.at,
         permissions,
+        parked,
         wait_until: reply.wait_until.filter(|_| reply.status == Some(Status::Streaming)),
     })
 }

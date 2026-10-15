@@ -84,6 +84,16 @@ pub struct ToolUse {
     pub declined: bool,
 }
 
+/// A request the CLI denied because nobody could answer it (full access runs with no prompts): it was not done, and it waits
+/// here until the person says what to do. `tool_use_id` names it, with the turn.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Parked {
+    pub tool_use_id: String,
+    pub tool: String,
+    pub input: Value,
+}
+
 /// A permission request waiting for the user.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -153,6 +163,12 @@ pub struct Message {
     pub cache_write_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_write_1h_tokens: Option<u64>,
+    /// When the prompt cache this turn wrote goes cold, in milliseconds. Claude only: Codex names no lifetime.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_warm_until: Option<u64>,
+    /// Requests the CLI denied in this turn for want of anyone to answer them (see `Parked`), oldest first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parked: Option<Vec<Parked>>,
     /// True when the token numbers cover only part of the turn (sub-model work, or no usage was seen).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub incomplete: Option<bool>,
@@ -197,6 +213,8 @@ impl Message {
             cache_read_tokens: None,
             cache_write_tokens: None,
             cache_write_1h_tokens: None,
+            cache_warm_until: None,
+            parked: None,
             incomplete: None,
             pace: None,
             wait_until: None,
@@ -339,6 +357,9 @@ pub struct RunningItem {
     pub since: u64,
     /// The questions the user has not answered yet.
     pub permissions: Vec<Permission>,
+    /// Requests the CLI denied in the latest reply that wait for the person (empty when none).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub parked: Vec<Parked>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wait_until: Option<f64>,
 }

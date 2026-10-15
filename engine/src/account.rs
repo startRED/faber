@@ -81,6 +81,13 @@ pub async fn check(vendor: Vendor, cli: &Cli, spawn: &Spawner, cwd: &Path, timeo
     if vendor == Vendor::Claude { verdict(vendor, &out, code) } else { verdict(vendor, &format!("{out}\n{err}"), code) }
 }
 
+/// Which newer flags the installed Claude Code lists in `--help` (one short hidden run, output bounded). None when it did not
+/// answer or printed nothing: the caller then keeps passing none of them.
+pub async fn claude_flags(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> Option<crate::claude::ClaudeFlags> {
+    let ran = run_args(cli, vec!["--help".into()], spawn, cwd, timeout).await?;
+    (!ran.out.trim().is_empty()).then(|| crate::claude::ClaudeFlags::from_help(&ran.out))
+}
+
 /// What `claude auth status` says about the plan and how the login is billed; nothing else of its output is kept (the email
 /// and organisation in it are dropped unread). None when the command failed, timed out or returned invalid status data.
 pub async fn claude_account(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> Option<Signals> {

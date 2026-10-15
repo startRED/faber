@@ -164,6 +164,13 @@ impl Watch {
                     notices.push(item.title.clone());
                 }
             }
+            // A request the CLI denied for want of anyone to answer it is a blocked request too (R92): named by its tool call.
+            for p in &item.parked {
+                let key = (item.conversation_id.clone(), item.turn_id.clone(), p.tool_use_id.clone());
+                if self.seen.insert(key) && !window_focused {
+                    notices.push(item.title.clone());
+                }
+            }
         }
         Some(Update { counts: counts(items), notices })
     }
@@ -287,6 +294,18 @@ mod tests {
         assert!(watch.take(4, &[], false).unwrap().notices.is_empty(), "finishing work is not an attention request");
     }
 
+    #[test]
+    fn a_parked_request_notifies_once_and_counts_as_needing_the_person() {
+        let mut watch = Watch::default();
+        let mut parked = item("a", "t1", "Ship it", &[]);
+        parked.state = RunState::NeedsYou;
+        parked.parked = vec![faber_engine::model::Parked { tool_use_id: "toolu_1".into(), tool: "Bash".into(), input: json!({}) }];
+        let first = watch.take(1, &[parked.clone()], false).unwrap();
+        assert_eq!((first.notices, first.counts.needs_you), (vec!["Ship it".to_string()], 1));
+        assert!(watch.take(2, &[parked.clone()], false).unwrap().notices.is_empty(), "once per request");
+        assert!(Watch::default().take(1, &[parked], true).unwrap().notices.is_empty(), "never while the window is focused");
+    }
+
     fn item(conversation: &str, turn: &str, title: &str, requests: &[&str]) -> RunningItem {
         RunningItem {
             conversation_id: conversation.into(),
@@ -300,6 +319,7 @@ mod tests {
             since: 0,
             wait_until: None,
             permissions: requests.iter().map(|r| Permission { request_id: (*r).into(), tool: "Write".into(), input: json!({}) }).collect(),
+            parked: vec![],
         }
     }
 

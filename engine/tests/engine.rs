@@ -1647,6 +1647,7 @@ async fn stop_leaves_no_worker(parent_script: &str, why: &str) {
                 permissions: Permissions::FullAccess,
                 instructions: None,
                 user_name: None,
+                flags: Default::default(),
             },
             spawn,
             sandbox: None,

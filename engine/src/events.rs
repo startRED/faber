@@ -39,6 +39,18 @@ pub enum EngineEvent {
     },
     /// What the CLI said about the account besides window readings: whether it can answer, paid fallback, plan, billing.
     Signals(crate::signals::Signals),
+    /// How long the prompt cache stays warm after this turn, from the cache-write buckets of the result (Claude: one hour for
+    /// the 1-hour bucket, five minutes for the 5-minute one). Sent before `Done`; absent when the CLI names no bucket.
+    CacheWarm {
+        secs: u64,
+    },
+    /// A request the CLI denied because nobody could answer it (`--permission-prompts none`): not done, and kept for the
+    /// person. Sent before `Done`, one per denial.
+    Parked {
+        tool_use_id: String,
+        tool: String,
+        input: Value,
+    },
     /// What a finished turn used. `cost_total_usd` is Claude Code's own API-priced figure as it reports it: cumulative for
     /// the conversation, so the engine subtracts what it saw before (`usage::settle`); None when the result carries no
     /// counters (an aborted turn). On Codex it is Faber's computed API-equivalent cost of this turn, priced per request,
