@@ -1,4 +1,5 @@
-import type { CheckResult, QuotaReading, RunningItem, Vendor } from './api.ts';
+import type { CheckResult, QuotaReading, RunningItem, Vendor, VendorUsage } from './api.ts';
+import type { Key } from './locales/en.ts';
 
 // The data behind the sidebar: how the chats are grouped, which quota reading each vendor shows, and what the tail of a
 // project says. Pure functions, so the screen's checks run them with a fixed clock.
@@ -66,6 +67,35 @@ export function usageRows(quotas: Quotas, vendor: Vendor, now: number): UsageRow
   return mine
     .sort((a, b) => rank(a.window) - rank(b.window) || (a.window < b.window ? -1 : 1))
     .map((q) => (expired(q, now) ? { window: q.window } : { window: q.window, used: q.used, resetsAt: q.resetsAt }));
+}
+
+/** How old a reading is, as the key of the words and the number to put in them: "now", "4 min ago", "2 h ago", "3 d ago". Under a
+ * minute is "now"; a clock that went back is "now" too. */
+export function ageOf(readAt: number, nowMs: number): { key: Key; n: number } {
+  const secs = Math.max(0, nowMs / 1000 - readAt);
+  if (secs < 60) return { key: 'quota.age.now', n: 0 };
+  if (secs < 3600) return { key: 'quota.age.min', n: Math.floor(secs / 60) };
+  if (secs < 86_400) return { key: 'quota.age.hour', n: Math.floor(secs / 3600) };
+  return { key: 'quota.age.day', n: Math.floor(secs / 86_400) };
+}
+
+/** What the screen knows about how current a vendor's number is: when it was read (the newest of its windows, or of the one
+ * asked for), whether Faber's own recent work may not be in it yet, and, where a measured conversion exists, how much that
+ * work adds. A share under half a point is not shown as a number. */
+export interface Freshness {
+  readAt?: number;
+  counting: boolean;
+  /** Points (0 to 100, whole) that the vendor has not counted yet, when known. */
+  uncountedPoints?: number;
+}
+
+export function freshness(usage: VendorUsage[] | undefined, vendor: Vendor, window?: string): Freshness {
+  const u = usage?.find((x) => x.vendor === vendor);
+  if (!u) return { counting: false };
+  const mine = window ? u.windows.filter((w) => w.name === window) : u.windows;
+  const readAt = mine.reduce<number | undefined>((newest, w) => (newest === undefined || w.readAt > newest ? w.readAt : newest), undefined);
+  const extra = mine.find((w) => w.uncounted != null && w.uncounted >= 0.005)?.uncounted;
+  return { readAt, counting: u.counting, uncountedPoints: extra == null ? undefined : Math.round(extra * 100) };
 }
 
 /** What Settings says about one account. An installed CLI is not a connected account: only the CLI saying it is signed in

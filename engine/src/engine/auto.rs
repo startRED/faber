@@ -106,8 +106,6 @@ impl Core {
         if req.choice.vendor != "auto" || text.is_empty() {
             return;
         }
-        // The first keystroke in Auto is the moment to ask Claude Code for a fresh reading, if the one held is old.
-        self.pulse_if_due();
         let id = self.draft_for(&req);
         let Some(route) = self.next_route(&id) else { return };
         let only = route.map(|p| p.vendor);

@@ -64,12 +64,21 @@ fn a_task_that_does_not_matter_never_gets_a_discount() {
 }
 
 #[test]
-fn a_vendor_running_low_is_priced_up_and_the_answer_says_so() {
+fn a_vendor_ahead_of_its_daily_line_is_priced_up_and_the_answer_says_it_is_fast_not_that_it_runs_out() {
     let (m, e, pace) = paced("code", "medium", &all(), &by_vendor(1.0, 25.0));
     assert_eq!((m, e), SONNET_MEDIUM);
-    assert_eq!(pace, Some(("low".to_string(), Vendor::Codex)));
+    assert_eq!(pace, Some(("fast".to_string(), Vendor::Codex)));
     let (m, _, pace) = paced("chat", "easy", &all(), &by_vendor(1.0, 25.0));
     assert_eq!(m, "claude-haiku-5-5");
+    assert_eq!(pace, Some(("fast".to_string(), Vendor::Codex)));
+}
+
+#[test]
+fn only_a_vendor_near_its_limit_is_said_to_be_running_low() {
+    // A window past 90% leaves under one day of the daily line (R88: 100% / 7 = 14.3%): that is near the limit.
+    let near = |p: &Profile| Factor { m: if p.vendor == Vendor::Claude { 1.0 } else { 25.0 }, w: 1.0, step_ok: p.vendor == Vendor::Claude };
+    let (m, _, pace) = paced("code", "medium", &all(), &near);
+    assert_eq!(m, SONNET_MEDIUM.0);
     assert_eq!(pace, Some(("low".to_string(), Vendor::Codex)));
 }
 

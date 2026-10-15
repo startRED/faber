@@ -442,7 +442,7 @@ rest. The design is in `docs/superpowers/specs/2026-10-12-ux-sentinel-design.md`
 
 ## Auto quota pacing
 
-Auto requires billing confirmed as a subscription before any user, router, pulse or summary request. The same quota gate
+Auto requires billing confirmed as a subscription before any user, router or summary request. The same quota gate
 checks every dispatch and rechecks waiting requests; plan checks spend no quota. Unknown billing is denied. The shell
 starts account watching before Auto, and the screen supplies the local UTC offset on start and each minute. Vendor-wide
 windows pace the whole shared account against approximately one seventh of the weekly quota per day; family windows
@@ -450,10 +450,8 @@ restrict only that family. Paid-fallback evidence survives restart, and missing 
 paid credits is bound to one conversation, reply and vendor, is consumed by that dispatch, and cannot authorize an
 auxiliary request or bypass unknown billing.
 
-A quota pulse asks Haiku for one word in a fresh, tool-free session only when Auto is in use and its reading is stale,
-at most once every twenty minutes. It closes after sixty seconds. Codex quota readings do not require a model request.
-`budget.json` stores bounded quota history, metered spans, learned whole-account shape, explained model weights and
-own spend. User turns, routing, pulses and hand-over summaries count in Faber's own API-equivalent USD, including cache
+Quota readings never ask a model anything (see "Quota readings that stay current" below). `budget.json` stores bounded quota history, metered spans, learned whole-account shape, explained model weights and
+own spend. User turns, routing and hand-over summaries count in Faber's own API-equivalent USD, including cache
 reads and writes. Percentage changes and shared-account credits never become Faber's own dollars. Codex prices each
 request's token delta at its context tier; a multi-request turn does not inherit a long-context fee just from its sum.
 Incomplete meters show a lower bound and cannot teach weights or plan size. Idle account movement is flagged as foreign,
@@ -466,6 +464,50 @@ long histories use a bounded, tool-free summary. It waits only for a usable rese
 resumption, Stop and shutdown cancellation. A pinned vendor asks before moving. The composer retains an unsent request
 and its attachments without overwriting newer input; explicit resumption clears only the matching restored draft.
 Settings separates whole-account bars from Faber's own spend and explains foreign use, incomplete meters and billing.
+
+### Quota readings that stay current
+
+Both vendors' counters are read by commands that answer locally, so a reading costs no model tokens:
+
+- Claude Code: `claude -p /usage --output-format json` (with Faber's usual isolation flags, no session saved). `/usage` is a local
+  command; the result reports `num_turns` 0, zero tokens and zero cost, and Faber checks that on every reading: if a CLI
+  version ever answered it with a model, the result is thrown away and `/usage` is never run again. Its text gives the session
+  and weekly percentages; the reset times are printed in the PC's own time, which the screen's offset converts. A reset time
+  within two minutes of the one already held is the same window (the stream prints seconds, `/usage` the minute).
+- Codex: `account/rateLimits/read` on a short-lived `codex app-server` (handshake, the two reads, nothing else).
+- During Faber's own requests both CLIs already send their windows with the stream (Claude's rate-limit events, Codex's
+  rate-limit updates); those go through the same recording.
+
+When it is read (`engine/src/cadence.rs`, tested with a fake clock): on start; every 5 minutes while the window is open and every
+15 while it is hidden (the owner's ceiling is a reading never more than 30 minutes old); two minutes after a request, at the
+earliest, when it ends; at once when the window gains focus; at once after the PC wakes (a loop that was not heard from for
+90 seconds slept). A sleeping PC reads nothing. Reads are short-lived, hidden (no console window, no shell), one at a time per
+vendor, and a failure leaves the old reading in place.
+
+The vendors count with a delay (docs below, "Quota lag"). Faber therefore keeps, per vendor, its own requests of the last
+`lag` seconds (`Work` in the ledger). While there is any, the reading is marked "still counting"; where the window is the one the
+conversion was measured on and the request's model has a measured points-per-dollar (the learned weights), the
+unreported share is added as a separate estimate (cost x points per dollar, minus what the reading has already risen since the
+work began). No conversion, no number. Decisions use the reading plus that estimate as a floor, and never believe a discount
+on a reading that is still counting.
+
+"Running low" is said only when a vendor-wide window is past 90%: under one day of the daily line (R88: 100% / 7 = 14.3%) is
+left. Being ahead of the line is said as "being used fast this week" and never as running out.
+
+### Quota lag, measured
+
+Measured on 15/10/2026 with a 3-minute poller over 90 minutes (both zero-token sources) plus one deliberate Codex run; the
+full table and method are in the maintainer notes (`pesquisa/quota-lag.md`).
+
+| Source | Measured lag | Window Faber assumes |
+| --- | --- | ---: |
+| Claude Code `/usage` | session counter within one poll (3 min) of work ending; weekly counter seen rising 4.1 min after the last request | 10 min (`LAG_CLAUDE`) |
+| Codex `account/rateLimits/read` | weekly counter rose 45 to 46 and was seen 29 s after a turn ended | 5 min (`LAG_CODEX`) |
+
+Both are bounds, not physics: the percentages are whole numbers and the poll was every 3 minutes. The vendors do not make the
+owner’s 30-minute ceiling impossible. Slow movement seen while Faber is idle is more likely use from the same shared account
+elsewhere than a late counter. Points per dollar are not measured for every model; where they are unknown only the
+"still counting" marker shows.
 
 ### Synthetic monthly acceptance
 

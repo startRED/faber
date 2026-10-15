@@ -10,6 +10,10 @@ pub struct WindowUsage {
     pub elapsed: f64,
     pub expected: f64,
     pub resets_at: f64,
+    /// When the vendor's counter was read, Unix seconds. `used` is that reading as it was, never adjusted.
+    pub read_at: f64,
+    /// The share Faber's own recent work adds that the reading does not hold yet; only where a measured conversion exists.
+    pub uncounted: Option<f64>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,6 +32,8 @@ pub struct VendorUsage {
     pub paid_possible: bool,
     pub own_spend_usd: f64,
     pub unmetered: u32,
+    /// Faber's own recent work may not be in the readings yet (or is running now): they may still rise.
+    pub counting: bool,
     pub windows: Vec<WindowUsage>,
 }
 impl Core {
@@ -62,7 +68,16 @@ impl Core {
                     .iter()
                     .map(|(name, w)| {
                         let e = elapsed(&shape, w.resets_at - w.length, now, w.resets_at, self.utc_offset);
-                        WindowUsage { name: name.clone(), used: w.used, elapsed: e, expected: e, resets_at: w.resets_at }
+                        let uncounted = v.uncounted(name, now);
+                        WindowUsage {
+                            name: name.clone(),
+                            used: v.readings.get(name).map_or(w.used, |r| r.used),
+                            elapsed: e,
+                            expected: e,
+                            resets_at: w.resets_at,
+                            read_at: w.read_at,
+                            uncounted,
+                        }
                     })
                     .collect();
                 VendorUsage {
@@ -80,6 +95,7 @@ impl Core {
                     ask_for_plan: snap.billing == Billing::Subscription && v.ask_for_plan(),
                     own_spend_usd: v.own_spend.get(&day).copied().unwrap_or(0.0),
                     unmetered: v.unmetered.get(&day).copied().unwrap_or(0),
+                    counting: v.counting(now) || self.live.values().any(|l| l.vendor == vendor && l.turn.is_some()),
                     windows,
                 }
             })

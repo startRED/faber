@@ -117,7 +117,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
           <em>· {fromEngine(m().reason, { when: m().waitUntil ? untilReset(m().waitUntil!) : t('quota.unknown'), from: m().movedFrom ? vendorName(m().movedFrom!) : '', to: m().vendor ? vendorName(m().vendor!) : '' })}</em>
         </Show>
       </div>
-      <Show when={m().pace}>{(pace) => <p class="pace">{t(`reason.pace.${pace().kind}`, { vendor: vendorName(pace().vendor) })}</p>}</Show>
+      <Show when={m().pace}>{(pace) => <p class="pace">{t(`reason.pace.${pace().kind}`, { vendor: vendorName(pace().vendor), other: m().vendor ? vendorName(m().vendor!) : t('model.auto') })}</p>}</Show>
       <QuotaCard id={props.conversationId} m={m()} usage={props.usage ?? []} />
       <Show when={steps()}>
         <details class="activity">

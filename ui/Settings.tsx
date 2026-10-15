@@ -7,9 +7,9 @@ import { Icon, VendorMark } from './Glyphs.tsx';
 import { LANGUAGES, t } from './i18n.ts';
 import { vendorName } from './models.ts';
 import { animateList } from './motion.ts';
-import { accountLine, type Quotas, usageRows } from './sidebar.ts';
+import { accountLine, freshness, type Quotas, usageRows } from './sidebar.ts';
 import { PlanName } from './QuotaCard.tsx';
-import { untilReset, windowName } from './Sidebar.tsx';
+import { ageWords, untilReset, windowName } from './Sidebar.tsx';
 
 const SECTIONS = [
   ['general', 'set.general', 'user'],
@@ -230,6 +230,8 @@ export function Settings(props: Props) {
                     <Show when={props.usage?.find((u) => u.vendor === v)}>{(u) => <>
                       <PlanName u={u()} />
                       <p class="usage-state">{t(`usage.state.${u().state}`)}</p>
+                      <Show when={freshness(props.usage, v).readAt !== undefined}><p class="note age">{t('quota.read', { when: ageWords(freshness(props.usage, v).readAt!, props.now) })}</p></Show>
+                      <Show when={u().counting}><p class="note counting">{t('quota.countingNote')}</p></Show>
                       <p>{t('usage.ownSpend', { cost: u().ownSpendUsd.toFixed(4) })}</p>
                       <p class="hint">{t('usage.shared')}</p>
                       <Show when={u().unmetered}><p class="note">{t('usage.meterIncomplete', { n: u().unmetered })}</p></Show>
@@ -250,7 +252,8 @@ export function Settings(props: Props) {
                             <Show when={props.usage?.find((u) => u.vendor === v)?.windows.find((w) => w.name === row.window)}>{(w) => <b class="expected" style={{ left: `${Math.round(w().expected * 100)}%` }} />}</Show>
                             <i style={{ width: `${Math.round(Math.min(1, Math.max(0, row.used ?? 0)) * 100)}%` }} />
                           </span>
-                          <Show when={props.usage?.find((u) => u.vendor === v)?.windows.find((w) => w.name === row.window)}>{(w) => <span class="pace-projection">{t('usage.expect', { elapsed: `${Math.round(w().elapsed * 100)}%`, share: `${Math.round(w().used / Math.max(w().elapsed, 0.1) * 100)}%` })}</span>}</Show>
+                          <Show when={props.usage?.find((u) => u.vendor === v)?.windows.find((w) => w.name === row.window)}>{(w) => <span class="pace-projection">{t('usage.expect', { elapsed: `${Math.round(w().elapsed * 100)}%`, share: `${Math.round((w().used + (w().uncounted ?? 0)) / Math.max(w().elapsed, 0.1) * 100)}%` })}</span>}</Show>
+                          <Show when={row.window && freshness(props.usage, v, row.window).uncountedPoints}>{(n) => <span class="note uncounted">{t('quota.uncounted', { share: `${n()}%` })}</span>}</Show>
                           <span class="note">{row.used !== undefined && row.resetsAt ? t('usage.resets', { when: untilReset(row.resetsAt) }) : ''}</span>
                         </div>
                       )}

@@ -283,7 +283,7 @@ material you do not trust. The Settings text says exactly this.
   by someone with write access to its parents; that window is not closed. This protects the folder the person picks; it does not
   limit what a command run inside it can reach, and the Settings text says the blocking of those folders for commands is best effort.
 - Hooks: the Settings switch applies only to Ask before commands. With full access the person's hooks always run.
-- Faber's own requests (the router, the pulse, any side question) start Claude with `--safe-mode`, `--setting-sources ""`,
+- Faber's own requests (the router, any side question, the `/usage` reading) start Claude with `--safe-mode`, `--setting-sources ""`,
   `--strict-mcp-config`, no tools and `disableAllHooks`, whatever mode the person chose. Before this a user hook ran during
   background routing (checked against the installed CLI with a decoy project hook).
 - Relocated sign-in variables accept an absolute local path or a network share (`\\host\share`, `\\?\UNC\host\share`); a

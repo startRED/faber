@@ -112,6 +112,11 @@ input, textarea { caret-color: var(--accent); }
 .vendor { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: var(--r-xs); color: var(--ink-3); font-size: calc(var(--fs-ui) - 2px); text-align: left; }
 .vendor:hover { background: var(--s2); color: var(--ink); }
 .vendor .share { margin-left: 2px; color: var(--ink-2); }
+.vendor .extra { color: var(--ink-3); }
+.vendor .age, .vendor .counting { font-size: calc(var(--fs-ui) - 3px); color: var(--ink-3); }
+.vendor .counting { font-style: italic; }
+.urow .uncounted { grid-column: 1 / -1; }
+.usage-v .counting { font-style: italic; }
 .usage .note { padding: 4px 6px; }
 .who { padding: 4px 10px 0; color: var(--ink); font-size: var(--fs-ui); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .version { padding: 0 10px; font-size: calc(var(--fs-ui) - 2px); color: var(--ink-3); }

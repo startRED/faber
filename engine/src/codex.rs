@@ -800,6 +800,11 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
 /// them (the account's email and other details) is dropped unread. A failed reply does not discard the other reply's evidence.
 pub async fn read_codex_limits(bin: &str, cwd: &Path, windows: bool, spawn: Spawner, timeout: Duration) -> Vec<EngineEvent> {
     let Ok(p) = spawn(bin, &codex_args(Area::Chat, windows, false, Permissions::Isolated), cwd) else { return vec![] };
+    #[cfg(windows)]
+    if let Some(pid) = p.child.as_ref().and_then(|c| c.id()) {
+        // A reading in the background never competes with a game or the person's work; if it cannot be lowered it still runs.
+        let _ = faber_winproc::lower_priority(pid);
+    }
     let mut stdin = p.stdin;
     let mut child = p.child;
     let mut job = p.contained;

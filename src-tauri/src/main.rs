@@ -119,6 +119,12 @@ fn set_clock(faber: State<'_, Faber>, utc_offset: i64) {
     faber.engine.set_utc_offset(utc_offset);
 }
 
+/// The window was shown, hidden or focused: the quota is read more often while it is open, and at once on focus.
+#[tauri::command]
+fn quota_attention(faber: State<'_, Faber>, visible: bool, focused: bool) {
+    faber.engine.set_attention(visible, focused);
+}
+
 #[tauri::command]
 fn answer_plan(faber: State<'_, Faber>, vendor: Vendor, plan: String) {
     faber.engine.answer_plan(vendor, &plan);
@@ -383,6 +389,7 @@ fn show(app: &AppHandle) {
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
+        app.state::<Faber>().engine.set_attention(true, true);
     }
 }
 
@@ -477,6 +484,7 @@ fn main() {
             branch,
             warm,
             set_clock,
+            quota_attention,
             answer_plan,
             approve_credits,
             move_turn,
@@ -603,6 +611,8 @@ fn main() {
                 && (!hidden || autostart_launch)
             {
                 api.prevent_exit();
+                // The screen is gone: the quota is read at the slower pace until the window comes back.
+                app.state::<Faber>().engine.set_attention(false, false);
             }
             if let RunEvent::Exit = event {
                 shut_down(app);

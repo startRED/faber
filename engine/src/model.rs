@@ -365,7 +365,8 @@ pub struct QuotaReading {
 /// Why the quota changed the pick of Auto, shown under the model name.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaceNote {
-    /// `step` (one rung up, bought with quota that would expire) or `low` (moved away from a vendor that is running low).
+    /// `step` (one rung up, bought with quota that would expire), `fast` (moved away from a vendor that is being used faster than
+    /// its daily line) or `low` (moved away from a vendor that is really near its limit).
     pub kind: String,
     pub vendor: Vendor,
 }

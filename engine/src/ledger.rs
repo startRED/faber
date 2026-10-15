@@ -12,6 +12,13 @@ use std::collections::BTreeMap;
 const KEEP_POINTS: usize = 200;
 const KEEP_SPANS: usize = 200;
 const KEEP_STRETCHES: usize = 60;
+/// How long a vendor's counter may trail real use: measured at 4.1 min (Claude) and under 0.5 min (Codex), with margin
+/// (docs/design.md "Quota lag, measured"). Work that ended
+/// within this long ago may not be in the reading yet.
+pub const LAG_CLAUDE: f64 = 10.0 * 60.0;
+pub const LAG_CODEX: f64 = 5.0 * 60.0;
+/// Two reset times this close are the same window: `/usage` prints the minute, the stream prints the second.
+const SAME_RESET: f64 = 120.0;
 /// A plan check younger than this lets a discount stand.
 pub const PLAN_FRESH: f64 = 30.0 * 60.0;
 /// After a plan change, discounts wait for this long or for enough stretches.
@@ -31,6 +38,21 @@ pub struct Reading {
     pub read_at: f64,
 }
 
+/// One request Faber made, with the moment it really ended (a `Span`'s end is the moment of the reading taken during it, which
+/// is what the learning needs). Kept for a few hours: it is what tells whether the vendor's counter has caught up.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Work {
+    pub start: f64,
+    pub finished: f64,
+    pub model: String,
+    pub cost: Option<f64>,
+    pub incomplete: bool,
+}
+
+/// Work older than this is dropped: longer than any lag.
+const KEEP_WORK_SECS: f64 = 6.0 * 3600.0;
+const KEEP_WORK: usize = 100;
+
 /// What is kept for one vendor.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -38,6 +60,7 @@ pub struct VendorLedger {
     pub readings: BTreeMap<String, Reading>,
     pub history: BTreeMap<String, Vec<Point>>,
     pub spans: Vec<Span>,
+    pub work: Vec<Work>,
     /// Own API-equivalent USD per local day, independent of account percentages.
     pub own_spend: BTreeMap<i64, f64>,
     pub unmetered: BTreeMap<i64, u32>,
@@ -70,6 +93,9 @@ pub struct VendorLedger {
     /// A check worked but named no plan.
     #[serde(skip)]
     pub nameless: bool,
+    /// Seconds the counter may trail real use; 0 switches the "still counting" logic off.
+    #[serde(skip)]
+    pub lag: f64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -85,6 +111,8 @@ impl Ledger {
     pub fn sanitize(&mut self) {
         self.claude.sanitize();
         self.codex.sanitize();
+        self.claude.lag = LAG_CLAUDE;
+        self.codex.lag = LAG_CODEX;
     }
 
     pub fn of(&self, vendor: Vendor) -> &VendorLedger {
@@ -114,6 +142,8 @@ impl VendorLedger {
         self.spans
             .retain(|s| s.start.is_finite() && s.end.is_finite() && s.end >= s.start && s.cost.is_none_or(|c| c.is_finite() && c >= 0.0));
         self.spans.drain(..self.spans.len().saturating_sub(KEEP_SPANS));
+        self.work.retain(|w| w.start.is_finite() && w.finished.is_finite() && w.cost.is_none_or(|c| c.is_finite() && c >= 0.0));
+        self.work.drain(..self.work.len().saturating_sub(KEEP_WORK));
         self.stretches.retain(|s| s.ppd.is_finite() && s.ppd > 0.0);
         self.stretches.drain(..self.stretches.len().saturating_sub(KEEP_STRETCHES));
         // The shape indexes 168 hours of the week; any other length would index out of range.
@@ -154,8 +184,10 @@ impl VendorLedger {
         if !plausible(used, resets_at) || resets_at <= now {
             return;
         }
-        // Whole seconds and hundredths are all a reading holds; the file stays small.
-        let (now, resets_at, used) = (now.round(), resets_at.round(), (used * 1000.0).round() / 1000.0);
+        // Whole seconds and hundredths are all a reading holds; the file stays small. A reset time within two minutes of the
+        // one held is the same window's, in the form first seen, so the history keeps comparing like with like.
+        let held = self.readings.get(window).map(|r| r.resets_at).filter(|at| (at - resets_at).abs() <= SAME_RESET);
+        let (now, resets_at, used) = (now.round(), held.unwrap_or(resets_at.round()), (used * 1000.0).round() / 1000.0);
         self.readings.insert(window.to_string(), Reading { used, resets_at, read_at: now });
         let point = Point { at: now, used, resets_at };
         let primary = self.primary(now).map(String::from);
@@ -271,19 +303,58 @@ impl VendorLedger {
         self.learned.shape()
     }
 
+    /// Faber's own work the vendor's counter may not hold yet: requests that ended within the lag before `now`.
+    fn recent_work(&self, now: f64) -> Vec<&Work> {
+        if self.lag <= 0.0 {
+            return vec![];
+        }
+        self.work.iter().filter(|w| w.finished >= self.since && w.finished > now - self.lag && w.finished <= now).collect()
+    }
+
+    /// A request Faber made has just ended: the counter may not hold it yet.
+    pub fn worked(&mut self, work: Work, now: f64) {
+        self.work.push(work);
+        self.work.retain(|w| w.finished > now - KEEP_WORK_SECS);
+        self.work.drain(..self.work.len().saturating_sub(KEEP_WORK));
+    }
+
+    /// Whether the reading may still be rising because of Faber's own recent work. It holds whether or not the reading has
+    /// moved yet: a counter that has not moved has not counted it either.
+    pub fn counting(&self, now: f64) -> bool {
+        !self.recent_work(now).is_empty()
+    }
+
+    /// The share (0 to 1) that Faber's own recent work adds beyond what the primary window's reading holds, from the cost of
+    /// each request and the points per dollar measured for its model. None when there is no recent work, or when any
+    /// request has no cost or no measured conversion: no number is invented. What the reading already rose by since the
+    /// work began is taken off, so nothing counts twice.
+    pub fn uncounted(&self, window: &str, now: f64) -> Option<f64> {
+        let work = self.recent_work(now);
+        if work.is_empty() || self.primary(now) != Some(window) {
+            return None;
+        }
+        let points: Option<f64> =
+            work.iter().map(|s| if s.incomplete { None } else { Some(s.cost? * self.weights.raw.get(&s.model)?) }).sum();
+        let begun = work.iter().map(|s| s.start).fold(f64::MAX, f64::min);
+        let reading = self.readings.get(window)?;
+        let before = self.history.get(window)?.iter().rev().find(|p| p.at <= begun && p.resets_at == reading.resets_at);
+        let risen = before.map_or(0.0, |p| ((reading.used - p.used) * 100.0).max(0.0));
+        Some(((points? - risen) / 100.0).max(0.0))
+    }
+
     pub fn snap(&self, now: f64) -> Snap {
         let windows = self
             .readings
             .iter()
             .filter(|(_, r)| r.resets_at > now)
             .map(|(name, r)| {
-                (
-                    name.clone(),
-                    Window { used: r.used, resets_at: r.resets_at, read_at: r.read_at, length: window_secs(name).unwrap_or(0.0) },
-                )
+                // A window still counting Faber's own work is a floor: the reading plus what is known to be missing from it.
+                let used = (r.used + self.uncounted(name, now).unwrap_or(0.0)).min(1.0).max(r.used);
+                (name.clone(), Window { used, resets_at: r.resets_at, read_at: r.read_at, length: window_secs(name).unwrap_or(0.0) })
             })
             .collect();
         Snap {
+            counting: self.counting(now),
             windows,
             billing: self.billing,
             reach: self.reach,

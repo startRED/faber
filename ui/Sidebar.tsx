@@ -1,5 +1,5 @@
 import { createEffect, createSignal, For, on, Show } from 'solid-js';
-import type { Area, Project, RunningItem, Summary, Vendor } from './api.ts';
+import type { Area, Project, RunningItem, Summary, Vendor, VendorUsage } from './api.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { lang, t } from './i18n.ts';
 import { en, type Key } from './locales/en.ts';
@@ -7,12 +7,18 @@ import { Peek } from './Mark.tsx';
 import { animateList, keepForExit } from './motion.ts';
 import { vendorName } from './models.ts';
 import type { Place } from './running.ts';
-import { groupChats, matches, type Quotas, showsChats, tailOf, tightest } from './sidebar.ts';
+import { ageOf, freshness, groupChats, matches, type Quotas, showsChats, tailOf, tightest } from './sidebar.ts';
 
 export function untilReset(resetsAt: number): string {
   const hours = (resetsAt * 1000 - Date.now()) / 3_600_000;
   if (hours <= 0) return t('quota.now');
   return hours < 24 ? t('quota.hours', { n: Math.ceil(hours) }) : t('quota.days', { n: Math.ceil(hours / 24) });
+}
+
+/** "now", "4 min ago": how long ago a reading was taken, in plain words. */
+export function ageWords(readAt: number, nowMs: number): string {
+  const { key, n } = ageOf(readAt, nowMs);
+  return t(key, { n });
 }
 
 export function windowName(window: string): string {
@@ -30,6 +36,8 @@ interface Props {
   place: Place;
   running: RunningItem[];
   quotas: Quotas;
+  /** What the engine knows about how current each vendor's number is. */
+  usage?: VendorUsage[];
   /** The time now in milliseconds, which the screen moves on every minute: the groups of chats and the quota readings age. */
   now: number;
   /** A new conversation in the area and project the user is in. */
@@ -216,6 +224,7 @@ export function Sidebar(props: Props) {
             {(v) => {
               const q = () => tightest(props.quotas, v, props.now);
               const share = () => (q() ? `${Math.round(q()!.used * 100)}%` : t('quota.unknown'));
+              const fresh = () => freshness(props.usage, v, q()?.window);
               return (
                 <button
                   class="vendor"
@@ -225,6 +234,9 @@ export function Sidebar(props: Props) {
                   <VendorMark vendor={v} />
                   <span>{vendorName(v)}</span>
                   <span class="share num">{share()}</span>
+                  <Show when={q() && fresh().uncountedPoints}>{(n) => <span class="extra num">{t('quota.uncountedShort', { share: `${n()}%` })}</span>}</Show>
+                  <Show when={q() && fresh().readAt !== undefined}><span class="age">{ageWords(fresh().readAt!, props.now)}</span></Show>
+                  <Show when={q() && fresh().counting}><span class="counting">{t('quota.counting')}</span></Show>
                 </button>
               );
             }}

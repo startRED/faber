@@ -194,12 +194,13 @@ export interface QuotaReading {
   used: number;
   resetsAt: number;
 }
-export interface WindowUsage { name: string; used: number; elapsed: number; expected: number; resetsAt: number }
+/** `used` is the reading as the vendor gave it; `readAt` is when (seconds). `uncounted` is the share Faber's own recent work adds that the reading does not hold yet, present only where a measured conversion exists. */
+export interface WindowUsage { name: string; used: number; elapsed: number; expected: number; resetsAt: number; readAt: number; uncounted?: number | null }
 export interface VendorUsage {
   vendor: Vendor; plan?: string | null; state: 'ok' | 'spare' | 'low' | 'out' | 'unknown';
   learning: boolean; relearning: boolean; outsideShare?: number | null; foreignUse: boolean;
   overageOn: boolean; billedPerUse: boolean; billingUnknown: boolean; askForPlan: boolean; paidPossible: boolean;
-  ownSpendUsd: number; unmetered: number; windows: WindowUsage[];
+  ownSpendUsd: number; unmetered: number; counting: boolean; windows: WindowUsage[];
 }
 export interface AppState {
   conversations: Summary[];
@@ -307,6 +308,8 @@ export const api = {
   moveTurn: (id: string, turnId: string) => invoke<void>('move_turn', { id, turnId }),
   waitTurn: (id: string, turnId: string) => invoke<void>('wait_turn', { id, turnId }),
   setClock: (utcOffset: number) => invoke<void>('set_clock', { utcOffset }),
+  /** Tells the engine whether the window is open and focused: it reads the quota every 5 minutes while open, every 15 while hidden, and at once on focus. */
+  quotaAttention: (visible: boolean, focused: boolean) => invoke<void>('quota_attention', { visible, focused }),
   setupCheck: (vendor: Vendor) => invoke<CheckResult>('setup_check', { vendor }),
   setupInstall: (vendor: Vendor) => invoke<void>('setup_install', { vendor }),
   setupSignIn: (vendor: Vendor) => invoke<void>('setup_sign_in', { vendor }),

@@ -23,6 +23,11 @@ await api.on((e) => {
   else inbox.push(e);
 });
 await api.setClock(-new Date().getTimezoneOffset() * 60);
+// The engine reads the quota more often while the window is open and at once when it gains focus (nothing sent to a model).
+const attention = (focused: boolean) => void api.quotaAttention(document.visibilityState === 'visible', focused && document.hasFocus()).catch(() => {});
+window.addEventListener('focus', () => attention(true));
+window.addEventListener('blur', () => attention(false));
+document.addEventListener('visibilitychange', () => attention(document.visibilityState === 'visible'));
 const state = await api.state();
 store.offer(state.running);
 

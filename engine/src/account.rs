@@ -51,8 +51,17 @@ struct Ran {
 /// Runs the status command without a shell, with its output bounded. None when the CLI fails to start, does not answer within
 /// `timeout` (it is killed when the run ends) or prints more than the bound.
 async fn run(vendor: Vendor, cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> Option<Ran> {
-    let args: Vec<String> = cli.prefix.iter().cloned().chain(status_args(vendor).iter().map(|a| a.to_string())).collect();
+    run_args(cli, status_args(vendor).iter().map(|a| a.to_string()).collect(), spawn, cwd, timeout).await
+}
+
+async fn run_args(cli: &Cli, args: Vec<String>, spawn: &Spawner, cwd: &Path, timeout: Duration) -> Option<Ran> {
+    let args: Vec<String> = cli.prefix.iter().cloned().chain(args).collect();
     let p = spawn(&cli.command, &args, cwd).ok()?;
+    #[cfg(windows)]
+    if let Some(pid) = p.child.as_ref().and_then(|c| c.id()) {
+        // A reading in the background never competes with a game or the person's work; if it cannot be lowered it still runs.
+        let _ = faber_winproc::lower_priority(pid);
+    }
     drop(p.stdin); // nothing to type: a CLI waiting for input sees end of input instead
     let mut child = p.child;
     let run = async {
@@ -79,6 +88,46 @@ pub async fn claude_account(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Dur
     let ran = run(Vendor::Claude, cli, spawn, cwd, timeout).await?;
     serde_json::from_str::<serde_json::Value>(&ran.out).ok()?["loggedIn"].as_bool()?;
     Some(claude_plan(&ran.out))
+}
+
+/// What `claude -p /usage` gave.
+#[derive(Debug, Clone, PartialEq)]
+pub enum UsageRead {
+    /// The vendor-wide windows: name, used (0 to 1), reset in Unix seconds.
+    Windows(Vec<(&'static str, f64, f64)>),
+    /// The CLI did not take `/usage` as a local command and asked a model: it is never used for readings again.
+    Spent,
+    Failed,
+}
+
+/// Reads Claude Code's quota windows through its own `/usage` command, which answers locally: no prompt is sent, no model
+/// runs, and the result says so (`num_turns` 0 and no tokens). Faber's usual isolation applies (no hooks, settings files or
+/// MCP servers), and no session is saved. A CLI whose result shows model work is reported as `Spent`.
+pub async fn claude_usage(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration, now: f64, offset: i64) -> UsageRead {
+    let args = [
+        "-p",
+        "/usage",
+        "--output-format",
+        "json",
+        "--safe-mode",
+        "--strict-mcp-config",
+        "--setting-sources",
+        "",
+        "--settings",
+        r#"{"disableAllHooks":true}"#,
+        "--no-session-persistence",
+    ];
+    let Some(ran) = run_args(cli, args.map(String::from).to_vec(), spawn, cwd, timeout).await else { return UsageRead::Failed };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&ran.out) else { return UsageRead::Failed };
+    let tokens: u64 = ["input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"]
+        .iter()
+        .map(|k| v["usage"][*k].as_u64().unwrap_or(0))
+        .sum();
+    if v["num_turns"].as_u64().unwrap_or(0) > 0 || tokens > 0 || v["total_cost_usd"].as_f64().unwrap_or(0.0) > 0.0 {
+        return UsageRead::Spent;
+    }
+    let windows = crate::signals::claude_usage_windows(v["result"].as_str().unwrap_or_default(), now, offset);
+    if windows.is_empty() { UsageRead::Failed } else { UsageRead::Windows(windows) }
 }
 
 async fn read_all(stream: Option<Box<dyn AsyncRead + Send + Unpin>>) -> Option<String> {

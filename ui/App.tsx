@@ -724,6 +724,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                 place={place()}
                 running={items()}
                 quotas={quotas()}
+                usage={state().usage ?? []}
                 now={clock()}
                 onNew={() => (closeSide(false), void fresh(place()))}
                 onArea={switchArea}
