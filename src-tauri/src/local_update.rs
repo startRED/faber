@@ -1089,7 +1089,7 @@ mod tests {
 
     #[test]
     fn a_build_may_write_its_ignored_output_but_nothing_else() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
         let root = dir.path();
         fs::create_dir_all(root.join("src-tauri/src")).unwrap();
         fs::write(root.join("src-tauri/src/main.rs"), "fn main() {}").unwrap();
