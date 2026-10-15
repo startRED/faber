@@ -6,6 +6,11 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+# R132: lets the qualification harness waive the R131 day-line margin for exactly one mission. Only `testkit` turns it on,
+# and nothing in the shipped app calls it.
+r132-harness = []
+
 [dependencies]
 # The existing workspace dependency supplies a safe native disk-space reading at build admission.
 sysinfo = { version = "0.39.6", default-features = false, features = ["disk"] }

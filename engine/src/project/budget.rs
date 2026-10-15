@@ -303,8 +303,8 @@ fn bootstrap(ledger: &Ledger, vendor: Vendor, model: Option<&str>, now: f64) -> 
         || !(0.0..=STALE_SECS).contains(&(now - latest.read_at))
         || !(0.0..=1.0).contains(&first.used)
         || !(first.used..=1.0).contains(&latest.used)
-        || line - first.used + f64::EPSILON < BOOTSTRAP_MARGIN
-        || line - latest.used + f64::EPSILON < BOOTSTRAP_MARGIN
+        || (!margin_waived() && line - first.used + f64::EPSILON < BOOTSTRAP_MARGIN)
+        || (!margin_waived() && line - latest.used + f64::EPSILON < BOOTSTRAP_MARGIN)
     {
         return Err("reason.budget.calibration");
     }
@@ -974,4 +974,48 @@ pub fn recover_unbounded(ledger: &mut Ledger) -> Result<bool, &'static str> {
         changed = true;
     }
     Ok(changed)
+}
+
+/// R132: a one-time exception to R88/R131 for the first real self-development mission. The shipped app never calls
+/// it and the feature is on only for the qualification harness (`testkit`). It waives exactly one thing: the two-point
+/// margin under the day's cumulative line. Fresh zero-turn evidence, the weekly window, billing and the US$2.00 mission
+/// cap all still apply. It opens once: the marker file is created with `create_new`, so a second use, in this process
+/// or any later one, is refused.
+#[cfg(feature = "r132-harness")]
+pub mod r132 {
+    use std::path::Path;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static WAIVED: AtomicBool = AtomicBool::new(false);
+
+    /// Writes the evidence marker (what was waived, the readings, when) and opens the waiver for this process.
+    pub fn waive(marker: &Path, evidence: &serde_json::Value) -> std::io::Result<()> {
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(marker)?;
+        file.write_all(&serde_json::to_vec_pretty(&serde_json::json!({
+            "exception": "R132", "waives": "R131 two-point margin under the day line", "singleUse": true,
+            "missionCapMicros": super::BOOTSTRAP_CAP, "evidence": evidence,
+        }))?)?;
+        file.sync_all()?;
+        WAIVED.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+
+    /// Ends the exception. The marker stays, so it cannot be opened again.
+    pub fn close() {
+        WAIVED.store(false, Ordering::SeqCst);
+    }
+
+    pub(super) fn active() -> bool {
+        WAIVED.load(Ordering::SeqCst)
+    }
+}
+
+#[cfg(feature = "r132-harness")]
+fn margin_waived() -> bool {
+    r132::active()
+}
+#[cfg(not(feature = "r132-harness"))]
+fn margin_waived() -> bool {
+    false
 }

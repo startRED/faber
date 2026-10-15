@@ -16,7 +16,7 @@ name = "fake-cli"
 path = "src/bin/fake-cli.rs"
 
 [dependencies]
-faber-engine = { path = "../engine" }
+faber-engine = { path = "../engine", features = ["r132-harness"] }
 base64 = "0.22"
 ctrlc = "3"
 serde = { version = "1", features = ["derive"] }
