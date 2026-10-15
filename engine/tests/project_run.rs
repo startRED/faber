@@ -254,3 +254,12 @@ fn opus_m2_known_proof_receipt_recovers_after_checkpoint_fault() {
     let mut b = ProofSet::new("2".repeat(40), "b".into(), vec![definition()], vec![]).unwrap();
     restored.start_proof(&j, "b", "rust", &mut b).unwrap();
 }
+
+#[test]
+fn a_heavy_proof_gets_the_time_of_a_cold_build_and_a_quick_check_does_not() {
+    use faber_engine::project::proof::deadline;
+    let mut check = definition();
+    check.heavy = false;
+    assert_eq!(deadline(&check).as_secs(), 120);
+    assert!(deadline(&definition()) >= std::time::Duration::from_secs(600));
+}

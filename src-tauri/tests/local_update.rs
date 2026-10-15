@@ -56,6 +56,9 @@ fn helper_and_slot_commands_are_native_headless_and_use_separate_data() {
     assert!(command.args.contains(&"--faber-local-start".into()));
     assert_eq!(command.environment.get("FABER_DATA_DIR"), Some(&dev.data().to_string_lossy().into_owned()));
     assert!(!command.environment.keys().any(|key| key.contains("TOKEN") || key.contains("API_KEY")));
+    // The slot reaches the CLIs' sign-in and the build toolchain through the session's folders, and nothing else of it.
+    assert_eq!(command.environment.get("USERPROFILE"), std::env::var("USERPROFILE").ok().as_ref());
+    assert_eq!(command.environment.get("CARGO_HOME"), std::env::var("CARGO_HOME").ok().as_ref());
 }
 
 #[test]
@@ -1410,4 +1413,16 @@ fn a_canary_that_stopped_waits_and_evidence_from_outside_the_run_fails() {
     });
     let (verdict, _) = judge_canary(&handshake, dir.path(), &candidate, CanaryMode::Real);
     assert!(matches!(verdict, CanaryVerdict::Fail { .. }), "{verdict:?}");
+}
+
+#[test]
+fn a_real_canary_needs_an_allowance_that_covers_its_cost() {
+    let dir = area();
+    assert!(!real_canary_allowed(dir.path()));
+    fs::write(dir.path().join("real-canary.json"), b"{\"capMicros\":1}").unwrap();
+    assert!(!real_canary_allowed(dir.path()));
+    fs::write(dir.path().join("real-canary.json"), b"{\"capMicros\":1000000}").unwrap();
+    assert!(real_canary_allowed(dir.path()));
+    fs::write(dir.path().join("real-canary.json"), b"not json").unwrap();
+    assert!(!real_canary_allowed(dir.path()));
 }

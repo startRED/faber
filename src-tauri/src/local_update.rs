@@ -50,6 +50,25 @@ struct Enrollment {
     installed_release: PathBuf,
 }
 
+/// Variables a running slot needs from its person's session to reach the CLIs' sign-in and the build toolchain.
+const PROFILE_AND_TOOLCHAIN: &[&str] = &[
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "ProgramData",
+    "ProgramFiles",
+    "ProgramFiles(x86)",
+    "RUSTUP_HOME",
+    "CARGO_HOME",
+    "LIB",
+    "INCLUDE",
+    "LIBPATH",
+    "VCINSTALLDIR",
+    "VCToolsInstallDir",
+];
+
 impl Development {
     pub fn new(channel: &str, root: PathBuf, installed_data: PathBuf, installed_release: PathBuf) -> Result<Self> {
         if channel != "development" {
@@ -199,6 +218,13 @@ impl Development {
         let mut command = NativeCommand::new(self.binary(slot), self.layout.slot_dir(slot));
         command.args.push("--faber-local-start".into());
         self.environment(&mut command);
+        // Folder names only, never a secret: the CLIs find their own sign-in through the profile, and a local build
+        // finds its toolchain through these. Without them the slot cannot start a mission or build the next slot.
+        for key in PROFILE_AND_TOOLCHAIN {
+            if let Ok(value) = std::env::var(key) {
+                command.environment.insert((*key).into(), value);
+            }
+        }
         command
     }
 
@@ -1148,8 +1174,25 @@ impl ProductionRunner {
                 faber_engine::cli::find_cli(name).filter(|cli| cli.prefix.is_empty()).ok_or(invalid("native build tool unavailable"))?;
             Ok::<_, UpdateError>(PathBuf::from(cli.command))
         };
-        Ok(Self::new(repo.join("node_modules"), native("node")?, native("cargo")?, data.into(), mission.into()))
+        let mut runner = Self::new(repo.join("node_modules"), native("node")?, native("cargo")?, data.into(), mission.into());
+        if real_canary_allowed(data) {
+            runner.canary = CanaryMode::Real;
+        }
+        Ok(runner)
     }
+}
+
+/// A real canary spends the person's subscription, so it runs only when a person put the allowance in the development
+/// data folder: `real-canary.json` with a `capMicros` that covers what one canary may cost. Without it the candidate
+/// still runs its replayed mission, stays ready and waits.
+pub fn real_canary_allowed(data: &Path) -> bool {
+    let Ok(Some((bytes, _))) = ScopedFile::new(&data.join("real-canary.json"), false).and_then(|f| f.read_limited(4096)) else {
+        return false;
+    };
+    serde_json::from_slice::<Value>(&bytes)
+        .ok()
+        .and_then(|v| v["capMicros"].as_u64())
+        .is_some_and(|cap| cap >= faber_engine::project::canary::REAL_CAP_MICROS)
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]

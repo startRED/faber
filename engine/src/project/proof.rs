@@ -439,6 +439,12 @@ pub struct Observation {
     pub evidence: wire::ArtifactRef,
 }
 
+/// How long a proof may run before it counts as failed. A heavy proof (a build and its tests) holds the build lane, so it
+/// gets the time a cold compile needs; every other proof is a quick check.
+pub fn deadline(definition: &Definition) -> std::time::Duration {
+    std::time::Duration::from_secs(if definition.heavy { 900 } else { 120 })
+}
+
 /// Execute a trusted definition through an owned process; missing exits never become passing evidence.
 pub async fn execute(definition: &Definition, cwd: &std::path::Path, spawn: &crate::proc::Spawner, path: String) -> Observation {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -446,7 +452,7 @@ pub async fn execute(definition: &Definition, cwd: &std::path::Path, spawn: &cra
     let mut errors = Vec::new();
     let mut exit = None;
     if let Ok(mut process) = spawn(&definition.program.to_string_lossy(), &definition.argv, cwd) {
-        let capture = tokio::time::timeout(std::time::Duration::from_secs(120), async {
+        let capture = tokio::time::timeout(deadline(definition), async {
             process.stdin.shutdown().await?;
             let limit = wire::MAX_ENVELOPE as u64 + 1;
             let mut stdout = process.stdout.take(limit);

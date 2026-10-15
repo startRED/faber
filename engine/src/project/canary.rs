@@ -47,8 +47,10 @@ const REPLAY_REVIEWER: &str = include_str!("../../../tests/fixtures/projects/can
 const REVISION: u64 = 3;
 const TASK: &str = "writer";
 const PROOF: &str = "canary-test";
-/// What the real canary may cost in total, as millionths of an API-equivalent dollar.
-pub const REAL_CAP_MICROS: u64 = 600_000;
+/// The ceiling one real mission is admitted under, in millionths of an API-equivalent dollar. A Claude turn reserves
+/// the cost of a whole context window up front (about 0.82 dollars) and settles to what it really used, so a smaller
+/// ceiling could not admit even one turn. The ceiling is not spending: the settled cost of a canary is a few cents.
+pub const REAL_CAP_MICROS: u64 = 1_000_000;
 const WRITER_MODEL: (Vendor, &str) = (Vendor::Claude, "claude-haiku-5-5");
 const REVIEWER_MODEL: (Vendor, &str) = (Vendor::Codex, "gpt-6-luna");
 
@@ -157,8 +159,9 @@ fn prepare(work: &Path) -> Result<PathBuf, String> {
     Ok(repo)
 }
 
-/// The one proof of the canary: the named test, offline, in a build folder outside the checkout.
-fn proof_definition(work: &Path) -> Result<(Definition, crate::proc::Spawner), String> {
+/// A cargo proof the engine runs for a mission: the named test arguments, offline and locked, in a build folder outside
+/// the checkout, with only the environment a Rust build needs. `heavy` gives it the time of a cold compile.
+pub fn cargo_proof(id: &str, test_args: &[&str], target_dir: &Path, heavy: bool) -> Result<(Definition, crate::proc::Spawner), String> {
     let cargo = PathBuf::from(crate::cli::find_cli("cargo").ok_or("reason.canary.cargo")?.command);
     let mut environment = BTreeMap::new();
     for name in [
@@ -183,21 +186,26 @@ fn proof_definition(work: &Path) -> Result<(Definition, crate::proc::Spawner), S
             environment.insert(name.to_string(), value);
         }
     }
-    environment.insert("CARGO_TARGET_DIR".into(), work.join("target").to_string_lossy().into_owned());
+    environment.insert("CARGO_TARGET_DIR".into(), target_dir.to_string_lossy().into_owned());
     environment.insert("CARGO_INCREMENTAL".into(), "0".into());
     environment.insert("CARGO_NET_OFFLINE".into(), "true".into());
     let definition = Definition {
-        id: PROOF.into(),
+        id: id.into(),
         version: 1,
         program: cargo,
-        argv: ["test", "--offline", "--locked", "trims_and_lowercases"].map(String::from).to_vec(),
+        argv: ["test", "--offline", "--locked"].into_iter().chain(test_args.iter().copied()).map(String::from).collect(),
         checks: vec!["C1".into()],
         toolchain: "rust".into(),
         dependencies: "none".into(),
         environment: environment.clone(),
-        heavy: false,
+        heavy,
     };
     Ok((definition, crate::proc::isolated_spawner(environment)))
+}
+
+/// The one proof of the canary: the named test of the frozen crate.
+fn proof_definition(work: &Path) -> Result<(Definition, crate::proc::Spawner), String> {
+    cargo_proof(PROOF, &["trims_and_lowercases"], &work.join("target"), false)
 }
 
 fn goal() -> Result<String, String> {
@@ -224,6 +232,34 @@ fn fixed_plan(proof: &Definition) -> Task {
     task.proofs = vec![proof.id.clone()];
     task.checks = proof.checks.clone();
     task
+}
+
+/// Fresh account readings: provider readings are stamped to the whole second and admission rejects one from the future.
+pub async fn read_accounts(engine: &Engine) {
+    engine.check_plans(Duration::from_secs(20)).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+}
+
+/// The caps one real mission is admitted under (after `read_accounts`).
+pub fn caps(engine: &Engine, mission: &str, cap_micros: u64) -> Result<(), String> {
+    for (vendor, model) in [WRITER_MODEL, REVIEWER_MODEL] {
+        engine.mission_budget(Change::AllocateModel { vendor, model: model.into(), cap_micros })?;
+    }
+    engine.mission_budget(Change::Grant {
+        mission: mission.into(),
+        grant: Budgeted {
+            cap_micros,
+            worker_micros: cap_micros.min(900_000),
+            kind_caps: BTreeMap::new(),
+            vendors: BTreeMap::from([(Vendor::Claude, cap_micros), (Vendor::Codex, cap_micros.min(300_000))]),
+            review_micros: cap_micros.min(300_000),
+            repair_micros: 0,
+            canary_micros: cap_micros,
+            paused: false,
+            extra: super::Extra::new(),
+        },
+    })?;
+    Ok(())
 }
 
 /// Run the miniature mission in `work` (which must not exist yet) on the engine whose data folder is `engine_data`.
@@ -261,26 +297,8 @@ pub async fn run(engine: &Engine, engine_data: &Path, work: &Path, mode: Mode) -
         }
     };
     if mode == Mode::Real {
-        // The engine's own admission: account readings first, then the caps of this one mission.
-        engine.check_plans(Duration::from_secs(20)).await;
-        tokio::time::sleep(Duration::from_secs(2)).await;
-        for (vendor, model) in [WRITER_MODEL, REVIEWER_MODEL] {
-            engine.mission_budget(Change::AllocateModel { vendor, model: model.into(), cap_micros: REAL_CAP_MICROS / 2 })?;
-        }
-        engine.mission_budget(Change::Grant {
-            mission: mid.clone(),
-            grant: Budgeted {
-                cap_micros: REAL_CAP_MICROS,
-                worker_micros: REAL_CAP_MICROS / 2,
-                kind_caps: BTreeMap::new(),
-                vendors: BTreeMap::from([(Vendor::Claude, REAL_CAP_MICROS / 2), (Vendor::Codex, REAL_CAP_MICROS / 2)]),
-                review_micros: REAL_CAP_MICROS / 4,
-                repair_micros: 0,
-                canary_micros: REAL_CAP_MICROS,
-                paused: false,
-                extra: super::Extra::new(),
-            },
-        })?;
+        read_accounts(engine).await;
+        caps(engine, &mid, REAL_CAP_MICROS)?;
     }
     let journal = Journal::open(Path::new(&repository.identity.root), engine_data, &mid).map_err(|e| e.key().to_string())?;
     // A replay has no provider to qualify, so only a real run goes through the admission of a live mission.
@@ -297,7 +315,7 @@ pub async fn run(engine: &Engine, engine_data: &Path, work: &Path, mode: Mode) -
         writable: vec!["src".into()],
         grant: Arc::new(move || Ok(Some(grant.clone()))),
         revision: REVISION,
-        micros: REAL_CAP_MICROS / 4,
+        micros: 900_000,
         turn_limit: Duration::from_secs(300),
         plan: Some(fixed_plan(&definition)),
     };
