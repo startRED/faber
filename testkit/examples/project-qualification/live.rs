@@ -135,10 +135,17 @@ fn effective_policy(thread: &Value, cwd: &str) -> io::Result<()> {
     {
         return Err(io::Error::other("role workspace or thread identity not acknowledged"));
     }
-    if thread["approvalPolicy"] != "on-request"
+    // Roles open with the isolated permission profile: the CLI reports it as a workspace sandbox with no extra writable
+    // root, no network and no temporary folder, and never asks. Whether a role can write is the profile's work (read-only
+    // for every role but the Writer), and the native probes below prove it; this check only refuses any other shape.
+    let sandbox = &thread["sandbox"];
+    if thread["approvalPolicy"] != "never"
         || thread["approvalsReviewer"] != "user"
-        || thread["sandbox"]["type"] != "readOnly"
-        || thread["sandbox"]["networkAccess"] != false
+        || sandbox["type"] != "workspaceWrite"
+        || sandbox["networkAccess"] != false
+        || sandbox["writableRoots"].as_array().is_none_or(|roots| !roots.is_empty())
+        || sandbox["excludeSlashTmp"] != true
+        || sandbox["excludeTmpdirEnvVar"] != true
     {
         return Err(io::Error::other("role containment policy not acknowledged"));
     }
@@ -668,8 +675,9 @@ mod tests {
     #[test]
     fn effective_policy_requires_acknowledged_pins_and_a_path_list_of_instruction_sources() {
         let valid = json!({"model":"gpt-6-luna","modelProvider":"openai","reasoningEffort":"low",
-            "approvalPolicy":"on-request","approvalsReviewer":"user","cwd":"workspace",
-            "sandbox":{"type":"readOnly","networkAccess":false},"instructionSources":[],
+            "approvalPolicy":"never","approvalsReviewer":"user","cwd":"workspace",
+            "sandbox":{"type":"workspaceWrite","networkAccess":false,"writableRoots":[],"excludeSlashTmp":true,"excludeTmpdirEnvVar":true},
+            "instructionSources":[],
             "thread":{"id":"owned-thread","cwd":"workspace","ephemeral":true,"cliVersion":"0.162.1"}});
         assert!(effective_policy(&valid, "workspace").is_ok());
         #[cfg(windows)]
@@ -685,10 +693,16 @@ mod tests {
             ("model", json!("another-model")),
             ("modelProvider", json!("other")),
             ("reasoningEffort", Value::Null),
-            ("approvalPolicy", json!("never")),
+            ("approvalPolicy", json!("on-request")),
             ("approvalsReviewer", json!("auto_review")),
             ("cwd", json!("another-workspace")),
-            ("sandbox", json!({"type":"readOnly","networkAccess":true})),
+            ("sandbox", json!({"type":"readOnly","networkAccess":false,"writableRoots":[],"excludeSlashTmp":true,"excludeTmpdirEnvVar":true})),
+            ("sandbox", json!({"type":"dangerFullAccess"})),
+            ("sandbox", json!({"type":"workspaceWrite","networkAccess":true,"writableRoots":[],"excludeSlashTmp":true,"excludeTmpdirEnvVar":true})),
+            ("sandbox", json!({"type":"workspaceWrite","networkAccess":false,"writableRoots":["C:/elsewhere"],"excludeSlashTmp":true,"excludeTmpdirEnvVar":true})),
+            ("sandbox", json!({"type":"workspaceWrite","networkAccess":false,"excludeSlashTmp":true,"excludeTmpdirEnvVar":true})),
+            ("sandbox", json!({"type":"workspaceWrite","networkAccess":false,"writableRoots":[],"excludeSlashTmp":false,"excludeTmpdirEnvVar":true})),
+            ("sandbox", Value::Null),
             ("instructionSources", json!([1])),
             ("instructionSources", Value::Null),
         ] {
