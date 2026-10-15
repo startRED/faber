@@ -244,16 +244,56 @@ async fn add_project(app: AppHandle, faber: State<'_, Faber>) -> Res<Option<Proj
     }
     let Some(picked) = dialog.blocking_pick_folder() else { return Ok(None) };
     let path = picked.into_path().map_err(|e| e.to_string())?;
-    if faber_engine::permissions::forbidden_folder(&path) {
-        return Err("error.workingFolder".into());
-    }
-    Ok(Some(faber.engine.add_project(&path.to_string_lossy())))
+    faber.engine.open_folder(&path.to_string_lossy()).map(Some)
+}
+
+/// The recent folders and saved environments, judged now: a folder that is gone or refused carries a reason key.
+#[tauri::command]
+async fn recents(faber: State<'_, Faber>) -> Res<faber_engine::recents::RecentsView> {
+    Ok(faber.engine.recents())
 }
 
 #[tauri::command]
-async fn chat_folder(app: AppHandle, faber: State<'_, Faber>, id: Option<String>, scratch: bool) -> Res<Option<Conversation>> {
+async fn open_folders(faber: State<'_, Faber>, paths: Vec<String>) -> Res<Vec<Project>> {
+    faber.engine.open_folders(&paths)
+}
+
+#[tauri::command]
+async fn forget_recent(faber: State<'_, Faber>, path: String) -> Res<()> {
+    faber.engine.forget_recent(&path);
+    Ok(())
+}
+
+#[tauri::command]
+async fn save_environment(faber: State<'_, Faber>, name: String, folders: Vec<String>) -> Res<()> {
+    faber.engine.save_environment(&name, &folders)
+}
+
+#[tauri::command]
+async fn forget_environment(faber: State<'_, Faber>, id: String) -> Res<()> {
+    faber.engine.forget_environment(&id);
+    Ok(())
+}
+
+#[tauri::command]
+async fn start_environment(faber: State<'_, Faber>, id: String) -> Res<Vec<Project>> {
+    faber.engine.start_environment(&id)
+}
+
+#[tauri::command]
+async fn chat_folder(
+    app: AppHandle,
+    faber: State<'_, Faber>,
+    id: Option<String>,
+    scratch: bool,
+    path: Option<String>,
+) -> Res<Option<Conversation>> {
     if scratch {
         return faber.engine.chat_folder(id.as_deref(), None).map(Some);
+    }
+    // A folder taken from the recents needs no dialog; the engine checks it like any chosen folder.
+    if let Some(path) = path {
+        return faber.engine.chat_folder(id.as_deref(), Some(Path::new(&path))).map(Some);
     }
     // A hidden test build must never open a visible native dialog.
     if faber.hidden {
@@ -502,6 +542,12 @@ fn main() {
             save_theme,
             open_theme,
             add_project,
+            recents,
+            open_folders,
+            forget_recent,
+            save_environment,
+            forget_environment,
+            start_environment,
             chat_folder,
             save_file,
             show_file,
