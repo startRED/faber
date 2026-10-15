@@ -22,12 +22,14 @@ check('recents: a recent folder opens as a project in one click, a saved environ
   const stored = localStorage.getItem('faber.place');
   const language = lang();
   const original = { ...api };
-  const view: RecentsView = {
+  const fresh = (): RecentsView => ({
     folders: [folder('alpha'), folder('beta'), folder('gamma', 'reason.recents.gone'), folder('delta'), folder('epsilon')],
     environments: [{ id: 'env-1', name: 'Work set', folders: [folder('alpha'), folder('beta')] }],
-  };
+  });
+  let view = fresh();
+  let failRemoval = false;
   const calls: unknown[][] = [];
-  api.recents = async () => view;
+  api.recents = async () => ({ folders: [...view.folders], environments: [...view.environments] });
   api.setClock = async () => {};
   api.openFolders = async (paths) => {
     calls.push(['open', paths]);
@@ -40,11 +42,16 @@ check('recents: a recent folder opens as a project in one click, a saved environ
   api.saveEnvironment = async (name, folders) => {
     calls.push(['save', name, folders]);
   };
+  // The removals really remove, so the screen shows the list as it is afterwards.
   api.forgetRecent = async (path) => {
     calls.push(['forget', path]);
+    if (failRemoval) throw 'error.recents.saveFailed';
+    view = { ...view, folders: view.folders.filter((f) => f.path !== path) };
   };
   api.forgetEnvironment = async (id) => {
     calls.push(['forgetEnvironment', id]);
+    if (failRemoval) throw 'error.recents.saveFailed';
+    view = { ...view, environments: view.environments.filter((e) => e.id !== id) };
   };
   const effects = { ambient: false, texture: false, glow: false };
   const initial: AppState = {
@@ -55,8 +62,10 @@ check('recents: a recent folder opens as a project in one click, a saved environ
       appearance: { base: 'sala', ground: 'sala', accent: '#f3f0e8', textFont: 'archivo', headingFont: 'narrow', textSize: 14, density: 1, corners: 1, motion: 'none', effects },
     },
   };
-  const mount = async () => {
-    localStorage.setItem('faber.place', JSON.stringify({ area: 'project' }));
+  const mount = async (area: 'project' | 'chat' = 'project') => {
+    view = fresh();
+    failRemoval = false;
+    localStorage.setItem('faber.place', JSON.stringify({ area }));
     const root = document.createElement('div');
     root.style.cssText = 'position:fixed;inset:0';
     root.dataset.motion = 'none';
@@ -121,12 +130,22 @@ check('recents: a recent folder opens as a project in one click, a saved environ
       buttons[2].click();
       await settle();
       deepEqual(calls.at(-1), ['forget', 'X:/work/gamma']);
-      const again = screen.root.querySelectorAll<HTMLElement>('.recents section:first-child .rec-x');
-      equal(document.activeElement, again[2], 'focus lands on the entry that took the removed one\'s place');
+      const names = () => [...screen.root.querySelectorAll('.recents section:first-child .rec .n')].map((n) => n.textContent);
+      const focused = () => {
+        const el = document.activeElement as HTMLElement | null;
+        return el?.classList.contains('rec-x') ? el.closest('.rec')?.querySelector('.n')?.textContent : el?.className;
+      };
+      deepEqual(names(), ['alpha', 'beta', 'delta', 'epsilon'], 'the entry is gone from the list');
+      equal(focused(), 'delta', 'focus lands on the entry that took the removed one\'s place');
+      screen.root.querySelectorAll<HTMLButtonElement>('.recents section:first-child .rec-x')[3].click();
+      await settle();
+      deepEqual(names(), ['alpha', 'beta', 'delta']);
+      equal(focused(), 'delta', 'removing the last entry moves focus to the new last one');
       screen.root.querySelector<HTMLButtonElement>('section[aria-labelledby="env-title"] .rec-x')!.click();
       await settle();
       deepEqual(calls.at(-1), ['forgetEnvironment', 'env-1']);
-      ok(screen.root.contains(document.activeElement), 'focus is still inside the screen');
+      equal(screen.root.querySelector('section[aria-labelledby="env-title"]'), null, 'the environment is gone');
+      equal(document.activeElement, screen.root.querySelector('.recents'), 'with no entry left in its list, focus stays in the block');
     } finally {
       screen.done();
     }
@@ -142,6 +161,32 @@ check('recents: a recent folder opens as a project in one click, a saved environ
       dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
       await settle();
       equal(document.activeElement, opener, 'Escape puts focus back where the menu came from');
+    } finally {
+      screen.done();
+    }
+    // In Settings, Escape closes only the menu and gives focus back; a second Escape closes Settings. A failed removal is said.
+    calls.length = 0;
+    screen = await mount('chat');
+    try {
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: ',', ctrlKey: true, bubbles: true }));
+      await settle();
+      const opener = screen.root.querySelector<HTMLButtonElement>('.recents .rec-x')!;
+      ok(opener, 'Settings lists the recent folders');
+      opener.focus();
+      screen.root.querySelector<HTMLElement>('.recents .rec')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      await settle();
+      (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      await settle();
+      equal(screen.root.querySelector('.rec-menu'), null, 'Escape closes the menu');
+      ok(screen.root.querySelector('.recents'), 'Settings is still open');
+      equal(document.activeElement, opener, 'focus is back where the menu opened');
+      failRemoval = true;
+      opener.click();
+      await settle();
+      ok(screen.root.querySelector('.toast')?.textContent?.includes(t('error.recents.saveFailed')), 'the failed removal is shown');
+      (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      await settle();
+      equal(screen.root.querySelector('.recents'), null, 'a second Escape closes Settings');
     } finally {
       screen.done();
     }

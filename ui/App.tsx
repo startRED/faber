@@ -696,6 +696,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                   }
                 } catch (err) { setSaveError(failureText(err)); }
               } : undefined}
+              onError={(err) => setSaveError(failureText(err))}
               onClose={closeSettings}
               onOpenSetup={(keep) => {
                 setBack(keep);

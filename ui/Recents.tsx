@@ -37,13 +37,19 @@ export function Recents(props: {
     setMenu(undefined);
     if (restore) open?.opener?.focus();
   };
-  const key = (e: KeyboardEvent) => e.key === 'Escape' && menu() && closeMenu(true);
+  // Captured before the screen's own Escape (which closes Settings): with a menu open, Escape belongs to the menu alone.
+  const key = (e: KeyboardEvent) => {
+    if (e.key !== 'Escape' || !menu()) return;
+    e.stopPropagation();
+    e.preventDefault();
+    closeMenu(true);
+  };
   const away = () => closeMenu();
   addEventListener('pointerdown', away);
-  addEventListener('keydown', key);
+  addEventListener('keydown', key, true);
   onCleanup(() => {
     removeEventListener('pointerdown', away);
-    removeEventListener('keydown', key);
+    removeEventListener('keydown', key, true);
   });
   const guard = async (run: () => Promise<unknown>) => {
     try {
@@ -56,10 +62,10 @@ export function Recents(props: {
   /** Removes an entry and keeps focus in the list: on the entry that took its place, or on the block itself when none is left. */
   const remove = async (section: Section, index: number, run: () => Promise<unknown>) => {
     await guard(run);
-    queueMicrotask(() => {
+    setTimeout(() => {
       const buttons = box?.querySelectorAll<HTMLElement>(`[data-section="${section}"] .rec-x`);
       (buttons?.[Math.min(index, buttons.length - 1)] ?? box)?.focus();
-    });
+    }, 0);
   };
   const menuAt = (e: MouseEvent, label: Key, run: () => Promise<unknown>, section: Section, index: number) => {
     e.preventDefault();
