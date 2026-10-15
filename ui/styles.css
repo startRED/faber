@@ -578,20 +578,17 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .amb-beam .beam i { position: absolute; inset: 0; clip-path: polygon(44% 0, 56% 0, 86% 100%, 14% 100%); background: linear-gradient(180deg, var(--beam-color), transparent 92%); }
 .amb-beam .beam i + i { clip-path: polygon(48% 0, 52% 0, 64% 100%, 36% 100%); opacity: 0.8; }
 .amb-beam .dust { position: absolute; left: 0; top: 0; width: 760px; height: 320px; -webkit-mask-image: linear-gradient(180deg, #000 30%, transparent 72%); mask-image: linear-gradient(180deg, #000 30%, transparent 72%); }
-/* Every grain is a shadow of a 1 px dot (ui/Ambient.tsx). The three layers twinkle out of step, on the compositor only. */
-.dust i { position: absolute; left: 0; top: 0; width: 1px; height: 1px; border-radius: 50%; will-change: opacity; animation: twinkle 6s var(--ease-io) infinite alternate; }
-.dust i:nth-child(2) { animation-duration: 8s; animation-delay: -3s; }
-.dust i:nth-child(3) { animation-duration: 10s; animation-delay: -6s; }
-@keyframes twinkle { to { opacity: 0.4; } }
+/* Every grain is a shadow of a 1 px dot (ui/Ambient.tsx). The three layers twinkle out of step: ui/Ambient.tsx sets their
+   opacity, which only the compositor uses. */
+.dust i { position: absolute; left: 0; top: 0; width: 1px; height: 1px; border-radius: 50%; will-change: opacity; }
 /* The light that breathes lives only around the lens, above and right of the greeting. */
 /* Promote only the visible part of the mask, avoiding a stage-sized software composition each frame. */
 .amb-glow { display: var(--amb-beam); left: calc(min(100% - 120px, 740px) - 170px); top: 0; width: 340px; height: 110px; overflow: hidden; -webkit-mask-image: radial-gradient(circle 170px at 170px -60px, #000 30%, transparent 100%); mask-image: radial-gradient(circle 170px at 170px -60px, #000 30%, transparent 100%); }
 .amb-glow .amb-beam { position: absolute; display: block; left: -210px; }
 .amb-glow { opacity: 0; }
 .amb-glow .beam { opacity: 1; }
-/* Fade the composed mask and blur together, so software rendering does not repaint the beam every frame. */
-html[data-motion='full'] .amb-glow { will-change: opacity; animation: glow 7s var(--ease-io) infinite alternate; }
-@keyframes glow { to { opacity: 0.5; } }
+/* ui/Ambient.tsx fades the composed mask and blur together, so software rendering does not repaint the beam. */
+html[data-motion='full'] .amb-glow { will-change: opacity; }
 .amb-loom { display: var(--amb-loom); right: 0; bottom: 0; width: 440px; height: 600px; overflow: hidden; -webkit-mask-image: radial-gradient(circle at 100% 100%, #000 0, #000 28%, transparent 68%); mask-image: radial-gradient(circle at 100% 100%, #000 0, #000 28%, transparent 68%); }
 .amb-loom svg { position: absolute; right: 0; bottom: 0; width: 660px; height: 600px; }
 .loom-warp line { stroke: var(--ink); stroke-width: 1; opacity: 0.11; }
@@ -643,7 +640,7 @@ html.resizing :is(.shell, .main, .side, .fold, .tour-ring) { transition: none !i
   select option:is(:hover, :focus-visible, :checked) { background: var(--s3); color: var(--ink); }
   @starting-style { select:open::picker(select) { opacity: 0; transform: translateY(var(--motion-rise)) scale(var(--motion-scale)); } }
 }
-:is([data-motion='reduced'], [data-motion='none']) :is(.cursor, .live, .live::after, .run-dot, .loom-row, .loom-shuttle, .flow-trace, .amb-glow, .dust i) { animation: none !important; }
+:is([data-motion='reduced'], [data-motion='none']) :is(.cursor, .live, .live::after, .run-dot, .loom-row, .loom-shuttle, .flow-trace) { animation: none !important; }
 :is([data-motion='reduced'], [data-motion='none']) :is(.loom-shuttle, .flow-trace) { opacity: 0; }
 [data-motion='reduced'] { --arrive-y: 0px; }
 /* Reduced and none are instant, including native pickers and theme snapshots. */
@@ -654,7 +651,7 @@ html.resizing :is(.shell, .main, .side, .fold, .tour-ring) { transition: none !i
 :is([data-motion='reduced'], [data-motion='none']) select::picker(select) { transition: none !important; transform: none !important; }
 :is(html[data-motion='reduced'], html[data-motion='none'])::view-transition-old(root),
 :is(html[data-motion='reduced'], html[data-motion='none'])::view-transition-new(root) { animation: none !important; }
-html.hidden-win :is(.amb, .amb *) { animation-play-state: paused !important; }
+html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 /* The system preference is honoured even before the script runs. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
