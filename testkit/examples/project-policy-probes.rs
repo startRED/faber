@@ -308,6 +308,7 @@ mod live {
                     instructions: None,
                     user_name: None,
                     permissions: faber_engine::model::Permissions::Isolated,
+                    flags: Default::default(),
                 },
                 Role::Writer,
             )

@@ -131,6 +131,8 @@ fn launch(resume: Option<&str>) -> ClaudeLaunch {
         instructions: None,
         user_name: None,
         permissions: Permissions::FullAccess,
+        // A CLI that knows every newer flag: full access would run it with nobody to answer (#28).
+        flags: faber_engine::claude::ClaudeFlags { autocompact: true, permission_prompts: true },
     }
 }
 
@@ -165,11 +167,17 @@ fn project_controls_are_explicit_on_launch_and_resume_without_changing_chat() {
             assert_eq!(after(&args, "--permission-mode"), "dontAsk");
             // The person chose full access (see `launch`); a role never inherits it.
             assert!(!args.iter().any(|a| a == "bypassPermissions"), "{args:?}");
+            // Nor the full-access path that denies requests for want of anyone to answer them.
+            assert!(!args.iter().any(|a| a == "--permission-prompts"), "{args:?}");
+            assert_eq!(after(&args, "--permission-prompt-tool"), "stdio");
             assert_eq!(after(&args, "--tools"), "");
             assert!(args.iter().any(|a| a == "--strict-mcp-config"));
             assert!(args.iter().any(|a| a == "--disable-slash-commands"));
             let settings: Value = serde_json::from_str(after(&args, "--settings")).unwrap();
             assert_eq!(settings["disableAllHooks"], true);
+            assert_eq!(args.iter().filter(|a| *a == "--settings").count(), 1, "{args:?}");
+            let deny = settings["permissions"]["deny"].as_array().unwrap();
+            assert!(deny.iter().any(|r| r.as_str().is_some_and(|r| r.starts_with("Read(") && r.contains(".codex"))), "{deny:?}");
             let denied = after(&args, "--disallowedTools");
             for tool in ["Bash", "Write", "Edit", "Agent", "Task", "Bash(git push *)", "Bash(git reset *)", "Bash(git update-ref *)"] {
                 assert!(denied.split(',').any(|d| d == tool), "{tool}");

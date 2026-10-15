@@ -84,6 +84,25 @@ pub struct ToolUse {
     pub declined: bool,
 }
 
+/// A request the CLI denied because nobody could answer it (full access runs with no prompts): it was not done, and it waits
+/// here until the person says what to do. `tool_use_id` names it, with the turn. Only safe metadata is kept, never the request
+/// itself: a command line or a header in it could carry a token (see `engine::parked::describe`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Parked {
+    pub tool_use_id: String,
+    pub tool: String,
+    #[serde(default)]
+    /// "command", "file", "page" or "other".
+    pub kind: String,
+    #[serde(default)]
+    /// A file path, or the host of a page; empty for a command and for any other tool. Cut short.
+    pub label: String,
+    #[serde(default)]
+    /// When it was held back, in milliseconds.
+    pub at: u64,
+}
+
 /// A permission request waiting for the user.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -153,6 +172,15 @@ pub struct Message {
     pub cache_write_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_write_1h_tokens: Option<u64>,
+    /// When the prompt cache this turn wrote goes cold, in milliseconds. Claude only: Codex names no lifetime.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_warm_until: Option<u64>,
+    /// Requests the CLI denied in this turn for want of anyone to answer them (see `Parked`), oldest first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parked: Option<Vec<Parked>>,
+    /// How many more were denied in the turn beyond the few kept (see `parked::MAX_PARKED`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parked_more: Option<u32>,
     /// True when the token numbers cover only part of the turn (sub-model work, or no usage was seen).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub incomplete: Option<bool>,
@@ -197,6 +225,9 @@ impl Message {
             cache_read_tokens: None,
             cache_write_tokens: None,
             cache_write_1h_tokens: None,
+            cache_warm_until: None,
+            parked: None,
+            parked_more: None,
             incomplete: None,
             pace: None,
             wait_until: None,
@@ -384,6 +415,11 @@ pub struct RunningItem {
     pub since: u64,
     /// The questions the user has not answered yet.
     pub permissions: Vec<Permission>,
+    /// Requests the CLI denied in the latest reply that wait for the person (empty when none).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub parked: Vec<Parked>,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub parked_more: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wait_until: Option<f64>,
 }
@@ -486,6 +522,10 @@ pub enum Permissions {
 pub enum Setup {
     Done,
     Skipped,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 #[cfg(test)]

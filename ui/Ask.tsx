@@ -1,5 +1,5 @@
-import { createMemo, createSignal, Show } from 'solid-js';
-import { api, type Permission } from './api.ts';
+import { createMemo, createSignal, For, Show } from 'solid-js';
+import { api, type Parked, type Permission } from './api.ts';
 import { fromEngine, t } from './i18n.ts';
 import { answerOutcome } from './running.ts';
 
@@ -80,5 +80,27 @@ export function Asks(props: { conversationId: string; turnId: string; permission
         <div class="note">{t('ask.moreWaiting', { n: props.permissions.length - 1 })}</div>
       </Show>
     </>
+  );
+}
+
+/** Requests the CLI denied because nobody could answer them. No buttons: the CLI is past them, and what was held back was not
+ * done. The words say so and what the person can do. */
+export function Parkeds(props: { parked: Parked[]; more?: number; surface?: string }) {
+  return (
+    <Show when={props.parked.length > 0 || (props.more ?? 0) > 0}>
+      <div class="ask parked" data-surface={props.surface} role="status">
+        <b>{t('ask.parked')}</b>
+        <For each={props.parked}>
+          {(p) => (
+            <span class="note">
+              {t(`parked.${p.kind}`, { tool: p.tool })}
+              {p.label ? ` ${p.label}` : ''}
+            </span>
+          )}
+        </For>
+        <Show when={props.more}>{(n) => <span class="note">{t('parked.more', { n: n() })}</span>}</Show>
+        <span class="note">{t('ask.parkedHint')}</span>
+      </div>
+    </Show>
   );
 }

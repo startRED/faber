@@ -342,7 +342,7 @@ fn paid_fallback_survives_a_restart_and_missing_evidence_stays_conservative() {
         let mut restored: VendorLedger = serde_json::from_str(&serde_json::to_string(&ledger).unwrap()).unwrap();
         restored.billing = Billing::Subscription;
         assert_eq!(restored.paid_fallback, flag);
-        assert_eq!(gate(&restored.snap(BASE), None, Purpose::Pulse, false, BASE), Err(Why::Paid));
+        assert_eq!(gate(&restored.snap(BASE), None, Purpose::Summary, false, BASE), Err(Why::Paid));
     }
     let mut legacy: VendorLedger = serde_json::from_str("{}").unwrap();
     legacy.billing = Billing::Subscription;

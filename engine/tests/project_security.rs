@@ -4,7 +4,17 @@ use faber_engine::model::{Area, Permissions, Settings};
 use serde_json::{Value, json};
 
 fn launch(area: Area, permissions: Permissions) -> ClaudeLaunch {
-    ClaudeLaunch { area, permissions, model: None, effort: None, resume: None, user_hooks: false, instructions: None, user_name: None }
+    ClaudeLaunch {
+        area,
+        permissions,
+        model: None,
+        effort: None,
+        resume: None,
+        user_hooks: false,
+        instructions: None,
+        user_name: None,
+        flags: Default::default(),
+    }
 }
 
 fn settings(args: &[String]) -> Value {

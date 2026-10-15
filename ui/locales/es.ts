@@ -32,6 +32,8 @@ export const es: Messages = {
   'tray.running': { one: 'Faber: {n} en curso', other: 'Faber: {n} en curso' },
   'tray.needsYou': { one: ', {n} te necesita', other: ', {n} te necesitan' },
   'tray.notify': '{title} te necesita',
+  // Handwritten wording; native-speaker review pending (English is the source).
+  'tray.notifyMany': '{title}: {n} solicitudes te necesitan',
   'toast.dismiss': 'Descartar',
   'side.addProject': 'Añadir carpeta de proyecto',
   'side.noAi': 'Ninguna IA conectada',
@@ -126,6 +128,14 @@ export const es: Messages = {
   'ask.always': 'Permitir siempre en esta conversación',
   'ask.deny': 'Denegar',
   'ask.moreWaiting': { one: '1 más en espera', other: '{n} más en espera' },
+  // Handwritten wording; native-speaker review pending (English is the source).
+  'ask.parked': 'Retenido: no había nadie para responder',
+  'ask.parkedHint': 'No se hizo. Hazlo tú, o cambia en Ajustes a "Preguntar antes de ejecutar comandos" y pídelo de nuevo.',
+  'parked.command': 'Un comando',
+  'parked.file': 'Un archivo',
+  'parked.page': 'Una página',
+  'parked.other': '{tool}',
+  'parked.more': '+{n} más',
   'answer.label': 'Respuesta',
   'answer.thinking': 'Razonamiento',
   'activity.working': 'En curso · {steps} · {commands}',
@@ -143,6 +153,8 @@ export const es: Messages = {
   'nudge.noCheck': 'El código cambió, pero nada lo comprobó. Repite este mensaje con {to}.',
   'answer.cost': '{cost} US$ a precio de API',
   'answer.tokens': '{input} mil de entrada · {output} de salida',
+  // Handwritten wording; native-speaker review pending (English is the source).
+  'answer.cacheWarm': 'caché caliente hasta las {time}',
   'files.label': 'Archivos',
   'files.save': 'Guardar…',
   'files.show': 'Mostrar',

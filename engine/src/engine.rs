@@ -31,6 +31,7 @@ use uuid::Uuid;
 
 mod answer;
 mod auto;
+mod parked;
 mod project_budget;
 mod project_sessions;
 mod quota_watch;
@@ -188,6 +189,10 @@ fn unix_secs() -> f64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64())
 }
 
+/// The lifetime of the cache counts from when the request began, and the stream shows the answer only after its first word:
+/// this much is taken off the expiry so the note never promises more warmth than there is.
+const WARM_MARGIN_MS: u64 = 5_000;
+
 /// How often the quota ledger is written while readings keep coming.
 const LEDGER_EVERY: f64 = 30.0;
 
@@ -266,6 +271,8 @@ struct Core {
     closing: bool,
     /// `/usage` turned out to ask a model: Claude's quota is then read from its own answers only.
     usage_command_spent: bool,
+    /// The newer flags the installed Claude Code takes; none until `detect_claude_flags` has read them.
+    claude_flags: crate::claude::ClaudeFlags,
     /// When a failed Codex read last counted against the plan check.
     codex_failed_at: f64,
     /// The PC's offset from UTC in seconds, as the screen reports it.
@@ -345,6 +352,7 @@ impl Engine {
                 watching: false,
                 closing: false,
                 usage_command_spent: false,
+                claude_flags: Default::default(),
                 codex_failed_at: f64::MIN,
                 utc_offset: 0,
                 offset_known: false,
@@ -422,6 +430,17 @@ impl Engine {
             c.emit_usage();
         });
     }
+    /// The newer flags the installed Claude Code is known to take (none until the help has been read).
+    pub fn claude_flags(&self) -> crate::claude::ClaudeFlags {
+        self.with(|c| c.claude_flags)
+    }
+
+    /// Reads once which newer flags the installed Claude Code lists in `--help` (`autocompact`, `permission-prompts`). Until it
+    /// answers, and if it never does, every Claude process starts as it did before those flags existed. The shell starts it once.
+    pub fn detect_claude_flags(&self) {
+        self.with(|c| c.probe_claude_flags());
+    }
+
     /// Once the screen supplies its local offset: checks Claude's plan every quarter of an hour, and reads both quotas on the
     /// schedule in `cadence.rs` (at start, every few minutes, after a wake). The shell starts it once.
     pub fn watch_accounts(&self) {
@@ -1099,6 +1118,18 @@ impl Core {
         Ok(settings)
     }
 
+    /// Starts the hidden `--help` read (see `Engine::detect_claude_flags`); its answer replaces the flags known so far.
+    fn probe_claude_flags(&self) {
+        let Some(cli) = self.opts.clis.get(&Vendor::Claude).cloned() else { return };
+        let (me, spawn, cwd) = (self.me.clone(), self.opts.spawn.clone(), self.opts.data_dir.clone());
+        self.opts.runtime.spawn(async move {
+            let Some(flags) = account::claude_flags(&cli, &spawn, &cwd, Duration::from_secs(20)).await else { return };
+            if let Some(core) = me.upgrade() {
+                core.lock().unwrap_or_else(|e| e.into_inner()).claude_flags = flags;
+            }
+        });
+    }
+
     fn turn(&mut self, conv: &str) -> Option<&mut Message> {
         let id = self.live.get(conv)?.turn.clone()?;
         self.convs.get_mut(conv)?.messages.iter_mut().find(|m| m.id == id)
@@ -1216,6 +1247,13 @@ impl Core {
                 }
                 return self.push(conv, turn_id.as_deref(), true);
             }
+            EngineEvent::CacheWarm { secs, started_ms } => {
+                // The lifetime counts from the start of the request, not from the result: a long answer has used part of it.
+                if let (Some(m), Some(started)) = (self.turn(conv), started_ms) {
+                    m.cache_warm_until = Some(started.saturating_add(secs.saturating_mul(1000)).saturating_sub(WARM_MARGIN_MS));
+                }
+            }
+            EngineEvent::Parked { tool_use_id, tool, input } => self.park(conv, tool_use_id, tool, input),
             EngineEvent::Injected { tag } => return self.taken_in(conv, tag),
             EngineEvent::SteerFailed { tag } => return self.steer_failed(conv, &tag),
             EngineEvent::Quota { window, used, resets_at } => return self.note_quota(vendor, &window, used, resets_at),
@@ -1307,6 +1345,12 @@ impl Core {
                 return self.finish(conv, turn_id);
             }
             EngineEvent::Error { message, fatal } => {
+                // A CLI that refuses a flag Faber passed (it was changed under a running Faber): forget the newer flags at once, so the
+                // next launch is the old one, and read the new help.
+                if fatal && recovery::flag_rejected(&message) && self.claude_flags != Default::default() {
+                    self.claude_flags = Default::default();
+                    self.probe_claude_flags();
+                }
                 let limited = fatal && recovery::plan_limit(&message);
                 if let Some(m) = self.turn(conv) {
                     m.error = Some(message);
@@ -1919,7 +1963,17 @@ impl Core {
                 ClaudeOptions {
                     bin: cli.command.clone(),
                     cwd,
-                    launch: ClaudeLaunch { area, model, effort, resume, user_hooks, permissions, instructions: None, user_name },
+                    launch: ClaudeLaunch {
+                        area,
+                        model,
+                        effort,
+                        resume,
+                        user_hooks,
+                        permissions,
+                        instructions: None,
+                        user_name,
+                        flags: self.claude_flags,
+                    },
                     spawn,
                     sandbox: self.opts.clis.get(&Vendor::Codex).cloned(),
                 },
@@ -2328,11 +2382,15 @@ fn unseen(c: char) -> bool {
         )
 }
 
-/// The row of the running list for a conversation, if its latest reply is streaming or has unanswered permissions.
+/// The row of the running list for a conversation, if its latest reply is streaming, has unanswered permissions or has parked
+/// requests (denied for want of anyone to answer; they wait for the person until the next message, and count as "needs you").
+/// Cache warmth is not here: it is a quiet note on the reply itself.
 fn running_item(c: &Conversation) -> Option<RunningItem> {
     let reply = c.messages.last().filter(|m| m.role == Role::Assistant)?;
     let permissions = reply.permissions.clone().unwrap_or_default();
-    if reply.status != Some(Status::Streaming) && permissions.is_empty() {
+    let parked = reply.parked.clone().unwrap_or_default();
+    let parked_more = reply.parked_more.unwrap_or(0);
+    if reply.status != Some(Status::Streaming) && permissions.is_empty() && parked.is_empty() && parked_more == 0 {
         return None;
     }
     Some(RunningItem {
@@ -2343,9 +2401,11 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
         project_id: c.project_id.clone(),
         vendor: reply.vendor,
         model: reply.model.clone(),
-        state: if permissions.is_empty() { RunState::Working } else { RunState::NeedsYou },
+        state: if permissions.is_empty() && parked.is_empty() && parked_more == 0 { RunState::Working } else { RunState::NeedsYou },
         since: reply.at,
         permissions,
+        parked,
+        parked_more,
         wait_until: reply.wait_until.filter(|_| reply.status == Some(Status::Streaming)),
     })
 }

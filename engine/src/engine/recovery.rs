@@ -25,6 +25,11 @@ pub(super) fn with_attachments(text: &str, area: Area, shown: &[String]) -> Stri
     format!("{text}\n\nAttached files{place}:\n{}", shown.iter().map(|p| format!("- {p}")).collect::<Vec<_>>().join("\n"))
 }
 
+/// The CLI refused an option on its command line (`error: unknown option '--permission-prompts'`): a flag it no longer has.
+pub(super) fn flag_rejected(message: &str) -> bool {
+    message.to_ascii_lowercase().contains("unknown option")
+}
+
 pub(super) fn plan_limit(message: &str) -> bool {
     let m = message.to_ascii_lowercase();
     [

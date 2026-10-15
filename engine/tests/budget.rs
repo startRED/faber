@@ -232,7 +232,7 @@ const TURN: Purpose = Purpose::UserTurn { by_hand: false };
 
 #[test]
 fn the_gate_lets_a_vendor_with_no_reading_answer() {
-    for purpose in [TURN, Purpose::Router, Purpose::Pulse, Purpose::Summary, Purpose::PlanCheck] {
+    for purpose in [TURN, Purpose::Router, Purpose::Summary, Purpose::PlanCheck] {
         assert_eq!(gate(&snap(vec![]), None, purpose, false, NOW), Ok(()));
     }
 }
@@ -240,7 +240,7 @@ fn the_gate_lets_a_vendor_with_no_reading_answer() {
 #[test]
 fn the_gate_denies_unknown_billing_for_every_automatic_request() {
     let unknown = Snap::default();
-    for purpose in [TURN, Purpose::Router, Purpose::Pulse, Purpose::Summary] {
+    for purpose in [TURN, Purpose::Router, Purpose::Summary] {
         assert_eq!(gate(&unknown, None, purpose, false, NOW), Err(Why::Billing));
         assert_eq!(gate(&unknown, None, purpose, true, NOW), Err(Why::Billing));
     }
@@ -251,7 +251,7 @@ fn the_gate_denies_unknown_billing_for_every_automatic_request() {
 #[test]
 fn the_gate_keeps_usage_billed_logins_for_the_user_alone() {
     let billed = Snap { billing: Billing::UsageBilled, ..snap(vec![]) };
-    for purpose in [TURN, Purpose::Router, Purpose::Pulse, Purpose::Summary] {
+    for purpose in [TURN, Purpose::Router, Purpose::Summary] {
         assert_eq!(gate(&billed, None, purpose, false, NOW), Err(Why::Billing));
     }
     assert_eq!(gate(&billed, None, Purpose::UserTurn { by_hand: true }, false, NOW), Ok(()));
@@ -265,13 +265,13 @@ fn the_gate_denies_what_is_out_or_nearly_out() {
     let opus_out = snap(vec![five(0.2, HOUR), ("seven_day_opus".into(), window(1.0, DAY, 7.0 * DAY))]);
     assert_eq!(gate(&opus_out, Some("opus"), TURN, false, NOW), Err(Why::Exhausted));
     assert_eq!(gate(&opus_out, Some("sonnet"), TURN, false, NOW), Ok(()));
-    assert_eq!(gate(&snap(vec![five(0.985, HOUR)]), None, Purpose::Pulse, false, NOW), Err(Why::Window));
+    assert_eq!(gate(&snap(vec![five(0.985, HOUR)]), None, Purpose::Summary, false, NOW), Err(Why::Window));
 }
 
 #[test]
 fn the_gate_is_stricter_where_the_cli_could_switch_to_paid_use_by_itself() {
     let near_limit = Snap { paid_fallback: true, ..snap(vec![five(0.91, HOUR)]) };
-    for purpose in [TURN, Purpose::Router, Purpose::Pulse, Purpose::Summary] {
+    for purpose in [TURN, Purpose::Router, Purpose::Summary] {
         assert_eq!(gate(&near_limit, None, purpose, false, NOW), Err(Why::Paid));
     }
     assert_eq!(gate(&Snap { paid_fallback: false, ..near_limit.clone() }, None, TURN, false, NOW), Ok(()));

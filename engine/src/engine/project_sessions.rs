@@ -188,6 +188,7 @@ impl Engine {
                         user_name: None,
                         // A role never inherits the person's mode; the role's own arguments are stricter still.
                         permissions: Permissions::Isolated,
+                        flags: Default::default(),
                     },
                     spawn,
                     sandbox: None,

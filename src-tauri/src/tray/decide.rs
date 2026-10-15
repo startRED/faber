@@ -34,6 +34,13 @@ pub(crate) struct ShellTexts {
     needs_you: Plural,
     /// The notification, with `{title}` for the conversation: "{title} needs you".
     notify: String,
+    /// The notification for several requests held back in one turn, with `{title}` and `{n}`: "{title}: {n} requests need you".
+    #[serde(default = "default_notify_many")]
+    notify_many: String,
+}
+
+fn default_notify_many() -> String {
+    "{title}: {n} requests need you".into()
 }
 
 impl Default for ShellTexts {
@@ -46,6 +53,7 @@ impl Default for ShellTexts {
             running: same("Faber: {n} running"),
             needs_you: Plural { one: ", {n} needs you".into(), other: ", {n} need you".into() },
             notify: "{title} needs you".into(),
+            notify_many: default_notify_many(),
         }
     }
 }
@@ -153,13 +161,22 @@ pub(super) struct Watch {
     seen_decisions: HashSet<(String, String)>,
     last_running_counts: Counts,
     missions: HashMap<String, (u64, Counts)>,
+    /// How many requests beyond the kept ones were already counted for a turn (the engine only counts those).
+    more_seen: HashMap<(String, String), usize>,
+    /// When a notice about held-back requests was last sent, in seconds: the next one waits out `PARKED_COOLDOWN`.
+    last_parked: Option<f64>,
 }
+
+/// A notice about held-back requests waits this long after the last one (seconds).
+const PARKED_COOLDOWN: f64 = 60.0;
 
 /// What a list changes: the numbers to show, and the title of the conversation of each question to notify.
 #[derive(Debug, PartialEq)]
 pub(super) struct Update {
     pub(super) counts: Counts,
     pub(super) notices: Vec<String>,
+    /// One per turn that had new requests held back: its title and how many. Already past the cooldown.
+    pub(super) parked_notices: Vec<(String, usize)>,
 }
 
 impl Watch {
@@ -174,11 +191,17 @@ impl Watch {
     /// None for a list that is not newer than the last one taken in: it changes nothing. A question the user could
     /// already see (the window was focused when it came) is never notified later, and a question never notifies twice.
     pub(super) fn take(&mut self, revision: u64, items: &[RunningItem], window_focused: bool) -> Option<Update> {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64());
+        self.take_at(revision, items, window_focused, now)
+    }
+
+    fn take_at(&mut self, revision: u64, items: &[RunningItem], window_focused: bool, now: f64) -> Option<Update> {
         if self.revision.is_some_and(|last| revision <= last) {
             return None;
         }
         self.revision = Some(revision);
         let mut notices = Vec::new();
+        let mut parked_notices = Vec::new();
         for item in items {
             for p in &item.permissions {
                 let key = (item.conversation_id.clone(), item.turn_id.clone(), p.request_id.clone());
@@ -186,9 +209,21 @@ impl Watch {
                     notices.push(item.title.clone());
                 }
             }
+            // Requests the CLI denied for want of anyone to answer them are blocked requests too (R92), named by their tool call.
+            // A turn is one notice however many it had, and a notice waits out the cooldown after the last one: a flood of
+            // denials is one line, not a hundred. The tray number still counts them all.
+            let turn = (item.conversation_id.clone(), item.turn_id.clone());
+            let new_kept = item.parked.iter().filter(|p| self.seen.insert((turn.0.clone(), turn.1.clone(), p.tool_use_id.clone()))).count();
+            let counted = self.more_seen.insert(turn, item.parked_more as usize).unwrap_or(0);
+            let fresh = new_kept + (item.parked_more as usize).saturating_sub(counted);
+            let cooled = self.last_parked.is_none_or(|last| now - last >= PARKED_COOLDOWN);
+            if fresh > 0 && !window_focused && cooled {
+                self.last_parked = Some(now);
+                parked_notices.push((item.title.clone(), fresh));
+            }
         }
         self.last_running_counts = counts(items);
-        Some(Update { counts: self.combined_counts(), notices })
+        Some(Update { counts: self.combined_counts(), notices, parked_notices })
     }
 
     /// Evaluates a mission view: concrete choices and direction/taste/money/legal blockers become needs-you items
@@ -211,7 +246,7 @@ impl Watch {
         }
         let counts = Counts { running: usize::from(matches!(view.state, MissionState::Running)), needs_you: mission_needs };
         self.missions.insert(view.mission_id.clone(), (view.revision, counts));
-        Some(Update { counts: self.combined_counts(), notices })
+        Some(Update { counts: self.combined_counts(), notices, parked_notices: vec![] })
     }
 
     fn combined_counts(&self) -> Counts {
@@ -235,6 +270,13 @@ impl Shown {
 }
 
 /// The text of one notification; a conversation without a title yet is called by the app's name.
+pub(super) fn parked_notice_text(texts: &ShellTexts, title: &str, n: usize) -> String {
+    if n <= 1 {
+        return notice_text(texts, title);
+    }
+    fill(&fill(&texts.notify_many, "title", if title.is_empty() { "Faber" } else { title }), "n", &n.to_string())
+}
+
 pub(super) fn notice_text(texts: &ShellTexts, title: &str) -> String {
     fill(&texts.notify, "title", if title.is_empty() { "Faber" } else { title })
 }
@@ -398,6 +440,62 @@ mod tests {
         assert!(watch.take(4, &[], false).unwrap().notices.is_empty(), "finishing work is not an attention request");
     }
 
+    fn parked_item(conversation: &str, turn: &str, title: &str, ids: &[&str], more: u32) -> RunningItem {
+        let mut i = item(conversation, turn, title, &[]);
+        i.state = RunState::NeedsYou;
+        i.parked = ids
+            .iter()
+            .map(|id| faber_engine::model::Parked {
+                tool_use_id: (*id).into(),
+                tool: "Bash".into(),
+                kind: "command".into(),
+                label: String::new(),
+                at: 1,
+            })
+            .collect();
+        i.parked_more = more;
+        i
+    }
+
+    #[test]
+    fn a_parked_request_notifies_once_and_counts_as_needing_the_person() {
+        let mut watch = Watch::default();
+        let parked = parked_item("a", "t1", "Ship it", &["toolu_1"], 0);
+        let first = watch.take_at(1, std::slice::from_ref(&parked), false, 0.0).unwrap();
+        assert_eq!((first.parked_notices, first.counts.needs_you), (vec![("Ship it".to_string(), 1)], 1));
+        assert!(watch.take_at(2, std::slice::from_ref(&parked), false, 1000.0).unwrap().parked_notices.is_empty(), "once per request");
+        assert!(Watch::default().take_at(1, &[parked], true, 0.0).unwrap().parked_notices.is_empty(), "never while the window is focused");
+    }
+
+    #[test]
+    fn a_flood_of_denials_is_one_counted_notice_per_turn_and_the_next_turn_waits_out_the_cooldown() {
+        let ids: Vec<String> = (0..20).map(|n| format!("t{n}")).collect();
+        let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+        let mut watch = Watch::default();
+        // A hundred denied in one turn (twenty kept, eighty counted): one notice, saying how many.
+        let flood = parked_item("a", "t1", "Ship it", &ids, 80);
+        let update = watch.take_at(1, std::slice::from_ref(&flood), false, 0.0).unwrap();
+        assert_eq!(update.parked_notices, [("Ship it".to_string(), 100)]);
+        assert!(update.notices.is_empty());
+        // Another turn, 10 seconds later, is inside the cooldown: counted on the tray, no notice. Its requests never notify later.
+        let second = parked_item("b", "t2", "Other", &["x1", "x2"], 0);
+        let update = watch.take_at(2, &[flood.clone(), second.clone()], false, 10.0).unwrap();
+        assert!(update.parked_notices.is_empty());
+        assert_eq!(update.counts.needs_you, 2);
+        assert!(watch.take_at(3, &[flood.clone(), second], false, 500.0).unwrap().parked_notices.is_empty());
+        // After the cooldown a new turn notifies again, and the counted overflow of a turn is added once, not again.
+        let third = parked_item("c", "t3", "Third", &["y1", "y2", "y3"], 0);
+        let update = watch.take_at(4, &[flood.clone(), third], false, 500.0).unwrap();
+        assert_eq!(update.parked_notices, [("Third".to_string(), 3)]);
+        let grown = parked_item("a", "t1", "Ship it", &ids, 85);
+        assert_eq!(watch.take_at(5, &[grown], false, 1000.0).unwrap().parked_notices, [("Ship it".to_string(), 5)]);
+        // One request reads as the plain notice; several are counted in words.
+        let texts = ShellTexts::default();
+        assert_eq!(parked_notice_text(&texts, "Ship it", 1), "Ship it needs you");
+        assert_eq!(parked_notice_text(&texts, "Ship it", 7), "Ship it: 7 requests need you");
+        assert_eq!(parked_notice_text(&texts, "", 7), "Faber: 7 requests need you");
+    }
+
     fn item(conversation: &str, turn: &str, title: &str, requests: &[&str]) -> RunningItem {
         RunningItem {
             conversation_id: conversation.into(),
@@ -411,6 +509,8 @@ mod tests {
             since: 0,
             wait_until: None,
             permissions: requests.iter().map(|r| Permission { request_id: (*r).into(), tool: "Write".into(), input: json!({}) }).collect(),
+            parked: vec![],
+            parked_more: 0,
         }
     }
 

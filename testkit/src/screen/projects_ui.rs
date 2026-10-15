@@ -215,7 +215,8 @@ fn board(ctx: &mut Ctx) -> Result {
     same(app.page.count(&css(".ny-card"))?, 0, "the answer remains durable")?;
     let (mb, _) = ctx.memory_mb(app.id)?;
     peak = peak.max(mb);
-    ensure(peak <= 250.0, || format!("Projects peak {peak:.1} MB exceeds 250 MB"))?;
+    // R125: the end-to-end memory limit is 400 MB, as for the other screens (review.rs).
+    ensure(peak <= 400.0, || format!("Projects peak {peak:.1} MB exceeds 400 MB"))?;
     ctx.notes.push(format!("200 tasks, 6 looks x 5 widths, 18 px text, reduced motion; Projects peak {peak:.1} MB"));
     Ok(())
 }

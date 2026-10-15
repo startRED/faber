@@ -81,6 +81,38 @@ pub async fn check(vendor: Vendor, cli: &Cli, spawn: &Spawner, cwd: &Path, timeo
     if vendor == Vendor::Claude { verdict(vendor, &out, code) } else { verdict(vendor, &format!("{out}\n{err}"), code) }
 }
 
+/// Which newer flags the installed Claude Code lists in `--help` (one short hidden run, output bounded). None when it did not
+/// answer or printed nothing: the caller then keeps passing none of them.
+pub async fn claude_flags(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> Option<crate::claude::ClaudeFlags> {
+    let ran = run_args(cli, vec!["--help".into()], spawn, cwd, timeout).await?;
+    flags_from_run(ran.code, ran.replayed, &ran.out)
+}
+
+/// The flags a finished `--help` run declares. A help that failed (non-zero exit) is no declaration; a replayed recording has
+/// no exit status and is judged by its text alone.
+fn flags_from_run(code: Option<i32>, replayed: bool, out: &str) -> Option<crate::claude::ClaudeFlags> {
+    let finished = code == Some(0) || (replayed && code.is_none());
+    (finished && !out.trim().is_empty()).then(|| crate::claude::ClaudeFlags::from_help(out))
+}
+
+#[cfg(test)]
+mod flags_tests {
+    use super::*;
+    use crate::claude::ClaudeFlags;
+
+    const HELP: &str = "Usage: claude\n  --autocompact <auto|tokens>   Window\n  --permission-prompts <target>   Who answers\n";
+    const BOTH: ClaudeFlags = ClaudeFlags { autocompact: true, permission_prompts: true };
+
+    #[test]
+    fn only_a_help_that_finished_successfully_declares_flags() {
+        assert_eq!(flags_from_run(Some(0), false, HELP), Some(BOTH));
+        assert_eq!(flags_from_run(Some(1), false, HELP), None, "a failed run is no declaration");
+        assert_eq!(flags_from_run(None, false, HELP), None, "a real process with no status was cut off");
+        assert_eq!(flags_from_run(None, true, HELP), Some(BOTH), "a recording is judged by its text");
+        assert_eq!(flags_from_run(Some(0), false, "  \n"), None);
+    }
+}
+
 /// What `claude auth status` says about the plan and how the login is billed; nothing else of its output is kept (the email
 /// and organisation in it are dropped unread). None when the command failed, timed out or returned invalid status data.
 pub async fn claude_account(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> Option<Signals> {

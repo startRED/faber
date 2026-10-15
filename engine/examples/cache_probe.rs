@@ -136,6 +136,7 @@ impl Probe {
             user_hooks: false,
             instructions: None,
             user_name: None,
+            flags: Default::default(),
             permissions: Permissions::Ask,
         };
         let session = start_claude(
@@ -158,6 +159,7 @@ impl Probe {
             user_hooks: false,
             instructions: Some("Reply with the single word ok.".into()),
             user_name: None,
+            flags: Default::default(),
             permissions: Permissions::Ask,
         };
         let session = start_claude(
@@ -263,7 +265,7 @@ async fn run() {
             // The first pulse establishes the reading. Only the following n pulses belong to the measured interval.
             for i in 0..=n {
                 let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
-                gate(&snap, Some("haiku"), Purpose::Pulse, false, now).expect("the quota gate refused a pulse");
+                gate(&snap, Some("haiku"), Purpose::Summary, false, now).expect("the quota gate refused a pulse");
                 let (session, mut rx) = probe.pulse();
                 session.send(UserTurn::text("ok"));
                 let close = || session.close();

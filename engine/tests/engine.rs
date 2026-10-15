@@ -1651,6 +1651,7 @@ async fn stop_leaves_no_worker(parent_script: &str, why: &str) {
                 permissions: Permissions::FullAccess,
                 instructions: None,
                 user_name: None,
+                flags: Default::default(),
             },
             spawn,
             sandbox: None,
@@ -1805,4 +1806,68 @@ async fn r124b_a_worker_of_a_cli_that_already_exited_is_stopped_too() {
         "the worker of a CLI that had already exited kept running",
     )
     .await;
+}
+
+/// A spawner that answers `claude --help` itself: with `help`, or never (the read stays pending). Every other launch goes to `inner`.
+fn with_help(inner: Spawner, help: Option<&'static str>) -> Spawner {
+    Arc::new(move |bin, args, cwd| {
+        if args != ["--help"] {
+            return inner(bin, args, cwd);
+        }
+        let stdout: Box<dyn tokio::io::AsyncRead + Send + Unpin> = match help {
+            Some(text) => Box::new(std::io::Cursor::new(text.as_bytes().to_vec())),
+            None => {
+                let (reader, writer) = tokio::io::duplex(64);
+                std::mem::forget(writer); // never written, never closed: the read is still pending
+                Box::new(reader)
+            }
+        };
+        Ok(faber_engine::proc::Proc { stdin: Box::new(tokio::io::sink()), stdout, stderr: None, child: None, contained: None })
+    })
+}
+
+const NEWER_HELP: &str = "Options:\n  --autocompact <auto|tokens>   Window\n  --permission-prompts <target>   Who answers\n";
+
+async fn first_launch_args(help: Option<Option<&'static str>>) -> (Vec<String>, faber_engine::claude::ClaudeFlags) {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "chat"));
+    let spawn = match help {
+        Some(h) => with_help(f.spawn.clone(), h),
+        None => f.spawn.clone(),
+    };
+    let (engine, mut rx) = engine(dir.path(), Vendor::Claude, spawn);
+    if help.is_some() {
+        engine.detect_claude_flags();
+        if help == Some(Some(NEWER_HELP)) {
+            for _ in 0..300 {
+                if engine.claude_flags() != Default::default() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        } else {
+            tokio::time::sleep(Duration::from_millis(100)).await; // the read has had its chance, and is still pending
+        }
+    }
+    engine.send(ask(Area::Chat, SKY, choice("claude", None))).unwrap();
+    finished(&mut rx, |_| {}).await;
+    let args = f.args.lock().unwrap().first().cloned().expect("a launch");
+    (args, engine.claude_flags())
+}
+
+#[tokio::test]
+async fn a_launch_while_the_help_read_is_pending_uses_exactly_the_old_args_and_a_later_one_gets_the_flags() {
+    let (never_read, _) = first_launch_args(None).await;
+    let (pending, flags) = first_launch_args(Some(None)).await;
+    assert_eq!(flags, Default::default(), "nothing is known while the read is pending");
+    assert_eq!(pending, never_read, "a pending read changes nothing about the launch");
+    assert!(pending.windows(2).any(|a| a == ["--permission-prompt-tool", "stdio"]) && !pending.contains(&"--permission-prompts".into()));
+    // Once the help has answered with real declarations, the next launch has the flags and no host prompt tool.
+    let (later, flags) = first_launch_args(Some(Some(NEWER_HELP))).await;
+    assert!(flags.permission_prompts && flags.autocompact);
+    assert!(later.windows(2).any(|a| a == ["--permission-prompts", "none"]), "{later:?}");
+    assert!(!later.contains(&"--permission-prompt-tool".into()));
+    // A help whose text only mentions the flag in a diagnostic leaves the launch as it was.
+    let (mention, flags) = first_launch_args(Some(Some("error: --permission-prompts is unavailable\n"))).await;
+    assert_eq!((flags, mention), (Default::default(), never_read));
 }

@@ -332,7 +332,6 @@ pub enum Purpose {
         by_hand: bool,
     },
     Router,
-    Pulse,
     Summary,
     /// A local status command that spends no quota; listed so every request goes through the same door.
     PlanCheck,

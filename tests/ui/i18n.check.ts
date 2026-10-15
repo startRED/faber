@@ -49,6 +49,8 @@ check('i18n: the shell texts reach the tray with {n} and {title} intact, in ever
       ok(templates('tray.needsYou', code)[form].includes('{n}'), `${code} tray.needsYou ${form} lost {n}`);
     }
     ok(templates('tray.notify', code).other.includes('{title}'), `${code} tray.notify lost {title}`);
+    const many = templates('tray.notifyMany', code).other;
+    ok(many.includes('{title}') && many.includes('{n}'), `${code} tray.notifyMany lost {title} or {n}`);
   }
 });
 

@@ -80,12 +80,10 @@ fn trees(ctx: &mut Ctx) -> Result {
         eventually("the fake CLI's grandchild", Duration::from_secs(10), || {
             let Some(state) = std::fs::read(&ready).ok().and_then(|v| serde_json::from_slice::<Value>(&v).ok()) else { return false };
             root = state["root"].as_u64().unwrap_or(0) as u32;
-            // The CLI itself, its child and its grandchild.
-            original = snapshot()
-                .map(|rows| rows.iter().filter(|p| p.pid == root).cloned().chain(descendants(&rows, root)).collect())
-                .unwrap_or_default();
-            original.retain(|p: &crate::proctree::ProcRow| !p.name.eq_ignore_ascii_case("conhost.exe"));
-            original.len() >= 3
+            // The CLI itself (`descendants` includes its root), its child and its grandchild: three distinct processes.
+            original = snapshot().map(|rows| descendants(&rows, root)).unwrap_or_default();
+            original.retain(|p| !p.name.eq_ignore_ascii_case("conhost.exe"));
+            original.iter().map(|p| p.pid).collect::<std::collections::BTreeSet<_>>().len() >= 3
         })?;
         if mode == "crash" {
             host.stop_app();

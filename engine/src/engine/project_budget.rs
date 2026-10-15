@@ -731,9 +731,7 @@ mod tests {
         })
         .unwrap();
         e.mission_budget(Change::Pause { mission: "m1".into(), paused: true }).unwrap();
-        for purpose in
-            [Purpose::UserTurn { by_hand: true }, Purpose::UserTurn { by_hand: false }, Purpose::Router, Purpose::Pulse, Purpose::Summary]
-        {
+        for purpose in [Purpose::UserTurn { by_hand: true }, Purpose::UserTurn { by_hand: false }, Purpose::Router, Purpose::Summary] {
             assert!(e.with(|c| c.allows(Vendor::Codex, None, purpose, false)).is_ok());
         }
         e.with(|c| c.begin_unbounded(Vendor::Codex)).unwrap();
