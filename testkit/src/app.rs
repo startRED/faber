@@ -428,6 +428,12 @@ impl Ctx {
         crate::proctree::cpu_seconds(self.live[id].pid)
     }
 
+    /// The processor time the app and its whole tree have used so far, in milliseconds.
+    pub fn cpu_ms(&mut self, id: usize) -> Result<f64, String> {
+        self.record(id)?;
+        crate::proctree::cpu_ms(self.live[id].pid)
+    }
+
     /// Ends the app and waits for it, whatever else happens. Its children are recorded first, so the audit can check that
     /// they follow; if that fails the app is ended all the same, and the failure is reported.
     pub fn close(&mut self, id: usize) -> Result<(), String> {

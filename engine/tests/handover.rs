@@ -26,6 +26,7 @@ fn a_partial_answer_keeps_tool_effects_and_explicitly_continues_instead_of_repea
         input: serde_json::json!({"file_path":"done.txt"}),
         ok: Some(true),
         output: Some("x".repeat(1000)),
+        declined: false,
     }]);
     let partial = Partial::of(&reply);
     assert!(!partial.is_empty());

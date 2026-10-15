@@ -4,7 +4,7 @@
 //! What Auto chose is read from what was sent to the CLIs (the arguments of a Claude process, the lines written to Codex), not
 //! from the answer's `model`: the recordings report their own model as soon as they start, and that overwrites it.
 
-mod support;
+use crate::support;
 
 use faber_engine::budget::Billing;
 use faber_engine::cli::Cli;
@@ -288,6 +288,19 @@ async fn a_vendor_running_low_is_left_for_the_other_and_the_answer_says_so() {
     let (reply, went) = r.went(&id, 0).await;
     assert_eq!(went, claude("claude-sonnet-5-5", "medium"));
     assert_eq!(reply.pace, Some(PaceNote { kind: "low".into(), vendor: Vendor::Codex }));
+    r.engine.shutdown();
+}
+
+#[tokio::test]
+async fn a_vendor_ahead_of_its_line_but_far_from_its_limit_is_left_without_an_alarm() {
+    let dir = tempfile::tempdir().unwrap();
+    let r = both(dir.path(), verdicts(vec![("code", "medium")]));
+    // 30% used with the week barely begun: far ahead of the daily line, nowhere near the limit.
+    r.engine.note_account_events(Vendor::Codex, vec![plan("pro"), quota("seven_day", 0.30, 6 * DAY + DAY / 2)]);
+    let id = r.engine.send(auto(CODE)).unwrap();
+    let (reply, went) = r.went(&id, 0).await;
+    assert_eq!(went, claude("claude-sonnet-5-5", "medium"));
+    assert_eq!(reply.pace, Some(PaceNote { kind: "fast".into(), vendor: Vendor::Codex }));
     r.engine.shutdown();
 }
 

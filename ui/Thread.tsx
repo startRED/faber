@@ -70,6 +70,12 @@ function usage(m: Message): string {
   return parts.join(' · ');
 }
 
+// The picker names Claude models by alias ("opus"), so the full id of the next rung is matched to its entry.
+function rung(nudge: NonNullable<Message['nudge']>, options: Option[]): Choice {
+  const entry = options.find((o) => o.choice.vendor === nudge.vendor && (o.choice.model === nudge.model || o.choice.model === nudge.model.split('-')[1]));
+  return { ...(entry?.choice ?? { vendor: nudge.vendor, model: nudge.model }), effort: nudge.effort };
+}
+
 type OnBranch = (messageId: string, text: string, choice?: Choice) => void;
 
 interface Shared {
@@ -96,6 +102,9 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
     const tool = m().tools?.at(-1);
     return tool && tool.ok === undefined ? toolLabel(tool) : finalText().trim().split('\n').at(-1) || (tool ? toolLabel(tool) : m().thinking);
   };
+  // The name slot: while Auto is still choosing there is none (the reason says so), then the model's name from the moment
+  // it is known to the end and after reopening; a model the CLI never named reads as the default one all along.
+  const label = () => (streaming() && m().waitUntil ? t('run.waiting', { when: untilReset(m().waitUntil!) }) : m().vendor ? prettyModel(m().model) : '');
   return (
     <article
       class="ai"
@@ -109,13 +118,13 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
           <VendorMark vendor={m().vendor} />
           <b>{m().vendor ? vendorName(m().vendor!) : t('model.auto')}</b>
         </span>
-        <span>{streaming() && m().waitUntil ? t('run.waiting', { when: untilReset(m().waitUntil!) }) : streaming() ? t('answer.answering') : m().vendor ? prettyModel(m().model) : ''}</span>
+        <Show when={label()}><span>{label()}</span></Show>
         <Show when={m().effort}>{(effort) => <span>{t('effort.label')}: {t(`effort.${effort()}`)}</span>}</Show>
         <Show when={m().reason}>
           <em>· {fromEngine(m().reason, { when: m().waitUntil ? untilReset(m().waitUntil!) : t('quota.unknown'), from: m().movedFrom ? vendorName(m().movedFrom!) : '', to: m().vendor ? vendorName(m().vendor!) : '' })}</em>
         </Show>
       </div>
-      <Show when={m().pace}>{(pace) => <p class="pace">{t(`reason.pace.${pace().kind}`, { vendor: vendorName(pace().vendor) })}</p>}</Show>
+      <Show when={m().pace}>{(pace) => <p class="pace">{t(`reason.pace.${pace().kind}`, { vendor: vendorName(pace().vendor), other: m().vendor ? vendorName(m().vendor!) : t('model.auto') })}</p>}</Show>
       <QuotaCard id={props.conversationId} m={m()} usage={props.usage ?? []} />
       <Show when={steps()}>
         <details class="activity">
@@ -161,6 +170,17 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
       <Show when={!streaming()}>
         <div class="actions">
           <button onClick={() => void navigator.clipboard.writeText(m().text)}>{t('answer.copy')}</button>
+          <Show when={props.prompt && m().nudge} keyed>
+            {(nudge) => (
+              <button
+                class="nudge"
+                title={fromEngine(nudge.reason, { to: `${prettyModel(nudge.model)} · ${t(`effort.${nudge.effort}`)}` })}
+                onClick={() => props.onBranch(props.prompt!.id, props.prompt!.text, rung(nudge, props.options))}
+              >
+                {t('answer.nudge')}
+              </button>
+            )}
+          </Show>
           <Show when={props.prompt} keyed>
             {(prompt) => (
               <select

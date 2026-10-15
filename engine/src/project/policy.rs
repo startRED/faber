@@ -6,7 +6,8 @@
 //! Codex advertises sandbox, approval policy, config overrides and feature switches. Neither help output proves
 //! command/read isolation, linked-worktree common-dir protection, hook/plugin/MCP/subagent containment, or a maximum
 //! invocation exposure including nested calls. Claude's budget estimate is not a hard exposure bound.
-//! Windows owns a kill-on-close job before a trusted guard may start the CLI. Other platforms still own one child.
+//! Windows creates the CLI suspended inside a kill-on-close job before it runs (proc::spawn_command). Other platforms
+//! still own one child.
 //! Every automated role therefore stays blocked, including research/review. No real session is needed to deny it.
 //!
 //! Before opening admission: record version-bound containment/escape proofs, platform tree termination and measured

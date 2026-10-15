@@ -15,7 +15,7 @@
 //! The Node verifier currently has no bridge for this Rust target. Run only this
 //! target with `cargo test -p faber-engine --test install` for the RED evidence.
 
-mod loopback;
+use crate::loopback;
 
 use faber_engine::cli::Cli;
 use faber_engine::proc::{Proc, Spawner};
@@ -264,7 +264,13 @@ impl Rig {
             let profile_bin = PathBuf::from(request_profile.as_str().unwrap()).join(".local").join("bin");
             std::fs::create_dir_all(&profile_bin)?;
             std::fs::write(profile_bin.join("claude.exe"), &bytes)?;
-            Ok(Proc { stdin: Box::new(tokio::io::sink()), stdout: Box::new(tokio::io::empty()), stderr: None, child: None })
+            Ok(Proc {
+                stdin: Box::new(tokio::io::sink()),
+                stdout: Box::new(tokio::io::empty()),
+                stderr: None,
+                child: None,
+                contained: None,
+            })
         });
         let events = self.events.clone();
         let (left, temporary) = (self.left_at_failure.clone(), self.temporary());
@@ -524,7 +530,7 @@ async fn F04_native_destination() {
     let native_installer: Spawner = Arc::new(move |program, args, _| {
         assert_eq!(args, ["install"]);
         std::fs::write(&installed, std::fs::read(program)?)?;
-        Ok(Proc { stdin: Box::new(tokio::io::sink()), stdout: Box::new(tokio::io::empty()), stderr: None, child: None })
+        Ok(Proc { stdin: Box::new(tokio::io::sink()), stdout: Box::new(tokio::io::empty()), stderr: None, child: None, contained: None })
     });
     rig.request["user_profile"] = json!(actual_profile);
     let (fetch, download) = (scripted_fetch(&rig.responses), scripted_download(&rig.responses));
@@ -664,7 +670,7 @@ async fn F10_other_profile() {
     let native_installer: Spawner = Arc::new(move |program, args, _| {
         assert_eq!(args, ["install"]);
         std::fs::write(&other_exe, std::fs::read(program)?)?;
-        Ok(Proc { stdin: Box::new(tokio::io::sink()), stdout: Box::new(tokio::io::empty()), stderr: None, child: None })
+        Ok(Proc { stdin: Box::new(tokio::io::sink()), stdout: Box::new(tokio::io::empty()), stderr: None, child: None, contained: None })
     });
     let (fetch, download) = (scripted_fetch(&rig.responses), scripted_download(&rig.responses));
     let error = Cli::install_windows(&rig.request, &fetch, &download, &|_| Ok(()), native_installer, &|_| {})

@@ -12,7 +12,7 @@
 //! https://developers.openai.com/codex/cli/reference/
 //! Native installation location: https://code.claude.com/docs/en/setup
 
-mod support;
+use crate::support;
 
 use faber_engine::cli::{self, Cli};
 use faber_engine::model::{Area, Role, Settings, Status, Vendor};
@@ -145,7 +145,13 @@ fn status_spawner(stdout: &'static str, stderr: &'static str, hangs: bool) -> (S
     let spawn: Spawner = Arc::new(move |bin, args, _cwd| {
         recorded.lock().unwrap().push((bin.into(), args.to_vec()));
         if hangs {
-            return Ok(Proc { stdin: Box::new(tokio::io::sink()), stdout: Box::new(PendingReader), stderr: None, child: None });
+            return Ok(Proc {
+                stdin: Box::new(tokio::io::sink()),
+                stdout: Box::new(PendingReader),
+                stderr: None,
+                child: None,
+                contained: None,
+            });
         }
         let (mut out, stdout_reader) = tokio::io::duplex(4096);
         let (mut err, stderr_reader) = tokio::io::duplex(4096);
@@ -153,7 +159,13 @@ fn status_spawner(stdout: &'static str, stderr: &'static str, hangs: bool) -> (S
             let _ = out.write_all(stdout.as_bytes()).await;
             let _ = err.write_all(stderr.as_bytes()).await;
         });
-        Ok(Proc { stdin: Box::new(tokio::io::sink()), stdout: Box::new(stdout_reader), stderr: Some(Box::new(stderr_reader)), child: None })
+        Ok(Proc {
+            stdin: Box::new(tokio::io::sink()),
+            stdout: Box::new(stdout_reader),
+            stderr: Some(Box::new(stderr_reader)),
+            child: None,
+            contained: None,
+        })
     });
     (spawn, calls)
 }
@@ -242,7 +254,7 @@ async fn account_status_rejects_failed_or_oversized_output() {
             } else {
                 Box::new(std::io::Cursor::new("Logged in using ChatGPT\n".repeat(5000).into_bytes()))
             };
-            Ok(Proc { stdin: Box::new(tokio::io::sink()), stdout, stderr: None, child: None })
+            Ok(Proc { stdin: Box::new(tokio::io::sink()), stdout, stderr: None, child: None, contained: None })
         });
         let (engine, _) = engine(dir.path(), BTreeMap::from([(Vendor::Codex, native_cli())]), spawn);
         assert_eq!(serde_json::to_value(engine.account_status(Vendor::Codex, Duration::from_millis(100)).await).unwrap(), json!("unknown"));

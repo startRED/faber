@@ -19,9 +19,11 @@ import {
 import { Segmented, Toggle } from './controls.tsx';
 import { resizeComposer } from './composer-size.ts';
 import { Ambient } from './Ambient.tsx';
+import { Hole } from './Hole.tsx';
 import { Ghost } from './Ghost.tsx';
 import { greetingParts } from './greeting.ts';
 import { Peek } from './Mark.tsx';
+import { Recents } from './Recents.tsx';
 import { Icon } from './Glyphs.tsx';
 import { LocalBuild } from './LocalBuild.tsx';
 import { fromEngine, lang, t } from './i18n.ts';
@@ -53,6 +55,9 @@ interface Props {
   onOpen?: (conversation: Summary) => void;
   onProject?: (id: string) => void;
   onAdd?: () => void;
+  /** Opens recent folders or a saved environment as projects (the open-a-project screen). */
+  onOpened?: (projects: Project[]) => void;
+  onError?: (error: unknown) => void;
 }
 
 /** The last two parts of a folder path: enough to tell two projects apart without the whole drive. */
@@ -338,6 +343,10 @@ export function Projects(props: Props) {
       {/* The light behind a project's first screen; a mission board has none. */}
       <Show when={home()}>
         <Ambient variant="project" vendors={props.vendors} avoid={avoid} />
+        {/* A project's first screen is where a new session starts: in Dark Room the black hole sits behind it too. */}
+        <Show when={props.project}>
+          <Hole avoid={() => (root ? [...root.querySelectorAll('.peek, .hello, .lead, .composer, .setup, .p-header h2, .p-meta, .p-side section')] : [])} />
+        </Show>
       </Show>
       <div class="projects-stage" classList={{ home: home() }} ref={(el) => animateList(el)}>
         <Show
@@ -351,6 +360,12 @@ export function Projects(props: Props) {
                 <button type="button" class="btn primary" onClick={() => props.onAdd?.()}>
                   {t('side.addProject')}
                 </button>
+                <Recents
+                  mode="project"
+                  onPick={(path) => void api.openFolders([path]).then(props.onOpened, (error) => props.onError?.(error))}
+                  onOpened={props.onOpened}
+                  onError={(error) => props.onError?.(error)}
+                />
               </div>
               <Show when={others().length > 0 || conversations().length > 0}>
                 <div class="p-side">

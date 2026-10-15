@@ -168,7 +168,7 @@ fn the_screen_words_follow_the_multiplier() {
     let state = |s: &Snap| s.state(&shape, 0, NOW);
     assert_eq!(state(&snap(vec![five(0.10, 2.5 * HOUR)])), State::Spare);
     assert_eq!(state(&snap(vec![five(0.40, 2.5 * HOUR)])), State::Normal);
-    assert_eq!(state(&snap(vec![seven(0.45, 3.5 * DAY)])), State::Tight);
+    assert_eq!(state(&snap(vec![seven(0.45, 3.5 * DAY)])), State::Fast, "ahead of the line is fast, not running low");
     assert_eq!(state(&snap(vec![seven(0.92, 6.0 * DAY)])), State::Tight, "less than 10% left");
     assert_eq!(state(&Snap { plan_ok: false, ..snap(vec![five(0.10, 2.5 * HOUR)]) }), State::Normal);
 }

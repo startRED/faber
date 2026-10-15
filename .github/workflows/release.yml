@@ -3,6 +3,8 @@ name: release
 on:
   push:
     tags: ['v*']
+  # auto-release.yml starts this on the tag it pushed, since a tag pushed by a workflow fires no push event.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -48,6 +50,9 @@ jobs:
           targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
       - uses: Swatinem/rust-cache@v2
       - run: npm ci
+      # The tag is the version; package.json only moves on hand-made bumps.
+      - run: npm pkg set version="${GITHUB_REF_NAME#v}"
+        shell: bash
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -56,3 +61,18 @@ jobs:
         with:
           releaseId: ${{ needs.create.outputs.id }}
           args: ${{ matrix.args }}
+
+  # Owner decision R110: main follows each published release. Fast-forward only; a main that moved on its own stops here.
+  main:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - run: |
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/phase-1-base
+          # main may already be past this tag: it also follows each green commit (R127).
+          if git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then exit 0; fi
+          git merge-base --is-ancestor origin/main "$GITHUB_SHA"
+          git push origin "$GITHUB_SHA:refs/heads/main"

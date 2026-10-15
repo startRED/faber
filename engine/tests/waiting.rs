@@ -1,4 +1,4 @@
-mod support;
+use crate::support;
 
 use faber_engine::budget::{Billing, Reach};
 use faber_engine::cli::Cli;
@@ -133,6 +133,9 @@ fn rig(dir: &Path, vendors: &[Vendor], codex: Fake) -> Rig {
     sources(dir, vendors, fake(fixture("claude", "chat")), codex)
 }
 fn sources(dir: &Path, vendors: &[Vendor], claude: Fake, codex: Fake) -> Rig {
+    asking(dir, vendors, claude, codex, r#"{"kind":"chat","difficulty":"easy","confidence":0.95}"#)
+}
+fn asking(dir: &Path, vendors: &[Vendor], claude: Fake, codex: Fake, verdict: &'static str) -> Rig {
     let (c, x) = (claude.spawn.clone(), codex.spawn.clone());
     let engine = Engine::new(
         EngineOptions {
@@ -144,7 +147,7 @@ fn sources(dir: &Path, vendors: &[Vendor], claude: Fake, codex: Fake) -> Rig {
             max_warm: 3,
             idle: Duration::from_secs(120),
             runtime: tokio::runtime::Handle::current(),
-            ask: Some(Arc::new(|_| Box::pin(async { Some(r#"{"kind":"chat","difficulty":"easy","confidence":0.95}"#.into()) }))),
+            ask: Some(Arc::new(move |_| Box::pin(async move { Some(verdict.into()) }))),
         },
         Arc::new(|_| {}),
     );
@@ -371,12 +374,14 @@ fn seed(dir: &Path, long: bool) -> Conversation {
     answer.model = Some("claude-opus-5-5".into());
     answer.reason = Some("reason.route.chat.hard".into());
     let c = Conversation {
+        working_folder: None,
         choice: None,
         id: "seeded".into(),
         title: "Existing chat".into(),
         area: Area::Chat,
         project_id: None,
         sessions: BTreeMap::from([(Vendor::Claude, "old-session".into())]),
+        command_gate: false,
         cost_base: BTreeMap::new(),
         allow_always: None,
         branch_of: None,
@@ -455,5 +460,38 @@ async fn paid_consent_is_bound_to_one_reply_and_is_consumed() {
     r.engine.send(request(Some(&id), "auto")).unwrap();
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert_eq!(r.claude.wire.lines_with("\"type\":\"user\""), 1, "the next turn got no approval");
+    r.engine.shutdown();
+}
+
+#[tokio::test]
+async fn a_quota_recovery_keeps_the_blind_quality_floor_of_the_original_verdict() {
+    let dir = tempfile::tempdir().unwrap();
+    // Codex runs out of quota right after the turn starts.
+    let mut codex = fixture("codex", "chat");
+    let end = codex.iter().position(|e| e.msg["method"] == "turn/completed").unwrap();
+    let start = codex.iter().position(|e| e.msg["method"] == "item/started").unwrap();
+    let mut done = codex[end].clone();
+    done.msg["params"]["turn"]["status"] = json!("failed");
+    done.msg["params"]["turn"]["error"] = json!({"message":"usage limit reached"});
+    codex.truncate(start);
+    codex.push(done);
+    let r = asking(
+        dir.path(),
+        &Vendor::ALL,
+        fake(fixture("claude", "chat")),
+        fake(codex),
+        r#"{"kind":"code","difficulty":"medium","check":"blind","confidence":0.95}"#,
+    );
+    r.engine.send(request(None, "auto")).unwrap();
+    for _ in 0..200 {
+        if !r.claude.args.lock().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let args = r.claude.args.lock().unwrap().first().cloned().expect("the turn moved to Claude");
+    let flag = |name: &str| args.iter().position(|a| a == name).map(|i| args[i + 1].clone());
+    assert_eq!(flag("--model").as_deref(), Some("claude-sonnet-5-5"));
+    assert_eq!(flag("--effort").as_deref(), Some("high"), "blind code keeps its step up after the move");
     r.engine.shutdown();
 }

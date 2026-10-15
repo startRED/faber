@@ -2,7 +2,7 @@
 use super::*;
 use crate::budget::{QUEUE_SECS, Wait};
 use crate::handover::{self, Partial, Plan};
-use crate::route::{Asked, KINDS, LEVELS, ROUTER};
+use crate::route::{Asked, CHECKS, KINDS, LEVELS, ROUTER};
 
 #[derive(Clone)]
 pub(super) struct Transfer {
@@ -13,6 +13,8 @@ pub(super) struct Transfer {
     pub by_hand: bool,
     pub retried: bool,
     pub moving: bool,
+    /// The router's `check` for this request (`route::CHECKS`); `glance` when no verdict was read.
+    pub check: &'static str,
 }
 
 pub(super) fn with_attachments(text: &str, area: Area, shown: &[String]) -> String {
@@ -109,6 +111,7 @@ impl Core {
                 text: with_attachments(&q.text, c.area, &shown),
                 by_hand: true,
                 retried: false,
+                check: "glance".into(),
             }
         });
         self.transfers.insert(
@@ -121,6 +124,7 @@ impl Core {
                 by_hand: saved.by_hand,
                 retried: saved.retried,
                 moving: false,
+                check: CHECKS.into_iter().find(|c| *c == saved.check).unwrap_or("glance"),
             },
         );
         if let Some(m) = c.messages.last_mut() {
@@ -157,11 +161,13 @@ impl Core {
         }
     }
 
-    fn verdict(pick: &Pick) -> Asked {
+    // The reason key does not keep the router's `check`, so the transfer carries it.
+    fn verdict(pick: &Pick, check: &'static str) -> Asked {
         let words: Vec<&str> = pick.reason.split('.').collect();
         Asked {
             kind: KINDS.into_iter().find(|k| words.contains(k)).unwrap_or("chat"),
             difficulty: LEVELS.into_iter().find(|k| words.contains(k)).unwrap_or("medium"),
+            check,
             confidence: 0.95,
         }
     }
@@ -182,7 +188,7 @@ impl Core {
             self.move_failed(id, &t.reply);
             return Ok(());
         }
-        let verdict = Self::verdict(&t.pick);
+        let verdict = Self::verdict(&t.pick, t.check);
         let own = self.table(&verdict, Some(t.pick.vendor));
         let other = Vendor::ALL.into_iter().find(|v| *v != t.pick.vendor).and_then(|v| self.table(&verdict, Some(v)));
         let Some(routed) = own.or(other) else { return self.queue(id) };

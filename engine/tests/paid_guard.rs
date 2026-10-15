@@ -1,10 +1,10 @@
 //! Account-wide billing changes stop work before any further tool can run.
-mod support;
+use crate::support;
 
 use faber_engine::budget::Billing;
 use faber_engine::cli::Cli;
 use faber_engine::events::EngineEvent;
-use faber_engine::model::{Area, Status, Vendor};
+use faber_engine::model::{Area, Permissions, Settings, Status, Vendor};
 use faber_engine::router::Choice;
 use faber_engine::signals::Signals;
 use faber_engine::{Engine, EngineOptions, SendRequest};
@@ -43,6 +43,7 @@ async fn paid_notices_stop_an_unapproved_subscription_turn_and_clear_permissions
             Vendor::Claude,
             vec![EngineEvent::Signals(Signals { billing: Some(Billing::Subscription), credit_balance: Some(10.0), ..Signals::default() })],
         );
+        engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
         let id = engine
             .send(SendRequest {
                 conversation_id: None,

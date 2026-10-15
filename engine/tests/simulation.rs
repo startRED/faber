@@ -75,7 +75,8 @@ fn run(seed: u64, paced: bool) -> Outcome {
     let cands = candidates(&[Vendor::Claude, Vendor::Codex], &["gpt-6.1-sol".to_string(), "gpt-6-luna".to_string()]);
     let mut rng = Rng(seed.wrapping_mul(0x9E3779B97F4A7C15) ^ 0xD1B54A32D192ED03);
     // Faber's tasks per week: 65% of the combined capacity at the cost of what the plain table picks on average.
-    let mean_cost: f64 = MIX.iter().map(|(k, l, s)| choose(k, l, 0.9, &cands).unwrap().profile.cost as f64 * *s as f64 / 100.0).sum();
+    let mean_cost: f64 =
+        MIX.iter().map(|(k, l, s)| choose(k, l, "glance", 0.9, &cands).unwrap().profile.cost as f64 * *s as f64 / 100.0).sum();
     let tasks_per_week = 0.65 * (QUOTA[0] + QUOTA[1]) / mean_cost;
     let burst = seed.is_multiple_of(2);
     let mut out = Outcome::default();
@@ -133,7 +134,12 @@ fn run(seed: u64, paced: bool) -> Outcome {
                     let s = &snaps[vendor_index(p.vendor)];
                     Factor { m: s.profile_m(family_of(p.model), &shape, 0, now), w: 1.0, step_ok: s.step_ok(now) }
                 };
-                let routed = if paced { choose_paced(kind, level, 0.9, &open, &factor) } else { choose(kind, level, 0.9, &open) }.unwrap();
+                let routed = if paced {
+                    choose_paced(kind, level, "glance", 0.9, &open, &factor)
+                } else {
+                    choose(kind, level, "glance", 0.9, &open)
+                }
+                .unwrap();
                 let i = vendor_index(routed.profile.vendor);
                 used[i] += routed.profile.cost as f64 / QUOTA[i] * (0.7 + 0.6 * rng.next());
                 seen[i] = Some(((used[i].min(1.0) * 100.0).round() / 100.0, now));

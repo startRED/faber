@@ -12,6 +12,7 @@ mod project_commands;
 mod setup;
 mod terminal;
 mod tray;
+mod update;
 
 #[cfg(windows)]
 use awake::WindowsPower;
@@ -45,13 +46,13 @@ use tauri::window::Color;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
-use tauri_plugin_updater::{Update, UpdaterExt};
+use tauri_plugin_updater::Update;
 
 pub(crate) struct Faber {
     pub(crate) engine: Engine,
     /// ChatGPT models this account can use; empty until the Codex CLI answers.
     pub(crate) models: Mutex<Vec<ModelInfo>>,
-    /// A newer version, already downloaded; it installs when Faber quits.
+    /// A newer version, already downloaded; it installs at the first idle moment (`update.rs`) or when Faber quits.
     pub(crate) update: Mutex<Option<(Update, Vec<u8>)>>,
     pub(crate) data_dir: PathBuf,
     pub(crate) hidden: bool,
@@ -139,6 +140,12 @@ async fn branch(faber: State<'_, Faber>, req: BranchRequest) -> Res<String> {
 #[tauri::command]
 fn set_clock(faber: State<'_, Faber>, utc_offset: i64) {
     faber.engine.set_utc_offset(utc_offset);
+}
+
+/// The window was shown, hidden or focused: the quota is read more often while it is open, and at once on focus.
+#[tauri::command]
+fn quota_attention(faber: State<'_, Faber>, visible: bool, focused: bool) {
+    faber.engine.set_attention(visible, focused);
 }
 
 #[tauri::command]
@@ -266,7 +273,66 @@ async fn add_project(app: AppHandle, faber: State<'_, Faber>) -> Res<Option<Proj
     }
     let Some(picked) = dialog.blocking_pick_folder() else { return Ok(None) };
     let path = picked.into_path().map_err(|e| e.to_string())?;
-    Ok(Some(faber.engine.add_project(&path.to_string_lossy())))
+    faber.engine.open_folder(&path.to_string_lossy()).map(Some)
+}
+
+/// The recent folders and saved environments, judged now: a folder that is gone or refused carries a reason key.
+#[tauri::command]
+async fn recents(faber: State<'_, Faber>) -> Res<faber_engine::recents::RecentsView> {
+    Ok(faber.engine.recents())
+}
+
+#[tauri::command]
+async fn open_folders(faber: State<'_, Faber>, paths: Vec<String>) -> Res<Vec<Project>> {
+    faber.engine.open_folders(&paths)
+}
+
+#[tauri::command]
+async fn forget_recent(faber: State<'_, Faber>, path: String) -> Res<()> {
+    faber.engine.forget_recent(&path)
+}
+
+#[tauri::command]
+async fn save_environment(faber: State<'_, Faber>, name: String, folders: Vec<String>) -> Res<()> {
+    faber.engine.save_environment(&name, &folders)
+}
+
+#[tauri::command]
+async fn forget_environment(faber: State<'_, Faber>, id: String) -> Res<()> {
+    faber.engine.forget_environment(&id)
+}
+
+#[tauri::command]
+async fn start_environment(faber: State<'_, Faber>, id: String) -> Res<Vec<Project>> {
+    faber.engine.start_environment(&id)
+}
+
+#[tauri::command]
+async fn chat_folder(
+    app: AppHandle,
+    faber: State<'_, Faber>,
+    id: Option<String>,
+    scratch: bool,
+    path: Option<String>,
+) -> Res<Option<Conversation>> {
+    if scratch {
+        return faber.engine.chat_folder(id.as_deref(), None).map(Some);
+    }
+    // A folder taken from the recents needs no dialog; the engine checks it like any chosen folder.
+    if let Some(path) = path {
+        return faber.engine.chat_folder(id.as_deref(), Some(Path::new(&path))).map(Some);
+    }
+    // A hidden test build must never open a visible native dialog.
+    if faber.hidden {
+        return Err("error.chatFolder".into());
+    }
+    let mut dialog = app.dialog().file();
+    if let Some(w) = main_window(&app) {
+        dialog = dialog.set_parent(&w);
+    }
+    let Some(picked) = dialog.blocking_pick_folder() else { return Ok(None) };
+    let path = picked.into_path().map_err(|_| "error.chatFolder")?;
+    faber.engine.chat_folder(id.as_deref(), Some(&path)).map(Some)
 }
 
 /// Copies a file from a chat workspace to wherever the user picks.
@@ -674,11 +740,17 @@ fn detect_clis() -> BTreeMap<Vendor, Cli> {
     setup::detect_clis()
 }
 
+/// Under the config folder (Roaming on Windows), never next to a program: the per-user installer's own default folder is
+/// `%LOCALAPPDATA%\Faber`, so the data must not be there (`update.rs`).
+pub(crate) fn default_data_dir(config_dir: &Path) -> PathBuf {
+    config_dir.join("Faber")
+}
+
 /// Same folder the Electron versions used, so conversations carry over.
 fn data_dir(app: &AppHandle) -> tauri::Result<PathBuf> {
     match std::env::var_os("FABER_DATA_DIR") {
         Some(dir) => Ok(PathBuf::from(dir)),
-        None => Ok(app.path().config_dir()?.join("Faber")),
+        None => Ok(default_data_dir(&app.path().config_dir()?)),
     }
 }
 
@@ -700,16 +772,19 @@ pub(crate) fn load_models(app: &AppHandle, codex: Cli, cwd: PathBuf) {
     });
 }
 
-/// Looks for a newer release once per start and downloads it in the background, signed with Faber's own key.
-fn fetch_update(app: &AppHandle) {
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let Ok(updater) = app.updater() else { return };
-        let Ok(Some(update)) = updater.check().await else { return };
-        if let Ok(bytes) = update.download(|_, _| {}, || {}).await {
-            *lock(&app.state::<Faber>().update) = Some((update, bytes));
-        }
-    });
+/// What Quit does, and what the idle update install does before the installer ends the process.
+pub(crate) fn shut_down(app: &AppHandle) {
+    terminal::terminate_hidden();
+    let faber = app.state::<Faber>();
+    lock(&faber.awake).shutdown();
+    // A development build parks its missions at a checkpoint first and records that it closed cleanly.
+    if faber.local.is_some() {
+        let _ = tauri::async_runtime::block_on(faber.engine.pause_missions_for_update());
+    }
+    faber.engine.shutdown();
+    if let Some(dev) = &faber.local {
+        let _ = dev.record_clean_exit();
+    }
 }
 
 /// Brings the window back, building the screen again if it was closed to the tray.
@@ -727,6 +802,7 @@ fn show(app: &AppHandle) {
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
+        app.state::<Faber>().engine.set_attention(true, true);
     }
 }
 
@@ -927,6 +1003,7 @@ fn main() {
             branch,
             warm,
             set_clock,
+            quota_attention,
             answer_plan,
             approve_credits,
             move_turn,
@@ -944,6 +1021,13 @@ fn main() {
             save_theme,
             open_theme,
             add_project,
+            recents,
+            open_folders,
+            forget_recent,
+            save_environment,
+            forget_environment,
+            start_environment,
+            chat_folder,
             save_file,
             show_file,
             show_project,
@@ -1095,7 +1179,7 @@ fn main() {
                     std::env::var_os("FABER_DATA_DIR").is_some(),
                 )
             {
-                fetch_update(app.handle());
+                update::keep_updated(app.handle());
             }
             if let Some(dev) = &local {
                 let (dev, handle) = (dev.clone(), app.handle().clone());
@@ -1138,18 +1222,12 @@ fn main() {
                 && (!hidden || autostart_launch)
             {
                 api.prevent_exit();
+                // The screen is gone: the quota is read at the slower pace until the window comes back.
+                app.state::<Faber>().engine.set_attention(false, false);
             }
             if let RunEvent::Exit = event {
-                terminal::terminate_hidden();
+                shut_down(app);
                 let faber = app.state::<Faber>();
-                lock(&faber.awake).shutdown();
-                if faber.local.is_some() {
-                    let _ = tauri::async_runtime::block_on(faber.engine.pause_missions_for_update());
-                }
-                faber.engine.shutdown();
-                if let Some(dev) = &faber.local {
-                    let _ = dev.record_clean_exit();
-                }
                 // On Windows this starts the installer, which replaces Faber and needs it closed.
                 if faber.local.is_none()
                     && let Some((update, bytes)) = lock(&faber.update).take()

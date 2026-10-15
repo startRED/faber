@@ -1,7 +1,7 @@
 //! Claude Code driver: one long-lived `claude -p` process per conversation, spoken to in stream-json over stdio.
 
 use crate::events::{Delivery, EngineEvent, Session, SessionCommand, UserTurn};
-use crate::model::Area;
+use crate::model::{Area, Permissions};
 use crate::persona::{PersonaInput, persona, worker_contract};
 use crate::proc::{self, Spawner};
 use crate::signals::claude_signals;
@@ -18,6 +18,7 @@ pub struct ClaudeLaunch {
     pub effort: Option<String>,
     pub resume: Option<String>,
     pub user_hooks: bool,
+    pub permissions: Permissions,
     /// A side question (such as routing) with its own instructions: no tools, no MCP servers.
     pub instructions: Option<String>,
     /// How the user wants to be called, told to the model once, when the conversation starts (and again, unchanged, each time
@@ -25,13 +26,56 @@ pub struct ClaudeLaunch {
     pub user_name: Option<String>,
 }
 
-// Chat stays lean (about 3k tokens of setup instead of the user's full configuration) and runs in --restricted mode
-// inside its own workspace folder: file tools cannot leave it, edits there are accepted, and any command asks first.
+// Chat stays lean: a fixed list of built-in tools. Ask keeps Chat restricted with no MCP servers; Isolated also drops every
+// startup customization; full access leaves the person's own integrations on.
 const CHAT_TOOLS: &str = "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch";
 
+// Deny rules apply in bypassPermissions too; command patterns are not an OS sandbox, so a command can still reach what the
+// file tools cannot. Read rules also stop Edit and Write on the same path in recent CLIs; the Edit rules say it for older ones.
+// https://code.claude.com/docs/en/permissions#read-and-edit
+const CREDENTIAL_DIRS: [&str; 10] = [
+    "~/.claude",
+    "~/.codex",
+    "~/.gemini",
+    "~/.ssh",
+    "~/.aws",
+    "~/.docker",
+    "~/.azure",
+    "~/.kube",
+    "~/.config/gh",
+    "~/AppData/Roaming/GitHub CLI",
+];
+const CREDENTIAL_FILES: [&str; 4] = ["~/.claude.json*", "~/.git-credentials", "~/.npmrc", "//**/*updater.key*"];
+
+/// Every deny rule of the isolated and full-access modes, one string per rule. They travel in the settings JSON, an array
+/// that keeps each rule whole (a rule with a space, such as the GitHub CLI folder, cannot be split there). Where a documented
+/// variable (CLAUDE_CONFIG_DIR and the like) moved a sign-in folder, the new place is denied as well.
+pub fn tool_deny(var: &dyn Fn(&str) -> Option<String>) -> Vec<String> {
+    let mut rules = vec!["Edit(//**/.git/**)".to_string()];
+    let moved = crate::permissions::relocated_credentials(var);
+    let dirs = CREDENTIAL_DIRS.iter().map(|d| format!("{d}/**"));
+    let files = CREDENTIAL_FILES.iter().map(|f| (*f).to_string());
+    // A network path is written with two slashes as well: how the CLI spells one in a rule could not be checked.
+    let moved = moved.into_iter().flat_map(|(p, file)| {
+        let forms = if p.starts_with("//") {
+            vec![p.clone(), crate::permissions::claude_rule_path(&p)]
+        } else {
+            vec![crate::permissions::claude_rule_path(&p)]
+        };
+        forms.into_iter().map(move |rule| if file { rule } else { format!("{rule}/**") })
+    });
+    for path in dirs.chain(files).chain(moved) {
+        rules.push(format!("Read({path})"));
+        rules.push(format!("Edit({path})"));
+    }
+    rules
+}
+
 /// Arguments for one long-lived Claude Code process that takes many turns over stdin.
-/// Projects get the user's own setup (skills, MCP servers, plugins), like a direct session; the user's hooks stay
-/// off unless they turn them on, because hooks can rewrite answers. Permission prompts come back to Faber over stdio.
+/// Ask names its permission mode (`default`: ask before file changes and commands that are not plain reading), so neither the
+/// person's CLI settings nor an earlier session can pick a looser one. Full access ("Do not ask") bypasses approvals, keeps the
+/// person's integrations and only denies the credential folders. Isolated disables startup integrations and routes tools to
+/// Faber's working-folder policy. A side question (router, pulse) always gets the isolated treatment.
 pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     let mut args: Vec<String> = [
         "-p",
@@ -47,27 +91,75 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     ]
     .map(String::from)
     .to_vec();
+    let env = |name: &str| std::env::var(name).ok();
     if let Some(instructions) = &launch.instructions {
-        for a in ["--system-prompt", instructions, "--tools", "", "--strict-mcp-config", "--no-session-persistence"] {
-            args.push(a.into());
-        }
-    } else if launch.area == Area::Chat {
-        // Searching and reading pages never asks, like claude.ai.
+        // Whatever mode the person chose, Faber's own requests run without the person's hooks, settings files, MCP servers and
+        // plugins: a hook that fired on every background routing turn would run the person's commands unasked.
         for a in [
-            "--restricted",
-            "--strict-mcp-config",
+            "--system-prompt",
+            instructions,
             "--tools",
-            CHAT_TOOLS,
-            "--permission-mode",
-            "acceptEdits",
-            "--allowedTools",
-            "WebSearch,WebFetch",
+            "",
+            "--strict-mcp-config",
+            "--safe-mode",
+            "--setting-sources",
+            "",
+            "--settings",
+            r#"{"disableAllHooks":true}"#,
+            "--no-session-persistence",
         ] {
             args.push(a.into());
         }
-    } else if !launch.user_hooks {
-        args.push("--settings".into());
-        args.push(json!({ "disableAllHooks": true }).to_string());
+    } else {
+        let mut settings = json!({});
+        if launch.area == Area::Chat {
+            args.extend(["--tools".into(), CHAT_TOOLS.into()]);
+            match launch.permissions {
+                Permissions::Ask => {
+                    args.extend(["--strict-mcp-config".into(), "--restricted".into(), "--allowedTools".into(), "WebSearch,WebFetch".into()])
+                }
+                Permissions::Isolated => args.extend(["--strict-mcp-config".into(), "--safe-mode".into()]),
+                // The person's own MCP servers, plugins, skills and hooks load as they do in the CLI itself.
+                Permissions::FullAccess => {}
+            }
+        }
+        match launch.permissions {
+            Permissions::Isolated => {
+                if launch.area == Area::Project {
+                    args.extend(["--safe-mode".into(), "--strict-mcp-config".into()]);
+                }
+                // Restricted mode refuses bypassPermissions. Chat disables customizations with safe mode and
+                // keeps its lean tools/MCP setup, with the same host policy and sandbox as Projects.
+                args.extend(["--setting-sources".into(), "user".into()]);
+                args.extend(["--permission-mode".into(), "bypassPermissions".into()]);
+                settings["permissions"] = json!({ "blockReadsOutsideWorkingDirectories": true, "deny": tool_deny(&env),
+                    "ask": ["Read(//**)", "Edit(//**)", "Bash", "PowerShell", "*"] });
+                settings["sandbox"] = json!({ "autoAllowBashIfSandboxed": false });
+                settings["env"] = crate::permissions::child_env(std::path::Path::new("."));
+            }
+            // Full access (R121): no sandbox, no ask rules, network on. Deny rules still apply in bypassPermissions.
+            Permissions::FullAccess => {
+                args.extend(["--permission-mode".into(), "bypassPermissions".into()]);
+                settings["permissions"] = json!({ "deny": tool_deny(&env) });
+            }
+            // Ask carries the same credential denies as full access: a person's own rule or an approval card must not open them.
+            Permissions::Ask => {
+                args.extend(["--permission-mode".into(), "default".into()]);
+                settings["permissions"] = json!({ "deny": tool_deny(&env) });
+            }
+        }
+        let hooks_off = match launch.permissions {
+            Permissions::Isolated => true,
+            Permissions::FullAccess => false,
+            Permissions::Ask => launch.area == Area::Project && !launch.user_hooks,
+        };
+        if hooks_off {
+            settings["disableAllHooks"] = true.into();
+        }
+        if settings.as_object().is_some_and(|s| !s.is_empty()) {
+            args.push("--settings".into());
+            args.push(settings.to_string());
+        }
     }
     if launch.instructions.is_none() {
         args.push("--append-system-prompt".into());
@@ -97,6 +189,8 @@ pub fn project_claude_args(launch: &ClaudeLaunch, role: crate::project::Role) ->
     let mut restricted = launch.clone();
     restricted.instructions = Some(worker_contract(role));
     restricted.user_name = None;
+    // A role never inherits the person's mode: Isolated is the strictest one, whatever Chat and Projects use.
+    restricted.permissions = Permissions::Isolated;
     let mut args = claude_args(&restricted);
     // Unlike side questions, mission sessions may resume with the same fixed policy.
     args.retain(|a| a != "--no-session-persistence");
@@ -134,6 +228,9 @@ fn block_text(content: &Value) -> String {
     }
 }
 
+/// How a refused approval comes back as the tool's error: the text Faber answers with, and the older wording of the recordings.
+const DECLINED: [&str; 2] = ["The user declined.", "The user denied"];
+
 fn s(v: &Value) -> String {
     v.as_str().unwrap_or_default().to_string()
 }
@@ -168,7 +265,15 @@ pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
             .collect(),
         "user" => items(&msg["message"]["content"])
             .filter(|c| c["type"] == "tool_result")
-            .map(|c| EngineEvent::ToolResult { id: s(&c["tool_use_id"]), ok: c["is_error"] != true, text: block_text(&c["content"]) })
+            .map(|c| {
+                let (ok, text) = (c["is_error"] != true, block_text(&c["content"]));
+                EngineEvent::ToolResult {
+                    id: s(&c["tool_use_id"]),
+                    ok,
+                    declined: !ok && DECLINED.iter().any(|d| text.starts_with(d)),
+                    text,
+                }
+            })
             .collect(),
         "control_request" if msg["request"]["subtype"] == "can_use_tool" => vec![EngineEvent::Permission {
             request_id: s(&msg["request_id"]),
@@ -238,6 +343,7 @@ pub struct ClaudeOptions {
     pub cwd: PathBuf,
     pub launch: ClaudeLaunch,
     pub spawn: Spawner,
+    pub sandbox: Option<crate::cli::Cli>,
 }
 
 pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
@@ -258,6 +364,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
         let mut lines = BufReader::new(p.stdout).lines();
         let mut stdin = p.stdin;
         let mut child = p.child;
+        let mut job = p.contained;
         let mut pending: HashMap<String, Value> = HashMap::new();
         let mut closed = false;
         let mut control_id = 0u32;
@@ -269,7 +376,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
             tokio::select! {
                 () = proc::wait_deadline(deadline) => {
                     if watch.stopping() {
-                        proc::stop(&mut *stdin, &mut child).await;
+                        proc::stop(&mut *stdin, &mut child, &mut job).await;
                         on_event(EngineEvent::Error { message: "error.cli.interruptTimeout".into(), fatal: true });
                         break;
                     }
@@ -297,14 +404,34 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                             if project {
                                 match crate::project::policy::reject_native(&mut *stdin, crate::model::Vendor::Claude, &msg).await {
                                     Ok(true) => continue,
-                                    Err(_) => { proc::stop(&mut *stdin, &mut child).await; break; }
+                                    Err(_) => { proc::stop(&mut *stdin, &mut child, &mut job).await; break; }
                                     Ok(false) => {}
                                 }
                             }
                             watch.activity();
                             if finished { watch.finish(); }
                             for event in parse_claude_message(&msg) {
-                                if let EngineEvent::Permission { request_id, input, .. } = &event {
+                                if let EngineEvent::Permission { request_id, tool, input } = &event {
+                                    // Only the isolated mode answers for itself. Full access hands the request to the engine, which
+                                    // decides with the mode in force at that moment (see Core::handle), so a switch to Ask is never raced.
+                                    if opts.launch.permissions == Permissions::Isolated {
+                                        let resolve = |name: &str| crate::cli::Cli::find_in(name, &std::env::var("PATH").unwrap_or_default(), cfg!(windows),
+                                            &|key| std::env::var(key).ok(), &|path| std::path::Path::new(path).is_file(),
+                                            &|path| std::fs::read_to_string(path).unwrap_or_default());
+                                        let response = if let Some(updated) = crate::permissions::checked_input(&opts.cwd, tool, input, opts.sandbox.as_ref(), &resolve) {
+                                            json!({ "behavior": "allow", "updatedInput": updated })
+                                        } else {
+                                            json!({ "behavior": "deny", "message": "This action is outside the working-folder policy, or its native sandbox runner is unavailable. Use sandboxed tools; never retry unsandboxed." })
+                                        };
+                                        let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id,
+                                            "response": response } });
+                                        if proc::write_line(&mut *stdin, &msg).await.is_err() {
+                                            on_event(EngineEvent::Error { message: "error.permission.undelivered".into(), fatal: true });
+                                            proc::stop(&mut *stdin, &mut child, &mut job).await;
+                                            return;
+                                        }
+                                        continue;
+                                    }
                                     pending.insert(request_id.clone(), input.clone());
                                     watch.pause();
                                 }
@@ -314,7 +441,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                                 on_event(EngineEvent::Signals(crate::signals::Signals { billing: Some(crate::budget::Billing::Unknown), ..Default::default() }));
                             }
                             if closed && !watch.active() {
-                                proc::stop(&mut *stdin, &mut child).await;
+                                proc::stop(&mut *stdin, &mut child, &mut job).await;
                                 break;
                             }
                             if finished {
@@ -344,7 +471,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                         let delivery = match pending.get(&request_id) {
                             None => Delivery::Unknown,
                             Some(input) => {
-                                let response = if allow { json!({ "behavior": "allow", "updatedInput": input }) } else { json!({ "behavior": "deny", "message": "The user declined." }) };
+                                let response = if allow { json!({ "behavior": "allow", "updatedInput": input }) } else { json!({ "behavior": "deny", "message": DECLINED[0] }) };
                                 let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id, "response": response } });
                                 match proc::write_line(&mut *stdin, &msg).await {
                                     Ok(()) => {
@@ -356,7 +483,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                                         // A half-written or unflushed line cannot be sent again: end the process, and the
                                         // end of its output tells the engine.
                                         if e.torn {
-                                            proc::stop(&mut *stdin, &mut child).await;
+                                            proc::stop(&mut *stdin, &mut child, &mut job).await;
                                         }
                                         Delivery::WriteFailed
                                     }
@@ -382,7 +509,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                                 let _ = proc::write_line(&mut *stdin, &msg).await;
                             }
                         } else {
-                            proc::stop(&mut *stdin, &mut child).await;
+                            proc::stop(&mut *stdin, &mut child, &mut job).await;
                             break;
                         }
                     }
@@ -422,6 +549,7 @@ mod role_tests {
             stdout: Box::new(stdout),
             stderr: None,
             child: None,
+            contained: None,
         })));
         let spawn: Spawner = Arc::new(move |_, _, _| Ok(fake.lock().unwrap().take().unwrap()));
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -436,8 +564,10 @@ mod role_tests {
                 user_hooks: false,
                 instructions: None,
                 user_name: None,
+                permissions: Permissions::Isolated,
             },
             spawn,
+            sandbox: None,
         };
         let session = start_with_policy(opts, Arc::new(move |e| drop(tx.send(e))), vec![], true);
         let mut lines = BufReader::new(input).lines();

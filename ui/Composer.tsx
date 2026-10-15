@@ -213,7 +213,9 @@ export function Composer(props: Props) {
             disabled={props.locked}
             onChange={(e) => {
               const choice = props.options[Number(e.currentTarget.value)]!.choice;
-              props.onChoice(choice.vendor === 'auto' ? choice : { ...choice, effort: props.choice.effort ?? 'medium' });
+              // A level means different work on each model, so a new model starts again at the default.
+              const same = choice.vendor === props.choice.vendor && choice.model === props.choice.model;
+              props.onChoice(choice.vendor === 'auto' ? choice : { ...choice, effort: same ? (props.choice.effort ?? 'medium') : 'medium' });
               warmed = false; // the next keystroke warms the newly chosen model
             }}
           >

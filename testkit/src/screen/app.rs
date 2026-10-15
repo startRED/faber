@@ -1,14 +1,15 @@
 //! The app scenarios: what a person sees and does in a chat, in settings, and how much memory the app uses.
 
 use super::{Result, Scenario, ask, claude_chat, ensure, eventually, no_cli, pass_look, pause, same, start_settings, system_motion};
-use crate::app::Ctx;
+use crate::app::{Ctx, Opened};
 use crate::page::{Page, css, role};
+use crate::sandbox::{CliSlot, Launch};
 use serde_json::json;
 use std::time::{Duration, Instant};
 
 /// What Faber may use with no CLI running, as Task Manager counts it (private working set of the app and its webview).
-/// The product limit is 500 MB when Faber is complete; the test keeps half of it as room for what is still to come.
-const BUDGET_MB: f64 = 250.0;
+/// The product limit is 500 MB when Faber is complete; this test fails at 400 MB (R125), a safety net and not a goal.
+const BUDGET_MB: f64 = 400.0;
 
 const QUESTION: &str = "In one sentence: why is the sky blue?";
 
@@ -55,12 +56,21 @@ const FAMILIES: [&str; 6] = ["Archivo", "Barlow Condensed", "Bodoni Moda", "IBM 
 
 pub fn scenarios() -> Vec<Scenario> {
     vec![
+        Scenario { name: "recent folders open a project in one click and a folder that is gone cannot be picked", run: recent_folders },
         Scenario { name: "the app opens on an empty chat and fits the window", run: opens_empty },
         Scenario {
             name: "a chat thread with a tool card and a question card is readable and whole in each of the six looks",
             run: thread_in_every_look,
         },
         Scenario { name: "a chat streams an answer with the model and the reason, and lands in the sidebar", run: streams_an_answer },
+        Scenario {
+            name: "with Auto, the answer names its model as soon as it starts, keeps the name to the end and after reopening",
+            run: names_the_model_while_streaming,
+        },
+        Scenario {
+            name: "with Auto on Codex, the answer names the model the CLI reports before the first word and keeps it to the end",
+            run: names_the_codex_model_while_streaming,
+        },
         Scenario { name: "editing a message sends it as a branch and keeps the original conversation", run: edits_as_a_branch },
         Scenario { name: "deleting a conversation asks once, then removes it", run: deletes_after_asking },
         Scenario { name: "the sidebar footer shows the name the person gave, above the accounts", run: shows_the_name },
@@ -82,6 +92,10 @@ pub fn scenarios() -> Vec<Scenario> {
         },
         Scenario { name: "with no CLI running, Faber stays within its memory budget", run: idle_memory },
         Scenario { name: "with reduced motion on, the dust stays off and Faber stays within its memory budget", run: idle_memory_reduced },
+        Scenario {
+            name: "a new project session shows the black hole, which moves only in a shown and focused window, within the memory budget",
+            run: black_hole_in_a_project,
+        },
         Scenario { name: "after the six looks were applied in turn, Faber stays within its memory budget", run: memory_after_every_look },
         Scenario { name: "a conversation with a thousand messages opens quickly and stays within the budget", run: thousand_messages },
     ]
@@ -125,7 +139,7 @@ const COLOUR_OF: &str = "(name) => { const p = document.createElement('i'); p.st
 /// The drawings of Curioso on the stage: how many there are, how big each is, and the colour it is drawn in.
 fn peeks() -> String {
     format!(
-        "(() => {{ const colour = {COLOUR_OF}; return {{ ink3: colour('--ink-3'), found: [...document.querySelectorAll('.empty svg, .start-card .peek svg')].map((s) => {{ const r = s.getBoundingClientRect(); return {{ w: r.width, h: r.height, fill: getComputedStyle(s.querySelector('path')).fill }}; }}) }}; }})()"
+        "(() => {{ const colour = {COLOUR_OF}; return {{ ink3: colour('--ink-3'), found: [...document.querySelectorAll('.empty .peek svg, .start-card .peek svg')].map((s) => {{ const r = s.getBoundingClientRect(); return {{ w: r.width, h: r.height, fill: getComputedStyle(s.querySelector('path')).fill }}; }}) }}; }})()"
     )
 }
 
@@ -175,6 +189,44 @@ fn shows_the_brand(ctx: &mut Ctx) -> Result {
     ctx.shot(&mut app, "peek-project")
 }
 
+fn recent_folders(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let work = ctx.sb.data.join("work");
+    let names = ["alpha", "beta", "gamma", "delta", "epsilon"];
+    for name in names {
+        std::fs::create_dir_all(work.join(name)).map_err(|e| e.to_string())?;
+    }
+    let path = |name: &str| work.join(name).to_string_lossy().into_owned();
+    // "gamma" is stored but gone from the disk by the time the screen is read.
+    std::fs::remove_dir(work.join("gamma")).map_err(|e| e.to_string())?;
+    let recents = json!({
+        "folders": names.map(path),
+        "environments": [{ "id": "env-1", "name": "Pair", "folders": [path("alpha"), path("beta")] }]
+    });
+    std::fs::write(ctx.sb.data.join("recents.json"), recents.to_string()).map_err(|e| e.to_string())?;
+    let launch = claude_chat(ctx);
+    let mut app = ctx.launch(launch)?;
+    let page = &mut app.page;
+    let projects = page.named("button", "area.projects")?;
+    page.click(&projects)?;
+    let open = page.named("heading", "empty.openProjectTitle")?;
+    page.wait_visible(&open)?;
+    let rows = css(".recents section:first-child .rec");
+    page.wait_count(&rows, 5)?;
+    let gone = css(".recents .rec.gone .rec-main");
+    same(page.count(&gone)?, 1, "folders shown as gone")?;
+    ensure(page.is_disabled(&gone)?, || "a folder that is gone can be picked".into())?;
+    ctx.shot(&mut app, "recents-open-project")?;
+    let page = &mut app.page;
+    let first = rows.clone().css(".rec-main").has_text("alpha");
+    page.click(&first)?;
+    let name = role("heading", "alpha");
+    page.wait_visible(&name)?;
+    ctx.shot(&mut app, "recents-opened")?;
+    let saved = std::fs::read_to_string(ctx.sb.data.join("projects.json")).map_err(|e| e.to_string())?;
+    ensure(saved.contains("alpha"), || format!("the project was not saved: {saved}"))
+}
+
 fn streams_an_answer(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
     let launch = claude_chat(ctx);
@@ -192,6 +244,73 @@ fn streams_an_answer(ctx: &mut Ctx) -> Result {
     ensure(text.contains("at API prices"), || format!("the answer should show the price note: {text}"))?;
     page.wait_visible(&css(".list .item").has_text(QUESTION))?;
     ctx.shot(&mut app, "chat")
+}
+
+/// The whole answer header as text, and its height.
+const HEADER_ALL: &str = "(() => { const h = document.querySelector('article.ai .model'); return h && { text: h.innerText, height: h.getBoundingClientRect().height }; })()";
+
+/// The answer header's name slot and its height: what the person reads and where the line below sits.
+const HEADER: &str = "(() => { const h = document.querySelector('article.ai .model'); return h && { name: h.children[1].innerText, height: h.getBoundingClientRect().height }; })()";
+
+fn names_the_model_while_streaming(ctx: &mut Ctx) -> Result {
+    names_while_streaming(ctx, "claude", "Sunlight", "Haiku 5.5")
+}
+
+fn names_the_codex_model_while_streaming(ctx: &mut Ctx) -> Result {
+    names_while_streaming(ctx, "codex", "", "GPT-6 Luna")
+}
+
+/// With Auto and one vendor: the header says only that Auto is choosing, then names the model before the first word,
+/// keeps the name and the height to the end, and reads the same when the conversation is opened again. The recording
+/// stops after the first words of the answer until the scenario lets it go on.
+fn names_while_streaming(ctx: &mut Ctx, vendor: &str, first_words: &str, name: &str) -> Result {
+    start_settings(ctx, "en")?;
+    let fixtures = ctx.paths.fixtures.clone();
+    let launch = |recording: &str| {
+        let recording = Some(fixtures.join(format!("{vendor}/{recording}.jsonl")));
+        match vendor {
+            "claude" => Launch { claude: CliSlot::Fake, codex: CliSlot::Off, recording, ..Launch::default() },
+            _ => Launch { claude: CliSlot::Off, codex: CliSlot::Fake, recording, ..Launch::default() },
+        }
+    };
+    let mut app = ctx.launch(launch("chat-held"))?;
+    let page = &mut app.page;
+    ask(page, QUESTION)?;
+    // With two vendors Auto first waits for its router (the recorded CLI never answers it, so the wait runs to the end of
+    // the 30 s allowed) and the header says only that; with one vendor there is nothing to choose.
+    let choosing = if vendor == "claude" {
+        page.wait_for("the header of the answer", "!!document.querySelector('article.ai .model')")?;
+        let header = page.eval(HEADER_ALL)?;
+        let reason = page.text_of("reason.routing")?;
+        let text = header["text"].as_str().unwrap_or_default().split_whitespace().collect::<Vec<_>>().join(" ");
+        same(text, format!("Auto · {reason}"), "the header while Auto is choosing")?;
+        Some(header["height"].clone())
+    } else {
+        None
+    };
+    // The answer is held before its first word (Codex) or just after it (Claude): the name is there either way.
+    page.wait_for_within(
+        "the model's name in the header",
+        &format!(
+            "(() => {{ const h = document.querySelector('article.ai .model'); return h?.children[1]?.innerText === '{name}' && document.querySelector('article.ai .md').innerText.includes('{first_words}'); }})()"
+        ),
+        Duration::from_secs(60),
+    )?;
+    let during = page.eval(HEADER)?;
+    if let Some(height) = choosing {
+        same(during["height"].clone(), height, "the header's height once the name is there")?;
+    }
+    std::fs::write(ctx.sb.state.join("release"), "").map_err(|e| e.to_string())?;
+    let answer = page.named("article", "answer.label")?;
+    page.wait_visible(&answer.css(".actions"))?;
+    same(page.eval(HEADER)?, during.clone(), "the header at the end of the answer")?;
+    // A message saved and opened again reads the same.
+    ctx.close(app.id)?;
+    let mut app = ctx.launch(launch("chat"))?;
+    let page = &mut app.page;
+    page.click(&css(".list .item").has_text(QUESTION))?;
+    page.wait_visible(&css("article.ai .actions"))?;
+    same(page.eval(HEADER)?, during, "the header after reopening the conversation")
 }
 
 fn edits_as_a_branch(ctx: &mut Ctx) -> Result {
@@ -256,7 +375,7 @@ fn switches_language(ctx: &mut Ctx) -> Result {
     same(page.eval("document.documentElement.lang")?.as_str(), Some("pt-BR"), "the page language")?;
     ctx.shot(&mut app, "home-pt-BR")?;
     let page = &mut app.page;
-    let open = page.named_in("button", "settings.open", "pt-BR")?;
+    let open = page.named_in("button", "settings.open", "pt-BR")?.exact();
     page.click(&open)?;
     let language = crate::page::label(&page.text_in("set.language", "pt-BR")?);
     page.select_option(&language, "es")?;
@@ -266,7 +385,7 @@ fn switches_language(ctx: &mut Ctx) -> Result {
 }
 
 fn open_appearance(page: &mut Page) -> Result {
-    let settings = page.named("button", "settings.open")?;
+    let settings = page.named("button", "settings.open")?.exact();
     page.click(&settings)?;
     let appearance = page.named("button", "set.appearance")?;
     page.click(&appearance)?;
@@ -469,7 +588,7 @@ const THREAD: &str = r#"(() => {
 
 fn thread_in_every_look(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
-    let launch = super::shell::two_writes(ctx);
+    let launch = super::shell::two_writes(ctx)?;
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
     let size = json!({ "width": 1440, "height": 900, "deviceScaleFactor": 1, "mobile": false });
@@ -604,6 +723,15 @@ fn idle_memory_reduced(ctx: &mut Ctx) -> Result {
     idle_memory_with(ctx, true)
 }
 
+/// Tells the page whether it has the focus: the hidden test window must never take it from the person at the PC.
+pub(super) fn focus(page: &mut Page, on: bool) -> Result {
+    page.eval(&format!(
+        "(() => {{ document.hasFocus = () => {on}; window.dispatchEvent(new Event('{}')); }})()",
+        if on { "focus" } else { "blur" }
+    ))
+    .map(|_| ())
+}
+
 fn idle_memory_with(ctx: &mut Ctx, reduce: bool) -> Result {
     start_settings(ctx, "en")?;
     let launch = claude_chat(ctx);
@@ -618,41 +746,142 @@ fn idle_memory_with(ctx: &mut Ctx, reduce: bool) -> Result {
     let title = app.page.named("heading", "empty.chatTitle")?;
     app.page.wait_visible(&title)?;
     ensure(app.page.count(&css(".amb-beam .dust"))? == 1, || "the new conversation should show the dust".to_string())?;
-    // The memory below is only worth something while the dust really twinkles, and it stops with the window.
-    let states =
-        "[...document.querySelectorAll('.amb-beam .dust i')].flatMap((grain) => grain.getAnimations().map((a) => a.playState)).join()";
+    // The memory below is only worth something while the dust really twinkles, and it stops with the window or its focus.
+    let states = "document.querySelector('.amb-beam .dust').dataset.live";
+    let grain = "document.querySelector('.amb-beam .dust i').style.opacity";
     let hide = |page: &mut Page, on: bool| {
         page.eval(&format!(
             "(() => {{ Object.defineProperty(document, 'hidden', {{ configurable: true, get: () => {on} }}); document.dispatchEvent(new Event('visibilitychange')); }})()"
         ))
         .map(|_| ())
     };
-    // The native test window stays hidden; this scenario exercises both page visibility states explicitly.
+    // The native test window stays hidden and never takes the focus; this scenario sets both explicitly.
     hide(&mut app.page, false)?;
+    focus(&mut app.page, true)?;
     let moving = app.page.eval(states)?;
     if reduce {
         // Reduced motion keeps the dust on the page, still: no grain moves.
-        ensure(moving.as_str() == Some(""), || format!("the dust should not move under reduced motion, got {moving}"))?;
+        same(moving.as_str(), Some("off"), "the dust stands still under reduced motion")?;
         pause(10.0);
         let (mb, _) = ctx.memory_mb(app.id)?;
         ctx.notes.push(format!("idle on the new conversation with the dust (reduced motion): {mb:.0} MB"));
         return ensure(mb <= BUDGET_MB, || format!("{mb:.0} MB is over the {BUDGET_MB} MB budget"));
     }
-    ensure(moving.as_str().is_some_and(|all| all.contains("running") && !all.contains("paused")), || {
-        format!("the dust should twinkle while the window is visible, got {moving}")
+    same(moving.as_str(), Some("on"), "the dust twinkles in a visible, focused window")?;
+    let first = app.page.eval(grain)?;
+    pause(0.5);
+    let then = app.page.eval(grain)?;
+    ensure(then.as_str().is_some_and(|v| !v.is_empty()) && first != then, || {
+        format!("the dust should change its light over half a second, stayed at {then}")
     })?;
     hide(&mut app.page, true)?;
-    pause(0.4);
     let stopped = app.page.eval(states)?;
     hide(&mut app.page, false)?;
-    ensure(stopped.as_str().is_some_and(|all| all.contains("paused") && !all.contains("running")), || {
-        format!("the dust should stop while the window is hidden, got {stopped}")
-    })?;
+    same(stopped.as_str(), Some("off"), "the dust stops while the window is hidden")?;
+    focus(&mut app.page, false)?;
+    let blurred = app.page.eval(states)?;
+    focus(&mut app.page, true)?;
+    same(blurred.as_str(), Some("off"), "the dust stops while another app has the focus")?;
+    beam_cost(ctx, &mut app)?;
     pause(10.0);
     let motion = app.page.eval("document.documentElement.dataset.motion")?;
     let (mb, _) = ctx.memory_mb(app.id)?;
     ctx.notes.push(format!("idle on the new conversation with the dust ({} motion): {mb:.0} MB", motion.as_str().unwrap_or("?")));
     ensure(mb <= BUDGET_MB, || format!("{mb:.0} MB is over the {BUDGET_MB} MB budget"))
+}
+
+/// The Dark Room beam, its glow and its dust breathe only in a focused window. The hidden test window must never take
+/// focus from the person at the PC, so the page is told whether it has focus, and the processor time of the whole tree is
+/// read over a few seconds in a focused window and in an unfocused one.
+fn beam_cost(ctx: &mut Ctx, app: &mut Opened) -> Result {
+    let mut window = |focused: bool| -> std::result::Result<f64, String> {
+        focus(&mut app.page, focused)?;
+        let before = ctx.cpu_ms(app.id)?;
+        pause(6.0);
+        Ok((ctx.cpu_ms(app.id)? - before) / 60.0)
+    };
+    let (beam, beam_away) = (window(true)?, window(false)?);
+    ctx.notes.push(format!("Dark Room beam, glow and dust, processor of one core: focused {beam:.1}%, unfocused {beam_away:.1}%"));
+    Ok(())
+}
+
+/// The black hole behind a new project session in Dark Room: it runs in a shown, focused window and stops when the window
+/// is hidden or loses the focus. The processor time of the whole tree is read at rest, while it runs, and with a ripple
+/// started every 400 ms, then the memory.
+fn black_hole_in_a_project(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    super::shell::seed_project(ctx, "Demo")?;
+    let launch = claude_chat(ctx);
+    let mut app = ctx.launch(launch)?;
+    system_motion(&mut app.page, false)?;
+    let live = "document.querySelector('canvas.amb-hole')?.dataset.live";
+    let hide = |page: &mut Page, on: bool| {
+        page.eval(&format!(
+            "(() => {{ Object.defineProperty(document, 'hidden', {{ configurable: true, get: () => {on} }}); document.dispatchEvent(new Event('visibilitychange')); }})()"
+        ))
+        .map(|_| ())
+    };
+    hide(&mut app.page, false)?;
+    focus(&mut app.page, true)?;
+    let demo = css(".prow .item").has_text("Demo");
+    app.page.wait_visible(&demo)?;
+    app.page.click(&demo)?;
+    app.page.wait_visible(&css(".start-card .p-header h2").has_text("Demo"))?;
+    app.page.wait_for("the black hole to run in a shown, focused window", &format!("{live} === 'on'"))?;
+    // The entrance plays once: Curioso wakes, the spark flies, the scene lights up from the hole, and then it ends.
+    let intro = "document.querySelector('canvas.amb-hole')?.dataset.intro";
+    same(app.page.eval(intro)?.as_str(), Some("on"), "a new session opens with the entrance")?;
+    let wakes = app.page.eval("getComputedStyle(document.querySelector('.peek svg')).animationName")?;
+    same(wakes.as_str(), Some("wake"), "Curioso wakes during the entrance")?;
+    std::thread::sleep(std::time::Duration::from_millis(950));
+    ctx.shot(&mut app, "project-hole-spark")?;
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    ctx.shot(&mut app, "project-hole-entrance")?;
+    app.page.wait_for("the entrance to end", &format!("{intro} === undefined"))?;
+    // Something is drawn: the canvas has lit pixels near the top of the hole.
+    let lit = "(() => { const c = document.querySelector('canvas.amb-hole'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 20) n++; return n; })()";
+    let pixels = app.page.eval(lit)?.as_u64().unwrap_or(0);
+    ensure(pixels > 5000, || format!("the black hole should be drawn, {pixels} lit pixels"))?;
+    hide(&mut app.page, true)?;
+    let hidden = app.page.eval(live)?;
+    hide(&mut app.page, false)?;
+    same(hidden.as_str(), Some("off"), "the black hole stops while the window is hidden")?;
+    focus(&mut app.page, false)?;
+    same(app.page.eval(live)?.as_str(), Some("off"), "the black hole stops while another app has the focus")?;
+    let window = |ctx: &mut Ctx, app: &mut Opened| -> std::result::Result<(f64, f64), String> {
+        let before = ctx.cpu_ms(app.id)?;
+        pause(6.0);
+        let used = ctx.cpu_ms(app.id)? - before;
+        Ok((used / 60.0, ctx.memory_mb(app.id)?.0))
+    };
+    let (away, _) = window(ctx, &mut app)?;
+    focus(&mut app.page, true)?;
+    // The same window with the hole switched off, so the readings below are the hole's own.
+    // A pixel less of width makes the hole lay itself out again and read the token, as a change of look does.
+    app.page.eval("document.documentElement.style.setProperty('--amb-hole', 'none'); document.querySelector('.ambient:has(.amb-hole)').style.right = '1px'")?;
+    app.page.wait_for("the black hole to rest when the look turns it off", &format!("{live} === 'off'"))?;
+    let (base, _) = window(ctx, &mut app)?;
+    app.page.eval(
+        "document.documentElement.style.removeProperty('--amb-hole'); document.querySelector('.ambient:has(.amb-hole)').style.right = ''",
+    )?;
+    app.page.wait_for("the black hole to run again", &format!("{live} === 'on'"))?;
+    let (running, running_mb) = window(ctx, &mut app)?;
+    app.page.eval(
+        "(() => { const area = document.querySelector('.work'); const box = area.getBoundingClientRect(); window.__ripples = setInterval(() => area.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: box.left + box.width * 0.6, clientY: box.top + box.height * 0.3 })), 400); })()",
+    )?;
+    let (ripple, ripple_mb) = window(ctx, &mut app)?;
+    app.page.eval("clearInterval(window.__ripples)")?;
+    focus(&mut app.page, false)?;
+    ctx.notes.push(format!(
+        "black hole, processor of one core and memory: same window without it {base:.1}%, unfocused {away:.1}%, running {running:.1}% {running_mb:.0} MB, rippling {ripple:.1}% {ripple_mb:.0} MB"
+    ));
+    // How it sits on a full HD screen and on a small one.
+    for (width, height) in [(1920, 1040), (1280, 800)] {
+        super::shell::set_size(&mut app.page, width, height)?;
+        pause(0.6);
+        ctx.shot(&mut app, &format!("project-hole-{width}"))?;
+    }
+    ensure(ripple_mb.max(running_mb) <= BUDGET_MB, || format!("{:.0} MB is over the {BUDGET_MB} MB budget", ripple_mb.max(running_mb)))
 }
 
 fn memory_after_every_look(ctx: &mut Ctx) -> Result {

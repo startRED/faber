@@ -1,3 +1,4 @@
+use crate::support;
 use faber_engine::project::bar::*;
 use faber_engine::project::proof::*;
 use faber_engine::project::store::Journal;
@@ -6,7 +7,6 @@ use faber_engine::project::wire::{
     Facets, Fact, FactSheet, Piece, RiskAnswers, SheetQuestion,
 };
 use std::collections::BTreeMap;
-mod support;
 use support::canonical_tempdir as tempdir;
 
 #[test]

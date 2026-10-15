@@ -567,6 +567,9 @@ mod tests {
                     approved: false,
                     started: NOW,
                     steering: vec![],
+                    cwd: ".".into(),
+                    permissions: crate::model::Permissions::Ask,
+                    served: false,
                 },
             );
             c.remove(&id);

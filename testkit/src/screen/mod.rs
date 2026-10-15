@@ -21,7 +21,7 @@ pub mod shell;
 
 use crate::app::{Ctx, Paths};
 use crate::page::{Page, css};
-use crate::plan::Suite;
+use crate::plan::{Suite, deal};
 use crate::report::{Outcome, file_name};
 use crate::sandbox::{CliSlot, Launch};
 use std::fmt::Debug;
@@ -62,9 +62,31 @@ pub fn all() -> Vec<Scenario> {
 /// Runs each scenario (those whose name contains `filter`, if there is one) and audits it. A scenario fails if its own
 /// checks fail or if its audit finds a leaked process, an outside write or a changed environment. `done` hears of each
 /// outcome as soon as its scenario ends, so the runner can print it while the next one runs.
-pub fn run_all(paths: &Paths, filter: Option<&str>, done: &mut dyn FnMut(&Outcome)) -> Vec<Outcome> {
+/// Seconds the slowest scenarios took on CI (2026-10-14), so `--shard` deals them evenly; any other counts as 5.
+/// A renamed scenario only falls back to 5: the parts get a little uneven, never wrong.
+const SLOW: [(&str, u32); 7] = [
+    ("with no CLI running, Faber stays within its memory budget", 45),
+    ("with Auto, the answer names its model as soon as it starts", 35),
+    ("sentinel: panels move through frames", 27),
+    ("sentinel: the composer grows and shrinks", 15),
+    ("with reduced motion on, the dust stays off", 14),
+    ("a new project session shows the black hole", 30),
+    ("sentinel: no text is garbled in five languages", 14),
+];
+
+fn cost(name: &str) -> u32 {
+    SLOW.iter().find(|(start, _)| name.starts_with(start)).map_or(5, |(_, secs)| *secs)
+}
+
+pub fn run_all(paths: &Paths, filter: Option<&str>, shard: Option<(usize, usize)>, done: &mut dyn FnMut(&Outcome)) -> Vec<Outcome> {
     let mut outcomes = Vec::new();
-    for scenario in all().iter().filter(|s| filter.is_none_or(|f| s.name.contains(f))) {
+    let chosen: Vec<Scenario> = all().into_iter().filter(|s| filter.is_none_or(|f| s.name.contains(f))).collect();
+    let costs: Vec<u32> = chosen.iter().map(|s| cost(s.name)).collect();
+    let dealt = shard.map(|(part, parts)| (part - 1, deal(&costs, parts)));
+    for (index, scenario) in chosen.iter().enumerate() {
+        if dealt.as_ref().is_some_and(|(part, to)| to[index] != *part) {
+            continue;
+        }
         let outcome = run_one(paths, scenario);
         done(&outcome);
         outcomes.push(outcome);

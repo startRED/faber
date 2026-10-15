@@ -7,6 +7,7 @@
 
 use crate::ledger::Ledger;
 use crate::model::{Conversation, Project, Settings, Summary};
+use crate::recents::Recents;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::fs;
@@ -100,7 +101,9 @@ pub struct Store {
     conversations: PathBuf,
     projects: PathBuf,
     settings: PathBuf,
+    recents: PathBuf,
     budget: PathBuf,
+    cache_health: PathBuf,
     disk: Arc<dyn Disk>,
     budget_owner: Option<fs::File>,
     owner_required: bool,
@@ -119,10 +122,12 @@ impl Store {
             conversations,
             projects: data_dir.join("projects.json"),
             settings: data_dir.join("settings.json"),
+            recents: data_dir.join("recents.json"),
             budget: data_dir.join("budget.json"),
             disk,
             budget_owner: None,
             owner_required: false,
+            cache_health: data_dir.join("cache-health.jsonl"),
         }
     }
 
@@ -237,6 +242,14 @@ impl Store {
         }
     }
 
+    pub fn recents(&self) -> Recents {
+        read::<Recents>(&self.recents).unwrap_or_default().bounded()
+    }
+
+    pub fn save_recents(&self, recents: &Recents) -> Result<(), Fault> {
+        self.write(&self.recents, recents)
+    }
+
     /// What Faber remembers about each vendor's quota, for Chat and Auto. A missing, damaged or unreadable file is an empty
     /// ledger: it only holds what was learned, and learning starts again.
     pub fn ledger(&self) -> Ledger {
@@ -259,6 +272,29 @@ impl Store {
             return Err(Fault::Write);
         }
         replace(&*self.disk, &self.budget, serde_json::to_string(ledger).expect("plain data always serializes").as_bytes())
+    }
+}
+
+// ponytail: size cap, rotate if it ever matters.
+const CACHE_HEALTH_MAX: u64 = 1_000_000;
+
+impl Store {
+    /// Adds one line to the local cache-health log. Nothing reads it back and nothing sends it anywhere; it stops growing
+    /// at 1 MB and a failed write is ignored, so it can never break a turn.
+    pub fn log_cache_health(&self, line: &serde_json::Value) {
+        use std::io::Write;
+        if fs::metadata(&self.cache_health).is_ok_and(|m| m.len() >= CACHE_HEALTH_MAX) {
+            return;
+        }
+        let _ = fs::OpenOptions::new().create(true).append(true).open(&self.cache_health).and_then(|mut f| {
+            f.write_all(
+                format!(
+                    "{line}
+"
+                )
+                .as_bytes(),
+            )
+        });
     }
 }
 

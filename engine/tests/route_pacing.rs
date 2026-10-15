@@ -18,7 +18,7 @@ fn paced(
     from: &[Profile],
     f: &dyn Fn(&Profile) -> Factor,
 ) -> (&'static str, &'static str, Option<(String, Vendor)>) {
-    let r = choose_paced(kind, level, 0.9, from, f).unwrap();
+    let r = choose_paced(kind, level, "glance", 0.9, from, f).unwrap();
     (r.profile.model, r.profile.effort, r.pace.map(|n| (n.kind, n.vendor)))
 }
 
@@ -64,12 +64,21 @@ fn a_task_that_does_not_matter_never_gets_a_discount() {
 }
 
 #[test]
-fn a_vendor_running_low_is_priced_up_and_the_answer_says_so() {
+fn a_vendor_ahead_of_its_daily_line_is_priced_up_and_the_answer_says_it_is_fast_not_that_it_runs_out() {
     let (m, e, pace) = paced("code", "medium", &all(), &by_vendor(1.0, 25.0));
     assert_eq!((m, e), SONNET_MEDIUM);
-    assert_eq!(pace, Some(("low".to_string(), Vendor::Codex)));
+    assert_eq!(pace, Some(("fast".to_string(), Vendor::Codex)));
     let (m, _, pace) = paced("chat", "easy", &all(), &by_vendor(1.0, 25.0));
     assert_eq!(m, "claude-haiku-5-5");
+    assert_eq!(pace, Some(("fast".to_string(), Vendor::Codex)));
+}
+
+#[test]
+fn only_a_vendor_near_its_limit_is_said_to_be_running_low() {
+    // A window past 90% leaves under one day of the daily line (R88: 100% / 7 = 14.3%): that is near the limit.
+    let near = |p: &Profile| Factor { m: if p.vendor == Vendor::Claude { 1.0 } else { 25.0 }, w: 1.0, step_ok: p.vendor == Vendor::Claude };
+    let (m, _, pace) = paced("code", "medium", &all(), &near);
+    assert_eq!(m, SONNET_MEDIUM.0);
     assert_eq!(pace, Some(("low".to_string(), Vendor::Codex)));
 }
 
@@ -116,8 +125,8 @@ fn with_neutral_factors_the_picks_are_exactly_the_unpaced_table() {
         for kind in ["chat", "writing", "code", "math", "research", "image", "other"] {
             for level in ["easy", "medium", "hard"] {
                 for confidence in [0.2, 0.9] {
-                    let plain = choose(kind, level, confidence, set).unwrap();
-                    let neutral = choose_paced(kind, level, confidence, set, &|_| Factor::NEUTRAL).unwrap();
+                    let plain = choose(kind, level, "glance", confidence, set).unwrap();
+                    let neutral = choose_paced(kind, level, "glance", confidence, set, &|_| Factor::NEUTRAL).unwrap();
                     assert_eq!(plain.profile, neutral.profile, "{kind} {level} {confidence}");
                     assert_eq!(neutral.pace, None);
                 }
@@ -136,7 +145,7 @@ fn the_best_price_never_rises_when_a_vendor_gets_cheaper() {
         for codex in [0.1, 0.5, 1.0, 4.0] {
             let mut last = f64::INFINITY;
             for claude in steps {
-                let price = choose_paced(kind, level, 0.9, &all, &by_vendor(claude, codex)).unwrap().price;
+                let price = choose_paced(kind, level, "glance", 0.9, &all, &by_vendor(claude, codex)).unwrap().price;
                 assert!(price <= last + 1e-12, "{kind} {level}: price rose from {last} to {price} at m {claude} (codex {codex})");
                 last = price;
             }
@@ -147,7 +156,7 @@ fn the_best_price_never_rises_when_a_vendor_gets_cheaper() {
 #[test]
 fn the_router_line_is_read_without_the_table() {
     let a = asked("Sure.\n{\"kind\":\"code\",\"difficulty\":\"hard\",\"confidence\":0.8}").unwrap();
-    assert_eq!(a, Asked { kind: "code", difficulty: "hard", confidence: 0.8 });
+    assert_eq!(a, Asked { kind: "code", difficulty: "hard", check: "glance", confidence: 0.8 });
     assert_eq!(asked("no verdict"), None);
 }
 

@@ -1,15 +1,16 @@
 import { createEffect, createSignal, For, type JSX, Match, Show, Switch } from 'solid-js';
 import { api, type Appearance, type CheckResult, type Look, type Settings as Saved, type Vendor, type VendorUsage } from './api.ts';
 import { AppearanceSection } from './Appearance.tsx';
-import { Toggle } from './controls.tsx';
+import { Segmented, Toggle } from './controls.tsx';
 import { factory } from './draft.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { LANGUAGES, t } from './i18n.ts';
 import { vendorName } from './models.ts';
 import { animateList } from './motion.ts';
-import { accountLine, type Quotas, usageRows } from './sidebar.ts';
+import { accountLine, freshness, type Quotas, usageRows } from './sidebar.ts';
 import { PlanName } from './QuotaCard.tsx';
-import { untilReset, windowName } from './Sidebar.tsx';
+import { Recents } from './Recents.tsx';
+import { ageWords, untilReset, windowName } from './Sidebar.tsx';
 
 const SECTIONS = [
   ['general', 'set.general', 'user'],
@@ -46,6 +47,11 @@ interface Props {
   kept?: Appearance;
   /** Resolves to false when the save was refused or failed. */
   onSave: (patch: Saved) => Promise<boolean>;
+  chatFolder?: string;
+  chatFolderLocked?: boolean;
+  onChatFolder?: (scratch: boolean, path?: string) => Promise<void>;
+  /** Shows an error the section could not handle itself, such as a recents list that could not be saved. */
+  onError?: (error: unknown) => void;
   onClose: () => void;
   /** Opens the account cards; Settings comes back as it was, from `keep`. */
   onOpenSetup: (keep: Keep) => void;
@@ -143,6 +149,31 @@ export function Settings(props: Props) {
                 <Toggle label={t('set.hooksBody')} hint={t('set.hooksHint')} checked={props.saved.userHooks === true} onChange={(on) => props.onSave({ userHooks: on })} />
               </div>
             </Row>
+            <Segmented
+              id="set-permissions"
+              label={t('set.permissions')}
+              value={props.saved.permissions ?? 'dontAsk'}
+              options={[
+                ['dontAsk', t('set.permissions.dontAsk')],
+                ['ask', t('set.permissions.ask')],
+              ]}
+              onPick={(permissions) => void props.onSave({ permissions })}
+            />
+            <p class="hint" role="status">
+              {t(props.saved.permissions === 'ask' ? 'set.permissionsAskBody' : 'set.permissionsDontAskBody')}
+            </p>
+            <Row label={t('set.chatFolder')}>
+              <p class="hint">{t('set.chatFolderHint')}</p>
+              <Show when={props.onChatFolder}>
+                <p>{props.chatFolder ?? t('set.privateFolder')}</p>
+                <button class="btn" disabled={props.chatFolderLocked} onClick={() => void props.onChatFolder?.(false)}>{t('set.chooseFolder')}</button>
+                <Show when={props.chatFolder}>
+                  <button class="btn" disabled={props.chatFolderLocked} onClick={() => void props.onChatFolder?.(true)}>{t('set.privateFolder')}</button>
+                </Show>
+                <Show when={props.chatFolderLocked}><p class="hint">{t('error.chatFolderLocked')}</p></Show>
+                <Recents mode="chat" disabled={props.chatFolderLocked} onPick={(path) => void props.onChatFolder?.(false, path)} onError={(error) => props.onError?.(error)} />
+              </Show>
+            </Row>
             <Row label={t('set.notifications')}>
               <div class="toggles">
                 <Toggle label={t('set.notifyMe')} hint={t('set.notifyHint')} checked={props.saved.notifications !== false} onChange={(on) => props.onSave({ notifications: on })} />
@@ -203,6 +234,7 @@ export function Settings(props: Props) {
                     <Show when={props.usage?.find((u) => u.vendor === v)}>{(u) => <>
                       <PlanName u={u()} />
                       <p class="usage-state">{t(`usage.state.${u().state}`)}</p>
+                      <Show when={u().counting}><p class="note counting">{t('quota.countingNote')}</p></Show>
                       <p>{t('usage.ownSpend', { cost: u().ownSpendUsd.toFixed(4) })}</p>
                       <p class="hint">{t('usage.shared')}</p>
                       <Show when={u().unmetered}><p class="note">{t('usage.meterIncomplete', { n: u().unmetered })}</p></Show>
@@ -223,7 +255,9 @@ export function Settings(props: Props) {
                             <Show when={props.usage?.find((u) => u.vendor === v)?.windows.find((w) => w.name === row.window)}>{(w) => <b class="expected" style={{ left: `${Math.round(w().expected * 100)}%` }} />}</Show>
                             <i style={{ width: `${Math.round(Math.min(1, Math.max(0, row.used ?? 0)) * 100)}%` }} />
                           </span>
-                          <Show when={props.usage?.find((u) => u.vendor === v)?.windows.find((w) => w.name === row.window)}>{(w) => <span class="pace-projection">{t('usage.expect', { elapsed: `${Math.round(w().elapsed * 100)}%`, share: `${Math.round(w().used / Math.max(w().elapsed, 0.1) * 100)}%` })}</span>}</Show>
+                          <Show when={props.usage?.find((u) => u.vendor === v)?.windows.find((w) => w.name === row.window)}>{(w) => <span class="pace-projection">{t('usage.expect', { elapsed: `${Math.round(w().elapsed * 100)}%`, share: `${Math.round((w().used + (w().uncounted ?? 0)) / Math.max(w().elapsed, 0.1) * 100)}%` })}</span>}</Show>
+                          <Show when={row.window && freshness(props.usage, v, row.window).readAt !== undefined}><span class="note age">{t('quota.read', { when: ageWords(freshness(props.usage, v, row.window).readAt!, props.now) })}</span></Show>
+                          <Show when={row.window && freshness(props.usage, v, row.window).uncountedPoints}>{(n) => <span class="note uncounted">{t('quota.uncounted', { share: `${n()}%` })}</span>}</Show>
                           <span class="note">{row.used !== undefined && row.resetsAt ? t('usage.resets', { when: untilReset(row.resetsAt) }) : ''}</span>
                         </div>
                       )}

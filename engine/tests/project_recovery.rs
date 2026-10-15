@@ -1,4 +1,5 @@
 //! Safety persistence, retirement and disk guard; no real git or process.
+use crate::support;
 use faber_engine::model::Vendor;
 use faber_engine::project::disk::{DiskBudget, ResourceKind, Resources};
 use faber_engine::project::lease::Termination;
@@ -6,7 +7,6 @@ use faber_engine::project::run::Runner;
 use faber_engine::project::store::Journal;
 use faber_engine::project::worker::{ModelPin, Worker};
 use faber_engine::project::{Brief, ContractPin, Intent, IntentKind, Mission, MissionState, ProcessId, Role};
-mod support;
 use support::tempdir;
 fn mission() -> Mission {
     Mission::new("m1", "p1", "repo", "Fix", &"1".repeat(40), 3, 1)

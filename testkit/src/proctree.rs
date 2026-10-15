@@ -152,10 +152,10 @@ pub fn private_mb(root: u32) -> Result<f64, String> {
     Ok(bytes as f64 / (1024.0 * 1024.0))
 }
 
-/// The processor time, in seconds, that the app and its whole tree have used so far (user plus kernel), from the same WMI
-/// class as `private_mb`. A rate is the difference of two readings over the time between them. Windows only.
+/// The processor time, in milliseconds, the app and its whole tree have used so far. Windows only, from the same WMI
+/// class; two readings a few seconds apart give the cost of what ran between them.
 #[cfg(windows)]
-pub fn cpu_seconds(root: u32) -> Result<f64, String> {
+pub fn cpu_ms(root: u32) -> Result<f64, String> {
     use serde::Deserialize;
     #[derive(Deserialize)]
     #[serde(rename = "Win32_PerfRawData_PerfProc_Process", rename_all = "PascalCase")]
@@ -167,13 +167,19 @@ pub fn cpu_seconds(root: u32) -> Result<f64, String> {
     let ids: Vec<u32> = live_tree(&snapshot()?, root).iter().map(|r| r.pid).collect();
     let wmi = wmi::WMIConnection::new().map_err(|e| format!("WMI: {e}"))?;
     let rows = wmi.query::<Perf>().map_err(|e| format!("WMI processor query: {e}"))?;
+    // The raw counter is in 100 ns ticks.
     let ticks: u64 = rows.iter().filter(|p| ids.contains(&p.id_process)).map(|p| p.percent_processor_time).sum();
-    Ok(ticks as f64 / 10_000_000.0)
+    Ok(ticks as f64 / 10_000.0)
 }
 
 #[cfg(not(windows))]
-pub fn cpu_seconds(_root: u32) -> Result<f64, String> {
-    Err("processor time is read through WMI, which only Windows has".into())
+pub fn cpu_ms(_root: u32) -> Result<f64, String> {
+    Err("processor times are read through WMI, which only Windows has".into())
+}
+
+/// The same reading in seconds.
+pub fn cpu_seconds(root: u32) -> Result<f64, String> {
+    cpu_ms(root).map(|ms| ms / 1000.0)
 }
 
 #[cfg(not(windows))]

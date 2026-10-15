@@ -11,7 +11,10 @@ pub fn scenarios() -> Vec<Scenario> {
     vec![
         Scenario { name: "projects: guard acknowledgement never blocks spawn", run: |ctx| guards(ctx, "--guard-proof-host") },
         Scenario { name: "projects: cache example dispatches guard mode without a model", run: |ctx| guards(ctx, "--cache-proof-host") },
-        Scenario { name: "projects: warm CLI guard memory is measured", run: warm_memory },
+        Scenario {
+            name: "projects: a warm CLI runs straight under the app, with no guard process, and its memory is measured",
+            run: warm_memory,
+        },
         Scenario {
             name: "projects: engine jobs end grandchildren on stop, drop and owner crash; stale PID records cannot kill a peer",
             run: trees,
@@ -52,11 +55,15 @@ fn warm_memory(ctx: &mut Ctx) -> Result {
         .filter(|r| r.args.iter().any(|a| a == "-p"))
         .find_map(|r| rows.iter().find(|p| p.pid == r.pid))
         .ok_or("no warm fake CLI")?;
-    let guard = rows.iter().find(|p| p.pid == cli.parent).ok_or("no CLI guard")?;
-    let guard_mb = crate::proctree::private_mb(guard.pid)? - crate::proctree::private_mb(cli.pid)?;
+    // The CLI is created suspended inside its job (engine/src/proc.rs), so no second copy of the app stands between them.
+    let parent = rows.iter().find(|p| p.pid == cli.parent).ok_or("no CLI parent")?;
+    ensure(!rows.iter().any(|p| p.pid == parent.parent && p.name.eq_ignore_ascii_case(&parent.name)), || {
+        format!("the CLI runs under a second copy of {}", parent.name)
+    })?;
+    let cli_mb = crate::proctree::private_mb(cli.pid)?;
     let (total, _) = ctx.memory_mb(app.id)?;
-    ensure(guard_mb > 0.0 && total < 250.0, || format!("warm memory: guard {guard_mb:.1} MB, app tree {total:.1} MB"))?;
-    ctx.notes.push(format!("warm guard {guard_mb:.1} MB; whole app tree {total:.1} MB"));
+    ensure(cli_mb > 0.0 && total < 250.0, || format!("warm memory: CLI {cli_mb:.1} MB, app tree {total:.1} MB"))?;
+    ctx.notes.push(format!("warm CLI {cli_mb:.1} MB; whole app tree {total:.1} MB"));
     Ok(())
 }
 
@@ -73,9 +80,12 @@ fn trees(ctx: &mut Ctx) -> Result {
         eventually("the fake CLI's grandchild", Duration::from_secs(10), || {
             let Some(state) = std::fs::read(&ready).ok().and_then(|v| serde_json::from_slice::<Value>(&v).ok()) else { return false };
             root = state["root"].as_u64().unwrap_or(0) as u32;
-            original = snapshot().map(|rows| descendants(&rows, root)).unwrap_or_default();
-            original.retain(|p| !p.name.eq_ignore_ascii_case("conhost.exe"));
-            original.len() >= 4
+            // The CLI itself, its child and its grandchild.
+            original = snapshot()
+                .map(|rows| rows.iter().filter(|p| p.pid == root).cloned().chain(descendants(&rows, root)).collect())
+                .unwrap_or_default();
+            original.retain(|p: &crate::proctree::ProcRow| !p.name.eq_ignore_ascii_case("conhost.exe"));
+            original.len() >= 3
         })?;
         if mode == "crash" {
             host.stop_app();

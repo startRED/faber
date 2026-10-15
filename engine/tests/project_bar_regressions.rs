@@ -1,8 +1,8 @@
+use crate::support;
 use faber_engine::project::bar::*;
 use faber_engine::project::proof::*;
 use faber_engine::project::wire::{ArtifactRef, ChangeKind};
 use faber_engine::project::{Plan, Task, TaskKind};
-mod support;
 use support::canonical_tempdir as tempdir;
 
 fn sheet() -> DeliverableSheet {

@@ -1,6 +1,6 @@
+use crate::support;
 use faber_engine::project::proof::native::*;
 use serde_json::json;
-mod support;
 use support::canonical_tempdir as tempdir;
 
 #[test]
