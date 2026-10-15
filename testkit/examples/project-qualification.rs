@@ -12,6 +12,9 @@ mod live;
 #[path = "project-qualification/claude.rs"]
 mod live_claude;
 #[cfg(windows)]
+#[path = "project-qualification/promote.rs"]
+mod promote;
+#[cfg(windows)]
 #[path = "project-qualification/seam.rs"]
 mod seam;
 
@@ -111,10 +114,14 @@ fn run() -> io::Result<()> {
                 | "--live-claude-output-control"
                 | "--live-codex-stop"
                 | "--live-seam"
+                | "--live-promote"
                 | "--hidden-live"
         )
     {
         return Err(io::Error::other("invalid preflight arguments"));
+    }
+    if mode == "--live-promote" {
+        return promote_main(&data);
     }
     if matches!(mode.as_str(), "--hidden-worker" | "--hidden-live") {
         if std::env::var("FABER_QUALIFICATION_HIDDEN").as_deref() != Ok("preflight") {
@@ -144,6 +151,17 @@ fn run() -> io::Result<()> {
     if data.join("live-denial.json").exists() {
         return Err(io::Error::other("live receipt already exists; no automatic replay"));
     }
+    // The T13 mission runs on the development root's own data folder, after the root has its baseline.
+    let seam_data = if mode == "--live-seam" {
+        let dev = promote::Dev::from_env()?;
+        let (Ok(commit), Ok(tree)) = (std::env::var("FABER_T13_BASE_COMMIT"), std::env::var("FABER_T13_BASE_TREE")) else {
+            return Err(io::Error::other("no baseline identity"));
+        };
+        dev.enroll(&commit, &tree)?;
+        Some(dev.data())
+    } else {
+        None
+    };
     let executable = std::env::current_exe()?;
     let helper = executable.parent().and_then(Path::parent).ok_or_else(|| io::Error::other("missing debug folder"))?.join("fake-cli.exe");
     let mut env = BTreeMap::new();
@@ -155,9 +173,32 @@ fn run() -> io::Result<()> {
             env.insert(name.to_string(), value);
         }
     }
+    if mode == "--live-seam" {
+        // The T13 mission builds and tests a real clone: the toolchain locations and the run's own inputs pass through.
+        for name in [
+            "ProgramData",
+            "RUSTUP_HOME",
+            "CARGO_HOME",
+            "LIB",
+            "INCLUDE",
+            "LIBPATH",
+            "VCINSTALLDIR",
+            "VCToolsInstallDir",
+            "FABER_T13_SOURCE",
+            "FABER_T13_BRANCH",
+            "FABER_T13_PROOF_TARGET",
+        ] {
+            if let Ok(value) = std::env::var(name) {
+                env.insert(name.to_string(), value);
+            }
+        }
+    }
     env.insert("FABER_QUALIFICATION_HIDDEN".into(), "preflight".into());
     if let Ok(engine_data) = std::env::var("FABER_QUALIFICATION_ENGINE_DATA") {
         env.insert("FABER_QUALIFICATION_ENGINE_DATA".into(), engine_data);
+    }
+    if let Some(engine_data) = seam_data {
+        env.insert("FABER_QUALIFICATION_ENGINE_DATA".into(), engine_data.to_string_lossy().into_owned());
     }
     let temporary = data.join("temp");
     std::fs::create_dir_all(&temporary)?;
@@ -203,6 +244,88 @@ fn run() -> io::Result<()> {
     }
     println!("Private qualification observation recorded. Admission remains blocked.");
     Ok(())
+}
+
+/// Starts the enrolled baseline on the hidden desktop with the person's real session and follows the landed mission
+/// until its build runs.
+#[cfg(windows)]
+fn promote_main(data: &Path) -> io::Result<()> {
+    use std::collections::BTreeMap;
+    let dev = promote::Dev::from_env()?;
+    std::fs::create_dir_all(data)?;
+    if data.join("t13-promotion.json").exists() {
+        return Err(io::Error::other("promotion record already exists; no automatic replay"));
+    }
+    let mission: serde_json::Value = serde_json::from_slice(&std::fs::read(
+        std::env::var("FABER_T13_MISSION_REPORT").map_err(|_| io::Error::other("no mission report"))?,
+    )?)
+    .map_err(io::Error::other)?;
+    let landed = mission["steps"]
+        .as_array()
+        .and_then(|steps| steps.iter().find(|s| s["step"] == "landed"))
+        .map(|s| s["detail"].clone())
+        .ok_or_else(|| io::Error::other("the mission did not land"))?;
+    let (Some(head), Some(tree)) = (landed["head"].as_str(), landed["tree"].as_str()) else {
+        return Err(io::Error::other("no landed identity"));
+    };
+    let executable = std::env::current_exe()?;
+    let guard = executable.parent().and_then(Path::parent).ok_or_else(|| io::Error::other("missing debug folder"))?.join("fake-cli.exe");
+    // The person's own session variables (folders only, no secret): the CLIs find their sign-in through them and the
+    // local build finds its toolchain. Folders under a CLI's credential directory are never on the path.
+    let mut env = BTreeMap::new();
+    for name in [
+        "PATH",
+        "SystemRoot",
+        "WINDIR",
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "HOMEDRIVE",
+        "HOMEPATH",
+        "TEMP",
+        "TMP",
+        "ProgramData",
+        "ProgramFiles",
+        "ProgramFiles(x86)",
+        "RUSTUP_HOME",
+        "CARGO_HOME",
+        "LIB",
+        "INCLUDE",
+        "LIBPATH",
+        "VCINSTALLDIR",
+        "VCToolsInstallDir",
+    ] {
+        if let Ok(value) = std::env::var(name) {
+            env.insert(name.to_string(), value);
+        }
+    }
+    if let Some(path) = env.get("PATH") {
+        let permitted: Vec<_> = std::env::split_paths(path).filter(|p| !protected(p)).collect();
+        env.insert("PATH".into(), std::env::join_paths(permitted).map_err(io::Error::other)?.to_string_lossy().into_owned());
+    }
+    let report = promote::observe(&dev, &env, &guard, (head, tree), std::time::Duration::from_secs(80 * 60))?;
+    let mut report = report;
+    if report["verdict"]["outcome"] == "healthy" && report["running"]["ok"] == true {
+        let var =
+            |name: &str| std::env::var(name).map(std::path::PathBuf::from).map_err(|_| io::Error::other(format!("{name} is not set")));
+        let commit = std::env::var("FABER_T13_BASE_COMMIT").map_err(|_| io::Error::other("no baseline commit"))?;
+        let base_tree = std::env::var("FABER_T13_BASE_TREE").map_err(|_| io::Error::other("no baseline tree"))?;
+        report["rollbackDrill"] = promote::drill(
+            &var("FABER_T13_DEVROOT")?.join("drill"),
+            &var("FABER_T13_APP")?,
+            &var("FABER_T13_DRILL_HELPER")?,
+            &commit,
+            &base_tree,
+            &env,
+            &guard,
+        )?;
+    }
+    std::fs::write(data.join("t13-promotion.json"), serde_json::to_vec_pretty(&report).map_err(io::Error::other)?)?;
+    if report["verdict"]["outcome"] == "healthy" && report["running"]["ok"] == true {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!("the landed build did not become the running one: {}", report["verdict"])))
+    }
 }
 
 #[cfg(windows)]
