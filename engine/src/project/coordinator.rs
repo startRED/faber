@@ -780,7 +780,7 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
             Verbatim {
                 id: "format".into(),
                 text: format!(
-                    "{ENVELOPE_RULES} Keep lease 0, keep ping \"DoneReady\" and keep the receipt id. Change only the summary and, if you find a defect that makes the candidate wrong, verdict (\"block\") and findings (one short line each).\n{}",
+                    "{ENVELOPE_RULES} Keep lease 0, keep ping \"DoneReady\", keep next and keep the receipt id. Change only the summary and, if you find a defect that makes the candidate wrong, verdict (\"block\") and findings (one short line each).\n{}",
                     example(REVIEWER, &runner.mission.base, &pin.digest, 0, verdict, Some("DoneReady"))
                 ),
             },
