@@ -31,9 +31,18 @@ const CHAT_TOOLS: &str = "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch";
 
 /// Lean sessions and all worker roles share the same empty integration loadout.
 pub fn claude_exposure_args() -> Vec<String> {
-    ["--strict-mcp-config", "--mcp-config", "{\"mcpServers\":{}}", "--safe-mode", "--settings", "{\"disableAllHooks\":true}"]
-        .map(String::from)
-        .to_vec()
+    [
+        "--strict-mcp-config",
+        "--mcp-config",
+        "{\"mcpServers\":{}}",
+        "--safe-mode",
+        "--setting-sources",
+        "",
+        "--settings",
+        "{\"disableAllHooks\":true}",
+    ]
+    .map(String::from)
+    .to_vec()
 }
 
 /// Arguments for one long-lived Claude Code process that takes many turns over stdin.

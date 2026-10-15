@@ -28,6 +28,38 @@ pub struct Receipt {
     pub binary_hash: String,
     pub issued_at: u64,
     pub checks: BTreeMap<String, bool>,
+    /// What the loadout probe relied on: the launch flags that switch hooks off (Claude) and the instruction files the
+    /// session declared (Codex), each by path and SHA-256.
+    #[serde(default)]
+    pub proof: Proof,
+}
+
+/// Where a declared instruction file came from. Anything else refuses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SourceKind {
+    /// `AGENTS.md` or `CLAUDE.md` at the top of the mission clone: the project's own rules.
+    Clone,
+    /// The user's own global instruction file.
+    Global,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Source {
+    pub path: String,
+    pub sha256: String,
+    pub kind: SourceKind,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Proof {
+    /// The exact launch flags that load no hooks (Claude); empty for Codex.
+    #[serde(default)]
+    pub hook_flags: Vec<String>,
+    #[serde(default)]
+    pub instruction_sources: Vec<Source>,
 }
 
 /// What the installed CLI is right now.
@@ -49,6 +81,8 @@ pub enum Reject {
     Version,
     Binary,
     Unobserved,
+    /// A declared instruction file that is neither the mission clone's own rules nor the user's global file.
+    Source,
 }
 
 static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
@@ -161,7 +195,11 @@ pub fn verify(dir: &Path, vendor: Vendor, now: u64, observe: &dyn Fn() -> io::Re
     if receipt.schema != SCHEMA || receipt.vendor != vendor {
         return Err(Reject::Vendor);
     }
-    if !complete(&receipt.checks) || !hash_shaped(&receipt.binary_hash) || parse_version(&receipt.version).ok() != Some(&receipt.version) {
+    if !complete(&receipt.checks)
+        || !hash_shaped(&receipt.binary_hash)
+        || parse_version(&receipt.version).ok() != Some(&receipt.version)
+        || !proof_valid(vendor, &receipt.proof)
+    {
         return Err(Reject::Incomplete);
     }
     if receipt.issued_at > now || now - receipt.issued_at > MAX_AGE_SECS {
@@ -179,9 +217,13 @@ pub fn verify(dir: &Path, vendor: Vendor, now: u64, observe: &dyn Fn() -> io::Re
 
 /// Writes (or atomically replaces) a vendor's receipt. Refuses an incomplete set of passed probes, so a harness
 /// that skipped one cannot issue it.
-pub fn issue(dir: &Path, vendor: Vendor, identity: &Identity, checks: BTreeMap<String, bool>, now: u64) -> io::Result<()> {
+pub fn issue(dir: &Path, vendor: Vendor, identity: &Identity, checks: BTreeMap<String, bool>, proof: Proof, now: u64) -> io::Result<()> {
     use std::io::Write;
-    if !complete(&checks) || !hash_shaped(&identity.binary_hash) || parse_version(&identity.version)? != identity.version {
+    if !proof_valid(vendor, &proof)
+        || !complete(&checks)
+        || !hash_shaped(&identity.binary_hash)
+        || parse_version(&identity.version)? != identity.version
+    {
         return Err(io::Error::other("a receipt needs every probe passed and a measured identity"));
     }
     std::fs::create_dir_all(dir)?;
@@ -192,6 +234,7 @@ pub fn issue(dir: &Path, vendor: Vendor, identity: &Identity, checks: BTreeMap<S
         binary_hash: identity.binary_hash.clone(),
         issued_at: now,
         checks,
+        proof,
     };
     let temporary = dir.join(format!(".{}.{}.tmp", vendor.name(), uuid::Uuid::new_v4()));
     let mut options = std::fs::OpenOptions::new();
@@ -220,4 +263,66 @@ pub(crate) fn admitted(vendor: Vendor, bin: &dyn Fn() -> Option<String>) -> Resu
     let dir = DIR.get().ok_or(Reject::Missing)?;
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
     verify(dir, vendor, now, &|| observe(&bin().ok_or_else(|| io::Error::other("CLI not found"))?, &[]))
+}
+
+/// Claude Code reports no effective-hooks census, so hooks are off by construction: safe mode, no settings source
+/// loaded (user, project and local), and `disableAllHooks`. Returns exactly those launch flags, or `None` when the
+/// launch lacks any of them. Managed-policy hooks are the one thing these flags cannot switch off; the harness proves
+/// no managed policy exists on the machine (`MANAGED_POLICY_PATHS` and the registry keys) before it issues.
+pub fn hook_flags(args: &[String]) -> Option<Vec<String>> {
+    let value = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1));
+    let settings: serde_json::Value = serde_json::from_str(value("--settings")?).ok()?;
+    if !args.iter().any(|a| a == "--safe-mode") || settings["disableAllHooks"] != true || value("--setting-sources")?.as_str() != "" {
+        return None;
+    }
+    let mut flags = vec!["--safe-mode".to_string(), "--setting-sources".into(), String::new()];
+    flags.extend(["--settings".into(), value("--settings")?.clone()]);
+    Some(flags)
+}
+
+/// The documented system locations of Claude Code managed settings on Windows (files and drop-in folder). The two
+/// registry keys are `HKLM` and `HKCU` `SOFTWARE\Policies\ClaudeCode`.
+pub const MANAGED_POLICY_PATHS: [&str; 2] =
+    [r"C:\Program Files\ClaudeCode\managed-settings.json", r"C:\Program Files\ClaudeCode\managed-settings.d"];
+
+fn proof_valid(vendor: Vendor, proof: &Proof) -> bool {
+    match vendor {
+        Vendor::Claude => proof.instruction_sources.is_empty() && hook_flags(&proof.hook_flags).as_ref() == Some(&proof.hook_flags),
+        Vendor::Codex => {
+            proof.hook_flags.is_empty() && proof.instruction_sources.iter().all(|s| hash_shaped(&s.sha256) && !s.path.is_empty())
+        }
+    }
+}
+
+/// Identifies every instruction file a Codex session declared. Only two kinds are accepted: `AGENTS.md`/`CLAUDE.md`
+/// in the mission clone (the work folder or any folder above it up to the clone root), and the user's global
+/// `AGENTS.md`/`AGENTS.override.md` in `global_dir`. Anything else, or a path that is not exactly one of those files,
+/// refuses. Only those files are opened, to hash them; never anything else under the vendor folder.
+pub fn identify_sources(declared: &[String], work: &Path, clone_root: &Path, global_dir: &Path) -> Result<Vec<Source>, Reject> {
+    let canon = |p: &Path| std::fs::canonicalize(p).ok();
+    let root = canon(clone_root).ok_or(Reject::Source)?;
+    let mut allowed: Vec<(PathBuf, SourceKind)> = vec![];
+    let mut dir = canon(work).ok_or(Reject::Source)?;
+    while dir.starts_with(&root) {
+        for name in ["AGENTS.md", "CLAUDE.md"] {
+            allowed.push((dir.join(name), SourceKind::Clone));
+        }
+        if dir == root || !dir.pop() {
+            break;
+        }
+    }
+    if let Some(global) = canon(global_dir) {
+        for name in ["AGENTS.md", "AGENTS.override.md"] {
+            allowed.push((global.join(name), SourceKind::Global));
+        }
+    }
+    declared
+        .iter()
+        .map(|path| {
+            let real = canon(Path::new(path)).ok_or(Reject::Source)?;
+            let (_, kind) = allowed.iter().find(|(candidate, _)| *candidate == real).ok_or(Reject::Source)?;
+            let sha256 = fingerprint(&real).map_err(|_| Reject::Source)?;
+            Ok(Source { path: path.clone(), sha256, kind: *kind })
+        })
+        .collect()
 }
