@@ -65,6 +65,8 @@ export interface Message {
   parkedMore?: number;
   incomplete?: boolean;
   pace?: { kind: 'step' | 'low'; vendor: Vendor };
+  /** A note under the reply, as an engine key (`note.historyResent`). */
+  note?: string;
   waitUntil?: number;
   movedFrom?: Vendor;
   /** The next rung up, offered when the turn's own tools show it stopped early. */

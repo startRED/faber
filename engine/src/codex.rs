@@ -681,6 +681,7 @@ async fn serve(started: std::io::Result<proc::Proc>, opts: CodexServerOptions, m
                             Some(t) => {
                                 if method == Some("turn/started") {
                                     t.turn = params["turn"]["id"].as_str().map(String::from);
+                                    (t.sink)(EngineEvent::TurnStarted);
                                 }
                                 for event in parse_codex_notification(&msg, &mut t.state) {
                                     (t.sink)(event);

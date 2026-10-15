@@ -160,23 +160,48 @@ struct Live {
     served: bool,
     /// Queued messages handed to the running turn (Codex) and not yet taken in, oldest first.
     steering: Vec<String>,
+    /// The session id the CLI reported at start, kept out of the conversation until a turn really ran on it: a CLI saves a
+    /// session only once it has had a turn, so an id from a warm-up that never ran must not be resumed by a later launch.
+    unsaved_session: Option<String>,
 }
 
 /// Messages waiting behind a running turn. Each may carry images, which stay in memory and go out with every queue event.
 const MAX_QUEUED: usize = 10;
 
-const HISTORY_LIMIT: usize = 20_000;
-
-/// A model that joins a conversation midway reads what was said before, as plain text.
-pub fn with_history(history: &[Message], text: &str) -> String {
+/// A model that joins a conversation midway, or a fresh session that replaces a lost one, reads what was said before as plain
+/// text: every message, the names and places of the files attached, a count of the images it cannot see, and each tool's result
+/// shortened as `handover::transcript` does. The reply that carries it says so (`note.historyResent`).
+pub fn with_history(history: &[Message], text: &str, place: &dyn Fn(&str) -> String) -> String {
     let lines = history
         .iter()
-        .map(|m| format!("{}: {}", if m.role == Role::User { "User" } else { "Assistant" }, m.text))
+        .map(|m| {
+            let mut line = crate::handover::transcript(std::slice::from_ref(m));
+            for file in m.attachments.iter().flatten() {
+                line += &format!("\n[attached file: {}]", place(file));
+            }
+            match m.images.as_ref().map_or(0, |i| i.len()) {
+                0 => {}
+                n => line += &format!("\n[{n} image(s) sent here are not included]"),
+            }
+            line
+        })
         .collect::<Vec<_>>()
         .join("\n\n");
-    let skip = lines.chars().count().saturating_sub(HISTORY_LIMIT);
-    let lines: String = lines.chars().skip(skip).collect();
     format!("Earlier in this conversation, with another assistant:\n\n{lines}\n\nNow the user says:\n{text}")
+}
+
+/// Where a stored attachment can be opened: the working folder's own `attachments` in Chat, the data folder's in Projects.
+pub(crate) fn attachment_place(area: Area, data_dir: &Path, conversation: &str, name: &str) -> String {
+    if area == Area::Chat {
+        format!("attachments/{name}")
+    } else {
+        data_dir.join("attachments").join(conversation).join(name).to_string_lossy().into_owned()
+    }
+}
+
+/// This vendor already answered in the conversation, yet has no session to continue: the session was lost.
+fn session_was_lost(c: &Conversation, vendor: Vendor) -> bool {
+    c.resumable(vendor).is_none() && c.messages.iter().any(|m| m.role == Role::Assistant && m.vendor == Some(vendor))
 }
 
 fn now() -> u64 {
@@ -547,6 +572,7 @@ impl Engine {
             let conv = c.convs.get_mut(&id).expect("loaded conversation");
             conv.working_folder = folder;
             conv.sessions.clear();
+            conv.tentative.clear();
             conv.cost_base.clear();
             let result = conv.clone();
             c.save(&id);
@@ -907,7 +933,7 @@ impl Core {
         // A Codex session saved before R121 carries the isolated host command tool, which no mode the person can pick uses
         // any more: it restarts once, with visible history, without it.
         if c.command_gate {
-            c.sessions.remove(&Vendor::Codex);
+            c.forget_session(Vendor::Codex);
             c.cost_base.remove(&Vendor::Codex);
             c.command_gate = false;
         }
@@ -1053,9 +1079,44 @@ impl Core {
         if entry.sid != sid {
             return;
         }
-        let vendor = entry.vendor;
+        let (vendor, resumed) = (entry.vendor, entry.resumed);
         let turn_id = entry.turn.clone();
+        // A turn ran on the session: from here on it is the conversation's session for this vendor.
+        if !matches!(
+            event,
+            EngineEvent::Started { .. }
+                | EngineEvent::TurnStarted
+                | EngineEvent::Quota { .. }
+                | EngineEvent::Signals(_)
+                | EngineEvent::Error { .. }
+        ) && let Some(id) = self.live.get_mut(conv).and_then(|l| l.unsaved_session.take())
+            && let Some(c) = self.convs.get_mut(conv)
+        {
+            c.sessions.insert(vendor, id);
+            c.tentative.remove(&vendor);
+            if vendor == Vendor::Codex {
+                c.command_gate = self.live.get(conv).is_some_and(|l| l.permissions == Permissions::Isolated);
+            }
+            // a draft is saved only once something is sent
+            if !c.messages.is_empty() {
+                self.save(conv);
+            }
+        }
         match event {
+            // Codex accepted the turn: if Faber dies now, the next launch resumes this session instead of starting one that never
+            // heard of the turn.
+            EngineEvent::TurnStarted => {
+                let fresh = self.live.get(conv).and_then(|l| l.unsaved_session.clone());
+                if let (Some(id), Some(c)) = (fresh, self.convs.get_mut(conv))
+                    && c.sessions.get(&vendor) != Some(&id)
+                {
+                    c.tentative.insert(vendor, id);
+                    if !c.messages.is_empty() {
+                        self.save(conv);
+                    }
+                }
+                return;
+            }
             EngineEvent::Started { session_id, model } => {
                 // A CLI started while the user typed reports its model before any answer exists; later answers use it too.
                 if let Some(l) = self.live.get_mut(conv) {
@@ -1064,14 +1125,9 @@ impl Core {
                 if let Some(m) = self.turn(conv) {
                     m.model = Some(model);
                 }
-                let Some(c) = self.convs.get_mut(conv) else { return };
-                c.sessions.insert(vendor, session_id);
-                if vendor == Vendor::Codex {
-                    c.command_gate = self.live.get(conv).is_some_and(|l| l.permissions == Permissions::Isolated);
-                }
-                // a draft is saved only once something is sent
-                if !c.messages.is_empty() {
-                    self.save(conv);
+                // Not saved yet: the id becomes resumable with the first sign that a turn ran on it (above).
+                if let Some(l) = self.live.get_mut(conv) {
+                    l.unsaved_session = Some(session_id);
                 }
                 // The turn's reply now names its model: the screen hears it now, not with the first word.
                 self.refresh_running();
@@ -1258,6 +1314,24 @@ impl Core {
                 return self.finish(conv, turn_id);
             }
             EngineEvent::Error { message, fatal } => {
+                // The CLI no longer has the session this launch resumed (a warm-up that never ran a turn, or a cleaned-up history).
+                let mut message = message;
+                if fatal && resumed && recovery::session_lost(&message) {
+                    // Only a session that never took a turn may be replaced silently: not one whose turn was accepted, and not
+                    // a reply that already holds work (partial text, tool actions, a retry after the quota ran out).
+                    let silent = !self.convs.get(conv).is_some_and(|c| c.tentative.contains_key(&vendor))
+                        && !self.reply_has_work(conv, turn_id.as_deref())
+                        && !self.said_on(conv, vendor, turn_id.as_deref());
+                    if let Some(c) = self.convs.get_mut(conv) {
+                        c.forget_session(vendor);
+                    }
+                    // A new session with the same settings runs this turn once; a fresh launch is never `resumed`, so it cannot loop.
+                    if silent && self.rerun_fresh(conv, turn_id.as_deref()) {
+                        return;
+                    }
+                    // Turns did run there: say so, and let the next message start a session that is given the visible history.
+                    message = "error.sessionLost".into();
+                }
                 // A CLI that refuses a flag Faber passed (it was changed under a running Faber): forget the newer flags at once, so the
                 // next launch is the old one, and read the new help.
                 if fatal && recovery::flag_rejected(&message) && self.claude_flags != Default::default() {
@@ -1609,9 +1683,12 @@ impl Core {
             }
             None => fallback.clone(),
         };
-        let joining_late = !c.sessions.contains_key(&pick.vendor) && !c.messages.is_empty();
+        let data_dir = self.opts.data_dir.clone();
+        let joining_late = c.resumable(pick.vendor).is_none() && !c.messages.is_empty();
         let history = c.messages.clone();
         let at = now();
+        let resent = joining_late && session_was_lost(c, pick.vendor);
+        let area = c.area;
         let mut question = Message::new(new_id(), Role::User, item.text.clone(), at);
         question.images = item.images.clone();
         question.attachments = item.attachments.clone();
@@ -1621,6 +1698,7 @@ impl Core {
             reply.model = pick.model.clone();
         }
         reply.reason = Some(if routing { "reason.routing".into() } else { pick.reason.clone() });
+        reply.note = resent.then(|| "note.historyResent".to_string());
         reply.tools = Some(vec![]);
         reply.status = Some(Status::Streaming);
         let reply_id = reply.id.clone();
@@ -1646,7 +1724,8 @@ impl Core {
                 check: "glance",
             },
         );
-        let text = if joining_late { with_history(&history, &model_text) } else { model_text };
+        let text =
+            if joining_late { with_history(&history, &model_text, &|n| attachment_place(area, &data_dir, id, n)) } else { model_text };
         if let Some(before) = route {
             let only = before.as_ref().map(|p| p.vendor);
             let route = self.route_for(&item.text, images.len() + attachments_len, only);
@@ -1857,7 +1936,7 @@ impl Core {
         });
         // The hooks switch matters only while asking; with full access the person's hooks always run, as in the CLI itself.
         let user_hooks = self.store.settings().user_hooks == Some(true) && permissions == Permissions::Ask;
-        let resume = c.sessions.get(&pick.vendor).cloned();
+        let resume = c.resumable(pick.vendor).cloned();
         let resumed = resume.is_some();
         let area = c.area;
         // The conversation's own name, fixed when it began: a rename in Settings never reaches a conversation under way.
@@ -1910,6 +1989,7 @@ impl Core {
                 started: 0.0,
                 served: false,
                 steering: vec![],
+                unsaved_session: None,
             },
         );
         // ponytail: count-based limit on idle Claude processes; a RAM budget across all CLIs comes with parallel workers.
@@ -1943,6 +2023,7 @@ impl Core {
             project_id,
             working_folder: None,
             sessions: BTreeMap::new(),
+            tentative: BTreeMap::new(),
             command_gate: false,
             cost_base: BTreeMap::new(),
             allow_always: None,
@@ -2011,7 +2092,10 @@ impl Core {
         if c.title.is_empty() {
             c.title = req.text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(60).collect();
         }
-        let joining_late = !c.sessions.contains_key(&pick.vendor) && !c.messages.is_empty();
+        let data_dir = self.opts.data_dir.clone();
+        let joining_late = c.resumable(pick.vendor).is_none() && !c.messages.is_empty();
+        let resent = joining_late && session_was_lost(c, pick.vendor);
+        let area = c.area;
         let history = c.messages.clone();
         // Attached files are saved where the model can open them with its own tools (PDFs, spreadsheets, archives...).
         let name = |p: &Path| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -2029,6 +2113,7 @@ impl Core {
             reply.model = pick.model.clone();
         }
         reply.reason = Some(if routing { "reason.routing".into() } else { pick.reason.clone() });
+        reply.note = resent.then(|| "note.historyResent".to_string());
         reply.tools = Some(vec![]);
         reply.status = Some(Status::Streaming);
         let reply_id = reply.id.clone();
@@ -2053,7 +2138,7 @@ impl Core {
                 check: "glance",
             },
         );
-        let text = if joining_late { with_history(&history, &text) } else { text };
+        let text = if joining_late { with_history(&history, &text, &|n| attachment_place(area, &data_dir, &id, n)) } else { text };
         if let Some(before) = route {
             let only = before.as_ref().map(|p| p.vendor);
             let route = self.route_for(&req.text, req.images.len() + req.files.len(), only);
