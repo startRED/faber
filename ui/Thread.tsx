@@ -1,7 +1,7 @@
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import { createEffect, createResource, createSignal, For, Index, onCleanup, Show, type Accessor } from 'solid-js';
-import { api, type Choice, type Message, type QueuedTurn, type ToolUse, type VendorUsage } from './api.ts';
+import { api, type Choice, type Message, type QueuedTurn, type VendorUsage } from './api.ts';
 import { Asks, Parkeds } from './Ask.tsx';
 import { copyItem, openMenu } from './contextmenu.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
@@ -11,6 +11,7 @@ import { fromEngine, t } from './i18n.ts';
 import { prettyModel, vendorName, type Option } from './models.ts';
 import { animateList } from './motion.ts';
 import { warmLeft } from './running.ts';
+import { middle, thinkingParts, toolLine, toolRow } from './worklog.ts';
 
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
 
@@ -58,12 +59,6 @@ function FileCard(props: { conversationId: string; file: { path: string; size: n
   );
 }
 
-function toolLabel(tool: ToolUse): string {
-  const input = tool.input as Record<string, unknown> | string | undefined;
-  const detail = typeof input === 'string' ? input : input && (input.query ?? input.url ?? input.file_path ?? input.command ?? input.pattern);
-  return detail ? `${tool.name}: ${String(detail)}` : tool.name;
-}
-
 function usage(m: Message): string {
   const parts: string[] = [];
   if (m.costUsd) parts.push(t('answer.cost', { cost: m.costUsd.toFixed(4) }));
@@ -109,13 +104,27 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
     const end = m().activityEnd;
     return m().tools?.length && Number.isInteger(end) && end! > 0 && end! < m().text.length && m().text.slice(end).trim() ? end! : 0;
   };
-  const narration = () => boundary() ? [m().text.slice(0, boundary())] : [];
+  // The answer is always kept whole. A status sentence that is exactly the answer's opening paragraph is dropped from the
+  // activity instead, so it shows once.
   const finalText = () => m().text.slice(boundary());
-  const steps = () => narration().length + (m().tools?.length ?? 0) + (m().thinking ? 1 : 0);
+  const narration = () => {
+    if (!boundary()) return [];
+    const paragraphs = m().text.slice(0, boundary()).trimEnd().split(/\n{2,}/);
+    const last = paragraphs.at(-1)?.trim();
+    const answer = finalText().trimStart();
+    if (last && answer.startsWith(last) && (answer.length === last.length || /\s/.test(answer[last.length]!))) paragraphs.pop();
+    const rest = paragraphs.join('\n\n').trim();
+    return rest ? [rest] : [];
+  };
+  const thinking = () => thinkingParts(m().thinking ?? '');
+  const steps = () => narration().length + (m().tools?.length ?? 0) + (thinking().length ? 1 : 0);
   const commands = () => m().tools?.filter((tool) => /bash|command|exec|shell/i.test(tool.name)).length ?? 0;
+  // The answer on screen is never repeated here: once it has text, the status line steps aside.
   const latest = () => {
     const tool = m().tools?.at(-1);
-    return tool && tool.ok === undefined ? toolLabel(tool) : finalText().trim().split('\n').at(-1) || (tool ? toolLabel(tool) : m().thinking);
+    if (tool && tool.ok === undefined) return toolLine(tool);
+    if (finalText().trim()) return '';
+    return tool ? toolLine(tool) : middle(thinking().at(-1)?.text ?? '');
   };
   // The name slot: while Auto is still choosing there is none (the reason says so), then the model's name from the moment
   // it is known to the end and after reopening; a model the CLI never named reads as the default one all along.
@@ -145,16 +154,21 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
         <details class="activity">
           <summary>{t(streaming() ? 'activity.working' : 'activity.done', { steps: t('activity.steps', { n: steps() }), commands: t('activity.commands', { n: commands() }) })}</summary>
           <div class="activity-body">
-            <Show when={m().thinking}><div class="activity-thinking">{m().thinking}</div></Show>
+            <Show when={thinking().length}>
+              <div class="activity-thinking">
+                <For each={thinking()}>{(part) => <p>{part.title ? <b>{part.text}</b> : part.text}</p>}</For>
+              </div>
+            </Show>
             <For each={narration()}>{(text) => <div class="md" onClick={openLinks} innerHTML={html(text)} />}</For>
             <div class="tools">
               <For each={m().tools}>
                 {(tool) => (
-                  <span class={tool.ok === false ? 'bad' : ''} title={tool.output ?? toolLabel(tool)}>
+                  <span class={tool.ok === false ? 'bad' : ''} title={toolRow(tool).detail || tool.output}>
                     <Show when={tool.ok === true}>
                       <Icon name="check" small />
                     </Show>
-                    <i>{toolLabel(tool)}</i>
+                    <b>{toolRow(tool).label}</b>
+                    <Show when={toolRow(tool).detail}><i>{middle(toolRow(tool).detail)}</i></Show>
                   </span>
                 )}
               </For>

@@ -165,7 +165,7 @@ fn engine_tree_host(args: &[String]) -> i32 {
         std::fs::write(ready, serde_json::json!({"root":root}).to_string())?;
         let action = wait_control(control, "action").await?;
         // As the engine does: dropping the session drops the job and the child; stopping ends the job, then the child.
-        drop(p.contained.take());
+        p.contained = None;
         if action == "drop" {
             drop(p.child.take());
         } else if let Some(child) = p.child.as_mut() {

@@ -368,16 +368,20 @@ fn owner_repo(program: &str, sandbox: &Path) -> Result {
     git(program, &remote, &["init", "--bare", "--initial-branch=main"])?;
     let url = slashes(&remote);
     git(program, &repo, &["remote", "add", "origin", &url])?;
+    // The owner's many branch sections, written straight into the config file: one git process per key made this setup
+    // the slowest part of the probe. The control below still asks git itself to list them.
+    let mut sections = String::new();
     for n in 0..44 {
         let name = format!("feature/b{n}");
-        git(program, &repo, &["config", &format!("branch.{name}.remote"), "origin"])?;
-        git(program, &repo, &["config", &format!("branch.{name}.merge"), &format!("refs/heads/{name}")])?;
+        sections += &format!("[branch \"{name}\"]\n\tremote = origin\n\tmerge = refs/heads/{name}\n");
     }
-    git(program, &repo, &["config", "branch.main.remote", "."])?;
-    git(program, &repo, &["config", "branch.main.merge", "refs/heads/main"])?;
-    git(program, &repo, &["config", "branch.faber/m1.remote", "origin"])?;
-    git(program, &repo, &["config", "branch.faber/m1.merge", "refs/heads/faber/m1"])?;
-    git(program, &repo, &["config", "branch.release.v1.2.vscode-merge-base", "origin/main"])?;
+    sections += "[branch \"main\"]\n\tremote = .\n\tmerge = refs/heads/main\n";
+    sections += "[branch \"faber/m1\"]\n\tremote = origin\n\tmerge = refs/heads/faber/m1\n";
+    sections += "[branch \"release.v1.2\"]\n\tvscode-merge-base = origin/main\n";
+    let config = repo.join(".git/config");
+    let mut text = std::fs::read_to_string(&config).map_err(|e| e.to_string())?;
+    text += &sections;
+    std::fs::write(&config, text).map_err(|e| e.to_string())?;
     let granted = |at: &Path| {
         let mut t = target(at, &head);
         t.url = url.clone();
