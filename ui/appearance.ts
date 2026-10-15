@@ -8,7 +8,6 @@ const systemReduces = matchMedia('(prefers-reduced-motion: reduce)');
 const [applied, setApplied] = createSignal<Look>();
 const [reduced, setReduced] = createSignal(systemReduces.matches);
 const [hidden, setHidden] = createSignal(document.hidden);
-const [focused, setFocused] = createSignal(document.hasFocus());
 let lookRevision = 0;
 let fading: ViewTransition | undefined;
 let snapshots = 0;
@@ -19,8 +18,6 @@ export const appliedLook = applied;
 export const motion = (): Motion => effectiveMotion(applied()?.motion ?? 'full', reduced());
 /** True while the window is hidden; effect loops stop. */
 export const windowHidden = hidden;
-/** True while the window has the focus; effect loops stop when another app takes it. */
-export const windowFocused = focused;
 
 /** A system that asks for less motion turns `full` into `reduced`; the other levels already ask for less. */
 export const effectiveMotion = (level: Motion, systemReducesMotion: boolean): Motion => (level === 'full' && systemReducesMotion ? 'reduced' : level);
@@ -75,20 +72,14 @@ export function watchSystem(): () => void {
   };
   const onVisibility = () => {
     setHidden(document.hidden);
-    setFocused(document.hasFocus());
-    // The CSS animations of the effects pause while the window is hidden or another app has the focus, like the effect loops.
-    document.documentElement.classList.toggle('away-win', document.hidden || !document.hasFocus());
+    // The CSS animations of the effects pause with the window, like the dust loop does.
+    document.documentElement.classList.toggle('hidden-win', document.hidden);
   };
-  onVisibility();
   systemReduces.addEventListener('change', onMotion);
   document.addEventListener('visibilitychange', onVisibility);
-  window.addEventListener('focus', onVisibility);
-  window.addEventListener('blur', onVisibility);
   return () => {
     systemReduces.removeEventListener('change', onMotion);
     document.removeEventListener('visibilitychange', onVisibility);
-    window.removeEventListener('focus', onVisibility);
-    window.removeEventListener('blur', onVisibility);
   };
 }
 

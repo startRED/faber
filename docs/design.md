@@ -116,17 +116,12 @@ own inks.
 
 ### Effects
 - Effects appear only on the new conversation screen, never behind text the user reads, and they stop when the window
-  is hidden or another app has the focus.
-  - **Dark Room:** a static projector beam, a glow that breathes every 7 s and 72 dust grains (CSS shadows) that fade
-    out near any text block. A timer sets the opacity of the glow and the three dust layers ten times a second, which
-    the compositor alone applies; as CSS animations they made a 240 Hz screen composite the stage on every frame.
+  is hidden.
+  - **Dark Room:** a static projector beam, a glow that breathes every 7 s and 72 dust grains (CSS shadows that twinkle on the compositor, no canvas loop) that fade
+    out near any text block.
   - **Workshop:** a loom at the bottom right whose shuttle crosses every 9 s, and paper grain.
   - **Workbench:** a flow line at the top right reading "Your idea → Claude and Codex → Done, with proof". It names only
     the vendors that are connected.
-  - **Every theme but High contrast:** a faint field of monospace letters and digits on one canvas, also clear of
-    text. A few cells change every 140 ms; a click on an empty spot sends a ring that tints the cells it crosses with the
-    accent for about a second. Only changed cells repaint, the loop sleeps between ticks, and it stops when the window is
-    hidden or unfocused. Reduced or no motion leaves it still and turns the ripple off.
 - The texture switch controls grain and the dot grid. The glow switch controls the focus light and the amber light,
   which exist only in Dark Room and Cobalt; the other themes use borders.
 

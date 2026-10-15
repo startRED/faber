@@ -1,6 +1,5 @@
 import themes from '../../src-tauri/src/themes.json';
-import { render } from 'solid-js/web';
-import { Ambient, breath, clearance, dustShadows, fieldRuns, makeGrains, rippleTint } from '../../ui/Ambient.tsx';
+import { clearance, dustShadows, makeGrains } from '../../ui/Ambient.tsx';
 import type { AppState, Appearance, Look, SavedSettings } from '../../ui/api.ts';
 import { appliedLook, applyLook, effectiveMotion, inOrder, previewer, refreshed, saveAndApply, switchTheme, watchSystem, windowHidden } from '../../ui/appearance.ts';
 import { en } from '../../ui/locales/en.ts';
@@ -105,14 +104,6 @@ check('appearance: the system preference caps the motion level and never raises 
   equal(effectiveMotion('none', false), 'none');
 });
 
-check('appearance: a breath of the dust goes from 0 to 1 and back, eased in and out', () => {
-  equal(breath(0, 6000), 0);
-  equal(breath(3000, 6000), 0.5);
-  equal(breath(6000, 6000), 1);
-  equal(breath(12000, 6000), 0);
-  ok(breath(600, 6000) < 0.01 && breath(5400, 6000) > 0.99, 'slow at both ends');
-});
-
 check('appearance: the dust is the same at every launch and never lies behind text', () => {
   const grains = makeGrains();
   equal(grains.length, 72);
@@ -165,10 +156,8 @@ check('appearance: saves run in order, and a failed one does not stop the next',
   equal(await after, 'still runs');
 });
 
-check('appearance: hiding or blurring the window sets the class that pauses the effects, and showing it with the focus clears it', () => {
+check('appearance: hiding the window sets the hidden signal and the class that pauses the effects, and showing it clears both', () => {
   const root = document.documentElement;
-  let focused = true;
-  document.hasFocus = () => focused;
   const stop = watchSystem();
   const hide = (value: boolean) => {
     Object.defineProperty(document, 'hidden', { configurable: true, get: () => value });
@@ -177,20 +166,13 @@ check('appearance: hiding or blurring the window sets the class that pauses the 
   try {
     hide(true);
     ok(windowHidden(), 'the signal follows the window');
-    ok(root.classList.contains('away-win'), 'the class that pauses the CSS animations');
+    ok(root.classList.contains('hidden-win'), 'the class that pauses the CSS animations');
     hide(false);
     ok(!windowHidden(), 'the signal clears');
-    ok(!root.classList.contains('away-win'), 'the class clears');
-    focused = false;
-    window.dispatchEvent(new Event('blur'));
-    ok(root.classList.contains('away-win'), 'another app took the focus');
-    focused = true;
-    window.dispatchEvent(new Event('focus'));
-    ok(!root.classList.contains('away-win'), 'the focus came back');
+    ok(!root.classList.contains('hidden-win'), 'the class clears');
   } finally {
     Reflect.deleteProperty(document, 'hidden');
-    Reflect.deleteProperty(document, 'hasFocus');
-    root.classList.remove('away-win');
+    root.classList.remove('hidden-win');
     stop();
   }
 });
@@ -331,43 +313,4 @@ check('refreshed: a state asked for before a save brings the rest back but never
   equal(merged.settings.language, 'pt-BR');
   equal(merged.look.scheme, 'light');
   equal(merged.conversations.length, 2, 'what the refresh owns is taken');
-});
-
-check('appearance: the glyph field rests unless shown, focused and in full motion, and stays clear of text', async () => {
-  const shown = { on: true, motion: 'full', hidden: false, focused: true };
-  ok(fieldRuns(shown));
-  for (const off of [{ on: false }, { motion: 'reduced' }, { motion: 'none' }, { hidden: true }, { focused: false }]) ok(!fieldRuns({ ...shown, ...off }), JSON.stringify(off));
-  // The ring travels out from the click and is gone after about a second.
-  ok(rippleTint(0, 0) > 0.9 && rippleTint(200, 0) === 0, 'a fresh ring sits on the click');
-  ok(rippleTint(200, 590) > rippleTint(0, 590), 'the ring has moved out');
-  ok(rippleTint(200, 590) < rippleTint(0, 0), 'and faded');
-  equal(rippleTint(370, 1100), 0);
-
-  const root = document.createElement('div');
-  root.style.cssText = 'position:fixed;left:0;top:0;width:480px;height:320px';
-  for (const [key, value] of Object.entries(themes.css.base)) root.style.setProperty(`--${key}`, value);
-  const text = document.createElement('p');
-  text.style.cssText = 'position:absolute;left:160px;top:120px;width:160px;height:80px;margin:0';
-  root.append(text);
-  document.body.append(root);
-  const dispose = render(() => Ambient({ vendors: [], avoid: () => [text] }), root);
-  try {
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    const canvas = root.querySelector('canvas')!;
-    ok(canvas.width >= 480, 'one canvas covers the area');
-    const pixels = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data;
-    const scale = canvas.width / 480;
-    let [outside, under] = [0, 0];
-    for (let i = 3; i < pixels.length; i += 4) {
-      const [x, y] = [((i >> 2) % canvas.width) / scale, Math.floor((i >> 2) / canvas.width) / scale];
-      if (pixels[i]! === 0) continue;
-      if (x >= 160 && x <= 320 && y >= 120 && y <= 200) under++;
-      else outside++;
-    }
-    ok(outside > 0, 'the field is drawn');
-    equal(under, 0, 'no glyph lies behind text');
-  } finally {
-    dispose();
-    root.remove();
-  }
 });
