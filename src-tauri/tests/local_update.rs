@@ -1421,7 +1421,10 @@ fn a_real_canary_needs_an_allowance_that_covers_its_cost() {
     assert!(!real_canary_allowed(dir.path()));
     fs::write(dir.path().join("real-canary.json"), b"{\"capMicros\":1}").unwrap();
     assert!(!real_canary_allowed(dir.path()));
-    fs::write(dir.path().join("real-canary.json"), b"{\"capMicros\":1000000}").unwrap();
+    let cap = faber_engine::project::canary::REAL_CAP_MICROS;
+    fs::write(dir.path().join("real-canary.json"), format!("{{\"capMicros\":{}}}", cap - 1)).unwrap();
+    assert!(!real_canary_allowed(dir.path()));
+    fs::write(dir.path().join("real-canary.json"), format!("{{\"capMicros\":{cap}}}")).unwrap();
     assert!(real_canary_allowed(dir.path()));
     fs::write(dir.path().join("real-canary.json"), b"not json").unwrap();
     assert!(!real_canary_allowed(dir.path()));

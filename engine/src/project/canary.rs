@@ -47,10 +47,13 @@ const REPLAY_REVIEWER: &str = include_str!("../../../tests/fixtures/projects/can
 const REVISION: u64 = 3;
 const TASK: &str = "writer";
 const PROOF: &str = "canary-test";
-/// The ceiling one real mission is admitted under, in millionths of an API-equivalent dollar. A Claude turn reserves
-/// the cost of a whole context window up front (about 0.82 dollars) and settles to what it really used, so a smaller
-/// ceiling could not admit even one turn. The ceiling is not spending: the settled cost of a canary is a few cents.
-pub const REAL_CAP_MICROS: u64 = 1_000_000;
+/// The ceiling one real mission is admitted under, in millionths of an API-equivalent dollar. Admission reserves the
+/// most one turn could cost (a Claude Writer about 0.67 dollars, a Codex Reviewer 0.31) and settles to what it really
+/// used, so a smaller ceiling could not admit even one turn. The ceiling is not spending: the settled cost of a small
+/// mission is a few cents.
+pub const REAL_CAP_MICROS: u64 = 1_110_000;
+/// What a Codex turn may reserve at most: the share of the ceiling kept for the Reviewer.
+const REVIEW_SHARE_MICROS: u64 = 310_000;
 const WRITER_MODEL: (Vendor, &str) = (Vendor::Claude, "claude-haiku-5-5");
 const REVIEWER_MODEL: (Vendor, &str) = (Vendor::Codex, "gpt-6-luna");
 
@@ -240,25 +243,29 @@ pub async fn read_accounts(engine: &Engine) {
     tokio::time::sleep(Duration::from_secs(2)).await;
 }
 
+/// The cost grant of one real mission under a ceiling: the Reviewer's turn on Codex has its own share, every other
+/// turn runs on Claude within the rest.
+pub fn mission_grant(cap_micros: u64) -> Budgeted {
+    let claude = cap_micros.saturating_sub(REVIEW_SHARE_MICROS);
+    Budgeted {
+        cap_micros,
+        worker_micros: claude,
+        kind_caps: BTreeMap::new(),
+        vendors: BTreeMap::from([(Vendor::Claude, claude), (Vendor::Codex, REVIEW_SHARE_MICROS.min(cap_micros))]),
+        review_micros: REVIEW_SHARE_MICROS.min(cap_micros),
+        repair_micros: 0,
+        canary_micros: 0,
+        paused: false,
+        extra: super::Extra::new(),
+    }
+}
+
 /// The caps one real mission is admitted under (after `read_accounts`).
 pub fn caps(engine: &Engine, mission: &str, cap_micros: u64) -> Result<(), String> {
     for (vendor, model) in [WRITER_MODEL, REVIEWER_MODEL] {
         engine.mission_budget(Change::AllocateModel { vendor, model: model.into(), cap_micros })?;
     }
-    engine.mission_budget(Change::Grant {
-        mission: mission.into(),
-        grant: Budgeted {
-            cap_micros,
-            worker_micros: cap_micros.min(900_000),
-            kind_caps: BTreeMap::new(),
-            vendors: BTreeMap::from([(Vendor::Claude, cap_micros), (Vendor::Codex, cap_micros.min(300_000))]),
-            review_micros: cap_micros.min(300_000),
-            repair_micros: 0,
-            canary_micros: cap_micros,
-            paused: false,
-            extra: super::Extra::new(),
-        },
-    })?;
+    engine.mission_budget(Change::Grant { mission: mission.into(), grant: mission_grant(cap_micros) })?;
     Ok(())
 }
 

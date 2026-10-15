@@ -232,7 +232,7 @@ fn run() -> io::Result<()> {
         }
         text
     });
-    let deadline = Instant::now() + Duration::from_secs(if mode == "--live-seam" { 1200 } else { 90 });
+    let deadline = Instant::now() + Duration::from_secs(if mode == "--live-seam" { 3000 } else { 90 });
     while owned.is_running() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(100));
     }

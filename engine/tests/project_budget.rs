@@ -1058,3 +1058,24 @@ fn crashed_chat_is_reconciled_once_then_a_fresh_day_can_be_allocated() {
     apply(&mut saved, Change::Allocate { vendor: Vendor::Codex, cap_micros: 400_000 }, 3.0 * DAY, 0).unwrap();
     apply(&mut saved, Change::Admit(request("i1", "m1", "w1", Kind::Worker, 10_000)), 3.0 * DAY, 0).unwrap();
 }
+
+#[test]
+fn the_grant_of_a_real_canary_mission_is_admitted_and_leaves_room_for_each_role() {
+    use faber_engine::project::Role;
+    use faber_engine::project::budget::role_request_maximum;
+    use faber_engine::project::canary::{REAL_CAP_MICROS, mission_grant};
+    let g = mission_grant(REAL_CAP_MICROS);
+    assert_eq!(g.vendors.values().sum::<u64>(), g.cap_micros);
+    // Each turn is admitted at its largest possible cost, so each vendor's share must hold the largest one.
+    assert!(g.vendors[&Vendor::Claude] >= role_request_maximum("claude-haiku-5-5", Role::Writer, None, 0).unwrap());
+    assert!(g.vendors[&Vendor::Claude] >= role_request_maximum("claude-haiku-5-5", Role::Lead, None, 0).unwrap());
+    assert!(g.vendors[&Vendor::Codex] >= role_request_maximum("gpt-6-luna", Role::Reviewer, None, 0).unwrap());
+    assert!(g.worker_micros >= role_request_maximum("claude-haiku-5-5", Role::Writer, None, 0).unwrap());
+    let mut l = ledger();
+    for vendor in [Vendor::Codex, Vendor::Claude] {
+        apply(&mut l, Change::Allocate { vendor, cap_micros: 1_000_000 }, NOW, 0).unwrap();
+    }
+    apply(&mut l, Change::Grant { mission: "m1".into(), grant: g }, NOW, 0).unwrap();
+    let r = request("review", "m1", "reviewer", Kind::Review, role_request_maximum("gpt-6-luna", Role::Reviewer, None, 0).unwrap());
+    assert!(Budget::load(&l).unwrap().can_admit(&l, &r, NOW).is_ok());
+}

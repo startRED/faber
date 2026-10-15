@@ -79,7 +79,10 @@ impl Dev {
         std::fs::create_dir_all(self.data())?;
         // The one allowance for spending on the candidate's own canary: a person put it here. Without this file the
         // candidate would only replay its mission and wait.
-        std::fs::write(self.data().join("real-canary.json"), br#"{"capMicros":1000000}"#)?;
+        std::fs::write(
+            self.data().join("real-canary.json"),
+            format!("{{\"capMicros\":{}}}", faber_engine::project::canary::REAL_CAP_MICROS).as_bytes(),
+        )?;
         manager.adopt_baseline(Slot::A, tree, &payload, now()).map_err(|e| fail(e.key()))
     }
 }

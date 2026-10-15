@@ -35,7 +35,7 @@ const FILE: &str = "engine/src/usage.rs";
 const GOAL: &str = "In engine/src/usage.rs, settle() charges a resumed turn the sum of the reported total and the last trusted total instead of their difference. Fix settle() so the unit test usage::tests::a_resumed_turn_costs_the_difference passes. Do not change any test and do not change anything else in the file.";
 const BUG: (&str, &str) = ("(total >= b.total).then_some(total - b.total)", "(total >= b.total).then_some(total + b.total)");
 /// What the whole run may cost, in millionths of a dollar, and what the mission alone is admitted under.
-const MISSION_CEILING_MICROS: u64 = 1_000_000;
+const MISSION_CEILING_MICROS: u64 = faber_engine::project::canary::REAL_CAP_MICROS;
 
 /// The engine's roles, except that the first Writer start is refused as an interruption would be (nothing is spent).
 struct Interrupt {
