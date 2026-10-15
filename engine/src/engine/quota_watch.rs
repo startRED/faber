@@ -27,6 +27,9 @@ impl Drop for InFlight {
 impl Core {
     /// Starts one reading for each vendor named that is not being read already.
     pub(super) fn read_quotas(&mut self, vendors: Vec<Vendor>) {
+        if self.closing {
+            return;
+        }
         for vendor in vendors {
             let Some(cli) = self.opts.clis.get(&vendor).cloned() else { continue };
             // Claude's reset times are printed in the PC's own time: nothing is read until the screen has said what that is.

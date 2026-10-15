@@ -249,6 +249,8 @@ struct Core {
     reading: HashSet<Vendor>,
     /// The watcher runs (the shell started it and the screen said the PC's offset): only then do events start readings.
     watching: bool,
+    /// The engine is shutting down: no new quota reading starts.
+    closing: bool,
     /// `/usage` turned out to ask a model: Claude's quota is then read from its own answers only.
     usage_command_spent: bool,
     /// When a failed Codex read last counted against the plan check.
@@ -313,6 +315,7 @@ impl Engine {
                 cadence: Cadence::default(),
                 reading: HashSet::new(),
                 watching: false,
+                closing: false,
                 usage_command_spent: false,
                 codex_failed_at: f64::MIN,
                 utc_offset: 0,
@@ -578,6 +581,7 @@ impl Engine {
     }
     pub fn shutdown(&self) {
         self.with(|c| {
+            c.closing = true;
             let active: Vec<_> = c.live.keys().cloned().collect();
             for id in active {
                 c.note_turn(&id, None, true);

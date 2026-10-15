@@ -53,13 +53,14 @@ struct Ran {
 /// Runs the status command without a shell, with its output bounded. None when the CLI fails to start, does not answer within
 /// `timeout` (it is killed when the run ends) or prints more than the bound.
 async fn run(vendor: Vendor, cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> Option<Ran> {
-    run_args(cli, status_args(vendor).iter().map(|a| a.to_string()).collect(), spawn, cwd, timeout, false).await
+    run_args(cli, status_args(vendor).iter().map(|a| a.to_string()).collect(), spawn, cwd, timeout).await
 }
 
-async fn run_args(cli: &Cli, args: Vec<String>, spawn: &Spawner, cwd: &Path, timeout: Duration, background: bool) -> Option<Ran> {
+/// Runs a status command or a reading as a background process: both are short and periodic, and neither may compete with a
+/// game or the person’s own work (idle priority on Windows; see `proc::spawn_background`).
+async fn run_args(cli: &Cli, args: Vec<String>, spawn: &Spawner, cwd: &Path, timeout: Duration) -> Option<Ran> {
     let args: Vec<String> = cli.prefix.iter().cloned().chain(args).collect();
-    let p =
-        if background { crate::proc::spawn_background(spawn, &cli.command, &args, cwd) } else { spawn(&cli.command, &args, cwd) }.ok()?;
+    let p = crate::proc::spawn_background(spawn, &cli.command, &args, cwd).ok()?;
     drop(p.stdin); // nothing to type: a CLI waiting for input sees end of input instead
     let mut child = p.child;
     let run = async {
@@ -115,7 +116,7 @@ pub async fn claude_usage(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Durat
         r#"{"disableAllHooks":true}"#,
         "--no-session-persistence",
     ];
-    let Some(ran) = run_args(cli, args.map(String::from).to_vec(), spawn, cwd, timeout, true).await else { return UsageRead::Failed };
+    let Some(ran) = run_args(cli, args.map(String::from).to_vec(), spawn, cwd, timeout).await else { return UsageRead::Failed };
     usage_from(&ran.out, if ran.replayed { Some(0) } else { ran.code }, now, offset)
 }
 
@@ -124,15 +125,16 @@ pub async fn claude_usage(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Durat
 /// zero. Any model work (a turn, tokens, cost) makes it `Spent`.
 fn usage_from(out: &str, code: Option<i32>, now: f64, offset: i64) -> UsageRead {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(out) else { return UsageRead::Failed };
-    let (Some(turns), Some(input), Some(output), Some(cost)) =
-        (v["num_turns"].as_u64(), v["usage"]["input_tokens"].as_u64(), v["usage"]["output_tokens"].as_u64(), v["total_cost_usd"].as_f64())
-    else {
-        return UsageRead::Failed;
-    };
-    let cached: Option<u64> = ["cache_creation_input_tokens", "cache_read_input_tokens"].iter().map(|k| v["usage"][*k].as_u64()).sum();
-    let Some(cached) = cached else { return UsageRead::Failed };
-    if turns > 0 || input > 0 || output > 0 || cached > 0 || cost != 0.0 {
+    // Positive evidence of model work comes first, so a damaged answer that still shows spending switches `/usage` off for good.
+    let counts =
+        ["input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"].map(|k| v["usage"][k].as_u64());
+    let (turns, cost) = (v["num_turns"].as_u64(), v["total_cost_usd"].as_f64());
+    if turns.is_some_and(|t| t > 0) || counts.iter().flatten().any(|c| *c > 0) || cost.is_some_and(|c| c != 0.0) {
         return UsageRead::Spent;
+    }
+    // Then every field must be there and well typed, and zero: a missing one is no reading, never zero.
+    if turns.is_none() || cost.is_none() || counts.iter().any(Option::is_none) {
+        return UsageRead::Failed;
     }
     if code != Some(0) || v["is_error"] != false {
         return UsageRead::Failed;
@@ -238,6 +240,22 @@ Current week (all models): 36% used · resets Oct 20, 4:59am (X/Y)";
         let mut v = clean();
         v["total_cost_usd"] = "0".into();
         assert_eq!(read(&v, Some(0)), UsageRead::Failed);
+    }
+
+    #[test]
+    fn spending_is_seen_before_missing_fields_so_a_damaged_answer_still_switches_usage_off() {
+        let mut turns = clean();
+        turns["num_turns"] = 1.into();
+        turns.as_object_mut().unwrap().remove("usage");
+        assert_eq!(read(&turns, Some(0)), UsageRead::Spent);
+        let mut tokens = clean();
+        tokens["usage"] = serde_json::json!({ "output_tokens": 9 });
+        tokens.as_object_mut().unwrap().remove("num_turns");
+        assert_eq!(read(&tokens, Some(1)), UsageRead::Spent);
+        let mut cost = clean();
+        cost["total_cost_usd"] = 0.02.into();
+        cost.as_object_mut().unwrap().remove("num_turns");
+        assert_eq!(read(&cost, None), UsageRead::Spent);
     }
 
     #[test]

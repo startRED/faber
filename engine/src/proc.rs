@@ -20,6 +20,9 @@ pub struct Proc {
 pub type Spawner = Arc<dyn Fn(&str, &[String], &Path) -> io::Result<Proc> + Send + Sync>;
 
 thread_local! {
+    // ponytail: a thread-local read by the spawner, which assumes the Spawner starts the process synchronously on the calling thread
+    // (real_spawner and the shell’s wrapper do). An async or offloaded Spawner would silently lose idle priority; pass the
+    // priority through the Spawner signature if that ever changes.
     /// Set while a background reader is being started: the process is created at idle priority.
     static BACKGROUND: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }

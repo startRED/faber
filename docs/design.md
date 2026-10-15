@@ -495,8 +495,10 @@ The reset times it prints are parsed defensively (ASCII am/pm only, minutes 0 to
 arithmetic), because the text comes from a program Faber does not control.
 
 The vendors count with a delay (docs below, "Quota lag, measured"). Faber therefore keeps, per vendor, its own requests (`Work`
-in the ledger). A request is pending from the moment it ends until a reading has been taken after it ended plus the lag: time
-alone releases nothing, so when every refresh fails the floor stays up. While anything is pending, or a turn of the vendor is
+in the ledger). A request is pending for a window from the moment it ends until that same window has been read after it ended plus
+the lag: reading another window settles nothing, and time alone releases nothing, so when every refresh fails the floor stays up.
+Pending requests are never dropped; past 100 the oldest are folded into one record that keeps their convertible points and the
+latest end. While anything is pending, or a turn of the vendor is
 running (for decisions as well as for the screen), the reading is marked "still counting" and no discount is believed on it.
 Where the window is the one the conversion was measured on and the request’s model has a measured points-per-dollar (the
 learned weights), the unreported share is added as a separate estimate (cost x points per dollar, minus what the reading has

@@ -49,9 +49,20 @@ pub struct Work {
     pub incomplete: bool,
 }
 
-/// Work older than this is dropped: longer than any lag.
-const KEEP_WORK_SECS: f64 = 6.0 * 3600.0;
+/// Requests kept one by one while the counter may not hold them yet. Past this the oldest are folded into one `Folded` (never
+/// dropped: unsettled work keeps the floor up).
 const KEEP_WORK: usize = 100;
+
+/// Pending requests folded into one conservative record when there are too many to keep. It ends when the last of them ends
+/// (it settles last), starts when the first began, carries the points of the part that could be converted, and says whether any
+/// part could not.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Folded {
+    pub start: f64,
+    pub finished: f64,
+    pub points: f64,
+    pub unknown: bool,
+}
 
 /// What is kept for one vendor.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -61,6 +72,7 @@ pub struct VendorLedger {
     pub history: BTreeMap<String, Vec<Point>>,
     pub spans: Vec<Span>,
     pub work: Vec<Work>,
+    pub folded: Option<Folded>,
     /// Own API-equivalent USD per local day, independent of account percentages.
     pub own_spend: BTreeMap<i64, f64>,
     pub unmetered: BTreeMap<i64, u32>,
@@ -143,7 +155,8 @@ impl VendorLedger {
             .retain(|s| s.start.is_finite() && s.end.is_finite() && s.end >= s.start && s.cost.is_none_or(|c| c.is_finite() && c >= 0.0));
         self.spans.drain(..self.spans.len().saturating_sub(KEEP_SPANS));
         self.work.retain(|w| w.start.is_finite() && w.finished.is_finite() && w.cost.is_none_or(|c| c.is_finite() && c >= 0.0));
-        self.work.drain(..self.work.len().saturating_sub(KEEP_WORK));
+        self.folded =
+            self.folded.take().filter(|f| f.start.is_finite() && f.finished.is_finite() && f.points.is_finite() && f.points >= 0.0);
         self.stretches.retain(|s| s.ppd.is_finite() && s.ppd > 0.0);
         self.stretches.drain(..self.stretches.len().saturating_sub(KEEP_STRETCHES));
         // The shape indexes 168 hours of the week; any other length would index out of range.
@@ -157,6 +170,7 @@ impl VendorLedger {
         self.weights.w.retain(|_, w| w.is_finite());
         self.weights.w.values_mut().for_each(|w| *w = w.clamp(0.5, 2.0));
         self.weights.capacity = self.weights.capacity.filter(|c| c.is_finite() && *c > 0.0);
+        self.fold_overflow();
         for t in [&mut self.since, &mut self.relearn_until] {
             if !t.is_finite() {
                 *t = 0.0;
@@ -189,6 +203,7 @@ impl VendorLedger {
         let held = self.readings.get(window).map(|r| r.resets_at).filter(|at| (at - resets_at).abs() <= SAME_RESET);
         let (now, resets_at, used) = (now.round(), held.unwrap_or(resets_at.round()), (used * 1000.0).round() / 1000.0);
         self.readings.insert(window.to_string(), Reading { used, resets_at, read_at: now });
+        self.prune(now);
         let point = Point { at: now, used, resets_at };
         let primary = self.primary(now).map(String::from);
         self.history.retain(|name, _| Some(name) == primary.as_ref());
@@ -303,51 +318,111 @@ impl VendorLedger {
         self.learned.shape()
     }
 
-    /// Faber's own work the vendor's counter may not hold yet. A request is pending from the moment it ends until a reading has
-    /// been taken after it ended plus the lag: only then is the counter known to have caught up. Time alone releases nothing,
-    /// so when every refresh fails the work stays pending and the floor stays up (it is dropped after hours by `worked`).
-    fn recent_work(&self, now: f64) -> Vec<&Work> {
+    /// The windows with a live reading.
+    fn live_windows(&self, now: f64) -> Vec<&str> {
+        self.readings.iter().filter(|(_, r)| r.resets_at > now).map(|(n, _)| n.as_str()).collect()
+    }
+
+    /// Whether a request that ended at `finished` is known to be in this window's counter: the window has been read since it
+    /// ended plus the lag. Only the window's own reading says so; reading another window settles nothing here, and time alone
+    /// settles nothing, so when every refresh fails the floor stays up.
+    fn settled(&self, finished: f64, window: &str, now: f64) -> bool {
+        self.readings.get(window).is_some_and(|r| r.resets_at > now && r.read_at >= finished + self.lag)
+    }
+
+    /// Faber's own requests that this window's counter may not hold yet.
+    fn pending(&self, window: &str, now: f64) -> Vec<&Work> {
         if self.lag <= 0.0 {
             return vec![];
         }
-        let latest = self.readings.values().map(|r| r.read_at).fold(f64::MIN, f64::max);
-        self.work.iter().filter(|w| w.finished >= self.since && w.finished <= now && latest < w.finished + self.lag).collect()
+        self.work.iter().filter(|w| w.finished >= self.since && w.finished <= now && !self.settled(w.finished, window, now)).collect()
+    }
+
+    fn pending_folded(&self, window: &str, now: f64) -> Option<&Folded> {
+        if self.lag <= 0.0 {
+            return None;
+        }
+        self.folded.as_ref().filter(|f| f.finished >= self.since && f.finished <= now && !self.settled(f.finished, window, now))
+    }
+
+    /// Drops what every live window has settled; with no live window nothing is settled.
+    fn prune(&mut self, now: f64) {
+        let live: Vec<String> = self.live_windows(now).into_iter().map(String::from).collect();
+        let settled_everywhere = |me: &Self, finished: f64| !live.is_empty() && live.iter().all(|w| me.settled(finished, w, now));
+        let keep: Vec<bool> = self.work.iter().map(|w| w.finished >= self.since && !settled_everywhere(self, w.finished)).collect();
+        let mut keep = keep.into_iter();
+        self.work.retain(|_| keep.next().unwrap_or(true));
+        if self.folded.as_ref().is_some_and(|f| f.finished < self.since || settled_everywhere(self, f.finished)) {
+            self.folded = None;
+        }
+        self.fold_overflow();
+    }
+
+    /// Too many pending requests to keep one by one: the oldest become one `Folded` that keeps what is known of them (their
+    /// points) and the latest end, so it settles last. Nothing pending is ever thrown away.
+    fn fold_overflow(&mut self) {
+        let extra = self.work.len().saturating_sub(KEEP_WORK);
+        if extra == 0 {
+            return;
+        }
+        let folding: Vec<Work> = self.work.drain(..extra).collect();
+        let mut f = self.folded.take().unwrap_or(Folded { start: f64::MAX, finished: f64::MIN, points: 0.0, unknown: false });
+        for w in &folding {
+            f.start = f.start.min(w.start);
+            f.finished = f.finished.max(w.finished);
+            match self.known_points(w) {
+                Some(p) => f.points += p,
+                None => f.unknown = true,
+            }
+        }
+        self.folded = Some(f);
+    }
+
+    /// The points of the primary window one request is known to have cost, if its cost and its model's conversion are known.
+    fn known_points(&self, w: &Work) -> Option<f64> {
+        if w.incomplete { None } else { Some(w.cost? * self.weights.raw.get(&w.model)?) }
     }
 
     /// A request Faber made has just ended: the counter may not hold it yet.
     pub fn worked(&mut self, work: Work, now: f64) {
         self.work.push(work);
-        self.work.retain(|w| w.finished > now - KEEP_WORK_SECS);
-        self.work.drain(..self.work.len().saturating_sub(KEEP_WORK));
+        self.prune(now);
     }
 
-    /// Whether the reading may still be rising because of Faber's own recent work. It holds whether or not the reading has
-    /// moved yet: a counter that has not moved has not counted it either.
+    /// Whether any window's reading may still be rising because of Faber's own recent work. It holds whether or not the reading
+    /// has moved yet: a counter that has not moved has not counted it either.
     pub fn counting(&self, now: f64) -> bool {
-        !self.recent_work(now).is_empty()
+        let live = self.live_windows(now);
+        let any = |window: &str| !self.pending(window, now).is_empty() || self.pending_folded(window, now).is_some();
+        if live.is_empty() {
+            self.lag > 0.0 && (self.work.iter().any(|w| w.finished >= self.since && w.finished <= now) || self.folded.is_some())
+        } else {
+            live.into_iter().any(any)
+        }
     }
 
-    /// The share (0 to 1) that Faber's own pending work is known to add beyond what the primary window's reading holds, from
-    /// the cost of each request and the points per dollar measured for its model. Work with no cost or no measured conversion
-    /// adds nothing to the number but never takes the known part away: the floor only goes up. None when there is no pending
-    /// work or none of it can be converted. What the reading already rose by since the work began is taken off only when all
-    /// of the work is known (otherwise the rise may be the unknown part), so nothing counts twice and nothing is lost.
+    /// The share (0 to 1) that Faber's own work pending for this window is known to add beyond what its reading holds, from the
+    /// cost of each request and the points per dollar measured for its model. Work with no cost or no measured conversion adds
+    /// nothing to the number but never takes the known part away: the floor only goes up. None when nothing is pending or
+    /// none of it can be converted. What the reading already rose by since the work began is taken off only when all of the
+    /// work is known (otherwise the rise may be the unknown part), so nothing counts twice and nothing is lost.
     pub fn uncounted(&self, window: &str, now: f64) -> Option<f64> {
-        let work = self.recent_work(now);
-        if work.is_empty() || self.primary(now) != Some(window) {
+        let work = self.pending(window, now);
+        let folded = self.pending_folded(window, now);
+        if (work.is_empty() && folded.is_none()) || self.primary(now) != Some(window) {
             return None;
         }
-        let known: Vec<f64> =
-            work.iter().filter_map(|s| if s.incomplete { None } else { Some(s.cost? * self.weights.raw.get(&s.model)?) }).collect();
-        if known.is_empty() {
+        let known: Vec<f64> = work.iter().filter_map(|w| self.known_points(w)).collect();
+        let carried = folded.map_or(0.0, |f| f.points);
+        if known.is_empty() && carried <= 0.0 {
             return None;
         }
-        let all_known = known.len() == work.len();
-        let begun = work.iter().map(|s| s.start).fold(f64::MAX, f64::min);
+        let all_known = known.len() == work.len() && !folded.is_some_and(|f| f.unknown);
+        let begun = work.iter().map(|w| w.start).chain(folded.map(|f| f.start)).fold(f64::MAX, f64::min);
         let reading = self.readings.get(window)?;
         let before = self.history.get(window)?.iter().rev().find(|p| p.at <= begun && p.resets_at == reading.resets_at);
         let risen = if all_known { before.map_or(0.0, |p| ((reading.used - p.used) * 100.0).max(0.0)) } else { 0.0 };
-        Some(((known.iter().sum::<f64>() - risen) / 100.0).max(0.0))
+        Some(((known.iter().sum::<f64>() + carried - risen) / 100.0).max(0.0))
     }
 
     pub fn snap(&self, now: f64) -> Snap {

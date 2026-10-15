@@ -186,14 +186,60 @@ fn time_alone_never_makes_a_reading_final_again() {
 }
 
 #[test]
-fn a_reading_taken_after_the_work_and_its_lag_makes_it_final() {
+fn a_window_is_settled_only_by_its_own_reading_after_the_work_and_its_lag() {
     let mut v = calibrated(T0);
     work(&mut v, T0 + 20.0, T0 + 60.0, "m", Some(0.5));
-    v.record("five_hour", 0.14, T0 + 10_000.0, T0 + 60.0 + LAG_CLAUDE - 1.0, 0);
-    assert!(v.counting(T0 + 60.0 + LAG_CLAUDE), "a reading taken before the counter had time to catch up settles nothing");
-    v.record("five_hour", 0.19, T0 + 10_000.0, T0 + 60.0 + LAG_CLAUDE, 0);
-    assert!(!v.counting(T0 + 60.0 + LAG_CLAUDE + 1.0));
-    assert_eq!(used(&v, "five_hour", T0 + 60.0 + LAG_CLAUDE + 1.0), 0.19, "the number as read, no estimate on top");
+    let settled = T0 + 60.0 + LAG_CLAUDE;
+    v.record("five_hour", 0.14, T0 + 10_000.0, settled - 1.0, 0);
+    v.record("seven_day", 0.31, T0 + 400_000.0, settled - 1.0, 0);
+    assert!(v.counting(settled), "readings taken before the counter had time to catch up settle nothing");
+    // Only the weekly window is read after the lag: the five-hour window, where the estimate lives, is not settled by it.
+    v.record("seven_day", 0.32, T0 + 400_000.0, settled, 0);
+    assert!(v.counting(settled + 1.0));
+    assert!(v.uncounted("five_hour", settled + 1.0).is_some(), "another window's reading never clears this one's floor");
+    assert!(used(&v, "five_hour", settled + 1.0) > 0.14);
+    v.record("five_hour", 0.19, T0 + 10_000.0, settled + 5.0, 0);
+    assert!(!v.counting(settled + 6.0));
+    assert_eq!(used(&v, "five_hour", settled + 6.0), 0.19, "the number as read, no estimate on top");
+}
+
+#[test]
+fn unsettled_work_is_folded_never_dropped() {
+    let mut v = calibrated(T0);
+    for i in 0..150 {
+        work(&mut v, T0 + 20.0 + i as f64, T0 + 60.0 + i as f64, "m", Some(0.01)); // 0.2 points each, 30 in all
+    }
+    work(&mut v, T0 + 300.0, T0 + 320.0, "never-measured", Some(0.01));
+    assert!(v.work.len() <= 100 && v.folded.is_some(), "too many to keep one by one: the oldest are folded");
+    let day_later = T0 + 86_400.0 * 0.1; // every refresh since has failed
+    assert!(v.counting(day_later));
+    let extra = v.uncounted("five_hour", day_later).unwrap();
+    assert!((extra - 0.30).abs() < 1e-9, "what could be converted is all still there: {extra}");
+    // The first full reading of every window after the last of them settles all of it, folded or not.
+    let after = T0 + 320.0 + LAG_CLAUDE;
+    v.record("five_hour", 0.40, T0 + 10_000.0, after, 0);
+    v.record("seven_day", 0.50, T0 + 400_000.0, after, 0);
+    assert!(!v.counting(after + 1.0));
+    assert!(v.folded.is_none() && v.work.is_empty(), "settled work is forgotten");
+}
+
+#[test]
+fn a_ledger_read_from_disk_folds_too_much_pending_work_instead_of_dropping_it() {
+    let mut ledger = Ledger { claude: calibrated(T0), ..Default::default() };
+    for i in 0..150 {
+        ledger.claude.work.push(Work {
+            start: T0 + i as f64,
+            finished: T0 + 30.0 + i as f64,
+            model: "m".into(),
+            cost: Some(0.01),
+            incomplete: false,
+        });
+    }
+    ledger.sanitize();
+    assert_eq!(ledger.claude.work.len(), 100);
+    let folded = ledger.claude.folded.clone().unwrap();
+    assert!((folded.points - 50.0 * 0.2).abs() < 1e-9 && !folded.unknown, "{folded:?}");
+    assert!(ledger.claude.counting(T0 + 200.0));
 }
 
 #[test]
@@ -339,6 +385,7 @@ fn printing(out: String) -> Proc {
 struct Probe {
     calls: Calls,
     background: Arc<Mutex<Vec<bool>>>,
+    status_background: Arc<Mutex<Vec<bool>>>,
     text: Arc<Mutex<String>>,
     hold: Arc<std::sync::atomic::AtomicBool>,
     held: Arc<Mutex<Vec<tokio::io::DuplexStream>>>,
@@ -378,6 +425,7 @@ impl Probe {
                 }
                 Ok(printing(p.text.lock().unwrap().clone()))
             } else if args.iter().any(|a| a == "status") {
+                p.status_background.lock().unwrap().push(faber_engine::proc::starting_in_background());
                 Ok(printing(r#"{"loggedIn":true,"subscriptionType":"max"}"#.into()))
             } else if let Some(other) = &other {
                 other(bin, args, cwd)
@@ -448,6 +496,8 @@ async fn the_watcher_reads_claude_through_the_usage_command_and_asks_no_model() 
     support::assert_no_user_customizations(args);
     assert!(l.spans.is_empty() && l.own_spend.is_empty(), "a free reading is never metered as a request");
     assert_eq!(*probe.background.lock().unwrap(), vec![true], "the reading is started as a background reader (idle priority)");
+    until("the plan check runs", || !probe.status_background.lock().unwrap().is_empty()).await;
+    assert!(probe.status_background.lock().unwrap().iter().all(|b| *b), "the periodic account check is a background process too");
     engine.shutdown();
 }
 
@@ -649,4 +699,35 @@ async fn a_running_turn_takes_the_discount_away_for_every_decision() {
     until("the turn runs", || engine.state().usage[0].counting).await;
     assert_eq!(engine.state().usage[0].state, "ok", "while a turn runs the reading is a floor: no quota to spare is believed");
     engine.shutdown();
+}
+
+#[tokio::test]
+async fn no_reading_starts_once_the_engine_is_shutting_down() {
+    let dir = tempfile::tempdir().unwrap();
+    let silent: Spawner = Arc::new(|_, _, _| {
+        let (w, r) = tokio::io::duplex(1024);
+        std::mem::forget(w);
+        Ok(Proc { stdin: Box::new(tokio::io::sink()), stdout: Box::new(r), stderr: None, child: None, contained: None })
+    });
+    let probe = Probe::saying(usage_json(0));
+    let (engine, time) = start(dir.path(), probe.spawner(Some(silent)));
+    engine.set_utc_offset(-10_800);
+    engine.watch_accounts();
+    until("the first reading", || probe.calls.lock().unwrap().len() == 1).await;
+    let ask = SendRequest {
+        conversation_id: None,
+        area: Area::Chat,
+        project_id: None,
+        text: "hello".into(),
+        images: vec![],
+        files: vec![],
+        choice: Choice { vendor: "claude".into(), model: Some("haiku".into()), effort: None },
+    };
+    engine.send(ask).unwrap();
+    until("the turn runs", || engine.state().usage[0].counting).await;
+    // Far past every debounce: ending the turn would read again, but the app is closing.
+    time.store(WHEN + 3600, Ordering::SeqCst);
+    engine.shutdown();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(probe.calls.lock().unwrap().len(), 1);
 }
