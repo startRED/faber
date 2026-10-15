@@ -224,7 +224,25 @@ fn pin(vendor: Vendor, model: &str, version: &str) -> ModelPin {
 fn cli_version(vendor: Vendor) -> Result<String, String> {
     let name = if vendor == Vendor::Claude { "claude" } else { "codex" };
     let cli = crate::cli::find_cli(name).ok_or("error.cli.missing")?;
-    super::qualification::observe(&cli.command, &cli.prefix).map(|i| i.version).map_err(|_| "error.cli.missing".to_string())
+    let text = super::qualification::observe(&cli.command, &cli.prefix).map(|i| i.version).map_err(|_| "error.cli.missing".to_string())?;
+    version_token(&text).ok_or_else(|| "error.cli.missing".to_string())
+}
+
+/// A CLI prints a sentence ("2.1.296 (Claude Code)", "codex-cli 0.162.1"); a model pin carries only the version token.
+fn version_token(text: &str) -> Option<String> {
+    text.split_whitespace()
+        .find(|t| t.bytes().any(|b| b.is_ascii_digit()) && t.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b)))
+        .map(str::to_string)
+}
+
+#[cfg(test)]
+mod version_tests {
+    #[test]
+    fn a_pin_takes_the_version_token_from_the_cli_sentence() {
+        assert_eq!(super::version_token("2.1.296 (Claude Code)").as_deref(), Some("2.1.296"));
+        assert_eq!(super::version_token("codex-cli 0.162.1").as_deref(), Some("0.162.1"));
+        assert_eq!(super::version_token("no version here"), None);
+    }
 }
 
 /// The fixed plan of the frozen goal: one Writer task on `src/lib.rs`, proven by the canary test.
@@ -305,6 +323,9 @@ pub async fn run(engine: &Engine, engine_data: &Path, work: &Path, mode: Mode) -
     };
     if mode == Mode::Real {
         read_accounts(engine).await;
+        // R136: only a build with the qualification harness feature can honor this, and only when the harness armed it.
+        #[cfg(feature = "r132-harness")]
+        arm_waiver(&mid);
         caps(engine, &mid, REAL_CAP_MICROS)?;
     }
     let journal = Journal::open(Path::new(&repository.identity.root), engine_data, &mid).map_err(|e| e.key().to_string())?;
@@ -333,6 +354,8 @@ pub async fn run(engine: &Engine, engine_data: &Path, work: &Path, mode: Mode) -
         }
         Mode::Real => Coordinator::new(engine.clone(), journal, broker, setup)?.drive().await,
     };
+    #[cfg(feature = "r132-harness")]
+    super::budget::r132::close();
     match outcome {
         Outcome::Done { .. } => Ok(Evidence {
             mode,
@@ -343,6 +366,19 @@ pub async fn run(engine: &Engine, engine_data: &Path, work: &Path, mode: Mode) -
         Outcome::Stopped(Stop::Wait(k) | Stop::Park(k) | Stop::Block(k)) => Err(k),
         Outcome::Stopped(Stop::Crash) => Err("reason.canary.crash".into()),
     }
+}
+
+/// Whether this build carries the qualification harness (never true for a product build).
+pub const HARNESS_BUILD: bool = cfg!(feature = "r132-harness");
+
+/// R136: the canary mission of a harness-built candidate may be admitted once without the two-point margin. The harness
+/// names the evidence marker in `FABER_R136_ARM`; the marker is created once (a second run finds it and is refused), is
+/// bound to this mission id, and the waiver closes when the mission ends. A product build has no such code.
+#[cfg(feature = "r132-harness")]
+fn arm_waiver(mission: &str) {
+    let Some(marker) = std::env::var_os("FABER_R136_ARM") else { return };
+    let evidence = serde_json::json!({"exception": "R136", "for": "canary mission of a harness-built candidate"});
+    let _ = super::budget::r132::waive(Path::new(&marker), mission, &evidence);
 }
 
 /// Read the mission's journal and ledger and say what really happened. The Landing must be a Done mission with a
