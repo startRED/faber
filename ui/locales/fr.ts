@@ -32,6 +32,8 @@ export const fr: Messages = {
   'tray.running': { one: 'Faber : {n} en cours', other: 'Faber : {n} en cours' },
   'tray.needsYou': { one: ', {n} a besoin de vous', other: ', {n} ont besoin de vous' },
   'tray.notify': '{title} a besoin de vous',
+  // Handwritten wording; native-speaker review pending (English is the source).
+  'tray.notifyMany': '{title} : {n} demandes ont besoin de vous',
   'toast.dismiss': 'Ignorer',
   'side.addProject': 'Ajouter un dossier de projet',
   'side.noAi': 'Aucune IA connectée',
@@ -126,6 +128,14 @@ export const fr: Messages = {
   'ask.always': 'Toujours autoriser dans cette conversation',
   'ask.deny': 'Refuser',
   'ask.moreWaiting': { one: '1 autre en attente', other: '{n} autres en attente' },
+  // Handwritten wording; native-speaker review pending (English is the source).
+  'ask.parked': 'Mis de côté : personne n’était là pour répondre',
+  'ask.parkedHint': 'Ce n’a pas été fait. Fais-le toi-même, ou passe dans les Réglages à « Demander avant d’exécuter des commandes » et redemande.',
+  'parked.command': 'Une commande',
+  'parked.file': 'Un fichier',
+  'parked.page': 'Une page',
+  'parked.other': '{tool}',
+  'parked.more': '+{n} de plus',
   'answer.label': 'Réponse',
   'answer.thinking': 'Réflexion',
   'activity.working': 'En cours · {steps} · {commands}',
@@ -143,6 +153,8 @@ export const fr: Messages = {
   'nudge.noCheck': 'Le code a changé, mais rien ne l’a vérifié. Relance ce message avec {to}.',
   'answer.cost': '{cost} $ US au tarif de l’API',
   'answer.tokens': '{input} k en entrée · {output} en sortie',
+  // Handwritten wording; native-speaker review pending (English is the source).
+  'answer.cacheWarm': 'cache chaud jusqu’à {time}',
   'files.label': 'Fichiers',
   'files.save': 'Enregistrer…',
   'files.show': 'Afficher',

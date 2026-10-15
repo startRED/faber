@@ -1,14 +1,15 @@
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
-import { createResource, createSignal, For, Index, Show, type Accessor } from 'solid-js';
+import { createEffect, createResource, createSignal, For, Index, onCleanup, Show, type Accessor } from 'solid-js';
 import { api, type Choice, type Message, type QueuedTurn, type ToolUse, type VendorUsage } from './api.ts';
-import { Asks } from './Ask.tsx';
+import { Asks, Parkeds } from './Ask.tsx';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
 import { untilReset } from './Sidebar.tsx';
 import { fromEngine, t } from './i18n.ts';
 import { prettyModel, vendorName, type Option } from './models.ts';
 import { animateList } from './motion.ts';
+import { warmLeft } from './running.ts';
 
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
 
@@ -84,8 +85,22 @@ interface Shared {
   usage?: VendorUsage[];
 }
 
-function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
+function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?: boolean }) {
   const m = () => props.m();
+  // A quiet note on the latest reply only (a later turn overtakes an older one): how long the CLI keeps its prompt cache warm,
+  // hidden while unknown and once cold. One timer, and only while the note is shown.
+  const [now, setNow] = createSignal(Date.now());
+  createEffect(() => {
+    const left = props.last ? warmLeft(m().cacheWarmUntil, Date.now()) : undefined;
+    if (left === undefined) return;
+    const timer = setTimeout(() => setNow(Date.now()), left + 50);
+    onCleanup(() => clearTimeout(timer));
+  });
+  const warm = () => {
+    const until = m().cacheWarmUntil;
+    if (!props.last || warmLeft(until, Math.max(now(), Date.now())) === undefined) return '';
+    return t('answer.cacheWarm', { time: new Date(until!).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) });
+  };
   const streaming = () => m().status === 'streaming';
   const waiting = () => m().permissions ?? [];
   // Unknown legacy boundaries and tool-terminated turns keep the entire answer visible.
@@ -142,6 +157,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
         <Show when={streaming() && latest()}><div class="activity-latest" role="status" aria-live="polite" aria-atomic="true" title={latest()}>{latest()}</div></Show>
       </Show>
       <Asks conversationId={props.conversationId} turnId={m().id} permissions={waiting()} surface="ask" />
+      <Parkeds parked={m().parked ?? []} more={m().parkedMore} surface="ask" />
       <div class="md" aria-busy={streaming()} onClick={openLinks}>
         <div innerHTML={html(finalText())} />
         <Show when={streaming() && !waiting().length && !m().waitUntil}>
@@ -195,7 +211,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
           <button onClick={() => void api.openTerminal(props.conversationId)} title={t('answer.terminalHint')}>
             {t('answer.terminal')}
           </button>
-          <span>{usage(m())}</span>
+          <span>{[usage(m()), warm()].filter(Boolean).join(' · ')}</span>
         </div>
       </Show>
     </article>
@@ -310,7 +326,7 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
     <>
       <Index each={props.messages.slice(props.from)}>
         {(m, i) => (
-          <Show when={m().role === 'user'} fallback={<Answer {...props} m={m} prompt={prompt(props.from + i)} />}>
+          <Show when={m().role === 'user'} fallback={<Answer {...props} m={m} prompt={prompt(props.from + i)} last={props.from + i === props.messages.length - 1} />}>
             <Mine m={m} onBranch={props.onBranch} />
           </Show>
         )}

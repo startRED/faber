@@ -105,3 +105,8 @@ export function elapsed(since: number, now: number): { key: 'time.seconds' | 'ti
   if (seconds < 60) return { key: 'time.seconds', n: seconds };
   return seconds < 3600 ? { key: 'time.minutes', n: Math.floor(seconds / 60) } : { key: 'time.hours', n: Math.floor(seconds / 3600) };
 }
+
+/** How long the prompt cache of a reply stays warm: the milliseconds left, or undefined when it is unknown or already cold. */
+export function warmLeft(until: number | undefined, now: number): number | undefined {
+  return until !== undefined && until > now ? until - now : undefined;
+}

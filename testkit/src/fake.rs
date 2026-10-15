@@ -92,6 +92,13 @@ pub fn run(env: &Env, args: &[String], stdin: &mut dyn BufRead, stdout: &mut dyn
             writeln!(stdout, "{}", json!({ "loggedIn": true, "subscriptionType": "max", "authMethod": "claude.ai" }))?;
             return Ok(0);
         }
+        // The real CLI prints its help and exits. Replaying a session here would wait for input until the startup probe gave
+        // up, leaving a live process (and its console host) behind for the audit to find. The help names no newer flags, so the
+        // app keeps its ordinary arguments in every screen test.
+        if args.iter().map(String::as_str).eq(["--help"]) {
+            writeln!(stdout, "Usage: claude [options] [prompt]\n\nOptions:\n  -p, --print   Print the response and exit")?;
+            return Ok(0);
+        }
         return session(Dispatch::new(load(&env.recording)?, None, false, true), env.state_dir.as_deref(), false, stdin, stdout, stderr);
     }
     let setup: Setup = serde_json::from_str(&std::fs::read_to_string(&env.recording)?).map_err(io::Error::other)?;
@@ -288,6 +295,13 @@ mod tests {
         assert!(is_hold(r#"{"faber_hold":true}"#));
         assert!(!is_hold(r#"{"type":"assistant","text":"the faber_hold marker"}"#));
         assert!(err.is_empty(), "{err}");
+    }
+
+    #[test]
+    fn help_prints_and_exits_instead_of_replaying_a_session() {
+        let (code, out, _) = drive(fixtures().join("claude/deny-wins.jsonl"), None, &["--help"], "");
+        assert_eq!(code.unwrap(), 0);
+        assert!(out.contains("Usage: claude") && !out.contains("--permission-prompts") && !out.contains("--autocompact"), "{out}");
     }
 
     #[test]

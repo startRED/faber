@@ -23,7 +23,45 @@ pub struct ClaudeLaunch {
     /// How the user wants to be called, told to the model once, when the conversation starts (and again, unchanged, each time
     /// it resumes). Ignored for a side question, which has instructions of its own.
     pub user_name: Option<String>,
+    /// What the installed CLI is known to accept (see `ClaudeFlags`); the default passes none of the newer flags.
+    pub flags: ClaudeFlags,
 }
+
+/// Flags that only newer CLIs take, read once from `claude --help` (`from_help`). A flag the CLI does not list is never
+/// passed, so an older CLI starts exactly as before: the default (nothing known) is the safe one.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ClaudeFlags {
+    /// `--autocompact <auto|tokens>`: where the CLI compacts a long conversation (checked on 2.1.296).
+    pub autocompact: bool,
+    /// `--permission-prompts none`: a request that would prompt is denied at once instead of waiting for an answer (2.1.296).
+    pub permission_prompts: bool,
+}
+
+impl ClaudeFlags {
+    /// Only an option line counts: indented, starting with the flag (after an optional short alias) and followed by its value
+    /// placeholder or the gap before its description. The flag named in a sentence, an error or a description is no support.
+    pub fn from_help(help: &str) -> Self {
+        let declares = |flag: &str| {
+            help.lines().any(|line| {
+                if !line.starts_with([' ', '\t']) {
+                    return false;
+                }
+                let mut rest = line.trim_start();
+                if rest.starts_with('-') && !rest.starts_with("--") {
+                    rest = rest.split_once(", ").map_or(rest, |(_, after)| after.trim_start());
+                }
+                rest.strip_prefix(flag).is_some_and(|tail| {
+                    tail.is_empty() || tail.starts_with("  ") || tail.starts_with('\t') || tail.trim_start().starts_with(['<', '['])
+                })
+            })
+        };
+        ClaudeFlags { autocompact: declares("--autocompact"), permission_prompts: declares("--permission-prompts") }
+    }
+}
+
+/// Where Haiku conversations are compacted: under the 100K step above which its price rises fivefold. 100k is the lowest the
+/// CLI accepts.
+const HAIKU_AUTOCOMPACT: &str = "100k";
 
 // Chat stays lean: a fixed list of built-in tools. Ask keeps Chat restricted with no MCP servers; Isolated also drops every
 // startup customization; full access leaves the person's own integrations on.
@@ -84,12 +122,19 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
         "stream-json",
         "--verbose",
         "--include-partial-messages",
-        "--permission-prompt-tool",
-        "stdio",
         "--exclude-dynamic-system-prompt-sections",
     ]
     .map(String::from)
     .to_vec();
+    // Full access on a CLI that has the flag runs with nobody to answer: a request that would prompt is denied at once, comes
+    // back as a denial in the turn's result and is parked for the person (`EngineEvent::Parked`). Everything else (Ask, the
+    // isolated mode, a CLI without the flag) keeps the host answering over stdio.
+    let no_prompts = launch.instructions.is_none() && launch.permissions == Permissions::FullAccess && launch.flags.permission_prompts;
+    if no_prompts {
+        args.extend(["--permission-prompts".into(), "none".into()]);
+    } else {
+        args.extend(["--permission-prompt-tool".into(), "stdio".into()]);
+    }
     let env = |name: &str| std::env::var(name).ok();
     if let Some(instructions) = &launch.instructions {
         // Whatever mode the person chose, Faber's own requests run without the person's hooks, settings files, MCP servers and
@@ -169,6 +214,12 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
             args.push(flag.into());
             args.push(v.clone());
         }
+    }
+    // Faber's own Haiku workers and roles (the isolated mode and side questions) compact early; every other model, and every
+    // conversation the person chose a model for, keeps the CLI's own default.
+    let internal = launch.instructions.is_some() || launch.permissions == Permissions::Isolated;
+    if launch.flags.autocompact && internal && launch.model.as_deref().is_some_and(|m| m.to_ascii_lowercase().contains("haiku")) {
+        args.extend(["--autocompact".into(), HAIKU_AUTOCOMPACT.into()]);
     }
     args
 }
@@ -269,24 +320,52 @@ fn result_events(msg: &Value) -> Vec<EngineEvent> {
     // An aborted turn reports a total of 0 and an empty usage: no counters, which is not a cost of 0.
     let total = msg["total_cost_usd"].as_f64();
     let counters = total.is_some_and(|t| t > 0.0) || prompt + n("output_tokens") > 0;
-    vec![EngineEvent::Done {
-        ok: msg["subtype"] == "success" && msg["is_error"] != true,
-        reason: msg["errors"]
-            .as_array()
-            .filter(|errors| !errors.is_empty())
-            .map(|errors| errors.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" "))
-            .unwrap_or_else(|| msg["terminal_reason"].as_str().or(msg["subtype"].as_str()).unwrap_or_default().into()),
-        cost_total_usd: total.filter(|_| counters),
-        input_tokens: prompt,
-        output_tokens: n("output_tokens"),
-        cache_read_tokens: read,
-        cache_write_tokens: write,
-        cache_write_1h_tokens: u["cache_creation"]["ephemeral_1h_input_tokens"].as_u64().unwrap_or(0),
-        incomplete: whole_turn > prompt,
-    }]
+    let warm = cache_warm_secs(u).map(|secs| EngineEvent::CacheWarm { secs, started_ms: None });
+    // A request the CLI denied for want of anyone to answer it; each is kept for the person, never allowed on its own.
+    let parked = items(&msg["permission_denials"]).map(|d| EngineEvent::Parked {
+        tool_use_id: s(&d["tool_use_id"]),
+        tool: s(&d["tool_name"]),
+        input: d["tool_input"].clone(),
+    });
+    warm.into_iter()
+        .chain(parked)
+        .chain([EngineEvent::Done {
+            ok: msg["subtype"] == "success" && msg["is_error"] != true,
+            reason: msg["errors"]
+                .as_array()
+                .filter(|errors| !errors.is_empty())
+                .map(|errors| errors.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" "))
+                .unwrap_or_else(|| msg["terminal_reason"].as_str().or(msg["subtype"].as_str()).unwrap_or_default().into()),
+            cost_total_usd: total.filter(|_| counters),
+            input_tokens: prompt,
+            output_tokens: n("output_tokens"),
+            cache_read_tokens: read,
+            cache_write_tokens: write,
+            cache_write_1h_tokens: u["cache_creation"]["ephemeral_1h_input_tokens"].as_u64().unwrap_or(0),
+            incomplete: whole_turn > prompt,
+        }])
+        .collect()
+}
+
+/// How long this turn's cache writes stay warm: an hour when the 1-hour bucket was written (a subscription writes every entry
+/// that way), else five minutes when only the 5-minute bucket was. None when neither is named (an older CLI, or a turn that
+/// wrote nothing), which the screen shows as nothing. Mixed buckets count as the long one: the main conversation wrote it.
+pub fn cache_warm_secs(usage: &Value) -> Option<u64> {
+    let bucket = |k: &str| usage["cache_creation"][k].as_u64().unwrap_or(0);
+    if bucket("ephemeral_1h_input_tokens") > 0 {
+        Some(3600)
+    } else if bucket("ephemeral_5m_input_tokens") > 0 {
+        Some(300)
+    } else {
+        None
+    }
 }
 fn items(v: &Value) -> impl Iterator<Item = &Value> {
     v.as_array().into_iter().flatten()
+}
+
+fn unix_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
 }
 
 pub type EventSink = Arc<dyn Fn(EngineEvent) + Send + Sync>;
@@ -302,7 +381,11 @@ pub struct ClaudeOptions {
 pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     // The process starts right away, so a warmed-up session is already booting while the user types.
-    let started = (opts.spawn)(&opts.bin, &claude_args(&opts.launch), &opts.cwd);
+    let args = claude_args(&opts.launch);
+    // A denial in the result only means "nobody could answer" when the CLI ran with no prompts; with the host answering, a denial is
+    // the person's own refusal (or the engine's), which is no request to keep.
+    let parking = args.windows(2).any(|a| a == ["--permission-prompts", "none"]);
+    let started = (opts.spawn)(&opts.bin, &args, &opts.cwd);
     tokio::spawn(async move {
         let mut p = match started {
             Ok(p) => p,
@@ -317,6 +400,8 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
         let mut closed = false;
         let mut control_id = 0u32;
         let mut quota_seen = false;
+        // When the latest request of the running turn began: the cache lifetime counts from it, not from the result.
+        let mut request_began: Option<u64> = None;
         loop {
             tokio::select! {
                 line = lines.next_line() => {
@@ -334,8 +419,19 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                     match serde_json::from_str::<Value>(&line) {
                         Ok(msg) => {
                             quota_seen |= msg["type"] == "rate_limit_event";
+                            if msg["type"] == "stream_event" && msg["event"]["type"] == "message_start" && msg["parent_tool_use_id"].is_null() {
+                                request_began = Some(unix_ms());
+                            }
                             let finished = msg["type"] == "result";
-                            for event in parse_claude_message(&msg) {
+                            for mut event in parse_claude_message(&msg) {
+                                if matches!(event, EngineEvent::Parked { .. }) && !parking {
+                                    continue;
+                                }
+                                if let EngineEvent::CacheWarm { secs, .. } = event {
+                                    // A turn whose request start was never seen has no trustworthy expiry: nothing is shown.
+                                    let Some(began) = request_began.take() else { continue };
+                                    event = EngineEvent::CacheWarm { secs, started_ms: Some(began) };
+                                }
                                 if let EngineEvent::Permission { request_id, tool, input } = &event {
                                     // Only the isolated mode answers for itself. Full access hands the request to the engine, which
                                     // decides with the mode in force at that moment (see Core::handle), so a switch to Ask is never raced.
@@ -371,6 +467,7 @@ pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
                 cmd = rx.recv(), if !closed => match cmd {
                     Some(SessionCommand::Send(turn)) => {
                         quota_seen = false;
+                        request_began = None;
                         let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
                     }
                     // A line written mid-turn is folded into a turn that uses tools (one result for both) and becomes a turn of

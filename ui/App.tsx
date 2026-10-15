@@ -394,6 +394,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
             running: templates('tray.running'),
             needsYou: templates('tray.needsYou'),
             notify: templates('tray.notify').other,
+            notifyMany: templates('tray.notifyMany').other,
           })
           .catch(() => undefined),
     ),

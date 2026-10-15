@@ -136,6 +136,7 @@ impl Probe {
             user_hooks: false,
             instructions: None,
             user_name: None,
+            flags: Default::default(),
             permissions: Permissions::Ask,
         };
         let session = start_claude(
@@ -158,6 +159,7 @@ impl Probe {
             user_hooks: false,
             instructions: Some("Reply with the single word ok.".into()),
             user_name: None,
+            flags: Default::default(),
             permissions: Permissions::Ask,
         };
         let session = start_claude(

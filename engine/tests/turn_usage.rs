@@ -4,7 +4,7 @@ use faber_engine::events::EngineEvent;
 use serde_json::{Value, json};
 
 fn done(events: Vec<EngineEvent>) -> EngineEvent {
-    events.into_iter().next().expect("one Done")
+    events.into_iter().find(|e| matches!(e, EngineEvent::Done { .. })).expect("one Done")
 }
 
 #[test]
