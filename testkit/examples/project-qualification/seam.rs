@@ -184,6 +184,14 @@ fn clone_with_regression(git_program: &str, source: &Path, branch: &str, repo: &
     git(git_program, repo, &["config", "user.email", "t13@example.invalid"])?;
     let path = repo.join(FILE);
     let text = std::fs::read_to_string(&path)?;
+    if std::env::var("FABER_T13_REGRESSED").is_ok() {
+        // The source already carries the regression, so the running baseline carries it too.
+        if !text.contains(BUG.1) {
+            return Err(fail("the source does not carry the staged regression"));
+        }
+        copy_tree(&source.join("node_modules"), &repo.join("node_modules"))?;
+        return Ok(());
+    }
     if !text.contains(BUG.0) {
         return Err(fail("the source no longer has the line the regression replaces"));
     }

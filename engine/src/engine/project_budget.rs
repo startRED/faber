@@ -7,6 +7,8 @@ impl Engine {
     /// The host calls this after retirement; both endpoints come from no-model CLI account checks.
     pub async fn calibrate_mission(&self, mission: &str) -> Result<Status, String> {
         self.check_plans(Duration::from_secs(20)).await;
+        // Provider readings are stamped to the whole second, and calibration rejects a reading from the future.
+        tokio::time::sleep(Duration::from_secs(2)).await;
         self.mission_budget(Change::Calibrate { mission: mission.into() })
     }
     pub fn new_mission(&self, project: &Project, goal: &str, base: &str) -> Result<crate::project::Mission, String> {

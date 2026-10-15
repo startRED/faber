@@ -83,6 +83,14 @@ impl Dev {
             self.data().join("real-canary.json"),
             format!("{{\"capMicros\":{}}}", faber_engine::project::canary::REAL_CAP_MICROS).as_bytes(),
         )?;
+        // The receipts of the live qualification probes (each valid for 24 hours) travel with the data folder.
+        if let Ok(receipts) = std::env::var("FABER_T13_RECEIPTS") {
+            let target = self.data().join("qualification");
+            std::fs::create_dir_all(&target)?;
+            for vendor in ["claude", "codex"] {
+                std::fs::copy(Path::new(&receipts).join(format!("{vendor}.json")), target.join(format!("{vendor}.json")))?;
+            }
+        }
         manager.adopt_baseline(Slot::A, tree, &payload, now()).map_err(|e| fail(e.key()))
     }
 }
