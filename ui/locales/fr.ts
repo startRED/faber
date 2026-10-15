@@ -187,7 +187,7 @@ export const fr: Messages = {
   'error.settings.autostartFailed': 'Faber n’a pas pu modifier le lancement à l’ouverture de session. Tes réglages n’ont pas été modifiés.',
   'error.driverStopped': 'La session CLI s’est arrêtée de façon inattendue. Essaie de renvoyer ton message.',
   'error.sessionLost': 'La CLI n’a plus la session précédente de cette conversation. Renvoie ton message : il ouvre une nouvelle session et reçoit la conversation jusqu’ici.',
-  'note.historyResent': 'La session précédente s’est perdue ; la conversation a été renvoyée en texte, sans images et avec les sorties des outils abrégées.',
+  'note.historyResent': 'La session précédente s’est perdue ; la conversation a été renvoyée en texte, sans images, sans les entrées des outils et avec leurs sorties abrégées.',
   'set.back': '← Retour',
   'set.label': 'Réglages',
   'set.general': 'Général',

@@ -187,7 +187,7 @@ export const de: Messages = {
   'error.settings.autostartFailed': 'Faber konnte den Start bei der Anmeldung nicht ändern. Deine Einstellungen wurden nicht geändert.',
   'error.driverStopped': 'Die CLI-Sitzung wurde unerwartet beendet. Versuche, deine Nachricht erneut zu senden.',
   'error.sessionLost': 'Die CLI hat die frühere Sitzung dieser Unterhaltung nicht mehr. Sende deine Nachricht erneut: Sie startet eine neue Sitzung und bekommt die bisherige Unterhaltung mit.',
-  'note.historyResent': 'Die frühere Sitzung ging verloren; die Unterhaltung wurde als Text erneut gesendet, ohne Bilder und mit gekürzten Werkzeugausgaben.',
+  'note.historyResent': 'Die frühere Sitzung ging verloren; die Unterhaltung wurde als Text erneut gesendet, ohne Bilder, ohne die Eingaben der Werkzeuge und mit gekürzten Ausgaben.',
   'set.back': '← Zurück',
   'set.label': 'Einstellungen',
   'set.general': 'Allgemein',

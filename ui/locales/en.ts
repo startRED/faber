@@ -185,7 +185,7 @@ export const en = {
   'error.settings.autostartFailed': 'Faber could not change startup at sign-in. Your settings were not changed.',
   'error.driverStopped': 'The CLI session stopped unexpectedly. Try sending your message again.',
   'error.sessionLost': 'The CLI no longer has this conversation’s earlier session. Send your message again: it starts a new session and is given the conversation so far.',
-  'note.historyResent': 'The earlier session was lost; the conversation was sent again as text, without images and with tool outputs shortened.',
+  'note.historyResent': 'The earlier session was lost; the conversation was sent again as text, without images, without the tools’ inputs and with their outputs shortened.',
   'set.back': '← Back',
   'set.label': 'Settings',
   'set.general': 'General',
