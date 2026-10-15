@@ -55,6 +55,13 @@ pub fn same(a: &str, b: &str) -> bool {
     if cfg!(windows) { a.eq_ignore_ascii_case(b) } else { a == b }
 }
 
+/// Whether two spellings name the same folder: both are resolved first, so a stored entry that has since become a link to the
+/// other (or was written another way) still counts.
+pub fn same_place(a: &str, b: &str) -> bool {
+    let real = |p: &str| resolved(p).unwrap_or_else(|| p.to_string());
+    same(&real(a), &real(b))
+}
+
 /// The path to store for `path`: the checked real path, or `None` when the folder is refused.
 pub fn resolved(path: &str) -> Option<String> {
     checked_folder(Path::new(path)).map(|p| p.to_string_lossy().into_owned())
@@ -78,15 +85,14 @@ impl Recents {
     /// Puts the folder first, once. Returns the stored path, or `None` when the folder is refused and nothing changes.
     pub fn used(&mut self, path: &str) -> Option<String> {
         let path = resolved(path)?;
-        self.folders.retain(|f| !same(f, &path));
+        self.folders.retain(|f| !same_place(f, &path));
         self.folders.insert(0, path.clone());
         self.folders.truncate(MAX_RECENT);
         Some(path)
     }
 
     pub fn forget(&mut self, path: &str) {
-        let real = resolved(path);
-        self.folders.retain(|f| !same(f, path) && !real.as_ref().is_some_and(|r| same(f, r)));
+        self.folders.retain(|f| !same_place(f, path));
     }
 
     /// Saves (or replaces, when the name is already used) an environment. Errors are translation keys.
@@ -98,7 +104,7 @@ impl Recents {
         let mut stored: Vec<String> = Vec::new();
         for folder in folders {
             let folder = resolved(folder).ok_or("error.workingFolder")?;
-            if !stored.iter().any(|f| same(f, &folder)) {
+            if !stored.iter().any(|f| same_place(f, &folder)) {
                 stored.push(folder);
             }
         }
@@ -111,6 +117,20 @@ impl Recents {
             None => self.environments.push(Environment { id, name, folders: stored }),
         }
         Ok(())
+    }
+
+    /// The data as read from disk, cut to the same limits `used` and `save_environment` keep, since the file can be edited by hand.
+    pub fn bounded(mut self) -> Self {
+        self.folders.retain(|f| !f.is_empty());
+        self.folders.truncate(MAX_RECENT);
+        self.environments.retain_mut(|e| {
+            e.name = e.name.trim().chars().take(MAX_NAME).collect();
+            e.folders.retain(|f| !f.is_empty());
+            e.folders.truncate(MAX_FOLDERS);
+            !e.name.is_empty() && !e.folders.is_empty()
+        });
+        self.environments.truncate(MAX_ENVIRONMENTS);
+        self
     }
 
     pub fn forget_environment(&mut self, id: &str) {
@@ -193,6 +213,29 @@ mod tests {
     }
 
     #[test]
+    fn a_stored_spelling_of_the_same_folder_is_replaced_not_kept_beside_it() {
+        let (_root, p) = dirs(1);
+        let sep = std::path::MAIN_SEPARATOR;
+        let mut r = Recents { folders: vec![format!("{}{sep}..{sep}p0", p[0])], ..Recents::default() };
+        r.used(&p[0]).unwrap();
+        assert_eq!(r.view().folders.len(), 1);
+    }
+
+    #[test]
+    fn loaded_data_is_cut_to_the_limits() {
+        let (_root, p) = dirs(2);
+        let many = |n: usize| p.iter().cycle().take(n).cloned().collect::<Vec<_>>();
+        let env = |i: usize, name: &str, n: usize| Environment { id: format!("e{i}"), name: name.into(), folders: many(n) };
+        let mut environments: Vec<_> = (0..15).map(|i| env(i, &format!("n{i}"), 12)).collect();
+        environments.push(env(98, "  ", 2));
+        environments.push(env(99, "none", 0));
+        let r = Recents { folders: many(9), environments }.bounded();
+        assert_eq!(r.folders.len(), MAX_RECENT);
+        assert_eq!(r.environments.len(), MAX_ENVIRONMENTS);
+        assert!(r.environments.iter().all(|e| e.folders.len() == MAX_FOLDERS));
+    }
+
+    #[test]
     fn a_folder_can_be_forgotten() {
         let (_root, p) = dirs(2);
         let mut r = Recents::default();
@@ -211,7 +254,9 @@ mod tests {
         let ssh = root.path().join(".ssh");
         std::fs::create_dir(&ssh).unwrap();
         assert_eq!(r.save_environment("a".into(), "Work", &[ssh.to_string_lossy().into_owned()]), Err("error.workingFolder"));
-        r.save_environment("a".into(), "Work", &[p[0].clone(), p[0].clone(), p[1].clone()]).unwrap();
+        let sep = std::path::MAIN_SEPARATOR;
+        r.save_environment("a".into(), "Work", &[p[0].clone(), format!("{}{sep}.", p[0]), p[1].clone()]).unwrap();
+        assert_eq!(r.view().environments[0].folders.len(), 2, "two spellings of one folder are one");
         r.save_environment("b".into(), "work", &p[..1]).unwrap();
         let v = r.view().environments;
         assert_eq!((v.len(), v[0].id.as_str(), v[0].name.as_str(), v[0].folders.len()), (1, "a", "work", 1));

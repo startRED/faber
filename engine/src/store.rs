@@ -99,11 +99,11 @@ impl Store {
     }
 
     pub fn recents(&self) -> Recents {
-        read(&self.recents).unwrap_or_default()
+        read::<Recents>(&self.recents).unwrap_or_default().bounded()
     }
 
-    pub fn save_recents(&self, recents: &Recents) {
-        let _ = write(&self.recents, recents);
+    pub fn save_recents(&self, recents: &Recents) -> io::Result<()> {
+        write(&self.recents, recents)
     }
 
     /// What Faber remembers about each vendor's quota. A missing, damaged or unreadable file is an empty ledger: it only

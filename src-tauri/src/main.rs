@@ -260,8 +260,7 @@ async fn open_folders(faber: State<'_, Faber>, paths: Vec<String>) -> Res<Vec<Pr
 
 #[tauri::command]
 async fn forget_recent(faber: State<'_, Faber>, path: String) -> Res<()> {
-    faber.engine.forget_recent(&path);
-    Ok(())
+    faber.engine.forget_recent(&path)
 }
 
 #[tauri::command]
@@ -271,8 +270,7 @@ async fn save_environment(faber: State<'_, Faber>, name: String, folders: Vec<St
 
 #[tauri::command]
 async fn forget_environment(faber: State<'_, Faber>, id: String) -> Res<()> {
-    faber.engine.forget_environment(&id);
-    Ok(())
+    faber.engine.forget_environment(&id)
 }
 
 #[tauri::command]

@@ -448,4 +448,7 @@ export const fr: Messages = {
   "error.environment.full": "Il y a déjà 12 environnements. Supprime-en un d’abord.",
   "error.environment.gone": "Cet environnement n’existe plus.",
   "error.recents.gone": "Ce dossier n’existe plus.",
+  "recents.removeNamed": "Retirer {name} des récents",
+  "env.removeNamed": "Supprimer l’environnement {name}",
+  "error.recents.saveFailed": "Faber n’a pas pu enregistrer cette liste. Vérifie que le disque a de la place et que le dossier est accessible en écriture, puis réessaie.",
 };

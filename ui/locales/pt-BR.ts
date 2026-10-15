@@ -447,4 +447,7 @@ export const ptBR: Messages = {
   "error.environment.full": "Já existem 12 ambientes. Remova um antes.",
   "error.environment.gone": "Este ambiente não existe mais.",
   "error.recents.gone": "Esta pasta não existe mais.",
+  "recents.removeNamed": "Remover {name} dos recentes",
+  "env.removeNamed": "Remover o ambiente {name}",
+  "error.recents.saveFailed": "O Faber não conseguiu salvar esta lista. Veja se o disco tem espaço e se a pasta aceita gravação, e tente de novo.",
 };

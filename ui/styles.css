@@ -706,6 +706,9 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 .rec.gone .rec-main { opacity: 0.55; cursor: default; }
 .rec .off { text-decoration: line-through; }
 .rec-sel { flex: none; width: 32px; display: grid; place-items: center; color: var(--ink-3); transition: color var(--dur-fast); }
+.rec-x { flex: none; width: 32px; display: grid; place-items: center; color: var(--ink-3); transition: color var(--dur-fast); }
+.rec-x:hover, .rec-x:focus-visible { color: var(--danger); }
+.recents:focus { outline: none; }
 .rec-sel:hover, .rec-sel[aria-pressed='true'] { color: var(--accent-text); }
 .env-tray { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .env-tray .hint { flex-basis: 100%; }

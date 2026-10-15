@@ -445,6 +445,9 @@ export const en = {
   "error.environment.full": "There are 12 environments already. Remove one first.",
   "error.environment.gone": "This environment is gone.",
   "error.recents.gone": "This folder no longer exists.",
+  "recents.removeNamed": "Remove {name} from recents",
+  "env.removeNamed": "Remove environment {name}",
+  "error.recents.saveFailed": "Faber could not save this list. Check that the disk has room and the folder can be written, then try again.",
 } as const;
 
 export type Key = keyof typeof en;

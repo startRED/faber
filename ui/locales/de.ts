@@ -448,4 +448,7 @@ export const de: Messages = {
   "error.environment.full": "Es gibt schon 12 Umgebungen. Entferne zuerst eine.",
   "error.environment.gone": "Diese Umgebung gibt es nicht mehr.",
   "error.recents.gone": "Diesen Ordner gibt es nicht mehr.",
+  "recents.removeNamed": "{name} aus der Liste entfernen",
+  "env.removeNamed": "Umgebung {name} entfernen",
+  "error.recents.saveFailed": "Faber konnte diese Liste nicht speichern. Prüfe, ob auf dem Datenträger Platz ist und der Ordner beschreibbar ist, und versuche es erneut.",
 };

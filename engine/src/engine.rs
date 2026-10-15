@@ -559,26 +559,27 @@ impl Engine {
     pub fn recents(&self) -> RecentsView {
         self.with(|c| c.store.recents().view())
     }
-    pub fn forget_recent(&self, path: &str) {
-        self.with(|c| {
-            let mut recents = c.store.recents();
-            recents.forget(path);
-            c.store.save_recents(&recents);
-        })
-    }
-    pub fn save_environment(&self, name: &str, folders: &[String]) -> Result<(), String> {
-        self.with(|c| {
-            let mut recents = c.store.recents();
-            recents.save_environment(new_id(), name, folders).map_err(String::from)?;
-            c.store.save_recents(&recents);
+    pub fn forget_recent(&self, path: &str) -> Result<(), String> {
+        self.change_recents(|r| {
+            r.forget(path);
             Ok(())
         })
     }
-    pub fn forget_environment(&self, id: &str) {
+    pub fn save_environment(&self, name: &str, folders: &[String]) -> Result<(), String> {
+        self.change_recents(|r| r.save_environment(new_id(), name, folders).map_err(String::from))
+    }
+    pub fn forget_environment(&self, id: &str) -> Result<(), String> {
+        self.change_recents(|r| {
+            r.forget_environment(id);
+            Ok(())
+        })
+    }
+    /// Reads the recents, changes them and writes them back; a failed write is an error the screen can say, never a silent success.
+    fn change_recents(&self, change: impl FnOnce(&mut crate::recents::Recents) -> Result<(), String>) -> Result<(), String> {
         self.with(|c| {
             let mut recents = c.store.recents();
-            recents.forget_environment(id);
-            c.store.save_recents(&recents);
+            change(&mut recents)?;
+            c.store.save_recents(&recents).map_err(|_| "error.recents.saveFailed".to_string())
         })
     }
     /// Opens every folder of an environment that can still be opened; fails only when none can.
@@ -2173,14 +2174,15 @@ impl Core {
     fn note_folder(&self, path: &str) {
         let mut recents = self.store.recents();
         if recents.used(path).is_some() {
-            self.store.save_recents(&recents);
+            // Remembering is a courtesy: opening the folder never fails because the list could not be written.
+            let _ = self.store.save_recents(&recents);
         }
     }
 
     fn add_project(&mut self, path: &str) -> Project {
         let mut projects = self.store.projects();
         self.note_folder(path);
-        if let Some(found) = projects.iter().find(|p| crate::recents::same(&p.path, path)) {
+        if let Some(found) = projects.iter().find(|p| crate::recents::same_place(&p.path, path)) {
             return found.clone();
         }
         let name = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string());

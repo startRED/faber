@@ -4,11 +4,19 @@ import themes from '../../src-tauri/src/themes.json';
 import { App } from '../../ui/App.tsx';
 import { api, type AppState, type FolderView, type RecentsView } from '../../ui/api.ts';
 import { lang, t, useLanguage } from '../../ui/i18n.ts';
+import { shortPath } from '../../ui/Recents.tsx';
 import { check, deepEqual, equal, ok } from './check.ts';
 
 const settle = (ms = 40) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const folder = (name: string, reason?: string): FolderView => ({ path: `X:/work/${name}`, name, parent: 'X:/work', reason });
+
+check('recents: a long parent path keeps the drive and the last two folders, and short ones stay whole', () => {
+  equal(shortPath('E:\\Documentos\\ProjetosIA\\faber'), 'E:\\…\\ProjetosIA\\faber');
+  equal(shortPath('/home/erick/work/clients/faber'), '/…/clients/faber');
+  equal(shortPath('E:\\work\\faber'), 'E:\\work\\faber');
+  equal(shortPath('X:/work'), 'X:/work');
+});
 
 check('recents: a recent folder opens as a project in one click, a saved environment starts in one click, and the menu forgets', async () => {
   const stored = localStorage.getItem('faber.place');
@@ -34,6 +42,9 @@ check('recents: a recent folder opens as a project in one click, a saved environ
   };
   api.forgetRecent = async (path) => {
     calls.push(['forget', path]);
+  };
+  api.forgetEnvironment = async (id) => {
+    calls.push(['forgetEnvironment', id]);
   };
   const effects = { ambient: false, texture: false, glow: false };
   const initial: AppState = {
@@ -97,6 +108,40 @@ check('recents: a recent folder opens as a project in one click, a saved environ
       await settle();
       deepEqual(calls.at(-1), ['start', 'env-1']);
       equal(JSON.parse(localStorage.getItem('faber.place')!).projectId, 'p-env');
+    } finally {
+      screen.done();
+    }
+    // A keyboard user reaches removal without the menu, also on a folder that is gone, and focus stays in the list.
+    calls.length = 0;
+    screen = await mount();
+    try {
+      const buttons = [...screen.root.querySelectorAll<HTMLButtonElement>('.recents section:first-child .rec-x')];
+      equal(buttons.length, 5);
+      ok(buttons.every((b) => !b.disabled && b.getAttribute('aria-label')?.length), 'every row has a named, enabled remove button');
+      buttons[2].click();
+      await settle();
+      deepEqual(calls.at(-1), ['forget', 'X:/work/gamma']);
+      const again = screen.root.querySelectorAll<HTMLElement>('.recents section:first-child .rec-x');
+      equal(document.activeElement, again[2], 'focus lands on the entry that took the removed one\'s place');
+      screen.root.querySelector<HTMLButtonElement>('section[aria-labelledby="env-title"] .rec-x')!.click();
+      await settle();
+      deepEqual(calls.at(-1), ['forgetEnvironment', 'env-1']);
+      ok(screen.root.contains(document.activeElement), 'focus is still inside the screen');
+    } finally {
+      screen.done();
+    }
+    // The right-click menu has one line and forgets the folder; closing it with Escape gives focus back.
+    calls.length = 0;
+    screen = await mount();
+    try {
+      const opener = screen.root.querySelector<HTMLButtonElement>('.recents .rec-x')!;
+      opener.focus();
+      screen.root.querySelector<HTMLElement>('.recents .rec')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      await settle();
+      equal(screen.root.querySelector('.rec-menu [role="menuitem"]'), document.activeElement, 'the menu takes focus');
+      dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      await settle();
+      equal(document.activeElement, opener, 'Escape puts focus back where the menu came from');
     } finally {
       screen.done();
     }

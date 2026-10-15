@@ -448,4 +448,7 @@ export const es: Messages = {
   "error.environment.full": "Ya hay 12 entornos. Quita uno antes.",
   "error.environment.gone": "Este entorno ya no existe.",
   "error.recents.gone": "Esta carpeta ya no existe.",
+  "recents.removeNamed": "Quitar {name} de recientes",
+  "env.removeNamed": "Quitar el entorno {name}",
+  "error.recents.saveFailed": "Faber no pudo guardar esta lista. Comprueba que el disco tiene espacio y que se puede escribir en la carpeta, e inténtalo de nuevo.",
 };
