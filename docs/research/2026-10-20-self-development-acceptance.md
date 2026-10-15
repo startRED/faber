@@ -1,4 +1,74 @@
-# Task 13: R120 role bounds fit; acceptance remains incomplete
+# Task 13: qualification remains incomplete; no admission receipt issued
+
+## Latest result: R132 continuation (2026-10-15 UTC)
+
+The owner's R132 exception removes the quota-line obstacle for one US$2.00 mission; it does not waive boundary
+qualification. The fresh zero-turn readings are Claude **36%** and Codex **44%** weekly, both subscription billing
+with paid fallback **false**. The unchanged product correctly refuses R131 admission at the current **28.5714%**
+line. These are actual provider counters; Codex's reported 1–2 hour lag prevents treating a short-window change as
+the mission's isolated consumption. No model turn, mission, grant consumption, calibration stretch or baseline was
+invented. R132 is **not implemented or consumed**: execution stopped at the prerequisite qualification, as the
+owner explicitly required when a probe cannot be proven.
+
+Two runtime defects in the retained Codex work were corrected regression-first:
+
+- The startup catalog omitted the required instruction template. The installed CLI exited before initialization;
+  its version-matched catalog parser requires either the legacy base instructions or
+  `model_messages.instructions_template`. An original empty template now lets the catalog load without adding
+  instructions or native tools. The regression failed with `Null` versus `""`, then all 22 policy tests passed.
+- The probe compared Windows paths as strings, so the same workspace with `/` versus `\\` failed acknowledgement.
+  Native path comparison fixes the workspace and hook/skill inventory checks; a different workspace still fails.
+  The regression failed first, and all 16 qualification-helper self-checks now pass.
+
+The resulting actual Codex session acknowledges the pinned model/provider/effort, read-only sandbox, no network,
+on-request approvals and the owned workspace. It still reports **one instruction source**, so the strict empty
+instruction inventory fails before complete loadout qualification. The harness did not open or copy any
+instruction-source file.
+
+Claude's SDK initialization and context-only controls completed without a model turn. They report **zero MCP
+tools**, **zero memory files** and a pre-prompt context count of **253**, but expose no effective hooks census.
+That count is not the next request's complete context. The documented safe mode and non-managed
+`disableAllHooks` still permit managed-policy hooks; absence of a hooks field cannot prove an empty inventory.
+See the official [safe-mode contract](https://code.claude.com/docs/en/cli-reference#cli-flags) and
+[disableAllHooks scope](https://code.claude.com/docs/en/settings-reference#disableallhooks).
+
+No receipt was issued for either vendor. This is a qualification stop, not a claim that a native escape occurred.
+The five receipt checks map to evidence as follows; historical observations are not promoted into new passing
+receipts for a changed launch configuration.
+
+The intended R120 split remains Lead/Luna US$0.40, Writer/Haiku US$0.80, Reviewer/Luna US$0.40 and
+canary/repair US$0.40, totaling US$2.00. The corresponding complete-invocation **computed bounds**, not measured
+spend, are US$0.306000, US$0.665500 and US$0.306000. Their remaining spend room is US$0.094000,
+US$0.134500 and US$0.094000. These values come from the supported controls and dated prices in the
+[R120 bound report](2026-10-14-self-development-role-output-bounds.md); no real mission grant was created.
+
+| Probe | Claude Code | Codex |
+| --- | --- | --- |
+| loadout | Unproven: effective hooks not reported | Failed strict census: one instruction source reported |
+| native | Earlier denial/marker evidence only; not requalified | Earlier denial/marker evidence only; not requalified |
+| stop | Earlier interruption observation only | Earlier interruption observation only |
+| exposure | R117/R120 calculated bounds and control evidence; no complete receipt | Model-maximum calculated bound; no complete receipt |
+| billing | Fresh zero-turn subscription, paid fallback false | Fresh zero-turn subscription, paid fallback false |
+
+Private evidence root: `C:/Users/Erick/AppData/Local/Faber/t13-exposure-20261014/`:
+`r132-zero-turn/zero-turn-admission.json`, `r132-codex-experimental/live-denial.json`,
+`r132-claude-loadout/live-denial.json`, `r132-catalog-red.log`, `r132-catalog-green.log`,
+`r132-workspace-red.log` and `r132-observation-self-checks.log`. The earlier failing startup observations remain
+under `r132-codex-loadout*`; none is labeled a passing qualification. Markers were read back unchanged.
+
+The owner reports the stable install is now v0.3.3. Its exact executable was read-only hashed as
+`b3e8c4b314b4863f8d87632872d3fd7cfb547a66b278df92e9c144612b960094` (9,380,352 bytes). This supersedes
+the historical v0.3.1 baseline below; it is not a mission-window before/after comparison. There was no mission
+window, so owner checkout byte-identity is not claimed. The fresh clone, its build target and sandbox install
+were not created, and rollback and positive Resume were not attempted. Real-mission cost and RAM remain **not
+measured**; this continuation's zero-model probes consumed **US$0.00 model cost**. Historical unsettled turns
+remain unknown rather than zero.
+
+All seven required local proofs for this correction exit 0 and are recorded under
+`validation-r132-qualification/proofs.json`: **1426 passed, 0 failed, 0 not run, 0 skipped**, plus the 16
+qualification-helper self-checks. Hidden idle RAM is 117 MB and Projects peaks at 220.4 MB; both are scripted
+measurements. Delivery and final pushed-head CI are recorded separately in `delivery-r132.json`.
+The historical sections below retain their original dates, measurements and limitations.
 
 Observed on 2026-10-14 in `selfdev-t13`, draft PR #19 into `selfdev`.
 Task 13 and R96 remain incomplete. R117 supersedes the interrupted-reserve route
@@ -288,14 +358,14 @@ command log paths, calculated bounds, interruption metadata and accurate audit.
 | Gate | Status | Evidence / remaining |
 | --- | --- | --- |
 | G1 Authority | Not passed; partial native proof | Native denial/bytes and unknown-request stops pass. Receipt admission (version + binary hash) and the owned writer process proof are implemented and tested, but no receipt has been issued and no real Writer has run. Earlier owner changes are outside any mission window. |
-| G2 Spending | Not passed; partial bound proof | R120 role bounds/sub-caps fit $2; full admission proof remains closed. Fresh Codex weekly use 31% exceeds today's R88 line 28.5714%; calibration/day baseline absent. |
+| G2 Spending | Not passed; partial bound proof | R120 bounds/sub-caps fit $2. Fresh zero-turn billing passes for both; Claude weekly 36%, Codex 44%. R132 is authorized but unused; no mission accounting or calibration exists. |
 | G3 Scheduling | Not passed | No admitted live graph. |
 | G4 Acceptance | Not passed | Real fixture subprocess red/green proofs; no real candidate/review. |
 | G5 Recovery | Partial, scripted | Fixture recovery and once-only bound reconciliation; real rollback/public positive Resume pending. |
 | G6 Self-update | Not passed | Case 4 copies a prebuilt launcher/injects CanaryVerdict::Pass; actual build/miniature mission pending. |
-| G7 Resources | Partial, scripted | RAM failure reproduced at 282.8 MB; native offscreen containment fixes it. Final required full suite passes at 221.9 MB Projects peak; real mission lifecycle absent. |
+| G7 Resources | Partial, scripted | RAM failure reproduced at 282.8 MB; native offscreen containment fixes it. Latest hidden Projects scenario passes at 220.4 MB peak; real mission lifecycle absent. |
 | G8 Real use | Not passed | No fresh Seguro mission. |
-| G9 Kits | Partial | Zero inherited tools/active servers; Claude hook inventory and complete receipt absent. |
+| G9 Kits | Not passed; incomplete live qualification | Claude reports zero MCP tools/memory files but no hooks census; Codex reports one instruction source. No receipt issued. |
 | G10 Software bar | Not passed | No real software-bar acceptance. |
 | AS-1 Motion | Passed, scripted | Hidden frame/reduced-motion checks. |
 | AS-2 Composer | Passed, scripted | Hidden growth/cap/scroll/shrink checks. |
@@ -316,12 +386,15 @@ metrics. Audit `unchanged` compares to its already-dirty baseline, not git HEAD.
 
 Open items, in the order the real run needs them:
 
-1. **Issue receipts.** After each vendor's final live probes pass on the installed binary, map their rows to the five
+1. **Finish loadout qualification before issuing receipts.** Claude's effective managed hooks remain unreported;
+   Codex's strict instruction inventory is nonempty. Do not turn either unknown into a pass. After each vendor's
+   final live probes pass on the installed binary, map their rows to the five
    probes (`loadout`, `native`, `stop`, `exposure`, `billing`) and call `qualification::issue` into
-   `<mission data dir>/qualification/<vendor>.json`. `billing` needs a fresh paid-fallback attestation that Claude's
-   rows still lack. A later CLI update closes the receipt by itself; requalify then.
-2. **R131 readings.** The next R88 boundary is 2026-10-15 01:58:09 local. Take fresh zero-turn readings for both
-   vendors first; admit only at 2 points or more under that day's cumulative line.
+   `<mission data dir>/qualification/<vendor>.json`. Fresh zero-turn paid-fallback false is now observed for both.
+   A later CLI update closes the receipt by itself; requalify then.
+2. **R132 harness-only admission.** Once qualification passes, implement and test the explicit single-use US$2.00
+   exception in the qualification harness, record its consumption and actual before/after quota readings, and retain
+   R131 enforcement in the shipped product. Save only actual calibration, with the provider counter lag noted.
 3. **Drive a Writer through the new seam.** `prepare_launch` on its lease, `Engine::dispatch_mission_writer`, then
    `Engine::worker_termination` and `Leases::settle_process` before any broker IO. This path has been exercised only
    with a stand-in process and unit tests; it has never run against a real CLI because admission needs item 1.

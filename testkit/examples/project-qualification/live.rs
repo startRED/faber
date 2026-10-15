@@ -7,6 +7,10 @@ use std::time::{Duration, Instant};
 #[cfg(windows)]
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
+fn same_workspace(reported: &Value, cwd: &str) -> bool {
+    reported.as_str().is_some_and(|path| std::path::Path::new(path) == std::path::Path::new(cwd))
+}
+
 fn empty_loadout(observed: &Value, disabled: &Value) -> io::Result<()> {
     if observed["data"].as_array().is_none_or(|rows| {
         rows.iter().any(|row| {
@@ -34,7 +38,7 @@ fn loadout_census(method: &str, observed: &Value, cwd: &str) -> io::Result<()> {
                 .ok_or_else(|| fail("requested workspace inventory missing or ambiguous"))?;
             let row = &rows[0];
             let field = if method == "hooks/list" { "hooks" } else { "skills" };
-            if row["cwd"] != cwd || row["errors"].as_array().is_none_or(|errors| !errors.is_empty()) {
+            if !same_workspace(&row["cwd"], cwd) || row["errors"].as_array().is_none_or(|errors| !errors.is_empty()) {
                 return Err(fail("requested workspace census missing or errored"));
             }
             if method == "hooks/list" && row["warnings"].as_array().is_none_or(|warnings| !warnings.is_empty()) {
@@ -107,7 +111,10 @@ fn effective_policy(thread: &Value, cwd: &str) -> io::Result<()> {
     if thread["model"] != "gpt-6-luna" || thread["modelProvider"] != "openai" || thread["reasoningEffort"] != "low" {
         return Err(io::Error::other("model pin not acknowledged"));
     }
-    if thread["cwd"] != cwd || thread["thread"]["cwd"] != cwd || thread["thread"]["id"].as_str().is_none_or(str::is_empty) {
+    if !same_workspace(&thread["cwd"], cwd)
+        || !same_workspace(&thread["thread"]["cwd"], cwd)
+        || thread["thread"]["id"].as_str().is_none_or(str::is_empty)
+    {
         return Err(io::Error::other("role workspace or thread identity not acknowledged"));
     }
     if thread["approvalPolicy"] != "on-request"
@@ -204,6 +211,12 @@ pub async fn run(data: &Path) -> io::Result<()> {
                 "Access is denied",
                 "sharing violation",
                 "invalid type",
+                "os error 2",
+                "os error 5",
+                "os error 32",
+                "os error 303",
+                "failed to read",
+                "failed to parse",
             ]
             .into_iter()
             .filter(|needle| text.contains(needle))
@@ -216,7 +229,7 @@ pub async fn run(data: &Path) -> io::Result<()> {
         "qualificationPassed":false,"modelTurns":0,"state":"running","expectedMcpServers":[],
         "measuredStopReserveMicros":null,"nativeTools":"unobserved","plugins":"unobserved"});
     let mut result: io::Result<()> = async {
-        packet(&mut p, json!({"id":1,"method":"initialize","params":{"clientInfo":{"name":"faber_qualification","version":"0.1.0"}}})).await?;
+        packet(&mut p, json!({"id":1,"method":"initialize","params":{"clientInfo":{"name":"faber_qualification","version":"0.1.0"},"capabilities":{"experimentalApi":true}}})).await?;
         reply(&mut lines,1).await?;
         packet(&mut p,json!({"method":"initialized"})).await?;
         packet(&mut p,json!({"id":2,"method":"account/read","params":{"refreshToken":false}})).await?;
@@ -255,6 +268,9 @@ pub async fn run(data: &Path) -> io::Result<()> {
         let disabled=params["config"]["mcp_servers"].clone();
         packet(&mut p,json!({"id":4,"method":"thread/start","params":params})).await?;
         let thread = reply(&mut lines,4).await?;
+        row["workspaceAcknowledgement"] = json!({"requested":work,"cwd":thread["cwd"],"threadCwd":thread["thread"]["cwd"],
+            "threadIdentityPresent":thread["thread"]["id"].as_str().is_some_and(|id|!id.is_empty()),
+            "instructionSourceCount":thread["instructionSources"].as_array().map(Vec::len)});
         row["effectivePolicy"]=json!({"model":thread["model"],"provider":thread["modelProvider"],"effort":thread["reasoningEffort"],"sandbox":thread["sandbox"],"approvalPolicy":thread["approvalPolicy"]});
         effective_policy(&thread, &work.to_string_lossy())?;
         let id = thread["thread"]["id"].as_str().ok_or_else(||io::Error::other("thread identity missing"))?;
@@ -601,6 +617,15 @@ mod tests {
             "sandbox":{"type":"readOnly","networkAccess":false},"instructionSources":[],
             "thread":{"id":"owned-thread","cwd":"workspace","ephemeral":true,"cliVersion":"0.162.1"}});
         assert!(effective_policy(&valid, "workspace").is_ok());
+        #[cfg(windows)]
+        {
+            let mut normalized = valid.clone();
+            normalized["cwd"] = json!(r"E:\sandbox\lease");
+            normalized["thread"]["cwd"] = normalized["cwd"].clone();
+            assert!(effective_policy(&normalized, "E:/sandbox/lease").is_ok());
+            normalized["thread"]["cwd"] = json!(r"E:\sandbox\other");
+            assert!(effective_policy(&normalized, "E:/sandbox/lease").is_err());
+        }
         for (field, value) in [
             ("model", json!("another-model")),
             ("modelProvider", json!("other")),

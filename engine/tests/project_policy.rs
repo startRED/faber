@@ -60,6 +60,8 @@ fn every_codex_role_uses_a_closed_native_catalog_and_no_inherited_developer_inst
     }
     let catalog = faber_engine::codex::project_codex_catalog();
     let models = catalog["models"].as_array().unwrap();
+    // The installed catalog parser requires one instruction template even when the role supplies its own.
+    assert_eq!(models[0]["model_messages"]["instructions_template"], "");
     assert_eq!(models.len(), 1);
     assert_eq!(models[0]["slug"], "gpt-6-luna");
     assert_eq!(models[0]["shell_type"], "disabled");

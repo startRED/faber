@@ -134,6 +134,7 @@ pub fn project_codex_catalog() -> Value {
             {"effort":"max","description":"Maximum"}],
         "shell_type":"disabled", "visibility":"list", "supported_in_api":true, "priority":0,
         "support_verbosity":false, "apply_patch_tool_type":null,
+        "model_messages":{"instructions_template":""},
         "truncation_policy":{"mode":"tokens","limit":10000},
         "context_window":1050000, "max_context_window":1050000,
         "experimental_supported_tools":[], "input_modalities":["text"],

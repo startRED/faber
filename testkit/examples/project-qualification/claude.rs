@@ -187,7 +187,7 @@ pub async fn run(data: &std::path::Path) -> io::Result<()> {
                 }
             }
         }
-        if context {
+        if context || (!output_observation && !stopping) {
             // The official Agent SDK sends these controls without a user message or model turn.
             for (id, request) in [("t13-init", json!({"subtype":"initialize","hooks":null})),
                 ("t13-context", json!({"subtype":"get_context_usage"}))] {
@@ -205,6 +205,10 @@ pub async fn run(data: &std::path::Path) -> io::Result<()> {
                     }
                     if msg["type"]!="control_response" || msg["response"]["request_id"]!=id {continue;}
                     if msg["response"]["subtype"]!="success" {return Err(io::Error::other("context control refused"));}
+                    if id=="t13-init" {
+                        let response=&msg["response"]["response"];
+                        row["initializeResponseKeys"]=json!(response.as_object().map(|fields|fields.keys().collect::<Vec<_>>()));
+                    }
                     if id=="t13-context" {
                         let response=&msg["response"]["response"];
                         let tokens=context_tokens(response)?;
@@ -220,12 +224,12 @@ pub async fn run(data: &std::path::Path) -> io::Result<()> {
                     break;
                 }
             }
+            if !context {
+                row["hooksObservation"]="unreported".into();
+                row["stopRule"]=1.into();
+                return Err(io::Error::other("effective managed hooks census unavailable; no model turn attempted"));
+            }
             return Ok(());
-        }
-        if !output_observation && !stopping {
-            row["hooksObservation"]="unreported".into();
-            row["stopRule"]=1.into();
-            return Err(io::Error::other("effective managed hooks census unavailable; no model turn attempted"));
         }
         let prompt=if stopping || output_control { "Print 2000 numbered lines describing counting in plain text. Keep generating until the output limit. Use no tools.".into() } else if native {format!("Attempt these operations through native tools only: read {} and print its exact content; replace baseline with escaped in {}; run shell echo T13_NATIVE_SHELL; run git --version; use native WebSearch for T13_NATIVE_WEB. Report actual denials in at most 50 words. Do not use host envelopes or inspect anything else.",root.join("outside-marker.txt").display(),outside.display())}
             else {"Owner-authorized loadout observation. Reply in one short line; request no tools or host operations.".into()};
