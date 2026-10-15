@@ -111,8 +111,16 @@ own inks.
   View Transitions when available and apply immediately otherwise; no dependency or retained screen is needed.
 
 ### Effects
-- Effects appear only on the new conversation screen, never behind text the user reads, and they stop when the window
-  is hidden.
+- Effects appear only on the two homes (the new conversation of Chat and the first screen of a project), never behind
+  text the user reads. Every animation, including the composer's idle life, pauses while the window is hidden
+  (`html.hidden-win` sets `animation-play-state: paused`) and is gone with reduced or no motion.
+- Slow ambient loops step on a shared 1 s beat (`steps()`) instead of drawing 60 frames a second: idle CPU follows the
+  frames per second, not what changes in them. Dark Room's idle home costs about 10% of one core against 49% before.
+- The Projects home has its own light: the beam leans the other way, the loom runs slower and the flow line reads
+  "Your goal". A look with no effect of its own gets a faint drifting light when the ambient switch is on.
+- The empty composer idles (`ui/Ghost.tsx`): a blinking typing bar and a hint that changes every 8 s. It renders
+  nothing while the field has text or focus, with reduced or no motion, or while the window is hidden; the plain
+  placeholder stays underneath for assistive technology.
   - **Dark Room:** a static projector beam, a glow that breathes every 7 s and 72 dust grains (CSS shadows that twinkle on the compositor, no canvas loop) that fade
     out near any text block.
   - **Workshop:** a loom at the bottom right whose shuttle crosses every 9 s, and paper grain.
@@ -225,7 +233,7 @@ inside its own area.
 - Auto chooses both the model and its effort. A manual model adds an adjacent low, medium or high effort choice,
   defaulting to medium (R102). Each conversation remembers its choice. Changes apply to the next message only;
   the composer says so, and each answer keeps the effort actually used. Both CLI drivers always receive that effort.
-- The ambient effect of the theme runs here.
+- The ambient effect of the theme runs here, and the empty composer idles with a typing bar and rotating hints.
 - With no AI connected, the greeting, the suggestions and the list give way to an empty state with Curioso and a button
   that opens account management. The composer stays on screen but cannot send.
 
@@ -315,6 +323,13 @@ nothing needs a horizontal drag.
 
 Status colours always come with words and shapes. Amber stays for needs-you only: a quota wait or a dependency is not
 shown as a decision.
+
+### The Projects home
+
+The first screen of a project uses the layout of the Chat home (`welcome-grid`) with its own identity: the greeting
+"What should we tackle?", a goal composer with its own hints, the three safety controls kept visible as quiet rows under
+"How Faber works here" (plain sentences, with the technical detail and the revision and author behind one small "Details" link), and a side column with the project and its folder in short form (the last two folder names, the full path on hover), the conversations to pick up and the other projects. The
+light leans the other way. The two layouts share classes, so a change to one home reaches the other.
 
 ### Records
 
@@ -476,6 +491,14 @@ screen, which owns the locale files.
 - Choice buttons use `aria-pressed`, or native radio groups. Switches are native checkboxes. "Open file" is a real
   button. Theme thumbnails are `aria-hidden`, and each theme card is named by its name and its description.
 - Areas whose content can grow scroll; they never cut content off.
+- Right-click is Faber's own (R123, `ui/contextmenu.ts`, `ui/ContextMenu.tsx`). The browser's menu never shows, and its
+  reload, print, save and view-source shortcuts do nothing. A menu opens only on a chat (Rename, Delete), a project (New
+  conversation in this project, Open folder, Remove from Faber), a message (Copy; Edit on yours; Redo on an answer),
+  selected text (Copy) and a text field (Cut, Copy, Paste, Select all, with the ones that cannot apply disabled); anywhere
+  else nothing opens. Each menu has at most four items, only actions that already exist on screen, and a destructive one
+  goes last in the danger colour and asks twice by changing its own text; the second activation must be a separate gesture (one that follows within half a second is ignored). The engine refuses to remove a project while a conversation or a mission works in it, and "Open folder" only reveals a folder that exists on this computer (never a program, address or network share). The menu opens at the pointer, or by the Menu key
+  and Shift+F10 on a focused row; arrows move, Enter chooses, Esc and a click outside close it, and it stays inside the
+  window. It uses the normal entrance and exit and is instant in reduced and no motion.
 - Every overlay (the first-run steps, the tutorial cards, the narrow-window sidebar, the overlay running column) says
   whether it is modal. A modal overlay moves focus into itself when it opens and gives focus back when it closes. Esc
   closes it, except where a screen says otherwise. The one non-modal case is the running column when it opens by

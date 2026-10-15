@@ -143,11 +143,11 @@ input, textarea { caret-color: var(--accent); }
 
 /* The column over the stage must not cover the greeting's composer: the greeting makes room for it on its left, at once:
    padding is layout, so it is never animated (the column itself slides in over it). */
-.work.under .thread.welcome { padding-right: calc(min(352px, 100%) + 20px); }
+.work.under :is(.thread.welcome, .projects-stage.home) { padding-right: calc(min(352px, 100%) + 20px); }
 
 /* The new conversation: the greeting and the composer on the left; the conversations to pick up on the right when the
    stage is wide enough, below the suggestions when it is not. */
-.thread.welcome { display: grid; align-content: safe center; padding: 0 clamp(24px, 4vw, 60px) 40px clamp(24px, 6vw, 76px); container-type: inline-size; }
+.thread.welcome, .projects-stage.home { display: grid; align-content: safe center; padding: 0 clamp(24px, 4vw, 60px) 40px clamp(24px, 6vw, 76px); container-type: inline-size; }
 .welcome-grid { display: grid; grid-template-columns: minmax(0, 640px); gap: 40px 64px; }
 .w-main, .resume { position: relative; z-index: 2; min-width: 0; }
 .hello { font-size: min(var(--fs-display), 9vw); max-width: 8.4em; overflow-wrap: anywhere; padding-bottom: 4px; }
@@ -202,6 +202,8 @@ svg.i.sm { width: 14px; height: 14px; }
 .run-btn.need { box-shadow: inset 0 0 0 1px var(--amber-line), var(--amber-light); }
 .run-btn.need .ask { color: var(--amber-ink); background: var(--amber-soft); border-radius: 0 var(--r-pill) var(--r-pill) 0; }
 .run-btn.need .seg + .seg { border-left-color: var(--amber-line); }
+/* The icon of "needs you" breathes slowly; the words beside it carry the meaning. */
+.run-btn.need .seg.ask .i { animation: pulse 3.2s var(--ease-io) infinite; }
 
 /* The running column: beside the stage from 1,100 px, over it (above the composer) below that. */
 .runcol { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--s1); }
@@ -338,6 +340,13 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .dock .composer textarea { height: 40px; min-height: 40px; padding: 13px 16px 0; }
 .composer .chips { padding: 12px 14px 0; }
 .composer textarea::placeholder { color: var(--ink-3); }
+/* The idle composer (ui/Ghost.tsx): a typing bar and a hint drawn over the empty field, where its placeholder would be. The
+   field keeps its own placeholder for readers of the screen and shows it again whenever the hints are not drawn. */
+.composer:has(.idle-box) textarea::placeholder { color: transparent; }
+.idle-box { position: absolute; left: 18px; right: 18px; top: 16px; height: calc(var(--fs-read) * 1.5); pointer-events: none; }
+.g-hint { position: absolute; inset: 0; padding-left: 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--ink-3); font-size: var(--fs-read); line-height: 1.5; opacity: 0; transition: opacity var(--dur-ui) var(--ease); }
+.g-hint.on { opacity: 1; }
+.g-caret { position: absolute; left: 0; top: calc(var(--fs-read) * 0.2); width: 2px; height: calc(var(--fs-read) * 1.1); border-radius: 1px; background: var(--accent); animation: blink 1.1s steps(1) infinite; }
 .cbar { display: flex; gap: 6px; align-items: center; padding: 8px 10px 10px 12px; }
 .cbar:has(.effort) { flex-wrap: wrap; }
 .effort-hint { margin: 0; padding: 0 12px 10px; font-size: calc(var(--fs-ui) - 2px); color: var(--ink-3); }
@@ -571,24 +580,28 @@ select.pill option { background: var(--s2); color: var(--ink); }
    for a look that does not have the effect, and for every look when the ambient switch is off. */
 .ambient { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; container-type: inline-size; }
 .amb { position: absolute; pointer-events: none; }
-.amb-beam { display: var(--amb-beam); left: calc(min(100% - 120px, 740px) - 380px); top: -80px; width: 760px; height: 680px; transform: rotate(22deg); transform-origin: 50% 0; }
+.ambient { --beam-x: min(100% - 120px, 740px); }
+.ambient.project { --beam-x: min(380px, 100% - 120px); }
+.amb-beam { display: var(--amb-beam); left: calc(var(--beam-x) - 380px); top: -80px; width: 760px; height: 680px; transform: rotate(22deg); transform-origin: 50% 0; }
 .amb-beam .beam { position: absolute; inset: 0; filter: blur(30px); opacity: 0.9; }
 .amb-beam .beam i { position: absolute; inset: 0; clip-path: polygon(44% 0, 56% 0, 86% 100%, 14% 100%); background: linear-gradient(180deg, var(--beam-color), transparent 92%); }
 .amb-beam .beam i + i { clip-path: polygon(48% 0, 52% 0, 64% 100%, 36% 100%); opacity: 0.8; }
 .amb-beam .dust { position: absolute; left: 0; top: 0; width: 760px; height: 320px; -webkit-mask-image: linear-gradient(180deg, #000 30%, transparent 72%); mask-image: linear-gradient(180deg, #000 30%, transparent 72%); }
-/* Every grain is a shadow of a 1 px dot (ui/Ambient.tsx). The three layers twinkle out of step, on the compositor only. */
-.dust i { position: absolute; left: 0; top: 0; width: 1px; height: 1px; border-radius: 50%; will-change: opacity; animation: twinkle 6s var(--ease-io) infinite alternate; }
-.dust i:nth-child(2) { animation-duration: 8s; animation-delay: -3s; }
-.dust i:nth-child(3) { animation-duration: 10s; animation-delay: -6s; }
+/* Every grain is a shadow of a 1 px dot (ui/Ambient.tsx). The three layers twinkle out of step, on the compositor only. Every
+   slow ambient animation moves in steps of one second, all on the same beat: a frame costs the same however little changes
+   in it, so a calm light that changes once a second costs a sixtieth of one that is redrawn at the screen rate. */
+.dust i { position: absolute; left: 0; top: 0; width: 1px; height: 1px; border-radius: 50%; animation: twinkle 6s steps(6) infinite alternate; }
+.dust i:nth-child(2) { animation-duration: 8s; animation-timing-function: steps(8); animation-delay: -3s; }
+.dust i:nth-child(3) { animation-duration: 10s; animation-timing-function: steps(10); animation-delay: -6s; }
 @keyframes twinkle { to { opacity: 0.4; } }
 /* The light that breathes lives only around the lens, above and right of the greeting. */
 /* Promote only the visible part of the mask, avoiding a stage-sized software composition each frame. */
-.amb-glow { display: var(--amb-beam); left: calc(min(100% - 120px, 740px) - 170px); top: 0; width: 340px; height: 110px; overflow: hidden; -webkit-mask-image: radial-gradient(circle 170px at 170px -60px, #000 30%, transparent 100%); mask-image: radial-gradient(circle 170px at 170px -60px, #000 30%, transparent 100%); }
+.amb-glow { display: var(--amb-beam); left: calc(var(--beam-x) - 170px); top: 0; width: 340px; height: 110px; overflow: hidden; -webkit-mask-image: radial-gradient(circle 170px at 170px -60px, #000 30%, transparent 100%); mask-image: radial-gradient(circle 170px at 170px -60px, #000 30%, transparent 100%); }
 .amb-glow .amb-beam { position: absolute; display: block; left: -210px; }
 .amb-glow { opacity: 0; }
 .amb-glow .beam { opacity: 1; }
 /* Fade the composed mask and blur together, so software rendering does not repaint the beam every frame. */
-html[data-motion='full'] .amb-glow { will-change: opacity; animation: glow 7s var(--ease-io) infinite alternate; }
+html[data-motion='full'] .amb-glow { will-change: opacity; animation: glow 7s steps(7) infinite alternate; }
 @keyframes glow { to { opacity: 0.5; } }
 .amb-loom { display: var(--amb-loom); right: 0; bottom: 0; width: 440px; height: 600px; overflow: hidden; -webkit-mask-image: radial-gradient(circle at 100% 100%, #000 0, #000 28%, transparent 68%); mask-image: radial-gradient(circle at 100% 100%, #000 0, #000 28%, transparent 68%); }
 .amb-loom svg { position: absolute; right: 0; bottom: 0; width: 660px; height: 600px; }
@@ -605,6 +618,13 @@ html[data-motion='full'] .amb-glow { will-change: opacity; animation: glow 7s va
 @keyframes trace { from { stroke-dashoffset: 382; } to { stroke-dashoffset: 0; } }
 .flow-label { font: 500 12.5px var(--font-ui); fill: var(--ink-3); }
 .flow-node { fill: var(--bg); stroke: var(--line-3); stroke-width: 1.4; }
+/* A project's first screen has its own light: the beam leans the other way, from the left, over the desk, and the loom weaves slower. */
+.ambient.project .amb-beam { transform: rotate(-22deg); }
+.ambient.project :is(.loom-row, .loom-shuttle) { animation-duration: 12s; }
+/* A look with none of its own effects (and the ambient switch on) gets one soft light that drifts, so no home stands still. */
+.amb-drift { display: none; left: calc(var(--beam-x) - 380px); top: -220px; width: 760px; height: 560px; background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 16%, transparent), transparent); opacity: 0.55; animation: drift 32s steps(32) infinite alternate; }
+html[data-ambient='on'] .ambient.bare .amb-drift { display: block; }
+@keyframes drift { to { transform: translate(56px, 32px) scale(1.08); opacity: 0.9; } }
 .grain { position: absolute; inset: 0; pointer-events: none; opacity: var(--grain); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .9 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
 /* A narrow stage has no room beside the greeting for the loom or the flow line. */
 @container (max-width: 920px) { .amb-loom { display: none; } }
@@ -641,7 +661,7 @@ html.resizing :is(.shell, .main, .side, .fold, .tour-ring) { transition: none !i
   select option:is(:hover, :focus-visible, :checked) { background: var(--s3); color: var(--ink); }
   @starting-style { select:open::picker(select) { opacity: 0; transform: translateY(var(--motion-rise)) scale(var(--motion-scale)); } }
 }
-:is([data-motion='reduced'], [data-motion='none']) :is(.cursor, .live, .live::after, .run-dot, .loom-row, .loom-shuttle, .flow-trace, .amb-glow, .dust i) { animation: none !important; }
+:is([data-motion='reduced'], [data-motion='none']) :is(.cursor, .live, .live::after, .run-dot, .loom-row, .loom-shuttle, .flow-trace, .amb-glow, .amb-drift, .dust i, .g-caret, .run-btn .i) { animation: none !important; }
 :is([data-motion='reduced'], [data-motion='none']) :is(.loom-shuttle, .flow-trace) { opacity: 0; }
 [data-motion='reduced'] { --arrive-y: 0px; }
 /* Reduced and none are instant, including native pickers and theme snapshots. */
@@ -652,7 +672,8 @@ html.resizing :is(.shell, .main, .side, .fold, .tour-ring) { transition: none !i
 :is([data-motion='reduced'], [data-motion='none']) select::picker(select) { transition: none !important; transform: none !important; }
 :is(html[data-motion='reduced'], html[data-motion='none'])::view-transition-old(root),
 :is(html[data-motion='reduced'], html[data-motion='none'])::view-transition-new(root) { animation: none !important; }
-html.hidden-win :is(.amb, .amb *) { animation-play-state: paused !important; }
+/* A hidden or minimized window runs no animation at all: the root class comes from ui/appearance.ts. */
+html.hidden-win, html.hidden-win *, html.hidden-win *::before, html.hidden-win *::after { animation-play-state: paused !important; }
 /* The system preference is honoured even before the script runs. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
@@ -680,9 +701,24 @@ html.hidden-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 
 /* Projects board and start card */
 .projects-stage { display: flex; flex-direction: column; height: 100%; overflow-y: auto; padding: 24px; gap: 20px; }
-.projects-empty { display: grid; place-items: center; height: 100%; color: var(--ink-3); font-size: var(--fs-read); }
-.start-card { max-width: 800px; margin: 0 auto; width: 100%; display: flex; flex-direction: column; gap: 20px; }
-.start-card .composer-container { margin-top: calc(var(--thread-tail) - 20px); }
+/* The first screen of a project: the structure of the new conversation (.welcome-grid, .hello, .lead, .composer, .rrow), the goal
+   composer where the chat composer is, the safety choices as quiet rows under it, and what to pick up on the right. */
+.projects-root { position: relative; grid-column: 1; grid-row: 1; height: 100%; min-height: 0; min-width: 0; overflow: hidden; }
+.projects-stage { position: relative; z-index: 1; }
+.projects-stage.home { gap: 0; }
+.projects-stage.home .empty { padding-top: 0; }
+.start-card.welcome-grid { display: grid; width: auto; max-width: none; margin: 0; gap: 40px 64px; }
+.setup { display: grid; margin-top: 28px; }
+.setup h3, .p-side h3 { margin: 0; font: 600 calc(var(--fs-ui) - 1px) var(--font-ui); color: var(--ink-2); }
+.setup h3 { padding-bottom: 6px; }
+.p-side h3 { padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.setup .ctl-section { padding: calc(12px * var(--dens)) 0; border-radius: 0; background: none; box-shadow: none; border-top: 1px solid var(--line); }
+.setup .ctl-section:last-of-type { border-bottom: 1px solid var(--line); }
+.setup .setup-more { padding: calc(10px * var(--dens)) 0; }
+.setup .setup-more p { margin: 6px 0 0; overflow-wrap: anywhere; }
+.p-side { position: relative; z-index: 2; display: grid; align-content: start; gap: 28px; min-width: 0; }
+@container (min-width: 1000px) { .p-side { align-self: end; padding-bottom: 40px; } }
+.main:has(.projects-stage.home) .topbar { border-bottom-color: transparent; }
 .projects-stage { min-width: 0; flex: 1; container-type: inline-size; }
 .projects-stage .p-meta > span, .m-goal, .tc-title, .ny-question { min-width: 0; overflow-wrap: anywhere; }
 .projects-stage .m-controls, .projects-stage .ny-header, .projects-stage .pace-item { flex-wrap: wrap; }
@@ -738,3 +774,16 @@ html.hidden-win :is(.amb, .amb *) { animation-play-state: paused !important; }
   .task-columns, .cost-pace-panel { grid-template-columns: minmax(0, 1fr); }
 }
 
+
+/* Right-click menus (ui/ContextMenu.tsx): the look of the native pickers above, drawn by the page. Reduced and no motion are
+   covered by the rules above that switch every animation off. */
+.cmenu { position: fixed; z-index: 60; display: grid; gap: 1px; min-width: 184px; max-width: min(320px, calc(100vw - 16px)); padding: 4px; border-radius: var(--r-md); background: color-mix(in srgb, var(--s2) 96%, transparent); backdrop-filter: blur(var(--motion-backdrop)); color: var(--ink); box-shadow: var(--lift-shadow), inset 0 0 0 1px var(--line-2); outline: none; animation: cmenu-in var(--motion-enter) var(--motion-spring) both; }
+.cmenu.leaving { pointer-events: none; animation: cmenu-out var(--motion-exit) var(--motion-ease-in) both; }
+@keyframes cmenu-in { from { opacity: 0; transform: translateY(var(--motion-rise)) scale(var(--motion-scale)); } }
+@keyframes cmenu-out { to { opacity: 0; transform: scale(var(--motion-scale)); } }
+.cm-item { display: block; width: 100%; padding: 8px 12px; border-radius: var(--r-xs); color: var(--ink-2); font-size: calc(var(--fs-ui) - 0.5px); text-align: left; white-space: nowrap; }
+.cm-item:is(:hover, :focus-visible):not(:disabled) { background: var(--s3); color: var(--ink); outline: none; }
+.cm-item:disabled { color: var(--ink-3); opacity: 0.55; }
+.cm-item.danger { color: var(--danger); }
+.cm-item.danger.armed { background: var(--danger); color: var(--bg); font-weight: 600; }
+input.rename { width: 100%; height: calc(28px + 2px * var(--dens)); padding: 0 10px; border-radius: var(--r-xs); background: var(--s3); color: var(--ink); font-size: calc(var(--fs-ui) - 0.5px); box-shadow: inset 0 0 0 1px var(--accent-line); outline: none; }

@@ -356,6 +356,25 @@ mod tests {
         e.shutdown();
     }
 
+    #[tokio::test]
+    async fn a_worker_session_alive_in_a_project_keeps_it_from_being_removed_whatever_the_disk_says() {
+        let (dir, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let e = engine(dir.path());
+        // No mission record anywhere on disk: only the live session says the project is working.
+        let project = e.add_project(&repo.path().to_string_lossy());
+        e.with(|c| {
+            c.mission_sessions.insert("m1".into(), vec![Session::from_fn(|_| {})]);
+            c.mission_projects.insert("m1".into(), project.id.clone());
+        });
+        assert_eq!(e.remove_project(&project.id), Err("error.project.busy".to_string()));
+        e.with(|c| {
+            c.mission_sessions.remove("m1");
+            c.mission_projects.remove("m1");
+        });
+        assert_eq!(e.remove_project(&project.id), Ok(()));
+        e.shutdown();
+    }
+
     fn canonical_area() -> tempfile::TempDir {
         tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap()
     }

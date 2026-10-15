@@ -279,6 +279,12 @@ impl Page {
         self.cdp.click_at(at["x"].as_f64().unwrap_or_default(), at["y"].as_f64().unwrap_or_default())
     }
 
+    /// Presses the right mouse button on the middle of the element.
+    pub fn right_click(&mut self, loc: &Loc) -> Result<(), String> {
+        let at = self.on(loc, "visible", &format!("el.scrollIntoView({{ block: 'center', inline: 'center' }}); {}", Self::CENTER))?;
+        self.cdp.right_click_at(at["x"].as_f64().unwrap_or_default(), at["y"].as_f64().unwrap_or_default())
+    }
+
     /// Waits until the element is visible and not disabled, without acting on it.
     pub fn wait_enabled(&mut self, loc: &Loc) -> Result<(), String> {
         self.on(loc, "enabled", "return {};").map(drop)

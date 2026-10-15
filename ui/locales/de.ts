@@ -287,6 +287,19 @@ export const de: Messages = {
   'look.accentAdjusted': 'Der Akzent wurde angepasst, damit er auf diesem Hintergrund lesbar bleibt.',
   'ambient.idea': 'Deine Idee',
   'ambient.done': 'Fertig, mit Beleg',
+  'ambient.goal': 'Dein Ziel',
+  'hint.chat.2': 'Füge einen Text ein und frag, was er wirklich sagt',
+  'hint.chat.3': 'Beschreibe ein Problem und bitte um drei Auswege',
+  'projects.home.title': 'Was packen wir an?',
+  'projects.home.lead': 'Gib Faber ein Ziel für dieses Projekt. Es arbeitet in einer getrennten Kopie und zeigt, was es geprüft hat.',
+  'projects.home.rules': 'So arbeitet Faber hier',
+  'projects.home.details': "Details",
+  'projects.gitMode.seguroTech': "Sicherer Modus: getrennter Worktree, nur lokale Commits und Vorspulen nur auf dem Missions-Branch.",
+  'projects.selfUpdate.trustTech': "Ein neuer Build rückt erst nach einem Canary-Lauf und den Quarantäneprüfungen in den nächsten lokalen Slot vor.",
+  'projects.home.others': 'Andere Projekte',
+  'projects.home.hint.1': 'Beschreibe, was in diesem Projekt gebaut, repariert oder verbessert werden soll',
+  'projects.home.hint.2': 'Repariere den Test, der nur manchmal scheitert',
+  'projects.home.hint.3': 'Baue eine Einstellung ein und beweise, dass sie funktioniert',
   'setup.title': 'Abonnements verbinden',
   'setup.body': 'Wähle die offiziellen KI-Tools, die du mit deinen eigenen Abonnements nutzen möchtest.',
   'setup.claude': 'Claude',
@@ -399,107 +412,107 @@ export const de: Messages = {
   "quota.seven_day_sonnet": "Sonnet · 7 Tage",
   "quota.seven_day_haiku": "Haiku · 7 Tage",
   // Native speaker must translate (needs native review).
-  "projects.title": "Projects",
+  "projects.title": "Projekte",
   // Native speaker must translate (needs native review).
-  "projects.empty.selectProject": "Select a project folder to start a mission.",
+  "projects.empty.selectProject": "Wähle einen Projektordner aus, um eine Mission zu starten.",
   // Native speaker must translate (needs native review).
-  "projects.repo": "Repository",
+  "projects.repo": "Ordner",
   // Native speaker must translate (needs native review).
-  "projects.base": "Base revision",
+  "projects.base": "Basis-Revision",
   // Native speaker must translate (needs native review).
-  "projects.author": "Author",
+  "projects.author": "Autor",
   // Native speaker must translate (needs native review).
-  "projects.presence.title": "Tool selection",
+  "projects.presence.title": "Wenn ein Werkzeug fehlt",
   // Native speaker must translate (needs native review).
-  "projects.presence.continueWithout": "Continue without missing tools",
+  "projects.presence.continueWithout": "Ohne es weitermachen",
   // Native speaker must translate (needs native review).
-  "projects.presence.findTools": "Let Faber find and install the best tools",
+  "projects.presence.findTools": "Für mich suchen und installieren",
   // Native speaker must translate (needs native review).
-  "reason.kit.continueWithout": "Use verified built-in capabilities when mission execution is available.",
+  "reason.kit.continueWithout": "Faber nutzt die Werkzeuge, die es schon hat.",
   // Native speaker must translate (needs native review).
-  "reason.kit.findToolsInstallParked": "Tool installation is parked in the self-development MVP; the available role controls remain the capability floor.",
+  "reason.kit.findToolsInstallParked": "Werkzeuge zu installieren ist noch nicht fertig. Vorerst nutzt Faber die, die es schon hat.",
   // Native speaker must translate (needs native review).
-  "projects.gitMode.title": "Git authority",
+  "projects.gitMode.title": "Was Faber mit deinem Code tun darf",
   // Native speaker must translate (needs native review).
-  "projects.gitMode.seguro": "Seguro (Local worktree only)",
+  "projects.gitMode.seguro": "Sicher: nur eine getrennte Kopie",
   // Native speaker must translate (needs native review).
-  "projects.gitMode.seguroDesc": "Separate worktree, local commits, fast-forwards only the mission branch. No remote effects.",
+  "projects.gitMode.seguroDesc": "Faber arbeitet an einer getrennten Kopie deines Projekts. Es rührt weder GitHub noch etwas im Internet an.",
   // Native speaker must translate (needs native review).
-  "projects.gitMode.equilibrado": "Equilibrado (Local commits + draft PR)",
+  "projects.gitMode.equilibrado": "Equilibrado (Lokale Commits + Draft-PR)",
   // Native speaker must translate (needs native review).
-  "projects.gitMode.equilibradoDesc": "Seguro plus pushing the mission branch and creating one draft PR.",
+  "projects.gitMode.equilibradoDesc": "Seguro plus Übertragen des Missions-Branches und Erstellen eines Draft-PRs.",
   // Native speaker must translate (needs native review).
-  "projects.selfUpdate.trust": "Allow Faber to update itself",
+  "projects.selfUpdate.trust": "Faber erlauben, sich selbst zu aktualisieren",
   // Native speaker must translate (needs native review).
-  "projects.selfUpdate.trustDesc": "Promotes proven builds to the next local slot after canary verification and quarantine checks.",
+  "projects.selfUpdate.trustDesc": "Installiert eine neue Faber-Version erst, nachdem getestet wurde, dass sie funktioniert.",
   // Native speaker must translate (needs native review).
-  "projects.goal.label": "Mission goal",
+  "projects.goal.label": "Missionsziel",
   // Native speaker must translate (needs native review).
-  "projects.goal.placeholder": "Describe what you want Faber to build, fix, or improve in this project...",
+  "projects.goal.placeholder": "Beschreibe, was Faber in diesem Projekt bauen, reparieren oder verbessern soll …",
   // Native speaker must translate (needs native review).
-  "projects.action.start": "Start mission",
+  "projects.action.start": "Mission starten",
   // Native speaker must translate (needs native review).
-  "projects.action.stop": "Stop",
+  "projects.action.stop": "Stoppen",
   // Native speaker must translate (needs native review).
-  "projects.action.resume": "Resume",
+  "projects.action.resume": "Fortsetzen",
   // Native speaker must translate (needs native review).
   "projects.mode.normal": "Normal",
   // Native speaker must translate (needs native review).
-  "projects.mode.autonomous": "Autonomous",
+  "projects.mode.autonomous": "Autonom",
   // Native speaker must translate (needs native review).
-  "projects.needsYou": "Needs you",
+  "projects.needsYou": "Braucht dich",
   // Native speaker must translate (needs native review).
-  "projects.needsYou.desc": "Faber is waiting for your decision before proceeding.",
+  "projects.needsYou.desc": "Faber wartet auf deine Entscheidung, bevor es weitergeht.",
   // Native speaker must translate (needs native review).
-  "projects.decision.default": "Default",
+  "projects.decision.default": "Standard",
   // Native speaker must translate (needs native review).
-  "projects.decision.customPlaceholder": "Or type a custom answer...",
+  "projects.decision.customPlaceholder": "Oder gib eine eigene Antwort ein …",
   // Native speaker must translate (needs native review).
-  "projects.decision.answer": "Answer",
+  "projects.decision.answer": "Antworten",
   // Native speaker must translate (needs native review).
-  "decision.kind.direction": "Direction",
+  "decision.kind.direction": "Richtung",
   // Native speaker must translate (needs native review).
-  "decision.kind.taste": "Taste",
+  "decision.kind.taste": "Geschmack",
   // Native speaker must translate (needs native review).
   "decision.kind.money": "Budget",
   // Native speaker must translate (needs native review).
-  "decision.kind.legal": "Legal",
+  "decision.kind.legal": "Rechtlich",
   // Native speaker must translate (needs native review).
-  "decision.kind.technical": "Technical",
+  "decision.kind.technical": "Technisch",
   // Native speaker must translate (needs native review).
-  "projects.tasks.title": "Tasks",
+  "projects.tasks.title": "Aufgaben",
   // Native speaker must translate (needs native review).
-  "projects.task.ready": "Ready",
+  "projects.task.ready": "Bereit",
   // Native speaker must translate (needs native review).
-  "projects.task.running": "Running",
+  "projects.task.running": "Läuft",
   // Native speaker must translate (needs native review).
   "projects.task.review": "Review",
   // Native speaker must translate (needs native review).
-  "projects.task.done": "Done",
+  "projects.task.done": "Fertig",
   // Native speaker must translate (needs native review).
-  "projects.task.blocked": "Blocked",
+  "projects.task.blocked": "Blockiert",
   // Native speaker must translate (needs native review).
-  "projects.task.builder": "Builder",
+  "projects.task.builder": "Ersteller",
   // Native speaker must translate (needs native review).
-  "projects.task.reviewer": "Reviewer",
+  "projects.task.reviewer": "Prüfer",
   // Native speaker must translate (needs native review).
-  "projects.receipt.unverified": "Unverified",
+  "projects.receipt.unverified": "Ungeprüft",
   // Native speaker must translate (needs native review).
-  "projects.receipt.notRun": "Not run",
+  "projects.receipt.notRun": "Nicht ausgeführt",
   // Native speaker must translate (needs native review).
-  "projects.receipt.verified": "Verified",
+  "projects.receipt.verified": "Geprüft",
   // Native speaker must translate (needs native review).
-  "projects.cost.title": "Own cost",
+  "projects.cost.title": "Eigene Kosten",
   // Native speaker must translate (needs native review).
-  "projects.cost.unknown": "Unknown",
+  "projects.cost.unknown": "Unbekannt",
   // Native speaker must translate (needs native review).
-  "projects.cost.cap": "Cap",
+  "projects.cost.cap": "Limit",
   // Native speaker must translate (needs native review).
-  "projects.pace.title": "Account pace",
+  "projects.pace.title": "Kontotempo",
   // Native speaker must translate (needs native review).
-  "projects.pace.used": "used",
+  "projects.pace.used": "genutzt",
   // Native speaker must translate (needs native review).
-  "projects.pace.room": "daily room",
+  "projects.pace.room": "tägliche Reserve",
   // Native speaker must translate (needs native review).
   "projects.build.title": "Lokaler Build",
   // Native speaker must translate (needs native review).
@@ -513,81 +526,81 @@ export const de: Messages = {
   // Native speaker must translate (needs native review).
   "reason.task.waiting": "Wartet auf Abhängigkeiten",
   // Native speaker must translate (needs native review).
-  "error.project.notFound": "Project not found",
+  "error.project.notFound": "Projekt nicht gefunden",
   // Native speaker must translate (needs native review).
-  "error.journal.mismatch": "Journal mismatch",
+  "error.journal.mismatch": "Journal-Abweichung",
   // Native speaker must translate (needs native review).
-  "reason.grant.none": "Project has no active git grant",
+  "reason.grant.none": "Das Projekt hat keine aktive Git-Freigabe",
   // Native speaker must translate (needs native review).
-  "projects.mode.label": "Run mode",
+  "projects.mode.label": "Ausführungsmodus",
   // Native speaker must translate (needs native review).
-  "projects.state.planning": "Planning",
+  "projects.state.planning": "Planung",
   // Native speaker must translate (needs native review).
-  "projects.state.running": "Running",
+  "projects.state.running": "Läuft",
   // Native speaker must translate (needs native review).
-  "projects.state.paused": "Paused",
+  "projects.state.paused": "Pausiert",
   // Native speaker must translate (needs native review).
-  "projects.state.blocked": "Blocked",
+  "projects.state.blocked": "Blockiert",
   // Native speaker must translate (needs native review).
-  "projects.state.done": "Done",
+  "projects.state.done": "Fertig",
   // Native speaker must translate (needs native review).
   "projects.value.missing": "\u2014",
   // Native speaker must translate (needs native review).
-  "projects.details": "Details and evidence",
+  "projects.details": "Details und Nachweise",
   // Native speaker must translate (needs native review).
-  "projects.details.scope": "Scope",
+  "projects.details.scope": "Umfang",
   // Native speaker must translate (needs native review).
-  "projects.details.proofs": "Required checks",
+  "projects.details.proofs": "Erforderliche Prüfungen",
   // Native speaker must translate (needs native review).
-  "projects.details.noEvidence": "No engine-verified evidence is available.",
+  "projects.details.noEvidence": "Keine von der Engine geprüften Nachweise verfügbar.",
   // Native speaker must translate (needs native review).
-  "projects.pace.freshness": "Reading: {when}",
+  "projects.pace.freshness": "Messung: {when}",
   // Native speaker must translate (needs native review).
-  "reason.mission.runnerUnavailable": "Mission execution is waiting for the approved runner. No work has started.",
+  "reason.mission.runnerUnavailable": "Die Missionsausführung wartet auf den genehmigten Runner. Es wurde noch keine Arbeit begonnen.",
   // Native speaker must translate (needs native review).
-  "error.project.missionRequired": "Start a mission to work in this project. Direct project sessions are unavailable.",
+  "error.project.missionRequired": "Starte eine Mission, um in diesem Projekt zu arbeiten. Direkte Projektsitzungen sind nicht verfügbar.",
   // Native speaker must translate (needs native review).
-  "error.wire.malformed": "The request has invalid or missing values.",
+  "error.wire.malformed": "Die Anfrage enthält ungültige oder fehlende Werte.",
   // Native speaker must translate (needs native review).
-  "error.wire.tooBig": "The request is too large.",
+  "error.wire.tooBig": "Die Anfrage ist zu groß.",
   // Native speaker must translate (needs native review).
-  "error.wire.stale": "This mission changed. Reload it before answering.",
+  "error.wire.stale": "Diese Mission hat sich geändert. Lade sie neu, bevor du antwortest.",
   // Native speaker must translate (needs native review).
-  "reason.grant.stale": "The git grant changed. Review the start card again.",
+  "reason.grant.stale": "Die Git-Freigabe hat sich geändert. Sieh dir die Startkarte noch einmal an.",
   // Native speaker must translate (needs native review).
-  "reason.grant.mode": "Remote publication is parked in the self-development MVP.",
+  "reason.grant.mode": "Die Remote-Veröffentlichung ist im MVP zur Selbstentwicklung geparkt.",
   // Native speaker must translate (needs native review).
-  "reason.grant.otherRepo": "The folder now belongs to another repository. Add it again before granting authority.",
+  "reason.grant.otherRepo": "Der Ordner gehört jetzt zu einem anderen Repository. Füge ihn vor der Freigabe erneut hinzu.",
   // Native speaker must translate (needs native review).
-  "reason.grant.revoked": "The project grant was revoked.",
+  "reason.grant.revoked": "Die Projektfreigabe wurde widerrufen.",
   // Native speaker must translate (needs native review).
-  "error.journal.badId": "The mission or decision identifier is invalid.",
+  "error.journal.badId": "Die Kennung der Mission oder Entscheidung ist ungültig.",
   // Native speaker must translate (needs native review).
-  "error.store.write": "The changes could not be saved. Nothing was approved.",
+  "error.store.write": "Die Änderungen konnten nicht gespeichert werden. Es wurde nichts genehmigt.",
   // Native speaker must translate (needs native review).
-  "error.store.read": "Saved records could not be read.",
+  "error.store.read": "Gespeicherte Einträge konnten nicht gelesen werden.",
   // Native speaker must translate (needs native review).
-  "error.store.corrupt": "Saved records are damaged.",
+  "error.store.corrupt": "Gespeicherte Einträge sind beschädigt.",
   // Native speaker must translate (needs native review).
-  "error.decision.option": "Enter a valid answer to this decision.",
+  "error.decision.option": "Gib eine gültige Antwort auf diese Entscheidung ein.",
   // Native speaker must translate (needs native review).
-  "error.decision.answered": "This decision has already been answered.",
+  "error.decision.answered": "Diese Entscheidung wurde bereits beantwortet.",
   // Native speaker must translate (needs native review).
-  "error.decision.person": "This decision needs your answer.",
+  "error.decision.person": "Diese Entscheidung erfordert deine Antwort.",
   // Native speaker must translate (needs native review).
   "reason.build.unavailable": "Die lokalen Build-Slots wurden nicht initialisiert.",
   // Native speaker must translate (needs native review).
   "reason.update.quiescence": "Die Aktualisierung wartet auf den Abschluss aktiver Vorgänge und das Schließen des Fensters.",
   // Native speaker must translate (needs native review).
-  "reason.git.repository": "Choose a folder that belongs to a Git repository.",
+  "reason.git.repository": "Wähle einen Ordner, der zu einem Git-Repository gehört.",
   // Native speaker must translate (needs native review).
-  "reason.git.base": "The starting Git revision could not be resolved.",
+  "reason.git.base": "Die Git-Ausgangsrevision konnte nicht aufgelöst werden.",
   // Native speaker must translate (needs native review).
-  "reason.git.ref": "The mission branch reference is invalid.",
+  "reason.git.ref": "Die Branch-Referenz der Mission ist ungültig.",
   // Native speaker must translate (needs native review).
-  "reason.git.command": "The Git operation failed.",
+  "reason.git.command": "Die Git-Operation ist fehlgeschlagen.",
   // Native speaker must translate (needs native review).
-  "reason.git.unknown": "Native Git is unavailable or could not be checked.",
+  "reason.git.unknown": "Natives Git ist nicht verfügbar oder konnte nicht geprüft werden.",
   "reason.remote.ghMissing": "Die GitHub-CLI (gh) ist nicht installiert. Deine Arbeit bleibt lokal, bis sie es ist.",
   "reason.remote.ghLoggedOut": "Die GitHub-CLI ist nicht angemeldet. Führe gh auth login aus und versuche es erneut.",
   "reason.remote.target": "Der Branch, das Remote oder der zu veröffentlichende Text ist ungültig.",
@@ -615,33 +628,68 @@ export const de: Messages = {
   "reason.grant.noAccount": "Die Freigabe nennt kein GitHub-Konto. Sieh dir die Startkarte noch einmal an.",
   "decision.remote.merge": "Diesen Pull Request als bereit markieren und mergen?",
   // Native speaker must translate (needs native review).
-  "reason.grant.noAuthor": "Set a Git author before granting commit authority.",
+  "reason.grant.noAuthor": "Lege einen Git-Autor fest, bevor du die Commit-Berechtigung erteilst.",
   // Native speaker must translate (needs native review).
-  "reason.grant.newer": "This git grant needs a newer version of Faber.",
+  "reason.grant.newer": "Diese Git-Freigabe erfordert eine neuere Version von Faber.",
   // Native speaker must translate (needs native review).
-  "error.journal.newer": "These mission records need a newer version of Faber.",
+  "error.journal.newer": "Diese Missionseinträge erfordern eine neuere Version von Faber.",
   // Native speaker must translate (needs native review).
-  "error.store.full": "The disk is full. Nothing was approved.",
+  "error.store.full": "Der Datenträger ist voll. Es wurde nichts genehmigt.",
   // Native speaker must translate (needs native review).
-  "reason.interrupted": "Paused at the last saved checkpoint.",
+  "reason.interrupted": "Am letzten gespeicherten Prüfpunkt pausiert.",
   // Native speaker must translate (needs native review).
-  "error.plan.tooBig": "The mission plan exceeds the task limit.",
+  "error.plan.tooBig": "Der Missionsplan überschreitet das Aufgabenlimit.",
   // Native speaker must translate (needs native review).
-  "error.plan.badId": "The mission plan has an invalid task identifier.",
+  "error.plan.badId": "Der Missionsplan enthält eine ungültige Aufgabenkennung.",
   // Native speaker must translate (needs native review).
-  "error.plan.duplicateTask": "The mission plan repeats a task identifier.",
+  "error.plan.duplicateTask": "Der Missionsplan wiederholt eine Aufgabenkennung.",
   // Native speaker must translate (needs native review).
-  "error.plan.missingTask": "A task depends on a task that is missing.",
+  "error.plan.missingTask": "Eine Aufgabe hängt von einer fehlenden Aufgabe ab.",
   // Native speaker must translate (needs native review).
-  "error.plan.cycle": "The mission plan has circular dependencies.",
+  "error.plan.cycle": "Der Missionsplan enthält zirkuläre Abhängigkeiten.",
   // Native speaker must translate (needs native review).
-  "error.plan.duplicateDeliverable": "Two tasks claim the same deliverable.",
+  "error.plan.duplicateDeliverable": "Zwei Aufgaben beanspruchen dasselbe Lieferobjekt.",
   // Native speaker must translate (needs native review).
-  "error.plan.badPath": "The mission plan names a path outside its scope.",
+  "error.plan.badPath": "Der Missionsplan nennt einen Pfad außerhalb seines Umfangs.",
   // Native speaker must translate (needs native review).
-  "error.plan.readOnlyWrites": "A read-only task claims permission to write files.",
+  "error.plan.readOnlyWrites": "Eine schreibgeschützte Aufgabe beansprucht die Berechtigung zum Schreiben von Dateien.",
   // Native speaker must translate (needs native review).
-  "error.plan.overlap": "Unordered writers overlap the same source files.",
+  "error.plan.overlap": "Nicht geordnete Schreibvorgänge überschneiden dieselben Quelldateien.",
   // Native speaker must translate (needs native review).
   "crumb.separator": "\u203a",
+  // Right-click menus (ui/ContextMenu.tsx).
+  // Native speaker must translate (needs native review).
+  "menu.label": "Aktionen",
+  // Native speaker must translate (needs native review).
+  "menu.rename": "Umbenennen",
+  // Native speaker must translate (needs native review).
+  "menu.renameLabel": "Name der Unterhaltung",
+  // Native speaker must translate (needs native review).
+  "menu.delete": "Löschen",
+  // Native speaker must translate (needs native review).
+  "menu.newHere": "Neue Unterhaltung in diesem Projekt",
+  // Native speaker must translate (needs native review).
+  "menu.openFolder": "Ordner öffnen",
+  // Native speaker must translate (needs native review).
+  "menu.removeProject": "Aus Faber entfernen",
+  // Native speaker must translate (needs native review).
+  "menu.removeConfirm": "Entfernen?",
+  // Native speaker must translate (needs native review).
+  "menu.copy": "Kopieren",
+  // Native speaker must translate (needs native review).
+  "menu.cut": "Ausschneiden",
+  // Native speaker must translate (needs native review).
+  "menu.paste": "Einfügen",
+  // Native speaker must translate (needs native review).
+  "menu.selectAll": "Alles auswählen",
+  // Native speaker must translate (needs native review).
+  "menu.redo": "Wiederholen",
+  // Native speaker must translate (needs native review).
+  "error.project.busy": "In diesem Projekt arbeitet noch etwas. Beende es zuerst und entferne dann das Projekt.",
+  // Native speaker must translate (needs native review).
+  "error.folder.notLocal": "Dieser Ordner liegt nicht auf diesem Computer, deshalb öffnet Faber ihn nicht.",
+  // Native speaker must translate (needs native review).
+  "error.folder.missing": "Dieser Ordner ist nicht mehr da.",
+  // Native speaker must translate (needs native review).
+  "error.folder.link": "Dieser Ordner ist eine Verknüpfung zu einem anderen Ort, deshalb öffnet Faber ihn nicht. Öffne den echten Ordner im Dateimanager.",
 };

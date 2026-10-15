@@ -241,13 +241,13 @@ check('projects review: missing build slots stay explicit; quota freshness is se
   ok(root.querySelector('.pace-card')?.textContent?.includes('4%'));
 }));
 
-check('projects review AS-4: rendered composer gap is 64 px at both heights', () => withProjects(async (root) => {
+check('projects review AS-4: the goal composer keeps a 32 px gap under the lead at both heights', () => withProjects(async (root) => {
   const field = root.querySelector<HTMLTextAreaElement>('#mission-goal')!;
   for (const text of ['', 'Three\nlines\nhere']) {
     field.value = text; field.dispatchEvent(new Event('input', { bubbles: true })); await settle(300);
     const composer = root.querySelector('.composer')!.getBoundingClientRect();
-    const preceding = root.querySelector('.composer-container')!.previousElementSibling!.getBoundingClientRect();
-    ok(Math.abs(composer.top - preceding.bottom - 64) < 0.01, 'real 64 px gap, including flex gap');
+    const preceding = root.querySelector('.lead')!.getBoundingClientRect();
+    ok(Math.abs(composer.top - preceding.bottom - 32) < 0.01, 'the same gap as the new conversation, the 64 px of R104 belongs to the thread');
   }
 }));
 
@@ -373,7 +373,7 @@ check('projects AS-3: all five locales reject mojibake in the rendered breadcrum
 });
 
 // AS-4: 64 px thread/composer gap
-check('projects AS-4: rendered gap above the composer is 64 px per R104', async () => {
+check('projects AS-4: rendered gap above the goal composer is 32 px, the 64 px of R104 belongs to the thread', async () => {
   const root = document.createElement('div');
   root.style.cssText = 'position:fixed;left:0;top:0;width:800px;height:700px';
   root.dataset.motion = 'none';
@@ -385,11 +385,10 @@ check('projects AS-4: rendered gap above the composer is 64 px per R104', async 
 
   try {
     await settle(40);
-    const container = root.querySelector<HTMLElement>('.composer-container');
-    ok(container !== null, 'composer container must be rendered');
-    const previous = container.previousElementSibling!.getBoundingClientRect();
-    const composer = container.querySelector('.composer')!.getBoundingClientRect();
-    ok(Math.abs(composer.top - previous.bottom - 64) < 0.01, 'rendered gap must be 64 px per R104');
+    const lead = root.querySelector<HTMLElement>('.lead');
+    ok(lead !== null, 'the lead must be rendered');
+    const composer = root.querySelector('.composer')!.getBoundingClientRect();
+    ok(Math.abs(composer.top - lead.getBoundingClientRect().bottom - 32) < 0.01, 'rendered gap must be 32 px');
   } finally {
     dispose();
     root.remove();
@@ -418,7 +417,7 @@ check('projects: start card offers the two presence choices with parked install 
     await settle(20);
     equal(buttons[1]?.getAttribute('aria-pressed'), 'true');
     const note = root.querySelector('[role="note"]');
-    ok(note?.textContent?.includes('parked'), 'parked notice is displayed when findTools is chosen');
+    ok(note?.textContent?.includes('not ready yet'), 'the install-not-ready notice is displayed when findTools is chosen');
   } finally {
     dispose();
     root.remove();

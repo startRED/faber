@@ -1,5 +1,6 @@
 import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from 'solid-js';
 import type { Choice, Effort, Vendor } from './api.ts';
+import { Ghost } from './Ghost.tsx';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 import type { Option } from './models.ts';
@@ -23,6 +24,9 @@ interface Props {
   /** A conversation is still opening: nothing can be sent or warmed until it is in. */
   locked?: boolean;
   placeholder: string;
+  /** Hints that take the place of the placeholder while the empty field idles (ui/Ghost.tsx); the placeholder stays for
+   * reduced motion and for readers of the screen. */
+  hints?: string[];
   onSend: (draft: Draft) => void;
   onStop: () => void;
   onWarm: () => void;
@@ -71,6 +75,7 @@ async function attach(list: Iterable<File>, draft: Draft): Promise<{ draft: Draf
 export function Composer(props: Props) {
   const [draft, setDraft] = createSignal<Draft>(EMPTY);
   const [names, setNames] = createSignal<string[]>([]);
+  const [focused, setFocused] = createSignal(false);
   let warmed = false;
   let pause: ReturnType<typeof setTimeout> | undefined;
   onCleanup(() => clearTimeout(pause));
@@ -163,6 +168,8 @@ export function Composer(props: Props) {
         rows={1}
         placeholder={props.placeholder}
         value={draft().text}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
         onInput={(e) => {
           const text = e.currentTarget.value;
           setDraft((d) => ({ ...d, text }));
@@ -189,6 +196,9 @@ export function Composer(props: Props) {
           queueMicrotask(() => el.focus());
         }}
       />
+      <Show when={props.hints && !hasContent()}>
+        <Ghost hints={props.hints!} focused={focused()} />
+      </Show>
       <div class="cbar">
         <button type="button" class="iconbtn" aria-label={t('composer.attach')} title={t('composer.attach')} onClick={() => fileInput?.click()}>
           <Icon name="clip" />

@@ -72,9 +72,11 @@ export function watchSystem(): () => void {
   };
   const onVisibility = () => {
     setHidden(document.hidden);
-    // The CSS animations of the effects pause with the window, like the dust loop does.
+    // Every CSS animation pauses with the window (styles.css, `html.hidden-win`); the timers of idle life end with the signal.
     document.documentElement.classList.toggle('hidden-win', document.hidden);
   };
+  // A window that starts hidden (a start to the tray) is paused from its first frame.
+  onVisibility();
   systemReduces.addEventListener('change', onMotion);
   document.addEventListener('visibilitychange', onVisibility);
   return () => {

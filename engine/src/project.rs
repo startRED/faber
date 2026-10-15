@@ -43,6 +43,30 @@ pub fn valid_id(id: &str) -> bool {
     (1..=64).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
+/// Whether a mission of this project is planning or running, read from the records under `repo` and the checkpoints under
+/// `data_dir`. It fails closed: a folder of records or a record that cannot be read counts as running, because an
+/// unreadable state cannot be told from a live one. Only a missing `.faber/missions` means there is none.
+pub fn has_active_mission(repo: &std::path::Path, data_dir: &std::path::Path, project_id: &str) -> bool {
+    let entries = match std::fs::read_dir(repo.join(".faber").join("missions")) {
+        Ok(entries) => entries,
+        Err(e) => return e.kind() != std::io::ErrorKind::NotFound,
+    };
+    entries.into_iter().any(|entry| {
+        let Ok(entry) = entry else { return true };
+        let id = entry.file_name().to_string_lossy().into_owned();
+        if !valid_id(&id) {
+            return false;
+        }
+        let Ok(journal) = store::Journal::open(repo, data_dir, &id) else { return true };
+        match run::Runner::open(&journal) {
+            Ok(runner) => {
+                runner.mission.project_id == project_id && matches!(runner.mission.state, MissionState::Planning | MissionState::Running)
+            }
+            Err(_) => true,
+        }
+    })
+}
+
 /// A path inside the repository, with forward slashes and no `.` parts; "" is the whole repository. None for anything
 /// that could point outside it: an empty or absolute path, a drive or stream (`:`), or a `..` part. Symlinks, junctions
 /// and case on disk are the git broker's to resolve; this is only the text.
