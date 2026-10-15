@@ -1,5 +1,83 @@
 # Task 13: self-development acceptance
 
+## T13 final result (2026-10-15 UTC): a real coordinator mission lands and a real candidate is built; the real canary waits, so promotion, probation and rollback are not reached
+
+Decision R135 (`faber-notas/decisoes.md`) set the rules for this run. Claude Code 2.1.296 and Codex 0.162.1, hidden, no
+visible window, no shell for any child process. The owner's checkout, `E:\Apps\Faber` and the owner's running app were
+not touched.
+
+**Passed for real**
+
+- **A production coordinator.** `Coordinator` (engine) reads each role's kept reply and drives Lead, Writer, red proof,
+  green proof, other-vendor Reviewer and landing through the journal. One real Faber goal ran in Seguro mode on a clone
+  of a baseline that carries a staged regression: `settle()` in `engine/src/usage.rs` added a resumed turn's trusted
+  total instead of subtracting it. The Lead (Claude Haiku) planned one writer task, the Writer (Claude Haiku) patched
+  the line on a lease, the engine ran `usage::tests::a_resumed_turn_costs_the_difference` red on the base and green on
+  the exact tree, a fresh Codex Luna Reviewer passed that tree, and the engine landed it on `faber/<mission>` with the
+  owner branch untouched. Sixteen landed missions are recorded; each cost **US$0.0050 to 0.0059** API-equivalent
+  (for example Haiku 1,015 + 3,561 and Luna 1,211 millionths). Their ledgers sum to US$0.0906; with the interrupted and
+  refused attempts the whole run stayed well under US$0.20 (cap US$2.00).
+- **Positive Resume, once.** The harness refuses the first Writer start with a Wait, then the product path
+  (`Runner::load(..).resume(..)`) moves the mission Paused to Running with grant revision 3 unchanged and no invocation
+  added (`lead-1` before and after); a new coordinator then continues. Seen in every landed run.
+- **A real candidate was staged by the running baseline.** The baseline (slot A, started by the trusted launcher on a
+  hidden desktop) found the landing, froze the exact tree, built the candidate in about 6 minutes (release, offline,
+  locked), and its saved-data round trip with both the old and the new binary passed. It reached `canaryPending` at
+  about 412 s.
+- **The real canary child ran and refused to pass.** The candidate's own `--faber-local-canary` ran in real mode and
+  answered `reason.budget.calibration` (a wait, not a failure). Nothing was waived.
+
+**Blocked, and exactly why**
+
+- **Real canary admission.** Production admission (R131/R132, the waiver is testkit-only and single-mission) needs a
+  measured weekly conversion or a bootstrap margin of two points under the day line. Claude's weekly meter read 0.44
+  against a day line of 3/7 = 0.4286 (negative margin, because the shared account is used heavily). A mission that costs
+  US$0.006 never moves a 1% weekly meter: in ten reruns no Claude seven-day tick happened, so no conversion was learned.
+  The line moves to 4/7 at 2026-10-16 07:59:59 UTC (margin about 0.13), but the reused qualification receipts expire at
+  about 03:15 UTC, so the run needs fresh receipts first. The canary waits and the build stays ready; it was never
+  forced to pass and the offline replay never counts as a pass.
+- **Not reached, so not claimed:** promotion into slot B, the accepted revision being the running one, the 300 s
+  probation, and the bounded rollback drill (`drill` in `promote.rs` runs only after a Healthy promotion, and it uses a
+  crashing candidate with an injected verdict, so it proves recovery only). The fixture tests for these stay
+  "simulated".
+
+**Defects the real run found and fixed** (a regression test each unless noted)
+
+- A real mission's grant did not sum to its ceiling and the canary share overflowed; `mission_grant` splits it so each
+  role's largest turn is admitted.
+- `calibrate_mission` failed on a reading stamped in the same second; it now waits out the stamp.
+- The saved-data probe read the engine's `budget.json` (a ledger) as a bare budget and refused every real data folder
+  with `error.update.invalidState`; it now round-trips the ledger.
+- The slot's environment lacked the profile and toolchain variables a real candidate needs.
+- The worker contract named `ping` but not its values; a Lead answered `"ping":0` and the envelope was refused as
+  `error.wire.malformed`. The contract now lists the six strings (test keeps them in step with the enum).
+- The Reviewer dropped the required `next` field of a complete action (also `error.wire.malformed`); the brief and the
+  contract now say to keep it. Found by capturing the raw refused text (a temporary debug line, removed).
+- The native build writes `src-tauri/gen` into the frozen source, so the "build modified accepted source" check always
+  failed on a real build; that folder is now treated like `dist` and `node_modules`, and only the exact folder is
+  exempt (test).
+- The canary fixtures are compared byte for byte, but a baseline built from a checkout that converts line endings
+  carries CRLF copies and the candidate (built from git blobs) LF ones: "canary fixture changed". `.gitattributes` now
+  pins them as `-text`.
+- Provider readings of a rolling Codex window can leave `first.read_at <= start` for one second at 0% usage; the
+  harness retries with a fresh data folder (a product-side wait is the same outcome).
+
+**Cost and RAM.** Real spend: about US$0.12 API-equivalent in total, all on the subscriptions. The hidden engine worker
+idles at 3 to 5 MB; with a CLI turn running the tree is 83 to 160 MB. While the engine's own proof compiles the clone,
+the whole process tree peaks at 1.3 to 1.6 GB (rustc and cargo, counted in the tree). The full app with its window
+and the baseline slot were not sampled in a real run.
+
+Timings of one run: Lead about 100 s, positive Resume about 170 to 220 s, Writer and proofs to about 380 to 420 s, landing
+and calibration at about 400 s; candidate build about 6 min after that.
+
+**What needs the owner.** Fresh qualification receipts and a new run after 2026-10-16 07:59:59 UTC (or a day when
+Claude's weekly meter has room), then the promotion, probation and rollback gates can be observed. Nothing in the
+safety rules was loosened to get here.
+
+---
+
+# Earlier result (superseded by the final result above)
+
 ## T13 takeover result (2026-10-15 UTC): receipts and a real seam mission pass; canary, install, rollback and Resume are blocked
 
 Decisions R133 and R134 (`faber-notas/decisoes.md`) set the rules for this run. Everything below was observed on the
@@ -408,14 +486,14 @@ command log paths, calculated bounds, interruption metadata and accurate audit.
 
 | Gate | Status | Evidence / remaining |
 | --- | --- | --- |
-| G1 Authority | Passed real for the seam; autonomous mission not run | Receipts issued for both vendors; a real Claude Writer ran under a lease with an owned process tree, retired by `worker_termination` before any broker IO; native denial and stop probes pass. No coordinator drives roles in production. |
-| G2 Spending | Passed real for the seam | R132 single-use waiver (marker retained), caps and grant admitted, both invocations settled at US$0.001374, `calibrate_mission` Ready. All 17 attempts sum to US$0.0131. No second mission or normal-R88 admission tested. |
-| G3 Scheduling | Not passed | One scripted task; no scheduler or live graph. |
-| G4 Acceptance | Passed real for the seam | Engine-run red (exit 1) then green (exit 0) proof on the exact tree, fresh other-vendor review of that tree, landing on the mission ref, `report.json` written. Tokens per role are `unknown` because no coordinator recorded them. |
-| G5 Recovery | Simulated only | Fixture recovery and once-only bound reconciliation; real rollback and public positive Resume are blocked behind the canary. |
-| G6 Self-update | Blocked | `probe_canary` returns `NotRun` by design and no code produces `Pass`; the install/rollback tests inject the verdict and copy a prebuilt launcher (simulated). Needs the production coordinator first. |
-| G7 Resources | Partial real | Hidden harness tree (engine plus live CLI) idle 2 MB, peak 125 MB with the Writer running, 29 MB with the Reviewer. The full app with its window was not measured in a real mission; scripted scenarios peak at 220 MB. |
-| G8 Real use | Not passed | The mission ran on a throwaway repository from a harness, not a Seguro mission started from the product. |
+| G1 Authority | Passed real | Receipts for both vendors (reused, under 24 h); the production coordinator ran Claude Lead and Writer and a Codex Reviewer under leases with owned process trees; native denial and stop probes pass. |
+| G2 Spending | Passed real, one mission at a time | Caps and a split grant admitted under the R132 single-mission waiver (testkit-only); every invocation settled; 16 missions at US$0.005 to 0.006 each, whole run about US$0.12. Normal R131 admission without the waiver was refused for the canary (see G6), correctly. |
+| G3 Scheduling | Not passed | One writer task per mission; no scheduler or live graph. |
+| G4 Acceptance | Passed real | Engine-run red then green proof on the exact tree, fresh other-vendor review, landing on the mission ref, for a real bug fixed by the mission (`usage::tests::a_resumed_turn_costs_the_difference`). |
+| G5 Recovery | Positive Resume passed real; rollback simulated only | Resume consumed no extra invocation and left grant revision 3 unchanged, seen in every run. The bounded rollback drill was not reached (it runs after a Healthy promotion); fixture recovery tests stay simulated. |
+| G6 Self-update | Blocked: real canary waits | A real candidate was staged and built by the running baseline and its data round trip passed; the real canary answered `reason.budget.calibration` (Claude weekly 0.44 above the 3/7 day line, no weekly conversion learnable from a US$0.006 mission). Promotion, "accepted revision is the running one", probation and rollback not reached. Never waived; the install and rollback tests that inject the verdict stay simulated. |
+| G7 Resources | Partial real | Engine worker idle 3 to 5 MB, 83 to 160 MB with a CLI turn, 1.3 to 1.6 GB tree peak while the proof compiles the clone. The full app with its window and the slot were not sampled in a real run. |
+| G8 Real use | Partial real | A real Faber goal in Seguro mode on a clone of a real baseline with a staged regression, started through the coordinator from a harness, not from the product window. |
 | G9 Kits | Partial real | Qualification passed for both vendors (Claude hooks by flags, Codex sources by path and hash). Kits were assembled with an empty inventory; no real tool kit ran. |
 | G10 Software bar | Not passed | No real software-bar acceptance. |
 | AS-1 Motion | Passed, scripted | Hidden frame/reduced-motion checks. |
@@ -424,9 +502,9 @@ command log paths, calculated bounds, interruption metadata and accurate audit.
 | AS-4 Gap | Passed, scripted | Hidden 64 px checks. |
 | AS-5 Windows | Partial real | All live work ran in owned hidden jobs with no window, no shell and sanitized environment; no real install or update audit. |
 | AS-6 Disk | Not passed | The throwaway worktree and records are retained as evidence; no real promotion or cleanup run. |
-| AS-7 Specific plan | Not passed | The plan was written by the harness, not by a Lead. |
+| AS-7 Specific plan | Passed real | The Lead (Claude Haiku) wrote the plan: one writer task naming `engine/src/usage.rs`. |
 | AS-8 Dual vendors | Passed real for the seam | Writer on Claude Haiku, fresh Reviewer on Codex Luna, each with its own settled receipt. |
-| AS-9 Questions | Not passed | No Lead ran, so no question log. |
+| AS-9 Questions | Not passed | The Lead asked nothing on this goal, so no question log was exercised. |
 
 Earlier seven-point review disposition stays in the archived report. Proof
 dispatch, marker readback and the dirty-owner baseline were addressed. Reserved
@@ -435,19 +513,17 @@ metrics. Audit `unchanged` compares to its already-dirty baseline, not git HEAD.
 
 ## Remaining
 
-Open items, in the order a real autonomous run needs them:
+Open items, in the order a real run needs them:
 
-1. **A production coordinator.** Something must read the kept replies (\`Journal::reply\`, \`Journal::refusal\`), apply
-   patches under the lease, run the named proofs, choose the next role and record tokens per role. The seam harness
-   shows each engine call it makes, in order.
-2. **A canary that can pass.** The candidate must run its own miniature mission and write a receipt that
-   \`verify_canary_handshake\` accepts; today it only acknowledges startup. Then a sandbox build, install, rollback and a
-   positive exactly-once Resume can be proven for real.
-3. **Account readings.** Provider readings are stamped to the whole second and R131 rejects one from the future
-   within the same second; harmless in practice, worth rounding.
-4. PR #19 stays draft; pushed-head CI is recorded in the final report.
+1. **The real canary pass.** Needs a day when Claude's weekly meter has room (margin of two points under the day line)
+   or a measured weekly conversion, and fresh qualification receipts (24 h). Then promotion, probation, the running
+   revision check and the rollback drill can be observed for real; the harness (`--live-promote`) already does them.
+2. **A canary that does not depend on a quota tick.** A mission this small cannot move a 1% weekly meter, so a busy
+   shared account can keep the real canary waiting for days. The owner decides whether a smaller admission rule for a
+   canary-sized spend is acceptable; it was not changed here.
+3. PR #19 stays draft; pushed-head CI is recorded in the final report.
 
-Known gaps in this slice, not hidden: \`Termination\` still has public fields, so fixtures elsewhere can write a literal
-(only \`from_retired\` is derived from a real retirement); the receipt folder is fixed by the first \`Engine\` a process
+Known gaps in this slice, not hidden: `Termination` still has public fields, so fixtures elsewhere can write a literal
+(only `from_retired` is derived from a real retirement); the receipt folder is fixed by the first `Engine` a process
 creates; a Claude CLI found only as an npm script launcher never qualifies; the macOS build of the new cfg-gated code
 was not compiled here (CI will).
