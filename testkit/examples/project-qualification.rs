@@ -187,6 +187,7 @@ fn run() -> io::Result<()> {
             "FABER_T13_SOURCE",
             "FABER_T13_BRANCH",
             "FABER_T13_PROOF_TARGET",
+            "FABER_T13_REGRESSED",
         ] {
             if let Ok(value) = std::env::var(name) {
                 env.insert(name.to_string(), value);

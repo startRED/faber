@@ -434,6 +434,27 @@ fn executable_data_probe_round_trips_real_records_and_extensions_without_writes(
 }
 
 #[test]
+fn the_engine_budget_file_is_a_ledger_with_mission_spending_inside_and_round_trips() {
+    let dir = area();
+    let data = dir.path().join("data");
+    fs::create_dir(&data).unwrap();
+    let mut ledger = faber_engine::ledger::Ledger::default();
+    ledger.extra.insert("missionBudget".into(), serde_json::to_value(faber_engine::project::budget::Budget::default()).unwrap());
+    ledger.extra.insert("fromANewerFaber".into(), serde_json::json!({"keep": [1, 2]}));
+    faber_engine::store::Store::new(&data).save_ledger(&ledger).unwrap();
+    let output = dir.path().join("probe.json");
+    probe_saved_data(&data, &output).unwrap();
+    let receipt: serde_json::Value = serde_json::from_slice(&fs::read(output).unwrap()).unwrap();
+    assert_eq!(receipt["budget.json"]["fromANewerFaber"]["keep"], serde_json::json!([1, 2]));
+    assert!(receipt["budget.json"]["missionBudget"].is_object());
+    // Spending that does not read back is refused.
+    let mut broken = faber_engine::ledger::Ledger::default();
+    broken.extra.insert("missionBudget".into(), serde_json::json!({"schema": 99}));
+    faber_engine::store::Store::new(&data).save_ledger(&broken).unwrap();
+    assert!(probe_saved_data(&data, &dir.path().join("probe2.json")).is_err());
+}
+
+#[test]
 fn user_open_really_cancels_quiescence_and_requires_a_fresh_canary() {
     let dir = area();
     let dev = config(dir.path());

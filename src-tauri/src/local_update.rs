@@ -656,7 +656,14 @@ pub fn probe_saved_data(root: &Path, output: &Path) -> Result<()> {
         *record = match name {
             "runtime.json" => round_trip::<faber_engine::project::Runtime>(record)?,
             "grant.json" => round_trip::<Grant>(record)?,
-            "budget.json" => round_trip::<faber_engine::project::budget::Budget>(record)?,
+            // The engine writes its whole quota ledger to budget.json; the mission spending is a field inside it.
+            "budget.json" => {
+                let ledger = round_trip::<faber_engine::ledger::Ledger>(record)?;
+                let parsed: faber_engine::ledger::Ledger =
+                    serde_json::from_value(ledger.clone()).map_err(|_| invalid("incompatible saved record"))?;
+                faber_engine::project::budget::Budget::load(&parsed).map_err(|_| invalid("incompatible saved record"))?;
+                ledger
+            }
             "ledger.json" => round_trip::<faber_engine::ledger::Ledger>(record)?,
             "mission.json" => round_trip::<faber_engine::project::Mission>(record)?,
             "plan.json" => round_trip::<faber_engine::project::Plan>(record)?,
