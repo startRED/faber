@@ -37,6 +37,8 @@ pub enum EngineEvent {
         session_id: String,
         model: String,
     },
+    /// The CLI accepted a turn on the session. The session may have no saved history until the turn shows output.
+    TurnStarted,
     Text(String),
     /// A new block of text starts (for example after a tool ran), so it must not run into the previous one.
     Break {

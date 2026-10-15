@@ -123,6 +123,7 @@ mod tests {
                     approved: false,
                     started: 0.0,
                     served: false,
+                    unsaved_session: None,
                     steering: vec![],
                 },
             );

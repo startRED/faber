@@ -860,8 +860,17 @@ async fn attachments_are_saved_in_the_workspace_and_named_in_the_turn() {
 #[test]
 fn a_model_joining_midway_gets_the_earlier_conversation_as_text() {
     let history = [Message::new("1".into(), Role::User, "hi".into(), 0), Message::new("2".into(), Role::Assistant, "hello".into(), 0)];
-    let text = faber_engine::engine::with_history(&history, "and now?");
+    let text = faber_engine::engine::with_history(&history, "and now?", &|n| n.to_string());
     assert!(text.ends_with("User: hi\n\nAssistant: hello\n\nNow the user says:\nand now?"));
+    // Files stay reachable by name and place; images cannot go as text, so the count says they are missing.
+    let mut with_files = history.clone();
+    with_files[0].attachments = Some(vec!["notes.pdf".into()]);
+    with_files[0].images = Some(vec![faber_engine::model::Image { media_type: "image/png".into(), base64: "AAAA".into() }; 2]);
+    let text = faber_engine::engine::with_history(&with_files, "and now?", &|n| format!("attachments/{n}"));
+    assert!(
+        text.contains("User: hi\n[attached file: attachments/notes.pdf]\n[2 image(s) sent here are not included]\n\nAssistant: hello"),
+        "{text}"
+    );
 }
 
 #[test]

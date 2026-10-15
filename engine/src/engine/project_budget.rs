@@ -570,6 +570,7 @@ mod tests {
                     cwd: ".".into(),
                     permissions: crate::model::Permissions::Ask,
                     served: false,
+                    unsaved_session: None,
                 },
             );
             c.remove(&id);

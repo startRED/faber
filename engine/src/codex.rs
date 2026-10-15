@@ -829,6 +829,9 @@ async fn serve(
                                 t.watch.activity();
                                 if method == Some("turn/started") {
                                     t.turn = params["turn"]["id"].as_str().map(String::from);
+                                    if !t.blocked {
+                                        (t.sink)(EngineEvent::TurnStarted);
+                                    }
                                 }
                                 if method == Some("turn/completed") {
                                     t.turn = None;

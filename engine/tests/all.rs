@@ -97,6 +97,8 @@ mod route;
 mod route_pacing;
 #[path = "running.rs"]
 mod running;
+#[path = "session_resume.rs"]
+mod session_resume;
 #[path = "signals.rs"]
 mod signals;
 #[path = "simulation.rs"]
