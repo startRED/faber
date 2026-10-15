@@ -246,6 +246,17 @@ inside its own area.
 - With no AI connected, the greeting, the suggestions and the list give way to an empty state with Curioso and a button
   that opens account management. The composer stays on screen but cannot send.
 
+### Recent folders and environments
+
+The "Open a project" screen (Projects with none open) and the Chat folder setting list the last five folders used, newest
+first, one click each: a short name and the dimmed parent path. The engine judges each one when the list is read
+(`recents` command, `engine/src/recents.rs`): a folder that is gone or refused by R124 shows dimmed with its reason and
+cannot be picked, and a refused folder is never stored. Right-click on a row opens a one-line menu, "Remove from recents".
+In the project area a "+" on each row builds a selection that can be opened at once or saved as a named environment (up to
+12 environments, 8 folders each; the same name replaces). Starting an environment opens the folders that still exist as
+projects. Faber has no worktree creation for projects, so an environment has no "own worktree" flag. Both lists live in
+`recents.json` next to `settings.json`, written through a temp file and renamed.
+
 ### Running column
 
 - One block per project, plus one "Chat" block. Each row shows the vendor's shape (a neutral dot while Auto is still

@@ -428,6 +428,23 @@ export const en = {
   "quota.seven_day_opus": "Opus · 7 days",
   "quota.seven_day_sonnet": "Sonnet · 7 days",
   "quota.seven_day_haiku": "Haiku · 7 days",
+  "recents.title": "Recent folders",
+  "recents.choose": "Choose a folder",
+  "recents.select": "Select {name}",
+  "recents.forget": "Remove from recents",
+  "reason.recents.gone": "Folder not found",
+  "reason.recents.refused": "Faber does not work in this folder",
+  "env.title": "Environments",
+  "env.selected": "Selected: {names}",
+  "env.name": "Name for these folders",
+  "env.save": "Save as environment",
+  "env.start": "Open now",
+  "env.forget": "Remove environment",
+  "error.environment.name": "Give the environment a name.",
+  "error.environment.folders": "Select at least one folder.",
+  "error.environment.full": "There are 12 environments already. Remove one first.",
+  "error.environment.gone": "This environment is gone.",
+  "error.recents.gone": "This folder no longer exists.",
 } as const;
 
 export type Key = keyof typeof en;

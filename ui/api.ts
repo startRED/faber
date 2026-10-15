@@ -274,6 +274,23 @@ export interface ShellTexts {
   notify: string;
 }
 
+/** A recent folder as the engine judged it just now: `reason` is a translation key when it cannot be picked. */
+export interface FolderView {
+  path: string;
+  name: string;
+  parent: string;
+  reason?: string | null;
+}
+export interface EnvironmentView {
+  id: string;
+  name: string;
+  folders: FolderView[];
+}
+export interface RecentsView {
+  folders: FolderView[];
+  environments: EnvironmentView[];
+}
+
 // Typed calls into the engine (the commands in src-tauri/src/lib.rs).
 export const api = {
   state: () => invoke<AppState>('state'),
@@ -292,7 +309,14 @@ export const api = {
   sendQueued: (id: string, turnId: string) => invoke<void>('send_queued', { id, turnId }),
   removeProject: (id: string) => invoke<void>('remove_project', { id }),
   addProject: () => invoke<Project | null>('add_project'),
-  chatFolder: (id: string | undefined, scratch = false) => invoke<Conversation | null>('chat_folder', { id: id ?? null, scratch }),
+  chatFolder: (id: string | undefined, scratch = false, path?: string) =>
+    invoke<Conversation | null>('chat_folder', { id: id ?? null, scratch, path: path ?? null }),
+  recents: () => invoke<RecentsView>('recents'),
+  openFolders: (paths: string[]) => invoke<Project[]>('open_folders', { paths }),
+  forgetRecent: (path: string) => invoke<void>('forget_recent', { path }),
+  saveEnvironment: (name: string, folders: string[]) => invoke<void>('save_environment', { name, folders }),
+  forgetEnvironment: (id: string) => invoke<void>('forget_environment', { id }),
+  startEnvironment: (id: string) => invoke<Project[]>('start_environment', { id }),
   previewLook: (appearance: Appearance) => invoke<Look>('preview_look', { appearance }),
   saveSettings: (patch: Settings) => invoke<SavedSettings>('save_settings', { patch }),
   saveTheme: (appearance: Appearance, name: string) => invoke<boolean>('save_theme', { appearance, name }),
