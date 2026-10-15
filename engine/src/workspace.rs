@@ -14,11 +14,20 @@ pub struct Attachment {
 }
 
 /// Writes attached files into `dir` under safe, unique names and returns the full paths.
-pub fn save_files(dir: &Path, files: &[Attachment]) -> Vec<PathBuf> {
-    let _ = fs::create_dir_all(dir);
+pub fn save_files(root: &Path, dir: &Path, files: &[Attachment]) -> Vec<PathBuf> {
+    // Host-generated paths may have a trusted Windows 8.3 root (RUNNER~1). Check only the relative
+    // operand, preserving the shared policy's traversal, junction and protected-file guards.
+    let writable = |path: &Path| {
+        path.strip_prefix(root).is_ok_and(|relative| {
+            crate::permissions::allows(root, "Write", &serde_json::json!({ "file_path": relative.to_string_lossy() }))
+        })
+    };
+    if !writable(dir) || fs::create_dir_all(dir).is_err() {
+        return vec![];
+    }
     files
         .iter()
-        .map(|file| {
+        .filter_map(|file| {
             let name = file.name.replace('\\', "/");
             let name = name.rsplit('/').next().unwrap_or_default();
             let mut clean: String = name.chars().map(|c| if (c as u32) < 32 || "<>:\"|?*".contains(c) { '_' } else { c }).collect();
@@ -31,13 +40,19 @@ pub fn save_files(dir: &Path, files: &[Attachment]) -> Vec<PathBuf> {
             };
             let mut path = dir.join(&clean);
             let mut n = 1;
+            if !writable(&path) {
+                return None;
+            }
             while path.exists() {
                 path = dir.join(format!("{stem}-{n}{ext}"));
                 n += 1;
+                if !writable(&path) {
+                    return None;
+                }
             }
-            let bytes = base64::engine::general_purpose::STANDARD.decode(&file.base64).unwrap_or_default();
-            let _ = fs::write(&path, bytes);
-            path
+            let bytes = base64::engine::general_purpose::STANDARD.decode(&file.base64).ok()?;
+            fs::write(&path, bytes).ok()?;
+            Some(path)
         })
         .collect()
 }
@@ -61,6 +76,13 @@ fn walk(root: &Path, folder: &Path, since: u64, found: &mut Vec<FileInfo>) {
             return;
         }
         let path = entry.path();
+        let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().into_owned();
+        if matches!(entry.file_name().to_str(), Some(".git" | ".faber"))
+            || !crate::permissions::allows(root, "Read", &serde_json::json!({ "file_path": rel }))
+            || entry.file_type().is_ok_and(|kind| kind.is_symlink())
+        {
+            continue;
+        }
         let Ok(meta) = entry.metadata() else { continue };
         if meta.is_dir() {
             if !(folder == root && entry.file_name() == "attachments") {
@@ -96,5 +118,5 @@ pub fn inside_folder(dir: &Path, path: &str) -> Option<PathBuf> {
             _ => return None,
         }
     }
-    (depth > 0).then_some(full)
+    (depth > 0 && crate::permissions::allows(dir, "Read", &serde_json::json!({ "file_path": path }))).then_some(full)
 }

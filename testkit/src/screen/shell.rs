@@ -63,7 +63,7 @@ pub fn scenarios() -> Vec<Scenario> {
     ]
 }
 
-fn set_size(page: &mut Page, width: u32, height: u32) -> Result {
+pub(super) fn set_size(page: &mut Page, width: u32, height: u32) -> Result {
     let size = json!({ "width": width, "height": height, "deviceScaleFactor": 1, "mobile": false });
     page.cdp.call("Emulation.setDeviceMetricsOverride", size)?;
     // The screen follows `resize`, which comes a moment after the override.
@@ -296,13 +296,19 @@ fn fits_large_text(ctx: &mut Ctx) -> Result {
 }
 
 /// A launch that stops at a question: the recording asks to write two files and waits for the answers.
-pub(super) fn two_writes(ctx: &Ctx) -> Launch {
-    Launch {
+pub(super) fn two_writes(ctx: &Ctx) -> Result<Launch> {
+    // Card scenarios explicitly choose Ask; the app's default now applies to Chat too.
+    let path = ctx.sb.data.join("settings.json");
+    let mut settings: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    settings["permissions"] = "ask".into();
+    std::fs::write(path, settings.to_string()).map_err(|e| e.to_string())?;
+    Ok(Launch {
         claude: CliSlot::Fake,
         codex: CliSlot::Off,
         recording: Some(ctx.paths.fixtures.join("claude/tools.jsonl")),
         ..Launch::default()
-    }
+    })
 }
 
 /// Sends the request and returns once the first question has been asked.
@@ -316,7 +322,7 @@ pub(super) fn ask_two_writes(page: &mut Page) -> Result {
 
 fn opens_by_itself(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
-    let launch = two_writes(ctx);
+    let launch = two_writes(ctx)?;
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
     ask_two_writes(page)?;
@@ -367,7 +373,7 @@ fn opens_by_itself(ctx: &mut Ctx) -> Result {
 /// button is amber on first paint and the column opens once.
 fn opens_at_load(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
-    let launch = two_writes(ctx);
+    let launch = two_writes(ctx)?;
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
     ask_two_writes(page)?;
@@ -384,7 +390,7 @@ fn opens_at_load(ctx: &mut Ctx) -> Result {
 
 fn overlays_the_stage(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
-    let launch = two_writes(ctx);
+    let launch = two_writes(ctx)?;
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
     set_size(page, 1000, 700)?;
@@ -425,7 +431,7 @@ fn overlays_the_stage(ctx: &mut Ctx) -> Result {
 
 fn opens_a_running_conversation(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
-    let launch = two_writes(ctx);
+    let launch = two_writes(ctx)?;
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
     ask_two_writes(page)?;
@@ -450,11 +456,13 @@ fn opens_a_running_conversation(ctx: &mut Ctx) -> Result {
 
 fn opens_a_project_conversation(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
+    let mut settings: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(ctx.sb.data.join("settings.json")).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?;
+    settings["permissions"] = "ask".into();
+    std::fs::write(ctx.sb.data.join("settings.json"), settings.to_string()).map_err(|e| e.to_string())?;
     // One project, so the screen can send into it.
-    let folder = ctx.sb.data.join("demo");
-    std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
-    let projects = json!([{ "id": "demo", "name": "Demo", "path": folder.to_string_lossy() }]);
-    std::fs::write(ctx.sb.data.join("projects.json"), projects.to_string()).map_err(|e| e.to_string())?;
+    seed_project(ctx, "Demo")?;
     let conversations = ctx.sb.data.join("conversations");
     std::fs::create_dir_all(&conversations).map_err(|e| e.to_string())?;
     let saved = json!({"id":"legacy", "title":"Legacy history", "area":"project", "projectId":"demo",
@@ -612,7 +620,7 @@ pub(super) fn seed(ctx: &Ctx, id: &str, title: &str, project: Option<&str>, at: 
 }
 
 /// Writes `projects.json` with one project, `demo`, and its folder.
-fn seed_project(ctx: &Ctx, name: &str) -> Result {
+pub(super) fn seed_project(ctx: &Ctx, name: &str) -> Result {
     let folder = ctx.sb.data.join("demo");
     std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
     let projects = json!([{ "id": "demo", "name": name, "path": folder.to_string_lossy() }]);
@@ -685,7 +693,7 @@ fn waits_for_the_conversation(ctx: &mut Ctx) -> Result {
 
 fn leaves_the_greeting_composer(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
-    let launch = two_writes(ctx);
+    let launch = two_writes(ctx)?;
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
     set_size(page, 1099, 700)?;
@@ -717,7 +725,7 @@ fn leaves_the_greeting_composer(ctx: &mut Ctx) -> Result {
 
 fn keeps_focus_in_dialogs(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
-    let launch = two_writes(ctx);
+    let launch = two_writes(ctx)?;
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
     set_size(page, 1000, 700)?;
@@ -786,7 +794,8 @@ fn keys_until_the_question(page: &mut Page, chords: &[&str]) -> Result<std::time
         pause(0.3);
         if page.is_visible(&card)? {
             after += 1;
-            if after >= 4 && turn % chords.len() == chords.len() - 1 {
+            // Finish the whole key cycle: its net caret movement must not depend on when the question arrived.
+            if after >= 4 && (turn + 1) % chords.len() == 0 {
                 return Ok(last);
             }
         }
@@ -796,20 +805,24 @@ fn keys_until_the_question(page: &mut Page, chords: &[&str]) -> Result<std::time
 
 fn waits_for_every_key(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
-    let launch = two_writes(ctx);
+    let launch = two_writes(ctx)?;
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
     let model = page.labelled("composer.model")?;
     page.select_option(&model, "Claude Haiku")?;
     delay_open(page, 800)?;
     ask(page, TWO_WRITES)?;
-    // The conversation opens and its composer is drawn; a few words go in, and the caret goes to 3 and comes back.
-    page.wait_for(
-        "the conversation to open",
-        "document.querySelector('.crumb b')?.textContent.length > 0 && !document.querySelector('.crumb b').textContent.includes('New')",
-    )?;
+    // The title can arrive before the snapshot replaces the welcome composer with the conversation's composer.
+    page.wait_visible(&css(".dock .composer textarea"))?;
+    page.wait_enabled(&model)?;
     let composer = page.labelled("composer.message")?;
+    // As in `ask`, establish native input focus on the replacement field before typing through DevTools.
+    page.click(&composer)?;
     page.fill(&composer, "hello")?;
+    page.wait_for(
+        "the typed text and its caret",
+        "(() => { const f = document.querySelector('.dock .composer textarea'); return document.activeElement === f && f.value === 'hello' && f.selectionStart === 5 && f.selectionEnd === 5; })()",
+    )?;
     page.press("ArrowLeft")?;
     page.press("ArrowLeft")?;
     let initial = page.eval_on(&composer, "return { text: el.value, at: el.selectionStart, end: el.selectionEnd };")?;
@@ -822,6 +835,11 @@ fn waits_for_every_key(ctx: &mut Ctx) -> Result {
     let closed_for = last.elapsed();
     ensure(closed_for < Duration::from_millis(1400), || format!("too slow to look: {closed_for:?}"))?;
     ensure(!page.is_visible(&css(".runcol"))?, || format!("the column opened {closed_for:?} after the last key"))?;
+    same(
+        page.eval_on(&composer, "return [el.selectionStart, el.selectionEnd];")?,
+        json!([3, 3]),
+        "the keys returned the caret to 3 before the column opens",
+    )?;
     page.wait_visible(&css(".runcol .ask").has_text("a.txt"))?;
     let waited = last.elapsed();
     ensure(waited >= Duration::from_millis(1450), || format!("the column opened {waited:?} after the last key"))?;
@@ -855,7 +873,7 @@ fn dismissal_sticks_narrow(ctx: &mut Ctx) -> Result {
 /// screen may open it narrower than a desk does.
 fn dismissal(ctx: &mut Ctx, reduce: bool, width: u32) -> Result {
     start_settings(ctx, "en")?;
-    let launch = two_writes(ctx);
+    let launch = two_writes(ctx)?;
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
     system_motion(page, reduce)?;

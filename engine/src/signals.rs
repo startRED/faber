@@ -127,3 +127,92 @@ pub fn claude_env_billed(names: impl IntoIterator<Item = std::ffi::OsString>) ->
     ];
     names.into_iter().any(|name| OVERRIDES.iter().any(|expected| name.to_string_lossy().eq_ignore_ascii_case(expected)))
 }
+
+/// What `claude -p /usage` printed: a local command that asks no model anything. Its text has one line per window ("Current
+/// session: 10% used · resets Oct 14, 11:29pm (America/Fortaleza)"); only the two vendor-wide windows are read, as
+/// (window, used 0 to 1, reset in Unix seconds). The reset time is printed in the PC's own time, so the screen's offset reads
+/// it; a line without a percentage or a reset time is skipped, and so is anything else in the text.
+pub fn claude_usage_windows(text: &str, now: f64, offset: i64) -> Vec<(&'static str, f64, f64)> {
+    text.lines()
+        .filter_map(|line| {
+            let (name, rest) = line.split_once(": ")?;
+            let window = match name.trim() {
+                "Current session" => "five_hour",
+                "Current week (all models)" => "seven_day",
+                _ => return None,
+            };
+            let used = rest.split('%').next()?.trim().parse::<f64>().ok().filter(|u| u.is_finite() && *u >= 0.0)? / 100.0;
+            let when = rest.split_once("resets ")?.1;
+            let resets = printed_time(when.split(" (").next()?.trim(), now, offset)?;
+            Some((window, used, resets))
+        })
+        .collect()
+}
+
+/// "Oct 20, 4:59am" or "11:29pm" (today, or tomorrow when that has passed) in local time, as Unix seconds. The text comes from
+/// a program Faber does not control, so nothing here may panic: only ASCII am/pm suffixes are read, the minute (0 to 59), the
+/// hour (1 to 12) and the day (1 to 31) are range-checked before any arithmetic, and the arithmetic is checked.
+fn printed_time(text: &str, now: f64, offset: i64) -> Option<f64> {
+    let (date, clock) = match text.rsplit_once(", ") {
+        Some((date, clock)) => (Some(date), clock),
+        None => (None, text),
+    };
+    let clock = clock.trim().to_ascii_lowercase();
+    let (hm, pm) = match (clock.strip_suffix("am"), clock.strip_suffix("pm")) {
+        (Some(hm), _) => (hm, false),
+        (_, Some(hm)) => (hm, true),
+        _ => return None,
+    };
+    let (h, m) = hm.trim().split_once(':').map_or((hm.trim(), "0"), |(h, m)| (h, m));
+    let (h, m): (i64, i64) = (h.parse().ok()?, m.parse().ok()?);
+    if !(1..=12).contains(&h) || !(0..=59).contains(&m) {
+        return None;
+    }
+    let hour = h % 12 + if pm { 12 } else { 0 };
+    let local_now = (now as i64).checked_add(offset)?;
+    let (year, month, day) = civil(local_now.div_euclid(86_400));
+    let at = |y: i64, mo: i64, d: i64| -> Option<f64> {
+        let seconds = days(y, mo, d).checked_mul(86_400)?.checked_add(hour * 3600 + m * 60)?.checked_sub(offset)?;
+        Some(seconds as f64)
+    };
+    match date {
+        Some(date) => {
+            let (name, d) = date.split_once(' ')?;
+            let mo = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
+                .iter()
+                .position(|n| name.to_ascii_lowercase().starts_with(n))? as i64
+                + 1;
+            let d: i64 = d.trim().parse().ok()?;
+            if !(1..=31).contains(&d) {
+                return None;
+            }
+            let this = at(year, mo, d)?;
+            if this < now - 86_400.0 { at(year.checked_add(1)?, mo, d) } else { Some(this) }
+        }
+        None => {
+            let today = at(year, month, day)?;
+            Some(if today < now { today + 86_400.0 } else { today })
+        }
+    }
+}
+
+/// Days since 1970-01-01 of a civil date, and back (proleptic Gregorian; Howard Hinnant's algorithms).
+fn days(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468
+}
+
+fn civil(z: i64) -> (i64, i64, i64) {
+    let z = z + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (yoe + era * 400 + i64::from(m <= 2), m, d)
+}

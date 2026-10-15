@@ -23,7 +23,7 @@ impl Vendor {
     }
 }
 
-/// Chat never touches the user's files; a project works inside a folder the user opened.
+/// Chat uses a chosen folder or a private scratch folder; a project uses the folder the user opened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Area {
@@ -54,6 +54,10 @@ pub struct Image {
     pub base64: String,
 }
 
+fn glance() -> String {
+    "glance".into()
+}
+
 /// Dispatch intent for a quota error that still offers explicit recovery after restart. Consent is never stored here.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Recovery {
@@ -61,6 +65,9 @@ pub struct Recovery {
     pub text: String,
     pub by_hand: bool,
     pub retried: bool,
+    /// The router's `check` for the request; files from before it was kept read as `glance`.
+    #[serde(default = "glance")]
+    pub check: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -72,6 +79,28 @@ pub struct ToolUse {
     pub ok: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
+    /// The user (or the CLI's own approval) refused the tool, so it never ran; `ok` is false but nothing failed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub declined: bool,
+}
+
+/// A request the CLI denied because nobody could answer it (full access runs with no prompts): it was not done, and it waits
+/// here until the person says what to do. `tool_use_id` names it, with the turn. Only safe metadata is kept, never the request
+/// itself: a command line or a header in it could carry a token (see `engine::parked::describe`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Parked {
+    pub tool_use_id: String,
+    pub tool: String,
+    #[serde(default)]
+    /// "command", "file", "page" or "other".
+    pub kind: String,
+    #[serde(default)]
+    /// A file path, or the host of a page; empty for a command and for any other tool. Cut short.
+    pub label: String,
+    #[serde(default)]
+    /// When it was held back, in milliseconds.
+    pub at: u64,
 }
 
 /// A permission request waiting for the user.
@@ -143,18 +172,33 @@ pub struct Message {
     pub cache_write_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_write_1h_tokens: Option<u64>,
+    /// When the prompt cache this turn wrote goes cold, in milliseconds. Claude only: Codex names no lifetime.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_warm_until: Option<u64>,
+    /// Requests the CLI denied in this turn for want of anyone to answer them (see `Parked`), oldest first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parked: Option<Vec<Parked>>,
+    /// How many more were denied in the turn beyond the few kept (see `parked::MAX_PARKED`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parked_more: Option<u32>,
     /// True when the token numbers cover only part of the turn (sub-model work, or no usage was seen).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub incomplete: Option<bool>,
     /// Why the quota changed the model Auto chose, when it did.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pace: Option<PaceNote>,
+    /// A plain-language note under the reply (an i18n key): `note.historyResent` when the earlier conversation was sent again as text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wait_until: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub moved_from: Option<Vendor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recovery: Option<Recovery>,
+    /// The next rung, offered when the turn's own tools show it stopped early (see `nudge`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nudge: Option<crate::nudge::Nudge>,
 }
 
 impl Message {
@@ -184,11 +228,16 @@ impl Message {
             cache_read_tokens: None,
             cache_write_tokens: None,
             cache_write_1h_tokens: None,
+            cache_warm_until: None,
+            parked: None,
+            parked_more: None,
             incomplete: None,
             pace: None,
             wait_until: None,
             moved_from: None,
+            note: None,
             recovery: None,
+            nudge: None,
         }
     }
 }
@@ -231,9 +280,19 @@ pub struct Conversation {
     pub area: Area,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
+    /// Chat's canonical folder, chosen before its first message. None uses Faber-owned scratch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_folder: Option<String>,
     /// One CLI session per vendor, so switching models keeps each vendor's own history and cache.
     #[serde(default)]
     pub sessions: BTreeMap<Vendor, String>,
+    /// A session id whose first turn was accepted but has not shown any output yet. It is not resumable like `sessions` (the CLI may
+    /// not have saved it), but a restart after a crash resumes it instead of starting a session that knows nothing of the turn.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tentative: BTreeMap<Vendor, String>,
+    /// Older sessions restart once with visible history to receive the host command tool.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub command_gate: bool,
     /// The cumulative cost each CLI session last reported, so a turn costs the difference (`usage::settle`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub cost_base: BTreeMap<Vendor, crate::usage::CostBase>,
@@ -364,6 +423,11 @@ pub struct RunningItem {
     pub since: u64,
     /// The questions the user has not answered yet.
     pub permissions: Vec<Permission>,
+    /// Requests the CLI denied in the latest reply that wait for the person (empty when none).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub parked: Vec<Parked>,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub parked_more: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wait_until: Option<f64>,
 }
@@ -390,7 +454,8 @@ pub struct QuotaReading {
 /// Why the quota changed the pick of Auto, shown under the model name.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaceNote {
-    /// `step` (one rung up, bought with quota that would expire) or `low` (moved away from a vendor that is running low).
+    /// `step` (one rung up, bought with quota that would expire), `fast` (moved away from a vendor that is being used faster than
+    /// its daily line) or `low` (moved away from a vendor that is really near its limit).
     pub kind: String,
     pub vendor: Vendor,
 }
@@ -404,6 +469,9 @@ pub struct Settings {
     /// Projects run the user's own CLI hooks too (off by default: a hook can block or slow every turn).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_hooks: Option<bool>,
+    /// Missing in older settings means commands run without asking in Chat and Projects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<Permissions>,
     /// Attention notifications and their chime are both on unless explicitly disabled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notifications: Option<bool>,
@@ -439,11 +507,46 @@ pub enum Experience {
     Experienced,
 }
 
+/// How a CLI session may act. `Ask` and `FullAccess` are the two choices on screen (R121); `Isolated` exists only inside Faber.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Permissions {
+    /// Commands and file changes wait for a card the person answers.
+    #[serde(rename = "ask")]
+    Ask,
+    /// "Do not ask": no cards, no sandbox around commands, network and the person's own integrations on. Only the CLI
+    /// credential folders stay blocked, where the CLI can enforce it. Stored as `dontAsk`.
+    #[default]
+    #[serde(rename = "dontAsk")]
+    FullAccess,
+    /// Faber's own isolated mode (R97, R107, R109): commands run in a native sandbox with no network, only the working
+    /// folder writable, integrations off and sensitive folders refused. For the model list, the router, internal checks and
+    /// the self-development roles. Never stored, never chosen by the person.
+    #[serde(skip)]
+    Isolated,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Setup {
     Done,
     Skipped,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
+}
+
+impl Conversation {
+    /// The session to continue for this vendor: the one that has shown output, else one whose turn was accepted and then cut off.
+    pub fn resumable(&self, vendor: Vendor) -> Option<&String> {
+        self.sessions.get(&vendor).or_else(|| self.tentative.get(&vendor))
+    }
+
+    /// Forgets every session of the vendor.
+    pub fn forget_session(&mut self, vendor: Vendor) {
+        self.sessions.remove(&vendor);
+        self.tentative.remove(&vendor);
+    }
 }
 
 #[cfg(test)]

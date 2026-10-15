@@ -309,6 +309,7 @@ fn permission(ctx: &mut Ctx) -> Result {
     };
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
+    page.eval("window.__TAURI_INTERNALS__.invoke('save_settings', { patch: { permissions: 'ask' } }).then(() => true)")?;
     let mut found = Vec::new();
     viewport(page, 1440, 900)?;
     // The machine's own motion preference is not under test (a runner may ask for less): pin it, as the motion scenario does.

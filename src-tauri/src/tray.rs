@@ -10,7 +10,7 @@ mod sound;
 
 use badge::{glyph, tray_png, tray_side, with_badge};
 pub(crate) use decide::ShellTexts;
-use decide::{Counts, Shown, Watch, decode_seen, delivery, notice_text, tooltip};
+use decide::{Counts, Shown, Watch, decode_seen, delivery, notice_text, parked_notice_text, tooltip};
 use faber_engine::model::RunningItem;
 use faber_engine::project::wire::MissionView;
 use std::collections::HashSet;
@@ -180,8 +180,18 @@ pub(crate) fn set_texts(app: &AppHandle, texts: ShellTexts) -> Result<(), String
     say(&s)
 }
 
-fn deliver_notices(app: &AppHandle, s: &State, settings: &faber_engine::model::Settings, notices: &[String]) {
-    for title in notices {
+/// What the notifications of one update say: the needs-you titles, then the requests held back for want of an answer.
+fn words(texts: &ShellTexts, update: &decide::Update) -> Vec<String> {
+    update
+        .notices
+        .iter()
+        .map(|title| notice_text(texts, title))
+        .chain(update.parked_notices.iter().map(|(title, n)| parked_notice_text(texts, title, *n)))
+        .collect()
+}
+
+fn deliver_notices(app: &AppHandle, settings: &faber_engine::model::Settings, words: &[String]) {
+    for text in words {
         // Recheck focus at delivery, in case the user returned while the tray picture was updating.
         let focused = crate::main_window(app).is_some_and(|w| w.is_focused().unwrap_or(false));
         #[cfg(windows)]
@@ -214,11 +224,11 @@ fn deliver_notices(app: &AppHandle, s: &State, settings: &faber_engine::model::S
         // plugin by notify-rust (already in Cargo.lock) if hand checks show a silent failure.
         #[cfg(not(target_os = "linux"))]
         // With no sound name, these backends use WinRT audio silent=true and macOS sound=None.
-        let result = app.notification().builder().title(notice_text(&s.texts, title)).show().map_err(|e| e.to_string());
+        let result = app.notification().builder().title(text).show().map_err(|e| e.to_string());
         // The Linux plugin cannot pass SuppressSound; keep desktop sounds off so the sound switch also means silence.
         #[cfg(target_os = "linux")]
         let result = notify_rust::Notification::new()
-            .summary(&notice_text(&s.texts, title))
+            .summary(text)
             .hint(notify_rust::Hint::SuppressSound(true))
             .show()
             .map(|_| ())
@@ -250,7 +260,7 @@ pub(crate) fn on_running(app: &AppHandle, revision: u64, items: &[RunningItem]) 
         s.counts = update.counts;
         show_counts(app, &s, side);
     }
-    deliver_notices(app, &s, &settings, &update.notices);
+    deliver_notices(app, &settings, &words(&s.texts, &update));
 }
 
 /// A mission view update from the engine: non-technical decisions become needs-you items.
@@ -283,7 +293,7 @@ pub(crate) fn on_mission(app: &AppHandle, view: &MissionView) {
         show_counts(app, &s, side);
     }
     if saved {
-        deliver_notices(app, &s, &settings, &update.notices);
+        deliver_notices(app, &settings, &words(&s.texts, &update));
     }
 }
 

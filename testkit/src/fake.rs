@@ -92,7 +92,14 @@ pub fn run(env: &Env, args: &[String], stdin: &mut dyn BufRead, stdout: &mut dyn
             writeln!(stdout, "{}", json!({ "loggedIn": true, "subscriptionType": "max", "authMethod": "claude.ai" }))?;
             return Ok(0);
         }
-        return session(Dispatch::new(load(&env.recording)?, None, false, true), false, stdin, stdout, stderr);
+        // The real CLI prints its help and exits. Replaying a session here would wait for input until the startup probe gave
+        // up, leaving a live process (and its console host) behind for the audit to find. The help names no newer flags, so the
+        // app keeps its ordinary arguments in every screen test.
+        if args.iter().map(String::as_str).eq(["--help"]) {
+            writeln!(stdout, "Usage: claude [options] [prompt]\n\nOptions:\n  -p, --print   Print the response and exit")?;
+            return Ok(0);
+        }
+        return session(Dispatch::new(load(&env.recording)?, None, false, true), env.state_dir.as_deref(), false, stdin, stdout, stderr);
     }
     let setup: Setup = serde_json::from_str(&std::fs::read_to_string(&env.recording)?).map_err(io::Error::other)?;
     let state = env.state_dir.as_deref().ok_or_else(|| io::Error::other("Setup replay requires an isolated FABER_FAKE_STATE_DIR"))?;
@@ -153,12 +160,33 @@ fn setup_run(
     }
     let dir = env.recording.parent().unwrap_or(Path::new("."));
     let models = setup.models.as_ref().map(|m| dir.join(m));
-    session(Dispatch::new(load(&dir.join(&setup.chat))?, models, !claude, marker.exists()), true, stdin, stdout, stderr)
+    session(Dispatch::new(load(&dir.join(&setup.chat))?, models, !claude, marker.exists()), Some(state), true, stdin, stdout, stderr)
+}
+
+/// A recorded line with this key is not sent: the replay stops there until the scenario creates `RELEASE` in the state
+/// folder (at most a minute), so a screen check can look at the app in the middle of an answer.
+const HOLD: &str = "faber_hold";
+const RELEASE: &str = "release";
+
+/// Whether a recorded line is the hold marker itself: its own field, not a mention of it inside some text.
+fn is_hold(line: &str) -> bool {
+    serde_json::from_str::<Value>(line).is_ok_and(|v| v.get(HOLD).is_some())
+}
+
+fn hold(state: Option<&Path>) {
+    let Some(file) = state.map(|s| s.join(RELEASE)) else { return };
+    for _ in 0..1200 {
+        if file.exists() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
 }
 
 /// Replays until stdin ends. A setup run exits 1 on a difference; a plain run only reports it on stderr.
 fn session(
     mut dispatch: Dispatch,
+    state: Option<&Path>,
     strict: bool,
     stdin: &mut dyn BufRead,
     stdout: &mut dyn Write,
@@ -170,7 +198,12 @@ fn session(
             continue;
         }
         for out in dispatch.feed(&line)? {
-            writeln!(stdout, "{out}")?;
+            if is_hold(&out) {
+                stdout.flush()?;
+                hold(state);
+            } else {
+                writeln!(stdout, "{out}")?;
+            }
         }
         stdout.flush()?;
     }
@@ -245,6 +278,35 @@ mod tests {
         assert_eq!(code.unwrap(), 0);
         assert!(out.is_empty());
         assert!(err.contains("sent user \"something else\""), "{err}");
+    }
+
+    #[test]
+    fn a_hold_marker_is_never_sent_and_waits_for_the_release_file() {
+        let held = fixtures().join("claude/chat-held.jsonl");
+        let first = load(&held).unwrap().into_iter().find(|e| e.input).unwrap().msg.to_string();
+        let state = tempfile::tempdir().unwrap();
+        std::fs::write(state.path().join(RELEASE), "").unwrap();
+        let (code, out, err) = drive(
+            held,
+            Some(state.path().to_path_buf()),
+            &[],
+            &format!(
+                "{first}
+"
+            ),
+        );
+        assert_eq!(code.unwrap(), 0);
+        assert!(out.contains("Rayleigh") && !out.contains(HOLD), "{out}");
+        assert!(is_hold(r#"{"faber_hold":true}"#));
+        assert!(!is_hold(r#"{"type":"assistant","text":"the faber_hold marker"}"#));
+        assert!(err.is_empty(), "{err}");
+    }
+
+    #[test]
+    fn help_prints_and_exits_instead_of_replaying_a_session() {
+        let (code, out, _) = drive(fixtures().join("claude/deny-wins.jsonl"), None, &["--help"], "");
+        assert_eq!(code.unwrap(), 0);
+        assert!(out.contains("Usage: claude") && !out.contains("--permission-prompts") && !out.contains("--autocompact"), "{out}");
     }
 
     #[test]

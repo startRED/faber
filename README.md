@@ -9,7 +9,7 @@ It runs on Windows, macOS and Linux, with Windows first.
 
 It has two areas:
 
-- **Chat**: many conversations, no folders, never touches your files. Pick a model or Auto, and always see which model
+- **Chat**: many conversations, with an optional working folder; whether it may change files follows the permission you set. Pick a model or Auto, and always see which model
   answered and, in Auto, why. Each conversation has a hidden workspace where the model runs code and creates files. The
   goal is to beat claude.ai and ChatGPT.
 - **Projects**: open a folder, like in Claude Code, and keep many projects with many conversations each.

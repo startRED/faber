@@ -1,4 +1,4 @@
-mod support;
+use crate::support;
 
 use faber_engine::cli::Cli;
 use faber_engine::engine::Ask;
@@ -222,6 +222,9 @@ async fn with_only_claude_the_router_process_starts_while_the_user_types() {
         choice: Choice { vendor: "auto".into(), model: None, effort: None },
     });
     assert_eq!(routers(), 1, "a cold Claude takes about 9 s, so the router starts at the first keystroke");
+    // R124: the router is Faber's own request. It runs without the person's hooks, settings files and MCP servers.
+    let router = f.args.lock().unwrap().iter().find(|a| a.contains(&"--system-prompt".to_string())).cloned().unwrap();
+    crate::support::assert_no_user_customizations(&router);
     engine.send(auto(SKY)).unwrap();
     engine.shutdown();
     assert_eq!(routers(), 1, "the question goes to the router that was already waiting");
@@ -238,4 +241,45 @@ async fn stop_while_the_route_is_coming_stops_the_answer() {
     let reply = engine.open(&id).unwrap().messages[1].clone();
     engine.shutdown();
     assert_eq!(reply.status, Some(Status::Stopped));
+}
+
+/// R121: the router has no tools and reads nothing, and its Codex process is the isolated one in every mode, apart from the
+/// process a conversation gets for the mode the person chose.
+#[tokio::test]
+async fn r121_the_codex_router_starts_its_own_isolated_process_while_conversations_follow_the_chosen_mode() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("codex", "chat"));
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let opts = EngineOptions {
+        data_dir: dir.path().into(),
+        clis: BTreeMap::from([(Vendor::Codex, Cli { command: "codex".into(), prefix: vec![] })]),
+        spawn: f.spawn.clone(),
+        windows: false,
+        claude_env_billed: false,
+        max_warm: 3,
+        idle: Duration::from_secs(120),
+        runtime: tokio::runtime::Handle::current(),
+        ask: None,
+    };
+    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
+    engine.set_codex_models(vec!["gpt-6.1-sol".into(), "gpt-6-luna".into()], Some("gpt-6.1-sol".into()));
+    engine.warm(WarmRequest {
+        conversation_id: None,
+        area: Area::Chat,
+        project_id: None,
+        choice: Choice { vendor: "auto".into(), model: None, effort: None },
+    });
+    let isolated = faber_engine::codex::codex_args(Area::Chat, false, false, faber_engine::model::Permissions::Isolated);
+    assert_eq!(f.args.lock().unwrap().as_slice(), &[isolated], "the router starts the isolated process, in the default mode");
+    engine.warm(WarmRequest {
+        conversation_id: None,
+        area: Area::Chat,
+        project_id: None,
+        choice: Choice { vendor: "codex".into(), model: None, effort: None },
+    });
+    let args = f.args.lock().unwrap().clone();
+    assert_eq!(args.len(), 2);
+    assert_eq!(args[1], ["app-server"], "a conversation in the default mode, full access, gets the plain process");
+    assert_ne!(args[0], args[1]);
+    engine.shutdown();
 }

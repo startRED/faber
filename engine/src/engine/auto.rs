@@ -75,7 +75,7 @@ impl Core {
 
     fn quota_allows(&self, vendor: Vendor, family: Option<&str>, purpose: Purpose, approved: bool) -> Result<(), Why> {
         let now = self.secs();
-        let mut snap = self.ledger.of(vendor).snap(now);
+        let mut snap = self.snap(vendor, now);
         if vendor == Vendor::Claude && self.opts.claude_env_billed {
             snap.billing = Billing::UsageBilled;
         }
@@ -109,7 +109,7 @@ impl Core {
             })
             .collect();
         let known: BTreeMap<Vendor, (Snap, Shape)> =
-            vendors.iter().map(|v| (*v, (self.ledger.of(*v).snap(now), self.ledger.of(*v).shape()))).collect();
+            vendors.iter().map(|v| (*v, (self.snap(*v, now), self.ledger.of(*v).shape()))).collect();
         let factor = |p: &Profile| {
             let (snap, shape) = &known[&p.vendor];
             Factor {
@@ -118,7 +118,7 @@ impl Core {
                 step_ok: snap.step_ok(now),
             }
         };
-        choose_paced(verdict.kind, verdict.difficulty, verdict.confidence, &usable, &factor)
+        choose_paced(verdict.kind, verdict.difficulty, verdict.check, verdict.confidence, &usable, &factor)
     }
 
     /// While the user types in Auto.
@@ -127,8 +127,6 @@ impl Core {
         if req.choice.vendor != "auto" || text.is_empty() {
             return;
         }
-        // The first keystroke in Auto is the moment to ask Claude Code for a fresh reading, if the one held is old.
-        self.pulse_if_due();
         let id = self.draft_for(&req);
         let Some(route) = self.next_route(&id) else { return };
         let only = route.map(|p| p.vendor);
@@ -285,9 +283,10 @@ impl Core {
         let (cwd, instructions) = (self.opts.data_dir.clone(), Some(instructions.to_string()));
         let (model, effort) = (Some(model.to_string()), Some(effort.to_string()));
         let session = match vendor {
-            Vendor::Codex => self
-                .codex_server(Area::Chat, false, &cli)
-                .open(CodexThread { cwd, model, effort, resume: None, instructions, user_name: None }, sink),
+            Vendor::Codex => self.codex_server(Area::Chat, false, Permissions::Isolated, &cli).open(
+                CodexThread { cwd, model, effort, resume: None, instructions, user_name: None, permissions: Permissions::Isolated },
+                sink,
+            ),
             Vendor::Claude => start_claude(
                 ClaudeOptions {
                     bin: cli.command.clone(),
@@ -298,10 +297,13 @@ impl Core {
                         effort,
                         resume: None,
                         user_hooks: false,
+                        permissions: Permissions::Isolated,
                         instructions,
                         user_name: None,
+                        flags: self.claude_flags,
                     },
                     spawn: spawner(&self.opts.spawn, &cli),
+                    sandbox: None,
                 },
                 sink,
             ),
@@ -333,6 +335,9 @@ impl Core {
                 self.guess.as_mut().filter(|g| g.result.is_none() && g.warm.is_none() && g.waiters.iter().all(|w| w.is_closed()))
         {
             stop_router(g.stop.take());
+        }
+        if let (Some(r), Some(t)) = (&routed, self.transfers.get_mut(id)) {
+            t.check = r.check;
         }
         let pick = routed.map(|r| r.pick()).unwrap_or(fallback);
         if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id)) {
@@ -369,7 +374,7 @@ impl Core {
         }
         let codex = self.opts.clis.get(&Vendor::Codex).cloned().filter(|_| self.codex_models.iter().any(|m| m == ROUTER[0].1));
         if let Some(cli) = codex {
-            self.codex_server(Area::Chat, false, &cli);
+            self.codex_server(Area::Chat, false, Permissions::Isolated, &cli);
             return;
         }
         let Some(spare) = self.open_router().filter(|s| s.vendor == Vendor::Claude) else { return };

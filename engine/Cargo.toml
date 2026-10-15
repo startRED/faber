@@ -5,6 +5,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+# One test program for every file in tests/ (see tests/all.rs), plus the memory test that must run alone.
+autotests = false
 
 [features]
 # R132: lets the qualification harness waive the R131 day-line margin for exactly one mission. Only `testkit` turns it on,
@@ -26,8 +28,10 @@ uuid = { version = "1", features = ["v4"] }
 zip = { version = "4", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
-win32job = "2"
 winreg = "0.56"
+# Job objects (a CLI and everything it starts are ended together); the safe wrapper keeps this crate free of unsafe code.
+win32job = "2"
+faber-winproc = { path = "../winproc" }
 
 [target.'cfg(unix)'.dependencies]
 # Safe directory-relative file operations; already used by the workspace's dependencies.
@@ -42,3 +46,15 @@ tokio = { version = "1", features = ["test-util"] }
 
 [lints]
 workspace = true
+
+[target.'cfg(windows)'.dev-dependencies]
+# Standard Rust cannot create junctions on stable, and symlinks require privileges on the maintainer's PC.
+junction = "2"
+
+[[test]]
+name = "engine"
+path = "tests/all.rs"
+
+[[test]]
+name = "install_memory"
+path = "tests/install_memory.rs"

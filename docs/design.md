@@ -97,6 +97,10 @@ own inks.
   0.97 scale for cards and menus. Cards use a 2 px arrival blur; overlays use an 8 px static backdrop blur.
 - New items rise up to 6 px over 200 to 240 ms; exits take 180 ms. Buttons respond in 140 to 240 ms. The "running" dot pulses every 1.6 to 2 s.
   Workshop only fades and never moves anything vertically.
+- Frequency decides whether something moves at all. Anything the user does dozens of times a minute (a keystroke, a
+  shortcut, a tab or row switch, a row hover) changes instantly or with a 150 ms fade of colour or opacity at most;
+  expressive motion is for rare moments (first run, a finished task, an empty state). Motion is never the only
+  signal: every animated change also leaves a static cue (colour, icon or label).
 - Reduced motion and no motion both remove every animation and transition. A system that asks for less motion
   caps the user's level, and a change in the system setting changes only the level.
 - The running column slides and fades; its thread uses a short measured width transition so glyphs never stretch.
@@ -111,9 +115,10 @@ own inks.
   View Transitions when available and apply immediately otherwise; no dependency or retained screen is needed.
 
 ### Effects
-- Effects appear only on the two homes (the new conversation of Chat and the first screen of a project), never behind
-  text the user reads. Every animation, including the composer's idle life, pauses while the window is hidden
-  (`html.hidden-win` sets `animation-play-state: paused`) and is gone with reduced or no motion.
+- Effects appear only on the two homes (the new conversation of Chat and the first screen of a project) and behind a new
+  project session, never behind text the user reads. Every animation, including the composer's idle life, pauses while the
+  window is hidden (`html.hidden-win` sets `animation-play-state: paused`); the effects also stop while another app has the
+  focus (`html.away-win`), and they are gone with reduced or no motion.
 - Slow ambient loops step on a shared 1 s beat (`steps()`) instead of drawing 60 frames a second: idle CPU follows the
   frames per second, not what changes in them. Dark Room's idle home costs about 10% of one core against 49% before.
 - The Projects home has its own light: the beam leans the other way, the loom runs slower and the flow line reads
@@ -121,11 +126,24 @@ own inks.
 - The empty composer idles (`ui/Ghost.tsx`): a blinking typing bar and a hint that changes every 8 s. It renders
   nothing while the field has text or focus, with reduced or no motion, or while the window is hidden; the plain
   placeholder stays underneath for assistive technology.
-  - **Dark Room:** a static projector beam, a glow that breathes every 7 s and 72 dust grains (CSS shadows that twinkle on the compositor, no canvas loop) that fade
-    out near any text block.
+  - **Dark Room:** a static projector beam, a glow that breathes every 7 s and 72 dust grains (CSS shadows) that fade
+    out near any text block. A timer sets the opacity of the glow and the three dust layers ten times a second, which
+    the compositor alone applies; as CSS animations they made a 240 Hz screen composite the stage on every frame.
   - **Workshop:** a loom at the bottom right whose shuttle crosses every 9 s, and paper grain.
   - **Workbench:** a flow line at the top right reading "Your idea → Claude and Codex → Done, with proof". It names only
     the vendors that are connected.
+- The first screen of a project (where a new session starts) in Dark Room also shows a black hole drawn in monospace
+  characters on one canvas (ui/Hole.tsx, --amb-hole and --hole-colors): a huge shadow cut by the right edge, an amber disk sweeping in from the lower left
+  with fibres that turn faster near the hole, the far side of the disk bent over the top as a cool arc, a photon ring, a
+  dim glow, a small planet below it and stars. Its size follows the room right of the text; words stay clear and the
+  scene dims within 240 px of them.
+  Ten times a second it works out again only the cells the hole can reach and repaints those that changed; stars
+  twinkle every 700 ms and now and then one shoots across. A click on an empty spot sends a ring of the accent for
+  1.3 s. It stops when the window is hidden or unfocused; reduced or no motion draws one still frame and no ripple.
+  It opens with an entrance of about 2.8 s, once per new session, only with full motion in a shown, focused window:
+  Curioso rises from behind his ledge and leans toward the hole, a spark leaves his eyes and flies a curve into the
+  shadow, and the scene lights up from there outward, each character scrambling in the accent for 240 ms before it
+  settles. Losing focus or hiding the window ends it at once.
 - The texture switch controls grain and the dot grid. The glow switch controls the focus light and the amber light,
   which exist only in Dark Room and Cobalt; the other themes use borders.
 
@@ -152,7 +170,7 @@ own inks.
 - **Inside the app** the mark and the lockup always use the ink colour, never lime, because lime sits too close to
   amber for the colour validator. The titlebar shows the lockup in every theme.
 - **Empty states and the tutorial** use Curioso, static, for example peeking into an empty screen. The new conversation
-  screen has none. Curioso does not animate yet. He is 64 px, in the third ink, peeking over a hairline: only his top 44 px
+  screen has none. He moves only in the entrance of a new project session in Dark Room (below). He is 64 px, in the third ink, peeking over a hairline: only his top 44 px
   show, eyes included (`Peek` in `ui/Mark.tsx`). Today he is in the two Projects empty states.
 - **The wordmark** is "Faber" in Rubik Bold, converted to outlines. No font file ships.
 
@@ -237,6 +255,17 @@ inside its own area.
 - With no AI connected, the greeting, the suggestions and the list give way to an empty state with Curioso and a button
   that opens account management. The composer stays on screen but cannot send.
 
+### Recent folders and environments
+
+The "Open a project" screen (Projects with none open) and the Chat folder setting list the last five folders used, newest
+first, one click each: a short name and the dimmed parent path. The engine judges each one when the list is read
+(`recents` command, `engine/src/recents.rs`): a folder that is gone or refused by R124 shows dimmed with its reason and
+cannot be picked, and a refused folder is never stored. Right-click on a row opens a one-line menu, "Remove from recents".
+In the project area a "+" on each row builds a selection that can be opened at once or saved as a named environment (up to
+12 environments, 8 folders each; the same name replaces). Starting an environment opens the folders that still exist as
+projects. Faber has no worktree creation for projects, so an environment has no "own worktree" flag. Both lists live in
+`recents.json` next to `settings.json`, written through a temp file and renamed.
+
 ### Running column
 
 - One block per project, plus one "Chat" block. Each row shows the vendor's shape (a neutral dot while Auto is still
@@ -256,8 +285,50 @@ inside its own area.
 - Settings replaces the shell, as before, with a list of five sections on the left: General, Appearance, Connected
   accounts, Usage limits and Privacy. Ctrl comma opens it on General, the quota of a vendor in the sidebar opens it on
   Usage limits, and Esc or Back closes it.
-- General has the language and the switch that lets Projects run the person's own CLI hooks. A switch saves at once and
-  goes back to where it was if the save is refused.
+- General has the language, name, CLI hooks switch and Permissions choice. "Don't ask" is the default for new and
+  existing settings; "Ask before commands" preserves the previous behavior. Choices save at once and stay at the saved
+  value if the save fails. R107 applies the same default to Chat. Chat uses its chosen canonical folder
+  (fixed before the first message), or private per-conversation scratch; deletion/draft cleanup never removes a chosen
+  folder. General explains the rule and offers the folder choice.
+- R121 (it replaces the next item for the two choices on screen): "Don't ask" is full access. No approval cards, commands
+  run without Faber's sandbox and with network, WebFetch and WebSearch work, any folder can be the working folder, and the
+  person's own MCP servers, plugins and hooks stay on, as in the CLI itself. Claude Code runs in bypass mode with Read and
+  Edit deny rules for the credential folders (`.claude`, `.codex`, `.gemini`, `.ssh` and the other key files, and where a
+  documented variable moved them), which apply in bypass mode to its file tools but not to arbitrary commands. Codex runs with
+  `danger-full-access` and `never` approvals and has no way to block reads of the credential folders in that mode (see the
+  R121 section of [the R97 security review](security-r97-review.md)). Ask names its modes (Claude `default`, Codex
+  `untrusted`) and carries the same credential denies and the same refusal of forwarded credential requests; it asks except for
+  what the person pre-allowed in the tool's own settings. The system and credential folders are refused as working folders, judged
+  by their resolved path (R124, R124b), and Faber's own requests never run the person's hooks. A CLI and everything it started
+  end together (a Windows job object made before the CLI runs, failing closed; R124b, R124c). Settings shows the
+  details; the thread shows one calm line with a link to them. The isolated mode below is `Permissions::Isolated`: Faber's
+  own model list, router, internal checks and self-development roles use it, and the person cannot pick it.
+- No prompt can block a full-access turn. Where the installed Claude Code declares `--permission-prompts` as an option line in a successful `claude --help` (read once
+  at start, and again when a launch fails with "unknown option", which also drops the newer flags at once; present on 2.1.296), full access starts it with `--permission-mode bypassPermissions --permission-prompts none` and no host prompt
+  tool: a request that would have prompted is denied at once, listed in the turn's `permission_denials`, and kept on the reply as a
+  parked request, as safe metadata only (tool, a kind, a file path or a page host, the time; never a command or any input, which
+  could hold a token), at most 20 and 4 KB per turn with the rest counted ("+N more"). The row of the running list says "Needs you"
+  with a card that has no buttons (the CLI is past it, and the work was not done) until the next message. The tray notifies once
+  per turn ("N requests need you"), with a one-minute cooldown across turns (R92). It is never allowed on its own, and a request on a
+  credential folder is not parked at all: the deny rules refuse it for good. A CLI without the flag, Ask and the isolated mode start
+  as before. Faber's own Haiku workers and roles (the isolated mode and side questions) also start with `--autocompact 100k`, under the
+  100K step above which Haiku costs more, where the CLI lists that flag; every other launch keeps the CLI default.
+- R97/R107 (now the isolated mode only): bypass permissions with native deny rules for `.git` edits, credential directories
+  and key files; Codex uses `never` approvals with a workspace-only permission profile and sandbox network access disabled.
+  Native deny rules [apply even in bypass mode](https://code.claude.com/docs/en/permission-modes#available-modes), but
+  [command patterns are not an OS sandbox](https://code.claude.com/docs/en/permissions#what-a-bash-rule-doesnt-match).
+  Explicit ask rules [still prompt in bypass mode](https://code.claude.com/docs/en/permission-modes#actions-no-mode-auto-approves)
+  and reach Faber's automatic policy over stdio. It gates file reads/writes, read-only git and literal local deletions, resolving junctions and refusing
+  external or `.git` writes. Build/test tools and project entrypoints run through the installed native Codex sandbox
+  with the same profile, never through an unsandboxed fallback. Native Windows requires MXC support. Unsupported shell
+  syntax and arbitrary programs are declined without a card. Secret reads
+  are denied while environment templates and internal `.env` creation work. Git transports and GitHub authentication
+  are disabled in child commands. Both areas disclose the mode; tightening it stops current turns.
+  Don't ask loads only user settings to keep project env/hooks out of the host launcher. Chat also uses safe mode,
+  strict MCP configuration and its fixed tool list; Ask Chat retains restricted mode. Read-only shell commands and
+  deletions use the sandbox too; file tools retain their canonical path checks, including network-link guards.
+  Host file decisions, CLI startup customizations and external integrations are separate from command isolation;
+  see the verified findings and limits in [the R97 security review](security-r97-review.md).
 - Appearance is a draft. The six looks are small live renders; the controls (accent with a hex field, background, the two
   fonts, text size, density, corners, motion) and the three effect switches change the draft, and the preview panel on
   the right wears the answer of `preview_look` with the measured contrast of text, faint text and the accent. The panel
@@ -534,7 +605,10 @@ Every launch is sandboxed: a temporary home, an empty `PATH`, no provider variab
 CLI replays the recordings in `tests/fixtures/`). Each scenario is audited afterwards for leaked processes, writes outside
 the sandbox and a changed environment. The checks and the hooks that report them exist only in the test build
 (`--features test-hooks`, `vite build --mode test`); the production app and its `dist/` contain none of them. CI runs
-`cargo t --all` on all three systems and keeps the Windows screenshots as artifacts. Anything outside the page (tray,
+five jobs at once: lints with the `rust` and `ui` suites on Windows and macOS, and the `screen` suite on Windows in
+three parts (`cargo t --suite screen --shard 2/3`). The runner deals the scenarios so the parts take about the same
+time: the slowest first, each to the lightest part so far, using the CI seconds of the slowest few
+(`testkit/src/screen/mod.rs`, `SLOW`); any other counts as 5 s. CI keeps the Windows screenshots as artifacts. Anything outside the page (tray,
 notifications, installer, updates) is checked through the operating system's accessibility layer and file versions.
 
 Test launches also pass the browser engine switches that turn off crash reports and SmartScreen address lookups, and the
@@ -543,6 +617,35 @@ Nothing blocks the network at the operating system, and WebView2 has no document
 that bypasses the switches is not seen. The audit sees only requests that reach the fake release server.
 Known limit: the loopback-only rule is not enforced. Test processes get dead proxy variables and the switches above, but
 nothing stops a program from opening its own connection; blocking outbound traffic for test processes is deferred.
+
+### Build folder budget
+
+Each worktree builds into `target/<name>` of the main checkout (`faber-wt-projhome` into `target/projhome`), and Cargo
+never deletes old artifacts. The runner (`testkit/src/sweep.rs`, R106) sweeps that `target` before choosing the suites, at
+most once an hour (the `target/.faber-sweep` stamp), and prints a line only when it freed space:
+
+1. A `target/<name>` folder with a `CACHEDIR.TAG` whose worktree is gone (no `git worktree list` entry named `<name>` or
+   `*-<name>`) and that nothing used for a day is removed whole.
+2. In every build profile (a folder with `.fingerprint`, nested ones included), a file in `deps/` that a newer build of
+   the same crate and kind replaced more than a day ago is removed, and so is an `incremental/` folder a newer one of the
+   same crate replaced. A crate's newest build stays however old it is. Measured on 2026-10-14, `debug/incremental` held
+   52 folders for `faber_engine` alone, all but one dead.
+3. If `target` is still above 60 GB, whole worktree folders are removed, the least recently used first, until it fits.
+   A folder used in the last six hours belongs to a lane still at work and stays (a cold rebuild costs it ten minutes).
+   The main checkout's own folders (`debug`, `release`, `faber-test`) and this run's own folder are never removed whole;
+   if they alone exceed the cap, the runner says so.
+
+A folder is in use while Cargo holds one of its lock files (`.cargo-lock`, `.cargo-build-lock`, `.cargo-artifact-lock`)
+or, on Windows, while a program in one of its profiles runs (Windows refuses to open it for writing). In use, it is
+neither swept nor removed. The sweep holds the profile's locks while it deletes, so a build that starts meanwhile waits.
+sccache (user-wide, outside the repository) makes the rebuild of a swept dependency cheap.
+
+### Build slots
+
+Many lanes run `cargo t` on one PC; each run peaks near 8 GB. Before building, a run takes one of three slots
+(`testkit/src/slots.rs`): a locked file `target/.faber-slots/slot-<n>` of the main checkout, held until the run ends,
+crash included. With all three taken it prints one waiting line and waits. `FABER_BUILD_SLOTS` sets another count for
+another PC (R129, E3).
 
 ### UX sentinel
 
@@ -572,7 +675,7 @@ rest. The design is in `docs/superpowers/specs/2026-10-12-ux-sentinel-design.md`
 
 ## Auto quota pacing
 
-Auto requires billing confirmed as a subscription before any user, router, pulse or summary request. The same quota gate
+Auto requires billing confirmed as a subscription before any user, router or summary request. The same quota gate
 checks every dispatch and rechecks waiting requests; plan checks spend no quota. Unknown billing is denied. The shell
 starts account watching before Auto, and the screen supplies the local UTC offset on start and each minute. Vendor-wide
 windows pace the whole shared account against approximately one seventh of the weekly quota per day; family windows
@@ -580,10 +683,8 @@ restrict only that family. Paid-fallback evidence survives restart, and missing 
 paid credits is bound to one conversation, reply and vendor, is consumed by that dispatch, and cannot authorize an
 auxiliary request or bypass unknown billing.
 
-A quota pulse asks Haiku for one word in a fresh, tool-free session only when Auto is in use and its reading is stale,
-at most once every twenty minutes. It closes after sixty seconds. Codex quota readings do not require a model request.
-`budget.json` stores bounded quota history, metered spans, learned whole-account shape, explained model weights and
-own spend. User turns, routing, pulses and hand-over summaries count in Faber's own API-equivalent USD, including cache
+Quota readings never ask a model anything (see "Quota readings that stay current" below). `budget.json` stores bounded quota history, metered spans, learned whole-account shape, explained model weights and
+own spend. User turns, routing and hand-over summaries count in Faber's own API-equivalent USD, including cache
 reads and writes. Percentage changes and shared-account credits never become Faber's own dollars. Codex prices each
 request's token delta at its context tier; a multi-request turn does not inherit a long-context fee just from its sum.
 Incomplete meters show a lower bound and cannot teach weights or plan size. Idle account movement is flagged as foreign,
@@ -596,6 +697,67 @@ long histories use a bounded, tool-free summary. It waits only for a usable rese
 resumption, Stop and shutdown cancellation. A pinned vendor asks before moving. The composer retains an unsent request
 and its attachments without overwriting newer input; explicit resumption clears only the matching restored draft.
 Settings separates whole-account bars from Faber's own spend and explains foreign use, incomplete meters and billing.
+
+### Quota readings that stay current
+
+Both vendors' counters are read by commands that answer locally, so a reading costs no model tokens:
+
+- Claude Code: `claude -p /usage --output-format json` (with Faber's usual isolation flags, no session saved). `/usage` is a local
+  command; the result reports `num_turns` 0, zero tokens and zero cost, and Faber checks that on every reading: if a CLI
+  version ever answered it with a model, the result is thrown away and `/usage` is never run again. Its text gives the session
+  and weekly percentages; the reset times are printed in the PC's own time, which the screen's offset converts. A reset time
+  within two minutes of the one already held is the same window (the stream prints seconds, `/usage` the minute).
+- Codex: `account/rateLimits/read` on a short-lived `codex app-server` (handshake, the two reads, nothing else).
+- During Faber's own requests both CLIs already send their windows with the stream (Claude's rate-limit events, Codex's
+  rate-limit updates); those go through the same recording.
+
+When it is read (`engine/src/cadence.rs`, tested with a fake clock): on start, then every 15 minutes whether the window is
+visible or hidden (the owner’s ceiling is a reading never more than 30 minutes old). Three things may ask for an earlier
+reading: a request that ended, the window gaining focus, and the PC waking up (a loop that was not heard from for 90 seconds
+slept). All three share ONE debounce per vendor: no reading sooner than 5 minutes after the last one for Claude Code (whose
+reading starts a heavy Node process, about 12 CPU-seconds and 330 MB for a few seconds) and 1 minute for Codex (about 1
+CPU-second), whatever caused the last one. The timer counts from the last reading too. A sleeping PC reads nothing.
+
+Reads are short-lived, hidden (no console window, no shell), one at a time per vendor (a marker lifted by a guard, whichever way
+the read ends), and a failure leaves the old reading in place. Windows creates them at idle priority
+(`IDLE_PRIORITY_CLASS` in the creation flags, so not one instruction runs at normal priority); elsewhere there is no safe way to
+lower the priority from Rust (it would need unsafe code, which Faber keeps to one Windows file), so they run at normal
+priority. `/usage` is accepted only after a clean exit, `is_error` false, and every metering field present and well typed
+(`num_turns`, the four token counts, the cost); a missing field is no reading, never zero, and any model work makes it `Spent`.
+The reset times it prints are parsed defensively (ASCII am/pm only, minutes 0 to 59, hours 1 to 12, days 1 to 31, checked
+arithmetic), because the text comes from a program Faber does not control.
+
+The vendors count with a delay (docs below, "Quota lag, measured"). Faber therefore keeps, per vendor, its own requests (`Work`
+in the ledger). A request is pending for a window from the moment it ends until that same window has been read after it ended plus
+the lag: reading another window settles nothing, and time alone releases nothing, so when every refresh fails the floor stays up.
+Pending requests are never dropped; past 100 the oldest are folded into one record that keeps their convertible points and the
+latest end. While anything is pending, or a turn of the vendor is
+running (for decisions as well as for the screen), the reading is marked "still counting" and no discount is believed on it.
+Where the window is the one the conversion was measured on and the request’s model has a measured points-per-dollar (the
+learned weights), the unreported share is added as a separate estimate (cost x points per dollar, minus what the reading has
+already risen since the work began, taken off only when all the pending work is convertible). Work that cannot be converted adds
+nothing to the number but never takes the known part away. No conversion, no number. Decisions use the reading plus that
+estimate as a floor. The floor is only computed for the primary window (the shortest vendor-wide one: Claude’s five hours,
+Codex’s week); other windows stay as read, so admission on them can run slightly past what a settled reading would allow.
+
+"Running low" is said only when a vendor-wide window is past 90%: under one day of the daily line (R88: 100% / 7 = 14.3%) is
+left. Being ahead of the line is said as "being used fast this week" and never as running out, in the answer’s note and in
+Settings alike.
+
+### Quota lag, measured
+
+Measured on 15/10/2026 with a 3-minute poller over 90 minutes (both zero-token sources) plus one deliberate Codex run; the
+full table and method are in the maintainer notes (`pesquisa/quota-lag.md`).
+
+| Source | Measured lag | Window Faber assumes |
+| --- | --- | ---: |
+| Claude Code `/usage` | session counter within one poll (3 min) of work ending; weekly counter seen rising 4.1 min after the last request | 10 min (`LAG_CLAUDE`) |
+| Codex `account/rateLimits/read` | weekly counter rose 45 to 46 and was seen 29 s after a turn ended | 5 min (`LAG_CODEX`) |
+
+Both are bounds, not physics: the percentages are whole numbers and the poll was every 3 minutes. The vendors do not make the
+owner’s 30-minute ceiling impossible. Slow movement seen while Faber is idle is more likely use from the same shared account
+elsewhere than a late counter. Points per dollar are not measured for every model; where they are unknown only the
+"still counting" marker shows.
 
 ### Synthetic monthly acceptance
 
@@ -620,6 +782,49 @@ hours, fewer than 1% dropped tasks, no worse quality, fewer than 5% exhausted se
 It passed with 0.000 versus 1.500 exhausted hours and 0.844% versus 0.325% drops. The full 200-seed run passed all the same
 acceptance limits.
 
+### Cache and router, measured on 13/10/2026
+
+`engine/examples/cache_probe.rs` ran against the real CLIs on a Claude Max subscription (Sonnet 5.5) and a ChatGPT
+subscription (GPT-6 Luna). Every question carries about 3,800 new tokens, so a second turn that reads the whole earlier
+prefix still shows about 72%: the new question is written, not read. The table now has a `1h written` column.
+
+| Scenario | Second turn: read / written | Reading |
+| :--- | :--- | :--- |
+| Claude, three turns in one process | 10,876 / 4,296 | the baseline: the whole prefix is read |
+| Claude, resume at once, same effort | 10,876 / 4,299 | a restart with `--resume` loses nothing |
+| Claude, medium, then resume at high (twice) | 10,876 / 4,296 and 4,295 | **an effort change keeps the cache** |
+| Claude, resume after 240 s and 360 s | 10,876 / 4,295 and 4,298 | the 120 s idle close costs nothing |
+| Claude, resume after 3,700 s | 0 / 15,171 | the cache lives one hour, then everything is written again |
+| Codex, three turns on one thread | read 43%, 34%, 86% | Codex's own cache varies a lot between turns |
+| Codex, low then medium on one thread (twice) | read 19% and 34% | no loss beyond that variance |
+| Codex, a turn after 6 min and after 35 min | read 84% both | still warm after half an hour |
+
+On a subscription, Claude writes every cache entry with the one-hour lifetime, so closing an idle process after 120 s
+and resuming it inside the hour is free, and so is a change of effort through `--resume`. Changing effort before the
+next message therefore needs no deferral to a natural break. A change of model still starts a new cache.
+
+The result of every Claude turn names which bucket its cache writes went into (`usage.cache_creation.ephemeral_1h_input_tokens` and
+`ephemeral_5m_input_tokens`). Faber keeps "warm until" on the reply (`Message::cache_warm_until`: an hour for the 1-hour bucket, five
+minutes for the 5-minute one, nothing when neither is named) and the latest reply shows it quietly in its usage line, hidden when
+unknown or cold. The lifetime counts from the start of the last request (its assistant message start in the stream, less a 5 s margin),
+not from the result; a turn whose start was not seen shows nothing. It is display only: Auto does not route by it, because a change of model starts a new cache anyway. Codex names no
+lifetime, so it shows nothing.
+
+`engine/examples/route_eval.rs` sends 30 hand-labelled requests (kind, difficulty and the new `check`) to each router,
+one fresh session each, the way Auto asks:
+
+| Router | Valid JSON | Kind | Difficulty | Check | Median / slowest |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| GPT-6 Luna, medium | 100% | 93% | 70% | 87% | 3.3 s / 9.1 s |
+| GPT-6 Luna, low | 100% | 90% | 70% | 83% | 3.3 s / 4.5 s |
+| Haiku 5.5, medium | 100% | 100% | 70% | 73% | 9.6 s / 28.7 s |
+| Haiku 5.5, low | 100% | 100% | 70% | 77% | 9.5 s / 19.7 s |
+
+Low effort made neither router faster at the median and Luna slightly less accurate, so the routers stay at medium.
+The labels are one reader's, so a disagreement is a question, not a proven mistake. By the labels, the requests the
+routers called `blind` against the label were easy, of a kind the raise ignores, or already hard; the raise only moves
+medium code, math and research.
+
 ### Measurement still requiring the owner
 
 The manual `engine/examples/cache_probe.rs` now obtains one baseline before its measured pulses, retains each window's
@@ -627,8 +832,8 @@ latest reading, checks unchanged resets and plausible readings, closes immediate
 and applies the gate before each pulse with a sixty-second timeout. It prints own API-equivalent USD separately from
 account movement, which is an upper bound on a pulse's quota effect because the accounts are shared. Its three tests
 use fake events only, covering the denominator, invalid/reset/missing readings, duplicate windows and immediate stops.
-The real-account cache experiment and the real CLI pulse memory peak were not run here. No cache result or pulse peak
-is claimed. The owner can record them after running the manual probe; `docs/roadmap.md` was kept unstaged as instructed.
+The cache experiment ran on 13/10/2026 (above). The real CLI pulse memory peak has not been measured, and no pulse peak
+is claimed.
 
 Existing hidden-screen memory proofs passed: Task 11 measured 108-110 MB idle, 184 MB after six looks, and 141 MB for
 1,000 messages. These measurements used the fake CLI and are not a real pulse memory measurement. With

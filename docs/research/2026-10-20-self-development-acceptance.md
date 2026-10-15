@@ -65,6 +65,15 @@ child process. Reduced evidence: [2026-10-15-t13-drill.json](2026-10-15-t13-dril
 1.3 to 1.6 GB (rustc and cargo counted). **The promotion sampler measured the launcher, not the app (0.7 MB), so the
 running app's own idle and peak memory were not measured in this drill.** The full app with its window was not sampled.
 
+**Merged with `phase-1-base` after the drill (7865f36).** The drill ran on the pre-merge launch shape. Two things moved under it and are
+**not re-proven live**: (1) every Codex role now opens with the base's isolated permission profile (no `sandbox`, approval
+`never`, every role but the writer is read-only in the workspace) instead of the earlier read-only
+sandbox, so the Codex role live probe in `testkit/examples/project-qualification/live.rs` (`effective_policy`) still
+expects the old acknowledgement and its receipts must be re-earned against the new shape before Codex roles are qualified
+again; (2) a CLI no longer starts behind a per-CLI guard: it is created suspended inside its own kill-on-close job and the
+lease's release proof (`OwnedTree::retire`) now closes that job and waits until the root pid has ended (one extra safe
+query in the `winproc` crate). Unit and integration suites pass on the merged head; the real drill was not repeated.
+
 **Still open**
 
 - `mission_start` / `mission_resume` in the shell do not drive the coordinator yet: starting a mission from the Projects
@@ -528,8 +537,9 @@ metrics. Audit `unchanged` compares to its already-dirty baseline, not git HEAD.
 2. **A canary that does not depend on a quota tick.** A mission this small cannot move a 1% weekly meter, so a busy shared
    account can keep the real canary waiting for days. The owner decides whether a smaller admission rule for a canary-sized
    spend is acceptable; it was not changed.
-3. **Measure the running app's own memory** in the drill (the sampler must follow the app, not the launcher).
-4. PR #19 stays draft until the owner reads this; pushed-head CI is recorded in the final report.
+3. **Re-earn the Codex role qualification and repeat the drill on the merged head** (see the merge note above).
+4. **Measure the running app's own memory** in the drill (the sampler must follow the app, not the launcher).
+5. PR #19 is ready for review but not merged until the owner reads this; pushed-head CI is recorded in the final report.
 
 Known gaps in this slice, not hidden: `Termination` still has public fields, so fixtures elsewhere can write a literal
 (only `from_retired` is derived from a real retirement); the receipt folder is fixed by the first `Engine` a process

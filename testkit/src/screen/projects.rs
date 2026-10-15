@@ -690,7 +690,7 @@ pub fn probe_mission(sandbox: &Path) -> Result {
     let mut stand_in =
         faber_engine::proc::real_spawner()(&ping.to_string_lossy(), &["-n".into(), "60".into(), "127.0.0.1".into()], sandbox)
             .map_err(|e| e.to_string())?;
-    let writer_tree = stand_in.child.as_ref().and_then(|c| c.owned_tree()).ok_or("the stand-in has no owned tree")?;
+    let writer_tree = stand_in.contained.as_ref().and_then(|c| c.owned_tree()).ok_or("the stand-in has no owned tree")?;
     ensure(
         writer_tree.identity().started_at != 0 && Some(writer_tree.identity().pid) == stand_in.child.as_ref().and_then(|c| c.id()),
         || "owned identity is not the launched process".into(),

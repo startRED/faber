@@ -28,7 +28,8 @@ pub struct Entry {
 pub fn controlled() -> (Spawner, BufReader<tokio::io::DuplexStream>, tokio::io::DuplexStream) {
     let (stdin, input) = tokio::io::duplex(65536);
     let (output, stdout) = tokio::io::duplex(65536);
-    let process = Arc::new(Mutex::new(Some(Proc { stdin: Box::new(stdin), stdout: Box::new(stdout), stderr: None, child: None })));
+    let process =
+        Arc::new(Mutex::new(Some(Proc { stdin: Box::new(stdin), stdout: Box::new(stdout), stderr: None, child: None, contained: None })));
     (Arc::new(move |_, _, _| Ok(process.lock().unwrap().take().unwrap())), BufReader::new(input), output)
 }
 
@@ -171,6 +172,10 @@ impl Wire {
         String::from_utf8_lossy(&self.written.lock().unwrap()).lines().filter(|l| l.contains(needle)).count()
     }
 
+    pub fn messages(&self) -> Vec<Value> {
+        String::from_utf8_lossy(&self.written.lock().unwrap()).lines().map(|line| serde_json::from_str(line).unwrap()).collect()
+    }
+
     fn wrap(&self, p: Proc) -> Proc {
         Proc { stdin: Box::new(Tap { inner: p.stdin, wire: self.clone() }), ..p }
     }
@@ -234,7 +239,14 @@ pub fn replay(entries: Vec<Entry>, mismatches: Mismatches) -> Proc {
             }
             let Ok(Some(line)) = lines.next_line().await else { break };
             // A line cut short is the writer's failure, not a mismatch of the recording.
-            let Ok(sent) = serde_json::from_str(&line) else { continue };
+            let Ok(sent) = serde_json::from_str::<Value>(&line) else { continue };
+            if sent["method"] == "config/read" && entries.get(at).is_none_or(|entry| entry.msg["method"] != "config/read") {
+                let reply = format!("{}\n", serde_json::json!({"id":sent["id"],"result":{"config":{}}}));
+                if fake_out.write_all(reply.as_bytes()).await.is_err() {
+                    return;
+                }
+                continue;
+            }
             let sent = key(&sent);
             let expected = if at < entries.len() && entries[at].input { key(&entries[at].msg) } else { "(no input expected)".into() };
             if sent == expected {
@@ -245,7 +257,7 @@ pub fn replay(entries: Vec<Entry>, mismatches: Mismatches) -> Proc {
         }
         // stdin closed: the process exits, so its output ends
     });
-    Proc { stdin: Box::new(driver_in), stdout: Box::new(driver_out), stderr: None, child: None }
+    Proc { stdin: Box::new(driver_in), stdout: Box::new(driver_out), stderr: None, child: None, contained: None }
 }
 
 /// A spawner that replays `entries` each time it is called, recording the arguments it got and every line written.
@@ -307,4 +319,81 @@ pub async fn drive(
 }
 pub fn tempdir() -> tempfile::TempDir {
     tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap()
+}
+
+/// A fake CLI process the test drives by hand: it writes the CLI's output lines itself, whenever it likes, and reads
+/// everything the driver wrote to the process.
+pub struct Pipe {
+    pub out: tokio::io::DuplexStream,
+    pub lines: Arc<Mutex<Vec<Value>>>,
+    /// The driver closed the process's input (the end of a session).
+    pub closed: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Pipe {
+    pub async fn say(&mut self, msg: Value) {
+        self.out.write_all(format!("{msg}\n").as_bytes()).await.unwrap();
+    }
+
+    /// The answers (request id, behavior) written so far.
+    pub fn answers(&self) -> Vec<(String, String)> {
+        self.lines
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|m| m["type"] == "control_response")
+            .map(|m| {
+                (
+                    m["response"]["request_id"].as_str().unwrap().to_owned(),
+                    m["response"]["response"]["behavior"].as_str().unwrap().to_owned(),
+                )
+            })
+            .collect()
+    }
+}
+
+/// A spawner whose processes are driven by hand. Every process it starts is queued for `next_pipe`.
+pub fn pipes() -> (Spawner, Arc<Mutex<Vec<Pipe>>>) {
+    let made: Arc<Mutex<Vec<Pipe>>> = Arc::default();
+    let queue = made.clone();
+    let spawn: Spawner = Arc::new(move |_bin, _argv, _cwd| {
+        let (driver_in, fake_in) = tokio::io::duplex(1 << 20);
+        let (fake_out, driver_out) = tokio::io::duplex(1 << 20);
+        let lines: Arc<Mutex<Vec<Value>>> = Arc::default();
+        let closed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (seen, done) = (lines.clone(), closed.clone());
+        tokio::spawn(async move {
+            let mut input = BufReader::new(fake_in).lines();
+            while let Ok(Some(line)) = input.next_line().await {
+                if let Ok(msg) = serde_json::from_str::<Value>(&line) {
+                    seen.lock().unwrap().push(msg);
+                }
+            }
+            done.store(true, Ordering::SeqCst);
+        });
+        queue.lock().unwrap().push(Pipe { out: fake_out, lines, closed });
+        Ok(Proc { stdin: Box::new(driver_in), stdout: Box::new(driver_out), stderr: None, child: None, contained: None })
+    });
+    (spawn, made)
+}
+
+/// The first process a `pipes` spawner started, once it exists.
+pub async fn next_pipe(made: &Arc<Mutex<Vec<Pipe>>>) -> Pipe {
+    for _ in 0..300 {
+        if !made.lock().unwrap().is_empty() {
+            return made.lock().unwrap().remove(0);
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("no process was started");
+}
+
+/// What Faber's own Claude requests (the router, the pulse) must start with whatever mode the person chose: no hooks, no settings
+/// files, no MCP servers, no plugins. A hook that fired on every background request would run the person's commands unasked.
+pub fn assert_no_user_customizations(args: &[String]) {
+    let after = |flag: &str| args[args.iter().position(|a| a == flag).unwrap_or_else(|| panic!("{flag} missing in {args:?}")) + 1].clone();
+    assert!(args.contains(&"--safe-mode".into()) && args.contains(&"--strict-mcp-config".into()), "{args:?}");
+    assert_eq!(after("--setting-sources"), "", "{args:?}");
+    let settings: Value = serde_json::from_str(&after("--settings")).unwrap();
+    assert_eq!(settings["disableAllHooks"], true, "{args:?}");
 }

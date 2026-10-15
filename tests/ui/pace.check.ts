@@ -12,7 +12,7 @@ import { check, equal, ok } from './check.ts';
 
 check('pace: quota reasons, manual effort and grouped activity coexist without hiding the answer', () => {
   useLanguage('en');
-  for (const kind of ['step', 'low'] as const) {
+  for (const kind of ['step', 'fast', 'low'] as const) {
     const host = document.createElement('div');
     const narration = 'Checking the files.\n\n';
     const m = { id: 'reply', role: 'assistant', text: narration + 'Answer', activityEnd: narration.length,
@@ -24,7 +24,7 @@ check('pace: quota reasons, manual effort and grouped activity coexist without h
       const pace = host.querySelector('.pace');
       ok(normal && pace, 'both reasons show');
       ok(normal!.compareDocumentPosition(pace!) & Node.DOCUMENT_POSITION_FOLLOWING);
-      ok(pace!.textContent!.toLowerCase().includes(kind === 'step' ? 'one step up' : 'running low'));
+      ok(pace!.textContent!.toLowerCase().includes({ step: 'one step up', fast: 'being used fast', low: 'close to its limit' }[kind]));
       ok(host.querySelector('.model')!.textContent!.includes('Effort: High'));
       equal(host.querySelectorAll('details.activity').length, 1);
       equal(host.querySelector<HTMLDetailsElement>('details.activity')!.open, false);
@@ -39,7 +39,7 @@ check('pace: Settings separates own USD from shared quota and marks the daily li
   const until = Date.now() / 1000 + 3600;
   const usage = [{ vendor: 'claude', plan: 'max', state: 'ok', learning: false, relearning: false, outsideShare: 0.25,
     foreignUse: true, overageOn: false, billedPerUse: false, billingUnknown: false, askForPlan: false,
-    paidPossible: false, ownSpendUsd: 1.25, unmetered: 0,
+    paidPossible: false, ownSpendUsd: 1.25, unmetered: 0, counting: false,
     windows: [{ name: 'five_hour', used: 0.3, elapsed: 0.5, expected: 0.5, resetsAt: until }] }];
   const props = { start: 'usage', look: { appearance: { base: 'sala' }, vars: {}, scheme: 'dark', motion: 'none', effects: {}, checks: [], notices: [] }, saved: {}, vendors: ['claude'],
     quotas: { 'claude:five_hour': { vendor: 'claude', window: 'five_hour', used: 0.3, resetsAt: until } },

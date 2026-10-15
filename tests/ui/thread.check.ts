@@ -4,6 +4,7 @@ import themes from '../../src-tauri/src/themes.json';
 import { Composer } from '../../ui/Composer.tsx';
 import { Thread } from '../../ui/Thread.tsx';
 import type { Message } from '../../ui/api.ts';
+import { t } from '../../ui/i18n.ts';
 import { check, equal, ok } from './check.ts';
 
 check('thread: ten tool steps and narration fold into one activity row above the final answer', async () => {
@@ -36,6 +37,55 @@ check('thread: ten tool steps and narration fold into one activity row above the
     // Older conversations without recorded boundaries keep their full text.
     setMessage({ ...message(), textBreaks: undefined, activityEnd: undefined });
     ok(root.querySelector('.ai > .md')!.textContent?.includes('Checking the files'));
+  } finally {
+    dispose();
+    root.remove();
+  }
+});
+
+check('thread: with Auto the model name shows as soon as it is chosen, while the answer streams, and stays the same at the end', () => {
+  const root = document.createElement('div');
+  document.body.append(root);
+  const [message, setMessage] = createSignal<Message>({ id: 'auto-name', role: 'assistant', at: 0, status: 'streaming', text: '', reason: 'reason.routing' });
+  const dispose = render(() => createComponent(Thread, {
+    get messages() { return [message()]; }, from: 0, conversationId: 'auto-name', options: [], onBranch: () => {},
+  }), root);
+  const header = () => root.querySelector<HTMLElement>('.model')!;
+  const name = () => header().children[1]!.textContent;
+  try {
+    equal(header().querySelector('b')!.textContent, 'Auto');
+    equal(header().querySelector('em')!.textContent, `· ${t('reason.routing')}`, 'while Auto is still choosing it says only that');
+    equal(header().children.length, 2, 'with no name slot yet');
+    const choosing = header().getBoundingClientRect().height;
+    setMessage({ ...message(), vendor: 'claude', model: 'claude-haiku-5-5', effort: 'medium' });
+    equal(name(), 'Haiku 5.5', 'the name shows before the first word');
+    equal(header().getBoundingClientRect().height, choosing, 'and the header keeps its height');
+    setMessage({ ...message(), text: 'Sunlight cont' });
+    equal(name(), 'Haiku 5.5', 'and stays while the words arrive');
+    setMessage({ ...message(), status: 'done' });
+    equal(name(), 'Haiku 5.5', 'and is the same when the answer ends');
+  } finally {
+    dispose();
+    root.remove();
+  }
+});
+
+check('thread: a model the CLI never named reads the same while streaming and at the end, and never as "Codex Codex"', () => {
+  const root = document.createElement('div');
+  document.body.append(root);
+  const [message, setMessage] = createSignal<Message>({ id: 'codex-name', role: 'assistant', at: 0, status: 'streaming', text: 'The', vendor: 'codex' });
+  const dispose = render(() => createComponent(Thread, {
+    get messages() { return [message()]; }, from: 0, conversationId: 'codex-name', options: [], onBranch: () => {},
+  }), root);
+  const name = () => root.querySelector<HTMLElement>('.model')!.children[1]!.textContent;
+  try {
+    equal(name(), t('model.default'));
+    setMessage({ ...message(), model: 'codex' });
+    equal(name(), t('model.default'), "the engine's stand-in id is no name");
+    setMessage({ ...message(), status: 'done' });
+    equal(name(), t('model.default'), 'and the end changes nothing');
+    setMessage({ ...message(), model: 'gpt-6-luna' });
+    equal(name(), 'GPT-6 Luna');
   } finally {
     dispose();
     root.remove();
@@ -80,5 +130,77 @@ check('thread: the last answer and its actions leave at least 48px above either 
       disposeComposer();
       root.remove();
     }
+  }
+});
+
+check('thread: a Codex work log reads cleanly: titles on their own lines, tidy command rows, the status sentence once', () => {
+  const root = document.createElement('div');
+  document.body.append(root);
+  const status = 'The window control did not connect.';
+  const exe = '"C:\\\\WINDOWS\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe"';
+  const inner = "Set-Content -LiteralPath 'a.txt' -Value 'one' -NoNewline";
+  const [message, setMessage] = createSignal<Message>({
+    id: 'worklog', role: 'assistant', at: 0, status: 'streaming', text: `${status}\n\n${status}\n\nI checked the files instead.`,
+    textBreaks: [status.length + 2], activityEnd: status.length + 2,
+    thinking: '**Minimizing output verbosity****Assessing time budget and test approach****Preparing for final retry**',
+    tools: [{ id: 'c1', name: 'commandExecution', input: `${exe} -Command "${inner}"`, ok: true }],
+  });
+  const dispose = render(() => createComponent(Thread, {
+    get messages() { return [message()]; }, from: 0, conversationId: 'worklog', options: [], onBranch: () => {},
+  }), root);
+  try {
+    const group = root.querySelector<HTMLDetailsElement>('.activity')!;
+    group.open = true;
+    const shown = () => root.textContent ?? '';
+    ok(!shown().includes('**'), 'no raw bold markers');
+    ok(!shown().includes('commandExecution'), 'no internal kind name');
+    ok(!shown().includes('\\\\'), 'no doubled backslashes');
+    const titles = [...group.querySelectorAll('.activity-thinking p')].map((p) => p.textContent);
+    equal(titles.join('|'), 'Minimizing output verbosity|Assessing time budget and test approach|Preparing for final retry');
+    const row = group.querySelector<HTMLElement>('.tools > span')!;
+    equal(row.querySelector('b')!.textContent, 'PowerShell');
+    equal(row.querySelector('i')!.textContent, inner);
+    equal(row.title, inner, 'the full command is the tooltip');
+    equal(shown().split(status).length - 1, 1, 'the status sentence shows once while streaming');
+    equal(root.querySelector('.activity-latest'), null, 'no status line under a visible answer');
+    setMessage({ ...message(), status: 'done' });
+    equal((root.textContent ?? '').split(status).length - 1, 1, 'and once when done');
+  } finally {
+    dispose();
+    root.remove();
+  }
+});
+
+check('thread: the final answer is never cut, long commands are cut in the middle, and a command that looks like markup stays text', () => {
+  const root = document.createElement('div');
+  document.body.append(root);
+  const long = `START ${'x'.repeat(300)} END`;
+  const markup = '<img src=x onerror=alert(1)> **not bold** & <b>raw</b>';
+  const narration = 'Check\n\n';
+  const answer = 'Checking files.';
+  const [message] = createSignal<Message>({
+    id: 'worklog-edges', role: 'assistant', at: 0, status: 'done', text: narration + answer, textBreaks: [narration.length], activityEnd: narration.length,
+    tools: [
+      { id: 'l', name: 'Bash', input: { command: long }, ok: true },
+      { id: 'm', name: 'Bash', input: { command: markup }, ok: true },
+    ],
+  });
+  const dispose = render(() => createComponent(Thread, {
+    get messages() { return [message()]; }, from: 0, conversationId: 'worklog-edges', options: [], onBranch: () => {},
+  }), root);
+  try {
+    const group = root.querySelector<HTMLDetailsElement>('.activity')!;
+    group.open = true;
+    equal(root.querySelector('.ai > .md')!.textContent?.trim(), answer, 'a status that only starts the answer does not cut it');
+    ok(group.textContent?.includes('Check'), 'and stays in the activity');
+    const [first, second] = [...group.querySelectorAll<HTMLElement>('.tools > span')];
+    const cut = first!.querySelector('i')!.textContent!;
+    ok(cut.includes('…') && cut.length <= 96 && cut.startsWith('START') && cut.endsWith('END'), cut);
+    equal(first!.title, long, 'the full command is the tooltip');
+    equal(second!.querySelector('i')!.textContent, markup);
+    equal(second!.querySelectorAll('img, b i, i b').length, 0, 'no markup is built from a command');
+  } finally {
+    dispose();
+    root.remove();
   }
 });

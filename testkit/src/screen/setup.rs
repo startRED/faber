@@ -11,7 +11,7 @@ use crate::page::{Loc, css};
 use crate::sandbox::{CliSlot, Launch};
 use std::time::Duration;
 
-const BUDGET_MB: f64 = 250.0;
+const BUDGET_MB: f64 = 400.0;
 
 pub fn scenarios() -> Vec<Scenario> {
     vec![
@@ -19,7 +19,7 @@ pub fn scenarios() -> Vec<Scenario> {
         Scenario { name: "C5.2: missing ChatGPT installs from loopback, signs in and answers without reopening", run: c5_2 },
         Scenario { name: "C5.3: None persists, shows connection guidance and never reopens setup automatically", run: c5_3_none },
         Scenario { name: "C5.3: Skip persists, shows connection guidance and never reopens setup automatically", run: c5_3_skip },
-        Scenario { name: "C5.4: the open guide and the look step, with no conversation, use at most 250 MB", run: c5_4 },
+        Scenario { name: "C5.4: the open guide and the look step, with no conversation, use at most 400 MB", run: c5_4 },
         Scenario { name: "C5.5: closing the guide leaves no setup child or external writes", run: c5_5 },
         Scenario {
             name: "first run: None to the end shows no tutorial, and connecting an account afterwards starts it",

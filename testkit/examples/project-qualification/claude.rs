@@ -132,6 +132,8 @@ pub async fn run(data: &std::path::Path) -> io::Result<()> {
             effort: Some("low".into()),
             resume: None,
             user_hooks: false,
+            permissions: faber_engine::model::Permissions::Isolated,
+            flags: Default::default(),
             instructions: None,
             user_name: None,
         },

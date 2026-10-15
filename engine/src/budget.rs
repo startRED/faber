@@ -184,6 +184,8 @@ pub struct Snap {
     pub relearning: bool,
     /// A plan was detected less than 30 minutes ago, or the user typed one that no detection contradicts.
     pub plan_ok: bool,
+    /// Faber's own recent work may not be in the readings yet: they are a floor, never final.
+    pub counting: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,6 +193,8 @@ pub enum State {
     Spare,
     Normal,
     Tight,
+    /// Being used faster than the daily line, with room left.
+    Fast,
 }
 
 impl Snap {
@@ -198,9 +202,10 @@ impl Snap {
         self.windows.iter().filter(move |(n, w)| vendor_wide(n) && w.live(now)).map(|(_, w)| w)
     }
 
-    /// Discounts (a multiplier below 1) are believed only while nothing makes the reading doubtful.
+    /// Discounts (a multiplier below 1) are believed only while nothing makes the reading doubtful; a reading that is still
+    /// counting Faber's own work may only be higher in truth.
     pub fn discount_ok(&self) -> bool {
-        self.plan_ok && !self.jumped && !self.relearning && self.billing == Billing::Subscription
+        self.plan_ok && !self.jumped && !self.relearning && !self.counting && self.billing == Billing::Subscription
     }
 
     /// The highest multiplier over the vendor-wide windows; 1 with no live reading.
@@ -289,8 +294,11 @@ impl Snap {
     /// The word the screen shows for the vendor.
     pub fn state(&self, shape: &Shape, offset: i64, now: f64) -> State {
         let m = self.vendor_m(shape, offset, now);
-        if m >= LOW_M || self.top(now) > 0.9 {
+        // "Running low" is for a window that is nearly used up. Being ahead of the daily line only says the quota is going fast.
+        if self.top(now) > 0.9 {
             State::Tight
+        } else if m >= LOW_M {
+            State::Fast
         } else if m <= SPARE_M && self.discount_ok() {
             State::Spare
         } else {
@@ -324,7 +332,6 @@ pub enum Purpose {
         by_hand: bool,
     },
     Router,
-    Pulse,
     Summary,
     /// A local status command that spends no quota; listed so every request goes through the same door.
     PlanCheck,

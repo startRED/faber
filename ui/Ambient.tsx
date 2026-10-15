@@ -1,13 +1,29 @@
 import { createEffect, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 import type { Vendor } from './api.ts';
-import { appliedLook } from './appearance.ts';
+import { appliedLook, motion, windowFocused, windowHidden } from './appearance.ts';
 import { t } from './i18n.ts';
 import { vendorName } from './models.ts';
 
 // The effects of the new conversation (docs/design.md, "Ambient"). Which one shows comes from the look: the tokens
 // --amb-beam, --amb-loom and --amb-flow are `none` for a theme that does not have it, and for every theme when the
 // ambient switch is off. Effects sit behind the greeting and never behind text the user reads. Nothing here runs a frame
-// loop: the beam and the dust are CSS, and the dust only twinkles (opacity of three layers, on the compositor).
+// loop: the beam and the dust are CSS, and only a slow timer moves the dust's and the glow's opacity.
+
+// The dust's three layers and the glow breathe out of step, eased in and out. A timer sets their opacity ten times a
+// second: as CSS animations they made a 240 Hz screen composite the stage on every frame, about half a core.
+const BREATHS = [
+  { period: 6000, offset: 0, from: 1, to: 0.4 },
+  { period: 8000, offset: 3000, from: 1, to: 0.4 },
+  { period: 10000, offset: 6000, from: 1, to: 0.4 },
+  { period: 7000, offset: 0, from: 0, to: 0.5 }, // the glow
+];
+const BREATH_STEP = 100;
+
+/** How far a breath of `period` ms is, `t` ms in: from 0 to 1 and back, eased in and out. */
+export function breath(t: number, period: number): number {
+  const x = 1 - Math.abs(((t / period) % 2) - 1);
+  return x < 0.5 ? 4 * x ** 3 : 1 - (-2 * x + 2) ** 3 / 2;
+}
 
 const GRAINS = 72;
 const FADE = 28; // a grain fades to nothing within this many pixels of a text block
@@ -74,6 +90,9 @@ export function Ambient(props: { vendors: Vendor[]; avoid: () => Element[]; vari
   let color = '243,238,226';
   const grains = makeGrains();
   const [shadows, setShadows] = createSignal<string[]>(['', '', '']);
+  const [beam, setBeam] = createSignal(false);
+  const breathes = () => beam() && motion() === 'full' && !windowHidden() && windowFocused();
+  let breathed = 0;
 
   const project = () => props.variant === 'project';
   const paint = () =>
@@ -83,6 +102,7 @@ export function Ambient(props: { vendors: Vendor[]; avoid: () => Element[]; vari
   const measure = () => {
     const area = layer.parentElement?.getBoundingClientRect();
     if (!area) return;
+    setBeam(getComputedStyle(layer.querySelector('.amb-beam')!).display !== 'none');
     width = area.width;
     boxes = props.avoid().map((e) => {
       const r = e.getBoundingClientRect();
@@ -111,6 +131,25 @@ export function Ambient(props: { vendors: Vendor[]; avoid: () => Element[]; vari
     return !!vars && vars['amb-beam'] === 'none' && vars['amb-loom'] === 'none' && vars['amb-flow'] === 'none';
   };
 
+  // The breath keeps its place while it pauses, so it goes on from there; with less motion the dust stands lit and the glow off.
+  createEffect(() => {
+    if (!breathes()) {
+      if (motion() !== 'full') layer.querySelectorAll<HTMLElement>('.dust i, .amb-glow').forEach((el) => el.style.removeProperty('opacity'));
+      return;
+    }
+    let last = performance.now();
+    const timer = window.setInterval(() => {
+      const now = performance.now();
+      breathed += now - last;
+      last = now;
+      layer.querySelectorAll<HTMLElement>('.dust i, .amb-glow').forEach((el, i) => {
+        const b = BREATHS[i];
+        if (b) el.style.opacity = (b.from + (b.to - b.from) * breath(breathed + b.offset, b.period)).toFixed(3);
+      });
+    }, BREATH_STEP);
+    onCleanup(() => clearInterval(timer));
+  });
+
   const claude = () => props.vendors.includes('claude');
   const codex = () => props.vendors.includes('codex');
   // The path from the idea to the result runs through each connected vendor, and only those.
@@ -124,7 +163,7 @@ export function Ambient(props: { vendors: Vendor[]; avoid: () => Element[]; vari
           <i />
           <i />
         </div>
-        <div class="dust" aria-hidden="true">
+        <div class="dust" aria-hidden="true" data-live={breathes() ? 'on' : 'off'}>
           <For each={shadows()}>{(shadow) => <i style={{ 'box-shadow': shadow }} />}</For>
         </div>
       </div>

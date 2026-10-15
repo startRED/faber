@@ -1,9 +1,9 @@
+use crate::support;
 use faber_engine::model::Vendor;
 use faber_engine::project::Role;
 use faber_engine::project::run::{RouteStep, RouteV0};
 use faber_engine::project::store::Journal;
 use faber_engine::project::worker::ModelPin;
-mod support;
 use support::tempdir;
 #[test]
 fn route_v0_keeps_typed_pins_cost_and_receipts_and_never_becomes_a_plan() {

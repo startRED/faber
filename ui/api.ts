@@ -22,6 +22,16 @@ export interface Permission {
   tool: string;
   input: unknown;
 }
+/** A request the CLI denied for want of anyone to answer it. */
+export interface Parked {
+  toolUseId: string;
+  tool: string;
+  /** "command", "file", "page" or "other": the request itself is never kept. */
+  kind: "command" | "file" | "page" | "other";
+  /** A file path, or the host of a page; empty otherwise. */
+  label: string;
+  at: number;
+}
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
@@ -47,10 +57,20 @@ export interface Message {
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
   cacheWrite1hTokens?: number;
+  /** When the prompt cache of this reply goes cold, in milliseconds. Claude only; absent when unknown. */
+  cacheWarmUntil?: number;
+  /** Requests the CLI denied in this reply because nobody could answer them; they were not done. */
+  parked?: Parked[];
+  /** How many more were denied beyond the few kept. */
+  parkedMore?: number;
   incomplete?: boolean;
   pace?: { kind: 'step' | 'low'; vendor: Vendor };
+  /** A note under the reply, as an engine key (`note.historyResent`). */
+  note?: string;
   waitUntil?: number;
   movedFrom?: Vendor;
+  /** The next rung up, offered when the turn's own tools show it stopped early. */
+  nudge?: { reason: string; vendor: Vendor; model: string; effort: Effort };
 }
 export interface QueuedTurn {
   id: string;
@@ -68,6 +88,7 @@ export interface Conversation {
   choice?: Choice;
   area: Area;
   projectId?: string;
+  workingFolder?: string;
   sessions: Partial<Record<Vendor, string>>;
   allowAlways?: string[];
   branchOf?: { conversationId: string; messageId: string };
@@ -238,6 +259,7 @@ export type Experience = 'beginner' | 'experienced';
 export interface Settings {
   appearance?: Appearance;
   userHooks?: boolean;
+  permissions?: 'dontAsk' | 'ask';
   notifications?: boolean;
   notificationSound?: boolean;
   language?: string;
@@ -273,6 +295,9 @@ export interface RunningItem {
   /** The `at` of the turn's reply message, in milliseconds. */
   since: number;
   permissions: Permission[];
+  parked?: Parked[];
+  /** How many more were denied beyond the few kept. */
+  parkedMore?: number;
   waitUntil?: number;
 }
 /** The running list in the engine's order, with a revision that grows by one with every list the engine sends. */
@@ -287,12 +312,13 @@ export interface QuotaReading {
   used: number;
   resetsAt: number;
 }
-export interface WindowUsage { name: string; used: number; elapsed: number; expected: number; resetsAt: number }
+/** `used` is the reading as the vendor gave it; `readAt` is when (seconds). `uncounted` is the share Faber's own recent work adds that the reading does not hold yet, present only where a measured conversion exists. */
+export interface WindowUsage { name: string; used: number; elapsed: number; expected: number; resetsAt: number; readAt: number; uncounted?: number | null }
 export interface VendorUsage {
-  vendor: Vendor; plan?: string | null; state: 'ok' | 'spare' | 'low' | 'out' | 'unknown';
+  vendor: Vendor; plan?: string | null; state: 'ok' | 'spare' | 'fast' | 'low' | 'out' | 'unknown';
   learning: boolean; relearning: boolean; outsideShare?: number | null; foreignUse: boolean;
   overageOn: boolean; billedPerUse: boolean; billingUnknown: boolean; askForPlan: boolean; paidPossible: boolean;
-  ownSpendUsd: number; unmetered: number; windows: WindowUsage[];
+  ownSpendUsd: number; unmetered: number; counting: boolean; windows: WindowUsage[];
 }
 export interface AppState {
   conversations: Summary[];
@@ -364,6 +390,24 @@ export interface ShellTexts {
   running: Plural;
   needsYou: Plural;
   notify: string;
+  notifyMany: string;
+}
+
+/** A recent folder as the engine judged it just now: `reason` is a translation key when it cannot be picked. */
+export interface FolderView {
+  path: string;
+  name: string;
+  parent: string;
+  reason?: string | null;
+}
+export interface EnvironmentView {
+  id: string;
+  name: string;
+  folders: FolderView[];
+}
+export interface RecentsView {
+  folders: FolderView[];
+  environments: EnvironmentView[];
 }
 
 // Typed calls into the engine (the commands in src-tauri/src/lib.rs).
@@ -385,6 +429,14 @@ export const api = {
   removeProject: (id: string) => invoke<void>('remove_project', { id }),
   showProject: (id: string) => invoke<void>('show_project', { id }),
   addProject: () => invoke<Project | null>('add_project'),
+  chatFolder: (id: string | undefined, scratch = false, path?: string) =>
+    invoke<Conversation | null>('chat_folder', { id: id ?? null, scratch, path: path ?? null }),
+  recents: () => invoke<RecentsView>('recents'),
+  openFolders: (paths: string[]) => invoke<Project[]>('open_folders', { paths }),
+  forgetRecent: (path: string) => invoke<void>('forget_recent', { path }),
+  saveEnvironment: (name: string, folders: string[]) => invoke<void>('save_environment', { name, folders }),
+  forgetEnvironment: (id: string) => invoke<void>('forget_environment', { id }),
+  startEnvironment: (id: string) => invoke<Project[]>('start_environment', { id }),
   previewLook: (appearance: Appearance) => invoke<Look>('preview_look', { appearance }),
   saveSettings: (patch: Settings) => invoke<SavedSettings>('save_settings', { patch }),
   saveTheme: (appearance: Appearance, name: string) => invoke<boolean>('save_theme', { appearance, name }),
@@ -400,6 +452,8 @@ export const api = {
   moveTurn: (id: string, turnId: string) => invoke<void>('move_turn', { id, turnId }),
   waitTurn: (id: string, turnId: string) => invoke<void>('wait_turn', { id, turnId }),
   setClock: (utcOffset: number) => invoke<void>('set_clock', { utcOffset }),
+  /** Tells the engine whether the window is open and focused: it reads the quota every 5 minutes while open, every 15 while hidden, and at once on focus. */
+  quotaAttention: (visible: boolean, focused: boolean) => invoke<void>('quota_attention', { visible, focused }),
   setupCheck: (vendor: Vendor) => invoke<CheckResult>('setup_check', { vendor }),
   setupInstall: (vendor: Vendor) => invoke<void>('setup_install', { vendor }),
   setupSignIn: (vendor: Vendor) => invoke<void>('setup_sign_in', { vendor }),

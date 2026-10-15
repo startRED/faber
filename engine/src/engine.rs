@@ -2,20 +2,24 @@
 
 use crate::account::{self, AccountStatus};
 use crate::budget::{Billing, Purpose, Reach, Why, family_of};
+use crate::cadence::{Cadence, TICK};
 use crate::claude::{ClaudeLaunch, ClaudeOptions, EventSink, start_claude};
 use crate::cli::Cli;
 use crate::codex::read_codex_limits;
 use crate::codex::{CodexServer, CodexServerOptions, CodexThread};
 use crate::events::{EngineEvent, Session, UserTurn};
 use crate::learn::Span;
-use crate::ledger::{Ledger, plausible};
+use crate::ledger::{Ledger, Work, plausible};
 use crate::model::*;
+use crate::nudge;
 use crate::proc::Spawner;
+use crate::recents::RecentsView;
 use crate::router::{Choice, Effort, Pick, pick_model};
 use crate::signals::Signals;
 use crate::store::Store;
 use crate::usage;
 use crate::workspace::{Attachment, inside_folder, new_files, save_files};
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
@@ -27,9 +31,10 @@ use uuid::Uuid;
 
 mod answer;
 mod auto;
+mod parked;
 mod project_budget;
 mod project_sessions;
-mod pulse;
+mod quota_watch;
 mod recovery;
 mod usage_view;
 pub use usage_view::{VendorUsage, WindowUsage};
@@ -147,28 +152,58 @@ struct Live {
     cli: Cli,
     /// The process continues a session an earlier process began.
     resumed: bool,
+    permissions: Permissions,
+    /// The folder the process was started in (checked); a turn that finds the folder resolving elsewhere starts a new process.
+    cwd: PathBuf,
     by_hand: bool,
     approved: bool,
     started: f64,
+    /// A turn has finished on this process, so the next one finds the CLI's cache warm.
+    served: bool,
     /// Queued messages handed to the running turn (Codex) and not yet taken in, oldest first.
     steering: Vec<String>,
+    /// The session id the CLI reported at start, kept out of the conversation until a turn really ran on it: a CLI saves a
+    /// session only once it has had a turn, so an id from a warm-up that never ran must not be resumed by a later launch.
+    unsaved_session: Option<String>,
 }
 
 /// Messages waiting behind a running turn. Each may carry images, which stay in memory and go out with every queue event.
 const MAX_QUEUED: usize = 10;
 
-const HISTORY_LIMIT: usize = 20_000;
-
-/// A model that joins a conversation midway reads what was said before, as plain text.
-pub fn with_history(history: &[Message], text: &str) -> String {
+/// A model that joins a conversation midway, or a fresh session that replaces a lost one, reads what was said before as plain
+/// text: every message, the names and places of the files attached, a count of the images it cannot see, and each tool's result
+/// shortened as `handover::transcript` does. The reply that carries it says so (`note.historyResent`).
+pub fn with_history(history: &[Message], text: &str, place: &dyn Fn(&str) -> String) -> String {
     let lines = history
         .iter()
-        .map(|m| format!("{}: {}", if m.role == Role::User { "User" } else { "Assistant" }, m.text))
+        .map(|m| {
+            let mut line = crate::handover::transcript(std::slice::from_ref(m));
+            for file in m.attachments.iter().flatten() {
+                line += &format!("\n[attached file: {}]", place(file));
+            }
+            match m.images.as_ref().map_or(0, |i| i.len()) {
+                0 => {}
+                n => line += &format!("\n[{n} image(s) sent here are not included]"),
+            }
+            line
+        })
         .collect::<Vec<_>>()
         .join("\n\n");
-    let skip = lines.chars().count().saturating_sub(HISTORY_LIMIT);
-    let lines: String = lines.chars().skip(skip).collect();
     format!("Earlier in this conversation, with another assistant:\n\n{lines}\n\nNow the user says:\n{text}")
+}
+
+/// Where a stored attachment can be opened: the working folder's own `attachments` in Chat, the data folder's in Projects.
+pub(crate) fn attachment_place(area: Area, data_dir: &Path, conversation: &str, name: &str) -> String {
+    if area == Area::Chat {
+        format!("attachments/{name}")
+    } else {
+        data_dir.join("attachments").join(conversation).join(name).to_string_lossy().into_owned()
+    }
+}
+
+/// This vendor already answered in the conversation, yet has no session to continue: the session was lost.
+fn session_was_lost(c: &Conversation, vendor: Vendor) -> bool {
+    c.resumable(vendor).is_none() && c.messages.iter().any(|m| m.role == Role::Assistant && m.vendor == Some(vendor))
 }
 
 fn now() -> u64 {
@@ -178,6 +213,10 @@ fn now() -> u64 {
 fn unix_secs() -> f64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64())
 }
+
+/// The lifetime of the cache counts from when the request began, and the stream shows the answer only after its first word:
+/// this much is taken off the expiry so the note never promises more warmth than there is.
+const WARM_MARGIN_MS: u64 = 5_000;
 
 /// How often the quota ledger is written while readings keep coming.
 const LEDGER_EVERY: f64 = 30.0;
@@ -233,8 +272,9 @@ struct Core {
     pending: HashMap<String, String>,
     next_sid: u64,
     tick: u64,
-    /// The shared Codex processes, one per area and hooks choice.
-    codex: HashMap<(Area, bool), CodexServer>,
+    /// The shared Codex processes, one per area, hooks choice and permissions. Faber's internal questions (routing) use an
+    /// Isolated process of their own, so nothing the person's setting allows ever reaches them.
+    codex: HashMap<(Area, bool, Permissions), CodexServer>,
     /// The ChatGPT model the account recommends, once the CLI has listed the models.
     codex_recommended: Option<String>,
     /// Every model the account can run on Codex, once listed.
@@ -254,8 +294,19 @@ struct Core {
     ledger_failed: bool,
     /// No ownership or unreadable authority: keep Chat in memory and leave the durable budget intact.
     projects_closed: bool,
-    /// When the last quota pulse started.
-    last_pulse: f64,
+    /// When each vendor's quota is read next (cadence.rs), and which readings are under way.
+    cadence: Cadence,
+    reading: HashSet<Vendor>,
+    /// The watcher runs (the shell started it and the screen said the PC's offset): only then do events start readings.
+    watching: bool,
+    /// The engine is shutting down: no new quota reading starts.
+    closing: bool,
+    /// `/usage` turned out to ask a model: Claude's quota is then read from its own answers only.
+    usage_command_spent: bool,
+    /// The newer flags the installed Claude Code takes; none until `detect_claude_flags` has read them.
+    claude_flags: crate::claude::ClaudeFlags,
+    /// When a failed Codex read last counted against the plan check.
+    codex_failed_at: f64,
     /// The PC's offset from UTC in seconds, as the screen reports it.
     utc_offset: i64,
     offset_known: bool,
@@ -264,6 +315,9 @@ struct Core {
     transfers: HashMap<String, recovery::Transfer>,
     credit: Option<(String, String, Vendor)>,
 }
+
+/// How often Claude's plan is checked again.
+const PLAN_EVERY: f64 = 15.0 * 60.0;
 
 /// A handle to the engine; clones share the same engine.
 #[derive(Clone)]
@@ -276,6 +330,16 @@ impl Engine {
     pub fn new(opts: EngineOptions, emit: Emit) -> Engine {
         crate::project::qualification::use_dir(&opts.data_dir);
         let mut store = Store::new(&opts.data_dir);
+        // A crash can leave an unsaved draft behind. Visible records keep their scratch; orphan UUID folders do not.
+        let scratch = opts.data_dir.join("chat");
+        if scratch.symlink_metadata().is_ok_and(|m| !m.file_type().is_symlink()) {
+            for entry in std::fs::read_dir(&scratch).into_iter().flatten().flatten() {
+                let id = entry.file_name().to_string_lossy().into_owned();
+                if Uuid::parse_str(&id).is_ok() && !opts.data_dir.join("conversations").join(format!("{id}.json")).exists() {
+                    let _ = std::fs::remove_dir_all(entry.path());
+                }
+            }
+        }
         let owned = store.claim_budget().is_ok();
         let mut ledger = store.ledger();
         let projects_closed = !owned
@@ -320,7 +384,13 @@ impl Engine {
                 ledger_saved: 0.0,
                 ledger_failed: false,
                 projects_closed,
-                last_pulse: 0.0,
+                cadence: Cadence::default(),
+                reading: HashSet::new(),
+                watching: false,
+                closing: false,
+                usage_command_spent: false,
+                claude_flags: Default::default(),
+                codex_failed_at: f64::MIN,
                 utc_offset: 0,
                 offset_known: false,
                 watch_requested: false,
@@ -375,17 +445,7 @@ impl Engine {
         let mut claude_quota = None;
         for (vendor, cli, spawn, cwd, windows) in jobs {
             match vendor {
-                Vendor::Claude => {
-                    let found = account::claude_account(&cli, &spawn, &cwd, timeout).await;
-                    let subscription = found.as_ref().is_some_and(|s| s.billing == Some(Billing::Subscription));
-                    self.with(|c| {
-                        c.claude_plan_checked(found);
-                        c.emit_usage();
-                    });
-                    if subscription {
-                        claude_quota = Some((cli, spawn, cwd));
-                    }
-                }
+                Vendor::Claude => claude_quota = self.check_claude_plan(timeout).await,
                 Vendor::Codex => {
                     let events = read_codex_limits(&cli.command, &cwd, windows, spawner(&spawn, &cli), timeout).await;
                     self.with(|c| {
@@ -404,10 +464,35 @@ impl Engine {
             });
         }
     }
-    /// Checks the plans once the screen supplies its local offset, then every quarter of an hour. The shell starts it once.
+    /// Checks the Claude plan; when the account is a subscription, returns what a zero-token quota read needs.
+    async fn check_claude_plan(&self, timeout: Duration) -> Option<(Cli, Spawner, PathBuf)> {
+        let (cli, spawn, cwd) =
+            self.with(|c| c.opts.clis.get(&Vendor::Claude).map(|cli| (cli.clone(), c.opts.spawn.clone(), c.opts.data_dir.clone())))?;
+        let found = account::claude_account(&cli, &spawn, &cwd, timeout).await;
+        let subscription = found.as_ref().is_some_and(|s| s.billing == Some(Billing::Subscription));
+        self.with(|c| {
+            c.claude_plan_checked(found);
+            c.emit_usage();
+        });
+        subscription.then_some((cli, spawn, cwd))
+    }
+    /// The newer flags the installed Claude Code is known to take (none until the help has been read).
+    pub fn claude_flags(&self) -> crate::claude::ClaudeFlags {
+        self.with(|c| c.claude_flags)
+    }
+
+    /// Reads once which newer flags the installed Claude Code lists in `--help` (`autocompact`, `permission-prompts`). Until it
+    /// answers, and if it never does, every Claude process starts as it did before those flags existed. The shell starts it once.
+    pub fn detect_claude_flags(&self) {
+        self.with(|c| c.probe_claude_flags());
+    }
+
+    /// Once the screen supplies its local offset: checks Claude's plan every quarter of an hour, and reads both quotas on the
+    /// schedule in `cadence.rs` (at start, every few minutes, after a wake). The shell starts it once.
     pub fn watch_accounts(&self) {
         let Some(me) = self.with(|c| {
             c.watch_requested = true;
+            c.watching |= c.offset_known;
             c.offset_known.then(|| c.me.clone())
         }) else {
             return;
@@ -415,10 +500,20 @@ impl Engine {
         let runtime = self.runtime.clone();
         let handle = runtime.clone();
         runtime.spawn(async move {
+            let mut plan_checked = f64::MIN;
             loop {
                 let Some(core) = me.upgrade() else { return };
-                Engine { core, runtime: handle.clone() }.check_plans(Duration::from_secs(20)).await;
-                tokio::time::sleep(Duration::from_secs(15 * 60)).await;
+                let engine = Engine { core, runtime: handle.clone() };
+                let now = engine.with(|c| {
+                    c.quota_tick();
+                    c.secs()
+                });
+                if !(0.0..PLAN_EVERY).contains(&(now - plan_checked)) {
+                    plan_checked = now;
+                    engine.check_claude_plan(Duration::from_secs(20)).await;
+                }
+                drop(engine);
+                tokio::time::sleep(Duration::from_secs_f64(TICK)).await;
             }
         });
     }
@@ -489,6 +584,50 @@ impl Engine {
     pub fn rename(&self, id: &str, title: &str) {
         self.with(|c| c.rename(id, title))
     }
+    /// A folder is chosen by the person, before any messages or files belong to the conversation.
+    pub fn chat_folder(&self, id: Option<&str>, folder: Option<&Path>) -> Result<Conversation, String> {
+        self.with(|c| {
+            let folder = folder
+                .map(|p| {
+                    // Any folder can be the working folder in both modes (R121), except the system folders and the ones that hold
+                    // sign-ins and keys (R124).
+                    if crate::permissions::forbidden_folder(p) {
+                        return Err("error.workingFolder");
+                    }
+                    crate::permissions::working_root(p).filter(|p| p.is_dir()).ok_or("error.chatFolder")
+                })
+                .transpose()?
+                .map(|p| p.to_string_lossy().into_owned());
+            let id = match id {
+                Some(id) => {
+                    let conv = c.load(id).ok_or("error.conversationGone")?;
+                    if conv.area != Area::Chat || !conv.messages.is_empty() {
+                        return Err("error.chatFolderLocked".into());
+                    }
+                    id.to_string()
+                }
+                None => {
+                    c.drop_draft();
+                    c.blank(Area::Chat, None)
+                }
+            };
+            if let Some(live) = c.live.remove(&id) {
+                live.session.close();
+            }
+            if let Some(f) = &folder {
+                c.note_folder(f);
+            }
+            let conv = c.convs.get_mut(&id).expect("loaded conversation");
+            conv.working_folder = folder;
+            conv.sessions.clear();
+            conv.tentative.clear();
+            conv.cost_base.clear();
+            let result = conv.clone();
+            c.save(&id);
+            c.list_changed();
+            Ok(result)
+        })
+    }
     pub fn remove(&self, id: &str) {
         self.with(|c| c.remove(id))
     }
@@ -538,6 +677,58 @@ impl Engine {
             }
         })
     }
+    /// A folder picked in a dialog or taken from the recents, as a project. A refused or missing folder adds nothing.
+    pub fn open_folder(&self, path: &str) -> Result<Project, String> {
+        let Some(path) = crate::recents::resolved(path) else { return Err("error.workingFolder".into()) };
+        if !Path::new(&path).is_dir() {
+            return Err("error.recents.gone".into());
+        }
+        Ok(self.with(|c| c.add_project(&path)))
+    }
+    pub fn recents(&self) -> RecentsView {
+        self.with(|c| c.store.recents().view())
+    }
+    pub fn forget_recent(&self, path: &str) -> Result<(), String> {
+        self.change_recents(|r| {
+            r.forget(path);
+            Ok(())
+        })
+    }
+    pub fn save_environment(&self, name: &str, folders: &[String]) -> Result<(), String> {
+        self.change_recents(|r| r.save_environment(new_id(), name, folders).map_err(String::from))
+    }
+    pub fn forget_environment(&self, id: &str) -> Result<(), String> {
+        self.change_recents(|r| {
+            r.forget_environment(id);
+            Ok(())
+        })
+    }
+    /// Reads the recents, changes them and writes them back; a failed write is an error the screen can say, never a silent success.
+    fn change_recents(&self, change: impl FnOnce(&mut crate::recents::Recents) -> Result<(), String>) -> Result<(), String> {
+        self.with(|c| {
+            let mut recents = c.store.recents();
+            change(&mut recents)?;
+            c.store.save_recents(&recents).map_err(|_| "error.recents.saveFailed".to_string())
+        })
+    }
+    /// Opens every folder of an environment that can still be opened; fails only when none can.
+    pub fn start_environment(&self, id: &str) -> Result<Vec<Project>, String> {
+        let folders = self.with(|c| c.store.recents().environment(id).map(|e| e.folders.clone())).ok_or("error.environment.gone")?;
+        self.open_folders(&folders)
+    }
+    /// Opens each folder that can be opened as a project, the first of the list ending up the most recent.
+    pub fn open_folders(&self, folders: &[String]) -> Result<Vec<Project>, String> {
+        let mut projects = Vec::new();
+        let mut failure = String::from("error.environment.folders");
+        for folder in folders.iter().rev() {
+            match self.open_folder(folder) {
+                Ok(p) => projects.push(p),
+                Err(e) => failure = e,
+            }
+        }
+        projects.reverse();
+        if projects.is_empty() { Err(failure) } else { Ok(projects) }
+    }
     /// Takes a project out of the list. Anything still working in it (a conversation answering, a mission planning or
     /// running) stops the removal with `error.project.busy`: the person stops it first. Nothing on disk is deleted.
     pub fn remove_project(&self, id: &str) -> Result<(), String> {
@@ -578,8 +769,14 @@ impl Engine {
             Some(TerminalCommand { command: cli.command, args, cwd: c.opts.data_dir.clone() })
         })
     }
+    /// Whether any answer is streaming or waits for the user: the running list is not empty. The shell uses it to hold back
+    /// anything that would end the process (installing an update).
+    pub fn is_working(&self) -> bool {
+        self.with(|c| !c.running.items.is_empty())
+    }
     pub fn shutdown(&self) {
         self.with(|c| {
+            c.closing = true;
             let active: Vec<_> = c.live.keys().cloned().collect();
             for id in active {
                 c.note_turn(&id, None, true);
@@ -730,6 +927,8 @@ impl Core {
             v.primary(now).and_then(|name| v.readings.get(name)).map(|r| r.read_at).filter(|at| *at >= start && *at <= now).unwrap_or(now);
         self.ledger.of_mut(vendor).spend(cost, incomplete, now, self.utc_offset);
         self.ledger.of_mut(vendor).span(Span { start, end, model: model.to_string(), cost, incomplete });
+        self.ledger.of_mut(vendor).worked(Work { start, finished: now, model: model.to_string(), cost, incomplete }, now);
+        self.quota_event();
         self.ledger.of_mut(vendor).learn_weights(now);
         if crate::project::budget::finish_unbounded(&mut self.ledger, vendor).is_err() {
             self.projects_closed = true;
@@ -818,16 +1017,27 @@ impl Core {
         self.opts.clis = clis;
     }
 
-    // Each chat conversation gets a private workspace folder: code runs and files are created there, never elsewhere.
-    fn workspace_of(&self, id: &str) -> PathBuf {
+    fn scratch_of(&self, id: &str) -> PathBuf {
         self.opts.data_dir.join("chat").join(id)
+    }
+
+    fn workspace_of(&self, id: &str) -> PathBuf {
+        let folder = match self.convs.get(id) {
+            Some(c) => c.working_folder.clone(),
+            None => self.store.get(id).and_then(|c| c.working_folder),
+        };
+        folder.map(PathBuf::from).unwrap_or_else(|| self.scratch_of(id))
     }
 
     fn cwd_of(&self, c: &Conversation) -> Result<PathBuf, String> {
         if c.area == Area::Chat {
             let dir = self.workspace_of(&c.id);
-            let _ = std::fs::create_dir_all(&dir);
-            return Ok(dir);
+            if c.working_folder.is_none() {
+                std::fs::create_dir_all(&dir).map_err(|_| "error.projectSandbox")?;
+            }
+            // The private folder and a chosen one are checked alike on every launch: a link put there since may lead somewhere
+            // that is not allowed. The CLI starts in the path that was checked.
+            return crate::permissions::checked_folder(&dir).ok_or_else(|| "error.workingFolder".to_string());
         }
         self.store
             .projects()
@@ -835,6 +1045,7 @@ impl Core {
             .find(|p| Some(&p.id) == c.project_id.as_ref())
             .map(|p| PathBuf::from(p.path))
             .ok_or_else(|| "error.projectGone".to_string())
+            .and_then(|path| crate::permissions::checked_folder(&path).ok_or_else(|| "error.workingFolder".to_string()))
     }
 
     fn load(&mut self, id: &str) -> Option<&mut Conversation> {
@@ -846,7 +1057,15 @@ impl Core {
             self.restore_recovery(&mut c);
             self.convs.insert(id.to_string(), c);
         }
-        self.convs.get_mut(id)
+        let c = self.convs.get_mut(id)?;
+        // A Codex session saved before R121 carries the isolated host command tool, which no mode the person can pick uses
+        // any more: it restarts once, with visible history, without it.
+        if c.command_gate {
+            c.forget_session(Vendor::Codex);
+            c.cost_base.remove(&Vendor::Codex);
+            c.command_gate = false;
+        }
+        Some(c)
     }
 
     fn save(&self, id: &str) {
@@ -868,7 +1087,13 @@ impl Core {
                             && m.status == Some(Status::Error)
                             && matches!(m.error.as_deref(), Some("error.quotaOut" | "error.quotaWait"))
                     })
-                    .map(|t| Recovery { pick: t.pick.clone(), text: t.text.clone(), by_hand: t.by_hand, retried: t.retried });
+                    .map(|t| Recovery {
+                        pick: t.pick.clone(),
+                        text: t.text.clone(),
+                        by_hand: t.by_hand,
+                        retried: t.retried,
+                        check: t.check.into(),
+                    });
             }
             self.store.save(&saved);
         }
@@ -894,6 +1119,7 @@ impl Core {
         let settings = Settings {
             appearance: patch.appearance.or(before.appearance),
             user_hooks: patch.user_hooks.or(before.user_hooks),
+            permissions: patch.permissions.or(before.permissions),
             notifications: patch.notifications.or(before.notifications),
             notification_sound: patch.notification_sound.or(before.notification_sound),
             language: patch.language.or(before.language),
@@ -905,16 +1131,36 @@ impl Core {
             autostart: patch.autostart.or(before.autostart),
         };
         self.store.save_settings(&settings).map_err(|_| "error.settings.saveFailed".to_string())?;
+        // Turns started with full access keep it until they end, so going back to asking stops them (a turn that began with
+        // approval cards keeps asking; switching to "Do not ask" does not touch it).
+        if before.permissions.unwrap_or_default() == Permissions::FullAccess && settings.permissions == Some(Permissions::Ask) {
+            let active: Vec<String> = self.live.iter().filter(|(_, live)| live.turn.is_some()).map(|(id, _)| id.clone()).collect();
+            for id in active {
+                if let Some(live) = self.live.remove(&id) {
+                    live.session.interrupt();
+                    live.session.close();
+                    if let Some(message) =
+                        live.turn.as_ref().and_then(|turn| self.convs.get_mut(&id)?.messages.iter_mut().find(|m| &m.id == turn))
+                    {
+                        settle(message);
+                    }
+                    self.finish(&id, live.turn);
+                }
+            }
+        }
         // The blank conversation being typed was started with the old name; the next one starts with the new one.
         if settings.user_name != before.user_name {
             self.drop_draft();
         }
-        // Idle project CLIs restart on their next turn, so a changed hooks choice applies right away.
-        if settings.user_hooks != before.user_hooks {
+        // Idle CLIs restart on their next turn when permissions change; hooks remain a Projects choice.
+        if settings.user_hooks != before.user_hooks || settings.permissions != before.permissions {
             let idle: Vec<String> = self
                 .live
                 .iter()
-                .filter(|(id, l)| l.turn.is_none() && self.convs.get(*id).is_some_and(|c| c.area == Area::Project))
+                .filter(|(id, l)| {
+                    l.turn.is_none()
+                        && (settings.permissions != before.permissions || self.convs.get(*id).is_some_and(|c| c.area == Area::Project))
+                })
                 .map(|(id, _)| id.clone())
                 .collect();
             for id in idle {
@@ -922,11 +1168,33 @@ impl Core {
                     l.session.close();
                 }
             }
-            if let Some(server) = self.codex.remove(&(Area::Project, before.user_hooks == Some(true))) {
-                server.retire();
+            let stale: Vec<_> = self
+                .codex
+                .keys()
+                .filter(|(area, _, p)| {
+                    *p != Permissions::Isolated && (*area == Area::Project || settings.permissions != before.permissions)
+                })
+                .copied()
+                .collect();
+            for key in stale {
+                if let Some(server) = self.codex.remove(&key) {
+                    server.retire();
+                }
             }
         }
         Ok(settings)
+    }
+
+    /// Starts the hidden `--help` read (see `Engine::detect_claude_flags`); its answer replaces the flags known so far.
+    fn probe_claude_flags(&self) {
+        let Some(cli) = self.opts.clis.get(&Vendor::Claude).cloned() else { return };
+        let (me, spawn, cwd) = (self.me.clone(), self.opts.spawn.clone(), self.opts.data_dir.clone());
+        self.opts.runtime.spawn(async move {
+            let Some(flags) = account::claude_flags(&cli, &spawn, &cwd, Duration::from_secs(20)).await else { return };
+            if let Some(core) = me.upgrade() {
+                core.lock().unwrap_or_else(|e| e.into_inner()).claude_flags = flags;
+            }
+        });
     }
 
     fn turn(&mut self, conv: &str) -> Option<&mut Message> {
@@ -939,9 +1207,44 @@ impl Core {
         if entry.sid != sid {
             return;
         }
-        let vendor = entry.vendor;
+        let (vendor, resumed) = (entry.vendor, entry.resumed);
         let turn_id = entry.turn.clone();
+        // A turn ran on the session: from here on it is the conversation's session for this vendor.
+        if !matches!(
+            event,
+            EngineEvent::Started { .. }
+                | EngineEvent::TurnStarted
+                | EngineEvent::Quota { .. }
+                | EngineEvent::Signals(_)
+                | EngineEvent::Error { .. }
+        ) && let Some(id) = self.live.get_mut(conv).and_then(|l| l.unsaved_session.take())
+            && let Some(c) = self.convs.get_mut(conv)
+        {
+            c.sessions.insert(vendor, id);
+            c.tentative.remove(&vendor);
+            if vendor == Vendor::Codex {
+                c.command_gate = self.live.get(conv).is_some_and(|l| l.permissions == Permissions::Isolated);
+            }
+            // a draft is saved only once something is sent
+            if !c.messages.is_empty() {
+                self.save(conv);
+            }
+        }
         match event {
+            // Codex accepted the turn: if Faber dies now, the next launch resumes this session instead of starting one that never
+            // heard of the turn.
+            EngineEvent::TurnStarted => {
+                let fresh = self.live.get(conv).and_then(|l| l.unsaved_session.clone());
+                if let (Some(id), Some(c)) = (fresh, self.convs.get_mut(conv))
+                    && c.sessions.get(&vendor) != Some(&id)
+                {
+                    c.tentative.insert(vendor, id);
+                    if !c.messages.is_empty() {
+                        self.save(conv);
+                    }
+                }
+                return;
+            }
             EngineEvent::Started { session_id, model } => {
                 // A CLI started while the user typed reports its model before any answer exists; later answers use it too.
                 if let Some(l) = self.live.get_mut(conv) {
@@ -950,15 +1253,13 @@ impl Core {
                 if let Some(m) = self.turn(conv) {
                     m.model = Some(model);
                 }
-                let Some(c) = self.convs.get_mut(conv) else { return };
-                c.sessions.insert(vendor, session_id);
-                // a draft is saved only once something is sent
-                if !c.messages.is_empty() {
-                    self.save(conv);
+                // Not saved yet: the id becomes resumable with the first sign that a turn ran on it (above).
+                if let Some(l) = self.live.get_mut(conv) {
+                    l.unsaved_session = Some(session_id);
                 }
-                // The turn's reply now names its model.
+                // The turn's reply now names its model: the screen hears it now, not with the first word.
                 self.refresh_running();
-                return;
+                return self.push(conv, turn_id.as_deref(), true);
             }
             EngineEvent::Break { final_answer } => {
                 if final_answer && self.live.get(conv).is_some_and(|l| !l.answer_started) {
@@ -1001,10 +1302,10 @@ impl Core {
                     if !final_answer {
                         m.activity_end = Some(m.text.encode_utf16().count());
                     }
-                    m.tools.get_or_insert_default().push(ToolUse { id, name, input, ok: None, output: None });
+                    m.tools.get_or_insert_default().push(ToolUse { id, name, input, ok: None, output: None, declined: false });
                 }
             }
-            EngineEvent::ToolResult { id, ok, text } => {
+            EngineEvent::ToolResult { id, ok, declined, text } => {
                 // A message steered into the turn starts a new reply, so a tool that began in the one before still ends here.
                 let current = self.live.get(conv).and_then(|l| l.turn.clone());
                 let replies =
@@ -1013,10 +1314,27 @@ impl Core {
                 recent.sort_by_key(|m| Some(&m.id) != current.as_ref());
                 if let Some(tool) = recent.into_iter().filter_map(|m| m.tools.as_mut()).flatten().find(|t| t.id == id) {
                     tool.ok = Some(ok);
+                    tool.declined = declined;
                     tool.output = Some(text.chars().take(4000).collect());
                 }
             }
             EngineEvent::Permission { request_id, tool, input } => {
+                // A request that touches a credential folder is refused in both modes, with no card (best effort for a command
+                // line: see `touches_credentials`). Full access never shows a card. The answer is decided here, under the lock
+                // that also saves the mode, so a request that was already on its way when the person switched to Ask finds the
+                // session gone (and is never accepted).
+                let cwd = self.convs.get(conv).and_then(|c| self.cwd_of(c).ok());
+                if let Some(l) = self.live.get(conv)
+                    && crate::permissions::touches_credentials(&input, cwd.as_deref().and_then(Path::to_str), &|name| {
+                        std::env::var(name).ok()
+                    })
+                {
+                    drop(l.session.answer(&request_id, false));
+                    return;
+                }
+                if self.live.get(conv).is_some_and(|l| l.permissions == Permissions::FullAccess) {
+                    return self.auto_answer(conv, vec![Permission { request_id, tool, input }]);
+                }
                 let allowed = self.convs.get(conv).and_then(|c| c.allow_always.as_ref()).is_some_and(|a| a.contains(&tool));
                 if allowed {
                     return self.auto_answer(conv, vec![Permission { request_id, tool, input }]);
@@ -1026,6 +1344,13 @@ impl Core {
                 }
                 return self.push(conv, turn_id.as_deref(), true);
             }
+            EngineEvent::CacheWarm { secs, started_ms } => {
+                // The lifetime counts from the start of the request, not from the result: a long answer has used part of it.
+                if let (Some(m), Some(started)) = (self.turn(conv), started_ms) {
+                    m.cache_warm_until = Some(started.saturating_add(secs.saturating_mul(1000)).saturating_sub(WARM_MARGIN_MS));
+                }
+            }
+            EngineEvent::Parked { tool_use_id, tool, input } => self.park(conv, tool_use_id, tool, input),
             EngineEvent::Injected { tag } => return self.taken_in(conv, tag),
             EngineEvent::SteerFailed { tag } => return self.steer_failed(conv, &tag),
             EngineEvent::Quota { window, used, resets_at } => return self.note_quota(vendor, &window, used, resets_at),
@@ -1043,7 +1368,9 @@ impl Core {
             } => {
                 // Claude reports a conversation total; Codex has already priced this turn's individual requests.
                 let session = self.convs.get(conv).and_then(|c| c.sessions.get(&vendor)).cloned().unwrap_or_default();
+                let area = self.convs.get(conv).map_or(Area::Chat, |c| c.area);
                 let fresh = self.live.get(conv).is_some_and(|l| !l.resumed);
+                let first = self.live.get_mut(conv).is_some_and(|l| !std::mem::replace(&mut l.served, true));
                 let before = self.convs.get(conv).and_then(|c| c.cost_base.get(&vendor));
                 let settled = if vendor == Vendor::Codex {
                     usage::Settled { cost: cost_total_usd.filter(|cost| cost.is_finite() && *cost >= 0.0), base: None }
@@ -1066,8 +1393,21 @@ impl Core {
                         if vendor == Vendor::Codex { 0 } else { input_tokens },
                     )
                 });
+                // A first turn after a resume starts from whatever the CLI's cache still holds, which is what an idle close or a
+                // change of effort costs; it is logged (resumed) where a fresh process's first turn, always cold, is not.
+                let resumed = first && self.live.get(conv).is_some_and(|l| l.resumed);
+                if usage::worth_logging(input_tokens, cache_read_tokens, first && !resumed) {
+                    let effort = self.live.get(conv).map(|l| l.effort.as_str());
+                    self.store.log_cache_health(&serde_json::json!({
+                        "at": now(), "conv": conv, "vendor": vendor.name(), "model": model, "effort": effort, "input": input_tokens,
+                        "read": cache_read_tokens, "written": cache_write_tokens, "written1h": cache_write_1h_tokens,
+                        "share": usage::cache_share(input_tokens, cache_read_tokens).map(|s| (s * 1000.0).round() / 1000.0),
+                        "resumed": resumed,
+                    }));
+                }
                 let missing = cost.is_none() || ((native.is_none() || vendor == Vendor::Codex) && incomplete);
                 self.note_turn(conv, cost, missing);
+                let can_run = crate::route::candidates(&self.vendors(), &self.codex_models);
                 if let Some(m) = self.turn(conv) {
                     m.status = Some(if ok { Status::Done } else { Status::Stopped });
                     m.cost_usd = cost.map(|cost| m.cost_usd.unwrap_or(0.0) + cost).or(m.cost_usd);
@@ -1078,6 +1418,7 @@ impl Core {
                     m.cache_write_1h_tokens = Some(cache_write_1h_tokens);
                     m.incomplete = (incomplete || m.incomplete.unwrap_or(false)).then_some(true);
                     m.permissions = None;
+                    m.nudge = nudge::of(m, area, &can_run);
                 }
                 if !ok && self.transfers.get(conv).is_some_and(|t| t.moving) {
                     if let Some(reply) = turn_id {
@@ -1101,6 +1442,30 @@ impl Core {
                 return self.finish(conv, turn_id);
             }
             EngineEvent::Error { message, fatal } => {
+                // The CLI no longer has the session this launch resumed (a warm-up that never ran a turn, or a cleaned-up history).
+                let mut message = message;
+                if fatal && resumed && recovery::session_lost(&message) {
+                    // Only a session that never took a turn may be replaced silently: not one whose turn was accepted, and not
+                    // a reply that already holds work (partial text, tool actions, a retry after the quota ran out).
+                    let silent = !self.convs.get(conv).is_some_and(|c| c.tentative.contains_key(&vendor))
+                        && !self.reply_has_work(conv, turn_id.as_deref())
+                        && !self.said_on(conv, vendor, turn_id.as_deref());
+                    if let Some(c) = self.convs.get_mut(conv) {
+                        c.forget_session(vendor);
+                    }
+                    // A new session with the same settings runs this turn once; a fresh launch is never `resumed`, so it cannot loop.
+                    if silent && self.rerun_fresh(conv, turn_id.as_deref()) {
+                        return;
+                    }
+                    // Turns did run there: say so, and let the next message start a session that is given the visible history.
+                    message = "error.sessionLost".into();
+                }
+                // A CLI that refuses a flag Faber passed (it was changed under a running Faber): forget the newer flags at once, so the
+                // next launch is the old one, and read the new help.
+                if fatal && recovery::flag_rejected(&message) && self.claude_flags != Default::default() {
+                    self.claude_flags = Default::default();
+                    self.probe_claude_flags();
+                }
                 let limited = fatal && recovery::plan_limit(&message);
                 if let Some(m) = self.turn(conv) {
                     m.error = Some(message);
@@ -1150,6 +1515,9 @@ impl Core {
             c.queued.iter_mut().for_each(|q| q.sending = false);
         }
         let workspace = self.workspace_of(conv);
+        if self.convs.get(conv).is_some_and(|c| c.area == Area::Chat && c.working_folder.is_none()) {
+            crate::permissions::clean_tmp(&workspace);
+        }
         let completed_ok = if let Some(c) = self.convs.get_mut(conv) {
             if let Some(m) = turn_id.as_ref().and_then(|id| c.messages.iter_mut().find(|m| &m.id == id))
                 && c.area == Area::Chat
@@ -1260,9 +1628,12 @@ impl Core {
         if c.queued.len() >= MAX_QUEUED {
             return Err("error.queueFull".into());
         }
-        let attachments_dir =
-            if c.area == Area::Chat { self.workspace_of(id).join("attachments") } else { self.opts.data_dir.join("attachments").join(id) };
-        let saved = if req.files.is_empty() { vec![] } else { save_files(&attachments_dir, &req.files) };
+        let root = if c.area == Area::Chat { self.cwd_of(c)? } else { self.opts.data_dir.clone() };
+        let attachments_dir = if c.area == Area::Chat { root.join("attachments") } else { root.join("attachments").join(id) };
+        let saved = if req.files.is_empty() { vec![] } else { save_files(&root, &attachments_dir, &req.files) };
+        if saved.len() != req.files.len() {
+            return Err("error.projectSandbox".into());
+        }
         let names: Vec<String> =
             saved.iter().map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()).collect();
         let at = now();
@@ -1418,6 +1789,7 @@ impl Core {
     /// Starts a queued message as a turn. If nothing can answer it, it goes back to the front of the queue, so no message is
     /// lost; once the turn exists, a failure shows on that turn's reply like any other.
     fn dispatch_queued(&mut self, id: &str, item: QueuedTurn) -> Result<(), String> {
+        self.load(id).ok_or("error.conversationGone")?;
         if self.local_build {
             self.requeue(id, item);
             return Err("error.update.activeOperations".into());
@@ -1443,9 +1815,12 @@ impl Core {
             }
             None => fallback.clone(),
         };
-        let joining_late = !c.sessions.contains_key(&pick.vendor) && !c.messages.is_empty();
+        let data_dir = self.opts.data_dir.clone();
+        let joining_late = c.resumable(pick.vendor).is_none() && !c.messages.is_empty();
         let history = c.messages.clone();
         let at = now();
+        let resent = joining_late && session_was_lost(c, pick.vendor);
+        let area = c.area;
         let mut question = Message::new(new_id(), Role::User, item.text.clone(), at);
         question.images = item.images.clone();
         question.attachments = item.attachments.clone();
@@ -1455,6 +1830,7 @@ impl Core {
             reply.model = pick.model.clone();
         }
         reply.reason = Some(if routing { "reason.routing".into() } else { pick.reason.clone() });
+        reply.note = resent.then(|| "note.historyResent".to_string());
         reply.tools = Some(vec![]);
         reply.status = Some(Status::Streaming);
         let reply_id = reply.id.clone();
@@ -1477,9 +1853,11 @@ impl Core {
                 by_hand: !auto,
                 retried: false,
                 moving: false,
+                check: "glance",
             },
         );
-        let text = if joining_late { with_history(&history, &model_text) } else { model_text };
+        let text =
+            if joining_late { with_history(&history, &model_text, &|n| attachment_place(area, &data_dir, id, n)) } else { model_text };
         if let Some(before) = route {
             let only = before.as_ref().map(|p| p.vendor);
             let route = self.route_for(&item.text, images.len() + attachments_len, only);
@@ -1545,17 +1923,18 @@ impl Core {
         self.push(id, Some(reply_id), true);
     }
 
-    /// The shared Codex process for an area and hooks choice, started again if it died.
-    fn codex_server(&mut self, area: Area, user_hooks: bool, cli: &Cli) -> &CodexServer {
+    /// The shared Codex process for an area, hooks choice and permissions, started again if it died.
+    fn codex_server(&mut self, area: Area, user_hooks: bool, permissions: Permissions, cli: &Cli) -> &CodexServer {
         let opts = CodexServerOptions {
-            bin: cli.command.clone(),
+            permissions,
+            cli: cli.clone(),
             cwd: self.opts.data_dir.clone(),
             area,
             user_hooks,
             windows: self.opts.windows,
             spawn: spawner(&self.opts.spawn, cli),
         };
-        let server = self.codex.entry((area, user_hooks)).or_insert_with(|| CodexServer::start(opts.clone()));
+        let server = self.codex.entry((area, user_hooks, permissions)).or_insert_with(|| CodexServer::start(opts.clone()));
         if !server.is_alive() {
             *server = CodexServer::start(opts);
         }
@@ -1629,8 +2008,26 @@ impl Core {
     fn launch(&mut self, conv: &str, pick: &Pick) -> Result<(), String> {
         self.tick += 1;
         let cli = self.opts.clis.get(&pick.vendor).cloned();
+        let permissions = self.store.settings().permissions.unwrap_or_default();
+        // Every turn checks the working folder again, also when the process of an earlier turn is reused: a link inside the path
+        // may have been pointed somewhere else since.
+        let cwd = match self.convs.get(conv).ok_or_else(|| "error.conversationGone".to_string()).and_then(|c| self.cwd_of(c)) {
+            Ok(cwd) => cwd,
+            Err(error) => {
+                if let Some(l) = self.live.remove(conv) {
+                    l.session.close();
+                }
+                return Err(error);
+            }
+        };
         if let Some(l) = self.live.get_mut(conv) {
-            if l.vendor == pick.vendor && l.model == pick.model && l.effort == pick.effort && Some(&l.cli) == cli.as_ref() {
+            if l.vendor == pick.vendor
+                && l.model == pick.model
+                && l.effort == pick.effort
+                && Some(&l.cli) == cli.as_ref()
+                && l.permissions == permissions
+                && l.cwd == cwd
+            {
                 l.used = self.tick; // most recently used
                 return Ok(());
             }
@@ -1638,7 +2035,7 @@ impl Core {
             self.live.remove(conv);
         }
         let c = self.convs.get(conv).ok_or("error.conversationGone")?;
-        let cwd = self.cwd_of(c)?;
+        let cwd_used = cwd.clone();
         let cli = cli.ok_or("error.notConnected")?;
         let spawn = spawner(&self.opts.spawn, &cli);
         self.next_sid += 1;
@@ -1673,8 +2070,9 @@ impl Core {
                 core.lock().unwrap_or_else(|e| e.into_inner()).handle(&end.key, end.sid, e);
             }
         });
-        let user_hooks = self.store.settings().user_hooks == Some(true);
-        let resume = c.sessions.get(&pick.vendor).cloned();
+        // The hooks switch matters only while asking; with full access the person's hooks always run, as in the CLI itself.
+        let user_hooks = self.store.settings().user_hooks == Some(true) && permissions == Permissions::Ask;
+        let resume = c.resumable(pick.vendor).cloned();
         let resumed = resume.is_some();
         let area = c.area;
         // The conversation's own name, fixed when it began: a rename in Settings never reaches a conversation under way.
@@ -1685,14 +2083,25 @@ impl Core {
                 ClaudeOptions {
                     bin: cli.command.clone(),
                     cwd,
-                    launch: ClaudeLaunch { area, model, effort, resume, user_hooks, instructions: None, user_name },
+                    launch: ClaudeLaunch {
+                        area,
+                        model,
+                        effort,
+                        resume,
+                        user_hooks,
+                        permissions,
+                        instructions: None,
+                        user_name,
+                        flags: self.claude_flags,
+                    },
                     spawn,
+                    sandbox: self.opts.clis.get(&Vendor::Codex).cloned(),
                 },
                 sink,
             ),
             Vendor::Codex => self
-                .codex_server(area, user_hooks, &cli)
-                .open(CodexThread { cwd, model, effort, resume, instructions: None, user_name }, sink),
+                .codex_server(area, user_hooks, permissions, &cli)
+                .open(CodexThread { cwd, model, effort, resume, instructions: None, user_name, permissions }, sink),
         };
         self.live.insert(
             conv.to_string(),
@@ -1709,10 +2118,14 @@ impl Core {
                 used: self.tick,
                 cli,
                 resumed,
+                permissions,
+                cwd: cwd_used,
                 by_hand: false,
                 approved: false,
                 started: 0.0,
+                served: false,
                 steering: vec![],
+                unsaved_session: None,
             },
         );
         // ponytail: count-based limit on idle Claude processes; a RAM budget across all CLIs comes with parallel workers.
@@ -1744,7 +2157,10 @@ impl Core {
             choice: None,
             area,
             project_id,
+            working_folder: None,
             sessions: BTreeMap::new(),
+            tentative: BTreeMap::new(),
+            command_gate: false,
             cost_base: BTreeMap::new(),
             allow_always: None,
             branch_of: None,
@@ -1783,10 +2199,21 @@ impl Core {
                 None => self.blank(req.area, req.project_id.clone()),
             },
         };
-        let attachments_dir = if req.area == Area::Chat {
-            self.workspace_of(&id).join("attachments")
+        self.load(&id).ok_or("error.conversationGone")?;
+        let saved = if req.files.is_empty() {
+            vec![]
         } else {
-            self.opts.data_dir.join("attachments").join(&id)
+            let root = if req.area == Area::Chat {
+                self.cwd_of(self.convs.get(&id).ok_or("error.conversationGone")?)?
+            } else {
+                self.opts.data_dir.clone()
+            };
+            let dir = if req.area == Area::Chat { root.join("attachments") } else { root.join("attachments").join(&id) };
+            let files = save_files(&root, &dir, &req.files);
+            if files.len() != req.files.len() {
+                return Err("error.projectSandbox".into());
+            }
+            files
         };
         let at = now();
         let auto = req.choice.vendor == "auto";
@@ -1805,10 +2232,12 @@ impl Core {
         if c.title.is_empty() {
             c.title = req.text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(60).collect();
         }
-        let joining_late = !c.sessions.contains_key(&pick.vendor) && !c.messages.is_empty();
+        let data_dir = self.opts.data_dir.clone();
+        let joining_late = c.resumable(pick.vendor).is_none() && !c.messages.is_empty();
+        let resent = joining_late && session_was_lost(c, pick.vendor);
+        let area = c.area;
         let history = c.messages.clone();
         // Attached files are saved where the model can open them with its own tools (PDFs, spreadsheets, archives...).
-        let saved = if req.files.is_empty() { vec![] } else { save_files(&attachments_dir, &req.files) };
         let name = |p: &Path| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let shown: Vec<String> = saved
             .iter()
@@ -1824,6 +2253,7 @@ impl Core {
             reply.model = pick.model.clone();
         }
         reply.reason = Some(if routing { "reason.routing".into() } else { pick.reason.clone() });
+        reply.note = resent.then(|| "note.historyResent".to_string());
         reply.tools = Some(vec![]);
         reply.status = Some(Status::Streaming);
         let reply_id = reply.id.clone();
@@ -1845,9 +2275,10 @@ impl Core {
                 by_hand: !auto,
                 retried: false,
                 moving: false,
+                check: "glance",
             },
         );
-        let text = if joining_late { with_history(&history, &text) } else { text };
+        let text = if joining_late { with_history(&history, &text, &|n| attachment_place(area, &data_dir, &id, n)) } else { text };
         if let Some(before) = route {
             let only = before.as_ref().map(|p| p.vendor);
             let route = self.route_for(&req.text, req.images.len() + req.files.len(), only);
@@ -1887,6 +2318,7 @@ impl Core {
         let c = self.convs.get_mut(&id).expect("just created");
         c.title = format!("↳ {}", source.title.trim_start_matches("↳ "));
         c.branch_of = Some(BranchOf { conversation_id: source.id.clone(), message_id: req.message_id.clone() });
+        c.working_folder = source.working_folder.clone();
         c.messages = source.messages[..at]
             .iter()
             .cloned()
@@ -1895,17 +2327,35 @@ impl Core {
                 m
             })
             .collect();
-        if source.area == Area::Chat && from.is_dir() {
+        if source.area == Area::Chat && source.working_folder.is_none() && from.is_dir() {
             copy_dir(&from, &to);
         }
+        // The resend carries what the selected message carried: its images and attached files. A chat workspace copy already
+        // holds the files, so they are taken out of it and saved again under the same names by the send.
+        let picked = &source.messages[at];
+        let images = picked.images.clone().unwrap_or_default();
+        let kept =
+            if source.area == Area::Chat { from.join("attachments") } else { self.opts.data_dir.join("attachments").join(&source.id) };
+        let files: Vec<Attachment> = picked
+            .attachments
+            .iter()
+            .flatten()
+            .filter_map(|name| {
+                let bytes = std::fs::read(kept.join(name)).ok()?;
+                if source.area == Area::Chat {
+                    let _ = std::fs::remove_file(to.join("attachments").join(name));
+                }
+                Some(Attachment { name: name.clone(), base64: base64::engine::general_purpose::STANDARD.encode(bytes) })
+            })
+            .collect();
         self.save(&id);
         self.send(SendRequest {
             conversation_id: Some(id),
             area: source.area,
             project_id: source.project_id,
             text: req.text,
-            images: vec![],
-            files: vec![],
+            images,
+            files,
             choice: req.choice,
         })
     }
@@ -1942,7 +2392,7 @@ impl Core {
                 l.session.close();
             }
             self.convs.remove(&old);
-            let _ = std::fs::remove_dir_all(self.workspace_of(&old));
+            let _ = std::fs::remove_dir_all(self.scratch_of(&old));
         }
     }
 
@@ -1984,7 +2434,7 @@ impl Core {
         if self.store.get(id).is_some() || self.convs.contains_key(id) {
             self.store.remove(id);
             self.convs.remove(id);
-            let _ = std::fs::remove_dir_all(self.workspace_of(id));
+            let _ = std::fs::remove_dir_all(self.scratch_of(id));
             let _ = std::fs::remove_dir_all(self.opts.data_dir.join("attachments").join(id));
         }
         self.list_changed();
@@ -2006,9 +2456,19 @@ impl Core {
         Some(TerminalCommand { command: cli.command, args: cli.prefix.into_iter().chain(resume).collect(), cwd: self.cwd_of(&c).ok()? })
     }
 
+    /// A folder was used: it goes to the top of the recents (a refused one is not kept).
+    fn note_folder(&self, path: &str) {
+        let mut recents = self.store.recents();
+        if recents.used(path).is_some() {
+            // Remembering is a courtesy: opening the folder never fails because the list could not be written.
+            let _ = self.store.save_recents(&recents);
+        }
+    }
+
     fn add_project(&mut self, path: &str) -> Project {
         let mut projects = self.store.projects();
-        if let Some(found) = projects.iter().find(|p| p.path == path) {
+        self.note_folder(path);
+        if let Some(found) = projects.iter().find(|p| crate::recents::same_place(&p.path, path)) {
             return found.clone();
         }
         let name = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string());
@@ -2048,11 +2508,15 @@ fn unseen(c: char) -> bool {
         )
 }
 
-/// The row of the running list for a conversation, if its latest reply is streaming or has unanswered permissions.
+/// The row of the running list for a conversation, if its latest reply is streaming, has unanswered permissions or has parked
+/// requests (denied for want of anyone to answer; they wait for the person until the next message, and count as "needs you").
+/// Cache warmth is not here: it is a quiet note on the reply itself.
 fn running_item(c: &Conversation) -> Option<RunningItem> {
     let reply = c.messages.last().filter(|m| m.role == Role::Assistant)?;
     let permissions = reply.permissions.clone().unwrap_or_default();
-    if reply.status != Some(Status::Streaming) && permissions.is_empty() {
+    let parked = reply.parked.clone().unwrap_or_default();
+    let parked_more = reply.parked_more.unwrap_or(0);
+    if reply.status != Some(Status::Streaming) && permissions.is_empty() && parked.is_empty() && parked_more == 0 {
         return None;
     }
     Some(RunningItem {
@@ -2063,9 +2527,11 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
         project_id: c.project_id.clone(),
         vendor: reply.vendor,
         model: reply.model.clone(),
-        state: if permissions.is_empty() { RunState::Working } else { RunState::NeedsYou },
+        state: if permissions.is_empty() && parked.is_empty() && parked_more == 0 { RunState::Working } else { RunState::NeedsYou },
         since: reply.at,
         permissions,
+        parked,
+        parked_more,
         wait_until: reply.wait_until.filter(|_| reply.status == Some(Status::Streaming)),
     })
 }
@@ -2073,6 +2539,14 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
 fn copy_dir(from: &Path, to: &Path) {
     let _ = std::fs::create_dir_all(to);
     for entry in std::fs::read_dir(from).into_iter().flatten().flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name == ".faber"
+            || name == ".git"
+            || entry.file_type().is_ok_and(|kind| kind.is_symlink())
+            || !crate::permissions::allows(from, "Read", &serde_json::json!({ "file_path": name }))
+        {
+            continue;
+        }
         let target = to.join(entry.file_name());
         if entry.path().is_dir() {
             copy_dir(&entry.path(), &target);

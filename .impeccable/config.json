@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "ui/styles.css"
+        ],
+        "createdAt": "2026-10-11T16:15:18.584Z",
+        "reason": "AI (Claude): L84 is a 2px neutral var(--line) indent rule for the collapsed thinking text, like a blockquote rule, not a coloured accent card; kept in the approved design-final mock"
+      }
+    ]
+  }
+}

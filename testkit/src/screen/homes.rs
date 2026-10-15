@@ -66,11 +66,13 @@ const LIFE: &str = r#"(() => ({
   hints: document.querySelectorAll('.composer .g-hint').length,
   carets: document.querySelectorAll('.composer .g-caret').length,
   running: document.getAnimations().filter((a) => a.playState === 'running').length,
+  // The dust, the glow and the black hole move on timers of their own, not as CSS animations.
+  timers: document.querySelectorAll('.dust[data-live=on], canvas.amb-hole[data-live=on]').length,
   level: document.documentElement.dataset.motion,
   hidden: document.hidden,
   paused: document.documentElement.classList.contains('hidden-win'),
   projectLight: !!document.querySelector('.ambient.project'),
-  chatLight: !!document.querySelector('.ambient:not(.project)'),
+  chatLight: !!document.querySelector('.ambient:not(.project):not(:has(.amb-hole))'),
 }))()"#;
 
 fn life(app: &mut Opened) -> Result<Value> {
@@ -92,8 +94,12 @@ fn open_project(app: &mut Opened) -> Result {
     app.page.wait_visible(&css(".start-card"))
 }
 
+fn moves(state: &Value) -> bool {
+    state["running"].as_u64().unwrap_or(0) + state["timers"].as_u64().unwrap_or(0) > 0
+}
+
 fn still(state: &Value) -> bool {
-    state["ghost"] == false && state["carets"] == 0 && state["running"] == 0
+    state["ghost"] == false && state["carets"] == 0 && state["running"] == 0 && state["timers"] == 0
 }
 
 fn looks(ctx: &mut Ctx) -> Result {
@@ -101,19 +107,21 @@ fn looks(ctx: &mut Ctx) -> Result {
     big(&mut app)?;
     system_motion(&mut app.page, false)?;
     app.page.wait_visible(&css(".hello"))?;
+    // The effects also rest while another app has the focus; the hidden test window never has it on its own.
+    super::app::focus(&mut app.page, true)?;
     pause(1.5);
     let chat = life(&mut app)?;
     ensure(chat["hidden"] == false, || format!("the test window counts as hidden: {chat}"))?;
     ensure(chat["ghost"] == true && chat["hints"] == 3, || format!("the Chat home's composer idles: {chat}"))?;
     ensure(chat["chatLight"] == true && chat["projectLight"] == false, || format!("the Chat home has the chat light: {chat}"))?;
-    ensure(chat["running"].as_u64().unwrap_or(0) > 0, || format!("something moves on the Chat home: {chat}"))?;
+    ensure(moves(&chat), || format!("something moves on the Chat home: {chat}"))?;
     ctx.shot(&mut app, "homes-chat")?;
     open_project(&mut app)?;
     pause(1.5);
     let project = life(&mut app)?;
     ensure(project["ghost"] == true && project["hints"] == 3, || format!("the Projects home's composer idles: {project}"))?;
     ensure(project["projectLight"] == true && project["chatLight"] == false, || format!("the Projects home has its own light: {project}"))?;
-    ensure(project["running"].as_u64().unwrap_or(0) > 0, || format!("something moves on the Projects home: {project}"))?;
+    ensure(moves(&project), || format!("something moves on the Projects home: {project}"))?;
     ensure(app.page.count(&css(".start-card.welcome-grid .hello"))? == 1, || "the Projects home has the greeting of a home".into())?;
     ctx.shot(&mut app, "homes-project")?;
     // With reduced motion both homes stand completely still and the fields show their plain placeholders.
@@ -133,7 +141,7 @@ fn looks(ctx: &mut Ctx) -> Result {
     system_motion(&mut app.page, false)?;
     pause(0.6);
     let again = life(&mut app)?;
-    ensure(again["ghost"] == true && again["running"].as_u64().unwrap_or(0) > 0, || format!("motion did not come back: {again}"))
+    ensure(again["ghost"] == true && moves(&again), || format!("motion did not come back: {again}"))
 }
 
 /// The cost of standing still, in percent of one processor core, over `seconds` with nobody touching the window.
@@ -148,6 +156,7 @@ fn costs_nothing_while_hidden(ctx: &mut Ctx) -> Result {
     big(&mut app)?;
     system_motion(&mut app.page, false)?;
     app.page.wait_visible(&css(".hello"))?;
+    super::app::focus(&mut app.page, true)?;
     pause(3.0);
     let chat = cpu(ctx, &app, 8.0)?;
     open_project(&mut app)?;
@@ -162,9 +171,7 @@ fn costs_nothing_while_hidden(ctx: &mut Ctx) -> Result {
     app.page.eval("Reflect.deleteProperty(document, 'hidden'); document.dispatchEvent(new Event('visibilitychange')); 1")?;
     pause(1.0);
     let back = life(&mut app)?;
-    ensure(back["paused"] == false && back["ghost"] == true && back["running"].as_u64().unwrap_or(0) > 0, || {
-        format!("a shown window stays still: {back}")
-    })?;
+    ensure(back["paused"] == false && back["ghost"] == true && moves(&back), || format!("a shown window stays still: {back}"))?;
     system_motion(&mut app.page, true)?;
     pause(2.0);
     let reduced = cpu(ctx, &app, 8.0)?;

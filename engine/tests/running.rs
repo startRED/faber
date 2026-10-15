@@ -1,10 +1,10 @@
 //! The running list and the quota readings: what the engine says is running, in which order, and when it says it.
 
-mod support;
+use crate::support;
 
 use faber_engine::cli::Cli;
 use faber_engine::engine::Ask;
-use faber_engine::model::{Area, RunState, RunningItem, Status, Vendor};
+use faber_engine::model::{Area, Permissions, RunState, RunningItem, Settings, Status, Vendor};
 use faber_engine::proc::Spawner;
 use faber_engine::router::Choice;
 use faber_engine::{AppEvent, Engine, EngineOptions, SendRequest};
@@ -39,6 +39,8 @@ fn engine(dir: &Path, vendors: &[Vendor], spawn: Spawner, ask: Option<Ask>) -> (
         ask,
     };
     let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
+    // These scenarios exercise permission queues and stale card answers, not the unattended default.
+    engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
     for vendor in engine.vendors() {
         engine.note_account_events(
             vendor,
@@ -195,6 +197,7 @@ async fn blocks_with_a_question_come_first_then_the_sidebar_order_with_chat_last
         Ok(replay(entries, Mismatches::default()))
     });
     let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], spawn, None);
+    engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
     let (one, two) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let first = engine.add_project(&one.path().to_string_lossy());
     let second = engine.add_project(&two.path().to_string_lossy());
@@ -392,6 +395,7 @@ async fn request_ids_that_repeat_in_two_conversations_are_two_questions() {
     // A chat and a project use two Codex processes, and each numbers its approvals from 0.
     let f = fake(fixture("codex", "tools"));
     let (engine, mut rx) = engine(dir.path(), &[Vendor::Codex], f.spawn.clone(), None);
+    engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
     let project = engine.add_project(&dir.path().to_string_lossy());
     let chat = engine.send(request(Area::Chat, None, TWO_FILES, "codex")).unwrap();
     let work = engine.send(request(Area::Project, Some(&project.id), TWO_FILES, "codex")).unwrap();
@@ -492,6 +496,21 @@ async fn interrupting_a_running_conversation_drops_its_row() {
 }
 
 #[tokio::test]
+async fn the_engine_is_working_from_the_first_row_until_the_last_one_leaves() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "interrupt"));
+    let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], f.spawn.clone(), None);
+    assert!(!engine.is_working(), "nothing has been sent");
+    let id = engine.send(request(Area::Chat, None, "Write a 600-word essay about the history of bread.", "claude")).unwrap();
+    lists_until(&mut rx, WAIT, |rows| !rows.is_empty()).await;
+    assert!(engine.is_working());
+    engine.interrupt(&id);
+    lists_until(&mut rx, WAIT, |rows| rows.is_empty()).await;
+    assert!(!engine.is_working());
+    engine.shutdown();
+}
+
+#[tokio::test]
 async fn removing_a_running_conversation_drops_its_row() {
     let dir = tempfile::tempdir().unwrap();
     let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], fake(fixture("claude", "tools")).spawn, None);
@@ -526,7 +545,13 @@ async fn a_driver_panic_removes_only_its_run_from_overlapping_chat_and_project_w
         let spawn: Spawner = Arc::new(move |_, _, _| {
             let (tx, rx) = tokio::sync::oneshot::channel();
             keep.lock().unwrap().push(tx);
-            Ok(faber_engine::proc::Proc { stdin: Box::new(tokio::io::sink()), stdout: Box::new(Panics(rx)), stderr: None, child: None })
+            Ok(faber_engine::proc::Proc {
+                stdin: Box::new(tokio::io::sink()),
+                stdout: Box::new(Panics(rx)),
+                stderr: None,
+                child: None,
+                contained: None,
+            })
         });
         let dir = tempfile::tempdir().unwrap();
         let (engine, mut rx) = engine(dir.path(), &[vendor], spawn, None);

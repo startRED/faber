@@ -161,7 +161,7 @@ fn engine_tree_host(args: &[String]) -> i32 {
         let mut p = spawn(&binary, &["--tree-cli".into()], &cwd)?;
         let root = p.child.as_ref().and_then(|p| p.id()).ok_or_else(|| io::Error::other("no root"))?;
         #[cfg(windows)]
-        let tree = p.child.as_ref().and_then(|p| p.owned_tree()).ok_or_else(|| io::Error::other("no owned tree"))?;
+        let tree = p.contained.as_ref().and_then(|p| p.owned_tree()).ok_or_else(|| io::Error::other("no owned tree"))?;
         #[cfg(windows)]
         if tree.identity().pid != root || tree.identity().started_at == 0 {
             return Err(io::Error::other("wrong owned tree identity"));
@@ -170,6 +170,8 @@ fn engine_tree_host(args: &[String]) -> i32 {
         BufReader::new(p.stdout).read_line(&mut line).await?;
         std::fs::write(ready, serde_json::json!({"root":root}).to_string())?;
         let action = wait_control(control, "action").await?;
+        // As the engine does: dropping the session drops the job and the child; stopping ends the job, then the child.
+        p.contained = None;
         if action == "drop" {
             drop(p.child.take());
         } else if action == "retire" {
@@ -185,7 +187,7 @@ fn engine_tree_host(args: &[String]) -> i32 {
         if action == "stop" {
             let peer = spawn(&binary, &["--idle".into()], &cwd)?;
             #[cfg(windows)]
-            if peer.child.as_ref().and_then(|p| p.owned_tree()).is_none_or(|p| p.identity() == tree.identity()) {
+            if peer.contained.as_ref().and_then(|p| p.owned_tree()).is_none_or(|p| p.identity() == tree.identity()) {
                 return Err(io::Error::other("peer reused the owned tree identity"));
             }
             let peer_id = peer.child.as_ref().and_then(|p| p.id()).unwrap_or(0);

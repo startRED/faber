@@ -112,6 +112,11 @@ input, textarea { caret-color: var(--accent); }
 .vendor { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: var(--r-xs); color: var(--ink-3); font-size: calc(var(--fs-ui) - 2px); text-align: left; }
 .vendor:hover { background: var(--s2); color: var(--ink); }
 .vendor .share { margin-left: 2px; color: var(--ink-2); }
+.vendor .extra { color: var(--ink-3); }
+.vendor .age, .vendor .counting { font-size: calc(var(--fs-ui) - 3px); color: var(--ink-3); }
+.vendor .counting { font-style: italic; }
+.urow .uncounted { grid-column: 1 / -1; }
+.usage-v .counting { font-style: italic; }
 .usage .note { padding: 4px 6px; }
 .who { padding: 4px 10px 0; color: var(--ink); font-size: var(--fs-ui); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .version { padding: 0 10px; font-size: calc(var(--fs-ui) - 2px); color: var(--ink-3); }
@@ -136,10 +141,21 @@ input, textarea { caret-color: var(--accent); }
 .col { width: min(100%, 660px); margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(18px * var(--dens)); }
 .empty { display: grid; justify-items: start; gap: 16px; padding-top: 14vh; }
 .empty h1 { font-size: min(var(--fs-display), 9vw); max-width: 8.4em; overflow-wrap: anywhere; }
-.empty p { margin: 0; color: var(--ink-2); font-size: var(--fs-lead); max-width: 44ch; line-height: 1.5; }
+.empty p { margin: 0; color: var(--ink-2); font-size: var(--fs-lead); max-width: 44ch; line-height: 1.5; overflow-wrap: anywhere; }
 /* Curioso peeks over a ledge: only the top 44 of his 64 px show, with both eyes, above a hairline. */
 .peek { width: min(100%, 44ch); height: 45px; overflow: hidden; color: var(--ink-3); border-bottom: 1px solid var(--line-2); }
 .peek svg { display: block; margin-left: -2px; } /* the drawing has 2 px of room on its left; his edge lines up with the heading */
+/* The entrance of a new project session (ui/Hole.tsx): he rises from behind the ledge and leans toward the hole as the
+   spark leaves his eyes. It plays only while the canvas marks the entrance, which needs full motion. */
+.work:has(.amb-hole[data-intro]) .peek svg { transform-origin: 50% 100%; animation: wake 1100ms var(--ease) both; }
+@keyframes wake {
+  0% { transform: translateY(46px); }
+  38% { transform: translateY(-4px); }
+  50% { transform: translateY(0); }
+  64% { transform: rotate(8deg) translateX(3px); }
+  82% { transform: rotate(-2deg); }
+  100% { transform: none; }
+}
 
 /* The column over the stage must not cover the greeting's composer: the greeting makes room for it on its left, at once:
    padding is layout, so it is never animated (the column itself slides in over it). */
@@ -291,13 +307,16 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 .tools { display: flex; flex-wrap: wrap; gap: 8px; font-size: calc(var(--fs-ui) - 1px); }
 .tools span { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; padding: 5px 10px; box-shadow: inset 0 0 0 1px var(--line); border-radius: var(--r-sm); color: var(--ink-2); white-space: nowrap; }
 .tools span svg { flex: none; color: var(--accent-text); }
-.tools span i { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-style: normal; }
+.tools span b { flex: none; font-weight: 600; color: var(--ink); }
+.tools span i { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-style: normal; font-family: var(--font-mono); font-size: 0.92em; }
 .tools span.bad { color: var(--ink-3); text-decoration: line-through; }
 .activity { border-radius: var(--r-sm); background: var(--s1); color: var(--ink-2); font-size: calc(var(--fs-ui) - 1px); }
 .activity summary { cursor: pointer; padding: 10px 12px; border-radius: inherit; transition: background-color var(--dur-fast) var(--ease); }
 .activity summary:hover { background: var(--s2); }
 .activity-body { display: grid; gap: 12px; padding: 0 12px 12px; }
-.activity-thinking { white-space: pre-wrap; color: var(--ink-3); }
+.activity-thinking { display: grid; gap: 4px; color: var(--ink-3); }
+.activity-thinking p { margin: 0; white-space: pre-wrap; }
+.activity-thinking b { font-weight: 600; color: var(--ink-2); }
 .activity-latest { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: calc(var(--fs-ui) - 1px); }
 /* A question waiting for the user is the one place the amber meaning appears in a conversation. */
 .ask { display: grid; gap: 8px; padding: 12px 14px; border-radius: var(--r-md); background: linear-gradient(180deg, var(--amber-soft), transparent 120%), var(--card-bg); box-shadow: inset 0 0 0 1px var(--amber-line), var(--amber-light); animation: arrive var(--dur-arrive) var(--ease) both; }
@@ -392,6 +411,8 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .lbl { display: flex; align-items: center; gap: 8px; font-size: calc(var(--fs-ui) - 1px); font-weight: 600; color: var(--ink-2); }
 .lbl small { margin-left: auto; font: 400 calc(var(--fs-ui) - 1.5px) var(--font-data); color: var(--ink-3); }
 .hint { margin: 0; font-size: calc(var(--fs-ui) - 1.5px); color: var(--ink-3); line-height: 1.45; }
+.hint button { color: var(--ink-2); text-decoration: underline; text-underline-offset: 2px; }
+.hint button:hover { color: var(--ink); }
 .dots { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .dot { position: relative; flex: none; width: 28px; height: 28px; border-radius: var(--r-pill); background: var(--c); box-shadow: inset 0 0 0 1px var(--line-3); }
 .dot[aria-pressed='true']::after { content: ''; position: absolute; inset: -4px; border-radius: var(--r-pill); box-shadow: 0 0 0 1.5px var(--ink); }
@@ -580,6 +601,8 @@ select.pill option { background: var(--s2); color: var(--ink); }
    for a look that does not have the effect, and for every look when the ambient switch is off. */
 .ambient { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; container-type: inline-size; }
 .amb { position: absolute; pointer-events: none; }
+/* The black hole behind a new project session (ui/Hole.tsx) reads its colours from --hole-colors and its ripple from caret-color. */
+.amb-hole { display: var(--amb-hole); position: absolute; inset: 0; width: 100%; height: 100%; caret-color: var(--accent); font-family: var(--font-mono); }
 .ambient { --beam-x: min(100% - 120px, 740px); }
 .ambient.project { --beam-x: min(380px, 100% - 120px); }
 .amb-beam { display: var(--amb-beam); left: calc(var(--beam-x) - 380px); top: -80px; width: 760px; height: 680px; transform: rotate(22deg); transform-origin: 50% 0; }
@@ -587,22 +610,17 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .amb-beam .beam i { position: absolute; inset: 0; clip-path: polygon(44% 0, 56% 0, 86% 100%, 14% 100%); background: linear-gradient(180deg, var(--beam-color), transparent 92%); }
 .amb-beam .beam i + i { clip-path: polygon(48% 0, 52% 0, 64% 100%, 36% 100%); opacity: 0.8; }
 .amb-beam .dust { position: absolute; left: 0; top: 0; width: 760px; height: 320px; -webkit-mask-image: linear-gradient(180deg, #000 30%, transparent 72%); mask-image: linear-gradient(180deg, #000 30%, transparent 72%); }
-/* Every grain is a shadow of a 1 px dot (ui/Ambient.tsx). The three layers twinkle out of step, on the compositor only. Every
-   slow ambient animation moves in steps of one second, all on the same beat: a frame costs the same however little changes
-   in it, so a calm light that changes once a second costs a sixtieth of one that is redrawn at the screen rate. */
-.dust i { position: absolute; left: 0; top: 0; width: 1px; height: 1px; border-radius: 50%; animation: twinkle 6s steps(6) infinite alternate; }
-.dust i:nth-child(2) { animation-duration: 8s; animation-timing-function: steps(8); animation-delay: -3s; }
-.dust i:nth-child(3) { animation-duration: 10s; animation-timing-function: steps(10); animation-delay: -6s; }
-@keyframes twinkle { to { opacity: 0.4; } }
+/* Every grain is a shadow of a 1 px dot (ui/Ambient.tsx). The three layers twinkle out of step: ui/Ambient.tsx sets their
+   opacity, which only the compositor uses. */
+.dust i { position: absolute; left: 0; top: 0; width: 1px; height: 1px; border-radius: 50%; will-change: opacity; }
 /* The light that breathes lives only around the lens, above and right of the greeting. */
 /* Promote only the visible part of the mask, avoiding a stage-sized software composition each frame. */
 .amb-glow { display: var(--amb-beam); left: calc(var(--beam-x) - 170px); top: 0; width: 340px; height: 110px; overflow: hidden; -webkit-mask-image: radial-gradient(circle 170px at 170px -60px, #000 30%, transparent 100%); mask-image: radial-gradient(circle 170px at 170px -60px, #000 30%, transparent 100%); }
 .amb-glow .amb-beam { position: absolute; display: block; left: -210px; }
 .amb-glow { opacity: 0; }
 .amb-glow .beam { opacity: 1; }
-/* Fade the composed mask and blur together, so software rendering does not repaint the beam every frame. */
-html[data-motion='full'] .amb-glow { will-change: opacity; animation: glow 7s steps(7) infinite alternate; }
-@keyframes glow { to { opacity: 0.5; } }
+/* ui/Ambient.tsx fades the composed mask and blur together, so software rendering does not repaint the beam. */
+html[data-motion='full'] .amb-glow { will-change: opacity; }
 .amb-loom { display: var(--amb-loom); right: 0; bottom: 0; width: 440px; height: 600px; overflow: hidden; -webkit-mask-image: radial-gradient(circle at 100% 100%, #000 0, #000 28%, transparent 68%); mask-image: radial-gradient(circle at 100% 100%, #000 0, #000 28%, transparent 68%); }
 .amb-loom svg { position: absolute; right: 0; bottom: 0; width: 660px; height: 600px; }
 .loom-warp line { stroke: var(--ink); stroke-width: 1; opacity: 0.11; }
@@ -661,7 +679,7 @@ html.resizing :is(.shell, .main, .side, .fold, .tour-ring) { transition: none !i
   select option:is(:hover, :focus-visible, :checked) { background: var(--s3); color: var(--ink); }
   @starting-style { select:open::picker(select) { opacity: 0; transform: translateY(var(--motion-rise)) scale(var(--motion-scale)); } }
 }
-:is([data-motion='reduced'], [data-motion='none']) :is(.cursor, .live, .live::after, .run-dot, .loom-row, .loom-shuttle, .flow-trace, .amb-glow, .amb-drift, .dust i, .g-caret, .run-btn .i) { animation: none !important; }
+:is([data-motion='reduced'], [data-motion='none']) :is(.cursor, .live, .live::after, .run-dot, .loom-row, .loom-shuttle, .flow-trace, .amb-drift, .g-caret, .run-btn .i, .peek svg) { animation: none !important; }
 :is([data-motion='reduced'], [data-motion='none']) :is(.loom-shuttle, .flow-trace) { opacity: 0; }
 [data-motion='reduced'] { --arrive-y: 0px; }
 /* Reduced and none are instant, including native pickers and theme snapshots. */
@@ -674,6 +692,8 @@ html.resizing :is(.shell, .main, .side, .fold, .tour-ring) { transition: none !i
 :is(html[data-motion='reduced'], html[data-motion='none'])::view-transition-new(root) { animation: none !important; }
 /* A hidden or minimized window runs no animation at all: the root class comes from ui/appearance.ts. */
 html.hidden-win, html.hidden-win *, html.hidden-win *::before, html.hidden-win *::after { animation-play-state: paused !important; }
+/* Another app with the focus pauses the effects of the homes too. */
+html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 /* The system preference is honoured even before the script runs. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
@@ -787,3 +807,26 @@ html.hidden-win, html.hidden-win *, html.hidden-win *::before, html.hidden-win *
 .cm-item.danger { color: var(--danger); }
 .cm-item.danger.armed { background: var(--danger); color: var(--bg); font-weight: 600; }
 input.rename { width: 100%; height: calc(28px + 2px * var(--dens)); padding: 0 10px; border-radius: var(--r-xs); background: var(--s3); color: var(--ink); font-size: calc(var(--fs-ui) - 0.5px); box-shadow: inset 0 0 0 1px var(--accent-line); outline: none; }
+/* Recent folders and saved environments on the open-a-project screen and in the Chat folder setting. */
+.recents { width: min(100%, 440px); display: grid; gap: 18px; }
+.recents h2 { margin: 0; padding-bottom: 8px; border-bottom: 1px solid var(--line); font: 600 calc(var(--fs-ui) - 1px) var(--font-ui); color: var(--ink-2); }
+.recents ul { margin: 0; padding: 0; list-style: none; }
+.rec { display: flex; align-items: stretch; border-bottom: 1px solid var(--line); }
+.rec-main { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 12px; padding: calc(8px * var(--dens)) 0; text-align: left; color: var(--ink); transition: color var(--dur-fast); }
+.rec-main:hover:not(:disabled) { color: var(--accent-text); }
+.rec-main .n { flex: none; max-width: 60%; font-weight: 500; font-size: calc(var(--fs-ui) + 0.5px); overflow-wrap: anywhere; }
+.rec-main .d { flex: 1; min-width: 0; font-size: calc(var(--fs-ui) - 1px); color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rec.gone .rec-main { opacity: 0.55; cursor: default; }
+.rec .off { text-decoration: line-through; }
+.rec-sel { flex: none; width: 32px; display: grid; place-items: center; color: var(--ink-3); transition: color var(--dur-fast); }
+.rec-x { flex: none; width: 32px; display: grid; place-items: center; color: var(--ink-3); transition: color var(--dur-fast); }
+.rec-x:hover, .rec-x:focus-visible { color: var(--danger); }
+.recents:focus { outline: none; }
+.rec-sel:hover, .rec-sel[aria-pressed='true'] { color: var(--accent-text); }
+.env-tray { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.env-tray .hint { flex-basis: 100%; }
+.env-tray input { flex: 1; min-width: 140px; height: 32px; padding: 0 10px; border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink); font-size: calc(var(--fs-ui) - 0.5px); }
+.rec-menu { position: fixed; z-index: 30; min-width: 170px; padding: 4px; border-radius: var(--r-md); background: var(--s3); box-shadow: inset 0 0 0 1px var(--line-2), var(--lift-shadow); animation: arrive var(--dur-arrive) var(--ease) both; }
+.rec-menu button { display: block; width: 100%; height: 30px; padding: 0 10px; border-radius: var(--r-xs); color: var(--ink); text-align: left; font-size: calc(var(--fs-ui) - 0.5px); transition: background var(--dur-fast); }
+.rec-menu button:hover, .rec-menu button:focus-visible { background: var(--s1); }
+.empty:has(.recents) { padding-top: 4vh; gap: 12px; }

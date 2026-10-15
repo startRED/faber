@@ -260,7 +260,7 @@ pub async fn run(data: &Path) -> io::Result<()> {
         row["quota"] = json!({"primary":limits["rateLimits"]["primary"],"secondary":limits["rateLimits"]["secondary"]});
         if signals.paid_fallback != Some(false) { return Err(io::Error::other("credit fallback not disabled")); }
         let (_,mut params) = faber_engine::codex::project_thread_params(&faber_engine::codex::CodexThread {
-            cwd:work.clone(),model:Some("gpt-6-luna".into()),effort:Some("low".into()),resume:None,instructions:None,user_name:None
+            cwd:work.clone(),model:Some("gpt-6-luna".into()),effort:Some("low".into()),resume:None,instructions:None,user_name:None,permissions:faber_engine::model::Permissions::Isolated
         },Role::Writer).map_err(|_|io::Error::other("invalid invocation"))?;
         packet(&mut p,json!({"id":9,"method":"config/read","params":{"includeLayers":false,"cwd":work}})).await?;
         tokio::time::timeout(Duration::from_secs(15),async {

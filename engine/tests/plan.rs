@@ -1,23 +1,20 @@
 //! Plan detection, the billing verdict and the quota pulse. No real CLI runs: status commands and the pulse are replayed.
 
-mod support;
+use crate::support;
 
 use faber_engine::budget::Billing;
 use faber_engine::cli::Cli;
 use faber_engine::engine::Ask;
-use faber_engine::events::EngineEvent;
-use faber_engine::model::{Area, Vendor};
+use faber_engine::model::Vendor;
 use faber_engine::proc::{Proc, Spawner};
-use faber_engine::router::Choice;
-use faber_engine::signals::Signals;
-use faber_engine::{AppEvent, Engine, EngineOptions, WarmRequest};
+use faber_engine::{AppEvent, Engine, EngineOptions};
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use support::{Entry, fake, fixture};
+use support::{Entry, fake};
 use tokio::io::{AsyncRead, AsyncWriteExt, ReadBuf};
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -45,11 +42,11 @@ fn status(stdout: Option<&'static str>) -> (Spawner, Calls) {
     let spawn: Spawner = Arc::new(move |bin, args, _cwd| {
         recorded.lock().unwrap().push((bin.into(), args.to_vec()));
         let Some(stdout) = stdout else {
-            return Ok(Proc { stdin: Box::new(tokio::io::sink()), stdout: Box::new(Pending), stderr: None, child: None });
+            return Ok(Proc { stdin: Box::new(tokio::io::sink()), stdout: Box::new(Pending), stderr: None, child: None, contained: None });
         };
         let (mut out, reader) = tokio::io::duplex(4096);
         tokio::spawn(async move { drop(out.write_all(stdout.as_bytes()).await) });
-        Ok(Proc { stdin: Box::new(tokio::io::sink()), stdout: Box::new(reader), stderr: None, child: None })
+        Ok(Proc { stdin: Box::new(tokio::io::sink()), stdout: Box::new(reader), stderr: None, child: None, contained: None })
     });
     (spawn, calls)
 }
@@ -244,104 +241,6 @@ async fn startup_account_readings_wait_for_the_local_offset_and_do_not_spend() {
     engine.set_utc_offset(-10800);
     tokio::time::sleep(Duration::from_millis(30)).await;
     assert_eq!(f.args.lock().unwrap().len(), 1, "clock updates do not duplicate the watcher");
-    engine.shutdown();
-}
-
-/// The recording of a Claude chat, with the one-word question a pulse asks in place of the recorded one.
-fn pulse_recording() -> Vec<Entry> {
-    fixture("claude", "chat")
-        .into_iter()
-        .map(|mut e| {
-            if e.input && e.msg["type"] == "user" {
-                e.msg["message"]["content"] = json!("ok");
-            }
-            e
-        })
-        .collect()
-}
-
-fn typing() -> WarmRequest {
-    WarmRequest {
-        conversation_id: None,
-        area: Area::Chat,
-        project_id: None,
-        choice: Choice { vendor: "auto".into(), model: None, effort: None },
-    }
-}
-
-fn silent() -> Ask {
-    Arc::new(|_| Box::pin(async { None }))
-}
-
-async fn settle_for(engine: &Engine, window: &str) -> bool {
-    for _ in 0..100 {
-        if engine.ledger().claude.readings.contains_key(window) {
-            return true;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    false
-}
-
-#[tokio::test]
-async fn typing_in_auto_asks_for_a_fresh_reading_only_when_the_one_held_is_old() {
-    let dir = tempfile::tempdir().unwrap();
-    let f = fake(pulse_recording());
-    let (engine, _, time) = start(dir.path(), f.spawn.clone(), Some(silent()));
-    engine.note_account_events(
-        Vendor::Claude,
-        vec![EngineEvent::Signals(Signals { billing: Some(Billing::Subscription), ..Signals::default() })],
-    );
-    engine.route_draft(typing(), "Plan a trip".into());
-    assert!(settle_for(&engine, "five_hour").await, "the pulse brought a reading");
-    let args = f.args.lock().unwrap().clone();
-    assert_eq!(args.len(), 1);
-    assert!(args[0].contains(&"claude-haiku-5-5".to_string()) && args[0].contains(&"--system-prompt".to_string()));
-    assert_eq!(*f.mismatches.lock().unwrap(), Vec::<String>::new());
-    assert_eq!(engine.ledger().claude.spans.len(), 1, "the pulse is Faber's own request, so the learning knows when it ran");
-
-    engine.route_draft(typing(), "Plan a trip to Lisbon".into());
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    assert_eq!(f.args.lock().unwrap().len(), 1, "the reading is fresh");
-
-    time.store(WHEN + 21 * 60, Ordering::SeqCst);
-    engine.route_draft(typing(), "Plan a trip to Porto".into());
-    for _ in 0..50 {
-        if f.args.lock().unwrap().len() == 2 {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    assert_eq!(f.args.lock().unwrap().len(), 2, "twenty minutes later the reading is old");
-    engine.shutdown();
-}
-
-#[tokio::test]
-async fn a_pulse_is_a_request_like_any_other_and_waits_at_the_gate() {
-    let dir = tempfile::tempdir().unwrap();
-    let f = fake(pulse_recording());
-    let (engine, _, time) = start(dir.path(), f.spawn.clone(), Some(silent()));
-    // Nearly out, and the CLI may switch to paid use by itself: the pulse must not be the request that does it.
-    let quota = EngineEvent::Quota { window: "five_hour".into(), used: 0.95, resets_at: (WHEN + 3600) as f64 };
-    let paid = EngineEvent::Signals(Signals { paid_fallback: Some(true), billing: Some(Billing::Subscription), ..Signals::default() });
-    engine.note_account_events(Vendor::Claude, vec![quota, paid]);
-    time.store(WHEN + 21 * 60, Ordering::SeqCst);
-    engine.route_draft(typing(), "Plan a trip".into());
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    assert!(f.args.lock().unwrap().is_empty(), "denied: a window above 90% with paid use possible");
-    engine.shutdown();
-}
-
-#[tokio::test]
-async fn a_typed_plan_never_allows_a_pulse_with_unknown_billing() {
-    let dir = tempfile::tempdir().unwrap();
-    let f = fake(pulse_recording());
-    let (engine, _, _) = start(dir.path(), f.spawn.clone(), Some(silent()));
-    engine.answer_plan(Vendor::Claude, "max");
-    engine.route_draft(typing(), "Plan a trip".into());
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    assert_eq!(engine.ledger().claude.billing, Billing::Unknown);
-    assert!(f.args.lock().unwrap().is_empty());
     engine.shutdown();
 }
 

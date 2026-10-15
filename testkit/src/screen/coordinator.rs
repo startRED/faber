@@ -114,7 +114,7 @@ impl Roles for Scripted {
             let stand_in =
                 faber_engine::proc::real_spawner()(&ping.to_string_lossy(), &["-n".into(), "60".into(), "127.0.0.1".into()], &self.dir)
                     .map_err(|e| e.to_string())?;
-            let tree = stand_in.child.as_ref().and_then(|c| c.owned_tree()).ok_or("the stand-in has no owned tree")?;
+            let tree = stand_in.contained.as_ref().and_then(|c| c.owned_tree()).ok_or("the stand-in has no owned tree")?;
             leases.attach_process(lease, tree.identity()).map_err(|e| e.key().to_string())?;
             self.trees.lock().unwrap().insert(id.clone(), (tree, stand_in));
         }

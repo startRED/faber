@@ -37,6 +37,8 @@ pub enum EngineEvent {
         session_id: String,
         model: String,
     },
+    /// The CLI accepted a turn on the session. The session may have no saved history until the turn shows output.
+    TurnStarted,
     Text(String),
     /// A new block of text starts (for example after a tool ran), so it must not run into the previous one.
     Break {
@@ -51,6 +53,8 @@ pub enum EngineEvent {
     ToolResult {
         id: String,
         ok: bool,
+        /// The tool was refused before it ran (a declined approval), which is not a failure of the work.
+        declined: bool,
         text: String,
     },
     Permission {
@@ -65,6 +69,22 @@ pub enum EngineEvent {
     },
     /// What the CLI said about the account besides window readings: whether it can answer, paid fallback, plan, billing.
     Signals(crate::signals::Signals),
+    /// How long the prompt cache stays warm after this turn, from the cache-write buckets of the result (Claude: one hour for
+    /// the 1-hour bucket, five minutes for the 5-minute one). Sent before `Done`; absent when the CLI names no bucket.
+    CacheWarm {
+        secs: u64,
+        /// When the last request of the turn began (the start of its assistant message in the stream), in milliseconds: the
+        /// lifetime counts from the request, not from the result. The parser leaves it empty; the driver fills it in and drops
+        /// the event when it never saw that start.
+        started_ms: Option<u64>,
+    },
+    /// A request the CLI denied because nobody could answer it (`--permission-prompts none`): not done, and kept for the
+    /// person. Sent before `Done`, one per denial.
+    Parked {
+        tool_use_id: String,
+        tool: String,
+        input: Value,
+    },
     /// What a finished turn used. `cost_total_usd` is Claude Code's own API-priced figure as it reports it: cumulative for
     /// the conversation, so the engine subtracts what it saw before (`usage::settle`); None when the result carries no
     /// counters (an aborted turn). On Codex it is Faber's computed API-equivalent cost of this turn, priced per request,

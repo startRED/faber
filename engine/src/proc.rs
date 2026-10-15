@@ -5,7 +5,6 @@ use std::path::Path;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-#[cfg(not(windows))]
 use tokio::process::{Child, Command};
 use tokio::time::{Duration, Instant};
 
@@ -68,149 +67,9 @@ pub struct Proc {
     pub stdout: Box<dyn AsyncRead + Send + Unpin>,
     pub stderr: Option<Box<dyn AsyncRead + Send + Unpin>>,
     /// The real process, if there is one; a replayed recording has none.
-    pub child: Option<Process>,
-}
-
-/// Owned handles only. Windows owns a non-inheritable kill-on-close job; no descendant is ever adopted by PID.
-pub struct Process {
-    #[cfg(not(windows))]
-    inner: Child,
-    #[cfg(windows)]
-    inner: Arc<Mutex<std::process::Child>>,
-    #[cfg(windows)]
-    job: Arc<Mutex<Option<win32job::Job>>>,
-    #[cfg(windows)]
-    identity: crate::project::ProcessId,
-}
-
-/// What a lease needs to know about one launched CLI tree, shared with whoever later releases the lease.
-/// It exists only for a process this engine started inside its own kill-on-close job (Windows); nothing can build
-/// one from a PID, a snapshot or a recorded file.
-#[derive(Clone)]
-pub struct OwnedTree {
-    identity: crate::project::ProcessId,
-    #[cfg(windows)]
-    job: Arc<Mutex<Option<win32job::Job>>>,
-    #[cfg(windows)]
-    root: Arc<Mutex<std::process::Child>>,
-}
-
-impl std::fmt::Debug for OwnedTree {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "OwnedTree({})", self.identity.pid)
-    }
-}
-
-/// Proof that an owned tree is gone. Only `OwnedTree::retire` makes one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Retired {
-    identity: crate::project::ProcessId,
-}
-
-impl Retired {
-    pub fn identity(&self) -> crate::project::ProcessId {
-        self.identity
-    }
-}
-
-impl OwnedTree {
-    /// The root's pid, with the microsecond this engine launched it: a reused pid has another start.
-    pub fn identity(&self) -> crate::project::ProcessId {
-        self.identity
-    }
-
-    /// Closes the kill-on-close job, so every member ends, then waits for the root to be reaped. Safe to repeat: a
-    /// tree already retired answers with the same identity and never touches another process.
-    pub async fn retire(&self) -> io::Result<Retired> {
-        #[cfg(windows)]
-        {
-            drop(self.job.lock().unwrap().take());
-            let deadline = Instant::now() + Duration::from_secs(5);
-            loop {
-                {
-                    let mut root = self.root.lock().unwrap();
-                    if root.try_wait()?.is_some() {
-                        break;
-                    }
-                    root.kill()?;
-                }
-                if Instant::now() >= deadline {
-                    return Err(io::Error::other("owned tree did not end"));
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-            Ok(Retired { identity: self.identity })
-        }
-        #[cfg(not(windows))]
-        {
-            Err(io::Error::other("owned trees need the Windows job"))
-        }
-    }
-}
-
-impl Process {
-    pub fn id(&self) -> Option<u32> {
-        #[cfg(windows)]
-        {
-            Some(self.identity.pid)
-        }
-        #[cfg(not(windows))]
-        {
-            self.inner.id()
-        }
-    }
-
-    /// The launched tree's owned identity, for a lease and its release proof. `None` where no job owns the tree.
-    pub fn owned_tree(&self) -> Option<OwnedTree> {
-        #[cfg(windows)]
-        {
-            Some(OwnedTree { identity: self.identity, job: self.job.clone(), root: self.inner.clone() })
-        }
-        #[cfg(not(windows))]
-        {
-            None
-        }
-    }
-
-    pub fn start_kill(&mut self) -> io::Result<()> {
-        #[cfg(windows)]
-        {
-            drop(self.job.lock().unwrap().take());
-            let mut root = self.inner.lock().unwrap();
-            if root.try_wait()?.is_none() {
-                root.kill()?;
-            }
-            Ok(())
-        }
-        #[cfg(not(windows))]
-        {
-            self.inner.start_kill()
-        }
-    }
-
-    pub async fn wait(&mut self) -> io::Result<std::process::ExitStatus> {
-        #[cfg(windows)]
-        {
-            loop {
-                if let Some(status) = self.inner.lock().unwrap().try_wait()? {
-                    return Ok(status);
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        }
-        #[cfg(not(windows))]
-        {
-            self.inner.wait().await
-        }
-    }
-}
-
-#[cfg(windows)]
-impl Drop for Process {
-    fn drop(&mut self) {
-        drop(self.job.lock().unwrap().take());
-        let _ = self.inner.lock().unwrap().kill();
-    }
+    pub child: Option<Child>,
+    /// What ends the process together with everything it started (a Windows job object); none for a replayed recording.
+    pub contained: Option<Containment>,
 }
 
 /// Each executable embedding the engine dispatches this before starting its UI/runtime. The trusted guard waits
@@ -251,109 +110,118 @@ fn guard(args: &[std::ffi::OsString]) -> io::Result<i32> {
 
 pub type Spawner = Arc<dyn Fn(&str, &[String], &Path) -> io::Result<Proc> + Send + Sync>;
 
+thread_local! {
+    // ponytail: a thread-local read by the spawner, which assumes the Spawner starts the process synchronously on the calling thread
+    // (real_spawner and the shell’s wrapper do). An async or offloaded Spawner would silently lose idle priority; pass the
+    // priority through the Spawner signature if that ever changes.
+    /// Set while a background reader is being started: the process is created at idle priority.
+    static BACKGROUND: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Starts a short background reader (a quota reading) so that it never competes with a game or the person’s work. On
+/// Windows the process is created at idle priority, before it runs a single instruction. Elsewhere there is no safe way to
+/// lower the priority from Rust (it would need unsafe code, which Faber keeps to one Windows file), so it runs normally.
+pub fn spawn_background(spawn: &Spawner, bin: &str, args: &[String], cwd: &Path) -> io::Result<Proc> {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            BACKGROUND.with(|b| b.set(false));
+        }
+    }
+    BACKGROUND.with(|b| b.set(true));
+    let _reset = Reset;
+    spawn(bin, args, cwd)
+}
+
+/// Whether the process being started now is a background reader (the spawner reads this).
+pub fn starting_in_background() -> bool {
+    BACKGROUND.with(|b| b.get())
+}
+
+/// The Windows process creation flags: no console window, started suspended (to join its job first), and at idle priority for
+/// a background reader.
+#[cfg(windows)]
+fn creation_flags(background: bool) -> u32 {
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    const CREATE_SUSPENDED: u32 = 0x0000_0004;
+    const IDLE_PRIORITY_CLASS: u32 = 0x0000_0040;
+    CREATE_NO_WINDOW | CREATE_SUSPENDED | if background { IDLE_PRIORITY_CLASS } else { 0 }
+}
+
+/// Drain both pipes without retaining an unbounded build log; dropping the future kills the owned child.
+pub(crate) async fn command_output(mut p: Proc) -> (bool, String) {
+    async fn drain(mut pipe: Box<dyn AsyncRead + Send + Unpin>) -> io::Result<String> {
+        let mut tail = Vec::new();
+        let mut buf = [0u8; 4096];
+        loop {
+            let n = pipe.read(&mut buf).await?;
+            if n == 0 {
+                return Ok(String::from_utf8_lossy(&tail).into_owned());
+            }
+            tail.extend_from_slice(&buf[..n]);
+            if tail.len() > 4096 {
+                tail.drain(..tail.len() - 4096);
+            }
+        }
+    }
+    drop(p.stdin);
+    let stderr = p.stderr.take().unwrap_or_else(|| Box::new(tokio::io::empty()));
+    let (out, err, code) = tokio::join!(drain(p.stdout), drain(stderr), exit_code(&mut p.child));
+    (code == "0" && out.is_ok() && err.is_ok(), format!("{}{}", out.unwrap_or_default(), err.unwrap_or_default()))
+}
+
 /// Starts a real process with piped stdio, no shell and, on Windows, no console window.
 pub fn real_spawner() -> Spawner {
     configured_spawner(None)
 }
 
-/// Proof executors inherit only their recorded environment, including the process guard.
+/// Proof executors inherit only their recorded environment.
 pub fn isolated_spawner(environment: std::collections::BTreeMap<String, String>) -> Spawner {
     configured_spawner(Some(environment))
 }
 
 fn configured_spawner(environment: Option<std::collections::BTreeMap<String, String>>) -> Spawner {
     Arc::new(move |bin, args, cwd| {
-        #[cfg(windows)]
-        {
-            spawn_windows(bin, args, cwd, environment.as_ref())
+        let mut cmd = Command::new(bin);
+        if let Some(environment) = &environment {
+            cmd.env_clear().envs(environment);
         }
-        #[cfg(not(windows))]
-        {
-            let mut cmd = Command::new(bin);
-            if let Some(environment) = &environment {
-                cmd.env_clear().envs(environment);
-            }
-            cmd.args(args).current_dir(cwd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
-            let mut child = cmd.spawn()?;
-            Ok(Proc {
-                stdin: Box::new(child.stdin.take().expect("piped stdin")),
-                stdout: Box::new(child.stdout.take().expect("piped stdout")),
-                stderr: child.stderr.take().map(|s| Box::new(s) as Box<dyn AsyncRead + Send + Unpin>),
-                child: Some(Process { inner: child }),
-            })
-        }
+        cmd.args(args).current_dir(cwd);
+        spawn_command(cmd)
     })
 }
 
-#[cfg(windows)]
-fn spawn_windows(
-    bin: &str,
-    args: &[String],
-    cwd: &Path,
-    environment: Option<&std::collections::BTreeMap<String, String>>,
-) -> io::Result<Proc> {
-    use std::io::Write;
-    use std::os::windows::{io::AsRawHandle, process::CommandExt};
-    let job = win32job::Job::create().map_err(io::Error::other)?;
-    let mut limits = job.query_extended_limit_info().map_err(io::Error::other)?;
-    limits.limit_kill_on_job_close();
-    job.set_extended_limit_info(&limits).map_err(io::Error::other)?;
-    let mut command = std::process::Command::new(std::env::current_exe()?);
-    if let Some(environment) = environment {
-        command.env_clear().envs(environment);
-    }
-    let child = command
-        .arg("--faber-process-guard")
-        .arg(bin)
-        .args(args)
-        .current_dir(cwd)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .creation_flags(0x0800_0000)
-        .spawn()?;
-    let started_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_micros() as u64).max(1);
-    let identity = crate::project::ProcessId { pid: child.id(), started_at };
-    let process = Process { inner: Arc::new(Mutex::new(child)), job: Arc::new(Mutex::new(Some(job))), identity };
-    process
-        .job
-        .lock()
-        .unwrap()
-        .as_ref()
-        .expect("owned job")
-        .assign_process(process.inner.lock().unwrap().as_raw_handle() as isize)
-        .map_err(io::Error::other)?;
-    let mut stdin = process.inner.lock().unwrap().stdin.take().expect("piped stdin");
-    stdin.write_all(b"G")?;
-    stdin.flush()?;
-    let mut stdin = tokio::process::ChildStdin::from_std(stdin)?;
-    let mut stdout = tokio::process::ChildStdout::from_std(process.inner.lock().unwrap().stdout.take().expect("piped stdout"))?;
-    let (input, mut pending) = tokio::io::duplex(8192);
-    let (mut output, reader) = tokio::io::duplex(8192);
-    let job = process.job.clone();
-    // Await startup outside the synchronous spawner/engine lock; no CLI input can precede the guard ack.
-    tokio::spawn(async move {
-        let mut ack = [0];
-        if !matches!(tokio::time::timeout(Duration::from_secs(5), stdout.read_exact(&mut ack)).await, Ok(Ok(_))) || ack != *b"R" {
-            drop(job.lock().unwrap().take());
-            return;
-        }
-        let input = async move {
-            let _ = tokio::io::copy(&mut pending, &mut stdin).await;
-            let _ = stdin.shutdown().await;
-        };
-        let output = async move {
-            let _ = tokio::io::copy(&mut stdout, &mut output).await;
-            let _ = output.shutdown().await;
-        };
-        tokio::join!(input, output);
+/// Starts `cmd` with piped stdio and, on Windows, inside its own job object. The process is created suspended, put in the job
+/// and only then allowed to run, so nothing it starts can be outside the job. If that fails the process is killed and the
+/// error returned: no CLI ever runs uncontained.
+pub fn spawn_command(cmd: Command) -> io::Result<Proc> {
+    spawn_in_job(cmd, join_job)
+}
+
+fn spawn_in_job(mut cmd: Command, join: impl FnOnce(&Child) -> io::Result<Containment>) -> io::Result<Proc> {
+    cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
+    #[cfg(windows)]
+    cmd.creation_flags(creation_flags(starting_in_background()));
+    let mut child = cmd.spawn()?;
+    let joined = join(&child);
+    #[cfg(windows)]
+    let joined = joined.and_then(|job| {
+        faber_winproc::resume_process(child.id().ok_or_else(|| io::Error::other("the process already ended"))?)?;
+        Ok(job)
     });
-    let stderr = process.inner.lock().unwrap().stderr.take().map(tokio::process::ChildStderr::from_std).transpose()?;
+    let contained = match joined {
+        Ok(job) => Some(job),
+        Err(error) => {
+            let _ = child.start_kill();
+            return Err(error);
+        }
+    };
     Ok(Proc {
-        stdin: Box::new(input),
-        stdout: Box::new(reader),
-        stderr: stderr.map(|s| Box::new(s) as Box<dyn AsyncRead + Send + Unpin>),
-        child: Some(process),
+        stdin: Box::new(child.stdin.take().expect("piped stdin")),
+        stdout: Box::new(child.stdout.take().expect("piped stdout")),
+        stderr: child.stderr.take().map(|s| Box::new(s) as Box<dyn AsyncRead + Send + Unpin>),
+        child: Some(child),
+        contained,
     })
 }
 
@@ -404,15 +272,151 @@ pub(crate) async fn write_line(stdin: &mut (dyn AsyncWrite + Send + Unpin), msg:
     stdin.flush().await.map_err(|_| WriteError { torn: true })
 }
 
-/// Ends the owned job on Windows and the held child elsewhere. It never accepts a PID or a process snapshot.
-pub(crate) async fn stop(stdin: &mut (dyn AsyncWrite + Send + Unpin), child: &mut Option<Process>) {
-    let _ = tokio::time::timeout(Duration::from_secs(1), stdin.shutdown()).await;
-    if let Some(child) = child {
-        let _ = child.start_kill();
+/// Everything a CLI starts, held so it can all be ended together. On Windows this is a job object with kill-on-close and no
+/// breakaway: every process the CLI starts joins the job, and ending the job ends them all, whether or not the CLI is still
+/// alive (a process tree found through parent links is lost as soon as the parent exits). Dropping it ends the processes
+/// too, so a CLI that quits on its own leaves no worker behind. Elsewhere there is no job and only the CLI itself is ended.
+pub struct Containment {
+    #[cfg(windows)]
+    job: Arc<Mutex<Option<win32job::Job>>>,
+    #[cfg(windows)]
+    identity: crate::project::ProcessId,
+}
+
+impl Containment {
+    /// The launched tree's owned identity, for a lease and its release proof. `None` where no job owns the tree.
+    pub fn owned_tree(&self) -> Option<OwnedTree> {
+        #[cfg(windows)]
+        {
+            Some(OwnedTree { identity: self.identity, job: self.job.clone() })
+        }
+        #[cfg(not(windows))]
+        {
+            None
+        }
     }
 }
 
-pub(crate) async fn exit_code(child: &mut Option<Process>) -> String {
+#[cfg(windows)]
+impl Drop for Containment {
+    fn drop(&mut self) {
+        // The job may be shared with an `OwnedTree`: closing it here ends the processes whoever holds a clone.
+        drop(self.job.lock().unwrap_or_else(|e| e.into_inner()).take());
+    }
+}
+
+/// What a lease needs to know about one launched CLI tree, shared with whoever later releases the lease.
+/// It exists only for a process this engine started inside its own kill-on-close job (Windows); nothing can build
+/// one from a PID, a snapshot or a recorded file.
+#[derive(Clone)]
+pub struct OwnedTree {
+    identity: crate::project::ProcessId,
+    #[cfg(windows)]
+    job: Arc<Mutex<Option<win32job::Job>>>,
+}
+
+impl std::fmt::Debug for OwnedTree {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "OwnedTree({})", self.identity.pid)
+    }
+}
+
+/// Proof that an owned tree is gone. Only `OwnedTree::retire` makes one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Retired {
+    identity: crate::project::ProcessId,
+}
+
+impl Retired {
+    pub fn identity(&self) -> crate::project::ProcessId {
+        self.identity
+    }
+}
+
+impl OwnedTree {
+    /// The root's pid, with the microsecond this engine launched it: a reused pid has another start.
+    pub fn identity(&self) -> crate::project::ProcessId {
+        self.identity
+    }
+
+    /// Closes the kill-on-close job, so every member ends, then waits until the root has ended. Safe to repeat: a tree
+    /// already retired answers with the same identity. A pid that was reused meanwhile only delays the answer until it fails.
+    pub async fn retire(&self) -> io::Result<Retired> {
+        #[cfg(windows)]
+        {
+            drop(self.job.lock().unwrap_or_else(|e| e.into_inner()).take());
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !faber_winproc::process_ended(self.identity.pid) {
+                if Instant::now() >= deadline {
+                    return Err(io::Error::other("owned tree did not end"));
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            Ok(Retired { identity: self.identity })
+        }
+        #[cfg(not(windows))]
+        {
+            Err(io::Error::other("owned trees need the Windows job"))
+        }
+    }
+}
+
+#[cfg(windows)]
+fn join_job(child: &Child) -> io::Result<Containment> {
+    let handle = child.raw_handle().ok_or_else(|| io::Error::other("the process already ended"))?;
+    let mut limits = win32job::ExtendedLimitInfo::new();
+    limits.limit_kill_on_job_close();
+    let job = win32job::Job::create_with_limit_info(&limits).map_err(io::Error::other)?;
+    job.assign_process(handle as isize).map_err(io::Error::other)?;
+    let started_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_micros() as u64).max(1);
+    let identity = crate::project::ProcessId { pid: child.id().ok_or_else(|| io::Error::other("the process already ended"))?, started_at };
+    Ok(Containment { job: Arc::new(Mutex::new(Some(job))), identity })
+}
+
+#[cfg(not(windows))]
+fn join_job(_child: &Child) -> io::Result<Containment> {
+    Ok(Containment {})
+}
+
+/// Ends a process and everything it started, then closes its input. The processes go first: a CLI that quits when its input
+/// closes would otherwise be gone before the tree could be found, and its workers would keep running.
+pub(crate) async fn stop(stdin: &mut (dyn AsyncWrite + Send + Unpin), child: &mut Option<Child>, contained: &mut Option<Containment>) {
+    // Closing the last handle of the job ends every process in it.
+    let jobbed = contained.take().is_some();
+    if let Some(child) = child {
+        if !jobbed {
+            kill_tree(child.id()).await;
+        }
+        let _ = child.start_kill();
+    }
+    let _ = stdin.shutdown().await;
+}
+
+/// Fallback for a process that is in no job (a test double, or off Windows). Killing only the CLI leaves a command it started (a build, a script)
+/// running, and in full access that command can keep changing files after the person switched to asking. On Windows
+/// `taskkill /T` ends the whole tree while its root is still alive. It is run directly, never through a shell, and a failure
+/// is logged. Elsewhere only the CLI itself is ended.
+#[cfg(windows)]
+async fn kill_tree(pid: Option<u32>) {
+    let Some(pid) = pid else { return };
+    let exe = std::env::var_os("SystemRoot")
+        .map(|root| std::path::PathBuf::from(root).join("System32").join("taskkill.exe"))
+        .filter(|path| path.is_file())
+        .unwrap_or_else(|| "taskkill".into());
+    let mut cmd = Command::new(exe);
+    cmd.args(["/PID", &pid.to_string(), "/T", "/F"]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    match tokio::time::timeout(std::time::Duration::from_secs(5), cmd.status()).await {
+        Ok(Ok(status)) if status.success() => {}
+        // The CLI having already exited is the usual reason; either way the process is ended next.
+        other => eprintln!("faber: taskkill did not end the process tree of {pid}: {other:?}"),
+    }
+}
+
+#[cfg(not(windows))]
+async fn kill_tree(_pid: Option<u32>) {}
+
+pub(crate) async fn exit_code(child: &mut Option<Child>) -> String {
     match child {
         Some(child) => match child.wait().await {
             Ok(status) => status.code().map_or("unknown".into(), |c| c.to_string()),
@@ -458,5 +462,69 @@ mod lifecycle_tests {
         watch.finish();
         assert!(!watch.stopping());
         assert_eq!(watch.deadline(), None);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// R124c, item 2: a CLI that cannot be put in its job never runs. It is created suspended, so killing it at that point
+    /// means not one instruction of it ran.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_process_that_cannot_join_its_job_is_killed_before_it_runs_and_the_spawn_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("ran.txt");
+        let script = dir.path().join("cli.cmd");
+        std::fs::write(&script, "@echo off\r\necho x> %~dp0ran.txt\r\n").unwrap();
+        let mut cmd = Command::new("cmd.exe");
+        cmd.args(["/c", &script.to_string_lossy()]).current_dir(dir.path());
+        let failed = spawn_in_job(cmd, |_| Err(io::Error::other("no job today")));
+        assert!(failed.is_err_and(|e| e.to_string().contains("no job today")));
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        assert!(!marker.exists(), "the process ran although it was not contained");
+    }
+    #[tokio::test]
+    async fn command_output_drains_large_pipes_and_keeps_a_bounded_tail() {
+        let (mut write, read) = tokio::io::duplex(32);
+        tokio::spawn(async move {
+            write.write_all(&vec![b'x'; 100_000]).await.unwrap();
+            write.write_all(b"TAIL_OK").await.unwrap();
+        });
+        let p = Proc {
+            stdin: Box::new(tokio::io::sink()),
+            stdout: Box::new(read),
+            stderr: Some(Box::new(std::io::Cursor::new(b"STDERR_OK".to_vec()))),
+            child: None,
+            contained: None,
+        };
+        let (ok, text) = tokio::time::timeout(std::time::Duration::from_secs(3), command_output(p)).await.unwrap();
+        assert!(ok && text.ends_with("TAIL_OKSTDERR_OK"));
+        assert!(text.len() <= 8192);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_background_reader_is_created_at_idle_priority_and_an_ordinary_process_is_not() {
+        const NO_WINDOW_SUSPENDED: u32 = 0x0800_0000 | 0x0000_0004;
+        const IDLE: u32 = 0x0000_0040;
+        assert_eq!(creation_flags(false), NO_WINDOW_SUSPENDED);
+        assert_eq!(creation_flags(true), NO_WINDOW_SUSPENDED | IDLE);
+    }
+
+    #[test]
+    fn the_background_mark_is_set_only_while_the_reader_is_being_started() {
+        let seen = Arc::new(Mutex::new(vec![]));
+        let record = seen.clone();
+        let spawn: Spawner = Arc::new(move |_, _, _| {
+            record.lock().unwrap().push(starting_in_background());
+            Err(io::Error::other("nothing starts in this test"))
+        });
+        assert!(!starting_in_background());
+        assert!(spawn_background(&spawn, "x", &[], Path::new(".")).is_err());
+        assert!(spawn("x", &[], Path::new(".")).is_err());
+        assert!(!starting_in_background(), "the mark is lifted afterwards");
+        assert_eq!(*seen.lock().unwrap(), vec![true, false]);
     }
 }

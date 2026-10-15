@@ -472,7 +472,7 @@ pub async fn execute(definition: &Definition, cwd: &std::path::Path, spawn: &cra
         if !matches!(capture, Ok(Ok(()))) {
             output.clear();
             errors.clear();
-            crate::proc::stop(&mut *process.stdin, &mut process.child).await;
+            crate::proc::stop(&mut *process.stdin, &mut process.child, &mut process.contained).await;
         }
     }
     let mut combined = output.clone();

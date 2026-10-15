@@ -8,6 +8,7 @@ const systemReduces = matchMedia('(prefers-reduced-motion: reduce)');
 const [applied, setApplied] = createSignal<Look>();
 const [reduced, setReduced] = createSignal(systemReduces.matches);
 const [hidden, setHidden] = createSignal(document.hidden);
+const [focused, setFocused] = createSignal(document.hasFocus());
 let lookRevision = 0;
 let fading: ViewTransition | undefined;
 let snapshots = 0;
@@ -18,6 +19,8 @@ export const appliedLook = applied;
 export const motion = (): Motion => effectiveMotion(applied()?.motion ?? 'full', reduced());
 /** True while the window is hidden; effect loops stop. */
 export const windowHidden = hidden;
+/** True while the window has the focus; effect loops stop when another app takes it. */
+export const windowFocused = focused;
 
 /** A system that asks for less motion turns `full` into `reduced`; the other levels already ask for less. */
 export const effectiveMotion = (level: Motion, systemReducesMotion: boolean): Motion => (level === 'full' && systemReducesMotion ? 'reduced' : level);
@@ -72,16 +75,23 @@ export function watchSystem(): () => void {
   };
   const onVisibility = () => {
     setHidden(document.hidden);
-    // Every CSS animation pauses with the window (styles.css, `html.hidden-win`); the timers of idle life end with the signal.
+    setFocused(document.hasFocus());
+    // Every CSS animation pauses with a hidden window (styles.css, `html.hidden-win`); the effects of the homes also pause
+    // while another app has the focus (`html.away-win`). The timers of idle life end with the signals.
     document.documentElement.classList.toggle('hidden-win', document.hidden);
+    document.documentElement.classList.toggle('away-win', document.hidden || !document.hasFocus());
   };
   // A window that starts hidden (a start to the tray) is paused from its first frame.
   onVisibility();
   systemReduces.addEventListener('change', onMotion);
   document.addEventListener('visibilitychange', onVisibility);
+  window.addEventListener('focus', onVisibility);
+  window.addEventListener('blur', onVisibility);
   return () => {
     systemReduces.removeEventListener('change', onMotion);
     document.removeEventListener('visibilitychange', onVisibility);
+    window.removeEventListener('focus', onVisibility);
+    window.removeEventListener('blur', onVisibility);
   };
 }
 

@@ -268,7 +268,7 @@ mod tests {
                     let _ = started.lock().unwrap().take().unwrap().send(());
                     Box::new(reader.lock().unwrap().take().unwrap())
                 };
-                Ok(crate::proc::Proc { stdin: Box::new(tokio::io::sink()), stdout, stderr: None, child: None })
+                Ok(crate::proc::Proc { stdin: Box::new(tokio::io::sink()), stdout, stderr: None, child: None, contained: None })
             });
         });
         let checking = e.clone();
@@ -821,6 +821,10 @@ mod tests {
                     approved: false,
                     started: NOW,
                     steering: vec![],
+                    cwd: ".".into(),
+                    permissions: crate::model::Permissions::Ask,
+                    served: false,
+                    unsaved_session: None,
                 },
             );
             c.remove(&id);
@@ -982,9 +986,7 @@ mod tests {
         })
         .unwrap();
         e.mission_budget(Change::Pause { mission: "m1".into(), paused: true }).unwrap();
-        for purpose in
-            [Purpose::UserTurn { by_hand: true }, Purpose::UserTurn { by_hand: false }, Purpose::Router, Purpose::Pulse, Purpose::Summary]
-        {
+        for purpose in [Purpose::UserTurn { by_hand: true }, Purpose::UserTurn { by_hand: false }, Purpose::Router, Purpose::Summary] {
             assert!(e.with(|c| c.allows(Vendor::Codex, None, purpose, false)).is_ok());
         }
         e.with(|c| c.begin_unbounded(Vendor::Codex)).unwrap();

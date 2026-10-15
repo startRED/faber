@@ -18,7 +18,7 @@ use faber_engine::claude::{ClaudeLaunch, ClaudeOptions, EventSink, start_claude}
 use faber_engine::cli::{Cli, find_cli};
 use faber_engine::codex::{CodexServer, CodexServerOptions, CodexThread};
 use faber_engine::events::{EngineEvent, Session, UserTurn};
-use faber_engine::model::Area;
+use faber_engine::model::{Area, Permissions};
 use faber_engine::proc::{Spawner, real_spawner};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -51,6 +51,7 @@ struct Turn {
     input: u64,
     cached: u64,
     written: u64,
+    written_1h: u64,
     output: u64,
     incomplete: bool,
     windows: Windows,
@@ -83,11 +84,20 @@ async fn finish(rx: &mut UnboundedReceiver<EngineEvent>, stop: Option<&dyn Fn()>
                     return turn;
                 }
             }
-            e @ EngineEvent::Done { ok, input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, incomplete, .. } => {
+            e @ EngineEvent::Done {
+                ok,
+                input_tokens,
+                cache_read_tokens,
+                cache_write_tokens,
+                cache_write_1h_tokens,
+                output_tokens,
+                incomplete,
+                ..
+            } => {
                 turn.ok = ok;
                 turn.own_cost = faber_engine::usage::fresh_price(&e, "claude-haiku-5-5").0;
-                (turn.input, turn.cached, turn.written, turn.output, turn.incomplete) =
-                    (input_tokens, cache_read_tokens, cache_write_tokens, output_tokens, incomplete);
+                (turn.input, turn.cached, turn.written, turn.written_1h, turn.output, turn.incomplete) =
+                    (input_tokens, cache_read_tokens, cache_write_tokens, cache_write_1h_tokens, output_tokens, incomplete);
                 return turn;
             }
             EngineEvent::Error { message, fatal } => panic!("the CLI said: {message} (fatal: {fatal})"),
@@ -99,10 +109,11 @@ async fn finish(rx: &mut UnboundedReceiver<EngineEvent>, stop: Option<&dyn Fn()>
 fn row(scenario: &str, label: &str, t: &Turn) {
     let hit = if t.input == 0 { 0.0 } else { t.cached as f64 * 100.0 / t.input as f64 };
     println!(
-        "| {scenario} | {label} | {} | {} | {} | {hit:.1}% | {} | {} |",
+        "| {scenario} | {label} | {} | {} | {} | {} | {hit:.1}% | {} | {} |",
         t.input,
         t.cached,
         t.written,
+        t.written_1h,
         t.output,
         if t.incomplete { "incomplete" } else { "" }
     );
@@ -125,8 +136,13 @@ impl Probe {
             user_hooks: false,
             instructions: None,
             user_name: None,
+            flags: Default::default(),
+            permissions: Permissions::Ask,
         };
-        let session = start_claude(ClaudeOptions { bin: cli.command.clone(), cwd: self.dir.clone(), launch, spawn: spawner(&cli) }, sink);
+        let session = start_claude(
+            ClaudeOptions { bin: cli.command.clone(), cwd: self.dir.clone(), launch, spawn: spawner(&cli), sandbox: None },
+            sink,
+        );
         (session, rx)
     }
 
@@ -143,15 +159,21 @@ impl Probe {
             user_hooks: false,
             instructions: Some("Reply with the single word ok.".into()),
             user_name: None,
+            flags: Default::default(),
+            permissions: Permissions::Ask,
         };
-        let session = start_claude(ClaudeOptions { bin: cli.command.clone(), cwd: self.dir.clone(), launch, spawn: spawner(&cli) }, sink);
+        let session = start_claude(
+            ClaudeOptions { bin: cli.command.clone(), cwd: self.dir.clone(), launch, spawn: spawner(&cli), sandbox: None },
+            sink,
+        );
         (session, rx)
     }
 
     fn codex_server(&self) -> CodexServer {
         let cli = find_cli("codex").expect("codex is not installed");
         CodexServer::start(CodexServerOptions {
-            bin: cli.command.clone(),
+            permissions: Permissions::Ask,
+            cli: cli.clone(),
             cwd: self.dir.clone(),
             area: Area::Chat,
             user_hooks: false,
@@ -170,6 +192,7 @@ impl Probe {
             resume,
             instructions: None,
             user_name: None,
+            permissions: Permissions::Ask,
         };
         (server.open(thread, sink), rx)
     }
@@ -195,8 +218,8 @@ async fn run() {
     let dir = std::env::temp_dir().join("faber-cache-probe");
     std::fs::create_dir_all(&dir).expect("a folder to work in");
     let probe = Probe { dir };
-    println!("| scenario | turn | prompt tokens | cache read | cache written | hit | output | note |");
-    println!("|---|---|---|---|---|---|---|---|");
+    println!("| scenario | turn | prompt tokens | cache read | cache written | 1h written | hit | output | note |");
+    println!("|---|---|---|---|---|---|---|---|---|");
     match scenario {
         "claude-turns" => {
             let (session, mut rx) = probe.claude(None, "medium");
@@ -242,7 +265,7 @@ async fn run() {
             // The first pulse establishes the reading. Only the following n pulses belong to the measured interval.
             for i in 0..=n {
                 let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
-                gate(&snap, Some("haiku"), Purpose::Pulse, false, now).expect("the quota gate refused a pulse");
+                gate(&snap, Some("haiku"), Purpose::Summary, false, now).expect("the quota gate refused a pulse");
                 let (session, mut rx) = probe.pulse();
                 session.send(UserTurn::text("ok"));
                 let close = || session.close();

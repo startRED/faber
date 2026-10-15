@@ -1,9 +1,9 @@
-mod support;
+use crate::support;
 
 use faber_engine::claude::{ClaudeLaunch, ClaudeOptions, project_claude_args, start_project_claude};
 use faber_engine::codex::{CodexServer, CodexServerOptions, CodexThread, project_codex_args, project_thread_params};
 use faber_engine::events::{Capabilities, terminal_reason};
-use faber_engine::model::{Area, Vendor};
+use faber_engine::model::{Area, Permissions, Vendor};
 use faber_engine::project::Role;
 use faber_engine::project::policy::{Blocker, blockers};
 use serde_json::{Value, json};
@@ -17,14 +17,14 @@ fn review_1_and_8_project_parameters_do_not_grant_admission_or_reach_a_fallback(
         assert_eq!(faber_engine::project::policy::admit(vendor), Err(Blocker::Restrictions));
     }
     let (_, params) = project_thread_params(&thread(None), Role::Writer).unwrap();
-    assert_eq!(params["approvalPolicy"], "on-request");
-    assert_eq!(params["sandbox"], "read-only");
+    assert_eq!(params["approvalPolicy"], "never");
+    assert_eq!(profile(&params)["filesystem"][":workspace_roots"]["."], "write");
 }
 
 #[test]
 fn review_5_automatic_server_disables_customizations_without_changing_manual_projects() {
     let args = project_codex_args(true);
-    let legacy = faber_engine::codex::codex_args(Area::Project, true, true);
+    let legacy = faber_engine::codex::codex_args(Area::Project, true, true, Permissions::Ask);
     assert!(!legacy.iter().any(|a| a == "mcp_servers={}"));
     for feature in ["hooks", "apps", "plugins", "computer_use", "browser_use"] {
         assert!(args.windows(2).any(|a| a == ["--disable", feature]));
@@ -42,10 +42,15 @@ fn review_6_project_controls_include_the_installed_restricted_and_safe_mode_flag
 #[test]
 fn the_live_probe_writer_does_not_inherit_network_temp_roots_shell_or_subagents() {
     let (_, params) = project_thread_params(&thread(None), Role::Writer).unwrap();
-    assert_eq!(params["config"]["sandbox_workspace_write"]["network_access"], false);
-    assert_eq!(params["config"]["sandbox_workspace_write"]["exclude_tmpdir_env_var"], true);
-    assert_eq!(params["config"]["sandbox_workspace_write"]["exclude_slash_tmp"], true);
-    assert_eq!(params["config"]["service_tier"], "default");
+    // The person chose full access (see `thread`); the role still gets Faber's own profile.
+    let profile = profile(&params);
+    assert_eq!(profile["network"]["enabled"], false);
+    assert_eq!(profile["filesystem"][":tmpdir"], "deny");
+    assert_eq!(profile["filesystem"][":slash_tmp"], "deny");
+    assert_eq!(profile["filesystem"]["~/.codex"], "deny");
+    assert_eq!(params["config"]["sandbox_workspace_write.network_access"], false);
+    assert_eq!(params["config"]["features.shell_tool"], false);
+    assert!(params.get("sandbox").is_none() && params.get("dynamicTools").is_none(), "{params}");
     for feature in ["shell_tool", "multi_agent", "multi_agent_v2"] {
         assert!(project_codex_args(true).windows(2).any(|a| a == ["--disable", feature]));
     }
@@ -57,6 +62,10 @@ fn every_codex_role_uses_a_closed_native_catalog_and_no_inherited_developer_inst
     assert!(args.windows(2).any(|a| a[0] == "-c" && a[1].starts_with("model_catalog_json=")));
     for feature in ["view_image", "request_permissions_tool", "code_mode", "code_mode_only", "token_budget"] {
         assert!(args.windows(2).any(|a| a == ["--disable", feature]), "{feature}");
+    }
+    for setting in ["developer_instructions=\"\"", "tools.update_plan.enabled=false", "tools.experimental_request_user_input.enabled=false"]
+    {
+        assert!(args.windows(2).any(|a| a == ["-c", setting]), "{setting}");
     }
     let catalog = faber_engine::codex::project_codex_catalog();
     let models = catalog["models"].as_array().unwrap();
@@ -72,9 +81,8 @@ fn every_codex_role_uses_a_closed_native_catalog_and_no_inherited_developer_inst
     for role in ROLES {
         for resume in [None, Some("thread")] {
             let (_, params) = project_thread_params(&thread(resume), role).unwrap();
-            assert_eq!(params["developerInstructions"], "");
-            assert_eq!(params["config"]["tools"]["update_plan"]["enabled"], false);
-            assert_eq!(params["config"]["tools"]["experimental_request_user_input"]["enabled"], false);
+            assert!(params.get("developerInstructions").is_none(), "{params}");
+            assert_eq!(params["config"]["features.shell_tool"], false);
         }
     }
 }
@@ -243,7 +251,15 @@ fn launch(resume: Option<&str>) -> ClaudeLaunch {
         user_hooks: true,
         instructions: None,
         user_name: None,
+        permissions: Permissions::FullAccess,
+        // A CLI that knows every newer flag: full access would run it with nobody to answer (#28).
+        flags: faber_engine::claude::ClaudeFlags { autocompact: true, permission_prompts: true },
     }
+}
+
+/// Faber's own permission profile in a role's thread parameters.
+fn profile(params: &Value) -> &Value {
+    params["config"].as_object().unwrap().iter().find(|(k, _)| k.starts_with("permissions.")).map(|(_, v)| v).unwrap()
 }
 
 fn thread(resume: Option<&str>) -> CodexThread {
@@ -254,6 +270,7 @@ fn thread(resume: Option<&str>) -> CodexThread {
         resume: resume.map(String::from),
         instructions: None,
         user_name: None,
+        permissions: Permissions::FullAccess,
     }
 }
 
@@ -269,11 +286,19 @@ fn project_controls_are_explicit_on_launch_and_resume_without_changing_chat() {
             assert_eq!(after(&args, "--model"), "claude-sonnet-4-6");
             assert_eq!(after(&args, "--effort"), "high");
             assert_eq!(after(&args, "--permission-mode"), "dontAsk");
+            // The person chose full access (see `launch`); a role never inherits it.
+            assert!(!args.iter().any(|a| a == "bypassPermissions"), "{args:?}");
+            // Nor the full-access path that denies requests for want of anyone to answer them.
+            assert!(!args.iter().any(|a| a == "--permission-prompts"), "{args:?}");
+            assert_eq!(after(&args, "--permission-prompt-tool"), "stdio");
             assert_eq!(after(&args, "--tools"), "");
             assert!(args.iter().any(|a| a == "--strict-mcp-config"));
             assert!(args.iter().any(|a| a == "--disable-slash-commands"));
             let settings: Value = serde_json::from_str(after(&args, "--settings")).unwrap();
             assert_eq!(settings["disableAllHooks"], true);
+            assert_eq!(args.iter().filter(|a| *a == "--settings").count(), 1, "{args:?}");
+            let deny = settings["permissions"]["deny"].as_array().unwrap();
+            assert!(deny.iter().any(|r| r.as_str().is_some_and(|r| r.starts_with("Read(") && r.contains(".codex"))), "{deny:?}");
             let denied = after(&args, "--disallowedTools");
             for tool in [
                 "Bash",
@@ -292,8 +317,9 @@ fn project_controls_are_explicit_on_launch_and_resume_without_changing_chat() {
             assert_eq!(method, if resume.is_some() { "thread/resume" } else { "thread/start" });
             assert_eq!(params["model"], "gpt-6");
             assert_eq!(params["config"]["model_reasoning_effort"], "high");
-            assert_eq!(params["approvalPolicy"], "on-request");
-            assert_eq!(params["sandbox"], "read-only");
+            assert_eq!(params["approvalPolicy"], "never");
+            assert_eq!(profile(&params)["filesystem"][":workspace_roots"]["."], if role == Role::Writer { "write" } else { "read" });
+            assert!(params.get("sandbox").is_none() && params.get("dynamicTools").is_none(), "{params}");
             if let Some(id) = resume {
                 assert_eq!(after(&args, "--resume"), id);
                 assert_eq!(params["threadId"], id);
@@ -353,10 +379,11 @@ async fn every_automated_role_is_denied_before_spawn_even_with_explicit_controls
     for role in ROLES {
         for resume in [None, Some("5e27c797-25b6-434d-a0a2-0e0e0c32ef9e")] {
             let f = fake(vec![]);
-            let opts = ClaudeOptions { bin: "fake".into(), cwd: ".".into(), launch: launch(resume), spawn: f.spawn.clone() };
+            let opts = ClaudeOptions { bin: "fake".into(), cwd: ".".into(), launch: launch(resume), spawn: f.spawn.clone(), sandbox: None };
             assert_eq!(start_project_claude(opts, role, Arc::new(|_| {})).unwrap_err(), Blocker::Restrictions);
             let opts = CodexServerOptions {
-                bin: "fake".into(),
+                permissions: Permissions::FullAccess,
+                cli: faber_engine::cli::Cli { command: "fake".into(), prefix: vec![] },
                 cwd: ".".into(),
                 area: Area::Project,
                 user_hooks: false,

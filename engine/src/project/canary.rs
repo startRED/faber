@@ -448,7 +448,7 @@ impl Roles for Replay {
         if let Some((leases, lease)) = writer {
             let stand_in =
                 crate::proc::real_spawner()(&self.git.to_string_lossy(), &["--version".into()], journal.private()).map_err(key)?;
-            let tree = stand_in.child.as_ref().and_then(|c| c.owned_tree()).ok_or("reason.project.processTreeUnproven")?;
+            let tree = stand_in.contained.as_ref().and_then(|c| c.owned_tree()).ok_or("reason.project.processTreeUnproven")?;
             leases.attach_process(lease, tree.identity()).map_err(|e| e.key().to_string())?;
             self.trees.lock().map_err(|_| "reason.canary.replay")?.insert(request.id.clone(), (tree, stand_in));
         }

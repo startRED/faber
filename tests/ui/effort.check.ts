@@ -9,7 +9,7 @@ import { check, deepEqual, equal, ok } from './check.ts';
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
 
-check('effort: only a manual model shows low, medium and high; medium is the default and changes are for the next message', async () => {
+check('effort: only a manual model shows low, medium and high; medium is the default, a new model resets it, and changes are for the next message', async () => {
   const root = document.createElement('div');
   root.style.cssText = 'position:fixed;left:0;top:0;width:500px';
   root.dataset.motion = 'none';
@@ -18,7 +18,7 @@ check('effort: only a manual model shows low, medium and high; medium is the def
   let warms = 0;
   let sends = 0;
   const dispose = render(() => createComponent(Composer, {
-    vendors: ['claude'], options: [{ label: 'Auto', choice: { vendor: 'auto' } }, { label: 'Haiku', choice: { vendor: 'claude', model: 'haiku' } }],
+    vendors: ['claude'], options: [{ label: 'Auto', choice: { vendor: 'auto' } }, { label: 'Haiku', choice: { vendor: 'claude', model: 'haiku' } }, { label: 'Sonnet', choice: { vendor: 'claude', model: 'sonnet' } }],
     get choice() { return choice(); }, busy: true, nextMessage: true, placeholder: '',
     onChoice: setChoice, onSend: () => { sends++; }, onWarm: () => { warms++; }, onStop: () => {}, onPause: () => {},
   }), root);
@@ -37,6 +37,9 @@ check('effort: only a manual model shows low, medium and high; medium is the def
     equal(root.querySelector('.effort-hint')?.textContent, t('effort.nextMessage'));
     equal(warms, 0, 'changing the choice alone never launches a session');
     equal(sends, 0);
+    model.value = '2';
+    model.dispatchEvent(new Event('change', { bubbles: true }));
+    equal(choice().effort, 'medium', 'another model starts again at the default');
     model.value = '0';
     model.dispatchEvent(new Event('change', { bubbles: true }));
     equal(root.querySelector('.effort'), null);

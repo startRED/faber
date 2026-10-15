@@ -1,8 +1,8 @@
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
-import { createResource, createSignal, For, Index, Show, type Accessor } from 'solid-js';
-import { api, type Choice, type Message, type QueuedTurn, type ToolUse, type VendorUsage } from './api.ts';
-import { Asks } from './Ask.tsx';
+import { createEffect, createResource, createSignal, For, Index, onCleanup, Show, type Accessor } from 'solid-js';
+import { api, type Choice, type Message, type QueuedTurn, type VendorUsage } from './api.ts';
+import { Asks, Parkeds } from './Ask.tsx';
 import { copyItem, openMenu } from './contextmenu.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
@@ -10,6 +10,8 @@ import { untilReset } from './Sidebar.tsx';
 import { fromEngine, t } from './i18n.ts';
 import { prettyModel, vendorName, type Option } from './models.ts';
 import { animateList } from './motion.ts';
+import { warmLeft } from './running.ts';
+import { middle, thinkingParts, toolLine, toolRow } from './worklog.ts';
 
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
 
@@ -57,17 +59,17 @@ function FileCard(props: { conversationId: string; file: { path: string; size: n
   );
 }
 
-function toolLabel(tool: ToolUse): string {
-  const input = tool.input as Record<string, unknown> | string | undefined;
-  const detail = typeof input === 'string' ? input : input && (input.query ?? input.url ?? input.file_path ?? input.command ?? input.pattern);
-  return detail ? `${tool.name}: ${String(detail)}` : tool.name;
-}
-
 function usage(m: Message): string {
   const parts: string[] = [];
   if (m.costUsd) parts.push(t('answer.cost', { cost: m.costUsd.toFixed(4) }));
   if (m.inputTokens) parts.push(t('answer.tokens', { input: (m.inputTokens / 1000).toFixed(1), output: m.outputTokens ?? 0 }));
   return parts.join(' · ');
+}
+
+// The picker names Claude models by alias ("opus"), so the full id of the next rung is matched to its entry.
+function rung(nudge: NonNullable<Message['nudge']>, options: Option[]): Choice {
+  const entry = options.find((o) => o.choice.vendor === nudge.vendor && (o.choice.model === nudge.model || o.choice.model === nudge.model.split('-')[1]));
+  return { ...(entry?.choice ?? { vendor: nudge.vendor, model: nudge.model }), effort: nudge.effort };
 }
 
 type OnBranch = (messageId: string, text: string, choice?: Choice) => void;
@@ -79,8 +81,22 @@ interface Shared {
   usage?: VendorUsage[];
 }
 
-function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
+function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?: boolean }) {
   const m = () => props.m();
+  // A quiet note on the latest reply only (a later turn overtakes an older one): how long the CLI keeps its prompt cache warm,
+  // hidden while unknown and once cold. One timer, and only while the note is shown.
+  const [now, setNow] = createSignal(Date.now());
+  createEffect(() => {
+    const left = props.last ? warmLeft(m().cacheWarmUntil, Date.now()) : undefined;
+    if (left === undefined) return;
+    const timer = setTimeout(() => setNow(Date.now()), left + 50);
+    onCleanup(() => clearTimeout(timer));
+  });
+  const warm = () => {
+    const until = m().cacheWarmUntil;
+    if (!props.last || warmLeft(until, Math.max(now(), Date.now())) === undefined) return '';
+    return t('answer.cacheWarm', { time: new Date(until!).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) });
+  };
   const streaming = () => m().status === 'streaming';
   const waiting = () => m().permissions ?? [];
   // Unknown legacy boundaries and tool-terminated turns keep the entire answer visible.
@@ -88,14 +104,31 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
     const end = m().activityEnd;
     return m().tools?.length && Number.isInteger(end) && end! > 0 && end! < m().text.length && m().text.slice(end).trim() ? end! : 0;
   };
-  const narration = () => boundary() ? [m().text.slice(0, boundary())] : [];
+  // The answer is always kept whole. A status sentence that is exactly the answer's opening paragraph is dropped from the
+  // activity instead, so it shows once.
   const finalText = () => m().text.slice(boundary());
-  const steps = () => narration().length + (m().tools?.length ?? 0) + (m().thinking ? 1 : 0);
+  const narration = () => {
+    if (!boundary()) return [];
+    const paragraphs = m().text.slice(0, boundary()).trimEnd().split(/\n{2,}/);
+    const last = paragraphs.at(-1)?.trim();
+    const answer = finalText().trimStart();
+    if (last && answer.startsWith(last) && (answer.length === last.length || /\s/.test(answer[last.length]!))) paragraphs.pop();
+    const rest = paragraphs.join('\n\n').trim();
+    return rest ? [rest] : [];
+  };
+  const thinking = () => thinkingParts(m().thinking ?? '');
+  const steps = () => narration().length + (m().tools?.length ?? 0) + (thinking().length ? 1 : 0);
   const commands = () => m().tools?.filter((tool) => /bash|command|exec|shell/i.test(tool.name)).length ?? 0;
+  // The answer on screen is never repeated here: once it has text, the status line steps aside.
   const latest = () => {
     const tool = m().tools?.at(-1);
-    return tool && tool.ok === undefined ? toolLabel(tool) : finalText().trim().split('\n').at(-1) || (tool ? toolLabel(tool) : m().thinking);
+    if (tool && tool.ok === undefined) return toolLine(tool);
+    if (finalText().trim()) return '';
+    return tool ? toolLine(tool) : middle(thinking().at(-1)?.text ?? '');
   };
+  // The name slot: while Auto is still choosing there is none (the reason says so), then the model's name from the moment
+  // it is known to the end and after reopening; a model the CLI never named reads as the default one all along.
+  const label = () => (streaming() && m().waitUntil ? t('run.waiting', { when: untilReset(m().waitUntil!) }) : m().vendor ? prettyModel(m().model) : '');
   return (
     <article
       class="ai"
@@ -109,28 +142,34 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
           <VendorMark vendor={m().vendor} />
           <b>{m().vendor ? vendorName(m().vendor!) : t('model.auto')}</b>
         </span>
-        <span>{streaming() && m().waitUntil ? t('run.waiting', { when: untilReset(m().waitUntil!) }) : streaming() ? t('answer.answering') : m().vendor ? prettyModel(m().model) : ''}</span>
+        <Show when={label()}><span>{label()}</span></Show>
         <Show when={m().effort}>{(effort) => <span>{t('effort.label')}: {t(`effort.${effort()}`)}</span>}</Show>
         <Show when={m().reason}>
           <em>· {fromEngine(m().reason, { when: m().waitUntil ? untilReset(m().waitUntil!) : t('quota.unknown'), from: m().movedFrom ? vendorName(m().movedFrom!) : '', to: m().vendor ? vendorName(m().vendor!) : '' })}</em>
         </Show>
       </div>
-      <Show when={m().pace}>{(pace) => <p class="pace">{t(`reason.pace.${pace().kind}`, { vendor: vendorName(pace().vendor) })}</p>}</Show>
+      <Show when={m().pace}>{(pace) => <p class="pace">{t(`reason.pace.${pace().kind}`, { vendor: vendorName(pace().vendor), other: m().vendor ? vendorName(m().vendor!) : t('model.auto') })}</p>}</Show>
+      <Show when={m().note}><p class="pace">{fromEngine(m().note)}</p></Show>
       <QuotaCard id={props.conversationId} m={m()} usage={props.usage ?? []} />
       <Show when={steps()}>
         <details class="activity">
           <summary>{t(streaming() ? 'activity.working' : 'activity.done', { steps: t('activity.steps', { n: steps() }), commands: t('activity.commands', { n: commands() }) })}</summary>
           <div class="activity-body">
-            <Show when={m().thinking}><div class="activity-thinking">{m().thinking}</div></Show>
+            <Show when={thinking().length}>
+              <div class="activity-thinking">
+                <For each={thinking()}>{(part) => <p>{part.title ? <b>{part.text}</b> : part.text}</p>}</For>
+              </div>
+            </Show>
             <For each={narration()}>{(text) => <div class="md" onClick={openLinks} innerHTML={html(text)} />}</For>
             <div class="tools">
               <For each={m().tools}>
                 {(tool) => (
-                  <span class={tool.ok === false ? 'bad' : ''} title={tool.output ?? toolLabel(tool)}>
+                  <span class={tool.ok === false ? 'bad' : ''} title={toolRow(tool).detail || tool.output}>
                     <Show when={tool.ok === true}>
                       <Icon name="check" small />
                     </Show>
-                    <i>{toolLabel(tool)}</i>
+                    <b>{toolRow(tool).label}</b>
+                    <Show when={toolRow(tool).detail}><i>{middle(toolRow(tool).detail)}</i></Show>
                   </span>
                 )}
               </For>
@@ -140,6 +179,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
         <Show when={streaming() && latest()}><div class="activity-latest" role="status" aria-live="polite" aria-atomic="true" title={latest()}>{latest()}</div></Show>
       </Show>
       <Asks conversationId={props.conversationId} turnId={m().id} permissions={waiting()} surface="ask" />
+      <Parkeds parked={m().parked ?? []} more={m().parkedMore} surface="ask" />
       <div class="md" aria-busy={streaming()} onClick={openLinks}>
         <div innerHTML={html(finalText())} />
         <Show when={streaming() && !waiting().length && !m().waitUntil}>
@@ -161,6 +201,17 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
       <Show when={!streaming()}>
         <div class="actions">
           <button onClick={() => void navigator.clipboard.writeText(m().text)}>{t('answer.copy')}</button>
+          <Show when={props.prompt && m().nudge} keyed>
+            {(nudge) => (
+              <button
+                class="nudge"
+                title={fromEngine(nudge.reason, { to: `${prettyModel(nudge.model)} · ${t(`effort.${nudge.effort}`)}` })}
+                onClick={() => props.onBranch(props.prompt!.id, props.prompt!.text, rung(nudge, props.options))}
+              >
+                {t('answer.nudge')}
+              </button>
+            )}
+          </Show>
           <Show when={props.prompt} keyed>
             {(prompt) => (
               <select
@@ -182,7 +233,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message }) {
           <button onClick={() => void api.openTerminal(props.conversationId)} title={t('answer.terminalHint')}>
             {t('answer.terminal')}
           </button>
-          <span>{usage(m())}</span>
+          <span>{[usage(m()), warm()].filter(Boolean).join(' · ')}</span>
         </div>
       </Show>
     </article>
@@ -300,7 +351,7 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
     <>
       <Index each={props.messages.slice(props.from)}>
         {(m, i) => (
-          <Show when={m().role === 'user'} fallback={<Answer {...props} m={m} prompt={prompt(props.from + i)} />}>
+          <Show when={m().role === 'user'} fallback={<Answer {...props} m={m} prompt={prompt(props.from + i)} last={props.from + i === props.messages.length - 1} />}>
             <Mine m={m} onBranch={props.onBranch} />
           </Show>
         )}

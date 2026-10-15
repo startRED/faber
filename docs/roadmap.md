@@ -49,7 +49,7 @@ Creative results are judged blind, shown as "A" and "B", and the answer is revea
 | Quota and tokens | tokens per approved task, priced at API rates (input, output, cache) | ≤ 70% of the plain CLI's cost for the same task |
 | Speed | time to first token with a warm session | ≤ 2 s |
 | Precision | corrections the user asks for after "done" | half of the plain CLI |
-| Efficiency | idle RAM without a CLI open; installer size; sessions broken by CLI updates | under 500 MB (the test fails above 250 MB today); ≤ 120 MB; 0 |
+| Efficiency | idle RAM without a CLI open; installer size; sessions broken by CLI updates | under 500 MB (the test fails above 400 MB, R125); ≤ 120 MB; 0 |
 
 ### Measuring without burning the user's quota
 
@@ -107,8 +107,18 @@ name. Auto aims to pick a model that does the task well, without waste and quick
   greeting first). Those stay with their subscription, so the CLI keeps the history, and only move up. Once a message
   needed more, the conversation stays with that model. A sent message waits at most 30 s for its route; past it, the
   turn starts with the everyday default. The answer shows the chosen model and the reason.
+- The router also says how the work can be checked: by a machine (a test, an exit code, a number to recount), at a
+  glance, or blind (the person cannot tell a wrong answer from a right one). A blind medium request in code, math or
+  research gets the hard bar, as math always did, because the model's own checking matters most where nobody else can
+  check (done, `engine/src/route.rs`; measured in [design.md](design.md)).
+- An answer whose last check failed, or whose code changed with nothing checking it, offers one step up: the same
+  model one effort higher, else the next model at medium. It runs as a new branch, so a conversation's model and effort
+  never change (done, `engine/src/nudge.rs`).
 - **Still to build.** The table learns from what the user approves or redoes. The draft is routed at most twice per
   message while the user types; today it is routed at every pause.
+- **Still to build: quota pacing** ([spec](superpowers/specs/2026-10-11-auto-quota-pacing-design.md), draft). Auto
+  reads each window against its reset time, the weekday and the plan (detected at start and watched while open, on a
+  shared account), and spends quota that would expire on quality: one rung up when a vendor has spare quota.
 - The router is measured too: on the benchmark of real requests, its picks must match always using the strongest
   model while spending less quota.
 
@@ -221,6 +231,42 @@ parallel, each on what it does best, and the result must read as if one careful 
 - When a quota runs out, the work moves to the other subscription, or waits and resumes by itself at the renewal.
 
 **Decision list.** Every project keeps a decision list with authors. The AI's decisions show as "not reviewed".
+
+### Running many workers
+
+Taken from Claude Code Projects and pushed further (AI proposal, not reviewed; research in
+[projects-orchestration.md](research/2026-10-14/projects-orchestration.md)).
+
+- **The lead routes every message.** A quick question is answered in place; new work goes to a new worker or to the
+  worker already in that area; several tasks in one message become several workers. It can list suggested workers
+  with "start all".
+- **The lead never reads the whole history.** It works at low effort from worker reports, recent turns and the
+  `.faber/` memory, so a project can run for weeks.
+- **A brief in five parts** goes to every worker, written by Faber, not by the user: what the project is for, where
+  the work happens, how a worker checks its work, what to do when something is missing, and what needs approval.
+- **A new project starts with proposals.** Faber reads the recent work and proposes the first tasks; the first worker
+  only reads and proposes next steps.
+- **Missing-item gate.** A worker finishes through a report with required "assumed" and "could not reach" fields. A
+  missing login, tool, file or secret, or a stand-in (a mock, a fake key, an invented path), keeps the step waiting
+  with the missing item named, and "done" is refused. The user's answer goes into the brief, and every new brief is
+  checked against past gaps first. The reviewer from the other vendor checks "assumed" against the diff.
+- **A canary before a batch.** When the lead fans out similar workers (one per repository, file, chapter or
+  thumbnail), one runs first and passes its proof and a review from the other vendor; its mistakes become rules in
+  the brief, then the rest start in parallel. Batches of three or fewer, or with a very cheap proof, skip it.
+- **Workers leave a written state and exit.** A worker's lease renews only with evidence of progress. When it lapses
+  or the work ends, the worker writes its state (step, branch, next step, proof, files) to `.faber/` and its process
+  closes. A follow-up resumes the session while the one-hour cache is warm and starts a fresh one from that state when
+  it is cold, showing both token estimates. The same file serves vendor switches and crash recovery.
+- **Limits in plain words become real limits.** "At most two at a time" or "ask before starting" is stored as a
+  setting the engine enforces, not a hint for the model. New workers have a daily cap.
+- **After delivery the worker keeps watching.** A worker that opened a pull request fixes failing checks and review
+  comments until it lands. Its row offers the next step as a plain button ("Fix the failing check", "Publish"), and
+  publishing still follows guardrail 3.
+- **The progress view adds "Waiting on you" and "Landing"** (approved, waiting to merge), and a worker idle for a week
+  is resolved by itself.
+- **A library per project** lists the files the user added and the files workers produced.
+- **One question explains a stall:** for every worker, what it was asked, what it assumed, what it could not reach and
+  what it waits on.
 
 ### Toolbox
 
@@ -344,9 +390,9 @@ phase.
    a hidden choice.
 3. **Set the model and the effort before a conversation starts, and never change model, effort, tools or system prompt
    in the middle of one without need.** The prompt cache is the biggest saving. A change of model always starts a new
-   cache, and a change of tools or system prompt invalidates everything after it. A change of effort may keep the cache
-   today, but Faber does not count on it. Facts that change travel as text inside the next message, never as a
-   system-prompt edit.
+   cache, and a change of tools or system prompt invalidates everything after it. A change of effort kept the Claude cache
+   through `--resume` and cost Codex nothing measurable (13/10/2026, [design.md](design.md)). Facts that change travel as
+   text inside the next message, never as a system-prompt edit.
 4. **Hand work to another model through a written summary or a diff, not the conversation.** Thinking blocks are tied to
    the model that wrote them.
 5. **Interrupt gracefully before killing, watch for silence, and kill the whole process tree on Windows.** The stop uses
@@ -397,7 +443,8 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
   anything heavy on screen (terminal, 3D viewer, video) is tested on all three. The first Electron version stays
   tagged as `electron-f1`.
 - **A memory budget, enforced by a test.** Faber itself (window open, no CLI running) stays under 500 MB when it is
-  complete; the end-to-end test fails above 250 MB so there is room for what is still to come. Anything that keeps a
+  complete; the end-to-end test fails above 400 MB (R125). The limit is a safety net: each change still aims at the
+  lightest and most responsive result it can reach. Anything that keeps a
   process or a large DOM alive needs a reason and a measurement. Measured on 2026-10-10 as Task Manager counts it
   (private working set): 89 MB idle, 114 MB with a thousand-message conversation open (only the last 40 messages are
   drawn, more on scrolling up), 4 MB closed to the tray (the screen is freed; the engine keeps running and the window
@@ -500,6 +547,18 @@ The program is `faber-test`, run as `cargo t`.
 4. **Unit tests never spawn processes, touch real git or call a real CLI.**
 5. **The benchmark of ~40 real requests** that measures the goals against plain Claude Code and plain Codex before
    each version.
+6. **Still to build: faster and lighter than TL-ADE's suite, measured fairly** (R113, R115, R116, owner;
+   [spec](superpowers/specs/2026-10-14-test-system-rework-design.md),
+   [plan](superpowers/plans/2026-10-14-test-system-rework.md)). A job-object meter measures both projects the same way:
+   the warm suites, 8 matched scenarios and 7 real-work tasks, never compilation. The floor is 5x less time and
+   processes and 3x less memory and CPU, with no ceiling; no test is weakened. Steps: one engine test program, the
+   `rust-lld` linker, lighter debug info and below-normal priority (landed 2026-10-14), then event waits,
+   parallel lanes, skipping unchanged builds and a shared running app for the screen scenarios.
+7. **The build folder has a budget** (R106). Every worktree builds into a folder of the main checkout's `target`, and
+   Cargo never deletes anything there, so it grew to 123 GB and once filled the disk. `cargo t` sweeps it at start, at
+   most once an hour: folders of removed worktrees and builds replaced more than a day ago go, and above 60 GB
+   the least recently used worktree folders go too. A folder in use is never touched
+   ([design](design.md#build-folder-budget)).
 
 ## Design and identity
 
@@ -533,6 +592,11 @@ belongs to them.
 - GitHub Releases on every tag, downloaded directly: an `.exe` (NSIS) installer for Windows, a universal `.dmg` for macOS,
   AppImage and `.deb` for Linux. Windows comes first, and macOS and Linux compatibility is kept from now on. arm64
   Windows and `.rpm` come later.
+- Every user-facing change ships by itself (R130). When CI goes green on `phase-1-base` and a `feat`, `fix` or `perf`
+  commit that touches the shipped app (`ui/`, `engine/`, `src-tauri/`, `package.json`, `vite.config.ts`) landed since
+  the last tag, `auto-release.yml` tags the next patch version there and starts the release, so
+  installs update through the built-in updater without anyone asking. A finished area still gets its minor bump by hand.
+  The tag is the version; the release build writes it into `package.json`.
 - No paid signing for now. Windows shows a SmartScreen notice that the download page explains. The Microsoft Store and
   a code-signing certificate come back to the table when everything is complete.
 - macOS builds are not notarized, so users allow the app once in System Settings. Faber updates itself there too. If a
@@ -550,7 +614,7 @@ each version, the benchmark measures it, and the version ships only with the mai
 | 1 | New base | the FSL-1.1-ALv2 license and these documents, Faber's own Rust test runner, the design system and themes, the identity, the shell layout and running list, the tray number and notifications, the first run and tutorial, Settings, and the CLI download written straight to disk. No public release: it is checked in the live app and a local installer build |
 | 1a (R96) | Self-development MVP | the minimal Projects slice above ([spec](superpowers/specs/2026-10-12-self-development-mvp-design.md)); closes the project execution, handoff, stop and live-budget gaps needed to let Faber build Faber before Full Chat |
 | 2 | Full Chat | the benchmark, visual answers, asking Faber about Faber, search, moving a chat to a project, Auto learning from approvals, the draft routed at most twice per message, reporting failed writes of conversation and project files, and closing the engine gaps of rules 2, 3, 5 and 6 |
-| 3 | Projects with the lead agent | the lead agent, toolbox, 15 powers, modes, guardrails and big-work rules, the progress view, the decision list, the catalog, learning and the `.faber/` folder, and rules 4 and 7 |
+| 3 | Projects with the lead agent | the lead agent, toolbox, 15 powers, modes, guardrails and big-work rules, the rules for running many workers, the progress view, the decision list, the catalog, learning and the `.faber/` folder, and rules 4 and 7 | |
 | 4 | Excellent software | generalize the self-development workflow; nightly CLI version tests and the live manifest, shared project MCP infrastructure, and qualified department writers |
 | 5 | First public version | |
 | 6 | Image and design | creative drafts, blind judging and comparison views |

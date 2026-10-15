@@ -44,6 +44,15 @@ pub struct Pick {
 /// Medium effort by default: high quality for most work without spending quota on easy turns.
 const EFFORT: &str = "medium";
 
+/// The picker's aliases ("sonnet") as the same full IDs as Auto's measured table, so the name an answer shows when it
+/// starts is the one the CLI reports a moment later. New models enter through that table, which changes with each Faber release.
+fn pinned(vendor: Vendor, model: &str) -> &str {
+    crate::route::PROFILES
+        .iter()
+        .find(|p| p.vendor == Vendor::Claude && vendor == Vendor::Claude && p.model.split('-').nth(1) == Some(model))
+        .map_or(model, |p| p.model)
+}
+
 /// ChatGPT without a model runs `codex_recommended`, the account's recommended model (the one ChatGPT on the web
 /// uses), so a default someone set by hand in the CLI's own settings never answers by surprise.
 // ponytail: fixed default until the measured router (phase F5) replaces it; the reason line is already shown.
@@ -58,20 +67,14 @@ pub fn pick_model(choice: &Choice, available: &[Vendor], codex_recommended: Opti
     if choice.vendor != "auto" {
         let vendor = Vendor::ALL.into_iter().find(|v| v.name() == choice.vendor)?;
         return available.contains(&vendor).then(|| {
-            let model = choice.model.as_deref().map(|model| {
-                // Pin the picker's aliases to the same full IDs as Auto's measured table.
-                crate::route::PROFILES
-                    .iter()
-                    .find(|p| p.vendor == Vendor::Claude && vendor == Vendor::Claude && p.model.split('-').nth(1) == Some(model))
-                    .map_or(model, |p| p.model)
-            });
+            let model = choice.model.as_deref().map(|model| pinned(vendor, model));
             let mut chosen = pick(vendor, model, "reason.chosen");
             chosen.effort = choice.effort.unwrap_or(Effort::Medium).name().into();
             chosen
         });
     }
     if available.contains(&Vendor::Claude) {
-        return Some(pick(Vendor::Claude, Some("sonnet"), "reason.autoDefault"));
+        return Some(pick(Vendor::Claude, Some(pinned(Vendor::Claude, "sonnet")), "reason.autoDefault"));
     }
     if available.contains(&Vendor::Codex) {
         return Some(pick(Vendor::Codex, None, "reason.autoOnly"));

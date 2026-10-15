@@ -1,7 +1,7 @@
 //! Scars carry proven regression checks, never prompt rules or failure text.
+use crate::support;
 use faber_engine::book::{Scar, ScarStore};
 use faber_engine::project::wire::{ArtifactRef, CheckKind, CheckOutcome, CheckReceipt, CheckResult};
-mod support;
 use support::tempdir;
 fn receipt(id: &str, check: &str, tree: &str, result: CheckResult) -> CheckReceipt {
     CheckReceipt {

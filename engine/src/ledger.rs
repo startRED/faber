@@ -12,6 +12,13 @@ use std::collections::BTreeMap;
 const KEEP_POINTS: usize = 200;
 const KEEP_SPANS: usize = 200;
 const KEEP_STRETCHES: usize = 60;
+/// How long a vendor's counter may trail real use: measured at 4.1 min (Claude) and under 0.5 min (Codex), with margin
+/// (docs/design.md "Quota lag, measured"). Work that ended
+/// within this long ago may not be in the reading yet.
+pub const LAG_CLAUDE: f64 = 10.0 * 60.0;
+pub const LAG_CODEX: f64 = 5.0 * 60.0;
+/// Two reset times this close are the same window: `/usage` prints the minute, the stream prints the second.
+const SAME_RESET: f64 = 120.0;
 /// A plan check younger than this lets a discount stand.
 pub const PLAN_FRESH: f64 = 30.0 * 60.0;
 /// After a plan change, discounts wait for this long or for enough stretches.
@@ -42,6 +49,32 @@ pub struct DailySample {
     pub extra: BTreeMap<String, serde_json::Value>,
 }
 
+/// One request Faber made, with the moment it really ended (a `Span`'s end is the moment of the reading taken during it, which
+/// is what the learning needs). Kept for a few hours: it is what tells whether the vendor's counter has caught up.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Work {
+    pub start: f64,
+    pub finished: f64,
+    pub model: String,
+    pub cost: Option<f64>,
+    pub incomplete: bool,
+}
+
+/// Requests kept one by one while the counter may not hold them yet. Past this the oldest are folded into one `Folded` (never
+/// dropped: unsettled work keeps the floor up).
+const KEEP_WORK: usize = 100;
+
+/// Pending requests folded into one conservative record when there are too many to keep. It ends when the last of them ends
+/// (it settles last), starts when the first began, carries the points of the part that could be converted, and says whether any
+/// part could not.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Folded {
+    pub start: f64,
+    pub finished: f64,
+    pub points: f64,
+    pub unknown: bool,
+}
+
 /// What is kept for one vendor.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -55,6 +88,8 @@ pub struct VendorLedger {
     /// Only the engine's no-model account check stamps this evidence; ordinary quota events do not.
     pub zero_turn_readings: BTreeMap<String, Reading>,
     pub spans: Vec<Span>,
+    pub work: Vec<Work>,
+    pub folded: Option<Folded>,
     /// Own API-equivalent USD per local day, independent of account percentages.
     pub own_spend: BTreeMap<i64, f64>,
     pub unmetered: BTreeMap<i64, u32>,
@@ -92,6 +127,9 @@ pub struct VendorLedger {
     /// Fields written by a newer Faber, kept as they were: an older build must not drop what it does not know.
     #[serde(flatten)]
     pub extra: BTreeMap<String, serde_json::Value>,
+    /// Seconds the counter may trail real use; 0 switches the "still counting" logic off.
+    #[serde(skip)]
+    pub lag: f64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -110,6 +148,8 @@ impl Ledger {
     pub fn sanitize(&mut self) {
         self.claude.sanitize();
         self.codex.sanitize();
+        self.claude.lag = LAG_CLAUDE;
+        self.codex.lag = LAG_CODEX;
     }
 
     pub fn of(&self, vendor: Vendor) -> &VendorLedger {
@@ -139,6 +179,9 @@ impl VendorLedger {
         self.spans
             .retain(|s| s.start.is_finite() && s.end.is_finite() && s.end >= s.start && s.cost.is_none_or(|c| c.is_finite() && c >= 0.0));
         self.spans.drain(..self.spans.len().saturating_sub(KEEP_SPANS));
+        self.work.retain(|w| w.start.is_finite() && w.finished.is_finite() && w.cost.is_none_or(|c| c.is_finite() && c >= 0.0));
+        self.folded =
+            self.folded.take().filter(|f| f.start.is_finite() && f.finished.is_finite() && f.points.is_finite() && f.points >= 0.0);
         self.stretches.retain(|s| s.ppd.is_finite() && s.ppd > 0.0);
         self.stretches.drain(..self.stretches.len().saturating_sub(KEEP_STRETCHES));
         // The shape indexes 168 hours of the week; any other length would index out of range.
@@ -152,6 +195,7 @@ impl VendorLedger {
         self.weights.w.retain(|_, w| w.is_finite());
         self.weights.w.values_mut().for_each(|w| *w = w.clamp(0.5, 2.0));
         self.weights.capacity = self.weights.capacity.filter(|c| c.is_finite() && *c > 0.0);
+        self.fold_overflow();
         for t in [&mut self.since, &mut self.relearn_until] {
             if !t.is_finite() {
                 *t = 0.0;
@@ -179,9 +223,12 @@ impl VendorLedger {
         if !plausible(used, resets_at) || resets_at <= now {
             return;
         }
-        // Whole seconds and hundredths are all a reading holds; the file stays small.
-        let (now, resets_at, used) = (now.round(), resets_at.round(), (used * 1000.0).round() / 1000.0);
+        // Whole seconds and hundredths are all a reading holds; the file stays small. A reset time within two minutes of the
+        // one held is the same window's, in the form first seen, so the history keeps comparing like with like.
+        let held = self.readings.get(window).map(|r| r.resets_at).filter(|at| (at - resets_at).abs() <= SAME_RESET);
+        let (now, resets_at, used) = (now.round(), held.unwrap_or(resets_at.round()), (used * 1000.0).round() / 1000.0);
         self.readings.insert(window.to_string(), Reading { used, resets_at, read_at: now });
+        self.prune(now);
         let point = Point { at: now, used, resets_at };
         if vendor_wide(window)
             && window_secs(window) == Some(7.0 * 86_400.0)
@@ -324,19 +371,126 @@ impl VendorLedger {
         self.learned.shape()
     }
 
+    /// The windows with a live reading.
+    fn live_windows(&self, now: f64) -> Vec<&str> {
+        self.readings.iter().filter(|(_, r)| r.resets_at > now).map(|(n, _)| n.as_str()).collect()
+    }
+
+    /// Whether a request that ended at `finished` is known to be in this window's counter: the window has been read since it
+    /// ended plus the lag. Only the window's own reading says so; reading another window settles nothing here, and time alone
+    /// settles nothing, so when every refresh fails the floor stays up.
+    fn settled(&self, finished: f64, window: &str, now: f64) -> bool {
+        self.readings.get(window).is_some_and(|r| r.resets_at > now && r.read_at >= finished + self.lag)
+    }
+
+    /// Faber's own requests that this window's counter may not hold yet.
+    fn pending(&self, window: &str, now: f64) -> Vec<&Work> {
+        if self.lag <= 0.0 {
+            return vec![];
+        }
+        self.work.iter().filter(|w| w.finished >= self.since && w.finished <= now && !self.settled(w.finished, window, now)).collect()
+    }
+
+    fn pending_folded(&self, window: &str, now: f64) -> Option<&Folded> {
+        if self.lag <= 0.0 {
+            return None;
+        }
+        self.folded.as_ref().filter(|f| f.finished >= self.since && f.finished <= now && !self.settled(f.finished, window, now))
+    }
+
+    /// Drops what every live window has settled; with no live window nothing is settled.
+    fn prune(&mut self, now: f64) {
+        let live: Vec<String> = self.live_windows(now).into_iter().map(String::from).collect();
+        let settled_everywhere = |me: &Self, finished: f64| !live.is_empty() && live.iter().all(|w| me.settled(finished, w, now));
+        let keep: Vec<bool> = self.work.iter().map(|w| w.finished >= self.since && !settled_everywhere(self, w.finished)).collect();
+        let mut keep = keep.into_iter();
+        self.work.retain(|_| keep.next().unwrap_or(true));
+        if self.folded.as_ref().is_some_and(|f| f.finished < self.since || settled_everywhere(self, f.finished)) {
+            self.folded = None;
+        }
+        self.fold_overflow();
+    }
+
+    /// Too many pending requests to keep one by one: the oldest become one `Folded` that keeps what is known of them (their
+    /// points) and the latest end, so it settles last. Nothing pending is ever thrown away.
+    fn fold_overflow(&mut self) {
+        let extra = self.work.len().saturating_sub(KEEP_WORK);
+        if extra == 0 {
+            return;
+        }
+        let folding: Vec<Work> = self.work.drain(..extra).collect();
+        let mut f = self.folded.take().unwrap_or(Folded { start: f64::MAX, finished: f64::MIN, points: 0.0, unknown: false });
+        for w in &folding {
+            f.start = f.start.min(w.start);
+            f.finished = f.finished.max(w.finished);
+            match self.known_points(w) {
+                Some(p) => f.points += p,
+                None => f.unknown = true,
+            }
+        }
+        self.folded = Some(f);
+    }
+
+    /// The points of the primary window one request is known to have cost, if its cost and its model's conversion are known.
+    fn known_points(&self, w: &Work) -> Option<f64> {
+        if w.incomplete { None } else { Some(w.cost? * self.weights.raw.get(&w.model)?) }
+    }
+
+    /// A request Faber made has just ended: the counter may not hold it yet.
+    pub fn worked(&mut self, work: Work, now: f64) {
+        self.work.push(work);
+        self.prune(now);
+    }
+
+    /// Whether any window's reading may still be rising because of Faber's own recent work. It holds whether or not the reading
+    /// has moved yet: a counter that has not moved has not counted it either.
+    pub fn counting(&self, now: f64) -> bool {
+        let live = self.live_windows(now);
+        let any = |window: &str| !self.pending(window, now).is_empty() || self.pending_folded(window, now).is_some();
+        if live.is_empty() {
+            self.lag > 0.0 && (self.work.iter().any(|w| w.finished >= self.since && w.finished <= now) || self.folded.is_some())
+        } else {
+            live.into_iter().any(any)
+        }
+    }
+
+    /// The share (0 to 1) that Faber's own work pending for this window is known to add beyond what its reading holds, from the
+    /// cost of each request and the points per dollar measured for its model. Work with no cost or no measured conversion adds
+    /// nothing to the number but never takes the known part away: the floor only goes up. None when nothing is pending or
+    /// none of it can be converted. What the reading already rose by since the work began is taken off only when all of the
+    /// work is known (otherwise the rise may be the unknown part), so nothing counts twice and nothing is lost.
+    pub fn uncounted(&self, window: &str, now: f64) -> Option<f64> {
+        let work = self.pending(window, now);
+        let folded = self.pending_folded(window, now);
+        if (work.is_empty() && folded.is_none()) || self.primary(now) != Some(window) {
+            return None;
+        }
+        let known: Vec<f64> = work.iter().filter_map(|w| self.known_points(w)).collect();
+        let carried = folded.map_or(0.0, |f| f.points);
+        if known.is_empty() && carried <= 0.0 {
+            return None;
+        }
+        let all_known = known.len() == work.len() && !folded.is_some_and(|f| f.unknown);
+        let begun = work.iter().map(|w| w.start).chain(folded.map(|f| f.start)).fold(f64::MAX, f64::min);
+        let reading = self.readings.get(window)?;
+        let before = self.history.get(window)?.iter().rev().find(|p| p.at <= begun && p.resets_at == reading.resets_at);
+        let risen = if all_known { before.map_or(0.0, |p| ((reading.used - p.used) * 100.0).max(0.0)) } else { 0.0 };
+        Some(((known.iter().sum::<f64>() + carried - risen) / 100.0).max(0.0))
+    }
+
     pub fn snap(&self, now: f64) -> Snap {
         let windows = self
             .readings
             .iter()
             .filter(|(_, r)| r.resets_at > now)
             .map(|(name, r)| {
-                (
-                    name.clone(),
-                    Window { used: r.used, resets_at: r.resets_at, read_at: r.read_at, length: window_secs(name).unwrap_or(0.0) },
-                )
+                // A window still counting Faber's own work is a floor: the reading plus what is known to be missing from it.
+                let used = (r.used + self.uncounted(name, now).unwrap_or(0.0)).min(1.0).max(r.used);
+                (name.clone(), Window { used, resets_at: r.resets_at, read_at: r.read_at, length: window_secs(name).unwrap_or(0.0) })
             })
             .collect();
         Snap {
+            counting: self.counting(now),
             windows,
             billing: self.billing,
             reach: self.reach,
