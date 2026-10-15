@@ -2,13 +2,14 @@
 
 use crate::account::{self, AccountStatus};
 use crate::budget::{Billing, Purpose, Reach, Why, family_of};
+use crate::cadence::{Cadence, TICK};
 use crate::claude::{ClaudeLaunch, ClaudeOptions, EventSink, start_claude};
 use crate::cli::Cli;
 use crate::codex::read_codex_limits;
 use crate::codex::{CodexServer, CodexServerOptions, CodexThread};
 use crate::events::{EngineEvent, Session, UserTurn};
 use crate::learn::Span;
-use crate::ledger::{Ledger, plausible};
+use crate::ledger::{Ledger, Work, plausible};
 use crate::model::*;
 use crate::nudge;
 use crate::proc::Spawner;
@@ -29,7 +30,7 @@ use uuid::Uuid;
 
 mod answer;
 mod auto;
-mod pulse;
+mod quota_watch;
 mod recovery;
 mod usage_view;
 pub use usage_view::{VendorUsage, WindowUsage};
@@ -243,8 +244,17 @@ struct Core {
     /// What Faber remembers about each vendor's quota (`budget.json`).
     ledger: Ledger,
     ledger_saved: f64,
-    /// When the last quota pulse started.
-    last_pulse: f64,
+    /// When each vendor's quota is read next (cadence.rs), and which readings are under way.
+    cadence: Cadence,
+    reading: HashSet<Vendor>,
+    /// The watcher runs (the shell started it and the screen said the PC's offset): only then do events start readings.
+    watching: bool,
+    /// The engine is shutting down: no new quota reading starts.
+    closing: bool,
+    /// `/usage` turned out to ask a model: Claude's quota is then read from its own answers only.
+    usage_command_spent: bool,
+    /// When a failed Codex read last counted against the plan check.
+    codex_failed_at: f64,
     /// The PC's offset from UTC in seconds, as the screen reports it.
     utc_offset: i64,
     offset_known: bool,
@@ -253,6 +263,9 @@ struct Core {
     transfers: HashMap<String, recovery::Transfer>,
     credit: Option<(String, String, Vendor)>,
 }
+
+/// How often Claude's plan is checked again.
+const PLAN_EVERY: f64 = 15.0 * 60.0;
 
 /// A handle to the engine; clones share the same engine.
 #[derive(Clone)]
@@ -299,7 +312,12 @@ impl Engine {
                 spare: None,
                 ledger,
                 ledger_saved: 0.0,
-                last_pulse: 0.0,
+                cadence: Cadence::default(),
+                reading: HashSet::new(),
+                watching: false,
+                closing: false,
+                usage_command_spent: false,
+                codex_failed_at: f64::MIN,
                 utc_offset: 0,
                 offset_known: false,
                 watch_requested: false,
@@ -353,13 +371,7 @@ impl Engine {
         });
         for (vendor, cli, spawn, cwd, windows) in jobs {
             match vendor {
-                Vendor::Claude => {
-                    let found = account::claude_account(&cli, &spawn, &cwd, timeout).await;
-                    self.with(|c| {
-                        c.claude_plan_checked(found);
-                        c.emit_usage();
-                    });
-                }
+                Vendor::Claude => self.check_claude_plan(timeout).await,
                 Vendor::Codex => {
                     let events = read_codex_limits(&cli.command, &cwd, windows, spawner(&spawn, &cli), timeout).await;
                     self.with(|c| {
@@ -370,10 +382,24 @@ impl Engine {
             }
         }
     }
-    /// Checks the plans once the screen supplies its local offset, then every quarter of an hour. The shell starts it once.
+    async fn check_claude_plan(&self, timeout: Duration) {
+        let Some((cli, spawn, cwd)) =
+            self.with(|c| c.opts.clis.get(&Vendor::Claude).map(|cli| (cli.clone(), c.opts.spawn.clone(), c.opts.data_dir.clone())))
+        else {
+            return;
+        };
+        let found = account::claude_account(&cli, &spawn, &cwd, timeout).await;
+        self.with(|c| {
+            c.claude_plan_checked(found);
+            c.emit_usage();
+        });
+    }
+    /// Once the screen supplies its local offset: checks Claude's plan every quarter of an hour, and reads both quotas on the
+    /// schedule in `cadence.rs` (at start, every few minutes, after a wake). The shell starts it once.
     pub fn watch_accounts(&self) {
         let Some(me) = self.with(|c| {
             c.watch_requested = true;
+            c.watching |= c.offset_known;
             c.offset_known.then(|| c.me.clone())
         }) else {
             return;
@@ -381,10 +407,20 @@ impl Engine {
         let runtime = self.runtime.clone();
         let handle = runtime.clone();
         runtime.spawn(async move {
+            let mut plan_checked = f64::MIN;
             loop {
                 let Some(core) = me.upgrade() else { return };
-                Engine { core, runtime: handle.clone() }.check_plans(Duration::from_secs(20)).await;
-                tokio::time::sleep(Duration::from_secs(15 * 60)).await;
+                let engine = Engine { core, runtime: handle.clone() };
+                let now = engine.with(|c| {
+                    c.quota_tick();
+                    c.secs()
+                });
+                if !(0.0..PLAN_EVERY).contains(&(now - plan_checked)) {
+                    plan_checked = now;
+                    engine.check_claude_plan(Duration::from_secs(20)).await;
+                }
+                drop(engine);
+                tokio::time::sleep(Duration::from_secs_f64(TICK)).await;
             }
         });
     }
@@ -545,6 +581,7 @@ impl Engine {
     }
     pub fn shutdown(&self) {
         self.with(|c| {
+            c.closing = true;
             let active: Vec<_> = c.live.keys().cloned().collect();
             for id in active {
                 c.note_turn(&id, None, true);
@@ -684,6 +721,8 @@ impl Core {
             v.primary(now).and_then(|name| v.readings.get(name)).map(|r| r.read_at).filter(|at| *at >= start && *at <= now).unwrap_or(now);
         self.ledger.of_mut(vendor).spend(cost, incomplete, now, self.utc_offset);
         self.ledger.of_mut(vendor).span(Span { start, end, model: model.to_string(), cost, incomplete });
+        self.ledger.of_mut(vendor).worked(Work { start, finished: now, model: model.to_string(), cost, incomplete }, now);
+        self.quota_event();
         self.ledger.of_mut(vendor).learn_weights(now);
         self.save_ledger(true);
         self.emit_usage();

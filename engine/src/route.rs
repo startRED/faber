@@ -293,7 +293,10 @@ pub fn choose_paced(
     } else if step && (profile.iq, profile.agent) > (usual.profile.iq, usual.profile.agent) {
         Some(PaceNote { kind: "step".into(), vendor: profile.vendor })
     } else if factor(&usual.profile).m >= LOW_M && profile.vendor != usual.profile.vendor {
-        Some(PaceNote { kind: "low".into(), vendor: usual.profile.vendor })
+        // "Running low" is said only when the vendor is really near its limit: a window past STEP_LIMIT, which leaves less than
+        // one day of the daily line (R88: 100% / 7 = 14.3%). Being ahead of that line is not an alarm; it is "fast".
+        let near = !factor(&usual.profile).step_ok;
+        Some(PaceNote { kind: if near { "low" } else { "fast" }.into(), vendor: usual.profile.vendor })
     } else {
         None
     };

@@ -71,7 +71,7 @@ impl Core {
     /// The one door before a request reaches a CLI (3.4): may this vendor and family be asked for this purpose now.
     pub(super) fn allows(&self, vendor: Vendor, family: Option<&str>, purpose: Purpose, approved: bool) -> Result<(), Why> {
         let now = self.secs();
-        let mut snap = self.ledger.of(vendor).snap(now);
+        let mut snap = self.snap(vendor, now);
         if vendor == Vendor::Claude && self.opts.claude_env_billed {
             snap.billing = Billing::UsageBilled;
         }
@@ -88,7 +88,7 @@ impl Core {
             .filter(|p| self.allows(p.vendor, family_of(p.model), Purpose::UserTurn { by_hand: false }, false).is_ok())
             .collect();
         let known: BTreeMap<Vendor, (Snap, Shape)> =
-            vendors.iter().map(|v| (*v, (self.ledger.of(*v).snap(now), self.ledger.of(*v).shape()))).collect();
+            vendors.iter().map(|v| (*v, (self.snap(*v, now), self.ledger.of(*v).shape()))).collect();
         let factor = |p: &Profile| {
             let (snap, shape) = &known[&p.vendor];
             Factor {
@@ -106,8 +106,6 @@ impl Core {
         if req.choice.vendor != "auto" || text.is_empty() {
             return;
         }
-        // The first keystroke in Auto is the moment to ask Claude Code for a fresh reading, if the one held is old.
-        self.pulse_if_due();
         let id = self.draft_for(&req);
         let Some(route) = self.next_route(&id) else { return };
         let only = route.map(|p| p.vendor);
