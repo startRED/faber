@@ -70,6 +70,9 @@ and the baseline slot were not sampled in a real run.
 Timings of one run: Lead about 100 s, positive Resume about 170 to 220 s, Writer and proofs to about 380 to 420 s, landing
 and calibration at about 400 s; candidate build about 6 min after that.
 
+**Waiting for owner away.** The promotion, probation and rollback steps start the candidate app, so they are parked until the
+owner is away from the screen; the screen suites were not run locally for the last commits (CI runs them).
+
 **What needs the owner.** Fresh qualification receipts and a new run after 2026-10-16 07:59:59 UTC (or a day when
 Claude's weekly meter has room), then the promotion, probation and rollback gates can be observed. Nothing in the
 safety rules was loosened to get here.
