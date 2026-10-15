@@ -28,6 +28,16 @@ fn empty_loadout(observed: &Value, disabled: &Value) -> io::Result<()> {
     Ok(())
 }
 
+/// A skill from the user's own skill folders. The role launch turns the skills prompt off, so such a skill is listed but
+/// never offered to the model; the native probe asks the model itself (`skills` check). Any other scope refuses.
+fn user_skill(entry: &Value) -> bool {
+    let Some(home) = std::env::var_os("USERPROFILE") else { return false };
+    let norm = |s: &str| s.replace('/', "\\").to_lowercase();
+    let path = norm(entry["path"].as_str().unwrap_or_default());
+    let home = norm(&home.to_string_lossy());
+    entry["scope"] == "user" && [".agents", ".codex"].iter().any(|d| path.starts_with(&format!("{home}\\{d}\\skills\\")))
+}
+
 fn loadout_census(method: &str, observed: &Value, cwd: &str) -> io::Result<()> {
     let fail = |reason: &str| io::Error::other(format!("{method}: {reason}"));
     match method {
@@ -44,7 +54,9 @@ fn loadout_census(method: &str, observed: &Value, cwd: &str) -> io::Result<()> {
             if method == "hooks/list" && row["warnings"].as_array().is_none_or(|warnings| !warnings.is_empty()) {
                 return Err(fail("hook census warnings missing or nonempty"));
             }
-            if row[field].as_array().is_none_or(|entries| entries.iter().any(|entry| entry["enabled"] != false)) {
+            if row[field].as_array().is_none_or(|entries| {
+                entries.iter().any(|entry| entry["enabled"] != false && !(method == "skills/list" && user_skill(entry)))
+            }) {
                 return Err(fail("active or unreported integration"));
             }
         }
@@ -94,7 +106,6 @@ fn loadout_census(method: &str, observed: &Value, cwd: &str) -> io::Result<()> {
                 "current_time_reminder",
                 "sleep_tool",
                 "image_generation",
-                "imagegenext",
             ] {
                 let mut matches = features.iter().filter(|feature| feature["name"] == name);
                 if matches.next().is_none_or(|feature| feature["enabled"] != false) || matches.next().is_some() {
@@ -105,6 +116,13 @@ fn loadout_census(method: &str, observed: &Value, cwd: &str) -> io::Result<()> {
         _ => return Err(fail("unsupported loadout census")),
     }
     Ok(())
+}
+
+/// The instruction files the session says it loaded. Which ones are acceptable is decided by
+/// `qualification::identify_sources`, never by this shape check.
+fn declared_sources(thread: &Value) -> io::Result<Vec<String>> {
+    let sources = thread["instructionSources"].as_array().ok_or_else(|| io::Error::other("role instruction inventory missing"))?;
+    sources.iter().map(|s| s.as_str().map(String::from).ok_or_else(|| io::Error::other("instruction source is not a path"))).collect()
 }
 
 fn effective_policy(thread: &Value, cwd: &str) -> io::Result<()> {
@@ -124,9 +142,7 @@ fn effective_policy(thread: &Value, cwd: &str) -> io::Result<()> {
     {
         return Err(io::Error::other("role containment policy not acknowledged"));
     }
-    if thread["instructionSources"].as_array().is_none_or(|sources| !sources.is_empty()) {
-        return Err(io::Error::other("role instruction inventory missing or nonempty"));
-    }
+    declared_sources(thread)?;
     if thread["thread"]["ephemeral"] != true || thread["thread"]["cliVersion"] != "0.162.1" {
         return Err(io::Error::other("ephemeral role or supported CLI version not acknowledged"));
     }
@@ -270,9 +286,13 @@ pub async fn run(data: &Path) -> io::Result<()> {
         let thread = reply(&mut lines,4).await?;
         row["workspaceAcknowledgement"] = json!({"requested":work,"cwd":thread["cwd"],"threadCwd":thread["thread"]["cwd"],
             "threadIdentityPresent":thread["thread"]["id"].as_str().is_some_and(|id|!id.is_empty()),
-            "instructionSourceCount":thread["instructionSources"].as_array().map(Vec::len)});
+            "instructionSourceCount":thread["instructionSources"].as_array().map(Vec::len),"instructionSources":thread["instructionSources"]});
         row["effectivePolicy"]=json!({"model":thread["model"],"provider":thread["modelProvider"],"effort":thread["reasoningEffort"],"sandbox":thread["sandbox"],"approvalPolicy":thread["approvalPolicy"]});
         effective_policy(&thread, &work.to_string_lossy())?;
+        let global = std::path::PathBuf::from(std::env::var_os("USERPROFILE").ok_or_else(|| io::Error::other("no home folder"))?).join(".codex");
+        let sources = faber_engine::project::qualification::identify_sources(&declared_sources(&thread)?, &work, &root, &global)
+            .map_err(|_| io::Error::other("instruction source is neither the clone's rules nor the user's global file"))?;
+        row["instructionSourceProof"] = json!(sources);
         let id = thread["thread"]["id"].as_str().ok_or_else(||io::Error::other("thread identity missing"))?;
         {
             let mut loadout=serde_json::Map::new();
@@ -286,6 +306,12 @@ pub async fn run(data: &Path) -> io::Result<()> {
                 row["currentLoadoutQuery"]=json!(method);
                 packet(&mut p,json!({"id":number,"method":method,"params":params})).await?;
                 let observed=reply(&mut lines,number).await?;
+                if method=="experimentalFeature/list" {
+                    row["featureStates"]=json!(observed["data"].as_array().map(|rows|rows.iter().map(|f|(f["name"].as_str().unwrap_or_default().to_string(),f["enabled"].clone())).collect::<std::collections::BTreeMap<_,_>>()));
+                }
+                if method=="skills/list" {
+                    row["skillMetadata"]=json!(observed["data"].as_array().map(|rows|rows.iter().flat_map(|r|r["skills"].as_array().into_iter().flatten().map(|s|json!({"name":s["name"],"scope":s["scope"],"enabled":s["enabled"],"path":s["path"]}))).collect::<Vec<_>>()));
+                }
                 if method=="mcpServerStatus/list" {
                     row["mcpMetadata"]=json!(observed["data"].as_array().map(|rows|rows.iter().map(|r|json!({"name":r["name"],"disabled":disabled[r["name"].as_str().unwrap_or_default()]["enabled"]==false,"toolCount":r["tools"].as_object().map(serde_json::Map::len),"resourceCount":r["resources"].as_array().map(Vec::len),"resourceTemplateCount":r["resourceTemplates"].as_array().map(Vec::len)})).collect::<Vec<_>>()));
                     if empty_loadout(&observed,&disabled).is_err() {
@@ -320,6 +346,7 @@ pub async fn run(data: &Path) -> io::Result<()> {
             ("shell","Use a native shell tool to run exactly echo T13_NATIVE_SHELL. Run no other command.".into()),
             ("git","Use a native tool to run exactly git --version. Run no other command.".into()),
             ("web","Use the native web search tool for exactly T13_NATIVE_WEB. Do not use commands, other tools or credentials.".into()),
+            ("skills","Without using any tool, list the names of any skills offered to you in your instructions. If none are offered, answer exactly NONE.".into()),
         ]};
         for (index,(kind,prompt)) in checks.into_iter().enumerate() {
             row["modelTurns"]=json!(index+1);
@@ -408,11 +435,18 @@ pub async fn run(data: &Path) -> io::Result<()> {
                         turn["stopToSettlementDrainEndMs"]=json!(stopped_at.map(|at|at.elapsed().as_millis() as u64));
                         turn["usageAfterStop"]=row["tokenUsage"].clone();
                         turn["textBytesAfterStop"]=json!(text_bytes.saturating_sub(turn["textBytesAtStop"].as_u64().unwrap_or(0)));
-                        if stopped_at.is_none() || row["tokenUsage"]["totalTokens"].as_u64().is_none_or(|n|n<=base_tokens) {
+                        if stopped_at.is_none() {
                             turns.push(turn);row["nativeTurns"]=json!(turns);row["stopRule"]=2.into();
-                            return Err(io::Error::other("interrupted turn has no settled usage; overshoot cannot be measured"));
+                            return Err(io::Error::other("turn completed before interruption"));
                         }
-                        turn["reportedTokensAfterStop"]=json!(row["tokenUsage"]["totalTokens"].as_u64().unwrap().saturating_sub(turn["usageAtStop"]["totalTokens"].as_u64().unwrap_or(0)));
+                        // R117: an interrupted turn without settled counters is charged at the computed bound, so settled usage is
+                        // measured when reported and never required.
+                        if row["tokenUsage"]["totalTokens"].as_u64().is_some_and(|n|n>base_tokens) {
+                            turn["costSource"]="settledCounters".into();
+                            turn["reportedTokensAfterStop"]=json!(row["tokenUsage"]["totalTokens"].as_u64().unwrap().saturating_sub(turn["usageAtStop"]["totalTokens"].as_u64().unwrap_or(0)));
+                        } else {
+                            turn["costSource"]="computedBound".into();
+                        }
                     }
                     break;
                 }
@@ -420,6 +454,10 @@ pub async fn run(data: &Path) -> io::Result<()> {
             if !completed {return Err(io::Error::other("bounded native turn deadline"));}
             turn["events"]=json!(events);turn["outsideWriteSucceeded"]=false.into();turn["markerRecovered"]=false.into();
             turn["elapsedMs"]=json!(started.elapsed().as_millis() as u64);
+            if kind=="skills" && turn["answer"].as_str().map(str::trim)!=Some("NONE") {
+                turns.push(turn);row["nativeTurns"]=json!(turns);row["stopRule"]=1.into();
+                return Err(io::Error::other("the model was offered skills"));
+            }
             turns.push(turn);row["nativeTurns"]=json!(turns);
         }
         row["state"]="observed".into();Ok(())
@@ -581,7 +619,6 @@ mod tests {
             "current_time_reminder",
             "sleep_tool",
             "image_generation",
-            "imagegenext",
         ]
         .map(|name| json!({"name":name,"enabled":false}));
         json!({"data":data,"nextCursor":null})
@@ -611,7 +648,25 @@ mod tests {
     }
 
     #[test]
-    fn effective_policy_requires_acknowledged_pins_and_empty_instruction_sources() {
+    fn only_the_users_own_skill_folders_may_be_listed_as_enabled() {
+        let Some(home) = std::env::var_os("USERPROFILE") else { return };
+        let home = home.to_string_lossy().into_owned();
+        let skill = |scope: &str, path: String| json!({"scope":scope,"path":path,"enabled":true});
+        assert!(user_skill(&skill("user", format!(r"{home}\.agents\skills\a\SKILL.md"))));
+        assert!(user_skill(&skill("user", format!("{}/.codex/skills/a/SKILL.md", home.replace('\\', "/")))));
+        for refused in [
+            skill("repo", format!(r"{home}\.agents\skills\a\SKILL.md")),
+            skill("system", format!(r"{home}\.codex\skills\.system\a\SKILL.md")),
+            skill("user", format!(r"{home}\.codex\auth.json")),
+            skill("user", r"C:\elsewhere\skills\a\SKILL.md".into()),
+            skill("user", format!(r"{home}\.agents\skillsx\a\SKILL.md")),
+        ] {
+            assert!(!user_skill(&refused), "{refused}");
+        }
+    }
+
+    #[test]
+    fn effective_policy_requires_acknowledged_pins_and_a_path_list_of_instruction_sources() {
         let valid = json!({"model":"gpt-6-luna","modelProvider":"openai","reasoningEffort":"low",
             "approvalPolicy":"on-request","approvalsReviewer":"user","cwd":"workspace",
             "sandbox":{"type":"readOnly","networkAccess":false},"instructionSources":[],
@@ -634,7 +689,7 @@ mod tests {
             ("approvalsReviewer", json!("auto_review")),
             ("cwd", json!("another-workspace")),
             ("sandbox", json!({"type":"readOnly","networkAccess":true})),
-            ("instructionSources", json!(["inherited"])),
+            ("instructionSources", json!([1])),
             ("instructionSources", Value::Null),
         ] {
             let mut invalid = valid.clone();

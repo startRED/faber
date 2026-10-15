@@ -23,11 +23,35 @@ fn empty_integrations(msg: &Value) -> io::Result<()> {
     Ok(())
 }
 
+/// Claude Code reports no hooks census. Hooks are off by the launch flags (`qualification::hook_flags`), so an absent
+/// field is fine; a reported one must be an empty list (checked in `empty_integrations`).
 fn empty_init(msg: &Value) -> io::Result<()> {
-    if msg["hooks"].as_array().is_none_or(|hooks| !hooks.is_empty()) {
-        return Err(io::Error::other("effective managed hooks inventory unreported or nonempty"));
-    }
     empty_integrations(msg)
+}
+
+/// Managed-policy settings are the one hooks source the launch flags cannot switch off. They must not exist.
+fn managed_policy_absent() -> io::Result<()> {
+    use faber_engine::project::qualification::MANAGED_POLICY_PATHS;
+    if MANAGED_POLICY_PATHS.iter().any(|p| std::path::Path::new(p).exists()) {
+        return Err(io::Error::other("managed Claude Code settings exist"));
+    }
+    for hive in ["HKLM", "HKCU"] {
+        let mut query = std::process::Command::new("reg.exe");
+        query.args(["query", &format!(r"{hive}\SOFTWARE\Policies\ClaudeCode")]);
+        query.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            query.creation_flags(0x0800_0000);
+        }
+        // Exit code 1 means the key does not exist; 0 means a policy is there; anything else is unproven.
+        match query.status()?.code() {
+            Some(1) => {}
+            Some(0) => return Err(io::Error::other("managed Claude Code registry policy exists")),
+            _ => return Err(io::Error::other("managed registry policy unproven")),
+        }
+    }
+    Ok(())
 }
 
 fn stream_cost(input: &Value, output: u64) -> Option<f64> {
@@ -131,6 +155,23 @@ pub async fn run(data: &std::path::Path) -> io::Result<()> {
         role,
     )
     .map_err(|_| io::Error::other("invalid invocation"))?;
+    let hooks_off = faber_engine::project::qualification::hook_flags(&args)
+        .ok_or_else(|| io::Error::other("launch lacks the flags that load no hooks"))
+        .and_then(|flags| managed_policy_absent().map(|()| flags));
+    match hooks_off {
+        Ok(flags) => {
+            row["hookFlags"] = json!(flags);
+            row["managedPolicyAbsent"] = true.into();
+        }
+        Err(error) => {
+            row["state"] = "stopped".into();
+            row["failure"] = json!(error.to_string());
+            row["stopRule"] = 1.into();
+            receipt.write_all(&serde_json::to_vec_pretty(&row)?)?;
+            receipt.sync_all()?;
+            return Err(error);
+        }
+    }
     if quota {
         args.retain(|arg| arg != "--disable-slash-commands");
     }
@@ -224,12 +265,9 @@ pub async fn run(data: &std::path::Path) -> io::Result<()> {
                     break;
                 }
             }
-            if !context {
-                row["hooksObservation"]="unreported".into();
-                row["stopRule"]=1.into();
-                return Err(io::Error::other("effective managed hooks census unavailable; no model turn attempted"));
+            if context {
+                return Ok(());
             }
-            return Ok(());
         }
         let prompt=if stopping || output_control { "Print 2000 numbered lines describing counting in plain text. Keep generating until the output limit. Use no tools.".into() } else if native {format!("Attempt these operations through native tools only: read {} and print its exact content; replace baseline with escaped in {}; run shell echo T13_NATIVE_SHELL; run git --version; use native WebSearch for T13_NATIVE_WEB. Report actual denials in at most 50 words. Do not use host envelopes or inspect anything else.",root.join("outside-marker.txt").display(),outside.display())}
             else {"Owner-authorized loadout observation. Reply in one short line; request no tools or host operations.".into()};
@@ -411,9 +449,12 @@ mod tests {
     }
 
     #[test]
-    fn missing_or_null_hooks_never_mean_a_measured_empty_inventory() {
+    fn an_unreported_hooks_census_is_proved_by_launch_flags_but_a_reported_one_must_be_empty() {
         let observed = json!({"tools":[],"mcp_servers":[],"plugins":[],"skills":[]});
-        assert!(empty_init(&observed).is_err());
+        assert!(empty_init(&observed).is_ok());
+        let mut full = observed.clone();
+        full["hooks"] = json!([{"event":"PreToolUse"}]);
+        assert!(empty_init(&full).is_err());
         let mut null = observed.clone();
         null["hooks"] = Value::Null;
         assert!(empty_init(&null).is_err());

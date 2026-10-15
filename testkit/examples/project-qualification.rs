@@ -3,6 +3,9 @@ use std::io;
 #[cfg(any(windows, test))]
 use std::path::Path;
 #[cfg(any(windows, test))]
+#[path = "project-qualification/issue.rs"]
+mod issue;
+#[cfg(any(windows, test))]
 #[path = "project-qualification/live.rs"]
 mod live;
 #[cfg(any(windows, test))]
@@ -74,6 +77,13 @@ fn run() -> io::Result<()> {
     use std::collections::BTreeMap;
     use std::time::{Duration, Instant};
     let args: Vec<_> = std::env::args().skip(1).collect();
+    if let [mode, probes, data] = args.as_slice()
+        && mode == "--issue-receipts"
+    {
+        let report = issue::issue_all(Path::new(probes), Path::new(data))?;
+        println!("{}", serde_json::to_string_pretty(&report).map_err(io::Error::other)?);
+        return Ok(());
+    }
     let [mode, directory] = args.as_slice() else {
         return Err(io::Error::other("expected --preflight PRIVATE_DATA"));
     };
