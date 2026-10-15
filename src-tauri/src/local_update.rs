@@ -1057,16 +1057,21 @@ fn read_payload(path: &Path) -> Result<Vec<u8>> {
     ScopedFile::new(&real_path(path)?, false)?.read_limited(256 * 1024 * 1024)?.map(|(bytes, _)| bytes).ok_or(invalid("missing executable"))
 }
 
+/// What the build itself writes inside the snapshot and git ignores: installed packages, the screen's output and the
+/// shell's generated schemas. Everything else must stay exactly as accepted.
+const BUILD_OUTPUT: [&str; 3] = ["node_modules", "dist", "src-tauri/gen"];
+
 fn source_inventory(root: &Path) -> Result<BTreeMap<PathBuf, String>> {
-    fn collect(path: &Path, root: &Path, entries: &mut BTreeMap<PathBuf, String>) -> Result<()> {
+    fn collect(path: &Path, relative: &Path, entries: &mut BTreeMap<PathBuf, String>) -> Result<()> {
         for entry in fs::read_dir(path).map_err(io_error)? {
             let entry = entry.map_err(io_error)?;
-            if path == root && (entry.file_name() == "node_modules" || entry.file_name() == "dist") {
+            let child = relative.join(entry.file_name());
+            if BUILD_OUTPUT.iter().any(|output| child == Path::new(output)) {
                 continue;
             }
             let path = real_path(&entry.path())?;
             if path.is_dir() {
-                collect(&path, root, entries)?;
+                collect(&path, &child, entries)?;
             } else {
                 entries.insert(path.clone(), ScopedFile::new(&path, false)?.hash()?.ok_or(invalid("source file disappeared"))?);
             }
@@ -1074,8 +1079,30 @@ fn source_inventory(root: &Path) -> Result<BTreeMap<PathBuf, String>> {
         Ok(())
     }
     let mut entries = BTreeMap::new();
-    collect(root, root, &mut entries)?;
+    collect(root, Path::new(""), &mut entries)?;
     Ok(entries)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_build_may_write_its_ignored_output_but_nothing_else() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("src-tauri/src")).unwrap();
+        fs::write(root.join("src-tauri/src/main.rs"), "fn main() {}").unwrap();
+        let before = source_inventory(root).unwrap();
+        for output in ["dist/index.js", "node_modules/p/i.js", "src-tauri/gen/schemas/desktop.json"] {
+            fs::create_dir_all(root.join(output).parent().unwrap()).unwrap();
+            fs::write(root.join(output), "generated").unwrap();
+        }
+        assert_eq!(source_inventory(root).unwrap(), before);
+        fs::create_dir_all(root.join("src-tauri/src/gen")).unwrap();
+        fs::write(root.join("src-tauri/src/gen/x.rs"), "x").unwrap();
+        assert_ne!(source_inventory(root).unwrap(), before, "only the exact generated folders are exempt");
+    }
 }
 
 pub fn build_commands(snapshot: &Path, target: &Path, node: &Path, cargo: &Path) -> Vec<NativeCommand> {
