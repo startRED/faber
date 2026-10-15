@@ -478,21 +478,36 @@ Both vendors' counters are read by commands that answer locally, so a reading co
 - During Faber's own requests both CLIs already send their windows with the stream (Claude's rate-limit events, Codex's
   rate-limit updates); those go through the same recording.
 
-When it is read (`engine/src/cadence.rs`, tested with a fake clock): on start; every 5 minutes while the window is open and every
-15 while it is hidden (the owner's ceiling is a reading never more than 30 minutes old); two minutes after a request, at the
-earliest, when it ends; at once when the window gains focus; at once after the PC wakes (a loop that was not heard from for
-90 seconds slept). A sleeping PC reads nothing. Reads are short-lived, hidden (no console window, no shell), one at a time per
-vendor, and a failure leaves the old reading in place.
+When it is read (`engine/src/cadence.rs`, tested with a fake clock): on start, then every 15 minutes whether the window is
+visible or hidden (the owner’s ceiling is a reading never more than 30 minutes old). Three things may ask for an earlier
+reading: a request that ended, the window gaining focus, and the PC waking up (a loop that was not heard from for 90 seconds
+slept). All three share ONE debounce per vendor: no reading sooner than 5 minutes after the last one for Claude Code (whose
+reading starts a heavy Node process, about 12 CPU-seconds and 330 MB for a few seconds) and 1 minute for Codex (about 1
+CPU-second), whatever caused the last one. The timer counts from the last reading too. A sleeping PC reads nothing.
 
-The vendors count with a delay (docs below, "Quota lag"). Faber therefore keeps, per vendor, its own requests of the last
-`lag` seconds (`Work` in the ledger). While there is any, the reading is marked "still counting"; where the window is the one the
-conversion was measured on and the request's model has a measured points-per-dollar (the learned weights), the
-unreported share is added as a separate estimate (cost x points per dollar, minus what the reading has already risen since the
-work began). No conversion, no number. Decisions use the reading plus that estimate as a floor, and never believe a discount
-on a reading that is still counting.
+Reads are short-lived, hidden (no console window, no shell), one at a time per vendor (a marker lifted by a guard, whichever way
+the read ends), and a failure leaves the old reading in place. Windows creates them at idle priority
+(`IDLE_PRIORITY_CLASS` in the creation flags, so not one instruction runs at normal priority); elsewhere there is no safe way to
+lower the priority from Rust (it would need unsafe code, which Faber keeps to one Windows file), so they run at normal
+priority. `/usage` is accepted only after a clean exit, `is_error` false, and every metering field present and well typed
+(`num_turns`, the four token counts, the cost); a missing field is no reading, never zero, and any model work makes it `Spent`.
+The reset times it prints are parsed defensively (ASCII am/pm only, minutes 0 to 59, hours 1 to 12, days 1 to 31, checked
+arithmetic), because the text comes from a program Faber does not control.
+
+The vendors count with a delay (docs below, "Quota lag, measured"). Faber therefore keeps, per vendor, its own requests (`Work`
+in the ledger). A request is pending from the moment it ends until a reading has been taken after it ended plus the lag: time
+alone releases nothing, so when every refresh fails the floor stays up. While anything is pending, or a turn of the vendor is
+running (for decisions as well as for the screen), the reading is marked "still counting" and no discount is believed on it.
+Where the window is the one the conversion was measured on and the request’s model has a measured points-per-dollar (the
+learned weights), the unreported share is added as a separate estimate (cost x points per dollar, minus what the reading has
+already risen since the work began, taken off only when all the pending work is convertible). Work that cannot be converted adds
+nothing to the number but never takes the known part away. No conversion, no number. Decisions use the reading plus that
+estimate as a floor. The floor is only computed for the primary window (the shortest vendor-wide one: Claude’s five hours,
+Codex’s week); other windows stay as read, so admission on them can run slightly past what a settled reading would allow.
 
 "Running low" is said only when a vendor-wide window is past 90%: under one day of the daily line (R88: 100% / 7 = 14.3%) is
-left. Being ahead of the line is said as "being used fast this week" and never as running out.
+left. Being ahead of the line is said as "being used fast this week" and never as running out, in the answer’s note and in
+Settings alike.
 
 ### Quota lag, measured
 

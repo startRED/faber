@@ -87,10 +87,43 @@ check('quota: Settings spells out the estimate and the age', () => {
   const dispose = render(() => createComponent(Settings, props), host);
   try {
     const text = host.textContent!;
-    ok(text.includes('+ ~2% ainda não contado'), text);
-    ok(text.includes('Lido há 4 min'), text);
+    ok(text.includes('+ ~2% ainda vai entrar na conta'), text);
+    ok(text.includes('Atualizado há 4 min'), text);
     ok(text.includes('O número ainda pode subir'), text);
   } finally { dispose(); }
+});
+
+check('quota: Settings gives each window its own age, never the newest one', () => {
+  useLanguage('pt-BR');
+  const two = usage({ readAt: at(10) });
+  two[0].windows.push({ name: 'five_hour', used: 0.1, elapsed: 0.5, expected: 0.5, resetsAt: NOW / 1000 + 3600, readAt: at(3 * 3600), uncounted: null });
+  const host = document.createElement('div');
+  const props = { start: 'usage', look: { appearance: { base: 'sala' }, vars: {}, scheme: 'dark', motion: 'none', effects: {}, checks: [], notices: [] }, saved: {}, vendors: ['codex'],
+    quotas: { ...quotas, 'codex:five_hour': { vendor: 'codex' as const, window: 'five_hour', used: 0.1, resetsAt: NOW / 1000 + 3600 } }, now: NOW, usage: two, onClose: () => {}, onSave: async () => true, onOpenSetup: () => {} } as unknown as Parameters<typeof Settings>[0];
+  const dispose = render(() => createComponent(Settings, props), host);
+  try {
+    const ages = [...host.querySelectorAll('.urow .age')].map((e) => e.textContent);
+    deepEqual(ages.sort(), ['Atualizado agora', 'Atualizado há 3 h'].sort());
+  } finally { dispose(); }
+});
+
+check('quota: Settings says running low only for a nearly used window, and fast use calmly (C002)', () => {
+  const stateText = (state: VendorUsage['state']) => {
+    const u = usage();
+    u[0].state = state;
+    const host = document.createElement('div');
+    const props = { start: 'usage', look: { appearance: { base: 'sala' }, vars: {}, scheme: 'dark', motion: 'none', effects: {}, checks: [], notices: [] }, saved: {}, vendors: ['codex'],
+      quotas, now: NOW, usage: u, onClose: () => {}, onSave: async () => true, onOpenSetup: () => {} } as unknown as Parameters<typeof Settings>[0];
+    const dispose = render(() => createComponent(Settings, props), host);
+    try { return host.querySelector('.usage-state')!.textContent!; } finally { dispose(); }
+  };
+  useLanguage('pt-BR');
+  equal(stateText('fast'), 'Gastando rápido');
+  equal(stateText('low'), 'Cota acabando');
+  for (const language of ['en', 'pt-BR', 'es', 'fr', 'de'] as const) {
+    useLanguage(language);
+    ok(!/acabando|running low|poca cuota|faible|knapp/i.test(stateText('fast')), `${language}: "${stateText('fast')}" must not alarm`);
+  }
 });
 
 check('quota: Auto never alarms about quota that is far from the limit (C002)', () => {

@@ -46,22 +46,20 @@ struct Ran {
     out: String,
     err: String,
     code: Option<i32>,
+    /// A replayed recording has no process and so no exit status: its text is all there is.
+    replayed: bool,
 }
 
 /// Runs the status command without a shell, with its output bounded. None when the CLI fails to start, does not answer within
 /// `timeout` (it is killed when the run ends) or prints more than the bound.
 async fn run(vendor: Vendor, cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> Option<Ran> {
-    run_args(cli, status_args(vendor).iter().map(|a| a.to_string()).collect(), spawn, cwd, timeout).await
+    run_args(cli, status_args(vendor).iter().map(|a| a.to_string()).collect(), spawn, cwd, timeout, false).await
 }
 
-async fn run_args(cli: &Cli, args: Vec<String>, spawn: &Spawner, cwd: &Path, timeout: Duration) -> Option<Ran> {
+async fn run_args(cli: &Cli, args: Vec<String>, spawn: &Spawner, cwd: &Path, timeout: Duration, background: bool) -> Option<Ran> {
     let args: Vec<String> = cli.prefix.iter().cloned().chain(args).collect();
-    let p = spawn(&cli.command, &args, cwd).ok()?;
-    #[cfg(windows)]
-    if let Some(pid) = p.child.as_ref().and_then(|c| c.id()) {
-        // A reading in the background never competes with a game or the person's work; if it cannot be lowered it still runs.
-        let _ = faber_winproc::lower_priority(pid);
-    }
+    let p =
+        if background { crate::proc::spawn_background(spawn, &cli.command, &args, cwd) } else { spawn(&cli.command, &args, cwd) }.ok()?;
     drop(p.stdin); // nothing to type: a CLI waiting for input sees end of input instead
     let mut child = p.child;
     let run = async {
@@ -70,7 +68,7 @@ async fn run_args(cli: &Cli, args: Vec<String>, spawn: &Spawner, cwd: &Path, tim
             Some(c) => c.wait().await.ok().and_then(|s| s.code()),
             None => None,
         };
-        Some(Ran { out, err, code })
+        Some(Ran { out, err, code, replayed: child.is_none() })
     };
     tokio::time::timeout(timeout, run).await.ok().flatten()
 }
@@ -78,7 +76,7 @@ async fn run_args(cli: &Cli, args: Vec<String>, spawn: &Spawner, cwd: &Path, tim
 /// Runs the status command. Its output is read into memory only to reach a verdict, then dropped; a CLI that fails to start or
 /// does not answer within `timeout` is `Unknown`, and is killed when the check ends.
 pub async fn check(vendor: Vendor, cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Duration) -> AccountStatus {
-    let Some(Ran { out, err, code }) = run(vendor, cli, spawn, cwd, timeout).await else { return AccountStatus::Unknown };
+    let Some(Ran { out, err, code, .. }) = run(vendor, cli, spawn, cwd, timeout).await else { return AccountStatus::Unknown };
     if vendor == Vendor::Claude { verdict(vendor, &out, code) } else { verdict(vendor, &format!("{out}\n{err}"), code) }
 }
 
@@ -117,14 +115,27 @@ pub async fn claude_usage(cli: &Cli, spawn: &Spawner, cwd: &Path, timeout: Durat
         r#"{"disableAllHooks":true}"#,
         "--no-session-persistence",
     ];
-    let Some(ran) = run_args(cli, args.map(String::from).to_vec(), spawn, cwd, timeout).await else { return UsageRead::Failed };
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(&ran.out) else { return UsageRead::Failed };
-    let tokens: u64 = ["input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"]
-        .iter()
-        .map(|k| v["usage"][*k].as_u64().unwrap_or(0))
-        .sum();
-    if v["num_turns"].as_u64().unwrap_or(0) > 0 || tokens > 0 || v["total_cost_usd"].as_f64().unwrap_or(0.0) > 0.0 {
+    let Some(ran) = run_args(cli, args.map(String::from).to_vec(), spawn, cwd, timeout, true).await else { return UsageRead::Failed };
+    usage_from(&ran.out, if ran.replayed { Some(0) } else { ran.code }, now, offset)
+}
+
+/// What the output of `claude -p /usage` means. A reading needs a clean exit, no error flag and every metering field present
+/// and well typed (`num_turns`, the token counts and the cost); a missing or mistyped field is no reading at all, never
+/// zero. Any model work (a turn, tokens, cost) makes it `Spent`.
+fn usage_from(out: &str, code: Option<i32>, now: f64, offset: i64) -> UsageRead {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(out) else { return UsageRead::Failed };
+    let (Some(turns), Some(input), Some(output), Some(cost)) =
+        (v["num_turns"].as_u64(), v["usage"]["input_tokens"].as_u64(), v["usage"]["output_tokens"].as_u64(), v["total_cost_usd"].as_f64())
+    else {
+        return UsageRead::Failed;
+    };
+    let cached: Option<u64> = ["cache_creation_input_tokens", "cache_read_input_tokens"].iter().map(|k| v["usage"][*k].as_u64()).sum();
+    let Some(cached) = cached else { return UsageRead::Failed };
+    if turns > 0 || input > 0 || output > 0 || cached > 0 || cost != 0.0 {
         return UsageRead::Spent;
+    }
+    if code != Some(0) || v["is_error"] != false {
+        return UsageRead::Failed;
     }
     let windows = crate::signals::claude_usage_windows(v["result"].as_str().unwrap_or_default(), now, offset);
     if windows.is_empty() { UsageRead::Failed } else { UsageRead::Windows(windows) }
@@ -174,5 +185,71 @@ mod tests {
         assert_eq!(verdict(Vendor::Claude, "", Some(1)), AccountStatus::SignedOut);
         assert_eq!(verdict(Vendor::Codex, "", Some(1)), AccountStatus::Unknown);
         assert_eq!(verdict(Vendor::Claude, "{\"loggedIn\":false}", Some(0)), AccountStatus::SignedOut);
+    }
+
+    const TEXT: &str = "Current session: 10% used · resets Oct 14, 11:29pm (X/Y)
+Current week (all models): 36% used · resets Oct 20, 4:59am (X/Y)";
+    const NOW: f64 = 1_791_620_000.0;
+
+    fn clean() -> serde_json::Value {
+        serde_json::json!({ "is_error": false, "num_turns": 0, "total_cost_usd": 0,
+            "usage": { "input_tokens": 0, "output_tokens": 0, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0 }, "result": TEXT })
+    }
+
+    fn read(v: &serde_json::Value, code: Option<i32>) -> UsageRead {
+        usage_from(&v.to_string(), code, NOW, 0)
+    }
+
+    #[test]
+    fn a_clean_local_answer_is_a_reading() {
+        assert!(matches!(read(&clean(), Some(0)), UsageRead::Windows(w) if w.len() == 2));
+    }
+
+    #[test]
+    fn a_failed_answer_is_never_a_reading() {
+        let mut errored = clean();
+        errored["is_error"] = true.into();
+        assert_eq!(read(&errored, Some(0)), UsageRead::Failed);
+        assert_eq!(read(&clean(), Some(1)), UsageRead::Failed, "a non-zero exit");
+        assert_eq!(read(&clean(), None), UsageRead::Failed, "killed, no exit code");
+        let mut no_flag = clean();
+        no_flag.as_object_mut().unwrap().remove("is_error");
+        assert_eq!(read(&no_flag, Some(0)), UsageRead::Failed, "an answer that does not say it succeeded");
+        assert_eq!(usage_from("not json", Some(0), NOW, 0), UsageRead::Failed);
+    }
+
+    #[test]
+    fn a_missing_or_mistyped_metering_field_is_no_reading_never_zero() {
+        for field in ["num_turns", "total_cost_usd"] {
+            let mut v = clean();
+            v.as_object_mut().unwrap().remove(field);
+            assert_eq!(read(&v, Some(0)), UsageRead::Failed, "{field} missing");
+        }
+        for field in ["input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"] {
+            let mut v = clean();
+            v["usage"].as_object_mut().unwrap().remove(field);
+            assert_eq!(read(&v, Some(0)), UsageRead::Failed, "{field} missing");
+            v["usage"][field] = "0".into();
+            assert_eq!(read(&v, Some(0)), UsageRead::Failed, "{field} a string");
+        }
+        let mut v = clean();
+        v.as_object_mut().unwrap().remove("usage");
+        assert_eq!(read(&v, Some(0)), UsageRead::Failed);
+        let mut v = clean();
+        v["total_cost_usd"] = "0".into();
+        assert_eq!(read(&v, Some(0)), UsageRead::Failed);
+    }
+
+    #[test]
+    fn any_model_work_is_spent_even_when_the_exit_is_bad() {
+        for (key, value) in [("num_turns", serde_json::json!(1)), ("total_cost_usd", serde_json::json!(0.01))] {
+            let mut v = clean();
+            v[key] = value;
+            assert_eq!(read(&v, Some(0)), UsageRead::Spent, "{key}");
+            assert_eq!(read(&v, Some(1)), UsageRead::Spent, "{key}, exit 1");
+        }
+        let mut v = clean();
+        v["usage"]["output_tokens"] = 5.into();
+        assert_eq!(read(&v, Some(0)), UsageRead::Spent);
     }
 }

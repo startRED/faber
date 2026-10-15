@@ -2,7 +2,7 @@
 
 use crate::account::{self, AccountStatus};
 use crate::budget::{Billing, Purpose, Reach, Why, family_of};
-use crate::cadence::{Cadence, Reason, TICK};
+use crate::cadence::{Cadence, TICK};
 use crate::claude::{ClaudeLaunch, ClaudeOptions, EventSink, start_claude};
 use crate::cli::Cli;
 use crate::codex::read_codex_limits;
@@ -718,7 +718,7 @@ impl Core {
         self.ledger.of_mut(vendor).spend(cost, incomplete, now, self.utc_offset);
         self.ledger.of_mut(vendor).span(Span { start, end, model: model.to_string(), cost, incomplete });
         self.ledger.of_mut(vendor).worked(Work { start, finished: now, model: model.to_string(), cost, incomplete }, now);
-        self.quota_event(Reason::TurnEnded);
+        self.quota_event();
         self.ledger.of_mut(vendor).learn_weights(now);
         self.save_ledger(true);
         self.emit_usage();

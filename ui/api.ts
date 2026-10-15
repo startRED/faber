@@ -197,7 +197,7 @@ export interface QuotaReading {
 /** `used` is the reading as the vendor gave it; `readAt` is when (seconds). `uncounted` is the share Faber's own recent work adds that the reading does not hold yet, present only where a measured conversion exists. */
 export interface WindowUsage { name: string; used: number; elapsed: number; expected: number; resetsAt: number; readAt: number; uncounted?: number | null }
 export interface VendorUsage {
-  vendor: Vendor; plan?: string | null; state: 'ok' | 'spare' | 'low' | 'out' | 'unknown';
+  vendor: Vendor; plan?: string | null; state: 'ok' | 'spare' | 'fast' | 'low' | 'out' | 'unknown';
   learning: boolean; relearning: boolean; outsideShare?: number | null; foreignUse: boolean;
   overageOn: boolean; billedPerUse: boolean; billingUnknown: boolean; askForPlan: boolean; paidPossible: boolean;
   ownSpendUsd: number; unmetered: number; counting: boolean; windows: WindowUsage[];

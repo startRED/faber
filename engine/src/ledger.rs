@@ -303,12 +303,15 @@ impl VendorLedger {
         self.learned.shape()
     }
 
-    /// Faber's own work the vendor's counter may not hold yet: requests that ended within the lag before `now`.
+    /// Faber's own work the vendor's counter may not hold yet. A request is pending from the moment it ends until a reading has
+    /// been taken after it ended plus the lag: only then is the counter known to have caught up. Time alone releases nothing,
+    /// so when every refresh fails the work stays pending and the floor stays up (it is dropped after hours by `worked`).
     fn recent_work(&self, now: f64) -> Vec<&Work> {
         if self.lag <= 0.0 {
             return vec![];
         }
-        self.work.iter().filter(|w| w.finished >= self.since && w.finished > now - self.lag && w.finished <= now).collect()
+        let latest = self.readings.values().map(|r| r.read_at).fold(f64::MIN, f64::max);
+        self.work.iter().filter(|w| w.finished >= self.since && w.finished <= now && latest < w.finished + self.lag).collect()
     }
 
     /// A request Faber made has just ended: the counter may not hold it yet.
@@ -324,22 +327,27 @@ impl VendorLedger {
         !self.recent_work(now).is_empty()
     }
 
-    /// The share (0 to 1) that Faber's own recent work adds beyond what the primary window's reading holds, from the cost of
-    /// each request and the points per dollar measured for its model. None when there is no recent work, or when any
-    /// request has no cost or no measured conversion: no number is invented. What the reading already rose by since the
-    /// work began is taken off, so nothing counts twice.
+    /// The share (0 to 1) that Faber's own pending work is known to add beyond what the primary window's reading holds, from
+    /// the cost of each request and the points per dollar measured for its model. Work with no cost or no measured conversion
+    /// adds nothing to the number but never takes the known part away: the floor only goes up. None when there is no pending
+    /// work or none of it can be converted. What the reading already rose by since the work began is taken off only when all
+    /// of the work is known (otherwise the rise may be the unknown part), so nothing counts twice and nothing is lost.
     pub fn uncounted(&self, window: &str, now: f64) -> Option<f64> {
         let work = self.recent_work(now);
         if work.is_empty() || self.primary(now) != Some(window) {
             return None;
         }
-        let points: Option<f64> =
-            work.iter().map(|s| if s.incomplete { None } else { Some(s.cost? * self.weights.raw.get(&s.model)?) }).sum();
+        let known: Vec<f64> =
+            work.iter().filter_map(|s| if s.incomplete { None } else { Some(s.cost? * self.weights.raw.get(&s.model)?) }).collect();
+        if known.is_empty() {
+            return None;
+        }
+        let all_known = known.len() == work.len();
         let begun = work.iter().map(|s| s.start).fold(f64::MAX, f64::min);
         let reading = self.readings.get(window)?;
         let before = self.history.get(window)?.iter().rev().find(|p| p.at <= begun && p.resets_at == reading.resets_at);
-        let risen = before.map_or(0.0, |p| ((reading.used - p.used) * 100.0).max(0.0));
-        Some(((points? - risen) / 100.0).max(0.0))
+        let risen = if all_known { before.map_or(0.0, |p| ((reading.used - p.used) * 100.0).max(0.0)) } else { 0.0 };
+        Some(((known.iter().sum::<f64>() - risen) / 100.0).max(0.0))
     }
 
     pub fn snap(&self, now: f64) -> Snap {

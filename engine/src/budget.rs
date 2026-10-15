@@ -176,6 +176,8 @@ pub enum State {
     Spare,
     Normal,
     Tight,
+    /// Being used faster than the daily line, with room left.
+    Fast,
 }
 
 impl Snap {
@@ -275,8 +277,11 @@ impl Snap {
     /// The word the screen shows for the vendor.
     pub fn state(&self, shape: &Shape, offset: i64, now: f64) -> State {
         let m = self.vendor_m(shape, offset, now);
-        if m >= LOW_M || self.top(now) > 0.9 {
+        // "Running low" is for a window that is nearly used up. Being ahead of the daily line only says the quota is going fast.
+        if self.top(now) > 0.9 {
             State::Tight
+        } else if m >= LOW_M {
+            State::Fast
         } else if m <= SPARE_M && self.discount_ok() {
             State::Spare
         } else {

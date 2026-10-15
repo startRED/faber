@@ -19,6 +19,41 @@ pub struct Proc {
 
 pub type Spawner = Arc<dyn Fn(&str, &[String], &Path) -> io::Result<Proc> + Send + Sync>;
 
+thread_local! {
+    /// Set while a background reader is being started: the process is created at idle priority.
+    static BACKGROUND: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Starts a short background reader (a quota reading) so that it never competes with a game or the person’s work. On
+/// Windows the process is created at idle priority, before it runs a single instruction. Elsewhere there is no safe way to
+/// lower the priority from Rust (it would need unsafe code, which Faber keeps to one Windows file), so it runs normally.
+pub fn spawn_background(spawn: &Spawner, bin: &str, args: &[String], cwd: &Path) -> io::Result<Proc> {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            BACKGROUND.with(|b| b.set(false));
+        }
+    }
+    BACKGROUND.with(|b| b.set(true));
+    let _reset = Reset;
+    spawn(bin, args, cwd)
+}
+
+/// Whether the process being started now is a background reader (the spawner reads this).
+pub fn starting_in_background() -> bool {
+    BACKGROUND.with(|b| b.get())
+}
+
+/// The Windows process creation flags: no console window, started suspended (to join its job first), and at idle priority for
+/// a background reader.
+#[cfg(windows)]
+fn creation_flags(background: bool) -> u32 {
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    const CREATE_SUSPENDED: u32 = 0x0000_0004;
+    const IDLE_PRIORITY_CLASS: u32 = 0x0000_0040;
+    CREATE_NO_WINDOW | CREATE_SUSPENDED | if background { IDLE_PRIORITY_CLASS } else { 0 }
+}
+
 /// Drain both pipes without retaining an unbounded build log; dropping the future kills the owned child.
 pub(crate) async fn command_output(mut p: Proc) -> (bool, String) {
     async fn drain(mut pipe: Box<dyn AsyncRead + Send + Unpin>) -> io::Result<String> {
@@ -60,7 +95,7 @@ pub fn spawn_command(cmd: Command) -> io::Result<Proc> {
 fn spawn_in_job(mut cmd: Command, join: impl FnOnce(&Child) -> io::Result<Containment>) -> io::Result<Proc> {
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     #[cfg(windows)]
-    cmd.creation_flags(0x0800_0000 | 0x0000_0004); // CREATE_NO_WINDOW | CREATE_SUSPENDED
+    cmd.creation_flags(creation_flags(starting_in_background()));
     let mut child = cmd.spawn()?;
     let joined = join(&child);
     #[cfg(windows)]
@@ -240,5 +275,29 @@ mod tests {
         let (ok, text) = tokio::time::timeout(std::time::Duration::from_secs(3), command_output(p)).await.unwrap();
         assert!(ok && text.ends_with("TAIL_OKSTDERR_OK"));
         assert!(text.len() <= 8192);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_background_reader_is_created_at_idle_priority_and_an_ordinary_process_is_not() {
+        const NO_WINDOW_SUSPENDED: u32 = 0x0800_0000 | 0x0000_0004;
+        const IDLE: u32 = 0x0000_0040;
+        assert_eq!(creation_flags(false), NO_WINDOW_SUSPENDED);
+        assert_eq!(creation_flags(true), NO_WINDOW_SUSPENDED | IDLE);
+    }
+
+    #[test]
+    fn the_background_mark_is_set_only_while_the_reader_is_being_started() {
+        let seen = Arc::new(Mutex::new(vec![]));
+        let record = seen.clone();
+        let spawn: Spawner = Arc::new(move |_, _, _| {
+            record.lock().unwrap().push(starting_in_background());
+            Err(io::Error::other("nothing starts in this test"))
+        });
+        assert!(!starting_in_background());
+        assert!(spawn_background(&spawn, "x", &[], Path::new(".")).is_err());
+        assert!(spawn("x", &[], Path::new(".")).is_err());
+        assert!(!starting_in_background(), "the mark is lifted afterwards");
+        assert_eq!(*seen.lock().unwrap(), vec![true, false]);
     }
 }

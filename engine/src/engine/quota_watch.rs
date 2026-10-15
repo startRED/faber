@@ -9,6 +9,21 @@ use crate::account::{UsageRead, claude_usage};
 const CLAUDE_TIMEOUT: Duration = Duration::from_secs(45);
 const CODEX_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// Marks a vendor’s reading as under way for exactly as long as the task that does it lives: whichever way that task ends
+/// (an answer, a failure, the engine going away, a panic), the mark is lifted, so a vendor is never left unread for good.
+struct InFlight {
+    core: std::sync::Weak<Mutex<Core>>,
+    vendor: Vendor,
+}
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        if let Some(core) = self.core.upgrade() {
+            core.lock().unwrap_or_else(|e| e.into_inner()).reading.remove(&self.vendor);
+        }
+    }
+}
+
 impl Core {
     /// Starts one reading for each vendor named that is not being read already.
     pub(super) fn read_quotas(&mut self, vendors: Vec<Vendor>) {
@@ -21,12 +36,12 @@ impl Core {
             let (me, spawn, cwd, windows) = (self.me.clone(), self.opts.spawn.clone(), self.opts.data_dir.clone(), self.opts.windows);
             let (now, offset) = (self.secs(), self.utc_offset);
             self.opts.runtime.spawn(async move {
+                let _in_flight = InFlight { core: me.clone(), vendor };
                 match vendor {
                     Vendor::Claude => {
                         let read = claude_usage(&cli, &spawn, &cwd, CLAUDE_TIMEOUT, now, offset).await;
                         let Some(core) = me.upgrade() else { return };
                         let mut c = core.lock().unwrap_or_else(|e| e.into_inner());
-                        c.reading.remove(&vendor);
                         match read {
                             UsageRead::Windows(found) => {
                                 found.into_iter().for_each(|(window, used, resets_at)| c.note_quota(vendor, window, used, resets_at))
@@ -39,7 +54,6 @@ impl Core {
                         let events = read_codex_limits(&cli.command, &cwd, windows, spawner(&spawn, &cli), CODEX_TIMEOUT).await;
                         let Some(core) = me.upgrade() else { return };
                         let mut c = core.lock().unwrap_or_else(|e| e.into_inner());
-                        c.reading.remove(&vendor);
                         // A reading every few minutes must not make three quick failures ask the person which plan they have: a
                         // failed read counts against the plan at most once per plan check interval.
                         let now = c.secs();
@@ -54,13 +68,13 @@ impl Core {
         }
     }
 
-    /// Something happened that makes a fresh reading worth having (a request ended, the window was focused).
-    pub(super) fn quota_event(&mut self, reason: Reason) {
+    /// Something happened that makes a fresh reading worth having (a request ended). The shared debounce decides.
+    pub(super) fn quota_event(&mut self) {
         if !self.watching {
             return;
         }
         let (now, vendors) = (self.secs(), self.vendors());
-        let due = self.cadence.event(now, &vendors, reason);
+        let due = self.cadence.event(now, &vendors);
         self.read_quotas(due);
     }
 

@@ -1,6 +1,6 @@
 //! Small account views for the screen: the account's quota and Faber's own money have separate labels and fields.
 use super::*;
-use crate::budget::{State, elapsed};
+use crate::budget::{Snap, State, elapsed};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,6 +37,19 @@ pub struct VendorUsage {
     pub windows: Vec<WindowUsage>,
 }
 impl Core {
+    /// Whether a turn of this vendor is running now: the counter is about to rise by what it is spending.
+    pub(super) fn turn_running(&self, vendor: Vendor) -> bool {
+        self.live.values().any(|l| l.vendor == vendor && l.turn.is_some())
+    }
+
+    /// The vendor’s quota as every decision (and the screen) sees it: the ledger’s snapshot, still counting while a turn of
+    /// the vendor runs. A reading taken now is a floor then, so no discount is believed on it.
+    pub(super) fn snap(&self, vendor: Vendor, now: f64) -> Snap {
+        let mut snap = self.ledger.of(vendor).snap(now);
+        snap.counting |= self.turn_running(vendor);
+        snap
+    }
+
     pub(super) fn usage(&self) -> Vec<VendorUsage> {
         let now = self.secs();
         let day = ((now + self.utc_offset as f64) / 86_400.0).floor() as i64;
@@ -44,7 +57,7 @@ impl Core {
             .into_iter()
             .map(|vendor| {
                 let v = self.ledger.of(vendor);
-                let mut snap = v.snap(now);
+                let mut snap = self.snap(vendor, now);
                 if vendor == Vendor::Claude && self.opts.claude_env_billed {
                     snap.billing = Billing::UsageBilled;
                 }
@@ -60,6 +73,7 @@ impl Core {
                     match snap.state(&shape, self.utc_offset, now) {
                         State::Spare => "spare",
                         State::Normal => "ok",
+                        State::Fast => "fast",
                         State::Tight => "low",
                     }
                 };
@@ -95,7 +109,7 @@ impl Core {
                     ask_for_plan: snap.billing == Billing::Subscription && v.ask_for_plan(),
                     own_spend_usd: v.own_spend.get(&day).copied().unwrap_or(0.0),
                     unmetered: v.unmetered.get(&day).copied().unwrap_or(0),
-                    counting: v.counting(now) || self.live.values().any(|l| l.vendor == vendor && l.turn.is_some()),
+                    counting: snap.counting,
                     windows,
                 }
             })
