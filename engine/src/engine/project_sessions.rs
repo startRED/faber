@@ -289,6 +289,23 @@ impl Engine {
         Ok(crate::project::lease::Termination::from_retired(&retired, settled))
     }
 
+    /// The end of a read-only role: the mission's role sessions are closed and the invocation settles against what it
+    /// reported (or its computed bound if it reported nothing). A Writer ends through `worker_termination` instead,
+    /// which needs the owned process tree; refuses here so source access never settles without that proof.
+    pub fn finish_role(&self, invocation: &str) -> Result<(), String> {
+        let (tree, terminal) = self.with(|c| (c.worker_trees.get(invocation).cloned(), c.worker_terminals.get(invocation).cloned()));
+        let mission = self.mission_reservation(invocation)?.request.mission;
+        if tree.is_some() {
+            return Err("reason.project.processTreeUnproven".into());
+        }
+        for session in self.mission_sessions(&mission) {
+            session.close();
+        }
+        self.with(|c| c.mission_sessions.remove(&mission));
+        let event = terminal.unwrap_or(EngineEvent::Error { message: "reason.interrupted".into(), fatal: true });
+        self.mission_budget(crate::project::budget::Change::Report { id: invocation.into(), event, terminated: true }).map(|_| ())
+    }
+
     pub(super) fn mission_event(
         &self,
         journal: &Journal,
@@ -319,7 +336,17 @@ impl Engine {
                 text.push_str(&delta);
             }
             event @ (EngineEvent::Done { .. } | EngineEvent::Error { .. }) => {
-                self.with(|c| c.worker_terminals.insert(invocation.into(), event.clone()));
+                // What follows a completed turn is the engine closing the session, never a new failure.
+                let completed = self.with(|c| {
+                    let done = matches!(c.worker_terminals.get(invocation), Some(EngineEvent::Done { .. }));
+                    if !done {
+                        c.worker_terminals.insert(invocation.into(), event.clone());
+                    }
+                    done
+                });
+                if completed {
+                    return Ok(());
+                }
                 let stopped = self.mission_budget(crate::project::budget::Change::Report {
                     id: invocation.into(),
                     event: event.clone(),
@@ -342,7 +369,12 @@ impl Engine {
                         crate::project::worker::Reply::Accepted(envelope) | crate::project::worker::Reply::Proposal(envelope) => {
                             journal.record_reply(invocation, &envelope).map_err(|e| e.key().to_string())?;
                         }
-                        _ => {}
+                        crate::project::worker::Reply::Bounce(key) | crate::project::worker::Reply::Blocked(key) => {
+                            journal.record_refusal(invocation, key).map_err(|e| e.key().to_string())?;
+                        }
+                        crate::project::worker::Reply::Continue => {
+                            journal.record_refusal(invocation, "reason.stall").map_err(|e| e.key().to_string())?;
+                        }
                     }
                 }
             }

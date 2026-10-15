@@ -600,7 +600,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_accepted_turn_keeps_its_envelope_for_the_coordinator() {
+    async fn an_accepted_turn_keeps_its_envelope_and_a_refused_one_its_key() {
         let (dir, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let e = engine(dir.path());
         let (j, mut r) = runner_fixture(&e, repo.path());
@@ -654,6 +654,80 @@ mod tests {
         // The same invocation cannot be recorded twice, and an unparsable turn leaves no record.
         assert!(j.record_reply("i1", &kept).is_err());
         assert!(j.reply("i2").unwrap().is_none());
+        // A refused or stalled turn keeps its key, never its text, and still leaves no envelope.
+        j.record_refusal("i2", "error.wire.malformed").unwrap();
+        assert_eq!(j.refusal("i2").unwrap().as_deref(), Some("error.wire.malformed"));
+        assert!(j.reply("i2").unwrap().is_none());
+        e.shutdown();
+    }
+
+    #[tokio::test]
+    async fn a_read_only_role_ends_by_closing_its_session_and_settling_its_reservation() {
+        let (dir, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let e = engine(dir.path());
+        let (j, mut r) = runner_fixture(&e, repo.path());
+        let mut brief = crate::project::Brief::new(
+            "w1",
+            1,
+            crate::project::Role::Research,
+            "Read",
+            &"1".repeat(40),
+            crate::project::ContractPin { id: "c1".into(), digest: "a".repeat(64) },
+        );
+        brief.grant_micros = Some(100_000);
+        brief.stop = "Done or blocked".into();
+        brief.scope = vec!["fixture".into()];
+        let pin = crate::project::worker::ModelPin {
+            vendor: Vendor::Codex,
+            model: "gpt-6.1-sol".into(),
+            effort: "medium".into(),
+            cli_version: "0.162.1".into(),
+        };
+        r.workers.insert("w1".into(), crate::project::worker::Worker::new(brief, pin, 3).unwrap());
+        r.save(&j).unwrap();
+        e.mission_budget(Change::Admit(request())).unwrap();
+        let mut intent = crate::project::Intent::new("i1", "m1", crate::project::IntentKind::Dispatch, 3, 1);
+        intent.task = Some("w1".into());
+        intent.expected.insert("invocation".into(), "i1".into());
+        j.record_intent(&intent).unwrap();
+        let commands = Arc::new(Mutex::new(vec![]));
+        let recorded = commands.clone();
+        e.with(|c| {
+            c.mission_sessions.insert(
+                "m1".into(),
+                vec![Session::from_fn(move |command| {
+                    recorded.lock().unwrap().push(match command {
+                        crate::events::SessionCommand::Close => "close",
+                        _ => "other",
+                    })
+                })],
+            );
+        });
+        let mut text = String::new();
+        e.mission_event(&j, "i1", "w1", &mut text, EngineEvent::Started { session_id: "s1".into(), model: "gpt-6.1-sol".into() }).unwrap();
+        let done = EngineEvent::Done {
+            ok: true,
+            reason: "completed".into(),
+            cost_total_usd: None,
+            input_tokens: 1000,
+            output_tokens: 100,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            cache_write_1h_tokens: 0,
+            incomplete: false,
+        };
+        e.mission_event(&j, "i1", "w1", &mut text, done).unwrap();
+        // The close that follows the turn is the engine's own: it neither fails the mission nor replaces the reported end.
+        let closed = EngineEvent::Error { message: "Claude Code stopped (exit 0).".into(), fatal: true };
+        e.mission_event(&j, "i1", "w1", &mut text, closed).unwrap();
+        assert!(!Budget::load(&e.ledger()).unwrap().invocations["i1"].terminated);
+        e.finish_role("i1").unwrap();
+        let after = Budget::load(&e.ledger()).unwrap().invocations["i1"].clone();
+        assert!(after.terminated && after.settled);
+        assert_eq!(*commands.lock().unwrap(), ["close"]);
+        assert!(e.mission_sessions("m1").is_empty());
+        // A Writer's invocation has an owned tree and ends only through its proof.
+        assert_eq!(e.finish_role("unknown"), Err("reason.budget.identity".into()));
         e.shutdown();
     }
 
