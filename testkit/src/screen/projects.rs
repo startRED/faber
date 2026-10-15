@@ -99,6 +99,16 @@ pub(super) fn run_probe_for(ctx: &mut Ctx, mode: &str, limit: Duration) -> Resul
         let shell = Path::new(&git.command).ancestors().map(|folder| folder.join("usr/bin")).find(|bin| bin.join("sh.exe").is_file());
         path.extend(shell);
     }
+    if mode == "--project-canary" {
+        // The canary proves with cargo: the toolchain folder and where it lives, nothing else from this computer.
+        let cargo = faber_engine::cli::find_cli("cargo").ok_or("cargo is not installed")?;
+        path.push(Path::new(&cargo.command).parent().ok_or("cargo has no folder")?.to_path_buf());
+        for name in ["RUSTUP_HOME", "CARGO_HOME", "ProgramData", "ProgramFiles", "ProgramFiles(x86)"] {
+            if let Ok(value) = std::env::var(name) {
+                env.insert(name.into(), value);
+            }
+        }
+    }
     env.insert("PATH".into(), std::env::join_paths(path).map_err(|e| e.to_string())?.to_string_lossy().into());
     // Require the hidden desktop even if this probe is invoked in CI; it uses no webview.
     env.remove("GITHUB_ACTIONS");

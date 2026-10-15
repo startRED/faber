@@ -6,6 +6,7 @@ use crate::sandbox::{Launch, child_env};
 use faber_engine::project::update::{CanaryVerdict, ExactTree, Slot, SlotLayout, SwapCheck, UpdateManager, UpdateState};
 use faber_engine::project::{GitMode, Grant, RepoIdentity, SCHEMA};
 use std::fs;
+use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub fn scenarios() -> Vec<Scenario> {
@@ -21,6 +22,25 @@ pub fn scenarios() -> Vec<Scenario> {
         Scenario { name: "local_update: hidden session observer preserves next on orderly logoff or shutdown", run: session },
         Scenario { name: "T13 4: fixture promotion reaches Healthy; quiescence, probation and rollback remain headless", run: handoff },
     ]
+}
+
+/// Put the folders of git and cargo (and where the toolchain lives) into the candidate's environment.
+fn canary_tools(env: &mut std::collections::BTreeMap<String, String>) -> Result<()> {
+    let mut path = vec![];
+    for tool in ["git", "cargo"] {
+        let cli = faber_engine::cli::find_cli(tool).ok_or_else(|| format!("{tool} is not installed"))?;
+        path.push(Path::new(&cli.command).parent().ok_or("a tool has no folder")?.to_path_buf());
+    }
+    if let Some(system) = std::env::var_os("SystemRoot") {
+        path.push(std::path::PathBuf::from(system).join("System32"));
+    }
+    env.insert("PATH".into(), std::env::join_paths(path).map_err(|e| e.to_string())?.to_string_lossy().into());
+    for name in ["RUSTUP_HOME", "CARGO_HOME", "ProgramData", "ProgramFiles", "ProgramFiles(x86)"] {
+        if let Ok(value) = std::env::var(name) {
+            env.insert(name.into(), value);
+        }
+    }
+    Ok(())
 }
 
 fn canary(ctx: &mut Ctx) -> Result {
@@ -44,30 +64,65 @@ fn canary(ctx: &mut Ctx) -> Result {
         ("FABER_INSTALLED_DATA".into(), ctx.sb.data.to_string_lossy().into_owned()),
         ("FABER_INSTALLED_RELEASE".into(), ctx.sb.release.to_string_lossy().into_owned()),
     ]);
+    // The candidate runs a real miniature mission: it needs git and the Rust toolchain, nothing else from this computer.
+    canary_tools(&mut env)?;
     let (host, _, _) =
         Owned::start(&launcher, &["--test-canary".into()], &env, &ctx.sb.sandbox, &ctx.paths.fake_cli).map_err(|e| e.to_string())?;
     let result = (|| {
-        eventually("candidate canary receipt", Duration::from_secs(40), || !host.is_running())?;
+        eventually("candidate canary receipt", Duration::from_secs(240), || !host.is_running())?;
         ensure(host.status().is_some_and(|s| s.contains('0')), || "candidate canary failed".into())?;
         let verdict: CanaryVerdict = serde_json::from_slice(&fs::read(data.join("test-canary-result.json")).map_err(|e| e.to_string())?)
             .map_err(|e| e.to_string())?;
-        ensure(verdict == CanaryVerdict::NotRun, || "startup fabricated miniature mission acceptance".into())?;
-        let receipt = fs::read_dir(data.join("missions/canary"))
-            .map_err(|e| e.to_string())?
-            .next()
+        ensure(verdict == CanaryVerdict::NotRun, || {
+            let found: Vec<String> = fs::read_dir(data.join("missions/canary"))
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|e| format!("{}: {}", e.file_name().to_string_lossy(), fs::read_to_string(e.path()).unwrap_or_default()))
+                .collect();
+            format!("the offline canary must stay a wait, got {verdict:?}; {found:?}")
+        })?;
+        let receipts = || -> std::result::Result<Vec<std::path::PathBuf>, String> {
+            fs::read_dir(data.join("missions/canary"))
+                .map_err(|e| e.to_string())?
+                .map(|e| e.map(|e| e.path()).map_err(|e| e.to_string()))
+                .collect()
+        };
+        let all = receipts()?;
+        let receipt = all
+            .iter()
+            .find(|p| {
+                p.file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with("canary-") && !n.to_string_lossy().starts_with("canary-verified-"))
+            })
             .ok_or("missing private canary receipt")?
-            .map_err(|e| e.to_string())?
-            .path();
+            .clone();
+        let verified = all
+            .iter()
+            .find(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("canary-verified-")))
+            .ok_or("the supervisor wrote no verified summary")?;
         let handshake: serde_json::Value =
             serde_json::from_slice(&fs::read(receipt).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
         ensure(handshake["buildHash"] == ExactTree::compute_build_hash(&bytes) && handshake["nonce"] == handshake["receipt"], || {
             "wrong candidate handshake".into()
         })?;
+        // The candidate ran its whole miniature mission on recorded replies: it is evidence, never a promotion.
+        ensure(handshake["evidence"]["mode"] == "offline", || format!("the candidate did not report an offline mission: {handshake}"))?;
+        let summary: serde_json::Value =
+            serde_json::from_slice(&fs::read(verified).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        ensure(
+            summary["mode"] == "offline"
+                && summary["writer"] == "claude"
+                && summary["reviewer"] == "codex"
+                && summary["spentMicros"] == 0
+                && summary["head"].as_str().is_some_and(|h| h.len() == 40),
+            || format!("the supervisor did not verify the mission: {summary}"),
+        )?;
         assert_hidden(ctx, &[&host], &env)
     })();
     host.terminate();
     ctx.notes.push(
-        "candidate Engine startup; challenge, executable hash, schema and private receipt; no fake/live miniature mission Pass".into(),
+        "candidate runs its own miniature mission on recorded replies (real git, cargo proof, other-vendor review, landing); supervisor reads its journal; offline evidence is never a Pass".into(),
     );
     result
 }

@@ -42,6 +42,7 @@ pub fn all() -> Vec<Scenario> {
         .chain(permissions::scenarios())
         .chain(projects::scenarios())
         .chain(coordinator::scenarios())
+        .chain(coordinator::canary_scenarios())
         .chain(projects_ui::scenarios())
         .chain(remote_git::scenarios())
         .chain(shell::scenarios())

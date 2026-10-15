@@ -25,6 +25,7 @@ fn main() {
                 | "--project-path-race"
                 | "--project-git-clean"
                 | "--project-coordinator"
+                | "--project-canary"
                 | "--remote-git"
                 | "--project-screen-fixture"
         )
@@ -38,6 +39,7 @@ fn main() {
             "--project-path-race" => faber_testkit::screen::projects::probe_path_race(sandbox),
             "--project-git-clean" => faber_testkit::screen::projects::probe_cleanup(sandbox),
             "--project-coordinator" => faber_testkit::screen::coordinator::probe(sandbox),
+            "--project-canary" => faber_testkit::screen::coordinator::probe_canary(sandbox),
             "--remote-git" => faber_testkit::screen::remote_git::probe(sandbox),
             _ => faber_testkit::screen::projects::probe(sandbox),
         };

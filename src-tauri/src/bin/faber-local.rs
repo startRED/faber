@@ -19,15 +19,7 @@ fn main() {
             let manifest = dev.manager().map_err(|_| ())?.manifest().map_err(|_| ())?.ok_or(())?;
             let tree = manifest.current_good.ok_or(())?.tree;
             let data = dev.build_dir().join("canary");
-            for (name, bytes) in [
-                ("goal.json", include_bytes!("../../../tests/fixtures/projects/canary/goal.json").as_slice()),
-                ("src/lib.rs", include_bytes!("../../../tests/fixtures/projects/canary/src/lib.rs").as_slice()),
-            ] {
-                faber_engine::project::files::ScopedFile::new(&data.join(name), true)
-                    .map_err(|_| ())?
-                    .write(bytes, None)
-                    .map_err(|_| ())?;
-            }
+            faber_engine::project::canary::lay_out(&data).map_err(|_| ())?;
             let mut runner =
                 faber::local_update::ProductionRunner::new(data.clone(), data.clone(), data.clone(), dev.data(), "canary".into());
             let verdict = runner.canary(&dev.binary(manifest.active_slot), &tree, &data).map_err(|_| ())?;

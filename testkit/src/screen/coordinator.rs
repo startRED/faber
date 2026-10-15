@@ -431,3 +431,65 @@ pub fn probe(sandbox: &Path) -> Result {
         Some(error) => Err(error),
     }
 }
+
+/// The canary of a build: the frozen mission on recorded replies through the production coordinator, then the
+/// supervisor's reading of what it left behind. A child that lies about its mode or its mission is not believed.
+pub fn probe_canary(sandbox: &Path) -> Result {
+    use faber_engine::project::canary::{self, Evidence, Mode};
+    let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().map_err(|e| e.to_string())?;
+    let data = sandbox.join("canary-data");
+    let engine = faber_engine::Engine::new(
+        faber_engine::EngineOptions {
+            data_dir: data.clone(),
+            clis: Default::default(),
+            spawn: faber_engine::proc::real_spawner(),
+            windows: true,
+            claude_env_billed: false,
+            max_warm: 0,
+            idle: Duration::from_secs(30),
+            runtime: runtime.handle().clone(),
+            ask: None,
+        },
+        Arc::new(|_| {}),
+    );
+    let work = sandbox.join("canary-work");
+    let evidence = runtime.block_on(canary::run(&engine, &data, &work, Mode::Offline))?;
+    engine.shutdown();
+    let verified = canary::verify(&evidence, &data)?;
+    ensure(verified.mode == Mode::Offline && verified.spent_micros == 0, || "a replay spent money".into())?;
+    ensure(verified.writer == Vendor::Claude && verified.reviewer == Vendor::Codex, || "the review is not by the other vendor".into())?;
+    let repo = Path::new(&evidence.repo_root);
+    let program = faber_engine::cli::find_cli("git").ok_or("missing git")?.command;
+    let lib = git(&program, repo, &["show", &format!("{}:src/lib.rs", verified.head)])?;
+    ensure(lib.contains("trim().to_lowercase()") && lib.contains("fn trims_and_lowercases"), || "the landed file is not the fix".into())?;
+    ensure(git(&program, repo, &["rev-parse", "HEAD"])? != verified.head, || "the owner ref moved".into())?;
+    ensure(git(&program, repo, &["status", "--porcelain"])?.is_empty(), || "the checkout was touched".into())?;
+    // Lies. A replay claiming to be real has no settled provider spending in the ledger; a mission that never existed
+    // has no journal; a mission that is not finished cannot be accepted.
+    let lie = Evidence { mode: Mode::Real, ..evidence.clone() };
+    ensure(canary::verify(&lie, &data) == Err("reason.canary.notReal".into()), || "a replay passed for a real run".into())?;
+    let ghost = Evidence { mission: "00000000-0000-4000-8000-000000000000".into(), ..evidence.clone() };
+    ensure(canary::verify(&ghost, &data).is_err(), || "a mission with no journal was accepted".into())?;
+    std::fs::write(
+        sandbox.join("canary.json"),
+        json!({"head": verified.head, "tree": verified.tree, "proofReceipt": verified.proof_receipt, "millis": evidence.millis})
+            .to_string(),
+    )
+    .map_err(|e| e.to_string())?;
+    std::fs::write(sandbox.join("project-git.ok"), "canary proved").map_err(|e| e.to_string())
+}
+
+pub fn canary_scenarios() -> Vec<Scenario> {
+    vec![Scenario {
+        name: "canary: the frozen mission lands through the coordinator and a replay can never pass for a real run",
+        run: canary_acceptance,
+    }]
+}
+
+fn canary_acceptance(ctx: &mut Ctx) -> Result {
+    run_probe_for(ctx, "--project-canary", Duration::from_secs(300))?;
+    let report: Value = serde_json::from_slice(&std::fs::read(ctx.sb.sandbox.join("canary.json")).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    ctx.notes.push(format!("canary on recorded replies: {report}; real git, cargo proof, other-vendor review, landing; lies refused"));
+    Ok(())
+}

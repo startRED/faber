@@ -1152,9 +1152,9 @@ fn production_canary_rejects_a_non_executable_payload() {
         dir.path().join("private"),
         "m1".into(),
     );
-    runner.canary_available = false;
+    runner.canary = faber::local_update::CanaryMode::Unavailable;
     assert_eq!(runner.canary(&exe, &tree_obj, dir.path()).unwrap(), CanaryVerdict::NotRun);
-    runner.canary_available = true;
+    runner.canary = faber::local_update::CanaryMode::Offline;
     assert!(runner.canary(&exe, &tree_obj, dir.path()).is_err());
 }
 
@@ -1167,6 +1167,8 @@ fn canary_handshake_rejects_replay_hash_schema_and_fabricated_pass() {
         build_hash: candidate.build_hash.clone(),
         schema: SCHEMA,
         verdict: CanaryVerdict::NotRun,
+        evidence: None,
+        stopped: None,
     };
     assert_eq!(verify_canary_handshake(&response, "challenge", &candidate).unwrap(), CanaryVerdict::NotRun);
     assert!(verify_canary_handshake(&response, "previous", &candidate).is_err());
@@ -1367,4 +1369,45 @@ async fn landed_checkpoint_drives_exact_tree_staging_at_quiescence() {
     assert!(!checkout.join(".faber/missions/m0").exists(), "coalescing wrote the other project's mirror into this checkout");
     assert!(!dev.service_landed_missions::<Gates>(&engine, true, &mut source, |_, _| panic!("request replayed")).unwrap());
     engine.shutdown();
+}
+
+#[test]
+fn a_canary_that_stopped_waits_and_evidence_from_outside_the_run_fails() {
+    use faber_engine::project::canary::{Evidence, Mode};
+    let dir = area();
+    let candidate = tree(b"candidate");
+    let mut handshake = CanaryHandshake {
+        nonce: "challenge".into(),
+        receipt: "challenge".into(),
+        build_hash: candidate.build_hash.clone(),
+        schema: SCHEMA,
+        verdict: CanaryVerdict::NotRun,
+        evidence: None,
+        stopped: Some("reason.budget.cap".into()),
+    };
+    // A mission that stopped on a wait is not a verdict on the build: it stays ready and the canary runs again.
+    let (verdict, summary) = judge_canary(&handshake, dir.path(), &candidate, CanaryMode::Real);
+    assert_eq!(verdict, CanaryVerdict::NotRun);
+    assert_eq!(summary["wait"], "reason.budget.cap");
+    // Evidence whose repository is not under the run's own work folder is a lie, whatever it claims.
+    fs::create_dir_all(dir.path().join("work")).unwrap();
+    fs::create_dir_all(dir.path().join("elsewhere")).unwrap();
+    handshake.stopped = None;
+    handshake.evidence = Some(Evidence {
+        mode: Mode::Real,
+        mission: "m1".into(),
+        repo_root: dir.path().join("elsewhere").to_string_lossy().into_owned(),
+        millis: 1,
+    });
+    let (verdict, _) = judge_canary(&handshake, dir.path(), &candidate, CanaryMode::Real);
+    assert!(matches!(verdict, CanaryVerdict::Fail { .. }), "{verdict:?}");
+    // A replay reported while a real run was requested is refused as well.
+    handshake.evidence = Some(Evidence {
+        mode: Mode::Offline,
+        mission: "m1".into(),
+        repo_root: dir.path().join("work").join("repo").to_string_lossy().into_owned(),
+        millis: 1,
+    });
+    let (verdict, _) = judge_canary(&handshake, dir.path(), &candidate, CanaryMode::Real);
+    assert!(matches!(verdict, CanaryVerdict::Fail { .. }), "{verdict:?}");
 }
