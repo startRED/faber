@@ -1,0 +1,152 @@
+{
+ "date": "2026-10-15",
+ "note": "Reduced evidence of the T13 drill: one real Faber goal through the coordinator, a harness-built candidate, the real canary under the single-use R136 waiver, promotion, 300 s probation and a bounded rollback drill. The rollback drill uses a crashing candidate with an injected verdict, so it proves recovery only. RAM columns of the promotion sampler measured the launcher, not the app, and are not evidence.",
+ "mission": {
+  "elapsedSecs": 430,
+  "peakTreePrivateMbIncludingCompilers": 1420,
+  "steps": [
+   {
+    "atSecs": 38,
+    "step": "mission-started",
+    "detail": {
+     "goal": "In engine/src/usage.rs, settle() charges a resumed turn the sum of the reported total and the last trusted total instead of their difference. Fix settle() so the unit test usage::tests::a_resumed_turn_costs_the_difference passes. Do not change any test and do not change anything else in the file."
+    }
+   },
+   {
+    "atSecs": 219,
+    "step": "positive-resume",
+    "detail": {
+     "stateBefore": "Paused",
+     "stateAfter": "Running",
+     "revisionBefore": 3,
+     "revisionAfter": 3,
+     "invocationsBefore": [
+      "lead-1"
+     ],
+     "invocationsAfter": [
+      "lead-1"
+     ]
+    }
+   },
+   {
+    "atSecs": 415,
+    "step": "landed",
+    "detail": {
+     "fixed": true,
+     "head": "817e8b7e2e9beaad4dfe58a8ef1bea5fd10a12d0",
+     "ownerBase": "bc09a5e93fca511277ad7dc26f89f41414d64634",
+     "ownerHead": "bc09a5e93fca511277ad7dc26f89f41414d64634",
+     "ref": "faber/24397483-4222-4b09-8655-9bdb5e6c867a",
+     "tree": "a67295a6e28acc076a8c44905d96afab9c49e2ab"
+    }
+   },
+   {
+    "atSecs": 430,
+    "step": "spend",
+    "detail": {
+     "invocations": {
+      "lead-1": {
+       "bounded": false,
+       "model": "claude-haiku-5-5",
+       "paidMicros": 1093,
+       "settled": true,
+       "vendor": "claude"
+      },
+      "reviewer-1": {
+       "bounded": false,
+       "model": "gpt-6-luna",
+       "paidMicros": 1101,
+       "settled": true,
+       "vendor": "codex"
+      },
+      "writer-2": {
+       "bounded": false,
+       "model": "claude-haiku-5-5",
+       "paidMicros": 3845,
+       "settled": true,
+       "vendor": "claude"
+      }
+     },
+     "totalMicros": 6039
+    }
+   }
+  ]
+ },
+ "canary": {
+  "head": "7af70686c3173eb27c9f77fcb21323b07aa8220e",
+  "millis": 58594,
+  "mission": "9dc37dff-604b-4fe9-a54e-6edcd7a8a36b",
+  "mode": "real",
+  "proofReceipt": "4a468129-ff30-4ffd-a58d-a19273958c2c",
+  "reviewer": "codex",
+  "spentMicros": 1559,
+  "tree": "bb935fd0e912215aec654065bff9ccb2e18041a7",
+  "writer": "claude",
+  "waiver": {
+   "evidence": {
+    "exception": "R136",
+    "for": "canary mission of a harness-built candidate"
+   },
+   "exception": "R132",
+   "mission": "9dc37dff-604b-4fe9-a54e-6edcd7a8a36b",
+   "missionCapMicros": 2000000,
+   "singleUse": true,
+   "waives": "R131 two-point margin under the day line"
+  }
+ },
+ "promotion": {
+  "elapsedSecs": 796,
+  "idleTreePrivateMb": 0,
+  "peakTreePrivateMb": {
+   "atSecs": 0,
+   "mb": 0.71875,
+   "state": "idle/A"
+  },
+  "rollbackDrill": {
+   "baselineRanBefore": true,
+   "baselineRunningAgain": true,
+   "elapsedSecs": 11,
+   "goodSlot": "A",
+   "note": "recovery drill: the candidate is an executable that cannot start and its canary verdict is recorded by the drill; it does not stand for a canary result",
+   "outcome": "rolledBack/A",
+   "rejectedCandidates": 1,
+   "timeline": [
+    {
+     "atSecs": 2,
+     "state": "ready/A"
+    },
+    {
+     "atSecs": 4,
+     "state": "quiescent/A"
+    },
+    {
+     "atSecs": 5,
+     "state": "swapping/A"
+    },
+    {
+     "atSecs": 6,
+     "state": "probation/B"
+    },
+    {
+     "atSecs": 6,
+     "state": "rolledBack/A"
+    }
+   ]
+  },
+  "running": {
+   "buildHash": "0d5a19b1f8d54a6fcb9ce230af7ea7590c06fb0a8f3a15f9118b9bc8fa21432d",
+   "commit": "817e8b7e2e9beaad4dfe58a8ef1bea5fd10a12d0",
+   "identityBuildHash": "0d5a19b1f8d54a6fcb9ce230af7ea7590c06fb0a8f3a15f9118b9bc8fa21432d",
+   "landedCommit": "817e8b7e2e9beaad4dfe58a8ef1bea5fd10a12d0",
+   "landedTree": "a67295a6e28acc076a8c44905d96afab9c49e2ab",
+   "lastGood": "A",
+   "ok": true,
+   "runningLockHeld": true,
+   "slot": "B",
+   "tree": "a67295a6e28acc076a8c44905d96afab9c49e2ab"
+  },
+  "verdict": {
+   "outcome": "healthy"
+  }
+ }
+}
