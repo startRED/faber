@@ -282,6 +282,10 @@ pub struct Conversation {
     /// One CLI session per vendor, so switching models keeps each vendor's own history and cache.
     #[serde(default)]
     pub sessions: BTreeMap<Vendor, String>,
+    /// A session id whose first turn was accepted but has not shown any output yet. It is not resumable like `sessions` (the CLI may
+    /// not have saved it), but a restart after a crash resumes it instead of starting a session that knows nothing of the turn.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tentative: BTreeMap<Vendor, String>,
     /// Older sessions restart once with visible history to receive the host command tool.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub command_gate: bool,
@@ -481,6 +485,19 @@ pub enum Setup {
 
 fn is_zero(n: &u32) -> bool {
     *n == 0
+}
+
+impl Conversation {
+    /// The session to continue for this vendor: the one that has shown output, else one whose turn was accepted and then cut off.
+    pub fn resumable(&self, vendor: Vendor) -> Option<&String> {
+        self.sessions.get(&vendor).or_else(|| self.tentative.get(&vendor))
+    }
+
+    /// Forgets every session of the vendor.
+    pub fn forget_session(&mut self, vendor: Vendor) {
+        self.sessions.remove(&vendor);
+        self.tentative.remove(&vendor);
+    }
 }
 
 #[cfg(test)]

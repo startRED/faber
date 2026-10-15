@@ -99,8 +99,21 @@ impl Core {
         })
     }
 
+    /// Whether the reply of the running turn already holds work: text, tool actions, or a retry after the quota ran out.
+    /// Such a turn is never replayed from its request, because the replay would repeat what already ran.
+    pub(super) fn reply_has_work(&self, conv: &str, turn: Option<&str>) -> bool {
+        let retried = self.transfers.get(conv).is_some_and(|t| t.retried || t.moving);
+        retried
+            || self.convs.get(conv).and_then(|c| c.messages.iter().find(|m| Some(m.id.as_str()) == turn)).is_some_and(|m| {
+                !m.text.trim().is_empty()
+                    || m.tools.as_ref().is_some_and(|t| !t.is_empty())
+                    || m.parked.as_ref().is_some_and(|p| !p.is_empty())
+            })
+    }
+
     /// Runs the turn again on a new session of the same CLI with the same settings (the lost one is already forgotten). The
-    /// messages before this turn go along as text when other assistants spoke in the conversation.
+    /// messages before this turn go along as text when other assistants spoke in the conversation. Always true: the turn
+    /// either runs or its reply is failed here.
     pub(super) fn rerun_fresh(&mut self, conv: &str, turn: Option<&str>) -> bool {
         let Some(t) = self.transfers.get(conv).filter(|t| Some(t.reply.as_str()) == turn).cloned() else { return false };
         let Some(c) = self.convs.get(conv) else { return false };
@@ -110,7 +123,12 @@ impl Core {
         if let Some(l) = self.live.remove(conv) {
             l.session.close();
         }
-        self.dispatch(conv, &t.reply, &t.pick, text, t.images, t.by_hand).is_ok()
+        if let Err(error) = self.dispatch(conv, &t.reply, &t.pick, text, t.images, t.by_hand) {
+            // The old process is gone, so `turn()` finds nothing to mark: fail the reply by its saved id.
+            self.fail_reply(conv, &t.reply, error);
+            self.finish(conv, Some(t.reply));
+        }
+        true
     }
 
     pub(super) fn restore_recovery(&mut self, c: &mut Conversation) {

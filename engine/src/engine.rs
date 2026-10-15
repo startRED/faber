@@ -168,18 +168,13 @@ struct Live {
 /// Messages waiting behind a running turn. Each may carry images, which stay in memory and go out with every queue event.
 const MAX_QUEUED: usize = 10;
 
-const HISTORY_LIMIT: usize = 20_000;
-
-/// A model that joins a conversation midway reads what was said before, as plain text.
+/// A model that joins a conversation midway reads what was said before, as plain text: every message, with each tool's result
+/// shortened as `handover::transcript` does. Nothing is cut silently; a conversation too long for the model fails visibly.
 pub fn with_history(history: &[Message], text: &str) -> String {
-    let lines = history
-        .iter()
-        .map(|m| format!("{}: {}", if m.role == Role::User { "User" } else { "Assistant" }, m.text))
-        .collect::<Vec<_>>()
-        .join("\n\n");
-    let skip = lines.chars().count().saturating_sub(HISTORY_LIMIT);
-    let lines: String = lines.chars().skip(skip).collect();
-    format!("Earlier in this conversation, with another assistant:\n\n{lines}\n\nNow the user says:\n{text}")
+    format!(
+        "Earlier in this conversation, with another assistant:\n\n{}\n\nNow the user says:\n{text}",
+        crate::handover::transcript(history)
+    )
 }
 
 fn now() -> u64 {
@@ -550,6 +545,7 @@ impl Engine {
             let conv = c.convs.get_mut(&id).expect("loaded conversation");
             conv.working_folder = folder;
             conv.sessions.clear();
+            conv.tentative.clear();
             conv.cost_base.clear();
             let result = conv.clone();
             c.save(&id);
@@ -910,7 +906,7 @@ impl Core {
         // A Codex session saved before R121 carries the isolated host command tool, which no mode the person can pick uses
         // any more: it restarts once, with visible history, without it.
         if c.command_gate {
-            c.sessions.remove(&Vendor::Codex);
+            c.forget_session(Vendor::Codex);
             c.cost_base.remove(&Vendor::Codex);
             c.command_gate = false;
         }
@@ -1056,14 +1052,21 @@ impl Core {
         if entry.sid != sid {
             return;
         }
-        let vendor = entry.vendor;
+        let (vendor, resumed) = (entry.vendor, entry.resumed);
         let turn_id = entry.turn.clone();
         // A turn ran on the session: from here on it is the conversation's session for this vendor.
-        if !matches!(event, EngineEvent::Started { .. } | EngineEvent::Quota { .. } | EngineEvent::Signals(_) | EngineEvent::Error { .. })
-            && let Some(id) = self.live.get_mut(conv).and_then(|l| l.unsaved_session.take())
+        if !matches!(
+            event,
+            EngineEvent::Started { .. }
+                | EngineEvent::TurnStarted
+                | EngineEvent::Quota { .. }
+                | EngineEvent::Signals(_)
+                | EngineEvent::Error { .. }
+        ) && let Some(id) = self.live.get_mut(conv).and_then(|l| l.unsaved_session.take())
             && let Some(c) = self.convs.get_mut(conv)
         {
             c.sessions.insert(vendor, id);
+            c.tentative.remove(&vendor);
             if vendor == Vendor::Codex {
                 c.command_gate = self.live.get(conv).is_some_and(|l| l.permissions == Permissions::Isolated);
             }
@@ -1073,6 +1076,20 @@ impl Core {
             }
         }
         match event {
+            // Codex accepted the turn: if Faber dies now, the next launch resumes this session instead of starting one that never
+            // heard of the turn.
+            EngineEvent::TurnStarted => {
+                let fresh = self.live.get(conv).and_then(|l| l.unsaved_session.clone());
+                if let (Some(id), Some(c)) = (fresh, self.convs.get_mut(conv))
+                    && c.sessions.get(&vendor) != Some(&id)
+                {
+                    c.tentative.insert(vendor, id);
+                    if !c.messages.is_empty() {
+                        self.save(conv);
+                    }
+                }
+                return;
+            }
             EngineEvent::Started { session_id, model } => {
                 // A CLI started while the user typed reports its model before any answer exists; later answers use it too.
                 if let Some(l) = self.live.get_mut(conv) {
@@ -1272,12 +1289,17 @@ impl Core {
             EngineEvent::Error { message, fatal } => {
                 // The CLI no longer has the session this launch resumed (a warm-up that never ran a turn, or a cleaned-up history).
                 let mut message = message;
-                if fatal && recovery::session_lost(&message) {
+                if fatal && resumed && recovery::session_lost(&message) {
+                    // Only a session that never took a turn may be replaced silently: not one whose turn was accepted, and not
+                    // a reply that already holds work (partial text, tool actions, a retry after the quota ran out).
+                    let silent = !self.convs.get(conv).is_some_and(|c| c.tentative.contains_key(&vendor))
+                        && !self.reply_has_work(conv, turn_id.as_deref())
+                        && !self.said_on(conv, vendor, turn_id.as_deref());
                     if let Some(c) = self.convs.get_mut(conv) {
-                        c.sessions.remove(&vendor);
+                        c.forget_session(vendor);
                     }
-                    // Nothing was ever said on that session, so a new one with the same settings runs this turn once.
-                    if !self.said_on(conv, vendor, turn_id.as_deref()) && self.rerun_fresh(conv, turn_id.as_deref()) {
+                    // A new session with the same settings runs this turn once; a fresh launch is never `resumed`, so it cannot loop.
+                    if silent && self.rerun_fresh(conv, turn_id.as_deref()) {
                         return;
                     }
                     // Turns did run there: say so, and let the next message start a session that is given the visible history.
@@ -1634,7 +1656,7 @@ impl Core {
             }
             None => fallback.clone(),
         };
-        let joining_late = !c.sessions.contains_key(&pick.vendor) && !c.messages.is_empty();
+        let joining_late = c.resumable(pick.vendor).is_none() && !c.messages.is_empty();
         let history = c.messages.clone();
         let at = now();
         let mut question = Message::new(new_id(), Role::User, item.text.clone(), at);
@@ -1882,7 +1904,7 @@ impl Core {
         });
         // The hooks switch matters only while asking; with full access the person's hooks always run, as in the CLI itself.
         let user_hooks = self.store.settings().user_hooks == Some(true) && permissions == Permissions::Ask;
-        let resume = c.sessions.get(&pick.vendor).cloned();
+        let resume = c.resumable(pick.vendor).cloned();
         let resumed = resume.is_some();
         let area = c.area;
         // The conversation's own name, fixed when it began: a rename in Settings never reaches a conversation under way.
@@ -1969,6 +1991,7 @@ impl Core {
             project_id,
             working_folder: None,
             sessions: BTreeMap::new(),
+            tentative: BTreeMap::new(),
             command_gate: false,
             cost_base: BTreeMap::new(),
             allow_always: None,
@@ -2037,7 +2060,7 @@ impl Core {
         if c.title.is_empty() {
             c.title = req.text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(60).collect();
         }
-        let joining_late = !c.sessions.contains_key(&pick.vendor) && !c.messages.is_empty();
+        let joining_late = c.resumable(pick.vendor).is_none() && !c.messages.is_empty();
         let history = c.messages.clone();
         // Attached files are saved where the model can open them with its own tools (PDFs, spreadsheets, archives...).
         let name = |p: &Path| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
