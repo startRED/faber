@@ -9,6 +9,7 @@ import {
   type AppEvent,
   type Conversation,
   type Experience,
+  type Project,
   type RunningItem,
   type Settings as Saved,
   type Summary,
@@ -22,6 +23,7 @@ import { Icon, VendorMark } from './Glyphs.tsx';
 import { failureText, lang, t, templates, useLanguage } from './i18n.ts';
 import { createWidth } from './layout.ts';
 import { Lockup, Peek } from './Mark.tsx';
+import { Recents } from './Recents.tsx';
 import { modelOptions, prettyModel } from './models.ts';
 import { animateDetails, animateList, watchMotion } from './motion.ts';
 import { createOpening, upsert } from './opening.ts';
@@ -514,6 +516,11 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
       void fresh({ area: 'project', projectId: project.id });
     }
   };
+  const openProjects = (projects: Project[]) => {
+    if (!projects.length) return;
+    closeSide(false);
+    void fresh({ area: 'project', projectId: projects[0].id });
+  };
   const remove = async (id: string) => {
     await api.remove(id);
     try { localStorage.removeItem(`faber.choice.${id}`); } catch { /* Storage can be unavailable. */ }
@@ -680,15 +687,16 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
               onSave={saveSettings}
               chatFolder={current()?.workingFolder}
               chatFolderLocked={!!current()?.messages.length || loading()}
-              onChatFolder={area() === 'chat' ? async (scratch) => {
+              onChatFolder={area() === 'chat' ? async (scratch, path) => {
                 try {
-                  const conversation = await api.chatFolder(current()?.id, scratch);
+                  const conversation = await api.chatFolder(current()?.id, scratch, path);
                   if (conversation) {
                     await refresh();
                     await go({ area: 'chat', id: conversation.id });
                   }
                 } catch (err) { setSaveError(failureText(err)); }
               } : undefined}
+              onError={(err) => setSaveError(failureText(err))}
               onClose={closeSettings}
               onOpenSetup={(keep) => {
                 setBack(keep);
@@ -845,7 +853,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                         </Show>
                         <Show
                           when={current()?.messages.length ? current() : undefined}
-                          fallback={<Empty vendors={state().vendors.length} area={area()} project={project()} onConnect={openSetup} />}
+                          fallback={<Empty vendors={state().vendors.length} area={area()} project={project()} onConnect={openSetup} onChoose={() => void addProject().catch(fail)} onOpened={openProjects} onError={fail} />}
                         >
                           {(c) => (
                             <Thread
@@ -905,7 +913,15 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   );
 }
 
-function Empty(props: { vendors: number; area: Place['area']; project?: { name: string; path: string }; onConnect: () => void }) {
+function Empty(props: {
+  vendors: number;
+  area: Place['area'];
+  project?: { name: string; path: string };
+  onConnect: () => void;
+  onChoose: () => void;
+  onOpened: (projects: Project[]) => void;
+  onError: (error: unknown) => void;
+}) {
   return (
     <div class="empty">
       <Switch>
@@ -921,6 +937,16 @@ function Empty(props: { vendors: number; area: Place['area']; project?: { name: 
           <Peek />
           <h1 class="display">{t('empty.openProjectTitle')}</h1>
           <p>{t('empty.openProjectBody')}</p>
+          <button class="btn" onClick={() => props.onChoose()}>
+            <Icon name="folder" small />
+            {t('recents.choose')}
+          </button>
+          <Recents
+            mode="project"
+            onPick={(path) => void api.openFolders([path]).then(props.onOpened, props.onError)}
+            onOpened={props.onOpened}
+            onError={props.onError}
+          />
         </Match>
         <Match when={props.area === 'project'}>
           <Peek />

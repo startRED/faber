@@ -17,6 +17,7 @@ pub mod model;
 pub mod nudge;
 pub mod permissions;
 pub mod proc;
+pub mod recents;
 pub mod route;
 pub mod router;
 pub mod signals;

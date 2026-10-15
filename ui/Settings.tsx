@@ -9,6 +9,7 @@ import { vendorName } from './models.ts';
 import { animateList } from './motion.ts';
 import { accountLine, freshness, type Quotas, usageRows } from './sidebar.ts';
 import { PlanName } from './QuotaCard.tsx';
+import { Recents } from './Recents.tsx';
 import { ageWords, untilReset, windowName } from './Sidebar.tsx';
 
 const SECTIONS = [
@@ -48,7 +49,9 @@ interface Props {
   onSave: (patch: Saved) => Promise<boolean>;
   chatFolder?: string;
   chatFolderLocked?: boolean;
-  onChatFolder?: (scratch: boolean) => Promise<void>;
+  onChatFolder?: (scratch: boolean, path?: string) => Promise<void>;
+  /** Shows an error the section could not handle itself, such as a recents list that could not be saved. */
+  onError?: (error: unknown) => void;
   onClose: () => void;
   /** Opens the account cards; Settings comes back as it was, from `keep`. */
   onOpenSetup: (keep: Keep) => void;
@@ -168,6 +171,7 @@ export function Settings(props: Props) {
                   <button class="btn" disabled={props.chatFolderLocked} onClick={() => void props.onChatFolder?.(true)}>{t('set.privateFolder')}</button>
                 </Show>
                 <Show when={props.chatFolderLocked}><p class="hint">{t('error.chatFolderLocked')}</p></Show>
+                <Recents mode="chat" disabled={props.chatFolderLocked} onPick={(path) => void props.onChatFolder?.(false, path)} onError={(error) => props.onError?.(error)} />
               </Show>
             </Row>
             <Row label={t('set.notifications')}>

@@ -43,6 +43,8 @@ mod project_security;
 mod quota;
 #[path = "quota_live.rs"]
 mod quota_live;
+#[path = "recents.rs"]
+mod recents;
 #[path = "route.rs"]
 mod route;
 #[path = "route_pacing.rs"]

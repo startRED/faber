@@ -3,6 +3,7 @@
 
 use crate::ledger::Ledger;
 use crate::model::{Conversation, Project, Settings, Summary};
+use crate::recents::Recents;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::fs;
@@ -13,6 +14,7 @@ pub struct Store {
     conversations: PathBuf,
     projects: PathBuf,
     settings: PathBuf,
+    recents: PathBuf,
     budget: PathBuf,
     cache_health: PathBuf,
 }
@@ -39,6 +41,7 @@ impl Store {
             conversations,
             projects: data_dir.join("projects.json"),
             settings: data_dir.join("settings.json"),
+            recents: data_dir.join("recents.json"),
             budget: data_dir.join("budget.json"),
             cache_health: data_dir.join("cache-health.jsonl"),
         }
@@ -93,6 +96,14 @@ impl Store {
 
     pub fn save_settings(&self, settings: &Settings) -> io::Result<()> {
         write(&self.settings, settings)
+    }
+
+    pub fn recents(&self) -> Recents {
+        read::<Recents>(&self.recents).unwrap_or_default().bounded()
+    }
+
+    pub fn save_recents(&self, recents: &Recents) -> io::Result<()> {
+        write(&self.recents, recents)
     }
 
     /// What Faber remembers about each vendor's quota. A missing, damaged or unreadable file is an empty ledger: it only

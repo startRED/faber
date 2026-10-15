@@ -56,6 +56,7 @@ const FAMILIES: [&str; 6] = ["Archivo", "Barlow Condensed", "Bodoni Moda", "IBM 
 
 pub fn scenarios() -> Vec<Scenario> {
     vec![
+        Scenario { name: "recent folders open a project in one click and a folder that is gone cannot be picked", run: recent_folders },
         Scenario { name: "the app opens on an empty chat and fits the window", run: opens_empty },
         Scenario {
             name: "a chat thread with a tool card and a question card is readable and whole in each of the six looks",
@@ -138,7 +139,7 @@ const COLOUR_OF: &str = "(name) => { const p = document.createElement('i'); p.st
 /// The drawings of Curioso on the stage: how many there are, how big each is, and the colour it is drawn in.
 fn peeks() -> String {
     format!(
-        "(() => {{ const colour = {COLOUR_OF}; return {{ ink3: colour('--ink-3'), found: [...document.querySelectorAll('.empty svg')].map((s) => {{ const r = s.getBoundingClientRect(); return {{ w: r.width, h: r.height, fill: getComputedStyle(s.querySelector('path')).fill }}; }}) }}; }})()"
+        "(() => {{ const colour = {COLOUR_OF}; return {{ ink3: colour('--ink-3'), found: [...document.querySelectorAll('.empty .peek svg')].map((s) => {{ const r = s.getBoundingClientRect(); return {{ w: r.width, h: r.height, fill: getComputedStyle(s.querySelector('path')).fill }}; }}) }}; }})()"
     )
 }
 
@@ -186,6 +187,44 @@ fn shows_the_brand(ctx: &mut Ctx) -> Result {
     page.wait_visible(&name)?;
     looks(page, "a project with no conversations")?;
     ctx.shot(&mut app, "peek-project")
+}
+
+fn recent_folders(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let work = ctx.sb.data.join("work");
+    let names = ["alpha", "beta", "gamma", "delta", "epsilon"];
+    for name in names {
+        std::fs::create_dir_all(work.join(name)).map_err(|e| e.to_string())?;
+    }
+    let path = |name: &str| work.join(name).to_string_lossy().into_owned();
+    // "gamma" is stored but gone from the disk by the time the screen is read.
+    std::fs::remove_dir(work.join("gamma")).map_err(|e| e.to_string())?;
+    let recents = json!({
+        "folders": names.map(path),
+        "environments": [{ "id": "env-1", "name": "Pair", "folders": [path("alpha"), path("beta")] }]
+    });
+    std::fs::write(ctx.sb.data.join("recents.json"), recents.to_string()).map_err(|e| e.to_string())?;
+    let launch = claude_chat(ctx);
+    let mut app = ctx.launch(launch)?;
+    let page = &mut app.page;
+    let projects = page.named("button", "area.projects")?;
+    page.click(&projects)?;
+    let open = page.named("heading", "empty.openProjectTitle")?;
+    page.wait_visible(&open)?;
+    let rows = css(".recents section:first-child .rec");
+    page.wait_count(&rows, 5)?;
+    let gone = css(".recents .rec.gone .rec-main");
+    same(page.count(&gone)?, 1, "folders shown as gone")?;
+    ensure(page.is_disabled(&gone)?, || "a folder that is gone can be picked".into())?;
+    ctx.shot(&mut app, "recents-open-project")?;
+    let page = &mut app.page;
+    let first = rows.clone().css(".rec-main").has_text("alpha");
+    page.click(&first)?;
+    let name = role("heading", "alpha");
+    page.wait_visible(&name)?;
+    ctx.shot(&mut app, "recents-opened")?;
+    let saved = std::fs::read_to_string(ctx.sb.data.join("projects.json")).map_err(|e| e.to_string())?;
+    ensure(saved.contains("alpha"), || format!("the project was not saved: {saved}"))
 }
 
 fn streams_an_answer(ctx: &mut Ctx) -> Result {

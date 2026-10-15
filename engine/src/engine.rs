@@ -13,6 +13,7 @@ use crate::ledger::{Ledger, Work, plausible};
 use crate::model::*;
 use crate::nudge;
 use crate::proc::Spawner;
+use crate::recents::RecentsView;
 use crate::router::{Choice, Effort, Pick, pick_model};
 use crate::signals::Signals;
 use crate::store::Store;
@@ -521,6 +522,9 @@ impl Engine {
             if let Some(live) = c.live.remove(&id) {
                 live.session.close();
             }
+            if let Some(f) = &folder {
+                c.note_folder(f);
+            }
             let conv = c.convs.get_mut(&id).expect("loaded conversation");
             conv.working_folder = folder;
             conv.sessions.clear();
@@ -543,6 +547,58 @@ impl Engine {
     }
     pub fn add_project(&self, path: &str) -> Project {
         self.with(|c| c.add_project(path))
+    }
+    /// A folder picked in a dialog or taken from the recents, as a project. A refused or missing folder adds nothing.
+    pub fn open_folder(&self, path: &str) -> Result<Project, String> {
+        let Some(path) = crate::recents::resolved(path) else { return Err("error.workingFolder".into()) };
+        if !Path::new(&path).is_dir() {
+            return Err("error.recents.gone".into());
+        }
+        Ok(self.with(|c| c.add_project(&path)))
+    }
+    pub fn recents(&self) -> RecentsView {
+        self.with(|c| c.store.recents().view())
+    }
+    pub fn forget_recent(&self, path: &str) -> Result<(), String> {
+        self.change_recents(|r| {
+            r.forget(path);
+            Ok(())
+        })
+    }
+    pub fn save_environment(&self, name: &str, folders: &[String]) -> Result<(), String> {
+        self.change_recents(|r| r.save_environment(new_id(), name, folders).map_err(String::from))
+    }
+    pub fn forget_environment(&self, id: &str) -> Result<(), String> {
+        self.change_recents(|r| {
+            r.forget_environment(id);
+            Ok(())
+        })
+    }
+    /// Reads the recents, changes them and writes them back; a failed write is an error the screen can say, never a silent success.
+    fn change_recents(&self, change: impl FnOnce(&mut crate::recents::Recents) -> Result<(), String>) -> Result<(), String> {
+        self.with(|c| {
+            let mut recents = c.store.recents();
+            change(&mut recents)?;
+            c.store.save_recents(&recents).map_err(|_| "error.recents.saveFailed".to_string())
+        })
+    }
+    /// Opens every folder of an environment that can still be opened; fails only when none can.
+    pub fn start_environment(&self, id: &str) -> Result<Vec<Project>, String> {
+        let folders = self.with(|c| c.store.recents().environment(id).map(|e| e.folders.clone())).ok_or("error.environment.gone")?;
+        self.open_folders(&folders)
+    }
+    /// Opens each folder that can be opened as a project, the first of the list ending up the most recent.
+    pub fn open_folders(&self, folders: &[String]) -> Result<Vec<Project>, String> {
+        let mut projects = Vec::new();
+        let mut failure = String::from("error.environment.folders");
+        for folder in folders.iter().rev() {
+            match self.open_folder(folder) {
+                Ok(p) => projects.push(p),
+                Err(e) => failure = e,
+            }
+        }
+        projects.reverse();
+        if projects.is_empty() { Err(failure) } else { Ok(projects) }
     }
     pub fn remove_project(&self, id: &str) {
         self.with(|c| {
@@ -2114,9 +2170,19 @@ impl Core {
         Some(TerminalCommand { command: cli.command, args: cli.prefix.into_iter().chain(resume).collect(), cwd: self.cwd_of(&c).ok()? })
     }
 
+    /// A folder was used: it goes to the top of the recents (a refused one is not kept).
+    fn note_folder(&self, path: &str) {
+        let mut recents = self.store.recents();
+        if recents.used(path).is_some() {
+            // Remembering is a courtesy: opening the folder never fails because the list could not be written.
+            let _ = self.store.save_recents(&recents);
+        }
+    }
+
     fn add_project(&mut self, path: &str) -> Project {
         let mut projects = self.store.projects();
-        if let Some(found) = projects.iter().find(|p| p.path == path) {
+        self.note_folder(path);
+        if let Some(found) = projects.iter().find(|p| crate::recents::same_place(&p.path, path)) {
             return found.clone();
         }
         let name = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string());
