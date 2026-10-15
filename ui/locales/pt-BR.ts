@@ -145,6 +145,7 @@ export const ptBR: Messages = {
   'tool.webSearch': 'Busca na web',
   'tool.mcp': 'Ferramenta',
   'tool.tool': 'Ferramenta',
+  'tool.shell': 'Shell',
   'answer.stopped': 'Interrompida.',
   'answer.copy': 'Copiar',
   'answer.redo': 'Refazer com…',

@@ -24,7 +24,7 @@ export function thinkingParts(text: string): ThinkingPart[] {
     .filter((part) => part.text);
 }
 
-const SHELLS: Record<string, string> = { powershell: 'PowerShell', pwsh: 'PowerShell', cmd: 'cmd', bash: 'Bash', sh: 'Shell', zsh: 'Zsh' };
+const SHELLS: Record<string, string> = { powershell: 'PowerShell', pwsh: 'PowerShell', cmd: 'cmd', bash: 'Bash', zsh: 'Zsh' };
 const WRAPPED = /^\s*(?:"([^"]+)"|(\S+))\s+(?:-No\w+\s+)*(?:-Command|-c|-lc|\/c)\s+([\s\S]+)$/i;
 // Codex names its internal item kinds in camelCase; the screen names them in words.
 const KINDS: Record<string, Key> = {
@@ -54,7 +54,7 @@ export function toolRow(tool: ToolUse): ToolRow {
   const wrapped = KINDS[tool.name] === 'tool.command' && WRAPPED.exec(raw);
   if (wrapped) {
     const exe = (wrapped[1] ?? wrapped[2] ?? '').split(/[\\/]+/).pop()!.replace(/\.exe$/i, '').toLowerCase();
-    const shell = SHELLS[exe];
+    const shell = exe === 'sh' ? t('tool.shell') : SHELLS[exe];
     if (shell) {
       let rest = wrapped[3]!.trim();
       if (rest.length > 1 && rest.startsWith('"') && rest.endsWith('"')) rest = rest.slice(1, -1).replace(/\\"/g, '"');

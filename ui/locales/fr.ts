@@ -147,6 +147,7 @@ export const fr: Messages = {
   'tool.webSearch': 'Recherche web',
   'tool.mcp': 'Outil',
   'tool.tool': 'Outil',
+  'tool.shell': 'Shell',
   'answer.stopped': 'Interrompue.',
   'answer.copy': 'Copier',
   'answer.redo': 'Refaire avec…',

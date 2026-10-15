@@ -103,13 +103,17 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
     const end = m().activityEnd;
     return m().tools?.length && Number.isInteger(end) && end! > 0 && end! < m().text.length && m().text.slice(end).trim() ? end! : 0;
   };
-  const narration = () => boundary() ? [m().text.slice(0, boundary())] : [];
-  // A reply that opens by repeating the last status line the activity already holds shows it once.
-  const finalText = () => {
-    const text = m().text.slice(boundary());
-    const status = narration().at(-1)?.trim().split(/\n{2,}/).at(-1)?.trim();
-    const rest = status && text.trimStart().startsWith(status) ? text.trimStart().slice(status.length).replace(/^\s+/, '') : '';
-    return rest ? rest : text;
+  // The answer is always kept whole. A status sentence that is exactly the answer's opening paragraph is dropped from the
+  // activity instead, so it shows once.
+  const finalText = () => m().text.slice(boundary());
+  const narration = () => {
+    if (!boundary()) return [];
+    const paragraphs = m().text.slice(0, boundary()).trimEnd().split(/\n{2,}/);
+    const last = paragraphs.at(-1)?.trim();
+    const answer = finalText().trimStart();
+    if (last && answer.startsWith(last) && (answer.length === last.length || /\s/.test(answer[last.length]!))) paragraphs.pop();
+    const rest = paragraphs.join('\n\n').trim();
+    return rest ? [rest] : [];
   };
   const thinking = () => thinkingParts(m().thinking ?? '');
   const steps = () => narration().length + (m().tools?.length ?? 0) + (thinking().length ? 1 : 0);

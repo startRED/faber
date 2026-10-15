@@ -170,3 +170,37 @@ check('thread: a Codex work log reads cleanly: titles on their own lines, tidy c
     root.remove();
   }
 });
+
+check('thread: the final answer is never cut, long commands are cut in the middle, and a command that looks like markup stays text', () => {
+  const root = document.createElement('div');
+  document.body.append(root);
+  const long = `START ${'x'.repeat(300)} END`;
+  const markup = '<img src=x onerror=alert(1)> **not bold** & <b>raw</b>';
+  const narration = 'Check\n\n';
+  const answer = 'Checking files.';
+  const [message] = createSignal<Message>({
+    id: 'worklog-edges', role: 'assistant', at: 0, status: 'done', text: narration + answer, textBreaks: [narration.length], activityEnd: narration.length,
+    tools: [
+      { id: 'l', name: 'Bash', input: { command: long }, ok: true },
+      { id: 'm', name: 'Bash', input: { command: markup }, ok: true },
+    ],
+  });
+  const dispose = render(() => createComponent(Thread, {
+    get messages() { return [message()]; }, from: 0, conversationId: 'worklog-edges', options: [], onBranch: () => {},
+  }), root);
+  try {
+    const group = root.querySelector<HTMLDetailsElement>('.activity')!;
+    group.open = true;
+    equal(root.querySelector('.ai > .md')!.textContent?.trim(), answer, 'a status that only starts the answer does not cut it');
+    ok(group.textContent?.includes('Check'), 'and stays in the activity');
+    const [first, second] = [...group.querySelectorAll<HTMLElement>('.tools > span')];
+    const cut = first!.querySelector('i')!.textContent!;
+    ok(cut.includes('…') && cut.length <= 96 && cut.startsWith('START') && cut.endsWith('END'), cut);
+    equal(first!.title, long, 'the full command is the tooltip');
+    equal(second!.querySelector('i')!.textContent, markup);
+    equal(second!.querySelectorAll('img, b i, i b').length, 0, 'no markup is built from a command');
+  } finally {
+    dispose();
+    root.remove();
+  }
+});

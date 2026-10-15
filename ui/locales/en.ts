@@ -146,6 +146,7 @@ export const en = {
   'tool.webSearch': 'Web search',
   'tool.mcp': 'Tool',
   'tool.tool': 'Tool',
+  'tool.shell': 'Shell',
   'answer.stopped': 'Stopped.',
   'answer.copy': 'Copy',
   'answer.redo': 'Redo with…',
