@@ -380,3 +380,31 @@ async fn a_fresh_launch_that_fails_at_once_fails_the_reply() {
     assert_eq!((reply.status, reply.error.as_deref()), (Some(Status::Error), Some("error.projectGone")));
     engine.shutdown();
 }
+
+/// Earlier images cannot go as text and files go by reference: the recovered reply says plainly that the history was resent.
+#[tokio::test]
+async fn recovery_carries_attachment_references_and_tells_the_user_that_images_were_left_out() {
+    let (dir, disk) = (tempfile::tempdir().unwrap(), Shared::default());
+    let (engine, mut rx) = start(dir.path(), &disk);
+    let first = SendRequest {
+        images: vec![faber_engine::model::Image { media_type: "image/png".into(), base64: "AAAA".into() }],
+        files: vec![faber_engine::workspace::Attachment { name: "notes.pdf".into(), base64: "JVBERi0xLjQ=".into() }],
+        ..send(None, "look at these", Effort::High)
+    };
+    let id = engine.send(first).unwrap();
+    assert_eq!(finished(&mut rx).await.note, None, "a normal turn carries no note");
+    engine.shutdown();
+    disk.lock().unwrap().ran.clear(); // Codex lost the rollout file
+    let (engine, mut rx) = start(dir.path(), &disk);
+    engine.send(send(Some(&id), "second", Effort::High)).unwrap();
+    assert_eq!(finished(&mut rx).await.error.as_deref(), Some("error.sessionLost"));
+    engine.send(send(Some(&id), "third", Effort::High)).unwrap();
+    let reply = finished(&mut rx).await;
+    assert_eq!((reply.status, reply.note.as_deref()), (Some(Status::Done), Some("note.historyResent")), "{:?}", reply.error);
+    let d = disk.lock().unwrap();
+    let text = d.turns.last().unwrap();
+    assert!(text.contains("[attached file: attachments/notes.pdf]"), "{text}");
+    assert!(text.contains("[1 image(s) sent here are not included]"), "{text}");
+    drop(d);
+    engine.shutdown();
+}

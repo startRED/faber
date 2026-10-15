@@ -119,7 +119,12 @@ impl Core {
         let Some(c) = self.convs.get(conv) else { return false };
         let at = c.messages.iter().position(|m| m.id == t.reply).unwrap_or(0);
         let history = &c.messages[..at.saturating_sub(1)];
-        let text = if history.is_empty() { t.text.clone() } else { with_history(history, &t.text) };
+        let (area, data_dir) = (c.area, self.opts.data_dir.clone());
+        let resent = !history.is_empty();
+        let text = if resent { with_history(history, &t.text, &|n| attachment_place(area, &data_dir, conv, n)) } else { t.text.clone() };
+        if let Some(m) = self.convs.get_mut(conv).and_then(|c| c.messages.iter_mut().find(|m| m.id == t.reply)) {
+            m.note = resent.then(|| "note.historyResent".to_string());
+        }
         if let Some(l) = self.live.remove(conv) {
             l.session.close();
         }
@@ -444,7 +449,9 @@ impl Core {
 
 #[cfg(test)]
 mod tests {
-    use super::{plan_limit, session_lost};
+    use super::*;
+    use serde_json::json;
+    use std::sync::Mutex;
     #[test]
     fn a_lost_session_is_told_from_other_failures() {
         assert!(session_lost("Codex thread failed: no rollout found for thread id 01a1"));
@@ -458,5 +465,110 @@ mod tests {
         assert!(plan_limit("usage_limit_reached"));
         assert!(!plan_limit("429: too many requests; retry after 30 seconds"));
         assert!(!plan_limit("connection closed"));
+    }
+
+    /// Starts a conversation whose resumed Codex session reports a lost session, with the reply shaped by `shape` and a transfer
+    /// that was `retried` or not. Returns the reply after the error and how many processes the engine tried to start.
+    fn lost(shape: impl FnOnce(&mut Message), retried: bool) -> (Message, usize) {
+        use crate::events::EngineEvent;
+        let spawned = Arc::new(Mutex::new(0));
+        let counted = spawned.clone();
+        let opts = EngineOptions {
+            data_dir: tempfile::tempdir().unwrap().keep(),
+            clis: BTreeMap::from([(Vendor::Codex, Cli { command: "codex".into(), prefix: vec![] })]),
+            spawn: Arc::new(move |_, _, _| {
+                *counted.lock().unwrap() += 1;
+                Err(std::io::Error::other("no process in this test"))
+            }),
+            windows: false,
+            claude_env_billed: false,
+            max_warm: 1,
+            idle: Duration::from_secs(60),
+            runtime: tokio::runtime::Handle::current(),
+            ask: None,
+        };
+        let engine = Engine::new(opts, Arc::new(|_| {}));
+        let reply = engine.with(|c| {
+            let id = c.blank(Area::Chat, None);
+            let conv = c.convs.get_mut(&id).unwrap();
+            conv.messages.push(Message::new("question".into(), Role::User, "question".into(), 1));
+            let mut reply = Message::new("reply".into(), Role::Assistant, String::new(), 2);
+            reply.vendor = Some(Vendor::Codex);
+            reply.status = Some(Status::Streaming);
+            shape(&mut reply);
+            conv.messages.push(reply);
+            let pick = Pick { vendor: Vendor::Codex, model: None, effort: "medium".into(), reason: "reason.test".into(), pace: None };
+            c.transfers.insert(
+                id.clone(),
+                Transfer {
+                    reply: "reply".into(),
+                    pick,
+                    text: "question".into(),
+                    images: vec![],
+                    by_hand: true,
+                    retried,
+                    moving: false,
+                    check: "glance",
+                },
+            );
+            c.live.insert(
+                id.clone(),
+                Live {
+                    cwd: PathBuf::new(),
+                    vendor: Vendor::Codex,
+                    model: None,
+                    running: None,
+                    effort: "medium".into(),
+                    sid: 1,
+                    session: Session::from_fn(|_| {}),
+                    turn: Some("reply".into()),
+                    break_pending: false,
+                    answer_started: false,
+                    used: 0,
+                    cli: Cli { command: "codex".into(), prefix: vec![] },
+                    resumed: true,
+                    permissions: Permissions::FullAccess,
+                    by_hand: true,
+                    approved: false,
+                    started: 0.0,
+                    served: false,
+                    unsaved_session: None,
+                    steering: vec![],
+                },
+            );
+            let message = "Codex thread failed: no rollout found for thread id x".to_string();
+            c.handle(&id, 1, EngineEvent::Error { message, fatal: true });
+            c.convs[&id].messages[1].clone()
+        });
+        let spawns = *spawned.lock().unwrap();
+        (reply, spawns)
+    }
+
+    #[tokio::test]
+    async fn a_reply_with_nothing_done_is_replayed_on_a_new_session() {
+        let (_, spawns) = lost(|_| {}, false);
+        assert!(spawns > 0, "the control: without work the turn runs again on a new session");
+    }
+
+    #[tokio::test]
+    async fn a_quota_retry_is_never_replayed_even_before_any_text() {
+        let (reply, spawns) = lost(|_| {}, true);
+        assert_eq!((spawns, reply.error.as_deref()), (0, Some("error.sessionLost")));
+    }
+
+    #[tokio::test]
+    async fn a_reply_with_only_tool_actions_is_never_replayed() {
+        let tool = |m: &mut Message| {
+            m.tools = Some(vec![crate::model::ToolUse {
+                id: "t1".into(),
+                name: "Bash".into(),
+                input: json!({ "command": "git push" }),
+                ok: Some(true),
+                output: Some("pushed".into()),
+                declined: false,
+            }]);
+        };
+        let (reply, spawns) = lost(tool, false);
+        assert_eq!((spawns, reply.error.as_deref()), (0, Some("error.sessionLost")));
     }
 }

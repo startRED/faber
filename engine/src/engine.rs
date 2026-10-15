@@ -168,13 +168,40 @@ struct Live {
 /// Messages waiting behind a running turn. Each may carry images, which stay in memory and go out with every queue event.
 const MAX_QUEUED: usize = 10;
 
-/// A model that joins a conversation midway reads what was said before, as plain text: every message, with each tool's result
-/// shortened as `handover::transcript` does. Nothing is cut silently; a conversation too long for the model fails visibly.
-pub fn with_history(history: &[Message], text: &str) -> String {
-    format!(
-        "Earlier in this conversation, with another assistant:\n\n{}\n\nNow the user says:\n{text}",
-        crate::handover::transcript(history)
-    )
+/// A model that joins a conversation midway, or a fresh session that replaces a lost one, reads what was said before as plain
+/// text: every message, the names and places of the files attached, a count of the images it cannot see, and each tool's result
+/// shortened as `handover::transcript` does. The reply that carries it says so (`note.historyResent`).
+pub fn with_history(history: &[Message], text: &str, place: &dyn Fn(&str) -> String) -> String {
+    let lines = history
+        .iter()
+        .map(|m| {
+            let mut line = crate::handover::transcript(std::slice::from_ref(m));
+            for file in m.attachments.iter().flatten() {
+                line += &format!("\n[attached file: {}]", place(file));
+            }
+            match m.images.as_ref().map_or(0, |i| i.len()) {
+                0 => {}
+                n => line += &format!("\n[{n} image(s) sent here are not included]"),
+            }
+            line
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    format!("Earlier in this conversation, with another assistant:\n\n{lines}\n\nNow the user says:\n{text}")
+}
+
+/// Where a stored attachment can be opened: the working folder's own `attachments` in Chat, the data folder's in Projects.
+pub(crate) fn attachment_place(area: Area, data_dir: &Path, conversation: &str, name: &str) -> String {
+    if area == Area::Chat {
+        format!("attachments/{name}")
+    } else {
+        data_dir.join("attachments").join(conversation).join(name).to_string_lossy().into_owned()
+    }
+}
+
+/// This vendor already answered in the conversation, yet has no session to continue: the session was lost.
+fn session_was_lost(c: &Conversation, vendor: Vendor) -> bool {
+    c.resumable(vendor).is_none() && c.messages.iter().any(|m| m.role == Role::Assistant && m.vendor == Some(vendor))
 }
 
 fn now() -> u64 {
@@ -1656,9 +1683,12 @@ impl Core {
             }
             None => fallback.clone(),
         };
+        let data_dir = self.opts.data_dir.clone();
         let joining_late = c.resumable(pick.vendor).is_none() && !c.messages.is_empty();
         let history = c.messages.clone();
         let at = now();
+        let resent = joining_late && session_was_lost(c, pick.vendor);
+        let area = c.area;
         let mut question = Message::new(new_id(), Role::User, item.text.clone(), at);
         question.images = item.images.clone();
         question.attachments = item.attachments.clone();
@@ -1668,6 +1698,7 @@ impl Core {
             reply.model = pick.model.clone();
         }
         reply.reason = Some(if routing { "reason.routing".into() } else { pick.reason.clone() });
+        reply.note = resent.then(|| "note.historyResent".to_string());
         reply.tools = Some(vec![]);
         reply.status = Some(Status::Streaming);
         let reply_id = reply.id.clone();
@@ -1693,7 +1724,8 @@ impl Core {
                 check: "glance",
             },
         );
-        let text = if joining_late { with_history(&history, &model_text) } else { model_text };
+        let text =
+            if joining_late { with_history(&history, &model_text, &|n| attachment_place(area, &data_dir, id, n)) } else { model_text };
         if let Some(before) = route {
             let only = before.as_ref().map(|p| p.vendor);
             let route = self.route_for(&item.text, images.len() + attachments_len, only);
@@ -2060,7 +2092,10 @@ impl Core {
         if c.title.is_empty() {
             c.title = req.text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(60).collect();
         }
+        let data_dir = self.opts.data_dir.clone();
         let joining_late = c.resumable(pick.vendor).is_none() && !c.messages.is_empty();
+        let resent = joining_late && session_was_lost(c, pick.vendor);
+        let area = c.area;
         let history = c.messages.clone();
         // Attached files are saved where the model can open them with its own tools (PDFs, spreadsheets, archives...).
         let name = |p: &Path| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -2078,6 +2113,7 @@ impl Core {
             reply.model = pick.model.clone();
         }
         reply.reason = Some(if routing { "reason.routing".into() } else { pick.reason.clone() });
+        reply.note = resent.then(|| "note.historyResent".to_string());
         reply.tools = Some(vec![]);
         reply.status = Some(Status::Streaming);
         let reply_id = reply.id.clone();
@@ -2102,7 +2138,7 @@ impl Core {
                 check: "glance",
             },
         );
-        let text = if joining_late { with_history(&history, &text) } else { text };
+        let text = if joining_late { with_history(&history, &text, &|n| attachment_place(area, &data_dir, &id, n)) } else { text };
         if let Some(before) = route {
             let only = before.as_ref().map(|p| p.vendor);
             let route = self.route_for(&req.text, req.images.len() + req.files.len(), only);

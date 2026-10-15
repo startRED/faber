@@ -133,6 +133,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
         </Show>
       </div>
       <Show when={m().pace}>{(pace) => <p class="pace">{t(`reason.pace.${pace().kind}`, { vendor: vendorName(pace().vendor), other: m().vendor ? vendorName(m().vendor!) : t('model.auto') })}</p>}</Show>
+      <Show when={m().note}><p class="pace">{fromEngine(m().note)}</p></Show>
       <QuotaCard id={props.conversationId} m={m()} usage={props.usage ?? []} />
       <Show when={steps()}>
         <details class="activity">

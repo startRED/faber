@@ -187,6 +187,7 @@ export const es: Messages = {
   'error.settings.autostartFailed': 'Faber no pudo cambiar el inicio automático al iniciar sesión. No se cambiaron tus ajustes.',
   'error.driverStopped': 'La sesión de la CLI se detuvo inesperadamente. Intenta enviar tu mensaje de nuevo.',
   'error.sessionLost': 'La CLI ya no tiene la sesión anterior de esta conversación. Envía tu mensaje de nuevo: empieza una sesión nueva y recibe la conversación hasta ahora.',
+  'note.historyResent': 'La sesión anterior se perdió; la conversación se reenvió como texto, sin imágenes y con las salidas de las herramientas resumidas.',
   'set.back': '← Volver',
   'set.label': 'Ajustes',
   'set.general': 'General',

@@ -187,6 +187,9 @@ pub struct Message {
     /// Why the quota changed the model Auto chose, when it did.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pace: Option<PaceNote>,
+    /// A plain-language note under the reply (an i18n key): `note.historyResent` when the earlier conversation was sent again as text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wait_until: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -232,6 +235,7 @@ impl Message {
             pace: None,
             wait_until: None,
             moved_from: None,
+            note: None,
             recovery: None,
             nudge: None,
         }
