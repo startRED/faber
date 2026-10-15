@@ -82,6 +82,8 @@
       "amb-beam": "block",
       "amb-loom": "none",
       "amb-flow": "none",
+      "amb-hole": "block",
+      "hole-colors": "#cfd8e8 #5b6a92 #f2d6b8 #eebc90 #e29a62 #c8724a #9a4e30 #7a3e28 #e8e1d6 #d9b896",
       "beam-color": "rgba(243,238,226,.22)",
       "dust": "243,238,226",
       "ease": "cubic-bezier(.16,1,.3,1)",
@@ -105,6 +107,7 @@
     "themes": {
       "sala": {},
       "oficina": {
+        "amb-hole": "none",
         "frame": "#181715",
         "bg": "#121110",
         "s1": "#181715",
@@ -180,6 +183,7 @@
         "live-anim": "pulse 1.6s ease-in-out infinite"
       },
       "bancada": {
+        "amb-hole": "none",
         "frame": "#191d19",
         "bg": "#161916",
         "s1": "#1a1e1a",
@@ -252,6 +256,7 @@
     },
     "presets": {
       "manha": {
+        "amb-hole": "none",
         "frame": "#e9ede7",
         "bg": "#f3f5f0",
         "s1": "#ecf0ea",
@@ -320,6 +325,7 @@
         "live-anim": "none"
       },
       "alto": {
+        "amb-hole": "none",
         "frame": "#000000",
         "bg": "#000000",
         "s1": "#0a0a0a",
@@ -355,6 +361,7 @@
         "live-anim": "none"
       },
       "cobalto": {
+        "amb-hole": "none",
         "frame": "#080c26",
         "bg": "#0b1030",
         "s1": "#111845",

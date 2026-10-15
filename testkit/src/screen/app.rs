@@ -91,6 +91,10 @@ pub fn scenarios() -> Vec<Scenario> {
         },
         Scenario { name: "with no CLI running, Faber stays within its memory budget", run: idle_memory },
         Scenario { name: "with reduced motion on, the dust stays off and Faber stays within its memory budget", run: idle_memory_reduced },
+        Scenario {
+            name: "a new project session shows the black hole, which moves only in a shown and focused window, within the memory budget",
+            run: black_hole_in_a_project,
+        },
         Scenario { name: "after the six looks were applied in turn, Faber stays within its memory budget", run: memory_after_every_look },
         Scenario { name: "a conversation with a thousand messages opens quickly and stays within the budget", run: thousand_messages },
     ]
@@ -760,6 +764,75 @@ fn beam_cost(ctx: &mut Ctx, app: &mut Opened) -> Result {
     let (beam, beam_away) = (window(true)?, window(false)?);
     ctx.notes.push(format!("Dark Room beam, glow and dust, processor of one core: focused {beam:.1}%, unfocused {beam_away:.1}%"));
     Ok(())
+}
+
+/// The black hole behind a new project session in Dark Room: it runs in a shown, focused window and stops when the window
+/// is hidden or loses the focus. The processor time of the whole tree is read at rest, while it runs, and with a ripple
+/// started every 400 ms, then the memory.
+fn black_hole_in_a_project(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    super::shell::seed_project(ctx, "Demo")?;
+    let launch = claude_chat(ctx);
+    let mut app = ctx.launch(launch)?;
+    system_motion(&mut app.page, false)?;
+    let demo = css(".prow .item").has_text("Demo");
+    app.page.wait_visible(&demo)?;
+    app.page.click(&demo)?;
+    app.page.wait_visible(&css(".empty h1").has_text("Demo"))?;
+    let live = "document.querySelector('canvas.amb-hole')?.dataset.live";
+    let hide = |page: &mut Page, on: bool| {
+        page.eval(&format!(
+            "(() => {{ Object.defineProperty(document, 'hidden', {{ configurable: true, get: () => {on} }}); document.dispatchEvent(new Event('visibilitychange')); }})()"
+        ))
+        .map(|_| ())
+    };
+    hide(&mut app.page, false)?;
+    focus(&mut app.page, true)?;
+    app.page.wait_for("the black hole to run in a shown, focused window", &format!("{live} === 'on'"))?;
+    // Something is drawn: the canvas has lit pixels near the top of the hole.
+    let lit = "(() => { const c = document.querySelector('canvas.amb-hole'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 20) n++; return n; })()";
+    let pixels = app.page.eval(lit)?.as_u64().unwrap_or(0);
+    ensure(pixels > 5000, || format!("the black hole should be drawn, {pixels} lit pixels"))?;
+    hide(&mut app.page, true)?;
+    let hidden = app.page.eval(live)?;
+    hide(&mut app.page, false)?;
+    same(hidden.as_str(), Some("off"), "the black hole stops while the window is hidden")?;
+    focus(&mut app.page, false)?;
+    same(app.page.eval(live)?.as_str(), Some("off"), "the black hole stops while another app has the focus")?;
+    let window = |ctx: &mut Ctx, app: &mut Opened| -> std::result::Result<(f64, f64), String> {
+        let before = ctx.cpu_ms(app.id)?;
+        pause(6.0);
+        let used = ctx.cpu_ms(app.id)? - before;
+        Ok((used / 60.0, ctx.memory_mb(app.id)?.0))
+    };
+    let (away, _) = window(ctx, &mut app)?;
+    focus(&mut app.page, true)?;
+    // The same window with the hole switched off, so the readings below are the hole's own.
+    // A pixel less of width makes the hole lay itself out again and read the token, as a change of look does.
+    app.page.eval("document.documentElement.style.setProperty('--amb-hole', 'none'); document.querySelector('.ambient:has(.amb-hole)').style.right = '1px'")?;
+    app.page.wait_for("the black hole to rest when the look turns it off", &format!("{live} === 'off'"))?;
+    let (base, _) = window(ctx, &mut app)?;
+    app.page.eval(
+        "document.documentElement.style.removeProperty('--amb-hole'); document.querySelector('.ambient:has(.amb-hole)').style.right = ''",
+    )?;
+    app.page.wait_for("the black hole to run again", &format!("{live} === 'on'"))?;
+    let (running, running_mb) = window(ctx, &mut app)?;
+    app.page.eval(
+        "(() => { const area = document.querySelector('.work'); const box = area.getBoundingClientRect(); window.__ripples = setInterval(() => area.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: box.left + box.width * 0.6, clientY: box.top + box.height * 0.3 })), 400); })()",
+    )?;
+    let (ripple, ripple_mb) = window(ctx, &mut app)?;
+    app.page.eval("clearInterval(window.__ripples)")?;
+    focus(&mut app.page, false)?;
+    ctx.notes.push(format!(
+        "black hole, processor of one core and memory: same window without it {base:.1}%, unfocused {away:.1}%, running {running:.1}% {running_mb:.0} MB, rippling {ripple:.1}% {ripple_mb:.0} MB"
+    ));
+    // How it sits on a full HD screen and on a small one.
+    for (width, height) in [(1920, 1040), (1280, 800)] {
+        super::shell::set_size(&mut app.page, width, height)?;
+        pause(0.6);
+        ctx.shot(&mut app, &format!("project-hole-{width}"))?;
+    }
+    ensure(ripple_mb.max(running_mb) <= BUDGET_MB, || format!("{:.0} MB is over the {BUDGET_MB} MB budget", ripple_mb.max(running_mb)))
 }
 
 fn memory_after_every_look(ctx: &mut Ctx) -> Result {

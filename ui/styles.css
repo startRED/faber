@@ -136,7 +136,7 @@ input, textarea { caret-color: var(--accent); }
 .col { width: min(100%, 660px); margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(18px * var(--dens)); }
 .empty { display: grid; justify-items: start; gap: 16px; padding-top: 14vh; }
 .empty h1 { font-size: min(var(--fs-display), 9vw); max-width: 8.4em; overflow-wrap: anywhere; }
-.empty p { margin: 0; color: var(--ink-2); font-size: var(--fs-lead); max-width: 44ch; line-height: 1.5; }
+.empty p { margin: 0; color: var(--ink-2); font-size: var(--fs-lead); max-width: 44ch; line-height: 1.5; overflow-wrap: anywhere; }
 /* Curioso peeks over a ledge: only the top 44 of his 64 px show, with both eyes, above a hairline. */
 .peek { width: min(100%, 44ch); height: 45px; overflow: hidden; color: var(--ink-3); border-bottom: 1px solid var(--line-2); }
 .peek svg { display: block; margin-left: -2px; } /* the drawing has 2 px of room on its left; his edge lines up with the heading */
@@ -573,6 +573,8 @@ select.pill option { background: var(--s2); color: var(--ink); }
    for a look that does not have the effect, and for every look when the ambient switch is off. */
 .ambient { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; container-type: inline-size; }
 .amb { position: absolute; pointer-events: none; }
+/* The black hole behind a new project session (ui/Hole.tsx) reads its colours from --hole-colors and its ripple from caret-color. */
+.amb-hole { display: var(--amb-hole); position: absolute; inset: 0; width: 100%; height: 100%; caret-color: var(--accent); font-family: var(--font-mono); }
 .amb-beam { display: var(--amb-beam); left: calc(min(100% - 120px, 740px) - 380px); top: -80px; width: 760px; height: 680px; transform: rotate(22deg); transform-origin: 50% 0; }
 .amb-beam .beam { position: absolute; inset: 0; filter: blur(30px); opacity: 0.9; }
 .amb-beam .beam i { position: absolute; inset: 0; clip-path: polygon(44% 0, 56% 0, 86% 100%, 14% 100%); background: linear-gradient(180deg, var(--beam-color), transparent 92%); }

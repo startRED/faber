@@ -123,6 +123,14 @@ own inks.
   - **Workshop:** a loom at the bottom right whose shuttle crosses every 9 s, and paper grain.
   - **Workbench:** a flow line at the top right reading "Your idea → Claude and Codex → Done, with proof". It names only
     the vendors that are connected.
+- A new project session in Dark Room shows a black hole drawn in monospace characters on one canvas (ui/Hole.tsx,
+  --amb-hole and --hole-colors): a huge shadow cut by the right edge, an amber disk sweeping in from the lower left
+  with fibres that turn faster near the hole, the far side of the disk bent over the top as a cool arc, a photon ring, a
+  dim glow, a small planet below it and stars. Its size follows the room right of the text; words stay clear and the
+  scene dims within 240 px of them.
+  Ten times a second it works out again only the cells the hole can reach and repaints those that changed; stars
+  twinkle every 700 ms and now and then one shoots across. A click on an empty spot sends a ring of the accent for
+  1.3 s. It stops when the window is hidden or unfocused; reduced or no motion draws one still frame and no ripple.
 - The texture switch controls grain and the dot grid. The glow switch controls the focus light and the amber light,
   which exist only in Dark Room and Cobalt; the other themes use borders.
 

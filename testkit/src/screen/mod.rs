@@ -48,12 +48,13 @@ pub fn all() -> Vec<Scenario> {
 /// outcome as soon as its scenario ends, so the runner can print it while the next one runs.
 /// Seconds the slowest scenarios took on CI (2026-10-14), so `--shard` deals them evenly; any other counts as 5.
 /// A renamed scenario only falls back to 5: the parts get a little uneven, never wrong.
-const SLOW: [(&str, u32); 6] = [
+const SLOW: [(&str, u32); 7] = [
     ("with no CLI running, Faber stays within its memory budget", 45),
     ("with Auto, the answer names its model as soon as it starts", 35),
     ("sentinel: panels move through frames", 27),
     ("sentinel: the composer grows and shrinks", 15),
     ("with reduced motion on, the dust stays off", 14),
+    ("a new project session shows the black hole", 30),
     ("sentinel: no text is garbled in five languages", 14),
 ];
 

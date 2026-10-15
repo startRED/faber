@@ -63,7 +63,7 @@ pub fn scenarios() -> Vec<Scenario> {
     ]
 }
 
-fn set_size(page: &mut Page, width: u32, height: u32) -> Result {
+pub(super) fn set_size(page: &mut Page, width: u32, height: u32) -> Result {
     let size = json!({ "width": width, "height": height, "deviceScaleFactor": 1, "mobile": false });
     page.cdp.call("Emulation.setDeviceMetricsOverride", size)?;
     // The screen follows `resize`, which comes a moment after the override.

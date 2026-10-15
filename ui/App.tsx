@@ -1,5 +1,6 @@
 import { createEffect, createMemo, createSignal, Match, on, onCleanup, onMount, Show, Switch } from 'solid-js';
 import { Ambient } from './Ambient.tsx';
+import { Hole } from './Hole.tsx';
 import {
   api,
   type Appearance,
@@ -525,6 +526,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   const needsProject = () => area() === 'project' && !project();
   // The new conversation of a chat with a connected AI is the one place the effects of a look appear.
   const newChat = () => area() === 'chat' && state().vendors.length > 0 && !current()?.messages.length;
+  const newSession = () => area() === 'project' && !!project() && state().vendors.length > 0 && !current()?.messages.length;
   // A new conversation the user is in, not a remembered one that is still on its way: the tutorial would open over it and
   // vanish when its messages arrive.
   const startsFresh = () => newChat() && !loading() && !place().id;
@@ -809,6 +811,10 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                 <Show when={newChat()}>
                   {/* The effects of the look sit behind the greeting; dust keeps clear of the text and the composer. */}
                   <Ambient vendors={state().vendors} avoid={() => [...work!.querySelectorAll('.hello, .lead, .composer, .try, .resume')]} />
+                </Show>
+                <Show when={newSession()}>
+                  {/* A new project session gets its own scene, clear of the heading, the hint and the composer. */}
+                  <Hole avoid={() => [...work!.querySelectorAll('.empty h1, .empty p, .peek, .hint, .composer')]} />
                 </Show>
                 <div class="thread" classList={{ welcome: newChat() }} ref={(el) => {
                   thread = el;
