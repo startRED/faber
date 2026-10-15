@@ -1,0 +1,1 @@
+{"action":{"plan":{"summary":"Make src/a.rs say after.","acceptance":"The fixture check exits 0.","tasks":[{"title":"Make src/a.rs say after","writes":["src/a.rs"]}]}}}

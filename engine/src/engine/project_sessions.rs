@@ -312,6 +312,27 @@ impl Engine {
         self.end_role(invocation).await.map(|_| ())
     }
 
+    /// Whether the role's process tree is still held by this process. After a restart no tree is held, so a turn that
+    /// was running before it is not live.
+    pub fn role_live(&self, invocation: &str) -> bool {
+        self.with(|c| c.worker_trees.contains_key(invocation))
+    }
+
+    /// Settle a turn whose process is gone and whose reply never came, at its computed bound, and close the dispatch
+    /// record that waited for it. An invocation that was never admitted has nothing to settle.
+    pub async fn abandon_role(&self, journal: &Journal, invocation: &str) -> Result<(), String> {
+        let reservation = match self.mission_reservation(invocation) {
+            Ok(reservation) => reservation,
+            Err(key) if key == "reason.budget.identity" => return Ok(()),
+            Err(key) => return Err(key),
+        };
+        if !reservation.settled {
+            let event = EngineEvent::Error { message: "reason.interrupted".into(), fatal: true };
+            self.mission_budget(crate::project::budget::Change::Report { id: invocation.into(), event, terminated: true })?;
+        }
+        Runner::load(journal).map_err(str::to_string)?.settle_dispatches(journal, self)
+    }
+
     /// Wakes when a role turn ends or a mission stops. A coordinator reads the journal when this fires, never on a timer.
     pub fn mission_wake(&self) -> Arc<tokio::sync::Notify> {
         self.with(|c| c.mission_wake.clone())

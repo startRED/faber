@@ -73,6 +73,9 @@ fn cleanup(ctx: &mut Ctx) -> Result {
     run_probe(ctx, "--project-git-clean")
 }
 pub(super) fn run_probe(ctx: &mut Ctx, mode: &str) -> Result {
+    run_probe_for(ctx, mode, Duration::from_secs(60))
+}
+pub(super) fn run_probe_for(ctx: &mut Ctx, mode: &str, limit: Duration) -> Result {
     let git = faber_engine::cli::find_cli("git").ok_or("git is not installed")?;
     ensure(git.prefix.is_empty(), || "git must be a native executable".into())?;
     let parent: Vec<_> = std::env::vars().collect();
@@ -112,7 +115,7 @@ pub(super) fn run_probe(ctx: &mut Ctx, mode: &str) -> Result {
         }
         let _ = sender.send(errors);
     });
-    let waited = eventually("the local git probe to exit", Duration::from_secs(60), || !owned.is_running());
+    let waited = eventually("the local git probe to exit", limit, || !owned.is_running());
     owned.terminate();
     waited?;
     let errors = receiver.recv_timeout(Duration::from_secs(10)).map_err(|_| "git probe diagnostic pipe did not close")?;
