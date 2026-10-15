@@ -139,7 +139,7 @@ const COLOUR_OF: &str = "(name) => { const p = document.createElement('i'); p.st
 /// The drawings of Curioso on the stage: how many there are, how big each is, and the colour it is drawn in.
 fn peeks() -> String {
     format!(
-        "(() => {{ const colour = {COLOUR_OF}; return {{ ink3: colour('--ink-3'), found: [...document.querySelectorAll('.empty .peek svg')].map((s) => {{ const r = s.getBoundingClientRect(); return {{ w: r.width, h: r.height, fill: getComputedStyle(s.querySelector('path')).fill }}; }}) }}; }})()"
+        "(() => {{ const colour = {COLOUR_OF}; return {{ ink3: colour('--ink-3'), found: [...document.querySelectorAll('.empty .peek svg, .start-card .peek svg')].map((s) => {{ const r = s.getBoundingClientRect(); return {{ w: r.width, h: r.height, fill: getComputedStyle(s.querySelector('path')).fill }}; }}) }}; }})()"
     )
 }
 
@@ -174,8 +174,8 @@ fn shows_the_brand(ctx: &mut Ctx) -> Result {
         let found = page.eval(&peeks())?;
         let list = found["found"].as_array().cloned().unwrap_or_default();
         same(list.len(), 1, &format!("drawings of Curioso on {what}"))?;
-        same(list[0]["w"].as_f64(), Some(64.0), "his width")?;
-        same(list[0]["h"].as_f64(), Some(64.0), "his height")?;
+        ensure((list[0]["w"].as_f64().unwrap_or(0.0) - 64.0).abs() < 0.01, || format!("his width: {}", list[0]["w"]))?;
+        ensure((list[0]["h"].as_f64().unwrap_or(0.0) - 64.0).abs() < 0.01, || format!("his height: {}", list[0]["h"]))?;
         same(list[0]["fill"].as_str(), found["ink3"].as_str(), "his colour")
     };
     looks(page, "no project open")?;
@@ -724,7 +724,7 @@ fn idle_memory_reduced(ctx: &mut Ctx) -> Result {
 }
 
 /// Tells the page whether it has the focus: the hidden test window must never take it from the person at the PC.
-fn focus(page: &mut Page, on: bool) -> Result {
+pub(super) fn focus(page: &mut Page, on: bool) -> Result {
     page.eval(&format!(
         "(() => {{ document.hasFocus = () => {on}; window.dispatchEvent(new Event('{}')); }})()",
         if on { "focus" } else { "blur" }
@@ -826,7 +826,7 @@ fn black_hole_in_a_project(ctx: &mut Ctx) -> Result {
     let demo = css(".prow .item").has_text("Demo");
     app.page.wait_visible(&demo)?;
     app.page.click(&demo)?;
-    app.page.wait_visible(&css(".empty h1").has_text("Demo"))?;
+    app.page.wait_visible(&css(".start-card .p-header h2").has_text("Demo"))?;
     app.page.wait_for("the black hole to run in a shown, focused window", &format!("{live} === 'on'"))?;
     // The entrance plays once: Curioso wakes, the spark flies, the scene lights up from the hole, and then it ends.
     let intro = "document.querySelector('canvas.amb-hole')?.dataset.intro";

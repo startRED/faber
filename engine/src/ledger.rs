@@ -38,6 +38,17 @@ pub struct Reading {
     pub read_at: f64,
 }
 
+/// A quota reading with the existing own-spend counters at that instant. Their deltas survive local offset changes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DailySample {
+    pub reading: Point,
+    pub own_spend: BTreeMap<i64, f64>,
+    #[serde(default)]
+    pub unmetered: BTreeMap<i64, u32>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
+}
+
 /// One request Faber made, with the moment it really ended (a `Span`'s end is the moment of the reading taken during it, which
 /// is what the learning needs). Kept for a few hours: it is what tells whether the vendor's counter has caught up.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -70,6 +81,10 @@ pub struct Folded {
 pub struct VendorLedger {
     pub readings: BTreeMap<String, Reading>,
     pub history: BTreeMap<String, Vec<Point>>,
+    /// Evidence at or just before a reset-relative day boundary; a missing baseline grants no automated work.
+    pub day_baselines: BTreeMap<String, DailySample>,
+    /// Last weekly sample, so a reading just before a boundary is evidence rather than an invented empty day.
+    pub daily_samples: BTreeMap<String, DailySample>,
     pub spans: Vec<Span>,
     pub work: Vec<Work>,
     pub folded: Option<Folded>,
@@ -95,6 +110,8 @@ pub struct VendorLedger {
     pub overage_active: bool,
     /// None means paid fallback is still possible until the CLI explicitly rules it out.
     pub paid_fallback: Option<bool>,
+    /// Only an explicit paid-fallback field renews this evidence; quota updates do not.
+    pub paid_fallback_at: Option<f64>,
     #[serde(skip)]
     pub credit_balance: Option<f64>,
     /// When a plan check last succeeded, and how many failed in a row since.
@@ -105,6 +122,9 @@ pub struct VendorLedger {
     /// A check worked but named no plan.
     #[serde(skip)]
     pub nameless: bool,
+    /// Fields written by a newer Faber, kept as they were: an older build must not drop what it does not know.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
     /// Seconds the counter may trail real use; 0 switches the "still counting" logic off.
     #[serde(skip)]
     pub lag: f64,
@@ -115,6 +135,9 @@ pub struct VendorLedger {
 pub struct Ledger {
     pub claude: VendorLedger,
     pub codex: VendorLedger,
+    /// Fields written by a newer Faber, kept as they were.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 impl Ledger {
@@ -205,18 +228,46 @@ impl VendorLedger {
         self.readings.insert(window.to_string(), Reading { used, resets_at, read_at: now });
         self.prune(now);
         let point = Point { at: now, used, resets_at };
-        let primary = self.primary(now).map(String::from);
-        self.history.retain(|name, _| Some(name) == primary.as_ref());
-        if primary.as_deref() != Some(window) {
-            return;
+        if vendor_wide(window)
+            && window_secs(window) == Some(7.0 * 86_400.0)
+            && let Some(start) = crate::budget::daily_start(resets_at, now)
+        {
+            let sample = DailySample {
+                reading: point,
+                own_spend: self.own_spend.clone(),
+                unmetered: self.unmetered.clone(),
+                extra: BTreeMap::new(),
+            };
+            let prior = self.daily_samples.insert(window.into(), sample.clone());
+            if now == start {
+                let saved = self.day_baselines.entry(window.into()).or_insert(sample.clone());
+                if saved.reading.at == start && saved.reading.resets_at == resets_at {
+                    saved.reading.used = saved.reading.used.min(used);
+                } else {
+                    *saved = sample;
+                }
+            } else if let Some(prior) = prior
+                && prior.reading.resets_at == resets_at
+                && prior.reading.at <= start
+                && (0.0..=crate::budget::STALE_SECS).contains(&(start - prior.reading.at))
+            {
+                self.day_baselines.insert(window.into(), prior);
+            }
         }
+        let primary = self.primary(now).map(String::from);
+        self.day_baselines.retain(|name, _| self.readings.contains_key(name));
+        self.daily_samples.retain(|name, _| self.readings.contains_key(name));
+        // Keep reset history for calibration, but retire abandoned windows after a month.
+        self.history
+            .retain(|name, points| self.readings.contains_key(name) || points.last().is_some_and(|p| p.at >= now - 30.0 * 86_400.0));
         let list = self.history.entry(window.to_string()).or_default();
         let previous = list.last().copied();
         list.push(point);
         if list.len() > KEEP_POINTS {
             list.drain(..list.len() - KEEP_POINTS);
         }
-        if let Some(previous) = previous
+        if primary.as_deref() == Some(window)
+            && let Some(previous) = previous
             && previous.at >= self.since
         {
             self.learned.add(&previous, &point, offset);

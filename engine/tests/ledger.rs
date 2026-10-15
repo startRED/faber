@@ -1,6 +1,10 @@
 use faber_engine::budget::{Billing, Reach};
 use faber_engine::learn::Span;
 use faber_engine::ledger::{Ledger, PLAN_FRESH, RELEARN, VendorLedger};
+use faber_engine::store::{Disk, Fault, RealDisk, Store};
+use std::path::Path;
+use std::sync::Arc;
+use std::{fs, io};
 
 const HOUR: f64 = 3600.0;
 const BASE: f64 = 345_600.0 + 2.0 * 86_400.0;
@@ -33,6 +37,36 @@ fn the_history_is_bounded() {
         l.span(Span { incomplete: false, start: i as f64, end: i as f64 + 1.0, model: "a".into(), cost: None });
     }
     assert_eq!(l.spans.len(), 200);
+}
+
+#[test]
+fn abandoned_windows_expire_without_shrinking_active_pacing_history() {
+    let mut l = VendorLedger::default();
+    for i in 0..200 {
+        l.record("seven_day_opus", 0.2, BASE + 7.0 * 86_400.0, BASE + i as f64, 0);
+    }
+    l.record("five_hour", 0.2, BASE + 10.0 * 86_400.0, BASE + 8.0 * 86_400.0, 0);
+    assert_eq!(l.history["seven_day_opus"].len(), 200, "recent reset history remains available");
+    let later = BASE + 32.0 * 86_400.0;
+    for i in 0..200 {
+        l.record("five_hour", 0.2, later + 18_000.0, later + i as f64, 0);
+    }
+    assert!(!l.history.contains_key("seven_day_opus"));
+    assert_eq!(l.history["five_hour"].len(), 200);
+}
+
+#[test]
+fn other_windows_never_shrink_existing_primary_pacing_history() {
+    let mut l = VendorLedger::default();
+    for i in 0..250 {
+        for window in ["five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet"] {
+            l.record(window, 0.2, RESET, BASE + i as f64 * 60.0, 0);
+        }
+    }
+    for points in l.history.values() {
+        assert_eq!(points.len(), 200);
+        assert_eq!(points[0].at, BASE + 50.0 * 60.0);
+    }
 }
 
 #[test]
@@ -214,7 +248,8 @@ fn a_full_ledger_stays_small() {
         }
     }
     let size = serde_json::to_string(&ledger).unwrap().len();
-    assert!(size < 100_000, "{size} bytes");
+    // Three independent 200-point histories per vendor require 113 KB; none may evict Auto's primary evidence.
+    assert!(size < 128 * 1024, "{size} bytes");
 }
 
 #[test]
@@ -238,6 +273,67 @@ fn a_ledger_read_from_a_damaged_file_cannot_hurt() {
 }
 
 #[test]
+fn a_damaged_ledger_blocks_projects_and_stays_quarantined_after_chat_rewrites_it() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("budget.json"), "{\"claude\": {\"readings\": ").unwrap();
+    let store = Store::new(dir.path());
+    assert_eq!(store.ledger_checked().unwrap_err(), Fault::Corrupt);
+    // Chat only learns from the ledger, so it starts again from an empty one and may save over the damaged file.
+    let chat = store.ledger();
+    assert!(chat.claude.readings.is_empty());
+    store.save_ledger(&chat).unwrap();
+    assert_eq!(store.ledger_checked().unwrap_err(), Fault::Corrupt, "a rewrite does not turn damaged safety data into an empty budget");
+    assert!(dir.path().join("budget.json.quarantine").is_file(), "the damaged copy is kept as evidence");
+}
+
+#[test]
+fn a_missing_ledger_is_an_empty_one_and_a_good_one_reads_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::new(dir.path());
+    assert!(store.ledger_checked().unwrap().claude.readings.is_empty());
+    let mut ledger = Ledger::default();
+    ledger.claude.record("five_hour", 0.3, RESET, BASE, 0);
+    store.save_ledger(&ledger).unwrap();
+    assert_eq!(store.ledger_checked().unwrap().claude.readings["five_hour"].used, 0.3);
+}
+
+/// A disk with no room left for the temporary file.
+struct FullDisk;
+impl Disk for FullDisk {
+    fn write(&self, path: &Path, bytes: &[u8]) -> io::Result<()> {
+        fs::write(path, &bytes[..bytes.len() / 3])?;
+        Err(io::Error::from(io::ErrorKind::StorageFull))
+    }
+    fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+        RealDisk.rename(from, to)
+    }
+}
+
+#[test]
+fn a_ledger_that_cannot_be_saved_says_why_and_keeps_the_old_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ledger = Ledger::default();
+    ledger.codex.record("five_hour", 0.1, RESET, BASE, 0);
+    Store::new(dir.path()).save_ledger(&ledger).unwrap();
+    let full = Store::with_disk(dir.path(), Arc::new(FullDisk));
+    ledger.codex.record("five_hour", 0.9, RESET, BASE + HOUR, 0);
+    let err = full.save_ledger(&ledger).unwrap_err();
+    assert_eq!((err, err.key()), (Fault::DiskFull, "error.store.full"));
+    assert_eq!(full.ledger_checked().unwrap().codex.readings["five_hour"].used, 0.1);
+    assert!(!dir.path().join("budget.json.tmp").exists());
+}
+
+#[test]
+fn fields_a_newer_faber_wrote_survive_in_the_ledger() {
+    let json = r#"{"daily": {"day": 3, "spent": 1.5}, "claude": {"since": 1.0, "grants": [{"id": "g1"}]}}"#;
+    let ledger: Ledger = serde_json::from_str(json).unwrap();
+    let back: serde_json::Value = serde_json::to_value(&ledger).unwrap();
+    assert_eq!(back["daily"]["spent"], 1.5, "an older Faber must not drop a newer allocation");
+    assert_eq!(back["claude"]["grants"][0]["id"], "g1");
+    assert_eq!(back["claude"]["since"], 1.0);
+}
+
+#[test]
 fn paid_fallback_survives_a_restart_and_missing_evidence_stays_conservative() {
     use faber_engine::budget::{Billing, Purpose, Why, gate};
     for flag in [Some(true), None] {
@@ -246,7 +342,7 @@ fn paid_fallback_survives_a_restart_and_missing_evidence_stays_conservative() {
         let mut restored: VendorLedger = serde_json::from_str(&serde_json::to_string(&ledger).unwrap()).unwrap();
         restored.billing = Billing::Subscription;
         assert_eq!(restored.paid_fallback, flag);
-        assert_eq!(gate(&restored.snap(BASE), None, Purpose::Pulse, false, BASE), Err(Why::Paid));
+        assert_eq!(gate(&restored.snap(BASE), None, Purpose::Summary, false, BASE), Err(Why::Paid));
     }
     let mut legacy: VendorLedger = serde_json::from_str("{}").unwrap();
     legacy.billing = Billing::Subscription;

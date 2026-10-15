@@ -14,10 +14,39 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc::UnboundedReceiver;
 
+/// Broker fixtures begin at canonical roots, including macOS's /var system alias.
+pub fn canonical_tempdir() -> io::Result<tempfile::TempDir> {
+    tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize()?)
+}
+
 #[derive(Debug, Clone)]
 pub struct Entry {
     pub input: bool,
     pub msg: Value,
+}
+
+pub fn controlled() -> (Spawner, BufReader<tokio::io::DuplexStream>, tokio::io::DuplexStream) {
+    let (stdin, input) = tokio::io::duplex(65536);
+    let (output, stdout) = tokio::io::duplex(65536);
+    let process =
+        Arc::new(Mutex::new(Some(Proc { stdin: Box::new(stdin), stdout: Box::new(stdout), stderr: None, child: None, contained: None })));
+    (Arc::new(move |_, _, _| Ok(process.lock().unwrap().take().unwrap())), BufReader::new(input), output)
+}
+
+pub async fn read_message(input: &mut BufReader<tokio::io::DuplexStream>) -> Value {
+    let mut line = String::new();
+    tokio::time::timeout(Duration::from_secs(1), input.read_line(&mut line)).await.expect("no message on fake wire").unwrap();
+    serde_json::from_str(&line).unwrap()
+}
+
+pub async fn expect_method(input: &mut BufReader<tokio::io::DuplexStream>, method: &str) -> Value {
+    let msg = read_message(input).await;
+    assert_eq!(msg["method"], method);
+    msg
+}
+
+pub async fn emit(output: &mut tokio::io::DuplexStream, msg: Value) {
+    output.write_all(format!("{msg}\n").as_bytes()).await.unwrap();
 }
 
 pub fn fixture(vendor: &str, name: &str) -> Vec<Entry> {
@@ -287,6 +316,9 @@ pub async fn drive(
     session.close();
     let mismatches = fake.mismatches.lock().unwrap().clone();
     (events, mismatches)
+}
+pub fn tempdir() -> tempfile::TempDir {
+    tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap()
 }
 
 /// A fake CLI process the test drives by hand: it writes the CLI's output lines itself, whenever it likes, and reads

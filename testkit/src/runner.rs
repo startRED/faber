@@ -38,6 +38,15 @@ pub fn cargo_test_args(jobs: usize, filter: Option<&str>) -> Vec<String> {
     args
 }
 
+fn failure_output(stdout: &str, stderr: &str) -> String {
+    [stdout, stderr]
+        .map(|text| {
+            let lines: Vec<&str> = text.lines().collect();
+            lines[lines.len().saturating_sub(60)..].join("\n")
+        })
+        .join("\n")
+}
+
 fn run_rust(root: &Path, jobs: usize, filter: Option<&str>) -> Vec<Outcome> {
     let started = Instant::now();
     let mut command = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
@@ -53,8 +62,7 @@ fn run_rust(root: &Path, jobs: usize, filter: Option<&str>) -> Vec<Outcome> {
         .collect();
     if !output.status.success() {
         // A build error has no test lines at all; a test failure has its panic message in the output.
-        let tail: Vec<&str> = text.lines().collect();
-        let shown = tail[tail.len().saturating_sub(60)..].join("\n");
+        let shown = failure_output(&String::from_utf8_lossy(&output.stdout), &String::from_utf8_lossy(&output.stderr));
         outcomes.push(Outcome::fail(Suite::Rust, "cargo test --workspace", Some(started.elapsed()), &shown));
     } else if outcomes.is_empty() {
         // Nothing ran. With a filter that is the caller's mistake to hear about (see `nothing_matched`).
@@ -209,6 +217,14 @@ pub fn run(args: &[String]) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rust_failure_output_keeps_the_panic_when_cargo_stderr_is_long() {
+        let stderr = (0..100).map(|n| format!("Running target {n}")).collect::<Vec<_>>().join("\n");
+        let shown = failure_output("thread 'deadline' panicked: native socket timeout\nFAILED", &stderr);
+        assert!(shown.contains("panicked: native socket timeout"));
+        assert!(shown.contains("Running target 99"));
+    }
 
     #[test]
     fn a_filter_that_matched_no_test_anywhere_is_a_mistake_but_no_filter_and_no_tests_is_not_this_check() {

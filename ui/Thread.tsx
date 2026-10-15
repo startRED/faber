@@ -3,6 +3,7 @@ import { marked } from 'marked';
 import { createEffect, createResource, createSignal, For, Index, onCleanup, Show, type Accessor } from 'solid-js';
 import { api, type Choice, type Message, type QueuedTurn, type VendorUsage } from './api.ts';
 import { Asks, Parkeds } from './Ask.tsx';
+import { copyItem, openMenu } from './contextmenu.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
 import { untilReset } from './Sidebar.tsx';
@@ -129,7 +130,13 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
   // it is known to the end and after reopening; a model the CLI never named reads as the default one all along.
   const label = () => (streaming() && m().waitUntil ? t('run.waiting', { when: untilReset(m().waitUntil!) }) : m().vendor ? prettyModel(m().model) : '');
   return (
-    <article class="ai" aria-label={t('answer.label')}>
+    <article
+      class="ai"
+      aria-label={t('answer.label')}
+      onContextMenu={(e) =>
+        openMenu(e, [copyItem(m().text), ...(!streaming() && props.prompt ? [{ id: 'redo', label: t('menu.redo'), run: () => props.onBranch(props.prompt!.id, props.prompt!.text) }] : [])])
+      }
+    >
       <div class="model">
         <span class="vm" classList={{ claude: m().vendor === 'claude', codex: m().vendor === 'codex' }}>
           <VendorMark vendor={m().vendor} />
@@ -240,7 +247,10 @@ function Mine(props: { m: Accessor<Message>; onBranch: OnBranch }) {
     <Show
       when={editing() !== undefined}
       fallback={
-        <div class="mine">
+        <div
+          class="mine"
+          onContextMenu={(e) => openMenu(e, [copyItem(props.m().text), { id: 'edit', label: t('mine.edit'), run: () => setEditing(props.m().text) }])}
+        >
           <Show when={props.m().attachments?.length}>
             <div class="attach">
               <For each={props.m().attachments}>

@@ -159,11 +159,11 @@ input, textarea { caret-color: var(--accent); }
 
 /* The column over the stage must not cover the greeting's composer: the greeting makes room for it on its left, at once:
    padding is layout, so it is never animated (the column itself slides in over it). */
-.work.under .thread.welcome { padding-right: calc(min(352px, 100%) + 20px); }
+.work.under :is(.thread.welcome, .projects-stage.home) { padding-right: calc(min(352px, 100%) + 20px); }
 
 /* The new conversation: the greeting and the composer on the left; the conversations to pick up on the right when the
    stage is wide enough, below the suggestions when it is not. */
-.thread.welcome { display: grid; align-content: safe center; padding: 0 clamp(24px, 4vw, 60px) 40px clamp(24px, 6vw, 76px); container-type: inline-size; }
+.thread.welcome, .projects-stage.home { display: grid; align-content: safe center; padding: 0 clamp(24px, 4vw, 60px) 40px clamp(24px, 6vw, 76px); container-type: inline-size; }
 .welcome-grid { display: grid; grid-template-columns: minmax(0, 640px); gap: 40px 64px; }
 .w-main, .resume { position: relative; z-index: 2; min-width: 0; }
 .hello { font-size: min(var(--fs-display), 9vw); max-width: 8.4em; overflow-wrap: anywhere; padding-bottom: 4px; }
@@ -218,6 +218,8 @@ svg.i.sm { width: 14px; height: 14px; }
 .run-btn.need { box-shadow: inset 0 0 0 1px var(--amber-line), var(--amber-light); }
 .run-btn.need .ask { color: var(--amber-ink); background: var(--amber-soft); border-radius: 0 var(--r-pill) var(--r-pill) 0; }
 .run-btn.need .seg + .seg { border-left-color: var(--amber-line); }
+/* The icon of "needs you" breathes slowly; the words beside it carry the meaning. */
+.run-btn.need .seg.ask .i { animation: pulse 3.2s var(--ease-io) infinite; }
 
 /* The running column: beside the stage from 1,100 px, over it (above the composer) below that. */
 .runcol { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--s1); }
@@ -357,6 +359,13 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .dock .composer textarea { height: 40px; min-height: 40px; padding: 13px 16px 0; }
 .composer .chips { padding: 12px 14px 0; }
 .composer textarea::placeholder { color: var(--ink-3); }
+/* The idle composer (ui/Ghost.tsx): a typing bar and a hint drawn over the empty field, where its placeholder would be. The
+   field keeps its own placeholder for readers of the screen and shows it again whenever the hints are not drawn. */
+.composer:has(.idle-box) textarea::placeholder { color: transparent; }
+.idle-box { position: absolute; left: 18px; right: 18px; top: 16px; height: calc(var(--fs-read) * 1.5); pointer-events: none; }
+.g-hint { position: absolute; inset: 0; padding-left: 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--ink-3); font-size: var(--fs-read); line-height: 1.5; opacity: 0; transition: opacity var(--dur-ui) var(--ease); }
+.g-hint.on { opacity: 1; }
+.g-caret { position: absolute; left: 0; top: calc(var(--fs-read) * 0.2); width: 2px; height: calc(var(--fs-read) * 1.1); border-radius: 1px; background: var(--accent); animation: blink 1.1s steps(1) infinite; }
 .cbar { display: flex; gap: 6px; align-items: center; padding: 8px 10px 10px 12px; }
 .cbar:has(.effort) { flex-wrap: wrap; }
 .effort-hint { margin: 0; padding: 0 12px 10px; font-size: calc(var(--fs-ui) - 2px); color: var(--ink-3); }
@@ -594,7 +603,9 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .amb { position: absolute; pointer-events: none; }
 /* The black hole behind a new project session (ui/Hole.tsx) reads its colours from --hole-colors and its ripple from caret-color. */
 .amb-hole { display: var(--amb-hole); position: absolute; inset: 0; width: 100%; height: 100%; caret-color: var(--accent); font-family: var(--font-mono); }
-.amb-beam { display: var(--amb-beam); left: calc(min(100% - 120px, 740px) - 380px); top: -80px; width: 760px; height: 680px; transform: rotate(22deg); transform-origin: 50% 0; }
+.ambient { --beam-x: min(100% - 120px, 740px); }
+.ambient.project { --beam-x: min(380px, 100% - 120px); }
+.amb-beam { display: var(--amb-beam); left: calc(var(--beam-x) - 380px); top: -80px; width: 760px; height: 680px; transform: rotate(22deg); transform-origin: 50% 0; }
 .amb-beam .beam { position: absolute; inset: 0; filter: blur(30px); opacity: 0.9; }
 .amb-beam .beam i { position: absolute; inset: 0; clip-path: polygon(44% 0, 56% 0, 86% 100%, 14% 100%); background: linear-gradient(180deg, var(--beam-color), transparent 92%); }
 .amb-beam .beam i + i { clip-path: polygon(48% 0, 52% 0, 64% 100%, 36% 100%); opacity: 0.8; }
@@ -604,7 +615,7 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .dust i { position: absolute; left: 0; top: 0; width: 1px; height: 1px; border-radius: 50%; will-change: opacity; }
 /* The light that breathes lives only around the lens, above and right of the greeting. */
 /* Promote only the visible part of the mask, avoiding a stage-sized software composition each frame. */
-.amb-glow { display: var(--amb-beam); left: calc(min(100% - 120px, 740px) - 170px); top: 0; width: 340px; height: 110px; overflow: hidden; -webkit-mask-image: radial-gradient(circle 170px at 170px -60px, #000 30%, transparent 100%); mask-image: radial-gradient(circle 170px at 170px -60px, #000 30%, transparent 100%); }
+.amb-glow { display: var(--amb-beam); left: calc(var(--beam-x) - 170px); top: 0; width: 340px; height: 110px; overflow: hidden; -webkit-mask-image: radial-gradient(circle 170px at 170px -60px, #000 30%, transparent 100%); mask-image: radial-gradient(circle 170px at 170px -60px, #000 30%, transparent 100%); }
 .amb-glow .amb-beam { position: absolute; display: block; left: -210px; }
 .amb-glow { opacity: 0; }
 .amb-glow .beam { opacity: 1; }
@@ -625,6 +636,13 @@ html[data-motion='full'] .amb-glow { will-change: opacity; }
 @keyframes trace { from { stroke-dashoffset: 382; } to { stroke-dashoffset: 0; } }
 .flow-label { font: 500 12.5px var(--font-ui); fill: var(--ink-3); }
 .flow-node { fill: var(--bg); stroke: var(--line-3); stroke-width: 1.4; }
+/* A project's first screen has its own light: the beam leans the other way, from the left, over the desk, and the loom weaves slower. */
+.ambient.project .amb-beam { transform: rotate(-22deg); }
+.ambient.project :is(.loom-row, .loom-shuttle) { animation-duration: 12s; }
+/* A look with none of its own effects (and the ambient switch on) gets one soft light that drifts, so no home stands still. */
+.amb-drift { display: none; left: calc(var(--beam-x) - 380px); top: -220px; width: 760px; height: 560px; background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 16%, transparent), transparent); opacity: 0.55; animation: drift 32s steps(32) infinite alternate; }
+html[data-ambient='on'] .ambient.bare .amb-drift { display: block; }
+@keyframes drift { to { transform: translate(56px, 32px) scale(1.08); opacity: 0.9; } }
 .grain { position: absolute; inset: 0; pointer-events: none; opacity: var(--grain); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .9 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
 /* A narrow stage has no room beside the greeting for the loom or the flow line. */
 @container (max-width: 920px) { .amb-loom { display: none; } }
@@ -661,7 +679,7 @@ html.resizing :is(.shell, .main, .side, .fold, .tour-ring) { transition: none !i
   select option:is(:hover, :focus-visible, :checked) { background: var(--s3); color: var(--ink); }
   @starting-style { select:open::picker(select) { opacity: 0; transform: translateY(var(--motion-rise)) scale(var(--motion-scale)); } }
 }
-:is([data-motion='reduced'], [data-motion='none']) :is(.cursor, .live, .live::after, .run-dot, .loom-row, .loom-shuttle, .flow-trace, .peek svg) { animation: none !important; }
+:is([data-motion='reduced'], [data-motion='none']) :is(.cursor, .live, .live::after, .run-dot, .loom-row, .loom-shuttle, .flow-trace, .amb-drift, .g-caret, .run-btn .i, .peek svg) { animation: none !important; }
 :is([data-motion='reduced'], [data-motion='none']) :is(.loom-shuttle, .flow-trace) { opacity: 0; }
 [data-motion='reduced'] { --arrive-y: 0px; }
 /* Reduced and none are instant, including native pickers and theme snapshots. */
@@ -672,6 +690,9 @@ html.resizing :is(.shell, .main, .side, .fold, .tour-ring) { transition: none !i
 :is([data-motion='reduced'], [data-motion='none']) select::picker(select) { transition: none !important; transform: none !important; }
 :is(html[data-motion='reduced'], html[data-motion='none'])::view-transition-old(root),
 :is(html[data-motion='reduced'], html[data-motion='none'])::view-transition-new(root) { animation: none !important; }
+/* A hidden or minimized window runs no animation at all: the root class comes from ui/appearance.ts. */
+html.hidden-win, html.hidden-win *, html.hidden-win *::before, html.hidden-win *::after { animation-play-state: paused !important; }
+/* Another app with the focus pauses the effects of the homes too. */
 html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 /* The system preference is honoured even before the script runs. */
 @media (prefers-reduced-motion: reduce) {
@@ -697,6 +718,95 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 .urow .expected { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--ink); }
 .pace-projection { grid-column: 1 / -1; }
 .waiting-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Projects board and start card */
+.projects-stage { display: flex; flex-direction: column; height: 100%; overflow-y: auto; padding: 24px; gap: 20px; }
+/* The first screen of a project: the structure of the new conversation (.welcome-grid, .hello, .lead, .composer, .rrow), the goal
+   composer where the chat composer is, the safety choices as quiet rows under it, and what to pick up on the right. */
+.projects-root { position: relative; grid-column: 1; grid-row: 1; height: 100%; min-height: 0; min-width: 0; overflow: hidden; }
+.projects-stage { position: relative; z-index: 1; }
+.projects-stage.home { gap: 0; }
+.projects-stage.home .empty { padding-top: 0; }
+.start-card.welcome-grid { display: grid; width: auto; max-width: none; margin: 0; gap: 40px 64px; }
+.setup { display: grid; margin-top: 28px; }
+.setup h3, .p-side h3 { margin: 0; font: 600 calc(var(--fs-ui) - 1px) var(--font-ui); color: var(--ink-2); }
+.setup h3 { padding-bottom: 6px; }
+.p-side h3 { padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.setup .ctl-section { padding: calc(12px * var(--dens)) 0; border-radius: 0; background: none; box-shadow: none; border-top: 1px solid var(--line); }
+.setup .ctl-section:last-of-type { border-bottom: 1px solid var(--line); }
+.setup .setup-more { padding: calc(10px * var(--dens)) 0; }
+.setup .setup-more p { margin: 6px 0 0; overflow-wrap: anywhere; }
+.p-side { position: relative; z-index: 2; display: grid; align-content: start; gap: 28px; min-width: 0; }
+@container (min-width: 1000px) { .p-side { align-self: end; padding-bottom: 40px; } }
+.main:has(.projects-stage.home) .topbar { border-bottom-color: transparent; }
+.projects-stage { min-width: 0; flex: 1; container-type: inline-size; }
+.projects-stage .p-meta > span, .m-goal, .tc-title, .ny-question { min-width: 0; overflow-wrap: anywhere; }
+.projects-stage .m-controls, .projects-stage .ny-header, .projects-stage .pace-item { flex-wrap: wrap; }
+.projects-stage .ny-custom input { min-width: 0; }
+.projects-stage .p-header .peek { margin-bottom: 12px; color: var(--ink-3); }
+.projects-stage .note, .projects-stage .p-meta, .projects-stage .task-col-header, .projects-stage .cost-cap,
+.projects-stage .cost-card h3, .projects-stage .pace-card h3, .projects-stage .build-card h3,
+.projects-stage .pace-item, .projects-stage .build-slots { font-size: max(13px, calc(var(--fs-ui) - 1px)); }
+.p-header h2 { margin: 0 0 8px; font-size: var(--fs-h2); color: var(--ink); }
+.p-meta { display: flex; flex-wrap: wrap; gap: 16px; font-size: calc(var(--fs-ui) - 1px); color: var(--ink-2); }
+.ctl-section { display: flex; flex-direction: column; gap: 8px; padding: 14px; background: var(--card-bg); border-radius: var(--r-md); box-shadow: inset 0 0 0 1px var(--line-2); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0; }
+.mission-board { display: flex; flex-direction: column; gap: 24px; width: 100%; }
+.m-header { display: flex; flex-direction: column; gap: 12px; padding: 16px 20px; background: var(--card-bg); border-radius: var(--r-md); box-shadow: inset 0 0 0 1px var(--line-2); }
+.m-title-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.m-goal { margin: 0; font-size: var(--fs-h2); color: var(--ink); }
+.badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: var(--r-pill); font-size: max(13px, calc(var(--fs-ui) - 2px)); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; box-shadow: inset 0 0 0 1px var(--line-2); }
+.badge.running { background: var(--accent-soft); color: var(--accent-text); }
+.badge.paused { background: var(--s2); color: var(--ink-2); }
+.badge.blocked { background: var(--s2); color: var(--ink-2); }
+.badge.done { background: var(--accent-soft); color: var(--accent-text); }
+.m-controls { display: flex; align-items: center; gap: 12px; }
+.needs-you { display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: var(--r-md); background: linear-gradient(180deg, var(--amber-soft), transparent 150%), var(--card-bg); box-shadow: inset 0 0 0 1px var(--amber-line), var(--amber-light); }
+.ny-header { display: flex; align-items: center; gap: 8px; color: var(--amber-ink); }
+.ny-card { display: flex; flex-direction: column; gap: 10px; padding: 12px; background: var(--card-bg); border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--amber-line); }
+.ny-question { display: flex; align-items: center; gap: 8px; }
+.ny-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.ny-custom { display: flex; gap: 8px; align-items: center; }
+.ny-custom input { flex: 1; height: 32px; padding: 0 10px; background: var(--bg); border: 1px solid var(--line-2); border-radius: var(--r-sm); color: var(--ink); }
+.task-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+.task-col { display: flex; flex-direction: column; gap: 10px; padding: 12px; background: var(--s1); border-radius: var(--r-md); box-shadow: inset 0 0 0 1px var(--line-2); }
+.task-col-header { display: flex; align-items: center; justify-content: space-between; font-size: calc(var(--fs-ui) - 1px); color: var(--ink-2); }
+.task-count { font-size: max(13px, calc(var(--fs-ui) - 2px)); background: var(--s2); padding: 1px 6px; border-radius: var(--r-pill); }
+.task-list { display: flex; flex-direction: column; gap: 8px; }
+.task-card { display: flex; flex-direction: column; gap: 6px; padding: 10px; background: var(--card-bg); border-radius: var(--r-sm); box-shadow: var(--lift-shadow), inset 0 0 0 1px var(--line-2); }
+.tc-title { font-size: calc(var(--fs-ui) - 0.5px); font-weight: 500; color: var(--ink); }
+.tc-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+.tc-footer { display: flex; align-items: center; margin-top: 4px; }
+.receipt-badge { font-size: max(13px, calc(var(--fs-ui) - 2.5px)); padding: 2px 6px; border-radius: var(--r-xs); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-2); }
+.task-card pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
+.task-card summary { min-height: 24px; cursor: pointer; }
+.cost-pace-panel { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+.cost-card, .pace-card, .build-card { display: flex; flex-direction: column; gap: 8px; padding: 14px; background: var(--card-bg); border-radius: var(--r-md); box-shadow: inset 0 0 0 1px var(--line-2); }
+.cost-card h3, .pace-card h3, .build-card h3 { margin: 0; font-size: calc(var(--fs-ui) - 1px); color: var(--ink-2); }
+.cost-reading { display: flex; align-items: baseline; gap: 12px; }
+.cost-value { font-size: calc(var(--fs-h2) * 0.8); font-weight: 600; color: var(--ink); }
+.cost-cap { font-size: calc(var(--fs-ui) - 1px); color: var(--ink-3); }
+.pace-list { display: flex; flex-direction: column; gap: 6px; }
+.pace-item { display: flex; align-items: center; gap: 8px; font-size: calc(var(--fs-ui) - 1px); }
+.pace-stat { color: var(--ink-2); margin-left: auto; }
+.build-slots { display: flex; flex-direction: column; gap: 4px; font-size: calc(var(--fs-ui) - 1px); }
+@container (max-width: 760px) {
+  .task-columns, .cost-pace-panel { grid-template-columns: minmax(0, 1fr); }
+}
+
+
+/* Right-click menus (ui/ContextMenu.tsx): the look of the native pickers above, drawn by the page. Reduced and no motion are
+   covered by the rules above that switch every animation off. */
+.cmenu { position: fixed; z-index: 60; display: grid; gap: 1px; min-width: 184px; max-width: min(320px, calc(100vw - 16px)); padding: 4px; border-radius: var(--r-md); background: color-mix(in srgb, var(--s2) 96%, transparent); backdrop-filter: blur(var(--motion-backdrop)); color: var(--ink); box-shadow: var(--lift-shadow), inset 0 0 0 1px var(--line-2); outline: none; animation: cmenu-in var(--motion-enter) var(--motion-spring) both; }
+.cmenu.leaving { pointer-events: none; animation: cmenu-out var(--motion-exit) var(--motion-ease-in) both; }
+@keyframes cmenu-in { from { opacity: 0; transform: translateY(var(--motion-rise)) scale(var(--motion-scale)); } }
+@keyframes cmenu-out { to { opacity: 0; transform: scale(var(--motion-scale)); } }
+.cm-item { display: block; width: 100%; padding: 8px 12px; border-radius: var(--r-xs); color: var(--ink-2); font-size: calc(var(--fs-ui) - 0.5px); text-align: left; white-space: nowrap; }
+.cm-item:is(:hover, :focus-visible):not(:disabled) { background: var(--s3); color: var(--ink); outline: none; }
+.cm-item:disabled { color: var(--ink-3); opacity: 0.55; }
+.cm-item.danger { color: var(--danger); }
+.cm-item.danger.armed { background: var(--danger); color: var(--bg); font-weight: 600; }
+input.rename { width: 100%; height: calc(28px + 2px * var(--dens)); padding: 0 10px; border-radius: var(--r-xs); background: var(--s3); color: var(--ink); font-size: calc(var(--fs-ui) - 0.5px); box-shadow: inset 0 0 0 1px var(--accent-line); outline: none; }
 /* Recent folders and saved environments on the open-a-project screen and in the Chat folder setting. */
 .recents { width: min(100%, 440px); display: grid; gap: 18px; }
 .recents h2 { margin: 0; padding-bottom: 8px; border-bottom: 1px solid var(--line); font: 600 calc(var(--fs-ui) - 1px) var(--font-ui); color: var(--ink-2); }

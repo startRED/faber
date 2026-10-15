@@ -2,6 +2,7 @@
 //! The app shell (Tauri) only calls into it; nothing here knows about windows or screens.
 
 pub mod account;
+pub mod book;
 pub mod budget;
 pub mod cadence;
 pub mod claude;
@@ -16,7 +17,9 @@ pub mod ledger;
 pub mod model;
 pub mod nudge;
 pub mod permissions;
+pub mod persona;
 pub mod proc;
+pub mod project;
 pub mod recents;
 pub mod route;
 pub mod router;

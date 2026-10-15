@@ -5,6 +5,9 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Pinned by daily mission allocations; pricing continues to use the single table below.
+pub const RATE_DATE: &str = "2026-10-12";
+
 /// The last cumulative cost a CLI session reported.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CostBase {

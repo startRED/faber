@@ -573,7 +573,7 @@ async fn the_screen_is_told_how_old_the_reading_is_and_that_it_may_still_rise() 
     ledger.claude = calibrated(now - 300.0);
     ledger.claude.record("five_hour", 0.10, now + 10_000.0, now - 300.0, 0);
     work(&mut ledger.claude, now - 200.0, now - 100.0, "m", Some(0.5));
-    Store::new(dir.path()).save_ledger(&ledger);
+    Store::new(dir.path()).save_ledger(&ledger).unwrap();
     let (engine, _) = start(dir.path(), spawner(usage_json(0), None).0);
     let u = engine.state().usage.remove(0);
     assert!(u.counting);

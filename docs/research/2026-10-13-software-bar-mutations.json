@@ -1,0 +1,224 @@
+[
+  {
+    "rule": "mandatory semantics",
+    "test": "mandatory_checks_cannot_be_weakened",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "critic preservation",
+    "test": "critic_cannot_replace",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "digest inputs",
+    "test": "candidate_hash_has_unambiguous",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "cache validation",
+    "test": "cache_does_not_reuse",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "digest invalidation",
+    "test": "invalidation_also_removes",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "owner binding",
+    "test": "compiler_rejects_missing_owner",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "cycle guard",
+    "test": "compiler_rejects_cycles",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "evidence producer",
+    "test": "compiler_requires_evidence_producer",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "plan entry guard",
+    "test": "plan_cannot_carry_sheet",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "secret redaction",
+    "test": "secret_scanner_handles_unicode",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "receipt completeness",
+    "test": "receipt_rejects_empty",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "sheet completeness",
+    "test": "sheet_rejects_empty",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "compile phase completeness",
+    "test": "compile_receipt_rejects_missing",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "acceptance result",
+    "test": "acceptance_requires_each_check",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "per-piece coverage",
+    "test": "every_piece_receives_locked",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "ghost coverage",
+    "test": "project_screen_proofs::ghosts_require_every",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "draft width coverage",
+    "test": "project_screen_proofs::drafts_require_two",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "draft before code",
+    "test": "project_screen_proofs::drafts_require_two",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "ghost hidden app",
+    "test": "project_screen_proofs::ghosts_require_every",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "official source scope",
+    "test": "project_native::network_requests_are_scoped",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "source authorization",
+    "test": "project_native::network_requests_are_scoped",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "OSV unknown result",
+    "test": "project_native::osv_unknown_offline",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "registry exact version",
+    "test": "project_native::registry_requires_exact",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "license AND semantics",
+    "test": "project_native::license_metadata_checks",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "source input revalidation",
+    "test": "project_compile::durable_cache_reuses",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "private proof authority",
+    "test": "project_compile::acceptance_hashes_evidence",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "artifact hash verification",
+    "test": "project_compile::acceptance_hashes_evidence",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "refactor public API",
+    "test": "project_compile::refactor_requires_base",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "fast path risk",
+    "test": "fast_path_checks_existing",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "broker path boundary",
+    "test": "repair_ownership_does_not",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "finder isolation",
+    "test": "project_compile::software_library_miss",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "fenced heading",
+    "test": "grounds_do_not_treat",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "receipt reservation",
+    "test": "project_compile::acceptance_hashes_evidence",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "license purpose shortcut",
+    "test": "project_bar::spdx_license_checker_never",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "malformed Cargo inventory",
+    "test": "project_native::lock_inventory_covers",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "sheet extension preservation",
+    "test": "project_compile::sheet_records_keep",
+    "killed": true,
+    "exit": 101
+  },
+  {
+    "rule": "OSV public provenance",
+    "test": "project_native::osv_requires_public_registry",
+    "killed": true,
+    "exit": 101
+  }
+]

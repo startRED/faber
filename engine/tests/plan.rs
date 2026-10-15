@@ -197,7 +197,7 @@ async fn startup_account_readings_wait_for_the_local_offset_and_do_not_spend() {
     let dir = tempfile::tempdir().unwrap();
     let mut ledger = faber_engine::ledger::Ledger::default();
     ledger.codex.record("five_hour", 0.10, (WHEN + 7000) as f64, (WHEN - 60) as f64, -10800);
-    faber_engine::store::Store::new(dir.path()).save_ledger(&ledger);
+    faber_engine::store::Store::new(dir.path()).save_ledger(&ledger).unwrap();
     let f = fake(vec![
         Entry { input: true, msg: json!({"id":1,"method":"initialize"}) },
         Entry { input: false, msg: json!({"id":1,"result":{}}) },

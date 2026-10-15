@@ -76,9 +76,12 @@ export function watchSystem(): () => void {
   const onVisibility = () => {
     setHidden(document.hidden);
     setFocused(document.hasFocus());
-    // The CSS animations of the effects pause while the window is hidden or another app has the focus, like the effect loops.
+    // Every CSS animation pauses with a hidden window (styles.css, `html.hidden-win`); the effects of the homes also pause
+    // while another app has the focus (`html.away-win`). The timers of idle life end with the signals.
+    document.documentElement.classList.toggle('hidden-win', document.hidden);
     document.documentElement.classList.toggle('away-win', document.hidden || !document.hasFocus());
   };
+  // A window that starts hidden (a start to the tray) is paused from its first frame.
   onVisibility();
   systemReduces.addEventListener('change', onMotion);
   document.addEventListener('visibilitychange', onVisibility);

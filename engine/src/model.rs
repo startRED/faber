@@ -305,6 +305,9 @@ pub struct Conversation {
     /// time the conversation resumes, whatever Settings says by then; a conversation saved before this field has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_name: Option<String>,
+    /// Stable persona version used when this conversation began; legacy sessions keep None.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persona_version: Option<u32>,
     pub created_at: u64,
     pub updated_at: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -324,17 +327,59 @@ pub fn clean_name(raw: &str) -> Option<String> {
     (!name.is_empty()).then(|| name.to_string())
 }
 
-/// The one line both CLIs get when a conversation starts with a name. The name only changes how the answer addresses the
-/// user, so the line asks for nothing else.
-pub fn name_instructions(name: &str) -> String {
-    format!("The user would like to be called {name}. Use the name only where it feels natural, and never mention this note.")
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Project {
     pub id: String,
     pub name: String,
     pub path: String,
+    /// The repository this folder belongs to once it is enrolled for missions. A project saved before missions has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo: Option<crate::project::RepoIdentity>,
+    /// What the person granted at mission start. None grants no effect: planning stays read-only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grant: Option<crate::project::Grant>,
+    /// Fields written by a newer Faber, kept as they were so this version never drops them.
+    #[serde(flatten)]
+    pub extra: crate::project::Extra,
+}
+
+impl Project {
+    pub fn new(id: String, name: String, path: String) -> Self {
+        Project { id, name, path, repo: None, grant: None, extra: Default::default() }
+    }
+
+    /// Whether this project may take `effect` under the grant revision the work was admitted with. A key says why not.
+    pub fn allows(&self, effect: crate::project::Effect, revision: u64) -> Result<(), &'static str> {
+        match (&self.repo, &self.grant) {
+            (Some(repo), Some(grant)) => grant.allows(repo, revision, effect),
+            _ => Err("reason.grant.none"),
+        }
+    }
+
+    /// Accept the authority shown on the start card.
+    pub fn accept_grant(&mut self, mut grant: crate::project::Grant) -> Result<(), &'static str> {
+        if grant.schema > crate::project::SCHEMA || self.grant.as_ref().is_some_and(|g| g.schema > crate::project::SCHEMA) {
+            return Err("reason.grant.newer");
+        }
+        let expected = self.grant.as_ref().map_or(Some(1), |g| g.revision.checked_add(1)).ok_or("reason.grant.stale")?;
+        if grant.revision != expected {
+            return Err("reason.grant.stale");
+        }
+        if self.repo.as_ref().is_none_or(|r| r.common_dir != grant.repo) {
+            return Err("reason.grant.otherRepo");
+        }
+        // Publication is deferred in the self-development MVP (R103).
+        if grant.mode != crate::project::GitMode::Seguro {
+            return Err("reason.grant.mode");
+        }
+        if let Some(previous) = &self.grant {
+            for (key, value) in &previous.extra {
+                grant.extra.entry(key.clone()).or_insert_with(|| value.clone());
+            }
+        }
+        self.grant = Some(grant);
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

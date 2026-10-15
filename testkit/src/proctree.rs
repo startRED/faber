@@ -58,7 +58,37 @@ pub fn same_process(row: &ProcRow, seen: &[ProcRow]) -> bool {
     seen.iter().any(|old| old.pid == row.pid && old.born == row.born && old.name == row.name)
 }
 
+/// The fake CLI records its own creation time so a later PID owner cannot become a leak.
+pub fn current_birth() -> Result<u64, std::io::Error> {
+    #[cfg(windows)]
+    {
+        let (created, _, _, _) = winsafe::HPROCESS::GetCurrentProcess().GetProcessTimes().map_err(std::io::Error::other)?;
+        let ticks = (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime);
+        (ticks / 10).checked_sub(11_644_473_600_000_000).ok_or_else(|| std::io::Error::other("invalid process creation time"))
+    }
+    #[cfg(not(windows))]
+    {
+        snapshot()
+            .map_err(std::io::Error::other)?
+            .into_iter()
+            .find(|r| r.pid == std::process::id())
+            .map(|r| r.born)
+            .ok_or_else(|| std::io::Error::other("missing process creation time"))
+    }
+}
+
 /// Every process on this computer right now. Windows asks WMI (`Win32_Process`), whose creation date has microseconds.
+#[cfg(windows)]
+fn wmi_birth(date: &str) -> Result<u64, String> {
+    let parsed: wmi::WMIDateTime = date.parse().map_err(|e| format!("WMI creation time: {e}"))?;
+    let seconds = u64::try_from(parsed.0.timestamp()).map_err(|e| format!("WMI creation time: {e}"))?;
+    // WMIDateTime parses the six-digit CIM fraction as nanoseconds; retain the original microseconds.
+    let micros =
+        date.get(15..21).ok_or("WMI creation time has no fraction")?.parse::<u64>().map_err(|e| format!("WMI creation time: {e}"))?;
+    Ok(seconds * 1_000_000 + micros)
+}
+
+/// Every process on this computer right now, with exact creation times.
 #[cfg(windows)]
 pub fn snapshot() -> Result<Vec<ProcRow>, String> {
     use serde::Deserialize;
@@ -68,20 +98,21 @@ pub fn snapshot() -> Result<Vec<ProcRow>, String> {
         process_id: u32,
         parent_process_id: u32,
         name: String,
-        creation_date: Option<wmi::WMIDateTime>,
+        creation_date: Option<String>,
     }
     let wmi = wmi::WMIConnection::new().map_err(|e| format!("WMI: {e}"))?;
     let rows = wmi.query::<Row>().map_err(|e| format!("WMI process query: {e}"))?;
-    Ok(rows
-        .into_iter()
-        .map(|r| ProcRow {
-            pid: r.process_id,
-            parent: r.parent_process_id,
-            name: r.name,
-            // The idle process has no creation date; 0 sorts before everything, as it should.
-            born: r.creation_date.map_or(0, |d| u64::try_from(d.0.timestamp_micros()).unwrap_or(0)),
+    rows.into_iter()
+        .map(|r| {
+            Ok(ProcRow {
+                pid: r.process_id,
+                parent: r.parent_process_id,
+                name: r.name,
+                // The idle process has no creation date; 0 sorts before everything, as it should.
+                born: r.creation_date.as_deref().map(wmi_birth).transpose()?.unwrap_or(0),
+            })
         })
-        .collect())
+        .collect()
 }
 
 /// Every process on this computer right now, from the `sysinfo` crate (whole-second start times).
@@ -144,6 +175,11 @@ pub fn cpu_ms(root: u32) -> Result<f64, String> {
 #[cfg(not(windows))]
 pub fn cpu_ms(_root: u32) -> Result<f64, String> {
     Err("processor times are read through WMI, which only Windows has".into())
+}
+
+/// The same reading in seconds.
+pub fn cpu_seconds(root: u32) -> Result<f64, String> {
+    cpu_ms(root).map(|ms| ms / 1000.0)
 }
 
 #[cfg(not(windows))]
@@ -246,6 +282,12 @@ mod tests {
         // process that had the id earlier.
         let rows = [row(500, 4, SECOND + 500_000), row(600, 500, SECOND + 510_000), row(800, 500, SECOND + 460_000)];
         assert_eq!(pids(&descendants(&rows, 500)), [500, 600]);
+    }
+
+    #[test]
+    fn the_fake_clis_creation_time_matches_the_process_snapshot() {
+        let me = snapshot().unwrap().into_iter().find(|r| r.pid == std::process::id()).unwrap();
+        assert_eq!(current_birth().unwrap(), me.born);
     }
 
     #[test]

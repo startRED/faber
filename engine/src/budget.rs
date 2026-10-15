@@ -23,6 +23,23 @@ pub const LOW_M: f64 = 4.0;
 /// `m` at or below this is "plenty left" on the screen.
 pub const SPARE_M: f64 = 0.6;
 
+/// The current daily boundary in a weekly window, derived from its reset rather than a second clock.
+pub fn daily_start(reset: f64, now: f64) -> Option<f64> {
+    let day = 86_400.0;
+    let start = reset - 7.0 * day;
+    (reset.is_finite() && now.is_finite() && now >= start && now < reset).then(|| start + ((now - start) / day).floor() * day)
+}
+
+/// Hard room under the same 1/7 reference line Auto prices against; yesterday's unused share is not today's grant.
+pub fn daily_room(baseline: f64, used: f64, reset: f64, now: f64) -> Option<f64> {
+    let start = daily_start(reset, now)?;
+    if !(0.0..=1.5).contains(&baseline) || !(baseline..=1.5).contains(&used) {
+        return None;
+    }
+    let line = (start + 86_400.0 - (reset - 7.0 * 86_400.0)) / (7.0 * 86_400.0);
+    Some((1.0 / 7.0 - (used - baseline)).min(line - used).max(0.0))
+}
+
 /// The price multiplier of one window: `p` is the share expected to be used at the reset, `left` the share of the
 /// window still ahead. `p` of 0.7 is the pivot with a full window left (price 1); a window projected far under the pivot
 /// is cheap, one projected over it is dear, and one on the daily line costs 25, with a gradient above the line.
@@ -315,7 +332,6 @@ pub enum Purpose {
         by_hand: bool,
     },
     Router,
-    Pulse,
     Summary,
     /// A local status command that spends no quota; listed so every request goes through the same door.
     PlanCheck,

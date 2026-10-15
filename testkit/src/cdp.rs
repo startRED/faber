@@ -29,6 +29,11 @@ fn left(deadline: Instant, what: &str) -> Result<Duration, String> {
     deadline.checked_duration_since(Instant::now()).filter(|d| !d.is_zero()).ok_or_else(|| format!("timed out waiting for {what}"))
 }
 
+fn protocol_timed_out(error: &tungstenite::Error, deadline: Instant) -> bool {
+    Instant::now() >= deadline
+        || matches!(error, tungstenite::Error::Io(e) if matches!(e.kind(), io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock))
+}
+
 /// A connection that cannot outlast its deadline. The socket's own timeout restarts with every read, so a peer that
 /// sends a header or a frame a byte at a time would keep it going for ever; here the timeout is set to what is left of
 /// the one deadline before each read and each write, whoever asks (the HTTP parser or the WebSocket framing).
@@ -101,7 +106,7 @@ impl Cdp {
         let request = json!({ "id": id, "method": method, "params": params }).to_string();
         self.socket.get_mut().deadline = deadline;
         self.socket.send(Message::text(request)).map_err(|e| {
-            if Instant::now() >= deadline { format!("timed out waiting for {what}") } else { format!("DevTools send: {e}") }
+            if protocol_timed_out(&e, deadline) { format!("timed out waiting for {what}") } else { format!("DevTools send: {e}") }
         })?;
         loop {
             let reply = self.read(deadline, &what)?;
@@ -120,7 +125,11 @@ impl Cdp {
         loop {
             left(deadline, what)?;
             let message = self.socket.read().map_err(|e| {
-                if Instant::now() >= deadline { format!("timed out waiting for {what}") } else { format!("DevTools read ({what}): {e}") }
+                if protocol_timed_out(&e, deadline) {
+                    format!("timed out waiting for {what}")
+                } else {
+                    format!("DevTools read ({what}): {e}")
+                }
             })?;
             let Message::Text(text) = message else { continue };
             let reply: Value = serde_json::from_str(text.as_str()).map_err(|e| format!("DevTools sent bad JSON: {e}"))?;
@@ -217,6 +226,16 @@ impl Cdp {
         self.move_to(x, y)?;
         for (kind, buttons) in [("mousePressed", 1), ("mouseReleased", 0)] {
             let params = json!({ "type": kind, "x": x, "y": y, "button": "left", "buttons": buttons, "clickCount": 1 });
+            self.call("Input.dispatchMouseEvent", params)?;
+        }
+        Ok(())
+    }
+
+    /// A press of the right mouse button, which is what opens a context menu.
+    pub fn right_click_at(&mut self, x: f64, y: f64) -> Result<(), String> {
+        self.move_to(x, y)?;
+        for (kind, buttons) in [("mousePressed", 2), ("mouseReleased", 0)] {
+            let params = json!({ "type": kind, "x": x, "y": y, "button": "right", "buttons": buttons, "clickCount": 1 });
             self.call("Input.dispatchMouseEvent", params)?;
         }
         Ok(())
@@ -496,6 +515,17 @@ mod tests {
                 "Runtime.evaluate"
             ]
         );
+    }
+
+    #[test]
+    fn native_transport_timeout_keeps_deadline_semantics_before_the_clock_tick() {
+        let future = Instant::now() + CALL_LIMIT;
+        for kind in [io::ErrorKind::TimedOut, io::ErrorKind::WouldBlock] {
+            assert!(protocol_timed_out(&tungstenite::Error::Io(io::Error::new(kind, "native socket timeout")), future));
+        }
+        let reset = tungstenite::Error::Io(io::Error::new(io::ErrorKind::ConnectionReset, "peer reset"));
+        assert!(!protocol_timed_out(&reset, future));
+        assert!(protocol_timed_out(&reset, Instant::now()));
     }
 
     // A page that never stops sending events and never answers must not keep a call from ending on time.

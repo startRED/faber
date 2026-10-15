@@ -11,6 +11,8 @@ mod support;
 mod account;
 #[path = "auto.rs"]
 mod auto;
+#[path = "book.rs"]
+mod book;
 #[path = "budget.rs"]
 mod budget;
 #[path = "cache_health.rs"]
@@ -31,14 +33,58 @@ mod learn;
 mod learning;
 #[path = "ledger.rs"]
 mod ledger;
+#[path = "local_update.rs"]
+mod local_update;
 #[path = "pacing.rs"]
 mod pacing;
 #[path = "paid_guard.rs"]
 mod paid_guard;
+#[path = "persona.rs"]
+mod persona;
 #[path = "plan.rs"]
 mod plan;
+#[path = "project.rs"]
+mod project;
+#[path = "project_bar.rs"]
+mod project_bar;
+#[path = "project_bar_regressions.rs"]
+mod project_bar_regressions;
+#[path = "project_budget.rs"]
+mod project_budget;
+#[path = "project_compile.rs"]
+mod project_compile;
+#[path = "project_git.rs"]
+mod project_git;
+#[path = "project_git_t5.rs"]
+mod project_git_t5;
+#[path = "project_kit.rs"]
+mod project_kit;
+#[path = "project_lead.rs"]
+mod project_lead;
+#[path = "project_lease.rs"]
+mod project_lease;
+#[path = "project_native.rs"]
+mod project_native;
+#[path = "project_policy.rs"]
+mod project_policy;
+#[path = "project_queue.rs"]
+mod project_queue;
+#[path = "project_recovery.rs"]
+mod project_recovery;
+#[path = "project_review.rs"]
+mod project_review;
+#[path = "project_route_v0.rs"]
+mod project_route_v0;
+#[path = "project_run.rs"]
+mod project_run;
+#[path = "project_screen_proofs.rs"]
+mod project_screen_proofs;
 #[path = "project_security.rs"]
 mod project_security;
+#[path = "project_wire_v2.rs"]
+mod project_wire_v2;
+#[path = "project_worker.rs"]
+mod project_worker;
 #[path = "quota.rs"]
 mod quota;
 #[path = "quota_live.rs"]

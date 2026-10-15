@@ -32,6 +32,8 @@ use uuid::Uuid;
 mod answer;
 mod auto;
 mod parked;
+mod project_budget;
+mod project_sessions;
 mod quota_watch;
 mod recovery;
 mod usage_view;
@@ -251,6 +253,12 @@ struct Core {
     /// Conversations in use, the source of truth while the app runs; every change is written through to disk.
     convs: HashMap<String, Conversation>,
     live: HashMap<String, Live>,
+    mission_sessions: HashMap<String, Vec<Session>>,
+    /// The project each mission in `mission_sessions` belongs to, so a project can be asked whether a worker is alive in it.
+    mission_projects: HashMap<String, String>,
+    mission_lock: Arc<tokio::sync::Mutex<()>>,
+    local_update: Option<crate::project::update::SlotLayout>,
+    local_build: bool,
     /// A new conversation still being typed: its CLI starts before the first message is sent.
     draft: Option<String>,
     /// Streaming text goes to the screen at most ~30 times a second; the message waiting per conversation.
@@ -275,6 +283,10 @@ struct Core {
     /// What Faber remembers about each vendor's quota (`budget.json`).
     ledger: Ledger,
     ledger_saved: f64,
+    /// Safety changes cannot admit work after a failed ledger save.
+    ledger_failed: bool,
+    /// No ownership or unreadable authority: keep Chat in memory and leave the durable budget intact.
+    projects_closed: bool,
     /// When each vendor's quota is read next (cadence.rs), and which readings are under way.
     cadence: Cadence,
     reading: HashSet<Vendor>,
@@ -309,7 +321,7 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(opts: EngineOptions, emit: Emit) -> Engine {
-        let store = Store::new(&opts.data_dir);
+        let mut store = Store::new(&opts.data_dir);
         // A crash can leave an unsaved draft behind. Visible records keep their scratch; orphan UUID folders do not.
         let scratch = opts.data_dir.join("chat");
         if scratch.symlink_metadata().is_ok_and(|m| !m.file_type().is_symlink()) {
@@ -320,7 +332,15 @@ impl Engine {
                 }
             }
         }
-        let ledger = store.ledger();
+        let owned = store.claim_budget().is_ok();
+        let mut ledger = store.ledger();
+        let projects_closed = !owned
+            || store.ledger_checked().is_err()
+            || match crate::project::budget::recover_unbounded(&mut ledger) {
+                Ok(true) => store.save_ledger(&ledger).is_err(),
+                Ok(false) => false,
+                Err(_) => true,
+            };
         let quotas = remembered(&ledger, unix_secs());
         let runtime = opts.runtime.clone();
         let core = Arc::new_cyclic(|me| {
@@ -331,6 +351,11 @@ impl Engine {
                 me: me.clone(),
                 convs: HashMap::new(),
                 live: HashMap::new(),
+                mission_sessions: HashMap::new(),
+                mission_projects: HashMap::new(),
+                mission_lock: Arc::new(tokio::sync::Mutex::new(())),
+                local_update: None,
+                local_build: false,
                 draft: None,
                 pending: HashMap::new(),
                 next_sid: 0,
@@ -345,6 +370,8 @@ impl Engine {
                 spare: None,
                 ledger,
                 ledger_saved: 0.0,
+                ledger_failed: false,
+                projects_closed,
                 cadence: Cadence::default(),
                 reading: HashSet::new(),
                 watching: false,
@@ -593,6 +620,42 @@ impl Engine {
     pub fn add_project(&self, path: &str) -> Project {
         self.with(|c| c.add_project(path))
     }
+    pub fn project(&self, id: &str) -> Result<Project, String> {
+        self.with(|c| {
+            c.store
+                .projects_checked()
+                .map_err(|e| e.key().to_string())?
+                .into_iter()
+                .find(|p| p.id == id)
+                .ok_or_else(|| "error.project.notFound".into())
+        })
+    }
+
+    pub fn projects_checked(&self) -> Result<Vec<Project>, String> {
+        self.with(|c| c.store.projects_checked().map_err(|e| e.key().to_string()))
+    }
+    pub fn update_project(&self, before: &Project, project: &Project) -> Result<(), String> {
+        self.with(|c| {
+            let mut projects = c.store.projects_checked().map_err(|e| e.key().to_string())?;
+            if let Some(pos) = projects.iter().position(|p| p.id == project.id) {
+                if &projects[pos] != before {
+                    return Err("reason.grant.stale".into());
+                }
+                if before == project {
+                    return Ok(());
+                }
+                projects[pos] = project.clone();
+                if c.store.save_projects(&projects).is_ok() {
+                    c.list_changed();
+                    Ok(())
+                } else {
+                    Err("error.store.write".into())
+                }
+            } else {
+                Err("error.project.notFound".into())
+            }
+        })
+    }
     /// A folder picked in a dialog or taken from the recents, as a project. A refused or missing folder adds nothing.
     pub fn open_folder(&self, path: &str) -> Result<Project, String> {
         let Some(path) = crate::recents::resolved(path) else { return Err("error.workingFolder".into()) };
@@ -645,11 +708,21 @@ impl Engine {
         projects.reverse();
         if projects.is_empty() { Err(failure) } else { Ok(projects) }
     }
-    pub fn remove_project(&self, id: &str) {
+    /// Takes a project out of the list. Anything still working in it (a conversation answering, a mission planning or
+    /// running) stops the removal with `error.project.busy`: the person stops it first. Nothing on disk is deleted.
+    pub fn remove_project(&self, id: &str) -> Result<(), String> {
         self.with(|c| {
+            let Some(project) = c.store.projects().into_iter().find(|p| p.id == id) else { return Err("error.project.notFound".into()) };
+            let answering = c.convs.values().any(|conv| conv.project_id.as_deref() == Some(id) && running_item(conv).is_some());
+            // A worker session alive in memory counts even if its records on disk were removed or cannot be read.
+            let working = c.mission_sessions.iter().any(|(m, s)| !s.is_empty() && c.mission_projects.get(m).is_some_and(|p| p == id));
+            if answering || working || crate::project::has_active_mission(Path::new(&project.path), &c.opts.data_dir, id) {
+                return Err("error.project.busy".into());
+            }
             let projects: Vec<Project> = c.store.projects().into_iter().filter(|p| p.id != id).collect();
-            c.store.save_projects(&projects);
+            c.store.save_projects(&projects).map_err(|_| "error.store.write".to_string())?;
             c.list_changed();
+            Ok(())
         })
     }
     /// Swaps the CLIs in use, for example after one was installed or signed in to. Idle processes of a changed CLI
@@ -696,11 +769,15 @@ impl Engine {
             for (_, l) in c.live.drain() {
                 l.session.close();
             }
+            for session in c.mission_sessions.drain().flat_map(|(_, sessions)| sessions) {
+                session.close();
+            }
             for (_, server) in c.codex.drain() {
                 server.retire();
             }
             c.close_spare();
             c.save_ledger(true);
+            c.store.release_budget();
         })
     }
 }
@@ -711,12 +788,18 @@ impl Core {
         self.clock.as_ref().map_or_else(unix_secs, |clock| clock())
     }
 
-    /// Writes the ledger, but at most every half minute unless `force`: readings come with every answer.
+    /// Writes the ledger, but at most every half minute unless `force`: readings come with every answer. A failed write is
+    /// tried again with the next reading.
     fn save_ledger(&mut self, force: bool) {
+        if self.projects_closed {
+            return;
+        }
         let now = self.secs();
         if force || !(0.0..LEDGER_EVERY).contains(&(now - self.ledger_saved)) {
-            self.store.save_ledger(&self.ledger);
-            self.ledger_saved = now;
+            self.ledger_failed = self.store.save_ledger(&self.ledger).is_err();
+            if !self.ledger_failed {
+                self.ledger_saved = now;
+            }
         }
     }
 
@@ -752,6 +835,7 @@ impl Core {
         }
         if let Some(possible) = s.paid_fallback {
             v.paid_fallback = Some(possible);
+            v.paid_fallback_at = Some(now);
         }
         if let Some(billing) = s.billing {
             v.billing = billing;
@@ -825,6 +909,9 @@ impl Core {
         self.ledger.of_mut(vendor).worked(Work { start, finished: now, model: model.to_string(), cost, incomplete }, now);
         self.quota_event();
         self.ledger.of_mut(vendor).learn_weights(now);
+        if crate::project::budget::finish_unbounded(&mut self.ledger, vendor).is_err() {
+            self.projects_closed = true;
+        }
         self.save_ledger(true);
         self.emit_usage();
     }
@@ -1662,6 +1749,10 @@ impl Core {
     /// lost; once the turn exists, a failure shows on that turn's reply like any other.
     fn dispatch_queued(&mut self, id: &str, item: QueuedTurn) -> Result<(), String> {
         self.load(id).ok_or("error.conversationGone")?;
+        if self.local_build {
+            self.requeue(id, item);
+            return Err("error.update.activeOperations".into());
+        }
         let Some(fallback) = pick_model(&item.choice, &self.vendors(), self.codex_recommended.as_deref()) else {
             self.requeue(id, item);
             return Err("error.noSubscription".into());
@@ -1850,6 +1941,10 @@ impl Core {
             m.model = Some(running);
         }
         let started = self.secs();
+        if !self.live.contains_key(id) {
+            return Err("error.conversationGone".into());
+        }
+        self.begin_unbounded(pick.vendor)?;
         if let Some(l) = self.live.get_mut(id) {
             l.started = started;
             l.turn = Some(reply_id.to_string());
@@ -2029,6 +2124,7 @@ impl Core {
             allow_always: None,
             branch_of: None,
             user_name: self.store.settings().user_name.and_then(|name| clean_name(&name)),
+            persona_version: Some(crate::persona::VERSION),
             created_at: at,
             updated_at: at,
             queued: Vec::new(),
@@ -2040,6 +2136,9 @@ impl Core {
     }
 
     fn send(&mut self, req: SendRequest) -> Result<String, String> {
+        if self.local_build {
+            return Err("error.update.activeOperations".into());
+        }
         let fallback = pick_model(&req.choice, &self.vendors(), self.codex_recommended.as_deref()).ok_or("error.noSubscription")?;
         let existing = req.conversation_id.as_deref().and_then(|id| self.load(id).map(|c| c.id.clone()));
         if let Some(id) = &existing
@@ -2167,6 +2266,9 @@ impl Core {
     // Edit a message or redo an answer with another model: a new conversation keeps everything before that message,
     // with the chat workspace copied, and sends the new text. The original stays as it was.
     fn branch(&mut self, req: BranchRequest) -> Result<String, String> {
+        if self.local_build {
+            return Err("error.update.activeOperations".into());
+        }
         let source = self.load(&req.conversation_id).cloned().ok_or("error.messageGone")?;
         let at = source.messages.iter().position(|m| m.id == req.message_id).ok_or("error.messageGone")?;
         let id = self.blank(source.area, source.project_id.clone());
@@ -2219,6 +2321,9 @@ impl Core {
 
     // Starts the CLI before the user finishes typing, so the first word arrives sooner.
     fn warm(&mut self, req: WarmRequest) {
+        if self.local_build {
+            return;
+        }
         let Some(fallback) = pick_model(&req.choice, &self.vendors(), self.codex_recommended.as_deref()) else { return };
         let id = self.draft_for(&req);
         if self.live.get(&id).is_some_and(|l| l.turn.is_some()) {
@@ -2272,7 +2377,7 @@ impl Core {
 
     fn rename(&mut self, id: &str, title: &str) {
         let Some(c) = self.load(id) else { return };
-        let title: String = title.trim().chars().take(120).collect();
+        let title: String = title.chars().filter(|ch| !unseen(*ch)).collect::<String>().trim().chars().take(120).collect();
         if !title.is_empty() {
             c.title = title;
         }
@@ -2281,6 +2386,7 @@ impl Core {
     }
 
     fn remove(&mut self, id: &str) {
+        self.note_turn(id, None, true);
         if let Some(l) = self.live.remove(id) {
             l.session.close();
         }
@@ -2325,10 +2431,11 @@ impl Core {
             return found.clone();
         }
         let name = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string());
-        let project = Project { id: new_id(), name, path: path.to_string() };
+        let project = Project::new(new_id(), name, path.to_string());
         projects.push(project.clone());
-        self.store.save_projects(&projects);
-        self.list_changed();
+        if self.store.save_projects(&projects).is_ok() {
+            self.list_changed();
+        }
         project
     }
 }
@@ -2347,6 +2454,17 @@ fn same_as_before(c: &Conversation, live: Option<&Live>) -> Option<Pick> {
         live.filter(|l| l.vendor == vendor).map_or_else(|| last.effort.clone().unwrap_or_else(|| "medium".into()), |l| l.effort.clone());
     let reason = last.reason.clone().filter(|r| r != "reason.routing").unwrap_or_else(|| "reason.autoDefault".into());
     Some(Pick { vendor, model: last.model.clone(), effort, reason, pace: None })
+}
+
+/// A control character or an invisible formatting one (zero-width space, direction marks and overrides, line separators):
+/// nothing a person can see, so a title never keeps one. The joiners U+200C and U+200D stay: they decide how Persian, Indic
+/// and emoji text is spelled, and removing them changes the word.
+fn unseen(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{ad}' | '\u{61c}' | '\u{180e}' | '\u{200b}' | '\u{200e}'..='\u{200f}' | '\u{2028}'..='\u{202e}' | '\u{2060}'..='\u{206f}' | '\u{feff}' | '\u{fff9}'..='\u{fffb}'
+        )
 }
 
 /// The row of the running list for a conversation, if its latest reply is streaming, has unanswered permissions or has parked

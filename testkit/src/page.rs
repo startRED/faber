@@ -268,8 +268,21 @@ impl Page {
     }
 
     pub fn click(&mut self, loc: &Loc) -> Result<(), String> {
-        let at = self.on(loc, "enabled", Self::CENTER)?;
+        // Visibility can precede the rendered layout after navigation or scrolling.
+        let stable = "el.scrollIntoView({ block: 'center', inline: 'center' }); const before = el.getBoundingClientRect(); return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => { const r = el.getBoundingClientRect(); const x = r.x + r.width / 2, y = r.y + r.height / 2; const hit = document.elementFromPoint(x, y); resolve(el.isConnected && r.x === before.x && r.y === before.y && r.width === before.width && r.height === before.height && hit && el.contains(hit) ? { x, y } : { why: 'the click target has not reached its rendered layout' }); })));";
+        let script = format!("const at = (() => {{ {} }})(); if (at.why) return at; ", Self::CENTER) + stable;
+        let at = self.on(loc, "enabled", &script)?;
+        self.cdp.move_to(at["x"].as_f64().unwrap_or_default(), at["y"].as_f64().unwrap_or_default())?;
+        // Pointer entry can resume offscreen motion or change hover layout; settle it before the one button press.
+        self.on(loc, "enabled", Self::CENTER)?;
+        let at = self.on(loc, "enabled", stable)?;
         self.cdp.click_at(at["x"].as_f64().unwrap_or_default(), at["y"].as_f64().unwrap_or_default())
+    }
+
+    /// Presses the right mouse button on the middle of the element.
+    pub fn right_click(&mut self, loc: &Loc) -> Result<(), String> {
+        let at = self.on(loc, "visible", &format!("el.scrollIntoView({{ block: 'center', inline: 'center' }}); {}", Self::CENTER))?;
+        self.cdp.right_click_at(at["x"].as_f64().unwrap_or_default(), at["y"].as_f64().unwrap_or_default())
     }
 
     /// Waits until the element is visible and not disabled, without acting on it.

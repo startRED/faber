@@ -1,6 +1,9 @@
 //! The runner: `cargo t` (see `.cargo/config.toml`). All of it is in `faber_testkit::runner`.
 
 fn main() {
+    if let Some(code) = faber_engine::proc::guard_mode() {
+        std::process::exit(code);
+    }
     // Below normal: whatever the person is doing (a game, a call) wins the CPU. Everything the runner starts (cargo,
     // rustc, the linker, the test programs, the hidden app) inherits this class.
     #[cfg(windows)]

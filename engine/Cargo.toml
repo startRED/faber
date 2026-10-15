@@ -9,6 +9,8 @@ repository.workspace = true
 autotests = false
 
 [dependencies]
+# The existing workspace dependency supplies a safe native disk-space reading at build admission.
+sysinfo = { version = "0.39.6", default-features = false, features = ["disk"] }
 base64 = "0.22"
 flate2 = "1"
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
@@ -25,6 +27,10 @@ winreg = "0.56"
 # Job objects (a CLI and everything it starts are ended together); the safe wrapper keeps this crate free of unsafe code.
 win32job = "2"
 faber-winproc = { path = "../winproc" }
+
+[target.'cfg(unix)'.dependencies]
+# Safe directory-relative file operations; already used by the workspace's dependencies.
+rustix = { version = "1", features = ["fs"] }
 
 [dev-dependencies]
 # Reads the resident memory of the test's own process (install_memory.rs); the workspace forbids the unsafe code a counting allocator needs.

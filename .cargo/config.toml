@@ -1,7 +1,10 @@
 [alias]
 # `cargo t` runs Faber's own test runner (testkit/). Without arguments it runs what the changed files need.
-# The runner is compiled before it can choose half the cores, so that first build is capped at 4 jobs.
-t = "run --quiet -j 4 --package faber-testkit --bin faber-test --"
+t = "run --quiet --package faber-testkit --bin faber-test --"
+
+[build]
+# Cap the bootstrap build while preserving Cargo's CARGO_BUILD_JOBS override.
+jobs = 4
 
 # LLVM's linker ships with the Rust toolchain and links much faster than the Visual Studio one.
 [target.x86_64-pc-windows-msvc]

@@ -338,6 +338,19 @@ export const fr: Messages = {
   'look.accentAdjusted': 'L’accent a été ajusté pour rester lisible sur ce fond.',
   'ambient.idea': 'Votre idée',
   'ambient.done': 'Terminé, preuve à l’appui',
+  'ambient.goal': 'Votre objectif',
+  'hint.chat.2': 'Collez un texte et demandez ce qu’il dit vraiment',
+  'hint.chat.3': 'Décrivez un problème et demandez trois pistes',
+  'projects.home.title': 'Que faisons-nous ?',
+  'projects.home.lead': 'Donnez un objectif à Faber pour ce projet. Il travaille sur une copie séparée et montre ce qu’il a vérifié.',
+  'projects.home.rules': 'Comment Faber travaille ici',
+  'projects.home.details': "Détails",
+  'projects.gitMode.seguroTech': "Mode sûr : worktree séparé, commits locaux uniquement et avance rapide seulement sur la branche de la mission.",
+  'projects.selfUpdate.trustTech': "Une nouvelle version passe à l'emplacement local suivant seulement après un essai canari et les contrôles de quarantaine.",
+  'projects.home.others': 'Autres projets',
+  'projects.home.hint.1': 'Décrivez ce qu’il faut créer, corriger ou améliorer dans ce projet',
+  'projects.home.hint.2': 'Corrigez le test qui échoue de temps en temps',
+  'projects.home.hint.3': 'Ajoutez une option dans les réglages et prouvez qu’elle fonctionne',
   'setup.title': 'Connectez vos abonnements',
   'setup.body': 'Choisissez les outils d’IA officiels que vous souhaitez utiliser avec vos propres abonnements.',
   'setup.claude': 'Claude',
@@ -450,6 +463,287 @@ export const fr: Messages = {
   "quota.seven_day_opus": "Opus · 7 jours",
   "quota.seven_day_sonnet": "Sonnet · 7 jours",
   "quota.seven_day_haiku": "Haiku · 7 jours",
+  // Native speaker must translate (needs native review).
+  "projects.title": "Projets",
+  // Native speaker must translate (needs native review).
+  "projects.empty.selectProject": "Sélectionnez un dossier de projet pour démarrer une mission.",
+  // Native speaker must translate (needs native review).
+  "projects.repo": "Dossier",
+  // Native speaker must translate (needs native review).
+  "projects.base": "Révision de base",
+  // Native speaker must translate (needs native review).
+  "projects.author": "Auteur",
+  // Native speaker must translate (needs native review).
+  "projects.presence.title": "Si un outil manque",
+  // Native speaker must translate (needs native review).
+  "projects.presence.continueWithout": "Continuer sans lui",
+  // Native speaker must translate (needs native review).
+  "projects.presence.findTools": "Le trouver et l'installer pour moi",
+  // Native speaker must translate (needs native review).
+  "reason.kit.continueWithout": "Faber utilise les outils qu'il a déjà.",
+  // Native speaker must translate (needs native review).
+  "reason.kit.findToolsInstallParked": "L'installation d'outils n'est pas encore prête. Pour l'instant, Faber utilise ceux qu'il a déjà.",
+  // Native speaker must translate (needs native review).
+  "projects.gitMode.title": "Ce que Faber peut faire de votre code",
+  // Native speaker must translate (needs native review).
+  "projects.gitMode.seguro": "Sûr : une copie séparée seulement",
+  // Native speaker must translate (needs native review).
+  "projects.gitMode.seguroDesc": "Faber travaille sur une copie séparée de votre projet. Il ne touche ni à GitHub ni à rien en ligne.",
+  // Native speaker must translate (needs native review).
+  "projects.gitMode.equilibrado": "Equilibrado (Commits locaux + draft PR)",
+  // Native speaker must translate (needs native review).
+  "projects.gitMode.equilibradoDesc": "Seguro avec envoi de la branche de la mission et création d'une draft PR.",
+  // Native speaker must translate (needs native review).
+  "projects.selfUpdate.trust": "Autoriser Faber à se mettre à jour lui-même",
+  // Native speaker must translate (needs native review).
+  "projects.selfUpdate.trustDesc": "Installe une nouvelle version de Faber seulement après avoir vérifié qu'elle fonctionne.",
+  // Native speaker must translate (needs native review).
+  "projects.goal.label": "Objectif de la mission",
+  // Native speaker must translate (needs native review).
+  "projects.goal.placeholder": "Décrivez ce que vous souhaitez que Faber construise, corrige ou améliore dans ce projet...",
+  // Native speaker must translate (needs native review).
+  "projects.action.start": "Démarrer la mission",
+  // Native speaker must translate (needs native review).
+  "projects.action.stop": "Arrêter",
+  // Native speaker must translate (needs native review).
+  "projects.action.resume": "Reprendre",
+  // Native speaker must translate (needs native review).
+  "projects.mode.normal": "Normal",
+  // Native speaker must translate (needs native review).
+  "projects.mode.autonomous": "Autonome",
+  // Native speaker must translate (needs native review).
+  "projects.needsYou": "Besoin de vous",
+  // Native speaker must translate (needs native review).
+  "projects.needsYou.desc": "Faber attend votre décision avant de continuer.",
+  // Native speaker must translate (needs native review).
+  "projects.decision.default": "Par défaut",
+  // Native speaker must translate (needs native review).
+  "projects.decision.customPlaceholder": "Ou saisissez une réponse personnalisée…",
+  // Native speaker must translate (needs native review).
+  "projects.decision.answer": "Répondre",
+  // Native speaker must translate (needs native review).
+  "decision.kind.direction": "Orientation",
+  // Native speaker must translate (needs native review).
+  "decision.kind.taste": "Style",
+  // Native speaker must translate (needs native review).
+  "decision.kind.money": "Budget",
+  // Native speaker must translate (needs native review).
+  "decision.kind.legal": "Juridique",
+  // Native speaker must translate (needs native review).
+  "decision.kind.technical": "Technique",
+  // Native speaker must translate (needs native review).
+  "projects.tasks.title": "Tâches",
+  // Native speaker must translate (needs native review).
+  "projects.task.ready": "Prêt",
+  // Native speaker must translate (needs native review).
+  "projects.task.running": "En cours",
+  // Native speaker must translate (needs native review).
+  "projects.task.review": "Revue",
+  // Native speaker must translate (needs native review).
+  "projects.task.done": "Terminé",
+  // Native speaker must translate (needs native review).
+  "projects.task.blocked": "Bloqué",
+  // Native speaker must translate (needs native review).
+  "projects.task.builder": "Constructeur",
+  // Native speaker must translate (needs native review).
+  "projects.task.reviewer": "Réviseur",
+  // Native speaker must translate (needs native review).
+  "projects.receipt.unverified": "Non vérifié",
+  // Native speaker must translate (needs native review).
+  "projects.receipt.notRun": "Non exécuté",
+  // Native speaker must translate (needs native review).
+  "projects.receipt.verified": "Vérifié",
+  // Native speaker must translate (needs native review).
+  "projects.cost.title": "Coût propre",
+  // Native speaker must translate (needs native review).
+  "projects.cost.unknown": "Inconnu",
+  // Native speaker must translate (needs native review).
+  "projects.cost.cap": "Plafond",
+  // Native speaker must translate (needs native review).
+  "projects.pace.title": "Rythme du compte",
+  // Native speaker must translate (needs native review).
+  "projects.pace.used": "utilisé",
+  // Native speaker must translate (needs native review).
+  "projects.pace.room": "marge quotidienne",
+  // Native speaker must translate (needs native review).
+  "projects.build.title": "Build local",
+  // Native speaker must translate (needs native review).
+  "projects.build.current": "Actuel",
+  // Native speaker must translate (needs native review).
+  "projects.build.next": "Suivant",
+  // Native speaker must translate (needs native review).
+  "projects.build.lastGood": "Dernier stable",
+  // Native speaker must translate (needs native review).
+  "projects.build.waiting": "En attente de",
+  // Native speaker must translate (needs native review).
+  "reason.task.waiting": "En attente des dépendances",
+  // Native speaker must translate (needs native review).
+  "error.project.notFound": "Projet introuvable",
+  // Native speaker must translate (needs native review).
+  "error.journal.mismatch": "Incohérence dans le journal",
+  // Native speaker must translate (needs native review).
+  "reason.grant.none": "Le projet n'a aucune autorisation Git active",
+  // Native speaker must translate (needs native review).
+  "projects.mode.label": "Mode d'exécution",
+  // Native speaker must translate (needs native review).
+  "projects.state.planning": "Planification",
+  // Native speaker must translate (needs native review).
+  "projects.state.running": "En cours",
+  // Native speaker must translate (needs native review).
+  "projects.state.paused": "En pause",
+  // Native speaker must translate (needs native review).
+  "projects.state.blocked": "Bloqué",
+  // Native speaker must translate (needs native review).
+  "projects.state.done": "Terminé",
+  // Native speaker must translate (needs native review).
+  "projects.value.missing": "\u2014",
+  // Native speaker must translate (needs native review).
+  "projects.details": "Détails et preuves",
+  // Native speaker must translate (needs native review).
+  "projects.details.scope": "Périmètre",
+  // Native speaker must translate (needs native review).
+  "projects.details.proofs": "Contrôles requis",
+  // Native speaker must translate (needs native review).
+  "projects.details.noEvidence": "Aucune preuve vérifiée par le moteur n'est disponible.",
+  // Native speaker must translate (needs native review).
+  "projects.pace.freshness": "Relevé : {when}",
+  // Native speaker must translate (needs native review).
+  "reason.mission.runnerUnavailable": "L'exécution de la mission attend l'exécuteur approuvé. Aucun travail n'a commencé.",
+  // Native speaker must translate (needs native review).
+  "error.project.missionRequired": "Démarrez une mission pour travailler dans ce projet. Les sessions de projet directes ne sont pas disponibles.",
+  // Native speaker must translate (needs native review).
+  "error.wire.malformed": "La requête contient des valeurs non valides ou manquantes.",
+  // Native speaker must translate (needs native review).
+  "error.wire.tooBig": "La requête est trop volumineuse.",
+  // Native speaker must translate (needs native review).
+  "error.wire.stale": "Cette mission a changé. Rechargez-la avant de répondre.",
+  // Native speaker must translate (needs native review).
+  "reason.grant.stale": "L'autorisation Git a changé. Consultez à nouveau la carte de départ.",
+  // Native speaker must translate (needs native review).
+  "reason.grant.mode": "La publication distante est mise de côté dans le MVP d'auto-développement.",
+  // Native speaker must translate (needs native review).
+  "reason.grant.otherRepo": "Le dossier appartient désormais à un autre dépôt. Ajoutez-le à nouveau avant d'accorder l'autorisation.",
+  // Native speaker must translate (needs native review).
+  "reason.grant.revoked": "L'autorisation du projet a été révoquée.",
+  // Native speaker must translate (needs native review).
+  "error.journal.badId": "L'identifiant de la mission ou de la décision n'est pas valide.",
+  // Native speaker must translate (needs native review).
+  "error.store.write": "Les modifications n'ont pas pu être enregistrées. Rien n'a été approuvé.",
+  // Native speaker must translate (needs native review).
+  "error.store.read": "Les enregistrements sauvegardés n'ont pas pu être lus.",
+  // Native speaker must translate (needs native review).
+  "error.store.corrupt": "Les enregistrements sauvegardés sont endommagés.",
+  // Native speaker must translate (needs native review).
+  "error.decision.option": "Saisissez une réponse valide pour cette décision.",
+  // Native speaker must translate (needs native review).
+  "error.decision.answered": "Une réponse a déjà été donnée à cette décision.",
+  // Native speaker must translate (needs native review).
+  "error.decision.person": "Cette décision nécessite votre réponse.",
+  // Native speaker must translate (needs native review).
+  "reason.build.unavailable": "Les emplacements de build local n'ont pas été initialisés.",
+  // Native speaker must translate (needs native review).
+  "reason.update.quiescence": "La promotion attend la fin des opérations actives et la fermeture de la fenêtre.",
+  // Native speaker must translate (needs native review).
+  "reason.git.repository": "Choisissez un dossier appartenant à un dépôt Git.",
+  // Native speaker must translate (needs native review).
+  "reason.git.base": "La révision Git initiale n'a pas pu être résolue.",
+  // Native speaker must translate (needs native review).
+  "reason.git.ref": "La référence de branche de la mission n'est pas valide.",
+  // Native speaker must translate (needs native review).
+  "reason.git.command": "L'opération Git a échoué.",
+  // Native speaker must translate (needs native review).
+  "reason.git.unknown": "Le binaire Git natif n'est pas disponible ou n'a pas pu être vérifié.",
+  "reason.remote.ghMissing": "La CLI GitHub (gh) n'est pas installée. Votre travail reste local tant qu'elle ne l'est pas.",
+  "reason.remote.ghLoggedOut": "La CLI GitHub n'est pas connectée. Lancez gh auth login, puis réessayez.",
+  "reason.remote.target": "La branche, le dépôt distant ou le texte à publier n'est pas valide.",
+  "reason.remote.pending": "Une étape de publication précédente n'est pas encore réglée. Faber vérifie le dépôt distant avant d'envoyer autre chose.",
+  "reason.remote.config": "Ce dépôt contient des réglages Git que Faber n'autorise pas pour un envoi (seuls ceux de base du dépôt distant, de la branche et de l'auteur sont admis). Rien n'a été envoyé.",
+  "reason.remote.layout": "Ce dépôt réécrit l'historique ou emprunte des objets ailleurs (greffes, clone superficiel ou alternates), donc Faber ne peut pas prouver ce qui partirait. Rien n'a été envoyé.",
+  "reason.remote.otherRemote": "Ce dépôt a un second dépôt distant. Faber n'envoie que vers celui que vous avez autorisé, donc il n'envoie rien tant qu'un autre est configuré. Rien n'a été envoyé.",
+  "reason.remote.url": "Le dépôt distant ne pointe plus là où vous l'avez autorisé. Rien n'a été envoyé.",
+  "reason.remote.secret": "Un secret possible a été trouvé dans ce qui allait être envoyé. Rien n'a été envoyé.",
+  "reason.remote.unreachable": "Le dépôt distant est injoignable. Votre travail reste local.",
+  "reason.remote.diverged": "La branche distante contient des changements que Faber n'a pas. Faber ne la force ni ne la réécrit jamais.",
+  "reason.remote.rejected": "Le dépôt distant a refusé l'envoi. Votre travail reste local.",
+  "reason.remote.maybe": "Faber ne sait pas si cela est arrivé sur le dépôt distant. Il vérifie avant de faire quoi que ce soit d'autre.",
+  "reason.remote.notPushed": "Le commit validé n'est pas encore sur le dépôt distant.",
+  "reason.remote.headMoved": "La pull request a changé depuis que vous l'avez vue. Relisez-la.",
+  "reason.remote.needsYes": "La fusion demande votre accord pour cette pull request.",
+  "reason.remote.ci": "Les vérifications n'ont pas encore réussi, donc Faber ne fusionnera pas.",
+  "reason.remote.notOpen": "Cette pull request n'est pas ouverte.",
+  "reason.remote.prFailed": "La pull request n'a pas pu être ouverte.",
+  "reason.remote.mergeFailed": "La fusion n'a pas eu lieu.",
+  "reason.remote.oversized": "Ce qui serait envoyé est trop volumineux pour y chercher des secrets. Rien n'a été envoyé.",
+  "reason.remote.foreign": "Cette pull request ne vient pas de la branche de cette mission dans ce dépôt.",
+  "reason.remote.account": "Le GitHub CLI est connecté avec un autre compte que celui que vous avez autorisé. Rien n'a été fait.",
+  "reason.grant.noRemote": "Le dépôt distant n'est pas celui que vous avez autorisé.",
+  "reason.grant.noAccount": "L'autorisation n'indique aucun compte GitHub. Revoyez la carte de démarrage.",
+  "decision.remote.merge": "Marquer cette pull request comme prête et la fusionner ?",
+  // Native speaker must translate (needs native review).
+  "reason.grant.noAuthor": "Définissez un auteur Git avant d'accorder l'autorisation de commit.",
+  // Native speaker must translate (needs native review).
+  "reason.grant.newer": "Cette autorisation Git nécessite une version plus récente de Faber.",
+  // Native speaker must translate (needs native review).
+  "error.journal.newer": "Ces enregistrements de mission nécessitent une version plus récente de Faber.",
+  // Native speaker must translate (needs native review).
+  "error.store.full": "Le disque est plein. Rien n'a été approuvé.",
+  // Native speaker must translate (needs native review).
+  "reason.interrupted": "En pause au dernier point de contrôle sauvegardé.",
+  // Native speaker must translate (needs native review).
+  "error.plan.tooBig": "Le plan de mission dépasse la limite de tâches.",
+  // Native speaker must translate (needs native review).
+  "error.plan.badId": "Le plan de mission contient un identifiant de tâche non valide.",
+  // Native speaker must translate (needs native review).
+  "error.plan.duplicateTask": "Le plan de mission répète un identifiant de tâche.",
+  // Native speaker must translate (needs native review).
+  "error.plan.missingTask": "Une tâche dépend d'une tâche manquante.",
+  // Native speaker must translate (needs native review).
+  "error.plan.cycle": "Le plan de mission présente des dépendances circulaires.",
+  // Native speaker must translate (needs native review).
+  "error.plan.duplicateDeliverable": "Deux tâches revendiquent le même livrable.",
+  // Native speaker must translate (needs native review).
+  "error.plan.badPath": "Le plan de mission indique un chemin en dehors de son périmètre.",
+  // Native speaker must translate (needs native review).
+  "error.plan.readOnlyWrites": "Une tâche en lecture seule revendique l'autorisation d'écrire des fichiers.",
+  // Native speaker must translate (needs native review).
+  "error.plan.overlap": "Des écritures non ordonnées se chevauchent sur les mêmes fichiers source.",
+  // Native speaker must translate (needs native review).
+  "crumb.separator": "\u203a",
+  // Right-click menus (ui/ContextMenu.tsx).
+  // Native speaker must translate (needs native review).
+  "menu.label": "Actions",
+  // Native speaker must translate (needs native review).
+  "menu.rename": "Renommer",
+  // Native speaker must translate (needs native review).
+  "menu.renameLabel": "Nom de la conversation",
+  // Native speaker must translate (needs native review).
+  "menu.delete": "Supprimer",
+  // Native speaker must translate (needs native review).
+  "menu.newHere": "Nouvelle conversation dans ce projet",
+  // Native speaker must translate (needs native review).
+  "menu.openFolder": "Ouvrir le dossier",
+  // Native speaker must translate (needs native review).
+  "menu.removeProject": "Retirer de Faber",
+  // Native speaker must translate (needs native review).
+  "menu.removeConfirm": "Retirer ?",
+  // Native speaker must translate (needs native review).
+  "menu.copy": "Copier",
+  // Native speaker must translate (needs native review).
+  "menu.cut": "Couper",
+  // Native speaker must translate (needs native review).
+  "menu.paste": "Coller",
+  // Native speaker must translate (needs native review).
+  "menu.selectAll": "Tout sélectionner",
+  // Native speaker must translate (needs native review).
+  "menu.redo": "Refaire",
+  // Native speaker must translate (needs native review).
+  "error.project.busy": "Quelque chose travaille encore dans ce projet. Arrêtez-le d'abord, puis retirez le projet.",
+  // Native speaker must translate (needs native review).
+  "error.folder.notLocal": "Ce dossier n'est pas sur cet ordinateur, Faber ne l'ouvrira donc pas.",
+  // Native speaker must translate (needs native review).
+  "error.folder.missing": "Ce dossier n'existe plus.",
+  // Native speaker must translate (needs native review).
+  "error.folder.link": "Ce dossier est un lien vers un autre endroit, Faber ne l'ouvrira donc pas. Ouvrez le vrai dossier depuis l'explorateur de fichiers.",
   // Recent folders and environments: handwritten wording; native-speaker review pending (English is the source).
   "recents.title": "Dossiers récents",
   "recents.choose": "Choisir un dossier",

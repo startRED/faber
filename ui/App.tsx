@@ -1,6 +1,5 @@
 import { createEffect, createMemo, createSignal, Match, on, onCleanup, onMount, Show, Switch } from 'solid-js';
 import { Ambient } from './Ambient.tsx';
-import { Hole } from './Hole.tsx';
 import {
   api,
   type Appearance,
@@ -26,6 +25,7 @@ import { Lockup, Peek } from './Mark.tsx';
 import { Recents } from './Recents.tsx';
 import { modelOptions, prettyModel } from './models.ts';
 import { animateDetails, animateList, watchMotion } from './motion.ts';
+import { Projects } from './Projects.tsx';
 import { createOpening, upsert } from './opening.ts';
 import { Running } from './Running.tsx';
 import { createAutoOpen, openPlace, type Place, placeOfRunning, store, waitingKeys } from './running.ts';
@@ -534,7 +534,6 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   const needsProject = () => area() === 'project' && !project();
   // The new conversation of a chat with a connected AI is the one place the effects of a look appear.
   const newChat = () => area() === 'chat' && state().vendors.length > 0 && !current()?.messages.length;
-  const newSession = () => area() === 'project' && !!project() && state().vendors.length > 0 && !current()?.messages.length;
   // A new conversation the user is in, not a remembered one that is still on its way: the tutorial would open over it and
   // vanish when its messages arrive.
   const startsFresh = () => newChat() && !loading() && !place().id;
@@ -576,7 +575,8 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   // The model the open conversation is answering with now, else the one the next message will go to.
   const answering = () => current()?.messages.findLast((m) => m.role === 'assistant' && m.vendor);
 
-  const composer = () => (
+  // The same conversation's draft survives moving between the greeting and the dock.
+  const composer = createMemo(() => (
     <Show when={composerKey()} keyed>
       <Composer
         vendors={state().vendors}
@@ -587,6 +587,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
         nextMessage={!!current()?.messages.length}
         locked={loading()}
         placeholder={area() === 'project' ? t('composer.projectPlaceholder') : newChat() ? t('composer.chatPlaceholder') : t('composer.replyPlaceholder')}
+        hints={newChat() ? [t('composer.chatPlaceholder'), t('hint.chat.2'), t('hint.chat.3')] : undefined}
         onSend={(d) => void send(d)}
         onStop={() => current() && void api.interrupt(current()!.id)}
         onWarm={() => void api.warm({ conversationId: current()?.id, ...target(), choice: picked() })}
@@ -601,7 +602,13 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
         onClearRestored={(f) => (clearRestored = f)}
       />
     </Show>
-  );
+  ));
+  createEffect(on(newChat, () => {
+    const focused = lastFocus?.deref();
+    queueMicrotask(() => {
+      if (focused?.matches('.composer textarea') && focused.isConnected && document.activeElement === document.body) focused.focus();
+    });
+  }, { defer: true }));
 
   const runningColumn = () => (
     <Running
@@ -745,6 +752,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                 onOpen={openSummary}
                 onRemove={(id) => void remove(id)}
                 onSettings={(at) => (closeSide(false), openSettings(at))}
+                onError={(err) => setSaveError(failureText(err))}
               />
             </aside>
             <Show when={sideOverlay()}>
@@ -762,14 +770,14 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                     <Match when={place().id}>
                       {area() === 'chat' ? t('area.chat') : t('crumb.project')}
                       <span class="sep" aria-hidden="true">
-                        ›
+                        {t('crumb.separator')}
                       </span>
                       <b>{title() ?? ''}</b>
                     </Match>
                     <Match when={area() === 'project' && project()}>
                       {t('crumb.project')}
                       <span class="sep" aria-hidden="true">
-                        ›
+                        {t('crumb.separator')}
                       </span>
                       <b>{project()?.name}</b>
                     </Match>
@@ -780,7 +788,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                   </Switch>
                 </div>
                 <div class="right">
-                  <Show when={state().vendors.length > 0 && !newChat()}>
+                  <Show when={state().vendors.length > 0 && !newChat() && area() !== 'project'}>
                     <span class="chip" title={t('topbar.model')}>
                       <Show when={answering()} fallback={<>{options().find((o) => o.choice.vendor === picked().vendor && o.choice.model === picked().model)?.label}</>}>
                         {(m) => (
@@ -818,87 +826,104 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                 </div>
               </div>
               <div class="work" classList={{ under: columnOpen() && !docked() }} ref={(el) => { work = el; animateList(el); }}>
-                <Show when={newChat()}>
-                  {/* The effects of the look sit behind the greeting; dust keeps clear of the text and the composer. */}
-                  <Ambient vendors={state().vendors} avoid={() => [...work!.querySelectorAll('.hello, .lead, .composer, .try, .resume')]} />
-                </Show>
-                <Show when={newSession()}>
-                  {/* A new project session gets its own scene, clear of the heading, the hint and the composer. */}
-                  <Hole avoid={() => [...work!.querySelectorAll('.empty h1, .empty p, .peek, .hint, .composer')]} />
-                </Show>
-                <div class="thread" classList={{ welcome: newChat() }} ref={(el) => {
-                  thread = el;
-                  onMount(() => {
-                    // Keep the tail visible as the composer grows, without pulling a reader back down.
-                    const observer = new ResizeObserver(() => { if (stick) el.scrollTop = el.scrollHeight; });
-                    observer.observe(el);
-                    onCleanup(() => observer.disconnect());
-                  });
-                }} onScroll={(e) => onScroll(e.currentTarget)} inert={trapped()}>
-                  <Show
-                    when={newChat()}
-                    fallback={
-                      <div class="col" ref={(el) => {
-                        animateList(el);
+                <Show
+                  when={area() === 'project' && !place().id}
+                  fallback={
+                    <>
+                      <Show when={newChat()}>
+                        {/* The effects of the look sit behind the greeting; dust keeps clear of the text and the composer. */}
+                        <Ambient vendors={state().vendors} avoid={() => [...work!.querySelectorAll('.hello, .lead, .composer, .try, .resume')]} />
+                      </Show>
+                      <div class="thread" classList={{ welcome: newChat() }} ref={(el) => {
+                        thread = el;
                         onMount(() => {
-                          const observer = new ResizeObserver(() => { if (thread && stick) thread.scrollTop = thread.scrollHeight; });
+                          // Keep the tail visible as the composer grows, without pulling a reader back down.
+                          const observer = new ResizeObserver(() => { if (stick) el.scrollTop = el.scrollHeight; });
                           observer.observe(el);
                           onCleanup(() => observer.disconnect());
                         });
-                      }}>
-                        <Show when={area() === 'chat' || project()}>
-                          <p class="hint" role="status">
-                            {t(state().settings.permissions === 'ask' ? 'project.permissionsAsk' : 'project.permissionsDontAsk')}{' '}
-                            <button type="button" onClick={() => openSettings('general')}>{t('project.permissionsDetails')}</button>
-                          </p>
-                        </Show>
+                      }} onScroll={(e) => onScroll(e.currentTarget)} inert={trapped()}>
                         <Show
-                          when={current()?.messages.length ? current() : undefined}
-                          fallback={<Empty vendors={state().vendors.length} area={area()} project={project()} onConnect={openSetup} onChoose={() => void addProject().catch(fail)} onOpened={openProjects} onError={fail} />}
+                          when={newChat()}
+                          fallback={
+                            <div class="col" ref={(el) => {
+                              animateList(el);
+                              onMount(() => {
+                                const observer = new ResizeObserver(() => { if (thread && stick) thread.scrollTop = thread.scrollHeight; });
+                                observer.observe(el);
+                                onCleanup(() => observer.disconnect());
+                              });
+                            }}>
+                              <Show when={area() === 'chat' || project()}>
+                                <p class="hint" role="status">
+                                  {t(state().settings.permissions === 'ask' ? 'project.permissionsAsk' : 'project.permissionsDontAsk')}{' '}
+                                  <button type="button" onClick={() => openSettings('general')}>{t('project.permissionsDetails')}</button>
+                                </p>
+                              </Show>
+                              <Show
+                                when={current()?.messages.length ? current() : undefined}
+                                fallback={<Empty vendors={state().vendors.length} area={area()} project={project()} onConnect={openSetup} onChoose={() => void addProject().catch(fail)} onOpened={openProjects} onError={fail} />}
+                              >
+                                {(c) => (
+                                  <Thread
+                                    messages={c().messages}
+                                    queued={c().queued}
+                                    busy={busy()}
+                                    onError={fail}
+                                    usage={state().usage ?? []}
+                                    from={from()}
+                                    conversationId={c().id}
+                                    options={options()}
+                                    onBranch={(messageId, text, chosen) => void branch(messageId, text, chosen ?? picked())}
+                                  />
+                                )}
+                              </Show>
+                              <Show when={error()}>
+                                <div class="note err" role="alert">
+                                  {error()}
+                                </div>
+                              </Show>
+                            </div>
+                          }
                         >
-                          {(c) => (
-                            <Thread
-                              messages={c().messages}
-                              queued={c().queued}
-                              busy={busy()}
-                              onError={fail}
-                              usage={state().usage ?? []}
-                              from={from()}
-                              conversationId={c().id}
-                              options={options()}
-                              onBranch={(messageId, text, chosen) => void branch(messageId, text, chosen ?? picked())}
-                            />
-                          )}
-                        </Show>
-                        <Show when={error()}>
-                          <div class="note err" role="alert">
-                            {error()}
-                          </div>
+                          <Welcome
+                            recent={state().conversations}
+                            name={state().settings.userName}
+                            running={items()}
+                            projects={state().projects}
+                            onSuggest={(text) => fill?.(text)}
+                            onOpen={openSummary}
+                          >
+                            {composer()}
+                          </Welcome>
+                          <Show when={error()}>
+                            <div class="note err" role="alert">
+                              {error()}
+                            </div>
+                          </Show>
                         </Show>
                       </div>
-                    }
-                  >
-                    <Welcome
-                      recent={state().conversations}
-                      name={state().settings.userName}
-                      running={items()}
-                      projects={state().projects}
-                      onSuggest={(text) => fill?.(text)}
-                      onOpen={openSummary}
-                    >
-                      {composer()}
-                    </Welcome>
-                    <Show when={error()}>
-                      <div class="note err" role="alert">
-                        {error()}
-                      </div>
-                    </Show>
-                  </Show>
-                </div>
-                <Show when={!newChat() && !needsProject()}>
-                  <div class="dock" inert={trapped()}>
-                    {composer()}
-                  </div>
+                      <Show when={!newChat() && !needsProject() && area() !== 'project'}>
+                        <div class="dock" inert={trapped()}>
+                          {composer()}
+                        </div>
+                      </Show>
+                    </>
+                  }
+                >
+                  <Projects
+                    project={project()}
+                    vendors={state().vendors}
+                    now={clock()}
+                    projects={state().projects}
+                    recent={state().conversations}
+                    running={items()}
+                    onOpen={openSummary}
+                    onProject={(id) => void fresh({ area: 'project', projectId: id })}
+                    onAdd={() => void addProject().catch(fail)}
+                    onOpened={openProjects}
+                    onError={fail}
+                  />
                 </Show>
                 <Show when={columnOpen() && !docked()}>{runningColumn()}</Show>
               </div>

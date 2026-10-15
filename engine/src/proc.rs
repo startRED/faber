@@ -6,6 +6,61 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::process::{Child, Command};
+use tokio::time::{Duration, Instant};
+
+/// Only automatic roles arm silence; explicit interrupts always have a fixed grace period.
+#[derive(Default)]
+pub(crate) struct TurnWatch {
+    running: bool,
+    silent: Option<Instant>,
+    interrupt: Option<Instant>,
+    awaiting_permission: bool,
+}
+
+impl TurnWatch {
+    pub fn begin(&mut self, automated: bool) {
+        self.running = true;
+        self.silent = automated.then(|| Instant::now() + Duration::from_secs(120));
+        self.awaiting_permission = false;
+    }
+    pub fn activity(&mut self) {
+        if self.silent.is_some() {
+            self.silent = Some(Instant::now() + Duration::from_secs(120));
+        }
+    }
+    pub fn interrupt(&mut self) {
+        self.interrupt.get_or_insert_with(|| Instant::now() + Duration::from_secs(5));
+    }
+    pub fn finish(&mut self) {
+        self.running = false;
+        self.silent = None;
+        self.interrupt = None;
+        self.awaiting_permission = false;
+    }
+    pub fn pause(&mut self) {
+        self.awaiting_permission = true;
+    }
+    pub fn resume(&mut self) {
+        self.awaiting_permission = false;
+        self.activity();
+    }
+    pub fn stopping(&self) -> bool {
+        self.interrupt.is_some()
+    }
+    pub fn active(&self) -> bool {
+        self.running || self.interrupt.is_some()
+    }
+    pub fn deadline(&self) -> Option<Instant> {
+        self.interrupt.or(if self.awaiting_permission { None } else { self.silent })
+    }
+}
+
+pub(crate) async fn wait_deadline(deadline: Option<Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(deadline).await,
+        None => std::future::pending().await,
+    }
+}
 
 pub struct Proc {
     pub stdin: Box<dyn AsyncWrite + Send + Unpin>,
@@ -15,6 +70,42 @@ pub struct Proc {
     pub child: Option<Child>,
     /// What ends the process together with everything it started (a Windows job object); none for a replayed recording.
     pub contained: Option<Containment>,
+}
+
+/// Each executable embedding the engine dispatches this before starting its UI/runtime. The trusted guard waits
+/// for the parent to assign its job, acknowledges one byte, then launches the unmodified CLI with inherited pipes.
+pub fn guard_mode() -> Option<i32> {
+    #[cfg(windows)]
+    {
+        let args: Vec<_> = std::env::args_os().skip(1).collect();
+        if args.first().is_some_and(|s| s == "--faber-process-guard") {
+            return Some(guard(&args[1..]).unwrap_or(1));
+        }
+    }
+    None
+}
+
+#[cfg(windows)]
+fn guard(args: &[std::ffi::OsString]) -> io::Result<i32> {
+    use std::io::{Read, Write};
+    use std::os::windows::process::CommandExt;
+    let (binary, args) = args.split_first().ok_or_else(|| io::Error::other("missing guarded program"))?;
+    let mut go = [0];
+    io::stdin().read_exact(&mut go)?;
+    if go != *b"G" {
+        return Err(io::Error::other("guard not admitted"));
+    }
+    // The parent writes no CLI input until this ack, so stdin's buffer cannot swallow a protocol message.
+    io::stdout().write_all(b"R")?;
+    io::stdout().flush()?;
+    let status = std::process::Command::new(binary)
+        .args(args)
+        .creation_flags(0x0800_0000)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()?;
+    Ok(status.code().unwrap_or(1))
 }
 
 pub type Spawner = Arc<dyn Fn(&str, &[String], &Path) -> io::Result<Proc> + Send + Sync>;
@@ -238,6 +329,45 @@ pub(crate) async fn exit_code(child: &mut Option<Child>) -> String {
             Err(_) => "unknown".into(),
         },
         None => "0".into(),
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn waiting_for_permission_has_no_silence_deadline_but_stop_is_still_bounded() {
+        let mut watch = TurnWatch::default();
+        watch.begin(true);
+        watch.pause();
+        watch.activity();
+        assert!(watch.active());
+        assert_eq!(watch.deadline(), None);
+        watch.interrupt();
+        assert_eq!(watch.deadline(), Some(Instant::now() + Duration::from_secs(5)));
+        watch.finish();
+        watch.begin(true);
+        watch.pause();
+        watch.resume();
+        assert_eq!(watch.deadline(), Some(Instant::now() + Duration::from_secs(120)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn output_and_repeated_interrupts_cannot_extend_the_stop_grace() {
+        let mut watch = TurnWatch::default();
+        assert!(!watch.active());
+        watch.begin(true);
+        assert_eq!(watch.deadline(), Some(Instant::now() + Duration::from_secs(120)));
+        watch.interrupt();
+        let stop = watch.deadline();
+        tokio::time::advance(Duration::from_secs(4)).await;
+        watch.activity();
+        watch.interrupt();
+        assert_eq!(watch.deadline(), stop);
+        watch.finish();
+        assert!(!watch.stopping());
+        assert_eq!(watch.deadline(), None);
     }
 }
 

@@ -115,16 +115,25 @@ own inks.
   View Transitions when available and apply immediately otherwise; no dependency or retained screen is needed.
 
 ### Effects
-- Effects appear only on the new conversation screen, never behind text the user reads, and they stop when the window
-  is hidden or another app has the focus.
+- Effects appear only on the two homes (the new conversation of Chat and the first screen of a project) and behind a new
+  project session, never behind text the user reads. Every animation, including the composer's idle life, pauses while the
+  window is hidden (`html.hidden-win` sets `animation-play-state: paused`); the effects also stop while another app has the
+  focus (`html.away-win`), and they are gone with reduced or no motion.
+- Slow ambient loops step on a shared 1 s beat (`steps()`) instead of drawing 60 frames a second: idle CPU follows the
+  frames per second, not what changes in them. Dark Room's idle home costs about 10% of one core against 49% before.
+- The Projects home has its own light: the beam leans the other way, the loom runs slower and the flow line reads
+  "Your goal". A look with no effect of its own gets a faint drifting light when the ambient switch is on.
+- The empty composer idles (`ui/Ghost.tsx`): a blinking typing bar and a hint that changes every 8 s. It renders
+  nothing while the field has text or focus, with reduced or no motion, or while the window is hidden; the plain
+  placeholder stays underneath for assistive technology.
   - **Dark Room:** a static projector beam, a glow that breathes every 7 s and 72 dust grains (CSS shadows) that fade
     out near any text block. A timer sets the opacity of the glow and the three dust layers ten times a second, which
     the compositor alone applies; as CSS animations they made a 240 Hz screen composite the stage on every frame.
   - **Workshop:** a loom at the bottom right whose shuttle crosses every 9 s, and paper grain.
   - **Workbench:** a flow line at the top right reading "Your idea → Claude and Codex → Done, with proof". It names only
     the vendors that are connected.
-- A new project session in Dark Room shows a black hole drawn in monospace characters on one canvas (ui/Hole.tsx,
-  --amb-hole and --hole-colors): a huge shadow cut by the right edge, an amber disk sweeping in from the lower left
+- The first screen of a project (where a new session starts) in Dark Room also shows a black hole drawn in monospace
+  characters on one canvas (ui/Hole.tsx, --amb-hole and --hole-colors): a huge shadow cut by the right edge, an amber disk sweeping in from the lower left
   with fibres that turn faster near the hole, the far side of the disk bent over the top as a cool arc, a photon ring, a
   dim glow, a small planet below it and stars. Its size follows the room right of the text; words stay clear and the
   scene dims within 240 px of them.
@@ -242,7 +251,7 @@ inside its own area.
 - Auto chooses both the model and its effort. A manual model adds an adjacent low, medium or high effort choice,
   defaulting to medium (R102). Each conversation remembers its choice. Changes apply to the next message only;
   the composer says so, and each answer keeps the effort actually used. Both CLI drivers always receive that effort.
-- The ambient effect of the theme runs here.
+- The ambient effect of the theme runs here, and the empty composer idles with a typing bar and rotating hints.
 - With no AI connected, the greeting, the suggestions and the list give way to an empty state with Curioso and a button
   that opens account management. The composer stays on screen but cannot send.
 
@@ -360,12 +369,207 @@ projects. Faber has no worktree creation for projects, so an environment has no 
   skipping saves `tutorialDone: true` and gives focus back to where it was, or to the composer. It never reopens. If the
   save fails it still ends for that window and may show once more at the next launch.
 
+## Projects: self-development missions
+
+The minimal Projects slice of R96 ([spec](superpowers/specs/2026-10-12-self-development-mvp-design.md)). The engine types
+live in `engine/src/project.rs`, `project/store.rs` and `project/wire.rs`; this section is their published contract, and
+screen work may start against it with mock data before the engine runs missions.
+
+### Screen inventory
+
+The board keeps the titlebar, sidebar, topbar, running column, tokens, type and Curioso empty states, and uses the stage
+width rather than the 660 px reading column. Below the available width the state groups stack into one scrolling list;
+nothing needs a horizontal drag.
+
+| Surface | Minimum behaviour |
+| :--- | :--- |
+| Goal | The composer's styling: the goal, a short plan and Start. The text stays after a refused enrollment or start |
+| Start card | Repository, starting revision, git mode (Seguro selected), author and self-update trust; granted once, never per step |
+| Board | Ready, Running, Review, Done and Blocked; stable task rows with builder, reviewer and reason |
+| Cost | Own cost against the live cap; the account's daily pace and its freshness beside it, separately; unknown says unknown |
+| Decisions | The Ask and running cards, with author and default; nothing approves an effect by itself |
+| Stop | A keyboard-reachable button while running; then the paused checkpoint and Resume |
+| Task detail | Scope, diff and artifacts, command results, missing checks and risks; technical logs behind a click |
+| Local build | Current, next and last good, and why promotion waits; no completion toast |
+
+Status colours always come with words and shapes. Amber stays for needs-you only: a quota wait or a dependency is not
+shown as a decision.
+
+### The Projects home
+
+The first screen of a project uses the layout of the Chat home (`welcome-grid`) with its own identity: the greeting
+"What should we tackle?", a goal composer with its own hints, the three safety controls kept visible as quiet rows under
+"How Faber works here" (plain sentences, with the technical detail and the revision and author behind one small "Details" link), and a side column with the project and its folder in short form (the last two folder names, the full path on hover), the conversations to pick up and the other projects. The
+light leans the other way. The two layouts share classes, so a change to one home reaches the other.
+
+### Records
+
+A mission keeps plain records in the repository's `.faber/missions/<id>/` folder and private state in Faber's data
+folder. Every record has a `schema` version. A reader keeps the fields it does not know and writes them back unchanged,
+and refuses a record whose schema is newer than its own (`error.journal.newer`). Ids are 1 to 64 letters, digits, `-` or
+`_`.
+
+| File | Holds |
+| :--- | :--- |
+| `mission.json` | goal, project, repository (its common git directory), base revision, `faber/<id>` branch, grant revision, run mode, state |
+| `plan.json` | the task graph and its revision |
+| `contracts/<id>.json` | owner, version, digest, base, boundary, examples, proof ids, dependencies |
+| `briefs/<task>.json` | what a fresh worker session starts from: goal, non-goals, scope, base, contract, sources, proofs, grant, stop |
+| `decisions/<id>.json` | question, kind, who asked, default, the answer and who gave it |
+| `artifacts/<id>.json` | a hand-back: changed paths, revisions, command receipts, checks not run, cost completeness, summary |
+| `receipts/<intent>.json` | an intent written before an effect, and its receipt after; an intent with no receipt is reconciled, never replayed |
+| `missions/<id>/runtime.json` (data folder) | CLI sessions per task and the leases with their processes; never in the repository |
+
+In `projects.json` a project gains `repo` (its common git directory) and `grant` (mode, revision, author, remote,
+self-update trust, revocation). A project saved before missions has neither and allows no effect. Seguro allows
+worktrees, commits with a known author and fast-forwards of the mission's branch. Equilibrado adds the push of that
+branch and one draft pull request to a named remote. Self-update needs its own trust. Each check names the grant
+revision the work was admitted under, so a new revision or a revocation stops the next effect (`reason.grant.*`).
+
+Writes replace the file atomically and flush it; a failure leaves the old file and returns `error.store.full` or
+`error.store.write`. A damaged mission record, runtime sidecar, project list (read for Projects) or quota ledger is
+`error.store.corrupt`, never empty data. A damaged `budget.json` is copied to `budget.json.quarantine`, and Projects stays
+closed while that copy exists, even after Chat has saved a fresh ledger over the damaged one.
+
+The engine refuses a plan with a cycle, a missing or repeated task, a deliverable claimed twice, a write path outside
+the repository, writes on a read-only task, or two writers that nothing orders sharing an area, parent folders and case
+aliases included (`error.plan.*`). A contract's digest is SHA-256 over its content with sorted keys. A revision sends the
+tasks built on the old digest, and everything that depends on them, back to Blocked with `reason.contract.revised`;
+nothing else moves.
+
+### Worker envelope
+
+Every worker turn ends with one JSON object, version 2, with no unknown fields. Durable journal records remain version 1;
+old records stay readable and retain their extension data. Wire version 1 is not accepted for a new dispatch.
+The engine refuses an envelope over
+512 KB, a stale task, attempt, base, contract digest or lease generation (`error.wire.stale`), an action outside the role
+(`error.wire.role`), and a path that leaves the worktree (`error.wire.path`). A file write carries the SHA-256 of the
+content it replaces, or none for a new file.
+
+```json
+{"schema": 2, "task": "fix", "attempt": 1, "base": "3d3d502", "contract": "<sha-256>", "lease": 4,
+ "action": {"patch": {"ops": [
+   {"write": {"path": "engine/src/x.rs", "expect": "<sha-256 of the file as read>", "content": "..."}},
+   {"rename": {"from": "a.rs", "to": "b.rs", "expect": "<sha-256>"}}
+ ]}}}
+```
+
+| Action | Who | Carries |
+| :--- | :--- | :--- |
+| `read` | every role | up to 64 paths, and symbols whose callers to find |
+| `plan` | lead | summary, acceptance, tasks (id, title, kind, requires, decisions, contracts, deliverables, writes, proofs) |
+| `amend` | lead | tasks to add or replace, ids to remove, reason |
+| `patch` | writer; test proposal, kept as an artifact | up to 64 write, rename and delete operations, each with its expected hash |
+| `proof` | lead, writer | named proof ids, never command text |
+| `decision` | lead | question, kind (technical, direction, taste, money or legal), options, default |
+| `complete` | every role | summary, changed paths, assumptions, risks, checks not run, a reviewer's verdict and findings, next |
+
+The AI answers only technical decisions; direction, taste, money and legal ones wait for the person
+(`error.decision.person`), in autonomous mode too.
+
+Wire v2 adds optional fields without changing role authority. `ping` is `Order`, `Found`, `Blocked`, `NeedEyes`,
+`DoneReady` or `Disagree`; `note` is at most 60 whitespace-delimited words. Envelope `requires`, `checks` and `quotes`
+are verbatim-text ids; task `requires` continues to mean task dependencies. Briefs retain each id's exact UTF-8 text.
+Task drafts add `labels` (verb, at most eight normalized needs, risk, freshness and facets), scoped `paths`, check ids
+and a `kit` receipt/digest pin. Plans add the deliverable `sheet`, grounded `bar` and `compileReceipt` reference.
+Completions add a check `receipt` id, bounded check outcomes, artifact paths/SHA-256 hashes, claims tied to checks,
+assumptions with provenance, `unconfirmed`, `kitUsed` and newly requested needs. Unknown nested fields remain errors.
+
+`wire::CheckReceipt` is distinct from the journal's effect `Receipt`; it binds checks and evidence to one candidate,
+model, effort and known or unknown cost, with links to effect receipts. Check results are pass, fail or not-run:
+pass requires evidence; failure and not-run require a reason. `CompileReceipt` records phase timestamps and cost tags.
+These types publish the shared T5K/T5B/T5 contract. A worker's claimed receipt is data; only engine-verified proofs and
+the independent exact-tree review can authorize acceptance. Missing optional fields do not imply a passing bar or kit.
+
+### Automatic project kits
+
+`project/kit.rs` and its submodules implement the pure T5K contracts. Cards are written from reported inventory,
+scoped project sections and named engine proofs; kits are assembled from needs, never saved as hand-written loadouts.
+`Inventory::new` validates, hashes and indexes an immutable snapshot once per inventory change. Assembly uses that
+snapshot, origin priors, job ownership, conflicts, role budgets and safety filters. Versioned Beta outcomes only break
+ties. A blind, shuffled shortlist supports shadow comparisons; the code selection remains authoritative.
+
+Persist the selection with `Journal::record_kit` before dispatch. Compose approved, hash-checked inline bodies into
+the existing safe role prompt with `compose_role_prompt`; the role prompt remains its byte-for-byte prefix. This
+adapter changes no driver flags or policy. Record init with `attest_kit` before work, then add the outcome with
+`complete_kit`. Completion cannot replace the selection or its attestation. Receipts live in
+`.faber/missions/<id>/kits/<task>-<attempt>.json` and preserve additive root and nested metadata. Card caches and cited
+field briefs do the same; a newer durable schema is refused as newer. Dispatch and card-writer replies retain their
+strict schemas. A failed write prevents dispatch.
+The runner must enforce T2 admission and handle mismatched/unreported init; these receipts never grant containment.
+
+G0 is empty. G1 returns at most three cited suggestions with downsides, with installation parked. G2 stores bounded,
+cited primary-source briefs in `.faber/briefs/`; G3 retains verified role controls. Only a missing required capability
+parks its dependent node. The pure start-card adapter supplies two locale keys; T9 owns their screen and translations.
+The Auto labels adapter shares the existing classification turn and preserves its model-choice table. T5 integrates
+classification, fresh pass sessions, dispatch, proofs and two-order comparisons; T5B resolves native bar proof IDs.
+
+See [the T5K proof report](research/2026-10-12-project-kits.md) for measured synthetic performance and the live G9
+evidence still required by T13. Fixture attestation is not proof of native isolation.
+
+### Screen commands and event
+
+The commands fail with a key string, like the other shell commands, and never report a success they did not have.
+
+| Command | Request | Returns |
+| :--- | :--- | :--- |
+| `project_enroll` | `{projectId}` | the start card: repository, base, author, selected mode, revision, self-update, remote |
+| `project_grant` | `{projectId, mode, selfUpdate, revision}` | the grant |
+| `project_revoke` | `{projectId}` | nothing |
+| `mission_start` | `{projectId, goal}` | the mission id |
+| `mission_state` | `{missionId}` | the mission view |
+| `mission_mode` | `{missionId, mode}`, mode `normal` or `autonomous` | the mission view |
+| `mission_stop`, `mission_resume` | `{missionId}` | the mission view |
+| `mission_answer` | `{missionId, decisionId, answer}` | the mission view |
+
+The `mission` event carries the same view whenever it changes. Its `revision` grows with every view and the screen
+ignores an older one. Cost is in millionths of an API-equivalent dollar; `null` is unknown, never zero.
+
+Implementation status on `selfdev-t9`: the screen and fixed command adapter can display durable mission snapshots,
+but the approved T5 runner is not in this branch. Start and Resume return `reason.mission.runnerUnavailable`; an old
+`running` journal is displayed as blocked. Direct project send, warm, draft routing and branching are refused at the
+shell boundary, including quota/paid-credit recovery, while saved conversations remain readable. Equilibrado
+publication stays deferred (R103).
+
+The board restores the selected mission, rejects other mission identities and older revisions, and keeps task evidence
+behind a keyboard-reachable disclosure. `TaskView.detail` is an optional additive field containing scope, required
+proof IDs and durable artifacts; absence never means verified. Build slots without a T11 snapshot remain visibly
+unknown. The cap, measured spend, daily room and reading time come from the existing admission ledger, with unknown
+values preserved. The start card reuses the composer's height measurement and the 64 px tail token. Stages narrower
+than 760 px use one scrolling list. Mission notification receipts use the existing atomic store and R92 policy;
+hidden test builds inspect that policy without submitting OS notifications or playing audio.
+
+New non-English keys are English draft fallbacks marked `Native speaker must translate (needs native review)`.
+They require native review and are not accepted translations. These implementation limits do not release T9/T10's
+live-runner integration gate.
+
+```json
+{"missionId": "m1", "revision": 7, "state": "running", "mode": "normal", "gitMode": "seguro",
+ "goal": "Fix the failing normalization test", "plan": "One writer fixes clean_path; the other vendor reviews.",
+ "tasks": [{"id": "fix", "title": "Fix clean_path", "state": "running", "reason": null, "builder": "codex", "reviewer": "claude"}],
+ "cost": {"ownMicros": null, "capMicros": 2000000, "complete": false},
+ "pace": [{"vendor": "claude", "window": "seven_day", "used": 0.31, "room": 0.04, "readAt": 1791000000.0}],
+ "decisions": [], "build": null, "reason": null}
+```
+
+The keys these return (`error.store.*`, `error.journal.*`, `error.plan.*`, `error.wire.*`, `error.decision.*`,
+`reason.grant.*`, `reason.contract.revised`) get their hand-written texts in every locale together with the Projects
+screen, which owns the locale files.
+
 ## Rules for every screen
 
 - Every text on screen lives in `ui/locales/`, written by hand in each language.
 - Choice buttons use `aria-pressed`, or native radio groups. Switches are native checkboxes. "Open file" is a real
   button. Theme thumbnails are `aria-hidden`, and each theme card is named by its name and its description.
 - Areas whose content can grow scroll; they never cut content off.
+- Right-click is Faber's own (R123, `ui/contextmenu.ts`, `ui/ContextMenu.tsx`). The browser's menu never shows, and its
+  reload, print, save and view-source shortcuts do nothing. A menu opens only on a chat (Rename, Delete), a project (New
+  conversation in this project, Open folder, Remove from Faber), a message (Copy; Edit on yours; Redo on an answer),
+  selected text (Copy) and a text field (Cut, Copy, Paste, Select all, with the ones that cannot apply disabled); anywhere
+  else nothing opens. Each menu has at most four items, only actions that already exist on screen, and a destructive one
+  goes last in the danger colour and asks twice by changing its own text; the second activation must be a separate gesture (one that follows within half a second is ignored). The engine refuses to remove a project while a conversation or a mission works in it, and "Open folder" only reveals a folder that exists on this computer (never a program, address or network share). The menu opens at the pointer, or by the Menu key
+  and Shift+F10 on a focused row; arrows move, Enter chooses, Esc and a click outside close it, and it stays inside the
+  window. It uses the normal entrance and exit and is instant in reduced and no motion.
 - Every overlay (the first-run steps, the tutorial cards, the narrow-window sidebar, the overlay running column) says
   whether it is modal. A modal overlay moves focus into itself when it opens and gives focus back when it closes. Esc
   closes it, except where a screen says otherwise. The one non-modal case is the running column when it opens by

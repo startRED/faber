@@ -45,6 +45,8 @@ pub enum CliSlot {
 /// What a scenario chooses for a launch; everything else comes from the sandbox.
 #[derive(Debug, Clone, Default)]
 pub struct Launch {
+    /// The native git directory, only for contained Projects integration fixtures.
+    pub git_bin: Option<PathBuf>,
     pub args: Vec<String>,
     /// Exercises raster costs that a local GPU can hide; used only by the motion benchmark.
     pub software_rendering: bool,
@@ -228,7 +230,9 @@ pub fn child_env(parent: &[(String, String)], sb: &Sandbox, launch: &Launch, fak
     for name in temp_names {
         set(name, path(&sb.tmp));
     }
-    set("PATH", path(&sb.path_dir));
+    let mut paths = vec![sb.path_dir.clone()];
+    paths.extend(launch.git_bin.clone());
+    set("PATH", std::env::join_paths(paths).expect("sandbox paths are valid").to_string_lossy().into());
     if cfg!(target_os = "linux") {
         // WebKitGTK under xvfb has no usable dmabuf renderer; without this the test build's window stays blank.
         set("WEBKIT_DISABLE_DMABUF_RENDERER", "1".into());

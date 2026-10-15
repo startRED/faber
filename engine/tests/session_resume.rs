@@ -373,8 +373,9 @@ async fn a_fresh_launch_that_fails_at_once_fails_the_reply() {
     leave_a_stale_thread(dir.path(), &id, &engine);
     engine.shutdown();
     let (engine, mut rx) = start(dir.path(), &disk);
-    let (handle, gone) = (engine.clone(), project.clone());
-    disk.lock().unwrap().on_lost = Some(Arc::new(move || handle.remove_project(&gone)));
+    // The project leaves the list behind Faber's back: from the screen a busy project cannot be removed (error.project.busy).
+    let list = dir.path().join("projects.json");
+    disk.lock().unwrap().on_lost = Some(Arc::new(move || std::fs::write(&list, "[]").expect("the project leaves the list")));
     engine.send(ask("second", Some(&id))).unwrap();
     let reply = finished(&mut rx).await;
     assert_eq!((reply.status, reply.error.as_deref()), (Some(Status::Error), Some("error.projectGone")));

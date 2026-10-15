@@ -6,11 +6,33 @@ use serde_json::json;
 
 pub fn scenarios() -> Vec<Scenario> {
     vec![
+        Scenario { name: "pointer respects delayed finite layout motion before clicking", run: delayed_pointer },
         Scenario { name: "review 2: rapid column toggles on a large thread stay below 400 MB without stage clones", run: peak_memory },
         Scenario { name: "review 12: natural column motion has intermediate frames without stretching text", run: natural_motion },
         Scenario { name: "review 5: retained layout motion stays within the frame budget on a large thread", run: layout_motion },
         Scenario { name: "review 2: paint containment keeps keyboard focus rings visible", run: focus_ring },
     ]
+}
+
+fn delayed_pointer(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let mut app = ctx.launch(super::no_cli())?;
+    system_motion(&mut app.page, false)?;
+    app.page.wait_visible(&css(".app"))?;
+    app.page.eval(r#"(() => {
+        const button = document.createElement('button');
+        button.id = 'pointer-probe';
+        button.textContent = window.__faberText('tour.skip', {}, 'en');
+        button.style.cssText = 'position:fixed;left:20px;top:120px;width:100px;height:40px;z-index:100';
+        document.body.append(button);
+        const animation = button.animate([{transform:'translateX(0)'}, {transform:'translateX(0)',offset:0.8}, {transform:'translateX(200px)'}], {delay:60,duration:500,fill:'forwards'});
+        button.onclick = () => { window.__pointerEvidence = { moving: animation.playState === 'running' }; };
+        return true;
+    })()"#)?;
+    app.page.click(&css("#pointer-probe"))?;
+    let evidence = app.page.eval("window.__pointerEvidence")?;
+    ensure(evidence["moving"] == false, || format!("pointer clicked before finite layout motion settled: {evidence}"))?;
+    ctx.close(app.id)
 }
 
 fn large_thread(ctx: &mut Ctx, software_rendering: bool) -> Result<Opened> {

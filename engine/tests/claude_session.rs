@@ -22,6 +22,115 @@ fn launch(area: Area) -> ClaudeLaunch {
     }
 }
 
+#[tokio::test(start_paused = true)]
+async fn opus_1_manual_turns_may_be_silent_for_a_long_tool() {
+    for area in [Area::Chat, Area::Project] {
+        let (spawn, mut input, _output) = support::controlled();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let session = start_claude(
+            ClaudeOptions { bin: "fake".into(), cwd: ".".into(), launch: launch(area), spawn, sandbox: None },
+            Arc::new(move |e| drop(tx.send(e))),
+        );
+        session.send(UserTurn::text("long tool"));
+        assert_eq!(support::read_message(&mut input).await["type"], "user");
+        tokio::time::advance(Duration::from_secs(600)).await;
+        tokio::task::yield_now().await;
+        assert!(rx.try_recv().is_err(), "a manual silent turn was interrupted");
+        session.send(UserTurn::text("still available"));
+        assert_eq!(support::read_message(&mut input).await["message"]["content"], "still available");
+        session.close();
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn opus_4_interrupt_after_completion_keeps_the_warm_session() {
+    let (spawn, mut input, mut output) = support::controlled();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let session = start_claude(
+        ClaudeOptions { bin: "fake".into(), cwd: ".".into(), launch: launch(Area::Chat), spawn, sandbox: None },
+        Arc::new(move |e| drop(tx.send(e))),
+    );
+    session.send(UserTurn::text("first"));
+    support::read_message(&mut input).await;
+    support::emit(&mut output, serde_json::json!({"type":"result","subtype":"success"})).await;
+    assert!(matches!(rx.recv().await, Some(EngineEvent::Done { .. })));
+    assert!(matches!(rx.recv().await, Some(EngineEvent::Signals(s)) if s.billing == Some(faber_engine::budget::Billing::Unknown)));
+    session.interrupt();
+    tokio::task::yield_now().await;
+    tokio::time::advance(Duration::from_secs(6)).await;
+    tokio::task::yield_now().await;
+    while let Ok(event) = rx.try_recv() {
+        assert!(
+            matches!(event, EngineEvent::Signals(s) if s.billing == Some(faber_engine::budget::Billing::Unknown)),
+            "idle interrupt produced a lifecycle event"
+        );
+    }
+    session.send(UserTurn::text("second"));
+    assert_eq!(support::read_message(&mut input).await["message"]["content"], "second");
+    session.close();
+}
+
+#[tokio::test]
+async fn review_7_claude_preserves_a_turn_sent_before_interrupt_acknowledgement() {
+    let (spawn, mut input, mut output) = support::controlled();
+    let session = start_claude(
+        ClaudeOptions { bin: "fake".into(), cwd: ".".into(), launch: launch(Area::Chat), spawn, sandbox: None },
+        Arc::new(|_| {}),
+    );
+    session.send(UserTurn::text("first"));
+    let first = support::read_message(&mut input).await;
+    assert_eq!(first["type"], "user");
+    session.interrupt();
+    assert_eq!(support::read_message(&mut input).await["request"]["subtype"], "interrupt");
+    session.send(UserTurn::text("second"));
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    support::emit(&mut output, serde_json::json!({"type":"result", "subtype":"interrupted", "is_error":true})).await;
+    assert_eq!(support::read_message(&mut input).await["message"]["content"], "second");
+    session.close();
+}
+
+#[tokio::test(start_paused = true)]
+async fn waiting_for_a_person_is_not_cli_silence() {
+    let f = fake(fixture("claude", "tools"));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let opts = ClaudeOptions { bin: "fake".into(), cwd: ".".into(), launch: launch(Area::Chat), spawn: f.spawn.clone(), sandbox: None };
+    let session = start_claude(opts, Arc::new(move |e| drop(tx.send(e))));
+    session.send(UserTurn::text(
+        "Create a.txt containing 'one'. Then create b.txt containing 'two'. Use the Write tool for each, one at a time.",
+    ));
+    let request = next_permission(&mut rx).await;
+    tokio::time::advance(Duration::from_secs(130)).await;
+    tokio::task::yield_now().await;
+    assert_eq!(f.wire.lines_with("\"subtype\":\"interrupt\""), 0);
+    assert_eq!(session.answer(&request, true).await, Ok(Delivery::Delivered));
+    let request = next_permission(&mut rx).await;
+    assert_eq!(session.answer(&request, false).await, Ok(Delivery::Delivered));
+    while !matches!(rx.recv().await, Some(EngineEvent::Done { .. })) {}
+    session.close();
+    assert!(f.mismatches.lock().unwrap().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_ignored_interrupt_ends_the_owned_pipe_without_waiting_forever() {
+    let entries = vec![
+        Entry { input: true, msg: serde_json::json!({"type":"user", "message":{"content":"work"}}) },
+        Entry { input: false, msg: serde_json::json!({"type":"system", "subtype":"init", "session_id":"ignored", "model":"test"}) },
+        Entry { input: true, msg: serde_json::json!({"type":"control_request", "request":{"subtype":"interrupt"}}) },
+    ];
+    let f = fake(entries);
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let session = start_claude(
+        ClaudeOptions { bin: "fake".into(), cwd: ".".into(), launch: launch(Area::Chat), spawn: f.spawn.clone(), sandbox: None },
+        Arc::new(move |e| drop(tx.send(e))),
+    );
+    session.send(UserTurn::text("work"));
+    assert!(matches!(rx.recv().await, Some(EngineEvent::Started { .. })));
+    session.interrupt();
+    let event = tokio::time::timeout(Duration::from_secs(10), rx.recv()).await.unwrap().unwrap();
+    assert!(f.mismatches.lock().unwrap().is_empty());
+    assert!(matches!(event, EngineEvent::Error { message, fatal: true } if message == "error.cli.interruptTimeout"));
+}
+
 async fn run(
     entries: Vec<Entry>,
     first: &str,
@@ -532,7 +641,7 @@ fn the_name_is_appended_to_the_default_prompt_of_a_conversation_but_never_to_a_s
         assert!(after(&args, "--append-system-prompt").contains("called Erick."));
         assert!(!args.contains(&"--system-prompt".into()), "the default prompt stays");
         assert_eq!(args, claude_args(&named(launch(area))), "the same launch gives the same arguments");
-        assert!(!claude_args(&launch(area)).contains(&"--append-system-prompt".into()));
+        assert!(after(&claude_args(&launch(area)), "--append-system-prompt").contains("You are Faber"));
     }
     let resumed = claude_args(&named(ClaudeLaunch { resume: Some("abc".into()), ..launch(Area::Chat) }));
     assert_eq!(after(&resumed, "--append-system-prompt"), after(&claude_args(&named(launch(Area::Chat))), "--append-system-prompt"));

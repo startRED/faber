@@ -1099,6 +1099,7 @@ dependencies = [
  "notify-rust",
  "serde",
  "serde_json",
+ "sysinfo",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
@@ -1108,6 +1109,8 @@ dependencies = [
  "tauri-plugin-updater",
  "tempfile",
  "tokio",
+ "win32job",
+ "winsafe",
 ]
 
 [[package]]
@@ -1119,6 +1122,7 @@ dependencies = [
  "flate2",
  "junction",
  "reqwest",
+ "rustix",
  "serde",
  "serde_json",
  "sha2",
@@ -1138,11 +1142,13 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "ctrlc",
+ "faber-engine",
  "serde",
  "serde_json",
  "sha2",
  "sysinfo",
  "tempfile",
+ "tokio",
  "toml 0.8.2",
  "tungstenite",
  "win32job",

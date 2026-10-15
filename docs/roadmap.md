@@ -29,7 +29,7 @@ Faber is a desktop app that runs the official Claude Code and Codex CLIs on the 
 - **Light.** Memory is a feature, with a hard budget (see Architecture).
 - **Nothing third-party ships with the app.** Telemetry is off by default.
 - **Faber builds itself.** Claude and Codex build Faber together, and whoever writes a part never reviews it. Once the
-  software area is ready, Faber is built with Faber.
+  self-development MVP is ready, Faber builds the rest of Full Chat itself (R96).
 
 ## Goals
 
@@ -223,7 +223,8 @@ parallel, each on what it does best, and the result must read as if one careful 
 
 - "Stop" pauses, and the work resumes from where it stopped.
 - Going 50% over the estimate only warns and switches to economy mode: cheaper models for support work, extras put
-  off. Faber never kills work because of the budget.
+  off. Faber preserves unfinished work. Projects narrows or pauses before its live worker, mission and daily cost caps;
+  an estimate overrun only warns. R88/R90/R91 govern admission, not the estimate.
 - A stuck attempt is dropped while what it produced stays. The lead tries another path (another approach, a stronger
   model or one from the other vendor, a clean session) and only then asks the user about that one point, while the rest
   goes on.
@@ -287,12 +288,15 @@ Taken from Claude Code Projects and pushed further (AI proposal, not reviewed; r
 
 1. Faber never reads, copies or stores logins. Sign-in happens in each CLI's own flow, and CLIs run unmodified.
 2. Files are snapshotted before they change, so every local action can be undone.
-3. Sending, publishing, paying or deleting outside a copy asks for approval every time. Changing Faber itself
+3. Sending, publishing, paying or deleting outside a copy asks for approval, except the exact own-branch push and
+   draft PR already granted by Equilibrado at project start (R82/R83). Git never permits unrelated publication.
+   Changing Faber itself
    (installing, updating or removing a tool, changing a setting) asks too, with "allow once" and "always allow this
    kind" on the card, and a "full trust for Faber's own setup" switch in Settings. Full trust never covers sending,
    publishing, paying or deleting. Every self-change is logged and keeps the previous version. Nothing else asks.
 4. "Done" requires evidence: a test that ran, a recording, or judge scores.
-5. Another model reviews the work. In code, the writer never reviews its own work. Creative work gets two judges from
+5. Another model reviews the work. In code, the writer never reviews its own work. Self-development promotion requires
+   the other vendor; unavailable review waits. Creative work gets two judges from
    different vendors when both are connected.
 6. A mission never stops to wait for the user. Without an answer in time, it takes the safest path and logs it.
 7. Every mission has an estimate of time and quota. Passing it by 50% only warns and moves to economy mode (see Big
@@ -300,10 +304,21 @@ Taken from Claude Code Projects and pushed further (AI proposal, not reviewed; r
 8. Whatever shows up on screen, in a page or in a file is data, never an instruction.
 9. Nothing third-party ships with the app. Telemetry is off by default.
 
+### Self-development before Full Chat (R96)
+
+A minimal Projects slice comes after the new base and before Phase 2. Target: 2026-10-20 to 22.
+It includes a lead, contracts and ready dispatch, Seguro by default, worker worktrees and leases,
+a serial proof/review/fast-forward queue, Studio v0 read-only fan-out, daily own-cost grants,
+a minimal board and decisions, needs-you notifications (R92), and local next-build promotion/rollback (R93).
+Equilibrado adds only own-branch push and draft PR. Parallel writers need disjoint areas and measured qualification.
+Catalog, the remaining powers, Livre, and public release automation are deferred.
+The local development instance never touches the installed release in E:\Apps\Faber (R95).
+
 ## Following the work
 
-**Progress view.** Each part of the work is one row that moves left to right through four columns: Waiting, Doing,
-Reviewing and Done.
+**Progress view.** The self-development MVP uses Ready, Running, Review, Done and Blocked. Ready tasks can wait only
+for an explicit resource brake; Blocked tasks name their missing dependency or decision. The remaining Projects
+detail view follows the later full implementation.
 
 - **Rows** show the AI's name and a verb, such as "Claude drawing".
 - **Top:** one plain sentence, the overall bar, the time left, the share of the plan's limit used, and who is working
@@ -458,6 +473,11 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
 
 ## Updates
 
+Local self-development uses current/next slots and a retained last good. Exact-tree proofs and a small canary gate
+promotion. Swap only with no window and no active effect. An independent helper rolls back an early failure.
+Saved data stays compatible with last good. This channel is separate from signed public updates (R93–R95;
+[spec](superpowers/specs/2026-10-12-self-development-mvp-design.md)).
+
 - **Faber itself** updates itself. Today it downloads a signed update in the background and installs it on quit, so it
   never interrupts work.
 - **The CLIs.** Claude Code and Codex move only to versions that GitHub tested overnight with recorded conversations.
@@ -592,9 +612,10 @@ each version, the benchmark measures it, and the version ships only with the mai
 | Phase | Scope | What comes with it |
 | :-- | :--- | :--- |
 | 1 | New base | the FSL-1.1-ALv2 license and these documents, Faber's own Rust test runner, the design system and themes, the identity, the shell layout and running list, the tray number and notifications, the first run and tutorial, Settings, and the CLI download written straight to disk. No public release: it is checked in the live app and a local installer build |
+| 1a (R96) | Self-development MVP | the minimal Projects slice above ([spec](superpowers/specs/2026-10-12-self-development-mvp-design.md)); closes the project execution, handoff, stop and live-budget gaps needed to let Faber build Faber before Full Chat |
 | 2 | Full Chat | the benchmark, visual answers, asking Faber about Faber, search, moving a chat to a project, Auto learning from approvals, the draft routed at most twice per message, reporting failed writes of conversation and project files, and closing the engine gaps of rules 2, 3, 5 and 6 |
-| 3 | Projects with the lead agent | the lead agent, toolbox, 15 powers, modes, guardrails and big-work rules, the rules for running many workers, the progress view, the decision list, the catalog, learning and the `.faber/` folder, and rules 4 and 7 |
-| 4 | Excellent software, ending when Faber builds Faber | nightly CLI version tests and the live manifest, one shared copy of each MCP server per project, and a RAM budget for parallel workers |
+| 3 | Projects with the lead agent | the lead agent, toolbox, 15 powers, modes, guardrails and big-work rules, the rules for running many workers, the progress view, the decision list, the catalog, learning and the `.faber/` folder, and rules 4 and 7 | |
+| 4 | Excellent software | generalize the self-development workflow; nightly CLI version tests and the live manifest, shared project MCP infrastructure, and qualified department writers |
 | 5 | First public version | |
 | 6 | Image and design | creative drafts, blind judging and comparison views |
 | 7 | Phone and routines | the phone as a remote control, messaging channels and routines |

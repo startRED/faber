@@ -24,7 +24,6 @@ pub fn scenarios() -> Vec<Scenario> {
 /// details changing with the choice.
 fn do_not_ask_text(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
-    super::shell::seed_project(ctx, "Demo")?;
     let launch = Launch {
         claude: CliSlot::Fake,
         codex: CliSlot::Off,
@@ -33,9 +32,9 @@ fn do_not_ask_text(ctx: &mut Ctx) -> Result {
     };
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
-    let demo = css(".prow .item").has_text("Demo");
-    page.wait_visible(&demo)?;
-    page.click(&demo)?;
+    let model = page.labelled("composer.model")?;
+    page.select_option(&model, "Claude Haiku")?;
+    ask(page, TWO_WRITES)?;
     let line = page.text_of("project.permissionsDontAsk")?;
     let status = css("[role=status]").has_text(&line);
     page.wait_visible(&status)?;
@@ -86,7 +85,6 @@ fn chat_without_cards(ctx: &mut Ctx) -> Result {
 
 fn answers_a_card(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
-    super::shell::seed_project(ctx, "Demo")?;
     let launch = Launch {
         claude: CliSlot::Fake,
         codex: CliSlot::Off,
@@ -95,11 +93,6 @@ fn answers_a_card(ctx: &mut Ctx) -> Result {
     };
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
-    let demo = css(".prow .item").has_text("Demo");
-    page.wait_visible(&demo)?;
-    page.click(&demo)?;
-    let notice = page.text_of("project.permissionsDontAsk")?;
-    page.wait_visible(&css("[role=status]").has_text(&notice))?;
     let settings = page.named("button", "settings.open")?.exact();
     page.click(&settings)?;
     let dont_ask = page.named("button", "set.permissions.dontAsk")?;
@@ -118,24 +111,25 @@ fn answers_a_card(ctx: &mut Ctx) -> Result {
     same(page.attr(&ask_first, "aria-pressed")?, Some("true".into()), "the permissions choice survives reload")?;
     let back = page.named("button", "set.back")?;
     page.click(&back)?;
-    // Reload returns to the project already opened; the new mode is disclosed before the first turn.
-    let notice = page.text_of("project.permissionsAsk")?;
-    page.wait_visible(&css("[role=status]").has_text(&notice))?;
-    page.wait_visible(&css(".empty h1").has_text("Demo"))?;
+    // Projects run only missions, so the mode is a Chat matter: a chat says it over its thread.
     // Auto would send the request to a router process first, which would replay this recording instead of the chat.
     let model = page.labelled("composer.model")?;
     page.select_option(&model, "Claude Haiku")?;
     ask(page, TWO_WRITES)?;
+    let notice = page.text_of("project.permissionsAsk")?;
+    page.wait_visible(&css("[role=status]").has_text(&notice))?;
 
     // The CLI asks to write a.txt. Allow it ("Always allow" holds the same word, so the name must match exactly); the card for b.txt follows, and the recording denies that one.
-    let first = css(".ask").has_text("a.txt");
+    let first = css("article .ask").has_text("a.txt");
     page.wait_visible(&first)?;
-    let allow = page.named("button", "ask.allow")?.exact();
+    let allow = first.clone().role("button", &page.text_of("ask.allow")?).exact();
     page.click(&allow)?;
     page.wait_gone(&first)?;
-    let second = css(".ask").has_text("b.txt");
+    let second = css("article .ask").has_text("b.txt");
     page.wait_visible(&second)?;
-    let deny = page.named("button", "ask.deny")?.exact();
+    page.wait_visible(&css(".runcol .ask").has_text("b.txt"))?;
+    let deny = second.clone().role("button", &page.text_of("ask.deny")?).exact();
+    ensure(page.count(&deny)? == 1, || "the answer locator must name one button while both question copies are visible".to_string())?;
     page.click(&deny)?;
 
     // The recording ends the turn only if the CLI got both answers as recorded.

@@ -5,7 +5,14 @@ pub mod app;
 #[cfg(windows)]
 pub mod containment;
 pub mod first_run;
+pub mod homes;
+#[cfg(windows)]
+pub mod local_update;
+pub mod menus;
 pub mod permissions;
+pub mod projects;
+pub mod projects_ui;
+pub mod remote_git;
 pub mod review;
 pub mod sentinel;
 pub mod settings;
@@ -32,14 +39,23 @@ pub fn all() -> Vec<Scenario> {
     let all = app::scenarios()
         .into_iter()
         .chain(permissions::scenarios())
+        .chain(projects::scenarios())
+        .chain(projects_ui::scenarios())
+        .chain(remote_git::scenarios())
         .chain(shell::scenarios())
         .chain(review::scenarios())
         .chain(settings::scenarios())
         .chain(setup::scenarios())
         .chain(first_run::scenarios())
+        .chain(homes::scenarios())
+        .chain(menus::scenarios())
         .chain(sentinel::scenarios());
     #[cfg(windows)]
     let all = all.chain(containment::scenarios());
+    #[cfg(windows)]
+    let all = all.chain(project_drivers::scenarios());
+    #[cfg(windows)]
+    let all = all.chain(local_update::scenarios());
     all.collect()
 }
 
@@ -250,3 +266,6 @@ mod tests {
         assert!(names.len() == count, "{count} scenarios, {} different names", names.len());
     }
 }
+
+#[cfg(windows)]
+pub mod project_drivers;

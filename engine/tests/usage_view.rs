@@ -38,7 +38,7 @@ async fn the_usage_view_separates_own_money_from_foreign_account_use() {
     v.record("five_hour", 0.3, WHEN + 9000.0, WHEN - 3600.0, 0);
     v.record("five_hour", 0.35, WHEN + 9000.0, WHEN, 0);
     v.learned = Default::default();
-    Store::new(dir.path()).save_ledger(&ledger);
+    Store::new(dir.path()).save_ledger(&ledger).unwrap();
     let e = engine(dir.path());
     let u = e.state().usage.remove(0);
     assert_eq!(u.own_spend_usd, 1.25);
