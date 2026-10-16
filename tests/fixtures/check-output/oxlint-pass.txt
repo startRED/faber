@@ -1,0 +1,4 @@
+
+> demo@1.0.0 lint
+> node C:/work/node_modules/oxlint/bin/oxlint -D no-debugger src
+

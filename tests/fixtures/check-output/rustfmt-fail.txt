@@ -1,0 +1,7 @@
+Diff in \\?\C:\work\demo\src\lib.rs:19:
+         assert!(empty(&vec![]));
+     }
+ }
+[31m-pub fn  spaced( ) {}
+[0m[32m+pub fn spaced() {}
+[0m 
