@@ -451,8 +451,15 @@ impl Runner {
         let definition = proof.definitions().iter().find(|d| d.id == id).ok_or("reason.proof.definition")?;
         let path = format!("proofs/{receipt}.log");
         let mut observation = super::proof::execute(definition, cwd, spawn, path.clone()).await;
-        // The proof's output is code's output and may hold a printed secret, so the log keeps the exit code and the sizes only,
-        // and the receipt's evidence hashes exactly what is stored (the journal checks that on acceptance).
+        // The proof's output is code's output and may hold a printed secret: every line that looks like one is withheld before
+        // the whole output is kept in the mission's private folder and read into the short report the roles get (R155).
+        let mut printed = observation.stdout.clone();
+        printed.extend(&observation.stderr);
+        let whole = super::proof::output::withheld(&String::from_utf8_lossy(&printed));
+        let mut report = super::proof::output::read(&whole, observation.exit, &cwd.to_string_lossy());
+        report.summary = format!("{id} ({}) {}", definition.toolchain, report.summary);
+        // The receipt's evidence is a log with the exit code and the sizes only, and it hashes exactly what is stored (the
+        // journal checks that on acceptance).
         let log =
             format!("exit {:?}\nstdout {} bytes\nstderr {} bytes\n", observation.exit, observation.stdout.len(), observation.stderr.len());
         // From here the stored log is the observation's output, so the receipt checks the hash of exactly what is stored.
@@ -461,7 +468,18 @@ impl Runner {
         observation.evidence.sha256 = super::kit::digest(&observation.stdout);
         std::fs::create_dir_all(j.private().join("proofs")).map_err(|_| "error.store.write")?;
         std::fs::write(j.private().join(path), log).map_err(|_| "error.store.write")?;
+        std::fs::write(j.private().join(format!("proofs/{receipt}.output")), whole).map_err(|_| "error.store.write")?;
+        std::fs::write(j.private().join(format!("proofs/{receipt}.report")), super::proof::output::withheld(&report.text()))
+            .map_err(|_| "error.store.write")?;
         self.finish_proof(j, task, proof, &receipt, id, observation)
+    }
+    /// What a role reads of a proof the engine ran (R155): its failures with `file:line` and the tool's fix, its
+    /// measurements and one summary line. The whole output stays in `proofs/<receipt>.output` in the private folder.
+    pub fn proof_report(j: &Journal, receipt: &str) -> Option<String> {
+        if !super::valid_id(receipt) {
+            return None;
+        }
+        std::fs::read_to_string(j.private().join(format!("proofs/{receipt}.report"))).ok()
     }
     pub fn start_proof(&mut self, j: &Journal, task: &str, id: &str, proof: &mut super::proof::ProofSet) -> Result<String, &'static str> {
         if self.halted || self.mission.state != MissionState::Running {
@@ -1124,5 +1142,50 @@ mod proof_log_tests {
         let stored = std::fs::read_to_string(j.private().join(&art.path)).unwrap();
         assert!(stored.starts_with("exit "), "{stored}");
         assert!(super::super::store::verify_artifacts(j.private(), std::iter::once(art)).is_ok(), "the journal rejected the stored log");
+    }
+
+    /// The roles read the short report; the whole output stays in the private folder, both without a printed secret.
+    #[tokio::test]
+    async fn a_proof_keeps_its_whole_output_privately_and_gives_the_roles_its_short_report() {
+        let (repo, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let data_path = data.path().canonicalize().unwrap();
+        let j = super::super::store::Journal::open(repo.path(), &data_path, "m1").unwrap();
+        let mut runner = Runner::create(&j, crate::project::Mission::new("m1", "p1", "repo", "Fix", &"1".repeat(40), 3, 1)).unwrap();
+        runner.mission.state = MissionState::Running;
+        runner.save(&j).unwrap();
+        let definition = Definition {
+            id: "types".into(),
+            version: 1,
+            program: "/native/tsc".into(),
+            argv: vec![],
+            checks: vec!["C1".into()],
+            toolchain: "npm".into(),
+            dependencies: "deps-1".into(),
+            environment: std::collections::BTreeMap::new(),
+            heavy: false,
+        };
+        let mut proof = ProofSet::new("1".repeat(40), "input".into(), vec![definition], vec![]).unwrap();
+        let root = repo.path().to_string_lossy().into_owned();
+        let token = format!("ghp_{}", "b".repeat(36));
+        let printed = format!("> demo typecheck\n{root}/src/a.ts(4,3): error TS2322: Type 'number' is not assignable.\nprinted {token}\n");
+        let spawn: crate::proc::Spawner = std::sync::Arc::new(move |_, _, _| {
+            Ok(crate::proc::Proc {
+                stdin: Box::new(tokio::io::sink()),
+                stdout: Box::new(std::io::Cursor::new(printed.clone().into_bytes())),
+                stderr: None,
+                child: None,
+                contained: None,
+            })
+        });
+        let receipt = runner.run_proof(&j, "a", "types", &mut proof, repo.path(), &spawn).await.unwrap();
+        let report = Runner::proof_report(&j, &receipt.id).unwrap();
+        assert_eq!(
+            report, "src/a.ts:4:3: error TS2322: Type 'number' is not assignable.\ntypes (npm) did not finish: 1 type error",
+            "a fake process has no exit code, so it never passes"
+        );
+        let whole = std::fs::read_to_string(j.private().join(format!("proofs/{}.output", receipt.id))).unwrap();
+        assert!(whole.contains("> demo typecheck") && whole.contains("[line withheld: it looks like a secret]"), "{whole}");
+        assert!(!whole.contains(&token));
+        assert_eq!(Runner::proof_report(&j, "../escape"), None);
     }
 }

@@ -1,0 +1,25 @@
+   Compiling demo v0.1.0 (C:\work\demo)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.09s
+     Running unittests src\lib.rs (target\debug\deps\demo-fce5c8d8cb4a6271.exe)
+
+running 2 tests
+test tests::keeps ... ok
+test tests::adds ... FAILED
+
+failures:
+
+---- tests::adds stdout ----
+
+thread 'tests::adds' (26972) panicked at src\lib.rs:14:9:
+assertion `left == right` failed: two and two
+  left: 4
+ right: 5
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    tests::adds
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`

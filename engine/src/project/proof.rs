@@ -1,5 +1,6 @@
 //! Check receipts, partial reruns, content addressing, and first-party native checks.
 pub mod native;
+pub mod output;
 pub mod screen;
 use super::wire::{CheckOutcome, CheckReceipt, CheckResult, CompileReceipt};
 use std::collections::{BTreeMap, BTreeSet};

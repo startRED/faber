@@ -791,6 +791,12 @@ lists every failing test. `cargo t --suite lint` runs the two Clippy proofs the 
 CI's lines. The `cargo t` alias builds the runner itself with `--message-format=short`, so a broken build of the runner
 also prints one line per error.
 
+A mission reads its checks the same way (R155, `engine/src/project/proof/output.rs`, which `cargo t` also uses for
+Cargo). The roles get each failure with its `file:line` and the tool's fix, the measurements and one summary line, at
+most 20 failures of 8 lines; the whole output stays in the mission's private `proofs/` folder. It reads `cargo t`,
+rustc and Clippy, `cargo test`, `cargo fmt --check`, tsc and oxlint; any other format gives its last 20 lines when the
+check fails. A new format is one more parser in that file's list. Lines that look like a secret are withheld first.
+
 ### Lane claims
 
 Lanes that run at once (R128) say first what they will change (R154). A worktree on a branch writes `.faber-lane` at its

@@ -35,6 +35,7 @@ one is never touched again, and its boxes say nothing.
 | superpowers/specs/2026-10-12-ux-sentinel-design.md, plans/2026-10-13-ux-sentinel-s0.md | Slice S0 shipped (design.md, UX sentinel); the rest is a proposal |
 | superpowers/specs/2026-10-14-test-system-rework-design.md, plans/2026-10-14-test-system-rework.md | In progress |
 | superpowers/plans/2026-10-14-parallel-work-loop.md | The development loop (R128, R129); its rounds table is kept current |
+| superpowers/specs/2026-10-16-own-lessons-into-faber.md | Proposal, nothing built (lessons from building Faber by hand, mapped to features for 1a) |
 | research/ | Measurements, probes and reviews of the day in their name; model names and prices in them go stale fast |
 | ux-review.md, notifications-review.md, screen-test-flakes.md | Reviews of one moment; their conclusions live in design.md and roadmap.md |
 
