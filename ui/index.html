@@ -3,17 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <title>Faber</title>
-    <!-- The first frame, painted before any script runs (R157): the theme's frame colour and the mark, with no text, so no
-         language is needed and no window is ever blank. main.tsx removes it when the screen mounts. Dark Room and the
-         light theme's frame and ink, by the system's scheme; the saved look takes over at mount. No animation. -->
-    <style>
-      html, body { margin: 0; height: 100%; background: #08080a; color: #f3f2ee; }
-      #first { position: fixed; inset: 0; display: grid; place-content: center; }
-      #first svg { width: 64px; height: 64px; opacity: 0.5; }
-      @media (prefers-color-scheme: light) { html, body { background: #e9ede7; color: #1c2924; } }
-    </style>
   </head>
   <body>
+    <!-- The first frame, painted before any script runs (R157): the theme's frame colour and the mark, with no text, so no
+         language is needed and no window is ever blank. Its rules are the first lines of styles.css: an inline style element here
+         would make the shell add a hash to the page's CSP, which then ignores 'unsafe-inline' and blocks every style the
+         page adds later. main.tsx removes it when the screen mounts. -->
     <div id="first"><svg viewBox="0 0 64 64" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M49.93 2.69C54.37 2.69 55.52 5.11 57.82 8.53C58.84 10.04 62 14.66 62 16.28C62 21.1 47.72 19.92 47.72 30.11C47.72 38.29 59.02 39.02 59.02 53.78C59.02 57.48 57.08 61.31 53.16 61.31C38.8 61.31 24.4 61.31 10.04 61.31C5.09 61.31 2 56.87 2 51.95C2 44.67 9.7 21.13 13.92 15.9C16.48 12.73 20.35 11.2 24.07 9.85C29.06 8.04 45.32 2.69 49.93 2.69ZM33.67 28.28C33.67 29.39 32.78 30.29 31.67 30.29C30.56 30.29 29.67 29.39 29.67 28.28L29.67 22.81C29.67 21.7 30.56 20.8 31.67 20.8C32.78 20.8 33.67 21.7 33.67 22.81L33.67 28.28ZM42.03 31.58C42.03 32.69 41.13 33.59 40.03 33.59C38.92 33.59 38.03 32.69 38.03 31.58L38.03 26.46C38.03 25.35 38.92 24.46 40.03 24.46C41.13 24.46 42.03 25.35 42.03 26.46L42.03 31.58Z" /></svg></div>
     <div id="root"></div>
     <script type="module" src="./main.tsx"></script>

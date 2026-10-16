@@ -11,6 +11,10 @@
   --motion-slide: 24px; --motion-rise: var(--arrive-y, 6px); --motion-scale: .97;
   --motion-blur: 2px; --motion-backdrop: 8px; --motion-stagger: 18ms;
 }
+/* The first frame (ui/index.html, R157): Dark Room's frame and ink, or the light theme's by the system's scheme; no motion. */
+#first { position: fixed; inset: 0; z-index: 100; display: grid; place-content: center; background: #08080a; color: #f3f2ee; }
+#first svg { width: 64px; height: 64px; opacity: 0.5; }
+@media (prefers-color-scheme: light) { #first { background: #e9ede7; color: #1c2924; } }
 html, body, #root { height: 100%; margin: 0; }
 body { background: var(--frame); color: var(--ink); font-family: var(--font-ui); font-stretch: var(--ui-stretch); font-size: var(--fs-ui); line-height: 1.45; overflow: hidden; }
 ::selection { background: var(--selection); color: var(--ink); }
