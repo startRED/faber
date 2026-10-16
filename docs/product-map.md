@@ -95,7 +95,7 @@ Right-click menus:
 | An answer | Copy, Redo (as a branch, with the composer's current choice) |
 | Selected text | Copy |
 | A text field | Cut, Copy, Paste, Select all |
-| A recent folder or environment | Remove (a second menu inside `ui/Recents.tsx`, see Known incoherences) |
+| A recent folder or environment | Remove from recents, or Remove environment (confirm) |
 
 Keys: Ctrl+N new conversation (in Projects: the current project's start card), Ctrl+, Settings, Ctrl+. running column,
 Esc closes the top layer (menu, sidebar overlay, running column, account cards, Settings), Enter sends and Shift+Enter
@@ -274,8 +274,8 @@ ones.
    only; whether the answer's pickers stay is the owner's call (Owner).
 9. Two "Open a project" screens (`ui/Projects.tsx` and the leftover `Empty` branch in `ui/App.tsx`) with different
    labels; three labels for picking a folder ("Choose folder", "Choose a folder", "Add project folder").
-10. Two right-click menu implementations: `ui/Recents.tsx` has its own, with no confirm on Remove (C009).
-11. Three ways to confirm a delete: the × in the sidebar, the menu's Delete, and Recents' Remove with none.
+11. Two ways to remove a row: the sidebar's × and every menu ask first, while Recents' × forgets at once. Whether forgetting
+    a recent entry (it comes back when the folder opens again) needs a confirm is the owner's call (Owner).
 12. Money and quota in four vocabularies ("Own cost", "Cost so far", "Faber today … API-equivalent", "… at API prices";
     "Account pace", "Usage limits"); which words stay is the owner's call (Owner). Amounts are written the language's way
     (`money` and `amount` in `ui/i18n.ts`).

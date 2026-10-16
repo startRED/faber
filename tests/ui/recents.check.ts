@@ -3,6 +3,8 @@ import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
 import { App } from '../../ui/App.tsx';
 import { api, type AppState, type FolderView, type RecentsView } from '../../ui/api.ts';
+import { ContextMenuHost } from '../../ui/ContextMenu.tsx';
+import { installContextMenu } from '../../ui/contextmenu.ts';
 import { lang, t, useLanguage } from '../../ui/i18n.ts';
 import { shortPath } from '../../ui/Recents.tsx';
 import { check, deepEqual, equal, ok } from './check.ts';
@@ -71,7 +73,8 @@ check('recents: a recent folder opens as a project in one click, a saved environ
     root.dataset.motion = 'none';
     for (const [key, value] of Object.entries(themes.css.base)) root.style.setProperty(`--${key}`, value);
     document.body.append(root);
-    const dispose = render(() => createComponent(App, { initial, inbox: { take: () => {} } }), root);
+    installContextMenu();
+    const dispose = render(() => [createComponent(App, { initial, inbox: { take: () => {} } }), createComponent(ContextMenuHost, {})], root);
     await settle();
     return { root, done: () => { dispose(); root.remove(); } };
   };
@@ -150,6 +153,7 @@ check('recents: a recent folder opens as a project in one click, a saved environ
       screen.done();
     }
     // The right-click menu has one line and forgets the folder; closing it with Escape gives focus back.
+    // The menu shows in the first menu host on the page, which may belong to another check: it is looked up in the document.
     calls.length = 0;
     screen = await mount();
     try {
@@ -157,7 +161,7 @@ check('recents: a recent folder opens as a project in one click, a saved environ
       opener.focus();
       screen.root.querySelector<HTMLElement>('.recents .rec')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
       await settle();
-      equal(screen.root.querySelector('.rec-menu [role="menuitem"]'), document.activeElement, 'the menu takes focus');
+      equal(document.querySelector('.cmenu:not(.leaving) [role="menuitem"]'), document.activeElement, 'the menu takes focus');
       dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
       await settle();
       equal(document.activeElement, opener, 'Escape puts focus back where the menu came from');
@@ -177,7 +181,7 @@ check('recents: a recent folder opens as a project in one click, a saved environ
       await settle();
       (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
       await settle();
-      equal(screen.root.querySelector('.rec-menu'), null, 'Escape closes the menu');
+      equal(document.querySelector('.cmenu:not(.leaving)'), null, 'Escape closes the menu');
       ok(screen.root.querySelector('.recents'), 'Settings is still open');
       equal(document.activeElement, opener, 'focus is back where the menu opened');
       failRemoval = true;
@@ -190,25 +194,30 @@ check('recents: a recent folder opens as a project in one click, a saved environ
     } finally {
       screen.done();
     }
-    // The right-click menu has one line and forgets the folder.
+    // The right-click menu has one line, asks once more (C009) and then forgets the folder.
     calls.length = 0;
     screen = await mount();
     try {
       const row = screen.root.querySelector<HTMLElement>('.recents .rec')!;
       row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 60, clientY: 80 }));
       await settle();
-      const items = screen.root.querySelectorAll<HTMLButtonElement>('.rec-menu [role="menuitem"]');
+      const items = document.querySelectorAll<HTMLButtonElement>('.cmenu:not(.leaving) [role="menuitem"]');
       equal(items.length, 1);
       equal(items[0].textContent, t('recents.forget'));
       dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
       await settle();
-      equal(screen.root.querySelector('.rec-menu'), null, 'Escape closes the menu');
+      equal(document.querySelector('.cmenu:not(.leaving)'), null, 'Escape closes the menu');
       row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 60, clientY: 80 }));
       await settle();
-      screen.root.querySelector<HTMLButtonElement>('.rec-menu [role="menuitem"]')!.click();
+      document.querySelector<HTMLButtonElement>('.cmenu:not(.leaving) [role="menuitem"]')!.click();
+      await settle();
+      equal(document.querySelector('.cmenu:not(.leaving) [role="menuitem"]')?.textContent, t('menu.removeConfirm'), 'the first choice only asks');
+      equal(calls.length, 0);
+      await settle(560);
+      document.querySelector<HTMLButtonElement>('.cmenu:not(.leaving) [role="menuitem"]')!.click();
       await settle();
       deepEqual(calls.at(-1), ['forget', 'X:/work/alpha']);
-      equal(screen.root.querySelector('.rec-menu'), null);
+      equal(document.querySelector('.cmenu:not(.leaving)'), null);
     } finally {
       screen.done();
     }
