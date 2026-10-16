@@ -26,8 +26,10 @@ export interface ToolUse {
   input: unknown;
   ok?: boolean;
   output?: string;
-  /** The subagent step this call ran inside (Claude Code's Agent or Task call); absent for the reply's own steps. */
+  /** The agent call that started the subagent which ran this tool; absent for the agent's own tools. */
   parent?: string;
+  /** Refused before it ran: not a failure of the work. */
+  declined?: boolean;
 }
 export interface Permission {
   requestId: string;

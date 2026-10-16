@@ -263,10 +263,18 @@ inside its own area.
 ### Work log
 
 - Each step is a quiet chip: a verb in the ink color ("Reading", "Running") and what it acts on in the mono face, cut
-  in the middle. A subagent's calls sit under its step, set in by 12 px behind a 1 px rule in `--line`.
-- While subagents work, the status line under the folded log becomes one line per subagent: its name in `--ink-2` and
-  what it does now in `--ink-3`, three lines at most and "+N more". It changes only when a call arrives and has no motion
-  of its own.
+  in the middle. A tool Faber does not know keeps its own name; an MCP tool reads "Using a tool" with its server's name.
+
+### Subagent steps
+
+When the agent hands part of the work to a subagent (R161), the reply shows one row per helper between the work log and
+the answer, in the work log's surface and type: a check, a cross or the live mark, the few words it was given in bold, and
+on the right its kind, its state and its step count in the third ink. The row opens like every disclosure (`animateDetails`)
+to the tool chips it ran and its report as Markdown; nothing else moves. Rows sit in a `minmax(0, 1fr)` grid, so a long
+tool line ellipsizes instead of widening the reply. A helper that never finished reads "stopped" once the reply has
+ended; one sent to the background keeps the live mark until its task notice arrives; a refused one reads "declined" in
+the third ink, never as a failure. Known limit: when a reply moves to another AI after a quota stop, its open tools,
+helpers included, read as working again with the new reply.
 
 ### Recent folders and environments
 

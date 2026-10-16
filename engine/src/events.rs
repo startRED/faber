@@ -49,7 +49,7 @@ pub enum EngineEvent {
         id: String,
         name: String,
         input: Value,
-        /// The CLI's own subagent step this tool ran inside (Claude's `parent_tool_use_id`); none for the main reply.
+        /// The subagent that called it (the id of the agent tool call that started that subagent); None on the main thread.
         parent: Option<String>,
     },
     ToolResult {
@@ -57,6 +57,13 @@ pub enum EngineEvent {
         ok: bool,
         /// The tool was refused before it ran (a declined approval), which is not a failure of the work.
         declined: bool,
+        text: String,
+    },
+    /// A subagent finished (Claude Code's `task_notification`): `id` is the agent call that started it. It settles a
+    /// helper that ran in the background, whose call returned as soon as it started.
+    HelperDone {
+        id: String,
+        ok: bool,
         text: String,
     },
     Permission {

@@ -15,6 +15,10 @@ const TWO_WRITES: &str = "Create a.txt containing 'one'. Then create b.txt conta
 
 pub fn scenarios() -> Vec<Scenario> {
     vec![
+        Scenario {
+            name: "R161: a subagent the agent starts is one step in its reply, with what it ran and its report",
+            run: subagent_step,
+        },
         Scenario { name: "the layout follows the width, from 720 to 1440, and the running column fits each one", run: follows_the_width },
         Scenario { name: "a larger text size still fits every width", run: fits_large_text },
         Scenario {
@@ -945,4 +949,38 @@ fn keeps_long_titles_inside(ctx: &mut Ctx) -> Result {
     )?;
     ensure(num(&found, &["rows"]) >= 3.0, || format!("expected the project and two conversations: {found}"))?;
     ensure(found["bad"].as_array().is_some_and(Vec::is_empty) && found["still"] == true, || format!("the sidebar: {found}"))
+}
+
+/// The recording `claude/subagent.jsonl`: a real turn in which the agent hands a search to an Explore subagent.
+fn subagent_step(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let mut app = ctx.launch(Launch {
+        claude: CliSlot::Fake,
+        codex: CliSlot::Off,
+        recording: Some(ctx.paths.fixtures.join("claude/subagent.jsonl")),
+        ..Launch::default()
+    })?;
+    let page = &mut app.page;
+    let model = page.labelled("composer.model")?;
+    page.select_option(&model, "Claude Haiku")?;
+    ask(
+        page,
+        "Use the Agent tool exactly once (subagent_type Explore) to find which file in this folder defines load_config. Then answer in one short sentence.",
+    )?;
+    let step = css("article .agents .agent[data-state=done]");
+    page.wait_visible(&step)?;
+    let actions = page.named("article", "answer.label")?.css(".actions");
+    page.wait_visible(&actions)?;
+    // The step names the piece of work (waited for: the reply may still be settling in).
+    page.wait_visible(&step.clone().css("summary b").has_text("Find file defining load_config"))?;
+    ensure(!page.inner_text(&css("article.ai > .md"))?.contains("search recursively"), || "the subagent's brief joined the answer".into())?;
+    page.click(&step.clone().css("summary"))?;
+    page.wait_visible(&step.clone().css(".agent-report"))?;
+    ensure(!page.inner_text(&step)?.contains("Subagent hand-back"), || "the report kept its frame".into())?;
+    // The disclosure finishes opening before the picture.
+    pause(0.6);
+    // Opened, the step keeps inside the answer's column even with a long tool line in it.
+    let spill = page.eval("(() => { const a = document.querySelector('article.ai').getBoundingClientRect(); const s = document.querySelector('.agents .agent'); return Math.max(s.getBoundingClientRect().right - a.right, s.scrollWidth - s.clientWidth); })()")?;
+    ensure(spill.as_f64().is_some_and(|px| px <= 1.0), || format!("the opened step spills out of the column by {spill} px"))?;
+    ctx.shot(&mut app, "subagent-step")
 }

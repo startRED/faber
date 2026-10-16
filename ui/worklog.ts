@@ -51,7 +51,7 @@ const KINDS: Record<string, Key> = {
   Skill: 'tool.skill',
   ToolSearch: 'tool.toolSearch',
 };
-/** Claude Code's own subagent step: the calls it makes carry this step's id as their `parent`. */
+/** Claude Code's call that starts a subagent; it reads as the few words it was given. */
 const SUBAGENT = new Set(['Agent', 'Task']);
 
 export interface ToolRow {
@@ -102,45 +102,56 @@ export const toolLine = (tool: ToolUse): string => {
   return row.detail ? `${row.label} · ${middle(row.detail)}` : row.label;
 };
 
-/** A step of the reply, with every call its subagent made when it is one. */
-export interface Step {
-  tool: ToolUse;
-  children: ToolUse[];
+/** Claude Code's call that hands a piece of the work to a subagent (`Agent`; `Task` in older versions). */
+export const isAgentCall = (tool: ToolUse): boolean => !tool.parent && SUBAGENT.has(tool.name);
+
+export interface AgentStep {
+  call: ToolUse;
+  /** The few words the agent gave the piece of work, else the start of its brief. */
+  title: string;
+  /** The kind of subagent (`Explore`, `Plan`, a person's own agent), when the agent named one. */
+  kind: string;
+  /** What the subagent ran, in order. */
+  tools: ToolUse[];
+  report: string;
+  /** Sent to the background: its call returned when it started, and it finishes later. */
+  background: boolean;
 }
 
-/** The reply's own steps in order. A subagent's calls, and those of any subagent it started, go under its step; a call
- * whose step is not in the reply stays a step of its own, so nothing is ever hidden. */
-export function stepsOf(tools: ToolUse[] = []): Step[] {
-  const byId = new Map(tools.map((tool) => [tool.id, tool]));
-  const top = (tool: ToolUse): ToolUse => {
-    let step = tool;
-    for (let hops = 0; step.parent && byId.has(step.parent) && hops < 16; hops++) step = byId.get(step.parent)!;
-    return step;
+// Claude Code frames a subagent's report as model output and indents every line of it (2026-10 recording).
+const HANDBACK = /^\[Subagent hand-back\][\s\S]*?The report follows:\n/;
+
+/** The subagent's report without the frame Claude Code puts around it, its lines back at their own indent. */
+export function agentReport(output = ''): string {
+  const frame = HANDBACK.exec(output);
+  if (!frame) return output.trim();
+  return output
+    .slice(frame[0].length)
+    .split('\n')
+    .map((line) => line.replace(/^ {2}/, ''))
+    .join('\n')
+    .trim();
+}
+
+/** Each subagent the agent started, with the tools it ran under it. A subagent's own helper folds into it: its tools count
+ * for the agent call the whole chain started from. */
+export function agentSteps(tools: ToolUse[] = []): AgentStep[] {
+  const text = (v: unknown) => (typeof v === 'string' ? v : '');
+  const parents = new Map(tools.map((tool) => [tool.id, tool.parent]));
+  const root = (tool: ToolUse) => {
+    let id = tool.parent;
+    for (let hops = 0; id && parents.get(id) && hops < tools.length; hops++) id = parents.get(id);
+    return id;
   };
-  const steps = new Map<string, Step>();
-  for (const tool of tools) {
-    const root = top(tool);
-    if (root === tool) steps.set(tool.id, { tool, children: [] });
-    else steps.get(root.id)?.children.push(tool);
-  }
-  return [...steps.values()];
+  return tools.filter(isAgentCall).map((call) => {
+    const input = (call.input ?? {}) as Record<string, unknown>;
+    return {
+      call,
+      title: text(input.description).trim() || middle(text(input.prompt), 80),
+      kind: text(input.subagent_type),
+      tools: tools.filter((tool) => tool.parent && root(tool) === call.id),
+      report: agentReport(call.output),
+      background: input.run_in_background === true,
+    };
+  });
 }
-
-export const isSubagent = (step: Step): boolean => SUBAGENT.has(step.tool.name) || step.children.length > 0;
-
-/** A subagent still at work: its step has not returned, or it was sent to the background (whose step returns at once)
- * and a call of its own is still running. */
-export function atWork(step: Step): boolean {
-  if (!isSubagent(step)) return false;
-  if (step.tool.ok === undefined) return true;
-  return (step.tool.input as { run_in_background?: unknown } | undefined)?.run_in_background === true && step.children.some((c) => c.ok === undefined);
-}
-
-/** What a subagent does now, in one line: its latest call, or that it is starting. */
-export function nowOf(step: Step): string {
-  const last = step.children.at(-1);
-  return last ? toolLine(last) : t('tool.starting');
-}
-
-/** The name the agent gave a subagent step, or the plain word for one. */
-export const nameOf = (step: Step): string => middle(toolRow(step.tool).detail, 48) || t('tool.agent');

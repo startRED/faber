@@ -115,8 +115,6 @@ mod session_resume;
 mod signals;
 #[path = "simulation.rs"]
 mod simulation;
-#[path = "subagents.rs"]
-mod subagents;
 #[path = "turn_usage.rs"]
 mod turn_usage;
 #[path = "usage_view.rs"]

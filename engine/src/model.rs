@@ -92,9 +92,15 @@ pub struct ToolUse {
     /// The user (or the CLI's own approval) refused the tool, so it never ran; `ok` is false but nothing failed.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub declined: bool,
-    /// The subagent step (the CLI's own Agent or Task call) this tool ran inside; none for the reply's own tools.
+    /// The subagent that ran this tool: the id of the agent tool call that started it. None for the agent's own tools.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
+}
+
+/// A helper the agent sent to the background (Claude Code's `Agent` call with `run_in_background`): its call returns when it
+/// starts, and it finishes later.
+pub fn runs_in_background(tool: &ToolUse) -> bool {
+    tool.parent.is_none() && matches!(tool.name.as_str(), "Agent" | "Task") && tool.input["run_in_background"] == true
 }
 
 /// A request the CLI denied because nobody could answer it (full access runs with no prompts): it was not done, and it waits

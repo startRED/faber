@@ -12,23 +12,7 @@ import { fromEngine, t } from './i18n.ts';
 import { prettyModel, vendorName, type Option } from './models.ts';
 import { animateList } from './motion.ts';
 import { warmLeft } from './running.ts';
-import { atWork, middle, nameOf, nowOf, stepsOf, thinkingParts, toolLine, toolRow } from './worklog.ts';
-
-// Subagents still at work under the latest reply, each on its own line; the rest fold into "+N more".
-const SHOWN = 3;
-
-function ToolChip(props: { tool: ToolUse }) {
-  const row = () => toolRow(props.tool);
-  return (
-    <span class={props.tool.ok === false ? 'bad' : ''} title={row().detail || props.tool.output}>
-      <Show when={props.tool.ok === true}>
-        <Icon name="check" small />
-      </Show>
-      <b>{row().label}</b>
-      <Show when={row().detail}><i>{middle(row().detail)}</i></Show>
-    </span>
-  );
-}
+import { agentSteps, isAgentCall, middle, thinkingParts, toolLine, toolRow, type AgentStep } from './worklog.ts';
 
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
 
@@ -89,7 +73,56 @@ function rung(nudge: NonNullable<Message['nudge']>, options: Option[]): Choice {
   return { ...(entry?.choice ?? { vendor: nudge.vendor, model: nudge.model }), effort: nudge.effort };
 }
 
-type OnBranch = (messageId: string, text: string, choice?: Choice) => void;
+// One tool the turn ran: its kind and what it ran on, struck through when it failed.
+function ToolChip(props: { tool: ToolUse }) {
+  return (
+    <span class={props.tool.ok === false ? 'bad' : ''} title={toolRow(props.tool).detail || props.tool.output}>
+      <Show when={props.tool.ok === true}>
+        <Icon name="check" small />
+      </Show>
+      <b>{toolRow(props.tool).label}</b>
+      <Show when={toolRow(props.tool).detail}><i>{middle(toolRow(props.tool).detail)}</i></Show>
+    </span>
+  );
+}
+
+// A subagent the agent handed part of the work to (R161): one quiet row in the reply with what it was asked and whether it
+// is still working; opened, what it ran and the report it gave back. Never a board: the agent decides, this only shows it.
+function AgentRow(props: { step: Accessor<AgentStep>; streaming: boolean }) {
+  const step = () => props.step();
+  const state = () => {
+    const { ok, declined } = step().call;
+    if (ok === undefined) return step().background ? 'background' : props.streaming ? 'running' : 'stopped';
+    if (declined) return 'declined';
+    return ok ? 'done' : 'failed';
+  };
+  const live = () => state() === 'running' || state() === 'background';
+  return (
+    <details class="agent" role="listitem" data-state={state()}>
+      <summary>
+        <span class="agent-mark" aria-hidden="true">
+          <Show when={live()} fallback={<Show when={state() === 'done' || state() === 'failed'}><Icon name={state() === 'done' ? 'check' : 'close'} small /></Show>}>
+            <span class="live" />
+          </Show>
+        </span>
+        <b>{step().title || t('agent.untitled')}</b>
+        <span class="agent-meta">{[step().kind, t(`agent.${state()}`), t('activity.steps', { n: step().tools.length })].filter(Boolean).join(' · ')}</span>
+      </summary>
+      <div class="agent-body">
+        <Show when={step().tools.length}>
+          <div class="tools">
+            <For each={step().tools}>{(tool) => <ToolChip tool={tool} />}</For>
+          </div>
+        </Show>
+        <Show when={step().report}>
+          <div class="md agent-report" onClick={openLinks} innerHTML={html(step().report)} />
+        </Show>
+      </div>
+    </details>
+  );
+}
+
+type OnBranch =(messageId: string, text: string, choice?: Choice) => void;
 
 interface Shared {
   conversationId: string;
@@ -134,14 +167,14 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
     return rest ? [rest] : [];
   };
   const thinking = () => thinkingParts(m().thinking ?? '');
-  const steps = () => narration().length + (m().tools?.length ?? 0) + (thinking().length ? 1 : 0);
-  const commands = () => m().tools?.filter((tool) => /bash|command|exec|shell/i.test(tool.name)).length ?? 0;
-  // A subagent's calls sit under its own step, so the reply's steps and the subagents still at work read apart.
-  const toolSteps = () => stepsOf(m().tools);
-  const working = () => toolSteps().filter(atWork);
+  // The agent's own tools; each subagent and what it ran show as their own step below (AgentRow).
+  const own = () => m().tools?.filter((tool) => !tool.parent && !isAgentCall(tool)) ?? [];
+  const agents = () => agentSteps(m().tools);
+  const steps = () => narration().length + own().length + (thinking().length ? 1 : 0);
+  const commands = () => own().filter((tool) => /bash|command|exec|shell/i.test(tool.name)).length;
   // The answer on screen is never repeated here: once it has text, the status line steps aside.
   const latest = () => {
-    const tool = toolSteps().at(-1)?.tool;
+    const tool = m().tools?.at(-1);
     if (tool && tool.ok === undefined) return toolLine(tool);
     if (finalText().trim()) return '';
     return tool ? toolLine(tool) : middle(thinking().at(-1)?.text ?? '');
@@ -182,36 +215,21 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
               </div>
             </Show>
             <For each={narration()}>{(text) => <div class="md" onClick={openLinks} innerHTML={html(text)} />}</For>
-            <div class="tools">
-              <For each={toolSteps()}>
-                {(step) => (
-                  <>
-                    <ToolChip tool={step.tool} />
-                    <Show when={step.children.length}>
-                      <div class="tool-children">
-                        <For each={step.children}>{(tool) => <ToolChip tool={tool} />}</For>
-                      </div>
-                    </Show>
-                  </>
-                )}
-              </For>
-            </div>
-          </div>
-        </details>
-        <Show when={streaming() && (working().length || latest())}>
-          <div class="activity-latest" classList={{ subagents: !!working().length }} role="status" aria-live="polite" aria-atomic="true" title={working().length ? undefined : latest()}>
-            <Show when={working().length} fallback={latest()}>
-              <For each={working().slice(0, SHOWN)}>
-                {(step) => (
-                  <span title={nowOf(step)}>
-                    <b>{nameOf(step)}</b> <i>{nowOf(step)}</i>
-                  </span>
-                )}
-              </For>
-              <Show when={working().length > SHOWN}><span>{t('tool.more', { n: working().length - SHOWN })}</span></Show>
+            <Show when={own().length}>
+              <div class="tools">
+                <For each={own()}>{(tool) => <ToolChip tool={tool} />}</For>
+              </div>
             </Show>
           </div>
-        </Show>
+        </details>
+      </Show>
+      <Show when={agents().length}>
+        <div class="agents" role="list" aria-label={t('agent.label')}>
+          <Index each={agents()}>{(step) => <AgentRow step={step} streaming={streaming()} />}</Index>
+        </div>
+      </Show>
+      <Show when={(steps() || agents().length) && streaming() && latest()}>
+        <div class="activity-latest" role="status" aria-live="polite" aria-atomic="true" title={latest()}>{latest()}</div>
       </Show>
       <Asks conversationId={props.conversationId} turnId={m().id} permissions={waiting()} surface="ask" />
       <Parkeds parked={m().parked ?? []} more={m().parkedMore} surface="ask" />
