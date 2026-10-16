@@ -515,11 +515,13 @@ check('projects: checks that return after the owner switched project never reach
 check('projects: when the declaration changes after the checks were confirmed, Start refreshes and opens the sheet on the new list', () => {
   let current = proofView(true);
   let started = 0;
+  let refused = 0;
   return withProjects(async (root) => {
     await typeGoal(root);
     // The file changes while the screen stays open: the cached proof still says confirmed.
     current = { ...proofView(false, ['npm run lint', 'npm run e2e']), declared: ['npm run lint', 'npm run e2e'], changed: true };
     await start(root);
+    equal(refused, 1, 'the engine was asked once and refused');
     equal(started, 0, 'the engine refused, so no mission');
     const sheet = root.querySelector('[data-testid="proof-sheet"]');
     ok(sheet, 'the refusal opens the sheet');
@@ -527,7 +529,7 @@ check('projects: when the declaration changes after the checks were confirmed, S
     ok(!root.querySelector('[role="alert"]')?.textContent?.includes('Confirm the project'), 'and no error line repeats the refusal');
   }, () => {
     api.projectProof = async () => current;
-    api.missionStart = async () => { started += 1; throw 'reason.proof.unconfirmed'; };
+    api.missionStart = async () => { refused += 1; throw 'reason.proof.unconfirmed'; };
   });
 });
 
