@@ -50,6 +50,8 @@ render(
   ),
   document.getElementById('root')!,
 );
+// The static first frame (ui/index.html) has done its job: the real screen is in the page now.
+document.getElementById('first')?.remove();
 
 // The window starts hidden: it shows once the first frame is painted, so there is never an empty one. The timer covers a
 // page whose frames wait for a window that is not shown; the shell's own failsafe covers a page that never gets here.

@@ -599,6 +599,18 @@ The keys these return (`error.store.*`, `error.journal.*`, `error.plan.*`, `erro
 `reason.grant.*`, `reason.contract.revised`) get their hand-written texts in every locale together with the Projects
 screen, which owns the locale files.
 
+## First frame and update progress (R152)
+
+- `ui/index.html` paints a static first frame before any script runs: the frame colour of Dark Room, or of the light
+  theme when the system asks for light, with the mark centred at half strength. No text (so no language is needed) and
+  no animation, reduced motion or not. `main.tsx` removes it once the screen mounts, and the saved look takes over.
+- The window is built hidden. `screen_ready` shows it after the screen's first frame; a 3 s failsafe shows it anyway.
+  A second launch before that moment waits for the same reveal. Because the page paints its own frame, a reveal that
+  comes early or by the failsafe still shows the mark on the theme colour, never a blank window.
+- While Faber looks for, downloads or installs an update, the opening screen shows the progress meter: a percent, or the
+  megabytes when the size is unknown, then "Installing" (`ui/UpdateStage.tsx`).
+- `tests/ui/first-frame.check.ts` asserts the page carries the mark and an inline background for both schemes.
+
 ## Rules for every screen
 
 - Every text on screen lives in `ui/locales/`, written by hand in each language.

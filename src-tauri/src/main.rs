@@ -1031,8 +1031,9 @@ fn show(app: &AppHandle) {
         let faber = app.state::<Faber>();
         create_window(app, faber.hidden, &faber.data_dir).ok()
     });
-    // A window built just now is shown after its first paint (`reveal`), which also brings it forward.
-    if fresh && !app.state::<Faber>().hidden {
+    // A window not shown yet (built just now, or a second launch before its first paint) shows through `reveal`, which also
+    // brings it forward; the page paints its own static frame, so even the failsafe never shows a blank one (R152).
+    if (fresh || !app.state::<Faber>().revealed.load(std::sync::atomic::Ordering::SeqCst)) && !app.state::<Faber>().hidden {
         return;
     }
     if let Some(w) = window {
