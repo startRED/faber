@@ -529,7 +529,8 @@ fn join_job(_child: &Child) -> io::Result<Containment> {
 /// Ends a process and everything it started, then closes its input. The processes go first: a CLI that quits when its input
 /// closes would otherwise be gone before the tree could be found, and its workers would keep running.
 pub(crate) async fn stop(stdin: &mut (dyn AsyncWrite + Send + Unpin), child: &mut Option<Child>, contained: &mut Option<Containment>) {
-    drop(stop_keeping(stdin, child, contained).await);
+    // Dropping the kept job closes it; on other systems there is nothing to close.
+    let _ = stop_keeping(stdin, child, contained).await;
 }
 
 /// `stop`, but the job is handed back after its processes were told to end, so the caller can wait for them (`settle`).
