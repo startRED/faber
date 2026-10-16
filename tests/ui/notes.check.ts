@@ -10,7 +10,8 @@ import { check, deepEqual, equal, ok } from './check.ts';
 
 // "What's new" (ui/notes.ts, ui/WhatsNew.tsx): which entries show, and the one screen that shows them.
 
-const entry = (id: number, kind: Note['kind']): Note => ({ id, kind, key: `notes.${id}.${kind}` as Note['key'] });
+// The id only drives the ordering checks; the text is a real English entry of that kind, so the screen always has one to draw.
+const entry = (id: number, kind: Note['kind']): Note => ({ id, kind, key: NOTES.find((n) => n.kind === kind)!.key });
 const LIST = [entry(1, 'new'), entry(2, 'better'), entry(3, 'fixed'), entry(4, 'new')];
 
 check('notes: the entries are the numbered texts of the English file, oldest first, each id once', () => {
