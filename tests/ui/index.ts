@@ -19,6 +19,7 @@ import './composer.check.ts';
 import './contextmenu.check.ts';
 import './hole.check.ts';
 import './effort.check.ts';
+import './first-frame.check.ts';
 import './idle.check.ts';
 import './i18n.check.ts';
 import './inbox.check.ts';
@@ -43,6 +44,7 @@ import './steer.check.ts';
 import './thread.check.ts';
 import './tutorial.check.ts';
 import './unsent.check.ts';
+import './update.check.ts';
 
 type Vars = Record<string, string | number>;
 
