@@ -125,6 +125,14 @@ pub fn tool_deny(var: &dyn Fn(&str) -> Option<String>) -> Vec<String> {
     rules
 }
 
+/// How full a conversation gets before Claude Code compacts it. All three models hold 1M and the CLI compacts near 967K,
+/// deep into context rot. Haiku thrashes at 100K (the base context eats the room, measured) and at 130K stays under its
+/// 100K price step; Opus and Sonnet are starting points to measure, not proven optima. Unknown models keep the CLI's own.
+fn autocompact_window(model: &str) -> Option<&'static str> {
+    let model = model.to_ascii_lowercase();
+    [("haiku", "130k"), ("sonnet", "300k"), ("opus", "400k")].into_iter().find(|(name, _)| model.contains(name)).map(|(_, w)| w)
+}
+
 /// Arguments for one long-lived Claude Code process that takes many turns over stdin.
 /// Ask names its permission mode (`default`: ask before file changes and commands that are not plain reading), so neither the
 /// person's CLI settings nor an earlier session can pick a looser one. Full access ("Do not ask") bypasses approvals, keeps the
@@ -214,6 +222,9 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     if launch.instructions.is_none() {
         args.push("--append-system-prompt".into());
         args.push(persona(&PersonaInput { name: launch.user_name.as_deref() }));
+    }
+    if let Some(window) = launch.instructions.is_none().then(|| launch.model.as_deref().and_then(autocompact_window)).flatten() {
+        args.extend(["--autocompact".into(), window.into()]);
     }
     for (flag, value) in [("--model", &launch.model), ("--effort", &launch.effort), ("--resume", &launch.resume)] {
         if let Some(v) = value {

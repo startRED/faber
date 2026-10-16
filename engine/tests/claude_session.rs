@@ -342,7 +342,12 @@ fn chat_is_lean_and_confined_to_its_workspace_projects_get_the_user_setup_withou
     assert_eq!(after(&chat, "--permission-mode"), "default", "Ask names its mode, so a CLI default can never pick a looser one");
     assert_eq!(after(&chat, "--resume"), "abc");
     assert_eq!(after(&chat, "--model"), "haiku");
+    // Each model compacts at its own window; an unknown model keeps the CLI default.
+    assert_eq!(after(&chat, "--autocompact"), "130k");
+    let window = |model: &str| after(&claude_args(&ClaudeLaunch { model: Some(model.into()), ..launch(Area::Chat) }), "--autocompact");
+    assert_eq!((window("claude-sonnet-5-5"), window("claude-opus-5-5")), ("300k".into(), "400k".into()));
     let project = claude_args(&launch(Area::Project));
+    assert!(!project.contains(&"--autocompact".into()));
     assert!(!project.contains(&"--restricted".into()) && !project.contains(&"--strict-mcp-config".into()));
     // Hooks stay off until the switch is on; the settings carry the credential denies in every case (R124b).
     let off = settings_of(&project);

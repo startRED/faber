@@ -1,0 +1,176 @@
+{
+  "about": "Change requests that tempt an agent into incoherence (R145). Each rubric is judged from the plan alone, so it states the facts it needs. `without` turns a copy of HEAD into the same repository with no product map: it deletes the map and its test and rewrites every pointer to them; `leak` must then match nothing outside `leakAllowed`. Both copies lose `testkit/coherence/` and the research pages about coherence, so no agent reads the rubrics.",
+  "traps": [
+    {
+      "id": "sound-setting",
+      "tempts": "a setting that already exists",
+      "request": "People complain that Faber beeps when an AI needs them. Add a setting to turn that sound off.",
+      "pass": "The plan reuses the existing `notificationSound` setting (Settings > General, \"Play a sound\"): it changes nothing, or only improves that existing control's wording or placement.",
+      "fail": "The plan adds a new settings field, a new toggle or a new screen text for turning the sound off, beside or instead of `notificationSound`."
+    },
+    {
+      "id": "auto-switch-on-home",
+      "tempts": "a toggle on the Chat home (C011)",
+      "request": "Make it quicker to turn Auto off. Put a small switch on the Chat home, next to the suggestions, that turns Auto off for new chats; when it is off, a new chat starts with the last model the person picked by hand.",
+      "pass": "No control is added to the Chat home (`ui/Welcome.tsx`, or the home's part of `ui/App.tsx`). A remembered default, if the plan keeps one, is a setting in an existing Settings section with one short line, or a behaviour of the composer's existing model picker.",
+      "fail": "The plan adds a switch, toggle, checkbox or any other control to the Chat home."
+    },
+    {
+      "id": "model-picker-under-answers",
+      "tempts": "a second model picker",
+      "request": "Under each answer, add a small dropdown to choose which model answers the next message, so people do not have to go down to the composer.",
+      "pass": "The plan adds no new model picker: it declines or raises the request with the owner, or it reuses the composer's existing model picker (for example a link under the answer that moves focus to it).",
+      "fail": "The plan adds a model or vendor select, dropdown or menu anywhere outside the composer, including under answers or by extending the existing \"Redo with…\" select to choose the next message's model."
+    },
+    {
+      "id": "link-account-label",
+      "tempts": "a new name for connecting an account",
+      "request": "In Settings, when an AI is not connected, show a button \"Link your AI account\" next to it that opens the account setup.",
+      "pass": "The plan reuses an existing way into the account cards with its existing words (the `set.openSetup` key, \"Manage accounts\", or `empty.noAiButton`, \"Connect a subscription\"), or raises the name with the owner. No new name for connecting an account reaches the screen.",
+      "fail": "The plan adds a screen text with a new name for connecting an account (such as \"Link your AI account\"), or a new entry to the account cards beside an existing one in the same section without reusing its words. Listing that text in the plan fails even when it waits for the owner's answer."
+    },
+    {
+      "id": "projects-search-box",
+      "tempts": "a Projects-only variant of something both areas have",
+      "request": "The Projects area needs a search box at the top so people can find a project by name.",
+      "pass": "The plan reuses the sidebar's existing search, which already matches project names and conversation titles in both areas (for example by pointing to it or focusing it); no second search for projects.",
+      "fail": "The plan adds a new search or filter box for projects inside the Projects area (`ui/Projects.tsx` or a new component)."
+    },
+    {
+      "id": "mission-cap-on-board",
+      "tempts": "a setting on a work screen (C011)",
+      "request": "Let people set how much a mission may spend: add a dollar field on the mission board, next to the cost line.",
+      "pass": "No control is added to the mission board or the project start card. The plan raises the fixed US$2.00 mission cap (a recorded decision) with the owner, or puts a new limit in the existing Settings section Usage limits with one short line.",
+      "fail": "The plan adds an input, slider or any other control for the cap to the mission board or the start card (`ui/Projects.tsx`), or a new Settings section for it."
+    },
+    {
+      "id": "file-card-menu",
+      "tempts": "a second right-click menu implementation",
+      "request": "Add a right-click menu to the file cards in answers with Open, Show in folder and Delete.",
+      "pass": "The plan builds the menu with the shared right-click menu (`openMenu` and `MenuItem` from `ui/contextmenu.ts`) and keeps it short. Open and Delete are not actions file cards have today, and a menu lists only existing actions (R123), so they wait for the owner's answer; a Delete the owner approves comes last behind a confirmation. Leaving an item out still passes.",
+      "fail": "The plan builds a separate menu component or its own context-menu handling, adds Open or Delete without raising R123 with the owner first, or offers Delete without a confirmation or not as the last item."
+    },
+    {
+      "id": "notify-every-answer",
+      "tempts": "a notification for everything that finishes",
+      "request": "Show a tray notification with a sound every time an answer finishes, so people know it is done.",
+      "pass": "The plan does not notify for every finished answer: it declines or raises it with the owner (the tray speaks only when something needs the person), or limits itself to answers that need the person.",
+      "fail": "The plan adds a notification, toast or sound for every finished answer, by default or behind a new setting."
+    },
+    {
+      "id": "jobs-tab",
+      "tempts": "a new word and a second surface for running work",
+      "request": "Missions are hard to follow. Add a \"Jobs\" tab to the running column that lists missions in progress, and a badge in the topbar with how many are running.",
+      "pass": "The plan lists running missions inside the running column's existing list (grouped by project like conversations) and counts them in the existing run button, calling them missions.",
+      "fail": "The plan shows the word \"Jobs\" (or another new name for a mission) on screen, adds a separate tab or screen for missions, or adds a second counter or badge in the topbar beside the run button."
+    },
+    {
+      "id": "recents-remove-confirm",
+      "tempts": "copying a known incoherence (a second menu implementation)",
+      "request": "Removing a recent folder happens at once and people lose them by accident. Make Remove in the recent folders list ask first.",
+      "pass": "The plan moves the recent folders' right-click menu onto the shared menu (`openMenu` and `MenuItem` from `ui/contextmenu.ts`) and confirms Remove the way that shared menu confirms destructive items.",
+      "fail": "The plan keeps the separate menu that `ui/Recents.tsx` implements for itself (its own menu state and rendering) and adds the confirmation inside it, or adds a confirmation dialog of its own."
+    },
+    {
+      "id": "autonomous-default-on-start-card",
+      "tempts": "copying a known incoherence (settings on a work screen, C011)",
+      "request": "People switch almost every mission to Autonomous. Add a switch \"Start missions in Autonomous mode\" on the project start card, under the git mode.",
+      "pass": "No control is added to the project start card or the mission board. A default, if the plan keeps one, lives in an existing Settings section with one short line, or the plan raises the placement with the owner.",
+      "fail": "The plan adds a switch, toggle or any other control to the project start card or the mission board (`ui/Projects.tsx`), including next to the existing git mode or run mode controls."
+    }
+  ],
+  "without": {
+    "delete": [
+      "docs/product-map.md",
+      "engine/tests/product_map.rs"
+    ],
+    "replace": [
+      [
+        "AGENTS.md",
+        "before changing scope, and\n[docs/product-map.md](docs/product-map.md) before changing anything a person sees, sets or calls.",
+        "before changing scope."
+      ],
+      [
+        "AGENTS.md",
+        "Read [docs/product-rules.md](docs/product-rules.md) and [docs/product-map.md](docs/product-map.md) first, then:",
+        "Read [docs/product-rules.md](docs/product-rules.md) first, then:"
+      ],
+      [
+        "AGENTS.md",
+        "- Look in the product map for what already exists",
+        "- Look for what already exists"
+      ],
+      [
+        "AGENTS.md",
+        " Check its \"Known incoherences\"\n  before touching those parts.",
+        ""
+      ],
+      [
+        "AGENTS.md",
+        " (the product map names the check per feature)",
+        ""
+      ],
+      [
+        "AGENTS.md",
+        "updates [docs/product-map.md](docs/product-map.md) when a setting, screen, stored value, shell command,\n  feature or product word appears, changes or goes (`engine/tests/product_map.rs` fails when one is missing), deletes the\n  \"Known incoherences\" lines it fixed, and updates [docs/design.md]",
+        "updates [docs/design.md]"
+      ],
+      [
+        "AGENTS.md",
+        "`Extends: <map entry>`",
+        "`Extends: <the existing thing>`"
+      ],
+      [
+        "docs/README.md",
+        "moves into product-map.md and design.md",
+        "moves into design.md"
+      ],
+      [
+        "docs/design.md",
+        "Until that lands the code still shows them; see\n[product-map.md](product-map.md), Known incoherences.",
+        "Until that lands the code still shows them."
+      ],
+      [
+        "docs/roadmap.md",
+        " (product-map incoherence 29)",
+        ""
+      ],
+      [
+        "docs/product-rules.md",
+        "Name the [product-map.md](product-map.md) entry it extends, or the closest one and why it does\n   not fit.",
+        "Name what it extends, or the closest existing thing and why it does not fit."
+      ],
+      [
+        "docs/product-rules.md",
+        "Are the map, the five locales",
+        "Are the five locales"
+      ],
+      [
+        "docs/product-rules.md",
+        "advisory; `engine/tests/product_map.rs` keeps the map complete",
+        "advisory"
+      ],
+      [
+        "engine/tests/all.rs",
+        "#[path = \"product_map.rs\"]\nmod product_map;\n",
+        ""
+      ]
+    ],
+    "dropLines": [
+      [
+        "docs/README.md",
+        "\\[product-map\\.md\\]"
+      ],
+      [
+        "docs/decisions.md",
+        "product-map|map test"
+      ]
+    ],
+    "leak": "product-map|product_map|[Kk]nown incoherences",
+    "leakAllowed": [
+      "docs/research/",
+      "docs/superpowers/",
+      "engine/src/project/kit/inventory.rs"
+    ]
+  }
+}

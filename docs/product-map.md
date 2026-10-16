@@ -228,7 +228,7 @@ checks in `tests/ui/index.ts`, real-app scenarios in `testkit/src/screen/mod.rs`
 | Missions | v0 (see Words) | `engine/tests/project_*.rs`; `tests/fixtures/projects/`; `tests/ui/projects.check.ts`; `testkit/src/screen/coordinator.rs`, `projects.rs`, `projects_ui.rs` |
 | Local build (development channel) | Done, developer only | `engine/tests/local_update.rs`, `src-tauri/tests/local_update.rs`, `testkit/src/screen/local_update.rs` |
 | UX sentinel and memory budget | Done | `testkit/src/sentinel.rs`, `testkit/src/screen/app.rs` (400 MB) |
-| This map | Done | `engine/tests/product_map.rs` |
+| This map | Done | `engine/tests/product_map.rs`; the trap tasks and the weekly coherence pass in `testkit/coherence/` (R151) |
 
 Not built yet, so nothing may assume it: the catalog and live manifest, the toolbox, Livre, snapshots and undo, visual
 answers, the benchmark, asking Faber about Faber, full-text search, moving a chat to a project, the what's-new screen
@@ -239,7 +239,8 @@ produced by a mission, missions with more than one task.
 
 Found by the 2026-10-16 audit and not fixed yet. Touching one of these parts means fixing it or leaving it as it is,
 never copying it. "Owner" marks a choice of taste or direction that needs the owner first. Delete a line in the commit
-that fixes it.
+that fixes it. The weekly coherence pass (`testkit/coherence/weekly.md`) proposes new lines and the removal of fixed
+ones.
 
 1. Settings on a work screen (C011): the Projects start card carries the checks list, "If a tool is missing", a git mode
    with one option and the self-update switch, plus a technical Details block; the board carries the run mode. The owner
