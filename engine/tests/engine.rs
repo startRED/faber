@@ -2284,3 +2284,32 @@ async fn r161_a_running_helper_counts_on_its_quota_and_stops_when_its_vendor_wou
     assert!(result["content"][0]["text"].as_str().unwrap().contains("billed beyond its subscription"), "{result}");
     engine.shutdown();
 }
+
+/// Removing a project deletes Faber's own working copy and proofs' folder for it, and never what a link inside points at.
+#[tokio::test]
+async fn removing_a_project_deletes_its_working_copy_but_nothing_a_link_inside_points_at() {
+    // The data folder is a real path, as in the app: the copy is deleted only below real folders.
+    let data = tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+    let root = std::path::PathBuf::from(data.path().to_string_lossy().trim_start_matches(r"\\?\").to_string());
+    let (folder, outside) = (project_folder(), project_folder());
+    std::fs::write(outside.path().join("keep.txt"), "mine").unwrap();
+    std::fs::write(folder.path().join("notes.md"), "theirs").unwrap();
+    let (engine, _) = engine(&root, Vendor::Claude, fake(vec![]).spawn);
+    let project = engine.add_project(&folder.path().to_string_lossy()).unwrap();
+    let copy = root.join("workspaces").join(&project.id);
+    let own = root.join("proof-target").join(&project.id);
+    std::fs::create_dir_all(copy.join("tree").join("node_modules")).unwrap();
+    std::fs::create_dir_all(own.parent().unwrap()).unwrap();
+    // A link inside the copy, and the proofs' folder itself a link: both point at a folder that must stay whole.
+    link(&copy.join("tree").join("node_modules").join("pkg"), outside.path());
+    link(&own, outside.path());
+    engine.remove_project(&project.id).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while (copy.exists() || std::fs::symlink_metadata(&own).is_ok()) && std::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(!copy.exists() && std::fs::symlink_metadata(&own).is_err(), "Faber's own copy of the project is gone");
+    assert_eq!(std::fs::read_to_string(outside.path().join("keep.txt")).unwrap(), "mine");
+    assert_eq!(std::fs::read_to_string(folder.path().join("notes.md")).unwrap(), "theirs", "the project's own folder stays");
+    engine.shutdown();
+}

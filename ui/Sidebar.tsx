@@ -8,6 +8,7 @@ import { en, type Key } from './locales/en.ts';
 import { Peek } from './Mark.tsx';
 import { animateList, keepForExit } from './motion.ts';
 import { vendorName } from './models.ts';
+import { forgetProject } from './projects.ts';
 import type { Place } from './running.ts';
 import { ageOf, freshness, groupChats, matches, type Quotas, showsChats, tailOf, tightest } from './sidebar.ts';
 
@@ -220,7 +221,7 @@ export function Sidebar(props: Props) {
                         openMenu(e, [
                           { id: 'new', label: t('menu.newHere'), run: () => (toggle(p.id, true), props.onNewIn(p.id)) },
                           { id: 'open', label: t('menu.openFolder'), run: () => void api.showProject(p.id).catch((err) => props.onError?.(err)) },
-                          { id: 'remove', label: t('menu.removeProject'), danger: true, confirm: t('menu.removeConfirm'), disabled: () => tail().running, run: () => void api.removeProject(p.id).catch((err) => props.onError?.(err)) },
+                          { id: 'remove', label: t('menu.removeProject'), danger: true, confirm: t('menu.removeConfirm'), disabled: () => tail().running, run: () => void api.removeProject(p.id).then(() => forgetProject(p.id), (err) => props.onError?.(err)) },
                         ])
                       }
                     >

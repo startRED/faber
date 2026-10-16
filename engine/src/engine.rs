@@ -761,22 +761,34 @@ impl Engine {
         if projects.is_empty() { Err(failure) } else { Ok(projects) }
     }
     /// Takes a project out of the list. Anything still working in it (a conversation answering, a mission planning or
-    /// running) stops the removal with `error.project.busy`: the person stops it first. Nothing on disk is deleted.
+    /// running) stops the removal with `error.project.busy`: the person stops it first. Faber's own copy of the project goes;
+    /// the person's folder and the mission journals in it stay.
     pub fn remove_project(&self, id: &str) -> Result<(), String> {
-        self.with(|c| {
+        let data = self.with(|c| {
             let mut projects = c.store.projects_checked().map_err(|e| e.key().to_string())?;
             let Some(project) = projects.iter().find(|p| p.id == id).cloned() else { return Err("error.project.notFound".into()) };
             let answering = c.convs.values().any(|conv| conv.project_id.as_deref() == Some(id) && running_item(conv).is_some());
             // A worker session alive in memory counts even if its records on disk were removed or cannot be read.
             let working = c.mission_sessions.iter().any(|(m, s)| !s.is_empty() && c.mission_projects.get(m).is_some_and(|p| p == id));
-            if answering || working || crate::project::has_active_mission(Path::new(&project.path), &c.opts.data_dir, id) {
+            // A paused mission can still be finishing a setup or a proof in the copy until its drive ends.
+            let driven = c.driving.values().any(|p| p == id);
+            if answering || working || driven || crate::project::has_active_mission(Path::new(&project.path), &c.opts.data_dir, id) {
                 return Err("error.project.busy".into());
             }
             projects.retain(|p| p.id != id);
             c.store.save_projects(&projects).map_err(|_| "error.store.write".to_string())?;
             c.list_changed();
-            Ok(())
-        })
+            Ok::<_, String>(c.opts.data_dir.clone())
+        })?;
+        // Away from the lock: deleting a big copy takes a while, and nothing works in it any more.
+        if let Ok(copy) = crate::project::workspace::Workspace::new(&data, id) {
+            std::thread::spawn(move || {
+                if let Err(reason) = copy.discard() {
+                    eprintln!("faber: the copy of a removed project stays ({reason})");
+                }
+            });
+        }
+        Ok(())
     }
     /// Swaps the CLIs in use, for example after one was installed or signed in to. Idle processes of a changed CLI
     /// close and the shared Codex processes retire, so the next turn starts the new one; a turn in flight finishes

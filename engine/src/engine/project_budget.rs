@@ -377,6 +377,20 @@ mod tests {
         e.shutdown();
     }
 
+    #[tokio::test]
+    async fn a_paused_mission_still_driven_keeps_its_project_from_being_removed() {
+        let (dir, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let e = engine(dir.path());
+        let (j, mut r) = runner_fixture(&e, repo.path());
+        // Stop pauses the mission at once, while a setup or a proof can still run in the copy until the drive ends.
+        r.stop(&j, &e).await.unwrap();
+        let drive = e.drive("m1", &r.mission.project_id).unwrap();
+        assert_eq!(e.remove_project(&r.mission.project_id), Err("error.project.busy".to_string()));
+        drop(drive);
+        assert_eq!(e.remove_project(&r.mission.project_id), Ok(()));
+        e.shutdown();
+    }
+
     fn canonical_area() -> tempfile::TempDir {
         tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap()
     }
@@ -414,6 +428,12 @@ mod tests {
                 })],
             );
         });
+        // The record of a mission whose project left Faber stays behind; it must not stop the others from pausing.
+        let missions = layout.dev_root().join("data").join("missions");
+        let mut orphan: serde_json::Value = serde_json::from_slice(&std::fs::read(missions.join("m1").join("run.json")).unwrap()).unwrap();
+        orphan["mission"]["projectId"] = "gone".into();
+        std::fs::create_dir_all(missions.join("m2")).unwrap();
+        std::fs::write(missions.join("m2").join("run.json"), orphan.to_string()).unwrap();
         e.pause_missions_for_update().await.unwrap();
         assert_eq!(crate::project::run::Runner::load(&j).unwrap().mission.state, crate::project::MissionState::Paused);
         assert_eq!(*commands.lock().unwrap(), ["interrupt", "close"]);

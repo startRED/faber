@@ -1,4 +1,5 @@
 import type { DecisionKind, TaskState, TaskView } from './api.ts';
+import { keep } from './unsent.ts';
 
 export type PresenceChoice = 'continueWithout' | 'findTools';
 
@@ -35,6 +36,15 @@ export function saveMission(projectId: string, missionId: string): void {
 /** The board is left: the project opens on its start card again. The mission itself stays in the journal. */
 export function forgetMission(projectId: string): void {
   try { localStorage.removeItem('faber.project.mission.' + projectId); } catch { /* Nothing to forget. */ }
+}
+
+/** The project left Faber: the goal being typed, the mission shown and the unsent checks for it go too. */
+export function forgetProject(projectId: string): void {
+  try {
+    localStorage.removeItem(GOAL_KEY_PREFIX + projectId);
+    localStorage.removeItem('faber.project.mission.' + projectId);
+  } catch { /* Storage can be unavailable. */ }
+  keep(`proof.${projectId}`, '');
 }
 
 /** Formats own cost in millionths of an API-equivalent dollar.

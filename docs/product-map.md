@@ -90,7 +90,7 @@ Right-click menus:
 | Target | Items |
 | :--- | :--- |
 | A conversation row | Rename, Delete (confirm) |
-| A project row | New conversation in this project (opens its start card), Open folder, Remove from Faber (confirm; refused while it runs) |
+| A project row | New conversation in this project (opens its start card), Open folder, Remove from Faber (confirm; refused while it runs; deletes Faber's own working copy of it, while the folder and the mission journals in it stay) |
 | Your message | Copy, Edit |
 | An answer | Copy, Redo (as a branch, with the composer's current choice) |
 | Selected text | Copy |
@@ -177,7 +177,7 @@ The data folder is `%APPDATA%\Faber` (or `FABER_DATA_DIR`). JSON files are writt
 | `conversations/<id>.json` | One conversation: messages, `choice` (model and effort), `workingFolder`, `allowAlways` (tools always allowed in it), the copied `userName`, CLI sessions, queued messages, a waiting quota recovery | The engine |
 | `projects.json` | Projects: id, name, path, git identity (`repo`), `grant`, the confirmed checks (`extra.proof`) | Add, open or remove a project; Settings > Projects; the checks sheet |
 | `<project>/.faber/missions/<id>/` and `missions/<id>/` | A mission's journal (mission, plan, contracts, decisions, artifacts, report) and its run, runtime and effects records; in `missions/<id>/proofs/`, each check's whole output (`<receipt>.output`) and the short report the roles read (`<receipt>.report`, R155), with every line that looks like a secret withheld | The mission engine |
-| `workspaces/<project>/` | The persistent working copy where a project's setup and checks run | The mission engine |
+| `workspaces/<project>/`, `proof-target/<project>/` | The persistent working copy where a project's setup and checks run, and the checks' own build folder | The mission engine; both go when the project is removed |
 | `qualification/` | Receipts of the hidden check of the installed CLIs before missions (valid 24 h) | The shell, before a mission starts |
 | `recents.json` | Recent folders and environments | Opening folders, Recents |
 | `budget.json` | The quota ledger (readings, learned weekly shape, own spend, typed plan) and the mission budget; a damaged copy is set aside as `budget.json.quarantine` | The engine |
@@ -188,9 +188,9 @@ The data folder is `%APPDATA%\Faber` (or `FABER_DATA_DIR`). JSON files are writt
 | `chat/<id>/`, `attachments/<id>/` | A chat's private folder; a project conversation's attachments | The engine |
 | Browser storage `faber.place` | The last area, project and conversation | `ui/App.tsx` |
 | Browser storage `faber.choice.<conversationId>` | The model and effort picked for a conversation (the conversation file keeps a copy) | `ui/App.tsx` |
-| Browser storage `faber.project.goal.<projectId>` | The goal being typed on a start card | `ui/projects.ts` |
-| Browser storage `faber.project.mission.<projectId>` | The mission shown on a project's board; New mission clears it | `ui/projects.ts` |
-| Browser storage `faber.unsent.<field>` | Text typed and not sent, so an update restart or a crash loses nothing | `ui/unsent.ts` |
+| Browser storage `faber.project.goal.<projectId>` | The goal being typed on a start card (cleared when the project is removed) | `ui/projects.ts` |
+| Browser storage `faber.project.mission.<projectId>` | The mission shown on a project's board; New mission clears it, and so does removing the project | `ui/projects.ts` |
+| Browser storage `faber.unsent.<field>` | Text typed and not sent, so an update restart or a crash loses nothing (a project's go when it is removed) | `ui/unsent.ts` |
 | Outside Faber's folders | The Windows Run key (autostart); CLIs installed in `~/.local/bin` and added to the user PATH | `src-tauri/src/autostart.rs`, `engine/src/install.rs` |
 
 Environment variables are for tests and development: `FABER_DATA_DIR` (also turns off single instance, the updater and
@@ -235,11 +235,7 @@ checks in `tests/ui/index.ts`, real-app scenarios in `testkit/src/screen/mod.rs`
 | Permissions, cards, held-back requests | Done (five modes, R140) | `testkit/src/screen/permissions.rs`; `engine/tests/project_security.rs`; `tests/ui/thread.check.ts` |
 | Running column, tray, notifications | Done | `tests/ui/running.check.ts`; tests inside `src-tauri/src/tray/decide.rs` |
 | Keep awake, start with Windows | Done on Windows | tests inside `src-tauri/src/awake.rs`, `autostart.rs` |
-<<<<<<< HEAD
-| Public self-update | Done, on two channels (R156): stable reads the latest release's `latest.json` and previews (opt-in) the `preview-channel` release's, which every release replaces with its newest build; checks at start and every 6 h; installs on quit or, on Windows, at the first moment no conversation or CLI install runs and the window is hidden (a running mission does not hold it back, incoherence 29) (R141: it also installs at start, before the first input and with no unsent draft; "What's new" shows once after) | tests inside `src-tauri/src/update.rs` |
-=======
-| Public self-update | Done: checks at start and every 6 h; installs on quit or, on Windows, at the first moment no conversation, mission or CLI install runs and the window is hidden (R141: it also installs at start, before the first input and with no unsent draft; "What's new" shows once after) | tests inside `src-tauri/src/update.rs`; `engine/tests/running.rs` (`is_working`) |
->>>>>>> 2dbe7d1 (fix(engine): the engine knows every mission being driven, so nothing ends or removes one midway)
+| Public self-update | Done, on two channels (R156): stable reads the latest release's `latest.json` and previews (opt-in) the `preview-channel` release's, which every release replaces with its newest build; checks at start and every 6 h; installs on quit or, on Windows, at the first moment no conversation, mission or CLI install runs and the window is hidden (R141: it also installs at start, before the first input and with no unsent draft; "What's new" shows once after) | tests inside `src-tauri/src/update.rs`; `engine/tests/running.rs` (`is_working`) |
 | First run, account cards, tutorial | Done | `tests/ui/setup.check.ts`, `tutorial.check.ts`; `testkit/src/screen/setup.rs`, `first_run.rs` |
 | Settings, looks, theme files | Done | `tests/ui/settings.check.ts`, `appearance.check.ts`; `testkit/src/screen/settings.rs` |
 | Five languages | Done; part of de, es, fr and pt-BR still awaits a native speaker's review | `tests/ui/i18n.check.ts`, `mojibake.check.ts` |
@@ -312,8 +308,6 @@ ones.
     `projects.empty.selectProject`, `projects.receipt.verified`, `projects.gitMode.equilibrado`.
 25. Every Start grants again and bumps the grant revision, which makes earlier missions stale; `docs/design.md` says the
     grant is given once.
-26. Removing a project leaves its missions, working copy and browser keys behind; adding the folder again gives it a new
-    id, and its old missions fail with `error.journal.mismatch`.
 28. A project's tail in the sidebar shows the amber bubble with a bare number; design.md says amber always comes with
     words.
 
