@@ -1,7 +1,7 @@
 import { createEffect, createSignal, For, type JSX, Match, Show, Switch } from 'solid-js';
-import { api, type Appearance, type CheckResult, type Look, type Settings as Saved, type Vendor, type VendorUsage } from './api.ts';
+import { api, type Appearance, PERMISSION_MODES, type CheckResult, type Look, type PermissionMode, type ReasoningSummary, type Settings as Saved, type Vendor, type VendorUsage, type Verbosity, type WebSearch } from './api.ts';
 import { AppearanceSection } from './Appearance.tsx';
-import { Segmented, Toggle } from './controls.tsx';
+import { Choices, Learn, Segmented, Toggle } from './controls.tsx';
 import { factory } from './draft.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { LANGUAGES, t } from './i18n.ts';
@@ -29,6 +29,16 @@ export interface Keep {
 }
 
 const VENDORS: Vendor[] = ['claude', 'codex'];
+const MORE = {
+  ask: 'set.permissionsAskBody',
+  acceptEdits: 'set.permissions.acceptEdits.more',
+  plan: 'set.permissions.plan.more',
+  auto: 'set.permissions.auto.more',
+  dontAsk: 'set.permissionsDontAskBody',
+} as const;
+const WEB = [['off', 'set.webSearch.off'], ['cached', 'set.webSearch.cached'], ['live', 'set.webSearch.live']] as const;
+const SUMMARY = [['default', 'set.default'], ['auto', 'set.summary.auto'], ['concise', 'set.summary.concise'], ['detailed', 'set.summary.detailed'], ['none', 'set.summary.none']] as const;
+const VERBOSITY = [['default', 'set.default'], ['low', 'set.verbosity.low'], ['medium', 'set.verbosity.medium'], ['high', 'set.verbosity.high']] as const;
 const ACCOUNT_WORDS = { checking: 'set.checking', connected: 'set.connected', notConnected: 'set.notConnected', unsure: 'set.unsure' } as const;
 
 interface Props {
@@ -70,6 +80,7 @@ export function Settings(props: Props) {
   const [section, setSection] = createSignal<Section>(props.start ?? 'general');
   // The look being worked on in Appearance. It is not on the page until "Use this look" has saved it.
   const [draft, setDraft] = createSignal<Appearance>(props.kept ?? props.saved.appearance ?? factory());
+  const mode = () => props.saved.permissions ?? 'dontAsk';
   const title = () => t(SECTIONS.find(([id]) => id === section())![1]);
   // Whether each CLI says someone is signed in. Asked every time the section opens, so it is fresh after the account cards.
   const [checks, setChecks] = createSignal<Partial<Record<Vendor, CheckResult | 'failed'>>>({});
@@ -149,19 +160,41 @@ export function Settings(props: Props) {
                 <Toggle label={t('set.hooksBody')} hint={t('set.hooksHint')} checked={props.saved.userHooks === true} onChange={(on) => props.onSave({ userHooks: on })} />
               </div>
             </Row>
-            <Segmented
+            <Choices
               id="set-permissions"
               label={t('set.permissions')}
-              value={props.saved.permissions ?? 'dontAsk'}
-              options={[
-                ['dontAsk', t('set.permissions.dontAsk')],
-                ['ask', t('set.permissions.ask')],
-              ]}
+              value={mode()}
+              options={PERMISSION_MODES.map((m): [PermissionMode, string, string] => [m, t(`set.permissions.${m}`), t(`set.permissions.${m}.line`)])}
               onPick={(permissions) => void props.onSave({ permissions })}
             />
-            <p class="hint" role="status">
-              {t(props.saved.permissions === 'ask' ? 'set.permissionsAskBody' : 'set.permissionsDontAskBody')}
-            </p>
+            <Learn id="set-permissions-more">{t(MORE[mode()])}</Learn>
+            <Segmented
+              id="set-web"
+              label={t('set.webSearch')}
+              value={props.saved.webSearch ?? 'live'}
+              options={WEB.filter(([v]) => v !== 'cached' || props.vendors.includes('codex')).map(([v, key]): [WebSearch, string] => [v, t(key)])}
+              onPick={(webSearch) => void props.onSave({ webSearch })}
+            />
+            <p class="hint">{t('set.webSearch.line')}</p>
+            <Learn id="set-web-more">{t('set.webSearch.more')}</Learn>
+            <Show when={props.vendors.includes('codex')}>
+              <Segmented
+                id="set-summary"
+                label={t('set.summary')}
+                value={props.saved.reasoningSummary ?? 'default'}
+                options={SUMMARY.map(([v, key]): [ReasoningSummary, string] => [v, t(key)])}
+                onPick={(reasoningSummary) => void props.onSave({ reasoningSummary })}
+              />
+              <Segmented
+                id="set-verbosity"
+                label={t('set.verbosity')}
+                value={props.saved.verbosity ?? 'default'}
+                options={VERBOSITY.map(([v, key]): [Verbosity, string] => [v, t(key)])}
+                onPick={(verbosity) => void props.onSave({ verbosity })}
+              />
+              <p class="hint">{t('set.codexExtras.line')}</p>
+              <Learn id="set-codex-more">{t('set.codexExtras.more')}</Learn>
+            </Show>
             <Row label={t('set.chatFolder')}>
               <p class="hint">{t('set.chatFolderHint')}</p>
               <Show when={props.onChatFolder}>

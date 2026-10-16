@@ -197,6 +197,9 @@ pub struct Message {
     /// Why the quota changed the model Auto chose, when it did.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pace: Option<PaceNote>,
+    /// The permission mode that really ran this turn, as an i18n key, only when it is not the one chosen (`mode.fallback.auto`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
     /// A plain-language note under the reply (an i18n key): `note.historyResent` when the earlier conversation was sent again as text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
@@ -245,6 +248,7 @@ impl Message {
             pace: None,
             wait_until: None,
             moved_from: None,
+            mode: None,
             note: None,
             recovery: None,
             nudge: None,
@@ -482,6 +486,15 @@ pub struct Settings {
     /// Missing in older settings means commands run without asking in Chat and Projects.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permissions: Option<Permissions>,
+    /// Missing means live (R140).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_search: Option<WebSearch>,
+    /// Codex only; missing means the model's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_summary: Option<ReasoningSummary>,
+    /// Codex only; missing means the model's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verbosity: Option<Verbosity>,
     /// Attention notifications and their chime are both on unless explicitly disabled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notifications: Option<bool>,
@@ -517,12 +530,22 @@ pub enum Experience {
     Experienced,
 }
 
-/// How a CLI session may act. `Ask` and `FullAccess` are the two choices on screen (R121); `Isolated` exists only inside Faber.
+/// How a CLI session may act. `Ask`, `AcceptEdits`, `Plan`, `Auto` and `FullAccess` are the choices on screen (R121, R140);
+/// `Isolated` exists only inside Faber.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Permissions {
     /// Commands and file changes wait for a card the person answers.
     #[serde(rename = "ask")]
     Ask,
+    /// File edits run, commands ask (R140).
+    #[serde(rename = "acceptEdits")]
+    AcceptEdits,
+    /// Read and plan, no changes (R140).
+    #[serde(rename = "plan")]
+    Plan,
+    /// The CLI's own reviewer approves the safe actions and the rest asks (R140).
+    #[serde(rename = "auto")]
+    Auto,
     /// "Do not ask": no cards, no sandbox around commands, network and the person's own integrations on. Only the CLI
     /// credential folders stay blocked, where the CLI can enforce it. Stored as `dontAsk`.
     #[default]
@@ -533,6 +556,92 @@ pub enum Permissions {
     /// the self-development roles. Never stored, never chosen by the person.
     #[serde(skip)]
     Isolated,
+}
+
+impl Permissions {
+    /// The modes that keep the person in the loop (everything the person can choose except full access): the CLI starts in
+    /// its restricted setup, and the person's hooks stay off unless the switch is on.
+    pub fn guarded(self) -> bool {
+        matches!(self, Permissions::Ask | Permissions::AcceptEdits | Permissions::Plan | Permissions::Auto)
+    }
+
+    /// How far a mode lets the CLI act alone, from loosest to strictest. Moving to a higher number stops the turns in flight.
+    pub fn strictness(self) -> u8 {
+        match self {
+            Permissions::FullAccess => 0,
+            Permissions::Auto => 1,
+            Permissions::AcceptEdits => 2,
+            Permissions::Ask => 3,
+            Permissions::Plan | Permissions::Isolated => 4,
+        }
+    }
+
+    /// The mode Claude Code really runs. A CLI that does not list `auto` in its `--permission-mode` choices gets the nearest
+    /// safer one, accept edits.
+    pub fn for_claude(self, flags: crate::claude::ClaudeFlags) -> Permissions {
+        match self {
+            Permissions::Auto if !flags.auto_mode => Permissions::AcceptEdits,
+            other => other,
+        }
+    }
+
+    /// The locale key of the line that says a mode runs as another one. Only `for_claude` changes a mode, and only Auto.
+    pub fn fallback_note(self, runs: Permissions) -> Option<String> {
+        (self != runs).then(|| "mode.fallback.auto".to_string())
+    }
+}
+
+/// Web search for Chat and the person's own project sessions (R140). Live is the default: the most capable agent.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WebSearch {
+    Off,
+    /// Codex only; Claude Code has no cache, so it keeps searching and does not fetch pages.
+    Cached,
+    #[default]
+    Live,
+}
+
+/// Codex's reasoning summary. `Default` leaves the model's own.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ReasoningSummary {
+    #[default]
+    Default,
+    Auto,
+    Concise,
+    Detailed,
+    #[serde(rename = "none")]
+    Hidden,
+}
+
+/// Codex's answer length. `Default` leaves the model's own.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Verbosity {
+    #[default]
+    Default,
+    Low,
+    Medium,
+    High,
+}
+
+/// What a launch takes from the settings besides the mode. Never reaches a project role.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Tuning {
+    pub web: WebSearch,
+    pub summary: ReasoningSummary,
+    pub verbosity: Verbosity,
+}
+
+impl Settings {
+    pub fn tuning(&self) -> Tuning {
+        Tuning {
+            web: self.web_search.unwrap_or_default(),
+            summary: self.reasoning_summary.unwrap_or_default(),
+            verbosity: self.verbosity.unwrap_or_default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

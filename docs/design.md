@@ -290,6 +290,23 @@ projects. Faber has no worktree creation for projects, so an environment has no 
   value if the save fails. R107 applies the same default to Chat. Chat uses its chosen canonical folder
   (fixed before the first message), or private per-conversation scratch; deletion/draft cleanup never removes a chosen
   folder. General explains the rule and offers the folder choice.
+- R140 (Chat; the person's own project sessions take the same modes, and mission roles never do): the Permissions choice is a
+  list of five modes, each with one plain line and its long text behind a closed "Learn more" that is not in the page
+  while closed. The composer of Chat carries the same choice as a chip. Mode by CLI (the CLI that lacks a mode runs the
+  nearest safer one and the reply says so, `mode.fallback.auto`):
+
+  | Mode | Claude Code `--permission-mode` | Codex approvalPolicy / sandbox / approvalsReviewer |
+  |---|---|---|
+  | Ask | `default` | `untrusted` / `workspace-write` / `user` |
+  | Accept edits | `acceptEdits` | `on-request` / `workspace-write` / `user` |
+  | Plan | `plan` | `on-request` / `read-only` / `user` |
+  | Auto | `auto` (else `acceptEdits`) | `on-request` / `workspace-write` / `auto_review` |
+  | Full access (default, stored `dontAsk`) | `bypassPermissions` | `never` / `danger-full-access` |
+
+  Web search (Off, Cached, Live; Live by default): Codex `web_search` in the thread config; Claude Code allows
+  WebSearch and WebFetch (Live), only WebSearch and denies WebFetch (Cached, which it lacks), or denies both (Off).
+  Cached is offered only while Codex is connected. Codex reasoning summary and verbosity go into the thread config as
+  `model_reasoning_summary` and `model_verbosity` and stay unset (the model's own) until chosen.
 - R121 (it replaces the next item for the two choices on screen): "Don't ask" is full access. No approval cards, commands
   run without Faber's sandbox and with network, WebFetch and WebSearch work, any folder can be the working folder, and the
   person's own MCP servers, plugins and hooks stay on, as in the CLI itself. Claude Code runs in bypass mode with Read and

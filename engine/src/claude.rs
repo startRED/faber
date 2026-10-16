@@ -1,7 +1,7 @@
 //! Claude Code driver: one long-lived `claude -p` process per conversation, spoken to in stream-json over stdio.
 
 use crate::events::{Delivery, EngineEvent, Session, SessionCommand, UserTurn};
-use crate::model::{Area, Permissions};
+use crate::model::{Area, Permissions, Tuning, WebSearch};
 use crate::persona::{PersonaInput, persona, worker_contract};
 use crate::proc::{self, Spawner};
 use crate::signals::claude_signals;
@@ -26,6 +26,9 @@ pub struct ClaudeLaunch {
     pub user_name: Option<String>,
     /// What the installed CLI is known to accept (see `ClaudeFlags`); the default passes none of the newer flags.
     pub flags: ClaudeFlags,
+    /// Web search from the settings (R140). Chat and the person's own project sessions only: a side question and a role never
+    /// read it.
+    pub tuning: Tuning,
 }
 
 /// Flags that only newer CLIs take, read once from `claude --help` (`from_help`). A flag the CLI does not list is never
@@ -36,27 +39,39 @@ pub struct ClaudeFlags {
     pub autocompact: bool,
     /// `--permission-prompts none`: a request that would prompt is denied at once instead of waiting for an answer (2.1.296).
     pub permission_prompts: bool,
+    /// `auto` among the `--permission-mode` choices: the CLI's own reviewer approves the safe actions (R140).
+    pub auto_mode: bool,
 }
 
 impl ClaudeFlags {
     /// Only an option line counts: indented, starting with the flag (after an optional short alias) and followed by its value
     /// placeholder or the gap before its description. The flag named in a sentence, an error or a description is no support.
     pub fn from_help(help: &str) -> Self {
-        let declares = |flag: &str| {
-            help.lines().any(|line| {
-                if !line.starts_with([' ', '\t']) {
-                    return false;
-                }
-                let mut rest = line.trim_start();
-                if rest.starts_with('-') && !rest.starts_with("--") {
-                    rest = rest.split_once(", ").map_or(rest, |(_, after)| after.trim_start());
-                }
-                rest.strip_prefix(flag).is_some_and(|tail| {
-                    tail.is_empty() || tail.starts_with("  ") || tail.starts_with('\t') || tail.trim_start().starts_with(['<', '['])
-                })
+        let declaring = |line: &str, flag: &str| {
+            if !line.starts_with([' ', '\t']) {
+                return false;
+            }
+            let mut rest = line.trim_start();
+            if rest.starts_with('-') && !rest.starts_with("--") {
+                rest = rest.split_once(", ").map_or(rest, |(_, after)| after.trim_start());
+            }
+            rest.strip_prefix(flag).is_some_and(|tail| {
+                tail.is_empty() || tail.starts_with("  ") || tail.starts_with('\t') || tail.trim_start().starts_with(['<', '['])
             })
         };
-        ClaudeFlags { autocompact: declares("--autocompact"), permission_prompts: declares("--permission-prompts") }
+        let declares = |flag: &str| help.lines().any(|line| declaring(line, flag));
+        // The choices of `--permission-mode` are quoted words on the option's own lines, up to the next option.
+        let mut block = help.lines().skip_while(|line| !declaring(line, "--permission-mode"));
+        let mut modes = block.next().unwrap_or_default().to_string();
+        for line in block.take_while(|line| !line.trim_start().starts_with('-')) {
+            modes.push(' ');
+            modes.push_str(line);
+        }
+        ClaudeFlags {
+            autocompact: declares("--autocompact"),
+            permission_prompts: declares("--permission-prompts"),
+            auto_mode: modes.contains("\"auto\""),
+        }
     }
 }
 
@@ -125,9 +140,29 @@ pub fn tool_deny(var: &dyn Fn(&str) -> Option<String>) -> Vec<String> {
     rules
 }
 
+/// The deny rules the web setting adds (R140): Off drops both web tools; Cached has no equivalent in Claude Code, so it keeps
+/// searching and stops fetching pages.
+fn web_deny(web: WebSearch) -> Vec<String> {
+    match web {
+        WebSearch::Live => vec![],
+        WebSearch::Cached => vec!["WebFetch".into()],
+        WebSearch::Off => vec!["WebSearch".into(), "WebFetch".into()],
+    }
+}
+
+/// The tools a guarded Chat session may use without a card (R140).
+fn web_allowed(web: WebSearch) -> Option<&'static str> {
+    match web {
+        WebSearch::Live => Some("WebSearch,WebFetch"),
+        WebSearch::Cached => Some("WebSearch"),
+        WebSearch::Off => None,
+    }
+}
+
 /// Arguments for one long-lived Claude Code process that takes many turns over stdin.
-/// Ask names its permission mode (`default`: ask before file changes and commands that are not plain reading), so neither the
-/// person's CLI settings nor an earlier session can pick a looser one. Full access ("Do not ask") bypasses approvals, keeps the
+/// Every guarded mode names its permission mode (Ask: `default`, ask before file changes and commands that are not plain
+/// reading; Accept edits: `acceptEdits`; Plan: `plan`; Auto: `auto`, or accept edits when the CLI does not list it), so neither
+/// the person's CLI settings nor an earlier session can pick a looser one. Full access ("Do not ask") bypasses approvals, keeps the
 /// person's integrations and only denies the credential folders. Isolated disables startup integrations and routes tools to
 /// Faber's working-folder policy. A side question (router, pulse) always gets the isolated treatment.
 pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
@@ -165,15 +200,20 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
         if launch.area == Area::Chat {
             args.extend(["--tools".into(), CHAT_TOOLS.into()]);
             match launch.permissions {
-                Permissions::Ask => {
-                    args.extend(["--strict-mcp-config".into(), "--restricted".into(), "--allowedTools".into(), "WebSearch,WebFetch".into()])
+                mode if mode.guarded() => {
+                    args.extend(["--strict-mcp-config".into(), "--restricted".into()]);
+                    if let Some(allowed) = web_allowed(launch.tuning.web) {
+                        args.extend(["--allowedTools".into(), allowed.into()]);
+                    }
                 }
                 Permissions::Isolated => args.extend(["--strict-mcp-config".into(), "--safe-mode".into()]),
                 // The person's own MCP servers, plugins, skills and hooks load as they do in the CLI itself.
-                Permissions::FullAccess => {}
+                _ => {}
             }
         }
-        match launch.permissions {
+        let web = web_deny(launch.tuning.web);
+        let deny = || tool_deny(&env).into_iter().chain(web.iter().cloned()).collect::<Vec<_>>();
+        match launch.permissions.for_claude(launch.flags) {
             Permissions::Isolated => {
                 if launch.area == Area::Project {
                     args.extend(["--safe-mode".into(), "--strict-mcp-config".into()]);
@@ -190,18 +230,25 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
             // Full access (R121): no sandbox, no ask rules, network on. Deny rules still apply in bypassPermissions.
             Permissions::FullAccess => {
                 args.extend(["--permission-mode".into(), "bypassPermissions".into()]);
-                settings["permissions"] = json!({ "deny": tool_deny(&env) });
+                settings["permissions"] = json!({ "deny": deny() });
             }
-            // Ask carries the same credential denies as full access: a person's own rule or an approval card must not open them.
-            Permissions::Ask => {
-                args.extend(["--permission-mode".into(), "default".into()]);
-                settings["permissions"] = json!({ "deny": tool_deny(&env) });
+            // Every guarded mode carries the same credential denies as full access: a person's own rule or an approval card
+            // must not open them.
+            mode => {
+                let name = match mode {
+                    Permissions::AcceptEdits => "acceptEdits",
+                    Permissions::Plan => "plan",
+                    Permissions::Auto => "auto",
+                    _ => "default",
+                };
+                args.extend(["--permission-mode".into(), name.into()]);
+                settings["permissions"] = json!({ "deny": deny() });
             }
         }
         let hooks_off = match launch.permissions {
             Permissions::Isolated => true,
             Permissions::FullAccess => false,
-            Permissions::Ask => launch.area == Area::Project && !launch.user_hooks,
+            _ => launch.area == Area::Project && !launch.user_hooks,
         };
         if hooks_off {
             settings["disableAllHooks"] = true.into();
@@ -295,6 +342,7 @@ pub(crate) fn project_launch_policy(roles: &[crate::project::Role]) -> Value {
         instructions: None,
         user_name: None,
         flags: Default::default(),
+        tuning: Default::default(),
     };
     json!(roles.iter().map(|role| project_claude_args(&launch, *role).ok()).collect::<Vec<_>>())
 }
@@ -721,6 +769,7 @@ mod role_tests {
                 user_name: None,
                 permissions: Permissions::Isolated,
                 flags: Default::default(),
+                tuning: Default::default(),
             },
             spawn,
             sandbox: None,

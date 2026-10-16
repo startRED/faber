@@ -1,5 +1,5 @@
 import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from 'solid-js';
-import type { Choice, Effort, Vendor } from './api.ts';
+import { type Choice, type Effort, PERMISSION_MODES, type PermissionMode, type Vendor } from './api.ts';
 import { Ghost } from './Ghost.tsx';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
@@ -19,6 +19,9 @@ interface Props {
   options: Option[];
   choice: Choice;
   onChoice: (choice: Choice) => void;
+  /** The permission mode of Chat, and what picks another. Chat only: a project composer passes neither and shows no chip. */
+  mode?: PermissionMode;
+  onMode?: (mode: PermissionMode) => void;
   busy: boolean;
   nextMessage?: boolean;
   /** A conversation is still opening: nothing can be sent or warmed until it is in. */
@@ -237,6 +240,14 @@ export function Composer(props: Props) {
               warmed = false;
             }}>
               <For each={['low', 'medium', 'high'] as const}>{(effort) => <option value={effort}>{t(`effort.${effort}`)}</option>}</For>
+            </select>
+            <Icon name="down" small />
+          </label>
+        </Show>
+        <Show when={props.mode && props.onMode}>
+          <label class="chip choose mode" title={t(`set.permissions.${props.mode!}.line`)}>
+            <select aria-label={t('composer.mode')} value={props.mode} onChange={(e) => props.onMode!(e.currentTarget.value as PermissionMode)}>
+              <For each={PERMISSION_MODES}>{(m) => <option value={m} selected={m === props.mode} title={t(`set.permissions.${m}.line`)}>{t(`set.permissions.${m}`)}</option>}</For>
             </select>
             <Icon name="down" small />
           </label>

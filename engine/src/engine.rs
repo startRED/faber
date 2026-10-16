@@ -153,6 +153,10 @@ struct Live {
     /// The process continues a session an earlier process began.
     resumed: bool,
     permissions: Permissions,
+    /// What the web and Codex settings were when the process started (R140).
+    tuning: Tuning,
+    /// The mode the CLI really runs: not `permissions` when the CLI lacks it (Claude Code without `auto`).
+    runs: Permissions,
     /// The folder the process was started in (checked); a turn that finds the folder resolving elsewhere starts a new process.
     cwd: PathBuf,
     by_hand: bool,
@@ -1120,10 +1124,14 @@ impl Core {
     /// Keeps the merged settings, or fails with `error.settings.saveFailed` before anything live changes.
     fn save_settings(&mut self, patch: Settings) -> Result<Settings, String> {
         let before = self.store.settings();
+        let before_tuning = before.tuning();
         let settings = Settings {
             appearance: patch.appearance.or(before.appearance),
             user_hooks: patch.user_hooks.or(before.user_hooks),
             permissions: patch.permissions.or(before.permissions),
+            web_search: patch.web_search.or(before.web_search),
+            reasoning_summary: patch.reasoning_summary.or(before.reasoning_summary),
+            verbosity: patch.verbosity.or(before.verbosity),
             notifications: patch.notifications.or(before.notifications),
             notification_sound: patch.notification_sound.or(before.notification_sound),
             language: patch.language.or(before.language),
@@ -1135,9 +1143,10 @@ impl Core {
             autostart: patch.autostart.or(before.autostart),
         };
         self.store.save_settings(&settings).map_err(|_| "error.settings.saveFailed".to_string())?;
-        // Turns started with full access keep it until they end, so going back to asking stops them (a turn that began with
-        // approval cards keeps asking; switching to "Do not ask" does not touch it).
-        if before.permissions.unwrap_or_default() == Permissions::FullAccess && settings.permissions == Some(Permissions::Ask) {
+        // A turn keeps the mode it started with until it ends, so moving to a stricter mode stops the turns under way (a turn
+        // that began under a stricter mode keeps it; moving to a looser one does not touch it).
+        let (was, now) = (before.permissions.unwrap_or_default(), settings.permissions.unwrap_or_default());
+        if now.strictness() > was.strictness() {
             let active: Vec<String> = self.live.iter().filter(|(_, live)| live.turn.is_some()).map(|(id, _)| id.clone()).collect();
             for id in active {
                 if let Some(live) = self.live.remove(&id) {
@@ -1157,13 +1166,16 @@ impl Core {
             self.drop_draft();
         }
         // Idle CLIs restart on their next turn when permissions change; hooks remain a Projects choice.
-        if settings.user_hooks != before.user_hooks || settings.permissions != before.permissions {
+        let tuned = settings.tuning() != before_tuning;
+        if settings.user_hooks != before.user_hooks || settings.permissions != before.permissions || tuned {
             let idle: Vec<String> = self
                 .live
                 .iter()
                 .filter(|(id, l)| {
                     l.turn.is_none()
-                        && (settings.permissions != before.permissions || self.convs.get(*id).is_some_and(|c| c.area == Area::Project))
+                        && (settings.permissions != before.permissions
+                            || tuned
+                            || self.convs.get(*id).is_some_and(|c| c.area == Area::Project))
                 })
                 .map(|(id, _)| id.clone())
                 .collect();
@@ -1996,6 +2008,7 @@ impl Core {
             m.error = None;
             m.status = Some(Status::Streaming);
             m.permissions = None;
+            m.mode = self.live.get(id).and_then(|l| l.permissions.fallback_note(l.runs));
         }
         if let Some(running) = self.live.get(id).and_then(|l| l.running.clone())
             && let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id))
@@ -2029,7 +2042,14 @@ impl Core {
     fn launch(&mut self, conv: &str, pick: &Pick) -> Result<(), String> {
         self.tick += 1;
         let cli = self.opts.clis.get(&pick.vendor).cloned();
-        let permissions = self.store.settings().permissions.unwrap_or_default();
+        let settings = self.store.settings();
+        let (permissions, tuning) = (settings.permissions.unwrap_or_default(), settings.tuning());
+        let flags = match &cli {
+            Some(cli) if pick.vendor == Vendor::Claude => self.claude_flags_for(cli),
+            _ => Default::default(),
+        };
+        // Only Claude Code can lack a mode; its flags come from its own help, so a mode that appears later starts a new process.
+        let runs = if pick.vendor == Vendor::Claude { permissions.for_claude(flags) } else { permissions };
         // Every turn checks the working folder again, also when the process of an earlier turn is reused: a link inside the path
         // may have been pointed somewhere else since.
         let cwd = match self.convs.get(conv).ok_or_else(|| "error.conversationGone".to_string()).and_then(|c| self.cwd_of(c)) {
@@ -2047,6 +2067,8 @@ impl Core {
                 && l.effort == pick.effort
                 && Some(&l.cli) == cli.as_ref()
                 && l.permissions == permissions
+                && l.tuning == tuning
+                && l.runs == runs
                 && l.cwd == cwd
             {
                 l.used = self.tick; // most recently used
@@ -2055,10 +2077,6 @@ impl Core {
             l.session.close();
             self.live.remove(conv);
         }
-        let flags = match &cli {
-            Some(cli) if pick.vendor == Vendor::Claude => self.claude_flags_for(cli),
-            _ => Default::default(),
-        };
         let c = self.convs.get(conv).ok_or("error.conversationGone")?;
         let cwd_used = cwd.clone();
         let cli = cli.ok_or("error.notConnected")?;
@@ -2096,7 +2114,7 @@ impl Core {
             }
         });
         // The hooks switch matters only while asking; with full access the person's hooks always run, as in the CLI itself.
-        let user_hooks = self.store.settings().user_hooks == Some(true) && permissions == Permissions::Ask;
+        let user_hooks = settings.user_hooks == Some(true) && permissions.guarded();
         let resume = c.resumable(pick.vendor).cloned();
         let resumed = resume.is_some();
         let area = c.area;
@@ -2108,7 +2126,18 @@ impl Core {
                 ClaudeOptions {
                     bin: cli.command.clone(),
                     cwd,
-                    launch: ClaudeLaunch { area, model, effort, resume, user_hooks, permissions, instructions: None, user_name, flags },
+                    launch: ClaudeLaunch {
+                        area,
+                        model,
+                        effort,
+                        resume,
+                        user_hooks,
+                        permissions,
+                        instructions: None,
+                        user_name,
+                        flags,
+                        tuning,
+                    },
                     spawn,
                     sandbox: self.opts.clis.get(&Vendor::Codex).cloned(),
                 },
@@ -2116,7 +2145,7 @@ impl Core {
             ),
             Vendor::Codex => self
                 .codex_server(area, user_hooks, permissions, &cli)
-                .open(CodexThread { cwd, model, effort, resume, instructions: None, user_name, permissions }, sink),
+                .open(CodexThread { cwd, model, effort, resume, instructions: None, user_name, permissions, tuning }, sink),
         };
         self.live.insert(
             conv.to_string(),
@@ -2134,6 +2163,8 @@ impl Core {
                 cli,
                 resumed,
                 permissions,
+                tuning,
+                runs,
                 cwd: cwd_used,
                 by_hand: false,
                 approved: false,

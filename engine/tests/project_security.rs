@@ -14,6 +14,7 @@ fn launch(area: Area, permissions: Permissions) -> ClaudeLaunch {
         instructions: None,
         user_name: None,
         flags: Default::default(),
+        tuning: Default::default(),
     }
 }
 
@@ -51,6 +52,7 @@ fn review3_codex_credential_denies_survive_in_both_areas_and_on_resume() {
                     instructions: None,
                     user_name: None,
                     permissions: Permissions::Isolated,
+                    tuning: Default::default(),
                 },
             );
             let config = &params["config"];
@@ -104,6 +106,7 @@ fn review3_codex_shells_use_the_shared_git_gate_instead_of_native_execution() {
                 instructions: None,
                 user_name: None,
                 permissions: Permissions::Isolated,
+                tuning: Default::default(),
             },
         );
         assert_eq!(params["config"]["features.shell_tool"], false);
@@ -217,6 +220,7 @@ fn c1_h4_codex_network_is_off_on_start_and_resume_even_if_user_settings_enable_i
             instructions: None,
             user_name: None,
             permissions: Permissions::Isolated,
+            tuning: Default::default(),
         };
         let (_, params) = thread_params(Area::Project, &t);
         assert_eq!(params["approvalPolicy"], "never");
@@ -276,6 +280,7 @@ fn review2_h2_codex_selects_a_restricted_read_profile_on_start_and_resume() {
             instructions: None,
             user_name: None,
             permissions: Permissions::Isolated,
+            tuning: Default::default(),
         };
         let (_, params) = thread_params(Area::Project, &t);
         assert!(params.get("sandbox").is_none(), "legacy workspace-write must not override restricted reads");
@@ -322,6 +327,7 @@ fn m6_sandbox_failures_are_intended_and_writable_roots_must_not_expand_into_user
         instructions: None,
         user_name: None,
         permissions: Permissions::Isolated,
+        tuning: Default::default(),
     };
     let (_, params) = thread_params(Area::Project, &t);
     assert!(params.get("sandbox").is_none());
@@ -354,6 +360,7 @@ fn r107_internal_questions_restrict_reads_and_never_grant_workspace_writes() {
                     instructions: Some("Classify this request without tools.".into()),
                     user_name: None,
                     permissions,
+                    tuning: Default::default(),
                 },
             );
             assert_eq!(params["approvalPolicy"], "never");

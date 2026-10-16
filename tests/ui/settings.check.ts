@@ -1,7 +1,7 @@
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
-import type { Appearance, CheckResult, Look, QuotaReading, Settings as Saved } from '../../ui/api.ts';
+import type { Appearance, CheckResult, Look, QuotaReading, Settings as Saved, Vendor } from '../../ui/api.ts';
 import { AppearanceSection } from '../../ui/Appearance.tsx';
 import { previewer } from '../../ui/appearance.ts';
 import { Mini } from '../../ui/FirstRun.tsx';
@@ -29,7 +29,7 @@ check('R121: Do not ask is one calm line in the thread, with the risk and the cr
   ok(line.length < 60 && !/risk|danger|warning|error|denied|blocked/i.test(line), line);
   ok(en['project.permissionsDetails'].includes('Settings'));
   const body = en['set.permissionsDontAskBody'];
-  for (const word of ['internet', 'any folder', 'steer', 'Ask before commands', '.ssh', 'Codex can read', 'directly', 'Claude Code can through commands', 'best effort', 'Stop asks the tools to stop']) ok(body.includes(word), word);
+  for (const word of ['internet', 'any folder', 'steer', 'pick Ask for', '.ssh', 'Codex can read', 'directly', 'Claude Code can through commands', 'best effort', 'Stop asks the tools to stop']) ok(body.includes(word), word);
   ok(!/is kept out|cannot be kept out|Codex cannot/.test(body), 'no claim that one tool is kept away from the sign-in folders');
   ok(body.split('. ').length <= 5, 'one short paragraph');
   ok(!/sandbox|too broad|disabled/i.test(body), 'full access no longer describes a sandbox or disabled integrations');
@@ -399,4 +399,69 @@ check('settings: unsupported system controls are absent outside Windows', () => 
     if (original) Object.defineProperty(navigator, 'userAgent', original);
     else Reflect.deleteProperty(navigator, 'userAgent');
   }
+});
+
+check('R140: the chooser lists five modes with one plain line each, and the long text stays out of the page until Learn more opens it', async () => {
+  const [saved, setSaved] = createSignal<Saved>({});
+  const [vendors, setVendors] = createSignal<Vendor[]>(['claude']);
+  const patches: Saved[] = [];
+  const view = mount(() => createComponent(Settings, {
+    look: look(), get saved() { return saved(); }, get vendors() { return vendors(); }, quotas: {}, now: 0,
+    onClose: () => {}, onOpenSetup: () => {},
+    onSave: async (patch) => { patches.push(patch); setSaved({ ...saved(), ...patch }); return true; },
+  }));
+  try {
+    const rows = () => [...view.host.querySelectorAll<HTMLButtonElement>('#set-permissions + .choices button')];
+    deepEqual(rows().map((r) => r.querySelector('b')!.textContent), [en['set.permissions.ask'], en['set.permissions.acceptEdits'], en['set.permissions.plan'], en['set.permissions.auto'], en['set.permissions.dontAsk']]);
+    deepEqual(rows().map((r) => r.querySelector('small')!.textContent), [en['set.permissions.ask.line'], en['set.permissions.acceptEdits.line'], en['set.permissions.plan.line'], en['set.permissions.auto.line'], en['set.permissions.dontAsk.line']]);
+    for (const row of rows()) ok(row.querySelector('small')!.textContent!.length < 70, 'one short line');
+    deepEqual(rows().map((r) => r.getAttribute('aria-pressed')), ['false', 'false', 'false', 'false', 'true'], 'full access is on when nothing is saved');
+    const body = (key: 'set.permissionsDontAskBody' | 'set.permissionsAskBody' | 'set.permissions.auto.more') => view.host.textContent!.includes(en[key]);
+    equal(body('set.permissionsDontAskBody'), false, 'the long risk text is not on the page');
+    const more = view.host.querySelector<HTMLButtonElement>('#set-permissions-more')!;
+    equal(more.getAttribute('aria-expanded'), 'false');
+    more.click();
+    await tick();
+    equal(body('set.permissionsDontAskBody'), true);
+    rows()[3]!.click();
+    await tick();
+    deepEqual(patches, [{ permissions: 'auto' }]);
+    equal(rows()[3]!.getAttribute('aria-pressed'), 'true');
+    equal(body('set.permissions.auto.more'), true, 'the open text follows the mode');
+    more.click();
+    await tick();
+    equal(body('set.permissions.auto.more'), false, 'closed, it leaves the page');
+    // Web search: Cached and the Codex-only choices exist only where Codex is connected.
+    const labels = (id: string) => [...view.host.querySelectorAll<HTMLButtonElement>(`#${id} + .seg-ctl button`)].map((b) => b.textContent);
+    deepEqual(labels('set-web'), [en['set.webSearch.off'], en['set.webSearch.live']]);
+    equal(view.host.querySelector('#set-summary'), null);
+    equal(view.host.querySelector('#set-verbosity'), null);
+    equal(view.host.querySelector('#set-web + .seg-ctl button[aria-pressed="true"]')!.textContent, en['set.webSearch.live'], 'live is the default');
+    setVendors(['claude', 'codex']);
+    await tick();
+    deepEqual(labels('set-web'), [en['set.webSearch.off'], en['set.webSearch.cached'], en['set.webSearch.live']]);
+    deepEqual(labels('set-summary'), [en['set.default'], en['set.summary.auto'], en['set.summary.concise'], en['set.summary.detailed'], en['set.summary.none']]);
+    deepEqual(labels('set-verbosity'), [en['set.default'], en['set.verbosity.low'], en['set.verbosity.medium'], en['set.verbosity.high']]);
+    equal(view.host.querySelector('#set-summary + .seg-ctl button[aria-pressed="true"]')!.textContent, en['set.default']);
+    equal(body('set.permissions.auto.more'), false);
+    equal(view.host.textContent!.includes(en['set.webSearch.more']), false, 'the web details are closed too');
+    view.host.querySelector<HTMLButtonElement>('#set-web-more')!.click();
+    await tick();
+    equal(view.host.textContent!.includes(en['set.webSearch.more']), true);
+    view.host.querySelector<HTMLButtonElement>('#set-web + .seg-ctl button')!.click();
+    view.host.querySelectorAll<HTMLButtonElement>('#set-summary + .seg-ctl button')[3]!.click();
+    view.host.querySelectorAll<HTMLButtonElement>('#set-verbosity + .seg-ctl button')[1]!.click();
+    await tick();
+    deepEqual(patches.slice(1), [{ webSearch: 'off' }, { reasoningSummary: 'detailed' }, { verbosity: 'low' }]);
+  } finally { view.stop(); }
+});
+
+check('R140: every mode has a name, a line and, for the three new ones, details, in every language', () => {
+  for (const [code, messages] of Object.entries({ en, 'pt-BR': ptBR, es, fr, de })) {
+    for (const mode of ['ask', 'acceptEdits', 'plan', 'auto', 'dontAsk'] as const) {
+      ok(messages[`set.permissions.${mode}`].trim() && messages[`set.permissions.${mode}.line`].trim(), `${code} ${mode}`);
+    }
+    ok(messages['mode.fallback.auto'].trim() && messages['set.learnMore'].trim() && messages['composer.mode'].trim(), code);
+  }
+  equal(en['set.permissions.dontAsk'], 'Full access');
 });

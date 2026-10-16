@@ -239,6 +239,8 @@ mod tests {
                 cli: Cli { command: "claude".into(), prefix: vec![] },
                 resumed: false,
                 permissions: Permissions::Ask,
+                tuning: Default::default(),
+                runs: Permissions::Ask,
                 by_hand: true,
                 approved: false,
                 started: 0.0,

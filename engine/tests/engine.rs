@@ -1661,6 +1661,7 @@ async fn stop_leaves_no_worker(parent_script: &str, why: &str) {
                 instructions: None,
                 user_name: None,
                 flags: Default::default(),
+                tuning: Default::default(),
             },
             spawn,
             sandbox: None,
@@ -1937,4 +1938,105 @@ async fn the_first_launch_after_the_cli_is_downgraded_passes_none_of_the_newer_f
     assert_eq!(probes.load(std::sync::atomic::Ordering::SeqCst), 2, "the first read at start, one more after the binary changed");
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert_eq!(engine.claude_flags(), Default::default(), "the older help declares none");
+}
+
+#[tokio::test]
+async fn r140_auto_on_a_claude_that_lists_no_auto_runs_accept_edits_and_the_reply_says_so() {
+    for (permissions, note) in
+        [(Permissions::Auto, Some("mode.fallback.auto")), (Permissions::AcceptEdits, None), (Permissions::Plan, None)]
+    {
+        let data = tempfile::tempdir().unwrap();
+        let f = fake(fixture("claude", "chat"));
+        let (engine, mut rx) = engine(data.path(), Vendor::Claude, f.spawn.clone());
+        engine.save_settings(Settings { permissions: Some(permissions), ..Settings::default() }).unwrap();
+        engine.send(ask(Area::Chat, SKY, choice("claude", Some("haiku")))).unwrap();
+        let reply = finished(&mut rx, |_| {}).await;
+        engine.shutdown();
+        assert_eq!(reply.mode.as_deref(), note, "{permissions:?}");
+        let args = f.args.lock().unwrap();
+        let runs = if permissions == Permissions::Plan { "plan" } else { "acceptEdits" };
+        assert!(args[0].windows(2).any(|a| a == ["--permission-mode", runs]), "{permissions:?}: {:?}", args[0]);
+    }
+}
+
+#[tokio::test]
+async fn r140_a_codex_chat_thread_carries_the_mode_and_the_settings() {
+    use faber_engine::model::{ReasoningSummary, Verbosity, WebSearch};
+    let data = tempfile::tempdir().unwrap();
+    let f = fake(fixture("codex", "chat"));
+    let (engine, mut rx) = engine(data.path(), Vendor::Codex, f.spawn.clone());
+    engine
+        .save_settings(Settings {
+            permissions: Some(Permissions::Auto),
+            web_search: Some(WebSearch::Cached),
+            reasoning_summary: Some(ReasoningSummary::Concise),
+            verbosity: Some(Verbosity::High),
+            ..Settings::default()
+        })
+        .unwrap();
+    engine.send(ask(Area::Chat, SKY, choice("codex", None))).unwrap();
+    let reply = finished(&mut rx, |_| {}).await;
+    engine.shutdown();
+    assert_eq!(reply.mode, None, "Codex has every mode");
+    for needle in [
+        "\"approvalsReviewer\":\"auto_review\"",
+        "\"approvalPolicy\":\"on-request\"",
+        "\"sandbox\":\"workspace-write\"",
+        "\"web_search\":\"cached\"",
+        "\"model_reasoning_summary\":\"concise\"",
+        "\"model_verbosity\":\"high\"",
+    ] {
+        assert_eq!(f.wire.lines_with(needle), 1, "{needle}");
+    }
+}
+
+#[tokio::test]
+async fn r140_changing_web_search_or_the_mode_starts_the_next_turn_on_a_fresh_process_and_a_stricter_mode_stops_a_running_turn() {
+    use faber_engine::model::WebSearch;
+    let data = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "chat"));
+    let (engine, _) = engine(data.path(), Vendor::Claude, f.spawn.clone());
+    let warm =
+        || engine.warm(WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: choice("claude", Some("haiku")) });
+    let denies_web = |at: usize| f.args.lock().unwrap()[at].iter().any(|a| a.contains("\"WebSearch\""));
+    warm();
+    assert!(!denies_web(0), "live by default");
+    engine.save_settings(Settings { web_search: Some(WebSearch::Off), ..Settings::default() }).unwrap();
+    warm();
+    assert!(denies_web(1), "the idle process was replaced by one that denies the web tools");
+    engine.save_settings(Settings { permissions: Some(Permissions::Plan), ..Settings::default() }).unwrap();
+    warm();
+    assert!(f.args.lock().unwrap()[2].windows(2).any(|a| a == ["--permission-mode", "plan"]));
+    assert_eq!(f.args.lock().unwrap().len(), 3);
+    engine.shutdown();
+    assert!(Permissions::Plan.strictness() > Permissions::Ask.strictness());
+    assert!(Permissions::Ask.strictness() > Permissions::AcceptEdits.strictness());
+    assert!(Permissions::AcceptEdits.strictness() > Permissions::Auto.strictness());
+    assert!(Permissions::Auto.strictness() > Permissions::FullAccess.strictness());
+}
+
+#[tokio::test]
+async fn r140_a_request_the_cli_forwards_still_reaches_the_person_in_every_guarded_mode() {
+    let text = "Search the web for the latest stable version of Node.js and, in parallel, for the latest version of Python. Run both searches at the same time, then answer in two lines.";
+    for permissions in [Permissions::AcceptEdits, Permissions::Plan, Permissions::Auto] {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, mut rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "parallel")).spawn);
+        engine.save_settings(Settings { permissions: Some(permissions), ..Settings::default() }).unwrap();
+        let id = engine.send(ask(Area::Chat, text, choice("claude", None))).unwrap();
+        let (mut cards, mut answered) = (0, Vec::new());
+        let reply = finished(&mut rx, |m| {
+            let waiting = m.permissions.clone().unwrap_or_default();
+            cards = cards.max(waiting.len());
+            if let Some(first) = waiting.first()
+                && !answered.contains(&first.request_id)
+            {
+                answered.push(first.request_id.clone());
+                answer(&engine, &id, m, &first.request_id, true, false);
+            }
+        })
+        .await;
+        engine.shutdown();
+        assert_eq!((cards, answered.len()), (2, 2), "{permissions:?}");
+        assert_eq!(reply.status, Some(Status::Done));
+    }
 }
