@@ -20,6 +20,7 @@ import {
 } from './api.ts';
 import { Segmented, Toggle } from './controls.tsx';
 import { resizeComposer } from './composer-size.ts';
+import { useDraft } from './unsent.ts';
 import { Ambient } from './Ambient.tsx';
 import { Hole } from './Hole.tsx';
 import { Ghost } from './Ghost.tsx';
@@ -77,6 +78,7 @@ export function Projects(props: Props) {
     else setMissionData('view', undefined);
   };
   const [goal, setGoal] = createSignal<string>('');
+  useDraft(() => goal().trim() !== '');
   const [presence, setPresence] = createSignal<PresenceChoice>('continueWithout');
   const [gitMode, setGitMode] = createSignal<GitMode>('seguro');
   const [selfUpdate, setSelfUpdate] = createSignal(false);

@@ -62,6 +62,8 @@ pub(crate) struct Faber {
     /// The person has typed, pasted or dropped something since Faber opened: a draft may exist only on the screen, so the
     /// install at open waits for an idle moment (`update.rs`).
     pub(crate) touched: std::sync::atomic::AtomicBool,
+    /// Some field on the screen holds something typed or attached and not sent: no unattended install closes the window then.
+    pub(crate) draft_dirty: std::sync::atomic::AtomicBool,
     pub(crate) data_dir: PathBuf,
     pub(crate) hidden: bool,
     /// Serialize journal snapshots and mutations, so an answer cannot overwrite a newer view.
@@ -760,6 +762,8 @@ async fn ensure_agents(app: &AppHandle, faber: &Faber) -> Res<()> {
     if qualify::ready().is_ok() {
         return Ok(());
     }
+    // The check runs real probes: an update install waits for it, and none begins once the install is decided.
+    let _running = update::SetupRunning::begin()?;
     let tell = |view: AgentsView| {
         let _ = app.emit("agents", &view);
     };
@@ -1065,6 +1069,12 @@ fn input_seen(faber: State<'_, Faber>) {
     faber.touched.store(true, std::sync::atomic::Ordering::SeqCst);
 }
 
+/// The screen says whether any field holds an unsent draft (text or attachments); read when an install is decided.
+#[tauri::command]
+fn draft_dirty(faber: State<'_, Faber>, dirty: bool) {
+    faber.draft_dirty.store(dirty, std::sync::atomic::Ordering::SeqCst);
+}
+
 /// The last "what's new" entry the person has seen (`ui/notes.ts`), in its own small file in the data folder. None means
 /// no entry was ever shown, which the screen reads as a first install or as an install from before the screen existed. A
 /// test build answers "all seen", so no scenario starts behind the screen.
@@ -1317,6 +1327,7 @@ fn main() {
             update_status,
             update_restart,
             input_seen,
+            draft_dirty,
             notes_seen,
             save_notes_seen,
             setup::setup_check,
@@ -1417,6 +1428,7 @@ fn main() {
                 update: Mutex::default(),
                 updating: std::sync::atomic::AtomicBool::new(false),
                 touched: std::sync::atomic::AtomicBool::new(false),
+                draft_dirty: std::sync::atomic::AtomicBool::new(false),
                 data_dir: data_dir.clone(),
                 hidden,
                 missions,

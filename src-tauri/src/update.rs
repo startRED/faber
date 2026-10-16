@@ -134,8 +134,13 @@ fn with_line(log: &str, line: &str) -> String {
 /// on the same version and must not try the same install again at once, one relaunch after another.
 const TRIED_FILE: &str = "update-tried";
 
-fn note_tried(data_dir: &Path, version: &str) {
-    let _ = std::fs::write(data_dir.join(TRIED_FILE), format!("{version} {}", now_secs()));
+/// Written and flushed to the disk: an install that cannot leave this marker behind is not started unattended, because a
+/// failing installer would then bring Faber back to try it again, one relaunch after another.
+fn note_tried(data_dir: &Path, version: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::File::create(data_dir.join(TRIED_FILE))?;
+    file.write_all(format!("{version} {}", now_secs()).as_bytes())?;
+    file.sync_all()
 }
 
 /// Whether `text` (the tried file) says `version` was tried less than `TRIED_FOR` seconds before `now`.
@@ -210,6 +215,42 @@ impl Drop for SetupRunning {
 /// An update install has been decided: the shell's missions and CLI installs start nothing from here on.
 pub(crate) fn installing() -> bool {
     gate().installing
+}
+
+/// Who asks for the install.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Who {
+    /// Faber just opened and the update was downloaded.
+    Start,
+    /// The idle install, once an update is kept.
+    Later,
+    /// "Update ready, restart": the person's own choice.
+    Owner,
+}
+
+/// The one admission of an install, all inside the gate's lock. `close` shuts the engine and the shell's work (None when
+/// something runs). Then, still under the lock and as late as possible, an unattended install reads whether the person has
+/// an unsent draft (`editing`, which the start also reads as any input since Faber opened) and whether its tried marker
+/// reached the disk (`mark`): in either case it gives way and the engine reopens. The person's own restart ignores both.
+fn admit<G>(
+    gate: &mut Gate,
+    who: Who,
+    close: impl FnOnce() -> Option<G>,
+    editing: impl FnOnce() -> bool,
+    mark: impl FnOnce() -> std::io::Result<()>,
+) -> Option<G> {
+    let mut closed = None;
+    gate.reserve(|| {
+        let Some(guard) = close() else { return true };
+        if who == Who::Owner {
+            let _ = mark();
+        } else if editing() || mark().is_err() {
+            return true;
+        }
+        closed = Some(guard);
+        false
+    });
+    closed
 }
 
 #[cfg(test)]
@@ -295,11 +336,10 @@ trait Release {
     async fn download(&self) -> Result<(), String>;
     /// The screen's calm line while a start download runs.
     fn downloading(&self, on: bool);
-    /// The person has typed, pasted or dropped something since Faber opened: a draft may exist only on the screen.
-    fn editing(&self) -> bool;
-    /// Decides the install, all at once: nothing is running (an answer, a mission, a CLI install), and from here on nothing
-    /// new may start. False when anything is.
-    fn reserve(&self) -> bool;
+    /// Decides the install, all at once (`admit`): nothing is running (an answer, a mission, a check of the agents, a CLI
+    /// install), no unsent draft is on the screen, the tried marker is on the disk, and from here on nothing new may start.
+    /// False when anything stops it.
+    fn reserve(&self, who: Who) -> bool;
     fn shut_down(&self);
     /// Starts the installer; only a failure comes back.
     fn install(&self) -> Result<(), String>;
@@ -348,7 +388,7 @@ async fn update_on_start(release: &impl Release, check_wait: Duration, download_
     if !matches!(downloaded, Ok(Ok(()))) {
         return Start::Unreachable;
     }
-    match idle_install(|| !release.editing(), || release.reserve(), || release.shut_down(), || release.install(), || release.relaunch()) {
+    match idle_install(|| true, || release.reserve(Who::Start), || release.shut_down(), || release.install(), || release.relaunch()) {
         Idle::Installed => Start::Installed,
         Idle::Waited if release.retarget().await => Start::Waits,
         Idle::Waited => {
@@ -412,23 +452,27 @@ impl Release for Live {
         announce(&self.app);
     }
 
-    fn editing(&self) -> bool {
-        self.app.state::<Faber>().touched.load(Ordering::SeqCst)
-    }
-
-    fn reserve(&self) -> bool {
+    fn reserve(&self, who: Who) -> bool {
         let faber = self.app.state::<Faber>();
-        gate().reserve(|| {
-            // The engine's own admission closes first (it refuses when an answer or a mission worker runs, and refuses every
-            // new one after), then the shell's work is read: a mission being driven, the check of the agents. A mission that
-            // starts after this finds the engine closed and pauses cleanly.
-            let Ok(closed) = faber.engine.local_build_admission() else { return true };
-            if !lock(&faber.driving).is_empty() || faber.qualifying.try_lock().is_err() {
-                return true;
-            }
-            *lock(&self.closed) = Some(Box::new(closed));
-            false
-        })
+        let guard = admit(
+            &mut gate(),
+            who,
+            || {
+                // The engine's own admission closes first (it refuses when an answer or a mission worker runs, and refuses
+                // every new one after), then the shell's work is read: a mission being driven. A check of the agents is a
+                // `SetupRunning` and is read by the gate itself. A mission that starts after this finds the engine closed.
+                let closed = faber.engine.local_build_admission().ok()?;
+                lock(&faber.driving).is_empty().then_some(closed)
+            },
+            || faber.draft_dirty.load(Ordering::SeqCst) || (who == Who::Start && faber.touched.load(Ordering::SeqCst)),
+            || match lock(&faber.update).as_ref() {
+                Some((update, _)) => note_tried(&faber.data_dir, &update.version),
+                None => Err(std::io::Error::other("no update is ready")),
+            },
+        );
+        let Some(guard) = guard else { return false };
+        *lock(&self.closed) = Some(Box::new(guard));
+        true
     }
 
     fn shut_down(&self) {
@@ -438,8 +482,7 @@ impl Release for Live {
 
     fn install(&self) -> Result<(), String> {
         let (update, bytes) = lock(&self.app.state::<Faber>().update).take().ok_or("no update is ready")?;
-        // Written before the installer starts: whatever happens next, this version is not tried again at once.
-        note_tried(&self.app.state::<Faber>().data_dir, &update.version);
+        // The tried marker was written when the install was decided (`reserve`), before anything was closed.
         // Only a failure comes back: the process is gone otherwise. The update is dropped; the next check fetches it again.
         update.install(bytes).map_err(|e| e.to_string()).inspect_err(|e| self.note("install-failed", e))
     }
@@ -549,7 +592,7 @@ fn install_when_idle(app: &AppHandle, install_dir: &OsString) {
     let live = Live::new(app, install_dir, Reopen::Tray);
     let version = || lock(&faber.update).as_ref().map(|(update, _)| update.version.clone());
     let idle = || version().is_some_and(|v| may_install(true, false, window_visible(app)) && !live.tried(&v));
-    idle_install(idle, || live.reserve(), || live.shut_down(), || live.install(), || live.relaunch());
+    idle_install(idle, || live.reserve(Who::Later), || live.shut_down(), || live.install(), || live.relaunch());
 }
 
 /// "Update ready, restart": installs the kept update now, with the window as it is. Refused while an answer runs.
@@ -565,7 +608,7 @@ pub(crate) async fn restart_now(app: AppHandle) -> Result<(), String> {
         swap_args(&app, &dir, Reopen::Window).await;
     }
     // The person chose this, so a version tried a day ago does not stop it.
-    match idle_install(|| true, || live.reserve(), || live.shut_down(), || live.install(), || live.relaunch()) {
+    match idle_install(|| true, || live.reserve(Who::Owner), || live.shut_down(), || live.install(), || live.relaunch()) {
         Idle::Installed => Ok(()),
         Idle::Waited => Err("error.update.busy".into()),
         Idle::Failed => Err("error.update.failed".into()),
@@ -601,7 +644,10 @@ pub(crate) fn keep_updated(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::{CHECK_EVERY, RETRY_AFTER, TRIED_FOR, clean, next_check_delay, plain, tried_recently, update_on_start, with_line};
-    use super::{Gate, Idle, LOG_MAX, Release, Reopen, SetupRunning, Start, fetch, fetch_succeeded, idle_install, installer_args};
+    use super::{
+        Gate, Idle, LOG_MAX, Release, Reopen, SetupRunning, Start, Who, admit, fetch, fetch_succeeded, idle_install, installer_args,
+        note_tried,
+    };
     use super::{is_dos_path, may_install, setups_running};
     use std::cell::{Cell, RefCell};
     use std::ffi::OsString;
@@ -652,6 +698,75 @@ mod tests {
         assert!(!gate.begin_setup(), "no CLI install may begin once the install is decided");
         assert!(!gate.reserve(|| false), "and it is decided only once");
         assert_eq!(gate.setups, 0);
+    }
+
+    /// `admit` with the given answers; the guard is a plain string so a dropped one shows in `dropped`.
+    fn admission(gate: &mut Gate, who: Who, closes: bool, editing: bool, marks: bool, seen: &RefCell<Vec<&'static str>>) -> bool {
+        admit(
+            gate,
+            who,
+            || {
+                seen.borrow_mut().push("close");
+                closes.then_some("closed")
+            },
+            || {
+                seen.borrow_mut().push("read draft");
+                editing
+            },
+            || {
+                seen.borrow_mut().push("mark");
+                if marks { Ok(()) } else { Err(std::io::Error::other("disk")) }
+            },
+        )
+        .is_some()
+    }
+
+    #[test]
+    fn an_unattended_install_gives_way_to_an_unsent_draft_and_the_owner_does_not() {
+        for who in [Who::Start, Who::Later] {
+            let (mut gate, seen) = (Gate::default(), RefCell::new(vec![]));
+            assert!(!admission(&mut gate, who, true, true, true, &seen), "{who:?}");
+            assert!(!gate.installing, "a refused install decides nothing, so the window and the draft stay");
+            assert!(admission(&mut gate, who, true, false, true, &seen), "{who:?}: an empty draft does not stop it");
+        }
+        let (mut gate, seen) = (Gate::default(), RefCell::new(vec![]));
+        assert!(admission(&mut gate, Who::Owner, true, true, true, &seen), "\"Update ready, restart\" is the person's own choice");
+    }
+
+    #[test]
+    fn the_draft_is_read_inside_the_decision_after_the_engine_closed() {
+        let (mut gate, seen) = (Gate::default(), RefCell::new(vec![]));
+        assert!(admission(&mut gate, Who::Later, true, false, true, &seen));
+        assert_eq!(*seen.borrow(), ["close", "read draft", "mark"], "no input can slip in between the read and the decision");
+        let (mut busy, seen) = (Gate::default(), RefCell::new(vec![]));
+        assert!(!admission(&mut busy, Who::Later, false, false, true, &seen));
+        assert_eq!(*seen.borrow(), ["close"], "work that runs stops it before the draft or the marker are touched");
+    }
+
+    #[test]
+    fn a_marker_that_cannot_be_written_stops_every_unattended_install_before_anything_closes() {
+        for who in [Who::Start, Who::Later] {
+            let (mut gate, seen) = (Gate::default(), RefCell::new(vec![]));
+            assert!(!admission(&mut gate, who, true, false, false, &seen), "{who:?}");
+            assert!(!gate.installing, "nothing is decided, so nothing is shut down and no restart loop can begin");
+        }
+        let (mut gate, seen) = (Gate::default(), RefCell::new(vec![]));
+        assert!(admission(&mut gate, Who::Owner, true, false, false, &seen), "the person's own restart cannot loop by itself");
+        let missing = std::env::temp_dir().join("faber-no-such-folder-for-the-marker").join("deeper");
+        assert!(note_tried(&missing, "1.2.3").is_err(), "a folder that cannot be written is an error, not silence");
+        let here = std::env::temp_dir();
+        assert!(note_tried(&here, "1.2.3").is_ok());
+        let _ = std::fs::remove_file(here.join(super::TRIED_FILE));
+    }
+
+    #[test]
+    fn a_check_of_the_agents_holds_the_admission_to_its_end_and_nothing_qualifies_after_the_decision() {
+        let (mut gate, seen) = (Gate::default(), RefCell::new(vec![]));
+        assert!(gate.begin_setup(), "the check of the agents begins");
+        assert!(!admission(&mut gate, Who::Owner, true, false, true, &seen), "even the owner's restart waits for it");
+        gate.setups -= 1;
+        assert!(admission(&mut gate, Who::Later, true, false, true, &seen));
+        assert!(!gate.begin_setup(), "a mission that asks for a check after the decision is refused");
     }
 
     /// The install in order, with `reserve` answering as given.
@@ -774,12 +889,9 @@ mod tests {
         fn downloading(&self, on: bool) {
             self.seen.borrow_mut().push(if on { "line on" } else { "line off" });
         }
-        fn editing(&self) -> bool {
-            self.editing.get()
-        }
-        fn reserve(&self) -> bool {
+        fn reserve(&self, _: Who) -> bool {
             self.seen.borrow_mut().push("reserve");
-            !self.busy.get()
+            !self.busy.get() && !self.editing.get()
         }
         fn shut_down(&self) {
             self.seen.borrow_mut().push("shut down");
@@ -849,7 +961,11 @@ mod tests {
     async fn typing_during_the_download_keeps_the_draft_and_defers_the_install() {
         let release = Fake { typing_during_download: true, ..Fake::found() };
         assert_eq!(start(&release).await, Start::Waits);
-        assert_eq!(release.saw(), ["check", "line on", "download", "line off", "retarget"], "not even the decision is made");
+        assert_eq!(
+            release.saw(),
+            ["check", "line on", "download", "line off", "reserve", "retarget"],
+            "the decision reads the draft inside the lock and gives way"
+        );
     }
 
     #[tokio::test]

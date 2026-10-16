@@ -505,6 +505,8 @@ export const api = {
   updateStatus: () => invoke<UpdateStatus>('update_status'),
   updateRestart: () => invoke<void>('update_restart'),
   inputSeen: () => invoke<void>('input_seen'),
+  /** Whether any field holds something typed or attached and not sent: no unattended update closes the window then. */
+  draftDirty: (dirty: boolean) => invoke<void>('draft_dirty', { dirty }),
   onUpdate: (listener: (status: UpdateStatus) => void) => listen<UpdateStatus>('faber:update', (e) => listener(e.payload)),
   notesSeen: () => invoke<number | null>('notes_seen').then((id) => id ?? undefined),
   saveNotesSeen: (id: number) => invoke<void>('save_notes_seen', { id }),

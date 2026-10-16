@@ -5,6 +5,7 @@ import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 import type { Option } from './models.ts';
 import { resizeComposer } from './composer-size.ts';
+import { useDraft } from './unsent.ts';
 
 export interface Draft {
   text: string;
@@ -101,6 +102,7 @@ export function Composer(props: Props) {
   const selected = () => Math.max(0, props.options.findIndex((o) => o.choice.vendor === props.choice.vendor && o.choice.model === props.choice.model));
   const hasContent = () => draft().text.trim() !== '' || draft().images.length > 0 || draft().files.length > 0;
   const canSend = () => !props.locked && hasContent() && props.vendors.length > 0;
+  useDraft(hasContent);
 
   // The first keystroke starts the CLI, not focus: the box is focused as soon as Faber opens, and an unused Claude
   // process costs about 120 MB.
