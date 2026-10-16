@@ -1,31 +1,42 @@
-// Whether a change set is only words, so CI can skip the build and the suites (R163). The rule is testkit's
-// (`suites_for` in testkit/src/plan.rs): a file under docs/ or ending in .md needs no suite, except the documents a test
-// reads. Keep the two lists the same.
+// Which suites a change set needs, so CI starts only those jobs (R163). The rules are testkit's own
+// (testkit/suites.json, which `cargo t` reads too), so CI and a local run always pick the same suites.
 //
-//   git diff --name-only A...B | node scripts/ci-scope.mjs    exits 0 when every file is only words, 3 when any is not
+//   git diff --name-only A...B | node scripts/ci-scope.mjs
 //
-// An empty list is not "only words": nothing to compare means nothing proves the commit, so everything runs.
+// prints one line per decision for $GITHUB_OUTPUT: `lints=`, `rust=`, `ui=`, `screen=`, each `true` or `false`. The lints
+// run for any file that is not only words. An empty list proves nothing, so everything runs.
 
-/** Documents a test reads: engine/tests/product_map.rs fails when the map and the code disagree. */
-export const READ_BY_TESTS = ['docs/product-map.md'];
+import { readFileSync } from 'node:fs';
 
-export const isWords = (file) => (file.startsWith('docs/') || file.endsWith('.md')) && !READ_BY_TESTS.includes(file);
+const { rules } = JSON.parse(readFileSync(new URL('../testkit/suites.json', import.meta.url), 'utf8'));
 
-/** The first file that is not only words, or null when every one is. An empty list answers with an empty string. */
-export function firstCode(files) {
-  if (files.length === 0) return '';
-  return files.find((file) => !isWords(file)) ?? null;
+export const SUITES = ['rust', 'ui', 'screen'];
+
+/** The suites one path needs: the first rule that matches wins, and a path no rule matches needs every suite. */
+export function suitesFor(file) {
+  const path = file.replace(/^\.\//, '');
+  const rule = rules.find(
+    (r) =>
+      (r.files ?? []).includes(path) ||
+      (r.prefixes ?? []).some((p) => path.startsWith(p)) ||
+      (r.suffixes ?? []).some((s) => path.endsWith(s)),
+  );
+  return rule ? rule.suites : SUITES;
+}
+
+/** Words need no suite and no lint: a document a test reads is code here, since its rule names a suite. */
+export const isWords = (file) => suitesFor(file).length === 0;
+
+/** Every decision for a change set. */
+export function scope(files) {
+  if (files.length === 0) return { lints: true, rust: true, ui: true, screen: true };
+  const needed = new Set(files.flatMap(suitesFor));
+  return { lints: !files.every(isWords), ...Object.fromEntries(SUITES.map((s) => [s, needed.has(s)])) };
 }
 
 if (process.argv[1]?.endsWith('ci-scope.mjs')) {
   const chunks = [];
   for await (const chunk of process.stdin) chunks.push(chunk);
   const files = Buffer.concat(chunks).toString('utf8').split('\n').map((line) => line.trim()).filter(Boolean);
-  const code = firstCode(files);
-  if (code === null) {
-    process.stdout.write(`Only words changed (${files.length} files).\n`);
-  } else {
-    process.stdout.write(code ? `${code} is not only words.\n` : 'No file changed.\n');
-    process.exit(3);
-  }
+  for (const [name, needed] of Object.entries(scope(files))) process.stdout.write(`${name}=${needed}\n`);
 }

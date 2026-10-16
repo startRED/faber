@@ -731,14 +731,18 @@ Every launch is sandboxed: a temporary home, an empty `PATH`, no provider variab
 CLI replays the recordings in `tests/fixtures/`). Each scenario is audited afterwards for leaked processes, writes outside
 the sandbox and a changed environment. The checks and the hooks that report them exist only in the test build
 (`--features test-hooks`, `vite build --mode test`); the production app and its `dist/` contain none of them. CI runs
-ten jobs at once: on Windows and on macOS, the lints with the `ui` suite and the `rust` suite on its own, and the
-`screen` suite on Windows in six parts (`cargo t --suite screen --shard 2/6`). On CI the runner uses every core; on a person's PC it keeps to half. Each kind of job keeps its own Rust cache,
-since each builds different things. The runner deals the scenarios so the parts take about the same time: the slowest
-first, each to the lightest part so far, using the CI seconds of every scenario that takes 8 s or more
+only the jobs a change needs (R163). A first job reads the changed files and picks the suites by the same rules as
+`cargo t` (`testkit/suites.json`, read by `testkit/src/plan.rs` and `scripts/ci-scope.mjs`): words only (`docs/` or a
+`.md` file) need none, `docs/product-map.md` needs the `rust` suite because a test reads it, and any file that is not
+words runs the lints. A push may skip a suite only when the commit before it is green, and anything the job cannot tell
+runs everything. The lints and the `rust` suite run on Windows and on macOS (macOS adds the `ui` suite to its lints).
+One Windows job builds the test app once (`cargo t --build-only`), runs the `ui` suite on it (`--prebuilt`) and hands
+its programs (`built_programs` in `testkit/src/testbuild.rs`) to the `screen` suite in eight parts, which build nothing
+(`--suite screen --shard 2/8 --prebuilt`). On CI the runner uses every core; on a person's PC it keeps to half. Each kind
+of job keeps its own Rust cache. The runner deals the scenarios so the parts take about the same time: the slowest first,
+each to the lightest part so far, using the CI seconds of every scenario that takes 8 s or more
 (`testkit/src/screen/mod.rs`, `SLOW`); any other counts as 5 s. A slow scenario left out of `SLOW` makes its part late (on
-2026-10-16 one part took 17 minutes against 8 for the others), and a renamed one fails a test. A push that changes only
-words (`docs/` or a `.md` file, except `docs/product-map.md`, which a test reads; `scripts/ci-scope.mjs`) skips the
-jobs and is green in seconds, but only when the commit before it is green (R163). CI keeps the Windows screenshots as artifacts. Anything outside the page (tray,
+2026-10-16 one part took 17 minutes against 8 for the others), and a renamed one fails a test. CI keeps the Windows screenshots as artifacts. Anything outside the page (tray,
 notifications, installer, updates) is checked through the operating system's accessibility layer and file versions.
 
 Test launches also pass the browser engine switches that turn off crash reports and SmartScreen address lookups, and the

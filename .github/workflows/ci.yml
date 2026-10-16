@@ -12,20 +12,28 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # A change of words only (docs/ or a .md file, scripts/ci-scope.mjs) needs no build: `cargo t` runs no suite for it either.
-  # Such a push is green in seconds, but only when the commit before it is green already, so main never reaches unproven code
-  # through a docs commit (R127, R163). Anything this job cannot tell for sure runs every check.
+  # Which jobs this change needs, by testkit's own rules (testkit/suites.json, scripts/ci-scope.mjs, R163): the same
+  # suites `cargo t` picks locally. Words only (docs/ or a .md file) need none. A push may skip a suite only when the
+  # commit before it is green, so main never reaches unproven code (R127). Anything this job cannot tell runs everything.
   changes:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       actions: read
     outputs:
-      full: ${{ steps.decide.outputs.full }}
+      lints: ${{ steps.decide.outputs.lints }}
+      rust: ${{ steps.decide.outputs.rust }}
+      ui: ${{ steps.decide.outputs.ui }}
+      screen: ${{ steps.decide.outputs.screen }}
+      app: ${{ steps.decide.outputs.app }}
+      check: ${{ steps.decide.outputs.check }}
+      matrix: ${{ steps.decide.outputs.matrix }}
     steps:
       - uses: actions/checkout@v5
         with:
-          sparse-checkout: scripts/ci-scope.mjs
+          sparse-checkout: |
+            scripts/ci-scope.mjs
+            testkit/suites.json
           sparse-checkout-cone-mode: false
       - id: decide
         env:
@@ -36,41 +44,53 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          full() { echo "full=true" >> "$GITHUB_OUTPUT"; echo "Every check runs: $1"; exit 0; }
-          [[ "$BEFORE" =~ ^[0-9a-f]{40}$ && "$BEFORE" =~ [1-9a-f] ]] || full "there is no commit before this one"
-          # Three dots: what HEAD changed since it left BEFORE. The API lists at most 300 files; more runs everything.
-          compare=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BEFORE...$HEAD") || full "the change set could not be read"
-          [ "$EVENT" = pull_request ] || [ "$(jq -r .status <<<"$compare")" = ahead ] || full "the push rewrote history"
-          [ "$(jq '.files | length' <<<"$compare")" -lt 300 ] || full "300 files or more changed"
-          jq -r '.files[].filename' <<<"$compare" | node scripts/ci-scope.mjs || full "not only words"
-          if [ "$EVENT" = push ]; then
-            green=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$BEFORE&event=push&status=success" --jq .total_count) || full "the checks of $BEFORE could not be read"
-            [ "$green" -gt 0 ] || full "the commit before, $BEFORE, is not green (yet)"
+          scope=""
+          decide() {
+            [[ "$BEFORE" =~ ^[0-9a-f]{40}$ && "$BEFORE" =~ [1-9a-f] ]] || { echo "Everything runs: there is no commit before this one"; return; }
+            # Three dots: what HEAD changed since it left BEFORE. The API lists at most 300 files; more runs everything.
+            compare=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BEFORE...$HEAD") || { echo "Everything runs: the change set could not be read"; return; }
+            [ "$EVENT" = pull_request ] || [ "$(jq -r .status <<<"$compare")" = ahead ] || { echo "Everything runs: the push rewrote history"; return; }
+            [ "$(jq '.files | length' <<<"$compare")" -lt 300 ] || { echo "Everything runs: 300 files or more changed"; return; }
+            local found
+            found=$(jq -r '.files[].filename' <<<"$compare" | node scripts/ci-scope.mjs) || { echo "Everything runs: the scope could not be read"; return; }
+            if [ "$EVENT" = push ] && grep -q '=false' <<<"$found"; then
+              green=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$BEFORE&event=push&status=success" --jq .total_count) || { echo "Everything runs: the checks of $BEFORE could not be read"; return; }
+              [ "$green" -gt 0 ] || { echo "Everything runs: the commit before, $BEFORE, is not green (yet)"; return; }
+            fi
+            scope=$found
+          }
+          decide
+          [ -n "$scope" ] || scope=$(printf 'lints=true\nrust=true\nui=true\nscreen=true')
+          echo "$scope"
+          get() { if grep -q "^$1=true$" <<<"$scope"; then echo true; else echo false; fi; }
+          lints=$(get lints); rust=$(get rust); ui=$(get ui); screen=$(get screen)
+          entries=()
+          if [ "$lints" = true ]; then
+            entries+=('{"os":"windows-latest","part":"lints"}')
+            # macOS has no screen suite; its job runs the ui suite next to the lints, so the test app is built there too.
+            if [ "$ui" = true ]; then entries+=('{"os":"macos-latest","part":"lints ui"}'); else entries+=('{"os":"macos-latest","part":"lints"}'); fi
           fi
-          echo "full=false" >> "$GITHUB_OUTPUT"
-          echo "The build and the suites are skipped."
+          if [ "$rust" = true ]; then
+            entries+=('{"os":"windows-latest","part":"rust"}' '{"os":"macos-latest","part":"rust"}')
+          fi
+          app=false
+          if [ "$ui" = true ] || [ "$screen" = true ]; then app=true; fi
+          check=false
+          if [ ${#entries[@]} -gt 0 ]; then check=true; fi
+          matrix=$(IFS=,; echo "{\"include\":[${entries[*]}]}")
+          {
+            echo "lints=$lints"; echo "rust=$rust"; echo "ui=$ui"; echo "screen=$screen"
+            echo "app=$app"; echo "check=$check"; echo "matrix=$matrix"
+          } >> "$GITHUB_OUTPUT"
 
-  # The jobs run at once and each takes about the same time, so the slowest sets the wait (R129). The screen suite is
-  # dealt into six parts by CI seconds (testkit/src/screen/mod.rs, `SLOW`); the other suites are split by what they
-  # build, so no job builds everything.
+  # The lints and the Rust suite, each its own job, on Windows and macOS (R129, R163).
   check:
     needs: changes
-    if: needs.changes.outputs.full == 'true'
-    name: check (${{ matrix.os }}, ${{ matrix.part }}${{ matrix.shard && format(' {0}', matrix.shard) || '' }})
+    if: needs.changes.outputs.check == 'true'
+    name: check (${{ matrix.os }}, ${{ matrix.part }})
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - { os: windows-latest, part: lints ui }
-          - { os: windows-latest, part: rust }
-          - { os: macos-latest, part: lints ui }
-          - { os: macos-latest, part: rust }
-          - { os: windows-latest, part: screen, shard: 1/6 }
-          - { os: windows-latest, part: screen, shard: 2/6 }
-          - { os: windows-latest, part: screen, shard: 3/6 }
-          - { os: windows-latest, part: screen, shard: 4/6 }
-          - { os: windows-latest, part: screen, shard: 5/6 }
-          - { os: windows-latest, part: screen, shard: 6/6 }
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -81,9 +101,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
-      # One cache per part: the parts build different things (Clippy's metadata and the test app, the test programs, the
-      # test app alone). With one shared key the first job to finish saved its own build and every other part rebuilt its
-      # dependencies on each run.
+      # One cache per kind of job: each builds different things (Clippy's metadata, the test programs, the test app).
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.part == 'lints ui' && 'lints-ui' || matrix.part }}
@@ -99,21 +117,90 @@ jobs:
           cargo fmt --all --check
           cargo clippy --workspace --all-targets -- -D warnings
           cargo clippy -p faber --features test-hooks -- -D warnings
-      # `rust` and `ui` run on every system; `screen` needs WebView2's DevTools port, so only Windows runs it.
       # Building apart from running shows on the job page how much of the Rust suite is the compiler (R163).
-      - if: contains(matrix.part, 'rust')
+      - if: matrix.part == 'rust'
         run: cargo test --workspace --no-run
-      - if: contains(matrix.part, 'rust')
+      - if: matrix.part == 'rust'
         run: cargo t --suite rust
       - if: contains(matrix.part, 'ui')
         run: cargo t --suite ui
-      - if: matrix.part == 'screen'
-        run: cargo t --suite screen --shard ${{ matrix.shard }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: screenshots-${{ runner.os }}-${{ strategy.job-index }}
+          name: log-${{ runner.os }}-${{ strategy.job-index }}
           # The screen shows only failures; run.log has every line of the last `cargo t` (R154).
+          path: |
+            target/faber-test/shots/
+            target/faber-test/run.log
+          if-no-files-found: ignore
+
+  # The Windows test app is built once, runs the ui suite, and hands its programs to the screen parts (R163).
+  app:
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: app
+      - run: npm ci
+      - run: npm run build
+      - run: cargo t --build-only
+      - if: needs.changes.outputs.ui == 'true'
+        run: ./target/debug/faber-test.exe --suite ui --prebuilt
+      # Exactly the programs `--prebuilt` checks for (testkit/src/testbuild.rs, `built_programs`).
+      - uses: actions/upload-artifact@v4
+        with:
+          name: test-app
+          retention-days: 1
+          path: |
+            target/debug/faber-test.exe
+            target/debug/fake-cli.exe
+            target/debug/examples/cache_probe.exe
+            target/faber-test/debug/faber.exe
+            target/faber-test/debug/faber-local.exe
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: log-app
+          path: |
+            target/faber-test/shots/
+            target/faber-test/run.log
+          if-no-files-found: ignore
+
+  # The screen suite in eight parts dealt by CI seconds (testkit/src/screen/mod.rs, `SLOW`). A part builds nothing: it
+  # runs the programs of the app job. Cargo and Node stay installed because some scenarios run a project's own checks.
+  screen:
+    needs: [changes, app]
+    if: needs.changes.outputs.screen == 'true'
+    name: screen (${{ matrix.shard }})
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1/8, 2/8, 3/8, 4/8, 5/8, 6/8, 7/8, 8/8]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/download-artifact@v4
+        with:
+          name: test-app
+          path: target
+      - run: ./target/debug/faber-test.exe --suite screen --shard ${{ matrix.shard }} --prebuilt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: log-screen-${{ strategy.job-index }}
           path: |
             target/faber-test/shots/
             target/faber-test/run.log
@@ -121,13 +208,15 @@ jobs:
 
   # main follows every green phase-1-base commit on its own (R127), so nobody has to remember to move it.
   # Fast-forward only: a commit that is already in main, or a main that moved on its own, stops here without failing.
-  # A run of words only skips `check` on purpose, which counts as green; a failed or cancelled `check` never does.
+  # A job the plan left out is skipped on purpose and counts as green; a failed, cancelled or wrongly skipped one never does.
   main:
-    needs: [changes, check]
+    needs: [changes, check, app, screen]
     if: >-
       always() && github.event_name == 'push' && github.ref == 'refs/heads/phase-1-base' &&
       needs.changes.result == 'success' &&
-      (needs.check.result == 'success' || (needs.check.result == 'skipped' && needs.changes.outputs.full == 'false'))
+      (needs.check.result == 'success' || (needs.check.result == 'skipped' && needs.changes.outputs.check == 'false')) &&
+      (needs.app.result == 'success' || (needs.app.result == 'skipped' && needs.changes.outputs.app == 'false')) &&
+      (needs.screen.result == 'success' || (needs.screen.result == 'skipped' && needs.changes.outputs.screen == 'false'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
