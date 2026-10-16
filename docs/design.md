@@ -308,8 +308,12 @@ projects. Faber has no worktree creation for projects, so an environment has no 
   same settings save that changes the mode; each grant carries the token that was current when it was made (`allowAlwaysEpochs`),
   and it stands only while the settings hold that same token, on every check and after every restart. No clock is involved. A
   grant with no token (an older install) stands only while the settings have never held one. The conversation files are also
-  cleaned, but only as tidiness: a write that failed cannot bring a grant back. Settings that cannot be read start a new token,
-  and the next save keeps it, so the damaged file never lets an old grant back in. A stricter web setting stops a running turn but
+  cleaned, but only as tidiness: a write that failed cannot bring a grant back. Settings that cannot be read start a new token
+  that is kept in memory and is the one in force until a save writes it, so a read that works again never brings the old token
+  back. A card remembers the token it was made under: an "Always allow" on it is kept only if the token is still the same when the
+  answer settles, and otherwise lets that one request through and remembers nothing. Two Faber processes on one data folder are
+  not supported (single-instance protection prevents it; `FABER_DATA_DIR` is a dev and test hook), so no cross-process
+  serialization of this is built. A stricter web setting stops a running turn but
   does not change command grants.
   No mode promises zero execution: Ask lets plain reads through, Plan lets read-only commands through, and Accept edits lets
   Codex run commands inside the working folder. Leaving Claude's plan mode names `default` for the session. Settings that cannot

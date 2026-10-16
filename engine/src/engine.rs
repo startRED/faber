@@ -1396,16 +1396,17 @@ impl Core {
                     return;
                 }
                 if self.live.get(conv).is_some_and(|l| l.permissions == Permissions::FullAccess) {
-                    return self.auto_answer(conv, vec![Permission { request_id, tool, input }]);
+                    return self.auto_answer(conv, vec![Permission { request_id, tool, input, epoch: None }]);
                 }
                 // Plan never takes a remembered grant: nothing may change under it without a card.
                 let plan = self.live.get(conv).is_some_and(|l| l.permissions == Permissions::Plan);
                 let allowed = !plan && self.grant_stands(conv, &tool);
                 if allowed {
-                    return self.auto_answer(conv, vec![Permission { request_id, tool, input }]);
+                    return self.auto_answer(conv, vec![Permission { request_id, tool, input, epoch: None }]);
                 }
+                let epoch = self.store.settings().grants_epoch;
                 if let Some(m) = self.turn(conv) {
-                    m.permissions.get_or_insert_default().push(Permission { request_id, tool, input });
+                    m.permissions.get_or_insert_default().push(Permission { request_id, tool, input, epoch });
                 }
                 return self.push(conv, turn_id.as_deref(), true);
             }

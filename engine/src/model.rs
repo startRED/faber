@@ -120,6 +120,10 @@ pub struct Permission {
     pub request_id: String,
     pub tool: String,
     pub input: Value,
+    /// The grants epoch current when the card was made. An "Always allow" on it is remembered only if the epoch is still
+    /// that one when the answer settles. Never shown or saved.
+    #[serde(skip)]
+    pub epoch: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
