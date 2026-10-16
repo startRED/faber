@@ -109,7 +109,8 @@ async function mounted(close: (host: HTMLElement) => void) {
   document.body.append(host);
   const [open, setOpen] = createSignal(true);
   const dispose = render(
-    () => (open() ? createComponent(WhatsNew, { version: '9.9.9', notes: LIST, onClose: () => setOpen(false) }) : undefined),
+    // `render` runs its callback once, so the condition goes in the returned accessor, as `<Show>` does in the app.
+    () => () => (open() ? createComponent(WhatsNew, { version: '9.9.9', notes: LIST, onClose: () => setOpen(false) }) : undefined),
     host,
   );
   try {
