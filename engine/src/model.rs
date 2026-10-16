@@ -535,6 +535,10 @@ pub struct Settings {
     /// held one. Only the engine sets it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grants_epoch: Option<String>,
+    /// Receive previews: update checks read the preview channel (the newest build) instead of the weekly stable one (off by
+    /// default). Turning it off never installs an older version (`src-tauri/src/update.rs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previews: Option<bool>,
 }
 
 /// A fresh grants epoch: 244 random bits as hex.

@@ -290,8 +290,9 @@ projects. Faber has no worktree creation for projects, so an environment has no 
   accounts, Usage limits and Privacy. Ctrl comma opens it on General, the quota of a vendor in the sidebar opens it on
   Usage limits, and Esc or Back closes it.
 - General has, in order, the language, name, CLI hooks switch, Permissions choice, Chat working folder (with the recent
-  folders), Notifications (Notify me, Play a sound) and, on Windows, System (keep the computer awake while Faber works,
-  start Faber at sign-in). "Don't ask" is the default for new and
+  folders), Notifications (Notify me, Play a sound), Updates (one switch, "Receive previews", off by default, with one
+  short line; it acts at the next update check and turning it off never installs an older version) and, on Windows,
+  System (keep the computer awake while Faber works, start Faber at sign-in). "Don't ask" is the default for new and
   existing settings; "Ask before commands" preserves the previous behavior. Choices save at once and stay at the saved
   value if the save fails. R107 applies the same default to Chat. Chat uses its chosen canonical folder
   (fixed before the first message), or private per-conversation scratch; deletion/draft cleanup never removes a chosen

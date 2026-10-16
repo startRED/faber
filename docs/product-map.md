@@ -40,6 +40,7 @@ that changes them updates this page too. Last full audit: 2026-10-16.
 | Local build | Faber building and promoting itself from landed missions (slots A and B, a canary, a last good build). Only when started as the development channel. | `ui/LocalBuild.tsx`, `src-tauri/src/local_update.rs`, `engine/src/project/update.rs` |
 | Right-click menu | Faber's own short menu; the browser's menu never shows. | `ui/ContextMenu.tsx`, `ui/contextmenu.ts` |
 | Work log | The folded activity under an answer: steps, commands, thinking. | `ui/worklog.ts` |
+| Preview, stable | The two update channels (R156): stable is the weekly release everyone gets; a preview is the newest build, a few days early, for people who turn on "Receive previews" in Settings. | `src-tauri/src/update.rs`, `scripts/channel.mjs`, `.github/workflows/` |
 | Cache warm | Under the latest answer: until when the vendor's prompt cache keeps the next message cheaper. | `ui/Thread.tsx`, `ui/running.ts` |
 
 ## Screens and surfaces
@@ -115,7 +116,8 @@ Six sections, in this order. Nothing else is a Settings section.
 - **General**: Language (follow the system, or one of five); Your name; Your CLI hooks (only acts in the guarded modes, not "Full access");
   Permissions for Chat and Projects (five modes, "Full access" by default), Web search; reasoning summary and answer length (Codex only); Chat working folder (with Recents;
   acts on the open chat while it has no message; its controls only appear when Settings was opened from Chat); Notifications
-  (Notify me, Play a sound); System, Windows only (keep the computer awake while Faber works, start with Windows).
+  (Notify me, Play a sound); Updates (Receive previews, off by default, R156); System, Windows only (keep the computer awake
+  while Faber works, start with Windows).
 - **Projects**: per project, closed until opened: checks (confirm, edit, view), "If a tool is missing" (continue without),
   git mode, self-update trust (switch); folder, base and author under More. Applies to that project only.
 - **Appearance**: a draft with a live preview, applied only by "Use this look": six looks, accent (five swatches, any
@@ -154,6 +156,7 @@ choice a person makes anywhere else (a work screen, a banner) is an incoherence.
 | `userHooks` | true, false (false) | Settings > General | The engine; acts only in the guarded modes (not "Full access") |
 | `notifications` | true, false (true) | Settings > General | The tray |
 | `notificationSound` | true, false (true) | Settings > General | The tray |
+| `previews` | true, false (false) | Settings > General (Updates, "Receive previews") | `src-tauri/src/update.rs`, at every update check: on reads the preview manifest, off the stable one; a version that is not newer is never installed |
 | `keepAwake` | true, false (true) | Settings > General (System) | `src-tauri/src/awake.rs` |
 | `autostart` | true, false (false) | Settings > General (System) | `src-tauri/src/autostart.rs`, which also writes the Windows Run key |
 | `setup` | `done`, `skipped` (none: the first run is due) | The first run (the account cards' Close also writes it) | `ui/setup.ts` only |
@@ -226,7 +229,7 @@ checks in `tests/ui/index.ts`, real-app scenarios in `testkit/src/screen/mod.rs`
 | Permissions, cards, held-back requests | Done (five modes, R140) | `testkit/src/screen/permissions.rs`; `engine/tests/project_security.rs`; `tests/ui/thread.check.ts` |
 | Running column, tray, notifications | Done | `tests/ui/running.check.ts`; tests inside `src-tauri/src/tray/decide.rs` |
 | Keep awake, start with Windows | Done on Windows | tests inside `src-tauri/src/awake.rs`, `autostart.rs` |
-| Public self-update | Done: checks at start and every 6 h; installs on quit or, on Windows, at the first moment no conversation or CLI install runs and the window is hidden (a running mission does not hold it back, incoherence 29) (R141: it also installs at start, before the first input and with no unsent draft; "What's new" shows once after) | tests inside `src-tauri/src/update.rs` |
+| Public self-update | Done, on two channels (R156): stable reads the latest release's `latest.json` and previews (opt-in) the `preview-channel` release's, which every release replaces with its newest build; checks at start and every 6 h; installs on quit or, on Windows, at the first moment no conversation or CLI install runs and the window is hidden (a running mission does not hold it back, incoherence 29) (R141: it also installs at start, before the first input and with no unsent draft; "What's new" shows once after) | tests inside `src-tauri/src/update.rs` |
 | First run, account cards, tutorial | Done | `tests/ui/setup.check.ts`, `tutorial.check.ts`; `testkit/src/screen/setup.rs`, `first_run.rs` |
 | Settings, looks, theme files | Done | `tests/ui/settings.check.ts`, `appearance.check.ts`; `testkit/src/screen/settings.rs` |
 | Five languages | Done; part of de, es, fr and pt-BR still awaits a native speaker's review | `tests/ui/i18n.check.ts`, `mojibake.check.ts` |

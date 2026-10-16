@@ -1,8 +1,14 @@
 name: auto-release
 
-# Owner decision R130: every user-facing change ships on its own, so installs keep up through the built-in updater
-# without anyone asking. When CI goes green on phase-1-base and a feat, fix or perf commit landed since the last tag,
-# that commit is tagged with the next patch version. A finished area still gets its minor bump by hand.
+# Owner decisions R130 and R156: every user-facing change ships on its own, as a preview. When CI goes green on phase-1-base
+# and a feat, fix or perf commit landed since the last tag, that commit is tagged vX.Y.(Z+1)-preview.N, where vX.Y.Z is the
+# newest stable tag and N counts the previews after it. People who opted in to previews get it through the built-in
+# updater; everyone else gets the same commit when promote-stable.yml makes it stable. A finished area still gets its minor
+# bump by hand (a plain vX.Y.0 tag).
+#
+# Version scheme: plain semver pre-releases. They sort below the release they precede (0.3.16-preview.9 < 0.3.16), which is
+# the order the updater applies, and every bundle in tauri.conf.json accepts them. Windows MSI (WiX) would reject them
+# because it wants numbers only; MSI is not built, and scripts/channel.test.mjs fails if it is ever added.
 on:
   workflow_run:
     workflows: [ci]
@@ -10,7 +16,8 @@ on:
     types: [completed]
   workflow_dispatch:
 
-# Green runs that finish close together queue here; each one sees the tag the one before it pushed.
+# Green runs that finish close together queue here; each one sees the tag the one before it pushed. promote-stable.yml shares
+# the group, so a promotion and a new preview never read the tags at the same time.
 concurrency:
   group: auto-release
 
@@ -33,16 +40,18 @@ jobs:
         run: |
           set -euo pipefail
           sha=${GREEN_SHA:-$(gh run list --workflow ci.yml --branch phase-1-base --event push --status success --limit 1 --json headSha --jq '.[0].headSha')}
-          last=$(git tag --list 'v*' --sort=-v:refname | head -1)
-          if [ -z "$sha" ] || [ "$(git rev-parse "$last^{commit}")" = "$sha" ] || ! git merge-base --is-ancestor "$last" "$sha"; then
-            echo "No green commit after $last."; exit 0
+          # A tag on this commit or a later one means it is already covered; a late green run never tags old code with a newer number.
+          if [ -z "$sha" ] || [ -n "$(git tag --list 'v*' --contains "$sha")" ]; then
+            echo "No green commit after the newest tag."; exit 0
           fi
+          # The nearest tag behind the commit, of either channel: a stable made from an older preview does not hide the commits
+          # that landed after that preview.
+          last=$(git describe --tags --abbrev=0 --match 'v*' "$sha")
           # Only commits that touch what ships count; a fix to the test runner changes nothing for the user.
-          if ! git log --no-merges --format=%s "$last..$sha" -- ui engine src-tauri package.json vite.config.ts | grep -qE '^(feat|fix|perf)(\(|!|:)'; then
+          if ! node scripts/channel.mjs user-facing "$last" "$sha"; then
             echo "Nothing user-facing since $last."; exit 0
           fi
-          IFS=. read -r major minor patch <<< "${last#v}"
-          next="v$major.$minor.$((patch + 1))"
+          next=$(node scripts/channel.mjs next-preview)
           git tag "$next" "$sha"
           git push origin "$next"
           # A tag pushed with this token starts no workflow, so the release is started by hand.

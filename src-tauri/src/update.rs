@@ -51,6 +51,22 @@ const TRIED_FOR: u64 = 24 * 3600;
 /// The log keeps its last half when it grows past this.
 const LOG_MAX: usize = 32 * 1024;
 
+/// The preview channel's manifest: a release with a fixed tag whose `latest.json` every release replaces with the newest build
+/// (.github/workflows/release.yml, R156). The stable manifest is the endpoint in `tauri.conf.json`, which every install ever
+/// shipped already reads; it is left alone so those installs keep working.
+const PREVIEW_FEED: &str = "https://github.com/startRED/faber/releases/download/preview-channel/latest.json";
+
+/// The manifest to read when `previews` is on, or none when the configured stable one stays.
+fn preview_feed(previews: bool) -> Option<tauri::Url> {
+    previews.then(|| PREVIEW_FEED.parse().expect("the preview feed is a valid address"))
+}
+
+/// A release is installed only when it is newer than the running version, so turning previews off (the stable manifest is
+/// older than the preview that is running) and a stable built from older code never move Faber back (R156).
+fn is_upgrade(current: &semver::Version, remote: &semver::Version) -> bool {
+    remote > current
+}
+
 /// How Faber comes back after an install: with its window, or in the tray.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Reopen {
@@ -527,13 +543,15 @@ impl Live {
 
 impl Release for Live {
     async fn check(&self) -> Result<Option<String>, String> {
-        let updater = self
+        let mut builder = self
             .app
             .updater_builder()
             .installer_args(installer_args(self.reopen, &self.install_dir))
-            .build()
-            .map_err(|e| e.to_string())
-            .inspect_err(|e| self.note("check-setup-failed", e))?;
+            .version_comparator(|current, remote| is_upgrade(&current, &remote.version));
+        if let Some(feed) = preview_feed(self.app.state::<Faber>().engine.settings().previews == Some(true)) {
+            builder = builder.endpoints(vec![feed]).map_err(|e| e.to_string()).inspect_err(|e| self.note("check-setup-failed", e))?;
+        }
+        let updater = builder.build().map_err(|e| e.to_string()).inspect_err(|e| self.note("check-setup-failed", e))?;
         let found = updater.check().await.map_err(|e| e.to_string()).inspect_err(|e| self.note("check-failed", e))?;
         let version = found.as_ref().map(|update| update.version.clone());
         *lock(&self.found) = found;
@@ -773,7 +791,7 @@ mod tests {
         note_tried,
     };
     use super::{Meter, PROGRESS_EVERY, Phase, Status, counts_as_visible};
-    use super::{is_dos_path, may_install, setups_running};
+    use super::{PREVIEW_FEED, is_dos_path, is_upgrade, may_install, preview_feed, setups_running};
 
     fn mb(n: u32) -> Status {
         Status { mb: Some(n), ..Status::of(Phase::Downloading) }
@@ -839,6 +857,45 @@ mod tests {
     use std::cell::{Cell, RefCell};
     use std::ffi::OsString;
     use std::time::Duration;
+
+    fn v(text: &str) -> semver::Version {
+        text.parse().unwrap()
+    }
+
+    #[test]
+    fn previews_off_keeps_the_configured_stable_manifest_and_on_reads_the_preview_one() {
+        assert_eq!(preview_feed(false), None, "off leaves the endpoint of tauri.conf.json, the one every install already reads");
+        let feed = preview_feed(true).unwrap();
+        assert_eq!(feed.as_str(), PREVIEW_FEED);
+        assert_eq!(feed.scheme(), "https");
+        assert!(feed.path().ends_with("/preview-channel/latest.json"), "a fixed tag, never the newest release");
+    }
+
+    #[test]
+    fn the_stable_manifest_is_still_the_latest_release() {
+        let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(
+            conf["plugins"]["updater"]["endpoints"],
+            serde_json::json!(["https://github.com/startRED/faber/releases/latest/download/latest.json"]),
+            "installs shipped so far read this address; changing it strands them"
+        );
+        assert_ne!(PREVIEW_FEED, conf["plugins"]["updater"]["endpoints"][0].as_str().unwrap());
+    }
+
+    #[test]
+    fn a_release_installs_only_when_it_is_newer_so_nothing_ever_goes_back() {
+        // Turned off while running a preview: the stable manifest holds the older stable.
+        assert!(!is_upgrade(&v("0.3.16-preview.2"), &v("0.3.15")), "off never downgrades");
+        // The stable built from the preview that is running, or from an older one, is not an update for it.
+        assert!(!is_upgrade(&v("0.3.16"), &v("0.3.16")));
+        assert!(!is_upgrade(&v("0.3.17-preview.1"), &v("0.3.16")));
+        // Forward moves: the next preview, the stable of the preview that runs, and the next stable.
+        assert!(is_upgrade(&v("0.3.16-preview.1"), &v("0.3.16-preview.2")));
+        assert!(is_upgrade(&v("0.3.16-preview.9"), &v("0.3.16")), "a preview install takes the stable of its version");
+        assert!(is_upgrade(&v("0.3.15"), &v("0.3.16")));
+        assert!(is_upgrade(&v("0.3.15"), &v("0.3.16-preview.1")), "previews on offers the next preview to a stable install");
+        assert!(is_upgrade(&v("0.3.16"), &v("0.3.17-preview.1")));
+    }
 
     #[test]
     fn a_ready_update_waits_while_an_answer_runs() {

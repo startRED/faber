@@ -14,6 +14,7 @@ const QUESTION: &str = "In one sentence: why is the sky blue?";
 pub fn scenarios() -> Vec<Scenario> {
     vec![
         Scenario { name: "system toggles persist independently and survive reopening Settings", run: system_toggles_persist },
+        Scenario { name: "receive previews starts off, saves on its own and survives reopening Settings", run: previews_persist },
         Scenario { name: "autostart begins in the tray without creating a webview window", run: autostart_has_no_window },
         Scenario {
             name: "every section of Settings says its part: the accounts, the usage limits and what stays on this PC",
@@ -95,13 +96,15 @@ fn walks_the_sections(ctx: &mut Ctx) -> Result {
     // General: the language, hooks, both notification switches, keep-awake and autostart.
     let language = page.labelled("set.language")?;
     page.wait_visible(&language)?;
-    same(page.count(&role_any("switch"))?, 5, "switches on General")?;
+    same(page.count(&role_any("switch"))?, 6, "switches on General")?;
     for key in ["set.notifyMe", "set.playSound", "set.keepAwake"] {
         let toggle = page.named("switch", key)?;
         same(page.is_checked(&toggle)?, true, "defaults on")?;
     }
     let autostart = page.named("switch", "set.autostart")?;
     same(page.is_checked(&autostart)?, false, "autostart defaults off")?;
+    let previews = page.named("switch", "set.previews")?;
+    same(page.is_checked(&previews)?, false, "previews default off")?;
     ctx.shot(&mut app, "settings-general")?;
 
     // Appearance: the six looks are drawn before the picture is taken.
@@ -385,6 +388,29 @@ fn autostart_has_no_window(ctx: &mut Ctx) -> Result {
     same(report["windowCount"].as_u64(), Some(0), "autostart webview windows")?;
     ensure(ctx.exited(id).is_none(), || "autostart exited instead of staying in the tray".into())?;
     ctx.close(id)
+}
+
+fn previews_persist(ctx: &mut Ctx) -> Result {
+    start_settings(ctx, "en")?;
+    let mut app = ctx.launch(claude_chat(ctx))?;
+    let page = &mut app.page;
+    open_settings(page)?;
+    let previews = page.named("switch", "set.previews")?;
+    let file = ctx.sb.data.join("settings.json");
+    let saved = |on: bool| {
+        std::fs::read_to_string(&file)
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .is_some_and(|saved| saved["previews"] == on)
+    };
+    for on in [true, false] {
+        page.click(&previews)?;
+        eventually("the previews choice to reach settings.json", Duration::from_secs(15), || saved(on))?;
+        page.reload()?;
+        open_settings(page)?;
+        same(page.is_checked(&previews)?, on, "previews after reload")?;
+    }
+    ctx.close(app.id)
 }
 
 fn system_toggles_persist(ctx: &mut Ctx) -> Result {
