@@ -1,6 +1,7 @@
 //! Faber's own test runner, and the fake CLI it replays recordings with.
 
 pub mod app;
+pub mod base;
 pub mod cdp;
 pub mod checks;
 pub mod contain;
