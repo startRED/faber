@@ -1,5 +1,5 @@
 import themes from '../../src-tauri/src/themes.json';
-import { ARC, bornAt, type Cell, DISK, frame, hole, holeRuns, RIM, rippleTint, STAR } from '../../ui/Hole.tsx';
+import { ARC, bornAt, type Cell, DISK, frame, hole, holeRuns, RIM, rippleTint, STAR, veil } from '../../ui/Hole.tsx';
 import { check, equal, ok } from './check.ts';
 
 const [W, H] = [1600, 1000];
@@ -28,13 +28,22 @@ check('hole: the scene moves with time and is the same at the same moment', () =
   ok(points.some(([x, y], k) => Math.abs(at(x, y, 12).d - now[k]!) > 0.05), 'the disk turns over two seconds');
 });
 
-check('hole: the frame fits the room right of the words and keeps the arc off them', () => {
-  for (const [w, h, words] of [[1660, 935, 870], [1600, 1000, 640], [1200, 800, 700], [2400, 1300, 900]] as const) {
+check('hole: the whole shadow and its arc show right of the words, cut by no edge', () => {
+  for (const [w, h, words] of [[1660, 935, 720], [1660, 935, 870], [1600, 1000, 640], [1200, 800, 700], [2400, 1300, 900]] as const) {
     const f = frame(w, h, words);
-    ok(f.R >= 0.22 * h - 0.01 && f.R <= 0.4 * h + 0.01, `${w}x${h}: the radius stays between 22% and 40% of the height`);
-    ok(f.cx - 1.6 * f.R >= words + 29 || f.R <= 0.22 * h + 0.01, `${w}x${h}: the arc keeps 30 px off the words unless the room is too small`);
+    ok(f.R >= 0.16 * h - 0.01 && f.R <= 0.3 * h + 0.01, `${w}x${h}: the radius stays between 16% and 30% of the height`);
+    const inside = f.cx - 1.6 * f.R >= words + 150 - 0.01 && f.cx + 1.6 * f.R <= w - 27;
+    ok(inside || f.R <= 0.16 * h + 0.01, `${w}x${h}: the arc stays clear of the column and off the right edge unless the room is too small`);
+    ok(f.cy - 1.8 * f.R >= 27, `${w}x${h}: the arc stays off the top edge`);
     ok(f.qx > words && f.qx < w && f.qy + f.qr < h, `${w}x${h}: the planet sits inside the room, right of the words`);
   }
+});
+
+check('hole: no hard edge beside the column; the scene runs behind the words, dim enough to read over', () => {
+  const edge = 720;
+  ok(veil(edge - 300, edge) > 0 && veil(edge - 300, edge) <= 0.2, 'behind the words the scene keeps a faint part of its light');
+  equal(veil(edge + 400, edge), 1, 'well past the column it is at full light');
+  for (let x = edge - 300; x < edge + 400; x += 12) ok(veil(x + 12, edge) - veil(x, edge) < 0.1, `no step from ${x} px to the next cell`);
 });
 
 check('hole: the planet has a lit rim facing the disk and a dark body', () => {

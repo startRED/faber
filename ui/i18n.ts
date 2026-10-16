@@ -60,7 +60,11 @@ export function fromEngine(text: string | undefined, vars: Record<string, string
   // Auto's reason, "reason.route.<kind>.<level>": the kind of task and how hard it is.
   const route = /^reason\.route\.(\w+)\.(\w+)$/.exec(text);
   if (route) return t('reason.route', { kind: t(`kind.${route[1]}` as Key), level: t(`level.${route[2]}` as Key) });
-  return text in en ? t(text as Key, vars) : text;
+  if (text in en) return t(text as Key, vars);
+  // A key with no sentence yet never shows raw: a budget wait says so, anything else says it is in the log.
+  if (/^reason\.budget\.[\w.]+$/.test(text)) return t('reason.budget.other');
+  if (/^(reason|error)\.[\w.]+$/.test(text)) return t('reason.other');
+  return text;
 }
 
 /** The sentence for a refusal: the shell's key, with the field or the colour pairs it is about as `{detail}`. */

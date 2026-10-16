@@ -32,6 +32,11 @@ export function saveMission(projectId: string, missionId: string): void {
   try { localStorage.setItem('faber.project.mission.' + projectId, missionId); } catch { /* The journal remains durable. */ }
 }
 
+/** The board is left: the project opens on its start card again. The mission itself stays in the journal. */
+export function forgetMission(projectId: string): void {
+  try { localStorage.removeItem('faber.project.mission.' + projectId); } catch { /* Nothing to forget. */ }
+}
+
 /** Formats own cost in millionths of an API-equivalent dollar.
  * None/null/undefined is unknown, NEVER zero. */
 export function formatCost(ownMicros: number | null | undefined): { isUnknown: boolean; display: string } {

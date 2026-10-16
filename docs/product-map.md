@@ -63,8 +63,8 @@ replaces the shell; otherwise the shell shows the sidebar, the topbar, the work 
 | Composer | Chat only | Text, paste or drop files, attach, model, effort (manual model only), Stop, Send; warms the CLI on the first key and lets Auto route the draft | `ui/Composer.tsx`, `ui/models.ts`, `ui/composer-size.ts` |
 | Projects: open a project | Projects area, no project selected | "Add project folder", Recents and environments, pick up (three project conversations) | `ui/Projects.tsx`, `ui/Recents.tsx` |
 | Projects: start card | A project, no mission selected | One column: the project and its folder, greeting, goal box with one status line beside Start (Enter starts a mission), black hole behind, up to three conversations to pick up. No side columns and no list of other projects (the sidebar lists them). Checks, tools, git mode, self-update trust and Details moved to Settings > Projects | `ui/Projects.tsx`, `ui/projects.ts`, `ui/Hole.tsx` |
-| Projects: checks sheet | First mission start in a project | A compact panel with the check count and source and every command (and the setup that runs first) listed in full, never collapsed, a long list scrolling inside it; Confirm and start, or Not now. Confirming sends exactly the list and declaration shown, and the engine refuses it if the project changed them meanwhile; the panel then shows the new list. A refused start on changed checks reopens it. Asked once per list | `ui/Projects.tsx` |
-| Projects: mission board | A mission selected (remembered per project) | Run mode; Stop, Resume; progress line; report when done; needs-you and decision cards; tasks in Ready, Running, Review, Done, Blocked; own cost against the cap and account pace; local build | `ui/Projects.tsx`, `ui/LocalBuild.tsx` |
+| Projects: checks sheet | First mission start in a project, only in Ask, Accept edits or Plan (Auto and Full access confirm the declared list by themselves, R159) | A compact panel with the check count and source and every command (and the setup that runs first) listed in full, never collapsed, a long list scrolling inside it; Confirm and start, or Not now. Confirming sends exactly the list and declaration shown, and the engine refuses it if the project changed them meanwhile; the panel then shows the new list. A refused start on changed checks reopens it. Asked once per list | `ui/Projects.tsx` |
+| Projects: mission board | A mission selected (remembered per project) | One column: state, New mission (done, paused or blocked; asks first unless done), goal, step line, why it waits, Stop or Resume; needs-you and decision cards; report when done; tasks grouped by Ready, Running, Review, Done, Blocked, empty groups hidden, one line before the plan; folded "Run mode, cost and build" with run mode, own cost against the cap, account pace and local build | `ui/Projects.tsx`, `ui/LocalBuild.tsx` |
 | Past project conversation | Opened from the sidebar or a pick-up list | Read only: no composer | `ui/Thread.tsx` |
 | Running column | Run button, Ctrl+., or by itself 1.5 s after typing stops | Running conversations by project with their state in words; permission and held-back cards; open a conversation | `ui/Running.tsx`, `ui/running.ts` |
 | Settings | Ctrl+,, the sidebar button, a quota line (opens Usage limits), "Details in Settings" | Six sections (below); Back or Esc | `ui/Settings.tsx`, `ui/ProjectSettings.tsx`, `ui/Appearance.tsx`, `ui/draft.ts` |
@@ -107,7 +107,7 @@ adds a line. Browser keys (F5, F7, Ctrl+R, P, S, U) do nothing.
 | Tutorial | Only once an AI is signed in | `tutorialDone: true` on finish or skip |
 
 Left at their defaults, changeable later in Settings: language, permissions, web search, hooks, notifications, keep awake, autostart.
-A project's checks are confirmed on a sheet when its first mission starts, not in the first run; its grant lives in Settings > Projects.
+A project's checks are confirmed on a sheet when its first mission starts (in Auto and Full access the start confirms them by itself), not in the first run; its grant lives in Settings > Projects.
 
 ## Settings screen
 
@@ -184,7 +184,7 @@ The data folder is `%APPDATA%\Faber` (or `FABER_DATA_DIR`). JSON files are writt
 | Browser storage `faber.place` | The last area, project and conversation | `ui/App.tsx` |
 | Browser storage `faber.choice.<conversationId>` | The model and effort picked for a conversation (the conversation file keeps a copy) | `ui/App.tsx` |
 | Browser storage `faber.project.goal.<projectId>` | The goal being typed on a start card | `ui/projects.ts` |
-| Browser storage `faber.project.mission.<projectId>` | The mission shown on a project's board | `ui/projects.ts` |
+| Browser storage `faber.project.mission.<projectId>` | The mission shown on a project's board; New mission clears it | `ui/projects.ts` |
 | Browser storage `faber.unsent.<field>` | Text typed and not sent, so an update restart or a crash loses nothing | `ui/unsent.ts` |
 | Outside Faber's folders | The Windows Run key (autostart); CLIs installed in `~/.local/bin` and added to the user PATH | `src-tauri/src/autostart.rs`, `engine/src/install.rs` |
 
@@ -254,10 +254,11 @@ that fixes it. The weekly coherence pass (`testkit/coherence/weekly.md`) propose
 ones.
 
 1. Settings on a work screen (C011): the start card is calm now (checks, tools, git mode, self-update trust and Details
-   live in Settings > Projects); the board still carries the run mode.
+   live in Settings > Projects); the board still carries the run mode, folded under "Run mode, cost and build".
 2. Mission needs are invisible inside the window: the tray counts mission decisions and blocked missions, but the run
    button, the running column, the sidebar and the pick-up lists only count conversations.
-3. A mission board has no way to start another mission or leave it; the selection comes back from browser storage.
+3. A left mission cannot be opened again: no list of a project's missions exists, so New mission asks first on a paused
+   or blocked one.
 4. "If a tool is missing" is never sent to the engine; "Find and install it for me" only shows "not ready yet".
 5. `project_revoke` has no caller: a grant (and self-update trust) can never be withdrawn on screen, and Start grants
    again every time.

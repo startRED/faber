@@ -1,9 +1,9 @@
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
-import { api, type AgentsView, type AppState, type MissionView, type Project } from '../../ui/api.ts';
+import { api, type AgentsView, type AppState, type MissionView, type PermissionMode, type Project } from '../../ui/api.ts';
 import { App } from '../../ui/App.tsx';
-import { LANGUAGES, useLanguage } from '../../ui/i18n.ts';
+import { fromEngine, LANGUAGES, useLanguage } from '../../ui/i18n.ts';
 import { Projects } from '../../ui/Projects.tsx';
 import { ProjectsSection } from '../../ui/ProjectSettings.tsx';
 import { formatCap, formatCost, recallGoal, saveGoal, taskReceiptStatus } from '../../ui/projects.ts';
@@ -14,7 +14,7 @@ const demo: Project = { id: 'review-project', name: 'Review project', path: 'C:/
 const view = (revision = 1): MissionView => ({ missionId: 'review-mission', revision, state: 'running', mode: 'normal', gitMode: 'seguro', goal: 'Review goal', tasks: [], cost: { ownMicros: null, capMicros: null, complete: false }, pace: [], decisions: [] });
 
 let agentsEmit: (v: AgentsView) => void = () => {};
-async function withProjects(run: (root: HTMLElement, emit: (v: MissionView) => void, change: (p: Project) => void) => Promise<void>, before?: () => void) {
+async function withProjects(run: (root: HTMLElement, emit: (v: MissionView) => void, change: (p: Project) => void) => Promise<void>, before?: () => void, permissions: PermissionMode = 'ask') {
   const originals = { ...api };
   useLanguage('en');
   Object.assign(api, { localUpdateState: async () => null });
@@ -33,7 +33,7 @@ async function withProjects(run: (root: HTMLElement, emit: (v: MissionView) => v
   for (const [key, value] of Object.entries(themes.css.base)) root.style.setProperty(`--${key}`, value);
   document.body.append(root);
   const [project, setProject] = createSignal(demo);
-  const dispose = render(() => createComponent(Projects, { get project() { return project(); }, vendors: [], now: Date.now() }), root);
+  const dispose = render(() => createComponent(Projects, { get project() { return project(); }, vendors: [], now: Date.now(), permissions }), root);
   try { await settle(); await run(root, (v) => listener(v), setProject); }
   finally { dispose(); root.remove(); Object.assign(api, originals); saveGoal(demo.id, ''); localStorage.removeItem('faber.project.mission.' + demo.id); useLanguage('en'); }
 }
@@ -146,17 +146,18 @@ check('projects review: failed grant keeps goal, displays refusal, and never sta
   ok(root.querySelector('[role="alert"]')?.textContent?.includes('grant'), 'refusal is visible');
 }));
 
-check('projects T5: a refused role shows the T2 reason key and keeps the goal', () => withProjects(async (root) => {
+check('projects T5: a refused role says so in words, never as its raw key, and keeps the goal', () => withProjects(async (root) => {
   api.missionStart = async () => { throw 'reason.project.restrictionsUnproven'; };
   await start(root);
-  ok(root.querySelector('[role="alert"]')?.textContent?.includes('reason.project.restrictionsUnproven'));
+  const alert = root.querySelector('[role="alert"]')?.textContent ?? '';
+  ok(alert.includes(fromEngine('reason.project.restrictionsUnproven')) && !alert.includes('reason.project'), `the refusal reads as a sentence: ${alert}`);
   equal(root.querySelector<HTMLTextAreaElement>('#mission-goal')?.value, 'Review goal');
   ok(!root.querySelector('.mission-board'));
 }));
 
 check('projects review: mission state is localized and unknown cap is never invented', () => withProjects(async (root) => {
   await start(root);
-  equal(root.querySelector('.badge')?.textContent?.trim(), 'Running');
+  equal(root.querySelector('[data-testid="mission-state"]')?.textContent?.trim(), 'Running');
   ok(root.querySelector('.cost-cap')?.textContent?.includes('Unknown'), 'missing cap is unknown');
   equal(formatCap(null), 'projects.cost.unknown', 'formatting must not invent a cap');
 }));
@@ -449,6 +450,26 @@ const typeGoal = async (root: HTMLElement) => {
   await settle();
 };
 
+check('projects: in Full access and Auto the start confirms the checks by itself and starts, with no sheet', async () => {
+  for (const mode of ['dontAsk', 'auto'] as const) {
+    let confirmed = false;
+    let started = 0;
+    await withProjects(async (root) => {
+      const status = root.querySelector('[data-testid="p-status"]')?.textContent ?? '';
+      ok(status.includes('allowed by your permission mode'), `the status line says the mode covers them: ${status}`);
+      await typeGoal(root);
+      await start(root);
+      equal(root.querySelector('[data-testid="proof-sheet"]'), null, `${mode}: no sheet`);
+      ok(confirmed, `${mode}: the declared checks were confirmed`);
+      equal(started, 1, `${mode}: the mission started`);
+    }, () => {
+      api.projectProof = async () => proofView(confirmed);
+      api.projectProofConfirm = async (_id, commands) => { confirmed = true; return proofView(true, commands); };
+      api.missionStart = async () => { started += 1; return 'review-mission'; };
+    }, mode);
+  }
+});
+
 check('projects: the first start on unconfirmed checks opens a sheet that shows every command at once, and Confirm starts', () => {
   let confirmed = false;
   let started = 0;
@@ -715,7 +736,7 @@ check('settings projects: the self-update switch saves the grant with a fresh re
   });
 });
 
-check('projects home: no text sits on the lit part of the black hole, scrolled or not', async () => {
+check('projects home: text sits only on the faint veil of the black hole, scrolled or not', async () => {
   const originals = { ...api };
   useLanguage('en');
   Object.assign(api, { localUpdateState: async () => null });
@@ -759,7 +780,9 @@ check('projects home: no text sits on the lit part of the black hole, scrolled o
         const px = ctx.getImageData(x0, y0, x1 - x0, y1 - y0).data;
         let worst = 0;
         for (let i = 3; i < px.length; i += 4) worst = Math.max(worst, px[i]!);
-        equal(worst, 0, `${moment}: "${node.textContent.trim().slice(0, 30)}" sits on the black hole`);
+        // Behind the column the veil keeps a faint part of the light (tests/ui/hole.check.ts); at its edge, where the light
+        // starts to come up, a glyph under text still stays under a third of its brightness, so the text reads easily.
+        ok(worst <= 77, `${moment}: "${node.textContent.trim().slice(0, 30)}" sits on the bright part of the black hole (${worst})`);
       }
       ok(seen > 10, `${moment}: the texts were measured (${seen})`);
     };
@@ -852,3 +875,30 @@ check('projects review: a typed custom decision answer counts as unsent until it
   field.value = ''; field.dispatchEvent(new Event('input', { bubbles: true })); await settle();
   equal(dirtyCount(), before, 'an emptied field has nothing to lose');
 }));
+
+check('projects board: a paused mission says why in words, shows no raw key and can be left for a new mission', () => withProjects(async (root, emit) => {
+  await start(root);
+  emit({ ...view(2), state: 'paused', reason: 'reason.budget.calibration' });
+  await settle();
+  const board = root.querySelector('.mission-board')!.textContent ?? '';
+  ok(!/\breason\.[\w.]+/.test(board), `no raw engine key on the board: ${board}`);
+  ok(board.includes('still learning how much of your quota'), 'the calibration wait reads as a sentence');
+  ok(board.includes('No tasks yet'), 'a board with no tasks says so in one line, not five empty columns');
+  equal(root.querySelectorAll('.task-col').length, 0, 'empty task groups are not drawn');
+  ok(!root.querySelector('.m-more')?.hasAttribute('open'), 'run mode, cost and build start folded away');
+  await click(root.querySelector('[data-testid="mission-leave"]'));
+  ok(root.querySelector('.mission-board'), 'a paused mission asks before it is left');
+  equal(document.activeElement?.textContent, 'Stay', 'the question starts on the safe answer');
+  await click(root.querySelector('[data-testid="mission-leave-yes"]'));
+  ok(!root.querySelector('.mission-board'), 'leaving opens the start card');
+  ok(root.querySelector('#mission-goal'), 'the goal box is back');
+  equal(localStorage.getItem('faber.project.mission.' + demo.id), null, 'the board does not come back on reload');
+}));
+
+check('projects board: an unknown engine key never shows raw, in any language', () => {
+  for (const { code } of LANGUAGES) {
+    useLanguage(code);
+    for (const key of ['reason.budget.someNewWait', 'reason.kit.someNewReason', 'error.someNewFailure']) ok(fromEngine(key) !== key, `${code} shows ${key} raw`);
+  }
+  useLanguage('en');
+});

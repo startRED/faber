@@ -981,6 +981,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                     onAdd={() => void addProject().catch(fail)}
                     onOpened={openProjects}
                     onError={fail}
+                    permissions={state().settings.permissions}
                   />
                 </Show>
                 <Show when={columnOpen() && !docked()}>{runningColumn()}</Show>
