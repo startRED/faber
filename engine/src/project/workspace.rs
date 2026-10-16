@@ -61,6 +61,11 @@ impl Workspace {
         if !valid_project(project) {
             return Err("reason.workspace.unsafe");
         }
+        // Git does not accept a verbatim path (the extended-length form) in --work-tree, so the copy is always named in its
+        // ordinary form.
+        let plain = data.to_string_lossy();
+        let data =
+            plain.strip_prefix(r"\\?\").filter(|rest| rest.as_bytes().get(1) == Some(&b':')).map_or(data.to_path_buf(), PathBuf::from);
         let root = data.join("workspaces").join(project);
         Ok(Self { dir: root.join("tree"), root })
     }
@@ -201,5 +206,7 @@ mod tests {
             assert!(Workspace::new(data, bad).is_err(), "{bad}");
         }
         assert_eq!(Workspace::new(data, "p1").unwrap().dir(), Path::new("data").join("workspaces").join("p1").join("tree"));
+        let verbatim = Workspace::new(Path::new(r"\\?\E:\data"), "p1").unwrap();
+        assert!(!verbatim.dir().to_string_lossy().starts_with(r"\\?\"), "{:?}", verbatim.dir());
     }
 }

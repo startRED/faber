@@ -186,7 +186,9 @@ impl Executor for Process {
             &call.cwd,
             &["config", "--includes", "--name-only", "--get-regexp", "^(filter\\..*\\.(clean|smudge|process|required)|hook\\..*)$"],
         );
-        let found = self.command(&query).args(&query.args).output().map_err(|_| GitError::Process)?;
+        // It looks at the same repository the call does: an explicit `--git-dir`/`--work-tree` leads the call's own options.
+        let scope = repository_options(&call.args);
+        let found = self.command(&query).args(&scope).args(&query.args).output().map_err(|_| GitError::Process)?;
         if !found.status.success() && found.status.code() != Some(1) {
             return Err(GitError::Command);
         }
@@ -195,6 +197,19 @@ impl Executor for Process {
         let out = command.args(&call.args).output().map_err(|_| GitError::Process)?;
         Ok(Output { success: out.status.success(), stdout: out.stdout })
     }
+}
+
+/// The `--git-dir=` and `--work-tree=` options a call gives before its subcommand (after the fixed `-c` pairs).
+fn repository_options(args: &[String]) -> Vec<&String> {
+    let mut it = args.iter().peekable();
+    while it.next_if(|a| a.as_str() == "-c").is_some() {
+        it.next();
+    }
+    let mut found = vec![];
+    while let Some(option) = it.next_if(|a| a.starts_with("--git-dir=") || a.starts_with("--work-tree=")) {
+        found.push(option);
+    }
+    found
 }
 
 /// Pure argv construction for command-bearing config found through local, included and worktree config.
@@ -720,5 +735,17 @@ impl<E: Executor> Broker<E> {
     }
     pub fn finish(self) -> Result<(), GitError> {
         Ok(self.leases.finish()?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_config_query_follows_a_call_that_names_its_repository() {
+        let named = Invocation::new(Path::new("w"), &["--git-dir=g", "--work-tree=w", "status", "--git-dir=late"]);
+        assert_eq!(repository_options(&named.args), ["--git-dir=g", "--work-tree=w"]);
+        assert!(repository_options(&Invocation::new(Path::new("w"), &["status"]).args).is_empty());
     }
 }
