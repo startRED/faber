@@ -86,7 +86,7 @@ pub struct Invocation {
     pub private_index: Option<PathBuf>,
 }
 impl Invocation {
-    fn new(cwd: &Path, args: &[&str]) -> Self {
+    pub(crate) fn new(cwd: &Path, args: &[&str]) -> Self {
         let null = if cfg!(windows) { "NUL" } else { "/dev/null" };
         let mut fixed = vec![];
         for config in [
@@ -186,7 +186,9 @@ impl Executor for Process {
             &call.cwd,
             &["config", "--includes", "--name-only", "--get-regexp", "^(filter\\..*\\.(clean|smudge|process|required)|hook\\..*)$"],
         );
-        let found = self.command(&query).args(&query.args).output().map_err(|_| GitError::Process)?;
+        // It looks at the same repository the call does: an explicit `--git-dir`/`--work-tree` leads the call's own options.
+        let scope = repository_options(&call.args);
+        let found = self.command(&query).args(&scope).args(&query.args).output().map_err(|_| GitError::Process)?;
         if !found.status.success() && found.status.code() != Some(1) {
             return Err(GitError::Command);
         }
@@ -195,6 +197,19 @@ impl Executor for Process {
         let out = command.args(&call.args).output().map_err(|_| GitError::Process)?;
         Ok(Output { success: out.status.success(), stdout: out.stdout })
     }
+}
+
+/// The `--git-dir=` and `--work-tree=` options a call gives before its subcommand (after the fixed `-c` pairs).
+fn repository_options(args: &[String]) -> Vec<&String> {
+    let mut it = args.iter().peekable();
+    while it.next_if(|a| a.as_str() == "-c").is_some() {
+        it.next();
+    }
+    let mut found = vec![];
+    while let Some(option) = it.next_if(|a| a.starts_with("--git-dir=") || a.starts_with("--work-tree=")) {
+        found.push(option);
+    }
+    found
 }
 
 /// Pure argv construction for command-bearing config found through local, included and worktree config.
@@ -224,6 +239,47 @@ fn text(output: Output, error: GitError) -> Result<String, GitError> {
         return Err(error);
     }
     String::from_utf8(output.stdout).map(|s| s.trim_end_matches(['\r', '\n']).into()).map_err(|_| error)
+}
+
+/// One regular file of a commit's tree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tracked {
+    pub path: String,
+    pub oid: String,
+    pub size: u64,
+}
+
+/// The regular files tracked at `base` (symbolic links and submodules are left out), read with fixed argv. The owner's
+/// working folder is never read: this is the committed tree the mission clone starts from.
+pub fn tracked(executor: &mut impl Executor, root: &Path, base: &str) -> Result<Vec<Tracked>, GitError> {
+    if !valid_oid(base) {
+        return Err(GitError::Base);
+    }
+    let out = executor.execute(&Invocation::new(root, &["ls-tree", "-r", "-l", "-z", "--full-tree", "--end-of-options", base]))?;
+    if !out.success {
+        return Err(GitError::Command);
+    }
+    let mut files = vec![];
+    for record in out.stdout.split(|b| *b == 0).filter(|r| !r.is_empty()) {
+        let record = std::str::from_utf8(record).map_err(|_| GitError::Command)?;
+        let (meta, path) = record.split_once('\t').ok_or(GitError::Command)?;
+        let mut fields = meta.split_whitespace();
+        let (mode, kind, oid, size) = (fields.next(), fields.next(), fields.next(), fields.next());
+        if kind == Some("blob") && matches!(mode, Some("100644" | "100755")) {
+            let size = size.and_then(|s| s.parse().ok()).ok_or(GitError::Command)?;
+            files.push(Tracked { path: path.into(), oid: oid.ok_or(GitError::Command)?.into(), size });
+        }
+    }
+    Ok(files)
+}
+
+/// The content of one tracked blob.
+pub fn blob(executor: &mut impl Executor, root: &Path, oid: &str) -> Result<Vec<u8>, GitError> {
+    if !valid_oid(oid) {
+        return Err(GitError::Command);
+    }
+    let out = executor.execute(&Invocation::new(root, &["cat-file", "blob", oid]))?;
+    if out.success { Ok(out.stdout) } else { Err(GitError::Command) }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -679,5 +735,17 @@ impl<E: Executor> Broker<E> {
     }
     pub fn finish(self) -> Result<(), GitError> {
         Ok(self.leases.finish()?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_config_query_follows_a_call_that_names_its_repository() {
+        let named = Invocation::new(Path::new("w"), &["--git-dir=g", "--work-tree=w", "status", "--git-dir=late"]);
+        assert_eq!(repository_options(&named.args), ["--git-dir=g", "--work-tree=w"]);
+        assert!(repository_options(&Invocation::new(Path::new("w"), &["status"]).args).is_empty());
     }
 }

@@ -3,12 +3,14 @@ import { createStore, reconcile } from 'solid-js/store';
 import {
   api,
   errorText,
+  type AgentsView,
   type BuildView,
   type DecisionView,
   type EnrollView,
   type GitMode,
   type MissionView,
   type Project,
+  type ProofView,
   type RunMode,
   type RunningItem,
   type Summary,
@@ -78,6 +80,12 @@ export function Projects(props: Props) {
   const [presence, setPresence] = createSignal<PresenceChoice>('continueWithout');
   const [gitMode, setGitMode] = createSignal<GitMode>('seguro');
   const [selfUpdate, setSelfUpdate] = createSignal(false);
+  // What a mission proves its work with (R137): shown, confirmed or edited by the owner before a mission can start.
+  const [proof, setProof] = createSignal<ProofView>();
+  const [editing, setEditing] = createSignal(false);
+  const [draft, setDraft] = createSignal('');
+  // The check of the agents that runs before the first mission (and again when a receipt is stale).
+  const [agents, setAgents] = createSignal<AgentsView>();
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<string>();
   const [customAnswers, setCustomAnswers] = createSignal<Record<string, string>>({});
@@ -124,6 +132,11 @@ export function Projects(props: Props) {
       window.removeEventListener('resize', resize);
     });
 
+    const agentsListener = api.onAgents((view) => setAgents(view.state === 'ready' ? undefined : view)).catch(() => () => {});
+    onCleanup(() => {
+      void agentsListener.then((fn) => fn(), () => {});
+    });
+
     // Listen for mission events
     const unlisten = api.onMission((view) => {
       accept(view);
@@ -160,6 +173,8 @@ export function Projects(props: Props) {
         setSelfUpdate(false);
         if (!id) {
           setEnroll(undefined);
+          setProof(undefined);
+          setEditing(false);
           setMission(undefined);
           setGoal('');
           return;
@@ -174,6 +189,8 @@ export function Projects(props: Props) {
           setEnroll(enrolled);
           setGitMode(enrolled.mode);
           setSelfUpdate(enrolled.selfUpdate);
+          setProof(await api.projectProof(id));
+          if (token !== generation) return;
           if (selectedMission) accept(await api.missionState(selectedMission), token);
         } catch (err) {
           if (token !== generation) return;
@@ -194,11 +211,12 @@ export function Projects(props: Props) {
   };
 
   const startMission = async () => {
-    if (!props.project || !goal().trim() || busy() || !enroll()) return;
+    if (!props.project || !goal().trim() || busy() || !enroll() || !proof()?.confirmed) return;
     const projectId = props.project.id;
     const text = goal().trim();
     const token = generation;
     setError(undefined);
+    setAgents(undefined);
     setBusy(true);
     try {
       const rev = enroll()!.revision;
@@ -219,6 +237,25 @@ export function Projects(props: Props) {
     } finally {
       if (token === generation) setBusy(false);
     }
+  };
+
+  const confirmProof = async (commands: string[]) => {
+    if (!props.project || busy()) return;
+    const token = generation;
+    setBusy(true); setError(undefined);
+    try {
+      const next = await api.projectProofConfirm(props.project.id, commands, proof()?.setup ?? []);
+      if (token !== generation) return;
+      setProof(next);
+      setEditing(false);
+    } catch (err) {
+      if (token === generation) setError(errorText(err));
+    } finally { if (token === generation) setBusy(false); }
+  };
+
+  const startEditing = () => {
+    setDraft((proof()?.commands ?? []).join('\n'));
+    setEditing(true);
   };
 
   const stopMission = async () => {
@@ -377,6 +414,15 @@ export function Projects(props: Props) {
           }
         >
           <Show when={!mission() && localBuild()}>{(view) => <LocalBuild view={view()} />}</Show>
+          <Show when={agents()}>
+            {(a) => (
+              <div class="note" classList={{ err: a().state === 'failed' }} role={a().state === 'failed' ? 'alert' : 'status'} data-testid="agents-status">
+                {a().state === 'checking'
+                  ? t('projects.agents.checking', { seconds: a().estimateSeconds, step: a().step, total: a().total })
+                  : t('projects.agents.failed', { detail: fromEngine(a().detail ?? undefined) })}
+              </div>
+            )}
+          </Show>
           <Show when={error()}>
             <div class="note err" role="alert">
               {fromEngine(error())}
@@ -432,7 +478,7 @@ export function Projects(props: Props) {
                     <button
                       type="submit"
                       class="btn primary"
-                      disabled={!goal().trim() || busy() || !enroll()}
+                      disabled={!goal().trim() || busy() || !enroll() || !proof()?.confirmed}
                       aria-label={t('projects.action.start')}
                     >
                       {t('projects.action.start')}
@@ -443,6 +489,84 @@ export function Projects(props: Props) {
 
                 <section class="setup" aria-labelledby="setup-title">
                 <h3 id="setup-title">{t('projects.home.rules')}</h3>
+                {/* The checks a mission proves its work with: confirmed by the owner once per project (R137). */}
+                <div class="ctl-section proof" data-testid="proof">
+                  <b>{t('projects.proof.title')}</b>
+                  <p class="note">{t('projects.proof.desc')}</p>
+                  <Show when={proof()}>
+                    {(p) => (
+                      <>
+                        <p class="note">{t(`projects.proof.source.${p().source}` as any)}</p>
+                        <Show when={p().changed}>
+                          <p class="note" role="status">{t('projects.proof.changed')}</p>
+                        </Show>
+                        <Show
+                          when={editing()}
+                          fallback={
+                            <>
+                              <Show when={(p().setup ?? []).length > 0}>
+                                <p class="note">{t('projects.proof.setup')}</p>
+                                <ul class="proof-list" data-testid="proof-setup">
+                                  <For each={p().setup}>{(command) => <li><code>{command}</code></li>}</For>
+                                </ul>
+                              </Show>
+                              <ul class="proof-list" aria-label={t('projects.proof.title')}>
+                                <For each={p().commands}>{(command) => <li><code>{command}</code></li>}</For>
+                              </ul>
+                              <div class="proof-actions">
+                                <Show
+                                  when={p().confirmed}
+                                  fallback={
+                                    <button
+                                      type="button"
+                                      class="btn primary"
+                                      data-testid="proof-confirm"
+                                      disabled={busy() || p().commands.length === 0}
+                                      onClick={() => void confirmProof(p().declared)}
+                                    >
+                                      {t('projects.proof.confirm')}
+                                    </button>
+                                  }
+                                >
+                                  <span class="badge done" data-testid="proof-confirmed">{t('projects.proof.confirmed')}</span>
+                                </Show>
+                                <button type="button" class="btn" data-testid="proof-edit" disabled={busy()} onClick={startEditing}>
+                                  {t('projects.proof.edit')}
+                                </button>
+                              </div>
+                            </>
+                          }
+                        >
+                          <label class="sr-only" for="proof-draft">{t('projects.proof.edit.label')}</label>
+                          <textarea
+                            id="proof-draft"
+                            class="proof-draft"
+                            rows={Math.min(8, Math.max(3, draft().split('\n').length))}
+                            value={draft()}
+                            onInput={(e) => setDraft(e.currentTarget.value)}
+                          />
+                          <div class="proof-actions">
+                            <button
+                              type="button"
+                              class="btn primary"
+                              data-testid="proof-save"
+                              disabled={busy()}
+                              onClick={() => void confirmProof(draft().split('\n').map((l) => l.trim()).filter(Boolean))}
+                            >
+                              {t('projects.proof.save')}
+                            </button>
+                            <button type="button" class="btn" disabled={busy()} onClick={() => setEditing(false)}>
+                              {t('projects.proof.cancel')}
+                            </button>
+                          </div>
+                        </Show>
+                        <Show when={!p().confirmed && !editing()}>
+                          <p class="note" data-testid="proof-needed">{t('projects.proof.needed')}</p>
+                        </Show>
+                      </>
+                    )}
+                  </Show>
+                </div>
                 {/* Two presence choices */}
                 <div class="ctl-section">
                   <Segmented<PresenceChoice>
@@ -567,7 +691,18 @@ export function Projects(props: Props) {
                       </button>
                     </Show>
                   </div>
-                  <Show when={m().reason}>
+                  <Show when={m().progress}>
+                    {(p) => (
+                      <p class="m-progress" role="status" data-testid="mission-progress">
+                        <span>{t('projects.progress.step', { number: p().number, total: p().total, step: t(`projects.progress.${p().step}` as any) })}</span>
+                        <Show when={p().role && p().vendor}>
+                          <span class="chip">{t('projects.progress.by', { role: t(`projects.role.${p().role}` as any), vendor: p().vendor! })}</span>
+                        </Show>
+                        <span class="note">{t('projects.progress.cost', { cost: costDisplay().isUnknown ? t('projects.cost.unknown') : costDisplay().display })}</span>
+                      </p>
+                    )}
+                  </Show>
+                  <Show when={m().reason && !m().needs}>
                     <div class="note" role="status">
                       {fromEngine(m().reason ?? undefined)}
                     </div>
@@ -576,13 +711,54 @@ export function Projects(props: Props) {
 
                 {/* Amber Needs-You Decisions (R77, R92) */}
                 <Show when={m().plan}><p class="note">{m().plan}</p></Show>
-                <Show when={humanDecisions().length > 0}>
+                <Show when={m().report}>
+                  {(r) => (
+                    <section class="m-report" aria-labelledby="report-title" data-testid="mission-report">
+                      <h3 id="report-title">{t('projects.report.title')}</h3>
+                      <p><b>{t('projects.report.branch', { branch: r().branch })}</b></p>
+                      <Show when={r().head}>{(head) => <p class="note">{t('projects.report.head', { head: head().slice(0, 8) })}</p>}</Show>
+                      <Show when={r().seconds != null}>
+                        <p class="note">{t('projects.report.duration', { time: r().seconds! < 60 ? `${r().seconds} s` : `${Math.floor(r().seconds! / 60)} min ${r().seconds! % 60} s` })}</p>
+                      </Show>
+                      <Show when={r().checks.length > 0}>
+                        <h4>{t('projects.report.checks')}</h4>
+                        <ul class="proof-list">
+                          <For each={r().checks}>
+                            {(c) => (
+                              <li>
+                                <code>{c.id}</code>:{' '}
+                                {c.result === 'pass' ? t('projects.report.pass') : c.result === 'fail' ? t('projects.report.fail') : c.result}
+                              </li>
+                            )}
+                          </For>
+                        </ul>
+                      </Show>
+                      <p class="note">{t('projects.report.untouched')}</p>
+                    </section>
+                  )}
+                </Show>
+                <Show when={humanDecisions().length > 0 || m().needs}>
                   <section class="needs-you" role="region" aria-label={t('projects.needsYou')}>
                     <div class="ny-header">
                       <Icon name="ask" />
                       <b>{t('projects.needsYou')}</b>
                       <span class="note">{t('projects.needsYou.desc')}</span>
                     </div>
+                    <Show when={m().needs}>
+                      {(reason) => (
+                        <div class="ask ny-card" role="alertdialog" aria-label={fromEngine(reason())} data-testid="mission-needs">
+                          <div class="ny-question">
+                            <b>{fromEngine(reason())}</b>
+                          </div>
+                          <p class="note">{t('projects.needs.desc')}</p>
+                          <div class="ny-options">
+                            <button type="button" class="btn primary" disabled={busy()} onClick={() => void resumeMission()}>
+                              {t('projects.action.resume')}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </Show>
                     <For each={humanDecisions()}>
                       {(dec: DecisionView) => (
                         <div class="ask ny-card" role="alertdialog" aria-label={dec.question}>

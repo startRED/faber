@@ -6,7 +6,9 @@
 //! role wrote may then write only into folders labelled Low, `label_low`) and reading which file its image came from.
 
 #[cfg(windows)]
-pub use imp::{image_path, label_desktop_low, label_low, lower_to_low_integrity, process_ended, resume_process};
+pub use imp::{
+    image_path, job_active_processes, job_terminate, label_desktop_low, label_low, lower_to_low_integrity, process_ended, resume_process,
+};
 
 #[cfg(windows)]
 mod label {
@@ -279,6 +281,32 @@ mod imp {
     };
 
     const STILL_ACTIVE: u32 = 259;
+
+    /// How many processes the job object `job` (a handle) still has running.
+    pub fn job_active_processes(job: isize) -> io::Result<u32> {
+        use windows_sys::Win32::System::JobObjects::{
+            JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JobObjectBasicAccountingInformation, QueryInformationJobObject,
+        };
+        // SAFETY: `info` is a plain-data struct the call fills in, and the size passed is its size; the handle is only read.
+        unsafe {
+            let mut info: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = std::mem::zeroed();
+            let ok = QueryInformationJobObject(
+                job as _,
+                JobObjectBasicAccountingInformation,
+                (&mut info as *mut JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),
+                std::mem::size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
+                std::ptr::null_mut(),
+            );
+            if ok == 0 { Err(io::Error::last_os_error()) } else { Ok(info.ActiveProcesses) }
+        }
+    }
+
+    /// Ends every process in the job object `job` (a handle) at once.
+    pub fn job_terminate(job: isize) -> io::Result<()> {
+        use windows_sys::Win32::System::JobObjects::TerminateJobObject;
+        // SAFETY: a plain call on a job handle the caller holds open.
+        if unsafe { TerminateJobObject(job as _, 1) } == 0 { Err(io::Error::last_os_error()) } else { Ok(()) }
+    }
 
     /// Whether no process with this pid is running any more. A pid that was reused answers "running", so a caller waiting for
     /// the end only ever waits too long, never too short.

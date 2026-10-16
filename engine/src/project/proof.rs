@@ -401,7 +401,7 @@ pub struct Definition {
     pub heavy: bool,
 }
 impl Definition {
-    fn validate(&self) -> Result<(), &'static str> {
+    pub fn validate(&self) -> Result<(), &'static str> {
         wire::check_id(&self.id).map_err(|e| e.key())?;
         let name = self.program.file_name().and_then(|s| s.to_str()).ok_or("reason.proof.command")?.to_ascii_lowercase();
         let stem = name.trim_end_matches(".exe");
@@ -456,23 +456,49 @@ pub async fn execute(definition: &Definition, cwd: &std::path::Path, spawn: &cra
             process.stdin.shutdown().await?;
             let limit = wire::MAX_ENVELOPE as u64 + 1;
             let mut stdout = process.stdout.take(limit);
-            let stdout = stdout.read_to_end(&mut output);
             let mut stderr = process.stderr.take().unwrap_or_else(|| Box::new(tokio::io::empty())).take(limit);
-            let stderr = stderr.read_to_end(&mut errors);
-            tokio::try_join!(stdout, stderr)?;
+            {
+                let reads = async { tokio::try_join!(stdout.read_to_end(&mut output), stderr.read_to_end(&mut errors)).map(|_| ()) };
+                tokio::pin!(reads);
+                if let Some(child) = &mut process.child {
+                    let mut finished = false;
+                    let status = tokio::select! {
+                        status = child.wait() => status?,
+                        done = &mut reads => {
+                            done?;
+                            finished = true;
+                            child.wait().await?
+                        }
+                    };
+                    exit = status.code();
+                    // The process is gone. A process it started may still hold the pipes open; the pipes get a moment, and
+                    // then whatever still runs is ended below.
+                    if !finished {
+                        let _ = tokio::time::timeout(std::time::Duration::from_secs(2), &mut reads).await;
+                    }
+                } else {
+                    reads.await?;
+                }
+            }
             if output.len().saturating_add(errors.len()) > wire::MAX_ENVELOPE {
                 return Err(std::io::Error::other("proof output limit"));
-            }
-            if let Some(child) = &mut process.child {
-                exit = child.wait().await?.code();
             }
             Ok::<_, std::io::Error>(())
         })
         .await;
-        if !matches!(capture, Ok(Ok(()))) {
+        let job = if matches!(capture, Ok(Ok(()))) {
+            process.contained.take()
+        } else {
+            // A proof whose output could not be kept has not passed, whatever its exit code said.
+            exit = None;
             output.clear();
             errors.clear();
-            crate::proc::stop(&mut *process.stdin, &mut process.child, &mut process.contained).await;
+            crate::proc::stop_keeping(&mut *process.stdin, &mut process.child, &mut process.contained).await
+        };
+        // Whatever the proof started is ended and waited for before anything else touches the folder it ran in. A proof that
+        // leaves a process behind that will not end has not passed.
+        if !crate::proc::settle(job).await {
+            exit = None;
         }
     }
     let mut combined = output.clone();

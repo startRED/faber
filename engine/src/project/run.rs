@@ -450,9 +450,15 @@ impl Runner {
         let receipt = self.start_proof(j, task, id, proof)?;
         let definition = proof.definitions().iter().find(|d| d.id == id).ok_or("reason.proof.definition")?;
         let path = format!("proofs/{receipt}.log");
-        let observation = super::proof::execute(definition, cwd, spawn, path.clone()).await;
-        let mut log = observation.stdout.clone();
-        log.extend(&observation.stderr);
+        let mut observation = super::proof::execute(definition, cwd, spawn, path.clone()).await;
+        // The proof's output is code's output and may hold a printed secret, so the log keeps the exit code and the sizes only,
+        // and the receipt's evidence hashes exactly what is stored (the journal checks that on acceptance).
+        let log =
+            format!("exit {:?}\nstdout {} bytes\nstderr {} bytes\n", observation.exit, observation.stdout.len(), observation.stderr.len());
+        // From here the stored log is the observation's output, so the receipt checks the hash of exactly what is stored.
+        observation.stdout = log.clone().into_bytes();
+        observation.stderr = vec![];
+        observation.evidence.sha256 = super::kit::digest(&observation.stdout);
         std::fs::create_dir_all(j.private().join("proofs")).map_err(|_| "error.store.write")?;
         std::fs::write(j.private().join(path), log).map_err(|_| "error.store.write")?;
         self.finish_proof(j, task, proof, &receipt, id, observation)
@@ -1082,5 +1088,41 @@ impl RouteV0 {
             }
         }
         j.put(&j.records().join("route-v0.json"), self).map_err(|e| e.key())
+    }
+}
+
+#[cfg(test)]
+mod proof_log_tests {
+    use super::*;
+    use crate::project::proof::{Definition, ProofSet};
+
+    /// The receipt's evidence is checked by the journal against the stored log: it must hash what was stored.
+    #[tokio::test]
+    async fn a_proof_receipt_hashes_the_log_that_is_stored() {
+        let (repo, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        // The journal opens every folder without following links, and macOS keeps temp folders behind one (/var).
+        let data_path = data.path().canonicalize().unwrap();
+        let j = super::super::store::Journal::open(repo.path(), &data_path, "m1").unwrap();
+        let mut runner = Runner::create(&j, crate::project::Mission::new("m1", "p1", "repo", "Fix", &"1".repeat(40), 3, 1)).unwrap();
+        runner.mission.state = MissionState::Running;
+        runner.save(&j).unwrap();
+        let definition = Definition {
+            id: "rust".into(),
+            version: 1,
+            program: "/native/cargo".into(),
+            argv: vec!["t".into()],
+            checks: vec!["C1".into()],
+            toolchain: "rust-1".into(),
+            dependencies: "deps-1".into(),
+            environment: std::collections::BTreeMap::new(),
+            heavy: true,
+        };
+        let mut proof = ProofSet::new("1".repeat(40), "input".into(), vec![definition], vec![]).unwrap();
+        let spawn: crate::proc::Spawner = std::sync::Arc::new(|_, _, _| Err(std::io::Error::other("no process in a unit test")));
+        let receipt = runner.run_proof(&j, "a", "rust", &mut proof, repo.path(), &spawn).await.unwrap();
+        let art = &receipt.artifacts[0];
+        let stored = std::fs::read_to_string(j.private().join(&art.path)).unwrap();
+        assert!(stored.starts_with("exit "), "{stored}");
+        assert!(super::super::store::verify_artifacts(j.private(), std::iter::once(art)).is_ok(), "the journal rejected the stored log");
     }
 }

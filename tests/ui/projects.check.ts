@@ -1,7 +1,7 @@
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
-import { api, type AppState, type MissionView, type Project } from '../../ui/api.ts';
+import { api, type AgentsView, type AppState, type MissionView, type Project } from '../../ui/api.ts';
 import { App } from '../../ui/App.tsx';
 import { LANGUAGES, useLanguage } from '../../ui/i18n.ts';
 import { Projects } from '../../ui/Projects.tsx';
@@ -11,16 +11,20 @@ import { check, equal, ok } from './check.ts';
 const demo: Project = { id: 'review-project', name: 'Review project', path: 'C:/fixture/review' };
 const view = (revision = 1): MissionView => ({ missionId: 'review-mission', revision, state: 'running', mode: 'normal', gitMode: 'seguro', goal: 'Review goal', tasks: [], cost: { ownMicros: null, capMicros: null, complete: false }, pace: [], decisions: [] });
 
-async function withProjects(run: (root: HTMLElement, emit: (v: MissionView) => void, change: (p: Project) => void) => Promise<void>) {
+let agentsEmit: (v: AgentsView) => void = () => {};
+async function withProjects(run: (root: HTMLElement, emit: (v: MissionView) => void, change: (p: Project) => void) => Promise<void>, before?: () => void) {
   const originals = { ...api };
   useLanguage('en');
   Object.assign(api, { localUpdateState: async () => null });
   let listener: (v: MissionView) => void = () => {};
+  api.onAgents = async (fn) => { agentsEmit = fn; return () => {}; };
   api.projectEnroll = async (id) => ({ projectId: id, repo: demo.path, base: 'base', mode: 'seguro', revision: 1, selfUpdate: false });
   api.projectGrant = async () => ({ repo: demo.path, mode: 'seguro', revision: 1, grantedAt: 1, selfUpdate: false });
+  api.projectProof = async () => ({ commands: ['npm test'], declared: ['npm test'], source: 'agents', confirmed: true, changed: false });
   api.missionStart = async () => 'review-mission';
   api.missionState = async () => view();
   api.onMission = async (fn) => { listener = fn; return () => {}; };
+  before?.();
   const root = document.createElement('div');
   root.style.cssText = 'position:fixed;inset:0';
   root.dataset.motion = 'none';
@@ -460,3 +464,125 @@ check('projects: goal text persists across refusal or failed start', () => {
   saveGoal(pid, '');
   equal(recallGoal(pid), '', 'clearing goal removes it');
 });
+
+// R137: a mission starts only on checks the owner confirmed; the screen shows what runs, the step, the report and what needs the owner.
+const declared = ['npm run lint', 'cargo t'];
+const proofView = (confirmed: boolean, commands = declared) => ({ commands, declared, source: 'agents' as const, confirmed, changed: false, setup: ['npm ci', 'cargo fetch'] });
+const click = async (el: Element | null | undefined) => { (el as HTMLElement).click(); await settle(); };
+
+check('projects: an unconfirmed proof disables the start, and confirming it lists the commands and lets the mission start', () => {
+  let confirmed = false;
+  let started = 0;
+  return withProjects(async (root) => {
+  const field = root.querySelector<HTMLTextAreaElement>('#mission-goal')!;
+  field.value = 'Review goal'; field.dispatchEvent(new Event('input', { bubbles: true }));
+  await settle();
+  const list = root.querySelector('[data-testid="proof"]');
+  ok(list, 'the proof section is on the start card');
+  ok(list!.textContent?.includes('npm run lint') && list!.textContent?.includes('cargo t'), 'the commands that will run are shown');
+  const setup = root.querySelector('[data-testid="proof-setup"]')?.textContent ?? '';
+  ok(setup.includes('npm ci') && setup.includes('cargo fetch') && list!.textContent?.includes('First, in the clean copy'), `the setup runs first and is shown: ${setup}`);
+  ok(root.querySelector('[data-testid="proof-needed"]'), 'the screen says the checks must be confirmed');
+  ok(root.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled, 'start is disabled while the proof is unconfirmed');
+  root.querySelector<HTMLFormElement>('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  equal(started, 0, 'an unconfirmed proof must not start a mission');
+  await click(root.querySelector('[data-testid="proof-confirm"]'));
+  ok(root.querySelector('[data-testid="proof-confirmed"]'), 'the confirmation shows');
+  ok(!root.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled, 'start is enabled once confirmed');
+  await start(root);
+  equal(started, 1, 'the confirmed project starts a mission');
+  }, () => {
+    api.projectProof = async () => proofView(confirmed);
+    api.projectProofConfirm = async (_id, commands, setup) => {
+      confirmed = true;
+      equal(commands.join('|'), declared.join('|'), 'the declared list is what gets confirmed');
+      equal(setup.join('|'), 'npm ci|cargo fetch', 'the setup list the owner saw is what gets confirmed');
+      return proofView(true, commands);
+    };
+    api.missionStart = async () => { started += 1; return 'review-mission'; };
+  });
+});
+
+check('projects: the owner edits the checks, one command per line, and confirms the edited list', () => {
+  let sent: string[] = [];
+  return withProjects(async (root) => {
+  await click(root.querySelector('[data-testid="proof-edit"]'));
+  const box = root.querySelector<HTMLTextAreaElement>('#proof-draft')!;
+  ok(box, 'the edit box opens');
+  box.value = ['cargo fmt --check', '', '  npm test  '].join(String.fromCharCode(10));
+  box.dispatchEvent(new Event('input', { bubbles: true }));
+  await click(root.querySelector('[data-testid="proof-save"]'));
+  equal(sent.join('|'), 'cargo fmt --check|npm test', 'blank lines go and lines are trimmed');
+  ok(root.querySelector('[data-testid="proof-confirmed"]'), 'the edited list is confirmed');
+  }, () => {
+    api.projectProof = async () => proofView(false);
+    api.projectProofConfirm = async (_id, commands) => { sent = commands; return proofView(true, commands); };
+  });
+});
+
+check('projects: a running mission shows its step, role, vendor and cost so far, then its report', () => withProjects(async (root, emit) => {
+  await start(root);
+  emit({
+    ...view(2),
+    cost: { ownMicros: 250_000, capMicros: 2_000_000, complete: false },
+    progress: { step: 'write', number: 4, total: 7, role: 'writer', vendor: 'claude', model: 'claude-haiku-5-5' },
+  });
+  await settle();
+  const line = root.querySelector('[data-testid="mission-progress"]')?.textContent ?? '';
+  ok(line.includes('Step 4 of 7') && line.includes('Writing the change'), `the step is shown: ${line}`);
+  ok(line.includes('Writer') && line.includes('claude'), `role and vendor are shown: ${line}`);
+  ok(line.includes('$0.25'), `the cost so far is shown: ${line}`);
+  ok(!root.querySelector('[data-testid="mission-report"]'), 'no report while it runs');
+  emit({
+    ...view(3),
+    state: 'done',
+    report: { branch: 'faber/review-mission', head: '0123456789abcdef', checks: [{ id: 'proof-1', result: 'pass' }], seconds: 125 },
+  });
+  await settle();
+  const report = root.querySelector('[data-testid="mission-report"]')?.textContent ?? '';
+  ok(report.includes('faber/review-mission'), `the report names the branch: ${report}`);
+  ok(report.includes('01234567') && !report.includes('0123456789abcdef'), 'the commit is shortened');
+  ok(report.includes('proof-1') && report.includes('passed'), `the checks are listed: ${report}`);
+  ok(report.includes('2 min 5 s'), `the duration is shown: ${report}`);
+  ok(report.includes('Your own branch was not touched'), 'the report says the owner branch is safe');
+  ok(!root.querySelector('[data-testid="mission-progress"]'), 'progress goes away when done');
+}));
+
+check('projects: a parked or blocked mission asks for the owner in the Needs you card, in English and pt-BR', () => withProjects(async (root, emit) => {
+  let resumed = 0;
+  api.missionResume = async () => { resumed += 1; return { ...view(4), state: 'running' as const }; };
+  await start(root);
+  emit({ ...view(2), state: 'blocked', reason: 'reason.proof.failed', needs: 'reason.proof.failed' });
+  await settle();
+  const card = root.querySelector('[data-testid="mission-needs"]');
+  ok(card, 'a blocked mission shows a need');
+  ok(card!.textContent?.includes('The checks failed on the finished change'), 'the reason reads as a sentence');
+  ok(root.querySelector('.needs-you'), 'it uses the Needs you region');
+  useLanguage('pt-BR');
+  await settle();
+  ok(root.querySelector('[data-testid="mission-needs"]')!.textContent?.includes('As verificações falharam'), 'the reason is hand-written in pt-BR');
+  useLanguage('en');
+  await settle();
+  await click(root.querySelector('[data-testid="mission-needs"] button'));
+  equal(resumed, 1, 'the card resumes the mission');
+}));
+
+check('projects: the check of the agents shows its time left, then an honest failure, and goes away when ready', () => withProjects(async (root) => {
+  agentsEmit({ state: 'checking', step: 2, total: 7, vendor: 'codex', estimateSeconds: 180 });
+  await settle();
+  const checking = root.querySelector('[data-testid="agents-status"]')?.textContent ?? '';
+  ok(checking.includes('Checking the agents') && checking.includes('~180 s') && checking.includes('step 2 of 7'), `the wait is shown: ${checking}`);
+  agentsEmit({ state: 'failed', step: 0, total: 7, estimateSeconds: 0, detail: 'codex-native: native write escaped workspace' });
+  await settle();
+  const failed = root.querySelector('[data-testid="agents-status"]');
+  ok(failed?.textContent?.includes('no mission was started') && failed.textContent.includes('native write escaped workspace'), 'the failure carries the probe reason');
+  equal(failed?.getAttribute('role'), 'alert');
+  useLanguage('pt-BR');
+  await settle();
+  ok(root.querySelector('[data-testid="agents-status"]')?.textContent?.includes('nenhuma missão foi iniciada'), 'the failure is hand-written in pt-BR');
+  useLanguage('en');
+  agentsEmit({ state: 'ready', step: 7, total: 7, estimateSeconds: 0 });
+  await settle();
+  ok(!root.querySelector('[data-testid="agents-status"]'), 'nothing is shown once the agents are ready');
+}));

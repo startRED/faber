@@ -54,8 +54,8 @@ const PROOF: &str = "canary-test";
 pub const REAL_CAP_MICROS: u64 = 1_110_000;
 /// What a Codex turn may reserve at most: the share of the ceiling kept for the Reviewer.
 const REVIEW_SHARE_MICROS: u64 = 310_000;
-const WRITER_MODEL: (Vendor, &str) = (Vendor::Claude, "claude-haiku-5-5");
-const REVIEWER_MODEL: (Vendor, &str) = (Vendor::Codex, "gpt-6-luna");
+pub(crate) const WRITER_MODEL: (Vendor, &str) = (Vendor::Claude, "claude-haiku-5-5");
+pub(crate) const REVIEWER_MODEL: (Vendor, &str) = (Vendor::Codex, "gpt-6-luna");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -168,6 +168,26 @@ fn prepare(work: &Path) -> Result<PathBuf, String> {
 /// in the mission clone only (R138). `heavy` gives it the time of a cold compile.
 pub fn cargo_proof(id: &str, test_args: &[&str], own: &Path, heavy: bool) -> Result<(Definition, crate::proc::Spawner), String> {
     let cargo = PathBuf::from(crate::cli::find_cli("cargo").ok_or("reason.canary.cargo")?.command);
+    let (mut environment, folders) = proof_environment(own);
+    environment.insert("CARGO_NET_OFFLINE".into(), "true".into());
+    let definition = Definition {
+        id: id.into(),
+        version: 1,
+        program: cargo,
+        argv: ["test", "--offline", "--locked"].into_iter().chain(test_args.iter().copied()).map(String::from).collect(),
+        checks: vec!["C1".into()],
+        toolchain: "rust".into(),
+        dependencies: "none".into(),
+        environment: environment.clone(),
+        heavy,
+    };
+    Ok((definition, crate::proc::isolated_spawner(environment, folders)))
+}
+
+/// The only environment a proof process gets: what a Rust or Node build needs to find its toolchain, and folders of its own
+/// under `own` outside the checkout (the build folder, a cargo home, an npm cache, a temporary folder), which the proof
+/// spawner labels writable. Nothing else of the engine's environment (tokens, keys, provider settings) passes.
+pub fn proof_environment(own: &Path) -> (BTreeMap<String, String>, Vec<PathBuf>) {
     let mut environment = BTreeMap::new();
     for name in [
         "PATH",
@@ -184,6 +204,12 @@ pub fn cargo_proof(id: &str, test_args: &[&str], own: &Path, heavy: bool) -> Res
         "LIBPATH",
         "VCINSTALLDIR",
         "VCToolsInstallDir",
+        "ComSpec",
+        "PATHEXT",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "NUMBER_OF_PROCESSORS",
+        "PROCESSOR_ARCHITECTURE",
     ] {
         if let Ok(value) = std::env::var(name) {
             environment.insert(name.to_string(), value);
@@ -202,19 +228,7 @@ pub fn cargo_proof(id: &str, test_args: &[&str], own: &Path, heavy: bool) -> Res
         environment.insert(name.into(), value);
     }
     environment.insert("CARGO_INCREMENTAL".into(), "0".into());
-    environment.insert("CARGO_NET_OFFLINE".into(), "true".into());
-    let definition = Definition {
-        id: id.into(),
-        version: 1,
-        program: cargo,
-        argv: ["test", "--offline", "--locked"].into_iter().chain(test_args.iter().copied()).map(String::from).collect(),
-        checks: vec!["C1".into()],
-        toolchain: "rust".into(),
-        dependencies: "none".into(),
-        environment: environment.clone(),
-        heavy,
-    };
-    Ok((definition, crate::proc::isolated_spawner(environment, folders.to_vec())))
+    (environment, folders.to_vec())
 }
 
 /// The one proof of the canary: the named test of the frozen crate.
@@ -228,17 +242,17 @@ fn goal() -> Result<String, String> {
     value["goal"].as_str().map(str::to_string).ok_or_else(|| "reason.canary.goal".into())
 }
 
-fn pin(vendor: Vendor, model: &str, version: &str) -> ModelPin {
+pub(crate) fn pin(vendor: Vendor, model: &str, version: &str) -> ModelPin {
     ModelPin { vendor, model: model.into(), effort: "medium".into(), cli_version: version.into() }
 }
 
-fn cli(vendor: Vendor) -> Option<String> {
+pub(crate) fn cli(vendor: Vendor) -> Option<String> {
     crate::cli::find_cli(vendor.name()).filter(|c| c.prefix.is_empty()).map(|c| c.command)
 }
 
 /// The version of a CLI the receipt admits, through the same pinned, hash-first path as a role launch: a program whose hash
 /// is not the receipt's is never asked for `--version`.
-fn cli_version(vendor: Vendor, bin: &dyn Fn() -> Option<String>) -> Result<String, String> {
+pub(crate) fn cli_version(vendor: Vendor, bin: &dyn Fn() -> Option<String>) -> Result<String, String> {
     let text = super::qualification::admitted(vendor, bin).map(|pinned| pinned.version).map_err(|_| "error.cli.missing".to_string())?;
     version_token(&text).ok_or_else(|| "error.cli.missing".to_string())
 }
@@ -370,7 +384,11 @@ pub async fn run(engine: &Engine, engine_data: &Path, work: &Path, mode: Mode) -
     let broker = Broker::open(repository.clone(), journal.clone(), &mid, REVISION, process).map_err(|e| e.key().to_string())?;
     let setup = Setup {
         pins,
-        proof: definition.clone(),
+        proofs: vec![definition.clone()],
+        expect_red: true,
+        tree: vec![],
+        notify: None,
+        stage: None,
         proof_spawn: spawn,
         sources,
         writable: vec!["src".into()],

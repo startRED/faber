@@ -70,10 +70,17 @@ pub struct Pins {
 /// Everything the product supplies; nothing in it comes from a model.
 pub struct Setup {
     pub pins: Pins,
-    /// The one trusted proof, named in the catalog, run by the engine and never described by a model.
-    pub proof: Definition,
+    /// The trusted proofs, in the order they run: the commands the project declares and its owner confirmed (R137), run
+    /// by the engine in the mission clone and never described by a model. A candidate is green when all of them pass.
+    pub proofs: Vec<Definition>,
+    /// Whether the base must fail the proofs before any patch. A canary and a harness mission have a failing test to fix;
+    /// a project's own goal usually does not, and its proof is then a regression gate, not a before and after.
+    pub expect_red: bool,
+    /// Every path the roles may be told about (the tracked files minus the refused ones), beyond the file texts in `sources`.
+    pub tree: Vec<String>,
     pub proof_spawn: Spawner,
-    /// Files the roles are shown, as (clean path, text). The roles run in an empty folder, so this is all they see.
+    /// Files the roles are shown, as (clean path, text), most useful first. The roles run in an empty folder, so this and
+    /// `tree` are all they see.
     pub sources: Vec<(String, String)>,
     /// Path prefixes the Lead may plan to write under.
     pub writable: Vec<String>,
@@ -86,6 +93,11 @@ pub struct Setup {
     pub turn_limit: Duration,
     /// A plan fixed by the product instead of a Lead turn. Only the frozen canary goal has one.
     pub plan: Option<Task>,
+    /// Called after every finished step and every stop, so the screen can show where the mission is.
+    pub notify: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// Where the setup and the proofs run: a persistent working copy of the project (see `workspace`). None runs them in the
+    /// mission's own lease worktree, as the canary does.
+    pub stage: Option<super::workspace::Stage>,
 }
 
 /// Why the coordinator stopped before the end.
@@ -177,6 +189,15 @@ impl Progress {
     }
 }
 
+/// The steps of a one-task mission, in the order the coordinator takes them.
+pub const STEPS: [&str; 7] = ["plan", "arm", "red", "write", "green", "review", "land"];
+
+/// The step a mission is on: the first one the coordinator has not marked. `None` once all are marked.
+pub fn current_step(journal: &Journal) -> Option<&'static str> {
+    let progress = journal.get::<Progress>(&journal.private().join("coordinator.json")).ok().flatten().unwrap_or_else(Progress::new);
+    STEPS.into_iter().find(|step| !progress.done.contains(*step))
+}
+
 pub struct Coordinator<R: Roles, E: Executor> {
     roles: R,
     j: Journal,
@@ -205,6 +226,43 @@ fn files_text(files: &[(String, String)]) -> String {
         .map(|(path, text)| format!("{path} ({} bytes, sha256 {}):\n{text}", text.len(), hash(text.as_bytes())))
         .collect::<Vec<_>>()
         .join("\n---\n")
+}
+
+/// Most bytes of one quote (the brief refuses a longer one) and the most quotes a kind of text may take.
+const CHUNK: usize = 7 * 1024;
+const SOURCE_CHUNKS: usize = 16;
+const TREE_CHUNKS: usize = 3;
+const FILE_CHUNKS: usize = 24;
+
+/// Cut a text into quotes of at most `CHUNK` bytes, named `<id>-1`, `<id>-2`... A text that needs more than `max` quotes
+/// is cut short and says so when `cut` allows it; otherwise it is refused, because a role must never act on a partial file.
+fn chunks(id: &str, text: &str, max: usize, cut: bool) -> Step<Vec<Verbatim>> {
+    let mut out: Vec<Verbatim> = vec![];
+    let mut rest = text;
+    while !rest.is_empty() {
+        let mut end = rest.len().min(CHUNK);
+        while !rest.is_char_boundary(end) {
+            end -= 1;
+        }
+        if out.len() == max {
+            if !cut {
+                return Err(Stop::Block("error.wire.tooBig".into()));
+            }
+            if let Some(last) = out.last_mut() {
+                let mut keep = last.text.len().min(CHUNK - 64);
+                while !last.text.is_char_boundary(keep) {
+                    keep -= 1;
+                }
+                last.text.truncate(keep);
+                last.text.push_str("\n[the rest is not shown]");
+            }
+            break;
+        }
+        let (head, tail) = rest.split_at(end);
+        out.push(Verbatim { id: format!("{id}-{}", out.len() + 1), text: head.into() });
+        rest = tail;
+    }
+    Ok(out)
 }
 
 /// Merge a recorded patch over a JSON example: objects key by key, arrays of one length element by element.
@@ -251,13 +309,14 @@ pub fn deliver(journal: &Journal, task: &str, invocation: &str, text: &str) -> R
 }
 
 /// The Lead's reply as a plan the engine accepts: exactly one Writer task, writing only where the product allows.
-pub fn accept_plan(envelope: &Envelope, writable: &[String], proof: &Definition) -> Result<Task, &'static str> {
+pub fn accept_plan(envelope: &Envelope, writable: &[String], proofs: &[Definition]) -> Result<Task, &'static str> {
     let Action::Plan(draft) = &envelope.action else { return Err("error.wire.role") };
     let [one] = draft.tasks.as_slice() else { return Err("reason.plan.oneTask") };
     if one.kind != TaskKind::Writer || one.id == LEAD || one.id == REVIEWER || one.writes.is_empty() || one.writes.len() > 8 {
         return Err("reason.plan.oneTask");
     }
-    if !one.proofs.is_empty() && one.proofs != [proof.id.clone()] {
+    let ids: Vec<String> = proofs.iter().map(|p| p.id.clone()).collect();
+    if !one.proofs.is_empty() && one.proofs != ids {
         return Err("reason.proof.definition");
     }
     for path in &one.writes {
@@ -267,8 +326,8 @@ pub fn accept_plan(envelope: &Envelope, writable: &[String], proof: &Definition)
         }
     }
     let mut task = one.to_task();
-    task.proofs = vec![proof.id.clone()];
-    task.checks = proof.checks.clone();
+    task.proofs = ids;
+    task.checks = proofs.iter().flat_map(|p| p.checks.clone()).collect();
     task.paths = one.writes.clone();
     Ok(task)
 }
@@ -312,7 +371,13 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
         }
         self.p.done.insert(step.into());
         self.save()?;
+        self.tell();
         if self.crash_after == Some(self.marks) { Err(Stop::Crash) } else { Ok(()) }
+    }
+    fn tell(&self) {
+        if let Some(notify) = &self.setup.notify {
+            notify();
+        }
     }
     /// A git effect with an intent and no receipt has an unknown outcome. Whatever step comes next, the mission parks until
     /// a person reconciles it: nothing is written, proven or landed on top of it, and nothing is repeated.
@@ -363,6 +428,7 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
             let _ = runner.pause(&self.j);
         }
         self.roles.pause(self.j.mission_id());
+        self.tell();
     }
 
     async fn run(&mut self) -> Step<String> {
@@ -564,13 +630,26 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
         let runner = self.runner()?;
         let pin = self.contract_pin()?;
         let mut brief = Brief::new(task, 1, role, goal, &runner.mission.base, pin);
-        brief.scope = self.setup.sources.iter().map(|(path, _)| path.clone()).collect();
-        brief.sources = brief.scope.clone();
+        // The folders the plan may write under come first: a Writer's paths must sit inside the scope.
+        let shown = self.setup.sources.iter().map(|(path, _)| path.clone());
+        brief.scope = self.setup.writable.iter().cloned().chain(shown.clone()).take(super::wire::MAX_PATHS).collect();
+        brief.sources = shown.take(super::wire::MAX_PATHS).collect();
         brief.writes = writes.to_vec();
         brief.lease = lease;
         brief.quotes = quotes;
         brief.stop = "Stop after the single envelope.".into();
         Ok(brief)
+    }
+
+    /// The quotes every role gets: the goal, the project's files and path list, what the role needs besides, and the
+    /// format of its reply.
+    fn quotes(&self, goal: &str, extra: Vec<Verbatim>, format: String) -> Step<Vec<Verbatim>> {
+        let mut quotes = vec![Verbatim { id: "goal".into(), text: goal.into() }];
+        quotes.extend(chunks("files", &files_text(&self.setup.sources), SOURCE_CHUNKS, true)?);
+        quotes.extend(chunks("tree", &self.setup.tree.join("\n"), TREE_CHUNKS, true)?);
+        quotes.extend(extra);
+        quotes.push(Verbatim { id: "format".into(), text: format });
+        Ok(quotes)
     }
 
     fn contract_pin(&self) -> Step<ContractPin> {
@@ -602,20 +681,14 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
             "tasks": [{"id": "writer", "title": "A short title", "kind": "writer", "writes": ["path/under/an/allowed/folder"]}]
         }});
         let allowed = self.setup.writable.join(", ");
-        let quotes = vec![
-            Verbatim { id: "goal".into(), text: runner.mission.goal.clone() },
-            Verbatim { id: "files".into(), text: files_text(&self.setup.sources) },
-            Verbatim {
-                id: "format".into(),
-                text: format!(
-                    "{ENVELOPE_RULES} Plan exactly one writer task. Its writes list only paths under: {allowed}. Do not name a proof: the engine runs its own.\n{}",
-                    example(LEAD, &runner.mission.base, &pin.digest, 0, plan_shape, None)
-                ),
-            },
-        ];
+        let format = format!(
+            "{ENVELOPE_RULES} Plan exactly one writer task. Its writes list only paths under: {allowed}. Do not name a proof: the engine runs its own. The path list names every tracked file, so a path you name may be one whose text is not shown.\n{}",
+            example(LEAD, &runner.mission.base, &pin.digest, 0, plan_shape, None)
+        );
+        let quotes = self.quotes(&runner.mission.goal, vec![], format)?;
         let brief = self.brief(Role::Lead, LEAD, "Plan the mission as one writer task", &[], None, quotes)?;
         let (_, reply) = self.turn(Role::Lead, Kind::Lead, brief, None).await?;
-        let task = accept_plan(&reply, &self.setup.writable, &self.setup.proof)?;
+        let task = accept_plan(&reply, &self.setup.writable, &self.setup.proofs)?;
         self.j.save_plan(&Plan::new(&runner.mission.id, 1, vec![task.clone()]))?;
         self.mark("plan")?;
         Ok(task)
@@ -654,7 +727,7 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
     }
 
     fn proof_set(&self, tree: &str, input: &str, paths: Vec<String>) -> Step<ProofSet> {
-        Ok(ProofSet::new(tree.into(), input.into(), vec![self.setup.proof.clone()], paths)?)
+        Ok(ProofSet::new(tree.into(), input.into(), self.setup.proofs.clone(), paths)?)
     }
 
     /// The engine proves the base red before any patch: a proof that already passes proves nothing.
@@ -662,15 +735,64 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
         if self.done("red") {
             return Ok(());
         }
+        if !self.setup.expect_red {
+            return self.mark("red");
+        }
         let mut runner = self.runner()?;
         let base = runner.mission.base.clone();
         let mut red = self.proof_set(&base, "red", task.writes.clone())?;
-        let id = self.setup.proof.id.clone();
-        runner.run_proof(&self.j, &task.id, &id, &mut red, root, &self.setup.proof_spawn).await?;
+        let ground = self.ground(root, false).await?;
+        self.prove(&mut runner, &task.id, &mut red, &ground).await?;
         if red.verified() {
             return Err(Stop::Block("reason.proof.notRed".into()));
         }
         self.mark("red")
+    }
+
+    /// The folder the setup and the proofs run in: the mission's lease worktree, or the project's persistent working copy
+    /// brought to the same tree (its installed packages and build output are kept), with the setup run there first.
+    async fn ground(&self, root: &std::path::Path, candidate: bool) -> Step<std::path::PathBuf> {
+        let Some(stage) = self.setup.stage.clone() else { return Ok(root.to_path_buf()) };
+        let base = self.runner()?.mission.base.clone();
+        let from = root.to_path_buf();
+        let space = stage.workspace.clone();
+        let repo = stage.repo_root.clone();
+        let synced = tokio::task::spawn_blocking(move || {
+            let mut git = super::git::Process::find().map_err(|_| "reason.workspace.git")?;
+            space.sync(&mut git, &repo, &base, &from)
+        })
+        .await
+        .map_err(|_| Stop::Block("reason.workspace.git".into()))?;
+        synced.map_err(|key| Stop::Block(key.into()))?;
+        if candidate {
+            // From here the candidate's setup and proofs leave state in the copy; it is trusted again only if the candidate lands.
+            stage.workspace.taint().map_err(|key| Stop::Block(key.into()))?;
+        }
+        let dir = stage.workspace.dir().to_path_buf();
+        for definition in &stage.setup {
+            if stage.workspace.setup_current(definition) {
+                continue;
+            }
+            let seen = super::proof::execute(definition, &dir, &self.setup.proof_spawn, "setup".into()).await;
+            if seen.exit != Some(0) {
+                stage.workspace.setup_forget(definition);
+                return Err(Stop::Block("reason.setup.failed".into()));
+            }
+            stage.workspace.setup_done(definition);
+        }
+        Ok(dir)
+    }
+
+    /// Run the proofs in order on the tree in `root`, ending at the first one that does not pass: a candidate is green only
+    /// when every proof passed, and a base is red as soon as one fails.
+    async fn prove(&self, runner: &mut Runner, task: &str, set: &mut ProofSet, root: &std::path::Path) -> Step<()> {
+        for definition in self.setup.proofs.clone() {
+            let receipt = runner.run_proof(&self.j, task, &definition.id, set, root, &self.setup.proof_spawn).await?;
+            if receipt.checks.iter().any(|c| c.result != super::wire::CheckResult::Pass) {
+                break;
+            }
+        }
+        Ok(())
     }
 
     fn applied(root: &std::path::Path, op: &FileOp) -> bool {
@@ -696,19 +818,12 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
         let shape = serde_json::json!({"patch": {"ops": [{"write": {
             "path": task.writes[0], "expect": existing.first().map(|p| hash(std::fs::read(root.join(p)).unwrap_or_default().as_slice())),
             "content": "the complete new text of the file"}}]}});
-        let quotes = vec![
-            Verbatim { id: "goal".into(), text: runner.mission.goal.clone() },
-            Verbatim { id: "files".into(), text: files_text(&self.setup.sources) },
-            Verbatim { id: "targets".into(), text: files_text(&current) },
-            Verbatim {
-                id: "format".into(),
-                text: format!(
-                    "{ENVELOPE_RULES} Write only these paths: {}. A file that exists is replaced whole and its expect is the sha256 of its current text shown above; a new file has expect null.\n{}",
-                    task.writes.join(", "),
-                    example(&task.id, &base, &pin.digest, lease.generation, shape, None)
-                ),
-            },
-        ];
+        let format = format!(
+            "{ENVELOPE_RULES} Write only these paths: {}. A file that exists is replaced whole and its expect is the sha256 of its current text shown above; a new file has expect null.\n{}",
+            task.writes.join(", "),
+            example(&task.id, &base, &pin.digest, lease.generation, shape, None)
+        );
+        let quotes = self.quotes(&runner.mission.goal, chunks("targets", &files_text(&current), FILE_CHUNKS, false)?, format)?;
         let brief = self.brief(Role::Writer, &task.id, &task.title, &task.writes, Some(lease.generation), quotes)?;
         let (_, reply) = self.turn(Role::Writer, Kind::Worker, brief, Some(lease)).await?;
         let Action::Patch(patch) = &reply.action else { return Err(Stop::Block("error.wire.role".into())) };
@@ -739,8 +854,8 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
             let tree = self.broker()?.compose_tree(grant, lease, &paths)?;
             let input = runner.workers.get(&task.id).ok_or_else(|| Stop::Block("error.wire.stale".into()))?.digest();
             let mut proof = self.proof_set(&tree, &input, paths.clone())?;
-            let id = self.setup.proof.id.clone();
-            runner.run_proof(&self.j, &task.id, &id, &mut proof, root, &self.setup.proof_spawn).await?;
+            let ground = self.ground(root, true).await?;
+            self.prove(&mut runner, &task.id, &mut proof, &ground).await?;
             if !proof.verified() {
                 return Err(Stop::Block("reason.proof.failed".into()));
             }
@@ -752,7 +867,7 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
                 self.setup.pins.writer.vendor,
                 input,
                 paths,
-                vec![self.setup.proof.clone()],
+                self.setup.proofs.clone(),
             )?;
             runner.queue.enqueue(candidate)?;
             runner.queue.prove(&task.id, proof)?;
@@ -776,25 +891,16 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
         let verdict = serde_json::json!({"complete": {
             "summary": "One sentence on whether the candidate meets the goal.", "verdict": "pass", "next": "land",
             "receipt": receipt, "findings": []}});
-        let quotes = vec![
-            Verbatim { id: "goal".into(), text: runner.mission.goal.clone() },
-            Verbatim { id: "files".into(), text: files_text(&self.setup.sources) },
-            Verbatim {
-                id: "candidate".into(),
-                text: format!(
-                    "{}\nThe engine ran the proof {} on this exact tree and it exited 0. Engine receipt id: {receipt}.",
-                    files_text(&changed),
-                    self.setup.proof.id
-                ),
-            },
-            Verbatim {
-                id: "format".into(),
-                text: format!(
-                    "{ENVELOPE_RULES} Keep lease 0, keep ping \"DoneReady\", keep next and keep the receipt id. Change only the summary and, if you find a defect that makes the candidate wrong, verdict (\"block\") and findings (one short line each).\n{}",
-                    example(REVIEWER, &runner.mission.base, &pin.digest, 0, verdict, Some("DoneReady"))
-                ),
-            },
-        ];
+        let proved = self.setup.proofs.iter().map(|p| p.id.as_str()).collect::<Vec<_>>().join(", ");
+        let evidence = format!(
+            "{}\nThe engine ran the proof {proved} on this exact tree and every one exited 0. Engine receipt id: {receipt}.",
+            files_text(&changed)
+        );
+        let format = format!(
+            "{ENVELOPE_RULES} Keep lease 0, keep ping \"DoneReady\", keep next and keep the receipt id. Change only the summary and, if you find a defect that makes the candidate wrong, verdict (\"block\") and findings (one short line each).\n{}",
+            example(REVIEWER, &runner.mission.base, &pin.digest, 0, verdict, Some("DoneReady"))
+        );
+        let quotes = self.quotes(&runner.mission.goal, chunks("candidate", &evidence, FILE_CHUNKS, false)?, format)?;
         let brief = self.brief(Role::Reviewer, REVIEWER, "Review the candidate against the goal", &[], None, quotes)?;
         let (inv, reply) = self.turn(Role::Reviewer, Kind::Review, brief, None).await?;
         let Action::Complete(done) = &reply.action else { return Err(Stop::Block("error.wire.role".into())) };
@@ -831,6 +937,9 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
         let broker = self.broker()?;
         let head = runner.land(broker, &task.id, &lease, grant, &task.title, termination, |_| Ok(()))?;
         self.mark("land")?;
+        if let Some(stage) = &self.setup.stage {
+            stage.workspace.release(&head);
+        }
         if let Some(broker) = self.broker.take() {
             broker.finish()?;
         }
@@ -937,7 +1046,7 @@ mod tests {
             None,
         );
         let envelope = Envelope::parse(&plan, &expect(LEAD, 0), Role::Lead).unwrap();
-        let task = accept_plan(&envelope, &["src".into()], &proof()).unwrap();
+        let task = accept_plan(&envelope, &["src".into()], &[proof()]).unwrap();
         assert_eq!(
             (task.id.as_str(), task.proofs.clone(), task.checks.clone()),
             ("writer", vec!["node-check".to_string()], vec!["C1".to_string()])
@@ -962,6 +1071,21 @@ mod tests {
         Envelope::parse(&verdict, &expect(REVIEWER, 0), Role::Reviewer).unwrap();
     }
 
+    #[test]
+    fn long_text_becomes_quotes_the_brief_accepts_and_a_file_to_change_is_never_cut() {
+        let text = "é".repeat(10_000);
+        let quotes = chunks("files", &text, 16, true).unwrap();
+        assert!(quotes.len() > 1 && quotes.iter().all(|q| q.text.len() <= CHUNK));
+        assert_eq!(quotes.iter().map(|q| q.text.as_str()).collect::<String>(), text, "nothing lost, nothing split inside a letter");
+        assert_eq!(quotes[1].id, "files-2");
+        let long = "x".repeat(CHUNK * 3 + 1);
+        let cut = chunks("tree", &long, 3, true).unwrap();
+        assert_eq!(cut.len(), 3);
+        assert!(cut[2].text.ends_with("[the rest is not shown]") && cut[2].text.len() <= CHUNK);
+        assert_eq!(chunks("targets", &long, 3, false), Err(Stop::Block("error.wire.tooBig".into())));
+        assert!(chunks("none", "", 3, false).unwrap().is_empty());
+    }
+
     fn plan_with(tasks: serde_json::Value) -> Envelope {
         let text = example(LEAD, BASE, DIGEST, 0, serde_json::json!({"plan": {"summary": "s", "acceptance": "a", "tasks": tasks}}), None);
         Envelope::parse(&text, &expect(LEAD, 0), Role::Lead).unwrap()
@@ -975,20 +1099,20 @@ mod tests {
             task.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
             plan_with(serde_json::json!([task]))
         };
-        assert!(accept_plan(&one(serde_json::json!({})), &writable, &proof()).is_ok());
-        assert!(accept_plan(&one(serde_json::json!({"proofs": ["node-check"]})), &writable, &proof()).is_ok());
-        assert_eq!(accept_plan(&one(serde_json::json!({"proofs": ["rm-rf"]})), &writable, &proof()), Err("reason.proof.definition"));
-        assert_eq!(accept_plan(&one(serde_json::json!({"writes": ["other/a.js"]})), &writable, &proof()), Err("error.wire.path"));
-        assert_eq!(accept_plan(&one(serde_json::json!({"id": "reviewer"})), &writable, &proof()), Err("reason.plan.oneTask"));
+        assert!(accept_plan(&one(serde_json::json!({})), &writable, &[proof()]).is_ok());
+        assert!(accept_plan(&one(serde_json::json!({"proofs": ["node-check"]})), &writable, &[proof()]).is_ok());
+        assert_eq!(accept_plan(&one(serde_json::json!({"proofs": ["rm-rf"]})), &writable, &[proof()]), Err("reason.proof.definition"));
+        assert_eq!(accept_plan(&one(serde_json::json!({"writes": ["other/a.js"]})), &writable, &[proof()]), Err("error.wire.path"));
+        assert_eq!(accept_plan(&one(serde_json::json!({"id": "reviewer"})), &writable, &[proof()]), Err("reason.plan.oneTask"));
         assert_eq!(
-            accept_plan(&one(serde_json::json!({"kind": "research", "writes": []})), &writable, &proof()),
+            accept_plan(&one(serde_json::json!({"kind": "research", "writes": []})), &writable, &[proof()]),
             Err("reason.plan.oneTask")
         );
         let two = plan_with(serde_json::json!([
             {"id": "writer", "title": "t", "kind": "writer", "writes": ["src/a.js"]},
             {"id": "second", "title": "t", "kind": "writer", "writes": ["src/b.js"]}
         ]));
-        assert_eq!(accept_plan(&two, &writable, &proof()), Err("reason.plan.oneTask"));
+        assert_eq!(accept_plan(&two, &writable, &[proof()]), Err("reason.plan.oneTask"));
         let patch = example(
             "writer",
             BASE,
@@ -998,7 +1122,7 @@ mod tests {
             None,
         );
         let patch = Envelope::parse(&patch, &expect("writer", 2), Role::Writer).unwrap();
-        assert_eq!(accept_plan(&patch, &writable, &proof()), Err("error.wire.role"));
+        assert_eq!(accept_plan(&patch, &writable, &[proof()]), Err("error.wire.role"));
     }
 
     #[test]

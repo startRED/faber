@@ -79,8 +79,8 @@ fn commands(ctx: &mut Ctx) -> Result {
         "reason.grant.mode",
     )?;
     refused(&mut app.page, "mission_start", json!({"projectId":"demo","goal":""}), "error.wire.malformed")?;
-    refused(&mut app.page, "mission_start", json!({"projectId":"demo","goal":"A real goal"}), "reason.project.restrictionsUnproven")?;
-    refused(&mut app.page, "mission_resume", json!({"missionId":"screen_mission"}), "reason.project.restrictionsUnproven")?;
+    refused(&mut app.page, "mission_start", json!({"projectId":"demo","goal":"A real goal"}), "reason.proof.unconfirmed")?;
+    refused(&mut app.page, "mission_resume", json!({"missionId":"screen_mission"}), "reason.proof.unconfirmed")?;
     refused(
         &mut app.page,
         "mission_answer",
@@ -148,7 +148,7 @@ fn controls(ctx: &mut Ctx) -> Result {
     ensure(faber_engine::project::budget::Budget::load(&ledger).map_err(str::to_string)?.grants["screen_mission"].paused, || {
         "Stop did not pause the budget".into()
     })?;
-    refused(&mut app.page, "mission_resume", json!({"missionId":"screen_mission"}), "reason.project.restrictionsUnproven")?;
+    refused(&mut app.page, "mission_resume", json!({"missionId":"screen_mission"}), "reason.proof.unconfirmed")?;
     ensure(ctx.records()?.is_empty(), || "a refused role reached a CLI".into())?;
     Ok(())
 }

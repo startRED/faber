@@ -146,7 +146,10 @@ impl Record for SheetRecord {
     }
 }
 
-fn verify_artifacts<'a>(root: &Path, artifacts: impl IntoIterator<Item = &'a super::wire::ArtifactRef>) -> Result<(), JournalError> {
+pub(crate) fn verify_artifacts<'a>(
+    root: &Path,
+    artifacts: impl IntoIterator<Item = &'a super::wire::ArtifactRef>,
+) -> Result<(), JournalError> {
     for art in artifacts {
         art.validate().map_err(|_| JournalError::Mismatch)?;
         super::kit::delivery::scoped_path(&art.path).map_err(|_| JournalError::Mismatch)?;

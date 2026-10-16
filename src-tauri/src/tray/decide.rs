@@ -246,6 +246,16 @@ impl Watch {
                 }
             }
         }
+        // A mission the coordinator parked or blocked is waiting for the person too (R92): one notice per mission and reason.
+        if let Some(reason) = &view.needs {
+            mission_needs += 1;
+            // The receipt file only holds plain ids, so the reason's dots become dashes.
+            let id: String =
+                format!("needs-{}", reason.replace('.', "-")).chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').take(64).collect();
+            if self.seen_decisions.insert((view.mission_id.clone(), id)) && !window_focused {
+                notices.push(view.goal.clone());
+            }
+        }
         let counts = Counts { running: usize::from(matches!(view.state, MissionState::Running)), needs_you: mission_needs };
         self.missions.insert(view.mission_id.clone(), (view.revision, counts));
         Some(Update { counts: self.combined_counts(), notices, parked_notices: vec![] })
@@ -307,6 +317,26 @@ mod tests {
         assert!(restarted.take_mission(&view, false).unwrap().notices.is_empty());
         assert_eq!(decode_seen(b"["), Err("error.store.corrupt"));
         assert!(decode_seen(br#"[["../mission", "choice"]]"#).is_err());
+    }
+
+    #[test]
+    fn a_blocked_or_parked_mission_needs_you_once_per_reason() {
+        let mut watch = Watch::default();
+        let mut view: MissionView = serde_json::from_str(faber_engine::project::wire::MISSION_EXAMPLE).unwrap();
+        view.state = MissionState::Blocked;
+        view.needs = Some("reason.queue.review".into());
+        let first = watch.take_mission(&view, false).unwrap();
+        assert_eq!((first.counts.needs_you, first.notices.len()), (1, 1));
+        view.revision += 1;
+        let again = watch.take_mission(&view, false).unwrap();
+        assert_eq!((again.counts.needs_you, again.notices.len()), (1, 0), "the same reason does not notify twice");
+        view.revision += 1;
+        view.needs = Some("reason.proof.failed".into());
+        assert_eq!(watch.take_mission(&view, true).unwrap().notices.len(), 0, "a focused window gets no notice");
+        view.revision += 1;
+        view.needs = None;
+        view.state = MissionState::Paused;
+        assert_eq!(watch.take_mission(&view, false).unwrap().counts.needs_you, 0, "a plain wait is not a need");
     }
 
     #[test]

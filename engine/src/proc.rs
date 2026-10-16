@@ -378,6 +378,73 @@ impl Containment {
     }
 }
 
+impl Containment {
+    /// Ends every process of the job now. Closing the job does the same, but only asks: this is followed by `active`.
+    fn end(&self) {
+        #[cfg(windows)]
+        if let Some(job) = self.job.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            let _ = faber_winproc::job_terminate(job.handle());
+        }
+    }
+
+    /// How many processes of the job are still running; a job that cannot be asked counts as busy.
+    fn active(&self) -> u32 {
+        #[cfg(windows)]
+        {
+            self.job
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .as_ref()
+                .map_or(0, |job| faber_winproc::job_active_processes(job.handle()).unwrap_or(1))
+        }
+        #[cfg(not(windows))]
+        {
+            0
+        }
+    }
+}
+
+/// Jobs whose processes were still alive when their wait ran out. The next use of a folder they could write in checks them.
+static LINGERING: Mutex<Vec<Containment>> = Mutex::new(Vec::new());
+const SETTLE: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Ends a job's processes and waits until it reports none left, for about ten seconds. A job that is not empty by then is
+/// kept (see `jobs_quiet`) and `false` is returned: the caller fails closed.
+pub(crate) async fn settle(contained: Option<Containment>) -> bool {
+    let Some(job) = contained else { return true };
+    job.end();
+    let until = Instant::now() + SETTLE;
+    while job.active() > 0 {
+        if Instant::now() >= until {
+            LINGERING.lock().unwrap_or_else(|e| e.into_inner()).push(job);
+            return false;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    // The job counts no process, but Windows closes the handles of an ended process a moment later (files it held open).
+    #[cfg(windows)]
+    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    true
+}
+
+/// Whether no job that `settle` gave up on has a process left. Asked before Faber touches a folder a proof could write in;
+/// it waits (blocking, up to ten seconds) for the stragglers to go.
+pub fn jobs_quiet() -> bool {
+    let until = Instant::now() + SETTLE;
+    loop {
+        let mut left = LINGERING.lock().unwrap_or_else(|e| e.into_inner());
+        left.retain(|job| job.active() > 0);
+        if left.is_empty() {
+            return true;
+        }
+        drop(left);
+        if Instant::now() >= until {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
 #[cfg(windows)]
 impl Drop for Containment {
     fn drop(&mut self) {
@@ -462,8 +529,22 @@ fn join_job(_child: &Child) -> io::Result<Containment> {
 /// Ends a process and everything it started, then closes its input. The processes go first: a CLI that quits when its input
 /// closes would otherwise be gone before the tree could be found, and its workers would keep running.
 pub(crate) async fn stop(stdin: &mut (dyn AsyncWrite + Send + Unpin), child: &mut Option<Child>, contained: &mut Option<Containment>) {
-    // Closing the last handle of the job ends every process in it.
-    let jobbed = contained.take().is_some();
+    // Dropping the kept job closes it; on other systems there is nothing to close.
+    let _ = stop_keeping(stdin, child, contained).await;
+}
+
+/// `stop`, but the job is handed back after its processes were told to end, so the caller can wait for them (`settle`).
+pub(crate) async fn stop_keeping(
+    stdin: &mut (dyn AsyncWrite + Send + Unpin),
+    child: &mut Option<Child>,
+    contained: &mut Option<Containment>,
+) -> Option<Containment> {
+    // Ending the job ends every process in it.
+    let kept = contained.take();
+    if let Some(job) = &kept {
+        job.end();
+    }
+    let jobbed = kept.is_some();
     if let Some(child) = child {
         if !jobbed {
             kill_tree(child.id()).await;
@@ -471,6 +552,7 @@ pub(crate) async fn stop(stdin: &mut (dyn AsyncWrite + Send + Unpin), child: &mu
         let _ = child.start_kill();
     }
     let _ = stdin.shutdown().await;
+    kept
 }
 
 /// Fallback for a process that is in no job (a test double, or off Windows). Killing only the CLI leaves a command it started (a build, a script)

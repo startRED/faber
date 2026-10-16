@@ -512,7 +512,7 @@ fn plain(real: PathBuf) -> PathBuf {
     if std::fs::canonicalize(&stripped).is_ok_and(|again| again == real) { stripped } else { real }
 }
 
-fn secret(path: &Path, reading: bool) -> bool {
+pub(crate) fn secret(path: &Path, reading: bool) -> bool {
     let names: Vec<String> =
         path.components().map(|p| p.as_os_str().to_string_lossy().trim_end_matches(['.', ' ']).to_ascii_lowercase()).collect();
     let Some(name) = names.last() else { return true };

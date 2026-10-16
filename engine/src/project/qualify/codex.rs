@@ -1,4 +1,6 @@
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(any(windows, test))]
+use serde_json::json;
 use std::io;
 #[cfg(windows)]
 use std::path::Path;
@@ -135,10 +137,17 @@ fn effective_policy(thread: &Value, cwd: &str) -> io::Result<()> {
     {
         return Err(io::Error::other("role workspace or thread identity not acknowledged"));
     }
-    if thread["approvalPolicy"] != "on-request"
+    // Roles open with the isolated permission profile: the CLI reports it as a workspace sandbox with no extra writable
+    // root, no network and no temporary folder, and never asks. Whether a role can write is the profile's work (read-only
+    // for every role but the Writer), and the native probes below prove it; this check only refuses any other shape.
+    let sandbox = &thread["sandbox"];
+    if thread["approvalPolicy"] != "never"
         || thread["approvalsReviewer"] != "user"
-        || thread["sandbox"]["type"] != "readOnly"
-        || thread["sandbox"]["networkAccess"] != false
+        || sandbox["type"] != "workspaceWrite"
+        || sandbox["networkAccess"] != false
+        || sandbox["writableRoots"].as_array().is_none_or(|roots| !roots.is_empty())
+        || sandbox["excludeSlashTmp"] != true
+        || sandbox["excludeTmpdirEnvVar"] != true
     {
         return Err(io::Error::other("role containment policy not acknowledged"));
     }
@@ -150,7 +159,7 @@ fn effective_policy(thread: &Value, cwd: &str) -> io::Result<()> {
 }
 
 #[cfg(windows)]
-async fn packet(p: &mut faber_engine::proc::Proc, value: Value) -> io::Result<()> {
+async fn packet(p: &mut crate::proc::Proc, value: Value) -> io::Result<()> {
     tokio::time::timeout(Duration::from_secs(2), async {
         p.stdin.write_all(format!("{value}\n").as_bytes()).await?;
         p.stdin.flush().await
@@ -183,8 +192,8 @@ async fn reply(lines: &mut tokio::io::Lines<BufReader<Box<dyn tokio::io::AsyncRe
 /// Observe installed role controls; the name-only configuration reply is never retained.
 #[cfg(windows)]
 pub async fn run(data: &Path) -> io::Result<()> {
-    use faber_engine::budget::Billing;
-    use faber_engine::project::Role;
+    use crate::budget::Billing;
+    use crate::project::Role;
     use std::io::Write;
     let evidence = data.join("live-denial.json");
     let mut receipt = std::fs::OpenOptions::new().create_new(true).write(true).open(&evidence)?;
@@ -208,11 +217,11 @@ pub async fn run(data: &Path) -> io::Result<()> {
     if tools {
         std::fs::write(&inside, "baseline\n")?;
     }
-    let cli = faber_engine::cli::find_cli("codex").ok_or_else(|| io::Error::other("CLI unavailable"))?;
+    let cli = crate::cli::find_cli("codex").ok_or_else(|| io::Error::other("CLI unavailable"))?;
     let identity = super::fingerprint(Path::new(&cli.command))?;
-    faber_engine::codex::prepare_project_codex_catalog()?;
-    let args: Vec<_> = cli.prefix.iter().cloned().chain(faber_engine::codex::project_codex_args(true)).collect();
-    let mut p = faber_engine::proc::real_spawner()(&cli.command, &args, &work)?;
+    crate::codex::prepare_project_codex_catalog()?;
+    let args: Vec<_> = cli.prefix.iter().cloned().chain(crate::codex::project_codex_args(true)).collect();
+    let mut p = crate::proc::real_spawner()(&cli.command, &args, &work)?;
     let diagnostics = p.stderr.take().map(|stderr| {
         tokio::spawn(async move {
             let mut bytes = Vec::new();
@@ -250,17 +259,17 @@ pub async fn run(data: &Path) -> io::Result<()> {
         packet(&mut p,json!({"method":"initialized"})).await?;
         packet(&mut p,json!({"id":2,"method":"account/read","params":{"refreshToken":false}})).await?;
         let account = reply(&mut lines,2).await?;
-        let signals = faber_engine::signals::codex_account(&json!({"params":{"authMode":account["account"]["type"],"planType":account["account"]["planType"]}}));
+        let signals = crate::signals::codex_account(&json!({"params":{"authMode":account["account"]["type"],"planType":account["account"]["planType"]}}));
         row["billing"] = json!(if signals.billing == Some(Billing::Subscription) { "subscription" } else { "unknownOrPaid" });
         if signals.billing != Some(Billing::Subscription) { return Err(io::Error::other("billing unknown or paid")); }
         packet(&mut p,json!({"id":3,"method":"account/rateLimits/read"})).await?;
         let limits = reply(&mut lines,3).await?;
-        let signals = faber_engine::signals::codex_signals(&json!({"params":{"rateLimits":limits["rateLimits"]}}));
+        let signals = crate::signals::codex_signals(&json!({"params":{"rateLimits":limits["rateLimits"]}}));
         row["paidFallback"] = json!(signals.paid_fallback);
         row["quota"] = json!({"primary":limits["rateLimits"]["primary"],"secondary":limits["rateLimits"]["secondary"]});
         if signals.paid_fallback != Some(false) { return Err(io::Error::other("credit fallback not disabled")); }
-        let (_,mut params) = faber_engine::codex::project_thread_params(&faber_engine::codex::CodexThread {
-            cwd:work.clone(),model:Some("gpt-6-luna".into()),effort:Some("low".into()),resume:None,instructions:None,user_name:None,permissions:faber_engine::model::Permissions::Isolated
+        let (_,mut params) = crate::codex::project_thread_params(&crate::codex::CodexThread {
+            cwd:work.clone(),model:Some("gpt-6-luna".into()),effort:Some("low".into()),resume:None,instructions:None,user_name:None,permissions:crate::model::Permissions::Isolated
         },Role::Writer).map_err(|_|io::Error::other("invalid invocation"))?;
         packet(&mut p,json!({"id":9,"method":"config/read","params":{"includeLayers":false,"cwd":work}})).await?;
         tokio::time::timeout(Duration::from_secs(15),async {
@@ -270,7 +279,7 @@ pub async fn run(data: &Path) -> io::Result<()> {
                 if line.len()>4*1024*1024 {return Err(io::Error::other("oversized exposure reply"));}
                 let header:Header=serde_json::from_str(&line)?;
                 if header.id==Some(9) {
-                    faber_engine::codex::thread_exposure(&mut params,&line)
+                    crate::codex::thread_exposure(&mut params,&line)
                         .map_err(|_|io::Error::other("inherited exposure unavailable"))?;
                     return Ok::<_,io::Error>(());
                 }
@@ -290,7 +299,7 @@ pub async fn run(data: &Path) -> io::Result<()> {
         row["effectivePolicy"]=json!({"model":thread["model"],"provider":thread["modelProvider"],"effort":thread["reasoningEffort"],"sandbox":thread["sandbox"],"approvalPolicy":thread["approvalPolicy"]});
         effective_policy(&thread, &work.to_string_lossy())?;
         let global = std::path::PathBuf::from(std::env::var_os("USERPROFILE").ok_or_else(|| io::Error::other("no home folder"))?).join(".codex");
-        let sources = faber_engine::project::qualification::identify_sources(&declared_sources(&thread)?, &work, &root, &global)
+        let sources = crate::project::qualification::identify_sources(&declared_sources(&thread)?, &work, &root, &global)
             .map_err(|_| io::Error::other("instruction source is neither the clone's rules nor the user's global file"))?;
         row["instructionSourceProof"] = json!(sources);
         let id = thread["thread"]["id"].as_str().ok_or_else(||io::Error::other("thread identity missing"))?;
@@ -375,11 +384,11 @@ pub async fn run(data: &Path) -> io::Result<()> {
                         stopped_at=Some(Instant::now());turn["textBytesAtStop"]=json!(text_bytes);
                     }
                 }
-                if faber_engine::project::policy::reject_native(&mut *p.stdin,faber_engine::model::Vendor::Codex,&msg).await? {events.push(json!({"permission":"denied"}));}
+                if crate::project::policy::reject_native(&mut *p.stdin,crate::model::Vendor::Codex,&msg).await? {events.push(json!({"permission":"denied"}));}
                 if msg["method"]=="thread/tokenUsage/updated" {
                     let usage=&msg["params"]["tokenUsage"]["total"];
                     row["tokenUsage"]=usage.clone();
-                    let cost=faber_engine::usage::api_price("gpt-6-luna",usage["inputTokens"].as_u64().ok_or_else(||io::Error::other("input usage missing"))?,
+                    let cost=crate::usage::api_price("gpt-6-luna",usage["inputTokens"].as_u64().ok_or_else(||io::Error::other("input usage missing"))?,
                         usage["outputTokens"].as_u64().ok_or_else(||io::Error::other("output usage missing"))?,usage["cachedInputTokens"].as_u64().unwrap_or(0),0,0);
                     row["apiEquivalentUsd"]=json!(cost);
                     if cost.is_none_or(|cost|cost>=0.03) {row["reservationKill"]=true.into();return Err(io::Error::other("native probe reservation reached or unknown"));}
@@ -424,7 +433,7 @@ pub async fn run(data: &Path) -> io::Result<()> {
                             if settled["method"]=="thread/tokenUsage/updated" {
                                 let usage=&settled["params"]["tokenUsage"]["total"];
                                 row["tokenUsage"]=usage.clone();
-                                row["apiEquivalentUsd"]=json!(faber_engine::usage::api_price("gpt-6-luna",
+                                row["apiEquivalentUsd"]=json!(crate::usage::api_price("gpt-6-luna",
                                     usage["inputTokens"].as_u64().ok_or_else(||io::Error::other("input usage missing"))?,
                                     usage["outputTokens"].as_u64().ok_or_else(||io::Error::other("output usage missing"))?,
                                     usage["cachedInputTokens"].as_u64().unwrap_or(0),0,0));
@@ -472,10 +481,10 @@ pub async fn run(data: &Path) -> io::Result<()> {
         row["startupErrorClasses"] = json!(tokio::time::timeout(Duration::from_secs(2), task).await.ok().and_then(Result::ok));
     }
     row["markerUnchanged"] = json!(std::fs::read(&canary)? == marker.as_bytes());
-    row["markerSha256Before"] = json!(faber_engine::project::lease::hash(marker.as_bytes()));
+    row["markerSha256Before"] = json!(crate::project::lease::hash(marker.as_bytes()));
     row["markerSha256After"] = json!(super::fingerprint(&canary)?);
     if native {
-        row["outsideSha256Before"] = json!(faber_engine::project::lease::hash(b"baseline\n"));
+        row["outsideSha256Before"] = json!(crate::project::lease::hash(b"baseline\n"));
         row["outsideSha256After"] = json!(super::fingerprint(&outside)?);
     }
     if tools {
@@ -668,8 +677,9 @@ mod tests {
     #[test]
     fn effective_policy_requires_acknowledged_pins_and_a_path_list_of_instruction_sources() {
         let valid = json!({"model":"gpt-6-luna","modelProvider":"openai","reasoningEffort":"low",
-            "approvalPolicy":"on-request","approvalsReviewer":"user","cwd":"workspace",
-            "sandbox":{"type":"readOnly","networkAccess":false},"instructionSources":[],
+            "approvalPolicy":"never","approvalsReviewer":"user","cwd":"workspace",
+            "sandbox":{"type":"workspaceWrite","networkAccess":false,"writableRoots":[],"excludeSlashTmp":true,"excludeTmpdirEnvVar":true},
+            "instructionSources":[],
             "thread":{"id":"owned-thread","cwd":"workspace","ephemeral":true,"cliVersion":"0.162.1"}});
         assert!(effective_policy(&valid, "workspace").is_ok());
         #[cfg(windows)]
@@ -685,10 +695,28 @@ mod tests {
             ("model", json!("another-model")),
             ("modelProvider", json!("other")),
             ("reasoningEffort", Value::Null),
-            ("approvalPolicy", json!("never")),
+            ("approvalPolicy", json!("on-request")),
             ("approvalsReviewer", json!("auto_review")),
             ("cwd", json!("another-workspace")),
-            ("sandbox", json!({"type":"readOnly","networkAccess":true})),
+            (
+                "sandbox",
+                json!({"type":"readOnly","networkAccess":false,"writableRoots":[],"excludeSlashTmp":true,"excludeTmpdirEnvVar":true}),
+            ),
+            ("sandbox", json!({"type":"dangerFullAccess"})),
+            (
+                "sandbox",
+                json!({"type":"workspaceWrite","networkAccess":true,"writableRoots":[],"excludeSlashTmp":true,"excludeTmpdirEnvVar":true}),
+            ),
+            (
+                "sandbox",
+                json!({"type":"workspaceWrite","networkAccess":false,"writableRoots":["C:/elsewhere"],"excludeSlashTmp":true,"excludeTmpdirEnvVar":true}),
+            ),
+            ("sandbox", json!({"type":"workspaceWrite","networkAccess":false,"excludeSlashTmp":true,"excludeTmpdirEnvVar":true})),
+            (
+                "sandbox",
+                json!({"type":"workspaceWrite","networkAccess":false,"writableRoots":[],"excludeSlashTmp":false,"excludeTmpdirEnvVar":true}),
+            ),
+            ("sandbox", Value::Null),
             ("instructionSources", json!([1])),
             ("instructionSources", Value::Null),
         ] {
