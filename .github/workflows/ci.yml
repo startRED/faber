@@ -2,14 +2,16 @@ name: ci
 
 on:
   push:
-    branches: [main, 'phase-*']
+    branches: [main, 'phase-*', 'queue/**']
   pull_request:
+  # The land job starts a queue branch again by hand after rebasing it: a push made with this run's token starts nothing.
+  workflow_dispatch:
 
-# A newer push to the same pull request makes its older run pointless. Branch pushes keep every run, so main can follow
-# the newest green commit of phase-1-base (R127) even while pushes keep coming.
+# A newer push to the same pull request or queue branch makes its older run pointless. Pushes to the shared branches keep
+# every run, so main can follow the newest green commit of phase-1-base (R127) even while pushes keep coming.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || startsWith(github.ref, 'refs/heads/queue/') }}
 
 jobs:
   # A change of words only (docs/ or a .md file, scripts/ci-scope.mjs) needs no build: `cargo t` runs no suite for it either.
@@ -139,3 +141,53 @@ jobs:
           if git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then exit 0; fi
           git merge-base --is-ancestor origin/main "$GITHUB_SHA"
           git push origin "$GITHUB_SHA:refs/heads/main"
+
+  # The queue (R162): a commit pushed to queue/<name> lands on phase-1-base only after every check passed on top of the
+  # newest phase-1-base, so a commit that is red on one system never reaches the shared branch and never stalls the
+  # releases behind it. One landing at a time. When phase-1-base moved while the checks ran, the commit is rebased onto it
+  # and checked again; a conflict stops here and the queue branch waits for its author.
+  # Green means what it means for main above: `check` passed, or a run of words only skipped it on purpose.
+  land:
+    needs: [changes, check]
+    if: >-
+      always() && startsWith(github.ref, 'refs/heads/queue/') && github.event_name != 'pull_request' &&
+      needs.changes.result == 'success' &&
+      (needs.check.result == 'success' || (needs.check.result == 'skipped' && needs.changes.outputs.full == 'false'))
+    runs-on: ubuntu-latest
+    concurrency:
+      group: land
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          branch=${GITHUB_REF#refs/heads/}
+          git fetch --quiet origin phase-1-base main "$branch"
+          # A newer push to the queue branch has its own run.
+          if [ "$(git rev-parse "origin/$branch")" != "$GITHUB_SHA" ]; then echo "A newer commit is queued."; exit 0; fi
+          if git merge-base --is-ancestor "$GITHUB_SHA" origin/phase-1-base; then
+            git push origin --delete "$branch"; echo "Already on phase-1-base."; exit 0
+          fi
+          if git merge-base --is-ancestor origin/phase-1-base "$GITHUB_SHA"; then
+            git push origin "$GITHUB_SHA:refs/heads/phase-1-base"
+            # Green on top of the whole phase-1-base, so main follows at once (R127).
+            if git merge-base --is-ancestor origin/main "$GITHUB_SHA"; then git push origin "$GITHUB_SHA:refs/heads/main"; fi
+            git push origin --delete "$branch"
+            # Pushes made with this token start no workflow, so the preview release is started by hand (R130, R156).
+            gh workflow run auto-release.yml --ref phase-1-base -f sha="$GITHUB_SHA"
+            echo "Landed $GITHUB_SHA."; exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if ! git rebase --quiet origin/phase-1-base; then
+            echo "::error::$branch conflicts with phase-1-base. Rebase it by hand and push it again."; exit 1
+          fi
+          git push --force origin "HEAD:refs/heads/$branch"
+          gh workflow run ci.yml --ref "$branch"
+          echo "phase-1-base moved; $branch was rebased and is checked again."
