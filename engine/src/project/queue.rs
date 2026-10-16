@@ -66,6 +66,16 @@ impl Candidate {
     pub fn definitions(&self) -> &[super::proof::Definition] {
         &self.definitions
     }
+
+    /// The engine's proof of this exact tree, once it has been attached.
+    pub fn proof(&self) -> Option<&ProofSet> {
+        self.proof.as_ref()
+    }
+
+    /// The review attached to this exact tree, if any.
+    pub fn review(&self) -> Option<&Review> {
+        self.review.as_ref()
+    }
 }
 /// Observed by a fresh read-only reviewer driver after admission, never chosen by the writer.
 #[derive(Debug, Clone, Serialize, Deserialize)]

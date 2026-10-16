@@ -884,3 +884,50 @@ mod kit_path_tests {
         }
     }
 }
+
+/// The envelope a role's turn was accepted with, kept so the coordinator that acts on it (read, patch, proof,
+/// complete) can come back for it. Written once per invocation; the raw model text is never stored.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplyRecord {
+    pub schema: u32,
+    pub invocation: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub envelope: Option<super::wire::Envelope>,
+    /// The key of a reply the worker contract refused or stalled, kept so the coordinator can see why none was accepted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refused: Option<String>,
+}
+impl Record for ReplyRecord {
+    fn schema(&self) -> u32 {
+        self.schema
+    }
+}
+
+impl Journal {
+    /// Keeps the accepted envelope of one invocation. A second write for the same invocation is refused.
+    pub fn record_reply(&self, invocation: &str, envelope: &super::wire::Envelope) -> Result<(), JournalError> {
+        self.keep_reply(invocation, Some(envelope.clone()), None)
+    }
+
+    /// Keeps why a turn ended with no accepted envelope (a bounce, a stall or a block), by key only.
+    pub fn record_refusal(&self, invocation: &str, key: &str) -> Result<(), JournalError> {
+        self.keep_reply(invocation, None, Some(key.into()))
+    }
+
+    fn keep_reply(&self, invocation: &str, envelope: Option<super::wire::Envelope>, refused: Option<String>) -> Result<(), JournalError> {
+        let path = self.named("replies", invocation)?;
+        if self.get::<ReplyRecord>(&path)?.is_some() {
+            return Err(JournalError::ReceiptExists);
+        }
+        self.put(&path, &ReplyRecord { schema: SCHEMA, invocation: invocation.into(), envelope, refused })
+    }
+
+    pub fn reply(&self, invocation: &str) -> Result<Option<super::wire::Envelope>, JournalError> {
+        Ok(self.get::<ReplyRecord>(&self.named("replies", invocation)?)?.and_then(|r| r.envelope))
+    }
+
+    pub fn refusal(&self, invocation: &str) -> Result<Option<String>, JournalError> {
+        Ok(self.get::<ReplyRecord>(&self.named("replies", invocation)?)?.and_then(|r| r.refused))
+    }
+}

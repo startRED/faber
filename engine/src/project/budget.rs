@@ -16,8 +16,11 @@ const DAY: f64 = 86_400.0;
 const WEEK: f64 = 7.0 * DAY;
 /// One percentage point covers rounded provider readings.
 const GUARD: f64 = 0.01;
+const BOOTSTRAP_CAP: u64 = 2_000_000;
+/// R131: two points under the day's cumulative line.
+const BOOTSTRAP_MARGIN: f64 = 0.02;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Kind {
     Lead,
@@ -36,6 +39,9 @@ pub enum Kind {
 pub struct Grant {
     pub cap_micros: u64,
     pub worker_micros: u64,
+    /// Optional aggregate purpose limits survive retries and worker identity changes.
+    #[serde(default)]
+    pub kind_caps: BTreeMap<Kind, u64>,
     /// Vendor subgrants count inside the mission cap, never on top of it.
     pub vendors: BTreeMap<Vendor, u64>,
     pub review_micros: u64,
@@ -58,7 +64,7 @@ pub struct Invocation {
     pub effort: String,
     pub session: String,
     pub fresh: bool,
-    /// Verified invocation maximum, including nested calls and measured stop latency; None denies admission.
+    /// Complete invocation maximum at API-equivalent prices; None denies admission.
     pub exposure_micros: Option<u64>,
     #[serde(flatten)]
     pub extra: Extra,
@@ -73,6 +79,9 @@ pub struct Reservation {
     pub rates: String,
     pub paid_micros: u64,
     pub settled: bool,
+    /// Accounted at an upper bound rather than settled vendor counters; never a calibration sample.
+    #[serde(default)]
+    pub bounded: bool,
     pub terminated: bool,
     #[serde(flatten)]
     pub extra: Extra,
@@ -95,6 +104,13 @@ pub struct Allocation {
     pub extra: Extra,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Calibration {
+    pub before: BTreeMap<String, crate::learn::Point>,
+    pub after: BTreeMap<String, crate::learn::Point>,
+    pub costs: BTreeMap<String, u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Budget {
@@ -109,6 +125,8 @@ pub struct Budget {
     #[serde(default)]
     pub unbounded_at: BTreeMap<Vendor, f64>,
     pub last_at: f64,
+    #[serde(default)]
+    pub calibrations: BTreeMap<String, BTreeMap<Vendor, Calibration>>,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -125,6 +143,7 @@ impl Default for Budget {
             unbounded: BTreeMap::new(),
             unbounded_at: BTreeMap::new(),
             last_at: 0.0,
+            calibrations: BTreeMap::new(),
             extra: Extra::new(),
         }
     }
@@ -132,11 +151,13 @@ impl Default for Budget {
 
 pub enum Change {
     Allocate { vendor: Vendor, cap_micros: u64 },
+    AllocateModel { vendor: Vendor, model: String, cap_micros: u64 },
     Grant { mission: String, grant: Grant },
     Admit(Invocation),
     Continue { id: String },
     Report { id: String, event: EngineEvent, terminated: bool },
     Pause { mission: String, paused: bool },
+    Calibrate { mission: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,6 +172,51 @@ fn micros(cost: f64) -> Result<u64, &'static str> {
         return Err("reason.budget.cost");
     }
     Ok(value as u64)
+}
+
+/// R117: last settled usage plus one uncached request and the documented maximum output.
+/// Unknown CLI-built context uses the entire documented window, never an earlier turn's input count.
+/// Sources checked 2026-10-14: developers.openai.com/api/docs/models/gpt-6-luna and
+/// platform.claude.com/docs/en/models/overview. No supported universal smaller output cap is proven.
+pub fn complete_request_maximum(model: &str, context: Option<u64>, settled_micros: u64) -> Result<u64, &'static str> {
+    request_maximum(model, context, settled_micros, 128_000)
+}
+
+/// Requires the role launcher's version-bound control proof before dispatch.
+pub fn role_request_maximum(model: &str, role: super::Role, context: Option<u64>, settled_micros: u64) -> Result<u64, &'static str> {
+    let vendor = match model {
+        "gpt-6-luna" => Vendor::Codex,
+        "claude-haiku-5-5" => Vendor::Claude,
+        _ => return Err("reason.budget.exposure"),
+    };
+    let request = request_maximum(model, context, 0, super::policy::output_maximum(vendor, role))?;
+    let invocation = match vendor {
+        // Client budget is checked between requests, so reserve one entire overshooting request.
+        // The documented US data-residency premium is bounded at 10%; never assume the incoming geography.
+        Vendor::Claude => request
+            .checked_mul(11)
+            .and_then(|v| v.checked_add(9))
+            .map(|v| v / 10)
+            // Published worst/base Haiku prices differ by at most 5.5x, including US geography.
+            .and_then(|v| v.checked_add(27_500))
+            .ok_or("reason.budget.cost")?,
+        Vendor::Codex => request,
+    };
+    settled_micros.checked_add(invocation).ok_or("reason.budget.cost")
+}
+
+fn request_maximum(model: &str, context: Option<u64>, settled_micros: u64, output: u64) -> Result<u64, &'static str> {
+    let window = match model {
+        "gpt-6-luna" => 1_050_000,
+        "claude-haiku-5-5" => 1_000_000,
+        _ => return Err("reason.budget.exposure"),
+    };
+    let input = context.unwrap_or(window);
+    if input > window {
+        return Err("reason.budget.exposure");
+    }
+    let cost = usage::api_price(model, input, output, 0, 0, 0).ok_or("reason.budget.rate")?;
+    settled_micros.checked_add(micros(cost)?).ok_or("reason.budget.cost")
 }
 
 fn total(mut values: impl Iterator<Item = u64>) -> Result<u64, &'static str> {
@@ -168,7 +234,7 @@ fn driver(r: &Invocation) -> String {
 /// The lower measured cost-per-point bound, using the existing complete, non-overlapping stretches.
 fn conversion(ledger: &Ledger, vendor: Vendor, window: &str, model: Option<&str>) -> Result<f64, &'static str> {
     let v = ledger.of(vendor);
-    let points = v.history.get(window).ok_or("reason.budget.calibration")?;
+    let points = v.history.get(window).map(Vec::as_slice).unwrap_or(&[]);
     // Each stretch stays within its own reset; the same plan's measured capacity survives renewal.
     let current: Vec<_> = points.iter().filter(|p| p.at >= v.since).copied().collect();
     let measured = stretches(&current, &v.spans);
@@ -178,7 +244,31 @@ fn conversion(ledger: &Ledger, vendor: Vendor, window: &str, model: Option<&str>
             samples.entry(&s.model).or_default().push(s.ppd);
         }
     }
-    samples.values().filter(|v| v.len() >= ENOUGH).flatten().copied().reduce(f64::max).ok_or("reason.budget.calibration")
+    let normal = samples.values().filter(|v| v.len() >= ENOUGH).flatten().copied().reduce(f64::max);
+    let bootstrap = Budget::load(ledger)?
+        .calibrations
+        .values()
+        .filter_map(|vendors| {
+            let sample = vendors.get(&vendor)?;
+            if sample.costs.len() != 1 {
+                return None;
+            }
+            let (name, cost) = sample.costs.first_key_value()?;
+            let a = sample.before.get(window)?;
+            let b = sample.after.get(window)?;
+            if model.is_some_and(|m| m != name)
+                || *cost == 0
+                || a.at < v.since
+                || a.resets_at != b.resets_at
+                || b.at <= a.at
+                || b.used <= a.used
+            {
+                return None;
+            }
+            Some((b.used - a.used) * 100.0 / (*cost as f64 / 1e6))
+        })
+        .reduce(f64::max);
+    normal.into_iter().chain(bootstrap).reduce(f64::max).ok_or("reason.budget.calibration")
 }
 
 fn weekly(ledger: &Ledger, vendor: Vendor, now: f64) -> Result<(&str, f64, f64), &'static str> {
@@ -192,22 +282,66 @@ fn weekly(ledger: &Ledger, vendor: Vendor, now: f64) -> Result<(&str, f64, f64),
     Ok((name, reading.resets_at, start))
 }
 
+fn bootstrap(ledger: &Ledger, vendor: Vendor, model: Option<&str>, now: f64) -> Result<bool, &'static str> {
+    let v = ledger.of(vendor);
+    let (week, reset, start) = weekly(ledger, vendor, now)?;
+    let missing = v.readings.iter().any(|(name, r)| {
+        r.resets_at > now
+            && (vendor_wide(name) || model.and_then(family_of).is_some_and(|f| family_of(name) == Some(f)))
+            && conversion(ledger, vendor, name, model).is_err()
+    });
+    if !missing {
+        return Ok(false);
+    }
+    let first = v.zero_turn_readings.get(week).ok_or("reason.budget.calibration")?;
+    let latest = &v.readings[week];
+    let line = (start + DAY - (reset - WEEK)) / WEEK;
+    if first.resets_at != reset
+        || first.read_at <= start
+        || first.read_at < v.since.round()
+        || !(0.0..=STALE_SECS).contains(&(now - first.read_at))
+        || !(0.0..=STALE_SECS).contains(&(now - latest.read_at))
+        || !(0.0..=1.0).contains(&first.used)
+        || !(first.used..=1.0).contains(&latest.used)
+        || (!margin_waived() && line - first.used + f64::EPSILON < BOOTSTRAP_MARGIN)
+        || (!margin_waived() && line - latest.used + f64::EPSILON < BOOTSTRAP_MARGIN)
+    {
+        return Err("reason.budget.calibration");
+    }
+    Ok(true)
+}
+
 fn headroom(ledger: &Ledger, vendor: Vendor, model: Option<&str>, now: f64) -> Result<u64, &'static str> {
     let v = ledger.of(vendor);
     let snap = v.snap(now);
     gate(&snap, model.and_then(family_of), Purpose::UserTurn { by_hand: false }, false, now).map_err(|_| "reason.budget.quota")?;
     // Unlike a hand-picked Chat turn, automated roles must be unable to fall back to paid use.
-    if v.paid_fallback != Some(false) || v.paid_fallback_at.is_none_or(|at| !(0.0..=STALE_SECS).contains(&(now - at))) || snap.relearning {
+    if v.paid_fallback != Some(false) || v.paid_fallback_at.is_none_or(|at| !(0.0..=STALE_SECS).contains(&(now - at))) {
         return Err("reason.budget.billing");
     }
     let (week, reset, start) = weekly(ledger, vendor, now)?;
-    let baseline = &v.day_baselines.get(week).ok_or("reason.budget.day")?.reading;
-    if baseline.resets_at != reset || baseline.at > start || !(0.0..=STALE_SECS).contains(&(start - baseline.at)) {
-        return Err("reason.budget.day");
+    let bootstrapping = bootstrap(ledger, vendor, model, now)?;
+    if snap.relearning && !bootstrapping {
+        return Err("reason.budget.calibration");
     }
-    let latest = &v.readings[week];
-    let room = crate::budget::daily_room(baseline.used, latest.used, reset, now).ok_or("reason.budget.day")? - GUARD;
-    let mut dollars = (room.max(0.0) * 100.0) / conversion(ledger, vendor, week, model)?;
+    let mut dollars = if let Ok(rate) = conversion(ledger, vendor, week, model) {
+        let sample = v.day_baselines.get(week).ok_or("reason.budget.day")?;
+        let baseline = &sample.reading;
+        let bootstrap_baseline =
+            sample.extra.get("bootstrap") == Some(&serde_json::json!(true)) && baseline.at > start && baseline.at <= now;
+        if baseline.resets_at != reset
+            || (!bootstrap_baseline && (baseline.at > start || !(0.0..=STALE_SECS).contains(&(start - baseline.at))))
+        {
+            return Err("reason.budget.day");
+        }
+        let room = crate::budget::daily_room(baseline.used, v.readings[week].used, reset, now).ok_or("reason.budget.day")? - GUARD;
+        (room.max(0.0) * 100.0) / rate
+    } else {
+        BOOTSTRAP_CAP as f64 / 1e6
+    };
+    if bootstrapping {
+        dollars = dollars.min(BOOTSTRAP_CAP as f64 / 1e6);
+    }
     for (name, r) in &v.readings {
         if r.resets_at <= now {
             continue;
@@ -219,26 +353,40 @@ fn headroom(ledger: &Ledger, vendor: Vendor, model: Option<&str>, now: f64) -> R
         if !(0.0..=STALE_SECS).contains(&(now - r.read_at)) {
             return Err("reason.budget.stale");
         }
-        if name != week {
-            let rate = conversion(ledger, vendor, name, model)?;
+        if name != week
+            && let Ok(rate) = conversion(ledger, vendor, name, model)
+        {
             dollars = dollars.min((crate::budget::ADMIT_LIMIT - r.used - GUARD).max(0.0) * 100.0 / rate);
         }
     }
     // Flooring headroom and ceiling spend cannot manufacture fractional room.
-    Ok(micros(dollars)?.saturating_sub(1))
+    Ok(if dollars == BOOTSTRAP_CAP as f64 / 1e6 && bootstrapping { BOOTSTRAP_CAP } else { micros(dollars)?.saturating_sub(1) })
 }
 
 fn own_today(ledger: &Ledger, vendor: Vendor, week: &str, start: f64, now: f64) -> Result<u64, &'static str> {
     let v = ledger.of(vendor);
     let first = ((start - 14.0 * 3600.0) / DAY).floor() as i64;
     let last = ((now + 14.0 * 3600.0) / DAY).floor() as i64;
-    let sample = v.day_baselines.get(week).ok_or("reason.budget.day")?;
+    let sample = v
+        .day_baselines
+        .get(week)
+        .or_else(|| {
+            v.daily_samples.get(week).filter(|sample| {
+                v.zero_turn_readings.get(week).is_some_and(|r| {
+                    r.read_at > start
+                        && r.read_at == sample.reading.at
+                        && r.used == sample.reading.used
+                        && r.resets_at == sample.reading.resets_at
+                })
+            })
+        })
+        .ok_or("reason.budget.day")?;
     if v.unmetered.iter().any(|(day, n)| *n > sample.unmetered.get(day).copied().unwrap_or(0))
         || sample.unmetered.range(first..=last).any(|(day, n)| *n > v.unmetered.get(day).copied().unwrap_or(0))
     {
         return Err("reason.budget.unknown");
     }
-    let baseline = &v.day_baselines.get(week).ok_or("reason.budget.day")?.own_spend;
+    let baseline = &sample.own_spend;
     if baseline.iter().any(|(day, cost)| v.own_spend.get(day).is_some_and(|current| current < cost))
         || baseline.range(first..=last).any(|(day, cost)| *cost > 0.0 && !v.own_spend.contains_key(day))
     {
@@ -251,9 +399,16 @@ fn own_today(ledger: &Ledger, vendor: Vendor, week: &str, start: f64, now: f64) 
 impl Budget {
     pub fn cost_view(&self, mission: &str) -> super::wire::CostView {
         let receipts: Vec<_> = self.invocations.values().filter(|r| r.request.mission == mission).collect();
-        let complete = !receipts.is_empty() && receipts.iter().all(|r| r.settled && r.terminated);
+        let complete = !receipts.is_empty() && receipts.iter().all(|r| r.settled && r.terminated && !r.bounded);
         let own_micros = complete.then(|| receipts.iter().try_fold(0u64, |sum, r| sum.checked_add(r.paid_micros))).flatten();
-        super::wire::CostView { own_micros, cap_micros: self.grants.get(mission).map(|g| g.cap_micros), complete: own_micros.is_some() }
+        let bound_micros =
+            receipts.iter().any(|r| r.bounded).then(|| receipts.iter().try_fold(0u64, |sum, r| sum.checked_add(r.charge()))).flatten();
+        super::wire::CostView {
+            own_micros,
+            bound_micros,
+            cap_micros: self.grants.get(mission).map(|g| g.cap_micros),
+            complete: own_micros.is_some(),
+        }
     }
 
     pub fn load(ledger: &Ledger) -> Result<Self, &'static str> {
@@ -262,10 +417,35 @@ impl Budget {
         if b.schema != SCHEMA || !b.last_at.is_finite() || b.last_at < 0.0 {
             return Err("error.store.corrupt");
         }
+        for grant in b.grants.values() {
+            if total(grant.kind_caps.values().copied()).map_err(|_| "error.store.corrupt")? > grant.cap_micros {
+                return Err("error.store.corrupt");
+            }
+        }
+        for (mission, vendors) in &b.calibrations {
+            if !b.grants.contains_key(mission) {
+                return Err("error.store.corrupt");
+            }
+            for sample in vendors.values() {
+                if sample.before.is_empty()
+                    || sample.after.keys().any(|window| !sample.before.contains_key(window))
+                    || sample.before.values().chain(sample.after.values()).any(|p| {
+                        !(0.0..=1.0).contains(&p.used) || !p.at.is_finite() || p.at < 0.0 || !p.resets_at.is_finite() || p.resets_at <= p.at
+                    })
+                    || sample.after.iter().any(|(name, p)| {
+                        p.at <= sample.before[name].at || p.resets_at != sample.before[name].resets_at || p.used < sample.before[name].used
+                    })
+                    || total(sample.costs.values().copied()).is_err()
+                {
+                    return Err("error.store.corrupt");
+                }
+            }
+        }
         for (id, r) in &b.invocations {
             if id != &r.request.id
                 || !valid_id(id)
                 || r.request.exposure_micros.is_none_or(|n| n == 0)
+                || (r.bounded && (!r.settled || !r.terminated || r.paid_micros < r.request.exposure_micros.unwrap_or(0)))
                 || !r.started_at.is_finite()
                 || r.started_at < 0.0
                 || !b.grants.contains_key(&r.request.mission)
@@ -351,7 +531,7 @@ impl Budget {
         if self.invocations.len() >= 4096 {
             return Err("reason.budget.history");
         }
-        if self.invocations.values().any(|old| !old.settled && session_key(&old.request) == session_key(r)) {
+        if self.invocations.values().any(|old| (!old.settled || old.bounded) && session_key(&old.request) == session_key(r)) {
             return Err("reason.budget.unknown");
         }
         let g = self.grants.get(&r.mission).ok_or("reason.budget.grant")?;
@@ -367,9 +547,17 @@ impl Budget {
         {
             return Err("reason.budget.rate");
         }
+        if bootstrap(ledger, r.vendor, Some(&r.model), now)? && g.cap_micros > BOOTSTRAP_CAP {
+            return Err("reason.budget.cap");
+        }
         self.account(ledger, r.vendor, Some(&r.model), now)?;
+        for vendor in g.vendors.keys().copied().filter(|v| *v != r.vendor) {
+            self.account(ledger, vendor, None, now)?;
+        }
         let charge = total([self.charges(&r.mission, None, None, None)?, bound].into_iter())?;
         if charge > g.cap_micros
+            || total([self.charges(&r.mission, None, None, Some(r.kind))?, bound].into_iter())?
+                > if g.kind_caps.is_empty() { g.cap_micros } else { g.kind_caps.get(&r.kind).copied().unwrap_or(0) }
             || total([self.charges(&r.mission, Some(&r.worker), None, None)?, bound].into_iter())? > g.worker_micros
             || total([self.charges(&r.mission, None, Some(r.vendor), None)?, bound].into_iter())?
                 > g.vendors.get(&r.vendor).copied().unwrap_or(0)
@@ -406,6 +594,8 @@ impl Budget {
         }
         self.account(ledger, r.request.vendor, Some(&r.request.model), now)?;
         if self.charges(&r.request.mission, None, None, None)? > g.cap_micros
+            || self.charges(&r.request.mission, None, None, Some(r.request.kind))?
+                > if g.kind_caps.is_empty() { g.cap_micros } else { g.kind_caps.get(&r.request.kind).copied().unwrap_or(0) }
             || self.charges(&r.request.mission, Some(&r.request.worker), None, None)? > g.worker_micros
             || self.charges(&r.request.mission, None, Some(r.request.vendor), None)?
                 > g.vendors.get(&r.request.vendor).copied().unwrap_or(0)
@@ -418,7 +608,48 @@ impl Budget {
 
 /// Applies one change to a snapshot; the engine saves it atomically under its existing shared lock before effects.
 pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Result<Status, &'static str> {
+    #[cfg(feature = "r132-harness")]
+    {
+        // The R132 exception is scoped to the mission a change belongs to.
+        let (context, calibrating) = match &change {
+            Change::Allocate { .. } | Change::AllocateModel { .. } => (r132::Context::Allocation, None),
+            Change::Grant { mission, .. } | Change::Pause { mission, .. } => (r132::Context::Mission(mission.clone()), None),
+            Change::Calibrate { mission } => (r132::Context::Mission(mission.clone()), Some(mission.clone())),
+            Change::Admit(request) => (r132::Context::Mission(request.mission.clone()), None),
+            Change::Continue { id } | Change::Report { id, .. } => (
+                Budget::load(ledger)
+                    .ok()
+                    .and_then(|b| b.invocations.get(id).map(|r| r.request.mission.clone()))
+                    .map_or(r132::Context::Other, r132::Context::Mission),
+                None,
+            ),
+        };
+        let _scope = r132::scope(context, ledger);
+        let status = apply_inner(ledger, change, now, offset)?;
+        let calibrated = calibrating.filter(|_| status == Status::Ready);
+        // The spent mark goes into the ledger of this change first; only then is the waiver closed in this process.
+        r132::remember(ledger, calibrated.as_deref());
+        if let Some(mission) = &calibrated {
+            r132::consume(mission);
+        }
+        Ok(status)
+    }
+    #[cfg(not(feature = "r132-harness"))]
+    apply_inner(ledger, change, now, offset)
+}
+
+fn apply_inner(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Result<Status, &'static str> {
+    let (change, allocation_model) = match change {
+        Change::AllocateModel { vendor, model, cap_micros } => {
+            if !crate::route::PROFILES.iter().any(|p| p.vendor == vendor && p.model == model) {
+                return Err("reason.budget.rate");
+            }
+            (Change::Allocate { vendor, cap_micros }, Some(model))
+        }
+        change => (change, None),
+    };
     let mut reconciled = None;
+    let mut baseline = None;
     let mut b = Budget::load(ledger)?;
     // Reconciliation still records late spend after a clock reversal; it grants no new work.
     if !matches!(change, Change::Report { .. } | Change::Pause { .. }) {
@@ -428,7 +659,7 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
         return Err("reason.budget.clock");
     }
     let mut status = Status::Ready;
-    let admits = !matches!(change, Change::Report { .. } | Change::Pause { .. });
+    let admits = !matches!(change, Change::Report { .. } | Change::Pause { .. } | Change::Calibrate { .. });
     match change {
         Change::Allocate { vendor, cap_micros }
             if b.allocations
@@ -439,8 +670,24 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
         }
         Change::Allocate { vendor, cap_micros } => {
             let (week, reset, starts_at) = weekly(ledger, vendor, now)?;
-            let room = headroom(ledger, vendor, None, now)?;
-            let own = own_today(ledger, vendor, week, starts_at, now)?;
+            let mut current = ledger.clone();
+            if bootstrap(ledger, vendor, allocation_model.as_deref(), now)? {
+                let v = ledger.of(vendor);
+                let sample = v.daily_samples.get(week).ok_or("reason.budget.day")?;
+                let first = &v.zero_turn_readings[week];
+                if sample.reading.at != first.read_at || sample.reading.used != first.used || sample.reading.resets_at != reset {
+                    return Err("reason.budget.calibration");
+                }
+                let mut sample = sample.clone();
+                sample.extra.insert("bootstrap".into(), serde_json::json!(true));
+                if ledger.of(vendor).day_baselines.get(week).is_none_or(|old| old.reading.resets_at != reset || old.reading.at < starts_at)
+                {
+                    current.of_mut(vendor).day_baselines.insert(week.to_string(), sample.clone());
+                    baseline = Some((vendor, week.to_string(), sample));
+                }
+            }
+            let room = headroom(&current, vendor, allocation_model.as_deref(), now)?;
+            let own = own_today(&current, vendor, week, starts_at, now)?;
             if cap_micros == 0 || cap_micros > total([own, room].into_iter())? || b.unbounded.get(&vendor).copied().unwrap_or(0) > 0 {
                 return Err("reason.budget.daily");
             }
@@ -454,16 +701,46 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
                     extra: b.allocations.get(&vendor).map(|a| a.extra.clone()).unwrap_or_default(),
                 },
             );
-            b.account(ledger, vendor, None, now)?;
+            b.account(&current, vendor, allocation_model.as_deref(), now)?;
         }
         Change::Grant { mission, mut grant } => {
             if !valid_id(&mission)
                 || grant.vendors.is_empty()
                 || grant.worker_micros > grant.cap_micros
+                || total(grant.kind_caps.values().copied())? > grant.cap_micros
                 || total(grant.vendors.values().copied())? != grant.cap_micros
                 || total([grant.review_micros, grant.repair_micros, grant.canary_micros].into_iter())? > grant.cap_micros
             {
                 return Err("reason.budget.grant");
+            }
+            if grant.cap_micros > BOOTSTRAP_CAP && grant.vendors.keys().any(|v| bootstrap(ledger, *v, None, now).unwrap_or(true)) {
+                return Err("reason.budget.cap");
+            }
+            if !b.grants.contains_key(&mission) {
+                let mut samples = BTreeMap::new();
+                for vendor in grant.vendors.keys().copied() {
+                    let needs_sample = bootstrap(ledger, vendor, None, now)?;
+                    let start = weekly(ledger, vendor, now)?.2;
+                    let fresh_sample = ledger
+                        .of(vendor)
+                        .zero_turn_readings
+                        .values()
+                        .any(|r| r.read_at > start && (0.0..=STALE_SECS).contains(&(now - r.read_at)) && r.resets_at > now);
+                    // A grant precedes model selection; preserve real endpoints for a new model too.
+                    if needs_sample || fresh_sample {
+                        let v = ledger.of(vendor);
+                        let before = v
+                            .zero_turn_readings
+                            .iter()
+                            .filter(|(_, r)| r.read_at > start && (0.0..=STALE_SECS).contains(&(now - r.read_at)) && r.resets_at > now)
+                            .map(|(name, r)| (name.clone(), crate::learn::Point { at: r.read_at, used: r.used, resets_at: r.resets_at }))
+                            .collect();
+                        samples.insert(vendor, Calibration { before, ..Default::default() });
+                    }
+                }
+                if !samples.is_empty() {
+                    b.calibrations.insert(mission.clone(), samples);
+                }
             }
             if let Some(old) = b.grants.get(&mission) {
                 let increased: Vec<_> =
@@ -485,6 +762,22 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
         }
         Change::Admit(request) => {
             b.can_admit(ledger, &request, now)?;
+            if bootstrap(ledger, request.vendor, Some(&request.model), now)?
+                && !b.calibrations.get(&request.mission).is_some_and(|samples| samples.contains_key(&request.vendor))
+            {
+                let start = weekly(ledger, request.vendor, now)?.2;
+                let before = ledger
+                    .of(request.vendor)
+                    .zero_turn_readings
+                    .iter()
+                    .filter(|(_, r)| r.read_at > start && (0.0..=STALE_SECS).contains(&(now - r.read_at)) && r.resets_at > now)
+                    .map(|(name, r)| (name.clone(), crate::learn::Point { at: r.read_at, used: r.used, resets_at: r.resets_at }))
+                    .collect();
+                b.calibrations
+                    .entry(request.mission.clone())
+                    .or_default()
+                    .insert(request.vendor, Calibration { before, ..Default::default() });
+            }
             let base = b.bases.get(&session_key(&request)).cloned();
             b.invocations.insert(
                 request.id.clone(),
@@ -495,6 +788,7 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
                     started_at: now,
                     paid_micros: 0,
                     settled: false,
+                    bounded: false,
                     terminated: false,
                     extra: Extra::new(),
                 },
@@ -504,6 +798,51 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
         Change::Pause { mission, paused } => {
             b.grants.get_mut(&mission).ok_or("reason.budget.grant")?.paused = paused;
         }
+        Change::Calibrate { mission } => {
+            let samples = b.calibrations.get_mut(&mission).ok_or("reason.budget.calibration")?;
+            for (vendor, sample) in samples {
+                if !sample.after.is_empty() {
+                    continue;
+                }
+                let receipts: Vec<_> =
+                    b.invocations.values().filter(|r| r.request.mission == mission && r.request.vendor == *vendor).collect();
+                if receipts.is_empty() || receipts.iter().any(|r| !r.settled || !r.terminated || r.bounded) {
+                    return Err("reason.budget.unknown");
+                }
+                let v = ledger.of(*vendor);
+                let end = receipts.iter().try_fold(0.0_f64, |end, r| {
+                    let span = v
+                        .spans
+                        .iter()
+                        .find(|s| {
+                            s.start == r.started_at.round()
+                                && s.model == r.request.model
+                                && !s.incomplete
+                                && s.cost == Some(r.paid_micros as f64 / 1e6)
+                        })
+                        .ok_or("reason.budget.calibration")?;
+                    Ok::<_, &'static str>(end.max(span.end))
+                })?;
+                for (name, before) in &sample.before {
+                    let after = v.zero_turn_readings.get(name).ok_or("reason.budget.calibration")?;
+                    if after.read_at < end
+                        || after.read_at <= before.at
+                        || !(0.0..=STALE_SECS).contains(&(now - after.read_at))
+                        || after.resets_at != before.resets_at
+                        || !(before.used..=1.0).contains(&after.used)
+                    {
+                        return Err("reason.budget.calibration");
+                    }
+                    sample
+                        .after
+                        .insert(name.clone(), crate::learn::Point { at: after.read_at, used: after.used, resets_at: after.resets_at });
+                }
+                for r in receipts {
+                    let cost = sample.costs.entry(r.request.model.clone()).or_default();
+                    *cost = cost.checked_add(r.paid_micros).ok_or("reason.budget.cost")?;
+                }
+            }
+        }
         Change::Report { id, event, terminated } => {
             let r = b.invocations.get_mut(&id).ok_or("reason.budget.identity")?;
             if r.rates != usage::RATE_DATE {
@@ -511,6 +850,29 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
             }
             let was_settled = r.settled;
             r.terminated |= terminated;
+            let trusted = ledger.of(r.request.vendor).readings.values().map(|r| r.read_at).fold(b.last_at.max(r.started_at), f64::max);
+            let at = now.max(b.last_at).max(r.started_at).min(trusted + STALE_SECS);
+            if r.bounded {
+                // A late or duplicate result cannot turn a conservative charge into measured spend.
+                let late = match &event {
+                    EngineEvent::Done { cost_total_usd: Some(total), .. } if r.request.vendor == Vendor::Claude => {
+                        usage::settle(r.base.as_ref(), &r.request.session, r.request.fresh, Some(*total)).cost
+                    }
+                    _ => usage::fresh_price(&event, &r.request.model).0,
+                };
+                if let Some(cost) = late {
+                    let paid = micros(cost)?;
+                    if paid > r.paid_micros {
+                        ledger.of_mut(r.request.vendor).spend(Some((paid - r.paid_micros) as f64 / 1e6), false, at, offset);
+                        r.paid_micros = paid;
+                        b.disabled.insert(driver(&r.request));
+                        status = Status::Stop("reason.budget.breach");
+                    }
+                }
+                let value = serde_json::to_value(&b).map_err(|_| "error.store.corrupt")?;
+                ledger.extra.insert(KEY.into(), value);
+                return Ok(status);
+            }
             let cost_total_usd = match &event {
                 EngineEvent::Done { cost_total_usd, .. } => *cost_total_usd,
                 EngineEvent::Error { .. } => None,
@@ -542,9 +904,6 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
                 } else {
                     let delta = paid - r.paid_micros;
                     // Fresh quota extends trusted time for delayed receipts; a clock glitch alone cannot.
-                    let trusted =
-                        ledger.of(r.request.vendor).readings.values().map(|r| r.read_at).fold(b.last_at.max(r.started_at), f64::max);
-                    let at = now.max(b.last_at).max(r.started_at).min(trusted + STALE_SECS);
                     let v = reconciled.get_or_insert_with(|| (r.request.vendor, ledger.of(r.request.vendor).clone()));
                     v.1.spend(Some(delta as f64 / 1e6), false, at, offset);
                     r.paid_micros = paid;
@@ -570,10 +929,22 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
             if r.paid_micros > r.request.exposure_micros.unwrap_or(0) || b.disabled.contains(&driver(&r.request)) {
                 b.disabled.insert(driver(&r.request));
                 status = Status::Stop("reason.budget.breach");
-            } else if !r.settled && (incomplete || r.terminated) && status == Status::Ready {
-                status = Status::Stop("reason.budget.unknown");
+            } else if !r.settled && r.terminated && status == Status::Ready {
+                let charge =
+                    r.paid_micros.checked_add(r.request.exposure_micros.ok_or("reason.budget.exposure")?).ok_or("reason.budget.cost")?;
+                let delta = charge - r.paid_micros;
+                let v = reconciled.get_or_insert_with(|| (r.request.vendor, ledger.of(r.request.vendor).clone()));
+                v.1.spend(Some(delta as f64 / 1e6), false, at, offset);
+                r.paid_micros = charge;
+                r.bounded = true;
+                r.settled = true;
+                if charge > r.request.exposure_micros.unwrap_or(0) {
+                    b.disabled.insert(driver(&r.request));
+                    status = Status::Stop("reason.budget.breach");
+                }
             }
         }
+        Change::AllocateModel { .. } => unreachable!("normalized allocation"),
     }
     if admits {
         b.last_at = b.last_at.max(now);
@@ -581,6 +952,9 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
     let value = serde_json::to_value(&b).map_err(|_| "error.store.corrupt")?;
     if let Some((vendor, v)) = reconciled {
         *ledger.of_mut(vendor) = v;
+    }
+    if let Some((vendor, week, sample)) = baseline {
+        ledger.of_mut(vendor).day_baselines.insert(week, sample);
     }
     ledger.extra.insert(KEY.into(), value);
     Ok(status)
@@ -631,4 +1005,257 @@ pub fn recover_unbounded(ledger: &mut Ledger) -> Result<bool, &'static str> {
         changed = true;
     }
     Ok(changed)
+}
+
+/// R132 and R136: a one-time exception to R88/R131 for one named self-development mission (R132: the first real mission;
+/// R136: the canary mission of a harness-built candidate). The shipped app never calls it and the feature is on only for
+/// the qualification harness (`testkit`) and the builds it makes. It waives exactly one thing: the two-point margin under
+/// the day's cumulative line. Fresh zero-turn evidence, the weekly window, billing and the US$2.00 mission cap all still
+/// apply. It opens once per process and for one mission id: the margin is waived only inside a budget change that belongs
+/// to that mission, or a vendor/model allocation made for it (`for_mission`), never anywhere else, and the first
+/// successful calibration of the mission spends it for good.
+///
+/// Three records keep it single-use. The marker has one fixed path per exception in the engine's data folder
+/// (`Exception::marker`), created with `create_new`, so no caller or variable can point it elsewhere. The in-process
+/// state does not reopen when the marker is deleted. And the ledger remembers the mission whose margin was waived and
+/// whether it is spent: a new process with a deleted marker can open the waiver again, but the ledger refuses it for any
+/// other mission and for a spent one.
+#[cfg(feature = "r132-harness")]
+pub mod r132 {
+    use std::cell::RefCell;
+    use std::path::Path;
+    use std::sync::Mutex;
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Exception {
+        R132,
+        R136,
+    }
+
+    impl Exception {
+        /// The marker's one path in the engine's data folder.
+        pub fn marker(self, data_dir: &Path) -> std::path::PathBuf {
+            data_dir.join(match self {
+                Self::R132 => "r132-waiver.json",
+                Self::R136 => "r136-waiver.json",
+            })
+        }
+        /// Where the ledger remembers the waived mission.
+        fn record(self) -> &'static str {
+            match self {
+                Self::R132 => "r132Waiver",
+                Self::R136 => "r136Waiver",
+            }
+        }
+        fn name(self) -> &'static str {
+            match self {
+                Self::R132 => "R132",
+                Self::R136 => "R136",
+            }
+        }
+    }
+
+    #[derive(Clone, PartialEq)]
+    pub(super) enum Context {
+        Allocation,
+        Mission(String),
+        Other,
+    }
+
+    #[derive(Clone, PartialEq)]
+    enum State {
+        Unused,
+        Open(Exception, String),
+        Spent(Exception, String),
+    }
+
+    static WAIVER: Mutex<State> = Mutex::new(State::Unused);
+    thread_local! {
+        static CONTEXT: RefCell<Context> = const { RefCell::new(Context::Other) };
+        /// The mission a vendor or model allocation on this thread is made for (`for_mission`).
+        static ALLOCATING: RefCell<Option<String>> = const { RefCell::new(None) };
+        /// What the ledger of the change being applied remembers of the open exception.
+        static REMEMBERED: RefCell<Option<serde_json::Value>> = const { RefCell::new(None) };
+        /// The exception and mission whose margin the change being applied waived.
+        static USED: RefCell<Option<(Exception, String)>> = const { RefCell::new(None) };
+    }
+
+    fn open() -> Option<(Exception, String)> {
+        match &*WAIVER.lock().unwrap() {
+            State::Open(exception, mission) => Some((*exception, mission.clone())),
+            _ => None,
+        }
+    }
+
+    pub(super) struct Scope(Context);
+    impl Drop for Scope {
+        fn drop(&mut self) {
+            CONTEXT.with(|c| *c.borrow_mut() = std::mem::replace(&mut self.0, Context::Other));
+            REMEMBERED.with(|r| r.borrow_mut().take());
+        }
+    }
+    pub(super) fn scope(context: Context, ledger: &crate::ledger::Ledger) -> Scope {
+        let remembered = open().and_then(|(exception, _)| ledger.extra.get(exception.record()).cloned());
+        REMEMBERED.with(|r| *r.borrow_mut() = remembered);
+        USED.with(|u| u.borrow_mut().take());
+        Scope(CONTEXT.with(|c| c.replace(context)))
+    }
+
+    /// While it lives, vendor and model allocations on this thread are made for `mission`.
+    pub struct ForMission(Option<String>);
+    impl Drop for ForMission {
+        fn drop(&mut self) {
+            ALLOCATING.with(|a| *a.borrow_mut() = self.0.take());
+        }
+    }
+    pub fn for_mission(mission: &str) -> ForMission {
+        ForMission(ALLOCATING.with(|a| a.replace(Some(mission.to_string()))))
+    }
+
+    /// Writes the evidence marker (what was waived, for which mission, the readings) at the exception's fixed path in
+    /// `data_dir` and opens the waiver for this process and this mission. A second call in this process, or against an
+    /// existing marker, is refused.
+    pub fn waive(exception: Exception, data_dir: &Path, mission: &str, evidence: &serde_json::Value) -> std::io::Result<()> {
+        use std::io::Write;
+        if !super::valid_id(mission) {
+            return Err(std::io::Error::other("the waiver needs a mission id"));
+        }
+        let mut state = WAIVER.lock().unwrap();
+        if *state != State::Unused {
+            return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "the waiver was already used in this process"));
+        }
+        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(exception.marker(data_dir))?;
+        file.write_all(&serde_json::to_vec_pretty(&serde_json::json!({
+            "exception": exception.name(), "waives": "R131 two-point margin under the day line", "singleUse": true,
+            "mission": mission, "missionCapMicros": super::BOOTSTRAP_CAP, "evidence": evidence,
+        }))?)?;
+        file.sync_all()?;
+        *state = State::Open(exception, mission.into());
+        Ok(())
+    }
+
+    /// The mission's calibration is done: the exception is spent and cannot be opened again.
+    pub fn consume(mission: &str) {
+        if open().is_some_and(|(_, open)| open == mission) {
+            close();
+        }
+    }
+
+    /// Ends the exception. The marker stays, so it cannot be opened again.
+    pub fn close() {
+        let mut state = WAIVER.lock().unwrap();
+        if let State::Open(exception, mission) = state.clone() {
+            *state = State::Spent(exception, mission);
+        }
+    }
+
+    /// The exception and mission this process waived, open or spent.
+    fn bound() -> Option<(Exception, String)> {
+        match &*WAIVER.lock().unwrap() {
+            State::Open(exception, mission) | State::Spent(exception, mission) => Some((*exception, mission.clone())),
+            State::Unused => None,
+        }
+    }
+
+    /// Whether this process holds the waiver open for `mission`.
+    pub fn admits(mission: &str) -> bool {
+        open().is_some_and(|(_, open)| open == mission)
+    }
+
+    /// Whether the change being applied has its margin waived: the waiver is open for its mission (an allocation's is the
+    /// one it is made for), and the ledger remembers no other waived mission and no spent waiver of that exception.
+    pub(super) fn active() -> bool {
+        let mission = match CONTEXT.with(|c| c.borrow().clone()) {
+            Context::Allocation => ALLOCATING.with(|a| a.borrow().clone()),
+            Context::Mission(m) => Some(m),
+            Context::Other => None,
+        };
+        let Some((exception, open)) = open() else { return false };
+        if mission.as_deref() != Some(open.as_str()) {
+            return false;
+        }
+        if REMEMBERED.with(|r| r.borrow().clone()).is_some_and(|r| r["mission"] != open.as_str() || r["spent"] == true) {
+            return false;
+        }
+        USED.with(|u| *u.borrow_mut() = Some((exception, open)));
+        true
+    }
+
+    /// Writes into the ledger of a change, before the waiver is consumed: the mission whose margin the change waived, and
+    /// that the waiver is spent once that mission's calibration is done. It reads the waived mission from the process,
+    /// open or already spent, so a spending calibration is always recorded; a record of another mission is never touched.
+    pub fn remember(ledger: &mut crate::ledger::Ledger, calibrated: Option<&str>) {
+        let used = USED.with(|u| u.borrow_mut().take()).is_some();
+        let Some((exception, bound)) = bound() else { return };
+        let mut record = ledger.extra.get(exception.record()).cloned();
+        if used || calibrated == Some(bound.as_str()) {
+            record.get_or_insert_with(|| serde_json::json!({"mission": bound, "spent": false}));
+        }
+        if let Some(record) = record.as_mut()
+            && calibrated == Some(bound.as_str())
+            && record["mission"] == bound.as_str()
+        {
+            record["spent"] = true.into();
+        }
+        if let Some(record) = record {
+            ledger.extra.insert(exception.record().into(), record);
+        }
+    }
+
+    /// Adds a waiver record without ever undoing one: a record that is already there stays, unless the new one says spent.
+    fn merge(into: &mut std::collections::BTreeMap<String, serde_json::Value>, records: serde_json::Map<String, serde_json::Value>) {
+        for (key, record) in records {
+            if !into.contains_key(&key) || record["spent"] == true {
+                into.insert(key, record);
+            }
+        }
+    }
+
+    fn records(ledger: &crate::ledger::Ledger) -> serde_json::Map<String, serde_json::Value> {
+        [Exception::R132, Exception::R136]
+            .iter()
+            .filter_map(|e| ledger.extra.get(e.record()).map(|r| (e.record().to_string(), r.clone())))
+            .collect()
+    }
+
+    /// R136: keeps a ledger's waiver records in `path`, outside the canary data folder that every canary run deletes.
+    pub fn save_records(ledger: &crate::ledger::Ledger, path: &Path) -> std::io::Result<()> {
+        let mut kept = match std::fs::read(path) {
+            Ok(bytes) => {
+                serde_json::from_slice::<std::collections::BTreeMap<String, serde_json::Value>>(&bytes).map_err(std::io::Error::other)?
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => std::collections::BTreeMap::new(),
+            Err(e) => return Err(e),
+        };
+        merge(&mut kept, records(ledger));
+        std::fs::write(path, serde_json::to_vec(&kept).map_err(std::io::Error::other)?)
+    }
+
+    /// R136: a harness canary starts from a ledger of its own, because the supervisor's day sample no longer matches the
+    /// account after the mission that came before it. Only the waiver records are carried over, from the ledger it was
+    /// seeded with and from `kept` (`save_records`), so a fresh ledger never reopens a waiver. A ledger or a record file
+    /// that cannot be read is refused instead of being replaced.
+    pub fn fresh_ledger(data_dir: &Path, kept: &Path) -> std::io::Result<()> {
+        let path = data_dir.join("budget.json");
+        let mut fresh = crate::ledger::Ledger::default();
+        match std::fs::read(&path) {
+            Ok(bytes) => merge(&mut fresh.extra, records(&serde_json::from_slice(&bytes).map_err(std::io::Error::other)?)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+        match std::fs::read(kept) {
+            Ok(bytes) => merge(&mut fresh.extra, serde_json::from_slice(&bytes).map_err(std::io::Error::other)?),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+        std::fs::write(&path, serde_json::to_vec(&fresh).map_err(std::io::Error::other)?)
+    }
+}
+#[cfg(feature = "r132-harness")]
+fn margin_waived() -> bool {
+    r132::active()
+}
+#[cfg(not(feature = "r132-harness"))]
+fn margin_waived() -> bool {
+    false
 }

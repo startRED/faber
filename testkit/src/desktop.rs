@@ -30,6 +30,8 @@ pub fn name() -> Result<&'static str, String> {
         let name = format!("faber-test-{}-{stamp}-{}", std::process::id(), COUNT.fetch_add(1, Ordering::SeqCst));
         let desktop = HDESK::CreateDesktop(&name, None, co::DESKTOP_RIGHTS::GENERIC_ALL, None)
             .map_err(|e| format!("cannot create the hidden desktop, so the app is not started (it would not be hidden): {e}"))?;
+        // Mission proofs run at Low integrity (R138); like the person's own desktop, this one must let them start.
+        faber_winproc::label_desktop_low(desktop.ptr() as isize).map_err(|e| format!("cannot label the hidden desktop: {e}"))?;
         // The desktop is destroyed when its last handle closes and nothing is on it; this one is kept for the whole run.
         std::mem::forget(desktop);
         Ok(name)

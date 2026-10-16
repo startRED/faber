@@ -773,7 +773,7 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 .task-col-header { display: flex; align-items: center; justify-content: space-between; font-size: calc(var(--fs-ui) - 1px); color: var(--ink-2); }
 .task-count { font-size: max(13px, calc(var(--fs-ui) - 2px)); background: var(--s2); padding: 1px 6px; border-radius: var(--r-pill); }
 .task-list { display: flex; flex-direction: column; gap: 8px; }
-.task-card { display: flex; flex-direction: column; gap: 6px; padding: 10px; background: var(--card-bg); border-radius: var(--r-sm); box-shadow: var(--lift-shadow), inset 0 0 0 1px var(--line-2); }
+.task-card { display: flex; flex-direction: column; gap: 6px; padding: 10px; background: var(--card-bg); border-radius: var(--r-sm); box-shadow: var(--lift-shadow), inset 0 0 0 1px var(--line-2); content-visibility: auto; contain-intrinsic-block-size: auto 150px; }
 .tc-title { font-size: calc(var(--fs-ui) - 0.5px); font-weight: 500; color: var(--ink); }
 .tc-meta { display: flex; flex-wrap: wrap; gap: 6px; }
 .tc-footer { display: flex; align-items: center; margin-top: 4px; }

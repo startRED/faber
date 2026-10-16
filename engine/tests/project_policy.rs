@@ -56,6 +56,37 @@ fn the_live_probe_writer_does_not_inherit_network_temp_roots_shell_or_subagents(
     }
 }
 
+#[test]
+fn every_codex_role_uses_a_closed_native_catalog_and_no_inherited_developer_instructions() {
+    let args = project_codex_args(true);
+    assert!(args.windows(2).any(|a| a[0] == "-c" && a[1].starts_with("model_catalog_json=")));
+    for feature in ["view_image", "request_permissions_tool", "code_mode", "code_mode_only", "token_budget"] {
+        assert!(args.windows(2).any(|a| a == ["--disable", feature]), "{feature}");
+    }
+    for setting in ["developer_instructions=\"\"", "tools.update_plan.enabled=false", "tools.experimental_request_user_input.enabled=false"]
+    {
+        assert!(args.windows(2).any(|a| a == ["-c", setting]), "{setting}");
+    }
+    let catalog = faber_engine::codex::project_codex_catalog();
+    let models = catalog["models"].as_array().unwrap();
+    // The installed catalog parser requires one instruction template even when the role supplies its own.
+    assert_eq!(models[0]["model_messages"]["instructions_template"], "");
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0]["slug"], "gpt-6-luna");
+    assert_eq!(models[0]["shell_type"], "disabled");
+    assert!(models[0]["apply_patch_tool_type"].is_null());
+    assert_eq!(models[0]["experimental_supported_tools"], json!([]));
+    assert_eq!(models[0]["tool_mode"], "direct");
+    assert_eq!(models[0]["include_skills_usage_instructions"], false);
+    for role in ROLES {
+        for resume in [None, Some("thread")] {
+            let (_, params) = project_thread_params(&thread(resume), role).unwrap();
+            assert!(params.get("developerInstructions").is_none(), "{params}");
+            assert_eq!(params["config"]["features.shell_tool"], false);
+        }
+    }
+}
+
 #[tokio::test]
 async fn review_4_every_escape_request_receives_a_native_denial_on_the_fake_wire() {
     let entries = fixture("projects", "policy-escapes");
@@ -100,6 +131,96 @@ async fn review_1_codex_native_approvals_are_declined_and_malformed_requests_fai
 }
 
 const ROLES: [Role; 5] = [Role::Lead, Role::Research, Role::TestProposal, Role::Writer, Role::Reviewer];
+
+#[tokio::test]
+async fn unknown_permission_requests_stop_instead_of_hanging_or_guessing_a_decline() {
+    let (spawn, _, _) = support::controlled();
+    let mut process = spawn("fake", &[], ".".as_ref()).unwrap();
+    for line in include_str!("../../tests/fixtures/projects/unknown-permissions.jsonl").lines() {
+        let entry: Value = serde_json::from_str(line).unwrap();
+        let vendor = if entry["vendor"] == "codex" { Vendor::Codex } else { Vendor::Claude };
+        assert!(faber_engine::project::policy::reject_native(&mut *process.stdin, vendor, &entry["msg"]).await.is_err(), "{entry}");
+    }
+}
+
+#[tokio::test]
+async fn known_permission_and_elicitation_denials_use_their_protocol_forms() {
+    for (method, result) in [
+        ("item/permissions/requestApproval", json!({"permissions":{},"scope":"turn"})),
+        ("mcpServer/elicitation/request", json!({"action":"decline","content":null})),
+    ] {
+        let (spawn, mut cli, _) = support::controlled();
+        let mut process = spawn("fake", &[], ".".as_ref()).unwrap();
+        let request = json!({"id":"deny","method":method,"params":{"threadId":"t"}});
+        assert!(faber_engine::project::policy::reject_native(&mut *process.stdin, Vendor::Codex, &request).await.unwrap());
+        assert_eq!(support::read_message(&mut cli).await, json!({"id":"deny","result":result}));
+    }
+}
+
+#[tokio::test]
+async fn ungranted_native_completions_fail_closed_for_both_vendors() {
+    let (spawn, _, _) = support::controlled();
+    let mut process = spawn("fake", &[], ".".as_ref()).unwrap();
+    for kind in ["fileChange", "commandExecution", "webSearch", "mcpToolCall", "dynamicToolCall", "unknownFutureTool"] {
+        for status in ["completed", "failed", "declined"] {
+            let msg = json!({"method":"item/completed","params":{"item":{"type":kind,"status":status}}});
+            let result = faber_engine::project::policy::reject_native(&mut *process.stdin, Vendor::Codex, &msg).await;
+            assert_eq!(result.is_err(), status == "completed");
+        }
+    }
+    for msg in [
+        json!({"type":"assistant","message":{"content":[{"type":"tool_use","name":"NotebookEdit"}]}}),
+        json!({"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"tool_use","name":"Bash"}}}),
+    ] {
+        assert!(faber_engine::project::policy::reject_native(&mut *process.stdin, Vendor::Claude, &msg).await.is_err());
+    }
+    for (vendor, msg) in [
+        (Vendor::Codex, json!({"method":"item/completed","params":{"item":{"type":"agentMessage"}}})),
+        (Vendor::Claude, json!({"type":"assistant","message":{"content":[{"type":"text","text":"<Bash>literal text</Bash>"}]}})),
+    ] {
+        assert!(!faber_engine::project::policy::reject_native(&mut *process.stdin, vendor, &msg).await.unwrap());
+    }
+}
+
+#[test]
+fn t13_shared_exposure_discards_values_and_never_uses_missing_or_malformed_configuration() {
+    let entry: Value = serde_json::from_str(include_str!("../../tests/fixtures/projects/inherited-mcp.jsonl").trim()).unwrap();
+    for role in ROLES {
+        let (_, mut params) = project_thread_params(&thread(None), role).unwrap();
+        faber_engine::codex::thread_exposure(&mut params, &entry["msg"].to_string()).unwrap();
+        assert_eq!(params["config"]["mcp_servers"].as_object().unwrap().len(), 4);
+        assert!(!params.to_string().contains("synthetic"));
+        assert!(!params.to_string().contains("SYNTHETIC"));
+        assert_eq!(params["config"]["model_reasoning_effort"], "high");
+        for bad in [
+            "{}",
+            "not JSON",
+            r#"{"error":{"message":"SYNTHETIC"}}"#,
+            r#"{"result":{"config":{"mcp_servers":{"":{}}}}}"#,
+            r#"{"result":{"config":{"mcp_servers":[]}}}"#,
+        ] {
+            assert_eq!(faber_engine::codex::thread_exposure(&mut params, bad), Err(Blocker::Restrictions));
+        }
+    }
+}
+
+#[test]
+fn t13_every_role_gets_explicit_empty_strict_mcp_and_no_user_startup_integrations() {
+    for role in ROLES {
+        for resume in [None, Some("550e8400-e29b-41d4-a716-446655440000")] {
+            let args = project_claude_args(&launch(resume), role).unwrap();
+            assert!(args.windows(2).any(|pair| pair == ["--mcp-config", "{\"mcpServers\":{}}"]));
+            assert!(args.iter().any(|arg| arg == "--strict-mcp-config"));
+            assert!(args.iter().any(|arg| arg == "--safe-mode"));
+            assert!(args.windows(2).any(|pair| pair == ["--tools", ""]));
+            let settings: Value = serde_json::from_str(&args[args.iter().position(|a| a == "--settings").unwrap() + 1]).unwrap();
+            assert_eq!(settings["disableAllHooks"], true);
+            assert_eq!(settings["env"]["CLAUDE_CODE_MAX_OUTPUT_TOKENS"], if role == Role::Writer { "32000" } else { "8000" });
+            assert_eq!(after(&args, "--max-budget-usd"), "0.005");
+            assert_eq!(after(&args, "--max-turns"), "1");
+        }
+    }
+}
 
 #[test]
 fn opus_2_production_and_probe_use_the_same_pinned_provider() {
@@ -179,7 +300,17 @@ fn project_controls_are_explicit_on_launch_and_resume_without_changing_chat() {
             let deny = settings["permissions"]["deny"].as_array().unwrap();
             assert!(deny.iter().any(|r| r.as_str().is_some_and(|r| r.starts_with("Read(") && r.contains(".codex"))), "{deny:?}");
             let denied = after(&args, "--disallowedTools");
-            for tool in ["Bash", "Write", "Edit", "Agent", "Task", "Bash(git push *)", "Bash(git reset *)", "Bash(git update-ref *)"] {
+            for tool in [
+                "Bash",
+                "Write",
+                "Edit",
+                "NotebookEdit",
+                "Agent",
+                "Task",
+                "Bash(git push *)",
+                "Bash(git reset *)",
+                "Bash(git update-ref *)",
+            ] {
                 assert!(denied.split(',').any(|d| d == tool), "{tool}");
             }
             let (method, params) = project_thread_params(&thread(resume), role).unwrap();
@@ -195,6 +326,27 @@ fn project_controls_are_explicit_on_launch_and_resume_without_changing_chat() {
             }
         }
     }
+}
+
+#[test]
+fn uncached_invocation_bound_disables_more_expensive_cache_writes_for_every_role() {
+    for role in ROLES {
+        for resume in [None, Some("5e27c797-25b6-434d-a0a2-0e0e0c32ef9e")] {
+            let args = project_claude_args(&launch(resume), role).unwrap();
+            let settings: Value = serde_json::from_str(after(&args, "--settings")).unwrap();
+            assert_eq!(settings["env"]["DISABLE_PROMPT_CACHING"], "1");
+            for (name, value) in [
+                ("DISABLE_COMPACT", "1"),
+                ("CLAUDE_CODE_MAX_RETRIES", "0"),
+                ("CLAUDE_CODE_NONSTREAMING_TIMEOUT_RETRIES", "0"),
+                ("CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK", "1"),
+            ] {
+                assert_eq!(settings["env"][name], value, "{role:?}: {name}");
+            }
+        }
+    }
+    let args = faber_engine::claude::claude_args(&launch(None));
+    assert!(!args.iter().any(|arg| arg.contains("DISABLE_PROMPT_CACHING")));
 }
 
 #[test]

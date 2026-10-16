@@ -4,6 +4,13 @@ use crate::project::budget::{self, Budget, Change, Invocation, Status};
 use crate::route::{Asked, Routed};
 
 impl Engine {
+    /// The host calls this after retirement; both endpoints come from no-model CLI account checks.
+    pub async fn calibrate_mission(&self, mission: &str) -> Result<Status, String> {
+        self.check_plans(Duration::from_secs(20)).await;
+        // Provider readings are stamped to the whole second, and calibration rejects a reading from the future.
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        self.mission_budget(Change::Calibrate { mission: mission.into() })
+    }
     pub fn new_mission(&self, project: &Project, goal: &str, base: &str) -> Result<crate::project::Mission, String> {
         let repo = project.repo.as_ref().ok_or("reason.grant.otherRepo")?;
         let grant = project.grant.as_ref().ok_or("reason.grant.none")?;
@@ -64,8 +71,10 @@ impl Engine {
                             let room = v.day_baselines.get(name).and_then(|base| {
                                 let start = crate::budget::daily_start(r.resets_at, now)?;
                                 (base.reading.resets_at == r.resets_at
-                                    && base.reading.at <= start
-                                    && start - base.reading.at <= crate::budget::STALE_SECS)
+                                    && ((base.reading.at <= start && start - base.reading.at <= crate::budget::STALE_SECS)
+                                        || (base.extra.get("bootstrap") == Some(&serde_json::json!(true))
+                                            && base.reading.at > start
+                                            && base.reading.at <= now)))
                                     .then(|| crate::budget::daily_room(base.reading.used, r.used, r.resets_at, now))
                                     .flatten()
                             });
@@ -168,6 +177,7 @@ mod tests {
         Grant {
             cap_micros: cap,
             worker_micros: cap,
+            kind_caps: BTreeMap::new(),
             vendors: BTreeMap::from([(Vendor::Codex, cap)]),
             review_micros: 20_000,
             repair_micros: 20_000,
@@ -206,6 +216,71 @@ mod tests {
             },
             Arc::new(|_| {}),
         )
+    }
+
+    #[tokio::test]
+    async fn r131_only_the_no_model_account_check_stamps_zero_turn_evidence() {
+        let root = tempfile::tempdir().unwrap();
+        let e = new_engine(root.path());
+        e.set_time_source(Arc::new(|| NOW));
+        let quota = EngineEvent::Quota { window: "seven_day".into(), used: 0.30, resets_at: 7.0 * DAY };
+        e.note_account_events(
+            Vendor::Codex,
+            vec![
+                quota.clone(),
+                EngineEvent::Signals(Signals { billing: Some(Billing::Subscription), paid_fallback: Some(false), ..Default::default() }),
+            ],
+        );
+        assert!(e.ledger().codex.zero_turn_readings.is_empty());
+        assert!(e.mission_budget(Change::Allocate { vendor: Vendor::Codex, cap_micros: 2_000_000 }).is_err());
+        e.with(|c| c.zero_turn_checked(Vendor::Codex, vec![quota]));
+        assert!(e.mission_budget(Change::Allocate { vendor: Vendor::Codex, cap_micros: 2_000_000 }).is_ok());
+        assert_eq!(e.ledger().codex.zero_turn_readings["seven_day"].read_at, NOW);
+        e.with(|c| {
+            c.zero_turn_checked(
+                Vendor::Codex,
+                vec![EngineEvent::Quota { window: "seven_day".into(), used: f64::NAN, resets_at: 7.0 * DAY }],
+            )
+        });
+        assert_eq!(e.ledger().codex.zero_turn_readings["seven_day"].used, 0.30);
+        e.shutdown();
+    }
+
+    #[tokio::test]
+    async fn a_slow_quota_query_does_not_delay_the_completed_subscription_check() {
+        let root = tempfile::tempdir().unwrap();
+        let e = new_engine(root.path());
+        let (writer, reader) = tokio::io::duplex(64);
+        let reader = Arc::new(Mutex::new(Some(reader)));
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let started = Arc::new(Mutex::new(Some(started)));
+        e.with(|c| {
+            c.opts.clis = BTreeMap::from([
+                (Vendor::Claude, Cli { command: "account-fixture".into(), prefix: vec![] }),
+                (Vendor::Codex, Cli { command: "limits-fixture".into(), prefix: vec![] }),
+            ]);
+            c.opts.spawn = Arc::new(move |bin, args, _| {
+                let stdout: Box<dyn tokio::io::AsyncRead + Send + Unpin> = if args == ["auth", "status"] {
+                    Box::new(std::io::Cursor::new(br#"{"loggedIn":true,"subscriptionType":"max","authMethod":"claude.ai"}"#.to_vec()))
+                } else if bin == "limits-fixture" {
+                    Box::new(std::io::Cursor::new(b"{\"id\":1,\"result\":{}}\n{\"id\":2,\"result\":{\"rateLimits\":null}}\n{\"id\":3,\"result\":{\"account\":{\"type\":\"chatgpt\",\"planType\":\"pro\"}}}\n".to_vec()))
+                } else {
+                    let _ = started.lock().unwrap().take().unwrap().send(());
+                    Box::new(reader.lock().unwrap().take().unwrap())
+                };
+                Ok(crate::proc::Proc { stdin: Box::new(tokio::io::sink()), stdout, stderr: None, child: None, contained: None })
+            });
+        });
+        let checking = e.clone();
+        let task = tokio::spawn(async move {
+            checking.check_plans(Duration::from_secs(1)).await;
+        });
+        ready.await.unwrap();
+        assert_eq!(e.ledger().claude.billing, Billing::Subscription);
+        assert_eq!(e.ledger().codex.billing, Billing::Subscription);
+        drop(writer);
+        task.await.unwrap();
+        e.shutdown();
     }
     fn engine(root: &Path) -> Engine {
         let e = new_engine(root);
@@ -471,7 +546,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn opus_h2_native_start_closes_dispatch_but_unknown_spend_stays_parked() {
+    async fn opus_h2_native_start_closes_dispatch_and_interrupt_accounts_a_bound() {
         let (dir, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let e = engine(dir.path());
         let (j, mut r) = runner_fixture(&e, repo.path());
@@ -518,8 +593,170 @@ mod tests {
         .unwrap();
         r.pause(&j).unwrap();
         e.pause_mission_budget("m1").unwrap();
-        assert_eq!(r.resume_authorized(&j, &e), Err("reason.project.reconcile".into()));
-        assert!(Budget::load(&e.ledger()).unwrap().grants["m1"].paused);
+        r.resume_authorized(&j, &e).unwrap();
+        let budget = Budget::load(&e.ledger()).unwrap();
+        assert!(!budget.grants["m1"].paused);
+        assert!(budget.invocations["i1"].bounded);
+        assert_eq!(budget.invocations["i1"].paid_micros, 100_000);
+        e.shutdown();
+    }
+
+    #[tokio::test]
+    async fn an_accepted_turn_keeps_its_envelope_and_a_refused_one_its_key() {
+        let (dir, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let e = engine(dir.path());
+        let (j, mut r) = runner_fixture(&e, repo.path());
+        let mut brief = crate::project::Brief::new(
+            "w1",
+            1,
+            crate::project::Role::Research,
+            "Read",
+            &"1".repeat(40),
+            crate::project::ContractPin { id: "c1".into(), digest: "a".repeat(64) },
+        );
+        brief.grant_micros = Some(100_000);
+        brief.stop = "Done or blocked".into();
+        brief.scope = vec!["fixture".into()];
+        let pin = crate::project::worker::ModelPin {
+            vendor: Vendor::Codex,
+            model: "gpt-6.1-sol".into(),
+            effort: "medium".into(),
+            cli_version: "0.162.1".into(),
+        };
+        r.workers.insert("w1".into(), crate::project::worker::Worker::new(brief, pin, 3).unwrap());
+        r.save(&j).unwrap();
+        e.mission_budget(Change::Admit(request())).unwrap();
+        let mut intent = crate::project::Intent::new("i1", "m1", crate::project::IntentKind::Dispatch, 3, 1);
+        intent.task = Some("w1".into());
+        intent.expected.insert("invocation".into(), "i1".into());
+        j.record_intent(&intent).unwrap();
+        let done = || EngineEvent::Done {
+            ok: true,
+            reason: "completed".into(),
+            cost_total_usd: None,
+            input_tokens: 1000,
+            output_tokens: 100,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            cache_write_1h_tokens: 0,
+            incomplete: false,
+        };
+        let mut text = String::new();
+        e.mission_event(&j, "i1", "w1", &mut text, EngineEvent::Started { session_id: "s1".into(), model: "gpt-6.1-sol".into() }).unwrap();
+        let envelope = format!(
+            r#"{{"schema":{},"task":"w1","attempt":1,"base":"{}","contract":"{}","lease":0,"action":{{"read":{{"paths":["fixture/a.txt"],"callers":[]}}}}}}"#,
+            crate::project::wire::SCHEMA,
+            "1".repeat(40),
+            "a".repeat(64)
+        );
+        e.mission_event(&j, "i1", "w1", &mut text, EngineEvent::Text(envelope)).unwrap();
+        e.mission_event(&j, "i1", "w1", &mut text, done()).unwrap();
+        let kept = j.reply("i1").unwrap().expect("the accepted envelope is kept");
+        assert!(matches!(kept.action, crate::project::wire::Action::Read(ref read) if read.paths == ["fixture/a.txt"]));
+        // The same invocation cannot be recorded twice, and an unparsable turn leaves no record.
+        assert!(j.record_reply("i1", &kept).is_err());
+        assert!(j.reply("i2").unwrap().is_none());
+        // A refused turn keeps its key, never its text, and leaves no envelope: the engine itself records it from the
+        // turn it received (a second invocation of the same worker, whose reply is not an envelope at all).
+        e.mission_budget(Change::Report { id: "i1".into(), event: done(), terminated: true }).unwrap();
+        let mut second = request();
+        second.id = "i2".into();
+        e.mission_budget(Change::Admit(second)).unwrap();
+        let mut intent = crate::project::Intent::new("i2", "m1", crate::project::IntentKind::Dispatch, 3, 1);
+        intent.task = Some("w1".into());
+        intent.expected.insert("invocation".into(), "i2".into());
+        j.record_intent(&intent).unwrap();
+        let mut text = String::new();
+        e.mission_event(&j, "i2", "w1", &mut text, EngineEvent::Started { session_id: "s2".into(), model: "gpt-6.1-sol".into() }).unwrap();
+        e.mission_event(&j, "i2", "w1", &mut text, EngineEvent::Text("I will gladly help with that!".into())).unwrap();
+        e.mission_event(&j, "i2", "w1", &mut text, done()).unwrap();
+        assert_eq!(j.refusal("i2").unwrap().as_deref(), Some("error.wire.malformed"));
+        assert!(j.reply("i2").unwrap().is_none());
+        assert!(!std::fs::read_to_string(j.private().join("run.json")).unwrap().contains("gladly"), "the reply text is never kept");
+        e.shutdown();
+    }
+
+    #[tokio::test]
+    async fn a_role_settles_only_after_its_process_tree_is_confirmed_gone_and_a_security_failure_after_done_still_stops() {
+        let (dir, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let e = engine(dir.path());
+        let (j, mut r) = runner_fixture(&e, repo.path());
+        let mut brief = crate::project::Brief::new(
+            "w1",
+            1,
+            crate::project::Role::Research,
+            "Read",
+            &"1".repeat(40),
+            crate::project::ContractPin { id: "c1".into(), digest: "a".repeat(64) },
+        );
+        brief.grant_micros = Some(100_000);
+        brief.stop = "Done or blocked".into();
+        brief.scope = vec!["fixture".into()];
+        let pin = crate::project::worker::ModelPin {
+            vendor: Vendor::Codex,
+            model: "gpt-6.1-sol".into(),
+            effort: "medium".into(),
+            cli_version: "0.162.1".into(),
+        };
+        r.workers.insert("w1".into(), crate::project::worker::Worker::new(brief, pin, 3).unwrap());
+        r.save(&j).unwrap();
+        e.mission_budget(Change::Admit(request())).unwrap();
+        let mut intent = crate::project::Intent::new("i1", "m1", crate::project::IntentKind::Dispatch, 3, 1);
+        intent.task = Some("w1".into());
+        intent.expected.insert("invocation".into(), "i1".into());
+        j.record_intent(&intent).unwrap();
+        let commands = Arc::new(Mutex::new(vec![]));
+        let recorded = commands.clone();
+        e.with(|c| {
+            c.mission_sessions.insert(
+                "m1".into(),
+                vec![Session::from_fn(move |command| {
+                    recorded.lock().unwrap().push(match command {
+                        crate::events::SessionCommand::Close => "close",
+                        _ => "other",
+                    })
+                })],
+            );
+        });
+        let mut text = String::new();
+        e.mission_event(&j, "i1", "w1", &mut text, EngineEvent::Started { session_id: "s1".into(), model: "gpt-6.1-sol".into() }).unwrap();
+        let done = EngineEvent::Done {
+            ok: true,
+            reason: "completed".into(),
+            cost_total_usd: None,
+            input_tokens: 1000,
+            output_tokens: 100,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            cache_write_1h_tokens: 0,
+            incomplete: false,
+        };
+        e.mission_event(&j, "i1", "w1", &mut text, done).unwrap();
+        // The close that follows the turn is the engine's own: it neither fails the mission nor replaces the reported end.
+        let closed = EngineEvent::Error { message: "Claude Code stopped (exit 0).".into(), fatal: true };
+        e.mission_event(&j, "i1", "w1", &mut text, closed).unwrap();
+        assert!(!Budget::load(&e.ledger()).unwrap().invocations["i1"].terminated);
+        // A role with no owned tree (a recording, or a platform without the job) cannot be confirmed gone: nothing
+        // closes, nothing settles, and the invocation stays reserved at its bound.
+        assert_eq!(e.finish_role("i1").await, Err("reason.project.processTreeUnproven".into()));
+        let after = Budget::load(&e.ledger()).unwrap().invocations["i1"].clone();
+        assert!(!after.terminated && !after.settled);
+        assert!(commands.lock().unwrap().is_empty());
+        assert_eq!(e.mission_sessions("m1").len(), 1);
+        assert_eq!(e.finish_role("unknown").await, Err("reason.project.processTreeUnproven".into()));
+        // What a finished turn reports afterwards is only excused when it is the clean exit or the engine closing it.
+        let key = crate::project::policy::Blocker::Restrictions.key();
+        let fatal = |m: &str| EngineEvent::Error { message: m.into(), fatal: true };
+        assert_eq!(e.mission_event(&j, "i1", "w1", &mut text, fatal(key)), Err(key.into()));
+        assert_eq!(
+            e.mission_event(&j, "i1", "w1", &mut text, fatal("Codex stopped (exit 1). boom")),
+            Err("error.project.invocation".into())
+        );
+        assert_eq!(e.mission_event(&j, "i1", "w1", &mut text, fatal("some other fatal error")), Err("error.project.invocation".into()));
+        assert_eq!(e.mission_event(&j, "i1", "w1", &mut text, EngineEvent::Error { message: "x".into(), fatal: false }), Ok(()));
+        e.with(|c| c.worker_closing.insert("i1".into()));
+        assert_eq!(e.mission_event(&j, "i1", "w1", &mut text, fatal("Codex stopped (exit 1). killed")), Ok(()));
+        assert_eq!(e.mission_event(&j, "i1", "w1", &mut text, fatal(key)), Err(key.into()), "shutdown never excuses a policy failure");
         e.shutdown();
     }
 
@@ -532,6 +769,23 @@ mod tests {
         assert!(j.pending().unwrap().is_empty());
         assert!(Budget::load(&e.ledger()).unwrap().invocations.is_empty());
         assert!(e.mission_sessions(&r.mission.id).is_empty());
+        e.shutdown();
+    }
+
+    #[tokio::test]
+    async fn a_role_policy_failure_reaches_the_coordinator_without_waiting_for_cost_settlement() {
+        let (dir, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let e = engine(dir.path());
+        let (j, _) = runner_fixture(&e, repo.path());
+        e.mission_budget(Change::Admit(request())).unwrap();
+        let intent = crate::project::Intent::new("i1", "m1", crate::project::IntentKind::Dispatch, 3, 1);
+        j.record_intent(&intent).unwrap();
+        let key = crate::project::policy::Blocker::Restrictions.key();
+        for (message, expected) in [(key, key), ("untrusted CLI diagnostics", "error.project.invocation")] {
+            let event = EngineEvent::Error { message: message.into(), fatal: true };
+            assert_eq!(e.mission_event(&j, "i1", "w1", &mut String::new(), event), Err(expected.into()));
+        }
+        assert!(!Budget::load(&e.ledger()).unwrap().invocations["i1"].settled, "an error is not an owned-job retirement proof");
         e.shutdown();
     }
 

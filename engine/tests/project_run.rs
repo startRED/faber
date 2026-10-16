@@ -4,6 +4,30 @@ use faber_engine::project::run::{Capacity, schedule};
 use faber_engine::project::wire::{ArtifactRef, CheckKind, CheckResult};
 use faber_engine::project::{Contract, Decision, DecisionKind, Plan, Task, TaskKind, TaskState};
 use std::collections::{BTreeMap, BTreeSet};
+#[tokio::test]
+async fn proof_dispatch_failure_is_persisted_as_not_run() {
+    let (repo, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let j = faber_engine::project::store::Journal::open(repo.path(), data.path(), "m1").unwrap();
+    let mut runner = faber_engine::project::run::Runner::create(
+        &j,
+        faber_engine::project::Mission::new("m1", "p1", "repo", "Fix", &"1".repeat(40), 3, 1),
+    )
+    .unwrap();
+    runner.mission.state = faber_engine::project::MissionState::Running;
+    runner.save(&j).unwrap();
+    let mut proof = ProofSet::new("1".repeat(40), "input".into(), vec![definition()], vec![]).unwrap();
+    let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let check = called.clone();
+    let spawn: faber_engine::proc::Spawner = std::sync::Arc::new(move |_, _, _| {
+        check.store(true, std::sync::atomic::Ordering::SeqCst);
+        Err(std::io::Error::other("fixture dispatch failure"))
+    });
+    let receipt = runner.run_proof(&j, "a", "rust", &mut proof, repo.path(), &spawn).await.unwrap();
+    assert!(called.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(receipt.checks[0].result, CheckResult::NotRun);
+    assert!(!proof.verified());
+    assert_eq!(j.check(&receipt.id).unwrap(), Some(receipt));
+}
 fn task(id: &str, kind: TaskKind) -> Task {
     let mut t = Task::new(id, id, kind);
     t.checks = vec!["C1".into()];
@@ -229,4 +253,13 @@ fn opus_m2_known_proof_receipt_recovers_after_checkpoint_fault() {
     let mut restored = faber_engine::project::run::Runner::load(&j).unwrap();
     let mut b = ProofSet::new("2".repeat(40), "b".into(), vec![definition()], vec![]).unwrap();
     restored.start_proof(&j, "b", "rust", &mut b).unwrap();
+}
+
+#[test]
+fn a_heavy_proof_gets_the_time_of_a_cold_build_and_a_quick_check_does_not() {
+    use faber_engine::project::proof::deadline;
+    let mut check = definition();
+    check.heavy = false;
+    assert_eq!(deadline(&check).as_secs(), 120);
+    assert!(deadline(&definition()) >= std::time::Duration::from_secs(600));
 }

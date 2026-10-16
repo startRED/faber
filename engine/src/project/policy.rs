@@ -8,7 +8,8 @@
 //! invocation exposure including nested calls. Claude's budget estimate is not a hard exposure bound.
 //! Windows creates the CLI suspended inside a kill-on-close job before it runs (proc::spawn_command). Other platforms
 //! still own one child.
-//! Every automated role therefore stays blocked, including research/review. No real session is needed to deny it.
+//! Every automated role stays blocked, including research/review, until `qualification` finds a private, fresh receipt
+//! for the exact installed CLI version and executable hash (Windows only). No caller input can substitute for it.
 //!
 //! Before opening admission: record version-bound containment/escape proofs, platform tree termination and measured
 //! interrupt latency, and an enforceable exposure bound or verified live usage with a reserved safe stop margin.
@@ -53,30 +54,90 @@ pub fn blockers(_vendor: Vendor) -> &'static [Blocker] {
     &[Blocker::Restrictions, Blocker::ProcessTree, Blocker::Exposure]
 }
 
-/// This is deliberately not configurable: a manifest claim cannot unlock execution.
+/// Not configurable: no parameter, manifest or flag unlocks execution. Only a qualification receipt does, and only
+/// while it matches the installed program. This pre-check looks at the CLI found on PATH; the launch itself is checked
+/// again against the exact program it starts (`admit_launch`).
 pub fn admit(vendor: Vendor) -> Result<(), Blocker> {
-    Err(blockers(vendor)[0])
+    super::qualification::admitted(vendor, &|| crate::cli::find_cli(vendor.name()).filter(|c| c.prefix.is_empty()).map(|c| c.command))
+        .map(|_| ())
+        .map_err(|_| blockers(vendor)[0])
 }
 
-/// Reject every native permission request, including unknown tool names; this never parses command text.
+/// The authoritative check, made by the driver constructors with the program they are about to start. Returns the
+/// pinned program file, unchanged while it is held, and its SHA-256 for the check of the started process image before it
+/// runs (`proc::spawn_expecting`).
+pub fn admit_launch(vendor: Vendor, bin: &str) -> Result<super::qualification::Pinned, Blocker> {
+    super::qualification::admitted(vendor, &|| Some(bin.to_string())).map_err(|_| blockers(vendor)[0])
+}
+
+/// Fixed role controls; these values are not an admission receipt.
+pub fn output_maximum(vendor: Vendor, role: Role) -> u64 {
+    match vendor {
+        Vendor::Claude if role == Role::Writer => 32_000,
+        Vendor::Claude => 8_000,
+        // The installed config/protocol has no model-output control.
+        Vendor::Codex => 128_000,
+    }
+}
+
+/// Reject every native permission request and fail closed if an ungranted tool reaches execution.
 pub async fn reject_native(
     stdin: &mut (dyn tokio::io::AsyncWrite + Send + Unpin),
     vendor: Vendor,
     msg: &serde_json::Value,
 ) -> std::io::Result<bool> {
     use serde_json::json;
+    let escaped = match vendor {
+        Vendor::Codex => {
+            msg["method"] == "item/completed"
+                && !matches!(
+                    msg["params"]["item"]["type"].as_str(),
+                    Some("userMessage" | "agentMessage" | "reasoning" | "plan" | "contextCompaction")
+                )
+                && msg["params"]["item"]["status"] != "failed"
+                && msg["params"]["item"]["status"] != "declined"
+        }
+        Vendor::Claude => {
+            (msg["type"] == "assistant"
+                && msg["message"]["content"].as_array().is_some_and(|items| items.iter().any(|item| item["type"] == "tool_use")))
+                || (msg["type"] == "stream_event"
+                    && msg["event"]["type"] == "content_block_start"
+                    && msg["event"]["content_block"]["type"] == "tool_use")
+        }
+    };
+    if escaped {
+        return Err(std::io::Error::other("ungranted native tool executed"));
+    }
     let reply = match vendor {
         Vendor::Claude if msg["type"] == "control_request" && msg["request"]["subtype"] == "can_use_tool" => {
             let id = msg["request_id"].as_str().ok_or_else(|| std::io::Error::other("missing request identity"))?;
             json!({"type":"control_response", "response":{"subtype":"success", "request_id":id,
                 "response":{"behavior":"deny", "message":"Native tools are disabled for project roles."}}})
         }
-        Vendor::Codex if msg["method"].as_str().is_some_and(|m| m.ends_with("requestApproval")) => {
+        Vendor::Codex
+            if matches!(msg["method"].as_str(), Some("item/commandExecution/requestApproval" | "item/fileChange/requestApproval")) =>
+        {
             let id = msg
                 .get("id")
                 .filter(|id| id.is_string() || id.is_number())
                 .ok_or_else(|| std::io::Error::other("missing request identity"))?;
             json!({"id":id,"result":{"decision":"decline"}})
+        }
+        Vendor::Codex if matches!(msg["method"].as_str(), Some("item/permissions/requestApproval" | "mcpServer/elicitation/request")) => {
+            let id = msg
+                .get("id")
+                .filter(|id| id.is_string() || id.is_number())
+                .ok_or_else(|| std::io::Error::other("missing request identity"))?;
+            let result = if msg["method"] == "item/permissions/requestApproval" {
+                json!({"permissions":{},"scope":"turn"})
+            } else {
+                json!({"action":"decline","content":null})
+            };
+            json!({"id":id,"result":result})
+        }
+        Vendor::Claude if msg["type"] == "control_request" => return Err(std::io::Error::other("ungranted server request")),
+        Vendor::Codex if msg.get("method").is_some() && msg.get("id").is_some() => {
+            return Err(std::io::Error::other("ungranted server request"));
         }
         _ => return Ok(false),
     };

@@ -67,10 +67,16 @@ mod project_lease;
 mod project_native;
 #[path = "project_policy.rs"]
 mod project_policy;
+#[path = "project_qualification.rs"]
+mod project_qualification;
 #[path = "project_queue.rs"]
 mod project_queue;
+#[path = "project_r132.rs"]
+mod project_r132;
 #[path = "project_recovery.rs"]
 mod project_recovery;
+#[path = "project_report.rs"]
+mod project_report;
 #[path = "project_review.rs"]
 mod project_review;
 #[path = "project_route_v0.rs"]

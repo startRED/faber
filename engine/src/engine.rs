@@ -254,6 +254,13 @@ struct Core {
     convs: HashMap<String, Conversation>,
     live: HashMap<String, Live>,
     mission_sessions: HashMap<String, Vec<Session>>,
+    /// Owned process trees of writer roles by invocation id, and the terminal event each role reported.
+    worker_trees: HashMap<String, crate::proc::OwnedTree>,
+    worker_terminals: HashMap<String, EngineEvent>,
+    /// Role invocations the engine itself is closing: what their processes report from then on is the shutdown.
+    worker_closing: HashSet<String>,
+    /// Woken when a role turn ends or a mission stops, so a coordinator reads the journal exactly then.
+    mission_wake: Arc<tokio::sync::Notify>,
     /// The project each mission in `mission_sessions` belongs to, so a project can be asked whether a worker is alive in it.
     mission_projects: HashMap<String, String>,
     mission_lock: Arc<tokio::sync::Mutex<()>>,
@@ -321,6 +328,7 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(opts: EngineOptions, emit: Emit) -> Engine {
+        crate::project::qualification::use_dir(&opts.data_dir);
         let mut store = Store::new(&opts.data_dir);
         // A crash can leave an unsaved draft behind. Visible records keep their scratch; orphan UUID folders do not.
         let scratch = opts.data_dir.join("chat");
@@ -352,6 +360,10 @@ impl Engine {
                 convs: HashMap::new(),
                 live: HashMap::new(),
                 mission_sessions: HashMap::new(),
+                worker_trees: HashMap::new(),
+                worker_terminals: HashMap::new(),
+                worker_closing: HashSet::new(),
+                mission_wake: Arc::new(tokio::sync::Notify::new()),
                 mission_projects: HashMap::new(),
                 mission_lock: Arc::new(tokio::sync::Mutex::new(())),
                 local_update: None,
@@ -430,9 +442,10 @@ impl Engine {
         let jobs: Vec<Job> = self.with(|c| {
             c.opts.clis.iter().map(|(v, cli)| (*v, cli.clone(), c.opts.spawn.clone(), c.opts.data_dir.clone(), c.opts.windows)).collect()
         });
+        let mut claude_quota = None;
         for (vendor, cli, spawn, cwd, windows) in jobs {
             match vendor {
-                Vendor::Claude => self.check_claude_plan(timeout).await,
+                Vendor::Claude => claude_quota = self.check_claude_plan(timeout).await,
                 Vendor::Codex => {
                     let events = read_codex_limits(&cli.command, &cwd, windows, spawner(&spawn, &cli), timeout).await;
                     self.with(|c| {
@@ -442,18 +455,26 @@ impl Engine {
                 }
             }
         }
+        // Optional quota work cannot hold up either vendor's completed account check.
+        if let Some((cli, spawn, cwd)) = claude_quota {
+            let events = account::claude_limits(&cli, &spawn, &cwd, timeout).await;
+            self.with(|c| {
+                c.zero_turn_checked(Vendor::Claude, events);
+                c.emit_usage();
+            });
+        }
     }
-    async fn check_claude_plan(&self, timeout: Duration) {
-        let Some((cli, spawn, cwd)) =
-            self.with(|c| c.opts.clis.get(&Vendor::Claude).map(|cli| (cli.clone(), c.opts.spawn.clone(), c.opts.data_dir.clone())))
-        else {
-            return;
-        };
+    /// Checks the Claude plan; when the account is a subscription, returns what a zero-token quota read needs.
+    async fn check_claude_plan(&self, timeout: Duration) -> Option<(Cli, Spawner, PathBuf)> {
+        let (cli, spawn, cwd) =
+            self.with(|c| c.opts.clis.get(&Vendor::Claude).map(|cli| (cli.clone(), c.opts.spawn.clone(), c.opts.data_dir.clone())))?;
         let found = account::claude_account(&cli, &spawn, &cwd, timeout).await;
+        let subscription = found.as_ref().is_some_and(|s| s.billing == Some(Billing::Subscription));
         self.with(|c| {
             c.claude_plan_checked(found);
             c.emit_usage();
         });
+        subscription.then_some((cli, spawn, cwd))
     }
     /// The newer flags the installed Claude Code is known to take (none until the help has been read).
     pub fn claude_flags(&self) -> crate::claude::ClaudeFlags {
@@ -941,10 +962,30 @@ impl Core {
         if events.is_empty() {
             return self.ledger.codex.plan_failed();
         }
-        events.into_iter().for_each(|e| self.note_account_event(Vendor::Codex, e));
+        self.zero_turn_checked(Vendor::Codex, events);
         if self.ledger.codex.plan.is_none() && self.ledger.codex.billing != Billing::UsageBilled {
             self.ledger.codex.plan_missing();
         }
+    }
+
+    fn zero_turn_checked(&mut self, vendor: Vendor, events: Vec<EngineEvent>) {
+        for event in events {
+            if let EngineEvent::Quota { window, used, resets_at } = &event {
+                let now = self.secs();
+                if plausible(*used, *resets_at) && *resets_at > now {
+                    self.ledger.of_mut(vendor).zero_turn_readings.insert(
+                        window.clone(),
+                        crate::ledger::Reading {
+                            used: (used * 1000.0).round() / 1000.0,
+                            resets_at: resets_at.round(),
+                            read_at: now.round(),
+                        },
+                    );
+                }
+            }
+            self.note_account_event(vendor, event);
+        }
+        self.save_ledger(true);
     }
 
     fn note_account_event(&mut self, vendor: Vendor, event: EngineEvent) {

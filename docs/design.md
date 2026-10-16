@@ -507,6 +507,37 @@ classification, fresh pass sessions, dispatch, proofs and two-order comparisons;
 See [the T5K proof report](research/2026-10-12-project-kits.md) for measured synthetic performance and the live G9
 evidence still required by T13. Fixture attestation is not proof of native isolation.
 
+### Proof isolation (R138)
+
+A mission proof, and the canary's build and test of the code its Writer changed, run code a role wrote before any review.
+The engine starts them through `proc::isolated_spawner`: the recorded environment only, created suspended, joined to a
+kill-on-close job, and on Windows lowered to Low integrity before the first instruction. The mission clone, the proof's
+build folder, its own cargo home and npm cache, and its temporary folder are labelled Low (inheritable), so the proof can
+write there and nowhere else: Windows refuses its writes to the installed app, the engine's records, the owner checkout
+and the user profile (except folders that are Low by design, such as `AppData\LocalLow`). Where the user may only Modify
+a folder (a second drive), the folder's owner first grants itself the right to label it. On macOS `sandbox-exec` denies
+writes outside the same folders.
+
+Residual in v0, disclosed on screen (`projects.proofs.isolationTech`): a proof can still read what the user can read and
+use the network, and on Linux nothing limits its writes. R139 accepts this for v0: chat roles already run with full access
+(R121), which exposes strictly more, and a proof starts from a cleared environment at Low integrity. The upgrade path is an
+AppContainer (Windows), which closes reads and the network as well.
+
+The real canary is opt-in (`real-canary.json`). It runs the candidate build, untrusted until it passes, with the real
+Claude Code and Codex CLIs, signed in through the user's own profile and environment, with copied qualification receipts;
+only its proof runs isolated.
+
+Two more launch checks: every qualification receipt binds the launch-policy revision (a SHA-256 of every role's launch
+parameters), so a changed flag or setting asks for a new qualification run; and a role CLI is created suspended, the file
+its image came from is pinned (opened with a share mode that denies write and delete) and hashed through that handle before
+`--version` runs and again before resume; the handle stays open until the process has started, so the file cannot be
+swapped in between, and a hash other than the receipt's kills it before it runs. Waiver markers and their ledger records
+live next to the canary data folder, not inside it, so deleting that folder does not revive a spent waiver, and a waiver
+is recorded as spent before the mission that uses it runs.
+
+Follow-up: a crash after a proof ran but before its progress mark was written replays the proof on resume. Proofs are
+idempotent tests, so v0 accepts the replay.
+
 ### Screen commands and event
 
 The commands fail with a key string, like the other shell commands, and never report a success they did not have.

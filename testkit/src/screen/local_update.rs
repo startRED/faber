@@ -6,23 +6,41 @@ use crate::sandbox::{Launch, child_env};
 use faber_engine::project::update::{CanaryVerdict, ExactTree, Slot, SlotLayout, SwapCheck, UpdateManager, UpdateState};
 use faber_engine::project::{GitMode, Grant, RepoIdentity, SCHEMA};
 use std::fs;
+use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub fn scenarios() -> Vec<Scenario> {
     vec![
         Scenario { name: "local_update: candidate starts hidden and returns a real canary handshake without inventing Pass", run: canary },
-        Scenario { name: "local_update: independent helper restores an early crash headlessly without changing saved grants", run: crash },
+        Scenario { name: "T13 5: independent helper restores an early crash headlessly without changing saved grants", run: crash },
+        Scenario { name: "T13 6: post-rollback Resume refuses unqualified dispatch without consuming the existing grant", run: resume },
         Scenario { name: "local_update: trusted launcher recovers before a broken candidate can enter main", run: interrupted },
         Scenario {
             name: "local_update: autostart uses the trusted launcher to recover a broken candidate without environment variables",
             run: autostart,
         },
         Scenario { name: "local_update: hidden session observer preserves next on orderly logoff or shutdown", run: session },
-        Scenario {
-            name: "local_update: running mission blocks promotion until paused; autostart probation and rollback remain headless",
-            run: handoff,
-        },
+        Scenario { name: "T13 4: fixture promotion reaches Healthy; quiescence, probation and rollback remain headless", run: handoff },
     ]
+}
+
+/// Put the folders of git and cargo (and where the toolchain lives) into the candidate's environment.
+fn canary_tools(env: &mut std::collections::BTreeMap<String, String>) -> Result<()> {
+    let mut path = vec![];
+    for tool in ["git", "cargo"] {
+        let cli = faber_engine::cli::find_cli(tool).ok_or_else(|| format!("{tool} is not installed"))?;
+        path.push(Path::new(&cli.command).parent().ok_or("a tool has no folder")?.to_path_buf());
+    }
+    if let Some(system) = std::env::var_os("SystemRoot") {
+        path.push(std::path::PathBuf::from(system).join("System32"));
+    }
+    env.insert("PATH".into(), std::env::join_paths(path).map_err(|e| e.to_string())?.to_string_lossy().into());
+    for name in ["RUSTUP_HOME", "CARGO_HOME", "ProgramData", "ProgramFiles", "ProgramFiles(x86)"] {
+        if let Ok(value) = std::env::var(name) {
+            env.insert(name.into(), value);
+        }
+    }
+    Ok(())
 }
 
 fn canary(ctx: &mut Ctx) -> Result {
@@ -46,36 +64,137 @@ fn canary(ctx: &mut Ctx) -> Result {
         ("FABER_INSTALLED_DATA".into(), ctx.sb.data.to_string_lossy().into_owned()),
         ("FABER_INSTALLED_RELEASE".into(), ctx.sb.release.to_string_lossy().into_owned()),
     ]);
+    // The candidate runs a real miniature mission: it needs git and the Rust toolchain, nothing else from this computer.
+    canary_tools(&mut env)?;
     let (host, _, _) =
         Owned::start(&launcher, &["--test-canary".into()], &env, &ctx.sb.sandbox, &ctx.paths.fake_cli).map_err(|e| e.to_string())?;
     let result = (|| {
-        eventually("candidate canary receipt", Duration::from_secs(40), || !host.is_running())?;
+        eventually("candidate canary receipt", Duration::from_secs(240), || !host.is_running())?;
         ensure(host.status().is_some_and(|s| s.contains('0')), || "candidate canary failed".into())?;
         let verdict: CanaryVerdict = serde_json::from_slice(&fs::read(data.join("test-canary-result.json")).map_err(|e| e.to_string())?)
             .map_err(|e| e.to_string())?;
-        ensure(verdict == CanaryVerdict::NotRun, || "startup fabricated miniature mission acceptance".into())?;
-        let receipt = fs::read_dir(data.join("missions/canary"))
-            .map_err(|e| e.to_string())?
-            .next()
+        ensure(verdict == CanaryVerdict::NotRun, || {
+            let found: Vec<String> = fs::read_dir(data.join("missions/canary"))
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|e| format!("{}: {}", e.file_name().to_string_lossy(), fs::read_to_string(e.path()).unwrap_or_default()))
+                .collect();
+            format!("the offline canary must stay a wait, got {verdict:?}; {found:?}")
+        })?;
+        let receipts = || -> std::result::Result<Vec<std::path::PathBuf>, String> {
+            fs::read_dir(data.join("missions/canary"))
+                .map_err(|e| e.to_string())?
+                .map(|e| e.map(|e| e.path()).map_err(|e| e.to_string()))
+                .collect()
+        };
+        let all = receipts()?;
+        let receipt = all
+            .iter()
+            .find(|p| {
+                p.file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with("canary-") && !n.to_string_lossy().starts_with("canary-verified-"))
+            })
             .ok_or("missing private canary receipt")?
-            .map_err(|e| e.to_string())?
-            .path();
+            .clone();
+        let verified = all
+            .iter()
+            .find(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("canary-verified-")))
+            .ok_or("the supervisor wrote no verified summary")?;
         let handshake: serde_json::Value =
             serde_json::from_slice(&fs::read(receipt).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
         ensure(handshake["buildHash"] == ExactTree::compute_build_hash(&bytes) && handshake["nonce"] == handshake["receipt"], || {
             "wrong candidate handshake".into()
         })?;
+        // The candidate ran its whole miniature mission on recorded replies: it is evidence, never a promotion.
+        ensure(handshake["evidence"]["mode"] == "offline", || format!("the candidate did not report an offline mission: {handshake}"))?;
+        let summary: serde_json::Value =
+            serde_json::from_slice(&fs::read(verified).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        ensure(
+            summary["mode"] == "offline"
+                && summary["writer"] == "claude"
+                && summary["reviewer"] == "codex"
+                && summary["spentMicros"] == 0
+                && summary["head"].as_str().is_some_and(|h| h.len() == 40),
+            || format!("the supervisor did not verify the mission: {summary}"),
+        )?;
         assert_hidden(ctx, &[&host], &env)
     })();
     host.terminate();
     ctx.notes.push(
-        "candidate Engine startup; challenge, executable hash, schema and private receipt; no fake/live miniature mission Pass".into(),
+        "candidate runs its own miniature mission on recorded replies (real git, cargo proof, other-vendor review, landing); supervisor reads its journal; offline evidence is never a Pass".into(),
     );
     result
 }
 
 fn crash(ctx: &mut Ctx) -> Result {
     rollback(ctx, false, false, false)
+}
+fn resume(ctx: &mut Ctx) -> Result {
+    let data = ctx.sb.sandbox.join("development/data");
+    fs::create_dir_all(&data).map_err(|e| e.to_string())?;
+    let repo = ctx.sb.sandbox.join("resume-repo");
+    fs::create_dir_all(&repo).map_err(|e| e.to_string())?;
+    let mut project = faber_engine::model::Project::new("p1".into(), "Fixture".into(), repo.to_string_lossy().into_owned());
+    project.repo = Some(RepoIdentity::new("repo", &repo.to_string_lossy()));
+    project.grant = Some(Grant::new("repo", GitMode::Seguro, 1, 1));
+    let store = faber_engine::store::Store::new(&data);
+    store.save_projects(&[project]).map_err(|e| e.key())?;
+    let mut ledger = faber_engine::ledger::Ledger::default();
+    let mut budget = faber_engine::project::budget::Budget::default();
+    budget.grants.insert(
+        "m1".into(),
+        faber_engine::project::budget::Grant {
+            cap_micros: 2_000_000,
+            worker_micros: 600_000,
+            kind_caps: Default::default(),
+            vendors: std::collections::BTreeMap::from([(faber_engine::model::Vendor::Codex, 2_000_000)]),
+            review_micros: 400_000,
+            repair_micros: 700_000,
+            canary_micros: 0,
+            paused: true,
+            extra: Default::default(),
+        },
+    );
+    ledger.extra.insert("missionBudget".into(), serde_json::to_value(budget).map_err(|e| e.to_string())?);
+    store.save_ledger(&ledger).map_err(|e| e.key())?;
+    let before = fs::read(data.join("budget.json")).map_err(|e| e.to_string())?;
+    let journal = faber_engine::project::store::Journal::open(&repo, &data, "m1").map_err(|e| e.key())?;
+    let mut runner = faber_engine::project::run::Runner::create(
+        &journal,
+        faber_engine::project::Mission::new("m1", "p1", "repo", "Fixture", &"1".repeat(40), 1, 1),
+    )
+    .map_err(str::to_string)?;
+    runner.pause(&journal).map_err(str::to_string)?;
+    rollback(ctx, false, false, false)?;
+    let mut runner = faber_engine::project::run::Runner::load(&journal).map_err(str::to_string)?;
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| e.to_string())?;
+    let engine = faber_engine::Engine::new(
+        faber_engine::EngineOptions {
+            data_dir: data.clone(),
+            clis: Default::default(),
+            spawn: std::sync::Arc::new(|_, _, _| panic!("unqualified Resume must never spawn")),
+            windows: cfg!(windows),
+            claude_env_billed: false,
+            max_warm: 0,
+            idle: Duration::from_secs(30),
+            runtime: runtime.handle().clone(),
+            ask: None,
+        },
+        std::sync::Arc::new(|_| {}),
+    );
+    for _ in 0..2 {
+        ensure(runner.resume(&journal, &engine) == Err("reason.project.restrictionsUnproven".into()), || {
+            "unqualified Resume admitted a role".into()
+        })?;
+        ensure(fs::read(data.join("budget.json")).map_err(|e| e.to_string())? == before, || {
+            "refused Resume consumed or replaced the grant".into()
+        })?;
+    }
+    engine.shutdown();
+    ctx.notes
+        .push("Resume admission remains blocked; repeated requests preserve the $2 fixture grant. Successful Resume is not proven.".into());
+    Ok(())
 }
 fn interrupted(ctx: &mut Ctx) -> Result {
     rollback(ctx, true, false, false)
@@ -229,6 +348,13 @@ fn handoff(ctx: &mut Ctx) -> Result {
             eventually("five minute wall-clock promotion despite failed cleanup", Duration::from_secs(320), || {
                 manager.manifest().is_ok_and(|m| m.is_some_and(|m| m.state == UpdateState::Healthy))
             })?;
+            let healthy = manager.manifest().map_err(|e| e.key())?.ok_or("missing healthy manifest")?;
+            ensure(
+                healthy.active_slot == Slot::B
+                    && healthy.current_good.as_ref().is_some_and(|good| good.slot == Slot::B && good.tree == tree)
+                    && healthy.last_good.as_ref().is_some_and(|good| good.slot == Slot::A),
+                || "promotion lost the exact candidate or last good slot".into(),
+            )?;
             eventually("supervisor exits after healthy handoff", Duration::from_secs(10), || !resumed.is_running())?;
             eventually("previous helper image is retired before slot reuse", Duration::from_secs(10), || {
                 fs::OpenOptions::new().write(true).open(root.join("slots/a/faber-local.exe")).is_ok()

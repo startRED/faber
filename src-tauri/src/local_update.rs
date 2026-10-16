@@ -50,6 +50,25 @@ struct Enrollment {
     installed_release: PathBuf,
 }
 
+/// Variables a running slot needs from its person's session to reach the CLIs' sign-in and the build toolchain.
+const PROFILE_AND_TOOLCHAIN: &[&str] = &[
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "ProgramData",
+    "ProgramFiles",
+    "ProgramFiles(x86)",
+    "RUSTUP_HOME",
+    "CARGO_HOME",
+    "LIB",
+    "INCLUDE",
+    "LIBPATH",
+    "VCINSTALLDIR",
+    "VCToolsInstallDir",
+];
+
 impl Development {
     pub fn new(channel: &str, root: PathBuf, installed_data: PathBuf, installed_release: PathBuf) -> Result<Self> {
         if channel != "development" {
@@ -199,6 +218,13 @@ impl Development {
         let mut command = NativeCommand::new(self.binary(slot), self.layout.slot_dir(slot));
         command.args.push("--faber-local-start".into());
         self.environment(&mut command);
+        // Folder names only, never a secret: the CLIs find their own sign-in through the profile, and a local build
+        // finds its toolchain through these. Without them the slot cannot start a mission or build the next slot.
+        for key in PROFILE_AND_TOOLCHAIN {
+            if let Ok(value) = std::env::var(key) {
+                command.environment.insert((*key).into(), value);
+            }
+        }
         command
     }
 
@@ -630,7 +656,14 @@ pub fn probe_saved_data(root: &Path, output: &Path) -> Result<()> {
         *record = match name {
             "runtime.json" => round_trip::<faber_engine::project::Runtime>(record)?,
             "grant.json" => round_trip::<Grant>(record)?,
-            "budget.json" => round_trip::<faber_engine::project::budget::Budget>(record)?,
+            // The engine writes its whole quota ledger to budget.json; the mission spending is a field inside it.
+            "budget.json" => {
+                let ledger = round_trip::<faber_engine::ledger::Ledger>(record)?;
+                let parsed: faber_engine::ledger::Ledger =
+                    serde_json::from_value(ledger.clone()).map_err(|_| invalid("incompatible saved record"))?;
+                faber_engine::project::budget::Budget::load(&parsed).map_err(|_| invalid("incompatible saved record"))?;
+                ledger
+            }
             "ledger.json" => round_trip::<faber_engine::ledger::Ledger>(record)?,
             "mission.json" => round_trip::<faber_engine::project::Mission>(record)?,
             "plan.json" => round_trip::<faber_engine::project::Plan>(record)?,
@@ -993,13 +1026,7 @@ impl Development {
         let bytes = read_payload(&self.binary(slot))?;
         let proof = tree.extra.get("proofReceipt").and_then(Value::as_str).ok_or(invalid("missing accepted proof receipt"))?;
         let canary = self.build_dir().join("canary");
-        for (name, bytes) in [
-            ("Cargo.toml", include_bytes!("../../tests/fixtures/projects/canary/Cargo.toml").as_slice()),
-            ("src/lib.rs", include_bytes!("../../tests/fixtures/projects/canary/src/lib.rs").as_slice()),
-            ("goal.json", include_bytes!("../../tests/fixtures/projects/canary/goal.json").as_slice()),
-        ] {
-            ScopedFile::new(&canary.join(name), true)?.write(bytes, None)?;
-        }
+        faber_engine::project::canary::lay_out(&canary).map_err(|_| invalid("canary fixtures unavailable"))?;
         let verdict = runner
             .canary(&self.binary(slot), tree, &canary)
             .unwrap_or_else(|_| CanaryVerdict::Fail { at: now(), reason: "error.update.canaryFailed".into() });
@@ -1030,16 +1057,21 @@ fn read_payload(path: &Path) -> Result<Vec<u8>> {
     ScopedFile::new(&real_path(path)?, false)?.read_limited(256 * 1024 * 1024)?.map(|(bytes, _)| bytes).ok_or(invalid("missing executable"))
 }
 
+/// What the build itself writes inside the snapshot and git ignores: installed packages, the screen's output and the
+/// shell's generated schemas. Everything else must stay exactly as accepted.
+const BUILD_OUTPUT: [&str; 3] = ["node_modules", "dist", "src-tauri/gen"];
+
 fn source_inventory(root: &Path) -> Result<BTreeMap<PathBuf, String>> {
-    fn collect(path: &Path, root: &Path, entries: &mut BTreeMap<PathBuf, String>) -> Result<()> {
+    fn collect(path: &Path, relative: &Path, entries: &mut BTreeMap<PathBuf, String>) -> Result<()> {
         for entry in fs::read_dir(path).map_err(io_error)? {
             let entry = entry.map_err(io_error)?;
-            if path == root && (entry.file_name() == "node_modules" || entry.file_name() == "dist") {
+            let child = relative.join(entry.file_name());
+            if BUILD_OUTPUT.iter().any(|output| child == Path::new(output)) {
                 continue;
             }
             let path = real_path(&entry.path())?;
             if path.is_dir() {
-                collect(&path, root, entries)?;
+                collect(&path, &child, entries)?;
             } else {
                 entries.insert(path.clone(), ScopedFile::new(&path, false)?.hash()?.ok_or(invalid("source file disappeared"))?);
             }
@@ -1047,8 +1079,30 @@ fn source_inventory(root: &Path) -> Result<BTreeMap<PathBuf, String>> {
         Ok(())
     }
     let mut entries = BTreeMap::new();
-    collect(root, root, &mut entries)?;
+    collect(root, Path::new(""), &mut entries)?;
     Ok(entries)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_build_may_write_its_ignored_output_but_nothing_else() {
+        let dir = tempfile::Builder::new().tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("src-tauri/src")).unwrap();
+        fs::write(root.join("src-tauri/src/main.rs"), "fn main() {}").unwrap();
+        let before = source_inventory(root).unwrap();
+        for output in ["dist/index.js", "node_modules/p/i.js", "src-tauri/gen/schemas/desktop.json"] {
+            fs::create_dir_all(root.join(output).parent().unwrap()).unwrap();
+            fs::write(root.join(output), "generated").unwrap();
+        }
+        assert_eq!(source_inventory(root).unwrap(), before);
+        fs::create_dir_all(root.join("src-tauri/src/gen")).unwrap();
+        fs::write(root.join("src-tauri/src/gen/x.rs"), "x").unwrap();
+        assert_ne!(source_inventory(root).unwrap(), before, "only the exact generated folders are exempt");
+    }
 }
 
 pub fn build_commands(snapshot: &Path, target: &Path, node: &Path, cargo: &Path) -> Vec<NativeCommand> {
@@ -1058,7 +1112,18 @@ pub fn build_commands(snapshot: &Path, target: &Path, node: &Path, cargo: &Path)
     shell.args = ["build", "--offline", "--locked", "--release", "--package", "faber", "--bin", "faber", "--bin", "faber-local"]
         .map(String::from)
         .to_vec();
-    for key in ["RUSTUP_HOME", "CARGO_HOME", "LIB", "INCLUDE", "LIBPATH", "VCINSTALLDIR", "VCToolsInstallDir"] {
+    for key in [
+        "RUSTUP_HOME",
+        "CARGO_HOME",
+        "LIB",
+        "INCLUDE",
+        "LIBPATH",
+        "VCINSTALLDIR",
+        "VCToolsInstallDir",
+        "ProgramData",
+        "ProgramFiles",
+        "ProgramFiles(x86)",
+    ] {
         if let Ok(value) = std::env::var(key) {
             shell.environment.insert(key.into(), value);
         }
@@ -1108,11 +1173,20 @@ pub fn native_build(snapshot: &Path, target: &Path, dependencies: &Path, node: &
     Ok((executable, target.join(format!("release/faber-local{}", std::env::consts::EXE_SUFFIX))))
 }
 
+/// How the candidate's own miniature mission runs. Only `Real` can earn a pass; `Offline` replays recorded replies and
+/// can never promote a build.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CanaryMode {
+    Unavailable,
+    Offline,
+    Real,
+}
+
 pub struct ProductionRunner {
     pub dependencies: PathBuf,
     pub node: PathBuf,
     pub cargo: PathBuf,
-    pub canary_available: bool,
+    pub canary: CanaryMode,
     pub data: PathBuf,
     pub mission: String,
     _power: Option<crate::awake::MissionAwakeGuard>,
@@ -1120,7 +1194,7 @@ pub struct ProductionRunner {
 
 impl ProductionRunner {
     pub fn new(dependencies: PathBuf, node: PathBuf, cargo: PathBuf, data: PathBuf, mission: String) -> Self {
-        Self { dependencies, node, cargo, canary_available: true, data, mission, _power: None }
+        Self { dependencies, node, cargo, canary: CanaryMode::Offline, data, mission, _power: None }
     }
 
     pub fn with_awake(mut self, awake: std::sync::Arc<std::sync::Mutex<crate::awake::CountedAwake>>) -> Self {
@@ -1134,8 +1208,25 @@ impl ProductionRunner {
                 faber_engine::cli::find_cli(name).filter(|cli| cli.prefix.is_empty()).ok_or(invalid("native build tool unavailable"))?;
             Ok::<_, UpdateError>(PathBuf::from(cli.command))
         };
-        Ok(Self::new(repo.join("node_modules"), native("node")?, native("cargo")?, data.into(), mission.into()))
+        let mut runner = Self::new(repo.join("node_modules"), native("node")?, native("cargo")?, data.into(), mission.into());
+        if real_canary_allowed(data) {
+            runner.canary = CanaryMode::Real;
+        }
+        Ok(runner)
     }
+}
+
+/// A real canary spends the person's subscription, so it runs only when a person put the allowance in the development
+/// data folder: `real-canary.json` with a `capMicros` that covers what one canary may cost. Without it the candidate
+/// still runs its replayed mission, stays ready and waits.
+pub fn real_canary_allowed(data: &Path) -> bool {
+    let Ok(Some((bytes, _))) = ScopedFile::new(&data.join("real-canary.json"), false).and_then(|f| f.read_limited(4096)) else {
+        return false;
+    };
+    serde_json::from_slice::<Value>(&bytes)
+        .ok()
+        .and_then(|v| v["capMicros"].as_u64())
+        .is_some_and(|cap| cap >= faber_engine::project::canary::REAL_CAP_MICROS)
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -1146,48 +1237,70 @@ pub struct CanaryHandshake {
     pub schema: u32,
     pub receipt: String,
     pub verdict: CanaryVerdict,
+    /// What the child says its miniature mission did. The supervisor reads the journal itself and believes none of it.
+    #[serde(default)]
+    pub evidence: Option<faber_engine::project::canary::Evidence>,
+    /// The `reason.*` key the mission stopped with, when it did not finish.
+    #[serde(default)]
+    pub stopped: Option<String>,
 }
 
-/// This bounded headless operation runs inside the candidate before any GUI runtime or account discovery.
-pub fn probe_canary(data: &Path, nonce: &str, output: &Path) -> Result<()> {
+/// This bounded headless operation runs inside the candidate before any GUI runtime or account discovery. It takes the
+/// frozen canary goal through the production coordinator on a private data folder and reports what it did. It never
+/// issues a verdict: the supervisor reads the mission's journal and ledger itself.
+pub fn probe_canary(data: &Path, nonce: &str, output: &Path, mode: &str) -> Result<()> {
+    use faber_engine::project::canary::{self, Mode};
     if !faber_engine::project::valid_id(nonce) || !output.starts_with(data) {
         return Err(invalid("invalid canary challenge"));
     }
-    for (name, expected) in [
-        ("goal.json", include_bytes!("../../tests/fixtures/projects/canary/goal.json").as_slice()),
-        ("src/lib.rs", include_bytes!("../../tests/fixtures/projects/canary/src/lib.rs").as_slice()),
-    ] {
-        let bytes = ScopedFile::new(&data.join(name), false)?.read_limited(64 * 1024)?.ok_or(invalid("missing canary fixture"))?.0;
-        if bytes != expected {
-            return Err(invalid("canary fixture changed"));
+    let mode = match mode {
+        "offline" => Mode::Offline,
+        "real" => Mode::Real,
+        _ => return Err(invalid("unknown canary mode")),
+    };
+    if !canary::laid_out(data) {
+        return Err(invalid("canary fixture changed"));
+    }
+    let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().map_err(io_error)?;
+    let mut clis = std::collections::BTreeMap::new();
+    if mode == Mode::Real {
+        for (vendor, name) in [(faber_engine::model::Vendor::Claude, "claude"), (faber_engine::model::Vendor::Codex, "codex")] {
+            clis.insert(vendor, faber_engine::cli::find_cli(name).ok_or(invalid("canary CLI unavailable"))?);
         }
     }
-    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(io_error)?;
+    let engine_data = data.join("data");
+    canary::prepare_data(&engine_data, mode).map_err(|_| invalid("canary data could not be prepared"))?;
     let engine = faber_engine::Engine::new(
         faber_engine::EngineOptions {
-            data_dir: data.join("data"),
-            clis: Default::default(),
+            data_dir: engine_data.clone(),
+            clis,
             spawn: faber_engine::proc::real_spawner(),
             windows: cfg!(windows),
             claude_env_billed: false,
-            max_warm: 0,
+            max_warm: usize::from(mode == Mode::Real),
             idle: std::time::Duration::from_secs(30),
             runtime: runtime.handle().clone(),
             ask: None,
         },
         std::sync::Arc::new(|_| {}),
     );
-    validate_saved_data(&data.join("data"))?;
+    validate_saved_data(&engine_data)?;
     let _state = engine.state();
+    let outcome = runtime.block_on(canary::run(&engine, &engine_data, &data.join("work"), mode));
     engine.shutdown();
     let executable = std::env::current_exe().map_err(io_error)?;
+    let (evidence, stopped) = match outcome {
+        Ok(evidence) => (Some(evidence), None),
+        Err(key) => (None, Some(key)),
+    };
     let handshake = CanaryHandshake {
         nonce: nonce.into(),
         build_hash: ExactTree::compute_build_hash(&read_payload(&executable)?),
         schema: SCHEMA,
         receipt: nonce.into(),
-        // shortcut: T2/T5 still deny production writer dispatch, require a separately granted completed tiny mission before Pass.
         verdict: CanaryVerdict::NotRun,
+        evidence,
+        stopped,
     };
     ScopedFile::new(output, true)?.write(&serde_json::to_vec(&handshake).expect("plain data serializes"), None)?;
     Ok(())
@@ -1226,7 +1339,7 @@ impl Runner for ProductionRunner {
     }
 
     fn canary(&mut self, executable: &Path, tree: &ExactTree, data: &Path) -> Result<CanaryVerdict> {
-        if !self.canary_available {
+        if self.canary == CanaryMode::Unavailable {
             return Ok(CanaryVerdict::NotRun);
         }
         let bytes = read_payload(executable)?;
@@ -1254,6 +1367,15 @@ impl Runner for ProductionRunner {
         if !native {
             return Err(invalid("native canary executable required"));
         }
+        let real = self.canary == CanaryMode::Real;
+        // Each run starts from nothing of the last one: its own mission folder and a private copy of the engine's
+        // spending and qualification records (the running engine keeps the original; a copy cannot be spent twice).
+        for stale in ["work", "data"] {
+            remove_owned_tree(&data.join(stale), data)?;
+        }
+        if real {
+            seed_engine_data(&self.data, &data.join("data"))?;
+        }
         let nonce = format!(
             "{}-{}",
             std::process::id(),
@@ -1261,16 +1383,130 @@ impl Runner for ProductionRunner {
         );
         let output = data.join(format!("handshake-{nonce}.json"));
         let mut command = NativeCommand::new(executable.into(), data.into());
-        command.args =
-            vec!["--faber-local-canary".into(), data.to_string_lossy().into_owned(), nonce.clone(), output.to_string_lossy().into_owned()];
-        run_bounded(&command, std::time::Duration::from_secs(30))?;
+        command.args = vec![
+            "--faber-local-canary".into(),
+            data.to_string_lossy().into_owned(),
+            nonce.clone(),
+            output.to_string_lossy().into_owned(),
+            if real { "real" } else { "offline" }.into(),
+        ];
+        // The CLIs find their own sign-in through the user's profile; nothing of it is read here.
+        let profile: &[&str] = if real { &["USERPROFILE", "APPDATA", "LOCALAPPDATA", "HOMEDRIVE", "HOMEPATH"] } else { &[] };
+        for key in profile.iter().chain(&[
+            "RUSTUP_HOME",
+            "CARGO_HOME",
+            "LIB",
+            "INCLUDE",
+            "LIBPATH",
+            "VCINSTALLDIR",
+            "VCToolsInstallDir",
+            "ProgramData",
+            "ProgramFiles",
+            "ProgramFiles(x86)",
+        ]) {
+            if let Ok(value) = std::env::var(key) {
+                command.environment.insert((*key).into(), value);
+            }
+        }
+        run_bounded(&command, std::time::Duration::from_secs(if real { 20 * 60 } else { 10 * 60 }))?;
         let bytes = ScopedFile::new(&output, false)?.read_limited(64 * 1024)?.ok_or(invalid("canary did not acknowledge startup"))?.0;
         let handshake: CanaryHandshake = serde_json::from_slice(&bytes).map_err(|_| invalid("corrupt canary handshake"))?;
-        let verdict = verify_canary_handshake(&handshake, &nonce, tree)?;
+        verify_canary_handshake(&handshake, &nonce, tree)?;
         let receipt = self.data.join("missions").join(&self.mission).join(format!("canary-{nonce}.json"));
         ScopedFile::new(&receipt, true)?.write(&bytes, None)?;
+        let (verdict, summary) = judge_canary(&handshake, data, tree, self.canary);
+        let verified = self.data.join("missions").join(&self.mission).join(format!("canary-verified-{nonce}.json"));
+        ScopedFile::new(&verified, true)?.write(&serde_json::to_vec(&summary).expect("plain data serializes"), None)?;
         Ok(verdict)
     }
+}
+
+/// Copy what the private engine needs to admit spending: the ledger and the qualification receipts. The CLIs' own
+/// sign-in is never touched; each CLI finds it through the profile when it runs.
+fn seed_engine_data(from: &Path, to: &Path) -> Result<()> {
+    real_path(from)?;
+    fs::create_dir_all(to).map_err(io_error)?;
+    real_path(to)?;
+    let ledger = from.join("budget.json");
+    if ledger.is_file() {
+        let (bytes, permissions) = ScopedFile::new(&ledger, false)?.read_limited(16 * 1024 * 1024)?.ok_or(invalid("missing ledger"))?;
+        ScopedFile::new(&to.join("budget.json"), true)?.write(&bytes, Some(permissions))?;
+    }
+    let receipts = from.join("qualification");
+    if receipts.is_dir() {
+        for entry in fs::read_dir(&receipts).map_err(io_error)? {
+            let path = real_path(&entry.map_err(io_error)?.path())?;
+            if path.is_file() {
+                let (bytes, permissions) = ScopedFile::new(&path, false)?.read_limited(1024 * 1024)?.ok_or(invalid("missing receipt"))?;
+                let name = path.file_name().ok_or(invalid("receipt name"))?;
+                ScopedFile::new(&to.join("qualification").join(name), true)?.write(&bytes, Some(permissions))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Read what the child's mission really left behind and decide. A mission that stopped is a wait (the build stays
+/// ready and the canary runs again); a mission that claims success but cannot prove it is a failure. Only a verified
+/// real run is a pass, and the pass echoes the accepted proof the staged tree already carries.
+pub fn judge_canary(
+    handshake: &CanaryHandshake,
+    data: &Path,
+    tree: &ExactTree,
+    requested: CanaryMode,
+) -> (CanaryVerdict, serde_json::Value) {
+    use faber_engine::project::canary::{self, Mode};
+    let fail =
+        |why: &str| (CanaryVerdict::Fail { at: now(), reason: "error.update.canaryFailed".into() }, serde_json::json!({"fail": why}));
+    let Some(evidence) = &handshake.evidence else {
+        let why = handshake.stopped.clone().unwrap_or_else(|| "reason.canary.noMission".into());
+        return (CanaryVerdict::NotRun, serde_json::json!({"wait": why}));
+    };
+    let expected = if requested == CanaryMode::Real { Mode::Real } else { Mode::Offline };
+    let normal = |path: PathBuf| {
+        let text = path.to_string_lossy().replace('\\', "/");
+        let text = text.trim_start_matches("//?/");
+        #[cfg(any(windows, target_os = "macos"))]
+        let text = text.to_lowercase();
+        PathBuf::from(text)
+    };
+    let inside = match (real_path(&data.join("work")), real_path(Path::new(&evidence.repo_root))) {
+        (Ok(work), Ok(repo)) => normal(repo).starts_with(normal(work)),
+        _ => false,
+    };
+    if evidence.mode != expected || !inside {
+        return fail("evidence does not match the run");
+    }
+    let verified = match canary::verify(evidence, &data.join("data")) {
+        Ok(verified) => verified,
+        Err(key) => return fail(&key),
+    };
+    let summary = serde_json::json!({
+        "mode": evidence.mode, "mission": verified.mission, "head": verified.head, "tree": verified.tree,
+        "writer": verified.writer.name(), "reviewer": verified.reviewer.name(),
+        "proofReceipt": verified.proof_receipt, "spentMicros": verified.spent_micros, "millis": evidence.millis,
+    });
+    if evidence.mode != Mode::Real {
+        // Replayed replies prove the build can run a mission; they are never a promotion.
+        return (CanaryVerdict::NotRun, summary);
+    }
+    let Some(proof) = tree.extra.get("proofReceipt").and_then(Value::as_str) else {
+        return fail("the staged tree carries no accepted proof");
+    };
+    let mut schemas = vec![tree.schema_version];
+    if !schemas.contains(&SCHEMA) {
+        schemas.push(SCHEMA);
+    }
+    (
+        CanaryVerdict::Pass {
+            verified_at: now(),
+            receipt_id: handshake.receipt.clone(),
+            tree: tree.clone(),
+            proof_receipt: proof.to_string(),
+            compatible_schemas: schemas,
+        },
+        summary,
+    )
 }
 
 fn copy_dependencies(source: &Path, target: &Path) -> Result<()> {

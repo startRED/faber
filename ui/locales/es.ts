@@ -347,6 +347,7 @@ export const es: Messages = {
   'projects.home.details': "Detalles",
   'projects.gitMode.seguroTech': "Modo seguro: worktree separado, solo commits locales y avance rápido solo en la rama de la misión.",
   'projects.selfUpdate.trustTech': "Una versión nueva pasa a la siguiente ranura local solo tras una prueba canario y las comprobaciones de cuarentena.",
+  'projects.proofs.isolationTech': "Las comprobaciones que ejecutan código escrito por un rol se ejecutan con integridad baja en Windows: solo pueden escribir en la copia de la misión, en su carpeta de compilación y en sus carpetas temporales. Aún pueden leer tus archivos y usar la red; un aislamiento más fuerte (AppContainer) es el siguiente paso previsto. En macOS tampoco pueden escribir fuera de esas carpetas; en Linux todavía nada las limita.",
   'projects.home.others': 'Otros proyectos',
   'projects.home.hint.1': 'Describe qué construir, corregir o mejorar en este proyecto',
   'projects.home.hint.2': 'Arregla la prueba que falla de vez en cuando',

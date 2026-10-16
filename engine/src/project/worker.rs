@@ -142,7 +142,7 @@ pub fn render(brief: &Brief) -> Result<String, &'static str> {
     validate(brief)?;
     let mut text = crate::persona::worker_contract(brief.role);
     let header = serde_json::json!({"schema":wire::SCHEMA,"task":brief.task,"attempt":brief.attempt,"base":brief.base,
-        "contract":brief.contract,"lease":brief.lease,"goal":brief.goal,"scope":brief.scope,"writes":brief.writes,
+        "contract":brief.contract,"lease":brief.lease.unwrap_or(0),"goal":brief.goal,"scope":brief.scope,"writes":brief.writes,
         "sources":brief.sources,"proofs":brief.proofs,"grantMicros":brief.grant_micros,"stop":brief.stop,"kit":brief.kit});
     text.push('\n');
     text.push_str(&header.to_string());

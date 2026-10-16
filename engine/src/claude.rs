@@ -68,6 +68,22 @@ const HAIKU_AUTOCOMPACT: &str = "100k";
 // startup customization; full access leaves the person's own integrations on.
 const CHAT_TOOLS: &str = "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch";
 
+/// Lean sessions and all worker roles share the same empty integration loadout.
+pub fn claude_exposure_args() -> Vec<String> {
+    [
+        "--strict-mcp-config",
+        "--mcp-config",
+        "{\"mcpServers\":{}}",
+        "--safe-mode",
+        "--setting-sources",
+        "",
+        "--settings",
+        "{\"disableAllHooks\":true}",
+    ]
+    .map(String::from)
+    .to_vec()
+}
+
 // Deny rules apply in bypassPermissions too; command patterns are not an OS sandbox, so a command can still reach what the
 // file tools cannot. Read rules also stop Edit and Write on the same path in recent CLIs; the Edit rules say it for older ones.
 // https://code.claude.com/docs/en/permissions#read-and-edit
@@ -140,21 +156,10 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     if let Some(instructions) = &launch.instructions {
         // Whatever mode the person chose, Faber's own requests run without the person's hooks, settings files, MCP servers and
         // plugins: a hook that fired on every background routing turn would run the person's commands unasked.
-        for a in [
-            "--system-prompt",
-            instructions,
-            "--tools",
-            "",
-            "--strict-mcp-config",
-            "--safe-mode",
-            "--setting-sources",
-            "",
-            "--settings",
-            r#"{"disableAllHooks":true}"#,
-            "--no-session-persistence",
-        ] {
+        for a in ["--system-prompt", instructions, "--tools", "", "--no-session-persistence"] {
             args.push(a.into());
         }
+        args.extend(claude_exposure_args());
     } else {
         let mut settings = json!({});
         if launch.area == Area::Chat {
@@ -249,23 +254,49 @@ pub fn project_claude_args(launch: &ClaudeLaunch, role: crate::project::Role) ->
     args.retain(|a| a != "--no-session-persistence");
     for a in [
         "--restricted",
-        "--safe-mode",
+        "--max-budget-usd",
+        "0.005",
+        "--max-turns",
+        "1",
         "--permission-mode",
         "dontAsk",
         "--disable-slash-commands",
         "--disallowedTools",
-        "Bash,Write,Edit,Read,Glob,Grep,Agent,Task,WebSearch,WebFetch,Bash(git push *),Bash(git reset *),Bash(git update-ref *)",
+        "Bash,Write,Edit,NotebookEdit,Read,Glob,Grep,Agent,Task,WebSearch,WebFetch,Bash(git push *),Bash(git reset *),Bash(git update-ref *)",
     ] {
         args.push(a.into());
     }
-    // One settings value, which also carries the credential denies every other mode has, in case a tool ever comes back.
+    // One settings value: it also carries the credential denies every other mode has, in case a tool ever comes back, and
+    // R117 prices input uncached, while cache creation can cost more than that envelope.
     let env = |name: &str| std::env::var(name).ok();
-    let settings = json!({ "disableAllHooks": true, "permissions": { "deny": tool_deny(&env) } }).to_string();
+    let settings = json!({"disableAllHooks":true,"permissions":{"deny":tool_deny(&env)},"env":{
+        "CLAUDE_CODE_MAX_OUTPUT_TOKENS":policy::output_maximum(crate::model::Vendor::Claude,role).to_string(),
+        "DISABLE_PROMPT_CACHING":"1", "DISABLE_COMPACT":"1", "CLAUDE_CODE_MAX_RETRIES":"0",
+        "CLAUDE_CODE_NONSTREAMING_TIMEOUT_RETRIES":"0", "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK":"1"
+    }})
+    .to_string();
     match args.iter().position(|a| a == "--settings") {
         Some(at) => args[at + 1] = settings,
         None => args.extend(["--settings".into(), settings]),
     }
     Ok(args)
+}
+
+/// What every project role is launched with, the per-turn values (model, effort) replaced by fixed stand-ins. A receipt is
+/// bound to its hash (`qualification::launch_policy`), so a change to any flag or setting asks for a new qualification run.
+pub(crate) fn project_launch_policy(roles: &[crate::project::Role]) -> Value {
+    let launch = ClaudeLaunch {
+        area: Area::Project,
+        model: Some("claude-haiku-5-5".into()),
+        effort: Some("medium".into()),
+        resume: None,
+        user_hooks: false,
+        permissions: Permissions::Isolated,
+        instructions: None,
+        user_name: None,
+        flags: Default::default(),
+    };
+    json!(roles.iter().map(|role| project_claude_args(&launch, *role).ok()).collect::<Vec<_>>())
 }
 
 /// Automatic missions must never fall back to the legacy project session or its user's configuration.
@@ -275,7 +306,9 @@ pub fn start_project_claude(
     on_event: EventSink,
 ) -> Result<Session, crate::project::policy::Blocker> {
     let args = project_claude_args(&opts.launch, role)?;
-    crate::project::policy::admit(crate::model::Vendor::Claude).map(|()| start_with_policy(opts, on_event, args, true).for_project(role))
+    crate::project::policy::admit_launch(crate::model::Vendor::Claude, &opts.bin)
+        // The pin is held until the started process was checked and resumed.
+        .map(|pinned| proc::spawn_expecting(&pinned.sha256, || start_with_policy(opts, on_event, args, true)).for_project(role))
 }
 
 fn block_text(content: &Value) -> String {
@@ -444,6 +477,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
     // the person's own refusal (or the engine's), which is no request to keep.
     let parking = args.windows(2).any(|a| a == ["--permission-prompts", "none"]);
     let started = (opts.spawn)(&opts.bin, &args, &opts.cwd);
+    let tree = started.as_ref().ok().and_then(|p| p.contained.as_ref()).and_then(proc::Containment::owned_tree);
     tokio::spawn(async move {
         let mut p = match started {
             Ok(p) => p,
@@ -498,7 +532,11 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                             if project {
                                 match crate::project::policy::reject_native(&mut *stdin, crate::model::Vendor::Claude, &msg).await {
                                     Ok(true) => continue,
-                                    Err(_) => { proc::stop(&mut *stdin, &mut child, &mut job).await; break; }
+                                    Err(_) => {
+                                        on_event(EngineEvent::Error {message:crate::project::policy::Blocker::Restrictions.key().into(),fatal:true});
+                                        proc::stop(&mut *stdin, &mut child, &mut job).await;
+                                        break;
+                                    }
                                     Ok(false) => {}
                                 }
                             }
@@ -620,7 +658,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
             }
         }
     });
-    Session::new(tx)
+    Session::new(tx).with_tree(tree)
 }
 
 fn user_message(turn: &UserTurn) -> Value {
@@ -645,6 +683,15 @@ mod role_tests {
 
     #[tokio::test(start_paused = true)]
     async fn automated_loop_denies_every_fixture_tool_and_keeps_a_bounded_silence_watch() {
+        role_loop_rejects(false).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn role_loop_stops_an_unknown_permission_request_immediately() {
+        role_loop_rejects(true).await;
+    }
+
+    async fn role_loop_rejects(unknown: bool) {
         let (stdin, input) = tokio::io::duplex(65536);
         let (mut output, stdout) = tokio::io::duplex(65536);
         let fake = Arc::new(std::sync::Mutex::new(Some(proc::Proc {
@@ -690,6 +737,18 @@ mod role_tests {
             denied += 1;
         }
         assert_eq!(denied, 9);
+        if unknown {
+            let entry: Value =
+                serde_json::from_str(include_str!("../../tests/fixtures/projects/unknown-permissions.jsonl").lines().last().unwrap())
+                    .unwrap();
+            output.write_all(format!("{}\n", entry["msg"]).as_bytes()).await.unwrap();
+            let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv()).await;
+            assert!(
+                matches!(event, Ok(Some(EngineEvent::Error {fatal:true,ref message})) if message == crate::project::policy::Blocker::Restrictions.key()),
+                "{event:?}"
+            );
+            return;
+        }
         tokio::time::advance(std::time::Duration::from_secs(120)).await;
         let interrupt: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
         assert_eq!(interrupt["request"]["subtype"], "interrupt");

@@ -179,22 +179,115 @@ pub fn real_spawner() -> Spawner {
     })
 }
 
+/// Starts a proof: code a role may have written, run by the engine. It inherits only its recorded environment and may write
+/// only in the folder it runs in (the mission clone) and in `writable` (its build folder, its own tool caches and temporary
+/// folder). On Windows the process runs at Low integrity and those folders are labelled Low, so Windows refuses its writes
+/// anywhere else: the installed app, the engine's records, the owner checkout, the user profile. On macOS `sandbox-exec`
+/// denies writes outside them. Reads and the network stay open (a residual, docs/design.md); Linux has no write limit yet.
+pub fn isolated_spawner(environment: std::collections::BTreeMap<String, String>, writable: Vec<std::path::PathBuf>) -> Spawner {
+    // ponytail: a folder is labelled once per spawner; a folder deleted and made again meanwhile stays Medium, so the proof
+    // fails (closed) instead of writing elsewhere.
+    #[cfg(windows)]
+    let labelled = Mutex::new(std::collections::HashSet::new());
+    Arc::new(move |bin, args, cwd| {
+        let mut roots = writable.clone();
+        for root in &roots {
+            std::fs::create_dir_all(root)?;
+        }
+        roots.push(cwd.to_path_buf());
+        #[cfg(windows)]
+        {
+            let mut done = labelled.lock().unwrap_or_else(|e| e.into_inner());
+            for root in &roots {
+                if !done.contains(root) {
+                    faber_winproc::label_low(root).map_err(|e| {
+                        io::Error::new(e.kind(), format!("the proof folder {} cannot be labelled Low: {e}", root.display()))
+                    })?;
+                    done.insert(root.clone());
+                }
+            }
+        }
+        #[cfg(target_os = "macos")]
+        let mut cmd = {
+            let mut cmd = Command::new("/usr/bin/sandbox-exec");
+            cmd.arg("-p").arg(write_profile(&roots)?).arg(bin);
+            cmd
+        };
+        #[cfg(not(target_os = "macos"))]
+        let mut cmd = Command::new(bin);
+        cmd.env_clear().envs(&environment).args(args).current_dir(cwd);
+        spawn_in_job(cmd, join_job, true)
+    })
+}
+
+/// The sandbox profile of a proof on macOS: everything as usual, except writing, which only `roots` (and the null and
+/// terminal devices) allow.
+#[cfg(target_os = "macos")]
+fn write_profile(roots: &[std::path::PathBuf]) -> io::Result<String> {
+    let mut allowed = String::new();
+    for root in roots {
+        let real = std::fs::canonicalize(root)?;
+        let text =
+            real.to_str().filter(|t| !t.contains(['"', '\\'])).ok_or_else(|| io::Error::other("a proof folder needs a plain path"))?;
+        allowed.push_str(&format!(" (subpath \"{text}\")"));
+    }
+    Ok(format!(
+        "(version 1)(allow default)(deny file-write* (require-not (require-any{allowed} (literal \"/dev/null\") (literal \"/dev/tty\"))))"
+    ))
+}
+
+thread_local! {
+    /// Set while a qualified CLI is being started: the SHA-256 its image must have (see `spawn_expecting`).
+    static EXPECTED_IMAGE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Starts a qualified CLI through `start`, which must spawn it on this thread (as `real_spawner` does). On Windows the
+/// process is created suspended; before it runs, the file its image came from is hashed and compared with `sha256`, the
+/// hash the qualification receipt names. Another program (a CLI swapped between admission and launch) is killed before it
+/// runs a single instruction, and the start fails.
+pub fn spawn_expecting<T>(sha256: &str, start: impl FnOnce() -> T) -> T {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            EXPECTED_IMAGE.with(|e| e.borrow_mut().take());
+        }
+    }
+    EXPECTED_IMAGE.with(|e| *e.borrow_mut() = Some(sha256.to_string()));
+    let _reset = Reset;
+    start()
+}
+
 /// Starts `cmd` with piped stdio and, on Windows, inside its own job object. The process is created suspended, put in the job
 /// and only then allowed to run, so nothing it starts can be outside the job. If that fails the process is killed and the
 /// error returned: no CLI ever runs uncontained.
 pub fn spawn_command(cmd: Command) -> io::Result<Proc> {
-    spawn_in_job(cmd, join_job)
+    spawn_in_job(cmd, join_job, false)
 }
 
-fn spawn_in_job(mut cmd: Command, join: impl FnOnce(&Child) -> io::Result<Containment>) -> io::Result<Proc> {
+/// `low`: lower the suspended process to Low integrity before it runs (Windows; a proof).
+fn spawn_in_job(mut cmd: Command, join: impl FnOnce(&Child) -> io::Result<Containment>, low: bool) -> io::Result<Proc> {
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     #[cfg(windows)]
     cmd.creation_flags(creation_flags(starting_in_background()));
+    let expected = EXPECTED_IMAGE.with(|e| e.borrow_mut().take());
+    #[cfg(not(windows))]
+    let _ = (low, expected);
     let mut child = cmd.spawn()?;
     let joined = join(&child);
     #[cfg(windows)]
     let joined = joined.and_then(|job| {
-        faber_winproc::resume_process(child.id().ok_or_else(|| io::Error::other("the process already ended"))?)?;
+        let pid = child.id().ok_or_else(|| io::Error::other("the process already ended"))?;
+        if low {
+            faber_winproc::lower_to_low_integrity(pid)
+                .map_err(|e| io::Error::new(e.kind(), format!("the proof cannot run at Low integrity: {e}")))?;
+        }
+        if let Some(expected) = expected {
+            let image = faber_winproc::image_path(pid)?;
+            if crate::project::qualification::fingerprint(&image)? != expected {
+                return Err(io::Error::other("the started program is not the qualified one"));
+            }
+        }
+        faber_winproc::resume_process(pid)?;
         Ok(job)
     });
     let contained = match joined {
@@ -266,7 +359,87 @@ pub(crate) async fn write_line(stdin: &mut (dyn AsyncWrite + Send + Unpin), msg:
 /// too, so a CLI that quits on its own leaves no worker behind. Elsewhere there is no job and only the CLI itself is ended.
 pub struct Containment {
     #[cfg(windows)]
-    _job: win32job::Job,
+    job: Arc<Mutex<Option<win32job::Job>>>,
+    #[cfg(windows)]
+    identity: crate::project::ProcessId,
+}
+
+impl Containment {
+    /// The launched tree's owned identity, for a lease and its release proof. `None` where no job owns the tree.
+    pub fn owned_tree(&self) -> Option<OwnedTree> {
+        #[cfg(windows)]
+        {
+            Some(OwnedTree { identity: self.identity, job: self.job.clone() })
+        }
+        #[cfg(not(windows))]
+        {
+            None
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for Containment {
+    fn drop(&mut self) {
+        // The job may be shared with an `OwnedTree`: closing it here ends the processes whoever holds a clone.
+        drop(self.job.lock().unwrap_or_else(|e| e.into_inner()).take());
+    }
+}
+
+/// What a lease needs to know about one launched CLI tree, shared with whoever later releases the lease.
+/// It exists only for a process this engine started inside its own kill-on-close job (Windows); nothing can build
+/// one from a PID, a snapshot or a recorded file.
+#[derive(Clone)]
+pub struct OwnedTree {
+    identity: crate::project::ProcessId,
+    #[cfg(windows)]
+    job: Arc<Mutex<Option<win32job::Job>>>,
+}
+
+impl std::fmt::Debug for OwnedTree {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "OwnedTree({})", self.identity.pid)
+    }
+}
+
+/// Proof that an owned tree is gone. Only `OwnedTree::retire` makes one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Retired {
+    identity: crate::project::ProcessId,
+}
+
+impl Retired {
+    pub fn identity(&self) -> crate::project::ProcessId {
+        self.identity
+    }
+}
+
+impl OwnedTree {
+    /// The root's pid, with the microsecond this engine launched it: a reused pid has another start.
+    pub fn identity(&self) -> crate::project::ProcessId {
+        self.identity
+    }
+
+    /// Closes the kill-on-close job, so every member ends, then waits until the root has ended. Safe to repeat: a tree
+    /// already retired answers with the same identity. A pid that was reused meanwhile only delays the answer until it fails.
+    pub async fn retire(&self) -> io::Result<Retired> {
+        #[cfg(windows)]
+        {
+            drop(self.job.lock().unwrap_or_else(|e| e.into_inner()).take());
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !faber_winproc::process_ended(self.identity.pid) {
+                if Instant::now() >= deadline {
+                    return Err(io::Error::other("owned tree did not end"));
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            Ok(Retired { identity: self.identity })
+        }
+        #[cfg(not(windows))]
+        {
+            Err(io::Error::other("owned trees need the Windows job"))
+        }
+    }
 }
 
 #[cfg(windows)]
@@ -276,7 +449,9 @@ fn join_job(child: &Child) -> io::Result<Containment> {
     limits.limit_kill_on_job_close();
     let job = win32job::Job::create_with_limit_info(&limits).map_err(io::Error::other)?;
     job.assign_process(handle as isize).map_err(io::Error::other)?;
-    Ok(Containment { _job: job })
+    let started_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_micros() as u64).max(1);
+    let identity = crate::project::ProcessId { pid: child.id().ok_or_else(|| io::Error::other("the process already ended"))?, started_at };
+    Ok(Containment { job: Arc::new(Mutex::new(Some(job))), identity })
 }
 
 #[cfg(not(windows))]
@@ -386,10 +561,93 @@ mod tests {
         std::fs::write(&script, "@echo off\r\necho x> %~dp0ran.txt\r\n").unwrap();
         let mut cmd = Command::new("cmd.exe");
         cmd.args(["/c", &script.to_string_lossy()]).current_dir(dir.path());
-        let failed = spawn_in_job(cmd, |_| Err(io::Error::other("no job today")));
+        let failed = spawn_in_job(cmd, |_| Err(io::Error::other("no job today")), false);
         assert!(failed.is_err_and(|e| e.to_string().contains("no job today")));
         tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
         assert!(!marker.exists(), "the process ran although it was not contained");
+    }
+
+    /// Asks a proof process to write `target`, through the proof spawner, and says whether the file then holds its text.
+    #[cfg(any(windows, target_os = "macos"))]
+    async fn proof_writes(spawn: &Spawner, cwd: &Path, target: &Path) -> bool {
+        #[cfg(windows)]
+        let (program, args) = ("cmd.exe".to_string(), vec!["/d".into(), "/c".into(), "echo".into(), format!("proof>{}", target.display())]);
+        #[cfg(target_os = "macos")]
+        let (program, args) = ("/bin/sh".to_string(), vec!["-c".into(), format!("echo proof > '{}'", target.display())]);
+        let Ok(p) = spawn(&program, &args, cwd) else { return false };
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(10), command_output(p)).await;
+        std::fs::read_to_string(target).is_ok_and(|text| text.contains("proof"))
+    }
+
+    /// R138: a proof runs code a role wrote. It may write in the mission clone (an existing file and a new one) and in its
+    /// own folders, and nowhere else: a folder standing in for the engine's records or the installed app stays untouched.
+    #[cfg(any(windows, target_os = "macos"))]
+    #[tokio::test]
+    async fn a_proof_writes_inside_its_clone_and_own_folders_and_is_refused_everywhere_else() {
+        let (clone, own, outside) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        std::fs::write(clone.path().join("kept.txt"), "before").unwrap();
+        let mut environment = std::collections::BTreeMap::new();
+        for name in ["SystemRoot", "PATH"] {
+            if let Ok(value) = std::env::var(name) {
+                environment.insert(name.to_string(), value);
+            }
+        }
+        let tmp = own.path().join("tmp");
+        let spawn = isolated_spawner(environment, vec![tmp.clone()]);
+        assert!(proof_writes(&spawn, clone.path(), &clone.path().join("kept.txt")).await, "an existing file of the clone");
+        assert!(proof_writes(&spawn, clone.path(), &clone.path().join("new.txt")).await, "a new file in the clone");
+        assert!(proof_writes(&spawn, clone.path(), &tmp.join("scratch.txt")).await, "its own temporary folder");
+        let journal = outside.path().join("journal.json");
+        std::fs::write(&journal, "records").unwrap();
+        assert!(!proof_writes(&spawn, clone.path(), &journal).await, "an existing file outside");
+        assert_eq!(std::fs::read_to_string(&journal).unwrap(), "records");
+        assert!(!proof_writes(&spawn, clone.path(), &outside.path().join("planted.exe")).await, "a new file outside");
+        assert!(!outside.path().join("planted.exe").exists());
+    }
+
+    /// F5: a CLI swapped between its admission and its launch never runs. The image of the suspended process is hashed
+    /// before it is resumed; a hash other than the receipt's kills it, and the right one lets it run.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_program_whose_image_is_not_the_qualified_one_is_killed_before_it_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("ran.txt");
+        let cmd_exe = std::path::PathBuf::from(std::env::var("SystemRoot").unwrap()).join("System32").join("cmd.exe");
+        let args = vec!["/d".to_string(), "/c".into(), "echo".into(), format!("x>{}", marker.display())];
+        let spawn = real_spawner();
+        let wrong = "0".repeat(64);
+        let failed = spawn_expecting(&wrong, || spawn(&cmd_exe.to_string_lossy(), &args, dir.path()));
+        assert!(failed.is_err_and(|e| e.to_string().contains("not the qualified one")));
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        assert!(!marker.exists(), "the swapped program ran");
+        let right = crate::project::qualification::fingerprint(&cmd_exe).unwrap();
+        let p = spawn_expecting(&right, || spawn(&cmd_exe.to_string_lossy(), &args, dir.path())).unwrap();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(10), command_output(p)).await;
+        assert!(marker.exists(), "the qualified program did not run");
+        // The expectation covers one start only.
+        assert!(spawn(&cmd_exe.to_string_lossy(), &args, dir.path()).is_ok());
+    }
+
+    /// F5, second round: between the hash and the run nothing can swap the program. The admission pins the file (no
+    /// write, rename or delete while held), hashes it through that handle, and the launch runs it while still pinned.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_pinned_program_cannot_be_swapped_until_it_has_started() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = dir.path().join("cli.exe");
+        std::fs::copy(std::path::PathBuf::from(std::env::var("SystemRoot").unwrap()).join("System32").join("cmd.exe"), &cli).unwrap();
+        let pinned = crate::project::qualification::pin(&cli).unwrap();
+        assert_eq!(pinned.sha256, crate::project::qualification::fingerprint(&cli).unwrap());
+        assert!(std::fs::OpenOptions::new().write(true).open(&cli).is_err(), "written while pinned");
+        assert!(std::fs::rename(&cli, dir.path().join("moved.exe")).is_err(), "renamed while pinned");
+        assert!(std::fs::remove_file(&cli).is_err(), "deleted while pinned");
+        let marker = dir.path().join("ran.txt");
+        let args = vec!["/d".to_string(), "/c".into(), "echo".into(), format!("x>{}", marker.display())];
+        let p = spawn_expecting(&pinned.sha256, || real_spawner()(&cli.to_string_lossy(), &args, dir.path())).unwrap();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(10), command_output(p)).await;
+        assert!(marker.exists(), "the pinned program did not run");
+        drop(pinned);
+        std::fs::rename(&cli, dir.path().join("moved.exe")).unwrap();
     }
     #[tokio::test]
     async fn command_output_drains_large_pipes_and_keeps_a_bounded_tail() {

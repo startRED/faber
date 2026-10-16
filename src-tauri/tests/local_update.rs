@@ -56,6 +56,9 @@ fn helper_and_slot_commands_are_native_headless_and_use_separate_data() {
     assert!(command.args.contains(&"--faber-local-start".into()));
     assert_eq!(command.environment.get("FABER_DATA_DIR"), Some(&dev.data().to_string_lossy().into_owned()));
     assert!(!command.environment.keys().any(|key| key.contains("TOKEN") || key.contains("API_KEY")));
+    // The slot reaches the CLIs' sign-in and the build toolchain through the session's folders, and nothing else of it.
+    assert_eq!(command.environment.get("USERPROFILE"), std::env::var("USERPROFILE").ok().as_ref());
+    assert_eq!(command.environment.get("CARGO_HOME"), std::env::var("CARGO_HOME").ok().as_ref());
 }
 
 #[test]
@@ -428,6 +431,27 @@ fn executable_data_probe_round_trips_real_records_and_extensions_without_writes(
     for (path, bytes) in before {
         assert_eq!(fs::read(path).unwrap(), bytes);
     }
+}
+
+#[test]
+fn the_engine_budget_file_is_a_ledger_with_mission_spending_inside_and_round_trips() {
+    let dir = area();
+    let data = dir.path().join("data");
+    fs::create_dir(&data).unwrap();
+    let mut ledger = faber_engine::ledger::Ledger::default();
+    ledger.extra.insert("missionBudget".into(), serde_json::to_value(faber_engine::project::budget::Budget::default()).unwrap());
+    ledger.extra.insert("fromANewerFaber".into(), serde_json::json!({"keep": [1, 2]}));
+    faber_engine::store::Store::new(&data).save_ledger(&ledger).unwrap();
+    let output = dir.path().join("probe.json");
+    probe_saved_data(&data, &output).unwrap();
+    let receipt: serde_json::Value = serde_json::from_slice(&fs::read(output).unwrap()).unwrap();
+    assert_eq!(receipt["budget.json"]["fromANewerFaber"]["keep"], serde_json::json!([1, 2]));
+    assert!(receipt["budget.json"]["missionBudget"].is_object());
+    // Spending that does not read back is refused.
+    let mut broken = faber_engine::ledger::Ledger::default();
+    broken.extra.insert("missionBudget".into(), serde_json::json!({"schema": 99}));
+    faber_engine::store::Store::new(&data).save_ledger(&broken).unwrap();
+    assert!(probe_saved_data(&data, &dir.path().join("probe2.json")).is_err());
 }
 
 #[test]
@@ -1152,9 +1176,9 @@ fn production_canary_rejects_a_non_executable_payload() {
         dir.path().join("private"),
         "m1".into(),
     );
-    runner.canary_available = false;
+    runner.canary = faber::local_update::CanaryMode::Unavailable;
     assert_eq!(runner.canary(&exe, &tree_obj, dir.path()).unwrap(), CanaryVerdict::NotRun);
-    runner.canary_available = true;
+    runner.canary = faber::local_update::CanaryMode::Offline;
     assert!(runner.canary(&exe, &tree_obj, dir.path()).is_err());
 }
 
@@ -1167,6 +1191,8 @@ fn canary_handshake_rejects_replay_hash_schema_and_fabricated_pass() {
         build_hash: candidate.build_hash.clone(),
         schema: SCHEMA,
         verdict: CanaryVerdict::NotRun,
+        evidence: None,
+        stopped: None,
     };
     assert_eq!(verify_canary_handshake(&response, "challenge", &candidate).unwrap(), CanaryVerdict::NotRun);
     assert!(verify_canary_handshake(&response, "previous", &candidate).is_err());
@@ -1367,4 +1393,60 @@ async fn landed_checkpoint_drives_exact_tree_staging_at_quiescence() {
     assert!(!checkout.join(".faber/missions/m0").exists(), "coalescing wrote the other project's mirror into this checkout");
     assert!(!dev.service_landed_missions::<Gates>(&engine, true, &mut source, |_, _| panic!("request replayed")).unwrap());
     engine.shutdown();
+}
+
+#[test]
+fn a_canary_that_stopped_waits_and_evidence_from_outside_the_run_fails() {
+    use faber_engine::project::canary::{Evidence, Mode};
+    let dir = area();
+    let candidate = tree(b"candidate");
+    let mut handshake = CanaryHandshake {
+        nonce: "challenge".into(),
+        receipt: "challenge".into(),
+        build_hash: candidate.build_hash.clone(),
+        schema: SCHEMA,
+        verdict: CanaryVerdict::NotRun,
+        evidence: None,
+        stopped: Some("reason.budget.cap".into()),
+    };
+    // A mission that stopped on a wait is not a verdict on the build: it stays ready and the canary runs again.
+    let (verdict, summary) = judge_canary(&handshake, dir.path(), &candidate, CanaryMode::Real);
+    assert_eq!(verdict, CanaryVerdict::NotRun);
+    assert_eq!(summary["wait"], "reason.budget.cap");
+    // Evidence whose repository is not under the run's own work folder is a lie, whatever it claims.
+    fs::create_dir_all(dir.path().join("work")).unwrap();
+    fs::create_dir_all(dir.path().join("elsewhere")).unwrap();
+    handshake.stopped = None;
+    handshake.evidence = Some(Evidence {
+        mode: Mode::Real,
+        mission: "m1".into(),
+        repo_root: dir.path().join("elsewhere").to_string_lossy().into_owned(),
+        millis: 1,
+    });
+    let (verdict, _) = judge_canary(&handshake, dir.path(), &candidate, CanaryMode::Real);
+    assert!(matches!(verdict, CanaryVerdict::Fail { .. }), "{verdict:?}");
+    // A replay reported while a real run was requested is refused as well.
+    handshake.evidence = Some(Evidence {
+        mode: Mode::Offline,
+        mission: "m1".into(),
+        repo_root: dir.path().join("work").join("repo").to_string_lossy().into_owned(),
+        millis: 1,
+    });
+    let (verdict, _) = judge_canary(&handshake, dir.path(), &candidate, CanaryMode::Real);
+    assert!(matches!(verdict, CanaryVerdict::Fail { .. }), "{verdict:?}");
+}
+
+#[test]
+fn a_real_canary_needs_an_allowance_that_covers_its_cost() {
+    let dir = area();
+    assert!(!real_canary_allowed(dir.path()));
+    fs::write(dir.path().join("real-canary.json"), b"{\"capMicros\":1}").unwrap();
+    assert!(!real_canary_allowed(dir.path()));
+    let cap = faber_engine::project::canary::REAL_CAP_MICROS;
+    fs::write(dir.path().join("real-canary.json"), format!("{{\"capMicros\":{}}}", cap - 1)).unwrap();
+    assert!(!real_canary_allowed(dir.path()));
+    fs::write(dir.path().join("real-canary.json"), format!("{{\"capMicros\":{cap}}}")).unwrap();
+    assert!(real_canary_allowed(dir.path()));
+    fs::write(dir.path().join("real-canary.json"), b"not json").unwrap();
+    assert!(!real_canary_allowed(dir.path()));
 }

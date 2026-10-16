@@ -347,6 +347,7 @@ export const de: Messages = {
   'projects.home.details': "Details",
   'projects.gitMode.seguroTech': "Sicherer Modus: getrennter Worktree, nur lokale Commits und Vorspulen nur auf dem Missions-Branch.",
   'projects.selfUpdate.trustTech': "Ein neuer Build rückt erst nach einem Canary-Lauf und den Quarantäneprüfungen in den nächsten lokalen Slot vor.",
+  'projects.proofs.isolationTech': "Prüfungen, die von einer Rolle geschriebenen Code ausführen, laufen unter Windows mit niedriger Integrität: Sie dürfen nur in die Kopie der Mission, ihren Build-Ordner und ihre temporären Ordner schreiben. Sie können aber weiterhin deine Dateien lesen und das Netzwerk nutzen; eine stärkere Sandbox (AppContainer) ist der geplante nächste Schritt. Unter macOS können sie ebenfalls nicht außerhalb dieser Ordner schreiben; unter Linux begrenzt sie noch nichts.",
   'projects.home.others': 'Andere Projekte',
   'projects.home.hint.1': 'Beschreibe, was in diesem Projekt gebaut, repariert oder verbessert werden soll',
   'projects.home.hint.2': 'Repariere den Test, der nur manchmal scheitert',

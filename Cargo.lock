@@ -1143,6 +1143,7 @@ dependencies = [
  "base64 0.22.1",
  "ctrlc",
  "faber-engine",
+ "faber-winproc",
  "serde",
  "serde_json",
  "sha2",

@@ -899,11 +899,15 @@ fn main() {
         std::process::exit(code);
     }
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if let [mode, data, nonce, output] = args.as_slice()
+    if let [mode, data, nonce, output, canary] = args.as_slice()
         && mode == "--faber-local-canary"
     {
         std::process::exit(
-            if nonce.to_str().is_some_and(|nonce| local_update::probe_canary(Path::new(data), nonce, Path::new(output)).is_ok()) {
+            if nonce
+                .to_str()
+                .zip(canary.to_str())
+                .is_some_and(|(nonce, canary)| local_update::probe_canary(Path::new(data), nonce, Path::new(output), canary).is_ok())
+            {
                 0
             } else {
                 1

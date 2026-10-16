@@ -62,6 +62,14 @@ pub struct Termination {
     pub cost_settled: bool,
 }
 
+impl Termination {
+    /// The production proof: a tree this engine started inside its own job and has just closed and reaped. Struct
+    /// literals still exist for fixtures; only this constructor derives `tree_dead` from an actual retirement.
+    pub fn from_retired(tree: &crate::proc::Retired, cost_settled: bool) -> Self {
+        Self { process: Some(tree.identity()), tree_dead: true, cost_settled }
+    }
+}
+
 pub(crate) fn retirement_known(lease: &Lease) -> bool {
     lease.state == LeaseState::Released
         || (lease.state == LeaseState::Quarantined
@@ -544,6 +552,32 @@ impl Leases {
             }),
         );
         self.persist(runtime)
+    }
+
+    /// The launch was refused before any process existed (a budget or admission refusal): close its intent as
+    /// failed so a later launch may prepare a new one. A lease that already has a process is never touched.
+    pub fn abandon_launch(&mut self, lease: &Lease, id: &str) -> Result<(), LeaseError> {
+        let index = self.index(lease)?;
+        if self.runtime.leases[index].process.is_some() {
+            return Err(LeaseError::Live);
+        }
+        let launch = self
+            .journal
+            .pending()?
+            .into_iter()
+            .find(|i| {
+                i.id == id
+                    && i.kind == super::IntentKind::Dispatch
+                    && i.task.as_deref() == Some(&lease.task)
+                    && i.expected.get("generation") == Some(&lease.generation.to_string())
+            })
+            .ok_or(LeaseError::Live)?;
+        let receipt = super::Receipt::new(&launch.id, super::Outcome::Failed, launch.at);
+        if let Err(e) = self.journal.record_receipt(&receipt) {
+            self.blocked = true;
+            return Err(e.into());
+        }
+        Ok(())
     }
 
     fn unresolved_launch(&self, lease: &Lease) -> Result<bool, LeaseError> {

@@ -593,6 +593,8 @@ fn a_side_question_gets_its_own_instructions_no_tools_and_no_saved_session() {
     assert_eq!(after(&args, "--system-prompt"), "Route.");
     assert_eq!(after(&args, "--tools"), "");
     assert!(args.contains(&"--strict-mcp-config".into()) && args.contains(&"--safe-mode".into()));
+    assert_eq!(after(&args, "--mcp-config"), r#"{"mcpServers":{}}"#);
+    assert_eq!(after(&args, "--settings"), r#"{"disableAllHooks":true}"#);
     assert!(args.contains(&"--no-session-persistence".into()), "it stays out of the user's Claude history");
 }
 

@@ -8,6 +8,8 @@
 
 pub mod bar;
 pub mod budget;
+pub mod canary;
+pub mod coordinator;
 pub mod disk;
 pub mod files;
 pub mod git;
@@ -15,6 +17,7 @@ pub mod kit;
 pub mod lead;
 pub mod lease;
 pub mod proof;
+pub mod qualification;
 pub mod queue;
 pub mod report;
 pub mod run;

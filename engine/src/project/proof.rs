@@ -439,6 +439,47 @@ pub struct Observation {
     pub evidence: wire::ArtifactRef,
 }
 
+/// How long a proof may run before it counts as failed. A heavy proof (a build and its tests) holds the build lane, so it
+/// gets the time a cold compile needs; every other proof is a quick check.
+pub fn deadline(definition: &Definition) -> std::time::Duration {
+    std::time::Duration::from_secs(if definition.heavy { 900 } else { 120 })
+}
+
+/// Execute a trusted definition through an owned process; missing exits never become passing evidence.
+pub async fn execute(definition: &Definition, cwd: &std::path::Path, spawn: &crate::proc::Spawner, path: String) -> Observation {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut output = Vec::new();
+    let mut errors = Vec::new();
+    let mut exit = None;
+    if let Ok(mut process) = spawn(&definition.program.to_string_lossy(), &definition.argv, cwd) {
+        let capture = tokio::time::timeout(deadline(definition), async {
+            process.stdin.shutdown().await?;
+            let limit = wire::MAX_ENVELOPE as u64 + 1;
+            let mut stdout = process.stdout.take(limit);
+            let stdout = stdout.read_to_end(&mut output);
+            let mut stderr = process.stderr.take().unwrap_or_else(|| Box::new(tokio::io::empty())).take(limit);
+            let stderr = stderr.read_to_end(&mut errors);
+            tokio::try_join!(stdout, stderr)?;
+            if output.len().saturating_add(errors.len()) > wire::MAX_ENVELOPE {
+                return Err(std::io::Error::other("proof output limit"));
+            }
+            if let Some(child) = &mut process.child {
+                exit = child.wait().await?.code();
+            }
+            Ok::<_, std::io::Error>(())
+        })
+        .await;
+        if !matches!(capture, Ok(Ok(()))) {
+            output.clear();
+            errors.clear();
+            crate::proc::stop(&mut *process.stdin, &mut process.child, &mut process.contained).await;
+        }
+    }
+    let mut combined = output.clone();
+    combined.extend(&errors);
+    Observation { exit, stdout: output, stderr: errors, evidence: wire::ArtifactRef { path, sha256: digest(&combined) } }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProofSet {

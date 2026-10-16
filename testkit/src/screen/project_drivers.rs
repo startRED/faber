@@ -16,7 +16,7 @@ pub fn scenarios() -> Vec<Scenario> {
             run: warm_memory,
         },
         Scenario {
-            name: "projects: engine jobs end grandchildren on stop, drop and owner crash; stale PID records cannot kill a peer",
+            name: "projects: engine jobs end grandchildren on stop, drop, owner crash and tree retirement; stale PID records cannot kill a peer",
             run: trees,
         },
     ]
@@ -68,7 +68,7 @@ fn warm_memory(ctx: &mut Ctx) -> Result {
 }
 
 fn trees(ctx: &mut Ctx) -> Result {
-    for mode in ["stop", "drop", "crash"] {
+    for mode in ["stop", "drop", "crash", "retire"] {
         let ready = ctx.sb.sandbox.join(format!("tree-{mode}.json"));
         let control = ctx.sb.sandbox.join(format!("tree-{mode}-control.json"));
         let env = crate::sandbox::child_env(&std::env::vars().collect::<Vec<_>>(), &ctx.sb, &Default::default(), &ctx.paths.fake_cli);

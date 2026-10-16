@@ -15,6 +15,10 @@ use std::time::Duration;
 
 pub fn scenarios() -> Vec<Scenario> {
     vec![
+        Scenario { name: "T13 1: red acceptance receipt cannot satisfy landing", run: mission_red },
+        Scenario { name: "T13 2: exact reviewed tree lands locally in Seguro", run: mission_landing },
+        Scenario { name: "T13 3: persisted report retains exact evidence and unknown measurements", run: mission_report },
+        Scenario { name: "T13 7: original checkout and sandbox stable install hashes stay unchanged", run: mission_unchanged },
         Scenario { name: "projects T5: fixture mission lands an exact tree and retires operational data", run: mission },
         Scenario {
             name: "projects git and T11: detached work, CAS, hooks, filters, junction ownership and dirty owner preservation",
@@ -25,6 +29,30 @@ pub fn scenarios() -> Vec<Scenario> {
         Scenario { name: "projects git opus M3 and L4: candidate junction swap cannot redirect broker IO", run: path_race },
         Scenario { name: "projects git opus M1: git clean cannot erase pending effect authority", run: cleanup },
     ]
+}
+fn acceptance(ctx: &mut Ctx, key: &str) -> Result {
+    run_probe(ctx, "--project-mission")?;
+    let report: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(ctx.sb.sandbox.join("t13-scripted.json")).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?;
+    ensure(report[key] == true, || format!("missing T13 {key} evidence: {report}"))?;
+    ctx.notes.push(format!(
+        "T13 {key}: head={}, tree={}, red exit={}, owner={}, index={}, stable={}; fixture only",
+        report["head"], report["tree"], report["redReceipt"]["exit"], report["ownerSha256"], report["indexSha256"], report["stableSha256"]
+    ));
+    Ok(())
+}
+fn mission_red(ctx: &mut Ctx) -> Result {
+    acceptance(ctx, "red")
+}
+fn mission_landing(ctx: &mut Ctx) -> Result {
+    acceptance(ctx, "landing")
+}
+fn mission_report(ctx: &mut Ctx) -> Result {
+    acceptance(ctx, "report")
+}
+fn mission_unchanged(ctx: &mut Ctx) -> Result {
+    acceptance(ctx, "unchanged")
 }
 fn mission(ctx: &mut Ctx) -> Result {
     run_probe(ctx, "--project-mission")
@@ -45,6 +73,9 @@ fn cleanup(ctx: &mut Ctx) -> Result {
     run_probe(ctx, "--project-git-clean")
 }
 pub(super) fn run_probe(ctx: &mut Ctx, mode: &str) -> Result {
+    run_probe_for(ctx, mode, Duration::from_secs(60))
+}
+pub(super) fn run_probe_for(ctx: &mut Ctx, mode: &str, limit: Duration) -> Result {
     let git = faber_engine::cli::find_cli("git").ok_or("git is not installed")?;
     ensure(git.prefix.is_empty(), || "git must be a native executable".into())?;
     let parent: Vec<_> = std::env::vars().collect();
@@ -68,6 +99,16 @@ pub(super) fn run_probe(ctx: &mut Ctx, mode: &str) -> Result {
         let shell = Path::new(&git.command).ancestors().map(|folder| folder.join("usr/bin")).find(|bin| bin.join("sh.exe").is_file());
         path.extend(shell);
     }
+    if mode == "--project-canary" {
+        // The canary proves with cargo: the toolchain folder and where it lives, nothing else from this computer.
+        let cargo = faber_engine::cli::find_cli("cargo").ok_or("cargo is not installed")?;
+        path.push(Path::new(&cargo.command).parent().ok_or("cargo has no folder")?.to_path_buf());
+        for name in ["RUSTUP_HOME", "CARGO_HOME", "ProgramData", "ProgramFiles", "ProgramFiles(x86)"] {
+            if let Ok(value) = std::env::var(name) {
+                env.insert(name.into(), value);
+            }
+        }
+    }
     env.insert("PATH".into(), std::env::join_paths(path).map_err(|e| e.to_string())?.to_string_lossy().into());
     // Require the hidden desktop even if this probe is invoked in CI; it uses no webview.
     env.remove("GITHUB_ACTIONS");
@@ -84,7 +125,7 @@ pub(super) fn run_probe(ctx: &mut Ctx, mode: &str) -> Result {
         }
         let _ = sender.send(errors);
     });
-    let waited = eventually("the local git probe to exit", Duration::from_secs(60), || !owned.is_running());
+    let waited = eventually("the local git probe to exit", limit, || !owned.is_running());
     owned.terminate();
     waited?;
     let errors = receiver.recv_timeout(Duration::from_secs(10)).map_err(|_| "git probe diagnostic pipe did not close")?;
@@ -127,6 +168,7 @@ pub fn screen_fixture(sandbox: &Path) -> Result {
         faber_engine::project::budget::Grant {
             cap_micros: 100_000,
             worker_micros: 50_000,
+            kind_caps: Default::default(),
             vendors: std::collections::BTreeMap::from([(faber_engine::model::Vendor::Codex, 100_000)]),
             review_micros: 20_000,
             repair_micros: 20_000,
@@ -600,16 +642,20 @@ pub fn probe_mission(sandbox: &Path) -> Result {
     use faber_engine::model::Vendor;
     use faber_engine::project::disk::{ResourceKind, Resources};
     use faber_engine::project::lease::Termination;
-    use faber_engine::project::proof::{Definition, Observation, ProofSet};
+    use faber_engine::project::proof::{Definition, ProofSet};
     use faber_engine::project::queue::{Candidate, Review};
     use faber_engine::project::run::Runner;
-    use faber_engine::project::wire::ArtifactRef;
     use faber_engine::project::{Mission, MissionState, Plan, Task, TaskKind, TaskState};
     let (repo, repository, program) = review_repository(sandbox)?;
     let base = repository.base.clone();
     let identity = repository.identity.common_dir.clone();
     std::fs::write(repo.join("src/a.rs"), "dirty owner").map_err(|e| e.to_string())?;
     let owner_index = std::fs::read(repo.join(".git/index")).map_err(|e| e.to_string())?;
+    let stable = sandbox.join("stable-install");
+    std::fs::create_dir_all(&stable).map_err(|e| e.to_string())?;
+    std::fs::write(stable.join("faber.exe"), b"stable fixture, never executable").map_err(|e| e.to_string())?;
+    let stable_hash = hash(&std::fs::read(stable.join("faber.exe")).map_err(|e| e.to_string())?);
+    let owner_hash = hash(&std::fs::read(repo.join("src/a.rs")).map_err(|e| e.to_string())?);
     let (mut broker, grant, lease, root) = review_writer(sandbox, repository, Traced(check(Process::find())?))?;
     check(broker.create_branch(|| Ok(Some(grant.clone())), "branch"))?;
     let mut runner =
@@ -627,28 +673,61 @@ pub fn probe_mission(sandbox: &Path) -> Result {
         id: "fixture-check".into(),
         version: 1,
         program: std::env::current_exe().map_err(|e| e.to_string())?,
-        argv: vec!["--project-mission".into()],
+        argv: vec!["--project-proof".into(), root.join("src/a.rs").to_string_lossy().into_owned()],
         checks: vec!["C1".into()],
         toolchain: "first-party-fixture".into(),
         dependencies: "none".into(),
         environment: std::collections::BTreeMap::new(),
         heavy: false,
     };
-    // This first-party fixture check runs in this already-contained native helper, not candidate code or a model.
-    let verify = |path: &Path| -> Result<Observation> {
-        let passed = std::fs::read(path).map_err(|e| e.to_string())? == b"after";
-        let stdout = if passed { b"pass".to_vec() } else { b"fail".to_vec() };
-        Ok(Observation {
-            exit: Some(if passed { 0 } else { 1 }),
-            evidence: ArtifactRef { path: "proofs/fixture.log".into(), sha256: hash(&stdout) },
-            stdout,
-            stderr: vec![],
-        })
-    };
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| e.to_string())?;
+    let proof_spawn = faber_engine::proc::isolated_spawner(definition.environment.clone(), vec![]);
+    // The writer's stand-in is a real process in an engine-owned job. Its identity comes from that job, and the landing
+    // below is released only by a proof built from retiring it: a recorded literal cannot stand in for it.
+    let _enter = runtime.enter();
+    broker.leases().prepare_launch(&lease, "launch", 3, 1).map_err(|e| e.key())?;
+    let ping = Path::new(&std::env::var("SystemRoot").map_err(|e| e.to_string())?).join("System32").join("ping.exe");
+    let mut stand_in =
+        faber_engine::proc::real_spawner()(&ping.to_string_lossy(), &["-n".into(), "60".into(), "127.0.0.1".into()], sandbox)
+            .map_err(|e| e.to_string())?;
+    let writer_tree = stand_in.contained.as_ref().and_then(|c| c.owned_tree()).ok_or("the stand-in has no owned tree")?;
+    ensure(
+        writer_tree.identity().started_at != 0 && Some(writer_tree.identity().pid) == stand_in.child.as_ref().and_then(|c| c.id()),
+        || "owned identity is not the launched process".into(),
+    )?;
+    broker.leases().attach_process(&lease, writer_tree.identity()).map_err(|e| e.key())?;
+    runtime.block_on(tokio::time::sleep(Duration::from_millis(500)));
+    for forged in [
+        Termination { process: None, tree_dead: true, cost_settled: true },
+        Termination {
+            process: Some(faber_engine::project::ProcessId { started_at: writer_tree.identity().started_at - 1, ..writer_tree.identity() }),
+            tree_dead: true,
+            cost_settled: true,
+        },
+    ] {
+        ensure(broker.leases().release(&lease, forged).is_err(), || {
+            "a recorded literal released a lease with a live owned process".into()
+        })?;
+    }
     let mut red =
         ProofSet::new(base.clone(), "fixture".into(), vec![definition.clone()], vec!["src/a.rs".into()]).map_err(str::to_string)?;
-    red.record("red", "fixture-check", verify(&root.join("src/a.rs"))?).map_err(str::to_string)?;
+    let red_receipt = runtime
+        .block_on(runner.run_proof(broker.journal(), "writer", "fixture-check", &mut red, &root, &proof_spawn))
+        .map_err(str::to_string)?;
     ensure(!red.verified(), || "the fixture must begin red".into())?;
+    ensure(red_receipt.extra["exit"] == 1, || "missing nonzero red exit".into())?;
+    let retired = runtime.block_on(writer_tree.retire()).map_err(|e| e.to_string())?;
+    ensure(retired.identity() == writer_tree.identity(), || "the retirement proof names another process".into())?;
+    let mut rest = Vec::new();
+    {
+        use tokio::io::AsyncReadExt;
+        runtime
+            .block_on(tokio::time::timeout(Duration::from_secs(3), stand_in.stdout.read_to_end(&mut rest)))
+            .map_err(|_| "the retired stand-in still holds its pipe")?
+            .map_err(|e| e.to_string())?;
+    }
+    // Only a proof built from that retirement lets the broker touch the lease again.
+    broker.leases().settle_process(&lease, Termination::from_retired(&retired, true)).map_err(|e| e.key())?;
     broker
         .leases()
         .patch(
@@ -660,8 +739,9 @@ pub fn probe_mission(sandbox: &Path) -> Result {
         .map_err(|e| e.key())?;
     let tree = check(broker.compose_tree(|| Ok(Some(grant.clone())), &lease, &["src/a.rs".into()]))?;
     let mut proof = ProofSet::new(tree.clone(), "fixture".into(), vec![definition], vec!["src/a.rs".into()]).map_err(str::to_string)?;
-    let receipt = proof.record("green", "fixture-check", verify(&root.join("src/a.rs"))?).map_err(str::to_string)?;
-    broker.journal().record_check(&receipt).map_err(|e| e.key())?;
+    runtime
+        .block_on(runner.run_proof(broker.journal(), "writer", "fixture-check", &mut proof, &root, &proof_spawn))
+        .map_err(str::to_string)?;
     let candidate = Candidate::new(
         "writer",
         base.clone(),
@@ -693,7 +773,7 @@ pub fn probe_mission(sandbox: &Path) -> Result {
             &lease,
             || Ok(Some(grant.clone())),
             "Fix the fixture",
-            Termination { process: None, tree_dead: true, cost_settled: true },
+            Termination::from_retired(&retired, true),
             |_| Ok(()),
         )
         .map_err(str::to_string)?;
@@ -712,6 +792,33 @@ pub fn probe_mission(sandbox: &Path) -> Result {
     ensure(report_content.contains("\"commitReceipt\""), || "report missing commitReceipt".into())?;
     ensure(report_content.contains("\"treeReceipt\""), || "report missing treeReceipt".into())?;
     ensure(report_content.contains("\"timings\""), || "report missing timings".into())?;
+    let report: faber_engine::project::report::MissionReport = serde_json::from_str(&report_content).map_err(|e| e.to_string())?;
+    let commit = report.commit_receipt.as_ref().ok_or("missing commit receipt")?;
+    ensure(
+        report.state == "done"
+            && report.checks.len() == 1
+            && report.checks[0].result == "pass"
+            && commit.head == faber_engine::project::report::UnknownOr::Known(head.clone())
+            && commit.tree == faber_engine::project::report::UnknownOr::Known(tree.clone())
+            && report.tokens_per_role.values().all(|tokens| tokens == &Default::default()),
+        || "persisted report altered exact tree or invented measurements".into(),
+    )?;
+    ensure(broker.journal().check(&red_receipt.id).map_err(|e| e.key())?.as_ref() == Some(&red_receipt), || {
+        "red receipt did not survive persistence".into()
+    })?;
+    let unchanged = owner_hash == hash(&std::fs::read(repo.join("src/a.rs")).map_err(|e| e.to_string())?)
+        && stable_hash == hash(&std::fs::read(stable.join("faber.exe")).map_err(|e| e.to_string())?);
+    ensure(unchanged, || "owner or stable fixture hash changed".into())?;
+    std::fs::write(
+        sandbox.join("t13-scripted.json"),
+        serde_json::json!({"red":true,"landing":true,"report":true,"unchanged":unchanged,
+            "head":head,"tree":tree,"ownerSha256":owner_hash,"indexSha256":hash(&owner_index),
+            "stableSha256":stable_hash,"redReceipt":red_receipt,"reportReceipt":report,
+            "writerProcess":{"pid":retired.identity().pid,"startedAt":retired.identity().started_at,"retired":true},
+            "scope":"scripted fixture; real owned writer stand-in process; no qualified provider session"})
+        .to_string(),
+    )
+    .map_err(|e| e.to_string())?;
     check(broker.finish())?;
     std::fs::write(sandbox.join("project-git.ok"), "fixture mission proved").map_err(|e| e.to_string())
 }

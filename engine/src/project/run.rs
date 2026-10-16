@@ -438,6 +438,25 @@ impl Runner {
             .as_bytes(),
         )
     }
+    pub async fn run_proof(
+        &mut self,
+        j: &Journal,
+        task: &str,
+        id: &str,
+        proof: &mut super::proof::ProofSet,
+        cwd: &std::path::Path,
+        spawn: &crate::proc::Spawner,
+    ) -> Result<super::wire::CheckReceipt, &'static str> {
+        let receipt = self.start_proof(j, task, id, proof)?;
+        let definition = proof.definitions().iter().find(|d| d.id == id).ok_or("reason.proof.definition")?;
+        let path = format!("proofs/{receipt}.log");
+        let observation = super::proof::execute(definition, cwd, spawn, path.clone()).await;
+        let mut log = observation.stdout.clone();
+        log.extend(&observation.stderr);
+        std::fs::create_dir_all(j.private().join("proofs")).map_err(|_| "error.store.write")?;
+        std::fs::write(j.private().join(path), log).map_err(|_| "error.store.write")?;
+        self.finish_proof(j, task, proof, &receipt, id, observation)
+    }
     pub fn start_proof(&mut self, j: &Journal, task: &str, id: &str, proof: &mut super::proof::ProofSet) -> Result<String, &'static str> {
         if self.halted || self.mission.state != MissionState::Running {
             return Err("reason.budget.paused");

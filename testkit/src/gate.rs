@@ -160,6 +160,12 @@ fn engine_tree_host(args: &[String]) -> i32 {
         let spawn = faber_engine::proc::real_spawner();
         let mut p = spawn(&binary, &["--tree-cli".into()], &cwd)?;
         let root = p.child.as_ref().and_then(|p| p.id()).ok_or_else(|| io::Error::other("no root"))?;
+        #[cfg(windows)]
+        let tree = p.contained.as_ref().and_then(|p| p.owned_tree()).ok_or_else(|| io::Error::other("no owned tree"))?;
+        #[cfg(windows)]
+        if tree.identity().pid != root || tree.identity().started_at == 0 {
+            return Err(io::Error::other("wrong owned tree identity"));
+        }
         let mut line = String::new();
         BufReader::new(p.stdout).read_line(&mut line).await?;
         std::fs::write(ready, serde_json::json!({"root":root}).to_string())?;
@@ -168,17 +174,31 @@ fn engine_tree_host(args: &[String]) -> i32 {
         p.contained = None;
         if action == "drop" {
             drop(p.child.take());
+        } else if action == "retire" {
+            // Only the proof holder ends the tree: the driver's own handle is not used.
         } else if let Some(child) = p.child.as_mut() {
             child.start_kill()?;
             child.wait().await?;
         }
+        #[cfg(windows)]
+        if tree.retire().await?.identity() != tree.identity() {
+            return Err(io::Error::other("wrong retired tree identity"));
+        }
         if action == "stop" {
             let peer = spawn(&binary, &["--idle".into()], &cwd)?;
+            #[cfg(windows)]
+            if peer.contained.as_ref().and_then(|p| p.owned_tree()).is_none_or(|p| p.identity() == tree.identity()) {
+                return Err(io::Error::other("peer reused the owned tree identity"));
+            }
             let peer_id = peer.child.as_ref().and_then(|p| p.id()).unwrap_or(0);
             std::fs::write(ready, serde_json::json!({"root":root,"peer":peer_id}).to_string())?;
             wait_control(control, "stop-again").await?;
             if let Some(child) = p.child.as_mut() {
                 child.start_kill()?;
+            }
+            #[cfg(windows)]
+            if tree.retire().await?.identity() != tree.identity() {
+                return Err(io::Error::other("peer changed the retired tree proof"));
             }
             std::fs::write(ready, serde_json::json!({"root":root,"peer":peer_id,"stoppedAgain":true}).to_string())?;
             tokio::time::sleep(Duration::from_secs(30)).await;
