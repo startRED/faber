@@ -64,7 +64,9 @@ fn protected(path: &Path) -> bool {
 /// Directory and runtime names only: no API keys, tokens, loader options or provider overrides.
 fn child_environment(temp: &Path, probe: &str, workspace: &Path) -> io::Result<std::collections::BTreeMap<String, String>> {
     let mut env = std::collections::BTreeMap::new();
-    for name in ["PATH", "SystemRoot", "WINDIR", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "ProgramFiles", "ProgramFiles(x86)"] {
+    for name in
+        ["PATH", "SystemRoot", "WINDIR", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "ProgramFiles", "ProgramFiles(x86)"]
+    {
         if let Ok(value) = std::env::var(name) {
             env.insert(name.to_string(), value);
         }
@@ -83,7 +85,11 @@ fn child_environment(temp: &Path, probe: &str, workspace: &Path) -> io::Result<s
 /// The sentence a failed child printed, without the wrapper; nothing else of its output is shown.
 fn failure_detail(tail: &str) -> String {
     tail.lines()
-        .find_map(|line| line.trim().strip_prefix("Qualification failed (").and_then(|rest| rest.strip_suffix("); inspect the private receipt for requested model turns.")))
+        .find_map(|line| {
+            line.trim()
+                .strip_prefix("Qualification failed (")
+                .and_then(|rest| rest.strip_suffix("); inspect the private receipt for requested model turns."))
+        })
         .map_or_else(|| "the probe did not finish".to_string(), |detail| detail.chars().take(200).collect())
 }
 
@@ -132,9 +138,7 @@ pub fn child(probe: &str, data: &Path) -> i32 {
     #[cfg(windows)]
     {
         let result = tokio::runtime::Builder::new_current_thread().enable_all().build().and_then(|runtime| {
-            runtime.block_on(async {
-                if probe.starts_with("--live-claude") { claude::run(data).await } else { codex::run(data).await }
-            })
+            runtime.block_on(async { if probe.starts_with("--live-claude") { claude::run(data).await } else { codex::run(data).await } })
         });
         if let Err(error) = result {
             eprintln!("Qualification failed ({error}); inspect the private receipt for requested model turns.");

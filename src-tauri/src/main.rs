@@ -679,7 +679,7 @@ async fn run_mission(app: &AppHandle, faber: &Faber, mission_id: &str, commands:
         }
         let launch =
             mission::Launch { repository: repository.clone(), commands, data, project: pid, pins, grant, revision, notify: Some(notify) };
-        let setup = mission::setup(launch, &mut process, &|name| faber_engine::cli::find_cli(name))?;
+        let setup = mission::setup(launch, &mut process, &faber_engine::project::mission::resolve_tool)?;
         Ok((repository, setup))
     })
     .await

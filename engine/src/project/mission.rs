@@ -142,7 +142,9 @@ pub fn view(project: &Project) -> ProofView {
         Some((was, commands)) if was == declared && !commands.is_empty() => {
             ProofView { commands, declared, source: source.into(), confirmed: true, changed: false, setup }
         }
-        saved => ProofView { commands: declared.clone(), declared, source: source.into(), confirmed: false, changed: saved.is_some(), setup },
+        saved => {
+            ProofView { commands: declared.clone(), declared, source: source.into(), confirmed: false, changed: saved.is_some(), setup }
+        }
     }
 }
 
@@ -202,6 +204,41 @@ pub fn confirm(project: &Project, commands: &[String]) -> Result<Project, &'stat
 pub fn confirmed(project: &Project) -> Result<Vec<String>, &'static str> {
     let shown = view(project);
     if shown.confirmed { Ok(shown.commands) } else { Err("reason.proof.unconfirmed") }
+}
+
+/// The program a proof or setup command names, found without a shell. The official CLIs and native programs resolve as
+/// everywhere (`cli::find_cli`); Node's own `npm` and `npx` are a `.cmd` shim that cannot start without a shell, so they
+/// resolve to `node` with the tool's script from the same install, whatever the shim contains.
+pub fn resolve_tool(name: &str) -> Option<Cli> {
+    if let Some(cli) = crate::cli::find_cli(name) {
+        return Some(cli);
+    }
+    let path = std::env::var("PATH").or_else(|_| std::env::var("Path")).unwrap_or_default();
+    node_tool(name, &path, cfg!(windows), &|p| Path::new(p).is_file())
+}
+
+fn node_tool(name: &str, path_var: &str, windows: bool, exists: &dyn Fn(&str) -> bool) -> Option<Cli> {
+    let script = match name {
+        "npm" => "npm-cli.js",
+        "npx" => "npx-cli.js",
+        _ => return None,
+    };
+    let (sep, delim) = if windows { ('\\', ';') } else { ('/', ':') };
+    let join = |dir: &str, file: &str| format!("{}{sep}{file}", dir.trim_end_matches(sep));
+    for dir in path_var.split(delim).filter(|d| !d.is_empty()) {
+        let shim = join(dir, &if windows { format!("{name}.cmd") } else { name.to_string() });
+        let (node, cli) = if windows {
+            (join(dir, "node.exe"), join(dir, &format!("node_modules{sep}npm{sep}bin{sep}{script}")))
+        } else {
+            // A Unix install keeps the package beside the prefix: <prefix>/bin/npm and <prefix>/lib/node_modules/npm.
+            let prefix = dir.trim_end_matches(sep).rsplit_once(sep).map_or("", |(parent, _)| parent);
+            (join(dir, "node"), format!("{prefix}{sep}lib{sep}node_modules{sep}npm{sep}bin{sep}{script}"))
+        };
+        if exists(&shim) && exists(&node) && exists(&cli) {
+            return Some(Cli { command: node, prefix: vec![cli] });
+        }
+    }
+    None
 }
 
 /// The proof of each command: the program is looked up by `resolve` (a bare name on the PATH in production), the
@@ -480,6 +517,25 @@ mod tests {
     use super::*;
 
     const AGENTS: &str = "# Guide\n\nSome text.\n\n## Rules\n\n```\nnot a proof\n```\n\n## Proof commands\n\nAll exit 0 before any commit:\n\n```bash\nnpm run lint\n# a comment\n$ cargo fmt --all --check\ncargo clippy --workspace -- -D warnings && cargo t\n```\n\n## Stack\n\n```\nignored\n```\n";
+
+    #[test]
+    fn npm_resolves_to_node_and_its_own_script_not_to_a_shim_that_needs_a_shell() {
+        let win = |p: &str| p.replace('/', "\\");
+        let files: Vec<String> =
+            ["C:/Node/npm.cmd", "C:/Node/node.exe", "C:/Node/node_modules/npm/bin/npm-cli.js"].iter().map(|p| win(p)).collect();
+        let present = |p: &str| files.iter().any(|f| f == p);
+        let found = node_tool("npm", &win("C:/Other;C:/Node"), true, &present).unwrap();
+        assert_eq!(found.command, win("C:/Node/node.exe"));
+        assert_eq!(found.prefix, [win("C:/Node/node_modules/npm/bin/npm-cli.js")]);
+        assert!(node_tool("npx", &win("C:/Node"), true, &present).is_none(), "npx has no script here");
+        assert!(node_tool("curl", &win("C:/Node"), true, &present).is_none(), "only npm and npx");
+        assert!(node_tool("npm", &win("C:/Other"), true, &present).is_none());
+        let unix = |p: &str| ["/opt/node/bin/npm", "/opt/node/bin/node", "/opt/node/lib/node_modules/npm/bin/npm-cli.js"].contains(&p);
+        assert_eq!(
+            node_tool("npm", "/usr/bin:/opt/node/bin", false, &unix).unwrap().prefix,
+            ["/opt/node/lib/node_modules/npm/bin/npm-cli.js"]
+        );
+    }
 
     #[test]
     fn the_declared_list_is_the_code_block_under_the_proof_commands_heading() {

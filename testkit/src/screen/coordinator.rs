@@ -408,8 +408,11 @@ async fn run_wiring(sandbox: &Path) -> Result<Value> {
             ("AGENTS.md", "# Rules\n\n## Proof commands\n\n```\nfake-proof src/a.rs\n```\n"),
             (".env", "TOKEN=wiring-secret"),
             ("README.md", "A fixture project."),
-            (".gitignore", "cache/
-"),
+            (
+                ".gitignore",
+                "cache/
+",
+            ),
         ],
     )?;
     let project = faber_engine::model::Project::new("p1".into(), "Fixture".into(), w.repo.to_string_lossy().into_owned());
@@ -480,7 +483,9 @@ async fn run_wiring(sandbox: &Path) -> Result<Value> {
     let space = faber_engine::project::workspace::Workspace::new(&w.dir.join("records"), "p1").map_err(str::to_string)?;
     let landed_text = git(&w.program, &w.repo, &["show", "faber/m1:src/a.rs"])?;
     let in_copy = std::fs::read_to_string(space.dir().join("src/a.rs")).map_err(|e| e.to_string())?;
-    ensure(in_copy.trim() == landed_text.trim() && in_copy.trim() != "base", || format!("the working copy does not hold the candidate: {in_copy:?}"))?;
+    ensure(in_copy.trim() == landed_text.trim() && in_copy.trim() != "base", || {
+        format!("the working copy does not hold the candidate: {in_copy:?}")
+    })?;
     // The next mission resets it to its base but keeps what the project ignores: the build output stays, the strays go.
     std::fs::create_dir_all(space.dir().join("cache")).map_err(|e| e.to_string())?;
     std::fs::write(space.dir().join("cache/built.bin"), "built").map_err(|e| e.to_string())?;
