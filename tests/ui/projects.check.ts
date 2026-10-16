@@ -769,10 +769,14 @@ check('projects home: text sits only on the faint veil of the black hole, scroll
       const box = canvas.getBoundingClientRect();
       const scale = canvas.width / box.width;
       const walker = document.createTreeWalker(root.querySelector('.projects-stage')!, NodeFilter.SHOW_TEXT);
+      const range = document.createRange();
       let seen = 0;
       for (let node = walker.nextNode(); node; node = walker.nextNode()) {
         if (!node.textContent?.trim()) continue;
-        const r = (node.parentElement as Element).getBoundingClientRect();
+        // The glyphs, not the box that holds them: a row runs the column's full width past its last letter, as the veil's
+        // own edge does not (ui/Hole.tsx).
+        range.selectNodeContents(node);
+        const r = range.getBoundingClientRect();
         const [x0, y0] = [Math.max(0, Math.floor((r.left - box.left) * scale)), Math.max(0, Math.floor((r.top - box.top) * scale))];
         const [x1, y1] = [Math.min(canvas.width, Math.ceil((r.right - box.left) * scale)), Math.min(canvas.height, Math.ceil((r.bottom - box.top) * scale))];
         if (x1 <= x0 || y1 <= y0) continue;
