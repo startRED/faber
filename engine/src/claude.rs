@@ -1,5 +1,7 @@
 //! Claude Code driver: one long-lived `claude -p` process per conversation, spoken to in stream-json over stdio.
 
+mod background;
+
 use crate::events::{Delivery, EngineEvent, Session, SessionCommand, UserTurn};
 use crate::model::{Area, Permissions, Tuning, WebSearch};
 use crate::persona::{PersonaInput, persona, worker_contract};
@@ -569,6 +571,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
         // When the running turn was handed to the CLI: its request goes out at that moment. Set once per turn and never moved by
         // the lines that follow (status, retries), so later requests of a tool turn count from the first: never more warmth than there is.
         let mut turn_sent_ms = unix_ms();
+        let mut background = background::Background::default();
         loop {
             let deadline = watch.deadline();
             tokio::select! {
@@ -601,7 +604,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                             if msg["type"] == "stream_event" && msg["event"]["type"] == "message_start" && msg["parent_tool_use_id"].is_null() {
                                 request_began = Some(turn_sent_ms);
                             }
-                            let finished = msg["type"] == "result";
+                            let finished = background.ends_reply(&msg, watch.stopping());
                             if project {
                                 match crate::project::policy::reject_native(&mut *stdin, crate::model::Vendor::Claude, &msg).await {
                                     Ok(true) => continue,
@@ -616,6 +619,13 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                             watch.activity();
                             if finished { watch.finish(); }
                             for mut event in parse_claude_message(&msg) {
+                                if matches!(event, EngineEvent::Done { .. }) {
+                                    if !finished {
+                                        background.hold(event);
+                                        continue;
+                                    }
+                                    event = background.close(event);
+                                }
                                 if matches!(event, EngineEvent::Parked { .. }) && !parking {
                                     continue;
                                 }

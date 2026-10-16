@@ -925,6 +925,7 @@ export const ptBR: Messages = {
   'notes.14.new': 'Em um projeto você agora conversa com o assistente como em qualquer lugar, e as perguntas dele chegam como cards que você toca.',
   'notes.15.fixed': 'Na primeira tela de um projeto, as palavras ficam na parte escura do buraco negro quando uma lista abre abaixo delas.',
   'notes.16.new': 'Quando o assistente passa parte do trabalho para um ajudante, o ajudante aparece como uma etapa na resposta.',
+  'notes.17.fixed': 'Quando o assistente deixa subagentes trabalhando em segundo plano, a resposta agora espera por eles e chega inteira, em vez de parar no “vou aguardar”.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

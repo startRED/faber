@@ -938,6 +938,7 @@ export const fr: Messages = {
   'notes.14.new': 'Dans un projet, tu discutes désormais avec l’assistant comme ailleurs, et ses questions arrivent sous forme de cartes à toucher.',
   'notes.15.fixed': 'Sur le premier écran d’un projet, les mots restent sur la partie sombre du trou noir quand une liste s’ouvre en dessous.',
   'notes.16.new': 'Quand l’assistant confie une partie du travail à une aide, celle-ci apparaît comme une étape de sa réponse.',
+  'notes.17.fixed': 'Quand l’assistant laisse des sous-agents travailler en arrière-plan, sa réponse les attend maintenant et arrive entière, au lieu de s’arrêter à « je vais attendre ».',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',
