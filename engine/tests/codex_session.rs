@@ -687,13 +687,13 @@ fn permissions_keep_the_workspace_sandbox_and_disable_project_network_without_ap
                 } else if permissions == Permissions::FullAccess {
                     assert_eq!((&params["sandbox"], &params["approvalPolicy"]), (&"danger-full-access".into(), &"never".into()));
                     assert!(
-                        params["config"] == json!({"web_search": "live"}) && params.get("dynamicTools").is_none(),
+                        params["config"] == json!({"web_search": "disabled"}) && params.get("dynamicTools").is_none(),
                         "full access sends only the web search setting"
                     );
                 } else {
                     assert_eq!(params["sandbox"], "workspace-write");
                     assert_eq!(params["approvalPolicy"], "untrusted");
-                    assert!(params["config"] == json!({"web_search": "live"}), "no profile: only the web search setting");
+                    assert!(params["config"] == json!({"web_search": "disabled"}), "no profile: only the web search setting");
                 }
                 assert_eq!(params.get("baseInstructions").is_some(), area == Area::Chat);
                 let (_, side) = thread_params(area, &CodexThread { instructions: Some("Route.".into()), ..t });
@@ -1053,7 +1053,7 @@ fn r121_codex_full_access_has_no_sandbox_no_approvals_and_no_host_command_tool()
                 assert!(params.get(key).is_none(), "{area:?} {key}: full access sends no profile, no tool override and no workspace roots");
             }
             // R140: the only thing sent is the web search setting; no permission profile, no shell override.
-            assert_eq!(params["config"], json!({"web_search": "live"}), "{area:?}");
+            assert_eq!(params["config"], json!({"web_search": "disabled"}), "{area:?}");
         }
     }
 }
@@ -1140,7 +1140,7 @@ async fn r121_a_full_access_thread_keeps_the_persons_mcp_servers_and_starts_with
         let messages = f.wire.messages();
         let thread = messages.iter().find(|msg| msg["method"] == method).unwrap();
         assert_eq!(thread["params"]["sandbox"], "danger-full-access");
-        assert_eq!(thread["params"]["config"], json!({"web_search": "live"}), "no profile and no tool override");
+        assert_eq!(thread["params"]["config"], json!({"web_search": "disabled"}), "no profile and no tool override");
         assert!(f.mismatches.lock().unwrap().is_empty());
         session.close();
         server.retire();
@@ -1266,9 +1266,11 @@ fn r140_web_search_defaults_to_live_and_summary_and_verbosity_to_the_models_own(
     use faber_engine::model::{ReasoningSummary, Tuning, Verbosity, WebSearch};
     for permissions in [Permissions::Ask, Permissions::AcceptEdits, Permissions::Plan, Permissions::Auto, Permissions::FullAccess] {
         for resume in [None, Some("t1".to_string())] {
-            let t = CodexThread { resume, ..mode_thread(permissions, Tuning::default()) };
+            let t = CodexThread { resume, ..mode_thread(permissions, faber_engine::model::Settings::default().tuning()) };
             let (_, params) = thread_params(Area::Chat, &t);
             assert_eq!(params["config"], json!({"web_search": "live"}), "{permissions:?}: nothing but web search is set by default");
+            let (_, bare) = thread_params(Area::Chat, &CodexThread { tuning: Tuning::default(), ..t });
+            assert_eq!(bare["config"], json!({"web_search": "disabled"}), "a launch nobody chose for gets no web");
         }
         for (web, name) in [(WebSearch::Off, "disabled"), (WebSearch::Cached, "cached"), (WebSearch::Live, "live")] {
             let (_, params) = thread_params(Area::Project, &mode_thread(permissions, Tuning { web, ..Default::default() }));
@@ -1294,15 +1296,34 @@ fn r140_web_search_defaults_to_live_and_summary_and_verbosity_to_the_models_own(
 }
 
 #[test]
-fn r140_isolated_threads_and_side_questions_never_take_the_settings() {
+fn r140_every_isolated_or_internal_codex_thread_has_web_search_disabled_and_takes_no_setting() {
     use faber_engine::model::{ReasoningSummary, Tuning, Verbosity, WebSearch};
-    let chosen = Tuning { web: WebSearch::Cached, summary: ReasoningSummary::Detailed, verbosity: Verbosity::High };
-    let keys =
-        |params: &serde_json::Value| ["web_search", "model_reasoning_summary", "model_verbosity"].map(|k| params["config"].get(k).cloned());
-    let (_, isolated) = thread_params(Area::Chat, &mode_thread(Permissions::Isolated, chosen));
-    assert_eq!(keys(&isolated), [None, None, None]);
-    let side = CodexThread { instructions: Some("Route.".into()), ..mode_thread(Permissions::Auto, chosen) };
-    let (_, side) = thread_params(Area::Chat, &side);
-    assert_eq!(keys(&side), [None, None, None]);
-    assert_eq!(side["approvalPolicy"], "never", "a side question never asks, whatever the mode");
+    let chosen = Tuning { web: WebSearch::Live, summary: ReasoningSummary::Detailed, verbosity: Verbosity::High };
+    let keys = |params: &serde_json::Value| {
+        ["web_search", "model_reasoning_summary", "model_verbosity"]
+            .map(|k| params["config"].get(k).and_then(|v| v.as_str().map(String::from)))
+    };
+    let closed = [Some("disabled".to_string()), None, None];
+    for area in [Area::Chat, Area::Project] {
+        for resume in [None, Some("t1".to_string())] {
+            let isolated = CodexThread { resume: resume.clone(), ..mode_thread(Permissions::Isolated, chosen) };
+            assert_eq!(keys(&thread_params(area, &isolated).1), closed, "{area:?} isolated");
+            for permissions in [
+                Permissions::Ask,
+                Permissions::AcceptEdits,
+                Permissions::Plan,
+                Permissions::Auto,
+                Permissions::FullAccess,
+                Permissions::Isolated,
+            ] {
+                let side = CodexThread { resume: resume.clone(), instructions: Some("Route.".into()), ..mode_thread(permissions, chosen) };
+                let (_, side) = thread_params(area, &side);
+                assert_eq!(keys(&side), closed, "{area:?} side question under {permissions:?}");
+                assert_eq!(side["approvalPolicy"], "never", "a side question never asks, whatever the mode");
+            }
+        }
+    }
+    for writable in [false, true] {
+        assert_eq!(faber_engine::permissions::sandbox_config(".".as_ref(), writable)["web_search"], "disabled", "{writable}");
+    }
 }

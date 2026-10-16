@@ -159,6 +159,17 @@ fn web_allowed(web: WebSearch) -> Option<&'static str> {
     }
 }
 
+/// The answer that lets a request through. Leaving plan mode (the plan was approved) also names the mode the session goes on in:
+/// the CLI returns to the mode it was in before plan, which for a session that began in plan is `default` (read in the CLI),
+/// and naming it keeps the person's own `defaultMode` from ever being the one that takes over.
+fn allow_response(tool: &str, input: &Value) -> Value {
+    let mut response = json!({ "behavior": "allow", "updatedInput": input });
+    if tool == "ExitPlanMode" {
+        response["updatedPermissions"] = json!([{ "type": "setMode", "mode": "default", "destination": "session" }]);
+    }
+    response
+}
+
 /// Arguments for one long-lived Claude Code process that takes many turns over stdin.
 /// Every guarded mode names its permission mode (Ask: `default`, ask before file changes and commands that are not plain
 /// reading; Accept edits: `acceptEdits`; Plan: `plan`; Auto: `auto`, or accept edits when the CLI does not list it), so neither
@@ -536,7 +547,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
         let mut stdin = p.stdin;
         let mut child = p.child;
         let mut job = p.contained;
-        let mut pending: HashMap<String, Value> = HashMap::new();
+        let mut pending: HashMap<String, (String, Value)> = HashMap::new();
         let mut closed = false;
         let mut control_id = 0u32;
         let mut quota_seen = false;
@@ -623,7 +634,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                                         }
                                         continue;
                                     }
-                                    pending.insert(request_id.clone(), input.clone());
+                                    pending.insert(request_id.clone(), (tool.clone(), input.clone()));
                                     watch.pause();
                                 }
                                 on_event(event);
@@ -664,8 +675,8 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                         // The request stays pending until the write worked, so a failed write can be answered again.
                         let delivery = match pending.get(&request_id) {
                             None => Delivery::Unknown,
-                            Some(input) => {
-                                let response = if allow { json!({ "behavior": "allow", "updatedInput": input }) } else { json!({ "behavior": "deny", "message": DECLINED[0] }) };
+                            Some((tool, input)) => {
+                                let response = if allow { allow_response(tool, input) } else { json!({ "behavior": "deny", "message": DECLINED[0] }) };
                                 let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id, "response": response } });
                                 match proc::write_line(&mut *stdin, &msg).await {
                                     Ok(()) => {
@@ -727,6 +738,24 @@ fn user_message(turn: &UserTurn) -> Value {
         Value::Array(blocks)
     };
     json!({ "type": "user", "message": { "role": "user", "content": content }, "parent_tool_use_id": null, "session_id": "" })
+}
+
+#[cfg(test)]
+mod allow_tests {
+    use super::*;
+
+    #[test]
+    fn r140_leaving_plan_names_the_mode_default_for_the_session_and_no_other_request_names_one() {
+        let input = json!({ "plan": "do it" });
+        let leaving = allow_response("ExitPlanMode", &input);
+        assert_eq!(leaving["behavior"], "allow");
+        assert_eq!(leaving["updatedInput"], input);
+        assert_eq!(leaving["updatedPermissions"], json!([{ "type": "setMode", "mode": "default", "destination": "session" }]));
+        for tool in ["Write", "Bash", "Edit", "WebFetch"] {
+            let plain = allow_response(tool, &input);
+            assert_eq!(plain, json!({ "behavior": "allow", "updatedInput": input }), "{tool}");
+        }
+    }
 }
 
 #[cfg(test)]

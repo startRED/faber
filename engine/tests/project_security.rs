@@ -14,7 +14,7 @@ fn launch(area: Area, permissions: Permissions) -> ClaudeLaunch {
         instructions: None,
         user_name: None,
         flags: Default::default(),
-        tuning: Default::default(),
+        tuning: faber_engine::model::Tuning { web: faber_engine::model::WebSearch::Live, ..Default::default() },
     }
 }
 

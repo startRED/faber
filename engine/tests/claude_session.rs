@@ -19,7 +19,8 @@ fn launch(area: Area) -> ClaudeLaunch {
         user_name: None,
         permissions: Permissions::Ask,
         flags: Default::default(),
-        tuning: Default::default(),
+        // The credential tests below are about the deny rules, not the web: the web is on, as the person's settings default.
+        tuning: faber_engine::model::Tuning { web: faber_engine::model::WebSearch::Live, ..Default::default() },
     }
 }
 
@@ -1155,9 +1156,10 @@ fn r140_auto_is_found_among_the_permission_mode_choices_of_the_help() {
 }
 
 #[test]
-fn r140_web_search_is_live_by_default_and_off_or_cached_change_the_tools_and_deny_rules() {
+fn r140_web_search_is_live_in_the_saved_settings_and_off_or_cached_change_the_tools_and_deny_rules() {
     use faber_engine::model::{Tuning, WebSearch};
-    assert_eq!(Tuning::default().web, WebSearch::Live);
+    assert_eq!(Tuning::default().web, WebSearch::Off, "a launch nobody chose for gets no web");
+    assert_eq!(faber_engine::model::Settings::default().tuning().web, WebSearch::Live, "the person's saved settings default to live");
     let allowed = |args: &[String]| args.iter().position(|a| a == "--allowedTools").map(|at| args[at + 1].clone());
     for permissions in [Permissions::Ask, Permissions::AcceptEdits, Permissions::Plan, Permissions::Auto] {
         let with = |web| {
@@ -1210,7 +1212,12 @@ fn r140_old_saved_settings_load_as_before_and_the_new_ones_are_stored_by_name() 
     let old: Settings = serde_json::from_str(r#"{"permissions":"ask","userHooks":true}"#).unwrap();
     assert_eq!(old.permissions, Some(Permissions::Ask));
     assert_eq!((old.web_search, old.reasoning_summary, old.verbosity), (None, None, None));
-    assert_eq!(old.tuning(), Default::default(), "no saved web choice means live and the models' own summary and verbosity");
+    assert_eq!(
+        old.tuning(),
+        faber_engine::model::Tuning { web: WebSearch::Live, ..Default::default() },
+        "no saved web choice means live and the models' own summary and verbosity"
+    );
+    assert_eq!(faber_engine::model::Tuning::default().web, WebSearch::Off, "a launch nobody chose for gets no web");
     let full: Settings = serde_json::from_str(r#"{"permissions":"dontAsk"}"#).unwrap();
     assert_eq!(full.permissions, Some(Permissions::FullAccess));
     assert_eq!(Settings::default().permissions.unwrap_or_default(), Permissions::FullAccess, "full access stays the default");

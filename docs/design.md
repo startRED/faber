@@ -303,7 +303,15 @@ projects. Faber has no worktree creation for projects, so an environment has no 
   | Auto | `auto` (else `acceptEdits`) | `on-request` / `workspace-write` / `auto_review` |
   | Full access (default, stored `dontAsk`) | `bypassPermissions` | `never` / `danger-full-access` |
 
-  Web search (Off, Cached, Live; Live by default): Codex `web_search` in the thread config; Claude Code allows
+  Rules that hold in every mode: Plan never takes a remembered "Always allow" and remembers none, and moving to a stricter
+  mode (or to a stricter web setting) stops a running turn and forgets every remembered grant, in memory and on disk. No
+  mode promises zero execution: Ask lets plain reads through, Plan lets read-only commands through, and Accept edits lets
+  Codex run commands inside the working folder. Leaving Claude's plan mode names `default` for the session. Settings that cannot
+  be read start in Ask, not Full access (a missing file still means Full access). Every isolated or internal Codex thread has
+  `web_search` disabled. Credential-folder denies hold for Claude's file tools in every mode; Codex has no way to enforce them
+  in Chat in any mode (no profile, same limit as Full access) and only refuses a forwarded request that names them.
+
+  Web search (Off, Cached, Live; Live by default in the saved Chat settings, Off for any launch nobody chose for): Codex `web_search` in the thread config; Claude Code allows
   WebSearch and WebFetch (Live), only WebSearch and denies WebFetch (Cached, which it lacks), or denies both (Off).
   Cached is offered only while Codex is connected. Codex reasoning summary and verbosity go into the thread config as
   `model_reasoning_summary` and `model_verbosity` and stay unset (the model's own) until chosen.

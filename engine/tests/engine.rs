@@ -2040,3 +2040,68 @@ async fn r140_a_request_the_cli_forwards_still_reaches_the_person_in_every_guard
         assert_eq!(reply.status, Some(Status::Done));
     }
 }
+
+#[tokio::test]
+async fn r140_a_turn_under_way_stops_when_the_mode_or_the_web_gets_stricter_and_keeps_going_when_it_gets_looser() {
+    use faber_engine::model::WebSearch;
+    let mode = |permissions| Settings { permissions: Some(permissions), ..Settings::default() };
+    let web = |web| Settings { web_search: Some(web), ..Settings::default() };
+    // (setting the turn starts under, setting it moves to, whether the turn is stopped)
+    let moves = [
+        (mode(Permissions::Auto), mode(Permissions::Ask), true),
+        (mode(Permissions::Ask), mode(Permissions::Plan), true),
+        (mode(Permissions::AcceptEdits), mode(Permissions::Ask), true),
+        (mode(Permissions::FullAccess), mode(Permissions::Auto), true),
+        (web(WebSearch::Live), web(WebSearch::Off), true),
+        (web(WebSearch::Live), web(WebSearch::Cached), true),
+        (web(WebSearch::Cached), web(WebSearch::Off), true),
+        (mode(Permissions::Ask), mode(Permissions::Auto), false),
+        (mode(Permissions::Ask), mode(Permissions::AcceptEdits), false),
+        (mode(Permissions::Plan), mode(Permissions::Ask), false),
+        (mode(Permissions::Auto), mode(Permissions::FullAccess), false),
+        (web(WebSearch::Off), web(WebSearch::Live), false),
+        (web(WebSearch::Cached), web(WebSearch::Live), false),
+    ];
+    for (from, to, stops) in moves {
+        let dir = project_folder();
+        let entries = vec![
+            Entry { input: true, msg: serde_json::json!({ "type": "user", "message": { "content": "wait" } }) },
+            Entry {
+                input: false,
+                msg: serde_json::json!({ "type": "system", "subtype": "init", "session_id": "active", "model": "haiku" }),
+            },
+            Entry { input: true, msg: serde_json::json!({ "type": "control_request", "request": { "subtype": "interrupt" } }) },
+        ];
+        let f = fake(entries);
+        let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+        engine.save_settings(from.clone()).unwrap();
+        let chat = engine.send(ask(Area::Chat, "wait", choice("claude", None))).unwrap();
+        engine.save_settings(to.clone()).unwrap();
+        let status = engine.open(&chat).unwrap().messages.last().unwrap().status;
+        let want = if stops { Status::Stopped } else { Status::Streaming };
+        assert_eq!(status, Some(want), "{from:?} to {to:?}");
+        engine.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn r140_settings_that_cannot_be_read_ask_before_every_change_and_a_missing_file_keeps_full_access() {
+    for (text, expected) in [
+        (None, None),
+        (Some(r#"{"language":"de"}"#), None),
+        (Some(r#"{"permissions":"acceptEdits"}"#), Some(Permissions::AcceptEdits)),
+        (Some("{ this is not json"), Some(Permissions::Ask)),
+        (Some(r#"{"permissions":"someModeANewerBuildWrote"}"#), Some(Permissions::Ask)),
+        (Some(r#"{"permissions":"plan","webSearch":"somethingNew"}"#), Some(Permissions::Ask)),
+        (Some(""), Some(Permissions::Ask)),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        if let Some(text) = text {
+            std::fs::write(dir.path().join("settings.json"), text).unwrap();
+        }
+        let (engine, _) = engine(dir.path(), Vendor::Claude, fake(vec![]).spawn);
+        let got = engine.settings().permissions;
+        assert_eq!(got, expected, "{text:?}");
+        engine.shutdown();
+    }
+}

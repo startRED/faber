@@ -204,8 +204,27 @@ impl Store {
         self.write(&self.projects, &projects)
     }
 
+    /// A missing file is the defaults (full access). A file that cannot be read or understood (a hand edit, or values a newer
+    /// build wrote) is never read as that: it asks before every change.
     pub fn settings(&self) -> Settings {
-        read(&self.settings).unwrap_or_default()
+        match read_checked(&self.settings) {
+            Ok(found) => found.unwrap_or_default(),
+            Err(_) => Settings { permissions: Some(crate::model::Permissions::Ask), ..Settings::default() },
+        }
+    }
+
+    /// Forgets the "Always allow" of every conversation on disk except the `loaded` ones, which the engine clears itself.
+    pub fn clear_grants(&self, loaded: &dyn Fn(&str) -> bool) {
+        let files = fs::read_dir(&self.conversations).into_iter().flatten().flatten();
+        for entry in files.filter(|e| e.path().extension().is_some_and(|x| x == "json")) {
+            if let Some(mut c) = read::<Conversation>(&entry.path())
+                && c.allow_always.is_some()
+                && !loaded(&c.id)
+            {
+                c.allow_always = None;
+                self.save(&c);
+            }
+        }
     }
 
     pub fn save_settings(&self, settings: &Settings) -> Result<(), Fault> {

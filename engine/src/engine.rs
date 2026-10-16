@@ -1146,7 +1146,19 @@ impl Core {
         // A turn keeps the mode it started with until it ends, so moving to a stricter mode stops the turns under way (a turn
         // that began under a stricter mode keeps it; moving to a looser one does not touch it).
         let (was, now) = (before.permissions.unwrap_or_default(), settings.permissions.unwrap_or_default());
+        let stricter = now.strictness() > was.strictness() || settings.tuning().web.strictness() > before_tuning.web.strictness();
+        // A stricter mode never inherits what a looser one was told: every "Always allow" is forgotten.
         if now.strictness() > was.strictness() {
+            let ids: Vec<String> = self.convs.iter().filter(|(_, c)| c.allow_always.is_some()).map(|(id, _)| id.clone()).collect();
+            for id in ids {
+                if let Some(c) = self.convs.get_mut(&id) {
+                    c.allow_always = None;
+                }
+                self.save(&id);
+            }
+            self.store.clear_grants(&|id| self.convs.contains_key(id));
+        }
+        if stricter {
             let active: Vec<String> = self.live.iter().filter(|(_, live)| live.turn.is_some()).map(|(id, _)| id.clone()).collect();
             for id in active {
                 if let Some(live) = self.live.remove(&id) {
@@ -1368,7 +1380,9 @@ impl Core {
                 if self.live.get(conv).is_some_and(|l| l.permissions == Permissions::FullAccess) {
                     return self.auto_answer(conv, vec![Permission { request_id, tool, input }]);
                 }
-                let allowed = self.convs.get(conv).and_then(|c| c.allow_always.as_ref()).is_some_and(|a| a.contains(&tool));
+                // Plan never takes a remembered grant: nothing may change under it without a card.
+                let plan = self.live.get(conv).is_some_and(|l| l.permissions == Permissions::Plan);
+                let allowed = !plan && self.convs.get(conv).and_then(|c| c.allow_always.as_ref()).is_some_and(|a| a.contains(&tool));
                 if allowed {
                     return self.auto_answer(conv, vec![Permission { request_id, tool, input }]);
                 }

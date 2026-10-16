@@ -21,6 +21,8 @@ pub(super) struct Handed {
     tool: String,
     /// The process the answer went to; settling checks it is still the one in use.
     sid: u64,
+    /// "Always allow" holds: not in Plan, which takes no remembered grant.
+    always: bool,
 }
 
 impl Engine {
@@ -29,7 +31,7 @@ impl Engine {
     /// answer could not be written or was not confirmed in time. The lock is free while the engine waits, so nothing
     /// else in the engine waits for the CLI.
     pub async fn answer(&self, conv: &str, turn_id: &str, request_id: &str, allow: bool, always: bool) -> Result<(), String> {
-        let Handed { requests, tool, sid } = self.with(|c| c.prepare_answer(conv, turn_id, request_id, allow, always))?;
+        let Handed { requests, tool, sid, always } = self.with(|c| c.prepare_answer(conv, turn_id, request_id, allow, always))?;
         let deadline = Instant::now() + ACK_WAIT;
         let mut results = Vec::new();
         for (id, ack) in requests {
@@ -49,10 +51,11 @@ impl Core {
         let reply = self.convs.get(conv).and_then(|c| c.messages.iter().find(|m| m.id == turn_id)).ok_or(STALE)?;
         let waiting = reply.permissions.as_deref().unwrap_or_default();
         let tool = waiting.iter().find(|p| p.request_id == request_id).ok_or(STALE)?.tool.clone();
+        let always = always && live.permissions != Permissions::Plan;
         let others = waiting.iter().filter(|p| allow && always && p.tool == tool && p.request_id != request_id);
         let ids = std::iter::once(request_id).chain(others.map(|p| p.request_id.as_str()));
         let requests = ids.map(|id| (id.to_string(), live.session.answer(id, allow))).collect();
-        Ok(Handed { requests, tool, sid: live.sid })
+        Ok(Handed { requests, tool, sid: live.sid, always })
     }
 
     /// Applies what the sessions said. Other calls ran while the engine waited, so it looks again for the conversation,
@@ -600,5 +603,76 @@ mod tests {
             assert_eq!(call.await.unwrap(), Err(STALE.to_string()));
             assert_eq!(engine.open(&id).unwrap().allow_always, None);
         }
+    }
+
+    #[tokio::test]
+    async fn r140_plan_takes_no_remembered_grant_and_remembers_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        // A grant made under Ask, still on the conversation: Plan ignores it and shows the card.
+        let s = stub(vec![]);
+        let id = seed(&engine, s.session.clone(), &[("t1", &[])]);
+        engine.with(|c| {
+            c.convs.get_mut(&id).unwrap().allow_always = Some(vec!["Write".into(), "Bash".into()]);
+            c.live.get_mut(&id).unwrap().permissions = Permissions::Plan;
+        });
+        ask(&engine, &id, "7", "Write");
+        ask(&engine, &id, "8", "Bash");
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+        }
+        assert!(s.asked.lock().unwrap().is_empty(), "nothing was answered for the person");
+        assert_eq!(waiting(&engine, &id, "t1"), ["7", "8"]);
+        // Allowing with Always under Plan allows that one request only: no grant, and the same tool waiting stays waiting.
+        assert_eq!(engine.answer(&id, "t1", "7", true, true).await, Ok(()));
+        assert_eq!(*s.asked.lock().unwrap(), ["7"]);
+        assert_eq!(engine.open(&id).unwrap().allow_always, Some(vec!["Write".into(), "Bash".into()]), "the old list is untouched here");
+        engine.with(|c| c.convs.get_mut(&id).unwrap().allow_always = None);
+        ask(&engine, &id, "9", "Edit");
+        assert_eq!(engine.answer(&id, "t1", "9", true, true).await, Ok(()));
+        assert_eq!(engine.open(&id).unwrap().allow_always, None, "Plan remembers nothing");
+        // The same grant under Ask is honoured, as before.
+        engine.with(|c| {
+            c.convs.get_mut(&id).unwrap().allow_always = Some(vec!["Write".into()]);
+            c.live.get_mut(&id).unwrap().permissions = Permissions::Ask;
+        });
+        s.asked.lock().unwrap().clear();
+        ask(&engine, &id, "10", "Write");
+        assert_eq!(*s.asked.lock().unwrap(), ["10"]);
+    }
+
+    #[tokio::test]
+    async fn r140_a_stricter_mode_forgets_every_always_allow_loaded_or_on_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        // The default is Full access, so Ask is already a stricter step: move there before any grant exists.
+        engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+        let grant = |engine: &Engine| {
+            engine.with(|c| {
+                let id = c.blank(Area::Chat, None);
+                c.convs.get_mut(&id).unwrap().allow_always = Some(vec!["Write".into()]);
+                c.save(&id);
+                id
+            })
+        };
+        let loaded = grant(&engine);
+        let on_disk = grant(&engine);
+        engine.with(|c| c.convs.remove(&on_disk));
+        let granted = |engine: &Engine, id: &str| engine.open(id).unwrap().allow_always;
+        // Looser: kept. Ask to Accept edits loosens.
+        engine.save_settings(Settings { permissions: Some(Permissions::AcceptEdits), ..Settings::default() }).unwrap();
+        assert_eq!(granted(&engine, &loaded), Some(vec!["Write".into()]));
+        engine.with(|c| c.convs.remove(&on_disk));
+        assert_eq!(granted(&engine, &on_disk), Some(vec!["Write".into()]));
+        engine.with(|c| c.convs.remove(&on_disk));
+        // Stricter: gone, in memory and in the saved file of a conversation that was never opened.
+        engine.save_settings(Settings { permissions: Some(Permissions::Plan), ..Settings::default() }).unwrap();
+        assert_eq!(granted(&engine, &loaded), None);
+        assert_eq!(granted(&engine, &on_disk), None);
+        let saved = serde_json::from_slice::<serde_json::Value>(
+            &std::fs::read(dir.path().join("conversations").join(format!("{on_disk}.json"))).unwrap(),
+        )
+        .unwrap();
+        assert!(saved.get("allowAlways").is_none(), "{saved}");
     }
 }

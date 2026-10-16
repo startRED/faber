@@ -595,11 +595,23 @@ impl Permissions {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum WebSearch {
+    /// What a launch gets when nobody chose: only the person's saved settings turn the web on (`Settings::tuning`).
+    #[default]
     Off,
     /// Codex only; Claude Code has no cache, so it keeps searching and does not fetch pages.
     Cached,
-    #[default]
     Live,
+}
+
+impl WebSearch {
+    /// How little of the web it lets in: a higher number is stricter, and turning it up stops the turns under way.
+    pub fn strictness(self) -> u8 {
+        match self {
+            WebSearch::Live => 0,
+            WebSearch::Cached => 1,
+            WebSearch::Off => 2,
+        }
+    }
 }
 
 /// Codex's reasoning summary. `Default` leaves the model's own.
@@ -637,7 +649,8 @@ pub struct Tuning {
 impl Settings {
     pub fn tuning(&self) -> Tuning {
         Tuning {
-            web: self.web_search.unwrap_or_default(),
+            // Live is the default for the person's chat settings (R140); `Tuning::default()` is Off.
+            web: self.web_search.unwrap_or(WebSearch::Live),
             summary: self.reasoning_summary.unwrap_or_default(),
             verbosity: self.verbosity.unwrap_or_default(),
         }
