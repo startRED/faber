@@ -152,7 +152,7 @@ test('every bundle target accepts a pre-release version: no MSI, whose WiX wants
   const targets = conf.bundle.targets;
   assert.ok(Array.isArray(targets) && targets.length > 0, 'bundle.targets is an explicit list');
   for (const target of targets) assert.ok(!['msi', 'wix', 'all'].includes(target), `${target} would reject vX.Y.Z-preview.N`);
-  assert.deepEqual([...targets].sort(), ['appimage', 'deb', 'dmg', 'nsis']);
+  assert.deepEqual([...targets].sort(), ['app', 'appimage', 'deb', 'dmg', 'nsis']);
 });
 
 // ---- the whole decision, against a real repository ----
