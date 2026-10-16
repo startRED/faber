@@ -1100,7 +1100,9 @@ mod proof_log_tests {
     #[tokio::test]
     async fn a_proof_receipt_hashes_the_log_that_is_stored() {
         let (repo, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-        let j = super::super::store::Journal::open(repo.path(), data.path(), "m1").unwrap();
+        // The journal opens every folder without following links, and macOS keeps temp folders behind one (/var).
+        let data_path = data.path().canonicalize().unwrap();
+        let j = super::super::store::Journal::open(repo.path(), &data_path, "m1").unwrap();
         let mut runner = Runner::create(&j, crate::project::Mission::new("m1", "p1", "repo", "Fix", &"1".repeat(40), 3, 1)).unwrap();
         runner.mission.state = MissionState::Running;
         runner.save(&j).unwrap();
