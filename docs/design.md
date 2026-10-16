@@ -260,6 +260,11 @@ inside its own area.
 - With no AI connected, the greeting, the suggestions and the list give way to an empty state with Curioso and a button
   that opens account management. The composer stays on screen but cannot send.
 
+### Work log
+
+- Each step is a quiet chip: a verb in the ink color ("Reading", "Running") and what it acts on in the mono face, cut
+  in the middle. A tool Faber does not know keeps its own name; an MCP tool reads "Using a tool" with its server's name.
+
 ### Subagent steps
 
 When the agent hands part of the work to a subagent (R161), the reply shows one row per helper between the work log and

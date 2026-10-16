@@ -400,7 +400,7 @@ and Projects.
 ## Watching the agent work
 
 The owner's ask (2026-10-16): the person sees every part of the work happening and steps in as easily as reading a
-chat. Planned, not built. The design is an AI proposal, not reviewed, picked from a divergent pass (30 ideas under five
+chat. Steps 1 and 2 are built: each tool reads as a verb with what it acts on (one verb per tool; grouped phrases such as "Changing 3 files" and the time per subagent are not), and subagent rows are the steps of R161. The rest is planned. The design is an AI proposal, not reviewed, picked from a divergent pass (30 ideas under five
 frames) and checked against today's code. It fills the steps of R161 and never becomes a board or an agent map.
 
 **In order, each one extending what exists:**
