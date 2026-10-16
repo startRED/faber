@@ -138,7 +138,7 @@ own inks.
   with fibres that turn faster near the hole, the far side of the disk bent over the top as a cool arc, a photon ring, a
   dim glow, a small planet below it and stars. It has no hard edge beside the column of words: behind the column it keeps 14% of its light, comes up to full
   from 40 px left of the column's edge to 240 px right of it and dims the hole a little more within 320 px, across the
-  whole height, so words that scroll in the column always sit on the same veil. The project screens show no beam of light. With less than 400 px of room it does not show or run.
+  whole height, so words that scroll in the column always sit on the same veil. The veil follows the edge of the words, not only the window: when the column's words change (a list opens, a longer name shows) it is laid again, once a frame at most and only when that edge moved. The project screens show no beam of light. With less than 400 px of room it does not show or run.
   Ten times a second it works out again only the cells the hole can reach and repaints those that changed; stars
   twinkle every 700 ms and now and then one shoots across. A click on an empty spot sends a ring of the accent for
   1.3 s. It stops when the window is hidden or unfocused; reduced or no motion draws one still frame and no ripple.

@@ -795,6 +795,7 @@ export const en = {
   'notes.12.better': 'The mission board is calmer: the goal, its step and why it waits come first, empty columns are gone, and New mission starts another.',
   'notes.13.new': 'Settings can now send you previews of new versions a few days early.',
   'notes.14.new': 'In a project you now chat with the assistant like anywhere else, and its questions arrive as cards you tap.',
+  'notes.15.fixed': "On a project's first screen, the words stay on the dim part of the black hole when a list opens below them.",
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

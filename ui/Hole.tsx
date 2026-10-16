@@ -284,22 +284,29 @@ export function Hole(props: { avoid: () => Element[] }) {
     }
   };
 
+  // Where each word sits on the stage. The mark counts whole; a block of words by its glyphs, not its box, which may run
+  // wider than what it holds.
+  const wordsOn = (box: DOMRect): { els: Element[]; words: Box[] } => {
+    const range = document.createRange();
+    const els = props.avoid();
+    const words = els.map((e) => {
+      if (!e.matches('.peek')) range.selectNodeContents(e);
+      const r = e.matches('.peek') ? e.getBoundingClientRect() : range.getBoundingClientRect();
+      return { l: r.left - box.left, t: r.top - box.top, r: r.right - box.left, b: r.bottom - box.top };
+    });
+    return { els, words };
+  };
+  /** The column's edge the veil was last laid for. */
+  let laid = -1;
+
   // Size the canvas to the stage, read the look's colours, find the cells the hole can reach, and paint every cell once.
   const layout = () => {
     const box = canvas.parentElement?.getBoundingClientRect();
     const style = getComputedStyle(canvas);
-    // The mark counts whole; a block of words by its glyphs, not its box, which may run wider than what it holds.
-    const range = document.createRange();
-    const els = props.avoid();
-    const words: Box[] = box
-      ? els.map((e) => {
-          if (!e.matches('.peek')) range.selectNodeContents(e);
-          const r = e.matches('.peek') ? e.getBoundingClientRect() : range.getBoundingClientRect();
-          return { l: r.left - box.left, t: r.top - box.top, r: r.right - box.left, b: r.bottom - box.top };
-        })
-      : [];
+    const { els, words } = box ? wordsOn(box) : { els: [], words: [] };
     // Where the column of words ends: the scene lives only right of it.
     const edge = Math.max(0, ...words.map((b) => b.r));
+    laid = edge;
     setOn(style.display !== 'none' && !!box && box.width - edge >= ROOM);
     // A look without the hole, or a stage with no room beside the words, gives its pixels back.
     if (!on()) canvas.width = canvas.height = 0;
@@ -488,9 +495,23 @@ export function Hole(props: { avoid: () => Element[] }) {
     const resize = new ResizeObserver(layout);
     resize.observe(canvas.parentElement!);
     void document.fonts.ready.then(layout);
+    // The column's words change without the stage changing size (a list opens, a longer name shows): the veil follows
+    // their edge, once a frame at most, and the scene is laid again only when that edge moved.
+    let moved = 0;
+    const words = new MutationObserver((records) => {
+      if (moved || records.every((r) => (r.target instanceof Element ? r.target : r.target.parentElement)?.closest('.ambient'))) return;
+      moved = requestAnimationFrame(() => {
+        moved = 0;
+        const box = canvas.parentElement?.getBoundingClientRect();
+        if (box && Math.abs(Math.max(0, ...wordsOn(box).words.map((b) => b.r)) - laid) >= 1) layout();
+      });
+    });
+    words.observe(area, { childList: true, subtree: true, characterData: true });
     onCleanup(() => {
       stop();
       resize.disconnect();
+      words.disconnect();
+      cancelAnimationFrame(moved);
       area.removeEventListener('pointerdown', press);
     });
   });
