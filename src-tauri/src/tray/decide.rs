@@ -4,12 +4,12 @@
 use faber_engine::model::{RunState, RunningItem, Settings};
 use faber_engine::project::wire::MissionView;
 use faber_engine::project::{DecisionKind, MissionState};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 /// A text in two forms, as the screen sends it: `one` for a count of 1 and `other` for any other count. That is what
 /// `Intl.PluralRules` picks in all five languages for counts of 1 and more.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(super) struct Plural {
     one: String,
     other: String,
@@ -22,8 +22,8 @@ impl Plural {
 }
 
 /// The words the shell shows by itself, which the screen sends whenever the language changes. They stay here, so a
-/// closed window still has them.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+/// closed window still has them, and on disk, so a Faber started hidden has them too.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ShellTexts {
     pub(super) open: String,

@@ -184,6 +184,7 @@ The data folder is `%APPDATA%\Faber` (or `FABER_DATA_DIR`). JSON files are writt
 | The development root | Slots, manifest, canary and rollback records of the local build | `src-tauri/src/local_update.rs` |
 | `seen_decisions.json` | Mission notices already shown, so a restart does not repeat them | The tray |
 | `notes-seen` | The last "what's new" entry the person has seen, so it shows once per update | `save_notes_seen` in the shell |
+| `shell-texts.json` | The tray's words in the person's language, kept so a Faber started hidden is not in English | The tray |
 | `cache-health.jsonl` | A local log of cache misses, never sent anywhere | The engine |
 | `chat/<id>/`, `attachments/<id>/` | A chat's private folder; a project conversation's attachments | The engine |
 | Browser storage `faber.place` | The last area, project and conversation | `ui/App.tsx` |
@@ -297,7 +298,6 @@ ones.
     twice (the setting and the Windows Run key, which the screen never reads back).
 21. Defaults are repeated in each reader (`permissions`, `keepAwake`, `notifications`, `userHooks`, effort `medium`):
     a new setting keeps its default in one place.
-22. The tray stays in English when Faber starts hidden (autostart): its words arrive only from an open window.
 
 ## Worked example: adding a setting
 
