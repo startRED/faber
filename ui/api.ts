@@ -528,8 +528,8 @@ export const api = {
     invoke<Grant>('project_grant', { projectId, mode, selfUpdate, revision }),
   projectRevoke: (projectId: string) => invoke<void>('project_revoke', { projectId }),
   projectProof: (projectId: string) => invoke<ProofView>('project_proof', { projectId }),
-  projectProofConfirm: (projectId: string, commands: string[], setup: string[]) =>
-    invoke<ProofView>('project_proof_confirm', { projectId, commands, setup }),
+  projectProofConfirm: (projectId: string, commands: string[], setup: string[], declared: string[]) =>
+    invoke<ProofView>('project_proof_confirm', { projectId, commands, setup, declared }),
   missionStart: (projectId: string, goal: string) => invoke<string>('mission_start', { projectId, goal }),
   missionState: (missionId: string) => invoke<MissionView>('mission_state', { missionId }),
   missionMode: (missionId: string, mode: RunMode) => invoke<MissionView>('mission_mode', { missionId, mode }),

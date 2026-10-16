@@ -135,8 +135,9 @@ own inks.
 - The first screen of a project (where a new session starts) in Dark Room also shows a black hole drawn in monospace
   characters on one canvas (ui/Hole.tsx, --amb-hole and --hole-colors): a huge shadow cut by the right edge, an amber disk sweeping in from the lower left
   with fibres that turn faster near the hole, the far side of the disk bent over the top as a cool arc, a photon ring, a
-  dim glow, a small planet below it and stars. Its size follows the room right of the text; words stay clear and the
-  scene dims within 240 px of them.
+  dim glow, a small planet below it and stars. It lives only right of the column of words: it starts 32 px past the
+  column, fades in over 160 px and dims within 280 px, across the whole height, so words that scroll in the column never
+  pass over it. With less than 400 px of room it does not show or run.
   Ten times a second it works out again only the cells the hole can reach and repaints those that changed; stars
   twinkle every 700 ms and now and then one shoots across. A click on an empty spot sends a ring of the accent for
   1.3 s. It stops when the window is hidden or unfocused; reduced or no motion draws one still frame and no ripple.
@@ -442,13 +443,19 @@ shown as a decision.
 ### The Projects home
 
 The first screen of a project uses the layout of the Chat home (`welcome-grid`) with its own identity: the greeting
-"What should we tackle?", a goal composer with its own hints, the three safety controls kept visible as quiet rows under
-"How Faber works here" (plain sentences, with the technical detail and the revision and author behind one small "Details" link), and a side column with the project and its folder in short form (the last two folder names, the full path on hover), the conversations to pick up and the other projects. The
-light leans the other way. The two layouts share classes, so a change to one home reaches the other.
+"What should we tackle?", one column: Curioso, the project and its folder in short form (the last two folder names, the
+full path on hover), the greeting, a goal composer with its own hints and one quiet status line beside its button, and at
+most three conversations to pick up. Nothing else: the sidebar lists the projects, and every setting of a project (the
+tool policy, the code access, the self-update switch and the checks) is in Settings, Projects, one closed entry per
+project with one short line per option and the rest behind "Learn more". The checks are asked for just in time: the
+first start on checks nobody confirmed opens a compact sheet with their count and source, every command (and the setup)
+listed in full with no collapse, a long list scrolling inside it, and "Confirm and start"; what is confirmed is exactly the list
+shown, and a project that changed it meanwhile is refused so the sheet shows the new list. It does not come back until
+the checks change. The light leans the other way. The two layouts share classes, so a change to one home reaches the other.
 
 C011 (2026-10-16, the owner) overrides the quiet rows: the project screen shows only the work, and the grant, the checks
-and the tool choice move to Settings or to a just-in-time consent. Until that lands the code still shows them; see
-[product-map.md](product-map.md), Known incoherences.
+and the tool choice live in Settings or in a just-in-time consent. The start card is done; the mission board still carries
+the run mode (product-map.md, Known incoherences, 1).
 
 ### Records
 

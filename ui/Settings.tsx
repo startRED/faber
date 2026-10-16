@@ -1,5 +1,5 @@
 import { createEffect, createSignal, For, type JSX, Match, Show, Switch } from 'solid-js';
-import { api, type Appearance, PERMISSION_MODES, type CheckResult, type Look, type PermissionMode, type ReasoningSummary, type Settings as Saved, type Vendor, type VendorUsage, type Verbosity, type WebSearch } from './api.ts';
+import { api, type Appearance, PERMISSION_MODES, type CheckResult, type Look, type PermissionMode, type Project, type ReasoningSummary, type Settings as Saved, type Vendor, type VendorUsage, type Verbosity, type WebSearch } from './api.ts';
 import { AppearanceSection } from './Appearance.tsx';
 import { Choices, Learn, Segmented, Toggle } from './controls.tsx';
 import { factory } from './draft.ts';
@@ -9,11 +9,13 @@ import { vendorName } from './models.ts';
 import { animateList } from './motion.ts';
 import { accountLine, freshness, type Quotas, usageRows } from './sidebar.ts';
 import { PlanName } from './QuotaCard.tsx';
+import { ProjectsSection } from './ProjectSettings.tsx';
 import { Recents } from './Recents.tsx';
 import { ageWords, untilReset, windowName } from './Sidebar.tsx';
 
 const SECTIONS = [
   ['general', 'set.general', 'user'],
+  ['projects', 'set.projects', 'folder'],
   ['appearance', 'set.appearance', 'palette'],
   ['accounts', 'set.subscriptions', 'plug'],
   ['usage', 'set.usage', 'gauge'],
@@ -49,6 +51,8 @@ interface Props {
   vendors: Vendor[];
   quotas: Quotas;
   usage?: VendorUsage[];
+  /** The projects Faber knows, each with its own settings. */
+  projects?: Project[];
   /** The time now in milliseconds, which the screen moves on every minute: an old reading stops counting. */
   now: number;
   /** The section Settings opens at. */
@@ -299,6 +303,10 @@ export function Settings(props: Props) {
                 )}
               </For>
             </Show>
+          </Match>
+          <Match when={section() === 'projects'}>
+            <p class="hint">{t('set.projectsHint')}</p>
+            <ProjectsSection projects={props.projects ?? []} />
           </Match>
           <Match when={section() === 'privacy'}>
             <ul class="facts">
