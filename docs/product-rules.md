@@ -1,9 +1,10 @@
 # Product rules
 
 Faber has to feel like one product, whoever builds the next part. This page says where a new thing goes and which lessons
-it must not break. The details live in [design.md](design.md) and [roadmap.md](roadmap.md); R-numbers are decisions from
-the owner's decision ledger (kept outside the repository) and C-numbers are the taste cards below. When a change would
-break one of them, ask the owner first; never ship it and explain later.
+it must not break. The details live in [design.md](design.md) and [roadmap.md](roadmap.md); R-numbers are the decisions
+in [decisions.md](decisions.md) and C-numbers are the taste cards below. When a change would break one of them, ask the
+owner first; never ship it and explain later. A new decision takes the next R-number in decisions.md, in the same commit
+as the change it governs.
 
 ## Where things go
 

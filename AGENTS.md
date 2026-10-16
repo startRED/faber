@@ -39,7 +39,7 @@ Read [docs/product-rules.md](docs/product-rules.md) first, then:
 - Reuse what another area already does (control, words, layout) before inventing a second way.
 - Walk it as a newcomer and as a heavy user: first run, no AI connected, empty and waiting states, a 720 px window,
   reduced motion, the longest language.
-- Something that goes against a decision (R-number) or a card goes to the owner first.
+- Something that goes against a decision ([docs/decisions.md](docs/decisions.md)) or a card goes to the owner first.
 
 ## Stack
 
