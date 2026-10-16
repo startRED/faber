@@ -24,7 +24,7 @@ that changes them updates this page too. Last full audit: 2026-10-16.
 | Step up | "Try again one step up": the same question as a branch one effort up on the same model, or on the next stronger model of the same vendor when that rung is not available, offered when a check failed or code changed unchecked. | `engine/src/nudge.rs` |
 | Branch | Editing a past message starts a new conversation from that point. | `ui/Thread.tsx` |
 | Queue, steer | A message sent while an answer runs waits in a queue; Codex can take it into the running turn. | `engine/src/engine.rs` |
-| Permissions | "Don't ask" (`dontAsk`, full access, the default) or "Ask before commands" (`ask`), one choice for Chat. Missions run in an isolated mode nobody picks. | `engine/src/model.rs`, `engine/src/permissions.rs` |
+| Permissions | Five modes for Chat: "Ask", "Accept edits", "Plan", "Auto", "Full access" (`dontAsk`, the default). Auto runs as "Accept edits" when the CLI has no auto mode, and the screen says so. Missions run in an isolated mode nobody picks. | `engine/src/model.rs`, `engine/src/permissions.rs` |
 | Permission card, held-back request | A question the CLI asks in Ask mode; a request it denied because nobody could answer, shown and never allowed by itself. | `ui/Ask.tsx`, `engine/src/engine/parked.rs` |
 | Needs you | Amber, always with words: something waits for the person. | run button, running column, sidebar, tray |
 | Running column | The list on the right of everything running, grouped by project. | `ui/Running.tsx`, `ui/running.ts` |
@@ -102,15 +102,15 @@ adds a line. Browser keys (F5, F7, Ctrl+R, P, S, U) do nothing.
 | First chat | Lands on the Chat home | Nothing |
 | Tutorial | Only once an AI is signed in | `tutorialDone: true` on finish or skip |
 
-Left at their defaults, changeable later in Settings: language, permissions, hooks, notifications, keep awake, autostart.
+Left at their defaults, changeable later in Settings: language, permissions, web search, hooks, notifications, keep awake, autostart.
 A project's grant and checks are asked on its start card before its first mission, not in the first run.
 
 ## Settings screen
 
 Five sections, in this order. Nothing else is a Settings section.
 
-- **General**: Language (follow the system, or one of five); Your name; Your CLI hooks (only acts under "Ask before
-  commands"); Permissions for Chat and Projects ("Don't ask", "Ask before commands"); Chat working folder (with Recents;
+- **General**: Language (follow the system, or one of five); Your name; Your CLI hooks (only acts in the guarded modes, not "Full access");
+  Permissions for Chat and Projects (five modes, "Full access" by default), Web search; reasoning summary and answer length (Codex only); Chat working folder (with Recents;
   acts on the open chat while it has no message; its controls only appear when Settings was opened from Chat); Notifications
   (Notify me, Play a sound); System, Windows only (keep the computer awake while Faber works, start with Windows).
 - **Appearance**: a draft with a live preview, applied only by "Use this look": six looks, accent (five swatches, any
@@ -141,8 +141,12 @@ choice a person makes anywhere else (a work screen, a banner) is an incoherence.
 | `appearance` | A look: `base`, `accent`, `ground`, `textFont`, `headingFont`, `textSize`, `density`, `corners`, `motion`, `effects`, `colors` (Dark Room) | Settings > Appearance; the first run (`base`, `textSize`, `density`, `motion`); `colors` only arrives in a theme file opened there | `src-tauri/src/look.rs`, then the screen |
 | `language` | `""` follows the system, `en`, `pt-BR`, `es`, `fr`, `de` (none: the system) | Settings > General | `ui/i18n.ts`; the tray through `set_shell_texts` |
 | `userName` | Up to 40 characters (none) | Settings > General; the first run | Greeting, sidebar footer, and both CLIs (copied into each new conversation) |
-| `permissions` | `dontAsk`, `ask` (`dontAsk`) | Settings > General | The engine at every turn; the status line in a conversation |
-| `userHooks` | true, false (false) | Settings > General | The engine; acts only with `ask` |
+| `permissions` | `ask`, `acceptEdits`, `plan`, `auto`, `dontAsk` (`dontAsk`) | Settings > General; the composer chip in Chat | The engine at every turn; the status line in a conversation |
+| `webSearch` | `off`, `cached` (Codex only), `live` (`live`) | Settings > General | The engine at every turn, for Chat and the person's own project sessions |
+| `reasoningSummary` | `default`, `auto`, `concise`, `detailed`, `none` (`default`: the model's own) | Settings > General (Codex only) | The engine at every Codex turn |
+| `verbosity` | `default`, `low`, `medium`, `high` (`default`: the model's own) | Settings > General (Codex only) | The engine at every Codex turn |
+| `grantsEpoch` | A random token (none). Internal state: a person never sets it | None; only the engine writes it, when a stricter mode replaces the old one | The engine, to drop an "Always allow" made under a looser mode |
+| `userHooks` | true, false (false) | Settings > General | The engine; acts only in the guarded modes (not "Full access") |
 | `notifications` | true, false (true) | Settings > General | The tray |
 | `notificationSound` | true, false (true) | Settings > General | The tray |
 | `keepAwake` | true, false (true) | Settings > General (System) | `src-tauri/src/awake.rs` |
@@ -211,7 +215,7 @@ checks in `tests/ui/index.ts`, real-app scenarios in `testkit/src/screen/mod.rs`
 | Auto and step up | Done; the draft is routed at every pause (the roadmap wants at most twice) | `engine/tests/auto.rs`, `route.rs`, `simulation.rs`; `tests/ui/nudge.check.ts` |
 | Quota reading, pacing, recovery, plan question | Done | `engine/tests/pacing.rs`, `quota.rs`, `quota_live.rs`, `budget.rs`, `ledger.rs`, `learn.rs`, `paid_guard.rs`; `tests/ui/pace.check.ts`, `quota.check.ts` |
 | Queue, steer, branch | Done | `engine/tests/engine.rs`; `tests/ui/steer.check.ts` |
-| Permissions, cards, held-back requests | Done (two modes; R140 asks for more) | `testkit/src/screen/permissions.rs`; `engine/tests/project_security.rs`; `tests/ui/thread.check.ts` |
+| Permissions, cards, held-back requests | Done (five modes, R140) | `testkit/src/screen/permissions.rs`; `engine/tests/project_security.rs`; `tests/ui/thread.check.ts` |
 | Running column, tray, notifications | Done | `tests/ui/running.check.ts`; tests inside `src-tauri/src/tray/decide.rs` |
 | Keep awake, start with Windows | Done on Windows | tests inside `src-tauri/src/awake.rs`, `autostart.rs` |
 | Public self-update | Done: checks at start and every 6 h; installs on quit or, on Windows, at the first moment no conversation or CLI install runs and the window is hidden (a running mission does not hold it back, incoherence 29) (R141, install when it opens, is not built here yet) | tests inside `src-tauri/src/update.rs` |
@@ -228,7 +232,7 @@ checks in `tests/ui/index.ts`, real-app scenarios in `testkit/src/screen/mod.rs`
 
 Not built yet, so nothing may assume it: the catalog and live manifest, the toolbox, Livre, snapshots and undo, visual
 answers, the benchmark, asking Faber about Faber, full-text search, moving a chat to a project, the what's-new screen
-(R142), more permission modes (R140), installing updates when Faber opens (R141), Equilibrado on screen, decisions
+(R142), installing updates when Faber opens (R141), Equilibrado on screen, decisions
 produced by a mission, missions with more than one task.
 
 ## Known incoherences
@@ -272,7 +276,7 @@ that fixes it.
     differently; Close writes `done` even after a Skip.
 17. The chat working folder sits in global Settings but changes only the open, still empty chat; opened from Projects,
     the row keeps its label and explanation with no control under them.
-18. The hooks switch is always enabled but acts only under "Ask before commands"; Settings' "Permissions for Chat and
+18. The hooks switch is always enabled but acts only in the guarded modes (all but "Full access"); Settings' "Permissions for Chat and
     Projects" reads as if it governed missions, which run isolated.
 19. Settings has no "Learn more" pattern: General shows paragraphs of three to five sentences (product-rules: one short
     line per option).
