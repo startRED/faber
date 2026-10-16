@@ -1018,6 +1018,21 @@ mod tests {
         Envelope::parse(&verdict, &expect(REVIEWER, 0), Role::Reviewer).unwrap();
     }
 
+    #[test]
+    fn long_text_becomes_quotes_the_brief_accepts_and_a_file_to_change_is_never_cut() {
+        let text = "é".repeat(10_000);
+        let quotes = chunks("files", &text, 16, true).unwrap();
+        assert!(quotes.len() > 1 && quotes.iter().all(|q| q.text.len() <= CHUNK));
+        assert_eq!(quotes.iter().map(|q| q.text.as_str()).collect::<String>(), text, "nothing lost, nothing split inside a letter");
+        assert_eq!(quotes[1].id, "files-2");
+        let long = "x".repeat(CHUNK * 3 + 1);
+        let cut = chunks("tree", &long, 3, true).unwrap();
+        assert_eq!(cut.len(), 3);
+        assert!(cut[2].text.ends_with("[the rest is not shown]") && cut[2].text.len() <= CHUNK);
+        assert_eq!(chunks("targets", &long, 3, false), Err(Stop::Block("error.wire.tooBig".into())));
+        assert!(chunks("none", "", 3, false).unwrap().is_empty());
+    }
+
     fn plan_with(tasks: serde_json::Value) -> Envelope {
         let text = example(LEAD, BASE, DIGEST, 0, serde_json::json!({"plan": {"summary": "s", "acceptance": "a", "tasks": tasks}}), None);
         Envelope::parse(&text, &expect(LEAD, 0), Role::Lead).unwrap()

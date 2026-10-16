@@ -26,7 +26,7 @@ const FIXTURES: [&str; 5] = ["lead.json", "writer.json", "reviewer-pass.json", "
 
 pub fn scenarios() -> Vec<Scenario> {
     vec![Scenario {
-        name: "coordinator: a mission lands from its goal, survives a crash at every step, stops safely and waits on the budget",
+        name: "coordinator: a mission lands from its goal, survives a crash at every step, stops safely, waits on the budget and starts only on a confirmed proof",
         run: acceptance,
     }]
 }
@@ -40,7 +40,7 @@ fn acceptance(ctx: &mut Ctx) -> Result {
     run_probe_for(ctx, "--project-coordinator", Duration::from_secs(300))?;
     let report: Value = serde_json::from_slice(&std::fs::read(ctx.sb.sandbox.join("coordinator.json")).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
-    for key in ["mission", "crashes", "stops", "budget"] {
+    for key in ["mission", "crashes", "stops", "budget", "wiring"] {
         ensure(report[key]["ok"] == true, || format!("coordinator {key}: {}", report[key]))?;
         ctx.notes.push(format!("coordinator {key}: {}; recorded replies, real git, real owned stand-in process", report[key]));
     }
@@ -182,6 +182,11 @@ struct World {
 }
 
 fn world(sandbox: &Path, name: &str) -> Result<World> {
+    world_with(sandbox, name, &[])
+}
+
+/// The fixture repository with more tracked files beside `src/a.rs`.
+fn world_with(sandbox: &Path, name: &str, more: &[(&str, &str)]) -> Result<World> {
     let dir = sandbox.join(name);
     let repo = dir.join("repo");
     std::fs::create_dir_all(repo.join("src")).map_err(|e| e.to_string())?;
@@ -191,6 +196,10 @@ fn world(sandbox: &Path, name: &str) -> Result<World> {
     git(&program, &repo, &["config", "user.email", "fixture@example.invalid"])?;
     std::fs::write(repo.join("src/a.rs"), "base").map_err(|e| e.to_string())?;
     git(&program, &repo, &["add", "--", "src/a.rs"])?;
+    for (path, text) in more {
+        std::fs::write(repo.join(path), text).map_err(|e| e.to_string())?;
+        git(&program, &repo, &["add", "--", path])?;
+    }
     git(&program, &repo, &["commit", "--no-gpg-sign", "-m", "fixture base"])?;
     let repository = enroll(&mut Process::find().map_err(|e| e.key())?, &repo, "HEAD").map_err(|e| e.key())?;
     let mut grant = Grant::new(&repository.identity.common_dir, GitMode::Seguro, 3, 1);
@@ -211,14 +220,9 @@ fn open(world: &World) -> Result<(Journal, Broker<Process>)> {
 }
 
 fn setup(world: &World) -> Result<Setup> {
-    let pin = |vendor, model: &str| ModelPin { vendor, model: model.into(), effort: "medium".into(), cli_version: "1.0.0".into() };
     let grant = world.grant.clone();
     Ok(Setup {
-        pins: Pins {
-            lead: pin(Vendor::Claude, "claude-sonnet-5-5"),
-            writer: pin(Vendor::Claude, "claude-haiku-5-5"),
-            reviewer: pin(Vendor::Codex, "gpt-6-luna"),
-        },
+        pins: pins(),
         expect_red: true,
         tree: vec![],
         notify: None,
@@ -380,6 +384,95 @@ async fn run_stops(sandbox: &Path) -> Result<Value> {
     Ok(json!({"ok": true, "cases": seen}))
 }
 
+fn pins() -> Pins {
+    let pin = |vendor, model: &str| ModelPin { vendor, model: model.into(), effort: "medium".into(), cli_version: "1.0.0".into() };
+    Pins {
+        lead: pin(Vendor::Claude, "claude-sonnet-5-5"),
+        writer: pin(Vendor::Claude, "claude-haiku-5-5"),
+        reviewer: pin(Vendor::Codex, "gpt-6-luna"),
+    }
+}
+
+/// A project mission as the shell starts it (R137): the proof the project declares is read, refused until its owner
+/// confirms it, then run in the clone; the roles are shown the tracked files without the credentials; the coordinator
+/// lands the work and the board's views (progress, report, needs) read the journal it left.
+async fn run_wiring(sandbox: &Path) -> Result<Value> {
+    use faber_engine::cli::Cli;
+    use faber_engine::project::mission;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let w = world_with(
+        sandbox,
+        "wiring",
+        &[
+            ("AGENTS.md", "# Rules\n\n## Proof commands\n\n```\nfake-proof src/a.rs\n```\n"),
+            (".env", "TOKEN=wiring-secret"),
+            ("README.md", "A fixture project."),
+        ],
+    )?;
+    let project = faber_engine::model::Project::new("p1".into(), "Fixture".into(), w.repo.to_string_lossy().into_owned());
+    // An unconfirmed proof refuses the start, and shows what the project declares.
+    ensure(mission::confirmed(&project) == Err("reason.proof.unconfirmed"), || "an unconfirmed proof started a mission".into())?;
+    let declared = mission::view(&project);
+    ensure(declared.commands == ["fake-proof src/a.rs"] && declared.source == "agents" && !declared.confirmed, || {
+        format!("the declared proof was not read: {declared:?}")
+    })?;
+    let project = mission::confirm(&project, &declared.commands).map_err(str::to_string)?;
+    let commands = mission::confirmed(&project).map_err(str::to_string)?;
+
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?.to_string_lossy().into_owned();
+    let resolve = move |name: &str| (name == "fake-proof").then(|| Cli { command: exe.clone(), prefix: vec!["--project-proof".into()] });
+    let ticks = Arc::new(AtomicUsize::new(0));
+    let notify: Arc<dyn Fn() + Send + Sync> = {
+        let ticks = ticks.clone();
+        Arc::new(move || {
+            ticks.fetch_add(1, Ordering::SeqCst);
+        })
+    };
+    let grant = w.grant.clone();
+    let launch = mission::Launch {
+        repository: w.repository.clone(),
+        commands,
+        data: w.dir.join("records"),
+        project: "p1".into(),
+        pins: pins(),
+        grant: Arc::new(move || Ok(Some(grant.clone()))),
+        revision: 3,
+        notify: Some(notify),
+    };
+    let setup = mission::setup(launch, &mut Process::find().map_err(|e| e.key())?, &resolve)?;
+    ensure(setup.proofs.len() == 1 && setup.proofs[0].id == "proof-1" && !setup.expect_red, || "the setup does not carry the confirmed proof".into())?;
+    let (journal, broker) = open(&w)?;
+    let mut coordinator = Coordinator::new(Scripted::new(&w.dir, PASS), journal.clone(), broker, setup).map_err(str::to_string)?;
+    let outcome = coordinator.drive().await;
+    drop(coordinator);
+    landed(&w, &outcome, &ALL)?;
+    ensure(ticks.load(Ordering::SeqCst) >= MARKS, || format!("the board was told {} times", ticks.load(Ordering::SeqCst)))?;
+    // A project's base is not red, so no red run: the only proof receipt is the green one on the landed tree.
+    ensure(journal.list_checks().map_err(|e| e.key())?.len() == 1, || "the proof ran more or less than once".into())?;
+
+    // What the roles were shown: the tracked files, never the credential.
+    let runner = Runner::load(&journal).map_err(str::to_string)?;
+    for task in ["lead", "writer", "reviewer"] {
+        let brief = &runner.workers.get(task).ok_or("no worker")?.brief;
+        let shown: String = brief.quotes.iter().map(|q| q.text.as_str()).collect();
+        for wanted in ["src/a.rs", "AGENTS.md", "README.md", "A fixture project."] {
+            ensure(shown.contains(wanted), || format!("{task} was not shown {wanted}"))?;
+        }
+        ensure(!shown.contains("wiring-secret") && !shown.contains(".env"), || format!("{task} was shown the credential file"))?;
+        ensure(brief.scope.iter().any(|s| s == "src"), || format!("{task} has no writable folder in its scope"))?;
+    }
+    // The board's views of the finished mission.
+    let report = mission::report_view(&journal, &runner.mission).ok_or("no report view")?;
+    ensure(report.branch == "faber/m1" && report.head.as_deref() == Some(git(&w.program, &w.repo, &["rev-parse", "faber/m1"])?.as_str()), || {
+        format!("the report does not name the landed work: {report:?}")
+    })?;
+    ensure(report.checks.iter().any(|c| c.result == "pass"), || format!("the report has no passing check: {report:?}"))?;
+    ensure(mission::progress(&journal, &runner.mission).is_none() && mission::needs(&runner.mission).is_none(), || {
+        "a finished mission still shows progress or a need".into()
+    })?;
+    Ok(json!({"ok": true, "ticks": ticks.load(Ordering::SeqCst), "report": format!("{report:?}")}))
+}
+
 async fn run_budget(sandbox: &Path) -> Result<Value> {
     let w = world(sandbox, "budget")?;
     let mut a = coordinator(&w, Plot { refuse: Some("writer-1"), ..PASS })?;
@@ -417,6 +510,7 @@ pub fn probe(sandbox: &Path) -> Result {
         ("crashes", runtime.block_on(run_crashes(sandbox))),
         ("stops", runtime.block_on(run_stops(sandbox))),
         ("budget", runtime.block_on(run_budget(sandbox))),
+        ("wiring", runtime.block_on(run_wiring(sandbox))),
     ] {
         match result {
             Ok(value) => {

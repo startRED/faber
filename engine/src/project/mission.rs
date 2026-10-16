@@ -569,6 +569,24 @@ mod tests {
     }
 
     #[test]
+    fn only_a_block_or_a_parked_effect_needs_the_owner() {
+        let mut m = Mission::new("m1", "p1", "repo", "Goal", "base", 1, 100);
+        m.reason = Some("reason.queue.review".into());
+        assert_eq!(needs(&m), None, "a planning mission has nothing to settle");
+        m.state = MissionState::Blocked;
+        assert_eq!(needs(&m).as_deref(), Some("reason.queue.review"));
+        m.state = MissionState::Paused;
+        assert_eq!(needs(&m), None, "a paused mission with a block key is the owner's Resume, not a need");
+        m.reason = Some("reason.lease.live".into());
+        assert_eq!(needs(&m).as_deref(), Some("reason.lease.live"), "a parked effect is only the owner's to settle");
+        m.reason = Some("reason.budget.cap".into());
+        assert_eq!(needs(&m), None, "a wait for budget is not a need");
+        m.state = MissionState::Running;
+        m.reason = None;
+        assert_eq!(needs(&m), None);
+    }
+
+    #[test]
     fn credential_and_refused_paths_are_never_shown_to_a_role() {
         for path in ["src/a.rs", "docs/readme.md", "README.md", ".github/workflows/ci.yml", ".env.example"] {
             assert!(usable(path), "{path}");
