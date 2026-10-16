@@ -648,6 +648,10 @@ export const ptBR: Messages = {
   "reason.project.reconcile": "O Faber não conseguiu casar os registros deste projeto com o repositório. Confira e retome.",
   "reason.project.processTreeUnproven": "O Faber não conseguiu provar que tudo o que ele iniciou terminou. Confira os programas em execução e retome.",
   "reason.disk.needed": "Não há espaço livre em disco para uma cópia limpa.",
+  "projects.agents.checking": "Verificando os agentes… (~{seconds} s, passo {step} de {total})",
+  "projects.agents.failed": "Não foi possível verificar os agentes, então nenhuma missão foi iniciada: {detail}",
+  "reason.qualify.failed": "Não foi possível verificar os agentes. Nenhuma missão foi iniciada.",
+  "projects.proof.setup": "Primeiro, na cópia limpa:",
   // Native speaker must translate (needs native review).
   "projects.value.missing": "\u2014",
   // Native speaker must translate (needs native review).

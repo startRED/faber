@@ -651,6 +651,10 @@ export const de: Messages = {
   "reason.project.reconcile": "Faber konnte die Aufzeichnungen dieses Projekts nicht mit seinem Repository abgleichen. Prüfe es und setze dann fort.",
   "reason.project.processTreeUnproven": "Faber konnte nicht belegen, dass alles Gestartete beendet ist. Prüfe die laufenden Programme und setze dann fort.",
   "reason.disk.needed": "Für eine saubere Kopie ist nicht genug freier Speicherplatz da.",
+  "projects.agents.checking": "Die Agenten werden geprüft… (~{seconds} s, Schritt {step} von {total})",
+  "projects.agents.failed": "Die Agenten ließen sich nicht prüfen, deshalb wurde keine Mission gestartet: {detail}",
+  "reason.qualify.failed": "Die Agenten ließen sich nicht prüfen. Es wurde keine Mission gestartet.",
+  "projects.proof.setup": "Zuerst, in der sauberen Kopie:",
   // Native speaker must translate (needs native review).
   "projects.value.missing": "\u2014",
   // Native speaker must translate (needs native review).

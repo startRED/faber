@@ -3,6 +3,7 @@ import { createStore, reconcile } from 'solid-js/store';
 import {
   api,
   errorText,
+  type AgentsView,
   type BuildView,
   type DecisionView,
   type EnrollView,
@@ -83,6 +84,8 @@ export function Projects(props: Props) {
   const [proof, setProof] = createSignal<ProofView>();
   const [editing, setEditing] = createSignal(false);
   const [draft, setDraft] = createSignal('');
+  // The check of the agents that runs before the first mission (and again when a receipt is stale).
+  const [agents, setAgents] = createSignal<AgentsView>();
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<string>();
   const [customAnswers, setCustomAnswers] = createSignal<Record<string, string>>({});
@@ -127,6 +130,11 @@ export function Projects(props: Props) {
     onCleanup(() => {
       observer.disconnect();
       window.removeEventListener('resize', resize);
+    });
+
+    const agentsListener = api.onAgents((view) => setAgents(view.state === 'ready' ? undefined : view)).catch(() => () => {});
+    onCleanup(() => {
+      void agentsListener.then((fn) => fn(), () => {});
     });
 
     // Listen for mission events
@@ -208,6 +216,7 @@ export function Projects(props: Props) {
     const text = goal().trim();
     const token = generation;
     setError(undefined);
+    setAgents(undefined);
     setBusy(true);
     try {
       const rev = enroll()!.revision;
@@ -405,6 +414,15 @@ export function Projects(props: Props) {
           }
         >
           <Show when={!mission() && localBuild()}>{(view) => <LocalBuild view={view()} />}</Show>
+          <Show when={agents()}>
+            {(a) => (
+              <div class="note" classList={{ err: a().state === 'failed' }} role={a().state === 'failed' ? 'alert' : 'status'} data-testid="agents-status">
+                {a().state === 'checking'
+                  ? t('projects.agents.checking', { seconds: a().estimateSeconds, step: a().step, total: a().total })
+                  : t('projects.agents.failed', { detail: a().detail ?? '' })}
+              </div>
+            )}
+          </Show>
           <Show when={error()}>
             <div class="note err" role="alert">
               {fromEngine(error())}

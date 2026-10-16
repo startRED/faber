@@ -1,7 +1,7 @@
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
-import { api, type AppState, type MissionView, type Project } from '../../ui/api.ts';
+import { api, type AgentsView, type AppState, type MissionView, type Project } from '../../ui/api.ts';
 import { App } from '../../ui/App.tsx';
 import { LANGUAGES, useLanguage } from '../../ui/i18n.ts';
 import { Projects } from '../../ui/Projects.tsx';
@@ -11,11 +11,13 @@ import { check, equal, ok } from './check.ts';
 const demo: Project = { id: 'review-project', name: 'Review project', path: 'C:/fixture/review' };
 const view = (revision = 1): MissionView => ({ missionId: 'review-mission', revision, state: 'running', mode: 'normal', gitMode: 'seguro', goal: 'Review goal', tasks: [], cost: { ownMicros: null, capMicros: null, complete: false }, pace: [], decisions: [] });
 
+let agentsEmit: (v: AgentsView) => void = () => {};
 async function withProjects(run: (root: HTMLElement, emit: (v: MissionView) => void, change: (p: Project) => void) => Promise<void>, before?: () => void) {
   const originals = { ...api };
   useLanguage('en');
   Object.assign(api, { localUpdateState: async () => null });
   let listener: (v: MissionView) => void = () => {};
+  api.onAgents = async (fn) => { agentsEmit = fn; return () => {}; };
   api.projectEnroll = async (id) => ({ projectId: id, repo: demo.path, base: 'base', mode: 'seguro', revision: 1, selfUpdate: false });
   api.projectGrant = async () => ({ repo: demo.path, mode: 'seguro', revision: 1, grantedAt: 1, selfUpdate: false });
   api.projectProof = async () => ({ commands: ['npm test'], declared: ['npm test'], source: 'agents', confirmed: true, changed: false });
@@ -557,4 +559,23 @@ check('projects: a parked or blocked mission asks for the owner in the Needs you
   await settle();
   await click(root.querySelector('[data-testid="mission-needs"] button'));
   equal(resumed, 1, 'the card resumes the mission');
+}));
+
+check('projects: the check of the agents shows its time left, then an honest failure, and goes away when ready', () => withProjects(async (root) => {
+  agentsEmit({ state: 'checking', step: 2, total: 7, vendor: 'codex', estimateSeconds: 180 });
+  await settle();
+  const checking = root.querySelector('[data-testid="agents-status"]')?.textContent ?? '';
+  ok(checking.includes('Checking the agents') && checking.includes('~180 s') && checking.includes('step 2 of 7'), `the wait is shown: ${checking}`);
+  agentsEmit({ state: 'failed', step: 0, total: 7, estimateSeconds: 0, detail: 'codex-native: native write escaped workspace' });
+  await settle();
+  const failed = root.querySelector('[data-testid="agents-status"]');
+  ok(failed?.textContent?.includes('no mission was started') && failed.textContent.includes('native write escaped workspace'), 'the failure carries the probe reason');
+  equal(failed?.getAttribute('role'), 'alert');
+  useLanguage('pt-BR');
+  await settle();
+  ok(root.querySelector('[data-testid="agents-status"]')?.textContent?.includes('nenhuma missão foi iniciada'), 'the failure is hand-written in pt-BR');
+  useLanguage('en');
+  agentsEmit({ state: 'ready', step: 7, total: 7, estimateSeconds: 0 });
+  await settle();
+  ok(!root.querySelector('[data-testid="agents-status"]'), 'nothing is shown once the agents are ready');
 }));

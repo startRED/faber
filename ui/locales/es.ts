@@ -651,6 +651,10 @@ export const es: Messages = {
   "reason.project.reconcile": "Faber no pudo casar los registros de este proyecto con su repositorio. Compruébalo y reanuda.",
   "reason.project.processTreeUnproven": "Faber no pudo demostrar que todo lo que inició terminó. Revisa los programas en ejecución y reanuda.",
   "reason.disk.needed": "No hay espacio libre en disco para una copia limpia.",
+  "projects.agents.checking": "Comprobando los agentes… (~{seconds} s, paso {step} de {total})",
+  "projects.agents.failed": "No se pudieron comprobar los agentes, así que no se inició ninguna misión: {detail}",
+  "reason.qualify.failed": "No se pudieron comprobar los agentes. No se inició ninguna misión.",
+  "projects.proof.setup": "Primero, en la copia limpia:",
   // Native speaker must translate (needs native review).
   "projects.value.missing": "\u2014",
   // Native speaker must translate (needs native review).

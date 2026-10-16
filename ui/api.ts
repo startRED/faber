@@ -219,6 +219,16 @@ export interface ProofView {
   changed: boolean;
 }
 
+/** How the check of the agents goes (Faber earns its own role receipts before a mission, hidden). */
+export interface AgentsView {
+  state: 'checking' | 'ready' | 'failed';
+  step: number;
+  total: number;
+  vendor?: Vendor | null;
+  estimateSeconds: number;
+  detail?: string | null;
+}
+
 export interface ProgressView {
   step: string;
   number: number;
@@ -499,6 +509,7 @@ export const api = {
   missionResume: (missionId: string) => invoke<MissionView>('mission_resume', { missionId }),
   missionAnswer: (missionId: string, decisionId: string, answer: string) =>
     invoke<MissionView>('mission_answer', { missionId, decisionId, answer }),
+  onAgents: (listener: (view: AgentsView) => void) => listen<AgentsView>('agents', (e) => listener(e.payload)),
   onMission: (listener: (view: MissionView) => void) => listen<MissionView>('mission', (e) => listener(e.payload)),
   on: (listener: (event: AppEvent) => void) => listen<AppEvent>('faber:event', (e) => listener(e.payload)),
 };

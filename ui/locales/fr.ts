@@ -651,6 +651,10 @@ export const fr: Messages = {
   "reason.project.reconcile": "Faber n'a pas pu faire concorder les registres de ce projet avec son dépôt. Vérifiez puis reprenez.",
   "reason.project.processTreeUnproven": "Faber n'a pas pu prouver que tout ce qu'il a lancé est terminé. Vérifiez les programmes en cours puis reprenez.",
   "reason.disk.needed": "Il n'y a pas assez d'espace disque libre pour une copie propre.",
+  "projects.agents.checking": "Vérification des agents… (~{seconds} s, étape {step} sur {total})",
+  "projects.agents.failed": "Les agents n'ont pas pu être vérifiés, donc aucune mission n'a été lancée : {detail}",
+  "reason.qualify.failed": "Les agents n'ont pas pu être vérifiés. Aucune mission n'a été lancée.",
+  "projects.proof.setup": "D'abord, dans la copie propre :",
   // Native speaker must translate (needs native review).
   "projects.value.missing": "\u2014",
   // Native speaker must translate (needs native review).
