@@ -85,7 +85,8 @@ export function Projects(props: Props) {
   const [customAnswers, setCustomAnswers] = createSignal<Record<string, string>>({});
   const customAnswer = (id: string) => Object.hasOwn(customAnswers(), id) ? customAnswers()[id] : '';
   // A typed goal or decision answer is unsent text: an unattended install waits for it.
-  useDraft(() => goal().trim() !== '' || Object.values(customAnswers()).some((v) => v.trim() !== ''));
+  useDraft(() => goal().trim() !== '');
+  useDraft(() => Object.values(customAnswers()).some((v) => v.trim() !== ''));
   let generation = 0;
   let selectedMission: string | undefined;
   const accept = (view: MissionView, token = generation) => {
