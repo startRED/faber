@@ -627,10 +627,11 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
         let _scope = r132::scope(context, ledger);
         let status = apply_inner(ledger, change, now, offset)?;
         let calibrated = calibrating.filter(|_| status == Status::Ready);
+        // The spent mark goes into the ledger of this change first; only then is the waiver closed in this process.
+        r132::remember(ledger, calibrated.as_deref());
         if let Some(mission) = &calibrated {
             r132::consume(mission);
         }
-        r132::remember(ledger, calibrated.as_deref());
         Ok(status)
     }
     #[cfg(not(feature = "r132-harness"))]
@@ -1065,7 +1066,7 @@ pub mod r132 {
     enum State {
         Unused,
         Open(Exception, String),
-        Spent,
+        Spent(Exception, String),
     }
 
     static WAIVER: Mutex<State> = Mutex::new(State::Unused);
@@ -1135,17 +1136,24 @@ pub mod r132 {
 
     /// The mission's calibration is done: the exception is spent and cannot be opened again.
     pub fn consume(mission: &str) {
-        let mut state = WAIVER.lock().unwrap();
-        if matches!(&*state, State::Open(_, open) if open == mission) {
-            *state = State::Spent;
+        if open().is_some_and(|(_, open)| open == mission) {
+            close();
         }
     }
 
     /// Ends the exception. The marker stays, so it cannot be opened again.
     pub fn close() {
         let mut state = WAIVER.lock().unwrap();
-        if matches!(*state, State::Open(..)) {
-            *state = State::Spent;
+        if let State::Open(exception, mission) = state.clone() {
+            *state = State::Spent(exception, mission);
+        }
+    }
+
+    /// The exception and mission this process waived, open or spent.
+    fn bound() -> Option<(Exception, String)> {
+        match &*WAIVER.lock().unwrap() {
+            State::Open(exception, mission) | State::Spent(exception, mission) => Some((*exception, mission.clone())),
+            State::Unused => None,
         }
     }
 
@@ -1173,17 +1181,19 @@ pub mod r132 {
         true
     }
 
-    /// After a change was applied: the ledger remembers the mission whose margin it waived, and that the waiver is spent
-    /// once that mission's calibration is done.
-    pub(super) fn remember(ledger: &mut crate::ledger::Ledger, calibrated: Option<&str>) {
-        let used = USED.with(|u| u.borrow_mut().take());
-        let Some(exception) = used.as_ref().map(|(e, _)| *e).or_else(|| open().map(|(e, _)| e)) else { return };
+    /// Writes into the ledger of a change, before the waiver is consumed: the mission whose margin the change waived, and
+    /// that the waiver is spent once that mission's calibration is done. It reads the waived mission from the process,
+    /// open or already spent, so a spending calibration is always recorded; a record of another mission is never touched.
+    pub fn remember(ledger: &mut crate::ledger::Ledger, calibrated: Option<&str>) {
+        let used = USED.with(|u| u.borrow_mut().take()).is_some();
+        let Some((exception, bound)) = bound() else { return };
         let mut record = ledger.extra.get(exception.record()).cloned();
-        if let Some((_, mission)) = used {
-            record.get_or_insert_with(|| serde_json::json!({"mission": mission, "spent": false}));
+        if used || calibrated == Some(bound.as_str()) {
+            record.get_or_insert_with(|| serde_json::json!({"mission": bound, "spent": false}));
         }
-        if let (Some(record), Some(mission)) = (record.as_mut(), calibrated)
-            && record["mission"] == mission
+        if let Some(record) = record.as_mut()
+            && calibrated == Some(bound.as_str())
+            && record["mission"] == bound.as_str()
         {
             record["spent"] = true.into();
         }
@@ -1192,21 +1202,49 @@ pub mod r132 {
         }
     }
 
+    /// Adds a waiver record without ever undoing one: a record that is already there stays, unless the new one says spent.
+    fn merge(into: &mut std::collections::BTreeMap<String, serde_json::Value>, records: serde_json::Map<String, serde_json::Value>) {
+        for (key, record) in records {
+            if !into.contains_key(&key) || record["spent"] == true {
+                into.insert(key, record);
+            }
+        }
+    }
+
+    fn records(ledger: &crate::ledger::Ledger) -> serde_json::Map<String, serde_json::Value> {
+        [Exception::R132, Exception::R136]
+            .iter()
+            .filter_map(|e| ledger.extra.get(e.record()).map(|r| (e.record().to_string(), r.clone())))
+            .collect()
+    }
+
+    /// R136: keeps a ledger's waiver records in `path`, outside the canary data folder that every canary run deletes.
+    pub fn save_records(ledger: &crate::ledger::Ledger, path: &Path) -> std::io::Result<()> {
+        let mut kept = match std::fs::read(path) {
+            Ok(bytes) => {
+                serde_json::from_slice::<std::collections::BTreeMap<String, serde_json::Value>>(&bytes).map_err(std::io::Error::other)?
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => std::collections::BTreeMap::new(),
+            Err(e) => return Err(e),
+        };
+        merge(&mut kept, records(ledger));
+        std::fs::write(path, serde_json::to_vec(&kept).map_err(std::io::Error::other)?)
+    }
+
     /// R136: a harness canary starts from a ledger of its own, because the supervisor's day sample no longer matches the
-    /// account after the mission that came before it. Only the waiver records are carried over, so a fresh ledger never
-    /// reopens a waiver; a ledger that cannot be read is refused instead of being replaced.
-    pub fn fresh_ledger(data_dir: &Path) -> std::io::Result<()> {
+    /// account after the mission that came before it. Only the waiver records are carried over, from the ledger it was
+    /// seeded with and from `kept` (`save_records`), so a fresh ledger never reopens a waiver. A ledger or a record file
+    /// that cannot be read is refused instead of being replaced.
+    pub fn fresh_ledger(data_dir: &Path, kept: &Path) -> std::io::Result<()> {
         let path = data_dir.join("budget.json");
         let mut fresh = crate::ledger::Ledger::default();
         match std::fs::read(&path) {
-            Ok(bytes) => {
-                let old: crate::ledger::Ledger = serde_json::from_slice(&bytes).map_err(std::io::Error::other)?;
-                for exception in [Exception::R132, Exception::R136] {
-                    if let Some(record) = old.extra.get(exception.record()) {
-                        fresh.extra.insert(exception.record().into(), record.clone());
-                    }
-                }
-            }
+            Ok(bytes) => merge(&mut fresh.extra, records(&serde_json::from_slice(&bytes).map_err(std::io::Error::other)?)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+        match std::fs::read(kept) {
+            Ok(bytes) => merge(&mut fresh.extra, serde_json::from_slice(&bytes).map_err(std::io::Error::other)?),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(e),
         }

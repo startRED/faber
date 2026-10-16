@@ -341,6 +341,8 @@ pub async fn run(engine: &Engine, engine_data: &Path, work: &Path, mode: Mode) -
         #[cfg(feature = "r132-harness")]
         arm_waiver(engine_data, &mid);
         caps(engine, &mid, REAL_CAP_MICROS)?;
+        #[cfg(feature = "r132-harness")]
+        keep_waivers(engine, engine_data)?;
     }
     let journal = Journal::open(Path::new(&repository.identity.root), engine_data, &mid).map_err(|e| e.key().to_string())?;
     // A replay has no provider to qualify, so only a real run goes through the admission of a live mission.
@@ -370,6 +372,10 @@ pub async fn run(engine: &Engine, engine_data: &Path, work: &Path, mode: Mode) -
     };
     #[cfg(feature = "r132-harness")]
     super::budget::r132::close();
+    #[cfg(feature = "r132-harness")]
+    if mode == Mode::Real {
+        keep_waivers(engine, engine_data)?;
+    }
     match outcome {
         Outcome::Done { .. } => Ok(Evidence {
             mode,
@@ -382,23 +388,40 @@ pub async fn run(engine: &Engine, engine_data: &Path, work: &Path, mode: Mode) -
     }
 }
 
-/// R136: the real canary mission of a harness-built candidate may be admitted once without the two-point margin. The
-/// marker has its one fixed path in the canary's data folder and is created once (a later run finds it and is refused),
-/// the waiver is bound to this mission id and its allocations, the ledger remembers it, and it closes when the mission
-/// ends. A product build has no such code and reads no variable for it.
+/// R136: the real canary mission of a harness-built candidate may be admitted once without the two-point margin. Each
+/// run deletes the canary's data folder, so the marker and the waiver records live one folder up, in the canary folder
+/// that survives: the marker has its one fixed path there and is created once (a later run finds it and is refused),
+/// the waiver is bound to this mission id and its allocations, the ledger records are kept there after every budget step,
+/// and the waiver closes when the mission ends. A product build has no such code and reads no variable for it.
 #[cfg(feature = "r132-harness")]
 fn arm_waiver(engine_data: &Path, mission: &str) {
     use super::budget::r132::{Exception, waive};
     let evidence = serde_json::json!({"exception": "R136", "for": "canary mission of a harness-built candidate"});
-    let _ = waive(Exception::R136, engine_data, mission, &evidence);
+    let _ = waive(Exception::R136, kept_root(engine_data), mission, &evidence);
+}
+
+/// The canary folder that survives the deletion of its data folder.
+#[cfg(feature = "r132-harness")]
+fn kept_root(engine_data: &Path) -> &Path {
+    engine_data.parent().unwrap_or(engine_data)
+}
+
+#[cfg(feature = "r132-harness")]
+const KEPT: &str = "waiver-ledger.json";
+
+/// Copies the engine ledger's waiver records out of the data folder; a failure stops the mission (fail closed).
+#[cfg(feature = "r132-harness")]
+fn keep_waivers(engine: &Engine, engine_data: &Path) -> Result<(), String> {
+    super::budget::r132::save_records(&engine.ledger(), &kept_root(engine_data).join(KEPT)).map_err(key)
 }
 
 /// Prepares the canary's data folder before its engine starts. R136 (harness builds only): a real canary starts from a
-/// ledger of its own, keeping only the waiver records. A product build changes nothing.
+/// ledger of its own, keeping only the waiver records (the seeded ones and those kept outside the folder). A product
+/// build changes nothing.
 pub fn prepare_data(engine_data: &Path, mode: Mode) -> Result<(), String> {
     #[cfg(feature = "r132-harness")]
     if mode == Mode::Real {
-        super::budget::r132::fresh_ledger(engine_data).map_err(key)?;
+        super::budget::r132::fresh_ledger(engine_data, &kept_root(engine_data).join(KEPT)).map_err(key)?;
     }
     let _ = (engine_data, mode);
     Ok(())

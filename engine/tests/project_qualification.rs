@@ -2,8 +2,8 @@
 use faber_engine::model::Vendor;
 use faber_engine::project::qualification::{
     CHECKS, Identity, MAX_AGE_SECS, Presence, Proof, Receipt, Reject, SourceKind, fingerprint, fingerprint_source, hook_flags,
-    identify_sources, issue, launch_policy, managed_policy_clear, parse_version, path_presence, session_sources, sources_unchanged, verify,
-    verify_current,
+    identify_sources, issue, launch_policy, managed_policy_clear, observe_pinned, parse_version, path_presence, session_sources,
+    sources_unchanged, verify, verify_current,
 };
 use std::collections::BTreeMap;
 use std::io;
@@ -197,7 +197,7 @@ fn requalification_replaces_the_receipt_atomically() {
     issued(dir.path(), Vendor::Claude);
     let newer = Identity { version: "2.1.297 (Claude Code)".into(), binary_hash: HASH.replace('7', "8") };
     issue(dir.path(), Vendor::Claude, &newer, passed(), proof(Vendor::Claude), NOW + 5).unwrap();
-    assert_eq!(check(dir.path(), Vendor::Claude, NOW + 5, identity()), Err(Reject::Version));
+    assert_eq!(check(dir.path(), Vendor::Claude, NOW + 5, identity()), Err(Reject::Binary));
     assert_eq!(check(dir.path(), Vendor::Claude, NOW + 5, newer.clone()), Ok(()));
     let stored: Receipt = serde_json::from_slice(&std::fs::read(dir.path().join("claude.json")).unwrap()).unwrap();
     assert_eq!((stored.version, stored.issued_at), (newer.version, NOW + 5));
@@ -441,4 +441,18 @@ fn a_receipt_from_another_launch_policy_asks_to_requalify() {
     for vendor in Vendor::ALL {
         assert_eq!(launch_policy(vendor), launch_policy(vendor), "{vendor:?}: stable for the same parameters");
     }
+}
+
+/// F5: admission hashes the program before it runs anything. A program whose bytes are not the receipt's is never asked
+/// for `--version` (here a file that cannot run at all answers with its hash), and the matching one is.
+#[test]
+fn a_program_is_hashed_before_it_is_asked_for_its_version() {
+    let dir = tempfile::tempdir().unwrap();
+    let program = dir.path().join("cli.exe");
+    std::fs::write(&program, b"not a program").unwrap();
+    let hash = fingerprint(&program).unwrap();
+    let (other, pinned) = observe_pinned(&program.to_string_lossy(), &"0".repeat(64)).unwrap();
+    assert_eq!((other.version.as_str(), other.binary_hash.as_str(), pinned.sha256.as_str()), ("", hash.as_str(), hash.as_str()));
+    drop(pinned);
+    assert!(observe_pinned(&program.to_string_lossy(), &hash).is_err(), "the matching program is run, and this one cannot run");
 }

@@ -64,8 +64,9 @@ pub fn admit(vendor: Vendor) -> Result<(), Blocker> {
 }
 
 /// The authoritative check, made by the driver constructors with the program they are about to start. Returns the
-/// SHA-256 the receipt names, for the check of the started process image before it runs (`proc::spawn_expecting`).
-pub fn admit_launch(vendor: Vendor, bin: &str) -> Result<String, Blocker> {
+/// pinned program file, unchanged while it is held, and its SHA-256 for the check of the started process image before it
+/// runs (`proc::spawn_expecting`).
+pub fn admit_launch(vendor: Vendor, bin: &str) -> Result<super::qualification::Pinned, Blocker> {
     super::qualification::admitted(vendor, &|| Some(bin.to_string())).map_err(|_| blockers(vendor)[0])
 }
 

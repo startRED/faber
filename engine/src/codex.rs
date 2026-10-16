@@ -654,10 +654,11 @@ impl CodexServer {
         let opts = CodexServerOptions { permissions: Permissions::Isolated, ..opts };
         let thread = CodexThread { permissions: Permissions::Isolated, ..thread };
         project_thread_params(&thread, role)?;
-        let image = crate::project::policy::admit_launch(crate::model::Vendor::Codex, &opts.cli.command)?;
+        // The pin is held until the started process was checked and resumed.
+        let pinned = crate::project::policy::admit_launch(crate::model::Vendor::Codex, &opts.cli.command)?;
         #[cfg(windows)]
         prepare_project_codex_catalog().map_err(|_| crate::project::policy::Blocker::Restrictions)?;
-        let server = proc::spawn_expecting(&image, || Self::start_with_policy(opts, Some(role)));
+        let server = proc::spawn_expecting(&pinned.sha256, || Self::start_with_policy(opts, Some(role)));
         let session = server.open(thread, sink);
         server.retire();
         Ok(session.for_project(role))

@@ -92,6 +92,9 @@ proof; the candidate process itself and its CLIs do not.
 - `mission_start` / `mission_resume` in the shell do not drive the coordinator yet: starting a mission from the Projects
   screen admits and records it but nothing runs the roles. A general `Setup` needs a product decision first (which trusted
   proof a project's mission runs, and which files the roles are shown); only the canary and the harness have one.
+- A crash between a proof run and its progress mark replays that proof on resume; proofs are idempotent tests, so v0
+  accepts it.
+- Proof reads and the network stay open (R139); AppContainer is the upgrade path.
 - The canary still depends on a quota margin in production; whether a canary-sized spend may use a smaller admission
   rule is the owner's decision.
 

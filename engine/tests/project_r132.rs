@@ -112,28 +112,39 @@ fn the_waiver_is_explicit_single_use_recorded_bound_to_one_mission_and_only_move
     r132::consume("m2");
     assert!(allocate(&mut uncalibrated(0.45)).is_ok());
     r132::consume("m1");
+    // The calibration that spends it is written to the ledger although the waiver is no longer open, and a ledger that    // never saw it records it spent too (review 2, #1).    let mut ledger = remembering(json!({"mission": "m1", "spent": false}));    r132::remember(&mut ledger, Some("m1"));    assert_eq!(ledger.extra["r132Waiver"], json!({"mission": "m1", "spent": true}));    let mut unseen = uncalibrated(0.45);    r132::remember(&mut unseen, Some("m1"));    assert_eq!(unseen.extra["r132Waiver"], json!({"mission": "m1", "spent": true}));
     assert!(allocate(&mut uncalibrated(0.45)).is_err(), "spent");
     assert!(!r132::admits("m1"));
     assert!(r132::waive(Exception::R132, other.path(), "m1", &json!({})).is_err(), "single use survives being spent");
     r132::close();
 }
 
-/// R136: a harness canary's fresh ledger keeps only the waiver records, and an unreadable ledger is not replaced.
+/// R136: a harness canary's fresh ledger keeps only the waiver records, taken from the ledger it was seeded with and from
+/// the records kept outside the folder each canary deletes; an unreadable ledger or record file is not replaced.
 #[test]
-fn a_fresh_canary_ledger_keeps_the_waiver_records_only() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("budget.json");
-    r132::fresh_ledger(dir.path()).unwrap();
+fn a_fresh_canary_ledger_keeps_the_waiver_records_only_and_they_survive_the_deleted_folder() {
+    let (root, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let records = root.path().join("waiver-ledger.json");
+    let path = data.path().join("budget.json");
+    r132::fresh_ledger(data.path(), &records).unwrap();
     assert_eq!(serde_json::from_slice::<Ledger>(&std::fs::read(&path).unwrap()).unwrap().extra.len(), 0);
-    let mut old = remembering(json!({"mission": "m1", "spent": true}));
-    old.extra.insert("r136Waiver".into(), json!({"mission": "c1", "spent": false}));
-    std::fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
-    r132::fresh_ledger(dir.path()).unwrap();
+    // A run records its waiver outside the data folder, then the next run starts from a deleted one.
+    let mut run = uncalibrated(0.45);
+    run.extra.insert("r136Waiver".into(), json!({"mission": "c1", "spent": true}));
+    r132::save_records(&run, &records).unwrap();
+    std::fs::remove_dir_all(data.path()).unwrap();
+    std::fs::create_dir_all(data.path()).unwrap();
+    // The supervisor seeds its own ledger, which knows the R132 mission only.
+    std::fs::write(&path, serde_json::to_vec(&remembering(json!({"mission": "m1", "spent": true}))).unwrap()).unwrap();
+    r132::fresh_ledger(data.path(), &records).unwrap();
     let fresh: Ledger = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     assert_eq!(fresh.extra.get("r132Waiver"), Some(&json!({"mission": "m1", "spent": true})));
-    assert_eq!(fresh.extra.get("r136Waiver"), Some(&json!({"mission": "c1", "spent": false})));
+    assert_eq!(fresh.extra.get("r136Waiver"), Some(&json!({"mission": "c1", "spent": true})));
     assert!(fresh.of(Vendor::Codex).history.is_empty(), "the day sample does not carry over");
     std::fs::write(&path, b"not a ledger").unwrap();
-    assert!(r132::fresh_ledger(dir.path()).is_err());
+    assert!(r132::fresh_ledger(data.path(), &records).is_err());
     assert_eq!(std::fs::read(&path).unwrap(), b"not a ledger");
+    std::fs::write(&path, serde_json::to_vec(&Ledger::default()).unwrap()).unwrap();
+    std::fs::write(&records, b"not records").unwrap();
+    assert!(r132::fresh_ledger(data.path(), &records).is_err(), "unreadable records refuse instead of forgetting");
 }

@@ -307,7 +307,8 @@ pub fn start_project_claude(
 ) -> Result<Session, crate::project::policy::Blocker> {
     let args = project_claude_args(&opts.launch, role)?;
     crate::project::policy::admit_launch(crate::model::Vendor::Claude, &opts.bin)
-        .map(|image| proc::spawn_expecting(&image, || start_with_policy(opts, on_event, args, true)).for_project(role))
+        // The pin is held until the started process was checked and resumed.
+        .map(|pinned| proc::spawn_expecting(&pinned.sha256, || start_with_policy(opts, on_event, args, true)).for_project(role))
 }
 
 fn block_text(content: &Value) -> String {
