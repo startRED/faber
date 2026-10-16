@@ -16,9 +16,19 @@ jobs:
     outputs:
       id: ${{ steps.release.outputs.id }}
     steps:
+      # The body is the English "what's new" entries newer than the previous release (scripts/release-notes.mjs), which is
+      # why the whole history is fetched: the previous tag holds the last entry it shipped.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
       - id: release
         run: |
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "Faber $GITHUB_REF_NAME" --generate-notes
+          previous=$(git tag --list 'v*' --sort=-v:refname | grep -vx "$GITHUB_REF_NAME" | head -1 || true)
+          node scripts/release-notes.mjs "$previous" > "$RUNNER_TEMP/notes.md"
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "Faber $GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
           echo "id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" --jq .id)" >> "$GITHUB_OUTPUT"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

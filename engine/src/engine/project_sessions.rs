@@ -46,7 +46,9 @@ impl Engine {
     /// Reserve quiet Chat admission for the entire build/canary/promotion attempt.
     pub fn local_build_admission(&self) -> Result<LocalBuildGuard, String> {
         self.with(|c| {
-            if c.local_build || !c.running_items().is_empty() || c.convs.values().any(|v| !v.queued.is_empty()) {
+            // A mission worker alive in memory is work too: the install closes it.
+            let workers = c.mission_sessions.values().any(|sessions| !sessions.is_empty());
+            if c.local_build || workers || !c.running_items().is_empty() || c.convs.values().any(|v| !v.queued.is_empty()) {
                 return Err("error.update.activeOperations".into());
             }
             c.local_build = true;
@@ -160,6 +162,10 @@ impl Engine {
         let coordinator = self.mission_lock();
         let _turn = coordinator.lock().await;
         let _update = self.mission_update_admission()?;
+        // Once an install or a build holds the admission, no worker begins: it would be closed with the process.
+        if self.with(|c| c.local_build) {
+            return Err("error.update.activeOperations".into());
+        }
         let mut runner = Runner::load(&journal).map_err(str::to_string)?;
         runner.admit(request.vendor).map_err(str::to_string)?;
         // No trusted pre-request context census yet: use the published window, never the caller's estimate.
@@ -521,6 +527,34 @@ mod tests {
             core.convs.get_mut(&id).unwrap().messages.push(message);
         });
         assert!(e.local_build_admission().is_err());
+        e.shutdown();
+    }
+    #[tokio::test]
+    async fn a_mission_worker_counts_as_work_for_an_install_and_nothing_starts_after_the_decision() {
+        let data = tempfile::tempdir().unwrap();
+        let e = Engine::new(
+            EngineOptions {
+                data_dir: data.path().into(),
+                clis: Default::default(),
+                spawn: Arc::new(|_, _, _| panic!("an install must not spawn")),
+                windows: false,
+                claude_env_billed: false,
+                max_warm: 0,
+                idle: Duration::from_secs(30),
+                runtime: tokio::runtime::Handle::current(),
+                ask: None,
+            },
+            Arc::new(|_| {}),
+        );
+        assert!(!e.is_working());
+        e.with(|c| c.mission_sessions.insert("m1".into(), vec![Session::from_fn(|_| {})]));
+        assert!(e.is_working(), "a worker alive in a mission is work, with no conversation running");
+        assert!(e.local_build_admission().is_err(), "the install is not decided while it runs");
+        e.with(|c| c.mission_sessions.remove("m1"));
+        assert!(!e.is_working());
+        let decided = e.local_build_admission().unwrap();
+        assert!(e.with(|c| c.local_build), "from the decision on, no turn and no worker begins");
+        drop(decided);
         e.shutdown();
     }
     /// The app drives these from spawned tasks: their futures must stay `Send` (no lock held across an await).

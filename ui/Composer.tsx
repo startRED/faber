@@ -5,6 +5,7 @@ import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 import type { Option } from './models.ts';
 import { resizeComposer } from './composer-size.ts';
+import { keep, kept, release, useDraft } from './unsent.ts';
 
 export interface Draft {
   text: string;
@@ -37,6 +38,8 @@ interface Props {
   onRestore?: (restore: (draft: Draft) => boolean) => void;
   onClearRestored?: (clear: (draft: Draft) => boolean) => void;
   onReady?: (fill: (text: string) => void) => void;
+  /** Names this box's unsent text in storage; the text comes back after a restart. */
+  draftKey?: string;
 }
 
 // Small text files go inside the message (no tool call needed); anything else is attached as a file.
@@ -73,7 +76,7 @@ async function attach(list: Iterable<File>, draft: Draft): Promise<{ draft: Draf
 }
 
 export function Composer(props: Props) {
-  const [draft, setDraft] = createSignal<Draft>(EMPTY);
+  const [draft, setDraft] = createSignal<Draft>({ ...EMPTY, text: props.draftKey ? kept(props.draftKey) : '' });
   const [names, setNames] = createSignal<string[]>([]);
   const [focused, setFocused] = createSignal(false);
   let warmed = false;
@@ -101,6 +104,9 @@ export function Composer(props: Props) {
   const selected = () => Math.max(0, props.options.findIndex((o) => o.choice.vendor === props.choice.vendor && o.choice.model === props.choice.model));
   const hasContent = () => draft().text.trim() !== '' || draft().images.length > 0 || draft().files.length > 0;
   const canSend = () => !props.locked && hasContent() && props.vendors.length > 0;
+  useDraft(hasContent);
+  createEffect(() => props.draftKey && keep(props.draftKey, draft().text));
+  onCleanup(() => props.draftKey && release(props.draftKey));
 
   // The first keystroke starts the CLI, not focus: the box is focused as soon as Faber opens, and an unused Claude
   // process costs about 120 MB.
