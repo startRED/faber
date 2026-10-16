@@ -921,6 +921,7 @@ export const es: Messages = {
   'notes.10.better': "La pantalla del proyecto ya no pide confirmar las comprobaciones cuando tu modo de permisos es Auto o Acceso total.",
   'notes.12.better': 'El tablero de la misión es más tranquilo: el objetivo, su paso y por qué espera van primero, las columnas vacías ya no están y Nueva misión empieza otra.',
   'notes.13.new': 'En Ajustes puedes recibir versiones preliminares unos días antes.',
+  'notes.15.fixed': 'Cuando el asistente deja subagentes trabajando en segundo plano, la respuesta ahora los espera y llega completa, en vez de quedarse en “voy a esperar”.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

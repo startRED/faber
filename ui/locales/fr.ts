@@ -921,6 +921,7 @@ export const fr: Messages = {
   'notes.10.better': "L’écran du projet ne demande plus de confirmer les vérifications quand votre mode d’autorisation est Auto ou Accès total.",
   'notes.12.better': 'Le tableau de mission est plus calme : l’objectif, son étape et ce qu’il attend passent en premier, les colonnes vides ont disparu et Nouvelle mission en lance une autre.',
   'notes.13.new': 'Dans les réglages, tu peux recevoir les nouvelles versions quelques jours à l’avance.',
+  'notes.15.fixed': 'Quand l’assistant laisse des sous-agents travailler en arrière-plan, sa réponse les attend maintenant et arrive entière, au lieu de s’arrêter à « je vais attendre ».',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

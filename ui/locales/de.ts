@@ -921,6 +921,7 @@ export const de: Messages = {
   'notes.10.better': "Der Projektbildschirm fragt nicht mehr nach den Prüfungen, wenn dein Berechtigungsmodus Auto oder Vollzugriff ist.",
   'notes.12.better': 'Die Missionsübersicht ist ruhiger: Ziel, aktueller Schritt und Wartegrund stehen oben, leere Spalten sind weg, und Neue Mission startet eine weitere.',
   'notes.13.new': 'In den Einstellungen kannst du neue Versionen einige Tage früher erhalten.',
+  'notes.15.fixed': 'Wenn der Assistent Subagenten im Hintergrund arbeiten lässt, wartet seine Antwort jetzt auf sie und kommt vollständig an, statt bei „ich warte“ stehen zu bleiben.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

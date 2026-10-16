@@ -788,6 +788,7 @@ export const en = {
   'notes.10.better': "The project screen no longer asks you to confirm checks when your permission mode is Auto or Full access.",
   'notes.12.better': 'The mission board is calmer: the goal, its step and why it waits come first, empty columns are gone, and New mission starts another.',
   'notes.13.new': 'Settings can now send you previews of new versions a few days early.',
+  'notes.15.fixed': 'When the assistant leaves subagents working in the background, its reply now waits for them and arrives whole instead of stopping at “I will wait”.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

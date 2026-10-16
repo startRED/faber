@@ -908,6 +908,7 @@ export const ptBR: Messages = {
   'notes.10.better': "A tela do projeto não pede mais para confirmar as verificações quando o modo de permissão é Auto ou Acesso total.",
   'notes.12.better': 'O quadro da missão ficou mais calmo: o objetivo, o passo e o motivo da espera vêm primeiro, as colunas vazias sumiram e Nova missão começa outra.',
   'notes.13.new': 'Nas Configurações você pode receber prévias das versões novas alguns dias antes.',
+  'notes.15.fixed': 'Quando o assistente deixa subagentes trabalhando em segundo plano, a resposta agora espera por eles e chega inteira, em vez de parar no “vou aguardar”.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',
