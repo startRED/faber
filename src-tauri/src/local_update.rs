@@ -31,8 +31,37 @@ fn same_path(left: &Path, right: &Path) -> Result<bool> {
     };
     Ok(normalize(real_path(left)?) == normalize(real_path(right)?))
 }
+/// The update flow's clock, in seconds since 1970.
 pub fn now() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
+    let real = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    #[cfg(feature = "test-hooks")]
+    if let Some((anchor, speed)) = test_clock() {
+        let real_ms = u64::try_from(real.as_millis()).unwrap_or(u64::MAX);
+        return anchor.saturating_add(real_ms.saturating_sub(anchor).saturating_mul(speed)) / 1000;
+    }
+    real.as_secs()
+}
+
+/// How long the supervisor has watched, on the same clock as [`now`].
+fn watched(since: std::time::Instant) -> std::time::Duration {
+    #[cfg(feature = "test-hooks")]
+    if let Some((_, speed)) = test_clock() {
+        return since.elapsed().saturating_mul(u32::try_from(speed).unwrap_or(u32::MAX));
+    }
+    since.elapsed()
+}
+
+/// Test builds only: `FABER_TEST_CLOCK=<anchor in ms since 1970>:<speed from 2 to 20>` runs the clock `speed` times faster
+/// from the anchor, so the probation scenario proves the whole 300-second rule in a fraction of the time (R163). Every
+/// process of a scenario gets the same anchor, so they agree; after the anchor this clock is never behind the real one.
+#[cfg(feature = "test-hooks")]
+fn test_clock() -> Option<(u64, u64)> {
+    static CLOCK: std::sync::OnceLock<Option<(u64, u64)>> = std::sync::OnceLock::new();
+    *CLOCK.get_or_init(|| {
+        let text = std::env::var("FABER_TEST_CLOCK").ok()?;
+        let (anchor, speed) = text.split_once(':')?;
+        Some((anchor.parse().ok()?, speed.parse().ok().filter(|s| (2..=20).contains(s))?))
+    })
 }
 
 #[derive(Clone)]
@@ -237,6 +266,11 @@ impl Development {
             ("FABER_INSTALLED_RELEASE", self.installed_release.to_string_lossy().into_owned()),
         ] {
             command.environment.insert(key.into(), value);
+        }
+        // Test builds only: the next process keeps the faster test clock, or it would disagree with this one.
+        #[cfg(feature = "test-hooks")]
+        if let Ok(clock) = std::env::var("FABER_TEST_CLOCK") {
+            command.environment.insert("FABER_TEST_CLOCK".into(), clock);
         }
     }
 
@@ -2021,7 +2055,7 @@ fn helper_run(dev: &Development, recovering: bool) -> Result<()> {
         let must_stop = !alive
             || signal.is_err()
             || now() < current.updated_at
-            || (supervision.elapsed() > std::time::Duration::from_secs(301)
+            || (watched(supervision) > std::time::Duration::from_secs(301)
                 && matches!(current.state, UpdateState::Probation { probation_deadline, .. } if now() < probation_deadline))
             || match current.state {
                 UpdateState::Probation { health_ack_deadline, probation_deadline, health_acknowledged, .. } => {
@@ -2057,7 +2091,7 @@ fn helper_run(dev: &Development, recovering: bool) -> Result<()> {
             return Ok(());
         }
         let probation_due = matches!(current.state, UpdateState::Probation { probation_deadline, .. } if now() >= probation_deadline);
-        if (!probation_due || supervision.elapsed() >= std::time::Duration::from_secs(300))
+        if (!probation_due || watched(supervision) >= std::time::Duration::from_secs(300))
             && match monitor(dev, true, now()) {
                 Ok(outcome) => outcome == Monitor::Healthy,
                 Err(error) => {

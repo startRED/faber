@@ -66,8 +66,8 @@ pub fn all() -> Vec<Scenario> {
 /// other counts as 5 (the rest average 4.4 s). A scenario missing here deals as 5 however long it takes, which is how one part
 /// came to take twice the others: when a scenario takes 8 s or more on CI, add it. A renamed one fails a test.
 const SLOW: [(&str, u32); 41] = [
-    ("T13 4: fixture promotion", 335),
     ("coordinator: a mission lands", 166),
+    ("T13 4: fixture promotion", 120),
     ("with Auto, the answer names", 52),
     ("homes: idle life costs the", 50),
     ("a new project session shows", 33),
