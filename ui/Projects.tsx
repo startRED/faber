@@ -498,8 +498,8 @@ export function Projects(props: Props) {
                         onKeyDown={(e) => e.key === 'Escape' && setAsking(false)}
                       >
                         <h3 id="sheet-title">{t('projects.sheet.title')}</h3>
-                        <p class="p-sheet-count">{proofCount(p())}</p>
                         <Show when={p().commands.length > 0} fallback={<p class="hint">{t('projects.sheet.none')}</p>}>
+                          <p class="p-sheet-count">{proofCount(p())}</p>
                           <p class="hint">{t('projects.sheet.body')}</p>
                           <More label={t('projects.proof.view')} open={t('projects.proof.hide')}>
                             <ProofList proof={p()} />

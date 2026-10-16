@@ -850,6 +850,7 @@ export const es: Messages = {
   "set.projects.checks": "Comprobaciones",
   "set.projects.tools": "Herramientas que faltan",
   "set.projects.code": "Tu código",
+  "set.projects.noChecks": "Aún no hay comprobaciones. Añádelas con Editar.",
   "set.projects.faber": "Actualizaciones de Faber",
   "set.more": "Más información",
 };

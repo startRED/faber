@@ -62,7 +62,7 @@ function Entry(props: { project: Project }) {
       <button type="button" class="pset-head" aria-expanded={open()} onClick={() => setOpen(!open())}>
         <span class="t">{props.project.name}</span>
         <span class="s" title={props.project.path}>{tail(props.project.path)}</span>
-        <Icon name={open() ? 'up' : 'down'} small />
+        <Icon name={open() ? 'down' : 'right'} small />
       </button>
       <Show when={open()}>
         <Body project={props.project} />
@@ -130,7 +130,7 @@ function Body(props: { project: Project }) {
             {(p) => (
               <>
                 <span class="v">
-                  {proofCount(p())}
+                  {p().commands.length > 0 ? proofCount(p()) : t('set.projects.noChecks')}
                   <Show when={p().commands.length > 0}>
                     {' · '}
                     {p().confirmed ? t('projects.proof.confirmed') : t('projects.proof.unconfirmed')}

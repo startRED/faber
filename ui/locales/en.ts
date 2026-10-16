@@ -717,6 +717,7 @@ export const en = {
   "set.projects.checks": "Checks",
   "set.projects.tools": "Missing tools",
   "set.projects.code": "Your code",
+  "set.projects.noChecks": "No checks yet. Add them with Edit.",
   "set.projects.faber": "Faber updates",
   "set.more": "Learn more",
 } as const;

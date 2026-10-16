@@ -25,8 +25,8 @@ const BRIGHT = 1.15;
 /** The scene starts this far right of the column of words, fades in over FADE px and is dimmed over CALM px. It is a
  * band across the whole height, so words that scroll in the column never pass over it. */
 const [GAP, FADE, CALM] = [32, 160, 280];
-/** Less room than this right of the column and the scene does not show at all, nor run. */
-const ROOM = 280;
+/** Less room than this right of the column and the scene does not show at all, nor run: a sliver of it reads as broken. */
+const ROOM = 400;
 
 // The entrance, in ms: Curioso rises and leans toward the hole (styles.css, "wake"), a spark leaves his eyes and lands in
 // the shadow, and the scene lights up from there outward at SPEED px/ms, each character scrambling in the accent before

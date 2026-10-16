@@ -137,7 +137,7 @@ own inks.
   with fibres that turn faster near the hole, the far side of the disk bent over the top as a cool arc, a photon ring, a
   dim glow, a small planet below it and stars. It lives only right of the column of words: it starts 32 px past the
   column, fades in over 160 px and dims within 280 px, across the whole height, so words that scroll in the column never
-  pass over it. With less than 280 px of room it does not show or run.
+  pass over it. With less than 400 px of room it does not show or run.
   Ten times a second it works out again only the cells the hole can reach and repaints those that changed; stars
   twinkle every 700 ms and now and then one shoots across. A click on an empty spot sends a ring of the accent for
   1.3 s. It stops when the window is hidden or unfocused; reduced or no motion draws one still frame and no ripple.

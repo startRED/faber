@@ -837,6 +837,7 @@ export const ptBR: Messages = {
   "set.projects.checks": "Verificações",
   "set.projects.tools": "Ferramenta faltando",
   "set.projects.code": "Seu código",
+  "set.projects.noChecks": "Nenhuma verificação ainda. Adicione com Editar.",
   "set.projects.faber": "Atualizações do Faber",
   "set.more": "Saiba mais",
 };
