@@ -41,11 +41,14 @@ jobs:
           node scripts/release-notes.mjs "$previous" > "$RUNNER_TEMP/notes.md"
           # Both channels start as drafts (the updater must never see a release without its latest.json); the publish job
           # below makes it public, as a pre-release for a preview so /releases/latest keeps pointing at the newest stable.
-          flags=(--draft)
-          if [ "$kind" = preview ]; then flags+=(--prerelease); fi
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "Faber $GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" "${flags[@]}"
-          # The tags endpoint does not see drafts.
-          echo "id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq ".[] | select(.tag_name == \"$GITHUB_REF_NAME\") | .id")" >> "$GITHUB_OUTPUT"
+          # The id comes from the answer to the create itself: the release list may not show a new draft yet, and an empty id
+          # left every build uploading nowhere and every preview a draft.
+          prerelease=false
+          if [ "$kind" = preview ]; then prerelease=true; fi
+          id=$(gh api -X POST "repos/$GITHUB_REPOSITORY/releases" -f tag_name="$GITHUB_REF_NAME" -f name="Faber $GITHUB_REF_NAME" \
+            -F body=@"$RUNNER_TEMP/notes.md" -F draft=true -F prerelease="$prerelease" --jq .id)
+          [ -n "$id" ]
+          echo "id=$id" >> "$GITHUB_OUTPUT"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

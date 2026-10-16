@@ -1,0 +1,30 @@
+   Compiling demo v0.1.0 (C:\work\demo)
+error[E0277]: cannot add `&str` to `u32`
+ --> src\lib.rs:2:7
+  |
+2 |     a + "b"
+  |       ^ no implementation for `u32 + &str`
+  |
+  = help: the trait `Add<&str>` is not implemented for `u32`
+help: the following other types implement trait `Add<Rhs>`
+ --> /rustc/b940084d7eb6a299eb4bfeb8e34901bc051e7ac4/library\core\src\ops\arith.rs:98:8
+  |
+  = note: `u32` implements `Add`
+ ::: /rustc/b940084d7eb6a299eb4bfeb8e34901bc051e7ac4/library\core\src\ops\arith.rs:113:0
+  |
+  = note: in this macro invocation
+ --> /rustc/b940084d7eb6a299eb4bfeb8e34901bc051e7ac4/library\core\src\internal_macros.rs:22:8
+  |
+  = note: `&u32` implements `Add<u32>`
+ ::: /rustc/b940084d7eb6a299eb4bfeb8e34901bc051e7ac4/library\core\src\internal_macros.rs:33:8
+  |
+  = note: `u32` implements `Add<&u32>`
+ ::: /rustc/b940084d7eb6a299eb4bfeb8e34901bc051e7ac4/library\core\src\internal_macros.rs:44:8
+  |
+  = note: `&u32` implements `Add`
+  = note: this error originates in the macro `add_impl` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+For more information about this error, try `rustc --explain E0277`.
+error: could not compile `demo` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `demo` (lib test) due to 1 previous error
