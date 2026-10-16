@@ -259,26 +259,31 @@ produced by a mission, missions with more than one task.
 ## Known incoherences
 
 Found by the 2026-10-16 audit and not fixed yet. Touching one of these parts means fixing it or leaving it as it is,
-never copying it. "Owner" marks a choice of taste or direction that needs the owner first. Delete a line in the commit
-that fixes it. The weekly coherence pass (`testkit/coherence/weekly.md`) proposes new lines and the removal of fixed
-ones.
+never copying it. "Owner" marks a choice of taste or direction that needs the owner first; every item left waits for
+one. Delete a line in the commit that fixes it. The weekly coherence pass (`testkit/coherence/weekly.md`) proposes new
+lines and the removal of fixed ones.
 
 1. Settings on a work screen (C011): the start card is calm now (checks, tools, git mode, self-update trust and Details
-   live in Settings > Projects); the board still carries the run mode, folded under "Run mode, cost and build".
+   live in Settings > Projects); the board still carries the run mode, folded under "Run mode, cost and build". Where it
+   lands is a design choice to make with product-rules.md (Owner).
 2. Mission needs are invisible inside the window: the tray counts mission decisions and blocked missions, but the run
-   button, the running column, the sidebar and the pick-up lists only count conversations.
+   button, the running column, the sidebar and the pick-up lists only count conversations. How missions show there is
+   a design choice (Owner).
 3. A left mission cannot be opened again: no list of a project's missions exists, so New mission asks first on a paused
-   or blocked one.
-4. "If a tool is missing" is never sent to the engine; "Find and install it for me" only shows "not ready yet".
-5. `project_revoke` has no caller: a grant (and self-update trust) can never be withdrawn on screen.
+   or blocked one. Where such a list lives is a design choice (Owner).
+4. "If a tool is missing" is never sent to the engine; "Find and install it for me" only shows "not ready yet". It goes
+   with 1, and the install it promises is roadmap work (Owner).
+5. `project_revoke` has no caller: a grant (and self-update trust) can never be withdrawn on screen. Where the control
+   lives is the owner's call (Owner).
 6. (fixed by R160: a project opens a chat, not a mission start card.)
 7. Chat and Projects differ for the same things: pick-up lists (four of all areas against three of the project), the
    goal box is its own textarea instead of `ui/Composer.tsx`, no model chip in Projects, no "No AI" state in Projects.
+   Which way each one goes is a design choice (Owner).
 8. Model choice in four places: the composer, "Redo with…" and step up under every answer, and the answer's
    right-click Redo (which silently uses the composer's choice). design.md gives the choice to the composer
    only; whether the answer's pickers stay is the owner's call (Owner).
-11. Two ways to remove a row: the sidebar's × and every menu ask first, while Recents' × forgets at once. Whether forgetting
-    a recent entry (it comes back when the folder opens again) needs a confirm is the owner's call (Owner).
+11. Two ways to remove a row: the sidebar's × and every menu ask first, while Recents' × forgets at once. Whether
+    forgetting a recent entry (it comes back when the folder opens again) needs a confirm is the owner's call (Owner).
 12. Money and quota in four vocabularies ("Own cost", "Cost so far", "Faber today … API-equivalent", "… at API prices";
     "Account pace", "Usage limits"); which words stay is the owner's call (Owner). Amounts are written the language's way
     (`money` and `amount` in `ui/i18n.ts`).
@@ -286,18 +291,22 @@ ones.
     Local build card (development channel only); which words tell them apart is the owner's call (Owner).
 14. The same option in two places with different words: the name ("How should Faber call you?" in the first run, "Your
     name" in Settings) and text size (three buttons in the first run saving 13, the theme's own or 16; a slider up to 18
-    in Settings).
+    in Settings). Which words and which range stay is the owner's call (Owner).
 15. First-run answers that cannot change later: "Do you already use AI?" has no control and the tutorial cannot be
-    replayed, yet the first run's footer says everything can be changed in Settings > Appearance.
+    replayed, yet the first run's footer says everything can be changed in Settings > Appearance. Adding the controls or
+    changing the footer is the owner's call (Owner).
 16. The account cards have three entry labels ("Connect a subscription", "Manage accounts" twice) and two names for one
     account ("Codex" on the card, "ChatGPT" in the no-AI text); Skip and Continue save different values nothing reads
-    differently; Close writes `done` even after a Skip.
+    differently; Close writes `done` even after a Skip. Which label stays, and whether Skip should mean something, is
+    the owner's call (Owner).
 17. The chat working folder sits in global Settings but changes only the open, still empty chat; opened from Projects,
-    the row keeps its label and explanation with no control under them.
+    the row keeps its label and explanation with no control under them. Where the folder choice lives is the owner's
+    call (Owner).
 18. The hooks switch is always enabled but acts only in the guarded modes (all but "Full access"); Settings' "Permissions for Chat and
-    Projects" reads as if it governed missions, which run isolated.
+    Projects" reads as if it governed missions, which run isolated. Whether the switch hides or locks, and the words,
+    are the owner's call (Owner).
 19. Settings has no "Learn more" pattern: General shows paragraphs of three to five sentences (product-rules: one short
-    line per option).
+    line per option). The short lines are new words in five languages, so the owner reviews them (Owner).
 
 ## Worked example: adding a setting
 
