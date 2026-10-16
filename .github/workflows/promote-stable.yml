@@ -43,6 +43,23 @@ jobs:
           PREVIEW_TAG: ${{ inputs.preview_tag }}
         run: |
           set -euo pipefail
+          # Runs every suite of ci.yml on a preview tag of the commit and waits for the verdict.
+          full_check() {
+            local tag since id=""
+            tag=$(git tag --points-at "$1" --list "v*-preview.*" | head -n 1)
+            [ -n "$tag" ] || { echo "::error::$1 has no preview tag to check"; return 1; }
+            since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            gh workflow run ci.yml --ref "$tag"
+            for _ in $(seq 60); do
+              sleep 10
+              id=$(gh run list --workflow ci.yml --branch "$tag" --event workflow_dispatch --limit 5 --json databaseId,createdAt \
+                --jq "[.[] | select(.createdAt >= \"$since\")][0].databaseId // empty")
+              [ -z "$id" ] || break
+            done
+            [ -n "$id" ] || { echo "::error::the full check of $tag did not start"; return 1; }
+            echo "Every suite runs on $tag: run $id."
+            gh run watch "$id" --interval 30 --exit-status > /dev/null
+          }
           for attempt in 1 2 3; do
             # The tags are read again on every try: a preview may have been tagged, or the stable pushed by a run before this one.
             git fetch --quiet --tags --force origin
@@ -55,6 +72,9 @@ jobs:
             read -r stable commit <<< "$pick"
             # Only code that landed on phase-1-base (and so passed its CI) becomes stable.
             git merge-base --is-ancestor "$commit" origin/phase-1-base
+            # The queue runs only the suites a change needs, so every suite runs once more on this very commit before it
+            # becomes stable (R165); a failure stops the promotion.
+            if [ "$commit" != "${checked:-}" ]; then full_check "$commit"; checked=$commit; fi
             git tag "$stable" "$commit"
             if git push origin "$stable"; then break; fi
             git tag -d "$stable"
