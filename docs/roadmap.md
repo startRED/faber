@@ -331,7 +331,10 @@ A mission keeps a project as coherent as the agents that build Faber keep Faber 
   each becomes a rule only after the owner's yes.
 - **Sized by risk.** A small change in one area gets the Writer and the checks; a change across areas gets the whole
   chain.
-- **The reviewer** follows guardrail 5: the other vendor when it can, a fresh read-only session otherwise.
+- **The reviewer** follows guardrail 5: the other vendor when it can, a fresh read-only session otherwise. It reviews
+  by the rules of [product-rules.md](product-rules.md) (R147): an empty review is a pass, only a break for a person, for
+  data, for security or for a written rule blocks, a fix needs a failing test or a repro, and each round gets the
+  findings already decided so the loop ends.
 
 ## Following the work
 
@@ -548,6 +551,9 @@ The catalog screens and the catalog step in the first run arrive in Phase 3, wit
 - Updates are never automatic: diff, quarantine, previous version kept.
 - The catalog is maintained by a weekly scout run, community pull requests and CI checks (license, link health,
   activity, smoke test, scan).
+- Proposal, not built (R148): the same weekly scout also looks for new practices on coherence, review and harness
+  quality, judges each against the project's rules, and asks the owner a yes or no before any becomes a rule. It then
+  replaces the owner's own weekly scout that does this for Faber today.
 - A public repository publishes signed static files (no backend): the catalog, a nightly compatibility matrix built
   from recorded sessions against the newest CLI versions (users only move to green versions), a per-provider policy
   switch, and declarative driver descriptors so a CLI format change can be fixed without an app release. If GitHub is

@@ -42,6 +42,17 @@ A reviewer who did not write the change does this from the diff and the map, wit
 failures it must catch: "Redo with…" under every answer is a second model picker beside the composer's; connecting an
 account has three buttons with three names ("Connect a subscription", "Manage accounts" twice).
 
+Every review, of coherence or of code, works the same way, because each round samples again and feels pressed to find
+something (R147):
+
+- "Nothing to report" is a correct, complete answer, and the request says so up front.
+- Blocking means it breaks for a person, loses data, weakens security, or breaks a written rule, decision or card.
+  Everything else is optional and never blocks.
+- A finding is fixed only with a failing test or a concrete repro (`file:line` and steps); without one it is a note.
+- Each round gets the findings already decided (fixed, or dismissed with the reason) and does not raise them again.
+  Where two reviews are required (security), a finding both raise on their own is confirmed; one raised by a single
+  review needs the test or repro above.
+
 ## Taste cards
 
 A card is written when the owner disliked something or a bug passed green tests. Before a change, read the cards whose

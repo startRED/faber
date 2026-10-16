@@ -63,7 +63,8 @@ Read [docs/product-rules.md](docs/product-rules.md) and [docs/product-map.md](do
 - The commit body states the memory and processor cost measured, or why there is none (docs, tests only).
 - Code nobody can check by reading it once gets a review from a fresh session that did not write it: the other vendor
   when it is available, the same vendor in a new read-only session when its quota is poor (R146). Security changes get
-  two. A change a person sees also gets the coherence review of product-rules.md.
+  two. Every review follows the review rules of product-rules.md, and a change a person sees also gets its coherence
+  review.
 
 ## Stack
 
