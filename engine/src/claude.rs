@@ -277,7 +277,9 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
         args.push("--append-system-prompt".into());
         args.push(persona(&PersonaInput { name: launch.user_name.as_deref() }));
     }
-    if let Some(window) = launch.instructions.is_none().then(|| launch.model.as_deref().and_then(autocompact_window)).flatten() {
+    // Side questions keep the CLI default, and an older CLI that does not list the flag would refuse to start with it.
+    let compacts = launch.flags.autocompact && launch.instructions.is_none();
+    if let Some(window) = compacts.then(|| launch.model.as_deref().and_then(autocompact_window)).flatten() {
         args.extend(["--autocompact".into(), window.into()]);
     }
     for (flag, value) in [("--model", &launch.model), ("--effort", &launch.effort), ("--resume", &launch.resume)] {

@@ -45,3 +45,40 @@ check('composer: wrapped text grows to 40vh, scrolls inside and shrinks after se
     root.remove();
   }
 });
+
+check('composer: typed text survives a reload and is forgotten once sent', async () => {
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+  let sent = '';
+  const open = () => {
+    const root = document.createElement('div');
+    root.dataset.motion = 'none';
+    document.body.append(root);
+    let fill!: (text: string) => void;
+    const dispose = render(() => createComponent(Composer, {
+      draftKey: 'check-reload', vendors: ['codex'], options: [], choice: { vendor: 'auto' }, busy: false, placeholder: 'Ask',
+      onChoice: () => {}, onStop: () => {}, onWarm: () => {}, onPause: () => {},
+      onSend: (draft) => { sent = draft.text; }, onReady: (ready) => { fill = ready; },
+    }), root);
+    return { root, fill, close: () => (dispose(), root.remove()) };
+  };
+  try {
+    const first = open();
+    await settle();
+    first.fill('an unsent thought');
+    await settle();
+    first.close(); // the window goes away, as it does for an update
+    const second = open();
+    await settle();
+    equal(second.root.querySelector('textarea')!.value, 'an unsent thought', 'the text is back after the reload');
+    second.root.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    equal(sent, 'an unsent thought');
+    second.close();
+    const third = open();
+    await settle();
+    equal(third.root.querySelector('textarea')!.value, '', 'a sent message is not restored');
+    third.close();
+  } finally {
+    localStorage.removeItem('faber.unsent.check-reload');
+  }
+});

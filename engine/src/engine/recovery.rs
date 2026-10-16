@@ -543,11 +543,17 @@ mod tests {
                     steering: vec![],
                 },
             );
+            c.refresh_running();
+            assert_eq!(c.running.items.len(), 1, "the control: the turn is on the running list before it fails");
             let message = "Codex thread failed: no rollout found for thread id x".to_string();
             c.handle(&id, 1, EngineEvent::Error { message, fatal: true });
-            c.convs[&id].messages[1].clone()
+            (c.convs[&id].messages[1].clone(), c.running.items.len())
         });
+        let (reply, still_running) = reply;
         let spawns = *spawned.lock().unwrap();
+        // A turn that failed without starting another process must have left the running list, or `Engine::is_working` stays
+        // true and no update ever installs. (A replay is a turn that is genuinely running again.)
+        assert!(spawns > 0 || still_running == 0, "a failed turn stays on the running list");
         (reply, spawns)
     }
 

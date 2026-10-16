@@ -780,7 +780,7 @@ impl Engine {
     /// Whether any answer is streaming or waits for the user: the running list is not empty. The shell uses it to hold back
     /// anything that would end the process (installing an update).
     pub fn is_working(&self) -> bool {
-        self.with(|c| !c.running.items.is_empty())
+        self.with(|c| !c.running.items.is_empty() || c.mission_sessions.values().any(|s| !s.is_empty()))
     }
     pub fn shutdown(&self) {
         self.with(|c| {

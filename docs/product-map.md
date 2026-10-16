@@ -68,6 +68,7 @@ replaces the shell; otherwise the shell shows the sidebar, the topbar, the work 
 | Settings | Ctrl+,, the sidebar button, a quota line (opens Usage limits), "Details in Settings" | Five sections (below); Back or Esc | `ui/Settings.tsx`, `ui/Appearance.tsx`, `ui/draft.ts` |
 | Right-click menus | Right-click, the Menu key or Shift+F10 | Per target, below | `ui/ContextMenu.tsx`, `ui/contextmenu.ts` |
 | Save-error toast | A save fails | Read and dismiss | `ui/App.tsx` |
+| What's new | First start after an update | One calm page of the release's notes; Continue or Esc closes it | `ui/WhatsNew.tsx`, `ui/notes.ts` |
 | Tray | Always, outside the window | Open or Quit; a number while something needs the person; one notification per question, mission decision or held-back request, unless notifications are off | `src-tauri/src/tray.rs`, `src-tauri/src/tray/` |
 | Outside windows | The person's own action | Native pickers (project folder, chat folder, theme file, save a file); the file manager ("Open folder", "Show"); a visible console ("Open in terminal", "Sign in") | `src-tauri/src/main.rs`, `src-tauri/src/terminal.rs` |
 
@@ -170,12 +171,14 @@ The data folder is `%APPDATA%\Faber` (or `FABER_DATA_DIR`). JSON files are writt
 | `budget.json` | The quota ledger (readings, learned weekly shape, own spend, typed plan) and the mission budget; a damaged copy is set aside as `budget.json.quarantine` | The engine |
 | The development root | Slots, manifest, canary and rollback records of the local build | `src-tauri/src/local_update.rs` |
 | `seen_decisions.json` | Mission notices already shown, so a restart does not repeat them | The tray |
+| `notes-seen` | The last "what's new" entry the person has seen, so it shows once per update | `save_notes_seen` in the shell |
 | `cache-health.jsonl` | A local log of cache misses, never sent anywhere | The engine |
 | `chat/<id>/`, `attachments/<id>/` | A chat's private folder; a project conversation's attachments | The engine |
 | Browser storage `faber.place` | The last area, project and conversation | `ui/App.tsx` |
 | Browser storage `faber.choice.<conversationId>` | The model and effort picked for a conversation (the conversation file keeps a copy) | `ui/App.tsx` |
 | Browser storage `faber.project.goal.<projectId>` | The goal being typed on a start card | `ui/projects.ts` |
 | Browser storage `faber.project.mission.<projectId>` | The mission shown on a project's board | `ui/projects.ts` |
+| Browser storage `faber.unsent.<field>` | Text typed and not sent, so an update restart or a crash loses nothing | `ui/unsent.ts` |
 | Outside Faber's folders | The Windows Run key (autostart); CLIs installed in `~/.local/bin` and added to the user PATH | `src-tauri/src/autostart.rs`, `engine/src/install.rs` |
 
 Environment variables are for tests and development: `FABER_DATA_DIR` (also turns off single instance, the updater and
@@ -197,6 +200,7 @@ sentences; `open_link`'s English error and the raw system errors some commands p
 | Settings and looks | `save_settings`, `preview_look`, `save_theme`, `open_theme`, `set_shell_texts` |
 | Projects and folders | `add_project`, `remove_project`, `show_project`, `recents`, `open_folders`, `forget_recent`, `save_environment`, `forget_environment`, `start_environment` |
 | Missions | `project_enroll`, `project_grant`, `project_revoke` (no caller on screen yet), `project_proof`, `project_proof_confirm`, `mission_start`, `mission_state`, `mission_mode`, `mission_stop`, `mission_resume`, `mission_answer`, `local_update_state` |
+| Updates | `update_status`, `update_restart` (the "Update ready, restart" button), `input_seen` (first typing, paste or drop), `draft_dirty` (a field holds an unsent draft), `notes_seen`, `save_notes_seen` |
 | Accounts | `setup_check`, `setup_install`, `setup_sign_in` |
 
 Events: `faber:event` carries `message`, `queue`, `quota`, `usage`, `running`, `list` and the account cards' `setup`
@@ -218,7 +222,7 @@ checks in `tests/ui/index.ts`, real-app scenarios in `testkit/src/screen/mod.rs`
 | Permissions, cards, held-back requests | Done (five modes, R140) | `testkit/src/screen/permissions.rs`; `engine/tests/project_security.rs`; `tests/ui/thread.check.ts` |
 | Running column, tray, notifications | Done | `tests/ui/running.check.ts`; tests inside `src-tauri/src/tray/decide.rs` |
 | Keep awake, start with Windows | Done on Windows | tests inside `src-tauri/src/awake.rs`, `autostart.rs` |
-| Public self-update | Done: checks at start and every 6 h; installs on quit or, on Windows, at the first moment no conversation or CLI install runs and the window is hidden (a running mission does not hold it back, incoherence 29) (R141, install when it opens, is not built here yet) | tests inside `src-tauri/src/update.rs` |
+| Public self-update | Done: checks at start and every 6 h; installs on quit or, on Windows, at the first moment no conversation or CLI install runs and the window is hidden (a running mission does not hold it back, incoherence 29) (R141: it also installs at start, before the first input and with no unsent draft; "What's new" shows once after) | tests inside `src-tauri/src/update.rs` |
 | First run, account cards, tutorial | Done | `tests/ui/setup.check.ts`, `tutorial.check.ts`; `testkit/src/screen/setup.rs`, `first_run.rs` |
 | Settings, looks, theme files | Done | `tests/ui/settings.check.ts`, `appearance.check.ts`; `testkit/src/screen/settings.rs` |
 | Five languages | Done; part of de, es, fr and pt-BR still awaits a native speaker's review | `tests/ui/i18n.check.ts`, `mojibake.check.ts` |
@@ -228,7 +232,7 @@ checks in `tests/ui/index.ts`, real-app scenarios in `testkit/src/screen/mod.rs`
 | Missions | v0 (see Words) | `engine/tests/project_*.rs`; `tests/fixtures/projects/`; `tests/ui/projects.check.ts`; `testkit/src/screen/coordinator.rs`, `projects.rs`, `projects_ui.rs` |
 | Local build (development channel) | Done, developer only | `engine/tests/local_update.rs`, `src-tauri/tests/local_update.rs`, `testkit/src/screen/local_update.rs` |
 | UX sentinel and memory budget | Done | `testkit/src/sentinel.rs`, `testkit/src/screen/app.rs` (400 MB) |
-| This map | Done | `engine/tests/product_map.rs` |
+| This map | Done | `engine/tests/product_map.rs`; the trap tasks and the weekly coherence pass in `testkit/coherence/` (R151) |
 
 Not built yet, so nothing may assume it: the catalog and live manifest, the toolbox, Livre, snapshots and undo, visual
 answers, the benchmark, asking Faber about Faber, full-text search, moving a chat to a project, the what's-new screen
@@ -239,7 +243,8 @@ produced by a mission, missions with more than one task.
 
 Found by the 2026-10-16 audit and not fixed yet. Touching one of these parts means fixing it or leaving it as it is,
 never copying it. "Owner" marks a choice of taste or direction that needs the owner first. Delete a line in the commit
-that fixes it.
+that fixes it. The weekly coherence pass (`testkit/coherence/weekly.md`) proposes new lines and the removal of fixed
+ones.
 
 1. Settings on a work screen (C011): the Projects start card carries the checks list, "If a tool is missing", a git mode
    with one option and the self-update switch, plus a technical Details block; the board carries the run mode. The owner

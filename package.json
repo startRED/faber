@@ -22,6 +22,7 @@
     "dist": "tauri build",
     "lint": "oxlint ui tests/ui",
     "typecheck": "tsc --noEmit",
+    "test:scripts": "node --test scripts/release-notes.test.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

@@ -12,6 +12,7 @@ import {
   type RunningItem,
   type Settings as Saved,
   type Summary,
+  type UpdateStatus,
   type Vendor,
 } from './api.ts';
 import { inOrder, refreshed, saveAndApply, watchSystem } from './appearance.ts';
@@ -22,6 +23,7 @@ import { Icon, VendorMark } from './Glyphs.tsx';
 import { failureText, lang, t, templates, useLanguage } from './i18n.ts';
 import { createWidth } from './layout.ts';
 import { Lockup, Peek } from './Mark.tsx';
+import { isFirstInstall, newestId, NOTES, type Note, whatsNew } from './notes.ts';
 import { Recents } from './Recents.tsx';
 import { modelOptions, prettyModel } from './models.ts';
 import { animateDetails, animateList, watchMotion } from './motion.ts';
@@ -38,6 +40,7 @@ import { Thread } from './Thread.tsx';
 import { tutorialDue } from './tour.ts';
 import { Tutorial } from './Tutorial.tsx';
 import { Welcome } from './Welcome.tsx';
+import { WhatsNew } from './WhatsNew.tsx';
 import { mac, WindowControls } from './WindowControls.tsx';
 
 // Small per-window conveniences; storage can be missing, and the app works without it.
@@ -117,6 +120,10 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   );
   // The tutorial ended in this window, whether or not the save of `tutorialDone` worked.
   const [tourEnded, setTourEnded] = createSignal(false);
+  // "What's new": the entries newer than the last one seen, read once at start. A first install stores the newest and shows none.
+  const [notes, setNotes] = createSignal<Note[]>([]);
+  // The shell's view of the update: a download at open shows a calm line, a kept update a control that restarts at once.
+  const [update, setUpdate] = createSignal<UpdateStatus>('none');
   // The choices of step 2 while the person is back at step 1, so going back and forward loses nothing.
   const [kept, setKept] = createSignal<{ appearance: Appearance; experience?: Experience; name: string }>();
   const [from, setFrom] = createSignal(0);
@@ -298,6 +305,27 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   };
 
   onMount(() => {
+    const firstInstall = isFirstInstall(props.initial.settings, props.initial.conversations);
+    void api.notesSeen().then(
+      (seen) => {
+        const due = whatsNew(NOTES, seen, firstInstall);
+        if (due.remember !== undefined) void api.saveNotesSeen(due.remember).catch(() => {});
+        setNotes(due.show);
+      },
+      () => {},
+    );
+    void api.updateStatus().then(setUpdate, () => {});
+    const unlistenUpdate = api.onUpdate(setUpdate).catch(() => () => {});
+    onCleanup(() => void unlistenUpdate.then((stop) => stop()));
+    // The first typing, paste or drop of the session tells the shell a draft may exist only here, so an update at open waits.
+    const told = () => {
+      for (const type of ['input', 'paste', 'drop']) window.removeEventListener(type, told, true);
+      void api.inputSeen().catch(() => {});
+    };
+    for (const type of ['input', 'paste', 'drop']) window.addEventListener(type, told, true);
+    onCleanup(() => {
+      for (const type of ['input', 'paste', 'drop']) window.removeEventListener(type, told, true);
+    });
     if (saved?.id && props.initial.conversations.some((c) => c.id === saved.id)) void go({ ...saved, area: saved.area ?? 'chat' });
     const stopFollowing = watchSystem();
     // The restored conversation is already opening (`go` above), so what the inbox held since the page started is kept for
@@ -578,6 +606,13 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
     const back = was?.isConnected ? was : document.querySelector<HTMLElement>('.composer textarea');
     back?.focus();
   };
+  // The screen of what changed comes before anything else, once the first run and the tutorial are not in the way.
+  const notesOpen = () => notes().length > 0 && !step() && !tourOpen();
+  const closeNotes = () => {
+    void api.saveNotesSeen(newestId(notes())).catch(() => {});
+    setNotes([]);
+  };
+  const restartForUpdate = () => void api.updateRestart().catch((err) => setSaveError(failureText(err)));
   const composerKey = () => place().id ?? `new-${area()}-${projectId() ?? ''}`;
   const title = () => state().conversations.find((c) => c.id === place().id)?.title ?? current()?.title;
   // The model the open conversation is answering with now, else the one the next message will go to.
@@ -587,6 +622,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   const composer = createMemo(() => (
     <Show when={composerKey()} keyed>
       <Composer
+        draftKey={composerKey()}
         vendors={state().vendors}
         options={options()}
         choice={picked()}
@@ -729,7 +765,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
             class="shell"
             data-screen={`${area() === 'chat' ? 'chat' : 'project'}.${newChat() ? 'new' : 'thread'}`}
             classList={{ docked: columnOpen() && docked() }}
-            inert={tourOpen()}
+            inert={tourOpen() || notesOpen()}
             ref={animateList}
           >
             <aside
@@ -748,6 +784,9 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
                 projects={state().projects}
                 vendors={state().vendors}
                 version={state().version}
+                update={update()}
+                updateBlocked={items().length > 0}
+                onRestart={restartForUpdate}
                 userName={state().settings.userName}
                 place={place()}
                 running={items()}
@@ -944,6 +983,9 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
       </Show>
       <Show when={tourOpen()}>
         <Tutorial experience={state().settings.experience} onEnd={endTour} />
+      </Show>
+      <Show when={notesOpen()}>
+        <WhatsNew version={state().version} notes={notes()} onClose={closeNotes} />
       </Show>
     </div>
   );

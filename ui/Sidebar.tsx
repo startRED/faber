@@ -1,5 +1,5 @@
 import { createEffect, createSignal, For, on, Show } from 'solid-js';
-import { api, type Area, type Project, type RunningItem, type Summary, type Vendor, type VendorUsage } from './api.ts';
+import { api, type Area, type Project, type RunningItem, type Summary, type UpdateStatus, type Vendor, type VendorUsage } from './api.ts';
 import { openMenu } from './contextmenu.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { lang, t } from './i18n.ts';
@@ -63,6 +63,11 @@ interface Props {
   projects: Project[];
   vendors: Vendor[];
   version: string;
+  /** The shell's view of the update (`update.rs`): a download at open, or one kept for a restart. */
+  update?: UpdateStatus;
+  /** An answer is running, so the restart waits. */
+  updateBlocked?: boolean;
+  onRestart?: () => void;
   /** The name the person gave, shown above the connected accounts. */
   userName?: string;
   place: Place;
@@ -310,6 +315,23 @@ export function Sidebar(props: Props) {
             <span class="note">{t('side.noAi')}</span>
           </Show>
         </div>
+        {/* The update: a calm line while one downloads at open, a quiet control once one waits for a restart. */}
+        <Show when={props.update === 'downloading'}>
+          <div class="upd" role="status">
+            {t('update.downloading')}
+          </div>
+        </Show>
+        <Show when={props.update === 'ready'}>
+          <button
+            type="button"
+            class="upd act"
+            disabled={props.updateBlocked}
+            title={props.updateBlocked ? t('update.busyHint') : t('update.readyHint')}
+            onClick={() => props.onRestart?.()}
+          >
+            {t('update.ready')}
+          </button>
+        </Show>
         <div class="version num" lang={lang()}>
           v{props.version}
         </div>
