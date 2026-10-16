@@ -279,7 +279,8 @@ fn names_while_streaming(ctx: &mut Ctx, vendor: &str, first_words: &str, name: &
     // With two vendors Auto first waits for its router (the recorded CLI never answers it, so the wait runs to the end of
     // the 30 s allowed) and the header says only that; with one vendor there is nothing to choose.
     let choosing = if vendor == "claude" {
-        page.wait_for("the header of the answer", "!!document.querySelector('article.ai .model')")?;
+        // The header is placed a frame before its words are; reading it at once saw "".
+        page.wait_for("the header of the answer", "!!document.querySelector('article.ai .model')?.innerText.trim()")?;
         let header = page.eval(HEADER_ALL)?;
         let reason = page.text_of("reason.routing")?;
         let text = header["text"].as_str().unwrap_or_default().split_whitespace().collect::<Vec<_>>().join(" ");

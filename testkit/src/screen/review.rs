@@ -171,9 +171,13 @@ fn natural_motion(ctx: &mut Ctx) -> Result {
             .collect();
         ctx.notes.push(format!("natural toggle: {} frames, {travel:.1}px travel", frames.len()));
         ensure(travel > 300.0 && intermediate.len() >= 4, || format!("no continuous width motion: {samples}"))?;
-        ensure(intermediate.last().unwrap()[0].as_f64().unwrap() - intermediate[0][0].as_f64().unwrap() >= 120.0, || {
-            "motion has less than 120ms of intermediate frames".into()
-        })?;
+        // How long the width took to travel: from the last frame still at the start to the first one at the end. A jump
+        // makes this one frame; a frame a busy runner drops at either end no longer shortens it, as timing the first and
+        // last in-between frames did.
+        let at = |f: &serde_json::Value| f[0].as_f64().unwrap();
+        let left = frames.iter().rev().find(|f| (f[1].as_f64().unwrap() - first).abs() <= 0.01).map(at).unwrap();
+        let arrived = frames.iter().find(|f| (f[1].as_f64().unwrap() - last).abs() <= 0.01).map(at).unwrap();
+        ensure(arrived - left >= 120.0, || format!("the width travelled in less than 120 ms: {samples}"))?;
         ensure(frames.iter().all(|f| (f[2].as_f64().unwrap() - glyph).abs() < 0.1), || {
             format!("text is horizontally stretched: {samples}")
         })?;
