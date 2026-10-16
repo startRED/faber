@@ -1,6 +1,7 @@
 //! A process created with `CREATE_SUSPENDED` runs nothing until its main thread is resumed. Faber creates every CLI that way,
 //! puts it in its job object, and only then resumes it, so nothing the CLI starts can ever be outside the job. Neither std nor
-//! tokio gives the thread handle, so the thread is found through a toolhelp snapshot. Asking whether a process has ended is the other call. This is the only unsafe code in Faber.
+//! tokio gives the thread handle, so the thread is found through a toolhelp snapshot. Asking whether a process has ended is the other call. With three Windows API files of the shell (awake, autostart,
+//! tray), this is the only unsafe code in Faber.
 //!
 //! While a process is still suspended, two more calls act on it: lowering its token to Low integrity (a proof of code a
 //! role wrote may then write only into folders labelled Low, `label_low`) and reading which file its image came from.
