@@ -14,12 +14,14 @@
 //   node scripts/channel.mjs next-preview                prints the tag the next preview takes (reads git tags)
 //   node scripts/channel.mjs notes-base <tag>            prints the tag whose "what's new" entries the release notes start after
 //   node scripts/channel.mjs promotion [<preview-tag>]   prints the stable tag to push and the commit; exits 3 when none is due
+//                                                        (reads the releases with `gh`, or the file named by FABER_CHANNEL_RELEASES)
 //   node scripts/channel.mjs user-facing <from> <to>     exits 3 unless a feat, fix or perf touching what ships landed in from..to
 //   node scripts/channel.mjs newest <tag>...             prints the tag whose build is the newest of those given
 //
 // Nothing here goes through a shell: git runs with an argument list, and every tag is checked against TAG before it is used.
 
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 
 const TAG = /^v(\d+)\.(\d+)\.(\d+)(?:-preview\.(\d+))?$/;
 /** Files whose change a person can see; the same list auto-release.yml has always used. */
@@ -71,13 +73,36 @@ export function stableOf(previewTag) {
   return `v${p.major}.${p.minor}.${p.patch}`;
 }
 
+/** The platforms every release's latest.json names; release.yml's preview manifest step checks the same four. */
+export const PLATFORMS = ['darwin-aarch64', 'darwin-x86_64', 'linux-x86_64', 'windows-x86_64'];
+
+/** Whether a latest.json is the one of `tag` and names every platform, which is what a finished build leaves behind. */
+export function completeManifest(manifest, tag) {
+  const platforms = manifest?.platforms;
+  return manifest?.version === tag.slice(1) && !!platforms && typeof platforms === 'object' && PLATFORMS.every((name) => name in platforms);
+}
+
 /**
- * The preview to promote: the newest whose commit is at least a day old (so it has run a day without a newer fix landing
- * over it), or null. `candidates` is `[{ tag, time }]` with the commit time in seconds.
+ * The previews people could have installed, as `[{ tag, time }]` with the time the release was published, in seconds. A
+ * draft, a release with no publish time and anything that is not a preview tag is left out. `rows` is the output of
+ * `gh release list --json tagName,isDraft,publishedAt`.
  */
-export function pickPreview(candidates, now, minAge = DAY) {
-  const old = candidates.filter((c) => now - c.time >= minAge).map((c) => c.tag);
-  return releases(old)[0] ?? null;
+export function publishedPreviews(rows) {
+  return rows
+    .filter((row) => parse(row.tagName ?? '')?.preview != null && row.isDraft !== true)
+    .map((row) => ({ tag: row.tagName, time: Date.parse(row.publishedAt) / 1000 }))
+    .filter((c) => Number.isFinite(c.time));
+}
+
+/**
+ * The preview to promote: the newest one whose release was published at least a day ago and whose manifest is complete, or
+ * null. It need not be the newest preview overall, or frequent fixes would keep a stable from ever coming. The wait counts
+ * from the publish time of the release, not the commit, since a build can finish long after its commit. `complete(tag)` is
+ * asked only for those old enough, newest first.
+ */
+export function pickPreview(candidates, now, minAge = DAY, complete = () => true) {
+  const old = releases(candidates.filter((c) => now - c.time >= minAge).map((c) => c.tag));
+  return old.find((tag) => complete(tag)) ?? null;
 }
 
 /** Whether any commit subject is a feat, fix or perf. */
@@ -89,6 +114,31 @@ export function notesBase(tag, all, nearest) {
   // is new since the build before it, whichever channel that was.
   if (parse(tag).preview === null) return stables(all).find((other) => compare(other, tag) < 0) ?? '';
   return nearest();
+}
+
+function gh(...args) {
+  return execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024 }).trim();
+}
+
+/**
+ * Where the releases come from: GitHub through `gh`, or the JSON file named by FABER_CHANNEL_RELEASES (the tests' stand-in,
+ * rows of `{ tagName, isDraft, publishedAt, manifest }`). `manifest(tag)` is the parsed latest.json, or null when there is none.
+ */
+function releaseSource() {
+  const file = process.env.FABER_CHANNEL_RELEASES;
+  if (file) {
+    const rows = JSON.parse(readFileSync(file, 'utf8'));
+    return { rows, manifest: (tag) => rows.find((row) => row.tagName === tag)?.manifest ?? null };
+  }
+  const rows = JSON.parse(gh('release', 'list', '--exclude-drafts', '--limit', '200', '--json', 'tagName,isDraft,publishedAt'));
+  const manifest = (tag) => {
+    try {
+      return JSON.parse(gh('release', 'download', tag, '--pattern', 'latest.json', '--output', '-'));
+    } catch {
+      return null;
+    }
+  };
+  return { rows, manifest };
 }
 
 function git(...args) {
@@ -152,8 +202,8 @@ function main([command, ...args]) {
       if (chosen && parse(chosen).preview === null) throw new Error(`${chosen} is already a stable tag`);
       if (!chosen) {
         const now = Math.floor(Date.now() / 1000);
-        const candidates = previews(tags()).map((tag) => ({ tag, time: Number(git('log', '-1', '--format=%ct', commitOf(tag))) }));
-        chosen = pickPreview(candidates, now);
+        const source = releaseSource();
+        chosen = pickPreview(publishedPreviews(source.rows), now, DAY, (tag) => completeManifest(source.manifest(tag), tag));
       }
       if (!chosen) return process.exit(3);
       const commit = commitOf(chosen);

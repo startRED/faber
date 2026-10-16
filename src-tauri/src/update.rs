@@ -61,10 +61,13 @@ fn preview_feed(previews: bool) -> Option<tauri::Url> {
     previews.then(|| PREVIEW_FEED.parse().expect("the preview feed is a valid address"))
 }
 
-/// A release is installed only when it is newer than the running version, so turning previews off (the stable manifest is
-/// older than the preview that is running) and a stable built from older code never move Faber back (R156).
-fn is_upgrade(current: &semver::Version, remote: &semver::Version) -> bool {
-    remote > current
+/// A release is installed only when it is newer than the running version (R156). With previews on that is plain version
+/// order. With previews off a running pre-release takes only the next stable line: the weekly stable `X.Y.Z` is rebuilt from
+/// whichever preview was a day old, which can be older than the `X.Y.Z-preview.N` that runs, so the same `X.Y.Z` is not
+/// proof of newer code. Only a strictly greater `X.Y.Z` is. A stable install is never held back by this.
+fn is_upgrade(current: &semver::Version, remote: &semver::Version, previews: bool) -> bool {
+    let same_line = (remote.major, remote.minor, remote.patch) <= (current.major, current.minor, current.patch);
+    remote > current && (previews || current.pre.is_empty() || !same_line)
 }
 
 /// How Faber comes back after an install: with its window, or in the tray.
@@ -543,12 +546,13 @@ impl Live {
 
 impl Release for Live {
     async fn check(&self) -> Result<Option<String>, String> {
+        let previews = self.app.state::<Faber>().engine.settings().previews == Some(true);
         let mut builder = self
             .app
             .updater_builder()
             .installer_args(installer_args(self.reopen, &self.install_dir))
-            .version_comparator(|current, remote| is_upgrade(&current, &remote.version));
-        if let Some(feed) = preview_feed(self.app.state::<Faber>().engine.settings().previews == Some(true)) {
+            .version_comparator(move |current, remote| is_upgrade(&current, &remote.version, previews));
+        if let Some(feed) = preview_feed(previews) {
             builder = builder.endpoints(vec![feed]).map_err(|e| e.to_string()).inspect_err(|e| self.note("check-setup-failed", e))?;
         }
         let updater = builder.build().map_err(|e| e.to_string()).inspect_err(|e| self.note("check-setup-failed", e))?;
@@ -885,16 +889,29 @@ mod tests {
     #[test]
     fn a_release_installs_only_when_it_is_newer_so_nothing_ever_goes_back() {
         // Turned off while running a preview: the stable manifest holds the older stable.
-        assert!(!is_upgrade(&v("0.3.16-preview.2"), &v("0.3.15")), "off never downgrades");
-        // The stable built from the preview that is running, or from an older one, is not an update for it.
-        assert!(!is_upgrade(&v("0.3.16"), &v("0.3.16")));
-        assert!(!is_upgrade(&v("0.3.17-preview.1"), &v("0.3.16")));
-        // Forward moves: the next preview, the stable of the preview that runs, and the next stable.
-        assert!(is_upgrade(&v("0.3.16-preview.1"), &v("0.3.16-preview.2")));
-        assert!(is_upgrade(&v("0.3.16-preview.9"), &v("0.3.16")), "a preview install takes the stable of its version");
-        assert!(is_upgrade(&v("0.3.15"), &v("0.3.16")));
-        assert!(is_upgrade(&v("0.3.15"), &v("0.3.16-preview.1")), "previews on offers the next preview to a stable install");
-        assert!(is_upgrade(&v("0.3.16"), &v("0.3.17-preview.1")));
+        assert!(!is_upgrade(&v("0.3.16-preview.2"), &v("0.3.15"), false), "off never downgrades");
+        assert!(!is_upgrade(&v("0.3.17-preview.1"), &v("0.3.16"), false));
+        assert!(!is_upgrade(&v("0.3.16"), &v("0.3.16"), false));
+        assert!(!is_upgrade(&v("0.3.16"), &v("0.3.16"), true));
+        // Forward moves with previews on: the next preview, the stable of the preview that runs, the next stable.
+        assert!(is_upgrade(&v("0.3.16-preview.1"), &v("0.3.16-preview.2"), true));
+        assert!(is_upgrade(&v("0.3.16-preview.9"), &v("0.3.16"), true), "the preview feed holds the newest build");
+        assert!(is_upgrade(&v("0.3.15"), &v("0.3.16"), true));
+        assert!(is_upgrade(&v("0.3.15"), &v("0.3.16-preview.1"), true), "previews on offers the next preview to a stable install");
+        assert!(is_upgrade(&v("0.3.16"), &v("0.3.17-preview.1"), true));
+        // Previews off: a stable install follows the stable line as ever.
+        assert!(is_upgrade(&v("0.3.15"), &v("0.3.16"), false));
+        assert!(is_upgrade(&v("0.3.16"), &v("0.3.17"), false));
+    }
+
+    #[test]
+    fn previews_off_never_takes_the_stable_of_the_version_that_runs_as_a_preview() {
+        // The stable 0.3.16 may be built from preview.2, so it is not newer code than a running preview.3 (R156).
+        assert!(!is_upgrade(&v("0.3.16-preview.3"), &v("0.3.16"), false), "same X.Y.Z: not proven newer");
+        assert!(!is_upgrade(&v("0.3.16-preview.1"), &v("0.3.16"), false));
+        // Only the next stable line is.
+        assert!(is_upgrade(&v("0.3.16-preview.3"), &v("0.3.17"), false));
+        assert!(is_upgrade(&v("0.3.16-preview.3"), &v("0.4.0"), false));
     }
 
     #[test]

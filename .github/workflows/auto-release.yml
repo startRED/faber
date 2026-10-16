@@ -16,8 +16,10 @@ on:
     types: [completed]
   workflow_dispatch:
 
-# Green runs that finish close together queue here; each one sees the tag the one before it pushed. promote-stable.yml shares
-# the group, so a promotion and a new preview never read the tags at the same time.
+# Green runs that finish close together queue here; each one sees the tag the one before it pushed. promote-stable.yml has its
+# own group on purpose: GitHub keeps one pending run per group and cancels the others, so sharing this one would let a queued
+# preview cancel the pending weekly promotion (and the other way round). The two can then run at the same moment, which the
+# tag step below tolerates: it reads the tags again just before tagging and retries when the push is refused.
 concurrency:
   group: auto-release
 
@@ -51,9 +53,19 @@ jobs:
           if ! node scripts/channel.mjs user-facing "$last" "$sha"; then
             echo "Nothing user-facing since $last."; exit 0
           fi
-          next=$(node scripts/channel.mjs next-preview)
-          git tag "$next" "$sha"
-          git push origin "$next"
+          # A promotion may tag a stable while this runs, which changes the number; a push of a tag that exists is refused, so the
+          # tags are read again and the number worked out once more.
+          for attempt in 1 2 3; do
+            git fetch --quiet --tags --force origin
+            if [ -n "$(git tag --list 'v*' --contains "$sha")" ]; then
+              echo "A tag now covers $sha."; exit 0
+            fi
+            next=$(node scripts/channel.mjs next-preview)
+            git tag "$next" "$sha"
+            if git push origin "$next"; then break; fi
+            git tag -d "$next"
+            [ "$attempt" -lt 3 ]
+          done
           # A tag pushed with this token starts no workflow, so the release is started by hand.
           gh workflow run release.yml --ref "$next"
           echo "Released $next at $sha."

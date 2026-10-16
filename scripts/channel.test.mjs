@@ -7,7 +7,21 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { compare, newest, nextPreview, notesBase, parse, pickPreview, releases, stableOf, stables, userFacing } from './channel.mjs';
+import {
+  PLATFORMS,
+  compare,
+  completeManifest,
+  newest,
+  nextPreview,
+  notesBase,
+  parse,
+  pickPreview,
+  publishedPreviews,
+  releases,
+  stableOf,
+  stables,
+  userFacing,
+} from './channel.mjs';
 
 const conf = JSON.parse(readFileSync(new URL('../src-tauri/tauri.conf.json', import.meta.url), 'utf8'));
 
@@ -72,6 +86,42 @@ test('the promoted preview is the newest one that is a day old, not the newest o
   assert.equal(pickPreview([], now), null);
 });
 
+test('a preview counts from when its release was published, and only with a complete manifest', () => {
+  const now = 1_000_000;
+  const hours = (n) => now - n * 3600;
+  const published = publishedPreviews([
+    { tagName: 'v0.3.16-preview.1', isDraft: false, publishedAt: new Date(hours(50) * 1000).toISOString() },
+    { tagName: 'v0.3.16-preview.2', isDraft: false, publishedAt: new Date(hours(40) * 1000).toISOString() },
+    { tagName: 'v0.3.16-preview.3', isDraft: true, publishedAt: new Date(hours(40) * 1000).toISOString() },
+    { tagName: 'v0.3.16-preview.4', isDraft: false, publishedAt: null },
+    { tagName: 'v0.3.16-preview.5', isDraft: false, publishedAt: new Date(hours(3) * 1000).toISOString() },
+    { tagName: 'v0.3.15', isDraft: false, publishedAt: new Date(hours(300) * 1000).toISOString() },
+    { tagName: 'preview-channel', isDraft: false, publishedAt: new Date(hours(300) * 1000).toISOString() },
+  ]);
+  assert.deepEqual(
+    published.map((c) => c.tag),
+    ['v0.3.16-preview.1', 'v0.3.16-preview.2', 'v0.3.16-preview.5'],
+    'no draft, no release without a publish time, no stable and no manifest release'
+  );
+  assert.equal(pickPreview(published, now), 'v0.3.16-preview.2', 'the newest one published a day ago, not the newest');
+  const incomplete = new Set(['v0.3.16-preview.2']);
+  assert.equal(pickPreview(published, now, 24 * 3600, (tag) => !incomplete.has(tag)), 'v0.3.16-preview.1', 'a failed build is passed over');
+  assert.equal(pickPreview(published, now, 24 * 3600, () => false), null);
+  const asked = [];
+  pickPreview(published, now, 24 * 3600, (tag) => (asked.push(tag), true));
+  assert.deepEqual(asked, ['v0.3.16-preview.2'], 'a manifest is read only for previews that are old enough, newest first, until one fits');
+});
+
+test('a manifest is complete when it belongs to the release and names every platform', () => {
+  const platforms = Object.fromEntries(PLATFORMS.map((name) => [name, { url: 'u', signature: 's' }]));
+  assert.equal(completeManifest({ version: '0.3.16-preview.2', platforms }, 'v0.3.16-preview.2'), true);
+  assert.equal(completeManifest({ version: '0.3.16-preview.1', platforms }, 'v0.3.16-preview.2'), false, 'the manifest of another release');
+  const { 'windows-x86_64': _lost, ...partial } = platforms;
+  assert.equal(completeManifest({ version: '0.3.16-preview.2', platforms: partial }, 'v0.3.16-preview.2'), false, 'a platform is missing');
+  assert.equal(completeManifest({ version: '0.3.16-preview.2' }, 'v0.3.16-preview.2'), false);
+  assert.equal(completeManifest(null, 'v0.3.16-preview.2'), false);
+});
+
 test('only feat, fix and perf commits are changes a person sees', () => {
   assert.equal(userFacing(['docs: x', 'chore: y', 'test(engine): z', 'refactor: w']), false);
   for (const subject of ['feat: a', 'fix(ui): b', 'perf: c', 'feat!: d']) assert.equal(userFacing([subject]), true, subject);
@@ -126,8 +176,23 @@ function repo(steps) {
     execFileSync('git', ['commit', '-q', '-m', subject], { cwd: dir, env: { ...process.env, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date } });
     if (tag) git('tag', tag);
   });
-  const run = (...args) => spawnSync('node', [script, ...args], { cwd: dir, encoding: 'utf8' });
-  return { dir, git, run, stop: () => rmSync(dir, { recursive: true, force: true }) };
+  // The published releases the promotion reads: `[tag, hoursAgoPublished, kind?]`, kind 'draft' or 'partial' for a release that does not count.
+  const feed = join(dir, '.git', 'releases.json');
+  const platforms = Object.fromEntries(PLATFORMS.map((name) => [name, { url: 'u', signature: 's' }]));
+  const publish = (rows) =>
+    writeFileSync(
+      feed,
+      JSON.stringify(
+        rows.map(([tag, hours, kind]) => ({
+          tagName: tag,
+          isDraft: kind === 'draft',
+          publishedAt: new Date(Date.now() - hours * 3600_000).toISOString(),
+          manifest: { version: tag.slice(1), platforms: kind === 'partial' ? { 'linux-x86_64': {} } : platforms },
+        }))
+      )
+    );
+  const run = (...args) => spawnSync('node', [script, ...args], { cwd: dir, encoding: 'utf8', env: { ...process.env, FABER_CHANNEL_RELEASES: feed } });
+  return { dir, git, run, publish, stop: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
 test('the weekly promotion takes the newest preview a day old and tags the stable of its numbers', () => {
@@ -136,6 +201,11 @@ test('the weekly promotion takes the newest preview a day old and tags the stabl
     ['feat: b', 'ui/b.ts', 'v0.3.16-preview.1', 60],
     ['fix: c', 'engine/c.rs', 'v0.3.16-preview.2', 30],
     ['feat: d', 'ui/d.ts', 'v0.3.16-preview.3', 1],
+  ]);
+  r.publish([
+    ['v0.3.16-preview.1', 59],
+    ['v0.3.16-preview.2', 29],
+    ['v0.3.16-preview.3', 0.5],
   ]);
   try {
     const out = r.run('promotion');
@@ -161,6 +231,11 @@ test('the weekly promotion skips when nothing a person sees landed, or nothing i
     ['feat: first', 'ui/a.ts', 'v0.3.15', 300],
     ['feat: new', 'ui/b.ts', 'v0.3.16-preview.1', 2],
   ]);
+  quiet.publish([
+    ['v0.3.16-preview.1', 59],
+    ['v0.3.16-preview.2', 39],
+  ]);
+  fresh.publish([['v0.3.16-preview.1', 1]]);
   try {
     assert.equal(quiet.run('promotion').status, 3);
     assert.equal(fresh.run('promotion').status, 3);
@@ -171,6 +246,34 @@ test('the weekly promotion skips when nothing a person sees landed, or nothing i
   } finally {
     quiet.stop();
     fresh.stop();
+  }
+});
+
+test('the promotion counts from the release, skipping drafts and builds that did not finish', () => {
+  // Both commits are days old, but preview.2 was published two hours ago (a slow build), preview.3 never got a full manifest
+  // and preview.4 is still a draft. Only preview.1 qualifies, so the stable is built from it.
+  const r = repo([
+    ['feat: first', 'ui/a.ts', 'v0.3.15', 300],
+    ['feat: b', 'ui/b.ts', 'v0.3.16-preview.1', 100],
+    ['fix: c', 'engine/c.rs', 'v0.3.16-preview.2', 90],
+    ['fix: d', 'engine/d.rs', 'v0.3.16-preview.3', 80],
+    ['fix: e', 'engine/e.rs', 'v0.3.16-preview.4', 70],
+  ]);
+  r.publish([
+    ['v0.3.16-preview.1', 60],
+    ['v0.3.16-preview.2', 2],
+    ['v0.3.16-preview.3', 50, 'partial'],
+    ['v0.3.16-preview.4', 50, 'draft'],
+  ]);
+  try {
+    const out = r.run('promotion');
+    assert.equal(out.status, 0, out.stderr);
+    assert.equal(out.stdout.trim().split(' ')[1], r.git('rev-parse', 'v0.3.16-preview.1^{commit}').trim());
+    // With nothing eligible there is nothing to do, however old the commits are.
+    r.publish([['v0.3.16-preview.2', 2]]);
+    assert.equal(r.run('promotion').status, 3);
+  } finally {
+    r.stop();
   }
 });
 

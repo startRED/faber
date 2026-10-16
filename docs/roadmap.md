@@ -630,9 +630,10 @@ belongs to them.
   `phase-1-base` and a `feat`, `fix` or `perf` commit that touches the shipped app (`ui/`, `engine/`, `src-tauri/`,
   `package.json`, `vite.config.ts`) landed since the last tag, `auto-release.yml` tags `vX.Y.(Z+1)-preview.N` and starts the
   release as a GitHub pre-release. People who turned on "Receive previews" update to it through the built-in updater, from
-  the fixed `preview-channel` release's `latest.json`. Every Wednesday `promote-stable.yml` rebuilds the newest preview that
-  is a day old as `vX.Y.Z`, the release `/releases/latest` points at, which everyone else reads (it can also be run by hand
-  with a preview tag for an urgent fix). A finished area still gets its minor bump by hand. The tag is the version; the
+  the fixed `preview-channel` release's `latest.json`. Every Wednesday `promote-stable.yml` rebuilds the newest preview
+  published at least a day ago (with a complete manifest) as `vX.Y.Z`, the release `/releases/latest` points at, which
+  everyone else reads (it can also be run by hand with a preview tag for an urgent fix). A finished area still gets its
+  minor bump by hand. The tag is the version; the
   release build writes it into `package.json`. Semver pre-releases are accepted by every bundle (NSIS, DMG, AppImage,
   deb); an MSI would reject them and is not built. Every release carries `SHA256SUMS.txt` and build provenance
   (`gh attestation verify <file> --repo startRED/faber`). `scripts/channel.mjs` holds the rules and its tests run in CI.

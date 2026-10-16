@@ -114,27 +114,20 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_ID: ${{ needs.create.outputs.id }}
 
-  # After the release is public, in both channels: the checksums and build provenance of what was uploaded, then the
-  # preview manifest. Releases that finish together queue here, and the manifest is worked out again from what is
-  # published, so a run that was replaced while it waited loses nothing.
-  finish:
+  # After the release is public, in both channels: the checksums and build provenance of what was uploaded. Every release gets
+  # its own, so this job has no concurrency group: GitHub cancels a pending run when a newer one queues in the same group, and
+  # a release would lose its SHA256SUMS.txt and attestation. Only the preview manifest below is serialized.
+  checksums:
     needs: [create, publish]
     runs-on: ubuntu-latest
     permissions:
       contents: write
       id-token: write
       attestations: write
-    concurrency:
-      group: channel-manifest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
       - name: checksums
         run: |
           set -euo pipefail
@@ -150,9 +143,30 @@ jobs:
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-checksums: SHA256SUMS.txt
-      # The preview manifest is a release with the fixed tag `preview-channel` whose latest.json is the newest build's, of
-      # either channel: a preview install takes a stable too, but never one built from older code than it already runs. Only a
-      # build whose manifest names every platform counts, so a release still being built is passed over.
+
+  # The preview manifest: a release with the fixed tag `preview-channel` whose latest.json is the newest build's. Runs that
+  # finish together queue in one group where GitHub keeps one pending run and replaces the rest. That loses nothing, since
+  # every run works the manifest out again from all the published releases and not from its own tag, so the run that stays
+  # sees the release of a replaced one. A running job is never cancelled.
+  manifest:
+    needs: [create, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: channel-manifest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      # It holds the newest build of either channel: a preview install takes a stable too, but never one built from older code
+      # than it already runs. Only a build whose manifest names every platform counts, so a release still being built is
+      # passed over.
       - name: preview manifest
         run: |
           set -euo pipefail
