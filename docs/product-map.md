@@ -305,8 +305,6 @@ ones.
     prompts; in Rust the idle tray tooltip, a dialog filter and `open_link`'s English error.
 24. Unused locale keys: `answer.thinking`, `set.effects`, `usage.pace`, `projects.title`,
     `projects.empty.selectProject`, `projects.receipt.verified`, `projects.gitMode.equilibrado`.
-28. A project's tail in the sidebar shows the amber bubble with a bare number; design.md says amber always comes with
-    words.
 
 ## Worked example: adding a setting
 

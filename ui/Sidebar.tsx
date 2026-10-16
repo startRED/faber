@@ -240,13 +240,11 @@ export function Sidebar(props: Props) {
                         <Show when={tail().running && tail().needs === 0}>
                           <span class="tail run-dot" role="img" aria-label={t('side.running')} />
                         </Show>
-                        {/* Amber is a bubble and the words; in a row this narrow the words are the label and the tooltip. */}
+                        {/* Amber always comes with its words, as on the run button and in the running column. */}
                         <Show when={tail().needs > 0}>
-                          <span class="tail amber-tag" role="img" aria-label={t('run.needs', { n: tail().needs })} title={t('run.needs', { n: tail().needs })}>
+                          <span class="tail amber-tag">
                             <Icon name="ask" small />
-                            <span class="num" aria-hidden="true">
-                              {tail().needs}
-                            </span>
+                            {t('run.needs', { n: tail().needs })}
                           </span>
                         </Show>
                       </button>

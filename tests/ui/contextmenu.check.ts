@@ -187,6 +187,18 @@ check('right-click: a project offers a new conversation, its folder and removal,
   }
 });
 
+check('sidebar: a project that needs the person says so in words beside the amber mark, never with a bare number', async () => {
+  const root = stage();
+  const dispose = sidebar(root, [], () => [{ ...working('p1'), state: 'needsYou' }]);
+  try {
+    await settle();
+    equal(root.querySelector('.prow .amber-tag')?.textContent, t('run.needs', { n: 1 }));
+  } finally {
+    dispose();
+    root.remove();
+  }
+});
+
 check('right-click: the keyboard opens the menu on a focused row, arrows move, Esc closes and gives focus back', async () => {
   const root = stage();
   const dispose = sidebar(root, []);

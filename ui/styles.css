@@ -96,7 +96,7 @@ input, textarea { caret-color: var(--accent); }
 .prow:hover .plus, .prow:focus-within .plus { opacity: 1; }
 /* What a project says on its own row, at the right: the amber bubble and how many wait, or a square while it runs. */
 .item .tail { flex: none; margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font: 400 calc(var(--fs-ui) - 2px) var(--font-data); color: var(--ink-3); }
-.item .amber-tag.tail { color: var(--amber-ink); font-weight: 500; }
+.item .amber-tag.tail { color: var(--amber-ink); font-family: var(--font-ui); font-weight: 500; }
 .prow:hover .tail, .prow:has(:focus-visible) .tail { opacity: 0; }
 .run-dot { flex: none; width: 7px; height: 7px; border-radius: 1px; background: var(--accent); animation: var(--live-anim); }
 .proj-chats { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; padding-left: 10px; }
