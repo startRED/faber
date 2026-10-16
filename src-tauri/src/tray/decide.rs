@@ -465,7 +465,7 @@ mod tests {
         };
         let mut asking = item("a", "t1", "Choose a direction", &[]);
         asking.state = RunState::NeedsYou;
-        asking.permissions = vec![Permission { request_id: request_id.clone(), tool: tool.clone(), input: input.clone() }];
+        asking.permissions = vec![Permission { request_id: request_id.clone(), tool: tool.clone(), input: input.clone(), epoch: None }];
         assert_eq!(watch.take(1, &[asking.clone()], false).unwrap().notices, ["Choose a direction"]);
         assert!(watch.take(2, &[asking], false).unwrap().notices.is_empty());
         assert!(watch.take(3, &[item("a", "t1", "Working", &[])], false).unwrap().notices.is_empty());
@@ -550,7 +550,10 @@ mod tests {
             state: if requests.is_empty() { RunState::Working } else { RunState::NeedsYou },
             since: 0,
             wait_until: None,
-            permissions: requests.iter().map(|r| Permission { request_id: (*r).into(), tool: "Write".into(), input: json!({}) }).collect(),
+            permissions: requests
+                .iter()
+                .map(|r| Permission { request_id: (*r).into(), tool: "Write".into(), input: json!({}), epoch: None })
+                .collect(),
             parked: vec![],
             parked_more: 0,
         }

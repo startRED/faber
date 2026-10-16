@@ -120,6 +120,10 @@ pub struct Permission {
     pub request_id: String,
     pub tool: String,
     pub input: Value,
+    /// The grants epoch current when the card was made. An "Always allow" on it is remembered only if the epoch is still
+    /// that one when the answer settles. Never shown or saved.
+    #[serde(skip)]
+    pub epoch: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -197,6 +201,9 @@ pub struct Message {
     /// Why the quota changed the model Auto chose, when it did.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pace: Option<PaceNote>,
+    /// The permission mode that really ran this turn, as an i18n key, only when it is not the one chosen (`mode.fallback.auto`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
     /// A plain-language note under the reply (an i18n key): `note.historyResent` when the earlier conversation was sent again as text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
@@ -245,6 +252,7 @@ impl Message {
             pace: None,
             wait_until: None,
             moved_from: None,
+            mode: None,
             note: None,
             recovery: None,
             nudge: None,
@@ -309,6 +317,10 @@ pub struct Conversation {
     /// Tools the user chose to always allow in this conversation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allow_always: Option<Vec<String>>,
+    /// The grants epoch (`Settings::grants_epoch`) that was current when each tool in `allow_always` was allowed. A grant
+    /// stands only while the settings hold that same epoch.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub allow_always_epochs: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch_of: Option<BranchOf>,
     /// What the user asked to be called when this conversation started. Kept here so the CLI gets the same instructions every
@@ -482,6 +494,15 @@ pub struct Settings {
     /// Missing in older settings means commands run without asking in Chat and Projects.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permissions: Option<Permissions>,
+    /// Missing means live (R140).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_search: Option<WebSearch>,
+    /// Codex only; missing means the model's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_summary: Option<ReasoningSummary>,
+    /// Codex only; missing means the model's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verbosity: Option<Verbosity>,
     /// Attention notifications and their chime are both on unless explicitly disabled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notifications: Option<bool>,
@@ -508,6 +529,17 @@ pub struct Settings {
     /// Start Faber when signing in to Windows (off by default: registered in HKCU Run).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub autostart: Option<bool>,
+    /// A random token that every stricter mode replaces, in the same save that changes the mode. A remembered "Always allow"
+    /// stands only if it was made under the current token, wherever it is still stored, so a conversation file that failed to
+    /// update cannot bring it back, and no clock is involved. A grant with no token stands only while the settings have never
+    /// held one. Only the engine sets it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grants_epoch: Option<String>,
+}
+
+/// A fresh grants epoch: 244 random bits as hex.
+pub fn new_epoch() -> String {
+    format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -517,12 +549,22 @@ pub enum Experience {
     Experienced,
 }
 
-/// How a CLI session may act. `Ask` and `FullAccess` are the two choices on screen (R121); `Isolated` exists only inside Faber.
+/// How a CLI session may act. `Ask`, `AcceptEdits`, `Plan`, `Auto` and `FullAccess` are the choices on screen (R121, R140);
+/// `Isolated` exists only inside Faber.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Permissions {
     /// Commands and file changes wait for a card the person answers.
     #[serde(rename = "ask")]
     Ask,
+    /// File edits run, commands ask (R140).
+    #[serde(rename = "acceptEdits")]
+    AcceptEdits,
+    /// Read and plan, no changes (R140).
+    #[serde(rename = "plan")]
+    Plan,
+    /// The CLI's own reviewer approves the safe actions and the rest asks (R140).
+    #[serde(rename = "auto")]
+    Auto,
     /// "Do not ask": no cards, no sandbox around commands, network and the person's own integrations on. Only the CLI
     /// credential folders stay blocked, where the CLI can enforce it. Stored as `dontAsk`.
     #[default]
@@ -533,6 +575,105 @@ pub enum Permissions {
     /// the self-development roles. Never stored, never chosen by the person.
     #[serde(skip)]
     Isolated,
+}
+
+impl Permissions {
+    /// The modes that keep the person in the loop (everything the person can choose except full access): the CLI starts in
+    /// its restricted setup, and the person's hooks stay off unless the switch is on.
+    pub fn guarded(self) -> bool {
+        matches!(self, Permissions::Ask | Permissions::AcceptEdits | Permissions::Plan | Permissions::Auto)
+    }
+
+    /// How far a mode lets the CLI act alone, from loosest to strictest. Moving to a higher number stops the turns in flight.
+    pub fn strictness(self) -> u8 {
+        match self {
+            Permissions::FullAccess => 0,
+            Permissions::Auto => 1,
+            Permissions::AcceptEdits => 2,
+            Permissions::Ask => 3,
+            Permissions::Plan | Permissions::Isolated => 4,
+        }
+    }
+
+    /// The mode Claude Code really runs. A CLI that does not list `auto` in its `--permission-mode` choices gets the nearest
+    /// safer one, accept edits.
+    pub fn for_claude(self, flags: crate::claude::ClaudeFlags) -> Permissions {
+        match self {
+            Permissions::Auto if !flags.auto_mode => Permissions::AcceptEdits,
+            other => other,
+        }
+    }
+
+    /// The locale key of the line that says a mode runs as another one. Only `for_claude` changes a mode, and only Auto.
+    pub fn fallback_note(self, runs: Permissions) -> Option<String> {
+        (self != runs).then(|| "mode.fallback.auto".to_string())
+    }
+}
+
+/// Web search for Chat and the person's own project sessions (R140). Live is the default: the most capable agent.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WebSearch {
+    /// What a launch gets when nobody chose: only the person's saved settings turn the web on (`Settings::tuning`).
+    #[default]
+    Off,
+    /// Codex only; Claude Code has no cache, so it keeps searching and does not fetch pages.
+    Cached,
+    Live,
+}
+
+impl WebSearch {
+    /// How little of the web it lets in: a higher number is stricter, and turning it up stops the turns under way.
+    pub fn strictness(self) -> u8 {
+        match self {
+            WebSearch::Live => 0,
+            WebSearch::Cached => 1,
+            WebSearch::Off => 2,
+        }
+    }
+}
+
+/// Codex's reasoning summary. `Default` leaves the model's own.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ReasoningSummary {
+    #[default]
+    Default,
+    Auto,
+    Concise,
+    Detailed,
+    #[serde(rename = "none")]
+    Hidden,
+}
+
+/// Codex's answer length. `Default` leaves the model's own.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Verbosity {
+    #[default]
+    Default,
+    Low,
+    Medium,
+    High,
+}
+
+/// What a launch takes from the settings besides the mode. Never reaches a project role.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Tuning {
+    pub web: WebSearch,
+    pub summary: ReasoningSummary,
+    pub verbosity: Verbosity,
+}
+
+impl Settings {
+    pub fn tuning(&self) -> Tuning {
+        Tuning {
+            // Live is the default for the person's chat settings (R140); `Tuning::default()` is Off.
+            web: self.web_search.unwrap_or(WebSearch::Live),
+            summary: self.reasoning_summary.unwrap_or_default(),
+            verbosity: self.verbosity.unwrap_or_default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -16,15 +16,15 @@ that changes them updates this page too. Last full audit: 2026-10-16.
 | Projects | The area for git folders. The person gives a goal and Faber runs a mission. Nothing chats directly inside a project any more: the shell refuses it (`error.project.missionRequired`) and older project conversations open read-only. | `ui/Projects.tsx`, `engine/src/project/` |
 | Mission | One goal in one project, done by roles in a separate copy (a git worktree) and landed on Faber's own `faber/…` branch, never on the person's branch. Today (v0): one task, one Writer attempt, no repair loop, a US$2.00 cap. | `engine/src/project/coordinator.rs`, journal in `<project>/.faber/missions/<id>/` |
 | Lead, Writer, Reviewer | The roles of a mission: plans the work; changes the code; reviews the exact result. The Reviewer is always the other vendor. | `engine/src/project/` |
-| Checks | The commands a project declares under a "Proof commands" heading in its AGENTS.md or CLAUDE.md (or a detected default), confirmed by the person before the first mission (R137). Code and specs call them proofs. | `engine/src/project/mission.rs` |
-| Grant | What the person allows in a project: the git mode (Safe, `seguro`: a separate copy only; `equilibrado`, push and draft PR, exists in the engine but is not offered) and self-update trust. | `engine/src/project.rs` |
+| Checks | The commands a project declares under a "Proof commands" heading in its AGENTS.md or CLAUDE.md (or a detected default), confirmed by the person on a sheet when the first mission starts (R137), and read or edited later in Settings > Projects, where Confirm and Save are offered only with the full list and setup on screen (a confirmed list may fold behind "View commands"). Code and specs call them proofs. | `engine/src/project/mission.rs`, `ui/ProjectSettings.tsx`, `ui/Projects.tsx` |
+| Grant | What the person allows in a project: the git mode (Safe, `seguro`: a separate copy only; `equilibrado`, push and draft PR, exists in the engine but is not offered) and self-update trust. Changed in Settings > Projects. | `engine/src/project.rs`, `ui/ProjectSettings.tsx` |
 | Run mode | Normal or Autonomous on a mission. Stored; nothing reads it yet. | `ui/Projects.tsx` |
 | Auto | "AI: choose for me": a small model sorts each message and a fixed table picks the model and effort, paced by how much of each subscription's quota is left. | `engine/src/route.rs`, `engine/src/engine/auto.rs`, `engine/src/budget.rs` |
 | Effort | Low, medium or high for a model the person picked by hand; Auto picks its own. | `ui/Composer.tsx`, `engine/src/router.rs` |
 | Step up | "Try again one step up": the same question as a branch one effort up on the same model, or on the next stronger model of the same vendor when that rung is not available, offered when a check failed or code changed unchecked. | `engine/src/nudge.rs` |
 | Branch | Editing a past message starts a new conversation from that point. | `ui/Thread.tsx` |
 | Queue, steer | A message sent while an answer runs waits in a queue; Codex can take it into the running turn. | `engine/src/engine.rs` |
-| Permissions | "Don't ask" (`dontAsk`, full access, the default) or "Ask before commands" (`ask`), one choice for Chat. Missions run in an isolated mode nobody picks. | `engine/src/model.rs`, `engine/src/permissions.rs` |
+| Permissions | Five modes for Chat: "Ask", "Accept edits", "Plan", "Auto", "Full access" (`dontAsk`, the default). Auto runs as "Accept edits" when the CLI has no auto mode, and the screen says so. Missions run in an isolated mode nobody picks. | `engine/src/model.rs`, `engine/src/permissions.rs` |
 | Permission card, held-back request | A question the CLI asks in Ask mode; a request it denied because nobody could answer, shown and never allowed by itself. | `ui/Ask.tsx`, `engine/src/engine/parked.rs` |
 | Needs you | Amber, always with words: something waits for the person. | run button, running column, sidebar, tray |
 | Running column | The list on the right of everything running, grouped by project. | `ui/Running.tsx`, `ui/running.ts` |
@@ -60,14 +60,16 @@ replaces the shell; otherwise the shell shows the sidebar, the topbar, the work 
 | No AI | No CLI installed | "No AI found", "Connect a subscription" | `ui/App.tsx` (`Empty`) |
 | Chat conversation | A chat is open | Messages; work log; permission, held-back and quota cards; file cards (preview, save, show); answer actions (copy, step up, "Redo with…", open in terminal, cost, cache warm); one status line with "Details in Settings"; the composer below | `ui/Thread.tsx`, `ui/Ask.tsx`, `ui/QuotaCard.tsx`, `ui/worklog.ts` |
 | Composer | Chat only | Text, paste or drop files, attach, model, effort (manual model only), Stop, Send; warms the CLI on the first key and lets Auto route the draft | `ui/Composer.tsx`, `ui/models.ts`, `ui/composer-size.ts` |
-| Projects: open a project | Projects area, no project selected | "Add project folder", Recents and environments, pick up (three project conversations), other projects | `ui/Projects.tsx`, `ui/Recents.tsx` |
-| Projects: start card | A project, no mission selected | Goal box (Enter starts a mission); checks to confirm or edit; tool presence; git mode; self-update trust; Details (folder, base, author); side column with the project, pick up and other projects; black hole | `ui/Projects.tsx`, `ui/projects.ts`, `ui/Hole.tsx` |
+| Projects: open a project | Projects area, no project selected | "Add project folder", Recents and environments, pick up (three project conversations) | `ui/Projects.tsx`, `ui/Recents.tsx` |
+| Projects: start card | A project, no mission selected | One column: the project and its folder, greeting, goal box with one status line beside Start (Enter starts a mission), black hole behind, up to three conversations to pick up. No side columns and no list of other projects (the sidebar lists them). Checks, tools, git mode, self-update trust and Details moved to Settings > Projects | `ui/Projects.tsx`, `ui/projects.ts`, `ui/Hole.tsx` |
+| Projects: checks sheet | First mission start in a project | A compact panel with the check count and source and every command (and the setup that runs first) listed in full, never collapsed, a long list scrolling inside it; Confirm and start, or Not now. Confirming sends exactly the list and declaration shown, and the engine refuses it if the project changed them meanwhile; the panel then shows the new list. A refused start on changed checks reopens it. Asked once per list | `ui/Projects.tsx` |
 | Projects: mission board | A mission selected (remembered per project) | Run mode; Stop, Resume; progress line; report when done; needs-you and decision cards; tasks in Ready, Running, Review, Done, Blocked; own cost against the cap and account pace; local build | `ui/Projects.tsx`, `ui/LocalBuild.tsx` |
 | Past project conversation | Opened from the sidebar or a pick-up list | Read only: no composer | `ui/Thread.tsx` |
 | Running column | Run button, Ctrl+., or by itself 1.5 s after typing stops | Running conversations by project with their state in words; permission and held-back cards; open a conversation | `ui/Running.tsx`, `ui/running.ts` |
-| Settings | Ctrl+,, the sidebar button, a quota line (opens Usage limits), "Details in Settings" | Five sections (below); Back or Esc | `ui/Settings.tsx`, `ui/Appearance.tsx`, `ui/draft.ts` |
+| Settings | Ctrl+,, the sidebar button, a quota line (opens Usage limits), "Details in Settings" | Six sections (below); Back or Esc | `ui/Settings.tsx`, `ui/ProjectSettings.tsx`, `ui/Appearance.tsx`, `ui/draft.ts` |
 | Right-click menus | Right-click, the Menu key or Shift+F10 | Per target, below | `ui/ContextMenu.tsx`, `ui/contextmenu.ts` |
 | Save-error toast | A save fails | Read and dismiss | `ui/App.tsx` |
+| Update opening screen | A window that opens while Faber looks for, downloads or installs an update (R157) | The mark, "Looking for an update…", then "Downloading update… 42%" (megabytes when the size is unknown) with a thin bar, then "Installing…"; nothing to press, the window's buttons stay in reach. The sidebar shows the same words as a quiet line when the window opens in the middle of a download or an install | `ui/UpdateStage.tsx` |
 | What's new | First start after an update | One calm page of the release's notes; Continue or Esc closes it | `ui/WhatsNew.tsx`, `ui/notes.ts` |
 | Tray | Always, outside the window | Open or Quit; a number while something needs the person; one notification per question, mission decision or held-back request, unless notifications are off | `src-tauri/src/tray.rs`, `src-tauri/src/tray/` |
 | Outside windows | The person's own action | Native pickers (project folder, chat folder, theme file, save a file); the file manager ("Open folder", "Show"); a visible console ("Open in terminal", "Sign in") | `src-tauri/src/main.rs`, `src-tauri/src/terminal.rs` |
@@ -103,17 +105,19 @@ adds a line. Browser keys (F5, F7, Ctrl+R, P, S, U) do nothing.
 | First chat | Lands on the Chat home | Nothing |
 | Tutorial | Only once an AI is signed in | `tutorialDone: true` on finish or skip |
 
-Left at their defaults, changeable later in Settings: language, permissions, hooks, notifications, keep awake, autostart.
-A project's grant and checks are asked on its start card before its first mission, not in the first run.
+Left at their defaults, changeable later in Settings: language, permissions, web search, hooks, notifications, keep awake, autostart.
+A project's checks are confirmed on a sheet when its first mission starts, not in the first run; its grant lives in Settings > Projects.
 
 ## Settings screen
 
-Five sections, in this order. Nothing else is a Settings section.
+Six sections, in this order. Nothing else is a Settings section.
 
-- **General**: Language (follow the system, or one of five); Your name; Your CLI hooks (only acts under "Ask before
-  commands"); Permissions for Chat and Projects ("Don't ask", "Ask before commands"); Chat working folder (with Recents;
+- **General**: Language (follow the system, or one of five); Your name; Your CLI hooks (only acts in the guarded modes, not "Full access");
+  Permissions for Chat and Projects (five modes, "Full access" by default), Web search; reasoning summary and answer length (Codex only); Chat working folder (with Recents;
   acts on the open chat while it has no message; its controls only appear when Settings was opened from Chat); Notifications
   (Notify me, Play a sound); System, Windows only (keep the computer awake while Faber works, start with Windows).
+- **Projects**: per project, closed until opened: checks (confirm, edit, view), "If a tool is missing" (continue without),
+  git mode, self-update trust (switch); folder, base and author under More. Applies to that project only.
 - **Appearance**: a draft with a live preview, applied only by "Use this look": six looks, accent (five swatches, any
   colour, hex), background, text font, heading font, text size, spacing, corners, motion, the fixed-meaning colours
   (read only), save or open a theme file; in the preview, contrast readings and three effect switches; Back to default.
@@ -142,8 +146,12 @@ choice a person makes anywhere else (a work screen, a banner) is an incoherence.
 | `appearance` | A look: `base`, `accent`, `ground`, `textFont`, `headingFont`, `textSize`, `density`, `corners`, `motion`, `effects`, `colors` (Dark Room) | Settings > Appearance; the first run (`base`, `textSize`, `density`, `motion`); `colors` only arrives in a theme file opened there | `src-tauri/src/look.rs`, then the screen |
 | `language` | `""` follows the system, `en`, `pt-BR`, `es`, `fr`, `de` (none: the system) | Settings > General | `ui/i18n.ts`; the tray through `set_shell_texts` |
 | `userName` | Up to 40 characters (none) | Settings > General; the first run | Greeting, sidebar footer, and both CLIs (copied into each new conversation) |
-| `permissions` | `dontAsk`, `ask` (`dontAsk`) | Settings > General | The engine at every turn; the status line in a conversation |
-| `userHooks` | true, false (false) | Settings > General | The engine; acts only with `ask` |
+| `permissions` | `ask`, `acceptEdits`, `plan`, `auto`, `dontAsk` (`dontAsk`) | Settings > General; the composer chip in Chat | The engine at every turn; the status line in a conversation |
+| `webSearch` | `off`, `cached` (Codex only), `live` (`live`) | Settings > General | The engine at every turn, for Chat and the person's own project sessions |
+| `reasoningSummary` | `default`, `auto`, `concise`, `detailed`, `none` (`default`: the model's own) | Settings > General (Codex only) | The engine at every Codex turn |
+| `verbosity` | `default`, `low`, `medium`, `high` (`default`: the model's own) | Settings > General (Codex only) | The engine at every Codex turn |
+| `grantsEpoch` | A random token (none). Internal state: a person never sets it | None; only the engine writes it, when a stricter mode replaces the old one | The engine, to drop an "Always allow" made under a looser mode |
+| `userHooks` | true, false (false) | Settings > General | The engine; acts only in the guarded modes (not "Full access") |
 | `notifications` | true, false (true) | Settings > General | The tray |
 | `notificationSound` | true, false (true) | Settings > General | The tray |
 | `keepAwake` | true, false (true) | Settings > General (System) | `src-tauri/src/awake.rs` |
@@ -159,7 +167,7 @@ The data folder is `%APPDATA%\Faber` (or `FABER_DATA_DIR`). JSON files are writt
 | Where | What | Written by |
 | :--- | :--- | :--- |
 | `conversations/<id>.json` | One conversation: messages, `choice` (model and effort), `workingFolder`, `allowAlways` (tools always allowed in it), the copied `userName`, CLI sessions, queued messages, a waiting quota recovery | The engine |
-| `projects.json` | Projects: id, name, path, git identity (`repo`), `grant`, the confirmed checks (`extra.proof`) | Add, open or remove a project; the start card |
+| `projects.json` | Projects: id, name, path, git identity (`repo`), `grant`, the confirmed checks (`extra.proof`) | Add, open or remove a project; Settings > Projects; the checks sheet |
 | `<project>/.faber/missions/<id>/` and `missions/<id>/` | A mission's journal (mission, plan, contracts, decisions, artifacts, report) and its run, runtime and effects records | The mission engine |
 | `workspaces/<project>/` | The persistent working copy where a project's setup and checks run | The mission engine |
 | `qualification/` | Receipts of the hidden check of the installed CLIs before missions (valid 24 h) | The shell, before a mission starts |
@@ -196,7 +204,7 @@ sentences; `open_link`'s English error and the raw system errors some commands p
 | Settings and looks | `save_settings`, `preview_look`, `save_theme`, `open_theme`, `set_shell_texts` |
 | Projects and folders | `add_project`, `remove_project`, `show_project`, `recents`, `open_folders`, `forget_recent`, `save_environment`, `forget_environment`, `start_environment` |
 | Missions | `project_enroll`, `project_grant`, `project_revoke` (no caller on screen yet), `project_proof`, `project_proof_confirm`, `mission_start`, `mission_state`, `mission_mode`, `mission_stop`, `mission_resume`, `mission_answer`, `local_update_state` |
-| Updates | `update_status`, `update_restart` (the "Update ready, restart" button), `input_seen` (first typing, paste or drop), `draft_dirty` (a field holds an unsent draft), `notes_seen`, `save_notes_seen` |
+| Updates | `update_status` (phase and progress), `screen_ready` (the first frame is painted: the window, built hidden, shows; a failsafe shows it after 3 s; the page paints its own mark on the theme colour before any script, so neither shows a blank window), `update_restart` (the "Update ready, restart" button), `input_seen` (first typing, paste or drop), `draft_dirty` (a field holds an unsent draft), `notes_seen`, `save_notes_seen` |
 | Accounts | `setup_check`, `setup_install`, `setup_sign_in` |
 
 Events: `faber:event` carries `message`, `queue`, `quota`, `usage`, `running`, `list` and the account cards' `setup`
@@ -215,7 +223,7 @@ checks in `tests/ui/index.ts`, real-app scenarios in `testkit/src/screen/mod.rs`
 | Auto and step up | Done; the draft is routed at every pause (the roadmap wants at most twice) | `engine/tests/auto.rs`, `route.rs`, `simulation.rs`; `tests/ui/nudge.check.ts` |
 | Quota reading, pacing, recovery, plan question | Done | `engine/tests/pacing.rs`, `quota.rs`, `quota_live.rs`, `budget.rs`, `ledger.rs`, `learn.rs`, `paid_guard.rs`; `tests/ui/pace.check.ts`, `quota.check.ts` |
 | Queue, steer, branch | Done | `engine/tests/engine.rs`; `tests/ui/steer.check.ts` |
-| Permissions, cards, held-back requests | Done (two modes; R140 asks for more) | `testkit/src/screen/permissions.rs`; `engine/tests/project_security.rs`; `tests/ui/thread.check.ts` |
+| Permissions, cards, held-back requests | Done (five modes, R140) | `testkit/src/screen/permissions.rs`; `engine/tests/project_security.rs`; `tests/ui/thread.check.ts` |
 | Running column, tray, notifications | Done | `tests/ui/running.check.ts`; tests inside `src-tauri/src/tray/decide.rs` |
 | Keep awake, start with Windows | Done on Windows | tests inside `src-tauri/src/awake.rs`, `autostart.rs` |
 | Public self-update | Done: checks at start and every 6 h; installs on quit or, on Windows, at the first moment no conversation or CLI install runs and the window is hidden (a running mission does not hold it back, incoherence 29) (R141: it also installs at start, before the first input and with no unsent draft; "What's new" shows once after) | tests inside `src-tauri/src/update.rs` |
@@ -232,7 +240,7 @@ checks in `tests/ui/index.ts`, real-app scenarios in `testkit/src/screen/mod.rs`
 
 Not built yet, so nothing may assume it: the catalog and live manifest, the toolbox, Livre, snapshots and undo, visual
 answers, the benchmark, asking Faber about Faber, full-text search, moving a chat to a project, the what's-new screen
-(R142), more permission modes (R140), installing updates when Faber opens (R141), Equilibrado on screen, decisions
+(R142), installing updates when Faber opens (R141), Equilibrado on screen, decisions
 produced by a mission, missions with more than one task.
 
 ## Known incoherences
@@ -242,10 +250,8 @@ never copying it. "Owner" marks a choice of taste or direction that needs the ow
 that fixes it. The weekly coherence pass (`testkit/coherence/weekly.md`) proposes new lines and the removal of fixed
 ones.
 
-1. Settings on a work screen (C011): the Projects start card carries the checks list, "If a tool is missing", a git mode
-   with one option and the self-update switch, plus a technical Details block; the board carries the run mode. The owner
-   already decided (C011): they leave the work screen for Settings or a just-in-time consent. Where each one lands is
-   a design choice to make with product-rules.md.
+1. Settings on a work screen (C011): the start card is calm now (checks, tools, git mode, self-update trust and Details
+   live in Settings > Projects); the board still carries the run mode.
 2. Mission needs are invisible inside the window: the tray counts mission decisions and blocked missions, but the run
    button, the running column, the sidebar and the pick-up lists only count conversations.
 3. A mission board has no way to start another mission or leave it; the selection comes back from browser storage.
@@ -265,7 +271,7 @@ ones.
 11. Three ways to confirm a delete: the × in the sidebar, the menu's Delete, and Recents' Remove with none.
 12. Money and quota in three formats and four vocabularies ("Own cost", "Cost so far", "Faber today … API-equivalent",
     "… at API prices"; "Account pace", "Usage limits"), not localized.
-13. "Update itself" means three things: the silent updater, the start card's self-update trust and the Local build card
+13. "Update itself" means three things: the silent updater, the project's self-update trust (Settings > Projects) and the Local build card
     (shown on every mission board even outside the development channel).
 14. The same option in two places with different words: the name ("How should Faber call you?" in the first run, "Your
     name" in Settings) and text size (three buttons in the first run saving 13, the theme's own or 16; a slider up to 18
@@ -277,7 +283,7 @@ ones.
     differently; Close writes `done` even after a Skip.
 17. The chat working folder sits in global Settings but changes only the open, still empty chat; opened from Projects,
     the row keeps its label and explanation with no control under them.
-18. The hooks switch is always enabled but acts only under "Ask before commands"; Settings' "Permissions for Chat and
+18. The hooks switch is always enabled but acts only in the guarded modes (all but "Full access"); Settings' "Permissions for Chat and
     Projects" reads as if it governed missions, which run isolated.
 19. Settings has no "Learn more" pattern: General shows paragraphs of three to five sentences (product-rules: one short
     line per option).

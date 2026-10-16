@@ -31,6 +31,8 @@ window.addEventListener('focus', () => attention(true));
 window.addEventListener('blur', () => attention(false));
 document.addEventListener('visibilitychange', () => attention(document.visibilityState === 'visible'));
 const state = await api.state();
+// Read before the first draw: a window that opens during the install at open paints its opening screen at once.
+const update = await api.updateStatus().catch(() => undefined);
 store.offer(state.running);
 
 // The look is on the page before anything is drawn, so the first frame already has the theme's colours.
@@ -42,9 +44,22 @@ installContextMenu();
 render(
   () => (
     <>
-      <App initial={state} inbox={inbox} />
+      <App initial={state} update={update} inbox={inbox} />
       <ContextMenuHost />
     </>
   ),
   document.getElementById('root')!,
 );
+// The static first frame (ui/index.html) has done its job: the real screen is in the page now.
+document.getElementById('first')?.remove();
+
+// The window starts hidden: it shows once the first frame is painted, so there is never an empty one. The timer covers a
+// page whose frames wait for a window that is not shown; the shell's own failsafe covers a page that never gets here.
+let told = false;
+const painted = () => {
+  if (told) return;
+  told = true;
+  void api.screenReady().catch(() => {});
+};
+requestAnimationFrame(() => requestAnimationFrame(painted));
+setTimeout(painted, 150);

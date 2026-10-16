@@ -253,7 +253,8 @@ fn launch(resume: Option<&str>) -> ClaudeLaunch {
         user_name: None,
         permissions: Permissions::FullAccess,
         // A CLI that knows every newer flag: full access would run it with nobody to answer (#28).
-        flags: faber_engine::claude::ClaudeFlags { autocompact: true, permission_prompts: true },
+        flags: faber_engine::claude::ClaudeFlags { autocompact: true, permission_prompts: true, auto_mode: false },
+        tuning: Default::default(),
     }
 }
 
@@ -271,6 +272,7 @@ fn thread(resume: Option<&str>) -> CodexThread {
         instructions: None,
         user_name: None,
         permissions: Permissions::FullAccess,
+        tuning: Default::default(),
     }
 }
 
@@ -436,4 +438,38 @@ fn automatic_parameters_reject_moving_model_aliases_before_admission() {
     let mut t = thread(None);
     t.model = Some("gpt-latest".into());
     assert!(project_thread_params(&t, Role::Writer).is_err());
+}
+
+#[test]
+fn r140_a_role_never_takes_the_mode_or_the_settings_the_person_chose() {
+    use faber_engine::model::{ReasoningSummary, Tuning, Verbosity, WebSearch};
+    let chosen = Tuning { web: WebSearch::Live, summary: ReasoningSummary::Detailed, verbosity: Verbosity::High };
+    let off = Tuning { web: WebSearch::Off, ..chosen };
+    for role in ROLES {
+        for permissions in [Permissions::Auto, Permissions::AcceptEdits, Permissions::Plan, Permissions::Ask, Permissions::FullAccess] {
+            // Each thread names its profile with a fresh id; the content is what counts.
+            let plain = |params: &Value| {
+                let text = params.to_string();
+                let id = params["config"]["default_permissions"].as_str().unwrap().to_string();
+                text.replace(&id, "<profile>")
+            };
+            let baseline = project_thread_params(&thread(None), role).unwrap();
+            let (_, params) = project_thread_params(&CodexThread { permissions, tuning: chosen, ..thread(None) }, role).unwrap();
+            assert_eq!(
+                plain(&params),
+                plain(&baseline.1),
+                "{role:?} {permissions:?}: the thread of a role does not depend on the person's mode"
+            );
+            assert_eq!(params["config"]["web_search"], "disabled");
+            assert_eq!(params["config"]["approvals_reviewer"], "user");
+            assert_eq!(params["approvalPolicy"], "never");
+            for key in ["model_reasoning_summary", "model_verbosity"] {
+                assert!(params["config"].get(key).is_none(), "{role:?} {key}");
+            }
+            assert!(params.get("approvalsReviewer").is_none() && params.get("sandbox").is_none());
+            let args = project_claude_args(&ClaudeLaunch { permissions, tuning: off, ..launch(None) }, role).unwrap();
+            assert_eq!(args, project_claude_args(&launch(None), role).unwrap(), "{role:?} {permissions:?}");
+            assert_eq!(after(&args, "--permission-mode"), "dontAsk");
+        }
+    }
 }

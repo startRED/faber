@@ -138,6 +138,7 @@ impl Probe {
             user_name: None,
             flags: Default::default(),
             permissions: Permissions::Ask,
+            tuning: Default::default(),
         };
         let session = start_claude(
             ClaudeOptions { bin: cli.command.clone(), cwd: self.dir.clone(), launch, spawn: spawner(&cli), sandbox: None },
@@ -161,6 +162,7 @@ impl Probe {
             user_name: None,
             flags: Default::default(),
             permissions: Permissions::Ask,
+            tuning: Default::default(),
         };
         let session = start_claude(
             ClaudeOptions { bin: cli.command.clone(), cwd: self.dir.clone(), launch, spawn: spawner(&cli), sandbox: None },
@@ -193,6 +195,7 @@ impl Probe {
             instructions: None,
             user_name: None,
             permissions: Permissions::Ask,
+            tuning: Default::default(),
         };
         (server.open(thread, sink), rx)
     }

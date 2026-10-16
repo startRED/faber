@@ -533,6 +533,8 @@ mod tests {
                     cli: Cli { command: "codex".into(), prefix: vec![] },
                     resumed: true,
                     permissions: Permissions::FullAccess,
+                    tuning: Default::default(),
+                    runs: Permissions::FullAccess,
                     by_hand: true,
                     approved: false,
                     started: 0.0,

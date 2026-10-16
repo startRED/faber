@@ -310,21 +310,111 @@ pub(crate) fn install_dir_arg(exe: &Path, data_dir: &Path) -> Option<OsString> {
     Some(format!("/D={dir}").into())
 }
 
-fn window_visible(app: &AppHandle) -> bool {
-    main_window(app).is_some_and(|w| w.is_visible().unwrap_or(true) && !w.is_minimized().unwrap_or(false))
+/// A window still waiting for its first paint is about to be seen, so it counts as visible: nothing closes it under the person.
+fn counts_as_visible(revealed: bool, visible: bool, minimized: bool) -> bool {
+    !revealed || (visible && !minimized)
 }
 
-/// What the screen shows of the update: `downloading` while Faber opens and fetches one, `ready` once one is kept for
-/// an install, else `none`.
-pub(crate) fn status(app: &AppHandle) -> &'static str {
-    let faber = app.state::<Faber>();
-    if faber.updating.load(Ordering::SeqCst) {
-        "downloading"
-    } else if lock(&faber.update).is_some() {
-        "ready"
-    } else {
-        "none"
+fn window_visible(app: &AppHandle) -> bool {
+    let revealed = app.state::<Faber>().revealed.load(Ordering::SeqCst);
+    main_window(app).is_some_and(|w| counts_as_visible(revealed, w.is_visible().unwrap_or(true), w.is_minimized().unwrap_or(false)))
+}
+
+/// Where the update is, for the screen. `Checking`, `Downloading` and `Installing` belong to the install at open (and
+/// `Installing` to "Update ready, restart"); `Ready` is an update kept for an install.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum Phase {
+    #[default]
+    None,
+    Checking,
+    Downloading,
+    Installing,
+    Ready,
+}
+
+/// What the screen shows of the update: the phase and, while downloading, how far it is: a whole percent when the server
+/// said how big the file is, else the megabytes so far.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub(crate) struct Status {
+    phase: Phase,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    percent: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mb: Option<u32>,
+}
+
+impl Status {
+    fn of(phase: Phase) -> Self {
+        Self { phase, ..Self::default() }
     }
+
+    fn downloading(done: u64, total: Option<u64>) -> Self {
+        match total.filter(|total| *total > 0) {
+            Some(total) => {
+                Self { percent: Some((u128::from(done) * 100 / u128::from(total)).min(100) as u8), ..Self::of(Phase::Downloading) }
+            }
+            None => Self { mb: Some((done / 1_000_000).min(u64::from(u32::MAX)) as u32), ..Self::of(Phase::Downloading) },
+        }
+    }
+}
+
+/// The screen hears of a download at most this often, and only when what it shows has changed: the chunks come many times
+/// a second, and an event for each would be a flood.
+const PROGRESS_EVERY: Duration = Duration::from_millis(250);
+
+/// Turns the download's chunk callbacks into the few updates the screen needs.
+#[derive(Default)]
+struct Meter {
+    done: u64,
+    shown: Option<Status>,
+    at: Option<std::time::Instant>,
+}
+
+impl Meter {
+    /// A chunk of `chunk` bytes arrived; `total` is the file's size when the server gave one. The status to show, when it is
+    /// time and it differs from what is shown.
+    fn advance(&mut self, chunk: u64, total: Option<u64>, now: std::time::Instant) -> Option<Status> {
+        self.done += chunk;
+        let status = Status::downloading(self.done, total);
+        let due = self.at.is_none_or(|at| now.saturating_duration_since(at) >= PROGRESS_EVERY);
+        if !due || self.shown == Some(status) {
+            return None;
+        }
+        self.at = Some(now);
+        self.shown = Some(status);
+        Some(status)
+    }
+}
+
+pub(crate) fn status(app: &AppHandle) -> Status {
+    let faber = app.state::<Faber>();
+    let stage = *lock(&faber.stage);
+    if stage.phase != Phase::None {
+        stage
+    } else if lock(&faber.update).is_some() {
+        Status::of(Phase::Ready)
+    } else {
+        Status::default()
+    }
+}
+
+fn set_stage(app: &AppHandle, phase: Phase) {
+    *lock(&app.state::<Faber>().stage) = Status::of(phase);
+    announce(app);
+}
+
+/// A download's progress, kept only while the install at open shows one: the periodic fetch downloads in silence.
+fn report(app: &AppHandle, status: Status) {
+    let faber = app.state::<Faber>();
+    {
+        let mut stage = lock(&faber.stage);
+        if stage.phase != Phase::Downloading {
+            return;
+        }
+        *stage = status;
+    }
+    announce(app);
 }
 
 fn announce(app: &AppHandle) {
@@ -340,8 +430,8 @@ trait Release {
     fn tried(&self, version: &str) -> bool;
     /// Downloads the release found and keeps it ready.
     async fn download(&self) -> Result<(), String>;
-    /// The screen's calm line while a start download runs.
-    fn downloading(&self, on: bool);
+    /// What the screen shows of the install at open (`Phase::None` when it ends).
+    fn stage(&self, phase: Phase);
     /// Decides the install, all at once (`admit`): nothing is running (an answer, a mission, a check of the agents, a CLI
     /// install), no unsent draft is on the screen, the tried marker is on the disk, and from here on nothing new may start.
     /// False when anything stops it.
@@ -380,6 +470,16 @@ impl Start {
 /// or the person has typed anything (a draft lives only on the screen), nothing is ended: the update waits for an idle
 /// moment, or for the person's "Update ready, restart".
 async fn update_on_start(release: &impl Release, check_wait: Duration, download_wait: Duration) -> Start {
+    release.stage(Phase::Checking);
+    let start = start_steps(release, check_wait, download_wait).await;
+    // An install ends the process; anything else gives the screen back to the person.
+    if start != Start::Installed {
+        release.stage(Phase::None);
+    }
+    start
+}
+
+async fn start_steps(release: &impl Release, check_wait: Duration, download_wait: Duration) -> Start {
     let version = match timeout(check_wait, release.check()).await {
         Ok(Ok(Some(version))) => version,
         Ok(Ok(None)) => return Start::NothingNew,
@@ -388,12 +488,11 @@ async fn update_on_start(release: &impl Release, check_wait: Duration, download_
     if release.tried(&version) {
         return Start::Skipped;
     }
-    release.downloading(true);
-    let downloaded = timeout(download_wait, release.download()).await;
-    release.downloading(false);
-    if !matches!(downloaded, Ok(Ok(()))) {
+    release.stage(Phase::Downloading);
+    if !matches!(timeout(download_wait, release.download()).await, Ok(Ok(()))) {
         return Start::Unreachable;
     }
+    release.stage(Phase::Installing);
     match idle_install(|| true, || release.reserve(Who::Start), || release.shut_down(), || release.install(), || release.relaunch()) {
         Idle::Installed => Start::Installed,
         Idle::Waited if release.retarget().await => Start::Waits,
@@ -447,15 +546,20 @@ impl Release for Live {
 
     async fn download(&self) -> Result<(), String> {
         let update = lock(&self.found).take().ok_or("no release was found")?;
-        let bytes = update.download(|_, _| {}, || {}).await.map_err(|e| e.to_string()).inspect_err(|e| self.note("download-failed", e))?;
+        let (app, mut meter) = (self.app.clone(), Meter::default());
+        let progress = move |chunk: usize, total: Option<u64>| {
+            if let Some(status) = meter.advance(chunk as u64, total, std::time::Instant::now()) {
+                report(&app, status);
+            }
+        };
+        let bytes = update.download(progress, || {}).await.map_err(|e| e.to_string()).inspect_err(|e| self.note("download-failed", e))?;
         *lock(&self.app.state::<Faber>().update) = Some((update, bytes));
         announce(&self.app);
         Ok(())
     }
 
-    fn downloading(&self, on: bool) {
-        self.app.state::<Faber>().updating.store(on, Ordering::SeqCst);
-        announce(&self.app);
+    fn stage(&self, phase: Phase) {
+        set_stage(&self.app, phase);
     }
 
     fn reserve(&self, who: Who) -> bool {
@@ -617,10 +721,17 @@ pub(crate) async fn restart_now(app: AppHandle) -> Result<(), String> {
         swap_args(&app, &dir, Reopen::Window).await;
     }
     // The person chose this, so a version tried a day ago does not stop it.
+    live.stage(Phase::Installing);
     match idle_install(|| true, || live.reserve(Who::Owner), || live.shut_down(), || live.install(), || live.relaunch()) {
         Idle::Installed => Ok(()),
-        Idle::Waited => Err("error.update.busy".into()),
-        Idle::Failed => Err("error.update.failed".into()),
+        Idle::Waited => {
+            live.stage(Phase::None);
+            Err("error.update.busy".into())
+        }
+        Idle::Failed => {
+            live.stage(Phase::None);
+            Err("error.update.failed".into())
+        }
     }
 }
 
@@ -630,6 +741,10 @@ pub(crate) fn keep_updated(app: &AppHandle) {
         return;
     };
     let app = app.clone();
+    // Set before the screen asks, so its first paint is already the opening screen (the start check begins right after).
+    if cfg!(windows) {
+        set_stage(&app, Phase::Checking);
+    }
     tauri::async_runtime::spawn(async move {
         let mut next_check = Instant::now();
         // Elsewhere the installer does not restart the app, so an update waits for Quit and is only fetched below.
@@ -657,7 +772,70 @@ mod tests {
         Gate, Idle, LOG_MAX, Release, Reopen, SetupRunning, Start, Who, admit, fetch, fetch_succeeded, idle_install, installer_args,
         note_tried,
     };
+    use super::{Meter, PROGRESS_EVERY, Phase, Status, counts_as_visible};
     use super::{is_dos_path, may_install, setups_running};
+
+    fn mb(n: u32) -> Status {
+        Status { mb: Some(n), ..Status::of(Phase::Downloading) }
+    }
+
+    fn percent(n: u8) -> Status {
+        Status { percent: Some(n), ..Status::of(Phase::Downloading) }
+    }
+
+    #[test]
+    fn progress_is_a_whole_percent_of_the_size_and_never_passes_a_hundred() {
+        assert_eq!(Status::downloading(0, Some(200)), percent(0));
+        assert_eq!(Status::downloading(84, Some(200)), percent(42));
+        assert_eq!(Status::downloading(199, Some(200)), percent(99), "rounds down: 100 means done");
+        assert_eq!(Status::downloading(250, Some(200)), percent(100), "a server that undercounts does not show 125");
+        assert_eq!(Status::downloading(u64::MAX, Some(u64::MAX)), percent(100), "no overflow on huge sizes");
+    }
+
+    #[test]
+    fn an_unknown_size_shows_the_megabytes_so_far() {
+        assert_eq!(Status::downloading(12_500_000, None), mb(12));
+        assert_eq!(Status::downloading(999_999, None), mb(0));
+        assert_eq!(Status::downloading(12_500_000, Some(0)), mb(12), "a size of zero is no size");
+    }
+
+    #[test]
+    fn the_screen_hears_a_whole_percent_at_most_four_times_a_second() {
+        let (mut meter, start) = (Meter::default(), std::time::Instant::now());
+        // 1000 chunks of 1 byte in 100 ms: the first is shown at once, the rest wait for the next quarter second.
+        let shown: Vec<_> =
+            (0..1000u32).filter_map(|i| meter.advance(1, Some(1000), start + Duration::from_micros(u64::from(i) * 100))).collect();
+        assert_eq!(shown, [percent(0)]);
+        // A quarter of a second later the percent has moved, and it is shown once.
+        assert_eq!(meter.advance(0, Some(1000), start + PROGRESS_EVERY + Duration::from_millis(100)), Some(percent(100)));
+        assert_eq!(meter.advance(0, Some(1000), start + Duration::from_secs(5)), None, "the same percent is not said twice");
+    }
+
+    #[test]
+    fn a_slow_download_says_each_new_value_once_and_a_fast_one_never_floods() {
+        let (mut meter, start) = (Meter::default(), std::time::Instant::now());
+        let mut told = 0;
+        // 100 MB with no size, in 64 KB chunks over 10 seconds: the screen hears at most 40 times, each a new megabyte count.
+        let mut last = None;
+        for i in 0..1600u64 {
+            if let Some(status) = meter.advance(65_536, None, start + Duration::from_micros(i * 6_250)) {
+                assert_ne!(Some(status), last);
+                last = Some(status);
+                told += 1;
+            }
+        }
+        assert!((30..=41).contains(&told), "{told} events for 10 seconds");
+        assert!(last.is_some_and(|status| status.mb >= Some(100)), "{last:?}");
+    }
+
+    #[test]
+    fn a_window_waiting_for_its_first_paint_counts_as_seen() {
+        assert!(counts_as_visible(false, false, false), "not revealed yet: nothing closes it");
+        assert!(counts_as_visible(true, true, false));
+        assert!(!counts_as_visible(true, false, false), "closed to the tray");
+        assert!(!counts_as_visible(true, true, true), "minimized");
+    }
+
     use std::cell::{Cell, RefCell};
     use std::ffi::OsString;
     use std::time::Duration;
@@ -925,8 +1103,14 @@ mod tests {
             self.editing.set(self.typing_during_download);
             self.download.clone()
         }
-        fn downloading(&self, on: bool) {
-            self.seen.borrow_mut().push(if on { "line on" } else { "line off" });
+        fn stage(&self, phase: Phase) {
+            self.seen.borrow_mut().push(match phase {
+                Phase::None => "none",
+                Phase::Checking => "checking",
+                Phase::Downloading => "downloading",
+                Phase::Installing => "installing",
+                Phase::Ready => "ready",
+            });
         }
         fn reserve(&self, _: Who) -> bool {
             self.seen.borrow_mut().push("reserve");
@@ -961,26 +1145,26 @@ mod tests {
     async fn a_release_found_at_start_is_downloaded_and_installed_before_any_work() {
         let release = Fake::found();
         assert_eq!(start(&release).await, Start::Installed);
-        assert_eq!(release.saw(), ["check", "line on", "download", "line off", "reserve", "shut down", "install"]);
+        assert_eq!(release.saw(), ["checking", "check", "downloading", "download", "installing", "reserve", "shut down", "install"]);
     }
 
     #[tokio::test]
     async fn nothing_new_at_start_touches_nothing() {
         let release = Fake { found: Ok(None), ..Fake::found() };
         assert_eq!(start(&release).await, Start::NothingNew);
-        assert_eq!(release.saw(), ["check"]);
+        assert_eq!(release.saw(), ["checking", "check", "none"]);
     }
 
     #[tokio::test]
     async fn an_offline_start_gives_up_in_time_and_tries_again_soon() {
         let refused = Fake { found: Err("offline".into()), ..Fake::found() };
         assert_eq!(start(&refused).await, Start::Unreachable);
-        assert_eq!(refused.saw(), ["check"]);
+        assert_eq!(refused.saw(), ["checking", "check", "none"]);
         let silent = Fake { hangs: true, ..Fake::found() };
         let began = std::time::Instant::now();
         assert_eq!(start(&silent).await, Start::Unreachable);
         assert!(began.elapsed() < Duration::from_secs(5), "the start does not wait for a dead network");
-        assert_eq!(silent.saw(), ["check"]);
+        assert_eq!(silent.saw(), ["checking", "check", "none"], "the opening screen goes away with the check");
         assert!(!Start::Unreachable.succeeded() && !Start::Failed.succeeded());
         assert!(Start::NothingNew.succeeded() && Start::Installed.succeeded() && Start::Waits.succeeded() && Start::Skipped.succeeded());
     }
@@ -991,7 +1175,7 @@ mod tests {
         assert_eq!(start(&release).await, Start::Waits);
         assert_eq!(
             release.saw(),
-            ["check", "line on", "download", "line off", "reserve", "retarget"],
+            ["checking", "check", "downloading", "download", "installing", "reserve", "retarget", "none"],
             "no cleanup, no installer, no relaunch; the kept update is rebuilt for the tray"
         );
     }
@@ -1002,7 +1186,7 @@ mod tests {
         assert_eq!(start(&release).await, Start::Waits);
         assert_eq!(
             release.saw(),
-            ["check", "line on", "download", "line off", "reserve", "retarget"],
+            ["checking", "check", "downloading", "download", "installing", "reserve", "retarget", "none"],
             "the decision reads the draft inside the lock and gives way"
         );
     }
@@ -1011,14 +1195,14 @@ mod tests {
     async fn an_update_that_waits_is_rebuilt_for_the_tray_or_dropped() {
         let release = Fake { work_during_download: true, retarget: false, ..Fake::found() };
         assert_eq!(start(&release).await, Start::Unreachable);
-        assert_eq!(release.saw().last(), Some(&"discard"), "an update that would open a window from the tray is not kept");
+        assert!(release.saw().ends_with(&["discard", "none"]), "an update that would open a window from the tray is not kept");
     }
 
     #[tokio::test]
     async fn a_download_that_failed_installs_nothing() {
         let release = Fake { download: Err("cut".into()), ..Fake::found() };
         assert_eq!(start(&release).await, Start::Unreachable);
-        assert_eq!(release.saw(), ["check", "line on", "download", "line off"]);
+        assert_eq!(release.saw(), ["checking", "check", "downloading", "download", "none"]);
     }
 
     #[tokio::test]
@@ -1027,7 +1211,7 @@ mod tests {
         let began = std::time::Instant::now();
         assert_eq!(start(&release).await, Start::Unreachable);
         assert!(began.elapsed() < Duration::from_secs(5));
-        assert_eq!(release.saw(), ["check", "line on", "download", "line off"]);
+        assert_eq!(release.saw(), ["checking", "check", "downloading", "download", "none"]);
         // A download in the background is bounded too, so the six-hour loop is never held for good.
         assert!(!fetch(&Fake { stalls: true, ..Fake::found() }, WAIT).await);
     }
@@ -1036,14 +1220,19 @@ mod tests {
     async fn an_installer_that_does_not_start_leaves_a_relaunched_faber() {
         let release = Fake { install: Err("blocked".into()), ..Fake::found() };
         assert_eq!(start(&release).await, Start::Failed);
-        assert_eq!(release.saw().last(), Some(&"relaunch"));
+        // The real relaunch ends the process, so the screen is never told "none" after it.
+        assert!(release.saw().ends_with(&["install", "relaunch", "none"]));
     }
 
     #[tokio::test]
     async fn a_version_tried_a_day_ago_is_not_downloaded_or_installed_again_at_start() {
         let release = Fake { tried: true, ..Fake::found() };
         assert_eq!(start(&release).await, Start::Skipped);
-        assert_eq!(release.saw(), ["check"], "the relaunch after a failed install does not start the same install again");
+        assert_eq!(
+            release.saw(),
+            ["checking", "check", "none"],
+            "the relaunch after a failed install does not start the same install again"
+        );
         let later = Fake { tried: true, ..Fake::found() };
         assert!(fetch(&later, WAIT).await);
         assert_eq!(later.saw(), ["check"], "nor does the periodic check download it");

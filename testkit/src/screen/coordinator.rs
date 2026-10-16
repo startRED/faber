@@ -322,8 +322,20 @@ async fn run_crashes(sandbox: &Path) -> Result<Value> {
         let w = world(sandbox, &name)?;
         let plot = Plot { die: Some(turn), ..PASS };
         let mut a = coordinator(&w, plot.clone()).map_err(|e| format!("{name}: first start: {e}"))?;
-        let first = tokio::time::timeout(Duration::from_secs(5), a.drive()).await;
-        ensure(first.is_err(), || format!("{name}: the turn that never answers ended: {first:?}"))?;
+        // Cut the process only once the turn that never answers has really started: a fixed wait is a race on a slow runner.
+        let started = async {
+            while !std::fs::read_to_string(w.dir.join("roles.log")).unwrap_or_default().lines().any(|l| l == format!("start {turn}")) {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        };
+        let first = tokio::time::timeout(Duration::from_secs(120), async {
+            tokio::select! {
+                outcome = a.drive() => Some(outcome),
+                () = started => None,
+            }
+        })
+        .await;
+        ensure(matches!(first, Ok(None)), || format!("{name}: the turn that never answers did not hang as planned: {first:?}"))?;
         drop(a);
         let mut b = coordinator(&w, PASS).map_err(|e| format!("{name}: restart: {e}"))?;
         let second = b.drive().await;
@@ -463,7 +475,7 @@ async fn run_wiring(sandbox: &Path) -> Result<Value> {
     ensure(declared.commands == ["fake-proof src/a.rs"] && declared.source == "agents" && !declared.confirmed, || {
         format!("the declared proof was not read: {declared:?}")
     })?;
-    let project = mission::confirm(&project, &declared.commands, &declared.setup).map_err(str::to_string)?;
+    let project = mission::confirm(&project, &declared.commands, &declared.setup, &declared.declared).map_err(str::to_string)?;
     let commands = mission::confirmed(&project).map_err(str::to_string)?;
 
     let exe = std::env::current_exe().map_err(|e| e.to_string())?.to_string_lossy().into_owned();

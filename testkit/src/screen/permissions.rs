@@ -46,11 +46,14 @@ fn do_not_ask_text(ctx: &mut Ctx) -> Result {
     let details = page.named("button", "project.permissionsDetails")?;
     page.click(&details)?;
     let dont_ask_body = page.text_of("set.permissionsDontAskBody")?;
+    // The long text sits behind "Learn more": it is not on the page until that is opened (R140).
+    ensure(page.count(&css(".hint").has_text(&dont_ask_body))? == 0, || "the long risk text is on the page while closed".into())?;
+    page.click(&css("#set-permissions-more"))?;
     page.wait_visible(&css(".hint").has_text(&dont_ask_body))?;
-    let dont_ask = page.named("button", "set.permissions.dontAsk")?;
+    let dont_ask = css("#set-permissions + .choices button:nth-child(5)");
     same(page.attr(&dont_ask, "aria-pressed")?, Some("true".into()), "Do not ask is the default")?;
     // Choosing the other mode swaps the details; choosing this one again brings them back.
-    let ask_button = page.named("button", "set.permissions.ask")?;
+    let ask_button = css("#set-permissions + .choices button:nth-child(1)");
     page.click(&ask_button)?;
     let ask_body = page.text_of("set.permissionsAskBody")?;
     page.wait_visible(&css(".hint").has_text(&ask_body))?;
@@ -95,14 +98,14 @@ fn answers_a_card(ctx: &mut Ctx) -> Result {
     let page = &mut app.page;
     let settings = page.named("button", "settings.open")?.exact();
     page.click(&settings)?;
-    let dont_ask = page.named("button", "set.permissions.dontAsk")?;
+    let dont_ask = css("#set-permissions + .choices button:nth-child(5)");
     page.wait_visible(&dont_ask)?;
     same(page.attr(&dont_ask, "aria-pressed")?, Some("true".into()), "older settings default to Don't ask")?;
-    let ask_first = page.named("button", "set.permissions.ask")?;
+    let ask_first = css("#set-permissions + .choices button:nth-child(1)");
     page.click(&ask_first)?;
     page.wait_for(
         "the permissions choice to be saved",
-        "document.querySelector('#set-permissions + .seg-ctl button[aria-pressed=true]')?.textContent === 'Ask before commands'",
+        "document.querySelector('#set-permissions + .choices button[aria-pressed=true] b')?.textContent === 'Ask'",
     )?;
     page.cdp.call("Page.reload", serde_json::json!({}))?;
     page.wait_visible(&settings)?;

@@ -4,8 +4,15 @@ import { listen } from '@tauri-apps/api/event';
 // The shapes the engine sends (engine/src/model.rs).
 export type Vendor = 'claude' | 'codex';
 
-/** The shell's view of the update: one is downloading at open, one is kept for an install, or none. */
-export type UpdateStatus = 'none' | 'downloading' | 'ready';
+/**
+ * The shell's view of the update. The first three phases belong to the install at open: looking, downloading (with a whole
+ * `percent` when the size is known, else the `mb` so far) and installing. `ready` is one kept for a restart.
+ */
+export interface UpdateStatus {
+  phase: 'none' | 'checking' | 'downloading' | 'installing' | 'ready';
+  percent?: number;
+  mb?: number;
+}
 export type Effort = 'low' | 'medium' | 'high';
 export type Area = 'chat' | 'project';
 export type Status = 'streaming' | 'done' | 'stopped' | 'error';
@@ -68,6 +75,8 @@ export interface Message {
   parkedMore?: number;
   incomplete?: boolean;
   pace?: { kind: 'step' | 'low'; vendor: Vendor };
+  /** The mode that really ran this reply, as an engine key, only when it is not the one chosen (`mode.fallback.auto`). */
+  mode?: string;
   /** A note under the reply, as an engine key (`note.historyResent`). */
   note?: string;
   waitUntil?: number;
@@ -299,10 +308,22 @@ export type ThemeFile = Appearance & { name: string };
 
 /** The answer to "Do you already use AI?". No answer counts as a beginner. */
 export type Experience = 'beginner' | 'experienced';
+/** How a CLI may act in Chat (R140). `dontAsk` is Full access and the default when nothing is saved. */
+export type PermissionMode = 'ask' | 'acceptEdits' | 'plan' | 'auto' | 'dontAsk';
+/** The modes in the order they are listed, strictest first; full access is the default. */
+export const PERMISSION_MODES: PermissionMode[] = ['ask', 'acceptEdits', 'plan', 'auto', 'dontAsk'];
+export type WebSearch = 'off' | 'cached' | 'live';
+export type ReasoningSummary = 'default' | 'auto' | 'concise' | 'detailed' | 'none';
+export type Verbosity = 'default' | 'low' | 'medium' | 'high';
 export interface Settings {
   appearance?: Appearance;
   userHooks?: boolean;
-  permissions?: 'dontAsk' | 'ask';
+  permissions?: PermissionMode;
+  /** Missing means live. */
+  webSearch?: WebSearch;
+  /** Codex only; missing means the model's own. */
+  reasoningSummary?: ReasoningSummary;
+  verbosity?: Verbosity;
   notifications?: boolean;
   notificationSound?: boolean;
   language?: string;
@@ -503,6 +524,8 @@ export const api = {
   projectEnroll: (projectId: string) => invoke<EnrollView>('project_enroll', { projectId }),
   localUpdateState: () => invoke<BuildView | null>('local_update_state'),
   updateStatus: () => invoke<UpdateStatus>('update_status'),
+  /** The first frame is painted: the shell may show the window (it stays hidden until then). */
+  screenReady: () => invoke<void>('screen_ready'),
   updateRestart: () => invoke<void>('update_restart'),
   inputSeen: () => invoke<void>('input_seen'),
   /** Whether any field holds something typed or attached and not sent: no unattended update closes the window then. */
@@ -514,8 +537,8 @@ export const api = {
     invoke<Grant>('project_grant', { projectId, mode, selfUpdate, revision }),
   projectRevoke: (projectId: string) => invoke<void>('project_revoke', { projectId }),
   projectProof: (projectId: string) => invoke<ProofView>('project_proof', { projectId }),
-  projectProofConfirm: (projectId: string, commands: string[], setup: string[]) =>
-    invoke<ProofView>('project_proof_confirm', { projectId, commands, setup }),
+  projectProofConfirm: (projectId: string, commands: string[], setup: string[], declared: string[]) =>
+    invoke<ProofView>('project_proof_confirm', { projectId, commands, setup, declared }),
   missionStart: (projectId: string, goal: string) => invoke<string>('mission_start', { projectId, goal }),
   missionState: (missionId: string) => invoke<MissionView>('mission_state', { missionId }),
   missionMode: (missionId: string, mode: RunMode) => invoke<MissionView>('mission_mode', { missionId, mode }),
