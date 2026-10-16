@@ -34,6 +34,7 @@ fn settings_keys() -> Vec<String> {
         reasoning_summary: Some(Default::default()),
         verbosity: Some(Default::default()),
         grants_epoch: Some(String::new()),
+        previews: Some(true),
     };
     serde_json::to_value(every).unwrap().as_object().unwrap().keys().cloned().collect()
 }

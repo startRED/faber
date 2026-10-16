@@ -336,6 +336,8 @@ export interface Settings {
   userName?: string;
   keepAwake?: boolean;
   autostart?: boolean;
+  /** Receive previews: update checks read the preview channel. Off by default; turning it off never downgrades. */
+  previews?: boolean;
 }
 export interface ModelInfo {
   id: string;

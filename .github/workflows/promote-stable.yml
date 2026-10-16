@@ -1,0 +1,65 @@
+name: promote-stable
+
+# Owner decision R156: once a week the newest preview published at least a day ago is rebuilt as the stable release, so
+# everyone gets what the previews already proved. It is skipped when no feat, fix or perf touching what ships landed since the
+# last stable. For an urgent fix, run it by hand with the preview tag: that skips the one-day wait and the user-facing check.
+# A finished area keeps its hand-made minor bump (a plain vX.Y.0 tag pushed by the owner).
+#
+# The stable tag has the preview's numbers without the pre-release part (v0.3.16-preview.3 becomes v0.3.16), which
+# semver puts above every preview of that number. See auto-release.yml for the version scheme.
+on:
+  schedule:
+    - cron: '0 12 * * 3' # Wednesday, 12:00 UTC
+  workflow_dispatch:
+    inputs:
+      preview_tag:
+        description: 'A preview tag to promote now (urgent fix), e.g. v0.3.16-preview.2. Empty picks the newest one published a day ago.'
+        required: false
+        type: string
+
+# Its own group, not auto-release.yml's: GitHub keeps one pending run per group and cancels the others, so a queued preview would
+# cancel the weekly promotion and a week would pass without a stable. A promotion and a new preview can therefore run at the
+# same moment; each step that tags reads the tags again first and retries when the push is refused (a tag that exists is never
+# overwritten), and a preview number computed just before a stable lands only makes a preview that sorts below it, which no
+# one installs. Two promotions queue here instead of replacing each other.
+concurrency:
+  group: promote-stable
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: phase-1-base
+          fetch-depth: 0
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Read as data by scripts/channel.mjs, which refuses anything that is not vX.Y.Z-preview.N.
+          PREVIEW_TAG: ${{ inputs.preview_tag }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            # The tags are read again on every try: a preview may have been tagged, or the stable pushed by a run before this one.
+            git fetch --quiet --tags --force origin
+            status=0
+            pick=$(node scripts/channel.mjs promotion ${PREVIEW_TAG:+"$PREVIEW_TAG"}) || status=$?
+            if [ "$status" = 3 ]; then
+              echo "Nothing to promote."; exit 0
+            fi
+            [ "$status" = 0 ]
+            read -r stable commit <<< "$pick"
+            # Only code that landed on phase-1-base (and so passed its CI) becomes stable.
+            git merge-base --is-ancestor "$commit" origin/phase-1-base
+            git tag "$stable" "$commit"
+            if git push origin "$stable"; then break; fi
+            git tag -d "$stable"
+            [ "$attempt" -lt 3 ]
+          done
+          # A tag pushed with this token starts no workflow, so the release is started by hand.
+          gh workflow run release.yml --ref "$stable"
+          echo "Promoted $commit as $stable."

@@ -165,6 +165,9 @@ check('settings: the new sections are written in every language, and the file hi
     'set.keepAwakeHint',
     'set.autostart',
     'set.autostartHint',
+    'set.updates',
+    'set.previews',
+    'set.previewsHint',
     'set.usage',
     'set.privacy',
     'set.accountsHint',
@@ -307,6 +310,39 @@ check('settings: keep-awake defaults on and autostart defaults off, saving separ
   }
 });
 
+check('settings: receive previews defaults off, saves on its own and is restored when the save is refused', async () => {
+  const [saved, setSaved] = createSignal<Saved>({});
+  const patches: Saved[] = [];
+  let accept = false;
+  const view = mount(() => createComponent(Settings, {
+    look: look(), get saved() { return saved(); }, vendors: [], quotas: {}, now: 0,
+    onClose: () => {}, onOpenSetup: () => {},
+    onSave: async (patch) => {
+      patches.push(patch);
+      if (accept) setSaved({ ...saved(), ...patch });
+      return accept;
+    },
+  }));
+  try {
+    const row = [...view.host.querySelectorAll<HTMLElement>('.row')].find((r) => r.querySelector('span')?.textContent === en['set.updates']);
+    ok(row, 'General has an Updates row');
+    const previews = row!.querySelectorAll<HTMLInputElement>('input[role="switch"]');
+    equal(previews.length, 1, 'one switch, no second way');
+    equal(previews[0]!.checked, false, 'previews default off');
+    previews[0]!.click();
+    await tick();
+    equal(previews[0]!.checked, false, 'a refused save restores the switch');
+    accept = true;
+    previews[0]!.click();
+    await tick();
+    equal(previews[0]!.checked, true);
+    previews[0]!.click();
+    await tick();
+    equal(previews[0]!.checked, false, 'turning it off is saved too');
+    deepEqual(patches, [{ previews: true }, { previews: true }, { previews: false }]);
+  } finally { view.stop(); }
+});
+
 check('settings: an answer that arrives after Appearance closed leaves the draft alone', async () => {
   const [draft, setDraft] = createSignal<Appearance>({ base: 'oficina' });
   const asks: Array<{ resolve: (l: Look) => void; reject: (e: unknown) => void }> = [];
@@ -393,7 +429,7 @@ check('settings: unsupported system controls are absent outside Windows', () => 
     onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
   }));
   try {
-    equal(view.host.querySelectorAll('input[role="switch"]').length, 3);
+    equal(view.host.querySelectorAll('input[role="switch"]').length, 4);
   } finally {
     view.stop();
     if (original) Object.defineProperty(navigator, 'userAgent', original);

@@ -1152,6 +1152,7 @@ impl Core {
             keep_awake: patch.keep_awake.or(before.keep_awake),
             autostart: patch.autostart.or(before.autostart),
             grants_epoch: before.grants_epoch,
+            previews: patch.previews.or(before.previews),
         };
         // A stricter mode revokes every remembered "Always allow" in the very save that changes the mode, by replacing the grants
         // epoch: a grant made under another one never counts again, even if a conversation file below fails to update.

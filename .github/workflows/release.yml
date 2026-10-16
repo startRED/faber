@@ -1,19 +1,25 @@
 name: release
 
+# Two channels (R156). A tag vX.Y.Z is a stable release and vX.Y.Z-preview.N a preview, published as a GitHub pre-release so
+# /releases/latest, which stable installs read, never points at one. Both channels ship the same bundles; only the
+# manifest an install reads differs (see the `finish` job and scripts/channel.mjs for the version scheme).
 on:
   push:
     tags: ['v*']
   # auto-release.yml starts this on the tag it pushed, since a tag pushed by a workflow fires no push event.
   workflow_dispatch:
 
+# Each job asks for what it needs on top of this.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   # One job creates the release so the build jobs upload to it instead of racing to create it. It starts as a draft:
   # a published release with no latest.json yet makes every Faber get "not found" and skip the update.
   create:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       id: ${{ steps.release.outputs.id }}
     steps:
@@ -27,9 +33,17 @@ jobs:
           node-version: 24
       - id: release
         run: |
-          previous=$(git tag --list 'v*' --sort=-v:refname | grep -vx "$GITHUB_REF_NAME" | head -1 || true)
+          set -euo pipefail
+          # Refuses any tag that is not vX.Y.Z or vX.Y.Z-preview.N before it is used anywhere else.
+          kind=$(node scripts/channel.mjs kind "$GITHUB_REF_NAME")
+          # A stable lists what is new since the previous stable; a preview, since the build before it.
+          previous=$(node scripts/channel.mjs notes-base "$GITHUB_REF_NAME")
           node scripts/release-notes.mjs "$previous" > "$RUNNER_TEMP/notes.md"
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "Faber $GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" --draft
+          # Both channels start as drafts (the updater must never see a release without its latest.json); the publish job
+          # below makes it public, as a pre-release for a preview so /releases/latest keeps pointing at the newest stable.
+          flags=(--draft)
+          if [ "$kind" = preview ]; then flags+=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "Faber $GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" "${flags[@]}"
           # The tags endpoint does not see drafts.
           echo "id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq ".[] | select(.tag_name == \"$GITHUB_REF_NAME\") | .id")" >> "$GITHUB_OUTPUT"
         env:
@@ -37,6 +51,8 @@ jobs:
 
   build:
     needs: create
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -79,22 +95,105 @@ jobs:
           args: ${{ matrix.args }}
 
   # Publishes only after every platform uploaded and latest.json is there, so the updater never sees a release without
-  # it. A failed platform leaves the draft for a person to look at.
+  # it. A failed platform leaves the draft for a person to look at. A stable becomes the latest release, which stable
+  # installs read; a preview is a pre-release and never the latest.
   publish:
     needs: [create, build]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - run: |
+          set -euo pipefail
           gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" --paginate --jq '.[].name' | grep -qx latest.json
-          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false -f make_latest=true
+          case "$GITHUB_REF_NAME" in
+            *-preview.*) gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false -F prerelease=true -f make_latest=false ;;
+            *) gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false -F prerelease=false -f make_latest=true ;;
+          esac
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_ID: ${{ needs.create.outputs.id }}
+
+  # After the release is public, in both channels: the checksums and build provenance of what was uploaded. Every release gets
+  # its own, so this job has no concurrency group: GitHub cancels a pending run when a newer one queues in the same group, and
+  # a release would lose its SHA256SUMS.txt and attestation. Only the preview manifest below is serialized.
+  checksums:
+    needs: [create, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: checksums
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/assets"
+          gh release download "$GITHUB_REF_NAME" --dir "$RUNNER_TEMP/assets"
+          # latest.json is merged by each build and replaced on a re-run; the sums are what this job makes.
+          rm -f "$RUNNER_TEMP/assets/latest.json" "$RUNNER_TEMP/assets/SHA256SUMS.txt"
+          (cd "$RUNNER_TEMP/assets" && sha256sum -- * > "$GITHUB_WORKSPACE/SHA256SUMS.txt")
+          cat SHA256SUMS.txt
+          gh release upload "$GITHUB_REF_NAME" SHA256SUMS.txt --clobber
+      # Provenance for exactly the files the sums list, which are the files people download. Verify with
+      # `gh attestation verify <file> --repo startRED/faber`.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: SHA256SUMS.txt
+
+  # The preview manifest: a release with the fixed tag `preview-channel` whose latest.json is the newest build's. Runs that
+  # finish together queue in one group where GitHub keeps one pending run and replaces the rest. That loses nothing, since
+  # every run works the manifest out again from all the published releases and not from its own tag, so the run that stays
+  # sees the release of a replaced one. A running job is never cancelled.
+  manifest:
+    needs: [create, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: channel-manifest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      # It holds the newest build of either channel: a preview install takes a stable too, but never one built from older code
+      # than it already runs. Only a build whose manifest names every platform counts, so a release still being built is
+      # passed over.
+      - name: preview manifest
+        run: |
+          set -euo pipefail
+          complete=()
+          for tag in $(gh release list --limit 10 --exclude-drafts --json tagName --jq '.[].tagName'); do
+            node scripts/channel.mjs kind "$tag" > /dev/null 2>&1 || continue
+            dir="$RUNNER_TEMP/probe/$tag"
+            gh release download "$tag" --pattern latest.json --dir "$dir" 2>/dev/null || continue
+            if jq -e --arg v "${tag#v}" '.version == $v and ([.platforms | keys[]] | contains(["darwin-aarch64", "darwin-x86_64", "linux-x86_64", "windows-x86_64"]))' "$dir/latest.json" > /dev/null; then
+              complete+=("$tag")
+            fi
+          done
+          [ "${#complete[@]}" -gt 0 ]
+          best=$(node scripts/channel.mjs newest "${complete[@]}")
+          echo "The preview manifest describes $best."
+          if ! gh release view preview-channel > /dev/null 2>&1; then
+            gh release create preview-channel --target "$GITHUB_SHA" --prerelease --latest=false --title "Preview channel" \
+              --notes "Not a download. Faber reads latest.json from here when Receive previews is on in Settings."
+          fi
+          gh release upload preview-channel "$RUNNER_TEMP/probe/$best/latest.json" --clobber
 
   # Owner decision R110: main follows each published release. Fast-forward only; a main that moved on its own stops here.
   main:
     needs: publish
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v5
         with:

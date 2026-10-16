@@ -217,6 +217,11 @@ export function Settings(props: Props) {
                 <Toggle label={t('set.playSound')} hint={t('set.soundHint')} checked={props.saved.notificationSound !== false} onChange={(on) => props.onSave({ notificationSound: on })} />
               </div>
             </Row>
+            <Row label={t('set.updates')}>
+              <div class="toggles">
+                <Toggle label={t('set.previews')} hint={t('set.previewsHint')} checked={props.saved.previews === true} onChange={(on) => props.onSave({ previews: on })} />
+              </div>
+            </Row>
             <Show when={navigator.userAgent.includes('Windows')}>
               <Row label={t('set.system')}>
                 <div class="toggles">
