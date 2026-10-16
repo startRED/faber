@@ -62,25 +62,60 @@ pub fn all() -> Vec<Scenario> {
     all.collect()
 }
 
-/// Runs each scenario (those whose name contains `filter`, if there is one) and audits it. A scenario fails if its own
-/// checks fail or if its audit finds a leaked process, an outside write or a changed environment. `done` hears of each
-/// outcome as soon as its scenario ends, so the runner can print it while the next one runs.
-/// Seconds the slowest scenarios took on CI (2026-10-14), so `--shard` deals them evenly; any other counts as 5.
-/// A renamed scenario only falls back to 5: the parts get a little uneven, never wrong.
-const SLOW: [(&str, u32); 7] = [
-    ("with no CLI running, Faber stays within its memory budget", 45),
-    ("with Auto, the answer names its model as soon as it starts", 35),
-    ("sentinel: panels move through frames", 27),
-    ("sentinel: the composer grows and shrinks", 15),
-    ("with reduced motion on, the dust stays off", 14),
-    ("a new project session shows the black hole", 30),
-    ("sentinel: no text is garbled in five languages", 14),
+/// Seconds every scenario of 8 s or more took on CI (run 38945820716, 2026-10-16), so `--shard` deals them evenly; any
+/// other counts as 5 (the rest average 4.4 s). A scenario missing here deals as 5 however long it takes, which is how one part
+/// came to take twice the others: when a scenario takes 8 s or more on CI, add it. A renamed one fails a test.
+const SLOW: [(&str, u32); 41] = [
+    ("T13 4: fixture promotion", 335),
+    ("coordinator: a mission lands", 166),
+    ("with Auto, the answer names", 52),
+    ("homes: idle life costs the", 50),
+    ("a new project session shows", 33),
+    ("with no CLI running, Faber", 28),
+    ("remote git: a repository", 27),
+    ("sentinel: panels move through", 25),
+    ("first run, keyboard only", 22),
+    ("the running column opens", 16),
+    ("sentinel: no text is garbled", 16),
+    ("sentinel: the composer grows", 16),
+    ("local_update: candidate starts", 16),
+    ("first run, tutorial: an installed", 15),
+    ("a click on a running conversation", 13),
+    ("C5.4: the open guide and", 13),
+    ("review 5: retained layout", 13),
+    ("local_update: hidden session", 13),
+    ("first run, tutorial: a remembered", 13),
+    ("T13 5: independent helper", 13),
+    ("with reduced motion on, the", 13),
+    ("a chat thread with a tool", 12),
+    ("first run, step 2: a preview", 12),
+    ("a question that waits when", 12),
+    ("first run, tutorial: a beginner", 11),
+    ("local_update: autostart uses", 11),
+    ("first run, tutorial: waits", 11),
+    ("a settings save that fails", 11),
+    ("C5.3: None persists, shows", 11),
+    ("the layout follows the width", 11),
+    ("homes: the Chat home and", 10),
+    ("local_update: trusted launcher", 10),
+    ("reconnecting an account saves", 10),
+    ("an installed CLI that is", 10),
+    ("C5.2: missing ChatGPT installs", 9),
+    ("first run, step 2: three", 9),
+    ("sentinel: a permission card", 9),
+    ("every look fits the new conversation", 9),
+    ("C5.3: Skip persists, shows", 8),
+    ("projects git review 5 and", 8),
+    ("homes: the project home reads", 8),
 ];
 
 fn cost(name: &str) -> u32 {
     SLOW.iter().find(|(start, _)| name.starts_with(start)).map_or(5, |(_, secs)| *secs)
 }
 
+/// Runs each scenario (those whose name contains `filter`, if there is one) and audits it. A scenario fails if its own
+/// checks fail or if its audit finds a leaked process, an outside write or a changed environment. `done` hears of each
+/// outcome as soon as its scenario ends, so the runner can print it while the next one runs.
 pub fn run_all(paths: &Paths, filter: Option<&str>, shard: Option<(usize, usize)>, done: &mut dyn FnMut(&Outcome)) -> Vec<Outcome> {
     let mut outcomes = Vec::new();
     let chosen: Vec<Scenario> = all().into_iter().filter(|s| filter.is_none_or(|f| s.name.contains(f))).collect();
@@ -244,6 +279,17 @@ mod tests {
         assert_eq!(ensure(false, || "no".into()), Err("no".into()));
         assert!(same(1, 1, "n").is_ok());
         assert_eq!(same("a", "b", "letter"), Err("letter: expected \"b\", got \"a\"".into()));
+    }
+
+    // Windows has every scenario; elsewhere the Windows-only ones are not in the list to match.
+    #[cfg(windows)]
+    #[test]
+    fn every_slow_entry_names_exactly_one_scenario() {
+        let names: Vec<&str> = all().iter().map(|s| s.name).collect();
+        for (start, _) in SLOW {
+            let matches = names.iter().filter(|name| name.starts_with(start)).count();
+            assert_eq!(matches, 1, "SLOW entry {start:?} matches {matches} scenarios: a renamed scenario deals as 5 s");
+        }
     }
 
     #[test]

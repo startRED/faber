@@ -28,15 +28,21 @@ impl Suite {
     }
 }
 
-/// Half the logical cores, bounded by a positive Cargo job limit, never fewer than one.
-pub fn job_count(logical: usize, cargo_limit: Option<&str>) -> usize {
-    let half = (logical / 2).max(1);
+/// Half the logical cores on a person's PC, which games and other work share; every core on CI, where the runner is the
+/// job's alone (R163). A positive Cargo job limit bounds both, and it is never fewer than one.
+pub fn job_count(logical: usize, cargo_limit: Option<&str>, whole: bool) -> usize {
+    let share = if whole { logical } else { logical / 2 }.max(1);
     let limit = cargo_limit.and_then(|value| value.parse::<usize>().ok()).filter(|n| *n > 0);
-    half.min(limit.unwrap_or(half))
+    share.min(limit.unwrap_or(share))
+}
+
+/// GitHub Actions, like most CI services, sets `CI=true`.
+pub fn on_ci() -> bool {
+    std::env::var("CI").is_ok_and(|value| value == "true")
 }
 
 pub fn jobs() -> usize {
-    job_count(std::thread::available_parallelism().map_or(1, |n| n.get()), std::env::var("CARGO_BUILD_JOBS").ok().as_deref())
+    job_count(std::thread::available_parallelism().map_or(1, |n| n.get()), std::env::var("CARGO_BUILD_JOBS").ok().as_deref(), on_ci())
 }
 
 /// The suites that cover a set of changed paths (relative to the repository, `/` separators).
@@ -49,7 +55,11 @@ fn suites_for_path(path: &str) -> Vec<Suite> {
     let path = path.trim_start_matches("./");
     let inside = |dirs: &[&str]| dirs.iter().any(|d| path.starts_with(d));
     let is = |files: &[&str]| files.contains(&path);
-    if path.starts_with("docs/") || path.ends_with(".md") {
+    // engine/tests/product_map.rs reads the map; every other document is only words. CI skips its build for a push of words
+    // only, by the same rule (scripts/ci-scope.mjs, R163): keep the two lists the same.
+    if path == "docs/product-map.md" {
+        vec![Rust]
+    } else if path.starts_with("docs/") || path.ends_with(".md") {
         vec![]
     } else if inside(&["testkit/"]) {
         Suite::ALL.to_vec()
@@ -140,13 +150,13 @@ pub fn select(opts: &Options, changed: &[String]) -> BTreeSet<Suite> {
 mod tests {
     #[test]
     fn configured_build_jobs_limit_the_runner_without_changing_its_default() {
-        assert_eq!(super::job_count(16, Some("4")), 4);
-        assert_eq!(super::job_count(16, Some("2")), 2);
+        assert_eq!(super::job_count(16, Some("4"), false), 4);
+        assert_eq!(super::job_count(16, Some("2"), false), 2);
         for configured in [None, Some("0"), Some("-1"), Some("bad")] {
-            assert_eq!(super::job_count(16, configured), 8);
+            assert_eq!(super::job_count(16, configured, false), 8);
         }
         let logical = std::thread::available_parallelism().unwrap().get();
-        assert_eq!(super::jobs(), super::job_count(logical, std::env::var("CARGO_BUILD_JOBS").ok().as_deref()));
+        assert_eq!(super::jobs(), super::job_count(logical, std::env::var("CARGO_BUILD_JOBS").ok().as_deref(), super::on_ci()));
     }
     use super::*;
 
@@ -159,16 +169,20 @@ mod tests {
 
     #[test]
     fn half_the_cores_and_never_fewer_than_one() {
-        assert_eq!(job_count(16, None), 8);
-        assert_eq!(job_count(5, None), 2);
-        assert_eq!(job_count(2, None), 1);
-        assert_eq!(job_count(1, None), 1);
-        assert_eq!(job_count(0, None), 1);
-        assert_eq!(job_count(16, Some("4")), 4);
-        assert_eq!(job_count(16, Some("1")), 1);
-        assert_eq!(job_count(2, Some("4")), 1);
-        assert_eq!(job_count(16, Some("0")), 8);
-        assert_eq!(job_count(16, Some("invalid")), 8);
+        assert_eq!(job_count(16, None, false), 8);
+        assert_eq!(job_count(5, None, false), 2);
+        assert_eq!(job_count(2, None, false), 1);
+        assert_eq!(job_count(1, None, false), 1);
+        assert_eq!(job_count(0, None, false), 1);
+        assert_eq!(job_count(16, Some("4"), false), 4);
+        assert_eq!(job_count(16, Some("1"), false), 1);
+        assert_eq!(job_count(2, Some("4"), false), 1);
+        assert_eq!(job_count(16, Some("0"), false), 8);
+        assert_eq!(job_count(16, Some("invalid"), false), 8);
+        assert_eq!(job_count(4, None, true), 4);
+        assert_eq!(job_count(3, None, true), 3);
+        assert_eq!(job_count(0, None, true), 1);
+        assert_eq!(job_count(4, Some("2"), true), 2);
     }
 
     #[test]
@@ -180,13 +194,13 @@ mod tests {
 
     #[test]
     fn the_runner_respects_a_positive_cargo_build_limit() {
-        assert_eq!(job_count(16, Some("4")), 4);
-        assert_eq!(job_count(16, Some("2")), 2);
-        assert_eq!(job_count(2, Some("4")), 1);
+        assert_eq!(job_count(16, Some("4"), false), 4);
+        assert_eq!(job_count(16, Some("2"), false), 2);
+        assert_eq!(job_count(2, Some("4"), false), 1);
         for value in [None, Some("0"), Some("invalid"), Some("-2")] {
-            assert_eq!(job_count(16, value), 8);
+            assert_eq!(job_count(16, value, false), 8);
         }
-        let default = job_count(std::thread::available_parallelism().map_or(1, |n| n.get()), None);
+        let default = job_count(std::thread::available_parallelism().map_or(1, |n| n.get()), None, on_ci());
         let limit = std::env::var("CARGO_BUILD_JOBS").ok().and_then(|value| value.parse::<usize>().ok()).filter(|limit| *limit > 0);
         assert_eq!(jobs(), limit.map_or(default, |limit| default.min(limit)));
     }
@@ -222,6 +236,7 @@ mod tests {
             assert!(suites_for(&paths(&[path])).is_empty(), "{path}");
         }
         assert!(suites_for(&[]).is_empty());
+        assert_eq!(names(&suites_for(&paths(&["docs/product-map.md"]))), ["rust"], "a test reads the map");
     }
 
     #[test]
