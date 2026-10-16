@@ -1,4 +1,5 @@
 import { createEffect, createSignal, For, on, Show } from 'solid-js';
+import { UpdateLine } from './UpdateStage.tsx';
 import { api, type Area, type Project, type RunningItem, type Summary, type UpdateStatus, type Vendor, type VendorUsage } from './api.ts';
 import { openMenu } from './contextmenu.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
@@ -63,7 +64,7 @@ interface Props {
   projects: Project[];
   vendors: Vendor[];
   version: string;
-  /** The shell's view of the update (`update.rs`): a download at open, or one kept for a restart. */
+  /** The shell's view of the update (`update.rs`): a download or an install, or one kept for a restart. */
   update?: UpdateStatus;
   /** An answer is running, so the restart waits. */
   updateBlocked?: boolean;
@@ -316,12 +317,8 @@ export function Sidebar(props: Props) {
           </Show>
         </div>
         {/* The update: a calm line while one downloads at open, a quiet control once one waits for a restart. */}
-        <Show when={props.update === 'downloading'}>
-          <div class="upd" role="status">
-            {t('update.downloading')}
-          </div>
-        </Show>
-        <Show when={props.update === 'ready'}>
+        <UpdateLine status={props.update ?? { phase: 'none' }} />
+        <Show when={props.update?.phase === 'ready'}>
           <button
             type="button"
             class="upd act"

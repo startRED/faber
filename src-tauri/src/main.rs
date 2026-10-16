@@ -57,8 +57,11 @@ pub(crate) struct Faber {
     pub(crate) models: Mutex<Vec<ModelInfo>>,
     /// A newer version, already downloaded; it installs at the first idle moment (`update.rs`) or when Faber quits.
     pub(crate) update: Mutex<Option<(Update, Vec<u8>)>>,
-    /// A download started at open is running; the screen shows a calm line for it (`update.rs`).
-    pub(crate) updating: std::sync::atomic::AtomicBool,
+    /// The install at open, as the screen shows it: looking, downloading (how far), installing (`update.rs`).
+    pub(crate) stage: Mutex<update::Status>,
+    /// The window was shown after its first paint (or by the failsafe); false from its creation until then. A window not
+    /// shown yet counts as seen, so nothing closes it under the person (`update.rs`).
+    pub(crate) revealed: std::sync::atomic::AtomicBool,
     /// The person has typed, pasted or dropped something since Faber opened: a draft may exist only on the screen, so the
     /// install at open waits for an idle moment (`update.rs`).
     pub(crate) touched: std::sync::atomic::AtomicBool,
@@ -1022,16 +1025,45 @@ fn show(app: &AppHandle) {
     {
         return;
     }
-    let window = main_window(app).or_else(|| {
+    let existing = main_window(app);
+    let fresh = existing.is_none();
+    let window = existing.or_else(|| {
         let faber = app.state::<Faber>();
         create_window(app, faber.hidden, &faber.data_dir).ok()
     });
+    // A window built just now is shown after its first paint (`reveal`), which also brings it forward.
+    if fresh && !app.state::<Faber>().hidden {
+        return;
+    }
     if let Some(w) = window {
+        // Asked for by the person: the first-paint reveal has nothing left to do.
+        app.state::<Faber>().revealed.store(true, std::sync::atomic::Ordering::SeqCst);
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
         app.state::<Faber>().engine.set_attention(true, true);
     }
+}
+
+/// Shows the window once, when the screen has painted its first frame or the failsafe says so, so a person never sees an
+/// empty one. Automated runs build theirs shown (offscreen) and skip this.
+fn reveal(app: &AppHandle) {
+    let faber = app.state::<Faber>();
+    if faber.revealed.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    if let Some(w) = main_window(app) {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+        faber.engine.set_attention(true, true);
+    }
+}
+
+/// The screen painted its first frame: the window may show now.
+#[tauri::command]
+fn screen_ready(app: AppHandle) {
+    reveal(&app);
 }
 
 /// T9 owns presentation; no screen or worker can fabricate local promotion evidence.
@@ -1050,9 +1082,9 @@ fn local_update_state(faber: State<'_, Faber>) -> Res<Option<faber_engine::proje
         .unwrap_or(Ok(None))
 }
 
-/// `none`, `downloading` or `ready`: the screen's view of the update (`update.rs`). Changes arrive as `faber:update`.
+/// The screen's view of the update (`update.rs`): its phase and the download's progress. Changes arrive as `faber:update`.
 #[tauri::command]
-fn update_status(app: AppHandle) -> &'static str {
+fn update_status(app: AppHandle) -> update::Status {
     update::status(&app)
 }
 
@@ -1091,6 +1123,7 @@ fn save_notes_seen(faber: State<'_, Faber>, id: u32) -> Res<()> {
 
 fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Result<tauri::WebviewWindow> {
     let handle = app.clone();
+    app.state::<Faber>().revealed.store(hidden, std::sync::atomic::Ordering::SeqCst);
     // The first paint already has the theme's own colour.
     let [r, g, b] = look::frame_color(&look::stored(app.state::<Faber>().engine.settings().appearance.as_ref()));
     // A test build started with `FABER_CHECKS_OUT` opens the page that runs the screen's checks and reports them.
@@ -1104,6 +1137,8 @@ fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Resul
         .inner_size(1280.0, 800.0)
         .min_inner_size(720.0, 480.0)
         .background_color(Color(r, g, b, 0xff))
+        // Shown after the screen's first paint (`reveal`), so there is never a blank window.
+        .visible(hidden)
         // The "Paste" of the right-click menu reads the clipboard; without this WebView2 asks the person every time.
         .enable_clipboard_access()
         // The page never leaves Faber; a web link that slips through opens in the browser instead.
@@ -1158,7 +1193,16 @@ fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Resul
         }
         builder = builder.additional_browser_args(&args);
     }
-    builder.build()
+    let window = builder.build()?;
+    if !hidden {
+        // The failsafe: a screen that never reports its first paint still shows up.
+        let handle = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            reveal(&handle);
+        });
+    }
+    Ok(window)
 }
 
 fn main() {
@@ -1325,6 +1369,7 @@ fn main() {
             mission_answer,
             local_update_state,
             update_status,
+            screen_ready,
             update_restart,
             input_seen,
             draft_dirty,
@@ -1426,7 +1471,8 @@ fn main() {
                 engine,
                 models: Mutex::default(),
                 update: Mutex::default(),
-                updating: std::sync::atomic::AtomicBool::new(false),
+                stage: Mutex::default(),
+                revealed: std::sync::atomic::AtomicBool::new(false),
                 touched: std::sync::atomic::AtomicBool::new(false),
                 draft_dirty: std::sync::atomic::AtomicBool::new(false),
                 data_dir: data_dir.clone(),

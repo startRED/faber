@@ -68,6 +68,7 @@ replaces the shell; otherwise the shell shows the sidebar, the topbar, the work 
 | Settings | Ctrl+,, the sidebar button, a quota line (opens Usage limits), "Details in Settings" | Five sections (below); Back or Esc | `ui/Settings.tsx`, `ui/Appearance.tsx`, `ui/draft.ts` |
 | Right-click menus | Right-click, the Menu key or Shift+F10 | Per target, below | `ui/ContextMenu.tsx`, `ui/contextmenu.ts` |
 | Save-error toast | A save fails | Read and dismiss | `ui/App.tsx` |
+| Update opening screen | A window that opens while Faber looks for, downloads or installs an update (R152) | The mark, "Looking for an update…", then "Downloading update… 42%" (megabytes when the size is unknown) with a thin bar, then "Installing…"; nothing to press, the window's buttons stay in reach. The sidebar shows the same words as a quiet line when the window opens in the middle of a download or an install | `ui/UpdateStage.tsx` |
 | What's new | First start after an update | One calm page of the release's notes; Continue or Esc closes it | `ui/WhatsNew.tsx`, `ui/notes.ts` |
 | Tray | Always, outside the window | Open or Quit; a number while something needs the person; one notification per question, mission decision or held-back request, unless notifications are off | `src-tauri/src/tray.rs`, `src-tauri/src/tray/` |
 | Outside windows | The person's own action | Native pickers (project folder, chat folder, theme file, save a file); the file manager ("Open folder", "Show"); a visible console ("Open in terminal", "Sign in") | `src-tauri/src/main.rs`, `src-tauri/src/terminal.rs` |
@@ -196,7 +197,7 @@ sentences; `open_link`'s English error and the raw system errors some commands p
 | Settings and looks | `save_settings`, `preview_look`, `save_theme`, `open_theme`, `set_shell_texts` |
 | Projects and folders | `add_project`, `remove_project`, `show_project`, `recents`, `open_folders`, `forget_recent`, `save_environment`, `forget_environment`, `start_environment` |
 | Missions | `project_enroll`, `project_grant`, `project_revoke` (no caller on screen yet), `project_proof`, `project_proof_confirm`, `mission_start`, `mission_state`, `mission_mode`, `mission_stop`, `mission_resume`, `mission_answer`, `local_update_state` |
-| Updates | `update_status`, `update_restart` (the "Update ready, restart" button), `input_seen` (first typing, paste or drop), `draft_dirty` (a field holds an unsent draft), `notes_seen`, `save_notes_seen` |
+| Updates | `update_status` (phase and progress), `screen_ready` (the first frame is painted: the window, built hidden, shows; a failsafe shows it after 3 s), `update_restart` (the "Update ready, restart" button), `input_seen` (first typing, paste or drop), `draft_dirty` (a field holds an unsent draft), `notes_seen`, `save_notes_seen` |
 | Accounts | `setup_check`, `setup_install`, `setup_sign_in` |
 
 Events: `faber:event` carries `message`, `queue`, `quota`, `usage`, `running`, `list` and the account cards' `setup`

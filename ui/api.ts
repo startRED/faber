@@ -4,8 +4,15 @@ import { listen } from '@tauri-apps/api/event';
 // The shapes the engine sends (engine/src/model.rs).
 export type Vendor = 'claude' | 'codex';
 
-/** The shell's view of the update: one is downloading at open, one is kept for an install, or none. */
-export type UpdateStatus = 'none' | 'downloading' | 'ready';
+/**
+ * The shell's view of the update. The first three phases belong to the install at open: looking, downloading (with a whole
+ * `percent` when the size is known, else the `mb` so far) and installing. `ready` is one kept for a restart.
+ */
+export interface UpdateStatus {
+  phase: 'none' | 'checking' | 'downloading' | 'installing' | 'ready';
+  percent?: number;
+  mb?: number;
+}
 export type Effort = 'low' | 'medium' | 'high';
 export type Area = 'chat' | 'project';
 export type Status = 'streaming' | 'done' | 'stopped' | 'error';
@@ -503,6 +510,8 @@ export const api = {
   projectEnroll: (projectId: string) => invoke<EnrollView>('project_enroll', { projectId }),
   localUpdateState: () => invoke<BuildView | null>('local_update_state'),
   updateStatus: () => invoke<UpdateStatus>('update_status'),
+  /** The first frame is painted: the shell may show the window (it stays hidden until then). */
+  screenReady: () => invoke<void>('screen_ready'),
   updateRestart: () => invoke<void>('update_restart'),
   inputSeen: () => invoke<void>('input_seen'),
   /** Whether any field holds something typed or attached and not sent: no unattended update closes the window then. */
