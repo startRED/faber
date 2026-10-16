@@ -400,46 +400,64 @@ and Projects.
 ## Watching the agent work
 
 The owner's ask (2026-10-16): the person sees every part of the work happening and steps in as easily as reading a
-chat. Planned, not built. The design below is an AI proposal, not reviewed, picked from a divergent pass (30 ideas
-under five frames). It fills the steps of R161 and never becomes a board or an agent map.
+chat. Planned, not built. The design is an AI proposal, not reviewed, picked from a divergent pass (30 ideas under five
+frames) and checked against today's code. It fills the steps of R161 and never becomes a board or an agent map.
 
-- **A living sentence per child.** When the main agent splits a step, the step opens in place into one row per child
-  (a CLI subagent or a helper): the short name the agent gave it, what it does now in plain words ("Reading
-  akitaonrails.com/en/posts", "Running the tests", "Changing 3 files"), the time, and a small picture when it has a
-  screen. The engine builds the sentence from the child's last event with no model call and returns a key with
-  arguments; each language writes its own sentence. A row changes only when its sentence does, at most about once a
-  second. Past three rows the rest fold into "+2 more", and while nothing is stuck the whole split reads as one sentence
-  ("5 collectors reading 5 sites").
-- **Stuck shows only when it matters.** The engine notices a child repeating the same action, failing the same check
-  twice, or silent longer than its kind of work allows; a child waiting on a question is "waiting for you", never
-  stuck. The main agent hears first and tries once to retry, narrow the piece or hand it to the other vendor. Only if
-  that fails does the row turn amber with "Look" and "Tell it…", and only then is the person notified. It ships after
-  the living sentence, once the recorded fixtures show no false amber.
-- **The side chat.** Clicking a row opens that child on the right as a normal conversation, live: the first message is
-  the whole brief the main agent sent, word for word, then the child's messages, steps and results as they arrive. It
-  reuses the conversation's own message parts and loads only the open child, so a closed side chat costs nothing. For a
-  helper session the box below writes to that child, and the main agent gets the message before its next step. A CLI
-  subagent cannot be messaged while it runs, so there the box writes to the main agent about that step and says so; a
-  finished subagent offers "Continue with a helper".
-- **Facts, not a verdict.** When a child ends, its row shows what it was asked, what it did (files changed, checks run,
-  steps) and anything it touched that the brief never named. The main agent grading its own helper is not trusted:
-  each brief ends with a "done when" list, and the row ticks each line the report meets.
-- **Faber's own browser and app pane.** The agent or a child opens websites in a browser pane that belongs to Faber and
-  runs the app it builds in a pane beside the chat. A card in the reply ("Site open in the browser", with a picture and
-  Open) is the way in. The pane has one owner at a time: "Take over" stops the agent at its next action, the person
-  clicks and types, and "Let it continue" hands it back with a short note of what the person changed. Logins, captchas
-  and payments are always the person's turn ("Your turn" on the card), never the agent's (guardrails).
-- **Recorded, not streamed.** Each pane keeps a log: a small picture at each page change or agent action, with the
-  action that caused it, typed secrets masked and password fields blurred. Watching live is playing the end of that
-  log, coming back later is scrubbing it, and "Take over from here" starts from the latest picture. Only the pane the
-  person opened is a real live view; every other child is a still picture that steps forward. The log lives in Faber's
-  own data, never in the project folder (R35), never leaves the PC or enters an export, is trimmed by size and goes with
-  its conversation. "While you were away" sums it up in a few pictures with one sentence each.
-- **Quiet during games.** While a game is in front (the notification detector), pictures stop, rows stop repainting and
-  events wait as one summary for the person's return. Nothing opens a window or takes focus.
-- **Cost first.** One live browser view at a time, measured against R125 before it ships. The first step is a Windows
-  spike: a hidden child webview driven by the engine, a small picture after each of 20 actions, measuring stale or
-  blank pictures, memory, processor and any focus flash while a game is in front.
+**In order, each one extending what exists:**
+
+1. **Words for every step (now, Chat too).** Today the work log names only Codex's four item kinds; Claude's tools show
+   their raw names ("Read", "Task"), and the open log is a flat list (`ui/worklog.ts`, `ui/Thread.tsx`). Each tool
+   gets a plain present-tense phrase built from its input with no model call ("Reading akitaonrails.com/en/posts",
+   "Running the tests", "Changing 3 files"): the engine-side event stays as it is, and `worklog.ts` maps it to a key
+   with arguments that each language writes by hand. The status line that already shows the newest step becomes this
+   living sentence.
+2. **Subagents as rows inside the step (R161 step 2).** Claude's stream marks every event of a subagent with
+   `parent_tool_use_id`, which `engine/src/claude.rs` drops today, and the Task/Agent call already carries the whole
+   brief in its input. The engine keeps that mark on `Tool`, `Text` and `ToolResult`; the screen groups a child's
+   events under its Task step, which opens into one row per child: the short name the agent gave it, its living
+   sentence and its time. Past three rows the rest fold into "+2 more", and while nothing is stuck the whole split
+   reads as one sentence ("5 collectors reading 5 sites"). Codex has no subagents, so for Codex only helpers show.
+3. **The side chat lives in the right column.** The running column (`ui/App.tsx`, `ui/Running.tsx`) is already the one
+   place on the right; clicking a child row opens that child there as a normal conversation, with a back arrow to the
+   running list, so there is no second column. Its first message is the whole brief the main agent sent, word for word,
+   then the child's messages, steps and results as they arrive, drawn with the conversation's own message parts and
+   loaded only while open. A CLI subagent cannot be messaged while it runs, so its box writes to the main agent about
+   that step and says so.
+4. **Facts, not a verdict.** When a child ends, its row shows what it was asked, what it did (files changed, checks run,
+   steps) and anything it touched that the brief never named. The main agent grading its own helper is not trusted:
+   each brief ends with a "done when" list, and the row ticks each line the report meets.
+5. **Helpers talk back (R161 step 3).** A helper is a real Faber session on the other vendor, so in the side chat the
+   box writes to that child, and the main agent gets the message before its next step. A finished subagent offers
+   "Continue with a helper".
+6. **Stuck shows only when it matters.** The engine notices a child repeating the same action, failing the same check
+   twice, or silent longer than its kind of work allows; a child waiting on a question is "waiting for you", never
+   stuck. The main agent hears first and tries once to retry, narrow the piece or hand it to the other vendor. Only if
+   that fails does the row turn amber with "Look" and "Tell it…", and only then is the person notified. It ships once
+   the recorded fixtures show no false amber.
+7. **Faber's own browser and app pane (R161 step 4, the largest piece).** Nothing exists yet: the shell has one
+   webview. The agent or a child opens websites in a pane that belongs to Faber and runs the app it builds beside the
+   chat, through a Faber tool the CLI calls. A card in the reply ("Site open in the browser", with a picture and Open)
+   is the way in, next to the file and question cards that already exist. The pane has one owner at a time: "Take over"
+   stops the agent at its next action, the person clicks and types, and "Let it continue" hands it back with a short
+   note of what the person changed. Logins, captchas and payments are always the person's turn ("Your turn" on the
+   card), never the agent's (guardrails).
+8. **Recorded, not streamed.** Each pane keeps a log: a small picture at each page change or agent action, with the
+   action that caused it, typed secrets masked and password fields blurred. Watching live is playing the end of that
+   log, coming back later is scrubbing it, and "Take over from here" starts from the latest picture. Only the pane the
+   person opened is a real live view; every other child is a still picture that steps forward. The log follows the
+   attachments of a project conversation (`<data dir>/attachments/<conversation id>/`): Faber's own data, never the
+   project folder (R35), never in an export, trimmed by size and deleted with its conversation. "While you were away"
+   sums it up in a few pictures with one sentence each.
+
+**Across all of them:**
+
+- **Quiet during games.** The tray already knows when a game is in front (`src-tauri/src/tray/native.rs`, private
+  today); that check becomes one the screen can ask. While it holds, pictures stop, rows stop repainting and events wait
+  as one summary for the person's return. Nothing opens a window or takes focus.
+- **Cost first.** Faber idles near 110 MB today against the 400 MB test (R125). Steps 1 to 6 add no process and only
+  the rows on screen. A second webview is the big cost: one live view at a time, and before it is built a Windows
+  spike measures it (a hidden child webview driven by the engine, a small picture after each of 20 actions: stale or
+  blank pictures, memory, processor, and any focus flash while a game is in front).
 
 Parked: a floating picture over the game (takes the screen), a strip board with columns (a board, R161), a shortcut
 palette (a second way to do what the composer does), a layout that rearranges itself when the person looks away, and an
