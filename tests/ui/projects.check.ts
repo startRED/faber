@@ -676,6 +676,25 @@ check('settings projects: a refusal swaps the draft for the refreshed list and s
   });
 });
 
+check('settings projects: a refusal for invalid commands that comes with a moved declaration still drops the draft', () => {
+  let current = proofView(false);
+  return withProjectSettings(() => {
+    api.projectProof = async () => current;
+    api.projectProofConfirm = async () => { throw 'reason.proof.command'; };
+  }, async (root) => {
+    await click(root.querySelector('.pset-head'));
+    await click(root.querySelector('[data-testid="proof-edit"]'));
+    const box = root.querySelector<HTMLTextAreaElement>('[data-testid="proof-draft"]')!;
+    box.value = 'npm test && npm run lint';
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    current = { ...proofView(false, ['npm run evil']), declared: ['npm run evil'] };
+    await click(root.querySelector('[data-testid="proof-save"]'));
+    equal(root.querySelector('[data-testid="proof-draft"]'), null, 'the draft is gone, whatever the error was');
+    ok(root.querySelector('[data-testid="proof-commands"]')?.textContent?.includes('npm run evil'), 'the new list is on screen');
+  });
+});
+
 check('settings projects: the self-update switch saves the grant with a fresh revision', () => {
   let granted: unknown[] = [];
   return withProjectSettings(() => {

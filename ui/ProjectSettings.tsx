@@ -110,8 +110,10 @@ function Body(props: { project: Project }) {
           // before anything is confirmed. Edit starts again from them, so a draft never goes out against a list not seen.
           const latest = await api.projectProof(id()).catch(() => undefined);
           if (latest && !gone) {
+            const seen = proof();
+            const moved = JSON.stringify([seen?.declared, seen?.setup]) !== JSON.stringify([latest.declared, latest.setup]);
             setProof(latest);
-            if (['reason.proof.declaredChanged', 'reason.proof.setupChanged'].includes(errorText(err))) setEditing(false);
+            if (moved) setEditing(false);
           }
           throw err;
         });

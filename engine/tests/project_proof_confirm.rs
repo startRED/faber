@@ -28,3 +28,14 @@ fn a_confirmation_of_a_list_that_is_no_longer_declared_is_refused() {
     let edited = confirm(&project, &text(&["npm run lint"]), &again.setup, &again.declared).unwrap();
     assert_eq!(confirmed(&edited).unwrap(), ["npm run lint"]);
 }
+
+/// A draft with invalid commands against a declaration that moved on is refused for the declaration, so the screen refreshes.
+#[test]
+fn a_changed_declaration_wins_over_invalid_commands() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("AGENTS.md"), "## Proof commands\n```\nnpm test\n```").unwrap();
+    let project = Project::new("p1".into(), "P".into(), dir.path().to_string_lossy().into_owned());
+    let shown = view(&project);
+    std::fs::write(dir.path().join("AGENTS.md"), "## Proof commands\n```\nnpm run e2e\n```").unwrap();
+    assert_eq!(confirm(&project, &text(&["npm test && npm run lint"]), &shown.setup, &shown.declared), Err("reason.proof.declaredChanged"));
+}

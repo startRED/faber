@@ -193,21 +193,22 @@ pub fn setup_definitions(
 /// the owner was shown: if what the project would install or declare now is something else (a lock file appeared, or the
 /// declaration was edited, meanwhile), nothing is saved and the screen reads and shows the list again.
 pub fn confirm(project: &Project, commands: &[String], seen: &[String], seen_declared: &[String]) -> Result<Project, &'static str> {
+    // Stale snapshots are refused first, so an invalid draft never hides that the files moved on.
+    let (declared, _) = declared(Path::new(&project.path));
+    if declared != seen_declared {
+        return Err("reason.proof.declaredChanged");
+    }
+    let setup = setup_commands(&|path| Path::new(&project.path).join(path).is_file());
+    if setup != seen {
+        return Err("reason.proof.setupChanged");
+    }
     if commands.is_empty() || commands.len() > MAX_COMMANDS {
         return Err("reason.proof.command");
     }
     for command in commands {
         command_tokens(command)?;
     }
-    let (declared, _) = declared(Path::new(&project.path));
-    if declared != seen_declared {
-        return Err("reason.proof.declaredChanged");
-    }
     let mut next = project.clone();
-    let setup = setup_commands(&|path| Path::new(&project.path).join(path).is_file());
-    if setup != seen {
-        return Err("reason.proof.setupChanged");
-    }
     next.extra.insert("proof".into(), serde_json::json!({"declared": declared, "commands": commands, "setup": setup}));
     Ok(next)
 }
