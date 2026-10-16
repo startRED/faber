@@ -167,11 +167,11 @@ fn allow_response(tool: &str, input: &Value) -> Value {
 }
 
 /// How full a conversation gets before Claude Code compacts it. All three models hold 1M and the CLI compacts near 967K,
-/// deep into context rot. Haiku thrashes at 100K (the base context eats the room, measured) and at 130K stays under its
-/// 100K price step; Opus and Sonnet are starting points to measure, not proven optima. Unknown models keep the CLI's own.
+/// deep into context rot. Haiku thrashes at 100K (the base context eats the room, measured), so it compacts at 150K (R158);
+/// Opus and Sonnet are starting points to measure, not proven optima. Unknown models keep the CLI's own.
 fn autocompact_window(model: &str) -> Option<&'static str> {
     let model = model.to_ascii_lowercase();
-    [("haiku", "130k"), ("sonnet", "300k"), ("opus", "400k")].into_iter().find(|(name, _)| model.contains(name)).map(|(_, w)| w)
+    [("haiku", "150k"), ("sonnet", "300k"), ("opus", "400k")].into_iter().find(|(name, _)| model.contains(name)).map(|(_, w)| w)
 }
 
 /// Arguments for one long-lived Claude Code process that takes many turns over stdin.

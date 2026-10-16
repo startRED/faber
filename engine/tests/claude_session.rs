@@ -345,7 +345,7 @@ fn chat_is_lean_and_confined_to_its_workspace_projects_get_the_user_setup_withou
     assert_eq!(after(&chat, "--resume"), "abc");
     assert_eq!(after(&chat, "--model"), "haiku");
     // Each model compacts at its own window; an unknown model keeps the CLI default.
-    assert_eq!(after(&chat, "--autocompact"), "130k");
+    assert_eq!(after(&chat, "--autocompact"), "150k");
     let window =
         |model: &str| after(&claude_args(&ClaudeLaunch { model: Some(model.into()), flags: NEWER, ..launch(Area::Chat) }), "--autocompact");
     assert_eq!((window("claude-sonnet-5-5"), window("claude-opus-5-5")), ("300k".into(), "400k".into()));
@@ -895,7 +895,7 @@ fn each_model_compacts_at_its_own_window_once_and_only_where_the_cli_has_the_fla
     };
     let windows = |args: &[String]| args.windows(2).filter(|a| a[0] == "--autocompact").map(|a| a[1].clone()).collect::<Vec<_>>();
     for (model, window) in
-        [("haiku", "130k"), ("claude-haiku-5-5", "130k"), ("Haiku[1m]", "130k"), ("sonnet", "300k"), ("claude-opus-5-5", "400k")]
+        [("haiku", "150k"), ("claude-haiku-5-5", "150k"), ("Haiku[1m]", "150k"), ("sonnet", "300k"), ("claude-opus-5-5", "400k")]
     {
         for permissions in [Permissions::Isolated, Permissions::Ask, Permissions::FullAccess] {
             assert_eq!(windows(&with(model, permissions, None, NEWER)), [window], "{model} {permissions:?}: one window, never two");
