@@ -244,6 +244,7 @@ fn opus_10_role_resume_rejects_flag_values_before_spawn() {
 
 fn launch(resume: Option<&str>) -> ClaudeLaunch {
     ClaudeLaunch {
+        helper: Default::default(),
         area: Area::Project,
         model: Some("claude-sonnet-4-6".into()),
         effort: Some("high".into()),
@@ -265,6 +266,7 @@ fn profile(params: &Value) -> &Value {
 
 fn thread(resume: Option<&str>) -> CodexThread {
     CodexThread {
+        helper: Default::default(),
         cwd: ".".into(),
         model: Some("gpt-6".into()),
         effort: Some("high".into()),

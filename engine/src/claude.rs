@@ -31,6 +31,8 @@ pub struct ClaudeLaunch {
     /// Web search from the settings (R140). Chat and the person's own project sessions only: a side question and a role never
     /// read it.
     pub tuning: Tuning,
+    /// Faber's helper tool (R161): offered to a project's own agent, never to a side question or a role.
+    pub helper: crate::helper::Helper,
 }
 
 /// Flags that only newer CLIs take, read once from `claude --help` (`from_help`). A flag the CLI does not list is never
@@ -276,6 +278,12 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     if launch.instructions.is_none() {
         args.push("--append-system-prompt".into());
         args.push(persona(&PersonaInput { name: launch.user_name.as_deref() }));
+        // R161: Faber's own MCP server, answered by this driver over stdio, holds the helper tool. A helper keeps no history.
+        match launch.helper {
+            crate::helper::Helper::Offers => args.extend(["--mcp-config".into(), crate::helper::CLAUDE_MCP_CONFIG.into()]),
+            crate::helper::Helper::Is => args.push("--no-session-persistence".into()),
+            crate::helper::Helper::Off => {}
+        }
     }
     // Side questions keep the CLI default, and an older CLI that does not list the flag would refuse to start with it.
     let compacts = launch.flags.autocompact && launch.instructions.is_none();
@@ -347,6 +355,7 @@ pub fn project_claude_args(launch: &ClaudeLaunch, role: crate::project::Role) ->
 /// bound to its hash (`qualification::launch_policy`), so a change to any flag or setting asks for a new qualification run.
 pub(crate) fn project_launch_policy(roles: &[crate::project::Role]) -> Value {
     let launch = ClaudeLaunch {
+        helper: Default::default(),
         area: Area::Project,
         model: Some("claude-haiku-5-5".into()),
         effort: Some("medium".into()),
@@ -420,7 +429,13 @@ pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
             let parent = msg["parent_tool_use_id"].as_str().map(String::from);
             items(&msg["message"]["content"])
                 .filter(|c| c["type"] == "tool_use")
-                .map(|c| EngineEvent::Tool { id: s(&c["id"]), name: s(&c["name"]), input: c["input"].clone(), parent: parent.clone() })
+                .map(|c| {
+                    let name = match c["name"].as_str() {
+                        Some(crate::helper::CLAUDE_NAME) => crate::helper::TOOL.to_string(),
+                        _ => s(&c["name"]),
+                    };
+                    EngineEvent::Tool { id: s(&c["id"]), name, input: c["input"].clone(), parent: parent.clone() }
+                })
                 .collect()
         }
         "user" => items(&msg["message"]["content"])
@@ -561,6 +576,8 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
         let mut child = p.child;
         let mut job = p.contained;
         let mut pending: HashMap<String, (String, Value)> = HashMap::new();
+        // Helper calls waiting for their report: tool call id to the control request and the JSON-RPC id that carried it.
+        let mut helpers: HashMap<String, (String, Value)> = HashMap::new();
         let mut closed = false;
         let mut control_id = 0u32;
         let mut quota_seen = false;
@@ -618,6 +635,26 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                             }
                             watch.activity();
                             if finished { watch.finish(); }
+                            // R161: Faber's MCP server. Only a session that offers the helper has it; the CLI waits for each answer.
+                            if msg["type"] == "control_request" && msg["request"]["subtype"] == "mcp_message" {
+                                let offered = opts.launch.helper == crate::helper::Helper::Offers && msg["request"]["server_name"] == "faber";
+                                let step = if offered { crate::helper::mcp(&msg["request"]["message"]) } else {
+                                    crate::helper::Mcp::Answer(json!({"jsonrpc":"2.0","id":msg["request"]["message"]["id"],"error":{"code":-32601,"message":"No such server"}}))
+                                };
+                                match step {
+                                    crate::helper::Mcp::Answer(answer) => {
+                                        let reply = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": msg["request_id"],
+                                            "response": { "mcp_response": answer } } });
+                                        let _ = proc::write_line(&mut *stdin, &reply).await;
+                                    }
+                                    crate::helper::Mcp::Call { id, rpc, input } => {
+                                        helpers.insert(id.clone(), (s(&msg["request_id"]), rpc));
+                                        watch.pause();
+                                        on_event(EngineEvent::HelperCall { id, input });
+                                    }
+                                }
+                                continue;
+                            }
                             for mut event in parse_claude_message(&msg) {
                                 if matches!(event, EngineEvent::Done { .. }) {
                                     if !finished {
@@ -635,6 +672,13 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                                     event = EngineEvent::CacheWarm { secs, started_ms: Some(began) };
                                 }
                                 if let EngineEvent::Permission { request_id, tool, input } = &event {
+                                    // Calling the helper changes nothing by itself: what the helper does is held to the same mode.
+                                    if tool == crate::helper::CLAUDE_NAME && opts.launch.helper == crate::helper::Helper::Offers {
+                                        let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id,
+                                            "response": { "behavior": "allow", "updatedInput": input } } });
+                                        let _ = proc::write_line(&mut *stdin, &msg).await;
+                                        continue;
+                                    }
                                     // Only the isolated mode answers for itself. Full access hands the request to the engine, which
                                     // decides with the mode in force at that moment (see Core::handle), so a switch to Ask is never raced.
                                     if opts.launch.permissions == Permissions::Isolated {
@@ -717,6 +761,13 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                             }
                         };
                         let _ = ack.send(delivery);
+                    }
+                    Some(SessionCommand::HelperReply { id, ok, text }) => {
+                        let Some((request_id, rpc)) = helpers.remove(&id) else { continue };
+                        let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id,
+                            "response": { "mcp_response": crate::helper::mcp_result(&rpc, ok, &text) } } });
+                        let _ = proc::write_line(&mut *stdin, &msg).await;
+                        if helpers.is_empty() && pending.is_empty() { watch.resume(); }
                     }
                     Some(SessionCommand::Interrupt) => {
                         if !watch.active() || watch.stopping() { continue; }
@@ -848,6 +899,7 @@ mod role_tests {
             bin: "fake".into(),
             cwd: ".".into(),
             launch: ClaudeLaunch {
+                helper: Default::default(),
                 area: Area::Project,
                 model: None,
                 effort: None,

@@ -276,6 +276,12 @@ ended; one sent to the background keeps the live mark until its task notice arri
 the third ink, never as a failure. Known limit: when a reply moves to another AI after a quota stop, its open tools,
 helpers included, read as working again with the new reply.
 
+A helper from the other AI (Faber's helper tool, R161) is the same row: its title in bold and, as its kind, the AI that
+ran it, so a Claude Code reply reads "Codex". Its commands show under it and its report is its final words. The person
+never sees its approval cards: in a mode that asks, what the helper needed approval for is refused and named in its
+report, and the agent does that step itself, where the card shows. Known limit: a conversation resumed from before the
+helper tool existed keeps its Codex thread without it, since Codex takes dynamic tools only when a thread starts.
+
 ### Recent folders and environments
 
 The "Open a project" screen (Projects with none open) and the Chat folder setting list the last five folders used, newest

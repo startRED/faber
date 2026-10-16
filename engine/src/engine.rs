@@ -31,6 +31,7 @@ use uuid::Uuid;
 
 mod answer;
 mod auto;
+mod helpers;
 mod parked;
 mod project_budget;
 mod project_sessions;
@@ -321,6 +322,8 @@ struct Core {
     clock: Option<Clock>,
     transfers: HashMap<String, recovery::Transfer>,
     credit: Option<(String, String, Vendor)>,
+    /// Helpers at work (R161), by the agent's tool call that started each.
+    helpers: HashMap<String, helpers::Run>,
 }
 
 /// How often Claude's plan is checked again.
@@ -405,6 +408,7 @@ impl Engine {
                 clock: None,
                 transfers: HashMap::new(),
                 credit: None,
+                helpers: HashMap::new(),
             })
         });
         Engine { core, runtime }
@@ -585,7 +589,10 @@ impl Engine {
     }
     pub fn interrupt(&self, id: &str) {
         self.with(|c| match c.live.get(id).filter(|l| l.turn.is_some()) {
-            Some(l) => l.session.interrupt(),
+            Some(l) => {
+                l.session.interrupt();
+                c.stop_helpers(id, false);
+            }
             None => c.stop_waiting(id),
         })
     }
@@ -798,6 +805,7 @@ impl Engine {
             for (_, l) in c.live.drain() {
                 l.session.close();
             }
+            c.close_helpers();
             for session in c.mission_sessions.drain().flat_map(|(_, sessions)| sessions) {
                 session.close();
             }
@@ -881,6 +889,9 @@ impl Core {
         let paid = spent || v.overage_active || (v.paid_fallback.unwrap_or(true) && v.snap(self.secs()).exhausted(self.secs()));
         let unknown = v.billing == Billing::Unknown;
         let billed = v.billing == Billing::UsageBilled;
+        if unknown || billed || paid {
+            self.stop_paid_helpers(vendor);
+        }
         let stopped: Vec<String> = self
             .live
             .iter()
@@ -896,6 +907,7 @@ impl Core {
         }
         for id in stopped {
             self.note_turn(&id, None, true);
+            self.stop_helpers(&id, true);
             if let Some(l) = self.live.remove(&id) {
                 l.session.close();
             }
@@ -1398,6 +1410,7 @@ impl Core {
                     tool.output = Some(text.chars().take(4000).collect());
                 }
             }
+            EngineEvent::HelperCall { id, input } => return self.start_helper(conv, id, input),
             EngineEvent::Permission { request_id, tool, input } => {
                 // A request that touches a credential folder is refused in both modes, with no card (best effort for a command
                 // line: see `touches_credentials`). Full access never shows a card. The answer is decided here, under the lock
@@ -1517,6 +1530,7 @@ impl Core {
                     m.nudge = nudge::of(m, area, &can_run);
                 }
                 if !ok && self.transfers.get(conv).is_some_and(|t| t.moving) {
+                    self.stop_helpers(conv, true);
                     if let Some(reply) = turn_id {
                         self.move_failed(conv, &reply);
                     }
@@ -1525,6 +1539,7 @@ impl Core {
                 if !ok && recovery::plan_limit(&reason) {
                     self.ledger.of_mut(vendor).reach = Reach::Out(None);
                     self.save_ledger(true);
+                    self.stop_helpers(conv, true);
                     if let Some(l) = self.live.remove(conv) {
                         l.session.close();
                     }
@@ -1572,6 +1587,7 @@ impl Core {
                 }
                 if fatal {
                     self.note_turn(conv, None, true);
+                    self.stop_helpers(conv, true);
                     if let Some(l) = self.live.remove(conv) {
                         l.session.close();
                     }
@@ -1600,6 +1616,7 @@ impl Core {
 
     fn finish(&mut self, conv: &str, turn_id: Option<String>) {
         self.transfers.remove(conv);
+        self.stop_helpers(conv, true);
         if let Some(l) = self.live.get_mut(conv) {
             l.turn = None;
             // Whatever was handed to the turn and not taken in stays in the queue, and goes out like the rest of it.
@@ -2184,12 +2201,14 @@ impl Core {
         // The conversation's own name, fixed when it began: a rename in Settings never reaches a conversation under way.
         let user_name = c.user_name.clone();
         let (model, effort) = (pick.model.clone(), Some(pick.effort.clone()));
+        let helper = self.offers_helper(area, pick.vendor);
         let session = match pick.vendor {
             Vendor::Claude => start_claude(
                 ClaudeOptions {
                     bin: cli.command.clone(),
                     cwd,
                     launch: ClaudeLaunch {
+                        helper,
                         area,
                         model,
                         effort,
@@ -2208,7 +2227,7 @@ impl Core {
             ),
             Vendor::Codex => self
                 .codex_server(area, user_hooks, permissions, &cli)
-                .open(CodexThread { cwd, model, effort, resume, instructions: None, user_name, permissions, tuning }, sink),
+                .open(CodexThread { helper, cwd, model, effort, resume, instructions: None, user_name, permissions, tuning }, sink),
         };
         self.live.insert(
             conv.to_string(),
@@ -2538,6 +2557,7 @@ impl Core {
 
     fn remove(&mut self, id: &str) {
         self.note_turn(id, None, true);
+        self.stop_helpers(id, true);
         if let Some(l) = self.live.remove(id) {
             l.session.close();
         }

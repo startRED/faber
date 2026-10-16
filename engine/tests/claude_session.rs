@@ -10,6 +10,7 @@ use support::{Entry, drive, fake, fixture, next_permission, text_of};
 
 fn launch(area: Area) -> ClaudeLaunch {
     ClaudeLaunch {
+        helper: Default::default(),
         area,
         model: None,
         effort: None,
@@ -1259,4 +1260,52 @@ fn r140_old_saved_settings_load_as_before_and_the_new_ones_are_stored_by_name() 
     );
     let saved = serde_json::to_value(Settings::default()).unwrap();
     assert!(saved.get("webSearch").is_none() && saved.get("reasoningSummary").is_none() && saved.get("verbosity").is_none());
+}
+
+/// R161: only a project's own agent gets Faber's MCP server with the helper tool; a helper keeps no history, and a side
+/// question never gets either.
+#[test]
+fn r161_the_helper_tool_reaches_only_the_project_agent() {
+    use faber_engine::helper::{CLAUDE_MCP_CONFIG, Helper};
+    let args = |helper, instructions: Option<&str>| {
+        claude_args(&ClaudeLaunch { helper, instructions: instructions.map(String::from), ..launch(Area::Project) })
+    };
+    let has = |a: &[String], pair: [&str; 2]| a.windows(2).any(|w| w == pair);
+    assert!(has(&args(Helper::Offers, None), ["--mcp-config", CLAUDE_MCP_CONFIG]));
+    assert!(!args(Helper::Off, None).iter().any(|a| a == CLAUDE_MCP_CONFIG));
+    assert!(!args(Helper::Offers, Some("Route.")).iter().any(|a| a == CLAUDE_MCP_CONFIG), "a side question has no tools at all");
+    let helper = args(Helper::Is, None);
+    assert!(helper.iter().any(|a| a == "--no-session-persistence") && !helper.iter().any(|a| a == CLAUDE_MCP_CONFIG));
+}
+
+/// R161: Faber answers its MCP server's handshake itself, hands the helper call to the engine, and writes the report back
+/// as the tool's result (recorded on Claude Code 2.1.296).
+#[tokio::test]
+async fn r161_claude_calling_the_helper_waits_for_its_report_and_gets_it_as_the_tools_result() {
+    let mut asked = None;
+    let first = "Call the helper tool once with title \"Check\" and brief \"What is the answer?\". Then tell me in one line what it said.";
+    let (events, mismatches) = drive(
+        fixture("claude", "helper-call"),
+        |spawn, sink| {
+            let launch = ClaudeLaunch { helper: faber_engine::helper::Helper::Offers, ..launch(Area::Project) };
+            start_claude(ClaudeOptions { bin: "claude".into(), cwd: ".".into(), launch, spawn, sandbox: None }, sink)
+        },
+        first,
+        |e, session| {
+            if let EngineEvent::HelperCall { id, input } = e {
+                asked = Some((id.clone(), input["title"].clone()));
+                session.helper_reply(id, true, "Nothing risky.".into());
+            }
+            matches!(e, EngineEvent::Done { .. })
+        },
+    )
+    .await;
+    assert!(mismatches.is_empty(), "{mismatches:?}");
+    let (id, title) = asked.expect("the call reaches the engine");
+    assert_eq!(title, "Check config");
+    let tool = events.iter().find_map(|e| match e {
+        EngineEvent::Tool { id, name, .. } if name == "Helper" => Some(id),
+        _ => None,
+    });
+    assert_eq!(tool, Some(&id), "the tool call and the MCP call are the same step");
 }

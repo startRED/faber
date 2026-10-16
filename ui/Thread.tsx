@@ -169,7 +169,8 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
   const thinking = () => thinkingParts(m().thinking ?? '');
   // The agent's own tools; each subagent and what it ran show as their own step below (AgentRow).
   const own = () => m().tools?.filter((tool) => !tool.parent && !isAgentCall(tool)) ?? [];
-  const agents = () => agentSteps(m().tools);
+  // A helper always comes from the AI that is not running the reply.
+  const agents = () => agentSteps(m().tools, m().vendor ? vendorName(m().vendor === 'claude' ? 'codex' : 'claude') : '');
   const steps = () => narration().length + own().length + (thinking().length ? 1 : 0);
   const commands = () => own().filter((tool) => /bash|command|exec|shell/i.test(tool.name)).length;
   // The answer on screen is never repeated here: once it has text, the status line steps aside.
