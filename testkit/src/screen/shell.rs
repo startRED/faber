@@ -30,7 +30,10 @@ pub fn scenarios() -> Vec<Scenario> {
             run: overlays_the_stage,
         },
         Scenario { name: "a click on a running conversation opens it", run: opens_a_running_conversation },
-        Scenario { name: "Projects preserves legacy history without an owner-checkout composer", run: opens_a_project_conversation },
+        Scenario {
+            name: "a project conversation opens as a chat with its composer, and opening it starts no CLI (R160)",
+            run: opens_a_project_conversation,
+        },
         Scenario {
             name: "the new conversation greets, suggests without sending, and offers the last conversations",
             run: greets_and_suggests,
@@ -472,11 +475,11 @@ fn opens_a_project_conversation(ctx: &mut Ctx) -> Result {
     let mut app = ctx.launch(claude_chat(ctx))?;
     let page = &mut app.page;
     page.click(&css(".prow .item").has_text("Demo"))?;
-    page.wait_visible(&css(".start-card h2").has_text("Demo"))?;
+    page.wait_visible(&css(".welcome-grid .p-header h2").has_text("Demo"))?;
     page.click(&css(".proj-chats .item").has_text("Legacy history"))?;
     page.wait_visible(&css("article").has_text("An old project answer"))?;
-    same(page.count(&css(".work .composer"))?, 0, "legacy history has no direct project composer")?;
-    ensure(ctx.records()?.is_empty(), || "opening legacy history started a CLI".into())
+    page.wait_visible(&css(".work .composer"))?;
+    ensure(ctx.records()?.is_empty(), || "opening a project conversation started a CLI".into())
 }
 
 fn greets_and_suggests(ctx: &mut Ctx) -> Result {

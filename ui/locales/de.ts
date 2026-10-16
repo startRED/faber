@@ -127,6 +127,12 @@ export const de: Messages = {
   'ask.allow': 'Erlauben',
   'ask.always': 'In dieser Unterhaltung immer erlauben',
   'ask.deny': 'Ablehnen',
+  'ask.question.label': 'Eine Frage des Assistenten',
+  'ask.question.other': 'Etwas anderes…',
+  'ask.question.otherPlaceholder': 'Schreibe deine Antwort',
+  'ask.question.send': 'Antworten senden',
+  'ask.question.skip': 'Überspringen',
+  'ask.question.many': 'Wähle beliebig viele',
   'ask.moreWaiting': { one: '1 weitere wartet', other: '{n} weitere warten' },
   // Handwritten wording; native-speaker review pending (English is the source).
   'ask.parked': 'Zurückgehalten: niemand war da, um zu antworten',
@@ -381,6 +387,7 @@ export const de: Messages = {
   'hint.chat.3': 'Beschreibe ein Problem und bitte um drei Auswege',
   'projects.home.title': 'Was packen wir an?',
   'projects.home.lead': 'Gib Faber ein Ziel für dieses Projekt. Es arbeitet in einer getrennten Kopie und zeigt, was es geprüft hat.',
+  'projects.chat.lead': 'Bitte um alles in diesem Ordner. Der Assistent arbeitet direkt hier und fragt dich, wenn er etwas braucht.',
   'projects.gitMode.seguroTech': "Sicherer Modus: getrennter Worktree, nur lokale Commits und Vorspulen nur auf dem Missions-Branch.",
   'projects.selfUpdate.trustTech': "Ein neuer Build rückt erst nach einem Canary-Lauf und den Quarantäneprüfungen in den nächsten lokalen Slot vor.",
   'projects.proofs.isolationTech': "Prüfungen, die von einer Rolle geschriebenen Code ausführen, laufen unter Windows mit niedriger Integrität: Sie dürfen nur in die Kopie der Mission, ihren Build-Ordner und ihre temporären Ordner schreiben. Sie können aber weiterhin deine Dateien lesen und das Netzwerk nutzen; eine stärkere Sandbox (AppContainer) ist der geplante nächste Schritt. Unter macOS können sie ebenfalls nicht außerhalb dieser Ordner schreiben; unter Linux begrenzt sie noch nichts.",
@@ -721,7 +728,6 @@ export const de: Messages = {
   // Native speaker must translate (needs native review).
   "reason.mission.runnerUnavailable": "Die Missionsausführung wartet auf den genehmigten Runner. Es wurde noch keine Arbeit begonnen.",
   // Native speaker must translate (needs native review).
-  "error.project.missionRequired": "Starte eine Mission, um in diesem Projekt zu arbeiten. Direkte Projektsitzungen sind nicht verfügbar.",
   // Native speaker must translate (needs native review).
   "error.wire.malformed": "Die Anfrage enthält ungültige oder fehlende Werte.",
   // Native speaker must translate (needs native review).
@@ -921,6 +927,7 @@ export const de: Messages = {
   'notes.10.better': "Der Projektbildschirm fragt nicht mehr nach den Prüfungen, wenn dein Berechtigungsmodus Auto oder Vollzugriff ist.",
   'notes.12.better': 'Die Missionsübersicht ist ruhiger: Ziel, aktueller Schritt und Wartegrund stehen oben, leere Spalten sind weg, und Neue Mission startet eine weitere.',
   'notes.13.new': 'In den Einstellungen kannst du neue Versionen einige Tage früher erhalten.',
+  'notes.14.new': 'In einem Projekt unterhältst du dich jetzt wie überall mit dem Assistenten, und seine Fragen erscheinen als Karten zum Antippen.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

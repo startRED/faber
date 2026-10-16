@@ -75,9 +75,16 @@ fn chat_without_cards(ctx: &mut Ctx) -> Result {
     let model = page.labelled("composer.model")?;
     page.select_option(&model, "Claude Haiku")?;
     ask(page, "check policy")?;
+    // Every request is answered for the person; only the agent's own question waits, as a card to tap (R160).
+    let question = css("article [data-testid=question-card]");
+    page.wait_visible(&question)?;
+    ensure(page.count(&css("div.ask:not(.question)"))? == 0, || "full access must not leave a permission card".into())?;
+    page.click(&question.clone().css(".q-option").has_text("SQLite"))?;
+    let send = page.text_of("ask.question.send")?;
+    page.click(&question.clone().role("button", &send).exact())?;
     let actions = page.named("article", "answer.label")?.css(".actions");
     page.wait_visible(&actions)?;
-    ensure(page.count(&css(".ask"))? == 0, || "full access must not leave a permission card".into())?;
+    ensure(page.count(&css("div.ask"))? == 0, || "the answered question must not stay on screen".into())?;
     let settings = page.named("button", "settings.open")?.exact();
     page.click(&settings)?;
     let hint = page.text_of("set.chatFolderHint")?;
