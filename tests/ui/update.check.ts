@@ -93,5 +93,7 @@ check('update: the opening screen covers the window below the title bar and the 
     ok(Number(style.zIndex) < 60, 'the window buttons stay in reach');
     const rect = stage.getBoundingClientRect();
     ok(rect.width >= innerWidth - 1 && rect.height >= innerHeight - 1, 'it covers the whole window');
-    equal(getComputedStyle(host.querySelector('.ubar > span')!).transitionProperty, 'transform', 'only transform moves');
+    // Reduced motion (the system's preference, which the test build may carry) jumps the bar: then nothing transitions at all.
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    equal(getComputedStyle(host.querySelector('.ubar > span')!).transitionProperty, reduced ? 'none' : 'transform', 'only transform moves');
   }));

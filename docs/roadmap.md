@@ -259,6 +259,9 @@ Taken from Claude Code Projects and pushed further (AI proposal, not reviewed; r
   or the work ends, the worker writes its state (step, branch, next step, proof, files) to `.faber/` and its process
   closes. A follow-up resumes the session while the one-hour cache is warm and starts a fresh one from that state when
   it is cold, showing both token estimates. The same file serves vendor switches and crash recovery.
+- **Workers claim their files (R155).** Before it writes, each worker states the files it will change; Faber refuses a
+  change outside the claim or a claim that overlaps another worker's, and the reviewer sees the claim. It comes with
+  missions of more than one task, as Faber's own lanes already do (R154).
 - **Limits in plain words become real limits.** "At most two at a time" or "ask before starting" is stored as a
   setting the engine enforces, not a hint for the model. New workers have a daily cap.
 - **After delivery the worker keeps watching.** A worker that opened a pull request fixes failing checks and review
@@ -327,6 +330,10 @@ A mission keeps a project as coherent as the agents that build Faber keep Faber 
   `Extends:` it or `New:` with why it does not fit; the Writer starts only once the contract exists.
 - **Faber decides "done".** After the Writer's turn Faber runs the project's checks and the map check itself; a Writer
   cannot declare its own work done.
+- **Short check output (R155, next).** The roles read only what failed: each failure with its file and line, the tool's
+  suggested fix when it has one, measurements and a one-line summary. The whole output stays in the mission's log, and
+  a format Faber does not know falls back to its last lines. Faber's own runner cut a passing run from about 34k tokens
+  to about 50 this way (R154).
 - **Lessons need the owner's yes.** A mission's retrospective proposes rule or card changes with their evidence, and
   each becomes a rule only after the owner's yes.
 - **Sized by risk.** A small change in one area gets the Writer and the checks; a change across areas gets the whole

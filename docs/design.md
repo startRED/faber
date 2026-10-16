@@ -642,7 +642,7 @@ The keys these return (`error.store.*`, `error.journal.*`, `error.plan.*`, `erro
 `reason.grant.*`, `reason.contract.revised`) get their hand-written texts in every locale together with the Projects
 screen, which owns the locale files.
 
-## First frame and update progress (R155)
+## First frame and update progress (R156)
 
 - `ui/index.html` paints a static first frame before any script runs: the frame colour of Dark Room, or of the light
   theme when the system asks for light, with the mark centred at half strength. No text (so no language is needed) and
