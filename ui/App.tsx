@@ -689,6 +689,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
               vendors={state().vendors}
               quotas={quotas()}
               usage={state().usage ?? []}
+              projects={state().projects}
               now={clock()}
               start={back()?.section ?? settingsAt()}
               kept={back()?.draft}

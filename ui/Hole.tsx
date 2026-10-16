@@ -22,8 +22,11 @@ const RIPPLE_REACH = RIPPLE_MS * RIPPLE_SPEED + RIPPLE_BAND;
 const BUSY = 'button, a, input, textarea, select, label, [contenteditable], .composer, .runcol';
 /** The light the owner picked on the prototype (115%). */
 const BRIGHT = 1.15;
-/** Words keep the scene this far off at the least, and it is dimmed up to this far around them. */
-const [CLEAR, CALM] = [48, 240];
+/** The scene starts this far right of the column of words, fades in over FADE px and is dimmed over CALM px. It is a
+ * band across the whole height, so words that scroll in the column never pass over it. */
+const [GAP, FADE, CALM] = [32, 160, 280];
+/** Less room than this right of the column and the scene does not show at all, nor run. */
+const ROOM = 280;
 
 // The entrance, in ms: Curioso rises and leans toward the hole (styles.css, "wake"), a spark leaves his eyes and lands in
 // the shadow, and the scene lights up from there outward at SPEED px/ms, each character scrambling in the accent before
@@ -173,8 +176,8 @@ export function Hole(props: { avoid: () => Element[] }) {
   let dirs = new Uint8Array(0);
   let tint = new Float32Array(0);
   let glyph: string[] = [];
-  let clear = new Float32Array(0); // 0 on a word, 1 from CLEAR px away: nothing lies behind words
-  let calm = new Float32Array(0); // 0 near words, 1 from CALM px away: the hole is dimmed around them
+  let clear = new Float32Array(0); // 0 over the column of words, 1 from GAP + FADE px right of it: nothing lies behind words
+  let calm = new Float32Array(0); // 0 near the column, 1 from GAP + CALM px right of it: the hole is dimmed beside it
   let moving: number[] = []; // the cells the hole can reach; the rest is sky, still but for the stars
   let stars: number[] = [];
   let colors: string[] = [];
@@ -276,8 +279,20 @@ export function Hole(props: { avoid: () => Element[] }) {
   const layout = () => {
     const box = canvas.parentElement?.getBoundingClientRect();
     const style = getComputedStyle(canvas);
-    setOn(style.display !== 'none');
-    // A look without the hole gives its pixels back.
+    // The mark counts whole; a block of words by its glyphs, not its box, which may run wider than what it holds.
+    const range = document.createRange();
+    const els = props.avoid();
+    const words: Box[] = box
+      ? els.map((e) => {
+          if (!e.matches('.peek')) range.selectNodeContents(e);
+          const r = e.matches('.peek') ? e.getBoundingClientRect() : range.getBoundingClientRect();
+          return { l: r.left - box.left, t: r.top - box.top, r: r.right - box.left, b: r.bottom - box.top };
+        })
+      : [];
+    // Where the column of words ends: the scene lives only right of it.
+    const edge = Math.max(0, ...words.map((b) => b.r));
+    setOn(style.display !== 'none' && !!box && box.width - edge >= ROOM);
+    // A look without the hole, or a stage with no room beside the words, gives its pixels back.
     if (!on()) canvas.width = canvas.height = 0;
     if (!box || !on()) return;
     const dpr = Math.min(devicePixelRatio || 1, 2);
@@ -293,16 +308,7 @@ export function Hole(props: { avoid: () => Element[] }) {
     dirs = new Uint8Array(n).fill(NONE);
     tint = new Float32Array(n);
     glyph = Array.from({ length: n }, () => ' ');
-    // Lines of text count by their glyphs, not their box, which may run the full column; the mark and the composer count whole.
-    const range = document.createRange();
-    const els = props.avoid();
-    const words: Box[] = els.map((e) => {
-      if (!e.matches('.peek, .composer')) range.selectNodeContents(e);
-      const r = e.matches('.peek, .composer') ? e.getBoundingClientRect() : range.getBoundingClientRect();
-      return { l: r.left - box.left, t: r.top - box.top, r: r.right - box.left, b: r.bottom - box.top };
-    });
-    // The words that set the frame: everything but the composer at the bottom.
-    place = frame(w, h, Math.max(0, ...words.filter((b) => b.t < 0.7 * h).map((b) => b.r)));
+    place = frame(w, h, edge);
     // Curioso's eyes, where the spark of the entrance leaves from: 38 px into the drawing, 27 px down.
     const mark = words[els.findIndex((e) => e.matches('.peek'))];
     eye = mark ? { x: mark.l + 38, y: mark.t + 27 } : { x: place.cx, y: place.cy };
@@ -316,11 +322,10 @@ export function Hole(props: { avoid: () => Element[] }) {
     clear = new Float32Array(n);
     calm = new Float32Array(n);
     for (let i = 0; i < n; i++) {
-      const [x, y] = [(i % cols) * CELL + CELL / 2, Math.floor(i / cols) * CELL + CELL / 2];
-      let near = Infinity;
-      for (const b of words) near = Math.min(near, Math.hypot(Math.max(b.l - x, 0, x - b.r), Math.max(b.t - y, 0, y - b.b)));
-      clear[i] = smooth(0, CLEAR, near);
-      calm[i] = smooth(40, CALM, near);
+      // A cell's left edge, so no glyph straddles the line where the scene starts.
+      const x = (i % cols) * CELL;
+      clear[i] = smooth(edge + GAP, edge + GAP + FADE, x);
+      calm[i] = smooth(edge + GAP, edge + GAP + CALM, x);
     }
     ctx = canvas.getContext('2d');
     if (!ctx) return;

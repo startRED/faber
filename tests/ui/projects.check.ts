@@ -5,6 +5,7 @@ import { api, type AgentsView, type AppState, type MissionView, type Project } f
 import { App } from '../../ui/App.tsx';
 import { LANGUAGES, useLanguage } from '../../ui/i18n.ts';
 import { Projects } from '../../ui/Projects.tsx';
+import { ProjectsSection } from '../../ui/ProjectSettings.tsx';
 import { formatCap, formatCost, recallGoal, saveGoal, taskReceiptStatus } from '../../ui/projects.ts';
 import { check, equal, ok } from './check.ts';
 
@@ -399,35 +400,6 @@ check('projects AS-4: rendered gap above the goal composer is 32 px, the 64 px o
   }
 });
 
-// Start card presence choices
-check('projects: start card offers the two presence choices with parked install explanation', async () => {
-  const root = document.createElement('div');
-  root.style.cssText = 'position:fixed;left:0;top:0;width:700px;height:700px';
-  root.dataset.motion = 'none';
-  for (const [key, value] of Object.entries(themes.css.base)) root.style.setProperty(`--${key}`, value);
-  document.body.append(root);
-
-  const project: Project = { id: 'p-presence', name: 'Presence Test', path: 'C:/temp/presence' };
-  const dispose = render(() => createComponent(Projects, { project, vendors: ['claude'], now: Date.now() }), root);
-
-  try {
-    await settle(30);
-    const buttons = [...root.querySelectorAll<HTMLButtonElement>('#presence-choice ~ .seg-ctl button')];
-    equal(buttons.length, 2, 'two presence choices must be offered');
-    equal(buttons[0]?.getAttribute('aria-pressed'), 'true', 'continueWithout is active by default');
-
-    // Click findTools
-    buttons[1]?.click();
-    await settle(20);
-    equal(buttons[1]?.getAttribute('aria-pressed'), 'true');
-    const note = root.querySelector('[role="note"]');
-    ok(note?.textContent?.includes('not ready yet'), 'the install-not-ready notice is displayed when findTools is chosen');
-  } finally {
-    dispose();
-    root.remove();
-  }
-});
-
 // Honest receipts & unverified display
 check('projects: honest receipts show unverified and not run without fake claims', () => {
   const doneTask = { id: 't1', title: 'Task 1', state: 'done' as const };
@@ -465,33 +437,43 @@ check('projects: goal text persists across refusal or failed start', () => {
   equal(recallGoal(pid), '', 'clearing goal removes it');
 });
 
-// R137: a mission starts only on checks the owner confirmed; the screen shows what runs, the step, the report and what needs the owner.
+// R137: a mission starts only on checks the owner confirmed. The screen asks once, just in time, and keeps every other
+// setting in Settings, Projects.
 const declared = ['npm run lint', 'cargo t'];
 const proofView = (confirmed: boolean, commands = declared) => ({ commands, declared, source: 'agents' as const, confirmed, changed: false, setup: ['npm ci', 'cargo fetch'] });
-const click = async (el: Element | null | undefined) => { (el as HTMLElement).click(); await settle(); };
-
-check('projects: an unconfirmed proof disables the start, and confirming it lists the commands and lets the mission start', () => {
-  let confirmed = false;
-  let started = 0;
-  return withProjects(async (root) => {
+const click = async (el: Element | null | undefined) => { ok(el, 'the element to click is on the screen'); (el as HTMLElement).click(); await settle(); };
+const typeGoal = async (root: HTMLElement) => {
   const field = root.querySelector<HTMLTextAreaElement>('#mission-goal')!;
   field.value = 'Review goal'; field.dispatchEvent(new Event('input', { bubbles: true }));
   await settle();
-  const list = root.querySelector('[data-testid="proof"]');
-  ok(list, 'the proof section is on the start card');
-  ok(list!.textContent?.includes('npm run lint') && list!.textContent?.includes('cargo t'), 'the commands that will run are shown');
-  const setup = root.querySelector('[data-testid="proof-setup"]')?.textContent ?? '';
-  ok(setup.includes('npm ci') && setup.includes('cargo fetch') && list!.textContent?.includes('First, in the clean copy'), `the setup runs first and is shown: ${setup}`);
-  ok(root.querySelector('[data-testid="proof-needed"]'), 'the screen says the checks must be confirmed');
-  ok(root.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled, 'start is disabled while the proof is unconfirmed');
-  root.querySelector<HTMLFormElement>('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-  await settle();
-  equal(started, 0, 'an unconfirmed proof must not start a mission');
-  await click(root.querySelector('[data-testid="proof-confirm"]'));
-  ok(root.querySelector('[data-testid="proof-confirmed"]'), 'the confirmation shows');
-  ok(!root.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled, 'start is enabled once confirmed');
-  await start(root);
-  equal(started, 1, 'the confirmed project starts a mission');
+};
+
+check('projects: the first start on unconfirmed checks opens a compact sheet, the commands stay behind View, and Confirm starts', () => {
+  let confirmed = false;
+  let started = 0;
+  return withProjects(async (root) => {
+    for (const gone of ['input[role="switch"]', '.seg-ctl', '[data-testid="proof-commands"]', '[data-testid="proof-sheet"]'])
+      equal(root.querySelector(gone), null, `the start screen has no ${gone}`);
+    const status = root.querySelector('[data-testid="p-status"]')?.textContent ?? '';
+    ok(status.includes('2 checks read from AGENTS.md') && status.includes('confirm when you start'), `one quiet status line: ${status}`);
+    await typeGoal(root);
+    const submit = root.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+    ok(!submit.disabled, 'the start is not disabled: it leads to the sheet');
+    await start(root);
+    equal(started, 0, 'unconfirmed checks never start a mission');
+    const sheet = root.querySelector('[data-testid="proof-sheet"]');
+    ok(sheet, 'the start asks for the checks');
+    ok(sheet!.textContent?.includes('2 checks read from AGENTS.md'), `the sheet says how many and from where: ${sheet!.textContent}`);
+    equal(sheet!.querySelector('[data-testid="proof-commands"]'), null, 'the command list is collapsed by default, and not in the page');
+    const view = sheet!.querySelector<HTMLButtonElement>('button.more')!;
+    equal(view.getAttribute('aria-expanded'), 'false');
+    await click(view);
+    const list = sheet!.querySelector('[data-testid="proof-commands"]')?.textContent ?? '';
+    ok(list.includes('npm run lint') && list.includes('cargo t'), `View shows the commands: ${list}`);
+    ok(sheet!.querySelector('[data-testid="proof-setup"]')?.textContent?.includes('npm ci'), 'and the setup that runs first');
+    await click(sheet!.querySelector('[data-testid="proof-confirm"]'));
+    ok(confirmed, 'the list the owner saw is confirmed');
+    equal(started, 1, 'and the mission starts from there');
   }, () => {
     api.projectProof = async () => proofView(confirmed);
     api.projectProofConfirm = async (_id, commands, setup) => {
@@ -504,21 +486,156 @@ check('projects: an unconfirmed proof disables the start, and confirming it list
   });
 });
 
-check('projects: the owner edits the checks, one command per line, and confirms the edited list', () => {
-  let sent: string[] = [];
+check('projects: confirmed checks never ask again, and the status says the project is ready', () => {
+  let started = 0;
   return withProjects(async (root) => {
-  await click(root.querySelector('[data-testid="proof-edit"]'));
-  const box = root.querySelector<HTMLTextAreaElement>('#proof-draft')!;
-  ok(box, 'the edit box opens');
-  box.value = ['cargo fmt --check', '', '  npm test  '].join(String.fromCharCode(10));
-  box.dispatchEvent(new Event('input', { bubbles: true }));
-  await click(root.querySelector('[data-testid="proof-save"]'));
-  equal(sent.join('|'), 'cargo fmt --check|npm test', 'blank lines go and lines are trimmed');
-  ok(root.querySelector('[data-testid="proof-confirmed"]'), 'the edited list is confirmed');
+    equal(root.querySelector('[data-testid="p-status"]')?.textContent, 'Ready for missions');
+    await start(root);
+    equal(root.querySelector('[data-testid="proof-sheet"]'), null, 'no sheet once confirmed');
+    equal(started, 1);
   }, () => {
+    api.projectProof = async () => proofView(true);
+    api.missionStart = async () => { started += 1; return 'review-mission'; };
+  });
+});
+
+check('projects: a start that cannot happen yet says why, beside the button', () => withProjects(async (root) => {
+  await typeGoal(root);
+  const submit = root.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+  ok(submit.disabled, 'the start waits while the project is read');
+  const why = root.querySelector('[data-testid="p-status"]');
+  equal(why?.textContent, 'Reading the project…', 'the reason is on the screen');
+  equal(submit.getAttribute('aria-describedby'), why!.id, 'and tied to the button');
+  equal(why!.parentElement, submit.parentElement, 'next to it');
+}, () => {
+  api.projectEnroll = () => new Promise(() => {});
+}));
+
+// Settings, Projects: one closed entry per project; inside, one short line per option and the rest behind Learn more.
+async function withProjectSettings(mock: () => void, run: (root: HTMLElement) => Promise<void>) {
+  const originals = { ...api };
+  mock();
+  useLanguage('en');
+  const root = document.createElement('div');
+  root.style.cssText = 'position:fixed;left:0;top:0;width:900px;height:700px';
+  root.dataset.motion = 'none';
+  for (const [key, value] of Object.entries(themes.css.base)) root.style.setProperty(`--${key}`, value);
+  document.body.append(root);
+  const dispose = render(() => createComponent(ProjectsSection, { projects: [demo, { id: 'p2', name: 'Second', path: 'C:/fixture/second' }] }), root);
+  try { await settle(); await run(root); }
+  finally { dispose(); root.remove(); Object.assign(api, originals); }
+}
+
+check('settings projects: entries and every Learn more start closed, and closed parts are not in the page', () => {
+  let reads = 0;
+  return withProjectSettings(() => { api.projectProof = async () => { reads++; return proofView(false); }; }, async (root) => {
+    equal(root.querySelectorAll('.pset').length, 2, 'one entry per project');
+    equal(root.querySelector('.pset-body'), null, 'every entry starts closed');
+    equal(reads, 0, 'a closed entry reads nothing');
+    await click(root.querySelector('.pset-head'));
+    const body = root.querySelector('.pset-body')!;
+    ok(body.querySelector('[data-testid="pset-checks"]')?.textContent?.includes('2 checks read from AGENTS.md · not confirmed yet'), 'the checks in one line');
+    equal(body.querySelector('[data-testid="proof-commands"]'), null, 'the commands stay behind View');
+    const more = [...body.querySelectorAll<HTMLButtonElement>('button.more')];
+    ok(more.length >= 4, 'every option keeps its long text behind a disclosure');
+    ok(more.every((b) => b.getAttribute('aria-expanded') === 'false'), 'all closed');
+    equal(body.querySelector('.pset-line > p.hint'), null, 'no long text shows until asked');
+  });
+});
+
+check('settings projects: the owner edits the checks, one command per line, and confirms the edited list', () => {
+  let sent: string[] = [];
+  return withProjectSettings(() => {
     api.projectProof = async () => proofView(false);
     api.projectProofConfirm = async (_id, commands) => { sent = commands; return proofView(true, commands); };
+  }, async (root) => {
+    await click(root.querySelector('.pset-head'));
+    await click(root.querySelector('[data-testid="proof-edit"]'));
+    const box = root.querySelector<HTMLTextAreaElement>('[data-testid="proof-draft"]')!;
+    box.value = ['cargo fmt --check', '', '  npm test  '].join(String.fromCharCode(10));
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    await click(root.querySelector('[data-testid="proof-save"]'));
+    equal(sent.join('|'), 'cargo fmt --check|npm test', 'blank lines go and lines are trimmed');
+    ok(root.querySelector('[data-testid="pset-checks"]')?.textContent?.includes('Confirmed'), 'the edited list is confirmed');
   });
+});
+
+check('settings projects: the self-update switch saves the grant with a fresh revision', () => {
+  let granted: unknown[] = [];
+  return withProjectSettings(() => {
+    api.projectProof = async () => proofView(true);
+    api.projectEnroll = async (id) => ({ projectId: id, repo: demo.path, base: 'base', mode: 'seguro', revision: 5, selfUpdate: false });
+    api.projectGrant = async (...args) => { granted = args; return { repo: demo.path, mode: 'seguro', revision: 5, grantedAt: 1, selfUpdate: true }; };
+  }, async (root) => {
+    await click(root.querySelector('.pset-head'));
+    const box = root.querySelector<HTMLInputElement>('input[role="switch"]')!;
+    box.click();
+    await settle();
+    equal(JSON.stringify(granted), JSON.stringify([demo.id, 'seguro', true, 5]));
+    ok(box.checked, 'the switch stays on');
+  });
+});
+
+check('projects home: no text sits on the lit part of the black hole, scrolled or not', async () => {
+  const originals = { ...api };
+  useLanguage('en');
+  Object.assign(api, { localUpdateState: async () => null });
+  api.projectEnroll = async (id) => ({ projectId: id, repo: demo.path, base: 'base', mode: 'seguro', revision: 1, selfUpdate: false });
+  api.projectProof = async () => proofView(false);
+  api.onMission = async () => () => {};
+  api.onAgents = async () => () => {};
+  const root = document.createElement('div');
+  root.style.cssText = 'position:fixed;left:0;top:0;width:1600px;height:560px';
+  root.dataset.motion = 'none';
+  for (const [key, value] of Object.entries(themes.css.base)) root.style.setProperty(`--${key}`, value);
+  document.body.append(root);
+  const recent = [1, 2, 3, 4].map((n) => ({ id: `c${n}`, title: `Earlier talk ${n}`, area: 'project' as const, projectId: demo.id, updatedAt: Date.now() - n * 60_000 }));
+  const dispose = render(() => createComponent(Projects, { project: demo, vendors: ['claude'], now: Date.now(), projects: [demo], recent, running: [], onOpen: () => {} }), root);
+  try {
+    await settle(300);
+    // Open the sheet and its list, so the column runs past the bottom and scrolls.
+    await typeGoal(root);
+    await start(root);
+    await click(root.querySelector('[data-testid="proof-sheet"] button.more'));
+    await settle(200);
+    equal(root.querySelectorAll('.p-resume .rrow').length, 3, 'at most three to pick up');
+    const canvas = root.querySelector<HTMLCanvasElement>('canvas.amb-hole')!;
+    ok(canvas.width > 0, 'Dark Room draws the black hole');
+    const ctx = canvas.getContext('2d')!;
+    const all = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    let lit = 0;
+    for (let i = 3; i < all.length; i += 4) if (all[i]! > 20) lit++;
+    ok(lit > 1000, `the field is drawn, ${lit} lit pixels`);
+    const clearOfText = (moment: string) => {
+      const box = canvas.getBoundingClientRect();
+      const scale = canvas.width / box.width;
+      const walker = document.createTreeWalker(root.querySelector('.projects-stage')!, NodeFilter.SHOW_TEXT);
+      let seen = 0;
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (!node.textContent?.trim()) continue;
+        const r = (node.parentElement as Element).getBoundingClientRect();
+        const [x0, y0] = [Math.max(0, Math.floor((r.left - box.left) * scale)), Math.max(0, Math.floor((r.top - box.top) * scale))];
+        const [x1, y1] = [Math.min(canvas.width, Math.ceil((r.right - box.left) * scale)), Math.min(canvas.height, Math.ceil((r.bottom - box.top) * scale))];
+        if (x1 <= x0 || y1 <= y0) continue;
+        seen++;
+        const px = ctx.getImageData(x0, y0, x1 - x0, y1 - y0).data;
+        let worst = 0;
+        for (let i = 3; i < px.length; i += 4) worst = Math.max(worst, px[i]!);
+        equal(worst, 0, `${moment}: "${node.textContent.trim().slice(0, 30)}" sits on the black hole`);
+      }
+      ok(seen > 10, `${moment}: the texts were measured (${seen})`);
+    };
+    clearOfText('at the top');
+    const stage = root.querySelector<HTMLElement>('.projects-stage')!;
+    stage.scrollTop = stage.scrollHeight;
+    await settle(100);
+    ok(stage.scrollTop > 0, 'the column scrolls');
+    clearOfText('scrolled');
+  } finally {
+    dispose();
+    root.remove();
+    Object.assign(api, originals);
+  }
 });
 
 check('projects: a running mission shows its step, role, vendor and cost so far, then its report', () => withProjects(async (root, emit) => {

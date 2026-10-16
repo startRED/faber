@@ -343,12 +343,9 @@ export const es: Messages = {
   'hint.chat.3': 'Describe un problema y pide tres salidas',
   'projects.home.title': '¿Qué resolvemos?',
   'projects.home.lead': 'Dale una meta a Faber para este proyecto. Trabaja en una copia aparte y muestra lo que comprobó.',
-  'projects.home.rules': 'Cómo trabaja Faber aquí',
-  'projects.home.details': "Detalles",
   'projects.gitMode.seguroTech': "Modo seguro: worktree separado, solo commits locales y avance rápido solo en la rama de la misión.",
   'projects.selfUpdate.trustTech': "Una versión nueva pasa a la siguiente ranura local solo tras una prueba canario y las comprobaciones de cuarentena.",
   'projects.proofs.isolationTech': "Las comprobaciones que ejecutan código escrito por un rol se ejecutan con integridad baja en Windows: solo pueden escribir en la copia de la misión, en su carpeta de compilación y en sus carpetas temporales. Aún pueden leer tus archivos y usar la red; un aislamiento más fuerte (AppContainer) es el siguiente paso previsto. En macOS tampoco pueden escribir fuera de esas carpetas; en Linux todavía nada las limita.",
-  'projects.home.others': 'Otros proyectos',
   'projects.home.hint.1': 'Describe qué construir, corregir o mejorar en este proyecto',
   'projects.home.hint.2': 'Arregla la prueba que falla de vez en cuando',
   'projects.home.hint.3': 'Añade una opción en los ajustes y demuestra que funciona',
@@ -475,17 +472,14 @@ export const es: Messages = {
   // Native speaker must translate (needs native review).
   "projects.author": "Autor",
   // Native speaker must translate (needs native review).
-  "projects.presence.title": "Si falta una herramienta",
   // Native speaker must translate (needs native review).
   "projects.presence.continueWithout": "Seguir sin ella",
   // Native speaker must translate (needs native review).
-  "projects.presence.findTools": "Buscarla e instalarla por mí",
   // Native speaker must translate (needs native review).
   "reason.kit.continueWithout": "Faber usa las herramientas que ya tiene.",
   // Native speaker must translate (needs native review).
   "reason.kit.findToolsInstallParked": "Instalar herramientas aún no está listo. Por ahora Faber usa las que ya tiene.",
   // Native speaker must translate (needs native review).
-  "projects.gitMode.title": "Qué puede hacer Faber con tu código",
   // Native speaker must translate (needs native review).
   "projects.gitMode.seguro": "Seguro: solo en una copia aparte",
   // Native speaker must translate (needs native review).
@@ -599,10 +593,6 @@ export const es: Messages = {
   // Native speaker must review these (needs native review).
   "projects.proof.title": "Comprobaciones de este proyecto",
   "projects.proof.desc": "Una misión demuestra su trabajo ejecutando estos comandos en una copia limpia del proyecto. Confírmalos una vez; Faber vuelve a preguntar si el proyecto los cambia.",
-  "projects.proof.source.agents": "Leídas de AGENTS.md",
-  "projects.proof.source.claude": "Leídas de CLAUDE.md",
-  "projects.proof.source.detected": "Deducidas de los archivos del proyecto",
-  "projects.proof.source.none": "Este proyecto aún no declara comprobaciones. Añádelas con Editar.",
   "projects.proof.confirm": "Confirmar comprobaciones",
   "projects.proof.confirmed": "Confirmadas",
   "projects.proof.edit": "Editar",
@@ -610,7 +600,6 @@ export const es: Messages = {
   "projects.proof.save": "Guardar y confirmar",
   "projects.proof.cancel": "Cancelar",
   "projects.proof.changed": "Las comprobaciones del proyecto cambiaron desde que las confirmaste. Confírmalas de nuevo.",
-  "projects.proof.needed": "Confirma las comprobaciones para iniciar una misión.",
   "projects.progress.step": "Paso {number} de {total}: {step}",
   "projects.progress.by": "{role}, {vendor}",
   "projects.progress.cost": "Coste hasta ahora: {cost}",
@@ -838,4 +827,29 @@ export const es: Messages = {
   "recents.removeNamed": "Quitar {name} de recientes",
   "env.removeNamed": "Quitar el entorno {name}",
   "error.recents.saveFailed": "Faber no pudo guardar esta lista. Comprueba que el disco tiene espacio y que se puede escribir en la carpeta, e inténtalo de nuevo.",
+  "projects.proof.count.agents": { one: "{n} comprobación leída de AGENTS.md", other: "{n} comprobaciones leídas de AGENTS.md" },
+  "projects.proof.count.claude": { one: "{n} comprobación leída de CLAUDE.md", other: "{n} comprobaciones leídas de CLAUDE.md" },
+  "projects.proof.count.detected": { one: "{n} comprobación deducida de los archivos del proyecto", other: "{n} comprobaciones deducidas de los archivos del proyecto" },
+  "projects.proof.unconfirmed": "sin confirmar todavía",
+  "projects.proof.view": "Ver comandos",
+  "projects.proof.hide": "Ocultar comandos",
+  "projects.status.reading": "Leyendo el proyecto…",
+  "projects.status.starting": "Iniciando…",
+  "projects.status.ready": "Listo para misiones",
+  "projects.status.none": "Aún no hay comprobaciones · añádelas en Ajustes, Proyectos",
+  "projects.status.atStart": "se confirman al iniciar",
+  "projects.status.changed": "cambiaron, se confirman al iniciar",
+  "projects.sheet.title": "Primero, confirma las comprobaciones",
+  "projects.sheet.body": "Una misión demuestra su trabajo ejecutándolas en una copia limpia. Faber vuelve a preguntar solo si cambian.",
+  "projects.sheet.go": "Confirmar e iniciar",
+  "projects.sheet.later": "Ahora no",
+  "projects.sheet.none": "Este proyecto aún no tiene comprobaciones. Añádelas en Ajustes, Proyectos.",
+  "set.projects": "Proyectos",
+  "set.projectsHint": "Lo que Faber puede hacer en cada proyecto y las comprobaciones que demuestran su trabajo.",
+  "set.projects.none": "Aún no hay proyectos. Abre uno en Proyectos.",
+  "set.projects.checks": "Comprobaciones",
+  "set.projects.tools": "Herramientas que faltan",
+  "set.projects.code": "Tu código",
+  "set.projects.faber": "Actualizaciones de Faber",
+  "set.more": "Más información",
 };
