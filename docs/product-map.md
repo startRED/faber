@@ -62,7 +62,7 @@ replaces the shell; otherwise the shell shows the sidebar, the topbar, the work 
 | Composer | Chat only | Text, paste or drop files, attach, model, effort (manual model only), Stop, Send; warms the CLI on the first key and lets Auto route the draft | `ui/Composer.tsx`, `ui/models.ts`, `ui/composer-size.ts` |
 | Projects: open a project | Projects area, no project selected | "Add project folder", Recents and environments, pick up (three project conversations) | `ui/Projects.tsx`, `ui/Recents.tsx` |
 | Projects: start card | A project, no mission selected | One column: the project and its folder, greeting, goal box with one status line beside Start (Enter starts a mission), black hole behind, up to three conversations to pick up. No side columns and no list of other projects (the sidebar lists them). Checks, tools, git mode, self-update trust and Details moved to Settings > Projects | `ui/Projects.tsx`, `ui/projects.ts`, `ui/Hole.tsx` |
-| Projects: checks sheet | First mission start in a project | A compact panel with the check count and source and every command (and the setup that runs first) listed in full, never collapsed, a long list scrolling inside it; Confirm and start, or Not now. Confirming sends exactly the list and declaration shown, and the engine refuses it if the project changed them meanwhile; the panel then shows the new list. A refused start on changed checks reopens it. Asked once per list | `ui/Projects.tsx` |
+| Projects: checks sheet | First mission start in a project, only in Ask, Accept edits or Plan (Auto and Full access confirm the declared list by themselves, R159) | A compact panel with the check count and source and every command (and the setup that runs first) listed in full, never collapsed, a long list scrolling inside it; Confirm and start, or Not now. Confirming sends exactly the list and declaration shown, and the engine refuses it if the project changed them meanwhile; the panel then shows the new list. A refused start on changed checks reopens it. Asked once per list | `ui/Projects.tsx` |
 | Projects: mission board | A mission selected (remembered per project) | One column: state, New mission (done, paused or blocked; asks first unless done), goal, step line, why it waits, Stop or Resume; needs-you and decision cards; report when done; tasks grouped by Ready, Running, Review, Done, Blocked, empty groups hidden, one line before the plan; folded "Run mode, cost and build" with run mode, own cost against the cap, account pace and local build | `ui/Projects.tsx`, `ui/LocalBuild.tsx` |
 | Past project conversation | Opened from the sidebar or a pick-up list | Read only: no composer | `ui/Thread.tsx` |
 | Running column | Run button, Ctrl+., or by itself 1.5 s after typing stops | Running conversations by project with their state in words; permission and held-back cards; open a conversation | `ui/Running.tsx`, `ui/running.ts` |
@@ -106,7 +106,7 @@ adds a line. Browser keys (F5, F7, Ctrl+R, P, S, U) do nothing.
 | Tutorial | Only once an AI is signed in | `tutorialDone: true` on finish or skip |
 
 Left at their defaults, changeable later in Settings: language, permissions, web search, hooks, notifications, keep awake, autostart.
-A project's checks are confirmed on a sheet when its first mission starts, not in the first run; its grant lives in Settings > Projects.
+A project's checks are confirmed on a sheet when its first mission starts (in Auto and Full access the start confirms them by itself), not in the first run; its grant lives in Settings > Projects.
 
 ## Settings screen
 

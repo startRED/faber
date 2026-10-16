@@ -1,7 +1,7 @@
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
-import { api, type AgentsView, type AppState, type MissionView, type Project } from '../../ui/api.ts';
+import { api, type AgentsView, type AppState, type MissionView, type PermissionMode, type Project } from '../../ui/api.ts';
 import { App } from '../../ui/App.tsx';
 import { fromEngine, LANGUAGES, useLanguage } from '../../ui/i18n.ts';
 import { Projects } from '../../ui/Projects.tsx';
@@ -14,7 +14,7 @@ const demo: Project = { id: 'review-project', name: 'Review project', path: 'C:/
 const view = (revision = 1): MissionView => ({ missionId: 'review-mission', revision, state: 'running', mode: 'normal', gitMode: 'seguro', goal: 'Review goal', tasks: [], cost: { ownMicros: null, capMicros: null, complete: false }, pace: [], decisions: [] });
 
 let agentsEmit: (v: AgentsView) => void = () => {};
-async function withProjects(run: (root: HTMLElement, emit: (v: MissionView) => void, change: (p: Project) => void) => Promise<void>, before?: () => void) {
+async function withProjects(run: (root: HTMLElement, emit: (v: MissionView) => void, change: (p: Project) => void) => Promise<void>, before?: () => void, permissions: PermissionMode = 'ask') {
   const originals = { ...api };
   useLanguage('en');
   Object.assign(api, { localUpdateState: async () => null });
@@ -33,7 +33,7 @@ async function withProjects(run: (root: HTMLElement, emit: (v: MissionView) => v
   for (const [key, value] of Object.entries(themes.css.base)) root.style.setProperty(`--${key}`, value);
   document.body.append(root);
   const [project, setProject] = createSignal(demo);
-  const dispose = render(() => createComponent(Projects, { get project() { return project(); }, vendors: [], now: Date.now() }), root);
+  const dispose = render(() => createComponent(Projects, { get project() { return project(); }, vendors: [], now: Date.now(), permissions }), root);
   try { await settle(); await run(root, (v) => listener(v), setProject); }
   finally { dispose(); root.remove(); Object.assign(api, originals); saveGoal(demo.id, ''); localStorage.removeItem('faber.project.mission.' + demo.id); useLanguage('en'); }
 }
@@ -449,6 +449,26 @@ const typeGoal = async (root: HTMLElement) => {
   field.value = 'Review goal'; field.dispatchEvent(new Event('input', { bubbles: true }));
   await settle();
 };
+
+check('projects: in Full access and Auto the start confirms the checks by itself and starts, with no sheet', async () => {
+  for (const mode of ['dontAsk', 'auto'] as const) {
+    let confirmed = false;
+    let started = 0;
+    await withProjects(async (root) => {
+      const status = root.querySelector('[data-testid="p-status"]')?.textContent ?? '';
+      ok(status.includes('allowed by your permission mode'), `the status line says the mode covers them: ${status}`);
+      await typeGoal(root);
+      await start(root);
+      equal(root.querySelector('[data-testid="proof-sheet"]'), null, `${mode}: no sheet`);
+      ok(confirmed, `${mode}: the declared checks were confirmed`);
+      equal(started, 1, `${mode}: the mission started`);
+    }, () => {
+      api.projectProof = async () => proofView(confirmed);
+      api.projectProofConfirm = async (_id, commands) => { confirmed = true; return proofView(true, commands); };
+      api.missionStart = async () => { started += 1; return 'review-mission'; };
+    }, mode);
+  }
+});
 
 check('projects: the first start on unconfirmed checks opens a sheet that shows every command at once, and Confirm starts', () => {
   let confirmed = false;

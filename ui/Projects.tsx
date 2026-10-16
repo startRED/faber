@@ -8,6 +8,7 @@ import {
   type DecisionView,
   type EnrollView,
   type MissionView,
+  type PermissionMode,
   type Project,
   type ProofView,
   type RunMode,
@@ -61,7 +62,12 @@ interface Props {
   /** Opens recent folders or a saved environment as projects (the open-a-project screen). */
   onOpened?: (projects: Project[]) => void;
   onError?: (error: unknown) => void;
+  /** The permission mode from Settings; missing means Full access, the default. */
+  permissions?: PermissionMode;
 }
+
+/** Modes that never stop to ask before running a command: in them the start confirms the checks by itself. */
+const ASKLESS: PermissionMode[] = ['auto', 'dontAsk'];
 
 // The board reads what moves first: running, then what waits on someone, then what is queued, then what is finished.
 const TASK_STATES: TaskState[] = ['running', 'blocked', 'review', 'ready', 'done'];
@@ -214,6 +220,19 @@ export function Projects(props: Props) {
     setAsking(true);
   };
 
+  // In a mode that never asks, the start confirms exactly what the project declares now, as the sheet would. The engine
+  // still checks every command; a refusal falls back to the sheet.
+  const askless = () => ASKLESS.includes(props.permissions ?? 'dontAsk');
+  const confirmByMode = async (projectId: string, p: ProofView, token: number) => {
+    if (!askless() || p.source === 'none' || p.commands.length === 0) return false;
+    try {
+      const next = await api.projectProofConfirm(projectId, p.commands, p.setup ?? [], p.declared);
+      if (token !== generation) return false;
+      setProof(next);
+      return next.confirmed;
+    } catch { return false; }
+  };
+
   const startMission = async () => {
     if (!props.project || !goal().trim() || busy() || !enroll()) return;
     const projectId = props.project.id;
@@ -225,8 +244,8 @@ export function Projects(props: Props) {
       // The owner moved to another project while the checks were read: they belong to the one left behind.
       if (token !== generation) return;
       if (latest) setProof(latest);
-      if (!latest?.confirmed) {
-        setAsking(true);
+      if (!latest?.confirmed && !(latest && (await confirmByMode(projectId, latest, token)))) {
+        if (token === generation) setAsking(true);
         return;
       }
     }
@@ -293,6 +312,7 @@ export function Projects(props: Props) {
     if (!p) return t('projects.status.reading');
     if (p.confirmed) return t('projects.status.ready');
     if (p.source === 'none' || p.commands.length === 0) return t('projects.status.none');
+    if (askless()) return `${proofCount(p)} · ${t('projects.status.byMode')}`;
     return `${proofCount(p)} · ${t(p.changed ? 'projects.status.changed' : 'projects.status.atStart')}`;
   };
 
