@@ -314,7 +314,10 @@ pub fn usable(path: &str) -> bool {
 
 fn priority(path: &str) -> u8 {
     let lower = path.to_lowercase();
-    if !lower.contains('/') && (lower == "agents.md" || lower == "claude.md" || lower.starts_with("readme")) {
+    if lower == super::rules::FILE {
+        // The project's own rules size every change, so they are always read.
+        0
+    } else if !lower.contains('/') && (lower == "agents.md" || lower == "claude.md" || lower.starts_with("readme")) {
         0
     } else if !lower.contains('/') {
         1

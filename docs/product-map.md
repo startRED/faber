@@ -14,7 +14,7 @@ that changes them updates this page too. Last full audit: 2026-10-16.
 | :--- | :--- | :--- |
 | Chat | The area for conversations with one AI at a time. A chat works in a private folder of its own, or in a folder picked before its first message. | `ui/Welcome.tsx`, `ui/Thread.tsx`, `ui/Composer.tsx` |
 | Projects | The area for git folders. Inside a project the person talks to an AI agent that works in the folder, with the same permission modes as Chat (R160). The mission machinery stays in the engine, with no way to start one on screen. | `ui/App.tsx`, `ui/Projects.tsx`, `engine/src/project/` |
-| Mission | One goal in one project, done by roles in a separate copy (a git worktree) and landed on Faber's own `faber/…` branch, never on the person's branch. Today (v0): one task, one Writer attempt, no repair loop, a US$2.00 cap. | `engine/src/project/coordinator.rs`, journal in `<project>/.faber/missions/<id>/` |
+| Mission | One goal in one project, done by roles in a separate copy (a git worktree) and landed on Faber's own `faber/…` branch, never on the person's branch. Today (v0): one task, one Writer attempt and one repair, sized by risk (one review, or two from different sessions), a US$2.00 cap. | `engine/src/project/coordinator.rs`, journal in `<project>/.faber/missions/<id>/` |
 | Lead, Writer, Reviewer | The roles of a mission: plans the work; changes the code; reviews the exact result. The Reviewer is always the other vendor. | `engine/src/project/` |
 | Checks | The commands a project declares under a "Proof commands" heading in its AGENTS.md or CLAUDE.md (or a detected default), confirmed by the person on a sheet when the first mission starts (R137), and read or edited later in Settings > Projects, where Confirm and Save are offered only with the full list and setup on screen (a confirmed list may fold behind "View commands"). Code and specs call them proofs. | `engine/src/project/mission.rs`, `ui/ProjectSettings.tsx`, `ui/Projects.tsx` |
 | Grant | What the person allows in a project: the git mode (Safe, `seguro`: a separate copy only; `equilibrado`, push and draft PR, exists in the engine but is not offered) and self-update trust. Changed in Settings > Projects. | `engine/src/project.rs`, `ui/ProjectSettings.tsx` |
@@ -175,6 +175,7 @@ The data folder is `%APPDATA%\Faber` (or `FABER_DATA_DIR`). JSON files are writt
 | `projects.json` | Projects: id, name, path, git identity (`repo`), `grant`, the confirmed checks (`extra.proof`) | Add, open or remove a project; Settings > Projects; the checks sheet |
 | `<project>/.faber/missions/<id>/` and `missions/<id>/` | A mission's journal (mission, plan, contracts, decisions, artifacts, report) and its run, runtime and effects records | The mission engine |
 | `workspaces/<project>/` | The persistent working copy where a project's setup and checks run | The mission engine |
+| `<project>/faber-rules.json` | A project's own rules for its missions: map areas, security paths, numbered sequences (Faber's: R-numbers and `notes.<id>`). Read at the mission base, never from a candidate | The project's owner, by hand |
 | `qualification/` | Receipts of the hidden check of the installed CLIs before missions (valid 24 h) | The shell, before a mission starts |
 | `recents.json` | Recent folders and environments | Opening folders, Recents |
 | `budget.json` | The quota ledger (readings, learned weekly shape, own spend, typed plan) and the mission budget; a damaged copy is set aside as `budget.json.quarantine` | The engine |
@@ -238,7 +239,7 @@ checks in `tests/ui/index.ts`, real-app scenarios in `testkit/src/screen/mod.rs`
 | Right-click menus, rename, remove a project | Done | `tests/ui/contextmenu.check.ts`; `testkit/src/screen/menus.rs` |
 | Recents and environments | Done | `engine/tests/recents.rs`; `tests/ui/recents.check.ts` |
 | Homes and idle motion | Done | `tests/ui/idle.check.ts`, `hole.check.ts`, `motion.check.ts`; `testkit/src/screen/homes.rs` |
-| Missions | v0 (see Words) | `engine/tests/project_*.rs`; `tests/fixtures/projects/`; `tests/ui/projects.check.ts`; `testkit/src/screen/coordinator.rs`, `projects.rs`, `projects_ui.rs` |
+| Missions | v0 (see Words) | `engine/tests/project_*.rs`; sizing, contract fields, review classes, red base and numbers in `engine/tests/project_lessons.rs`; `tests/fixtures/projects/`; `tests/ui/projects.check.ts`; `testkit/src/screen/coordinator.rs`, `projects.rs`, `projects_ui.rs` |
 | Local build (development channel) | Done, developer only | `engine/tests/local_update.rs`, `src-tauri/tests/local_update.rs`, `testkit/src/screen/local_update.rs` |
 | UX sentinel and memory budget | Done | `testkit/src/sentinel.rs`, `testkit/src/screen/app.rs` (400 MB) |
 | This map | Done | `engine/tests/product_map.rs`; the trap tasks and the weekly coherence pass in `testkit/coherence/` (R151) |

@@ -598,6 +598,22 @@ impl Leases {
         self.persist(runtime)
     }
 
+    /// Let the same Writer task run one more turn (a repair) on this lease. Only once the last process is proven gone and
+    /// its cost settled: its identity and proof move to the lease's `past` list, and a new launch may then be prepared.
+    /// The worktree, its files and the generation stay, so every patch is still checked against the same area.
+    pub fn reopen(&mut self, lease: &Lease) -> Result<(), LeaseError> {
+        self.idle(lease)?;
+        let index = self.index(lease)?;
+        let Some(process) = self.runtime.leases[index].process else { return Ok(()) };
+        let mut runtime = self.runtime.clone();
+        let held = &mut runtime.leases[index];
+        let termination = held.extra.remove("termination").ok_or(LeaseError::Live)?;
+        let past = held.extra.entry("past".to_string()).or_insert_with(|| serde_json::json!([]));
+        past.as_array_mut().ok_or(Fault::Corrupt)?.push(serde_json::json!({"process": process, "termination": termination}));
+        held.process = None;
+        self.persist(runtime)
+    }
+
     pub(crate) fn idle(&self, lease: &Lease) -> Result<(), LeaseError> {
         let held = &self.runtime.leases[self.index(lease)?];
         if self.unresolved_launch(lease)?

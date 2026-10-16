@@ -143,6 +143,9 @@ pub struct TaskDraft {
     pub paths: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kit: Option<KitPin>,
+    /// What a Writer task touches and how it fits what exists (R146). The engine checks it before the Writer starts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coherence: Option<super::rules::Coherence>,
 }
 
 impl TaskDraft {
@@ -159,6 +162,7 @@ impl TaskDraft {
         t.checks = self.checks.clone();
         t.paths = self.paths.clone();
         t.kit = self.kit.clone();
+        t.coherence = self.coherence.clone();
         t
     }
 }
@@ -255,6 +259,83 @@ pub enum Verdict {
     Block,
 }
 
+/// What a review finding is about (R147). Only a break for a person, for data, for security or for a written rule
+/// blocks; a note is kept and shown, and the candidate goes on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FindingClass {
+    Person,
+    Data,
+    Security,
+    Rule,
+    Note,
+}
+
+/// One review finding. A plain string, as replies wrote it before classes, is a finding of no class, and it blocks:
+/// a finding nobody classified is never waved through.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Finding {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub class: Option<FindingClass>,
+    /// `path:line` of what it is about, when it is about a place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<String>,
+    pub text: String,
+}
+
+impl Finding {
+    pub fn blocks(&self) -> bool {
+        self.class != Some(FindingClass::Note)
+    }
+
+    /// One line for a brief or the queue: `security src/a.rs:3: text`.
+    pub fn line(&self) -> String {
+        let class = match self.class {
+            Some(FindingClass::Person) => "person",
+            Some(FindingClass::Data) => "data",
+            Some(FindingClass::Security) => "security",
+            Some(FindingClass::Rule) => "rule",
+            Some(FindingClass::Note) => "note",
+            None => "unclassified",
+        };
+        match &self.at {
+            Some(at) => format!("{class} {at}: {}", self.text),
+            None => format!("{class}: {}", self.text),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Finding {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct Full {
+            #[serde(default)]
+            class: Option<FindingClass>,
+            #[serde(default)]
+            at: Option<String>,
+            text: String,
+        }
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Shape {
+            Text(String),
+            Full(Full),
+        }
+        Ok(match Shape::deserialize(deserializer)? {
+            Shape::Text(text) => Finding { class: None, at: None, text },
+            Shape::Full(f) => Finding { class: f.class, at: f.at, text: f.text },
+        })
+    }
+}
+
+impl From<&str> for Finding {
+    fn from(text: &str) -> Self {
+        Finding { class: None, at: None, text: text.into() }
+    }
+}
+
 /// The hand-back: a short summary and what the lead needs; the evidence stays behind references.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -268,11 +349,11 @@ pub struct Complete {
     pub risks: Vec<String>,
     #[serde(default)]
     pub not_run: Vec<String>,
-    /// A reviewer's verdict and its blocking findings.
+    /// A reviewer's verdict and its findings; which of them block is the engine's reading of their classes.
     #[serde(default)]
     pub verdict: Option<Verdict>,
     #[serde(default)]
-    pub findings: Vec<String>,
+    pub findings: Vec<Finding>,
     pub next: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub receipt: Option<String>,
@@ -363,6 +444,13 @@ fn drafts(tasks: &[TaskDraft]) -> Result<(), WireError> {
         if let Some(kit) = &t.kit {
             kit.validate()?;
         }
+        if let Some(c) = &t.coherence {
+            text(&c.closest)?;
+            texts(&c.areas)?;
+            for link in [&c.extends, &c.new].into_iter().flatten() {
+                text(link)?;
+            }
+        }
     }
     Ok(())
 }
@@ -443,8 +531,17 @@ impl Action {
                 text(&c.summary)?;
                 text(&c.next)?;
                 paths(&c.changed)?;
-                for list in [&c.assumptions, &c.risks, &c.not_run, &c.findings] {
+                for list in [&c.assumptions, &c.risks, &c.not_run] {
                     texts(list)?;
+                }
+                if c.findings.len() > MAX_PATHS {
+                    return Err(WireError::TooBig);
+                }
+                for finding in &c.findings {
+                    text(&finding.text)?;
+                    if finding.at.as_ref().is_some_and(|at| at.is_empty() || at.len() > 512 || at.contains(['\n', '\r'])) {
+                        return Err(WireError::Malformed);
+                    }
                 }
                 if c.checks.len() > MAX_PATHS
                     || c.artifacts.len() > MAX_PATHS

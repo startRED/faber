@@ -450,6 +450,26 @@ mode, cost, account pace and the local build sit folded under "Run mode, cost an
 Status colours always come with words and shapes. Amber stays for needs-you only: a quota wait or a dependency is not
 shown as a decision.
 
+### How a mission's change is gated
+
+The coordinator (`engine/src/project/coordinator.rs`) carries the lessons of building Faber by hand (R146, R147, R162;
+[spec](superpowers/specs/2026-10-16-own-lessons-into-faber.md)). A project may declare `faber-rules.json` at its root:
+`areas` (a name and the paths it holds), `security` (paths that always need the full chain) and `sequences` (a name,
+the files, and the text `before` and `after` each number). It is read from the files the engine showed at the base; a
+tracked file that was not shown, or one that does not parse, stops the mission with `reason.rules.invalid`. Without it,
+each top folder is an area and only the shared security words count (`auth`, `credential`, `permission`, `secret`,
+`shell`, `spawn`, `token`, `update` and their kin, plus `.github/` and the rules file itself).
+
+| Step | What the engine does |
+| :--- | :--- |
+| Plan | The Writer task carries `coherence`: `areas`, `closest`, and `extends` or `new` (exactly one). They go into contract `c1` as its next version; missing, or not naming every area the planned writes fall in, stops with `reason.contract.coherence` before anything is written |
+| Write | The Writer reads the contract and the numbering rule. It writes `{{next:<sequence>}}` (or `{{next:<sequence>:<label>}}`) instead of a number, and the engine puts in the next free number of the head when it applies the patch, only on lines the file did not already have; the numbers are kept for a resume or a repair |
+| Size | From the paths the change really touched: one area and no security path is light (one review), anything wider or unknown is full (two reviews from different sessions). The contract may add areas, never remove them, and a touched area it does not name stops the mission |
+| Prove | The engine proves the composed tree. A red candidate on a red head stops the line (`reason.queue.baseRed`): only this Writer, now the base's repair owner, may land until the head is green. A red candidate on a green head is the Writer's to repair |
+| Review | Each round is a fresh session of the other vendor; rounds after the first pick the eligible pin furthest behind its pace. A finding is `{"class", "at", "text"}` with class `person`, `data`, `security`, `rule` or `note`; only the first four block, a plain string counts as unclassified and stops for a person, and each round reads what earlier rounds decided |
+| Repair | One repair turn on the same lease (`Leases::reopen` once the last process is proven gone), from a brief with the findings and their place, the receipts, the contract and the current files. It starts fresh; resuming needs a known small context, which no session reports yet |
+| Land | Only `Runner::land`, after `Queue::accepted`: the verified proof of the exact tree, the reviews the size asks for, and an open line |
+
 ### The Projects home
 
 The first screen of a project uses the layout of the Chat home (`welcome-grid`) with its own identity: the greeting

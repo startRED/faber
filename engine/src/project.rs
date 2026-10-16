@@ -22,7 +22,9 @@ pub mod qualification;
 pub mod qualify;
 pub mod queue;
 pub mod report;
+pub mod rules;
 pub mod run;
+pub mod sequence;
 pub mod store;
 pub mod update;
 pub mod wire;
@@ -366,6 +368,9 @@ pub struct Contract {
     pub decisions: Vec<String>,
     #[serde(default)]
     pub inputs: Vec<ContractPin>,
+    /// The coherence fields (R146): set from the plan before any Writer starts, and read by the reviewer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coherence: Option<rules::Coherence>,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -385,6 +390,7 @@ impl Contract {
             requires: vec![],
             decisions: vec![],
             inputs: vec![],
+            coherence: None,
             extra: Extra::new(),
         }
     }
@@ -509,6 +515,9 @@ pub struct Task {
     pub paths: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kit: Option<wire::KitPin>,
+    /// What a Writer task touches and how it fits what exists (R146), as the plan named it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coherence: Option<rules::Coherence>,
     #[serde(default)]
     pub state: TaskState,
     /// A `reason.*` key while blocked or waiting.
@@ -537,6 +546,7 @@ impl Task {
             checks: vec![],
             paths: vec![],
             kit: None,
+            coherence: None,
             state: TaskState::default(),
             reason: None,
             attempts: 0,

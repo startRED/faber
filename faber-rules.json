@@ -1,0 +1,39 @@
+{
+  "areas": [
+    { "name": "Missions", "paths": ["engine/src/project/", "engine/src/project.rs", "engine/src/engine/project_sessions.rs", "engine/src/engine/project_budget.rs"] },
+    { "name": "Engine", "paths": ["engine/src/", "engine/Cargo.toml"] },
+    { "name": "Screens", "paths": ["ui/", "index.html", "vite.config.ts", "tsconfig.json"] },
+    { "name": "Shell", "paths": ["src-tauri/"] },
+    { "name": "Process calls", "paths": ["winproc/"] },
+    { "name": "Tests", "paths": ["testkit/", "tests/", "engine/tests/"] },
+    { "name": "Docs", "paths": ["docs/", "AGENTS.md", "CLAUDE.md", "README.md", "SECURITY.md", "NOTICE", "LICENSE"] },
+    { "name": "Release", "paths": ["scripts/", ".github/", "package.json", "package-lock.json", "Cargo.toml", "Cargo.lock", "rustfmt.toml"] },
+    { "name": "Project rules", "paths": ["faber-rules.json", ".gitignore", ".gitattributes", ".ignore", ".cargo/", ".claude/", ".impeccable/"] }
+  ],
+  "security": [
+    "engine/src/proc.rs",
+    "engine/src/cli.rs",
+    "engine/src/install.rs",
+    "engine/src/account.rs",
+    "engine/src/project/lease.rs",
+    "engine/src/project/git.rs",
+    "engine/src/project/queue.rs",
+    "engine/src/project/coordinator.rs",
+    "engine/src/project/rules.rs",
+    "engine/src/project/policy.rs",
+    "engine/src/project/remote.rs",
+    "src-tauri/src/terminal.rs",
+    "src-tauri/src/awake.rs",
+    "src-tauri/src/autostart.rs",
+    "src-tauri/src/tray/native.rs",
+    "src-tauri/capabilities/",
+    "src-tauri/tauri.conf.json",
+    "winproc/",
+    "Cargo.lock",
+    "package-lock.json"
+  ],
+  "sequences": [
+    { "name": "decision", "files": ["docs/decisions.md"], "before": "| R", "after": " |" },
+    { "name": "notes", "files": ["ui/locales/"], "before": "'notes.", "after": "." }
+  ]
+}

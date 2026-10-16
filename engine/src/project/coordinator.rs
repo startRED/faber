@@ -9,8 +9,22 @@
 //! proven from the facts is never guessed: a pending effect, a Writer whose turn was cut short and a lease that is
 //! still held park the mission for a person.
 //!
-//! Limits of this first version, kept on purpose: one task per plan, one Writer attempt, no repair loop, and the
-//! landing gate is the exact-tree queue (proof plus other-vendor review), not the full deliverable bar.
+//! The lessons of building Faber by hand are engine rules here (R146, R147):
+//!
+//! - **The contract comes first.** The plan names the map areas the change touches, the closest thing that exists, and
+//!   `Extends:` or `New:` with why. No Writer starts without them, and the change may not touch an area they omit.
+//! - **Sized by risk.** The engine measures the paths the change really touched against the project's rules: one area
+//!   and no security path takes one review, anything wider two reviews from different sessions.
+//! - **Faber decides done.** Only the engine's proof of the exact composed tree, plus the reviews, opens the queue.
+//! - **Reviews that end.** Each finding carries a class; only a break for a person, for data, for security or for a
+//!   written rule blocks, and each round reads what earlier rounds decided. A finding with no class stops for a person.
+//! - **One repair.** A blocking finding or a red proof gives the Writer one repair turn from a self-contained brief.
+//! - **A red base stops the line.** When the candidate is red and so is the head under it, the head is what is broken:
+//!   the line stops, this Writer owns the base's repair, and nothing else lands until it does.
+//! - **Numbers at compose.** Decision and notes numbers are placeholders until the engine applies the patch.
+//!
+//! Limits of this version, kept on purpose: one task per plan and the landing gate is the exact-tree queue (proof plus
+//! other-vendor reviews), not the full deliverable bar.
 use super::{
     Brief, Contract, ContractPin, Extra, Grant, Lease, MissionState, Plan, Record, Role, SCHEMA, Task, TaskKind,
     budget::{Invocation, Kind},
@@ -19,11 +33,14 @@ use super::{
     lease::{LeaseError, Leases, Termination, hash, normalized, retirement_known},
     proof::{Definition, ProofSet},
     queue::{Candidate, Review},
+    rules::{Coherence, Rules, Sizing},
     run::Runner,
+    sequence,
     store::{Journal, JournalError},
-    wire::{Action, Envelope, Facets, FileOp, Fresh, Labels, Risk, Verb, Verbatim, Verdict},
+    wire::{Action, Envelope, Facets, FileOp, Finding, Fresh, Labels, Risk, Verb, Verbatim, Verdict},
     worker::{ModelPin, Worker},
 };
+use crate::model::Vendor;
 use crate::proc::Spawner;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -36,6 +53,62 @@ const REVIEWER: &str = "reviewer";
 const CONTRACT: &str = "c1";
 const BRANCH_INTENT: &str = "branch";
 const WORKTREE_INTENT: &str = "worktree";
+/// Repair turns a Writer gets after its first attempt: one focused repair (MVP spec §7).
+const REPAIRS: u32 = 1;
+/// Review rounds a candidate gets in all: two for a full change, and two more after its one repair.
+const ROUNDS: u32 = 4;
+/// The largest context a repair may resume instead of starting fresh, in tokens.
+const SMALL_CONTEXT: u64 = 40_000;
+
+/// How far each vendor is behind its quota pace (more is further behind, so more to spare), or `None` when unknown.
+pub type Pace = Arc<dyn Fn(Vendor) -> Option<f64> + Send + Sync>;
+
+/// The reviewer of a round. The first round is the product's pin; later rounds go to the eligible pin whose vendor is
+/// furthest behind its pace (R119 notes: spend what is spare on re-reviews). A pin of the Writer's vendor is never
+/// eligible (MVP spec §9), so with two vendors every round stays on the other one.
+pub fn pick_reviewer(first: &ModelPin, pool: &[ModelPin], writer: Vendor, round: u32, pace: Option<&Pace>) -> ModelPin {
+    if round <= 1 {
+        return first.clone();
+    }
+    let room = |pin: &ModelPin| pace.and_then(|pace| pace(pin.vendor)).unwrap_or(f64::MIN);
+    std::iter::once(first)
+        .chain(pool)
+        .filter(|pin| pin.vendor != writer)
+        .fold(None::<&ModelPin>, |best, pin| match best {
+            Some(b) if room(b) >= room(pin) => Some(b),
+            _ => Some(pin),
+        })
+        .unwrap_or(first)
+        .clone()
+}
+
+/// Whether a repair starts a fresh session from its self-contained brief. Only a Writer whose cache is still warm and
+/// whose context is known to be small resumes; anything unknown starts fresh.
+pub fn repair_fresh(warm: bool, context_tokens: Option<u64>) -> bool {
+    !(warm && context_tokens.is_some_and(|t| t <= SMALL_CONTEXT))
+}
+
+/// One finding a review round returned and what the engine made of it, so the next round does not argue it again.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Decided {
+    round: u32,
+    finding: Finding,
+    blocks: bool,
+}
+
+/// What the Writer's next repair turn is for.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Repair {
+    /// `review`, `proof` (the candidate is red on a green head) or `base` (the head itself is red).
+    why: String,
+    #[serde(default)]
+    findings: Vec<Finding>,
+    /// The engine receipts the repair answers to.
+    #[serde(default)]
+    receipts: Vec<String>,
+}
 
 /// What the coordinator needs from the model sessions. The engine implements it for production; a recorded script
 /// implements it for the tests, so the whole mission can be replayed without a CLI.
@@ -129,6 +202,7 @@ pub fn classify(key: &str) -> Stop {
             | "reason.project.processTreeUnproven"
             | "reason.disk.needed"
             | "reason.proof.busy"
+            | "reason.queue.baseRed"
     ) {
         Stop::Park(key.into())
     } else {
@@ -175,6 +249,21 @@ struct Progress {
     started: BTreeSet<String>,
     /// How many of the Writer's patch operations are on disk.
     applied: usize,
+    /// Numbers given to the candidate's placeholders (see `sequence`), kept so a resume gives the same ones.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    numbers: sequence::Given,
+    /// Review rounds finished; each one is its own fresh reviewer session.
+    #[serde(default)]
+    rounds: u32,
+    /// Repair turns the Writer finished.
+    #[serde(default)]
+    repairs: u32,
+    /// Every finding the rounds returned, with what was decided, for the next round to read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    decided: Vec<Decided>,
+    /// The repair the Writer owes next.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    repair: Option<Repair>,
     #[serde(flatten)]
     extra: Extra,
 }
@@ -185,7 +274,19 @@ impl Record for Progress {
 }
 impl Progress {
     fn new() -> Self {
-        Self { schema: SCHEMA, done: BTreeSet::new(), turns: BTreeMap::new(), started: BTreeSet::new(), applied: 0, extra: Extra::new() }
+        Self {
+            schema: SCHEMA,
+            done: BTreeSet::new(),
+            turns: BTreeMap::new(),
+            started: BTreeSet::new(),
+            applied: 0,
+            numbers: sequence::Given::new(),
+            rounds: 0,
+            repairs: 0,
+            decided: vec![],
+            repair: None,
+            extra: Extra::new(),
+        }
     }
 }
 
@@ -203,6 +304,9 @@ pub struct Coordinator<R: Roles, E: Executor> {
     j: Journal,
     broker: Option<Broker<E>>,
     setup: Setup,
+    rules: Rules,
+    pool: Vec<ModelPin>,
+    pace: Option<Pace>,
     p: Progress,
     marks: usize,
     crash_after: Option<usize>,
@@ -210,8 +314,11 @@ pub struct Coordinator<R: Roles, E: Executor> {
 }
 
 fn example(task: &str, base: &str, digest: &str, lease: u64, action: serde_json::Value, ping: Option<&str>) -> String {
-    let mut envelope =
-        serde_json::json!({"schema": 2, "task": task, "attempt": 1, "base": base, "contract": digest, "lease": lease, "action": action});
+    example_of(task, 1, base, digest, lease, action, ping)
+}
+
+fn example_of(task: &str, attempt: u32, base: &str, digest: &str, lease: u64, action: serde_json::Value, ping: Option<&str>) -> String {
+    let mut envelope = serde_json::json!({"schema": 2, "task": task, "attempt": attempt, "base": base, "contract": digest, "lease": lease, "action": action});
     if let Some(ping) = ping {
         envelope["ping"] = ping.into();
     }
@@ -338,7 +445,26 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
             return Err("reason.queue.review");
         }
         let p = journal.get::<Progress>(&journal.private().join("coordinator.json")).map_err(|e| e.key())?.unwrap_or_else(Progress::new);
-        Ok(Self { roles, j: journal, broker: Some(broker), setup, p, marks: 0, crash_after: None, crash_before: None })
+        let rules = Rules::from_setup(&setup.sources, &setup.tree)?;
+        Ok(Self {
+            roles,
+            j: journal,
+            broker: Some(broker),
+            setup,
+            rules,
+            pool: vec![],
+            pace: None,
+            p,
+            marks: 0,
+            crash_after: None,
+            crash_before: None,
+        })
+    }
+
+    /// More reviewer pins for the rounds after the first, and the pace that chooses among them (see `pick_reviewer`).
+    pub fn reviewers(&mut self, pool: Vec<ModelPin>, pace: Option<Pace>) {
+        self.pool = pool;
+        self.pace = pace;
     }
 
     /// Test hook: end the run as a power cut would right after the mark of this many finished steps. Production never
@@ -461,8 +587,17 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
         let (lease, root) = self.arm(&task).await?;
         self.red(&task, &root).await?;
         self.write(&task, &lease, &root).await?;
-        self.green(&task, &lease, &root).await?;
-        self.review(&task, &root).await?;
+        loop {
+            if let Some(repair) = self.p.repair.clone() {
+                self.repair(&task, &lease, &root, repair).await?;
+            }
+            if !self.green(&task, &lease, &root).await? {
+                continue;
+            }
+            if self.review(&task, &root).await? {
+                break;
+            }
+        }
         self.land(&task, &lease).await
     }
 
@@ -476,13 +611,15 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
         }
     }
 
-    /// Record the worker (its brief, pinned kit and model) once; a replacement turn reuses it.
-    fn wire(&mut self, role: Role, mut brief: Brief) -> Step<()> {
+    /// Record the worker (its brief, pinned kit and model) once; a replacement turn reuses it. A brief of a later attempt
+    /// (a repair) replaces the worker, and says so.
+    fn wire(&mut self, pin: &ModelPin, mut brief: Brief) -> Step<bool> {
         let mut runner = self.runner()?;
-        if runner.workers.contains_key(&brief.task) {
-            return Ok(());
+        if runner.workers.get(&brief.task).is_some_and(|w| w.brief.attempt >= brief.attempt) {
+            return Ok(false);
         }
-        let pin = self.pin_of(role);
+        let role = brief.role;
+        let pin = pin.clone();
         let labels = Labels { verb: Verb::Build, needs: vec![], risk: Risk::Low, fresh: Fresh::Stable, facets: Facets::default() };
         let kit = assemble(&Assembly {
             labels,
@@ -505,14 +642,19 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
         brief.grant_micros = Some(self.setup.micros);
         runner.workers.insert(brief.task.clone(), Worker::new(brief, pin, 3)?);
         runner.save(&self.j)?;
-        Ok(())
+        Ok(true)
     }
 
     /// One role turn, resumable: a recorded reply is reused, a live turn is awaited, a dead one is replaced.
-    async fn turn(&mut self, role: Role, kind: Kind, brief: Brief, lease: Option<&Lease>) -> Step<(String, Envelope)> {
+    async fn turn(&mut self, pin: &ModelPin, kind: Kind, brief: Brief, lease: Option<&Lease>) -> Step<(String, Envelope)> {
         let name = brief.task.clone();
-        self.wire(role, brief)?;
-        let pin = self.pin_of(role);
+        let fresh = brief.extra.get("start").is_none_or(|s| s != "resume");
+        if self.wire(pin, brief)? && lease.is_some() {
+            // A new Writer attempt starts its patch from the first operation.
+            self.p.applied = 0;
+            self.save()?;
+        }
+        let pin = pin.clone();
         loop {
             let n = *self.p.turns.entry(name.clone()).or_insert(1);
             let inv = format!("{name}-{n}");
@@ -549,7 +691,7 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
                     model: pin.model.clone(),
                     effort: pin.effort.clone(),
                     session: "unused".into(),
-                    fresh: true,
+                    fresh,
                     exposure_micros: None,
                     extra: Extra::new(),
                 };
@@ -626,10 +768,20 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
             .ok_or_else(|| Stop::Block("reason.lease.none".into()))
     }
 
-    fn brief(&self, role: Role, task: &str, goal: &str, writes: &[String], lease: Option<u64>, quotes: Vec<Verbatim>) -> Step<Brief> {
+    #[allow(clippy::too_many_arguments)]
+    fn brief(
+        &self,
+        role: Role,
+        task: &str,
+        attempt: u32,
+        goal: &str,
+        writes: &[String],
+        lease: Option<u64>,
+        quotes: Vec<Verbatim>,
+    ) -> Step<Brief> {
         let runner = self.runner()?;
         let pin = self.contract_pin()?;
-        let mut brief = Brief::new(task, 1, role, goal, &runner.mission.base, pin);
+        let mut brief = Brief::new(task, attempt, role, goal, &runner.mission.base, pin);
         // The folders the plan may write under come first: a Writer's paths must sit inside the scope.
         let shown = self.setup.sources.iter().map(|(path, _)| path.clone());
         brief.scope = self.setup.writable.iter().cloned().chain(shown.clone()).take(super::wire::MAX_PATHS).collect();
@@ -652,10 +804,47 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
         Ok(quotes)
     }
 
+    fn contract(&self) -> Step<Contract> {
+        self.j.contracts()?.into_iter().find(|c| c.id == CONTRACT).ok_or_else(|| Stop::Block("reason.contract.revised".into()))
+    }
+
     fn contract_pin(&self) -> Step<ContractPin> {
-        let contract =
-            self.j.contracts()?.into_iter().find(|c| c.id == CONTRACT).ok_or_else(|| Stop::Block("reason.contract.revised".into()))?;
+        let contract = self.contract()?;
         Ok(ContractPin { id: contract.id, digest: contract.digest })
+    }
+
+    /// The contract's coherence fields, checked against what `paths` touch. Without them, or when they leave out an area
+    /// the paths are in, nothing is written: the mission stops with `reason.contract.coherence`.
+    fn coherent(&self, paths: &[String]) -> Step<(Coherence, Sizing)> {
+        let refused = || Stop::Block("reason.contract.coherence".into());
+        let contract = self.contract()?;
+        let verified = contract.verify();
+        let coherence = contract.coherence.filter(|_| verified).ok_or_else(refused)?;
+        let mut sizing = self.rules.size(paths);
+        coherence.check(&self.rules, &sizing).map_err(|_| refused())?;
+        sizing.widen(&coherence);
+        Ok((coherence, sizing))
+    }
+
+    /// Put the plan's coherence fields into the contract, once, as its next version.
+    fn sign(&self, task: &Task) -> Step<()> {
+        let mut contract = self.contract()?;
+        if contract.coherence.is_some() || task.coherence.is_none() {
+            return Ok(());
+        }
+        contract.coherence = task.coherence.clone();
+        contract.version += 1;
+        self.j.save_contract(&contract.seal())?;
+        Ok(())
+    }
+
+    /// What every Writer and reviewer reads about the contract and the numbered entries.
+    fn contract_quotes(&self, coherence: &Coherence) -> Step<Vec<Verbatim>> {
+        let mut quotes = chunks("contract", &coherence.text(), 4, true)?;
+        if let Some(text) = sequence::brief(&self.rules.sequences) {
+            quotes.extend(chunks("numbers", &text, 1, true)?);
+        }
+        Ok(quotes)
     }
 
     // ----- steps -----
@@ -669,7 +858,18 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
         if self.j.contracts()?.iter().all(|c| c.id != CONTRACT) {
             self.j.save_contract(&Contract::new(CONTRACT, LEAD, &runner.mission.base).seal())?;
         }
-        if let Some(task) = self.setup.plan.clone() {
+        if let Some(mut task) = self.setup.plan.clone() {
+            // The product wrote this plan, so the product names what it touches: the areas its writes fall in.
+            if task.coherence.is_none() {
+                task.coherence = Some(Coherence {
+                    areas: self.rules.size(&task.writes).areas.into_iter().collect(),
+                    closest: task.writes.join(", "),
+                    extends: Some(task.title.clone()),
+                    new: None,
+                });
+            }
+            self.sign(&task)?;
+            self.coherent(&task.writes)?;
             self.j.save_plan(&Plan::new(&runner.mission.id, 1, vec![task.clone()]))?;
             self.mark("plan")?;
             return Ok(task);
@@ -678,17 +878,27 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
         let plan_shape = serde_json::json!({"plan": {
             "summary": "One sentence on what changes and why.",
             "acceptance": "What the proof checks.",
-            "tasks": [{"id": "writer", "title": "A short title", "kind": "writer", "writes": ["path/under/an/allowed/folder"]}]
+            "tasks": [{"id": "writer", "title": "A short title", "kind": "writer", "writes": ["path/under/an/allowed/folder"],
+                "coherence": {"areas": ["an area the writes fall in"], "closest": "The closest thing that already exists.",
+                    "extends": "The existing thing this change extends."}}]
         }});
         let allowed = self.setup.writable.join(", ");
+        let areas = if self.rules.areas.is_empty() {
+            "An area is the top folder of a path (\".\" for a file at the root).".to_string()
+        } else {
+            format!("The areas are: {}.", self.rules.areas.iter().map(|a| a.name.as_str()).collect::<Vec<_>>().join(", "))
+        };
         let format = format!(
-            "{ENVELOPE_RULES} Plan exactly one writer task. Its writes list only paths under: {allowed}. Do not name a proof: the engine runs its own. The path list names every tracked file, so a path you name may be one whose text is not shown.\n{}",
+            "{ENVELOPE_RULES} Plan exactly one writer task. Its writes list only paths under: {allowed}. Do not name a proof: the engine runs its own. The path list names every tracked file, so a path you name may be one whose text is not shown. Fill coherence before anything is written: areas names every area the writes fall in ({areas}), closest names the closest thing that already exists, and either extends says what this change extends or, when nothing fits, replace extends with new saying why the closest thing does not fit.\n{}",
             example(LEAD, &runner.mission.base, &pin.digest, 0, plan_shape, None)
         );
         let quotes = self.quotes(&runner.mission.goal, vec![], format)?;
-        let brief = self.brief(Role::Lead, LEAD, "Plan the mission as one writer task", &[], None, quotes)?;
-        let (_, reply) = self.turn(Role::Lead, Kind::Lead, brief, None).await?;
+        let brief = self.brief(Role::Lead, LEAD, 1, "Plan the mission as one writer task", &[], None, quotes)?;
+        let lead = self.pin_of(Role::Lead);
+        let (_, reply) = self.turn(&lead, Kind::Lead, brief, None).await?;
         let task = accept_plan(&reply, &self.setup.writable, &self.setup.proofs)?;
+        self.sign(&task)?;
+        self.coherent(&task.writes)?;
         self.j.save_plan(&Plan::new(&runner.mission.id, 1, vec![task.clone()]))?;
         self.mark("plan")?;
         Ok(task)
@@ -804,32 +1014,53 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
         }
     }
 
+    /// The Writer's format: replace whole files, each with the hash of its current text, at this attempt and lease.
+    fn patch_format(&self, task: &Task, attempt: u32, lease: &Lease, root: &std::path::Path) -> Step<String> {
+        let base = self.runner()?.mission.base;
+        let pin = self.contract_pin()?;
+        let existing: Vec<String> = task.writes.iter().filter(|p| root.join(p).is_file()).cloned().collect();
+        let shape = serde_json::json!({"patch": {"ops": [{"write": {
+            "path": task.writes[0], "expect": existing.first().map(|p| hash(std::fs::read(root.join(p)).unwrap_or_default().as_slice())),
+            "content": "the complete new text of the file"}}]}});
+        Ok(format!(
+            "{ENVELOPE_RULES} Write only these paths: {}. A file that exists is replaced whole and its expect is the sha256 of its current text shown above; a new file has expect null.\n{}",
+            task.writes.join(", "),
+            example_of(&task.id, attempt, &base, &pin.digest, lease.generation, shape, None)
+        ))
+    }
+
+    fn targets(task: &Task, root: &std::path::Path) -> Step<Vec<Verbatim>> {
+        let current: Vec<(String, String)> =
+            task.writes.iter().map(|p| (p.clone(), std::fs::read_to_string(root.join(p)).unwrap_or_default())).collect();
+        chunks("targets", &files_text(&current), FILE_CHUNKS, false)
+    }
+
     async fn write(&mut self, task: &Task, lease: &Lease, root: &std::path::Path) -> Step<()> {
         if self.done("write") {
             return Ok(());
         }
         self.effects_settled()?;
+        // The contract's coherence fields come before any patch: no Writer starts without them.
+        let (coherence, _) = self.coherent(&task.writes)?;
         let runner = self.runner()?;
-        let pin = self.contract_pin()?;
-        let base = runner.mission.base.clone();
-        let current: Vec<(String, String)> =
-            task.writes.iter().map(|p| (p.clone(), std::fs::read_to_string(root.join(p)).unwrap_or_default())).collect();
-        let existing: Vec<String> = task.writes.iter().filter(|p| root.join(p).is_file()).cloned().collect();
-        let shape = serde_json::json!({"patch": {"ops": [{"write": {
-            "path": task.writes[0], "expect": existing.first().map(|p| hash(std::fs::read(root.join(p)).unwrap_or_default().as_slice())),
-            "content": "the complete new text of the file"}}]}});
-        let format = format!(
-            "{ENVELOPE_RULES} Write only these paths: {}. A file that exists is replaced whole and its expect is the sha256 of its current text shown above; a new file has expect null.\n{}",
-            task.writes.join(", "),
-            example(&task.id, &base, &pin.digest, lease.generation, shape, None)
-        );
-        let quotes = self.quotes(&runner.mission.goal, chunks("targets", &files_text(&current), FILE_CHUNKS, false)?, format)?;
-        let brief = self.brief(Role::Writer, &task.id, &task.title, &task.writes, Some(lease.generation), quotes)?;
-        let (_, reply) = self.turn(Role::Writer, Kind::Worker, brief, Some(lease)).await?;
+        let mut extra = Self::targets(task, root)?;
+        extra.extend(self.contract_quotes(&coherence)?);
+        let format = self.patch_format(task, 1, lease, root)?;
+        let quotes = self.quotes(&runner.mission.goal, extra, format)?;
+        let brief = self.brief(Role::Writer, &task.id, 1, &task.title, &task.writes, Some(lease.generation), quotes)?;
+        let writer = self.pin_of(Role::Writer);
+        let (_, reply) = self.turn(&writer, Kind::Worker, brief, Some(lease)).await?;
+        self.apply(lease, root, &reply).await?;
+        self.mark("write")
+    }
+
+    /// Put the Writer's patch on disk through the lease, its placeholders numbered first (see `sequence`).
+    async fn apply(&mut self, lease: &Lease, root: &std::path::Path, reply: &Envelope) -> Step<()> {
         let Action::Patch(patch) = &reply.action else { return Err(Stop::Block("error.wire.role".into())) };
+        let ops = self.numbered(root, &patch.ops)?;
         let grant = (self.setup.grant)()?.ok_or_else(|| Stop::Block("reason.grant.none".into()))?;
         let revision = self.setup.revision;
-        for (index, op) in patch.ops.iter().enumerate() {
+        for (index, op) in ops.iter().enumerate() {
             if index < self.p.applied || Self::applied(root, op) {
                 self.p.applied = self.p.applied.max(index + 1);
                 continue;
@@ -838,54 +1069,236 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
             self.p.applied = index + 1;
             self.save()?;
         }
-        self.mark("write")
+        Ok(())
     }
 
-    /// Compose the tree, prove it green and queue the candidate with its proof.
-    async fn green(&mut self, task: &Task, lease: &Lease, root: &std::path::Path) -> Step<()> {
+    /// The patch with the next free numbers of the head in place of the candidate's placeholders. The numbers given are
+    /// saved before any operation lands, so a resume or a repair gives the same ones.
+    fn numbered(&mut self, root: &std::path::Path, ops: &[FileOp]) -> Step<Vec<FileOp>> {
+        if self.rules.sequences.is_empty() {
+            return Ok(ops.to_vec());
+        }
+        let read = |path: &str| std::fs::read_to_string(root.join(path)).ok();
+        let head: Vec<(String, String)> = self
+            .setup
+            .tree
+            .iter()
+            .filter(|p| self.rules.sequences.iter().any(|s| sequence::holds(s, p)))
+            .filter_map(|p| read(p).map(|text| (p.clone(), text)))
+            .collect();
+        let befores: Vec<Option<String>> = ops.iter().map(|op| if let FileOp::Write(w) = op { read(&w.path) } else { None }).collect();
+        let writes: Vec<sequence::Written> = ops
+            .iter()
+            .zip(&befores)
+            .filter_map(|(op, before)| match op {
+                FileOp::Write(w) => Some(sequence::Written { before: before.as_deref(), after: &w.content }),
+                _ => None,
+            })
+            .collect();
+        let mut given = self.p.numbers.clone();
+        let mut texts = sequence::assign(&self.rules.sequences, &head, &writes, &mut given).into_iter();
+        let out = ops
+            .iter()
+            .map(|op| match op {
+                FileOp::Write(w) => {
+                    let mut w = w.clone();
+                    w.content = texts.next().unwrap_or(w.content);
+                    FileOp::Write(w)
+                }
+                other => other.clone(),
+            })
+            .collect();
+        if given != self.p.numbers {
+            self.p.numbers = given;
+            self.save()?;
+        }
+        Ok(out)
+    }
+
+    /// Compose the tree, prove it and queue the candidate with its size. `false` means a repair is owed first.
+    async fn green(&mut self, task: &Task, lease: &Lease, root: &std::path::Path) -> Step<bool> {
         if self.done("green") {
-            return Ok(());
+            return Ok(true);
         }
         self.effects_settled()?;
         let mut runner = self.runner()?;
-        if runner.queue.get(&task.id).is_none() {
-            let paths = self.broker()?.leases().audit(lease)?;
-            let grant = self.grant();
-            let tree = self.broker()?.compose_tree(grant, lease, &paths)?;
-            let input = runner.workers.get(&task.id).ok_or_else(|| Stop::Block("error.wire.stale".into()))?.digest();
+        let paths = self.broker()?.leases().audit(lease)?;
+        // The engine sizes what the change really touched; the contract must name every area of it.
+        let (_, sizing) = self.coherent(&paths)?;
+        let grant = self.grant();
+        let tree = self.broker()?.compose_tree(grant, lease, &paths)?;
+        let input = runner.workers.get(&task.id).ok_or_else(|| Stop::Block("error.wire.stale".into()))?.digest();
+        let proven =
+            runner.queue.get(&task.id).is_some_and(|c| c.tree == tree && c.input == input && c.proof().is_some_and(ProofSet::verified));
+        if !proven {
+            match runner.queue.get(&task.id) {
+                None => {
+                    let candidate = Candidate::new(
+                        &task.id,
+                        runner.mission.base.clone(),
+                        tree.clone(),
+                        runner.mission.grant_revision,
+                        self.setup.pins.writer.vendor,
+                        input.clone(),
+                        paths.clone(),
+                        self.setup.proofs.clone(),
+                    )?;
+                    runner.queue.enqueue(candidate)?;
+                }
+                Some(c) if c.tree != tree || c.input != input => {
+                    runner.queue.repaired(&task.id, tree.clone(), input.clone(), paths.clone())?
+                }
+                Some(_) => {}
+            }
+            runner.save(&self.j)?;
             let mut proof = self.proof_set(&tree, &input, paths.clone())?;
             let ground = self.ground(root, true).await?;
             self.prove(&mut runner, &task.id, &mut proof, &ground).await?;
             if !proof.verified() {
-                return Err(Stop::Block("reason.proof.failed".into()));
+                return self.red_candidate(task, &mut runner, &proof).await;
             }
-            let candidate = Candidate::new(
-                &task.id,
-                runner.mission.base.clone(),
-                tree,
-                runner.mission.grant_revision,
-                self.setup.pins.writer.vendor,
-                input,
-                paths,
-                self.setup.proofs.clone(),
-            )?;
-            runner.queue.enqueue(candidate)?;
             runner.queue.prove(&task.id, proof)?;
-            runner.save(&self.j)?;
         }
-        self.mark("green")
+        let tier = sizing.tier();
+        runner.queue.require_reviews(&task.id, tier.reviews())?;
+        // The size is the engine's record, kept beside the candidate for the report.
+        let size = serde_json::json!({"tier": tier, "areas": sizing.areas, "security": sizing.security, "unknown": sizing.unknown});
+        runner.queue.note(&task.id, "size", size)?;
+        runner.save(&self.j)?;
+        self.mark("green")?;
+        Ok(true)
     }
 
-    /// A fresh role of the other vendor reads the exact tree and the engine's receipt, and answers in one envelope.
-    async fn review(&mut self, task: &Task, root: &std::path::Path) -> Step<()> {
-        if self.done("review") {
-            return Ok(());
+    /// The candidate is red. A red base under it stops the line and makes this Writer the owner of the base's repair;
+    /// otherwise the Writer repairs its own change. Past the one repair, the mission stops.
+    async fn red_candidate(&mut self, task: &Task, runner: &mut Runner, proof: &ProofSet) -> Step<bool> {
+        if self.p.repairs >= REPAIRS {
+            return Err(Stop::Block("reason.proof.failed".into()));
         }
+        let mut receipts: Vec<String> = proof.receipts().map(|r| r.id.clone()).collect();
+        let base = runner.mission.base.clone();
+        let why = match self.head_red(runner, task).await? {
+            Some(receipt) => {
+                runner.queue.stop_line(&base, &receipt)?;
+                runner.queue.own_repair(&task.id)?;
+                runner.save(&self.j)?;
+                receipts.push(receipt);
+                "base"
+            }
+            None => "proof",
+        };
+        self.p.repair = Some(Repair { why: why.into(), findings: vec![], receipts });
+        self.save()?;
+        Ok(false)
+    }
+
+    /// Prove the integration head itself, in the project's working copy brought back to it. `Some(receipt)` is a red
+    /// head. Without a working copy the head cannot be proven apart from the candidate, so it counts as green.
+    async fn head_red(&self, runner: &mut Runner, task: &Task) -> Step<Option<String>> {
+        if self.setup.expect_red {
+            return Ok(None);
+        }
+        let Some(stage) = self.setup.stage.clone() else { return Ok(None) };
+        let base = runner.mission.base.clone();
+        let tree = base.clone();
+        let space = stage.workspace.clone();
+        let repo = stage.repo_root.clone();
+        let synced = tokio::task::spawn_blocking(move || {
+            let mut git = super::git::Process::find().map_err(|_| "reason.workspace.git")?;
+            let own = space.dir().to_path_buf();
+            space.sync(&mut git, &repo, &base, &own)
+        })
+        .await
+        .map_err(|_| Stop::Block("reason.workspace.git".into()))?;
+        synced.map_err(|key| Stop::Block(key.into()))?;
+        let dir = stage.workspace.dir().to_path_buf();
+        let mut head = self.proof_set(&tree, "head", vec![])?;
+        self.prove(runner, &task.id, &mut head, &dir).await?;
+        Ok((!head.verified()).then(|| head.receipts().last().map(|r| r.id.clone())).flatten())
+    }
+
+    /// The Writer's repair turn, from a brief that holds everything it needs: what is wrong (findings with their place,
+    /// or the engine's receipts), the contract, and the current text of its files. It starts fresh unless its cache is warm
+    /// and its context small.
+    async fn repair(&mut self, task: &Task, lease: &Lease, root: &std::path::Path, repair: Repair) -> Step<()> {
+        self.effects_settled()?;
+        let attempt = 2 + self.p.repairs;
+        // The last Writer turn is over and proven gone: the same lease may launch the repair.
+        let held = self.lease_of(&task.id)?;
+        if held.process.is_some() && settled(&held).tree_dead {
+            self.broker()?.leases().reopen(&held)?;
+        }
+        let (coherence, _) = self.coherent(&task.writes)?;
         let runner = self.runner()?;
-        let candidate = runner.queue.get(&task.id).ok_or_else(|| Stop::Block("reason.queue.serial".into()))?.clone();
+        let what = match repair.why.as_str() {
+            "base" => {
+                "The engine's proof is red on the composed tree and also on the base under it: the base itself is broken. Nothing else lands until it is green again, and you own its repair. Make the proof pass."
+            }
+            "proof" => {
+                "The engine's proof is red on the composed tree, and the base under it is green: the change broke it. Make the proof pass."
+            }
+            _ => {
+                "The review found what must change before the candidate may land. Fix each finding and nothing else; where a test can show the fault, add one that fails without the fix."
+            }
+        };
+        let mut lines = vec![what.to_string()];
+        lines.extend(repair.findings.iter().map(|f| format!("- {}", f.line())));
+        if !repair.receipts.is_empty() {
+            lines.push(format!("Engine receipts: {}.", repair.receipts.join(", ")));
+        }
+        let mut extra = chunks("repair", &lines.join("\n"), 2, true)?;
+        extra.extend(Self::targets(task, root)?);
+        extra.extend(self.contract_quotes(&coherence)?);
+        let format = self.patch_format(task, attempt, lease, root)?;
+        let quotes = self.quotes(&runner.mission.goal, extra, format)?;
+        let mut brief = self.brief(Role::Writer, &task.id, attempt, &task.title, &task.writes, Some(lease.generation), quotes)?;
+        // No session today reports its context size, so a repair always starts fresh.
+        let start = if repair_fresh(false, None) { "fresh" } else { "resume" };
+        brief.extra.insert("start".into(), start.into());
+        let writer = self.pin_of(Role::Writer);
+        let (_, reply) = self.turn(&writer, Kind::Worker, brief, Some(lease)).await?;
+        self.apply(lease, root, &reply).await?;
+        self.p.repairs += 1;
+        self.p.repair = None;
+        self.p.done.remove("green");
+        self.p.done.remove("review");
+        self.save()?;
+        self.tell();
+        Ok(())
+    }
+
+    /// Fresh reviewer rounds on the exact tree until the candidate has the reviews its size asks for. `false` means the
+    /// Writer owes a repair first.
+    async fn review(&mut self, task: &Task, root: &std::path::Path) -> Step<bool> {
+        loop {
+            if self.done("review") {
+                return Ok(true);
+            }
+            let runner = self.runner()?;
+            let candidate = runner.queue.get(&task.id).ok_or_else(|| Stop::Block("reason.queue.serial".into()))?.clone();
+            if candidate.accepted_reviews().len() >= usize::from(candidate.reviews_needed())
+                && candidate.review().is_some_and(|r| r.accepted && r.findings.is_empty())
+            {
+                self.mark("review")?;
+                return Ok(true);
+            }
+            if self.p.rounds >= ROUNDS {
+                return Err(Stop::Block("reason.queue.review".into()));
+            }
+            let round = self.p.rounds + 1;
+            if !self.round(task, root, &candidate, round).await? {
+                return Ok(false);
+            }
+        }
+    }
+
+    /// One review round. `false` means the round blocked and the Writer owes a repair.
+    async fn round(&mut self, task: &Task, root: &std::path::Path, candidate: &Candidate, round: u32) -> Step<bool> {
+        let runner = self.runner()?;
         let proof = candidate.proof().ok_or_else(|| Stop::Block("reason.queue.proof".into()))?;
         let receipt = proof.receipts().next().ok_or_else(|| Stop::Block("reason.queue.proof".into()))?.id.clone();
         let pin = self.contract_pin()?;
+        let (coherence, _) = self.coherent(&candidate.paths)?;
         let changed: Vec<(String, String)> =
             candidate.paths.iter().map(|p| (p.clone(), std::fs::read_to_string(root.join(p)).unwrap_or_default())).collect();
         let verdict = serde_json::json!({"complete": {
@@ -896,36 +1309,73 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
             "{}\nThe engine ran the proof {proved} on this exact tree and every one exited 0. Engine receipt id: {receipt}.",
             files_text(&changed)
         );
+        let name = if round == 1 { REVIEWER.to_string() } else { format!("{REVIEWER}{round}") };
         let format = format!(
-            "{ENVELOPE_RULES} Keep lease 0, keep ping \"DoneReady\", keep next and keep the receipt id. Change only the summary and, if you find a defect that makes the candidate wrong, verdict (\"block\") and findings (one short line each).\n{}",
-            example(REVIEWER, &runner.mission.base, &pin.digest, 0, verdict, Some("DoneReady"))
+            "{ENVELOPE_RULES} Keep lease 0, keep ping \"DoneReady\", keep next and keep the receipt id. Change only the summary and, if you find something, findings: one object each, {{\"class\": \"person\" | \"data\" | \"security\" | \"rule\" | \"note\", \"at\": \"path:line\", \"text\": \"one short line\"}}. Only a break for a person, for data, for security or for a written rule blocks the candidate; anything else is a note. Set verdict to \"block\" only with a finding that blocks. Do not raise again what the decided quote already settled.\n{}",
+            example(&name, &runner.mission.base, &pin.digest, 0, verdict, Some("DoneReady"))
         );
-        let quotes = self.quotes(&runner.mission.goal, chunks("candidate", &evidence, FILE_CHUNKS, false)?, format)?;
-        let brief = self.brief(Role::Reviewer, REVIEWER, "Review the candidate against the goal", &[], None, quotes)?;
-        let (inv, reply) = self.turn(Role::Reviewer, Kind::Review, brief, None).await?;
+        let mut extra = chunks("candidate", &evidence, FILE_CHUNKS, false)?;
+        extra.extend(self.contract_quotes(&coherence)?);
+        if !self.p.decided.is_empty() {
+            let lines: Vec<String> = self
+                .p
+                .decided
+                .iter()
+                .map(|d| {
+                    let outcome = if d.blocks { "blocked, and the Writer repaired it" } else { "kept as a note" };
+                    format!("- round {}, {}: {outcome}", d.round, d.finding.line())
+                })
+                .collect();
+            extra.extend(chunks("decided", &format!("Findings earlier rounds already decided:\n{}", lines.join("\n")), 2, true)?);
+        }
+        let quotes = self.quotes(&runner.mission.goal, extra, format)?;
+        let brief = self.brief(Role::Reviewer, &name, 1, "Review the candidate against the goal", &[], None, quotes)?;
+        let reviewer = pick_reviewer(&self.setup.pins.reviewer, &self.pool, self.setup.pins.writer.vendor, round, self.pace.as_ref());
+        let (inv, reply) = self.turn(&reviewer, Kind::Review, brief, None).await?;
         let Action::Complete(done) = &reply.action else { return Err(Stop::Block("error.wire.role".into())) };
-        let accepted = done.verdict == Some(Verdict::Pass) && done.findings.is_empty();
-        let digest = proof.digest();
+        let mut blocking: Vec<Finding> = done.findings.iter().filter(|f| f.blocks()).cloned().collect();
+        if done.verdict == Some(Verdict::Block) && done.findings.is_empty() {
+            blocking.push(Finding::from("The reviewer blocked without a finding."));
+        }
+        let accepted = blocking.is_empty();
         let mut runner = self.runner()?;
         // A crash after the review was saved resumes here: the same session is already on the candidate.
-        if runner.queue.get(&task.id).and_then(Candidate::review).is_some_and(|r| r.session == inv && r.accepted && r.findings.is_empty()) {
-            return self.mark("review");
+        let recorded = runner.queue.get(&task.id).and_then(Candidate::review).is_some_and(|r| r.session == inv);
+        if !recorded {
+            let review = Review {
+                vendor: reviewer.vendor,
+                tree: candidate.tree.clone(),
+                proof_digest: proof.digest(),
+                session: inv.clone(),
+                fresh: true,
+                accepted,
+                findings: blocking.iter().map(Finding::line).collect(),
+            };
+            let outcome = runner.queue.review(&task.id, review);
+            runner.save(&self.j)?;
+            if accepted && outcome.is_err() {
+                return Err(Stop::Block("reason.queue.review".into()));
+            }
         }
-        let review = Review {
-            vendor: self.setup.pins.reviewer.vendor,
-            tree: candidate.tree.clone(),
-            proof_digest: digest,
-            session: inv,
-            fresh: true,
-            accepted,
-            findings: done.findings.clone(),
-        };
-        let outcome = runner.queue.review(&task.id, review);
-        runner.save(&self.j)?;
-        if !accepted || outcome.is_err() {
+        if self.p.rounds < round {
+            self.p.rounds = round;
+            self.p.decided.extend(done.findings.iter().map(|f| Decided { round, finding: f.clone(), blocks: f.blocks() }));
+            if done.verdict == Some(Verdict::Block) && done.findings.is_empty() {
+                self.p.decided.push(Decided { round, finding: blocking[0].clone(), blocks: true });
+            }
+            self.save()?;
+        }
+        if accepted {
+            return Ok(true);
+        }
+        // A finding nobody classified, or one past the one repair, is for a person to settle.
+        if blocking.iter().any(|f| f.class.is_none()) || self.p.repairs >= REPAIRS {
             return Err(Stop::Block("reason.queue.review".into()));
         }
-        self.mark("review")
+        let receipts = vec![receipt];
+        self.p.repair = Some(Repair { why: "review".into(), findings: blocking, receipts });
+        self.save()?;
+        Ok(false)
     }
 
     async fn land(&mut self, task: &Task, lease: &Lease) -> Step<String> {

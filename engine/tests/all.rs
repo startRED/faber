@@ -65,6 +65,8 @@ mod project_kit;
 mod project_lead;
 #[path = "project_lease.rs"]
 mod project_lease;
+#[path = "project_lessons.rs"]
+mod project_lessons;
 #[path = "project_native.rs"]
 mod project_native;
 #[path = "project_policy.rs"]
