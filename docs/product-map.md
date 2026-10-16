@@ -39,7 +39,7 @@ that changes them updates this page too. Last full audit: 2026-10-16.
 | Recents, environment | The last folders opened, and a named set of folders opened together. | `ui/Recents.tsx`, `engine/src/recents.rs` |
 | Local build | Faber building and promoting itself from landed missions (slots A and B, a canary, a last good build). Only when started as the development channel. | `ui/LocalBuild.tsx`, `src-tauri/src/local_update.rs`, `engine/src/project/update.rs` |
 | Right-click menu | Faber's own short menu; the browser's menu never shows. | `ui/ContextMenu.tsx`, `ui/contextmenu.ts` |
-| Work log | The folded activity under an answer: steps, commands, thinking. | `ui/worklog.ts` |
+| Work log | The folded activity under an answer: steps, commands, thinking. Each step says what it does in plain words ("Reading", "Running"); a subagent's calls sit under its step, and while subagents work the status line gives each one a line with its name and what it does now, three at most and "+N more". | `ui/worklog.ts` |
 | Preview, stable | The two update channels (R156): stable is the weekly release everyone gets; a preview is the newest build, a few days early, for people who turn on "Receive previews" in Settings. | `src-tauri/src/update.rs`, `scripts/channel.mjs`, `.github/workflows/` |
 | Cache warm | Under the latest answer: until when the vendor's prompt cache keeps the next message cheaper. | `ui/Thread.tsx`, `ui/running.ts` |
 
@@ -222,6 +222,7 @@ checks in `tests/ui/index.ts`, real-app scenarios in `testkit/src/screen/mod.rs`
 | Feature | State | Checks |
 | :--- | :--- | :--- |
 | Chat with Claude Code and Codex: streaming, tools, images, attachments, files | Done | `engine/tests/claude_session.rs`, `codex_session.rs`, `session_resume.rs`, `workspace.rs`; `tests/fixtures/{claude,codex}/`; `tests/ui/thread.check.ts` |
+| Work log words and subagent rows | Done; the elapsed time per subagent, the side chat and stuck signals are planned (roadmap: Watching the agent work) | `engine/tests/subagents.rs`; `tests/fixtures/claude/subagents.jsonl`; `tests/ui/worklog.check.ts` |
 | Model and effort | Done | `tests/ui/models.check.ts`, `effort.check.ts` |
 | Auto and step up | Done; the draft is routed at every pause (the roadmap wants at most twice) | `engine/tests/auto.rs`, `route.rs`, `simulation.rs`; `tests/ui/nudge.check.ts` |
 | Quota reading, pacing, recovery, plan question | Done | `engine/tests/pacing.rs`, `quota.rs`, `quota_live.rs`, `budget.rs`, `ledger.rs`, `learn.rs`, `paid_guard.rs`; `tests/ui/pace.check.ts`, `quota.check.ts` |

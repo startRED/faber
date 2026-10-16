@@ -1,7 +1,7 @@
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import { createEffect, createResource, createSignal, For, Index, onCleanup, Show, type Accessor } from 'solid-js';
-import { api, type Choice, type Message, type QueuedTurn, type VendorUsage } from './api.ts';
+import { api, type Choice, type Message, type QueuedTurn, type ToolUse, type VendorUsage } from './api.ts';
 import { Asks, Parkeds } from './Ask.tsx';
 import { copyItem, openMenu } from './contextmenu.ts';
 import { keep, kept, release, useDraft } from './unsent.ts';
@@ -12,7 +12,23 @@ import { fromEngine, t } from './i18n.ts';
 import { prettyModel, vendorName, type Option } from './models.ts';
 import { animateList } from './motion.ts';
 import { warmLeft } from './running.ts';
-import { middle, thinkingParts, toolLine, toolRow } from './worklog.ts';
+import { atWork, middle, nameOf, nowOf, stepsOf, thinkingParts, toolLine, toolRow } from './worklog.ts';
+
+// Subagents still at work under the latest reply, each on its own line; the rest fold into "+N more".
+const SHOWN = 3;
+
+function ToolChip(props: { tool: ToolUse }) {
+  const row = () => toolRow(props.tool);
+  return (
+    <span class={props.tool.ok === false ? 'bad' : ''} title={row().detail || props.tool.output}>
+      <Show when={props.tool.ok === true}>
+        <Icon name="check" small />
+      </Show>
+      <b>{row().label}</b>
+      <Show when={row().detail}><i>{middle(row().detail)}</i></Show>
+    </span>
+  );
+}
 
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
 
@@ -120,9 +136,12 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
   const thinking = () => thinkingParts(m().thinking ?? '');
   const steps = () => narration().length + (m().tools?.length ?? 0) + (thinking().length ? 1 : 0);
   const commands = () => m().tools?.filter((tool) => /bash|command|exec|shell/i.test(tool.name)).length ?? 0;
+  // A subagent's calls sit under its own step, so the reply's steps and the subagents still at work read apart.
+  const toolSteps = () => stepsOf(m().tools);
+  const working = () => toolSteps().filter(atWork);
   // The answer on screen is never repeated here: once it has text, the status line steps aside.
   const latest = () => {
-    const tool = m().tools?.at(-1);
+    const tool = toolSteps().at(-1)?.tool;
     if (tool && tool.ok === undefined) return toolLine(tool);
     if (finalText().trim()) return '';
     return tool ? toolLine(tool) : middle(thinking().at(-1)?.text ?? '');
@@ -164,21 +183,35 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
             </Show>
             <For each={narration()}>{(text) => <div class="md" onClick={openLinks} innerHTML={html(text)} />}</For>
             <div class="tools">
-              <For each={m().tools}>
-                {(tool) => (
-                  <span class={tool.ok === false ? 'bad' : ''} title={toolRow(tool).detail || tool.output}>
-                    <Show when={tool.ok === true}>
-                      <Icon name="check" small />
+              <For each={toolSteps()}>
+                {(step) => (
+                  <>
+                    <ToolChip tool={step.tool} />
+                    <Show when={step.children.length}>
+                      <div class="tool-children">
+                        <For each={step.children}>{(tool) => <ToolChip tool={tool} />}</For>
+                      </div>
                     </Show>
-                    <b>{toolRow(tool).label}</b>
-                    <Show when={toolRow(tool).detail}><i>{middle(toolRow(tool).detail)}</i></Show>
-                  </span>
+                  </>
                 )}
               </For>
             </div>
           </div>
         </details>
-        <Show when={streaming() && latest()}><div class="activity-latest" role="status" aria-live="polite" aria-atomic="true" title={latest()}>{latest()}</div></Show>
+        <Show when={streaming() && (working().length || latest())}>
+          <div class="activity-latest" classList={{ subagents: !!working().length }} role="status" aria-live="polite" aria-atomic="true" title={working().length ? undefined : latest()}>
+            <Show when={working().length} fallback={latest()}>
+              <For each={working().slice(0, SHOWN)}>
+                {(step) => (
+                  <span title={nowOf(step)}>
+                    <b>{nameOf(step)}</b> <i>{nowOf(step)}</i>
+                  </span>
+                )}
+              </For>
+              <Show when={working().length > SHOWN}><span>{t('tool.more', { n: working().length - SHOWN })}</span></Show>
+            </Show>
+          </div>
+        </Show>
       </Show>
       <Asks conversationId={props.conversationId} turnId={m().id} permissions={waiting()} surface="ask" />
       <Parkeds parked={m().parked ?? []} more={m().parkedMore} surface="ask" />

@@ -49,6 +49,8 @@ pub enum EngineEvent {
         id: String,
         name: String,
         input: Value,
+        /// The CLI's own subagent step this tool ran inside (Claude's `parent_tool_use_id`); none for the main reply.
+        parent: Option<String>,
     },
     ToolResult {
         id: String,

@@ -411,11 +411,14 @@ pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
                 _ => vec![],
             }
         }
-        // Text already arrived as deltas; only finished tool calls are new here.
-        "assistant" => items(&msg["message"]["content"])
-            .filter(|c| c["type"] == "tool_use")
-            .map(|c| EngineEvent::Tool { id: s(&c["id"]), name: s(&c["name"]), input: c["input"].clone() })
-            .collect(),
+        // Text already arrived as deltas; only finished tool calls are new here. A subagent's calls name the step it runs in.
+        "assistant" => {
+            let parent = msg["parent_tool_use_id"].as_str().filter(|p| !p.is_empty()).map(String::from);
+            items(&msg["message"]["content"])
+                .filter(|c| c["type"] == "tool_use")
+                .map(|c| EngineEvent::Tool { id: s(&c["id"]), name: s(&c["name"]), input: c["input"].clone(), parent: parent.clone() })
+                .collect()
+        }
         "user" => items(&msg["message"]["content"])
             .filter(|c| c["type"] == "tool_result")
             .map(|c| {

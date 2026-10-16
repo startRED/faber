@@ -1360,13 +1360,13 @@ impl Core {
                     m.thinking.get_or_insert_default().push_str(&delta);
                 }
             }
-            EngineEvent::Tool { id, name, input } => {
+            EngineEvent::Tool { id, name, input, parent } => {
                 let final_answer = self.live.get(conv).is_some_and(|l| l.answer_started);
                 if let Some(m) = self.turn(conv) {
                     if !final_answer {
                         m.activity_end = Some(m.text.encode_utf16().count());
                     }
-                    m.tools.get_or_insert_default().push(ToolUse { id, name, input, ok: None, output: None, declined: false });
+                    m.tools.get_or_insert_default().push(ToolUse { id, name, input, ok: None, output: None, declined: false, parent });
                 }
             }
             EngineEvent::ToolResult { id, ok, declined, text } => {

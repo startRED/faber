@@ -26,6 +26,8 @@ export interface ToolUse {
   input: unknown;
   ok?: boolean;
   output?: string;
+  /** The subagent step this call ran inside (Claude Code's Agent or Task call); absent for the reply's own steps. */
+  parent?: string;
 }
 export interface Permission {
   requestId: string;

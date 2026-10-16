@@ -33,6 +33,7 @@ import './opening.check.ts';
 import './review-answer.check.ts';
 import './review-motion.check.ts';
 import './running.check.ts';
+import './worklog.check.ts';
 import './settings.check.ts';
 import './projects.check.ts';
 import './pace.check.ts';

@@ -260,6 +260,14 @@ inside its own area.
 - With no AI connected, the greeting, the suggestions and the list give way to an empty state with Curioso and a button
   that opens account management. The composer stays on screen but cannot send.
 
+### Work log
+
+- Each step is a quiet chip: a verb in the ink color ("Reading", "Running") and what it acts on in the mono face, cut
+  in the middle. A subagent's calls sit under its step, set in by 12 px behind a 1 px rule in `--line`.
+- While subagents work, the status line under the folded log becomes one line per subagent: its name in `--ink-2` and
+  what it does now in `--ink-3`, three lines at most and "+N more". It changes only when a call arrives and has no motion
+  of its own.
+
 ### Recent folders and environments
 
 The "Open a project" screen (Projects with none open) and the Chat folder setting list the last five folders used, newest
