@@ -205,6 +205,34 @@ export interface MissionView {
   decisions: DecisionView[];
   build?: BuildView | null;
   reason?: string | null;
+  progress?: ProgressView | null;
+  report?: ReportView | null;
+  needs?: string | null;
+}
+
+/** What a project mission proves its work with (R137): the commands, where they were declared, and whether the owner confirmed them. */
+export interface ProofView {
+  commands: string[];
+  declared: string[];
+  source: 'agents' | 'claude' | 'detected' | 'none';
+  confirmed: boolean;
+  changed: boolean;
+}
+
+export interface ProgressView {
+  step: string;
+  number: number;
+  total: number;
+  role?: string | null;
+  vendor?: Vendor | null;
+  model?: string | null;
+}
+
+export interface ReportView {
+  branch: string;
+  head?: string | null;
+  checks: { id: string; result: string }[];
+  seconds?: number | null;
 }
 // The shapes the look engine sends and takes (src-tauri/src/look.rs). The screen never computes a colour.
 export type Motion = 'full' | 'reduced' | 'none';
@@ -462,6 +490,8 @@ export const api = {
   projectGrant: (projectId: string, mode: GitMode, selfUpdate: boolean, revision: number) =>
     invoke<Grant>('project_grant', { projectId, mode, selfUpdate, revision }),
   projectRevoke: (projectId: string) => invoke<void>('project_revoke', { projectId }),
+  projectProof: (projectId: string) => invoke<ProofView>('project_proof', { projectId }),
+  projectProofConfirm: (projectId: string, commands: string[]) => invoke<ProofView>('project_proof_confirm', { projectId, commands }),
   missionStart: (projectId: string, goal: string) => invoke<string>('mission_start', { projectId, goal }),
   missionState: (missionId: string) => invoke<MissionView>('mission_state', { missionId }),
   missionMode: (missionId: string, mode: RunMode) => invoke<MissionView>('mission_mode', { missionId, mode }),
