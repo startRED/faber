@@ -696,12 +696,24 @@ mod tests {
             ("approvalPolicy", json!("on-request")),
             ("approvalsReviewer", json!("auto_review")),
             ("cwd", json!("another-workspace")),
-            ("sandbox", json!({"type":"readOnly","networkAccess":false,"writableRoots":[],"excludeSlashTmp":true,"excludeTmpdirEnvVar":true})),
+            (
+                "sandbox",
+                json!({"type":"readOnly","networkAccess":false,"writableRoots":[],"excludeSlashTmp":true,"excludeTmpdirEnvVar":true}),
+            ),
             ("sandbox", json!({"type":"dangerFullAccess"})),
-            ("sandbox", json!({"type":"workspaceWrite","networkAccess":true,"writableRoots":[],"excludeSlashTmp":true,"excludeTmpdirEnvVar":true})),
-            ("sandbox", json!({"type":"workspaceWrite","networkAccess":false,"writableRoots":["C:/elsewhere"],"excludeSlashTmp":true,"excludeTmpdirEnvVar":true})),
+            (
+                "sandbox",
+                json!({"type":"workspaceWrite","networkAccess":true,"writableRoots":[],"excludeSlashTmp":true,"excludeTmpdirEnvVar":true}),
+            ),
+            (
+                "sandbox",
+                json!({"type":"workspaceWrite","networkAccess":false,"writableRoots":["C:/elsewhere"],"excludeSlashTmp":true,"excludeTmpdirEnvVar":true}),
+            ),
             ("sandbox", json!({"type":"workspaceWrite","networkAccess":false,"excludeSlashTmp":true,"excludeTmpdirEnvVar":true})),
-            ("sandbox", json!({"type":"workspaceWrite","networkAccess":false,"writableRoots":[],"excludeSlashTmp":false,"excludeTmpdirEnvVar":true})),
+            (
+                "sandbox",
+                json!({"type":"workspaceWrite","networkAccess":false,"writableRoots":[],"excludeSlashTmp":false,"excludeTmpdirEnvVar":true}),
+            ),
             ("sandbox", Value::Null),
             ("instructionSources", json!([1])),
             ("instructionSources", Value::Null),

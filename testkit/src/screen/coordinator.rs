@@ -440,7 +440,9 @@ async fn run_wiring(sandbox: &Path) -> Result<Value> {
         notify: Some(notify),
     };
     let setup = mission::setup(launch, &mut Process::find().map_err(|e| e.key())?, &resolve)?;
-    ensure(setup.proofs.len() == 1 && setup.proofs[0].id == "proof-1" && !setup.expect_red, || "the setup does not carry the confirmed proof".into())?;
+    ensure(setup.proofs.len() == 1 && setup.proofs[0].id == "proof-1" && !setup.expect_red, || {
+        "the setup does not carry the confirmed proof".into()
+    })?;
     let (journal, broker) = open(&w)?;
     let mut coordinator = Coordinator::new(Scripted::new(&w.dir, PASS), journal.clone(), broker, setup).map_err(str::to_string)?;
     let outcome = coordinator.drive().await;
@@ -463,9 +465,10 @@ async fn run_wiring(sandbox: &Path) -> Result<Value> {
     }
     // The board's views of the finished mission.
     let report = mission::report_view(&journal, &runner.mission).ok_or("no report view")?;
-    ensure(report.branch == "faber/m1" && report.head.as_deref() == Some(git(&w.program, &w.repo, &["rev-parse", "faber/m1"])?.as_str()), || {
-        format!("the report does not name the landed work: {report:?}")
-    })?;
+    ensure(
+        report.branch == "faber/m1" && report.head.as_deref() == Some(git(&w.program, &w.repo, &["rev-parse", "faber/m1"])?.as_str()),
+        || format!("the report does not name the landed work: {report:?}"),
+    )?;
     ensure(report.checks.iter().any(|c| c.result == "pass"), || format!("the report has no passing check: {report:?}"))?;
     ensure(mission::progress(&journal, &runner.mission).is_none() && mission::needs(&runner.mission).is_none(), || {
         "a finished mission still shows progress or a need".into()

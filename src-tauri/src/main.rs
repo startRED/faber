@@ -675,7 +675,8 @@ async fn run_mission(app: &AppHandle, faber: &Faber, mission_id: &str, commands:
         if owner.as_ref() != Some(&repository.identity) {
             return Err("reason.grant.otherRepo".to_string());
         }
-        let launch = mission::Launch { repository: repository.clone(), commands, data, project: pid, pins, grant, revision, notify: Some(notify) };
+        let launch =
+            mission::Launch { repository: repository.clone(), commands, data, project: pid, pins, grant, revision, notify: Some(notify) };
         let setup = mission::setup(launch, &mut process, &|name| faber_engine::cli::find_cli(name))?;
         Ok((repository, setup))
     })

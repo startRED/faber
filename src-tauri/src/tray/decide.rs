@@ -248,7 +248,8 @@ impl Watch {
         if let Some(reason) = &view.needs {
             mission_needs += 1;
             // The receipt file only holds plain ids, so the reason's dots become dashes.
-            let id: String = format!("needs-{}", reason.replace('.', "-")).chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').take(64).collect();
+            let id: String =
+                format!("needs-{}", reason.replace('.', "-")).chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').take(64).collect();
             if self.seen_decisions.insert((view.mission_id.clone(), id)) && !window_focused {
                 notices.push(view.goal.clone());
             }

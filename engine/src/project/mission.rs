@@ -126,9 +126,7 @@ pub fn command_tokens(line: &str) -> Result<Vec<String>, &'static str> {
 
 fn stored(project: &Project) -> Option<(Vec<String>, Vec<String>)> {
     let proof = project.extra.get("proof")?;
-    let list = |key: &str| -> Option<Vec<String>> {
-        proof[key].as_array()?.iter().map(|v| v.as_str().map(String::from)).collect()
-    };
+    let list = |key: &str| -> Option<Vec<String>> { proof[key].as_array()?.iter().map(|v| v.as_str().map(String::from)).collect() };
     Some((list("declared")?, list("commands")?))
 }
 
@@ -139,13 +137,7 @@ pub fn view(project: &Project) -> ProofView {
         Some((was, commands)) if was == declared && !commands.is_empty() => {
             ProofView { commands, declared, source: source.into(), confirmed: true, changed: false }
         }
-        saved => ProofView {
-            commands: declared.clone(),
-            declared,
-            source: source.into(),
-            confirmed: false,
-            changed: saved.is_some(),
-        },
+        saved => ProofView { commands: declared.clone(), declared, source: source.into(), confirmed: false, changed: saved.is_some() },
     }
 }
 
@@ -338,7 +330,10 @@ pub fn product_pins() -> Result<Pins, String> {
 /// Remember which model each role runs on, for the board. The pins are the product's choice, not a model's claim.
 pub fn remember_roles(mission: &mut Mission, pins: &Pins) {
     let role = |pin: &super::worker::ModelPin| serde_json::json!({"vendor": pin.vendor, "model": pin.model});
-    mission.extra.insert("roles".into(), serde_json::json!({"lead": role(&pins.lead), "writer": role(&pins.writer), "reviewer": role(&pins.reviewer)}));
+    mission.extra.insert(
+        "roles".into(),
+        serde_json::json!({"lead": role(&pins.lead), "writer": role(&pins.writer), "reviewer": role(&pins.reviewer)}),
+    );
 }
 
 // ----- the views -----
@@ -453,7 +448,18 @@ mod tests {
     #[test]
     fn a_command_is_plain_words_naming_a_program_not_a_path_or_a_shell_line() {
         assert_eq!(command_tokens("cargo test --workspace").unwrap(), ["cargo", "test", "--workspace"]);
-        for bad in ["", "   ", "cargo test | tee out", "npm test > log", "echo $HOME", "./run.sh", "C:\\tools\\x.exe a", "a/b c", "x \"quoted\"", "rm -rf *"] {
+        for bad in [
+            "",
+            "   ",
+            "cargo test | tee out",
+            "npm test > log",
+            "echo $HOME",
+            "./run.sh",
+            "C:\\tools\\x.exe a",
+            "a/b c",
+            "x \"quoted\"",
+            "rm -rf *",
+        ] {
             assert_eq!(command_tokens(bad), Err("reason.proof.command"), "{bad:?}");
         }
     }
@@ -476,7 +482,8 @@ mod tests {
         assert_eq!(declared(&node), (vec!["npm test".to_string()], "detected"));
         let no_script = folder("noscript", &[("package.json", r#"{"scripts":{"build":"x"}}"#), ("Cargo.toml", "[package]")]);
         assert_eq!(declared(&no_script), (vec!["cargo test".to_string()], "detected"));
-        let agents = folder("agents", &[("AGENTS.md", AGENTS), ("package.json", r#"{"scripts":{"test":"x"}}"#), ("CLAUDE.md", "@AGENTS.md")]);
+        let agents =
+            folder("agents", &[("AGENTS.md", AGENTS), ("package.json", r#"{"scripts":{"test":"x"}}"#), ("CLAUDE.md", "@AGENTS.md")]);
         assert_eq!(declared(&agents).1, "agents");
         let claude = folder("claude", &[("AGENTS.md", "no proof here"), ("CLAUDE.md", "## Proof commands\n```\nmake check\n```")]);
         assert_eq!(declared(&claude), (vec!["make check".to_string()], "claude"));
@@ -550,7 +557,16 @@ mod tests {
         // Every usable path is named, and nothing a role must not see.
         assert_eq!(
             seen.tree,
-            [".github/workflows/ci.yml", "AGENTS.md", "Cargo.lock", "README.md", "assets/blob.bin", "docs/guide.md", "src/big.rs", "src/zeta.rs"]
+            [
+                ".github/workflows/ci.yml",
+                "AGENTS.md",
+                "Cargo.lock",
+                "README.md",
+                "assets/blob.bin",
+                "docs/guide.md",
+                "src/big.rs",
+                "src/zeta.rs"
+            ]
         );
         // Texts: the project's own guides first (smallest first), then root files, then the rest by size; no lock, no oversize file, no binary.
         let names: Vec<&str> = seen.files.iter().map(|(p, _)| p.as_str()).collect();
@@ -591,7 +607,20 @@ mod tests {
         for path in ["src/a.rs", "docs/readme.md", "README.md", ".github/workflows/ci.yml", ".env.example"] {
             assert!(usable(path), "{path}");
         }
-        for path in [".env", ".env.production", ".claude/settings.json", ".codex/config.toml", "sub/.ssh/id_rsa", "keys/server.pem", "a/credentials.json", ".npmrc", "x/../y", "C:/x", "/abs", "a\\b"] {
+        for path in [
+            ".env",
+            ".env.production",
+            ".claude/settings.json",
+            ".codex/config.toml",
+            "sub/.ssh/id_rsa",
+            "keys/server.pem",
+            "a/credentials.json",
+            ".npmrc",
+            "x/../y",
+            "C:/x",
+            "/abs",
+            "a\\b",
+        ] {
             assert!(!usable(path), "{path}");
         }
     }
