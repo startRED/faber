@@ -30,6 +30,10 @@ fn settings_keys() -> Vec<String> {
         user_name: Some(String::new()),
         keep_awake: Some(true),
         autostart: Some(true),
+        web_search: Some(Default::default()),
+        reasoning_summary: Some(Default::default()),
+        verbosity: Some(Default::default()),
+        grants_epoch: Some(String::new()),
     };
     serde_json::to_value(every).unwrap().as_object().unwrap().keys().cloned().collect()
 }

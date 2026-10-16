@@ -194,6 +194,7 @@ fn inline_prompt_keeps_role_control_and_rejects_changed_hash_and_credential_path
             user_name: None,
             permissions: faber_engine::model::Permissions::Isolated,
             flags: Default::default(),
+            tuning: Default::default(),
         },
         kit.role,
     )

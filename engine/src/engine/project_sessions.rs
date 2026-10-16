@@ -240,6 +240,7 @@ impl Engine {
                         // A role never inherits the person's mode; the role's own arguments are stricter still.
                         permissions: Permissions::Isolated,
                         flags: Default::default(),
+                        tuning: Default::default(),
                     },
                     spawn,
                     sandbox: None,
@@ -265,6 +266,7 @@ impl Engine {
                     instructions: None,
                     user_name: None,
                     permissions: Permissions::Isolated,
+                    tuning: Default::default(),
                 },
                 worker.brief.role,
                 sink,

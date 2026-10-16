@@ -688,10 +688,10 @@ async fn the_hooks_choice_is_saved_and_restarts_idle_project_clis_with_it() {
     let appearance = serde_json::json!({ "base": "oficina" }).as_object().cloned();
     engine.save_settings(Settings { appearance, ..Settings::default() }).unwrap();
     engine.shutdown();
-    assert_eq!(
-        read_json(&dir.path().join("settings.json")),
-        serde_json::json!({ "userHooks": true, "permissions":"ask", "appearance": { "base": "oficina" } })
-    );
+    let mut saved = read_json(&dir.path().join("settings.json"));
+    // Full access to Ask is a stricter move, so the save carries a new grants epoch (a random token, no time).
+    assert!(saved.as_object_mut().unwrap().remove("grantsEpoch").unwrap().as_str().unwrap().len() >= 32);
+    assert_eq!(saved, serde_json::json!({ "userHooks": true, "permissions":"ask", "appearance": { "base": "oficina" } }));
 }
 
 #[tokio::test]
@@ -1661,6 +1661,7 @@ async fn stop_leaves_no_worker(parent_script: &str, why: &str) {
                 instructions: None,
                 user_name: None,
                 flags: Default::default(),
+                tuning: Default::default(),
             },
             spawn,
             sandbox: None,
@@ -1937,4 +1938,170 @@ async fn the_first_launch_after_the_cli_is_downgraded_passes_none_of_the_newer_f
     assert_eq!(probes.load(std::sync::atomic::Ordering::SeqCst), 2, "the first read at start, one more after the binary changed");
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert_eq!(engine.claude_flags(), Default::default(), "the older help declares none");
+}
+
+#[tokio::test]
+async fn r140_auto_on_a_claude_that_lists_no_auto_runs_accept_edits_and_the_reply_says_so() {
+    for (permissions, note) in
+        [(Permissions::Auto, Some("mode.fallback.auto")), (Permissions::AcceptEdits, None), (Permissions::Plan, None)]
+    {
+        let data = tempfile::tempdir().unwrap();
+        let f = fake(fixture("claude", "chat"));
+        let (engine, mut rx) = engine(data.path(), Vendor::Claude, f.spawn.clone());
+        engine.save_settings(Settings { permissions: Some(permissions), ..Settings::default() }).unwrap();
+        engine.send(ask(Area::Chat, SKY, choice("claude", Some("haiku")))).unwrap();
+        let reply = finished(&mut rx, |_| {}).await;
+        engine.shutdown();
+        assert_eq!(reply.mode.as_deref(), note, "{permissions:?}");
+        let args = f.args.lock().unwrap();
+        let runs = if permissions == Permissions::Plan { "plan" } else { "acceptEdits" };
+        assert!(args[0].windows(2).any(|a| a == ["--permission-mode", runs]), "{permissions:?}: {:?}", args[0]);
+    }
+}
+
+#[tokio::test]
+async fn r140_a_codex_chat_thread_carries_the_mode_and_the_settings() {
+    use faber_engine::model::{ReasoningSummary, Verbosity, WebSearch};
+    let data = tempfile::tempdir().unwrap();
+    let f = fake(fixture("codex", "chat"));
+    let (engine, mut rx) = engine(data.path(), Vendor::Codex, f.spawn.clone());
+    engine
+        .save_settings(Settings {
+            permissions: Some(Permissions::Auto),
+            web_search: Some(WebSearch::Cached),
+            reasoning_summary: Some(ReasoningSummary::Concise),
+            verbosity: Some(Verbosity::High),
+            ..Settings::default()
+        })
+        .unwrap();
+    engine.send(ask(Area::Chat, SKY, choice("codex", None))).unwrap();
+    let reply = finished(&mut rx, |_| {}).await;
+    engine.shutdown();
+    assert_eq!(reply.mode, None, "Codex has every mode");
+    for needle in [
+        "\"approvalsReviewer\":\"auto_review\"",
+        "\"approvalPolicy\":\"on-request\"",
+        "\"sandbox\":\"workspace-write\"",
+        "\"web_search\":\"cached\"",
+        "\"model_reasoning_summary\":\"concise\"",
+        "\"model_verbosity\":\"high\"",
+    ] {
+        assert_eq!(f.wire.lines_with(needle), 1, "{needle}");
+    }
+}
+
+#[tokio::test]
+async fn r140_changing_web_search_or_the_mode_starts_the_next_turn_on_a_fresh_process_and_a_stricter_mode_stops_a_running_turn() {
+    use faber_engine::model::WebSearch;
+    let data = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "chat"));
+    let (engine, _) = engine(data.path(), Vendor::Claude, f.spawn.clone());
+    let warm =
+        || engine.warm(WarmRequest { conversation_id: None, area: Area::Chat, project_id: None, choice: choice("claude", Some("haiku")) });
+    let denies_web = |at: usize| f.args.lock().unwrap()[at].iter().any(|a| a.contains("\"WebSearch\""));
+    warm();
+    assert!(!denies_web(0), "live by default");
+    engine.save_settings(Settings { web_search: Some(WebSearch::Off), ..Settings::default() }).unwrap();
+    warm();
+    assert!(denies_web(1), "the idle process was replaced by one that denies the web tools");
+    engine.save_settings(Settings { permissions: Some(Permissions::Plan), ..Settings::default() }).unwrap();
+    warm();
+    assert!(f.args.lock().unwrap()[2].windows(2).any(|a| a == ["--permission-mode", "plan"]));
+    assert_eq!(f.args.lock().unwrap().len(), 3);
+    engine.shutdown();
+    assert!(Permissions::Plan.strictness() > Permissions::Ask.strictness());
+    assert!(Permissions::Ask.strictness() > Permissions::AcceptEdits.strictness());
+    assert!(Permissions::AcceptEdits.strictness() > Permissions::Auto.strictness());
+    assert!(Permissions::Auto.strictness() > Permissions::FullAccess.strictness());
+}
+
+#[tokio::test]
+async fn r140_a_request_the_cli_forwards_still_reaches_the_person_in_every_guarded_mode() {
+    let text = "Search the web for the latest stable version of Node.js and, in parallel, for the latest version of Python. Run both searches at the same time, then answer in two lines.";
+    for permissions in [Permissions::AcceptEdits, Permissions::Plan, Permissions::Auto] {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, mut rx) = engine(dir.path(), Vendor::Claude, fake(fixture("claude", "parallel")).spawn);
+        engine.save_settings(Settings { permissions: Some(permissions), ..Settings::default() }).unwrap();
+        let id = engine.send(ask(Area::Chat, text, choice("claude", None))).unwrap();
+        let (mut cards, mut answered) = (0, Vec::new());
+        let reply = finished(&mut rx, |m| {
+            let waiting = m.permissions.clone().unwrap_or_default();
+            cards = cards.max(waiting.len());
+            if let Some(first) = waiting.first()
+                && !answered.contains(&first.request_id)
+            {
+                answered.push(first.request_id.clone());
+                answer(&engine, &id, m, &first.request_id, true, false);
+            }
+        })
+        .await;
+        engine.shutdown();
+        assert_eq!((cards, answered.len()), (2, 2), "{permissions:?}");
+        assert_eq!(reply.status, Some(Status::Done));
+    }
+}
+
+#[tokio::test]
+async fn r140_a_turn_under_way_stops_when_the_mode_or_the_web_gets_stricter_and_keeps_going_when_it_gets_looser() {
+    use faber_engine::model::WebSearch;
+    let mode = |permissions| Settings { permissions: Some(permissions), ..Settings::default() };
+    let web = |web| Settings { web_search: Some(web), ..Settings::default() };
+    // (setting the turn starts under, setting it moves to, whether the turn is stopped)
+    let moves = [
+        (mode(Permissions::Auto), mode(Permissions::Ask), true),
+        (mode(Permissions::Ask), mode(Permissions::Plan), true),
+        (mode(Permissions::AcceptEdits), mode(Permissions::Ask), true),
+        (mode(Permissions::FullAccess), mode(Permissions::Auto), true),
+        (web(WebSearch::Live), web(WebSearch::Off), true),
+        (web(WebSearch::Live), web(WebSearch::Cached), true),
+        (web(WebSearch::Cached), web(WebSearch::Off), true),
+        (mode(Permissions::Ask), mode(Permissions::Auto), false),
+        (mode(Permissions::Ask), mode(Permissions::AcceptEdits), false),
+        (mode(Permissions::Plan), mode(Permissions::Ask), false),
+        (mode(Permissions::Auto), mode(Permissions::FullAccess), false),
+        (web(WebSearch::Off), web(WebSearch::Live), false),
+        (web(WebSearch::Cached), web(WebSearch::Live), false),
+    ];
+    for (from, to, stops) in moves {
+        let dir = project_folder();
+        let entries = vec![
+            Entry { input: true, msg: serde_json::json!({ "type": "user", "message": { "content": "wait" } }) },
+            Entry {
+                input: false,
+                msg: serde_json::json!({ "type": "system", "subtype": "init", "session_id": "active", "model": "haiku" }),
+            },
+            Entry { input: true, msg: serde_json::json!({ "type": "control_request", "request": { "subtype": "interrupt" } }) },
+        ];
+        let f = fake(entries);
+        let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+        engine.save_settings(from.clone()).unwrap();
+        let chat = engine.send(ask(Area::Chat, "wait", choice("claude", None))).unwrap();
+        engine.save_settings(to.clone()).unwrap();
+        let status = engine.open(&chat).unwrap().messages.last().unwrap().status;
+        let want = if stops { Status::Stopped } else { Status::Streaming };
+        assert_eq!(status, Some(want), "{from:?} to {to:?}");
+        engine.shutdown();
+    }
+}
+
+#[tokio::test]
+async fn r140_settings_that_cannot_be_read_ask_before_every_change_and_a_missing_file_keeps_full_access() {
+    for (text, expected) in [
+        (None, None),
+        (Some(r#"{"language":"de"}"#), None),
+        (Some(r#"{"permissions":"acceptEdits"}"#), Some(Permissions::AcceptEdits)),
+        (Some("{ this is not json"), Some(Permissions::Ask)),
+        (Some(r#"{"permissions":"someModeANewerBuildWrote"}"#), Some(Permissions::Ask)),
+        (Some(r#"{"permissions":"plan","webSearch":"somethingNew"}"#), Some(Permissions::Ask)),
+        (Some(""), Some(Permissions::Ask)),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        if let Some(text) = text {
+            std::fs::write(dir.path().join("settings.json"), text).unwrap();
+        }
+        let (engine, _) = engine(dir.path(), Vendor::Claude, fake(vec![]).spawn);
+        let got = engine.settings().permissions;
+        assert_eq!(got, expected, "{text:?}");
+        engine.shutdown();
+    }
 }

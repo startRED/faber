@@ -138,6 +138,7 @@ pub async fn run(data: &std::path::Path) -> io::Result<()> {
             flags: Default::default(),
             instructions: None,
             user_name: None,
+            tuning: Default::default(),
         },
         role,
     )

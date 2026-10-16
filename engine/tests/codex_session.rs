@@ -34,6 +34,7 @@ async fn opus_1_codex_manual_turns_stay_available_after_long_silence_or_start_er
                 instructions: None,
                 user_name: None,
                 permissions: Permissions::Ask,
+                tuning: Default::default(),
             },
             Arc::new(move |e| drop(tx.send(e))),
         );
@@ -141,6 +142,7 @@ async fn review_7_codex_preserves_a_turn_sent_before_interrupt_acknowledgement()
             instructions: None,
             user_name: None,
             permissions: Permissions::Ask,
+            tuning: Default::default(),
         },
         Arc::new(|_| {}),
     );
@@ -190,6 +192,7 @@ async fn an_ignored_interrupt_quarantines_only_that_thread_and_preserves_a_runni
                 instructions: None,
                 user_name: None,
                 permissions: Permissions::Ask,
+                tuning: Default::default(),
             },
             Arc::new(move |e| drop(tx.send((name, e)))),
         )
@@ -234,6 +237,7 @@ async fn run(
         instructions: None,
         user_name: None,
         permissions: Permissions::Ask,
+        tuning: Default::default(),
     };
     drive(
         entries,
@@ -382,6 +386,7 @@ async fn codex_an_answer_that_fails_to_write_keeps_the_approval_and_the_retry_is
         instructions: None,
         user_name: None,
         permissions: Permissions::Ask,
+        tuning: Default::default(),
     };
     let session = CodexServer::start(opts).open(thread, Arc::new(move |e| drop(tx.send(e))));
     session.send(UserTurn::text("Create a.txt containing one. Then create b.txt containing two. Make each file in a separate step."));
@@ -424,6 +429,7 @@ async fn codex_an_answer_that_may_be_half_written_is_never_written_again() {
         instructions: None,
         user_name: None,
         permissions: Permissions::Ask,
+        tuning: Default::default(),
     };
     let session = CodexServer::start(opts).open(thread, Arc::new(move |e| drop(tx.send(e))));
     session.send(UserTurn::text("Create a.txt containing one. Then create b.txt containing two. Make each file in a separate step."));
@@ -553,6 +559,7 @@ async fn review3_user_mcp_servers_are_disabled_before_start_and_resume_without_c
                     instructions: None,
                     user_name: None,
                     permissions: Permissions::Isolated,
+                    tuning: Default::default(),
                 },
                 Arc::new(move |e| drop(tx.send(e))),
             );
@@ -610,6 +617,7 @@ async fn one_process_serves_two_conversations_at_once_and_keeps_their_answers_ap
             instructions: None,
             user_name: None,
             permissions: Permissions::Ask,
+            tuning: Default::default(),
         };
         server.open(thread, Arc::new(move |e| drop(tx.send((name, e)))))
     };
@@ -644,6 +652,7 @@ fn a_side_question_thread_has_its_own_instructions_restricted_reads_no_writes_an
         instructions: Some("Route.".into()),
         user_name: None,
         permissions: Permissions::Ask,
+        tuning: Default::default(),
     };
     let (method, params) = thread_params(Area::Chat, &thread);
     assert_eq!(method, "thread/start");
@@ -665,6 +674,7 @@ fn permissions_keep_the_workspace_sandbox_and_disable_project_network_without_ap
                     instructions: None,
                     user_name: None,
                     permissions,
+                    tuning: Default::default(),
                 };
                 let (method, params) = thread_params(area, &t);
                 assert_eq!(method, if t.resume.is_some() { "thread/resume" } else { "thread/start" });
@@ -676,11 +686,14 @@ fn permissions_keep_the_workspace_sandbox_and_disable_project_network_without_ap
                     assert_eq!(params["config"]["sandbox_workspace_write.network_access"], false);
                 } else if permissions == Permissions::FullAccess {
                     assert_eq!((&params["sandbox"], &params["approvalPolicy"]), (&"danger-full-access".into(), &"never".into()));
-                    assert!(params.get("config").is_none() && params.get("dynamicTools").is_none());
+                    assert!(
+                        params["config"] == json!({"web_search": "disabled"}) && params.get("dynamicTools").is_none(),
+                        "full access sends only the web search setting"
+                    );
                 } else {
                     assert_eq!(params["sandbox"], "workspace-write");
                     assert_eq!(params["approvalPolicy"], "untrusted");
-                    assert!(params.get("config").is_none());
+                    assert!(params["config"] == json!({"web_search": "disabled"}), "no profile: only the web search setting");
                 }
                 assert_eq!(params.get("baseInstructions").is_some(), area == Area::Chat);
                 let (_, side) = thread_params(area, &CodexThread { instructions: Some("Route.".into()), ..t });
@@ -717,6 +730,7 @@ async fn l2_serialized_start_and_resume_carry_the_no_approval_offline_policy() {
                     instructions: None,
                     user_name: None,
                     permissions: Permissions::Isolated,
+                    tuning: Default::default(),
                 },
                 Arc::new(move |e| {
                     let _ = tx.send(e);
@@ -774,6 +788,7 @@ async fn a_project_with_no_approvals_declines_a_residual_request_without_emittin
                         instructions: None,
                         user_name: None,
                         permissions: Permissions::Isolated,
+                        tuning: Default::default(),
                     },
                     sink,
                 )
@@ -797,6 +812,7 @@ fn the_name_is_a_developer_instruction_that_resume_repeats_and_a_side_question_n
         instructions: instructions.map(String::from),
         user_name: name.map(String::from),
         permissions: Permissions::Ask,
+        tuning: Default::default(),
     };
     let (method, start) = thread_params(Area::Project, &thread(None, None, Some("Erick")));
     assert_eq!(method, "thread/start");
@@ -869,6 +885,7 @@ async fn a_steer_before_the_turn_has_an_id_is_not_delivered() {
         instructions: None,
         user_name: None,
         permissions: Permissions::Ask,
+        tuning: Default::default(),
     };
     let opts = CodexServerOptions {
         permissions: Permissions::Ask,
@@ -955,6 +972,7 @@ async fn review3_command_gate_declines_git_mutations_and_runs_builds_only_in_the
                 instructions: None,
                 user_name: None,
                 permissions: Permissions::Isolated,
+                tuning: Default::default(),
             },
             Arc::new(|_| {}),
         );
@@ -1027,12 +1045,15 @@ fn r121_codex_full_access_has_no_sandbox_no_approvals_and_no_host_command_tool()
                 instructions: None,
                 user_name: None,
                 permissions: Permissions::FullAccess,
+                tuning: Default::default(),
             };
             let (_, params) = thread_params(area, &t);
             assert_eq!((&params["sandbox"], &params["approvalPolicy"]), (&"danger-full-access".into(), &"never".into()), "{area:?}");
-            for key in ["config", "dynamicTools", "runtimeWorkspaceRoots"] {
+            for key in ["dynamicTools", "runtimeWorkspaceRoots"] {
                 assert!(params.get(key).is_none(), "{area:?} {key}: full access sends no profile, no tool override and no workspace roots");
             }
+            // R140: the only thing sent is the web search setting; no permission profile, no shell override.
+            assert_eq!(params["config"], json!({"web_search": "disabled"}), "{area:?}");
         }
     }
 }
@@ -1048,6 +1069,7 @@ fn r121_a_side_question_stays_isolated_whatever_mode_the_person_chose() {
             instructions: Some("Route.".into()),
             user_name: None,
             permissions,
+            tuning: Default::default(),
         };
         let (_, params) = thread_params(Area::Chat, &t);
         assert!(params.get("sandbox").is_none() && params.get("dynamicTools").is_none(), "{permissions:?}");
@@ -1106,6 +1128,7 @@ async fn r121_a_full_access_thread_keeps_the_persons_mcp_servers_and_starts_with
                 instructions: None,
                 user_name: None,
                 permissions: Permissions::FullAccess,
+                tuning: Default::default(),
             },
             Arc::new(move |e| drop(tx.send(e))),
         );
@@ -1117,7 +1140,7 @@ async fn r121_a_full_access_thread_keeps_the_persons_mcp_servers_and_starts_with
         let messages = f.wire.messages();
         let thread = messages.iter().find(|msg| msg["method"] == method).unwrap();
         assert_eq!(thread["params"]["sandbox"], "danger-full-access");
-        assert!(thread["params"].get("config").is_none());
+        assert_eq!(thread["params"]["config"], json!({"web_search": "disabled"}), "no profile and no tool override");
         assert!(f.mismatches.lock().unwrap().is_empty());
         session.close();
         server.retire();
@@ -1157,6 +1180,7 @@ async fn r124_a_full_access_thread_hands_a_residual_approval_to_the_engine_and_n
                         instructions: None,
                         user_name: None,
                         permissions: Permissions::FullAccess,
+                        tuning: Default::default(),
                     },
                     sink,
                 )
@@ -1190,4 +1214,116 @@ fn codex_work_log_items_from_a_recorded_turn_keep_their_raw_shape_for_the_screen
     assert!(command.contains("Set-Content -LiteralPath 'a.txt'"), "{command}");
     let text: String = events.iter().filter_map(|e| if let EngineEvent::Text(t) = e { Some(t.as_str()) } else { None }).collect();
     assert_eq!(text.matches("The window control did not connect.").count(), 2, "the engine keeps both; the screen shows it once");
+}
+
+// R140: the vendors' own range of modes.
+
+fn mode_thread(permissions: Permissions, tuning: faber_engine::model::Tuning) -> CodexThread {
+    CodexThread { cwd: "project".into(), model: None, effort: None, resume: None, instructions: None, user_name: None, permissions, tuning }
+}
+
+#[test]
+fn r140_each_mode_maps_to_the_nearest_codex_policy_sandbox_and_reviewer() {
+    let table = [
+        (Permissions::Ask, "untrusted", "workspace-write", Some("user")),
+        (Permissions::AcceptEdits, "on-request", "workspace-write", Some("user")),
+        (Permissions::Plan, "on-request", "read-only", Some("user")),
+        (Permissions::Auto, "on-request", "workspace-write", Some("auto_review")),
+        (Permissions::FullAccess, "never", "danger-full-access", None),
+    ];
+    for area in [Area::Chat, Area::Project] {
+        for (permissions, approval, sandbox, reviewer) in table {
+            for resume in [None, Some("t1".to_string())] {
+                let t = CodexThread { resume, ..mode_thread(permissions, Default::default()) };
+                let (_, params) = thread_params(area, &t);
+                assert_eq!(params["approvalPolicy"], approval, "{permissions:?} {area:?}");
+                assert_eq!(params["sandbox"], sandbox, "{permissions:?} {area:?}");
+                assert_eq!(params.get("approvalsReviewer").and_then(|r| r.as_str()), reviewer, "{permissions:?} {area:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn r140_every_guarded_mode_starts_the_server_the_way_ask_does() {
+    for permissions in [Permissions::AcceptEdits, Permissions::Plan, Permissions::Auto] {
+        for area in [Area::Chat, Area::Project] {
+            for windows in [false, true] {
+                assert_eq!(
+                    codex_args(area, windows, false, permissions),
+                    codex_args(area, windows, false, Permissions::Ask),
+                    "{permissions:?} {area:?} {windows}"
+                );
+            }
+        }
+        assert!(!codex_args(Area::Project, false, true, permissions).join(" ").contains("hooks"), "the hooks switch still works");
+        assert!(codex_args(Area::Chat, false, false, permissions).join(" ").contains("mcp_servers={}"));
+    }
+}
+
+#[test]
+fn r140_web_search_defaults_to_live_and_summary_and_verbosity_to_the_models_own() {
+    use faber_engine::model::{ReasoningSummary, Tuning, Verbosity, WebSearch};
+    for permissions in [Permissions::Ask, Permissions::AcceptEdits, Permissions::Plan, Permissions::Auto, Permissions::FullAccess] {
+        for resume in [None, Some("t1".to_string())] {
+            let t = CodexThread { resume, ..mode_thread(permissions, faber_engine::model::Settings::default().tuning()) };
+            let (_, params) = thread_params(Area::Chat, &t);
+            assert_eq!(params["config"], json!({"web_search": "live"}), "{permissions:?}: nothing but web search is set by default");
+            let (_, bare) = thread_params(Area::Chat, &CodexThread { tuning: Tuning::default(), ..t });
+            assert_eq!(bare["config"], json!({"web_search": "disabled"}), "a launch nobody chose for gets no web");
+        }
+        for (web, name) in [(WebSearch::Off, "disabled"), (WebSearch::Cached, "cached"), (WebSearch::Live, "live")] {
+            let (_, params) = thread_params(Area::Project, &mode_thread(permissions, Tuning { web, ..Default::default() }));
+            assert_eq!(params["config"]["web_search"], name);
+        }
+    }
+    let chosen = Tuning { web: WebSearch::Live, summary: ReasoningSummary::Detailed, verbosity: Verbosity::Low };
+    let (_, params) = thread_params(Area::Chat, &mode_thread(Permissions::Auto, chosen));
+    assert_eq!(params["config"], json!({"web_search": "live", "model_reasoning_summary": "detailed", "model_verbosity": "low"}));
+    for (summary, name) in [
+        (ReasoningSummary::Auto, "auto"),
+        (ReasoningSummary::Concise, "concise"),
+        (ReasoningSummary::Detailed, "detailed"),
+        (ReasoningSummary::Hidden, "none"),
+    ] {
+        let (_, params) = thread_params(Area::Chat, &mode_thread(Permissions::FullAccess, Tuning { summary, ..Default::default() }));
+        assert_eq!(params["config"]["model_reasoning_summary"], name);
+    }
+    for (verbosity, name) in [(Verbosity::Low, "low"), (Verbosity::Medium, "medium"), (Verbosity::High, "high")] {
+        let (_, params) = thread_params(Area::Chat, &mode_thread(Permissions::FullAccess, Tuning { verbosity, ..Default::default() }));
+        assert_eq!(params["config"]["model_verbosity"], name);
+    }
+}
+
+#[test]
+fn r140_every_isolated_or_internal_codex_thread_has_web_search_disabled_and_takes_no_setting() {
+    use faber_engine::model::{ReasoningSummary, Tuning, Verbosity, WebSearch};
+    let chosen = Tuning { web: WebSearch::Live, summary: ReasoningSummary::Detailed, verbosity: Verbosity::High };
+    let keys = |params: &serde_json::Value| {
+        ["web_search", "model_reasoning_summary", "model_verbosity"]
+            .map(|k| params["config"].get(k).and_then(|v| v.as_str().map(String::from)))
+    };
+    let closed = [Some("disabled".to_string()), None, None];
+    for area in [Area::Chat, Area::Project] {
+        for resume in [None, Some("t1".to_string())] {
+            let isolated = CodexThread { resume: resume.clone(), ..mode_thread(Permissions::Isolated, chosen) };
+            assert_eq!(keys(&thread_params(area, &isolated).1), closed, "{area:?} isolated");
+            for permissions in [
+                Permissions::Ask,
+                Permissions::AcceptEdits,
+                Permissions::Plan,
+                Permissions::Auto,
+                Permissions::FullAccess,
+                Permissions::Isolated,
+            ] {
+                let side = CodexThread { resume: resume.clone(), instructions: Some("Route.".into()), ..mode_thread(permissions, chosen) };
+                let (_, side) = thread_params(area, &side);
+                assert_eq!(keys(&side), closed, "{area:?} side question under {permissions:?}");
+                assert_eq!(side["approvalPolicy"], "never", "a side question never asks, whatever the mode");
+            }
+        }
+    }
+    for writable in [false, true] {
+        assert_eq!(faber_engine::permissions::sandbox_config(".".as_ref(), writable)["web_search"], "disabled", "{writable}");
+    }
 }

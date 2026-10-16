@@ -96,6 +96,7 @@ impl Router {
                         instructions,
                         user_name: None,
                         permissions: Permissions::Ask,
+                        tuning: Default::default(),
                     },
                     sink,
                 )
@@ -112,6 +113,7 @@ impl Router {
                     user_name: None,
                     flags: Default::default(),
                     permissions: Permissions::Ask,
+                    tuning: Default::default(),
                 };
                 start_claude(
                     ClaudeOptions { bin: cli.command.clone(), cwd: self.dir.clone(), launch, spawn: spawner(cli), sandbox: None },

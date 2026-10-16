@@ -19,6 +19,8 @@ fn launch(area: Area) -> ClaudeLaunch {
         user_name: None,
         permissions: Permissions::Ask,
         flags: Default::default(),
+        // The credential tests below are about the deny rules, not the web: the web is on, as the person's settings default.
+        tuning: faber_engine::model::Tuning { web: faber_engine::model::WebSearch::Live, ..Default::default() },
     }
 }
 
@@ -821,7 +823,7 @@ fn r124_a_moved_sign_in_folder_is_denied_where_it_now_is() {
 
 // ---- no blocking prompts in full access, cache warmth, autocompact windows (checked on Claude Code 2.1.296) ----
 
-const NEWER: ClaudeFlags = ClaudeFlags { autocompact: true, permission_prompts: true };
+const NEWER: ClaudeFlags = ClaudeFlags { autocompact: true, permission_prompts: true, auto_mode: true };
 
 fn full(area: Area, flags: ClaudeFlags) -> Vec<String> {
     claude_args(&ClaudeLaunch { permissions: Permissions::FullAccess, flags, ..launch(area) })
@@ -852,7 +854,7 @@ fn full_access_runs_with_no_prompts_and_every_credential_deny_still_wins() {
 #[test]
 fn a_cli_without_the_flag_starts_full_access_exactly_as_before() {
     for area in [Area::Chat, Area::Project] {
-        let args = full(area, ClaudeFlags { autocompact: true, permission_prompts: false });
+        let args = full(area, ClaudeFlags { autocompact: true, permission_prompts: false, auto_mode: false });
         assert!(args.windows(2).any(|a| a == ["--permission-prompt-tool", "stdio"]));
         assert!(!args.contains(&"--permission-prompts".into()));
         assert_eq!(args, full(area, ClaudeFlags::default()));
@@ -910,9 +912,9 @@ fn each_model_compacts_at_its_own_window_once_and_only_where_the_cli_has_the_fla
 #[test]
 fn the_flags_are_read_from_the_help_text_word_by_word() {
     let help = "  --autocompact <auto|tokens>           Auto-compact window size\n  --permission-prompt-tool <tool>  MCP tool\n";
-    assert_eq!(ClaudeFlags::from_help(help), ClaudeFlags { autocompact: true, permission_prompts: false });
+    assert_eq!(ClaudeFlags::from_help(help), ClaudeFlags { autocompact: true, permission_prompts: false, auto_mode: false });
     let both = format!("{help}  --permission-prompts <target>         Who answers permission prompts\n");
-    assert_eq!(ClaudeFlags::from_help(&both), NEWER);
+    assert_eq!(ClaudeFlags::from_help(&both), ClaudeFlags { auto_mode: false, ..NEWER });
     // A mention in a description is not the flag.
     assert_eq!(ClaudeFlags::from_help("use autocompact and --permission-prompts-x"), ClaudeFlags::default());
     assert_eq!(ClaudeFlags::from_help(""), ClaudeFlags::default());
@@ -1103,4 +1105,141 @@ async fn the_cache_lifetime_starts_when_the_request_is_sent_not_when_the_first_w
     let began = began.expect("the request start was seen");
     assert!(began <= sent + 50, "started {}ms after the request was sent", began.saturating_sub(sent));
     session.close();
+}
+
+// R140: the vendors' own range of modes.
+
+#[test]
+fn r140_each_mode_names_the_native_claude_mode_in_chat_and_projects() {
+    let native = [
+        (Permissions::Ask, "default"),
+        (Permissions::AcceptEdits, "acceptEdits"),
+        (Permissions::Plan, "plan"),
+        (Permissions::Auto, "auto"),
+        (Permissions::FullAccess, "bypassPermissions"),
+    ];
+    for area in [Area::Chat, Area::Project] {
+        for (permissions, name) in native {
+            let args = claude_args(&ClaudeLaunch { permissions, flags: NEWER, ..launch(area) });
+            let at = args.iter().position(|a| a == "--permission-mode").unwrap();
+            assert_eq!(args[at + 1], name, "{permissions:?} {area:?}");
+            assert!(deny_rules(&args).contains(&"Read(~/.ssh/**)".to_string()), "credentials stay blocked in {permissions:?}");
+            let restricted = args.contains(&"--restricted".into());
+            assert_eq!(restricted, area == Area::Chat && permissions.guarded(), "{permissions:?} {area:?}");
+        }
+    }
+}
+
+#[test]
+fn r140_a_claude_without_auto_runs_accept_edits_and_the_screen_says_so() {
+    let old = ClaudeFlags { auto_mode: false, ..NEWER };
+    let args = claude_args(&ClaudeLaunch { permissions: Permissions::Auto, flags: old, ..launch(Area::Chat) });
+    assert!(args.windows(2).any(|a| a == ["--permission-mode", "acceptEdits"]), "the nearest safer mode: {args:?}");
+    assert!(!args.contains(&"auto".into()));
+    assert_eq!(Permissions::Auto.for_claude(old), Permissions::AcceptEdits);
+    assert_eq!(Permissions::Auto.for_claude(NEWER), Permissions::Auto);
+    assert_eq!(Permissions::Auto.fallback_note(Permissions::AcceptEdits).as_deref(), Some("mode.fallback.auto"));
+    assert_eq!(Permissions::Auto.fallback_note(Permissions::Auto), None);
+    for other in [Permissions::Ask, Permissions::AcceptEdits, Permissions::Plan, Permissions::FullAccess] {
+        assert_eq!(other.for_claude(old), other, "only Auto can be missing");
+    }
+}
+
+#[test]
+fn r140_auto_is_found_among_the_permission_mode_choices_of_the_help() {
+    let help = "\
+  --output-format <format>              Output format (choices: \"text\", \"json\")
+  --permission-mode <mode>              Permission mode to use for the session
+                                        (choices: \"acceptEdits\", \"auto\",
+                                        \"bypassPermissions\", \"manual\",
+                                        \"dontAsk\", \"plan\")
+  --permission-prompts <target>         Who answers permission prompts with
+";
+    assert!(ClaudeFlags::from_help(help).auto_mode);
+    let old = help.replace("\"auto\",", "");
+    assert!(!ClaudeFlags::from_help(&old).auto_mode);
+    // A mention elsewhere is not a choice of the option.
+    let elsewhere = "  --other <x>   uses \"auto\" mode\n  --permission-mode <mode>  Permission mode (choices: \"plan\")\n";
+    assert!(!ClaudeFlags::from_help(elsewhere).auto_mode);
+    assert!(!ClaudeFlags::from_help("").auto_mode);
+}
+
+#[test]
+fn r140_web_search_is_live_in_the_saved_settings_and_off_or_cached_change_the_tools_and_deny_rules() {
+    use faber_engine::model::{Tuning, WebSearch};
+    assert_eq!(Tuning::default().web, WebSearch::Off, "a launch nobody chose for gets no web");
+    assert_eq!(faber_engine::model::Settings::default().tuning().web, WebSearch::Live, "the person's saved settings default to live");
+    let allowed = |args: &[String]| args.iter().position(|a| a == "--allowedTools").map(|at| args[at + 1].clone());
+    for permissions in [Permissions::Ask, Permissions::AcceptEdits, Permissions::Plan, Permissions::Auto] {
+        let with = |web| {
+            claude_args(&ClaudeLaunch { permissions, flags: NEWER, tuning: Tuning { web, ..Default::default() }, ..launch(Area::Chat) })
+        };
+        let live = with(WebSearch::Live);
+        assert_eq!(allowed(&live).as_deref(), Some("WebSearch,WebFetch"), "{permissions:?}");
+        assert!(!deny_rules(&live).iter().any(|r| r.starts_with("Web")), "live denies nothing");
+        let cached = with(WebSearch::Cached);
+        assert_eq!(allowed(&cached).as_deref(), Some("WebSearch"));
+        assert!(deny_rules(&cached).contains(&"WebFetch".to_string()) && !deny_rules(&cached).contains(&"WebSearch".to_string()));
+        let off = with(WebSearch::Off);
+        assert_eq!(allowed(&off), None);
+        assert!(deny_rules(&off).contains(&"WebFetch".to_string()) && deny_rules(&off).contains(&"WebSearch".to_string()));
+    }
+    // Full access and the person's project sessions deny through the settings as well; the credential rules stay.
+    for area in [Area::Chat, Area::Project] {
+        let off = claude_args(&ClaudeLaunch {
+            permissions: Permissions::FullAccess,
+            tuning: Tuning { web: WebSearch::Off, ..Default::default() },
+            ..launch(area)
+        });
+        let rules = deny_rules(&off);
+        assert!(
+            rules.contains(&"WebSearch".to_string())
+                && rules.contains(&"WebFetch".to_string())
+                && rules.contains(&"Read(~/.ssh/**)".to_string())
+        );
+        let live = claude_args(&ClaudeLaunch { permissions: Permissions::FullAccess, ..launch(area) });
+        assert!(!deny_rules(&live).iter().any(|r| r.starts_with("Web")));
+    }
+}
+
+#[test]
+fn r140_the_web_setting_never_reaches_the_isolated_mode_or_a_side_question() {
+    use faber_engine::model::{Tuning, WebSearch};
+    let off = Tuning { web: WebSearch::Off, ..Default::default() };
+    for area in [Area::Chat, Area::Project] {
+        let isolated = ClaudeLaunch { permissions: Permissions::Isolated, ..launch(area) };
+        assert_eq!(claude_args(&isolated), claude_args(&ClaudeLaunch { tuning: off, ..isolated.clone() }), "{area:?}");
+        let side = ClaudeLaunch { instructions: Some("Route.".into()), permissions: Permissions::Auto, ..launch(area) };
+        assert_eq!(claude_args(&side), claude_args(&ClaudeLaunch { tuning: off, ..side.clone() }), "{area:?}");
+        assert!(!claude_args(&side).contains(&"--permission-mode".into()));
+    }
+}
+
+#[test]
+fn r140_old_saved_settings_load_as_before_and_the_new_ones_are_stored_by_name() {
+    use faber_engine::model::{ReasoningSummary, Settings, Verbosity, WebSearch};
+    let old: Settings = serde_json::from_str(r#"{"permissions":"ask","userHooks":true}"#).unwrap();
+    assert_eq!(old.permissions, Some(Permissions::Ask));
+    assert_eq!((old.web_search, old.reasoning_summary, old.verbosity), (None, None, None));
+    assert_eq!(
+        old.tuning(),
+        faber_engine::model::Tuning { web: WebSearch::Live, ..Default::default() },
+        "no saved web choice means live and the models' own summary and verbosity"
+    );
+    assert_eq!(faber_engine::model::Tuning::default().web, WebSearch::Off, "a launch nobody chose for gets no web");
+    let full: Settings = serde_json::from_str(r#"{"permissions":"dontAsk"}"#).unwrap();
+    assert_eq!(full.permissions, Some(Permissions::FullAccess));
+    assert_eq!(Settings::default().permissions.unwrap_or_default(), Permissions::FullAccess, "full access stays the default");
+    for (mode, name) in [(Permissions::AcceptEdits, "acceptEdits"), (Permissions::Plan, "plan"), (Permissions::Auto, "auto")] {
+        assert_eq!(serde_json::to_string(&mode).unwrap(), format!("\"{name}\""));
+        assert_eq!(serde_json::from_str::<Permissions>(&format!("\"{name}\"")).unwrap(), mode);
+    }
+    let new: Settings =
+        serde_json::from_str(r#"{"webSearch":"cached","reasoningSummary":"none","verbosity":"high","permissions":"auto"}"#).unwrap();
+    assert_eq!(
+        (new.web_search, new.reasoning_summary, new.verbosity),
+        (Some(WebSearch::Cached), Some(ReasoningSummary::Hidden), Some(Verbosity::High))
+    );
+    let saved = serde_json::to_value(Settings::default()).unwrap();
+    assert!(saved.get("webSearch").is_none() && saved.get("reasoningSummary").is_none() && saved.get("verbosity").is_none());
 }
