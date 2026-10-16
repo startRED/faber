@@ -945,6 +945,8 @@ input.rename { width: 100%; height: calc(28px + 2px * var(--dens)); padding: 0 1
 .pset-line .tg { flex: 1 1 auto; min-height: 24px; }
 .pset-acts { display: inline-flex; flex-wrap: wrap; gap: 8px; }
 
+/* The assistant's own questions: a card in its message, answered by tapping. */
+.ask.question { gap: 14px; }
 .ask .q { display: grid; gap: 8px; border: 0; padding: 0; margin: 0; min-width: 0; }
 .ask .q legend { padding: 0; color: var(--ink); font-weight: 600; font-size: var(--fs-ui); }
 .ask .q-head { display: inline-block; margin-right: 8px; padding: 1px 8px; border-radius: var(--r-pill); background: var(--amber-soft); color: var(--amber-ink); font-size: calc(var(--fs-ui) - 2px); font-weight: 600; }

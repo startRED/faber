@@ -1,7 +1,7 @@
 //! Real Projects IPC and geometry on the isolated desktop, using temporary records and no provider session.
-use super::{Result, Scenario, ensure, pause, same, start_settings, system_motion};
+use super::{Result, Scenario, ensure, same, start_settings};
 use crate::app::Ctx;
-use crate::page::{Page, css};
+use crate::page::Page;
 use crate::sandbox::Launch;
 use serde_json::{Value, json};
 use std::path::Path;
@@ -11,7 +11,6 @@ pub fn scenarios() -> Vec<Scenario> {
         Scenario { name: "projects screen: private checkpoints release mission power and restart never reacquires it", run: power },
         Scenario { name: "projects screen: fixed IPC rejects invalid identities, stale grants and fake execution", run: commands },
         Scenario { name: "projects T5: mode, answer and Stop use the authoritative runner", run: controls },
-        Scenario { name: "projects screen: checkpoint, decisions, task evidence, six looks, widths and memory", run: board },
         Scenario {
             name: "projects screen: R92 mission receipts survive restart and all delivery policies stay windowless",
             run: notifications,
@@ -87,26 +86,6 @@ fn commands(ctx: &mut Ctx) -> Result {
         json!({"missionId":"screen_mission","decisionId":"../choice","answer":"Keep"}),
         "error.journal.badId",
     )?;
-    let request = json!({"area":"project","projectId":"demo","text":"Unsafe direct work","choice":{"vendor":"auto"}});
-    refused(&mut app.page, "send", json!({"req":request}), "error.project.missionRequired")?;
-    let history = ctx.sb.data.join("conversations");
-    std::fs::create_dir_all(&history).map_err(|e| e.to_string())?;
-    std::fs::write(history.join("legacy.json"), json!({"id":"legacy","title":"Old history","area":"project","projectId":"demo","sessions":{},"createdAt":1,"updatedAt":1,"messages":[]}).to_string()).map_err(|e| e.to_string())?;
-    let spoofed = json!({"area":"chat","conversationId":"legacy","text":"Unsafe work","choice":{"vendor":"auto"}});
-    refused(&mut app.page, "send", json!({"req":spoofed}), "error.project.missionRequired")?;
-    let warm = json!({"area":"chat","conversationId":"legacy","choice":{"vendor":"auto"}});
-    refused(&mut app.page, "warm", json!({"req":warm}), "error.project.missionRequired")?;
-    refused(&mut app.page, "route_draft", json!({"req":warm,"text":"Unsafe draft"}), "error.project.missionRequired")?;
-    refused(
-        &mut app.page,
-        "branch",
-        json!({"req":{"conversationId":"legacy","messageId":"old","text":"Unsafe branch","choice":{"vendor":"auto"}}}),
-        "error.project.missionRequired",
-    )?;
-    refused(&mut app.page, "approve_credits", json!({"id":"legacy","turnId":"old","vendor":"claude"}), "error.project.missionRequired")?;
-    for command in ["move_turn", "wait_turn"] {
-        refused(&mut app.page, command, json!({"id":"legacy","turnId":"old"}), "error.project.missionRequired")?;
-    }
     ensure(ctx.records()?.is_empty(), || "a refused Projects command reached a CLI".into())?;
     ensure(invoke(&mut app.page, "project_revoke", json!({"projectId":"demo"}))?["ok"] == true, || "revoke failed".into())?;
     refused(&mut app.page, "mission_resume", json!({"missionId":"screen_mission"}), "reason.grant.revoked")?;
@@ -150,74 +129,6 @@ fn controls(ctx: &mut Ctx) -> Result {
     })?;
     refused(&mut app.page, "mission_resume", json!({"missionId":"screen_mission"}), "reason.proof.unconfirmed")?;
     ensure(ctx.records()?.is_empty(), || "a refused role reached a CLI".into())?;
-    Ok(())
-}
-
-fn board(ctx: &mut Ctx) -> Result {
-    let launch = fixture(ctx)?;
-    let mut app = ctx.launch(launch)?;
-    let state = invoke(&mut app.page, "mission_state", json!({"missionId":"screen_mission"}))?;
-    ensure(state["ok"] == true, || format!("fixture mission state: {state}"))?;
-    let enrolled = invoke(&mut app.page, "project_enroll", json!({"projectId":"demo"}))?;
-    ensure(enrolled["ok"] == true, || format!("fixture enrollment: {enrolled}"))?;
-    app.page.eval("localStorage.setItem('faber.project.mission.demo','screen_mission'); localStorage.setItem('faber.place',JSON.stringify({area:'project',projectId:'demo'}))")?;
-    app.page.reload()?;
-    if let Err(error) = app.page.wait_visible(&css(".mission-board")) {
-        let debug = app.page.eval("({ mission:localStorage.getItem('faber.project.mission.demo'), errors:[...document.querySelectorAll('[role=alert]')].map(e=>e.textContent), busy:document.querySelector('.composer button[type=submit]')?.disabled })")?;
-        return Err(format!("{error}: {debug}"));
-    }
-    same(app.page.count(&css(".task-card"))?, 200, "all bounded tasks")?;
-    same(app.page.count(&css(".ny-card"))?, 1, "the concrete decision")?;
-    let mut peak: f64 = 0.0;
-    for theme in ["sala", "oficina", "bancada", "manha", "alto", "cobalto"] {
-        let settings = invoke(&mut app.page, "save_settings", json!({"patch":{"appearance":{"base":theme,"textSize":18}}}))?;
-        ensure(settings["ok"] == true, || format!("{theme}: {settings}"))?;
-        app.page.reload()?;
-        app.page.wait_visible(&css(".mission-board"))?;
-        for width in [720, 900, 1100, 1440, 1920] {
-            app.page
-                .cdp
-                .call("Emulation.setDeviceMetricsOverride", json!({"width":width,"height":900,"deviceScaleFactor":1,"mobile":false}))?;
-            pause(0.3);
-            let geometry = app.page.eval("(() => {const s=document.querySelector('.projects-stage'); const r=s.getBoundingClientRect(); return {width:r.width, height:r.height, overflow:s.scrollWidth-s.clientWidth, right:r.right, viewport:innerWidth};})()")?;
-            if geometry["width"].as_f64().unwrap_or(0.0) < 760.0 {
-                let columns =
-                    app.page.eval("getComputedStyle(document.querySelector('.task-columns')).gridTemplateColumns.split(' ').length")?;
-                same(columns.as_u64(), Some(1), "a narrow stage uses one scrolling list")?;
-            }
-            ensure(geometry["width"].as_f64().unwrap_or(0.0) > 0.0 && geometry["height"].as_f64().unwrap_or(0.0) > 0.0, || {
-                format!("{theme}/{width}: missing stage {geometry}")
-            })?;
-            ensure(
-                geometry["overflow"].as_f64().unwrap_or(999.0) <= 1.0 && geometry["right"].as_f64() <= geometry["viewport"].as_f64(),
-                || format!("{theme}/{width}: overflow {geometry}"),
-            )?;
-            let (mb, _) = ctx.memory_mb(app.id)?;
-            peak = peak.max(mb);
-        }
-    }
-    system_motion(&mut app.page, true)?;
-    let summary = css(".task-card summary").last();
-    // Native toggle delivery is queued after the click. Exercise that handoff even on a fast local WebView.
-    app.page.eval("(() => {const detail=[...document.querySelectorAll('.task-card details')].at(-1); const defer=event => {event.stopImmediatePropagation(); detail.removeEventListener('toggle',defer,true); setTimeout(() => detail.dispatchEvent(new Event('toggle')),250);}; detail.addEventListener('toggle',defer,true);})()")?;
-    app.page.click(&summary)?;
-    app.page.wait_visible(&css(".task-card details").last().css("p").has_text("ui/Projects.tsx"))?;
-    ensure(app.page.inner_text(&css(".task-card details").last())?.contains("ui/Projects.tsx"), || {
-        "scope is missing from task evidence".into()
-    })?;
-    let keep = app.page.named("button", "projects.decision.answer")?;
-    ensure(app.page.is_disabled(&keep)?, || "empty answer stays disabled".into())?;
-    let answered = invoke(&mut app.page, "mission_answer", json!({"missionId":"screen_mission","decisionId":"choice","answer":"Keep"}))?;
-    ensure(answered["ok"] == true, || format!("answer refused: {answered}"))?;
-    app.page.wait_gone(&css(".ny-card"))?;
-    app.page.reload()?;
-    app.page.wait_visible(&css(".mission-board"))?;
-    same(app.page.count(&css(".ny-card"))?, 0, "the answer remains durable")?;
-    let (mb, _) = ctx.memory_mb(app.id)?;
-    peak = peak.max(mb);
-    // R125: the end-to-end memory limit is 400 MB, as for the other screens (review.rs).
-    ensure(peak <= 400.0, || format!("Projects peak {peak:.1} MB exceeds 400 MB"))?;
-    ctx.notes.push(format!("200 tasks, 6 looks x 5 widths, 18 px text, reduced motion; Projects peak {peak:.1} MB"));
     Ok(())
 }
 

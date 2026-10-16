@@ -285,6 +285,10 @@ projects. Faber has no worktree creation for projects, so an environment has no 
   choosing the model), the conversation title, the state in words ("Working", "Needs you" or "Choosing the model") and
   the time since the turn started.
 - An item that needs the user shows the permission card, and the user can answer in place with Allow, Always or Deny.
+  A question the agent asks (`AskUserQuestion`) shows instead as a question card, in the thread and in the column alike:
+  each question in bold with its short header chip, its options as full-width rows to tap (amber ring when chosen,
+  checkboxes when several are allowed), one line to write another answer, then Send answers (enabled once every
+  question has an answer) and Skip. No motion beyond the card's arrival; option hovers do not animate under reduced motion.
 - Clicking a row opens that conversation, setting the area, the project and the conversation together.
 - The column is closed when the window opens. It opens by itself once for each question it has not yet shown, 1.5 s
   after the last keystroke in any text field, including questions already waiting at launch. If the user closes it

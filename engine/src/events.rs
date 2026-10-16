@@ -160,6 +160,8 @@ pub enum SessionCommand {
     Answer {
         request_id: String,
         allow: bool,
+        /// What the user chose for a question the agent asked (`AskUserQuestion`): question text to the labels picked.
+        reply: Option<serde_json::Value>,
         ack: tokio::sync::oneshot::Sender<Delivery>,
     },
     Interrupt,
@@ -213,8 +215,12 @@ impl Session {
     /// The receiver hears whether the CLI got the answer. If the session is gone it fails instead, because the
     /// command, and the sender in it, were dropped.
     pub fn answer(&self, request_id: &str, allow: bool) -> tokio::sync::oneshot::Receiver<Delivery> {
+        self.answer_with(request_id, allow, None)
+    }
+    /// Like `answer`, carrying the user's choices for a question the agent asked.
+    pub fn answer_with(&self, request_id: &str, allow: bool, reply: Option<serde_json::Value>) -> tokio::sync::oneshot::Receiver<Delivery> {
         let (ack, delivered) = tokio::sync::oneshot::channel();
-        (self.send)(SessionCommand::Answer { request_id: request_id.to_string(), allow, ack });
+        (self.send)(SessionCommand::Answer { request_id: request_id.to_string(), allow, reply, ack });
         delivered
     }
     pub fn interrupt(&self) {

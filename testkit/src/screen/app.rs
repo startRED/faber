@@ -139,7 +139,7 @@ const COLOUR_OF: &str = "(name) => { const p = document.createElement('i'); p.st
 /// The drawings of Curioso on the stage: how many there are, how big each is, and the colour it is drawn in.
 fn peeks() -> String {
     format!(
-        "(() => {{ const colour = {COLOUR_OF}; return {{ ink3: colour('--ink-3'), found: [...document.querySelectorAll('.empty .peek svg, .start-card .peek svg')].map((s) => {{ const r = s.getBoundingClientRect(); return {{ w: r.width, h: r.height, fill: getComputedStyle(s.querySelector('path')).fill }}; }}) }}; }})()"
+        "(() => {{ const colour = {COLOUR_OF}; return {{ ink3: colour('--ink-3'), found: [...document.querySelectorAll('.empty .peek svg, .welcome-grid .peek svg')].map((s) => {{ const r = s.getBoundingClientRect(); return {{ w: r.width, h: r.height, fill: getComputedStyle(s.querySelector('path')).fill }}; }}) }}; }})()"
     )
 }
 
@@ -830,7 +830,7 @@ fn black_hole_in_a_project(ctx: &mut Ctx) -> Result {
     let demo = css(".prow .item").has_text("Demo");
     app.page.wait_visible(&demo)?;
     app.page.click(&demo)?;
-    app.page.wait_visible(&css(".start-card .p-header h2").has_text("Demo"))?;
+    app.page.wait_visible(&css(".welcome-grid .p-header h2").has_text("Demo"))?;
     app.page.wait_for("the black hole to run in a shown, focused window", &format!("{live} === 'on'"))?;
     // The entrance plays once: Curioso wakes, the spark flies, the scene lights up from the hole, and then it ends.
     let intro = "document.querySelector('canvas.amb-hole')?.dataset.intro";

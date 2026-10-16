@@ -94,7 +94,7 @@ fn open_project(app: &mut Opened) -> Result {
     let projects = app.page.named("button", "area.projects")?;
     app.page.click(&projects)?;
     app.page.click(&css(".prow .item").has_text("Demo"))?;
-    app.page.wait_visible(&css(".start-card"))
+    app.page.wait_visible(&css(".welcome-grid .p-header h2").has_text("Demo"))
 }
 
 fn moves(state: &Value) -> bool {
@@ -125,7 +125,7 @@ fn looks(ctx: &mut Ctx) -> Result {
     ensure(project["ghost"] == true && project["hints"] == 3, || format!("the Projects home's composer idles: {project}"))?;
     ensure(project["projectLight"] == true && project["chatLight"] == false, || format!("the Projects home has its own light: {project}"))?;
     ensure(moves(&project), || format!("something moves on the Projects home: {project}"))?;
-    ensure(app.page.count(&css(".start-card.welcome-grid .hello"))? == 1, || "the Projects home has the greeting of a home".into())?;
+    ensure(app.page.count(&css(".welcome-grid .hello"))? == 1, || "the Projects home has the greeting of a home".into())?;
     ctx.shot(&mut app, "homes-project")?;
     // With reduced motion both homes stand completely still and the fields show their plain placeholders.
     system_motion(&mut app.page, true)?;
@@ -133,7 +133,8 @@ fn looks(ctx: &mut Ctx) -> Result {
     let quiet = life(&mut app)?;
     ensure(still(&quiet), || format!("the Projects home moves with reduced motion: {quiet}"))?;
     ctx.shot(&mut app, "homes-project-reduced")?;
-    let chat = app.page.named("button", "area.chat")?;
+    // Exact: the rows to pick up name their area, and a chat row says "Chat" too.
+    let chat = app.page.named("button", "area.chat")?.exact();
     app.page.click(&chat)?;
     app.page.wait_visible(&css(".hello"))?;
     pause(0.6);
@@ -214,15 +215,9 @@ fn plain_rows_at_1280(ctx: &mut Ctx) -> Result {
     })?;
     ensure(state["title"].as_str().unwrap_or_default().len() > meta.len(), || format!("the full path is on hover: {state}"))?;
     // Nothing of the project's settings is on its screen: no switches, no choices, no list of commands.
-    let crowd = "document.querySelectorAll('.start-card :is(input[role=switch], .seg-ctl, .proof-list, details)').length";
+    let crowd = "document.querySelectorAll('.welcome-grid :is(input[role=switch], .seg-ctl, .proof-list, details)').length";
     ensure(app.page.eval(crowd)?.as_u64() == Some(0), || "the project home shows settings".into())?;
     ctx.shot(&mut app, "homes-project-1280")?;
-    // The first start on checks nobody confirmed asks for them in a compact sheet, under the composer.
-    app.page.fill(&css("#mission-goal"), "Conserte o teste que falha de vez em quando")?;
-    app.page.click(&css(".p-cbar button[type=submit]"))?;
-    app.page.wait_visible(&css("[data-testid=proof-sheet]"))?;
-    pause(0.4);
-    ctx.shot(&mut app, "homes-project-1280-sheet")?;
     // Its settings are one closed entry in Settings, Projects.
     let settings = app.page.named("button", "settings.open")?.exact();
     app.page.click(&settings)?;

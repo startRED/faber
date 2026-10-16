@@ -127,6 +127,12 @@ export const es: Messages = {
   'ask.allow': 'Permitir',
   'ask.always': 'Permitir siempre en esta conversación',
   'ask.deny': 'Denegar',
+  'ask.question.label': 'Una pregunta del asistente',
+  'ask.question.other': 'Otra cosa…',
+  'ask.question.otherPlaceholder': 'Escribe tu respuesta',
+  'ask.question.send': 'Enviar respuestas',
+  'ask.question.skip': 'Omitir',
+  'ask.question.many': 'Elige las que quieras',
   'ask.moreWaiting': { one: '1 más en espera', other: '{n} más en espera' },
   // Handwritten wording; native-speaker review pending (English is the source).
   'ask.parked': 'Retenido: no había nadie para responder',
@@ -394,6 +400,7 @@ export const es: Messages = {
   'hint.chat.3': 'Describe un problema y pide tres salidas',
   'projects.home.title': '¿Qué resolvemos?',
   'projects.home.lead': 'Dale una meta a Faber para este proyecto. Trabaja en una copia aparte y muestra lo que comprobó.',
+  'projects.chat.lead': 'Pide lo que quieras en esta carpeta. El asistente trabaja aquí mismo y te pregunta cuando lo necesita.',
   'projects.gitMode.seguroTech': "Modo seguro: worktree separado, solo commits locales y avance rápido solo en la rama de la misión.",
   'projects.selfUpdate.trustTech': "Una versión nueva pasa a la siguiente ranura local solo tras una prueba canario y las comprobaciones de cuarentena.",
   'projects.proofs.isolationTech': "Las comprobaciones que ejecutan código escrito por un rol se ejecutan con integridad baja en Windows: solo pueden escribir en la copia de la misión, en su carpeta de compilación y en sus carpetas temporales. Aún pueden leer tus archivos y usar la red; un aislamiento más fuerte (AppContainer) es el siguiente paso previsto. En macOS tampoco pueden escribir fuera de esas carpetas; en Linux todavía nada las limita.",
@@ -734,7 +741,6 @@ export const es: Messages = {
   // Native speaker must translate (needs native review).
   "reason.mission.runnerUnavailable": "La ejecución de la misión está esperando al ejecutor aprobado. No se ha iniciado ningún trabajo.",
   // Native speaker must translate (needs native review).
-  "error.project.missionRequired": "Inicia una misión para trabajar en este proyecto. Las sesiones directas de proyecto no están disponibles.",
   // Native speaker must translate (needs native review).
   "error.wire.malformed": "La solicitud contiene valores no válidos o faltantes.",
   // Native speaker must translate (needs native review).
@@ -934,7 +940,8 @@ export const es: Messages = {
   'notes.10.better': "La pantalla del proyecto ya no pide confirmar las comprobaciones cuando tu modo de permisos es Auto o Acceso total.",
   'notes.12.better': 'El tablero de la misión es más tranquilo: el objetivo, su paso y por qué espera van primero, las columnas vacías ya no están y Nueva misión empieza otra.',
   'notes.13.new': 'En Ajustes puedes recibir versiones preliminares unos días antes.',
-  'notes.14.better': 'Cada paso del trabajo ahora dice lo que hace con palabras sencillas, y cada subagente aparece en su propia línea con lo que está haciendo.',
+  'notes.14.new': 'En un proyecto ahora hablas con el asistente como en cualquier otro sitio, y sus preguntas llegan como tarjetas que tocas.',
+  'notes.16.better': 'Cada paso del trabajo ahora dice lo que hace con palabras sencillas, y cada subagente aparece en su propia línea con lo que está haciendo.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

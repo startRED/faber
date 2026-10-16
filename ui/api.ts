@@ -490,6 +490,9 @@ export const api = {
   interrupt: (id: string) => invoke<void>('interrupt', { id }),
   answer: (id: string, turnId: string, requestId: string, allow: boolean, always = false) =>
     invoke<void>('answer', { id, turnId, requestId, allow, always }),
+  /** The choices for a question the assistant asked: each question's text to the label picked (several joined by a comma). */
+  answerQuestion: (id: string, turnId: string, requestId: string, answers: Record<string, string>) =>
+    invoke<void>('answer_question', { id, turnId, requestId, answers }),
   rename: (id: string, title: string) => invoke<void>('rename', { id, title }),
   remove: (id: string) => invoke<void>('remove', { id }),
   removeQueued: (id: string, turnId: string) => invoke<void>('remove_queued', { id, turnId }),

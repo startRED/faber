@@ -1387,8 +1387,11 @@ impl Core {
                 // line: see `touches_credentials`). Full access never shows a card. The answer is decided here, under the lock
                 // that also saves the mode, so a request that was already on its way when the person switched to Ask finds the
                 // session gone (and is never accepted).
+                // A question the agent asks the person is always a card, in every mode: only the person can answer it.
+                let question = tool == "AskUserQuestion";
                 let cwd = self.convs.get(conv).and_then(|c| self.cwd_of(c).ok());
                 if let Some(l) = self.live.get(conv)
+                    && !question
                     && crate::permissions::touches_credentials(&input, cwd.as_deref().and_then(Path::to_str), &|name| {
                         std::env::var(name).ok()
                     })
@@ -1396,12 +1399,22 @@ impl Core {
                     drop(l.session.answer(&request_id, false));
                     return;
                 }
-                if self.live.get(conv).is_some_and(|l| l.permissions == Permissions::FullAccess) {
+                if !question && self.live.get(conv).is_some_and(|l| l.permissions == Permissions::FullAccess) {
+                    // Claude Code asks the host in Full access only for what bypass mode still holds back (the person's own ask
+                    // rules, protected paths): on a CLI that has `--permission-prompts` it is denied and parked, never allowed on its own, as
+                    // `--permission-prompts none` did; an older CLI keeps the yes it always had (R124).
+                    if vendor == Vendor::Claude && self.claude_flags.permission_prompts {
+                        if let Some(l) = self.live.get(conv) {
+                            drop(l.session.answer(&request_id, false));
+                        }
+                        self.park(conv, request_id, tool, input);
+                        return self.push(conv, turn_id.as_deref(), true);
+                    }
                     return self.auto_answer(conv, vec![Permission { request_id, tool, input, epoch: None }]);
                 }
                 // Plan never takes a remembered grant: nothing may change under it without a card.
                 let plan = self.live.get(conv).is_some_and(|l| l.permissions == Permissions::Plan);
-                let allowed = !plan && self.grant_stands(conv, &tool);
+                let allowed = !question && !plan && self.grant_stands(conv, &tool);
                 if allowed {
                     return self.auto_answer(conv, vec![Permission { request_id, tool, input, epoch: None }]);
                 }
