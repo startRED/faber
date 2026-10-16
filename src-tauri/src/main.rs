@@ -754,15 +754,21 @@ async fn ensure_agents(app: &AppHandle, faber: &Faber) -> Res<()> {
 async fn mission_start(app: AppHandle, faber: State<'_, Faber>, project_id: String, goal: String) -> Res<String> {
     project_commands::id(&project_id)?;
     project_commands::text(&goal)?;
+    // The cheap, certain refusals come first (a grant, the owner's confirmed checks), so no probe is spent on a mission
+    // that could not start; then the agents are checked; then the mission is made under the lock.
+    {
+        let project = faber.engine.project(&project_id)?;
+        let grant = project.grant.as_ref().ok_or("reason.grant.none")?;
+        project.allows(Effect::Worktree, grant.revision).map_err(|k| k.to_string())?;
+        // R137: a mission proves its work only with the commands the project declared and its owner confirmed.
+        mission::confirmed(&project).map_err(str::to_string)?;
+    }
     ensure_agents(&app, &faber).await?;
     let _turn = faber.missions.lock().await;
-    project_commands::id(&project_id)?;
     let project = faber.engine.project(&project_id)?;
     let grant = project.grant.as_ref().ok_or("reason.grant.none")?;
     project.allows(Effect::Worktree, grant.revision).map_err(|k| k.to_string())?;
-    project_commands::text(&goal)?;
     Runner::role_vendor(&faber.engine)?;
-    // R137: a mission proves its work only with the commands the project declared and its owner confirmed.
     let commands = mission::confirmed(&project).map_err(str::to_string)?;
     let mut process = Process::find().map_err(|e| e.key().to_string())?;
     let repo = enroll(&mut process, Path::new(&project.path), "HEAD").map_err(|e| e.key().to_string())?;
@@ -823,6 +829,12 @@ async fn mission_stop(app: AppHandle, faber: State<'_, Faber>, mission_id: Strin
 
 #[tauri::command]
 async fn mission_resume(app: AppHandle, faber: State<'_, Faber>, mission_id: String) -> Res<MissionView> {
+    {
+        let (project, _, mission) = find_mission_and_journal(&faber, &mission_id)?;
+        project_commands::editable(&mission)?;
+        project.allows(Effect::Worktree, mission.grant_revision).map_err(str::to_string)?;
+        mission::confirmed(&project).map_err(str::to_string)?;
+    }
     ensure_agents(&app, &faber).await?;
     let _turn = faber.missions.lock().await;
     let (project, journal, mission) = find_mission_and_journal(&faber, &mission_id)?;

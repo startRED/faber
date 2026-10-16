@@ -1,4 +1,6 @@
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(any(windows, test))]
+use serde_json::json;
 use std::io;
 #[cfg(windows)]
 use std::path::Path;

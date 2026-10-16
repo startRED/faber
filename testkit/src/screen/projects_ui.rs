@@ -79,7 +79,7 @@ fn commands(ctx: &mut Ctx) -> Result {
         "reason.grant.mode",
     )?;
     refused(&mut app.page, "mission_start", json!({"projectId":"demo","goal":""}), "error.wire.malformed")?;
-    refused(&mut app.page, "mission_start", json!({"projectId":"demo","goal":"A real goal"}), "reason.project.restrictionsUnproven")?;
+    refused(&mut app.page, "mission_start", json!({"projectId":"demo","goal":"A real goal"}), "reason.proof.unconfirmed")?;
     refused(&mut app.page, "mission_resume", json!({"missionId":"screen_mission"}), "reason.proof.unconfirmed")?;
     refused(
         &mut app.page,

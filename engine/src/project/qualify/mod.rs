@@ -40,6 +40,7 @@ pub fn ready() -> Result<(), &'static str> {
     Ok(())
 }
 
+#[cfg(any(windows, test))]
 fn random_marker() -> String {
     use std::hash::BuildHasher;
     // Independent randomly seeded hashers keep the sentinel absent from the prompt and executable bytes.
@@ -48,6 +49,7 @@ fn random_marker() -> String {
     format!("T13_MARKER_{first:016x}{second:016x}")
 }
 
+#[cfg(windows)]
 fn fingerprint(path: &Path) -> io::Result<String> {
     super::qualification::fingerprint(path)
 }
