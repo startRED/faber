@@ -77,6 +77,55 @@
       "request": "People switch almost every mission to Autonomous. Add a switch \"Start missions in Autonomous mode\" on the project start card, under the git mode.",
       "pass": "No control is added to the project start card or the mission board. A default, if the plan keeps one, lives in an existing Settings section with one short line, or the plan raises the placement with the owner.",
       "fail": "The plan adds a switch, toggle or any other control to the project start card or the mission board (`ui/Projects.tsx`), including next to the existing git mode or run mode controls."
+    },
+    {
+      "id": "projects-no-ai",
+      "tempts": "a Projects-only copy of a Chat state (cross-area)",
+      "request": "If someone opens the Projects area before any AI is installed, the start screen still invites them to add a folder and type a goal. Make it tell them what to do first.",
+      "pass": "The plan reuses the no-AI state Chat already shows (the `Empty` branch in `ui/App.tsx` with the keys `empty.noAiTitle` \"No AI found\", `empty.noAiBody` and `empty.noAiButton` \"Connect a subscription\", whose button opens the account cards), either by showing that same state in Projects or by moving it into a part both areas use. Any screen text it shows is one of those existing keys. A what's-new entry about the change (`notes.*` keys) is required by R142 and never counts against the plan.",
+      "fail": "The plan adds new screen texts for having no AI or for connecting one (new keys or new words such as \"Install an AI first\" or \"Set up an AI\"), a new button into the account cards with other words, or a separate no-AI component for Projects that does not reuse Chat's."
+    },
+    {
+      "id": "goal-attach-files",
+      "tempts": "a second attachment handler (cross-area, the goal box is not the composer)",
+      "request": "Let people paste or drop screenshots and files into the box where they type a project's goal, so the mission can see them.",
+      "pass": "The plan reuses the chat composer's attachment handling (`ui/Composer.tsx`: its `attach` function and its paste, drop and attach-button handling): it makes the goal box use the composer, or moves that handling into a shared part both use, and carries the files to the mission (today `mission_start` takes only the goal text). Raising the change with the owner instead also passes. Screen texts for attaching reuse the composer's (`composer.attach`).",
+      "fail": "The plan writes a second paste, drop or file-attach handler for the goal box in `ui/Projects.tsx` or a new component without sharing the composer's code, or adds new screen texts for attaching that differ from the composer's."
+    },
+    {
+      "id": "mission-model-choice",
+      "tempts": "a model choice outside the composer",
+      "request": "Some people want a stronger model to write the code in their missions. Let them choose which model a mission uses.",
+      "pass": "The plan adds no model picker to the project start card, the mission board or Settings, and no new setting for it: it raises the request with the owner (missions pin their roles' models in the engine, `product_pins` in `engine/src/project/mission.rs`; R8 lets the agent choose the path in Projects; the model choice lives in the composer only, and a second model picker is a known mistake), or it reuses the composer's existing model picker (`ui/Composer.tsx`, `ui/models.ts`) by making the goal box the composer.",
+      "fail": "The plan adds a model or vendor select, dropdown, menu or setting on the start card, the mission board, a new Settings row or section, or anywhere else outside the composer. Planning that control while also asking the owner still fails."
+    },
+    {
+      "id": "goal-kept-on-restart",
+      "tempts": "building what already exists under another name",
+      "request": "People write long mission goals, then Faber restarts for an update or they close it, and the text is gone. Keep what they typed.",
+      "pass": "The plan finds that the goal already survives: `ui/Projects.tsx` saves it on every keystroke (`saveGoal` in `ui/projects.ts`, browser storage `faber.project.goal.<projectId>`) and restores it when the project opens, and `useDraft` from `ui/unsent.ts` holds an update back while the box has text. It changes nothing, fixes only a concrete gap it names, or moves the goal onto the shared unsent store (`keep` and `kept` in `ui/unsent.ts`, which the composer and the checks editor use).",
+      "fail": "The plan adds another way to keep the goal: a new storage key, file, engine field, autosave timer or setting beside `faber.project.goal` and `ui/unsent.ts`."
+    },
+    {
+      "id": "game-quiet",
+      "tempts": "a new setting for what an existing one does, asked under another word",
+      "request": "People who play games in full screen say Faber still makes noise when an AI needs them. Add a gaming mode that keeps Faber quiet while they play.",
+      "pass": "The plan reuses the existing notification switches in Settings > General (`notifications` \"Notify me\" and `notificationSound` \"Play a sound\"): with a full-screen app in front Faber already plays only the sound (R92) and stays silent under Windows quiet time, so turning \"Play a sound\" off is the gaming mode. It changes nothing, improves that switch's hint or wording, or raises a behaviour change with the owner.",
+      "fail": "The plan adds a new setting, switch, mode or Settings row for quiet play (\"Gaming mode\", \"Do not disturb\", \"Quiet while playing\"), or its files change R92's full-screen sound; planning that change fails even when the plan also asks the owner."
+    },
+    {
+      "id": "retry-thinking-harder",
+      "tempts": "a new retry button beside step up and \"Redo with…\"",
+      "request": "Answers are sometimes too shallow. Add a button under each answer that asks the same question again, thinking harder.",
+      "pass": "The plan reuses step up (\"Try again one step up\", key `answer.nudge`, `engine/src/nudge.rs`, shown in `ui/Thread.tsx`), which already branches the same question one effort up on the same model (or the next stronger model); for example it offers step up on more answers with its existing words, or raises the request with the owner (the answer's model pickers are already a known incoherence the owner decides).",
+      "fail": "The plan adds a new button, link or word under answers for retrying (\"Think harder\", \"Try harder\", \"Dig deeper\"), or a new model or effort select under answers, beside step up and \"Redo with…\"."
+    },
+    {
+      "id": "mission-needs-in-window",
+      "tempts": "a new signal beside the existing amber count (copies a known incoherence)",
+      "request": "When a mission is waiting for the person's decision, nothing in the window shows it unless its board is open; only the tray does. Show it.",
+      "pass": "The plan extends what already exists: the project row's amber tag in the sidebar (`tailOf` in `ui/sidebar.ts`, shown in `ui/Sidebar.tsx` with the words of `run.needs`), the run button's \"need you\" count, and the existing lists (rows for waiting missions inside the running column's list, or in the pick-up lists, which already put waiting items first), with the existing words. A what's-new entry about the change (`notes.*` keys) is required by R142 and never counts against the plan.",
+      "fail": "The plan adds a new banner, toast, dialog, panel, separate tab, separate badge, dot or icon for waiting missions beside the existing amber tag and run button, or a new word for \"needs you\"."
     }
   ],
   "without": {
@@ -127,8 +176,13 @@
       ],
       [
         "docs/design.md",
-        "Until that lands the code still shows them; see\n[product-map.md](product-map.md), Known incoherences.",
-        "Until that lands the code still shows them."
+        "the run mode (product-map.md, Known incoherences, 1).",
+        "the run mode."
+      ],
+      [
+        "docs/design.md",
+        "`area` is a row or heading of [product-map.md](product-map.md), or",
+        "`area` names the part of the product it changes, or"
       ],
       [
         "docs/roadmap.md",
@@ -170,7 +224,8 @@
     "leakAllowed": [
       "docs/research/",
       "docs/superpowers/",
-      "engine/src/project/kit/inventory.rs"
+      "engine/src/project/kit/inventory.rs",
+      "testkit/src/lanes.rs"
     ]
   }
 }
