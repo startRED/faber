@@ -27,6 +27,7 @@ import './models.check.ts';
 import './mojibake.check.ts';
 import './motion.check.ts';
 import './nudge.check.ts';
+import './notes.check.ts';
 import './opening.check.ts';
 import './review-answer.check.ts';
 import './review-motion.check.ts';

@@ -19,6 +19,10 @@ with the user's own subscriptions. Read [docs/roadmap.md](docs/roadmap.md) befor
 - Every text on screen lives in `ui/locales/`. Each language is written by hand, never machine-translated; English
   (`en.ts`) is the source, and a new language needs a native speaker to review it. The engine returns keys
   (`error.*`, `reason.*`) instead of sentences.
+- Every change a person would notice adds the next numbered entry (`notes.<id>.<new|better|fixed>`) to every
+  `ui/locales/*.ts` file in the same pull request: one short sentence in plain words, written by hand. The id only grows
+  and never depends on the version. After an update the screen shows what is newer than the last entry seen, and the
+  release body is built from the English entries (R142, `scripts/release-notes.mjs`).
 - Memory is a feature: Faber with no CLI running stays under 500 MB when complete, and the end-to-end test fails above
   400 MB (R125). The limit is a safety net, not the goal: every change aims at the lightest and most responsive result
   it can reach and reports its memory and processor cost. Anything that keeps a process or a big DOM alive needs a

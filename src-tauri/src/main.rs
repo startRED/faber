@@ -57,6 +57,8 @@ pub(crate) struct Faber {
     pub(crate) models: Mutex<Vec<ModelInfo>>,
     /// A newer version, already downloaded; it installs at the first idle moment (`update.rs`) or when Faber quits.
     pub(crate) update: Mutex<Option<(Update, Vec<u8>)>>,
+    /// A download started at open is running; the screen shows a calm line for it (`update.rs`).
+    pub(crate) updating: std::sync::atomic::AtomicBool,
     pub(crate) data_dir: PathBuf,
     pub(crate) hidden: bool,
     /// Serialize journal snapshots and mutations, so an answer cannot overwrite a newer view.
@@ -1028,6 +1030,32 @@ fn local_update_state(faber: State<'_, Faber>) -> Res<Option<faber_engine::proje
         .unwrap_or(Ok(None))
 }
 
+/// `none`, `downloading` or `ready`: the screen's view of the update (`update.rs`). Changes arrive as `faber:update`.
+#[tauri::command]
+fn update_status(app: AppHandle) -> &'static str {
+    update::status(&app)
+}
+
+/// "Update ready, restart": installs the kept update now. Refused while an answer runs.
+#[tauri::command]
+async fn update_restart(app: AppHandle) -> Res<()> {
+    update::restart_now(app).await
+}
+
+/// The last "what's new" entry the person has seen (`ui/notes.ts`), in its own small file in the data folder. None means
+/// no entry was ever shown, which the screen reads as a first install or as an install from before the screen existed. A
+/// test build answers "all seen", so no scenario starts behind the screen.
+#[tauri::command]
+fn notes_seen(faber: State<'_, Faber>) -> Option<u32> {
+    let saved = std::fs::read_to_string(faber.data_dir.join("notes-seen")).ok().and_then(|text| text.trim().parse().ok());
+    saved.or(cfg!(feature = "test-hooks").then_some(u32::MAX))
+}
+
+#[tauri::command]
+fn save_notes_seen(faber: State<'_, Faber>, id: u32) -> Res<()> {
+    std::fs::write(faber.data_dir.join("notes-seen"), id.to_string()).map_err(|_| "error.settings.saveFailed".to_string())
+}
+
 fn create_window(app: &AppHandle, hidden: bool, data_dir: &Path) -> tauri::Result<tauri::WebviewWindow> {
     let handle = app.clone();
     // The first paint already has the theme's own colour.
@@ -1263,6 +1291,10 @@ fn main() {
             mission_resume,
             mission_answer,
             local_update_state,
+            update_status,
+            update_restart,
+            notes_seen,
+            save_notes_seen,
             setup::setup_check,
             setup::setup_install,
             setup::setup_sign_in,
@@ -1359,6 +1391,7 @@ fn main() {
                 engine,
                 models: Mutex::default(),
                 update: Mutex::default(),
+                updating: std::sync::atomic::AtomicBool::new(false),
                 data_dir: data_dir.clone(),
                 hidden,
                 missions,
