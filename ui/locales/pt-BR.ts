@@ -642,6 +642,7 @@ export const ptBR: Messages = {
   "projects.agents.failed": "Não foi possível verificar os agentes, então nenhuma missão foi iniciada: {detail}",
   "reason.qualify.failed": "Não foi possível verificar os agentes. Nenhuma missão foi iniciada.",
   "reason.proof.setupChanged": "As instalações do projeto mudaram desde que esta lista foi mostrada. Veja a lista de novo e confirme.",
+  "reason.proof.declaredChanged": "As verificações do projeto mudaram desde que esta lista foi mostrada. A lista abaixo é a nova; confira e confirme.",
   "reason.workspace.busy": "Uma verificação de uma execução anterior ainda está rodando, então a cópia de trabalho do projeto não foi mexida. Tente de novo em instantes.",
   "reason.qualify.probe": "Uma verificação de um dos agentes não passou.",
   "reason.qualify.timeout": "Uma verificação de um dos agentes demorou demais.",

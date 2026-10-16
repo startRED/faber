@@ -645,6 +645,7 @@ export const de: Messages = {
   "projects.agents.failed": "Die Agenten ließen sich nicht prüfen, deshalb wurde keine Mission gestartet: {detail}",
   "reason.qualify.failed": "Die Agenten ließen sich nicht prüfen. Es wurde keine Mission gestartet.",
   "reason.proof.setupChanged": "Die Installationen des Projekts haben sich geändert, seit diese Liste gezeigt wurde. Sieh dir die Liste noch einmal an und bestätige dann.",
+  "reason.proof.declaredChanged": "Die Prüfungen des Projekts haben sich geändert, seit diese Liste gezeigt wurde. Die Liste unten ist die neue; sieh sie dir an und bestätige dann.",
   "reason.workspace.busy": "Eine Prüfung eines früheren Laufs läuft noch, deshalb wurde die Arbeitskopie des Projekts nicht angefasst. Versuche es gleich noch einmal.",
   "reason.qualify.probe": "Eine Prüfung eines der Agenten ist nicht bestanden.",
   "reason.qualify.timeout": "Eine Prüfung eines der Agenten hat zu lange gedauert.",

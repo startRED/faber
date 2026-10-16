@@ -645,6 +645,7 @@ export const fr: Messages = {
   "projects.agents.failed": "Les agents n'ont pas pu être vérifiés, donc aucune mission n'a été lancée : {detail}",
   "reason.qualify.failed": "Les agents n'ont pas pu être vérifiés. Aucune mission n'a été lancée.",
   "reason.proof.setupChanged": "Les installations du projet ont changé depuis l'affichage de cette liste. Relisez la liste, puis confirmez.",
+  "reason.proof.declaredChanged": "Les vérifications du projet ont changé depuis l'affichage de cette liste. La liste ci-dessous est la nouvelle ; relisez-la, puis confirmez.",
   "reason.workspace.busy": "Une vérification d'une exécution précédente tourne encore, donc la copie de travail du projet n'a pas été touchée. Réessayez dans un instant.",
   "reason.qualify.probe": "Une vérification de l'un des agents n'a pas réussi.",
   "reason.qualify.timeout": "Une vérification de l'un des agents a pris trop de temps.",

@@ -448,7 +448,7 @@ const typeGoal = async (root: HTMLElement) => {
   await settle();
 };
 
-check('projects: the first start on unconfirmed checks opens a compact sheet, the commands stay behind View, and Confirm starts', () => {
+check('projects: the first start on unconfirmed checks opens a sheet that shows every command at once, and Confirm starts', () => {
   let confirmed = false;
   let started = 0;
   return withProjects(async (root) => {
@@ -464,25 +464,85 @@ check('projects: the first start on unconfirmed checks opens a compact sheet, th
     const sheet = root.querySelector('[data-testid="proof-sheet"]');
     ok(sheet, 'the start asks for the checks');
     ok(sheet!.textContent?.includes('2 checks read from AGENTS.md'), `the sheet says how many and from where: ${sheet!.textContent}`);
-    equal(sheet!.querySelector('[data-testid="proof-commands"]'), null, 'the command list is collapsed by default, and not in the page');
-    const view = sheet!.querySelector<HTMLButtonElement>('button.more')!;
-    equal(view.getAttribute('aria-expanded'), 'false');
-    await click(view);
+    equal(sheet!.querySelector('button.more'), null, 'nothing in the sheet is collapsed: no confirming what is hidden');
     const list = sheet!.querySelector('[data-testid="proof-commands"]')?.textContent ?? '';
-    ok(list.includes('npm run lint') && list.includes('cargo t'), `View shows the commands: ${list}`);
+    ok(list.includes('npm run lint') && list.includes('cargo t'), `the sheet shows the commands before Confirm: ${list}`);
     ok(sheet!.querySelector('[data-testid="proof-setup"]')?.textContent?.includes('npm ci'), 'and the setup that runs first');
+    const box = sheet!.querySelector<HTMLElement>('.proof-cmds')!;
+    ok(['auto', 'scroll'].includes(getComputedStyle(box).overflowY) && getComputedStyle(box).maxHeight !== 'none', 'a long list scrolls inside the sheet');
     await click(sheet!.querySelector('[data-testid="proof-confirm"]'));
     ok(confirmed, 'the list the owner saw is confirmed');
     equal(started, 1, 'and the mission starts from there');
   }, () => {
     api.projectProof = async () => proofView(confirmed);
-    api.projectProofConfirm = async (_id, commands, setup) => {
+    api.projectProofConfirm = async (_id, commands, setup, shown) => {
       confirmed = true;
+      equal(shown.join('|'), declared.join('|'), 'the declaration the owner saw is sent, so a changed file is refused');
       equal(commands.join('|'), declared.join('|'), 'the declared list is what gets confirmed');
       equal(setup.join('|'), 'npm ci|cargo fetch', 'the setup list the owner saw is what gets confirmed');
       return proofView(true, commands);
     };
     api.missionStart = async () => { started += 1; return 'review-mission'; };
+  });
+});
+
+check('projects: checks that return after the owner switched project never reach the other project', () => {
+  let release: (v: ReturnType<typeof proofView>) => void = () => {};
+  let sent = 0;
+  return withProjects(async (root, _emit, change) => {
+    await typeGoal(root);
+    await start(root);
+    ok(!root.querySelector('[data-testid="proof-sheet"]'), 'project A is still reading its checks');
+    change({ id: 'second-project', name: 'Second', path: 'C:/fixture/second' });
+    await settle();
+    release(proofView(false, ['rm-everything']));
+    await settle();
+    equal(root.querySelector('[data-testid="proof-sheet"]'), null, "A's late answer does not open a sheet on B");
+    ok(!root.textContent?.includes('rm-everything'), "A's commands are nowhere on B's screen");
+    equal(sent, 0, 'and nothing was confirmed');
+  }, () => {
+    let reads = 0;
+    api.projectProof = (id) => {
+      reads += 1;
+      // Reads 1 (A opens) and 3 (B opens) are immediate; read 2 is A's start, which stays pending until after the switch.
+      if (id === 'review-project' && reads === 2) return new Promise((resolve) => { release = resolve; });
+      return Promise.resolve(proofView(false));
+    };
+    api.projectProofConfirm = async () => { sent += 1; return proofView(true); };
+  });
+});
+
+check('projects: when the declaration changes after the checks were confirmed, Start refreshes and opens the sheet on the new list', () => {
+  let current = proofView(true);
+  let started = 0;
+  return withProjects(async (root) => {
+    await typeGoal(root);
+    // The file changes while the screen stays open: the cached proof still says confirmed.
+    current = { ...proofView(false, ['npm run lint', 'npm run e2e']), declared: ['npm run lint', 'npm run e2e'], changed: true };
+    await start(root);
+    equal(started, 0, 'the engine refused, so no mission');
+    const sheet = root.querySelector('[data-testid="proof-sheet"]');
+    ok(sheet, 'the refusal opens the sheet');
+    ok(sheet!.querySelector('[data-testid="proof-commands"]')?.textContent?.includes('npm run e2e'), 'with the new commands');
+    ok(!root.querySelector('[role="alert"]')?.textContent?.includes('Confirm the project'), 'and no error line repeats the refusal');
+  }, () => {
+    api.projectProof = async () => current;
+    api.missionStart = async () => { started += 1; throw 'reason.proof.unconfirmed'; };
+  });
+});
+
+check('projects: a confirmation the engine refuses because the files moved on reloads and shows the new list', () => {
+  let current = proofView(false);
+  return withProjects(async (root) => {
+    await typeGoal(root);
+    await start(root);
+    current = proofView(false, ['npm run lint', 'cargo t', 'npm run e2e']);
+    await click(root.querySelector('[data-testid="proof-confirm"]'));
+    ok(root.querySelector('[data-testid="proof-commands"]')?.textContent?.includes('npm run e2e'), 'the sheet shows what the project declares now');
+    ok(root.querySelector('[data-testid="proof-sheet"]'), 'and stays open');
+  }, () => {
+    api.projectProof = async () => current;
+    api.projectProofConfirm = async () => { throw 'reason.proof.declaredChanged'; };
   });
 });
 
@@ -596,7 +656,6 @@ check('projects home: no text sits on the lit part of the black hole, scrolled o
     // Open the sheet and its list, so the column runs past the bottom and scrolls.
     await typeGoal(root);
     await start(root);
-    await click(root.querySelector('[data-testid="proof-sheet"] button.more'));
     await settle(200);
     equal(root.querySelectorAll('.p-resume .rrow').length, 3, 'at most three to pick up');
     const canvas = root.querySelector<HTMLCanvasElement>('canvas.amb-hole')!;

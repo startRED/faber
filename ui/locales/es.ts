@@ -645,6 +645,7 @@ export const es: Messages = {
   "projects.agents.failed": "No se pudieron comprobar los agentes, así que no se inició ninguna misión: {detail}",
   "reason.qualify.failed": "No se pudieron comprobar los agentes. No se inició ninguna misión.",
   "reason.proof.setupChanged": "Las instalaciones del proyecto cambiaron desde que se mostró esta lista. Mira la lista otra vez y confirma.",
+  "reason.proof.declaredChanged": "Las comprobaciones del proyecto cambiaron desde que se mostró esta lista. La lista de abajo es la nueva; revísala y confirma.",
   "reason.workspace.busy": "Una comprobación de una ejecución anterior sigue en marcha, así que no se tocó la copia de trabajo del proyecto. Inténtalo de nuevo en un momento.",
   "reason.qualify.probe": "Una comprobación de uno de los agentes no se superó.",
   "reason.qualify.timeout": "Una comprobación de uno de los agentes tardó demasiado.",

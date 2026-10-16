@@ -27,7 +27,7 @@ import { Peek } from './Mark.tsx';
 import { Recents } from './Recents.tsx';
 import { Icon } from './Glyphs.tsx';
 import { LocalBuild } from './LocalBuild.tsx';
-import { More, ProofList, proofCount, tail } from './ProjectSettings.tsx';
+import { ProofList, proofCount, tail } from './ProjectSettings.tsx';
 import { fromEngine, lang, t } from './i18n.ts';
 import { animateList } from './motion.ts';
 import { pickUp } from './running.ts';
@@ -159,6 +159,7 @@ export function Projects(props: Props) {
         const token = ++generation;
         selectedMission = undefined;
         setEnroll(undefined);
+        setProof(undefined);
         setMission(undefined);
         setCustomAnswers({});
         setError(undefined);
@@ -199,21 +200,31 @@ export function Projects(props: Props) {
     }
   };
 
+  // Reads the project's checks again and opens the sheet on what they are now; a project left behind gets nothing.
+  const showChecks = async (projectId: string, token: number) => {
+    const latest = await api.projectProof(projectId).catch(() => proof());
+    if (token !== generation) return;
+    if (latest) setProof(latest);
+    setAsking(true);
+  };
+
   const startMission = async () => {
     if (!props.project || !goal().trim() || busy() || !enroll()) return;
+    const projectId = props.project.id;
+    const token = generation;
     // Checks the owner has not confirmed yet: ask once, just in time, and start from there.
     // Settings may have confirmed them since this screen read them, so read them again first.
     if (!proof()?.confirmed) {
-      const latest = await api.projectProof(props.project.id).catch(() => proof());
+      const latest = await api.projectProof(projectId).catch(() => proof());
+      // The owner moved to another project while the checks were read: they belong to the one left behind.
+      if (token !== generation) return;
       if (latest) setProof(latest);
       if (!latest?.confirmed) {
         setAsking(true);
         return;
       }
     }
-    const projectId = props.project.id;
     const text = goal().trim();
-    const token = generation;
     setError(undefined);
     setAgents(undefined);
     setBusy(true);
@@ -231,6 +242,11 @@ export function Projects(props: Props) {
       accept(view, token);
     } catch (err) {
       if (token !== generation) return;
+      // The checks changed since they were confirmed, while this screen stayed open: show the new list.
+      if (errorText(err) === 'reason.proof.unconfirmed') {
+        await showChecks(projectId, token);
+        return;
+      }
       setError(errorText(err));
       // Refresh the grant revision before a retry; do not clear the person's goal.
       try { const next = await api.projectEnroll(projectId); if (token === generation) setEnroll(next); } catch {}
@@ -240,19 +256,24 @@ export function Projects(props: Props) {
     }
   };
 
-  // The sheet confirms the list the owner was shown, then starts the mission it was asked for.
+  // The sheet confirms exactly the list the owner is shown (and the declaration it came from), then starts the mission it
+  // was asked for. If the project's files changed meanwhile the engine refuses, and the sheet shows the new list instead.
   const confirmAndStart = async () => {
     const p = proof();
     if (!props.project || !p || busy()) return;
+    const projectId = props.project.id;
     const token = generation;
     setBusy(true); setError(undefined);
     try {
-      const next = await api.projectProofConfirm(props.project.id, p.declared.length ? p.declared : p.commands, p.setup ?? []);
+      const next = await api.projectProofConfirm(projectId, p.commands, p.setup ?? [], p.declared);
       if (token !== generation) return;
       setProof(next);
       setAsking(false);
     } catch (err) {
-      if (token === generation) setError(errorText(err));
+      if (token === generation) {
+        setError(errorText(err));
+        await showChecks(projectId, token);
+      }
       return;
     } finally { if (token === generation) setBusy(false); }
     if (token === generation && proof()?.confirmed) await startMission();
@@ -501,9 +522,7 @@ export function Projects(props: Props) {
                         <Show when={p().commands.length > 0} fallback={<p class="hint">{t('projects.sheet.none')}</p>}>
                           <p class="p-sheet-count">{proofCount(p())}</p>
                           <p class="hint">{t('projects.sheet.body')}</p>
-                          <More label={t('projects.proof.view')} open={t('projects.proof.hide')}>
-                            <ProofList proof={p()} />
-                          </More>
+                          <ProofList proof={p()} />
                         </Show>
                         <div class="proof-actions">
                           <button

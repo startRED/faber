@@ -101,7 +101,14 @@ function Body(props: { project: Project }) {
   };
   const confirm = (commands: string[]) =>
     run(async () => {
-      const next = await api.projectProofConfirm(id(), commands, proof()?.setup ?? []);
+      const next = await api
+        .projectProofConfirm(id(), commands, proof()?.setup ?? [], proof()?.declared ?? [])
+        .catch(async (err) => {
+          // The project's files moved on since the list was shown: show the new list before anything is confirmed.
+          const latest = await api.projectProof(id()).catch(() => undefined);
+          if (latest && !gone) setProof(latest);
+          throw err;
+        });
       if (gone) return;
       setProof(next);
       setEditing(false);

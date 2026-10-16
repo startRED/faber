@@ -412,12 +412,14 @@ full path on hover), the greeting, a goal composer with its own hints and one qu
 most three conversations to pick up. Nothing else: the sidebar lists the projects, and every setting of a project (the
 tool policy, the code access, the self-update switch and the checks) is in Settings, Projects, one closed entry per
 project with one short line per option and the rest behind "Learn more". The checks are asked for just in time: the
-first start on checks nobody confirmed opens a compact sheet with their count and source, the commands behind "View",
-and "Confirm and start"; it does not come back until they change. The light leans the other way. The two layouts share classes, so a change to one home reaches the other.
+first start on checks nobody confirmed opens a compact sheet with their count and source, every command (and the setup)
+listed in full with no collapse, a long list scrolling inside it, and "Confirm and start"; what is confirmed is exactly the list
+shown, and a project that changed it meanwhile is refused so the sheet shows the new list. It does not come back until
+the checks change. The light leans the other way. The two layouts share classes, so a change to one home reaches the other.
 
 C011 (2026-10-16, the owner) overrides the quiet rows: the project screen shows only the work, and the grant, the checks
-and the tool choice move to Settings or to a just-in-time consent. Until that lands the code still shows them; see
-[product-map.md](product-map.md), Known incoherences.
+and the tool choice live in Settings or in a just-in-time consent. The start card is done; the mission board still carries
+the run mode (product-map.md, Known incoherences, 1).
 
 ### Records
 
