@@ -10,7 +10,8 @@ permissions:
   contents: write
 
 jobs:
-  # One job creates the release so the build jobs upload to it instead of racing to create it.
+  # One job creates the release so the build jobs upload to it instead of racing to create it. It starts as a draft:
+  # a published release with no latest.json yet makes every Faber get "not found" and skip the update.
   create:
     runs-on: ubuntu-latest
     outputs:
@@ -28,8 +29,9 @@ jobs:
         run: |
           previous=$(git tag --list 'v*' --sort=-v:refname | grep -vx "$GITHUB_REF_NAME" | head -1 || true)
           node scripts/release-notes.mjs "$previous" > "$RUNNER_TEMP/notes.md"
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "Faber $GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
-          echo "id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" --jq .id)" >> "$GITHUB_OUTPUT"
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "Faber $GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" --draft
+          # The tags endpoint does not see drafts.
+          echo "id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq ".[] | select(.tag_name == \"$GITHUB_REF_NAME\") | .id")" >> "$GITHUB_OUTPUT"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -72,9 +74,22 @@ jobs:
           releaseId: ${{ needs.create.outputs.id }}
           args: ${{ matrix.args }}
 
+  # Publishes only after every platform uploaded and latest.json is there, so the updater never sees a release without
+  # it. A failed platform leaves the draft for a person to look at.
+  publish:
+    needs: [create, build]
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" --paginate --jq '.[].name' | grep -qx latest.json
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false -f make_latest=true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.create.outputs.id }}
+
   # Owner decision R110: main follows each published release. Fast-forward only; a main that moved on its own stops here.
   main:
-    needs: build
+    needs: publish
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
