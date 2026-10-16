@@ -25,6 +25,7 @@ use crate::page::{Page, css};
 use crate::plan::{Suite, deal};
 use crate::report::{Outcome, file_name};
 use crate::sandbox::{CliSlot, Launch};
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::time::{Duration, Instant};
@@ -62,65 +63,51 @@ pub fn all() -> Vec<Scenario> {
     all.collect()
 }
 
-/// Seconds every scenario of 8 s or more took on CI (run 38945820716, 2026-10-16), so `--shard` deals them evenly; any
-/// other counts as 5 (the rest average 4.4 s). A scenario missing here deals as 5 however long it takes, which is how one part
-/// came to take twice the others: when a scenario takes 8 s or more on CI, add it. A renamed one fails a test.
-const SLOW: [(&str, u32); 41] = [
-    ("coordinator: a mission lands", 166),
-    ("T13 4: fixture promotion", 120),
-    ("with Auto, the answer names", 52),
-    ("homes: idle life costs the", 50),
-    ("a new project session shows", 33),
-    ("with no CLI running, Faber", 28),
-    ("remote git: a repository", 27),
-    ("sentinel: panels move through", 25),
-    ("first run, keyboard only", 22),
-    ("the running column opens", 16),
-    ("sentinel: no text is garbled", 16),
-    ("sentinel: the composer grows", 16),
-    ("local_update: candidate starts", 16),
-    ("first run, tutorial: an installed", 15),
-    ("a click on a running conversation", 13),
-    ("C5.4: the open guide and", 13),
-    ("review 5: retained layout", 13),
-    ("local_update: hidden session", 13),
-    ("first run, tutorial: a remembered", 13),
-    ("T13 5: independent helper", 13),
-    ("with reduced motion on, the", 13),
-    ("a chat thread with a tool", 12),
-    ("first run, step 2: a preview", 12),
-    ("a question that waits when", 12),
-    ("first run, tutorial: a beginner", 11),
-    ("local_update: autostart uses", 11),
-    ("first run, tutorial: waits", 11),
-    ("a settings save that fails", 11),
-    ("C5.3: None persists, shows", 11),
-    ("the layout follows the width", 11),
-    ("homes: the Chat home and", 10),
-    ("local_update: trusted launcher", 10),
-    ("reconnecting an account saves", 10),
-    ("an installed CLI that is", 10),
-    ("C5.2: missing ChatGPT installs", 9),
-    ("first run, step 2: three", 9),
-    ("sentinel: a permission card", 9),
-    ("every look fits the new conversation", 9),
-    ("C5.3: Skip persists, shows", 8),
-    ("projects git review 5 and", 8),
-    ("homes: the project home reads", 8),
-];
+/// Seconds each scenario takes on CI, which `--shard` deals the parts by: the middle of the newest green runs, read from
+/// their logs by `scripts/screen-costs.mjs` (R-next). CI hands its parts that day's seconds (`--costs`); the copy in
+/// `testkit/screen-costs.json` is what a run deals by without them. A scenario missing from the table counts as 5 s.
+pub struct Costs(HashMap<String, u32>);
 
-fn cost(name: &str) -> u32 {
-    SLOW.iter().find(|(start, _)| name.starts_with(start)).map_or(5, |(_, secs)| *secs)
+impl Costs {
+    pub fn parse(text: &str) -> Result<Costs> {
+        #[derive(serde::Deserialize)]
+        struct Table {
+            seconds: HashMap<String, f64>,
+        }
+        let table: Table = serde_json::from_str(text).map_err(|e| format!("the table of scenario seconds is not valid: {e}"))?;
+        Ok(Costs(table.seconds.into_iter().map(|(name, seconds)| (name, seconds.ceil().max(1.0) as u32)).collect()))
+    }
+
+    pub fn committed() -> Costs {
+        Costs::parse(include_str!("../../screen-costs.json")).expect("testkit/screen-costs.json is valid")
+    }
+
+    /// Every part of a CI run must deal by the same table, so a file that cannot be read stops the run instead of
+    /// falling back to another one.
+    pub fn read(path: &std::path::Path) -> Result<Costs> {
+        let text = std::fs::read_to_string(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        Costs::parse(&text).map_err(|e| format!("{}: {e}", path.display()))
+    }
+
+    fn of(&self, name: &str) -> u32 {
+        self.0.get(name).copied().unwrap_or(5)
+    }
 }
 
 /// Runs each scenario (those whose name contains `filter`, if there is one) and audits it. A scenario fails if its own
 /// checks fail or if its audit finds a leaked process, an outside write or a changed environment. `done` hears of each
 /// outcome as soon as its scenario ends, so the runner can print it while the next one runs.
-pub fn run_all(paths: &Paths, filter: Option<&str>, shard: Option<(usize, usize)>, done: &mut dyn FnMut(&Outcome)) -> Vec<Outcome> {
+pub fn run_all(
+    paths: &Paths,
+    filter: Option<&str>,
+    shard: Option<(usize, usize)>,
+    costs: &Costs,
+    done: &mut dyn FnMut(&Outcome),
+) -> Vec<Outcome> {
     let mut outcomes = Vec::new();
     let chosen: Vec<Scenario> = all().into_iter().filter(|s| filter.is_none_or(|f| s.name.contains(f))).collect();
-    let costs: Vec<u32> = chosen.iter().map(|s| cost(s.name)).collect();
-    let dealt = shard.map(|(part, parts)| (part - 1, deal(&costs, parts)));
+    let seconds: Vec<u32> = chosen.iter().map(|s| costs.of(s.name)).collect();
+    let dealt = shard.map(|(part, parts)| (part - 1, deal(&seconds, parts)));
     for (index, scenario) in chosen.iter().enumerate() {
         if dealt.as_ref().is_some_and(|(part, to)| to[index] != *part) {
             continue;
@@ -284,12 +271,25 @@ mod tests {
     // Windows has every scenario; elsewhere the Windows-only ones are not in the list to match.
     #[cfg(windows)]
     #[test]
-    fn every_slow_entry_names_exactly_one_scenario() {
+    fn every_scenario_in_the_committed_table_exists() {
         let names: Vec<&str> = all().iter().map(|s| s.name).collect();
-        for (start, _) in SLOW {
-            let matches = names.iter().filter(|name| name.starts_with(start)).count();
-            assert_eq!(matches, 1, "SLOW entry {start:?} matches {matches} scenarios: a renamed scenario deals as 5 s");
+        for name in Costs::committed().0.keys() {
+            assert!(
+                names.contains(&name.as_str()),
+                "testkit/screen-costs.json names {name:?}, which is no scenario: run `node scripts/screen-costs.mjs fetch --write`, or rename it there"
+            );
         }
+    }
+
+    #[test]
+    fn the_table_rounds_seconds_up_and_a_scenario_it_lacks_counts_as_five() {
+        let costs = Costs::parse(r#"{"about": "", "runs": [1], "seconds": {"slow one": 96.2, "quick one": 0.3}}"#).unwrap();
+        assert_eq!(costs.of("slow one"), 97);
+        assert_eq!(costs.of("quick one"), 1);
+        assert_eq!(costs.of("new one"), 5);
+        assert!(Costs::parse("{}").is_err(), "a table without seconds");
+        assert!(Costs::read(std::path::Path::new("no/such/costs.json")).is_err(), "a missing file is never a silent fallback");
+        assert!(!Costs::committed().0.is_empty());
     }
 
     #[test]

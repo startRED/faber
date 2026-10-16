@@ -83,7 +83,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
-      - uses: Swatinem/rust-cache@v2
+      # No Rust cache: a tag can read only its own caches and main's, which never hold a release build, so it restored nothing,
+      # and the four it saved per tag pushed the checks' caches out of the 10 GB GitHub keeps (R-next).
       - run: npm ci
       # The tag is the version; package.json only moves on hand-made bumps.
       - run: npm pkg set version="${GITHUB_REF_NAME#v}"

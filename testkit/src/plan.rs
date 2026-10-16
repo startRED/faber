@@ -108,6 +108,9 @@ pub struct Options {
     pub build_only: bool,
     /// `--prebuilt`: use the programs a `--build-only` run left instead of building them.
     pub prebuilt: bool,
+    /// `--costs <file>`: the seconds of each screen scenario to deal `--shard` by, instead of the table in the repository.
+    /// CI hands every part the same file (R-next).
+    pub costs: Option<std::path::PathBuf>,
 }
 
 pub fn parse_args(args: &[String]) -> Result<Options, String> {
@@ -124,9 +127,10 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--shard" => opts.shard = Some(shard(it.next().ok_or("--shard needs a part such as 1/3")?)?),
             "--build-only" => opts.build_only = true,
             "--prebuilt" => opts.prebuilt = true,
+            "--costs" => opts.costs = Some(it.next().ok_or("--costs needs a file such as target/screen-costs.json")?.into()),
             other => {
                 return Err(format!(
-                    "unknown argument {other}: use --all, --suite <name>, --filter <text>, --shard <i/n>, --build-only or --prebuilt"
+                    "unknown argument {other}: use --all, --suite <name>, --filter <text>, --shard <i/n>, --costs <file>, --build-only or --prebuilt"
                 ));
             }
         }
@@ -254,6 +258,41 @@ mod tests {
         }
     }
 
+    // The queue and `cargo t` read the same rules (R-next): a small change to the screen or to the engine runs only its own
+    // suites, a test file of the engine or the shell runs only the Rust suite, and the runner, the build, CI or a file no
+    // rule knows runs everything.
+    #[test]
+    fn a_small_change_runs_only_its_suites_and_the_tools_the_build_or_an_unknown_file_run_everything() {
+        let only: [(&str, &[&str]); 9] = [
+            ("ui/Thread.tsx", &["ui", "screen"]),
+            ("ui/locales/en.ts", &["ui", "screen"]),
+            ("engine/src/codex.rs", &["rust", "screen"]),
+            ("engine/examples/cache_probe.rs", &["rust", "screen"]),
+            ("engine/tests/codex_session.rs", &["rust"]),
+            ("engine/tests/support/mod.rs", &["rust"]),
+            ("engine/examples/route_eval.rs", &["rust"]),
+            ("src-tauri/tests/local_update.rs", &["rust"]),
+            ("tests/ui/thread.check.ts", &["ui"]),
+        ];
+        for (path, want) in only {
+            assert_eq!(names(&suites_for(&paths(&[path]))), want, "{path}");
+        }
+        for path in [
+            "testkit/src/screen/app.rs",
+            "testkit/suites.json",
+            "Cargo.toml",
+            "Cargo.lock",
+            "engine/Cargo.toml",
+            ".cargo/config.toml",
+            ".github/workflows/ci.yml",
+            "scripts/ci-scope.mjs",
+            "src-tauri/src/lib.rs",
+            "a-new-folder/file.txt",
+        ] {
+            assert_eq!(names(&suites_for(&paths(&[path]))), ["rust", "ui", "screen"], "{path}");
+        }
+    }
+
     #[test]
     fn every_suite_the_rules_name_exists_and_every_rule_matches_something() {
         for rule in rules() {
@@ -319,6 +358,8 @@ mod tests {
         assert!(args(&["--build-only"]).unwrap().build_only);
         assert!(args(&["--suite", "screen", "--prebuilt"]).unwrap().prebuilt);
         assert!(args(&["--build-only", "--prebuilt"]).is_err());
+        assert_eq!(args(&["--costs", "target/screen-costs.json"]).unwrap().costs, Some("target/screen-costs.json".into()));
+        assert!(args(&["--costs"]).is_err());
         for wrong in [&["--shard"][..], &["--shard", "0/3"], &["--shard", "4/3"], &["--shard", "3"], &["--shard", "a/b"]] {
             assert!(args(wrong).is_err(), "{wrong:?}");
         }

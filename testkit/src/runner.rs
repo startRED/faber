@@ -19,7 +19,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::Instant;
 
-const USAGE: &str = "usage: cargo t [--all] [--suite rust|ui|screen|lint] [--filter <text>] [--shard <i/n>] [--build-only | --prebuilt]";
+const USAGE: &str =
+    "usage: cargo t [--all] [--suite rust|ui|screen|lint] [--filter <text>] [--shard <i/n> [--costs <file>]] [--build-only | --prebuilt]";
 
 /// The two Clippy proofs, as CI runs them (a test keeps them equal). `--suite lint` runs them with [`lint_args`].
 pub const LINTS: [&[&str]; 2] = [
@@ -244,6 +245,13 @@ pub fn run(args: &[String]) -> i32 {
     // A red phase-1-base shows before anything runs: commits pushed onto it only wait behind the failure.
     base::warn(&paths.root);
     let suites = select(&opts, &changed);
+    let costs = match opts.costs.as_deref().map(screen::Costs::read).unwrap_or_else(|| Ok(screen::Costs::committed())) {
+        Ok(costs) => costs,
+        Err(e) => {
+            eprintln!("{e}");
+            return 2;
+        }
+    };
     if suites.is_empty() {
         println!("Nothing changed that needs a test (use --all to run everything).");
         return 0;
@@ -295,8 +303,9 @@ pub fn run(args: &[String]) -> i32 {
                     }
                     if screen_runs {
                         // Each scenario is logged as it ends, and a failure shows at once: the suite takes minutes.
-                        outcomes
-                            .extend(screen::run_all(&paths, filter, opts.shard, &mut |outcome| log.show(std::slice::from_ref(outcome))));
+                        outcomes.extend(screen::run_all(&paths, filter, opts.shard, &costs, &mut |outcome| {
+                            log.show(std::slice::from_ref(outcome))
+                        }));
                     }
                 }
             }

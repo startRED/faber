@@ -5,7 +5,16 @@ on:
     branches: [main, 'phase-*', 'queue/**']
   pull_request:
   # The land job starts a queue branch again by hand after rebasing it: a push made with this run's token starts nothing.
+  # The land and main jobs start a warm run on main the same way, and promote-stable.yml a full run on a preview tag.
   workflow_dispatch:
+    inputs:
+      warm:
+        description: Only build, and save the Rust caches (main only)
+        type: boolean
+        default: false
+  # Every suite once a day on main, whatever the queue skipped (R-next).
+  schedule:
+    - cron: '17 6 * * *'
 
 # A newer push to the same pull request or queue branch makes its older run pointless. Pushes to the shared branches keep
 # every run, so main can follow the newest green commit of phase-1-base (R127) even while pushes keep coming.
@@ -16,7 +25,8 @@ concurrency:
 jobs:
   # Which jobs this change needs, by testkit's own rules (testkit/suites.json, scripts/ci-scope.mjs, R163): the same
   # suites `cargo t` picks locally. Words only (docs/ or a .md file) need none. A push may skip a suite only when the
-  # commit before it is green, so main never reaches unproven code (R127). Anything this job cannot tell runs everything.
+  # commit before it is green, so main never reaches unproven code (R127); a queue commit is compared with phase-1-base,
+  # where it lands, and needs phase-1-base green the same way (R-next). Anything this job cannot tell runs everything.
   changes:
     runs-on: ubuntu-latest
     permissions:
@@ -30,6 +40,9 @@ jobs:
       app: ${{ steps.decide.outputs.app }}
       check: ${{ steps.decide.outputs.check }}
       matrix: ${{ steps.decide.outputs.matrix }}
+      parts: ${{ steps.decide.outputs.parts }}
+      tested: ${{ steps.decide.outputs.tested }}
+      warm: ${{ steps.decide.outputs.warm }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -41,48 +54,80 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
+          WARM: ${{ github.event_name == 'workflow_dispatch' && inputs.warm && github.ref == 'refs/heads/main' }}
           BEFORE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         shell: bash
         run: |
           set -uo pipefail
           scope=""
+          # A commit is green when a run of this workflow that checked that very commit passed: a push, a queue run, or one
+          # started by hand. A pull request checks a merge commit instead, and a warm run of main checks nothing.
+          green() {
+            local count
+            count=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$1&status=success&per_page=100" \
+              --jq '[.workflow_runs[] | select(.event != "pull_request" and .head_branch != "main")] | length') || return 1
+            [ "$count" -gt 0 ]
+          }
           decide() {
-            [[ "$BEFORE" =~ ^[0-9a-f]{40}$ && "$BEFORE" =~ [1-9a-f] ]] || { echo "Everything runs: there is no commit before this one"; return; }
-            # Three dots: what HEAD changed since it left BEFORE. The API lists at most 300 files; more runs everything.
-            compare=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BEFORE...$HEAD") || { echo "Everything runs: the change set could not be read"; return; }
-            [ "$EVENT" = pull_request ] || [ "$(jq -r .status <<<"$compare")" = ahead ] || { echo "Everything runs: the push rewrote history"; return; }
+            local base compare found
+            if [[ "$GITHUB_REF" == refs/heads/queue/* ]]; then
+              # Three dots: what the queue commit changes on top of phase-1-base, where the land job puts it (R162).
+              compare=$(gh api "repos/$GITHUB_REPOSITORY/compare/phase-1-base...$HEAD") || { echo "Everything runs: the change set could not be read"; return; }
+              base=$(jq -r .merge_base_commit.sha <<<"$compare")
+            else
+              [[ "$BEFORE" =~ ^[0-9a-f]{40}$ && "$BEFORE" =~ [1-9a-f] ]] || { echo "Everything runs: there is no commit before this one"; return; }
+              # Three dots: what HEAD changed since it left BEFORE.
+              compare=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BEFORE...$HEAD") || { echo "Everything runs: the change set could not be read"; return; }
+              [ "$EVENT" = pull_request ] || [ "$(jq -r .status <<<"$compare")" = ahead ] || { echo "Everything runs: the push rewrote history"; return; }
+              base=$BEFORE
+            fi
+            # The API lists at most 300 files; more runs everything.
             [ "$(jq '.files | length' <<<"$compare")" -lt 300 ] || { echo "Everything runs: 300 files or more changed"; return; }
-            local found
             found=$(jq -r '.files[].filename' <<<"$compare" | node scripts/ci-scope.mjs) || { echo "Everything runs: the scope could not be read"; return; }
-            if [ "$EVENT" = push ] && grep -q '=false' <<<"$found"; then
-              green=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$BEFORE&event=push&status=success" --jq .total_count) || { echo "Everything runs: the checks of $BEFORE could not be read"; return; }
-              [ "$green" -gt 0 ] || { echo "Everything runs: the commit before, $BEFORE, is not green (yet)"; return; }
+            if [ "$EVENT" != pull_request ] && grep -q '=false' <<<"$found"; then
+              green "$base" || { echo "Everything runs: $base, the commit this one builds on, is not green (yet)"; return; }
             fi
             scope=$found
           }
-          decide
+          warm=false
+          if [ "$WARM" = true ]; then
+            warm=true
+            echo "A warm run: it builds what the checks build and saves the Rust caches, and tests nothing"
+            scope=$(printf 'lints=false\nrust=false\nui=false\nscreen=false')
+          else
+            decide
+          fi
           [ -n "$scope" ] || scope=$(printf 'lints=true\nrust=true\nui=true\nscreen=true')
           echo "$scope"
           get() { if grep -q "^$1=true$" <<<"$scope"; then echo true; else echo false; fi; }
           lints=$(get lints); rust=$(get rust); ui=$(get ui); screen=$(get screen)
+          # `cache` names the Rust cache of each kind of job; the warm job below builds the same kinds under the same names.
           entries=()
           if [ "$lints" = true ]; then
-            entries+=('{"os":"windows-latest","part":"lints"}')
+            entries+=('{"os":"windows-latest","part":"lints","cache":"lints"}')
             # macOS has no screen suite; its job runs the ui suite next to the lints, so the test app is built there too.
-            if [ "$ui" = true ]; then entries+=('{"os":"macos-latest","part":"lints ui"}'); else entries+=('{"os":"macos-latest","part":"lints"}'); fi
+            if [ "$ui" = true ]; then part='lints ui'; else part=lints; fi
+            entries+=("{\"os\":\"macos-latest\",\"part\":\"$part\",\"cache\":\"lints-ui\"}")
           fi
           if [ "$rust" = true ]; then
-            entries+=('{"os":"windows-latest","part":"rust"}' '{"os":"macos-latest","part":"rust"}')
+            entries+=('{"os":"windows-latest","part":"rust","cache":"rust"}' '{"os":"macos-latest","part":"rust","cache":"rust"}')
           fi
           app=false
           if [ "$ui" = true ] || [ "$screen" = true ]; then app=true; fi
           check=false
           if [ ${#entries[@]} -gt 0 ]; then check=true; fi
           matrix=$(IFS=,; echo "{\"include\":[${entries[*]}]}")
+          # The parts that run the Windows test app: the ui suite, and the screen suite in eight.
+          parts=()
+          if [ "$ui" = true ]; then parts+=('"ui"'); fi
+          if [ "$screen" = true ]; then for i in 1 2 3 4 5 6 7 8; do parts+=("\"$i/8\""); done; fi
+          tested=false
+          if [ ${#parts[@]} -gt 0 ]; then tested=true; fi
           {
             echo "lints=$lints"; echo "rust=$rust"; echo "ui=$ui"; echo "screen=$screen"
             echo "app=$app"; echo "check=$check"; echo "matrix=$matrix"
+            echo "parts=$(IFS=,; echo "[${parts[*]}]")"; echo "tested=$tested"; echo "warm=$warm"
           } >> "$GITHUB_OUTPUT"
 
   # The lints and the Rust suite, each its own job, on Windows and macOS (R129, R163).
@@ -104,9 +149,12 @@ jobs:
         with:
           components: clippy, rustfmt
       # One cache per kind of job: each builds different things (Clippy's metadata, the test programs, the test app).
+      # Only main saves (R-next): a run reads the caches of its own branch and of main, and every branch that saved its own
+      # pushed the others out of the 10 GB GitHub keeps.
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.part == 'lints ui' && 'lints-ui' || matrix.part }}
+          shared-key: ${{ matrix.cache }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: npm ci
       - run: npm run build
       # bash stops at the first failing line; PowerShell would only report the last one.
@@ -136,7 +184,7 @@ jobs:
             target/faber-test/run.log
           if-no-files-found: ignore
 
-  # The Windows test app is built once, runs the ui suite, and hands its programs to the screen parts (R163).
+  # The Windows test app is built once and handed to the ui part and the eight screen parts (R163).
   app:
     needs: changes
     if: needs.changes.outputs.app == 'true'
@@ -150,14 +198,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          key: app
+          shared-key: app
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: npm ci
+      # src-tauri/build.rs makes an empty dist/ when there is none, and the test build refuses a changed dist/.
       - run: npm run build
       - run: cargo t --build-only
-      # `rustup run` hands the runner what `cargo t` would (RUSTUP_HOME, the toolchain): the sandbox has its own home, and a
-      # mission proof (the canary) runs cargo inside it.
-      - if: needs.changes.outputs.ui == 'true'
-        run: rustup run stable ./target/debug/faber-test.exe --suite ui --prebuilt
       # Exactly the programs `--prebuilt` checks for (testkit/src/testbuild.rs, `built_programs`).
       - uses: actions/upload-artifact@v4
         with:
@@ -170,46 +216,117 @@ jobs:
             target/faber-test/debug/faber.exe
             target/faber-test/debug/faber-local.exe
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: log-app
-          path: |
-            target/faber-test/shots/
-            target/faber-test/run.log
-          if-no-files-found: ignore
 
-  # The screen suite in eight parts dealt by CI seconds (testkit/src/screen/mod.rs, `SLOW`). A part builds nothing: it
-  # runs the programs of the app job. Cargo and Node stay installed because some scenarios run a project's own checks.
-  screen:
-    needs: [changes, app]
+  # How long each screen scenario took in the newest green runs, so the parts are dealt by today's seconds and not by a
+  # table that ages (scripts/screen-costs.mjs, R-next). It never fails: without the runs it hands on the table in the repo.
+  costs:
+    needs: changes
     if: needs.changes.outputs.screen == 'true'
-    name: screen (${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: |
+            scripts/screen-costs.mjs
+            testkit/screen-costs.json
+          sparse-checkout-cone-mode: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/screen-costs.mjs fetch > screen-costs.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screen-costs
+          retention-days: 1
+          path: screen-costs.json
+
+  # The ui suite and the screen suite in eight parts, dealt by CI seconds. A part builds nothing: it runs the programs of
+  # the app job. Node stays installed, and the Rust the runner image already has, because some scenarios run a project's
+  # own checks; installing the newest Rust took each part 20 to 30 s.
+  screen:
+    needs: [changes, app, costs]
+    if: >-
+      always() && needs.changes.outputs.tested == 'true' && needs.app.result == 'success' &&
+      (needs.costs.result == 'success' || (needs.costs.result == 'skipped' && needs.changes.outputs.screen == 'false'))
+    name: ${{ matrix.part == 'ui' && 'ui' || format('screen ({0})', matrix.part) }}
     strategy:
       fail-fast: false
       matrix:
-        shard: [1/8, 2/8, 3/8, 4/8, 5/8, 6/8, 7/8, 8/8]
+        part: ${{ fromJSON(needs.changes.outputs.parts) }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-      - uses: dtolnay/rust-toolchain@stable
       - uses: actions/download-artifact@v4
         with:
           name: test-app
           path: target
-      # As in the app job: `rustup run` hands the runner the toolchain, as `cargo t` would.
-      - run: rustup run stable ./target/debug/faber-test.exe --suite screen --shard ${{ matrix.shard }} --prebuilt
+      # `rustup run` hands the runner what `cargo t` would (RUSTUP_HOME, the toolchain): the sandbox has its own home, and a
+      # mission proof (the canary) runs cargo inside it.
+      - if: matrix.part == 'ui'
+        run: rustup run stable ./target/debug/faber-test.exe --suite ui --prebuilt
+      - if: matrix.part != 'ui'
+        uses: actions/download-artifact@v4
+        with:
+          name: screen-costs
+          path: target
+      - if: matrix.part != 'ui'
+        run: rustup run stable ./target/debug/faber-test.exe --suite screen --shard ${{ matrix.part }} --costs target/screen-costs.json --prebuilt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: log-screen-${{ strategy.job-index }}
+          name: ${{ matrix.part == 'ui' && 'log-ui' || format('log-screen-{0}', strategy.job-index) }}
           path: |
             target/faber-test/shots/
             target/faber-test/run.log
           if-no-files-found: ignore
+
+  # A warm run (R-next) builds on main what each kind of job builds and saves it as that kind's Rust cache, which every
+  # branch, queue and pull request can read. The land and main jobs start one after main moves; the daily run saves too.
+  # When main already holds a cache for the exact dependencies, the job restores it, sees it is current and stops.
+  warm:
+    needs: changes
+    if: needs.changes.outputs.warm == 'true'
+    name: warm (${{ matrix.os }}, ${{ matrix.cache }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, cache: lints }
+          - { os: macos-latest, cache: lints-ui }
+          - { os: windows-latest, cache: rust }
+          - { os: macos-latest, cache: rust }
+          - { os: windows-latest, cache: app }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - id: cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ matrix.cache }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -e
+          npm ci
+          npm run build
+          case "${{ matrix.cache }}" in
+            lints) cargo clippy --workspace --all-targets -- -D warnings; cargo clippy -p faber --features test-hooks -- -D warnings ;;
+            lints-ui) cargo clippy --workspace --all-targets -- -D warnings; cargo clippy -p faber --features test-hooks -- -D warnings; cargo t --build-only ;;
+            rust) cargo test --workspace --no-run; cargo build -p faber-testkit --bin faber-test ;;
+            app) cargo t --build-only ;;
+          esac
 
   # main follows every green phase-1-base commit on its own (R127), so nobody has to remember to move it.
   # Fast-forward only: a commit that is already in main, or a main that moved on its own, stops here without failing.
@@ -221,18 +338,23 @@ jobs:
       needs.changes.result == 'success' &&
       (needs.check.result == 'success' || (needs.check.result == 'skipped' && needs.changes.outputs.check == 'false')) &&
       (needs.app.result == 'success' || (needs.app.result == 'skipped' && needs.changes.outputs.app == 'false')) &&
-      (needs.screen.result == 'success' || (needs.screen.result == 'skipped' && needs.changes.outputs.screen == 'false'))
+      (needs.screen.result == 'success' || (needs.screen.result == 'skipped' && needs.changes.outputs.tested == 'false'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - run: |
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
           if git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then exit 0; fi
           git merge-base --is-ancestor origin/main "$GITHUB_SHA"
           git push origin "$GITHUB_SHA:refs/heads/main"
+          # A push made with this token starts no workflow, so main's warm run is started by hand (R-next).
+          gh workflow run ci.yml --ref main -f warm=true
 
   # The queue (R162): a commit pushed to queue/<name> lands on phase-1-base only after every check passed on top of the
   # newest phase-1-base, so a commit that is red on one system never reaches the shared branch and never stalls the
@@ -246,7 +368,7 @@ jobs:
       needs.changes.result == 'success' &&
       (needs.check.result == 'success' || (needs.check.result == 'skipped' && needs.changes.outputs.check == 'false')) &&
       (needs.app.result == 'success' || (needs.app.result == 'skipped' && needs.changes.outputs.app == 'false')) &&
-      (needs.screen.result == 'success' || (needs.screen.result == 'skipped' && needs.changes.outputs.screen == 'false'))
+      (needs.screen.result == 'success' || (needs.screen.result == 'skipped' && needs.changes.outputs.tested == 'false'))
     runs-on: ubuntu-latest
     concurrency:
       group: land
@@ -271,9 +393,13 @@ jobs:
           if git merge-base --is-ancestor origin/phase-1-base "$GITHUB_SHA"; then
             git push origin "$GITHUB_SHA:refs/heads/phase-1-base"
             # Green on top of the whole phase-1-base, so main follows at once (R127).
-            if git merge-base --is-ancestor origin/main "$GITHUB_SHA"; then git push origin "$GITHUB_SHA:refs/heads/main"; fi
+            if git merge-base --is-ancestor origin/main "$GITHUB_SHA"; then
+              git push origin "$GITHUB_SHA:refs/heads/main"
+              # Pushes made with this token start no workflow, so main's warm run is started by hand (R-next).
+              gh workflow run ci.yml --ref main -f warm=true
+            fi
             git push origin --delete "$branch"
-            # Pushes made with this token start no workflow, so the preview release is started by hand (R130, R156).
+            # The same goes for the preview release (R130, R156).
             gh workflow run auto-release.yml --ref phase-1-base -f sha="$GITHUB_SHA"
             echo "Landed $GITHUB_SHA."; exit 0
           fi
