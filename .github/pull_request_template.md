@@ -4,7 +4,8 @@
 
 ## For you
 
-<!-- One or two plain sentences on what changes for a person using Faber. They feed the release notes.
+<!-- Paste the English `notes.<id>` entry this pull request adds to every `ui/locales/*.ts` file (R142); the release
+     notes and the what's-new screen are built from those entries, not from this text.
      Write "Nothing a person sees." when that is true. -->
 
 ## Coherence
