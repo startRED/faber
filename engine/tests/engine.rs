@@ -1410,6 +1410,46 @@ async fn the_result_of_a_tool_that_ran_across_a_steer_lands_on_the_tool_not_on_t
     assert!(c.messages[3].tools.as_ref().unwrap().is_empty());
 }
 
+/// A real Claude Code turn (recorded 2026-10-16, paths replaced) in which the agent hands a search to an Explore subagent.
+#[tokio::test]
+async fn r161_a_subagents_tools_are_kept_under_its_agent_call_and_its_report_is_the_calls_output() {
+    const ASK: &str = "Use the Agent tool exactly once (subagent_type Explore) to find which file in this folder defines load_config. Then answer in one short sentence.";
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "subagent"));
+    let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let id = engine.send(ask(Area::Chat, ASK, choice("claude", Some("haiku")))).unwrap();
+    let c = until(&engine, &id, |c| settled(c, 2)).await;
+    engine.shutdown();
+    assert_eq!(f.mismatches.lock().unwrap().clone(), Vec::<String>::new());
+    let reply = &c.messages[1];
+    let tools = reply.tools.as_ref().unwrap();
+    let names = tools.iter().map(|t| (t.name.as_str(), t.parent.as_deref())).collect::<Vec<_>>();
+    assert_eq!(names, [("Agent", None), ("Grep", Some("toolu_01Qbe3kFjzVQ5sTZ4qVrX6Pg"))]);
+    assert!(tools.iter().all(|t| t.ok == Some(true)), "{tools:?}");
+    assert!(tools[0].output.as_deref().is_some_and(|o| o.contains("config.rs")), "the report is the agent call's output");
+    assert!(reply.text.starts_with("`load_config` is defined in"), "only the agent's own words are the answer: {}", reply.text);
+    assert!(!reply.text.contains("search recursively"), "the subagent's brief never joins the answer");
+    // The recording carries the subagent's own streamed words too (added by hand): they never join the answer or its thinking.
+    assert!(!reply.text.contains("CHILD WORDS"), "{}", reply.text);
+    assert!(!reply.thinking.as_deref().unwrap_or_default().contains("CHILD THINKING"));
+}
+
+/// A helper sent to the background answers its call at once ("launched"); it is settled by its task notification instead.
+#[tokio::test]
+async fn r161_a_background_helper_stays_open_until_its_notification_settles_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = fake(fixture("claude", "subagent-background"));
+    let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
+    let id = engine
+        .send(ask(Area::Chat, "Start a background helper to audit the docs, then tell me it is running.", choice("claude", Some("haiku"))))
+        .unwrap();
+    let c = until(&engine, &id, |c| settled(c, 2)).await;
+    engine.shutdown();
+    assert_eq!(f.mismatches.lock().unwrap().clone(), Vec::<String>::new());
+    let call = &c.messages[1].tools.as_ref().unwrap()[0];
+    assert_eq!((call.ok, call.output.as_deref()), (Some(true), Some("Two pages name an old setting.")), "{call:?}");
+}
+
 #[tokio::test]
 async fn a_plan_limit_after_a_steer_stops_the_steered_reply_and_leaves_the_first_one_done() {
     let dir = tempfile::tempdir().unwrap();

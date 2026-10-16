@@ -579,6 +579,7 @@ mod tests {
                 ok: Some(true),
                 output: Some("pushed".into()),
                 declined: false,
+                parent: None,
             }]);
         };
         let (reply, spawns) = lost(tool, false);

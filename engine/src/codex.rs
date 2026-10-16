@@ -305,7 +305,7 @@ pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<
                 .unwrap_or(item)
                 .clone();
             let name = if kind == "dynamicToolCall" && item["tool"] == "run_command" { "Bash" } else { kind };
-            vec![EngineEvent::Tool { id: s(&item["id"]), name: name.into(), input }]
+            vec![EngineEvent::Tool { id: s(&item["id"]), name: name.into(), input, parent: None }]
         }
         "item/completed" => {
             let item = &p["item"];

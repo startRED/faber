@@ -260,6 +260,17 @@ inside its own area.
 - With no AI connected, the greeting, the suggestions and the list give way to an empty state with Curioso and a button
   that opens account management. The composer stays on screen but cannot send.
 
+### Subagent steps
+
+When the agent hands part of the work to a subagent (R161), the reply shows one row per helper between the work log and
+the answer, in the work log's surface and type: a check, a cross or the live mark, the few words it was given in bold, and
+on the right its kind, its state and its step count in the third ink. The row opens like every disclosure (`animateDetails`)
+to the tool chips it ran and its report as Markdown; nothing else moves. Rows sit in a `minmax(0, 1fr)` grid, so a long
+tool line ellipsizes instead of widening the reply. A helper that never finished reads "stopped" once the reply has
+ended; one sent to the background keeps the live mark until its task notice arrives; a refused one reads "declined" in
+the third ink, never as a failure. Known limit: when a reply moves to another AI after a quota stop, its open tools,
+helpers included, read as working again with the new reply.
+
 ### Recent folders and environments
 
 The "Open a project" screen (Projects with none open) and the Chat folder setting list the last five folders used, newest

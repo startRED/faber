@@ -1261,6 +1261,16 @@ impl Core {
         self.claude_flags
     }
 
+    /// A tool of one of the last replies. A message steered into the turn starts a new reply, so a tool that began in the one
+    /// before still ends there; the current reply is looked at first.
+    fn tool_of(&mut self, conv: &str, id: &str) -> Option<&mut ToolUse> {
+        let current = self.live.get(conv).and_then(|l| l.turn.clone());
+        let replies = self.convs.get_mut(conv).into_iter().flat_map(|c| c.messages.iter_mut().rev()).filter(|m| m.role == Role::Assistant);
+        let mut recent = replies.take(3).collect::<Vec<_>>();
+        recent.sort_by_key(|m| Some(&m.id) != current.as_ref());
+        recent.into_iter().filter_map(|m| m.tools.as_mut()).flatten().find(|t| t.id == id)
+    }
+
     fn turn(&mut self, conv: &str) -> Option<&mut Message> {
         let id = self.live.get(conv)?.turn.clone()?;
         self.convs.get_mut(conv)?.messages.iter_mut().find(|m| m.id == id)
@@ -1360,25 +1370,31 @@ impl Core {
                     m.thinking.get_or_insert_default().push_str(&delta);
                 }
             }
-            EngineEvent::Tool { id, name, input } => {
+            EngineEvent::Tool { id, name, input, parent } => {
                 let final_answer = self.live.get(conv).is_some_and(|l| l.answer_started);
                 if let Some(m) = self.turn(conv) {
-                    if !final_answer {
+                    // A subagent works while the agent waits for it, so its tools never move where the answer begins.
+                    if !final_answer && parent.is_none() {
                         m.activity_end = Some(m.text.encode_utf16().count());
                     }
-                    m.tools.get_or_insert_default().push(ToolUse { id, name, input, ok: None, output: None, declined: false });
+                    m.tools.get_or_insert_default().push(ToolUse { id, name, input, ok: None, output: None, declined: false, parent });
                 }
             }
             EngineEvent::ToolResult { id, ok, declined, text } => {
-                // A message steered into the turn starts a new reply, so a tool that began in the one before still ends here.
-                let current = self.live.get(conv).and_then(|l| l.turn.clone());
-                let replies =
-                    self.convs.get_mut(conv).into_iter().flat_map(|c| c.messages.iter_mut().rev()).filter(|m| m.role == Role::Assistant);
-                let mut recent = replies.take(3).collect::<Vec<_>>();
-                recent.sort_by_key(|m| Some(&m.id) != current.as_ref());
-                if let Some(tool) = recent.into_iter().filter_map(|m| m.tools.as_mut()).flatten().find(|t| t.id == id) {
+                if let Some(tool) = self.tool_of(conv, &id) {
+                    // A helper sent to the background answers its call as soon as it starts; its end comes as `HelperDone`.
+                    if !declined && crate::model::runs_in_background(tool) {
+                        return;
+                    }
                     tool.ok = Some(ok);
                     tool.declined = declined;
+                    tool.output = Some(text.chars().take(4000).collect());
+                }
+            }
+            EngineEvent::HelperDone { id, ok, text } => {
+                // A helper that ran with its call is already settled by the call's own result, its full report included.
+                if let Some(tool) = self.tool_of(conv, &id).filter(|t| t.ok.is_none()) {
+                    tool.ok = Some(ok);
                     tool.output = Some(text.chars().take(4000).collect());
                 }
             }

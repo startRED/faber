@@ -1,0 +1,9 @@
+{"dir":"in","msg":{"type":"user","message":{"role":"user","content":"Start a background helper to audit the docs, then tell me it is running."},"parent_tool_use_id":null,"session_id":""}}
+{"dir":"out","msg":{"type":"system","subtype":"init","cwd":"C:workdemo","session_id":"bg-fixture","tools":["Agent"],"mcp_servers":[],"model":"claude-haiku-5-5","permissionMode":"bypassPermissions"}}
+{"dir":"out","msg":{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_bg1","name":"Agent","input":{"description":"Audit the docs","subagent_type":"general-purpose","prompt":"Audit docs/.","run_in_background":true}}]},"parent_tool_use_id":null,"session_id":"bg-fixture"}}
+{"dir":"out","msg":{"type":"system","subtype":"task_started","task_id":"t1","tool_use_id":"toolu_bg1","description":"Audit the docs","is_backgrounded":true,"session_id":"bg-fixture"}}
+{"dir":"out","msg":{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_bg1","type":"tool_result","content":[{"type":"text","text":"Async agent launched successfully."}]}]},"parent_tool_use_id":null,"session_id":"bg-fixture"}}
+{"dir":"out","msg":{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}},"parent_tool_use_id":null,"session_id":"bg-fixture"}}
+{"dir":"out","msg":{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"The audit is running in the background."}},"parent_tool_use_id":null,"session_id":"bg-fixture"}}
+{"dir":"out","msg":{"type":"system","subtype":"task_notification","task_id":"t1","tool_use_id":"toolu_bg1","status":"completed","summary":"Two pages name an old setting.","session_id":"bg-fixture"}}
+{"dir":"out","msg":{"type":"result","subtype":"success","is_error":false,"usage":{},"session_id":"bg-fixture"}}
