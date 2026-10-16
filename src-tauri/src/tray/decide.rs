@@ -222,6 +222,8 @@ impl Watch {
                 parked_notices.push((item.title.clone(), fresh));
             }
         }
+        // A turn that left the list is over, so what was counted for it is not needed again: the map stays as small as the list.
+        self.more_seen.retain(|(conversation, turn), _| items.iter().any(|i| &i.conversation_id == conversation && &i.turn_id == turn));
         self.last_running_counts = counts(items);
         Some(Update { counts: self.combined_counts(), notices, parked_notices })
     }
@@ -494,6 +496,16 @@ mod tests {
         assert_eq!(parked_notice_text(&texts, "Ship it", 1), "Ship it needs you");
         assert_eq!(parked_notice_text(&texts, "Ship it", 7), "Ship it: 7 requests need you");
         assert_eq!(parked_notice_text(&texts, "", 7), "Faber: 7 requests need you");
+    }
+
+    #[test]
+    fn the_overflow_counts_of_turns_that_left_the_list_are_forgotten() {
+        let mut watch = Watch::default();
+        let flood = parked_item("a", "t1", "Ship it", &["toolu_1"], 80);
+        watch.take_at(1, std::slice::from_ref(&flood), false, 0.0).unwrap();
+        assert_eq!(watch.more_seen.len(), 1);
+        watch.take_at(2, &[], false, 1.0).unwrap();
+        assert!(watch.more_seen.is_empty(), "{:?}", watch.more_seen);
     }
 
     fn item(conversation: &str, turn: &str, title: &str, requests: &[&str]) -> RunningItem {

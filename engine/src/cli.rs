@@ -10,6 +10,19 @@ pub struct Cli {
     pub prefix: Vec<String>,
 }
 
+impl Cli {
+    /// A cheap stand-in for the installed version: the size and modified time of the program and of each script given to it.
+    /// It changes when the CLI is updated or downgraded, and costs a few file reads of metadata, never a process.
+    pub fn stamp(&self) -> String {
+        std::iter::once(&self.command)
+            .chain(&self.prefix)
+            .filter_map(|p| std::fs::metadata(p).ok())
+            .map(|m| format!("{}:{:?}", m.len(), m.modified().ok()))
+            .collect::<Vec<_>>()
+            .join(";")
+    }
+}
+
 /// Finds a CLI on PATH without a shell. On Windows, npm installs `.cmd` shims, which cannot be started without a
 /// shell, so Faber reads the shim and runs what it points to: a native .exe, or `node script.js`.
 /// `exists` and `read` are parameters so tests can describe a computer without touching the disk.

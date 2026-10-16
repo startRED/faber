@@ -1062,3 +1062,36 @@ async fn the_cache_lifetime_starts_at_the_assistant_message_start_and_is_dropped
     let (events, _) = run(without, "In one sentence: why is the sky blue?", |e, _| matches!(e, EngineEvent::Done { .. })).await;
     assert!(events.iter().all(|e| started(e).is_none()), "{events:?}");
 }
+
+#[tokio::test]
+async fn the_cache_lifetime_starts_when_the_request_is_sent_not_when_the_first_word_comes_back() {
+    let (spawn, mut input, mut output) = support::controlled();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let session = start_claude(
+        ClaudeOptions { bin: "fake".into(), cwd: ".".into(), launch: launch(Area::Chat), spawn, sandbox: None },
+        Arc::new(move |e| drop(tx.send(e))),
+    );
+    let clock = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+    session.send(UserTurn::text("hello"));
+    support::read_message(&mut input).await;
+    let sent = clock();
+    // The CLI takes a while to answer; the cache already counts from the moment the request left.
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    // A status line in between is no new request: it must not move the start.
+    support::emit(&mut output, json!({ "type": "system", "subtype": "status", "status": "requesting" })).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    support::emit(&mut output, json!({ "type": "stream_event", "event": { "type": "message_start" }, "parent_tool_use_id": null })).await;
+    let usage = json!({ "cache_creation": { "ephemeral_5m_input_tokens": 10 } });
+    support::emit(&mut output, result_with(usage, json!([]))).await;
+    let mut began = None;
+    while let Some(event) = rx.recv().await {
+        match event {
+            EngineEvent::CacheWarm { started_ms, .. } => began = started_ms,
+            EngineEvent::Done { .. } => break,
+            _ => {}
+        }
+    }
+    let began = began.expect("the request start was seen");
+    assert!(began <= sent + 50, "started {}ms after the request was sent", began.saturating_sub(sent));
+    session.close();
+}

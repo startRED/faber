@@ -300,7 +300,7 @@ impl Core {
                         permissions: Permissions::Isolated,
                         instructions,
                         user_name: None,
-                        flags: self.claude_flags,
+                        flags: self.claude_flags_for(&cli),
                     },
                     spawn: spawner(&self.opts.spawn, &cli),
                     sandbox: None,

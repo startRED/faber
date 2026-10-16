@@ -58,6 +58,16 @@ fn glance() -> String {
     "glance".into()
 }
 
+fn other() -> String {
+    "other".into()
+}
+
+/// Parked items saved before `kind` existed hold it empty; the screen has no text for that, so it reads as `other`.
+fn kind_or_other<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    let kind = String::deserialize(d)?;
+    Ok(if kind.is_empty() { other() } else { kind })
+}
+
 /// Dispatch intent for a quota error that still offers explicit recovery after restart. Consent is never stored here.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Recovery {
@@ -92,7 +102,7 @@ pub struct ToolUse {
 pub struct Parked {
     pub tool_use_id: String,
     pub tool: String,
-    #[serde(default)]
+    #[serde(default = "other", deserialize_with = "kind_or_other")]
     /// "command", "file", "page" or "other".
     pub kind: String,
     #[serde(default)]
@@ -563,5 +573,13 @@ mod tests {
         let long = "ã".repeat(50);
         assert_eq!(clean_name(&long).unwrap().chars().count(), NAME_LIMIT);
         assert_eq!(clean_name(&format!("{} x", "a".repeat(39))).as_deref(), Some(&*"a".repeat(39)), "no space left dangling at the cut");
+    }
+
+    #[test]
+    fn a_parked_item_saved_with_an_empty_or_missing_kind_loads_as_other() {
+        for json in [r#"{"toolUseId":"t","tool":"Read"}"#, r#"{"toolUseId":"t","tool":"Read","kind":""}"#] {
+            assert_eq!(serde_json::from_str::<Parked>(json).unwrap().kind, "other", "{json}");
+        }
+        assert_eq!(serde_json::from_str::<Parked>(r#"{"toolUseId":"t","tool":"Bash","kind":"command"}"#).unwrap().kind, "command");
     }
 }
