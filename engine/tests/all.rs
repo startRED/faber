@@ -35,6 +35,8 @@ mod learning;
 mod ledger;
 #[path = "local_update.rs"]
 mod local_update;
+#[path = "locales.rs"]
+mod locales;
 #[path = "pacing.rs"]
 mod pacing;
 #[path = "paid_guard.rs"]

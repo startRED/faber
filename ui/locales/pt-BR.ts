@@ -141,7 +141,6 @@ export const ptBR: Messages = {
   'parked.other': '{tool}',
   'parked.more': '+{n} a mais',
   'answer.label': 'Resposta',
-  'answer.thinking': 'Raciocínio',
   'activity.working': 'Trabalhando · {steps} · {commands}',
   'activity.done': 'Trabalho realizado · {steps} · {commands}',
   'activity.steps': { one: '{n} etapa', other: '{n} etapas' },
@@ -251,7 +250,6 @@ export const ptBR: Messages = {
   'set.cornersSquare': 'Retos',
   'set.cornersSoft': 'Suaves',
   'set.motion': 'Movimento',
-  'set.effects': 'Efeitos',
   'set.themeHint': 'Muda só o visual. Conversas e projetos continuam iguais.',
   'error.permission.undelivered': "O Faber não conseguiu enviar a resposta de permissão. Tente novamente.",
   // R107: handwritten wording; native-speaker review pending (English is the source).
@@ -511,7 +509,6 @@ export const ptBR: Messages = {
   "usage.outside": "Uso fora do Faber: pelo menos {share} da variação observada na conta.",
   "usage.overageOn": "Esta conta permite uso extra pago. O Faber pergunta antes de usá-lo; desligar essa opção no provedor impede que a ferramenta mude sozinha.",
   "usage.billedPerUse": "Este login cobra por uso, então o Automático não o usa.",
-  "usage.pace": "Uso esperado da conta",
   "usage.expect": "Já passaram {elapsed} desta janela · projeção de cerca de {share} até a renovação",
   "usage.authNeeded": "A ferramenta precisa confirmar a cobrança por assinatura para o Automático. Informar o plano não confirma isso.",
   "usage.ownSpend": "Faber hoje: US$ {cost} equivalentes na API",
@@ -523,9 +520,7 @@ export const ptBR: Messages = {
   "quota.seven_day_sonnet": "Sonnet · 7 dias",
   "quota.seven_day_haiku": "Haiku · 7 dias",
   // Native speaker must translate (needs native review).
-  "projects.title": "Projetos",
   // Native speaker must translate (needs native review).
-  "projects.empty.selectProject": "Selecione a pasta de um projeto para iniciar uma missão.",
   // Native speaker must translate (needs native review).
   "projects.repo": "Pasta",
   // Native speaker must translate (needs native review).
@@ -546,8 +541,8 @@ export const ptBR: Messages = {
   // Native speaker must translate (needs native review).
   "projects.gitMode.seguroDesc": "O Faber trabalha numa cópia separada do projeto. Não mexe no GitHub nem em nada na internet.",
   // Native speaker must translate (needs native review).
-  "projects.gitMode.equilibrado": "Equilibrado (Commits locais + draft PR)",
   // Native speaker must translate (needs native review).
+  "projects.gitMode.equilibrado": "Equilibrado (Commits locais + draft PR)",
   "projects.gitMode.equilibradoDesc": "Seguro mais o envio da branch da missão e a criação de um draft PR.",
   // Native speaker must translate (needs native review).
   "projects.selfUpdate.trust": "Permitir que o Faber atualize a si mesmo",
@@ -608,7 +603,6 @@ export const ptBR: Messages = {
   // Native speaker must translate (needs native review).
   "projects.receipt.notRun": "Não executado",
   // Native speaker must translate (needs native review).
-  "projects.receipt.verified": "Verificado",
   // Native speaker must translate (needs native review).
   "projects.cost.title": "Custo próprio",
   // Native speaker must translate (needs native review).
@@ -742,7 +736,6 @@ export const ptBR: Messages = {
   'projects.tasks.none': 'Nenhuma tarefa ainda. O Faber divide o objetivo em tarefas enquanto planeja.',
   'projects.tasks.count': '{done} de {total} concluídas',
   // Native speaker must translate (needs native review).
-  "reason.mission.runnerUnavailable": "A execução da missão está aguardando o executor aprovado. Nenhum trabalho foi iniciado.",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   "error.wire.malformed": "A solicitação contém valores inválidos ou ausentes.",

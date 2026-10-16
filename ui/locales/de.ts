@@ -143,7 +143,6 @@ export const de: Messages = {
   'parked.other': '{tool}',
   'parked.more': '+{n} weitere',
   'answer.label': 'Antwort',
-  'answer.thinking': 'Denkprozess',
   'activity.working': 'In Arbeit · {steps} · {commands}',
   'activity.done': 'Bearbeitet · {steps} · {commands}',
   'activity.steps': { one: '{n} Schritt', other: '{n} Schritte' },
@@ -254,7 +253,6 @@ export const de: Messages = {
   'set.cornersSquare': 'Eckig',
   'set.cornersSoft': 'Weich',
   'set.motion': 'Bewegung',
-  'set.effects': 'Effekte',
   'set.themeHint': 'Nur das Aussehen ändert sich. Deine Chats und Projekte bleiben, wie sie sind.',
   'error.permission.undelivered': "Faber konnte die Antwort auf die Berechtigungsanfrage nicht senden. Versuche es erneut.",
   // R107: handwritten wording; native-speaker review pending (English is the source).
@@ -514,7 +512,6 @@ export const de: Messages = {
   "usage.outside": "Nutzung außerhalb von Faber: mindestens {share} der beobachteten Kontobewegung.",
   "usage.overageOn": "Bezahlte Zusatznutzung ist für dieses Konto verfügbar. Faber fragt vorher; Abschalten beim Anbieter verhindert einen selbstständigen Wechsel des Werkzeugs.",
   "usage.billedPerUse": "Dieser Zugang wird nach Verbrauch abgerechnet, deshalb nutzt Auto ihn nicht.",
-  "usage.pace": "Erwartete Kontonutzung",
   "usage.expect": "{elapsed} des Zeitfensters sind vorbei · etwa {share} bis zur Erneuerung erwartet",
   "usage.authNeeded": "Das Werkzeug muss die Aboabrechnung für Auto bestätigen. Ein Tarifname bestätigt sie nicht.",
   "usage.ownSpend": "Faber heute: ${cost} API-Gegenwert",
@@ -526,9 +523,7 @@ export const de: Messages = {
   "quota.seven_day_sonnet": "Sonnet · 7 Tage",
   "quota.seven_day_haiku": "Haiku · 7 Tage",
   // Native speaker must translate (needs native review).
-  "projects.title": "Projekte",
   // Native speaker must translate (needs native review).
-  "projects.empty.selectProject": "Wähle einen Projektordner aus, um eine Mission zu starten.",
   // Native speaker must translate (needs native review).
   "projects.repo": "Ordner",
   // Native speaker must translate (needs native review).
@@ -549,8 +544,8 @@ export const de: Messages = {
   // Native speaker must translate (needs native review).
   "projects.gitMode.seguroDesc": "Faber arbeitet an einer getrennten Kopie deines Projekts. Es rührt weder GitHub noch etwas im Internet an.",
   // Native speaker must translate (needs native review).
-  "projects.gitMode.equilibrado": "Equilibrado (Lokale Commits + Draft-PR)",
   // Native speaker must translate (needs native review).
+  "projects.gitMode.equilibrado": "Equilibrado (Lokale Commits + Draft-PR)",
   "projects.gitMode.equilibradoDesc": "Seguro plus Übertragen des Missions-Branches und Erstellen eines Draft-PRs.",
   // Native speaker must translate (needs native review).
   "projects.selfUpdate.trust": "Faber erlauben, sich selbst zu aktualisieren",
@@ -611,7 +606,6 @@ export const de: Messages = {
   // Native speaker must translate (needs native review).
   "projects.receipt.notRun": "Nicht ausgeführt",
   // Native speaker must translate (needs native review).
-  "projects.receipt.verified": "Geprüft",
   // Native speaker must translate (needs native review).
   "projects.cost.title": "Eigene Kosten",
   // Native speaker must translate (needs native review).
@@ -745,7 +739,6 @@ export const de: Messages = {
   'projects.tasks.none': 'Noch keine Aufgaben. Faber teilt das Ziel beim Planen in Aufgaben auf.',
   'projects.tasks.count': '{done} von {total} erledigt',
   // Native speaker must translate (needs native review).
-  "reason.mission.runnerUnavailable": "Die Missionsausführung wartet auf den genehmigten Runner. Es wurde noch keine Arbeit begonnen.",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   "error.wire.malformed": "Die Anfrage enthält ungültige oder fehlende Werte.",
