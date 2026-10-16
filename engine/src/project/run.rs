@@ -469,7 +469,8 @@ impl Runner {
         std::fs::create_dir_all(j.private().join("proofs")).map_err(|_| "error.store.write")?;
         std::fs::write(j.private().join(path), log).map_err(|_| "error.store.write")?;
         std::fs::write(j.private().join(format!("proofs/{receipt}.output")), whole).map_err(|_| "error.store.write")?;
-        std::fs::write(j.private().join(format!("proofs/{receipt}.report")), report.text()).map_err(|_| "error.store.write")?;
+        std::fs::write(j.private().join(format!("proofs/{receipt}.report")), super::proof::output::withheld(&report.text()))
+            .map_err(|_| "error.store.write")?;
         self.finish_proof(j, task, proof, &receipt, id, observation)
     }
     /// What a role reads of a proof the engine ran (R155): its failures with `file:line` and the tool's fix, its

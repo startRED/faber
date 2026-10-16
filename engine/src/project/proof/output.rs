@@ -24,6 +24,8 @@ pub struct Report {
     pub measurements: Vec<String>,
     /// One line: passed or failed, and the tool's own tally when it prints one.
     pub summary: String,
+    /// The only failure is the output's last lines, shown whole.
+    pub fallback: bool,
 }
 
 /// The most failures a role reads, the most lines of each, and the longest line; the log keeps everything.
@@ -65,7 +67,8 @@ pub fn read(output: &str, exit: Option<i32>, root: &str) -> Report {
         Some(code) => format!("failed (exit {code})"),
         None => "did not finish".to_string(),
     };
-    if exit != Some(0) && failures.is_empty() {
+    let fallback = exit != Some(0) && failures.is_empty();
+    if fallback {
         let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
         let last = lines[lines.len().saturating_sub(LAST_LINES)..].join("\n");
         if !last.is_empty() {
@@ -79,19 +82,26 @@ pub fn read(output: &str, exit: Option<i32>, root: &str) -> Report {
     if !known && exit != Some(0) {
         summary.push_str(" (output not recognised; its last lines are shown)");
     }
-    Report { failures, measurements: found.measurements, summary }
+    Report { fallback: fallback && !failures.is_empty(), failures, measurements: found.measurements, summary }
 }
 
 /// The output with every line the secret scanner flags replaced, so neither the log nor a role ever holds a printed secret.
+/// A line is scanned as printed and without its colour codes (which could split a token), and a private key is withheld
+/// from its header to its footer, or to the end when the footer never comes.
 pub fn withheld(output: &str) -> String {
     let mut text = String::with_capacity(output.len());
+    let mut in_key = false;
     for line in output.split_inclusive('\n') {
-        if super::scan_secrets(line).is_ok() {
-            text.push_str(line);
-        } else {
+        let bare = plain(line, "");
+        let key = |marker: &str| bare.contains(marker) && bare.contains("PRIVATE KEY-----");
+        in_key = in_key || key("-----BEGIN");
+        if in_key || super::scan_secrets(line).is_err() || super::scan_secrets(&bare).is_err() {
             text.push_str("[line withheld: it looks like a secret]");
             text.push_str(if line.ends_with('\n') { "\n" } else { "" });
+        } else {
+            text.push_str(line);
         }
+        in_key = in_key && !key("-----END");
     }
     text
 }
@@ -107,8 +117,13 @@ impl Report {
                 Some(place) => out.push_str(&format!("{place}: {first}\n")),
                 None => out.push_str(&format!("{first}\n")),
             }
-            for line in lines.by_ref().take(FAILURE_LINES - 1) {
+            let most = if self.fallback { LAST_LINES } else { FAILURE_LINES };
+            for line in lines.by_ref().take(most - 1) {
                 out.push_str(&format!("    {line}\n"));
+            }
+            let more = lines.count();
+            if more > 0 {
+                out.push_str(&format!("    ({more} more lines in the log)\n"));
             }
             if let Some(fix) = &failure.fix {
                 out.push_str(&format!("    fix: {}\n", cut(fix)));
@@ -174,7 +189,7 @@ fn place(text: &str) -> Option<String> {
     }
     let path = if digits(middle) { parts.next()? } else { middle };
     // A drive letter alone (`C:5`) is not a path.
-    (path.len() > 1 && !path.contains(' ')).then(|| text.to_string())
+    (path.trim().len() > 1).then(|| text.to_string())
 }
 
 // ----- `cargo t`, Faber's own runner -----
@@ -418,6 +433,19 @@ fn rustc(text: &str, found: &mut Found) -> bool {
         while at < lines.len() && !lines[at].trim().is_empty() {
             block.push(lines[at]);
             at += 1;
+        }
+        // An error of Cargo itself (a build script, a missing package) has no place; its cause follows in sections.
+        if !block.iter().any(|l| l.trim_start().starts_with("--> ")) {
+            let mut said: Vec<&str> = block.iter().map(|l| l.trim()).collect();
+            while at < lines.len() && !lines[at].starts_with("error") && !lines[at].starts_with("warning:") {
+                said.push(lines[at].trim());
+                at += 1;
+            }
+            let said = said.into_iter().filter(|l| !l.is_empty());
+            let message = std::iter::once(format!("error{code}: {message}")).chain(said.map(str::to_string)).collect::<Vec<_>>();
+            found.failures.push(Failure { place: None, message: message.join("\n"), fix: None });
+            errors += 1;
+            continue;
         }
         let spot = block.iter().find_map(|l| l.trim_start().strip_prefix("--> ")).and_then(place);
         let (mut label, mut edit, mut first_advice) = (None, None, None);
@@ -777,6 +805,38 @@ mod tests {
         let output = format!("src/a.ts(1,1): error TS1: leaked {token}\r\nok line\nlast");
         assert_eq!(withheld(&output), "[line withheld: it looks like a secret]\nok line\nlast");
         assert!(!read(&withheld(&output), Some(2), "").text().contains(&token));
+        let split = format!("error TS1: gh\u{1b}[0mp_{}\n", "a".repeat(36));
+        assert_eq!(withheld(&split), "[line withheld: it looks like a secret]\n", "a colour code cannot hide a token");
+        let key = "a\n-----BEGIN PRIVATE KEY-----\nMC4CAQAw\n-----END PRIVATE KEY-----\nb\n-----BEGIN RSA PRIVATE KEY-----\nMIIE\n";
+        let shown = withheld(key);
+        let kept: Vec<&str> = shown.lines().filter(|l| !l.starts_with("[line withheld")).collect();
+        assert_eq!(kept, ["a", "b"], "a key is withheld whole, and to the end without its footer");
+    }
+
+    #[test]
+    fn an_unknown_failure_shows_all_its_last_lines_and_a_long_failure_counts_what_it_cut() {
+        let output = (1..=19).map(|n| format!("step {n}")).chain(["fatal: missing config.toml".to_string()]).collect::<Vec<_>>();
+        let text = read(&output.join("\n"), Some(1), "").text();
+        assert!(text.contains("fatal: missing config.toml") && text.contains("step 1\n"), "{text}");
+        let message = (0..12).map(|n| format!("line {n}")).collect::<Vec<_>>().join("\n");
+        let long = Report { failures: vec![Failure { place: None, message, fix: None }], ..Report::default() };
+        assert!(long.text().contains("    line 7\n    (4 more lines in the log)"), "{}", long.text());
+    }
+
+    #[test]
+    fn a_path_with_a_space_keeps_its_error() {
+        let output = "src/my folder/a.ts(1,7): error TS2322: x\nsrc/b.ts(2,7): error TS2322: y\n";
+        let places: Vec<_> = read(output, Some(2), "").failures.into_iter().filter_map(|f| f.place).collect();
+        assert_eq!(places, ["src/my folder/a.ts:1:7", "src/b.ts:2:7"]);
+    }
+
+    #[test]
+    fn an_error_of_cargo_itself_keeps_its_cause() {
+        let output = "error: failed to run custom build command for `demo v0.1.0`\n\nCaused by:\n  process didn't exit successfully: \
+                      `build-script-build` (exit code: 1)\n  --- stderr\n  pkg-config could not find openssl\n";
+        let report = read(output, Some(101), "");
+        assert_eq!(report.failures.len(), 1);
+        assert!(report.failures[0].message.ends_with("pkg-config could not find openssl"), "{:?}", report.failures);
     }
 
     #[test]
