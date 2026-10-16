@@ -448,20 +448,19 @@ frames) and checked against today's code. It fills the steps of R161 and never b
    attachments of a project conversation (`<data dir>/attachments/<conversation id>/`): Faber's own data, never the
    project folder (R35), never in an export, trimmed by size and deleted with its conversation. "While you were away"
    sums it up in a few pictures with one sentence each.
-9. **Screens that build themselves in front of you.** The owner's ask (2026-10-16), with Google Stitch as a reference
-   for the feeling, never its look: when the agent builds or changes a screen, the app pane shows that screen filling
-   in as the work lands, not a finished picture at the end. The project's own dev server reloads after each saved
-   change, so the pane follows on its own; between two pictures of the log Faber marks the part that changed with a
-   soft outline that fades. Each subagent at work has its own pointer on the pane, in its color, with a small tag
-   bearing the name from its row; a pointer moves to where that subagent last clicked or changed something. Clicking a
-   tag opens that subagent in the side chat, and clicking the outlined part says which call changed it. Several
-   screens of one task sit side by side, each filling in as its subagent works, and the one the person opens is the
-   only live view. Reduced motion shows the outline and the tag with no movement; during a game nothing moves.
-10. **Every kind of work has a picture.** The goal is work that is easy to follow at a glance, not any one look. Beside
-    its living sentence, each subagent row shows a small picture of what it touches: the page it reads (its title and
-    site icon), the file it changes (a few changed lines, added in green and removed in red), the checks it runs (a
-    count that ticks up, green or red), the search it makes (the words and how many results). The picture comes from
-    the call itself, with no model call and no extra process, and opening the row shows it full size.
+9. **The view fits the work.** The owner's ask (2026-10-16): the person watches each agent work in whatever way makes
+   that work easiest to follow. The rule is the goal; the examples below are starting points, not a spec, and the
+   references (Google Stitch, Claude's own browser pane) are for the feeling, never the look.
+   - Browsing: the page live as the agent moves through it, its pointer and what it clicks or types, and the line of
+     what it is looking for.
+   - Building a screen: the screen filling in as each change lands (the project's dev server reloads on its own), the
+     changed part outlined for a moment, and a named pointer per subagent that opens it in the side chat.
+   - Changing files: the few lines that changed, added and removed. Running checks: a count that ticks up, green or red.
+   - Researching: the sources it opened and the one it reads now. Long or hidden work: the living sentence and the time.
+
+   Each view is built from the agent's own calls and the pane's log, with no model call and no extra process; only the
+   view the person opens is live. Reduced motion keeps the outlines and tags without movement; during a game nothing
+   moves.
 
 **Across all of them:**
 
