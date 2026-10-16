@@ -235,7 +235,8 @@ produced by a mission, missions with more than one task.
 
 Found by the 2026-10-16 audit and not fixed yet. Touching one of these parts means fixing it or leaving it as it is,
 never copying it. "Owner" marks a choice of taste or direction that needs the owner first. Delete a line in the commit
-that fixes it.
+that fixes it. The weekly coherence pass (`testkit/coherence/weekly.md`) proposes new lines and the removal of fixed
+ones.
 
 1. Settings on a work screen (C011): the Projects start card carries the checks list, "If a tool is missing", a git mode
    with one option and the self-update switch, plus a technical Details block; the board carries the run mode. The owner
