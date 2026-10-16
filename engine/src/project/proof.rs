@@ -489,6 +489,8 @@ pub async fn execute(definition: &Definition, cwd: &std::path::Path, spawn: &cra
         let job = if matches!(capture, Ok(Ok(()))) {
             process.contained.take()
         } else {
+            // A proof whose output could not be kept has not passed, whatever its exit code said.
+            exit = None;
             output.clear();
             errors.clear();
             crate::proc::stop_keeping(&mut *process.stdin, &mut process.child, &mut process.contained).await

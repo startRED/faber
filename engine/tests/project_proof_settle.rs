@@ -26,3 +26,23 @@ async fn a_process_a_proof_left_behind_is_gone_when_the_proof_returns() {
     // A process still holding the file would make this fail with a sharing violation.
     std::fs::remove_file(dir.path().join("hold.txt")).expect("the left-behind process was still running");
 }
+
+#[tokio::test]
+async fn a_proof_whose_output_is_too_big_has_no_exit_code_even_when_it_exits_zero() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("big.txt"), "x".repeat(faber_engine::project::wire::MAX_ENVELOPE + 1)).unwrap();
+    let system = std::env::var("SystemRoot").unwrap();
+    let definition = Definition {
+        id: "too-much-output".into(),
+        version: 1,
+        program: std::path::Path::new(&system).join("System32").join("cmd.exe"),
+        argv: vec!["/d".into(), "/c".into(), "type big.txt".into()],
+        checks: vec!["C1".into()],
+        toolchain: "cmd".into(),
+        dependencies: "none".into(),
+        environment: BTreeMap::new(),
+        heavy: false,
+    };
+    let seen = execute(&definition, dir.path(), &faber_engine::proc::real_spawner(), "proofs/x.log".into()).await;
+    assert_eq!(seen.exit, None, "output that could not be kept must never read as a pass");
+}
