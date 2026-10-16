@@ -813,6 +813,10 @@ fn black_hole_in_a_project(ctx: &mut Ctx) -> Result {
     super::shell::seed_project(ctx, "Demo")?;
     let launch = claude_chat(ctx);
     let mut app = ctx.launch(launch)?;
+    // The art lives only right of the column of words and needs room there, as on the owner's own screen.
+    app.page
+        .cdp
+        .call("Emulation.setDeviceMetricsOverride", json!({ "width": 1920, "height": 1080, "deviceScaleFactor": 1, "mobile": false }))?;
     system_motion(&mut app.page, false)?;
     let live = "document.querySelector('canvas.amb-hole')?.dataset.live";
     let hide = |page: &mut Page, on: bool| {

@@ -75,6 +75,8 @@ export interface Message {
   parkedMore?: number;
   incomplete?: boolean;
   pace?: { kind: 'step' | 'low'; vendor: Vendor };
+  /** The mode that really ran this reply, as an engine key, only when it is not the one chosen (`mode.fallback.auto`). */
+  mode?: string;
   /** A note under the reply, as an engine key (`note.historyResent`). */
   note?: string;
   waitUntil?: number;
@@ -306,10 +308,22 @@ export type ThemeFile = Appearance & { name: string };
 
 /** The answer to "Do you already use AI?". No answer counts as a beginner. */
 export type Experience = 'beginner' | 'experienced';
+/** How a CLI may act in Chat (R140). `dontAsk` is Full access and the default when nothing is saved. */
+export type PermissionMode = 'ask' | 'acceptEdits' | 'plan' | 'auto' | 'dontAsk';
+/** The modes in the order they are listed, strictest first; full access is the default. */
+export const PERMISSION_MODES: PermissionMode[] = ['ask', 'acceptEdits', 'plan', 'auto', 'dontAsk'];
+export type WebSearch = 'off' | 'cached' | 'live';
+export type ReasoningSummary = 'default' | 'auto' | 'concise' | 'detailed' | 'none';
+export type Verbosity = 'default' | 'low' | 'medium' | 'high';
 export interface Settings {
   appearance?: Appearance;
   userHooks?: boolean;
-  permissions?: 'dontAsk' | 'ask';
+  permissions?: PermissionMode;
+  /** Missing means live. */
+  webSearch?: WebSearch;
+  /** Codex only; missing means the model's own. */
+  reasoningSummary?: ReasoningSummary;
+  verbosity?: Verbosity;
   notifications?: boolean;
   notificationSound?: boolean;
   language?: string;
@@ -523,8 +537,8 @@ export const api = {
     invoke<Grant>('project_grant', { projectId, mode, selfUpdate, revision }),
   projectRevoke: (projectId: string) => invoke<void>('project_revoke', { projectId }),
   projectProof: (projectId: string) => invoke<ProofView>('project_proof', { projectId }),
-  projectProofConfirm: (projectId: string, commands: string[], setup: string[]) =>
-    invoke<ProofView>('project_proof_confirm', { projectId, commands, setup }),
+  projectProofConfirm: (projectId: string, commands: string[], setup: string[], declared: string[]) =>
+    invoke<ProofView>('project_proof_confirm', { projectId, commands, setup, declared }),
   missionStart: (projectId: string, goal: string) => invoke<string>('mission_start', { projectId, goal }),
   missionState: (missionId: string) => invoke<MissionView>('mission_state', { missionId }),
   missionMode: (missionId: string, mode: RunMode) => invoke<MissionView>('mission_mode', { missionId, mode }),

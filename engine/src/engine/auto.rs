@@ -284,7 +284,16 @@ impl Core {
         let (model, effort) = (Some(model.to_string()), Some(effort.to_string()));
         let session = match vendor {
             Vendor::Codex => self.codex_server(Area::Chat, false, Permissions::Isolated, &cli).open(
-                CodexThread { cwd, model, effort, resume: None, instructions, user_name: None, permissions: Permissions::Isolated },
+                CodexThread {
+                    cwd,
+                    model,
+                    effort,
+                    resume: None,
+                    instructions,
+                    user_name: None,
+                    permissions: Permissions::Isolated,
+                    tuning: Default::default(),
+                },
                 sink,
             ),
             Vendor::Claude => start_claude(
@@ -301,6 +310,7 @@ impl Core {
                         instructions,
                         user_name: None,
                         flags: self.claude_flags_for(&cli),
+                        tuning: Default::default(),
                     },
                     spawn: spawner(&self.opts.spawn, &cli),
                     sandbox: None,

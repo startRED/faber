@@ -56,7 +56,7 @@ pub fn sandbox_config(root: &Path, writable: bool) -> Map<String, Value> {
         }
     }
     let mut config = json!({ "default_permissions": id, format!("permissions.{id}"): profile,
-        "sandbox_workspace_write.network_access": false, "sandbox_workspace_write.writable_roots": [], "allow_login_shell": false,
+        "web_search": "disabled", "sandbox_workspace_write.network_access": false, "sandbox_workspace_write.writable_roots": [], "allow_login_shell": false,
         "shell_environment_policy.set": child_env(root), "shell_environment_policy.ignore_default_excludes": false
     })
     .as_object()

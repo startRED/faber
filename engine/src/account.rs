@@ -101,7 +101,7 @@ mod flags_tests {
     use crate::claude::ClaudeFlags;
 
     const HELP: &str = "Usage: claude\n  --autocompact <auto|tokens>   Window\n  --permission-prompts <target>   Who answers\n";
-    const BOTH: ClaudeFlags = ClaudeFlags { autocompact: true, permission_prompts: true };
+    const BOTH: ClaudeFlags = ClaudeFlags { autocompact: true, permission_prompts: true, auto_mode: false };
 
     #[test]
     fn only_a_help_that_finished_successfully_declares_flags() {
@@ -212,6 +212,7 @@ pub(crate) async fn claude_limits(cli: &Cli, spawn: &Spawner, cwd: &Path, timeou
         instructions: None,
         user_name: None,
         flags: Default::default(),
+        tuning: Default::default(),
     };
     let Ok(mut args) = project_claude_args(&launch, Role::Lead) else { return vec![] };
     args.retain(|arg| arg != "--disable-slash-commands");

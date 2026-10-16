@@ -62,6 +62,14 @@ function remember(key: string, value: unknown) {
 
 // A long conversation draws only its latest messages, and more as the user scrolls up, so memory stays flat.
 const PAGE = 40;
+// The calm line over a thread that says which mode is on.
+const MODE_LINE = {
+  ask: 'project.permissionsAsk',
+  acceptEdits: 'project.permissionsAcceptEdits',
+  plan: 'project.permissionsPlan',
+  auto: 'project.permissionsAuto',
+  dontAsk: 'project.permissionsDontAsk',
+} as const;
 
 const TYPING = 'textarea, input:not([type=checkbox], [type=radio], [type=range], [type=color], [type=file]), [contenteditable]';
 
@@ -627,6 +635,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         options={options()}
         choice={picked()}
         onChoice={pickChoice}
+        mode={area() === 'chat' ? (state().settings.permissions ?? 'dontAsk') : undefined}
+        onMode={area() === 'chat' ? (permissions) => void saveSettings({ permissions }) : undefined}
         busy={busy() && !loading()}
         nextMessage={!!current()?.messages.length}
         locked={loading()}
@@ -733,6 +743,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
               vendors={state().vendors}
               quotas={quotas()}
               usage={state().usage ?? []}
+              projects={state().projects}
               now={clock()}
               start={back()?.section ?? settingsAt()}
               kept={back()?.draft}
@@ -903,7 +914,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                             }}>
                               <Show when={area() === 'chat' || project()}>
                                 <p class="hint" role="status">
-                                  {t(state().settings.permissions === 'ask' ? 'project.permissionsAsk' : 'project.permissionsDontAsk')}{' '}
+                                  {t(MODE_LINE[state().settings.permissions ?? 'dontAsk'])}{' '}
                                   <button type="button" onClick={() => openSettings('general')}>{t('project.permissionsDetails')}</button>
                                 </p>
                               </Show>

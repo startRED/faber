@@ -107,6 +107,9 @@ pub struct Store {
     disk: Arc<dyn Disk>,
     budget_owner: Option<fs::File>,
     owner_required: bool,
+    /// The grants epoch started when the settings could not be read. It lives here, in memory, and is the epoch in force
+    /// until a save writes it: a read that works again later never brings the epoch on disk back.
+    recovery_epoch: std::sync::Mutex<Option<String>>,
 }
 
 impl Store {
@@ -127,6 +130,7 @@ impl Store {
             disk,
             budget_owner: None,
             owner_required: false,
+            recovery_epoch: std::sync::Mutex::new(None),
             cache_health: data_dir.join("cache-health.jsonl"),
         }
     }
@@ -204,12 +208,48 @@ impl Store {
         self.write(&self.projects, &projects)
     }
 
+    /// A missing file is the defaults (full access). A file that cannot be read or understood (a hand edit, or values a newer
+    /// build wrote) is never read as that: it asks before every change.
     pub fn settings(&self) -> Settings {
-        read(&self.settings).unwrap_or_default()
+        let mut recovery = self.recovery_epoch.lock().unwrap_or_else(|e| e.into_inner());
+        match read_checked(&self.settings) {
+            Ok(found) => {
+                let mut settings: Settings = found.unwrap_or_default();
+                if let Some(epoch) = recovery.clone() {
+                    settings.grants_epoch = Some(epoch);
+                }
+                settings
+            }
+            // No earlier grant counts either: a new epoch, kept in memory and written by the next save.
+            Err(_) => Settings {
+                permissions: Some(crate::model::Permissions::Ask),
+                grants_epoch: Some(recovery.get_or_insert_with(crate::model::new_epoch).clone()),
+                ..Settings::default()
+            },
+        }
+    }
+
+    /// Forgets the "Always allow" of every conversation on disk except the `loaded` ones, which the engine clears itself.
+    pub fn clear_grants(&self, loaded: &dyn Fn(&str) -> bool) {
+        let files = fs::read_dir(&self.conversations).into_iter().flatten().flatten();
+        for entry in files.filter(|e| e.path().extension().is_some_and(|x| x == "json")) {
+            if let Some(mut c) = read::<Conversation>(&entry.path())
+                && c.allow_always.is_some()
+                && !loaded(&c.id)
+            {
+                c.allow_always = None;
+                c.allow_always_epochs.clear();
+                self.save(&c);
+            }
+        }
     }
 
     pub fn save_settings(&self, settings: &Settings) -> Result<(), Fault> {
-        self.write(&self.settings, settings)
+        let mut recovery = self.recovery_epoch.lock().unwrap_or_else(|e| e.into_inner());
+        self.write(&self.settings, settings)?;
+        // The epoch in force is on disk now.
+        *recovery = None;
+        Ok(())
     }
 
     fn quarantine(&self) -> PathBuf {

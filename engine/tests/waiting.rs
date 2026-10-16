@@ -385,6 +385,7 @@ fn seed(dir: &Path, long: bool) -> Conversation {
         command_gate: false,
         cost_base: BTreeMap::new(),
         allow_always: None,
+        allow_always_epochs: Default::default(),
         branch_of: None,
         user_name: None,
         persona_version: None,

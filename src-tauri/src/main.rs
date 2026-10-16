@@ -737,14 +737,15 @@ async fn project_proof_confirm(
     project_id: String,
     commands: Vec<String>,
     setup: Vec<String>,
+    declared: Vec<String>,
 ) -> Res<mission::ProofView> {
     let _turn = faber.missions.lock().await;
     project_commands::id(&project_id)?;
-    for command in commands.iter().chain(&setup) {
+    for command in commands.iter().chain(&setup).chain(&declared) {
         project_commands::text(command)?;
     }
     let before = faber.engine.project(&project_id)?;
-    let after = mission::confirm(&before, &commands, &setup).map_err(str::to_string)?;
+    let after = mission::confirm(&before, &commands, &setup, &declared).map_err(str::to_string)?;
     faber.engine.update_project(&before, &after)?;
     Ok(mission::view(&after))
 }

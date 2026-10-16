@@ -135,8 +135,9 @@ own inks.
 - The first screen of a project (where a new session starts) in Dark Room also shows a black hole drawn in monospace
   characters on one canvas (ui/Hole.tsx, --amb-hole and --hole-colors): a huge shadow cut by the right edge, an amber disk sweeping in from the lower left
   with fibres that turn faster near the hole, the far side of the disk bent over the top as a cool arc, a photon ring, a
-  dim glow, a small planet below it and stars. Its size follows the room right of the text; words stay clear and the
-  scene dims within 240 px of them.
+  dim glow, a small planet below it and stars. It lives only right of the column of words: it starts 32 px past the
+  column, fades in over 160 px and dims within 280 px, across the whole height, so words that scroll in the column never
+  pass over it. With less than 400 px of room it does not show or run.
   Ten times a second it works out again only the cells the hole can reach and repaints those that changed; stars
   twinkle every 700 ms and now and then one shoots across. A click on an empty spot sends a ring of the accent for
   1.3 s. It stops when the window is hidden or unfocused; reduced or no motion draws one still frame and no ripple.
@@ -295,6 +296,42 @@ projects. Faber has no worktree creation for projects, so an environment has no 
   value if the save fails. R107 applies the same default to Chat. Chat uses its chosen canonical folder
   (fixed before the first message), or private per-conversation scratch; deletion/draft cleanup never removes a chosen
   folder. General explains the rule and offers the folder choice.
+- R140 (Chat; the person's own project sessions take the same modes, and mission roles never do): the Permissions choice is a
+  list of five modes, each with one plain line and its long text behind a closed "Learn more" that is not in the page
+  while closed. The composer of Chat carries the same choice as a chip. Mode by CLI (the CLI that lacks a mode runs the
+  nearest safer one and the reply says so, `mode.fallback.auto`):
+
+  | Mode | Claude Code `--permission-mode` | Codex approvalPolicy / sandbox / approvalsReviewer |
+  |---|---|---|
+  | Ask | `default` | `untrusted` / `workspace-write` / `user` |
+  | Accept edits | `acceptEdits` | `on-request` / `workspace-write` / `user` |
+  | Plan | `plan` | `on-request` / `read-only` / `user` |
+  | Auto | `auto` (else `acceptEdits`) | `on-request` / `workspace-write` / `auto_review` |
+  | Full access (default, stored `dontAsk`) | `bypassPermissions` | `never` / `danger-full-access` |
+
+  Rules that hold in every mode: Plan never takes a remembered "Always allow" and remembers none. Moving to a stricter mode
+  stops a running turn and revokes every remembered grant. The revocation is a new random token, `grantsEpoch`, written in the
+  same settings save that changes the mode; each grant carries the token that was current when it was made (`allowAlwaysEpochs`),
+  and it stands only while the settings hold that same token, on every check and after every restart. No clock is involved. A
+  grant with no token (an older install) stands only while the settings have never held one. The conversation files are also
+  cleaned, but only as tidiness: a write that failed cannot bring a grant back. Settings that cannot be read start a new token
+  that is kept in memory and is the one in force until a save writes it, so a read that works again never brings the old token
+  back. A card remembers the token it was made under: an "Always allow" on it is kept only if the token is still the same when the
+  answer settles, and otherwise lets that one request through and remembers nothing. Two Faber processes on one data folder are
+  not supported (single-instance protection prevents it; `FABER_DATA_DIR` is a dev and test hook), so no cross-process
+  serialization of this is built. A stricter web setting stops a running turn but
+  does not change command grants.
+  No mode promises zero execution: Ask lets plain reads through, Plan lets read-only commands through, and Accept edits lets
+  Codex run commands inside the working folder. Leaving Claude's plan mode names `default` for the session. Settings that cannot
+  be read start in Ask, not Full access (a missing file still means Full access). Every isolated or internal Codex thread has
+  `web_search` disabled. Credential-folder denies hold for Claude's file tools in every mode. For Codex Chat they are not
+  applied yet: permission profiles that extend `:workspace` or `:read-only` could carry them on compatible backends, and that is
+  a follow-up. Until then Faber only refuses a forwarded request that names a credential folder.
+
+  Web search (Off, Cached, Live; Live by default in the saved Chat settings, Off for any launch nobody chose for): Codex `web_search` in the thread config; Claude Code allows
+  WebSearch and WebFetch (Live), only WebSearch and denies WebFetch (Cached, which it lacks), or denies both (Off).
+  Cached is offered only while Codex is connected. Codex reasoning summary and verbosity go into the thread config as
+  `model_reasoning_summary` and `model_verbosity` and stay unset (the model's own) until chosen.
 - R121 (it replaces the next item for the two choices on screen): "Don't ask" is full access. No approval cards, commands
   run without Faber's sandbox and with network, WebFetch and WebSearch work, any folder can be the working folder, and the
   person's own MCP servers, plugins and hooks stay on, as in the CLI itself. Claude Code runs in bypass mode with Read and
@@ -406,13 +443,19 @@ shown as a decision.
 ### The Projects home
 
 The first screen of a project uses the layout of the Chat home (`welcome-grid`) with its own identity: the greeting
-"What should we tackle?", a goal composer with its own hints, the three safety controls kept visible as quiet rows under
-"How Faber works here" (plain sentences, with the technical detail and the revision and author behind one small "Details" link), and a side column with the project and its folder in short form (the last two folder names, the full path on hover), the conversations to pick up and the other projects. The
-light leans the other way. The two layouts share classes, so a change to one home reaches the other.
+"What should we tackle?", one column: Curioso, the project and its folder in short form (the last two folder names, the
+full path on hover), the greeting, a goal composer with its own hints and one quiet status line beside its button, and at
+most three conversations to pick up. Nothing else: the sidebar lists the projects, and every setting of a project (the
+tool policy, the code access, the self-update switch and the checks) is in Settings, Projects, one closed entry per
+project with one short line per option and the rest behind "Learn more". The checks are asked for just in time: the
+first start on checks nobody confirmed opens a compact sheet with their count and source, every command (and the setup)
+listed in full with no collapse, a long list scrolling inside it, and "Confirm and start"; what is confirmed is exactly the list
+shown, and a project that changed it meanwhile is refused so the sheet shows the new list. It does not come back until
+the checks change. The light leans the other way. The two layouts share classes, so a change to one home reaches the other.
 
 C011 (2026-10-16, the owner) overrides the quiet rows: the project screen shows only the work, and the grant, the checks
-and the tool choice move to Settings or to a just-in-time consent. Until that lands the code still shows them; see
-[product-map.md](product-map.md), Known incoherences.
+and the tool choice live in Settings or in a just-in-time consent. The start card is done; the mission board still carries
+the run mode (product-map.md, Known incoherences, 1).
 
 ### Records
 

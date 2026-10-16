@@ -21,6 +21,10 @@ pub(super) struct Handed {
     tool: String,
     /// The process the answer went to; settling checks it is still the one in use.
     sid: u64,
+    /// "Always allow" holds: not in Plan, which takes no remembered grant.
+    always: bool,
+    /// The grants epoch the clicked card was made under.
+    epoch: Option<String>,
 }
 
 impl Engine {
@@ -29,14 +33,14 @@ impl Engine {
     /// answer could not be written or was not confirmed in time. The lock is free while the engine waits, so nothing
     /// else in the engine waits for the CLI.
     pub async fn answer(&self, conv: &str, turn_id: &str, request_id: &str, allow: bool, always: bool) -> Result<(), String> {
-        let Handed { requests, tool, sid } = self.with(|c| c.prepare_answer(conv, turn_id, request_id, allow, always))?;
+        let Handed { requests, tool, sid, always, epoch } = self.with(|c| c.prepare_answer(conv, turn_id, request_id, allow, always))?;
         let deadline = Instant::now() + ACK_WAIT;
         let mut results = Vec::new();
         for (id, ack) in requests {
             // A queue that closed, or a session that said nothing in time, leaves the request waiting.
             results.push((id, timeout_at(deadline, ack).await.ok().and_then(|r| r.ok())));
         }
-        self.with(|c| c.settle_answer(conv, turn_id, sid, &tool, allow && always, &results))
+        self.with(|c| c.settle_answer(conv, turn_id, sid, &tool, (allow && always).then_some(epoch), &results))
     }
 }
 
@@ -48,11 +52,14 @@ impl Core {
         let live = self.live.get(conv).filter(|l| l.turn.as_deref() == Some(turn_id)).ok_or(STALE)?;
         let reply = self.convs.get(conv).and_then(|c| c.messages.iter().find(|m| m.id == turn_id)).ok_or(STALE)?;
         let waiting = reply.permissions.as_deref().unwrap_or_default();
-        let tool = waiting.iter().find(|p| p.request_id == request_id).ok_or(STALE)?.tool.clone();
+        let clicked = waiting.iter().find(|p| p.request_id == request_id).ok_or(STALE)?;
+        let (tool, epoch) = (clicked.tool.clone(), clicked.epoch.clone());
+        // Not in Plan, and not for a card made under an epoch that is gone: that answer lets only its own request through.
+        let always = always && live.permissions != Permissions::Plan && epoch == self.store.settings().grants_epoch;
         let others = waiting.iter().filter(|p| allow && always && p.tool == tool && p.request_id != request_id);
         let ids = std::iter::once(request_id).chain(others.map(|p| p.request_id.as_str()));
         let requests = ids.map(|id| (id.to_string(), live.session.answer(id, allow))).collect();
-        Ok(Handed { requests, tool, sid: live.sid })
+        Ok(Handed { requests, tool, sid: live.sid, always, epoch })
     }
 
     /// Applies what the sessions said. Other calls ran while the engine waited, so it looks again for the conversation,
@@ -67,7 +74,7 @@ impl Core {
         turn_id: &str,
         sid: u64,
         tool: &str,
-        remember: bool,
+        remember: Option<Option<String>>,
         results: &[(String, Option<Delivery>)],
     ) -> Result<(), String> {
         self.live.get(conv).filter(|l| l.sid == sid && l.turn.as_deref() == Some(turn_id)).ok_or(STALE)?;
@@ -81,17 +88,24 @@ impl Core {
             waiting.retain(|p| !over(&p.request_id));
             changed = waiting.len() != before;
         }
+        // The grants epoch changed while the card waited (a stricter mode, or settings that were unreadable): this answer lets the
+        // one request through and remembers nothing.
+        let remember = remember.is_some_and(|epoch| epoch == self.store.settings().grants_epoch);
         if remember && clicked == Some(Delivery::Delivered) {
             // The tool is allowed from now on, so a question that came in while the engine waited gets its answer too.
             if let Some(waiting) = reply.permissions.as_mut() {
                 (late, *waiting) = std::mem::take(waiting).into_iter().partition(|p| p.tool == tool);
-                changed |= !late.is_empty();
             }
             let list = c.allow_always.get_or_insert_default();
             if !list.iter().any(|t| t == tool) {
                 list.push(tool.to_string());
-                changed = true;
             }
+            // The epoch is renewed on every grant, so one made after a revocation counts again.
+            match self.store.settings().grants_epoch {
+                Some(epoch) => c.allow_always_epochs.insert(tool.to_string(), epoch),
+                None => c.allow_always_epochs.remove(tool),
+            };
+            changed = true;
         }
         if changed {
             self.save(conv);
@@ -220,6 +234,7 @@ mod tests {
                     request_id: request_id.to_string(),
                     tool: tool.to_string(),
                     input: json!({}),
+                    epoch: None,
                 };
                 reply.permissions = (!waiting.is_empty()).then(|| waiting.iter().map(ask).collect());
                 conv.messages.push(reply);
@@ -239,6 +254,8 @@ mod tests {
                 cli: Cli { command: "claude".into(), prefix: vec![] },
                 resumed: false,
                 permissions: Permissions::Ask,
+                tuning: Default::default(),
+                runs: Permissions::Ask,
                 by_hand: true,
                 approved: false,
                 started: 0.0,
@@ -598,5 +615,245 @@ mod tests {
             assert_eq!(call.await.unwrap(), Err(STALE.to_string()));
             assert_eq!(engine.open(&id).unwrap().allow_always, None);
         }
+    }
+
+    #[tokio::test]
+    async fn r140_plan_takes_no_remembered_grant_and_remembers_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        // A grant made under Ask, still on the conversation: Plan ignores it and shows the card.
+        let s = stub(vec![]);
+        let id = seed(&engine, s.session.clone(), &[("t1", &[])]);
+        engine.with(|c| {
+            c.convs.get_mut(&id).unwrap().allow_always = Some(vec!["Write".into(), "Bash".into()]);
+            c.live.get_mut(&id).unwrap().permissions = Permissions::Plan;
+        });
+        ask(&engine, &id, "7", "Write");
+        ask(&engine, &id, "8", "Bash");
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+        }
+        assert!(s.asked.lock().unwrap().is_empty(), "nothing was answered for the person");
+        assert_eq!(waiting(&engine, &id, "t1"), ["7", "8"]);
+        // Allowing with Always under Plan allows that one request only: no grant, and the same tool waiting stays waiting.
+        assert_eq!(engine.answer(&id, "t1", "7", true, true).await, Ok(()));
+        assert_eq!(*s.asked.lock().unwrap(), ["7"]);
+        assert_eq!(engine.open(&id).unwrap().allow_always, Some(vec!["Write".into(), "Bash".into()]), "the old list is untouched here");
+        engine.with(|c| c.convs.get_mut(&id).unwrap().allow_always = None);
+        ask(&engine, &id, "9", "Edit");
+        assert_eq!(engine.answer(&id, "t1", "9", true, true).await, Ok(()));
+        assert_eq!(engine.open(&id).unwrap().allow_always, None, "Plan remembers nothing");
+        // The same grant under Ask is honoured, as before.
+        engine.with(|c| {
+            c.convs.get_mut(&id).unwrap().allow_always = Some(vec!["Write".into()]);
+            c.live.get_mut(&id).unwrap().permissions = Permissions::Ask;
+        });
+        s.asked.lock().unwrap().clear();
+        ask(&engine, &id, "10", "Write");
+        assert_eq!(*s.asked.lock().unwrap(), ["10"]);
+    }
+
+    #[tokio::test]
+    async fn r140_a_stricter_mode_forgets_every_always_allow_loaded_or_on_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        // The default is Full access, so Ask is already a stricter step: move there before any grant exists.
+        engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+        let grant = |engine: &Engine| {
+            engine.with(|c| {
+                let id = c.blank(Area::Chat, None);
+                c.convs.get_mut(&id).unwrap().allow_always = Some(vec!["Write".into()]);
+                c.save(&id);
+                id
+            })
+        };
+        let loaded = grant(&engine);
+        let on_disk = grant(&engine);
+        engine.with(|c| c.convs.remove(&on_disk));
+        let granted = |engine: &Engine, id: &str| engine.open(id).unwrap().allow_always;
+        // Looser: kept. Ask to Accept edits loosens.
+        engine.save_settings(Settings { permissions: Some(Permissions::AcceptEdits), ..Settings::default() }).unwrap();
+        assert_eq!(granted(&engine, &loaded), Some(vec!["Write".into()]));
+        engine.with(|c| c.convs.remove(&on_disk));
+        assert_eq!(granted(&engine, &on_disk), Some(vec!["Write".into()]));
+        engine.with(|c| c.convs.remove(&on_disk));
+        // Stricter: gone, in memory and in the saved file of a conversation that was never opened.
+        engine.save_settings(Settings { permissions: Some(Permissions::Plan), ..Settings::default() }).unwrap();
+        assert_eq!(granted(&engine, &loaded), None);
+        assert_eq!(granted(&engine, &on_disk), None);
+        let saved = serde_json::from_slice::<serde_json::Value>(
+            &std::fs::read(dir.path().join("conversations").join(format!("{on_disk}.json"))).unwrap(),
+        )
+        .unwrap();
+        assert!(saved.get("allowAlways").is_none(), "{saved}");
+    }
+
+    fn stands(engine: &Engine, id: &str, tool: &str) -> bool {
+        engine.open(id).unwrap();
+        engine.with(|c| c.grant_stands(id, tool))
+    }
+
+    #[tokio::test]
+    async fn r140_a_revocation_holds_after_a_conversation_write_that_failed_and_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let (first, _) = engine(dir.path());
+        first.save_settings(Settings { permissions: Some(Permissions::Auto), ..Settings::default() }).unwrap();
+        let epoch = first.settings().grants_epoch.unwrap();
+        let id = first.with(|c| {
+            let id = c.blank(Area::Chat, None);
+            let conv = c.convs.get_mut(&id).unwrap();
+            conv.allow_always = Some(vec!["Bash".into(), "Write".into()]);
+            conv.allow_always_epochs.insert("Bash".into(), epoch.clone());
+            // Made while the clock ran far ahead, or with a token nobody holds: neither is ever read as a time.
+            conv.allow_always_epochs.insert("Write".into(), "9999999999999".into());
+            c.save(&id);
+            id
+        });
+        let file = dir.path().join("conversations").join(format!("{id}.json"));
+        let saved = std::fs::read(&file).unwrap();
+        assert!(stands(&first, &id, "Bash"), "made under the current epoch");
+        assert!(!stands(&first, &id, "Write"), "made under another one");
+        first.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+        assert_ne!(first.settings().grants_epoch, Some(epoch), "the stricter move replaced the epoch in its own save");
+        // The write that failed left the old file, grant included, on disk.
+        std::fs::write(&file, &saved).unwrap();
+        first.shutdown();
+        let (restarted, _) = engine(dir.path());
+        assert!(!stands(&restarted, &id, "Bash"), "the grant belongs to the old epoch, so Ask asks");
+        // A grant the person makes afterwards counts.
+        restarted.with(|c| {
+            let epoch = c.store.settings().grants_epoch.unwrap();
+            c.convs.get_mut(&id).unwrap().allow_always_epochs.insert("Bash".into(), epoch);
+        });
+        assert!(stands(&restarted, &id, "Bash"));
+        // A looser move keeps the epoch; a new stricter one replaces it.
+        let kept = restarted.settings().grants_epoch;
+        restarted.save_settings(Settings { permissions: Some(Permissions::AcceptEdits), ..Settings::default() }).unwrap();
+        assert_eq!(restarted.settings().grants_epoch, kept);
+        assert!(stands(&restarted, &id, "Bash"));
+        restarted.save_settings(Settings { permissions: Some(Permissions::Plan), ..Settings::default() }).unwrap();
+        assert_ne!(restarted.settings().grants_epoch, kept);
+        assert!(!stands(&restarted, &id, "Bash"));
+    }
+
+    #[tokio::test]
+    async fn r140_old_saved_grants_stand_until_the_first_revocation_and_the_card_shows_after_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        let s = stub(vec![]);
+        let id = seed(&engine, s.session.clone(), &[("t1", &[])]);
+        engine.with(|c| {
+            c.convs.get_mut(&id).unwrap().allow_always = Some(vec!["Write".into(), "Bash".into()]);
+            c.live.get_mut(&id).unwrap().permissions = Permissions::Ask;
+        });
+        // A grant saved before epochs existed has none: it stands while the settings never held one.
+        assert!(stands(&engine, &id, "Bash"));
+        ask(&engine, &id, "1", "Bash");
+        assert_eq!(*s.asked.lock().unwrap(), ["1"], "answered without a card");
+        // The first stricter move: the same old grants stop counting, and the request waits for the person.
+        // (Written straight to the store here: the real move also stops the running turn this test goes on using.)
+        engine.with(|c| {
+            let moved =
+                Settings { permissions: Some(Permissions::Ask), grants_epoch: Some(crate::model::new_epoch()), ..Settings::default() };
+            c.store.save_settings(&moved).unwrap();
+        });
+        assert!(!stands(&engine, &id, "Bash"));
+        assert!(!stands(&engine, &id, "Write"));
+        s.asked.lock().unwrap().clear();
+        ask(&engine, &id, "2", "Bash");
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+        }
+        assert!(s.asked.lock().unwrap().is_empty());
+        assert_eq!(waiting(&engine, &id, "t1"), ["2"]);
+        // Allowing with Always after the revocation counts, for that tool only.
+        assert_eq!(engine.answer(&id, "t1", "2", true, true).await, Ok(()));
+        assert!(stands(&engine, &id, "Bash"));
+        assert!(!stands(&engine, &id, "Write"));
+    }
+
+    #[tokio::test]
+    async fn r140_settings_that_cannot_be_read_and_the_next_save_never_revive_a_grant() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        let s = stub(vec![]);
+        let id = seed(&engine, s.session.clone(), &[("t1", &[])]);
+        engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+        let epoch = engine.settings().grants_epoch.unwrap();
+        engine.with(|c| {
+            let conv = c.convs.get_mut(&id).unwrap();
+            conv.allow_always = Some(vec!["Bash".into()]);
+            conv.allow_always_epochs.insert("Bash".into(), epoch);
+        });
+        assert!(stands(&engine, &id, "Bash"));
+        std::fs::write(dir.path().join("settings.json"), "{ not json").unwrap();
+        assert!(!stands(&engine, &id, "Bash"), "unreadable settings start a new epoch");
+        // The next save writes that new epoch (never a time that could have passed), so the grant stays gone.
+        engine.save_settings(Settings { language: Some("de".into()), ..Settings::default() }).unwrap();
+        assert!(!stands(&engine, &id, "Bash"));
+        assert!(engine.settings().grants_epoch.is_some());
+        // A grant made now works.
+        engine.with(|c| {
+            let epoch = c.store.settings().grants_epoch.unwrap();
+            c.convs.get_mut(&id).unwrap().allow_always_epochs.insert("Bash".into(), epoch);
+        });
+        assert!(stands(&engine, &id, "Bash"));
+    }
+
+    #[tokio::test]
+    async fn r140_a_read_failure_that_passes_never_brings_the_old_epoch_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        let file = dir.path().join("settings.json");
+        engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+        let old = engine.settings().grants_epoch.unwrap();
+        let good = std::fs::read(&file).unwrap();
+        std::fs::write(&file, "{ not json").unwrap();
+        let recovery = engine.settings().grants_epoch.unwrap();
+        assert_ne!(recovery, old);
+        assert_eq!(engine.settings().grants_epoch.as_ref(), Some(&recovery), "the same epoch on every read while it lasts");
+        // The failure passes: the file reads again, with the epoch it had. That epoch is not in force.
+        std::fs::write(&file, &good).unwrap();
+        assert_eq!(engine.settings().grants_epoch.as_ref(), Some(&recovery));
+        // The next save writes the recovery epoch, and it stays after that.
+        engine.save_settings(Settings { language: Some("de".into()), ..Settings::default() }).unwrap();
+        assert_eq!(read_epoch(&file), recovery);
+        assert_eq!(engine.settings().grants_epoch.as_ref(), Some(&recovery));
+        assert_eq!(engine.settings().language.as_deref(), Some("de"));
+    }
+
+    fn read_epoch(file: &Path) -> String {
+        serde_json::from_slice::<serde_json::Value>(&std::fs::read(file).unwrap()).unwrap()["grantsEpoch"].as_str().unwrap().into()
+    }
+
+    #[tokio::test]
+    async fn r140_an_always_allow_whose_epoch_changed_while_the_card_waited_lets_that_request_through_and_remembers_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        let s = stub(vec![]);
+        let id = seed(&engine, s.session.clone(), &[("t1", &[])]);
+        let moved = |engine: &Engine| {
+            engine.with(|c| {
+                let moved =
+                    Settings { permissions: Some(Permissions::Ask), grants_epoch: Some(crate::model::new_epoch()), ..Settings::default() };
+                c.store.save_settings(&moved).unwrap();
+            })
+        };
+        moved(&engine);
+        engine.with(|c| c.live.get_mut(&id).unwrap().permissions = Permissions::Ask);
+        ask(&engine, &id, "1", "Bash");
+        ask(&engine, &id, "2", "Bash");
+        assert_eq!(waiting(&engine, &id, "t1"), ["1", "2"]);
+        moved(&engine);
+        assert_eq!(engine.answer(&id, "t1", "1", true, true).await, Ok(()));
+        assert_eq!(*s.asked.lock().unwrap(), ["1"], "only the clicked card");
+        assert_eq!(waiting(&engine, &id, "t1"), ["2"], "the other card of the tool still waits for the person");
+        assert!(!stands(&engine, &id, "Bash"), "nothing was remembered");
+        // A card made under the current epoch is remembered as before, and answers the other waiting one of its tool.
+        s.asked.lock().unwrap().clear();
+        ask(&engine, &id, "3", "Bash");
+        assert_eq!(engine.answer(&id, "t1", "3", true, true).await, Ok(()));
+        assert!(stands(&engine, &id, "Bash"));
+        assert_eq!(*s.asked.lock().unwrap(), ["3", "2"]);
     }
 }

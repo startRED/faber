@@ -823,6 +823,8 @@ mod tests {
                     steering: vec![],
                     cwd: ".".into(),
                     permissions: crate::model::Permissions::Ask,
+                    tuning: Default::default(),
+                    runs: crate::model::Permissions::Ask,
                     served: false,
                     unsaved_session: None,
                 },

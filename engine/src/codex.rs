@@ -3,7 +3,7 @@
 
 use crate::claude::EventSink;
 use crate::events::{Delivery, EngineEvent, Session, SessionCommand, UserTurn};
-use crate::model::{Area, Permissions};
+use crate::model::{Area, Permissions, ReasoningSummary, Tuning, Verbosity, WebSearch};
 use crate::persona::{PersonaInput, persona, worker_contract};
 use crate::proc::{self, Spawner};
 use crate::signals::{codex_account, codex_signals};
@@ -22,19 +22,20 @@ const CHAT_INSTRUCTIONS: &str = "You are a helpful, precise assistant in a chat 
 Use Markdown when it helps. Your working folder belongs to this conversation: run code and create files \
 there when it helps, and mention the files you create.";
 
-/// Ask preserves the existing setup. Isolated servers disable integrations and require MXC on Windows. Full access ("Do not
-/// ask", R121) starts the CLI as the person would: their MCP servers, plugins and hooks stay on, and no sandbox is configured.
+/// Every guarded mode (Ask, Accept edits, Plan, Auto) preserves the existing Ask setup. Isolated servers disable integrations
+/// and require MXC on Windows. Full access ("Do not ask", R121) starts the CLI as the person would: their MCP servers, plugins
+/// and hooks stay on, and no sandbox is configured.
 pub fn codex_args(area: Area, windows: bool, user_hooks: bool, permissions: Permissions) -> Vec<String> {
     let mut args = vec!["app-server".to_string()];
     let mut push = |a: &[&str]| args.extend(a.iter().map(|s| s.to_string()));
     let isolated = permissions == Permissions::Isolated;
-    if isolated || (permissions == Permissions::Ask && !user_hooks) {
+    if isolated || (permissions.guarded() && !user_hooks) {
         push(&["--disable", "hooks"]);
     }
     if windows && permissions != Permissions::FullAccess {
         push(&["-c", if isolated { "windows.sandbox=\"mxc\"" } else { "windows.sandbox=\"unelevated\"" }]);
     }
-    if isolated || (area == Area::Chat && permissions == Permissions::Ask) {
+    if isolated || (area == Area::Chat && permissions.guarded()) {
         for feature in ["apps", "plugins", "computer_use", "browser_use"] {
             push(&["--disable", feature]);
         }
@@ -166,7 +167,10 @@ pub fn prepare_project_codex_catalog() -> std::io::Result<()> {
 }
 
 /// Parameters for thread/start and thread/resume. Ask keeps writes inside the working folder and asks before every command that
-/// is not a plain read and before every file change, inside that folder too.
+/// is not a plain read and before every file change, inside that folder too. The other guarded modes (R140) keep that sandbox and
+/// ask only for what leaves it: Accept edits and Auto let `on-request` decide, Plan makes the folder read-only, and Auto sends
+/// the requests that remain to Codex's own reviewer (`auto_review`) instead of the person. The reviewer is named in every
+/// guarded mode, so a person's own config file cannot pick a looser one.
 /// Full access runs without Codex's sandbox and never asks. Isolated runs Faber's own sandbox and fails what it does not allow.
 ///
 /// Full access cannot keep Codex away from the credential folders: Codex's only filesystem deny rules live in a permission
@@ -178,14 +182,20 @@ pub fn codex_thread(area: Area, model: Option<&str>, permissions: Permissions) -
     if let Some(model) = model {
         thread.insert("model".into(), model.into());
     }
-    let (sandbox, approval) = match permissions {
+    let (sandbox, approval, reviewer) = match permissions {
         // "untrusted": everything but a short list of plain reads asks first, file changes inside the working folder included.
-        Permissions::Ask => ("workspace-write", "untrusted"),
-        Permissions::FullAccess => ("danger-full-access", "never"),
-        Permissions::Isolated => ("workspace-write", "never"),
+        Permissions::Ask => ("workspace-write", "untrusted", Some("user")),
+        Permissions::AcceptEdits => ("workspace-write", "on-request", Some("user")),
+        Permissions::Plan => ("read-only", "on-request", Some("user")),
+        Permissions::Auto => ("workspace-write", "on-request", Some("auto_review")),
+        Permissions::FullAccess => ("danger-full-access", "never", None),
+        Permissions::Isolated => ("workspace-write", "never", None),
     };
     thread.insert("sandbox".into(), sandbox.into());
     thread.insert("approvalPolicy".into(), approval.into());
+    if let Some(reviewer) = reviewer {
+        thread.insert("approvalsReviewer".into(), reviewer.into());
+    }
     if permissions == Permissions::Isolated {
         thread.remove("sandbox");
         thread.insert("config".into(), crate::permissions::sandbox_config(Path::new("."), true).into());
@@ -430,6 +440,31 @@ pub struct CodexServerOptions {
     pub spawn: Spawner,
 }
 
+/// The settings that go into the thread's `config` (R140): web search always, and the two Codex-only choices when the person
+/// made one. Only the person's own Chat and project sessions get them: an internal question and a role never do.
+fn apply_tuning(params: &mut Map<String, Value>, tuning: Tuning) {
+    let web = match tuning.web {
+        WebSearch::Off => "disabled",
+        WebSearch::Cached => "cached",
+        WebSearch::Live => "live",
+    };
+    let mut config = json!({ "web_search": web });
+    match tuning.summary {
+        ReasoningSummary::Default => {}
+        ReasoningSummary::Auto => config["model_reasoning_summary"] = "auto".into(),
+        ReasoningSummary::Concise => config["model_reasoning_summary"] = "concise".into(),
+        ReasoningSummary::Detailed => config["model_reasoning_summary"] = "detailed".into(),
+        ReasoningSummary::Hidden => config["model_reasoning_summary"] = "none".into(),
+    }
+    match tuning.verbosity {
+        Verbosity::Default => {}
+        Verbosity::Low => config["model_verbosity"] = "low".into(),
+        Verbosity::Medium => config["model_verbosity"] = "medium".into(),
+        Verbosity::High => config["model_verbosity"] = "high".into(),
+    }
+    params.insert("config".into(), config);
+}
+
 /// One conversation inside the shared process.
 #[derive(Debug, Clone)]
 pub struct CodexThread {
@@ -442,6 +477,7 @@ pub struct CodexThread {
     /// How the user wants to be called; see `ClaudeLaunch::user_name`.
     pub user_name: Option<String>,
     pub permissions: Permissions,
+    pub tuning: Tuning,
 }
 
 enum ServerCommand {
@@ -527,6 +563,9 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
     } else {
         // Developer instructions sit beside Codex's own, so a project keeps its default prompt.
         params.insert("developerInstructions".into(), persona(&PersonaInput { name: t.user_name.as_deref() }).into());
+        if t.permissions != Permissions::Isolated {
+            apply_tuning(&mut params, t.tuning);
+        }
     }
     if t.permissions == Permissions::Isolated && t.instructions.is_none() {
         params.insert("config".into(), crate::permissions::sandbox_config(&t.cwd, true).into());
@@ -567,7 +606,7 @@ pub fn project_thread_params(
     policy::invocation(crate::model::Vendor::Codex, t.model.as_deref(), t.effort.as_deref(), t.instructions.is_some())?;
     // A role never inherits the person's mode: it always gets Faber's own permission profile (credential folders and
     // temporary folders denied, no network), and only the writer may write in its working folder.
-    let isolated = CodexThread { permissions: Permissions::Isolated, ..t.clone() };
+    let isolated = CodexThread { permissions: Permissions::Isolated, tuning: Tuning::default(), ..t.clone() };
     let (method, mut params) = thread_params(Area::Project, &isolated);
     params["approvalPolicy"] = "never".into();
     params["baseInstructions"] = worker_contract(role).into();
@@ -606,6 +645,7 @@ pub(crate) fn project_launch_policy(roles: &[crate::project::Role]) -> Value {
         instructions: None,
         user_name: None,
         permissions: Permissions::Isolated,
+        tuning: Default::default(),
     };
     // Each thread names its permission profile with a fresh id; the profile's content is what counts.
     let threads: Vec<Value> = roles
@@ -976,7 +1016,7 @@ async fn serve(
                             // moment, so a switch to Ask is never raced. Ask shows the card.
                             (true, Some(t))
                                 if t.params.instructions.is_none()
-                                    && (t.params.permissions == Permissions::Ask
+                                    && (t.params.permissions.guarded()
                                         || (t.params.permissions == Permissions::FullAccess
                                             && ["item/commandExecution/requestApproval", "item/fileChange/requestApproval"].contains(&method))) =>
                             {
@@ -1328,6 +1368,7 @@ mod role_tests {
                         instructions: None,
                         user_name: None,
                         permissions: Permissions::Isolated,
+                        tuning: Default::default(),
                     },
                     Arc::new(|_| {}),
                 );
@@ -1413,6 +1454,7 @@ mod role_tests {
                     instructions: None,
                     user_name: None,
                     permissions: Permissions::Isolated,
+                    tuning: Default::default(),
                 },
                 Arc::new(move |e| drop(tx.send(e))),
             );
@@ -1471,6 +1513,7 @@ mod role_tests {
                 instructions: None,
                 user_name: None,
                 permissions: Permissions::Isolated,
+                tuning: Default::default(),
             },
             Arc::new(move |e| drop(tx.send(e))),
         );
