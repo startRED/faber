@@ -807,7 +807,7 @@ a lane on another machine is not seen.
 
 A commit pushed onto a red `phase-1-base` waits behind the failure, and `main` cannot follow it (R127); on 2026-10-16 a
 macOS-only check kept it red for three hours while ten commits landed on top. So the red base shows before a push
-(R-next). `scripts/base.mjs` asks GitHub through `gh` for the newest finished push run of `ci.yml` on `phase-1-base`
+(R164). `scripts/base.mjs` asks GitHub through `gh` for the newest finished push run of `ci.yml` on `phase-1-base`
 (cancelled runs say nothing) and, when it failed, reads the runner's `FAIL` lines and compiler errors from its failed log,
 each with its job, or the failed jobs and steps when the log names none. It keeps the answer three minutes in the shared
 git folder (`.git/faber-base.json`). Every `cargo t` outside CI prints those lines first, marked `BASE`, and writes the
@@ -824,7 +824,7 @@ value seen on Windows go in its comment.
 ### Numbers
 
 Decision numbers (`docs/decisions.md`) and what's-new ids (`notes.<id>.<kind>`) are given at merge time, never in a
-branch (R-next): lanes that each took "the next one" collided at every merge, and one decision went through four numbers.
+branch (R164): lanes that each took "the next one" collided at every merge, and one decision went through four numbers.
 A branch writes `R-next` for its decision (`R-next-2` for a second) and `notes.next.<kind>` for its entry (`notes.next-2`
 for a second id), in every place that refers to them. Quoted in backticks they are only words, as here. Right before the
 merge, on a branch that already holds a fresh `origin/phase-1-base`, `node scripts/numbers.mjs assign` gives each the
