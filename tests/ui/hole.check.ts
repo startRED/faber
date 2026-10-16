@@ -1,5 +1,7 @@
+import { createComponent } from 'solid-js';
+import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
-import { ARC, bornAt, type Cell, DISK, frame, hole, holeRuns, RIM, rippleTint, STAR, veil } from '../../ui/Hole.tsx';
+import { ARC, bornAt, type Cell, DISK, frame, Hole, hole, holeRuns, RIM, rippleTint, STAR, veil } from '../../ui/Hole.tsx';
 import { check, equal, ok } from './check.ts';
 
 const [W, H] = [1600, 1000];
@@ -44,6 +46,46 @@ check('hole: no hard edge beside the column; the scene runs behind the words, di
   ok(veil(edge - 300, edge) > 0 && veil(edge - 300, edge) <= 0.2, 'behind the words the scene keeps a faint part of its light');
   equal(veil(edge + 400, edge), 1, 'well past the column it is at full light');
   for (let x = edge - 300; x < edge + 400; x += 12) ok(veil(x + 12, edge) - veil(x, edge) < 0.1, `no step from ${x} px to the next cell`);
+});
+
+check('hole: when the words grow wider, the veil follows their edge and they stay on its faint part', async () => {
+  const root = document.createElement('div');
+  root.style.cssText = 'position:fixed;left:0;top:0;width:1600px;height:560px';
+  root.dataset.motion = 'none';
+  for (const [key, value] of Object.entries(themes.css.base)) root.style.setProperty(`--${key}`, value);
+  const words = document.createElement('div');
+  words.style.cssText = 'position:absolute;left:24px;top:40px;width:640px;font:600 40px/1.4 sans-serif';
+  words.textContent = 'Hi';
+  root.append(words);
+  document.body.append(root);
+  const dispose = render(() => createComponent(Hole, { avoid: () => [words] }), root);
+  const settle = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  try {
+    await settle(200);
+    // The stage keeps its size: only the words change, as when a list of earlier talks opens under a short greeting.
+    words.textContent = 'A much longer block of words that runs wide across the column and down several lines';
+    await settle(200);
+    const canvas = root.querySelector<HTMLCanvasElement>('canvas.amb-hole')!;
+    ok(canvas.width > 0, 'Dark Room draws the black hole');
+    // A canvas still dark from the entrance would pass for nothing: the scene must be painted before it is measured.
+    const all = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data;
+    let lit = 0;
+    for (let i = 3; i < all.length; i += 4) if (all[i]! > 20) lit++;
+    ok(lit > 1000, `the scene is drawn, ${lit} lit pixels`);
+    const box = canvas.getBoundingClientRect();
+    const scale = canvas.width / box.width;
+    const range = document.createRange();
+    range.selectNodeContents(words);
+    const r = range.getBoundingClientRect();
+    const px = canvas.getContext('2d')!.getImageData(0, Math.floor((r.top - box.top) * scale), Math.floor((r.right - box.left) * scale), Math.ceil(r.height * scale)).data;
+    let worst = 0;
+    for (let i = 3; i < px.length; i += 4) worst = Math.max(worst, px[i]!);
+    // Same bound as the project screen's own check (projects.check.ts): a third of the light at most.
+    ok(worst <= 77, `the words sit on the bright part of the scene (${worst})`);
+  } finally {
+    dispose();
+    root.remove();
+  }
 });
 
 check('hole: the planet has a lit rim facing the disk and a dark body', () => {
