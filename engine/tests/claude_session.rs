@@ -336,7 +336,7 @@ async fn resume_a_new_process_continues_the_same_session() {
 #[test]
 fn chat_is_lean_and_confined_to_its_workspace_projects_get_the_user_setup_without_hooks() {
     let after = |args: &[String], flag: &str| args[args.iter().position(|a| a == flag).unwrap() + 1].clone();
-    let chat = claude_args(&ClaudeLaunch { resume: Some("abc".into()), model: Some("haiku".into()), ..launch(Area::Chat) });
+    let chat = claude_args(&ClaudeLaunch { resume: Some("abc".into()), model: Some("haiku".into()), flags: NEWER, ..launch(Area::Chat) });
     assert!(chat.contains(&"--restricted".into()) && chat.contains(&"--strict-mcp-config".into()));
     assert_eq!(after(&chat, "--tools"), "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch");
     assert_eq!(after(&chat, "--permission-mode"), "default", "Ask names its mode, so a CLI default can never pick a looser one");
@@ -344,7 +344,8 @@ fn chat_is_lean_and_confined_to_its_workspace_projects_get_the_user_setup_withou
     assert_eq!(after(&chat, "--model"), "haiku");
     // Each model compacts at its own window; an unknown model keeps the CLI default.
     assert_eq!(after(&chat, "--autocompact"), "130k");
-    let window = |model: &str| after(&claude_args(&ClaudeLaunch { model: Some(model.into()), ..launch(Area::Chat) }), "--autocompact");
+    let window =
+        |model: &str| after(&claude_args(&ClaudeLaunch { model: Some(model.into()), flags: NEWER, ..launch(Area::Chat) }), "--autocompact");
     assert_eq!((window("claude-sonnet-5-5"), window("claude-opus-5-5")), ("300k".into(), "400k".into()));
     let project = claude_args(&launch(Area::Project));
     assert!(!project.contains(&"--autocompact".into()));
@@ -818,7 +819,7 @@ fn r124_a_moved_sign_in_folder_is_denied_where_it_now_is() {
     assert_eq!(unset.len(), tool_deny(&|_| None).len());
 }
 
-// ---- no blocking prompts in full access, cache warmth, Haiku autocompact (checked on Claude Code 2.1.296) ----
+// ---- no blocking prompts in full access, cache warmth, autocompact windows (checked on Claude Code 2.1.296) ----
 
 const NEWER: ClaudeFlags = ClaudeFlags { autocompact: true, permission_prompts: true };
 
@@ -880,7 +881,7 @@ fn ask_the_isolated_mode_and_side_questions_never_change_with_the_new_flags() {
 }
 
 #[test]
-fn only_fabers_own_haiku_launches_compact_early_and_only_where_the_cli_has_the_flag() {
+fn each_model_compacts_at_its_own_window_once_and_only_where_the_cli_has_the_flag() {
     let with = |model: &str, permissions, instructions: Option<&str>, flags| {
         claude_args(&ClaudeLaunch {
             model: Some(model.into()),
@@ -890,17 +891,20 @@ fn only_fabers_own_haiku_launches_compact_early_and_only_where_the_cli_has_the_f
             ..launch(Area::Project)
         })
     };
-    let compacts = |args: &[String]| args.windows(2).any(|a| a == ["--autocompact", "100k"]);
-    for model in ["haiku", "claude-haiku-5-5", "Haiku[1m]"] {
-        assert!(compacts(&with(model, Permissions::Isolated, None, NEWER)), "{model}");
-        assert!(compacts(&with(model, Permissions::FullAccess, Some("Route."), NEWER)), "{model}");
-        assert!(!compacts(&with(model, Permissions::Isolated, None, ClaudeFlags::default())), "an older CLI is not given the flag");
-        assert!(!compacts(&with(model, Permissions::Ask, None, NEWER)), "a conversation the person chose keeps the CLI default");
-        assert!(!compacts(&with(model, Permissions::FullAccess, None, NEWER)));
+    let windows = |args: &[String]| args.windows(2).filter(|a| a[0] == "--autocompact").map(|a| a[1].clone()).collect::<Vec<_>>();
+    for (model, window) in
+        [("haiku", "130k"), ("claude-haiku-5-5", "130k"), ("Haiku[1m]", "130k"), ("sonnet", "300k"), ("claude-opus-5-5", "400k")]
+    {
+        for permissions in [Permissions::Isolated, Permissions::Ask, Permissions::FullAccess] {
+            assert_eq!(windows(&with(model, permissions, None, NEWER)), [window], "{model} {permissions:?}: one window, never two");
+        }
+        assert!(
+            windows(&with(model, Permissions::Isolated, None, ClaudeFlags::default())).is_empty(),
+            "an older CLI is not given the flag"
+        );
+        assert!(windows(&with(model, Permissions::FullAccess, Some("Route."), NEWER)).is_empty(), "a side question keeps the CLI default");
     }
-    for model in ["sonnet", "opus", "claude-sonnet-5-5", "fable"] {
-        assert!(!with(model, Permissions::Isolated, None, NEWER).contains(&"--autocompact".into()), "{model}");
-    }
+    assert!(windows(&with("fable", Permissions::Isolated, None, NEWER)).is_empty(), "an unknown model keeps the CLI default");
 }
 
 #[test]

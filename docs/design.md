@@ -316,8 +316,8 @@ projects. Faber has no worktree creation for projects, so an environment has no 
   with a card that has no buttons (the CLI is past it, and the work was not done) until the next message. The tray notifies once
   per turn ("N requests need you"), with a one-minute cooldown across turns (R92). It is never allowed on its own, and a request on a
   credential folder is not parked at all: the deny rules refuse it for good. A CLI without the flag, Ask and the isolated mode start
-  as before. Faber's own Haiku workers and roles (the isolated mode and side questions) also start with `--autocompact 100k`, under the
-  100K step above which Haiku costs more, where the CLI lists that flag; every other launch keeps the CLI default.
+  as before. Where the CLI lists `--autocompact`, every launch but a side question compacts at its model's window (Haiku 130k,
+  Sonnet 300k, Opus 400k, R150); side questions, unknown models and a CLI without the flag keep the CLI default.
 - R97/R107 (now the isolated mode only): bypass permissions with native deny rules for `.git` edits, credential directories
   and key files; Codex uses `never` approvals with a workspace-only permission profile and sandbox network access disabled.
   Native deny rules [apply even in bypass mode](https://code.claude.com/docs/en/permission-modes#available-modes), but
