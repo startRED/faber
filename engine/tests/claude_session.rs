@@ -1076,7 +1076,10 @@ async fn the_cache_lifetime_starts_when_the_request_is_sent_not_when_the_first_w
     support::read_message(&mut input).await;
     let sent = clock();
     // The CLI takes a while to answer; the cache already counts from the moment the request left.
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    // A status line in between is no new request: it must not move the start.
+    support::emit(&mut output, json!({ "type": "system", "subtype": "status", "status": "requesting" })).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
     support::emit(&mut output, json!({ "type": "stream_event", "event": { "type": "message_start" }, "parent_tool_use_id": null })).await;
     let usage = json!({ "cache_creation": { "ephemeral_5m_input_tokens": 10 } });
     support::emit(&mut output, result_with(usage, json!([]))).await;

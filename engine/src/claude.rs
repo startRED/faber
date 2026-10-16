@@ -496,9 +496,9 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
         let mut queued = vec![];
         // When the latest request of the running turn began: the cache lifetime counts from it, not from the result.
         let mut request_began: Option<u64> = None;
-        // When the CLI last wrote a line, or a turn was handed to it. A request goes out the moment the user message or a tool
-        // result is in, so the line just before an assistant message starts marks when its request began.
-        let mut last_line_ms = unix_ms();
+        // When the running turn was handed to the CLI: its request goes out at that moment. Set once per turn and never moved by
+        // the lines that follow (status, retries), so later requests of a tool turn count from the first: never more warmth than there is.
+        let mut turn_sent_ms = unix_ms();
         loop {
             let deadline = watch.deadline();
             tokio::select! {
@@ -529,9 +529,8 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                         Ok(msg) => {
                             quota_seen |= msg["type"] == "rate_limit_event";
                             if msg["type"] == "stream_event" && msg["event"]["type"] == "message_start" && msg["parent_tool_use_id"].is_null() {
-                                request_began = Some(last_line_ms);
+                                request_began = Some(turn_sent_ms);
                             }
-                            last_line_ms = unix_ms();
                             let finished = msg["type"] == "result";
                             if project {
                                 match crate::project::policy::reject_native(&mut *stdin, crate::model::Vendor::Claude, &msg).await {
@@ -592,7 +591,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                                 for turn in std::mem::take(&mut queued) {
                                     quota_seen = false;
                                     watch.begin(project);
-                                    last_line_ms = unix_ms();
+                                    turn_sent_ms = unix_ms();
                                     let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
                                 }
                             }
@@ -606,7 +605,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                         quota_seen = false;
                         watch.begin(project);
                         request_began = None;
-                        last_line_ms = unix_ms();
+                        turn_sent_ms = unix_ms();
                         let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
                     }
                     // A line written mid-turn is folded into a turn that uses tools (one result for both) and becomes a turn of

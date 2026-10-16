@@ -1888,11 +1888,13 @@ async fn the_first_launch_after_the_cli_is_downgraded_passes_none_of_the_newer_f
     std::fs::write(&bin, "a newer build with more in it").unwrap();
     let f = fake(fixture("claude", "chat"));
     let older = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let (inner, flag) = (f.spawn.clone(), older.clone());
+    let probes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (inner, flag, counted) = (f.spawn.clone(), older.clone(), probes.clone());
     let spawn: Spawner = Arc::new(move |bin, args, cwd| {
         if args != ["--help"] {
             return inner(bin, args, cwd);
         }
+        counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let text = if flag.load(std::sync::atomic::Ordering::SeqCst) { "Options:\n  --model <model>   Model\n" } else { NEWER_HELP };
         let stdout = Box::new(std::io::Cursor::new(text.as_bytes().to_vec()));
         Ok(faber_engine::proc::Proc { stdin: Box::new(tokio::io::sink()), stdout, stderr: None, child: None, contained: None })
@@ -1927,10 +1929,12 @@ async fn the_first_launch_after_the_cli_is_downgraded_passes_none_of_the_newer_f
     assert!(!args.contains(&"--permission-prompts".into()) && !args.contains(&"--autocompact".into()), "{args:?}");
     // The help was read again for the launches after that one.
     for _ in 0..300 {
-        if engine.claude_flags() == Default::default() {
+        if probes.load(std::sync::atomic::Ordering::SeqCst) == 2 {
             break;
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    assert_eq!(engine.claude_flags(), Default::default());
+    assert_eq!(probes.load(std::sync::atomic::Ordering::SeqCst), 2, "the first read at start, one more after the binary changed");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(engine.claude_flags(), Default::default(), "the older help declares none");
 }
