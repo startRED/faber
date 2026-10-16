@@ -26,13 +26,33 @@ export function thinkingParts(text: string): ThinkingPart[] {
 
 const SHELLS: Record<string, string> = { powershell: 'PowerShell', pwsh: 'PowerShell', cmd: 'cmd', bash: 'Bash', zsh: 'Zsh' };
 const WRAPPED = /^\s*(?:"([^"]+)"|(\S+))\s+(?:-No\w+\s+)*(?:-Command|-c|-lc|\/c)\s+([\s\S]+)$/i;
-// Codex names its internal item kinds in camelCase; the screen names them in words.
+// Every step reads as what it does, in plain words: Codex names its item kinds in camelCase and Claude Code names its
+// tools, and both map to the same words. A tool missing here keeps its own name.
 const KINDS: Record<string, Key> = {
   commandExecution: 'tool.command',
   fileChange: 'tool.fileChange',
   webSearch: 'tool.webSearch',
   mcpToolCall: 'tool.mcp',
+  Bash: 'tool.command',
+  PowerShell: 'tool.command',
+  Read: 'tool.read',
+  Write: 'tool.write',
+  Edit: 'tool.edit',
+  MultiEdit: 'tool.edit',
+  NotebookEdit: 'tool.edit',
+  Glob: 'tool.glob',
+  Grep: 'tool.grep',
+  WebSearch: 'tool.webSearch',
+  WebFetch: 'tool.webFetch',
+  Agent: 'tool.agent',
+  Task: 'tool.agent',
+  TodoWrite: 'tool.plan',
+  AskUserQuestion: 'tool.ask',
+  Skill: 'tool.skill',
+  ToolSearch: 'tool.toolSearch',
 };
+/** Claude Code's call that starts a subagent; it reads as the few words it was given. */
+const SUBAGENT = new Set(['Agent', 'Task']);
 
 export interface ToolRow {
   label: string;
@@ -43,14 +63,18 @@ function detailOf(input: unknown): string {
   if (typeof input === 'string') return input;
   if (Array.isArray(input)) return input.map((c) => (c as { path?: string })?.path).filter(Boolean).join(', ');
   const o = input as Record<string, unknown> | undefined;
-  const detail = o && (o.query ?? o.url ?? o.file_path ?? o.command ?? o.pattern);
-  return typeof detail === 'string' ? detail : '';
+  const detail = o && (o.query ?? o.url ?? o.file_path ?? o.notebook_path ?? o.command ?? o.pattern ?? o.skill);
+  return typeof detail === 'string' ? detail.replace(/^https?:\/\//, '') : '';
 }
 
 export function toolRow(tool: ToolUse): ToolRow {
-  const raw = detailOf(tool.input);
+  const named = SUBAGENT.has(tool.name) && (tool.input as { description?: unknown } | undefined)?.description;
+  const raw = typeof named === 'string' ? named : detailOf(tool.input);
   const camel = /^[a-z]+[A-Z]/.test(tool.name);
-  const label = KINDS[tool.name] ? t(KINDS[tool.name]!) : camel ? t('tool.tool') : tool.name;
+  // An MCP tool (`mcp__server__tool`) reads as using a tool, with the server's name when the call names nothing else.
+  const mcp = /^mcp__(.+?)__/.exec(tool.name);
+  const label = KINDS[tool.name] ? t(KINDS[tool.name]!) : mcp ? t('tool.mcp') : camel ? t('tool.tool') : tool.name;
+  if (mcp && !raw) return { label, detail: mcp[1]! };
   const wrapped = KINDS[tool.name] === 'tool.command' && WRAPPED.exec(raw);
   if (wrapped) {
     const exe = (wrapped[1] ?? wrapped[2] ?? '').split(/[\\/]+/).pop()!.replace(/\.exe$/i, '').toLowerCase();
@@ -79,7 +103,7 @@ export const toolLine = (tool: ToolUse): string => {
 };
 
 /** Claude Code's call that hands a piece of the work to a subagent (`Agent`; `Task` in older versions). */
-export const isAgentCall = (tool: ToolUse): boolean => !tool.parent && (tool.name === 'Agent' || tool.name === 'Task');
+export const isAgentCall = (tool: ToolUse): boolean => !tool.parent && SUBAGENT.has(tool.name);
 
 export interface AgentStep {
   call: ToolUse;

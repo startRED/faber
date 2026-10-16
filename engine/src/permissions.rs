@@ -455,6 +455,11 @@ pub fn forbidden_folder(root: &Path) -> bool {
 /// when a turn starts). A network path to an administrative share is refused whatever the host is called, because aliases such
 /// as the PC's LAN address cannot all be recognised.
 pub fn checked_folder(root: &Path) -> Option<PathBuf> {
+    // Refused by its name alone, before the resolution below asks the network: a host that does not answer held the check
+    // (and the screen waiting on it) for about ten seconds per path.
+    if administrative_share(&normal(&root.to_string_lossy())) {
+        return None;
+    }
     let real = match std::fs::canonicalize(root) {
         Ok(real) => Some(real),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,

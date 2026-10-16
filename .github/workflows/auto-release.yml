@@ -14,7 +14,12 @@ on:
     workflows: [ci]
     branches: [phase-1-base]
     types: [completed]
+  # The queue's land job (ci.yml, R162) passes the commit it landed; by hand, the newest green push is used.
   workflow_dispatch:
+    inputs:
+      sha:
+        description: Commit to release
+        required: false
 
 # Green runs that finish close together queue here; each one sees the tag the one before it pushed. promote-stable.yml has its
 # own group on purpose: GitHub keeps one pending run per group and cancels the others, so sharing this one would let a queued
@@ -38,7 +43,7 @@ jobs:
           fetch-depth: 0
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GREEN_SHA: ${{ github.event.workflow_run.head_sha }}
+          GREEN_SHA: ${{ github.event.workflow_run.head_sha || inputs.sha }}
         run: |
           set -euo pipefail
           sha=${GREEN_SHA:-$(gh run list --workflow ci.yml --branch phase-1-base --event push --status success --limit 1 --json headSha --jq '.[0].headSha')}

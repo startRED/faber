@@ -260,6 +260,11 @@ inside its own area.
 - With no AI connected, the greeting, the suggestions and the list give way to an empty state with Curioso and a button
   that opens account management. The composer stays on screen but cannot send.
 
+### Work log
+
+- Each step is a quiet chip: a verb in the ink color ("Reading", "Running") and what it acts on in the mono face, cut
+  in the middle. A tool Faber does not know keeps its own name; an MCP tool reads "Using a tool" with its server's name.
+
 ### Subagent steps
 
 When the agent hands part of the work to a subagent (R161), the reply shows one row per helper between the work log and
@@ -782,6 +787,12 @@ to `target/faber-test/run.log`, which CI keeps with the screenshots. `cargo test
 lists every failing test. `cargo t --suite lint` runs the two Clippy proofs the same way, and a test keeps them equal to
 CI's lines. The `cargo t` alias builds the runner itself with `--message-format=short`, so a broken build of the runner
 also prints one line per error.
+
+A mission reads its checks the same way (R155, `engine/src/project/proof/output.rs`, which `cargo t` also uses for
+Cargo). The roles get each failure with its `file:line` and the tool's fix, the measurements and one summary line, at
+most 20 failures of 8 lines; the whole output stays in the mission's private `proofs/` folder. It reads `cargo t`,
+rustc and Clippy, `cargo test`, `cargo fmt --check`, tsc and oxlint; any other format gives its last 20 lines when the
+check fails. A new format is one more parser in that file's list. Lines that look like a secret are withheld first.
 
 ### Lane claims
 

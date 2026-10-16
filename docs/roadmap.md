@@ -330,7 +330,8 @@ A mission keeps a project as coherent as the agents that build Faber keep Faber 
   `Extends:` it or `New:` with why it does not fit; the Writer starts only once the contract exists.
 - **Faber decides "done".** After the Writer's turn Faber runs the project's checks and the map check itself; a Writer
   cannot declare its own work done.
-- **Short check output (R155, next).** The roles read only what failed: each failure with its file and line, the tool's
+- **Short check output (R155; reading built for Cargo, tsc and oxlint, pytest, jest or vitest, eslint and go test
+  next).** The roles read only what failed: each failure with its file and line, the tool's
   suggested fix when it has one, measurements and a one-line summary. The whole output stays in the mission's log, and
   a format Faber does not know falls back to its last lines. Faber's own runner cut a passing run from about 34k tokens
   to about 50 this way (R154).
@@ -400,7 +401,7 @@ and Projects.
 ## Watching the agent work
 
 The owner's ask (2026-10-16): the person sees every part of the work happening and steps in as easily as reading a
-chat. Planned, not built. The design is an AI proposal, not reviewed, picked from a divergent pass (30 ideas under five
+chat. Steps 1 and 2 are built: each tool reads as a verb with what it acts on (one verb per tool; grouped phrases such as "Changing 3 files" and the time per subagent are not), and subagent rows are the steps of R161. The rest is planned. The design is an AI proposal, not reviewed, picked from a divergent pass (30 ideas under five
 frames) and checked against today's code. It fills the steps of R161 and never becomes a board or an agent map.
 
 **In order, each one extending what exists:**
