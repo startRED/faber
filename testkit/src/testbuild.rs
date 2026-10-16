@@ -103,6 +103,29 @@ pub fn ensure_fake_cli(paths: &Paths, jobs: usize) -> Result<(), String> {
     if paths.fake_cli.exists() { Ok(()) } else { Err(format!("the fake CLI is not at {}", paths.fake_cli.display())) }
 }
 
+/// The programs a screen run starts: what `--build-only` leaves and `--prebuilt` needs. CI hands
+/// exactly these from its build job to its screen parts (R163), so a scenario that needs another one fails there at once.
+pub fn built_programs(paths: &Paths) -> Vec<std::path::PathBuf> {
+    let suffix = std::env::consts::EXE_SUFFIX;
+    let debug = paths.fake_cli.parent().map(Path::to_path_buf).unwrap_or_default();
+    let mut list = vec![
+        paths.app.clone(),
+        paths.target.join(format!("debug/faber-local{suffix}")),
+        paths.fake_cli.clone(),
+        debug.join(format!("faber-test{suffix}")),
+    ];
+    if cfg!(windows) {
+        list.push(debug.join(format!("examples/cache_probe{suffix}")));
+    }
+    list
+}
+
+/// Every program a `--build-only` run leaves, or the ones that are missing.
+pub fn prebuilt(paths: &Paths) -> Result<(), String> {
+    let missing: Vec<String> = built_programs(paths).iter().filter(|p| !p.is_file()).map(|p| p.display().to_string()).collect();
+    if missing.is_empty() { Ok(()) } else { Err(format!("--prebuilt, but these programs were not built: {}", missing.join(", "))) }
+}
+
 /// Builds the test app under Cargo's target directory, once per run, with `jobs` cores for Cargo.
 pub fn build_test_app(paths: &Paths, jobs: usize) -> Result<(), String> {
     let production = paths.root.join("dist");

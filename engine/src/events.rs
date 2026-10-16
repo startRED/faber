@@ -66,6 +66,12 @@ pub enum EngineEvent {
         ok: bool,
         text: String,
     },
+    /// The agent called Faber's helper tool (R161, `crate::helper`): `id` is that tool call. The CLI waits for the answer,
+    /// which the engine sends with `Session::helper_reply` once the helper is done.
+    HelperCall {
+        id: String,
+        input: Value,
+    },
     Permission {
         request_id: String,
         tool: String,
@@ -171,6 +177,12 @@ pub enum SessionCommand {
         reply: Option<serde_json::Value>,
         ack: tokio::sync::oneshot::Sender<Delivery>,
     },
+    /// The helper's report for a `HelperCall`, which becomes that tool call's result.
+    HelperReply {
+        id: String,
+        ok: bool,
+        text: String,
+    },
     Interrupt,
     Close,
 }
@@ -229,6 +241,9 @@ impl Session {
         let (ack, delivered) = tokio::sync::oneshot::channel();
         (self.send)(SessionCommand::Answer { request_id: request_id.to_string(), allow, reply, ack });
         delivered
+    }
+    pub fn helper_reply(&self, id: &str, ok: bool, text: String) {
+        (self.send)(SessionCommand::HelperReply { id: id.to_string(), ok, text });
     }
     pub fn interrupt(&self) {
         (self.send)(SessionCommand::Interrupt);

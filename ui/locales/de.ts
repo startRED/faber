@@ -951,6 +951,7 @@ export const de: Messages = {
   'notes.16.new': 'Wenn der Assistent einen Teil der Arbeit an einen Helfer gibt, erscheint der Helfer als Schritt in seiner Antwort.',
   'notes.17.fixed': 'Wenn der Assistent Subagenten im Hintergrund arbeiten lässt, wartet seine Antwort jetzt auf sie und kommt vollständig an, statt bei „ich warte“ stehen zu bleiben.',
   'notes.18.better': 'Jeder Arbeitsschritt sagt jetzt in einfachen Worten, was er tut, etwa Liest, Durchsucht oder Ändert, mit der Datei oder dem Befehl, um die es geht.',
+  'notes.19.new': 'In einem Projekt kann der Assistent die andere KI um Hilfe bei einem Teil der Arbeit oder einer Prüfung bitten, und der Helfer erscheint als Schritt in seiner Antwort.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

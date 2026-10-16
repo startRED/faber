@@ -1726,6 +1726,7 @@ async fn stop_leaves_no_worker(parent_script: &str, why: &str) {
             bin: "claude".into(),
             cwd: dir.path().into(),
             launch: ClaudeLaunch {
+                helper: Default::default(),
                 area: Area::Project,
                 model: None,
                 effort: None,
@@ -2180,4 +2181,106 @@ async fn r140_settings_that_cannot_be_read_ask_before_every_change_and_a_missing
         assert_eq!(got, expected, "{text:?}");
         engine.shutdown();
     }
+}
+
+/// An engine with both CLIs connected on a known subscription, as a helper needs (R161).
+fn two_vendors(dir: &Path, spawn: Spawner) -> Engine {
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let clis = BTreeMap::from(Vendor::ALL.map(|v| (v, Cli { command: v.name().into(), prefix: vec![] })));
+    let opts = EngineOptions {
+        data_dir: dir.into(),
+        clis,
+        spawn,
+        windows: false,
+        claude_env_billed: false,
+        max_warm: 3,
+        idle: Duration::from_secs(120),
+        runtime: tokio::runtime::Handle::current(),
+        ask: None,
+    };
+    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
+    // Faber calls a vendor on its own only on a known subscription.
+    for vendor in engine.vendors() {
+        let plan = faber_engine::signals::Signals { billing: Some(faber_engine::budget::Billing::Subscription), ..Default::default() };
+        engine.note_account_events(vendor, vec![faber_engine::events::EngineEvent::Signals(plan)]);
+    }
+    engine.set_codex_models(vec!["gpt-6.1-sol".into()], Some("gpt-6.1-sol".into()));
+    engine
+}
+
+/// R161: a project's agent on Claude Code hands a piece of work to Codex. Codex runs it in a session of its own, its steps
+/// show inside the agent's call, and its final words go back to Claude Code as the call's result.
+#[tokio::test]
+async fn r161_the_agent_hands_a_piece_of_work_to_the_other_vendor_and_gets_its_report_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let (claude, codex) = (fake(fixture("claude", "helper-call")), fake(fixture("codex", "helper-run")));
+    let (to_claude, to_codex) = (claude.spawn.clone(), codex.spawn.clone());
+    let spawn: Spawner = Arc::new(move |bin, argv, cwd| if bin == "codex" { to_codex(bin, argv, cwd) } else { to_claude(bin, argv, cwd) });
+    let engine = two_vendors(dir.path(), spawn);
+    let project = engine.add_project(&dir.path().to_string_lossy());
+    let text = "Call the helper tool once with title \"Check\" and brief \"What is the answer?\". Then tell me in one line what it said.";
+    let id =
+        engine.send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, text, choice("claude", Some("haiku"))) }).unwrap();
+    let c = until(&engine, &id, |c| settled(c, 2)).await;
+    engine.shutdown();
+    assert_eq!(claude.mismatches.lock().unwrap().clone(), Vec::<String>::new());
+    assert_eq!(codex.mismatches.lock().unwrap().clone(), Vec::<String>::new(), "the helper is sent the agent's brief");
+
+    let claude_args = claude.args.lock().unwrap()[0].clone();
+    assert!(claude_args.windows(2).any(|a| a[0] == "--mcp-config" && a[1].contains("\"type\":\"sdk\"")), "{claude_args:?}");
+    let reply = &c.messages[1];
+    let tools = reply.tools.as_ref().unwrap();
+    let call = tools.iter().find(|t| t.name == "Helper").expect("the helper call is one step");
+    let report = "`config.toml` contains only `timeout = 30` and `retries = 3`.";
+    assert!(call.ok == Some(true) && call.output.as_deref().is_some_and(|o| o.starts_with(report)), "{call:?}");
+    let under: Vec<_> = tools.iter().filter(|t| t.parent.as_deref() == Some(call.id.as_str())).map(|t| t.name.as_str()).collect();
+    assert_eq!(under, ["commandExecution"; 4], "Codex's commands are kept under the call");
+    // What Faber wrote back to Claude Code: the helper's report as the tool's result, answering the call's request.
+    let answered =
+        claude.wire.messages().into_iter().find(|m| m["response"]["response"]["mcp_response"]["result"]["content"].is_array()).unwrap();
+    let sent = answered["response"]["response"]["mcp_response"]["result"]["content"][0]["text"].as_str().unwrap().to_string();
+    assert!(sent.starts_with(report) && answered["response"]["response"]["mcp_response"]["result"]["isError"] == false, "{sent}");
+    assert!(reply.text.contains("nothing risky"), "{}", reply.text);
+    // The helper's cost joins the reply's, which is more than the agent's own turn.
+    assert!(reply.cost_usd.unwrap() > 0.00815, "{:?}", reply.cost_usd);
+}
+
+/// R161, review: a helper at work counts against its vendor's quota while it runs, and stops, telling the agent why, as soon
+/// as its vendor would bill beyond the subscription (R86): a helper is never picked by hand nor approved for paid use.
+#[tokio::test]
+async fn r161_a_running_helper_counts_on_its_quota_and_stops_when_its_vendor_would_bill_beyond_the_plan() {
+    let dir = tempfile::tempdir().unwrap();
+    let (spawn, made) = pipes();
+    let engine = two_vendors(dir.path(), spawn);
+    let project = engine.add_project(&dir.path().to_string_lossy());
+    engine.send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, "check it", choice("claude", Some("haiku"))) }).unwrap();
+    let mut claude = next_pipe(&made).await;
+    let counting = |engine: &Engine| engine.state().usage.iter().any(|u| u.vendor == Vendor::Codex && u.counting);
+    assert!(!counting(&engine));
+    claude.say(json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-haiku-5-5"})).await;
+    let input = json!({"title":"Check","brief":"Look at config.toml."});
+    claude
+        .say(json!({"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"tool_use","id":"toolu_h","name":"mcp__faber__helper","input":input}]}}))
+        .await;
+    let call = json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"helper","arguments":input,"_meta":{"claudecode/toolUseId":"toolu_h"}}});
+    claude
+        .say(json!({"type":"control_request","request_id":"r1","request":{"subtype":"mcp_message","server_name":"faber","message":call}}))
+        .await;
+    let _codex = next_pipe(&made).await;
+    assert!(counting(&engine), "the helper spends Codex's quota while it works");
+
+    let paid = faber_engine::signals::Signals { overage_active: Some(true), ..Default::default() };
+    engine.note_account_events(Vendor::Codex, vec![faber_engine::events::EngineEvent::Signals(paid)]);
+    let mut answer = None;
+    for _ in 0..300 {
+        answer = claude.lines.lock().unwrap().iter().find(|m| m["response"]["request_id"] == "r1").cloned();
+        if answer.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let result = &answer.expect("the agent is answered")["response"]["response"]["mcp_response"]["result"];
+    assert_eq!(result["isError"], true);
+    assert!(result["content"][0]["text"].as_str().unwrap().contains("billed beyond its subscription"), "{result}");
+    engine.shutdown();
 }

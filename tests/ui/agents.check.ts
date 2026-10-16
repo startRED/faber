@@ -75,3 +75,32 @@ check('subagent step: a running helper is its own row in the reply, apart from t
     root.remove();
   }
 });
+
+// R161: a helper from the other AI (Faber's own `Helper` tool) is the same kind of step, named by its title and by the AI that ran it.
+const HELPER: ToolUse = { id: 'h1', name: 'Helper', input: { title: 'Review the parser', brief: 'Read parser.rs and list mistakes.' } };
+const HELPER_RUN: ToolUse = { id: 'c1', name: 'commandExecution', input: 'rg -n parse', parent: 'h1', ok: true };
+
+check('helper step: a helper call collects the other AI’s commands, is named by its title, and its kind is the AI that ran it', () => {
+  const steps = agentSteps([OWN, HELPER, HELPER_RUN], 'Codex');
+  deepEqual(steps.map((s) => [s.title, s.kind, s.helper, s.tools.map((t) => t.id)]), [['Review the parser', 'Codex', true, ['c1']]]);
+  deepEqual(agentSteps([{ ...HELPER, input: { brief: 'Read parser.rs and list mistakes.' } }], 'Codex')[0].title, 'Read parser.rs and list mistakes.');
+  equal(agentSteps([AGENT], 'Codex')[0].helper, false);
+});
+
+check('helper step: in a reply on Claude Code the helper row names Codex, and its report is the helper’s own words', async () => {
+  useLanguage('en');
+  const root = document.createElement('div');
+  document.body.append(root);
+  const tools = [OWN, { ...HELPER, ok: true, output: 'Two mistakes in parser.rs.' }, HELPER_RUN];
+  const message: Message = { id: 'help', role: 'assistant', at: 0, status: 'done', vendor: 'claude', text: 'Done.', tools };
+  const dispose = render(() => createComponent(Thread, { messages: [message], from: 0, conversationId: 'help', options: [], onBranch: () => {} }), root);
+  try {
+    const row = root.querySelector<HTMLDetailsElement>('.agents .agent')!;
+    equal(row.querySelector('summary b')!.textContent, 'Review the parser');
+    equal(row.querySelector('.agent-meta')!.textContent, 'Codex · done · 1 step');
+    equal(row.querySelector('.agent-report')!.textContent!.trim(), 'Two mistakes in parser.rs.');
+  } finally {
+    dispose();
+    root.remove();
+  }
+});

@@ -27,6 +27,7 @@ async fn opus_1_codex_manual_turns_stay_available_after_long_silence_or_start_er
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let session = server.open(
             CodexThread {
+                helper: Default::default(),
                 cwd: ".".into(),
                 model: None,
                 effort: None,
@@ -135,6 +136,7 @@ async fn review_7_codex_preserves_a_turn_sent_before_interrupt_acknowledgement()
     });
     let session = server.open(
         CodexThread {
+            helper: Default::default(),
             cwd: ".".into(),
             model: None,
             effort: None,
@@ -185,6 +187,7 @@ async fn an_ignored_interrupt_quarantines_only_that_thread_and_preserves_a_runni
         let tx = tx.clone();
         server.open(
             CodexThread {
+                helper: Default::default(),
                 cwd: ".".into(),
                 model: None,
                 effort: None,
@@ -230,6 +233,7 @@ async fn run(
     react: impl FnMut(&EngineEvent, &Session) -> bool,
 ) -> (Vec<EngineEvent>, Vec<String>) {
     let thread = CodexThread {
+        helper: Default::default(),
         cwd: ".".into(),
         model: None,
         effort: None,
@@ -379,6 +383,7 @@ async fn codex_an_answer_that_fails_to_write_keeps_the_approval_and_the_retry_is
     };
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let thread = CodexThread {
+        helper: Default::default(),
         cwd: ".".into(),
         model: None,
         effort: None,
@@ -422,6 +427,7 @@ async fn codex_an_answer_that_may_be_half_written_is_never_written_again() {
     };
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let thread = CodexThread {
+        helper: Default::default(),
         cwd: ".".into(),
         model: None,
         effort: None,
@@ -552,6 +558,7 @@ async fn review3_user_mcp_servers_are_disabled_before_start_and_resume_without_c
             });
             let session = server.open(
                 CodexThread {
+                    helper: Default::default(),
                     cwd: ".".into(),
                     model: None,
                     effort: None,
@@ -610,6 +617,7 @@ async fn one_process_serves_two_conversations_at_once_and_keeps_their_answers_ap
     let open = |name: &'static str| {
         let tx = tx.clone();
         let thread = CodexThread {
+            helper: Default::default(),
             cwd: ".".into(),
             model: None,
             effort: Some("medium".into()),
@@ -645,6 +653,7 @@ async fn one_process_serves_two_conversations_at_once_and_keeps_their_answers_ap
 #[test]
 fn a_side_question_thread_has_its_own_instructions_restricted_reads_no_writes_and_is_not_saved() {
     let thread = CodexThread {
+        helper: Default::default(),
         cwd: ".".into(),
         model: Some("gpt-6-luna".into()),
         effort: None,
@@ -667,6 +676,7 @@ fn permissions_keep_the_workspace_sandbox_and_disable_project_network_without_ap
         for permissions in [Permissions::Isolated, Permissions::Ask, Permissions::FullAccess] {
             for resume in [None, Some("thread-id".into())] {
                 let t = CodexThread {
+                    helper: Default::default(),
                     cwd: "project".into(),
                     model: Some("model".into()),
                     effort: None,
@@ -723,6 +733,7 @@ async fn l2_serialized_start_and_resume_carry_the_no_approval_offline_policy() {
             });
             let session = server.open(
                 CodexThread {
+                    helper: Default::default(),
                     cwd: ".".into(),
                     model: None,
                     effort: None,
@@ -781,6 +792,7 @@ async fn a_project_with_no_approvals_declines_a_residual_request_without_emittin
                 });
                 server.open(
                     CodexThread {
+                        helper: Default::default(),
                         cwd: ".".into(),
                         model: None,
                         effort: None,
@@ -805,6 +817,7 @@ async fn a_project_with_no_approvals_declines_a_residual_request_without_emittin
 #[test]
 fn the_name_is_a_developer_instruction_that_resume_repeats_and_a_side_question_never_gets() {
     let thread = |resume: Option<&str>, instructions: Option<&str>, name: Option<&str>| CodexThread {
+        helper: Default::default(),
         cwd: ".".into(),
         model: None,
         effort: None,
@@ -878,6 +891,7 @@ async fn a_steer_before_the_turn_has_an_id_is_not_delivered() {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let f = fake(entries);
     let thread = CodexThread {
+        helper: Default::default(),
         cwd: ".".into(),
         model: None,
         effort: None,
@@ -965,6 +979,7 @@ async fn review3_command_gate_declines_git_mutations_and_runs_builds_only_in_the
         });
         let session = server.open(
             CodexThread {
+                helper: Default::default(),
                 cwd: root.path().into(),
                 model: None,
                 effort: None,
@@ -1038,6 +1053,7 @@ fn r121_codex_full_access_has_no_sandbox_no_approvals_and_no_host_command_tool()
     for area in [Area::Chat, Area::Project] {
         for resume in [None, Some("thread".into())] {
             let t = CodexThread {
+                helper: Default::default(),
                 cwd: "project".into(),
                 model: None,
                 effort: None,
@@ -1062,6 +1078,7 @@ fn r121_codex_full_access_has_no_sandbox_no_approvals_and_no_host_command_tool()
 fn r121_a_side_question_stays_isolated_whatever_mode_the_person_chose() {
     for permissions in [Permissions::FullAccess, Permissions::Ask, Permissions::Isolated] {
         let t = CodexThread {
+            helper: Default::default(),
             cwd: ".".into(),
             model: None,
             effort: None,
@@ -1121,6 +1138,7 @@ async fn r121_a_full_access_thread_keeps_the_persons_mcp_servers_and_starts_with
         });
         let session = server.open(
             CodexThread {
+                helper: Default::default(),
                 cwd: ".".into(),
                 model: None,
                 effort: None,
@@ -1173,6 +1191,7 @@ async fn r124_a_full_access_thread_hands_a_residual_approval_to_the_engine_and_n
                 });
                 server.open(
                     CodexThread {
+                        helper: Default::default(),
                         cwd: ".".into(),
                         model: None,
                         effort: None,
@@ -1219,7 +1238,17 @@ fn codex_work_log_items_from_a_recorded_turn_keep_their_raw_shape_for_the_screen
 // R140: the vendors' own range of modes.
 
 fn mode_thread(permissions: Permissions, tuning: faber_engine::model::Tuning) -> CodexThread {
-    CodexThread { cwd: "project".into(), model: None, effort: None, resume: None, instructions: None, user_name: None, permissions, tuning }
+    CodexThread {
+        helper: Default::default(),
+        cwd: "project".into(),
+        model: None,
+        effort: None,
+        resume: None,
+        instructions: None,
+        user_name: None,
+        permissions,
+        tuning,
+    }
 }
 
 #[test]
@@ -1326,4 +1355,72 @@ fn r140_every_isolated_or_internal_codex_thread_has_web_search_disabled_and_take
     for writable in [false, true] {
         assert_eq!(faber_engine::permissions::sandbox_config(".".as_ref(), writable)["web_search"], "disabled", "{writable}");
     }
+}
+
+// R161: Faber's helper tool on Codex.
+
+#[test]
+fn r161_only_a_project_agent_gets_the_helper_tool_and_a_helper_keeps_no_history() {
+    let with = |helper, instructions: Option<&str>, resume: Option<&str>| {
+        let t = CodexThread {
+            helper,
+            instructions: instructions.map(String::from),
+            resume: resume.map(String::from),
+            ..mode_thread(Permissions::Isolated, Default::default())
+        };
+        thread_params(Area::Project, &t).1
+    };
+    let names = |p: &serde_json::Value| -> Vec<String> {
+        p["dynamicTools"].as_array().into_iter().flatten().map(|t| t["name"].as_str().unwrap().to_string()).collect()
+    };
+    use faber_engine::helper::Helper;
+    assert_eq!(names(&with(Helper::Offers, None, None)), ["run_command", "helper"], "beside the tool the mode gives");
+    assert_eq!(names(&with(Helper::Off, None, None)), ["run_command"]);
+    assert!(names(&with(Helper::Offers, Some("Route."), None)).is_empty(), "a side question never gets it");
+    assert!(with(Helper::Offers, None, Some("t1")).get("dynamicTools").is_none(), "a resumed thread keeps the tools it started with");
+    assert_eq!(with(Helper::Is, None, None)["ephemeral"], true);
+    assert!(with(Helper::Offers, None, None).get("ephemeral").is_none());
+}
+
+#[tokio::test]
+async fn r161_codex_calling_the_helper_waits_for_its_report_and_gets_it_as_the_tools_result() {
+    let thread = CodexThread {
+        helper: faber_engine::helper::Helper::Offers,
+        cwd: ".".into(),
+        model: Some("gpt-6-luna".into()),
+        ..mode_thread(Permissions::FullAccess, Default::default())
+    };
+    let first =
+        "Ask the helper tool to check config.toml for risky values (title \"Check config\"). Then tell me in one sentence what it found.";
+    let mut asked = None;
+    let (events, mismatches) = drive(
+        fixture("codex", "helper-call"),
+        |spawn, sink| {
+            let opts = CodexServerOptions {
+                permissions: Permissions::FullAccess,
+                cli: faber_engine::cli::Cli { command: "codex".into(), prefix: vec![] },
+                cwd: ".".into(),
+                area: Area::Project,
+                user_hooks: false,
+                windows: false,
+                spawn,
+            };
+            CodexServer::start(opts).open(thread, sink)
+        },
+        first,
+        |e, session| {
+            if let EngineEvent::HelperCall { id, input } = e {
+                asked = Some((id.clone(), input["title"].clone()));
+                session.helper_reply(id, true, "config.toml sets timeout = 30 and retries = 3; nothing risky.".into());
+            }
+            matches!(e, EngineEvent::Done { .. })
+        },
+    )
+    .await;
+    assert!(mismatches.is_empty(), "{mismatches:?}");
+    let (id, title) = asked.expect("the call reaches the engine");
+    assert_eq!(title, "Check config");
+    let tool = events.iter().find_map(|e| if let EngineEvent::Tool { id, name, .. } = e { Some((id, name)) } else { None });
+    assert_eq!(tool, Some((&id, &"Helper".to_string())), "the call is one step, named by its tool call id");
+    assert!(text_of(&events).contains("timeout = 30"), "{}", text_of(&events));
 }

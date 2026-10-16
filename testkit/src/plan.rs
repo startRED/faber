@@ -50,29 +50,39 @@ pub fn suites_for(paths: &[String]) -> BTreeSet<Suite> {
     paths.iter().flat_map(|p| suites_for_path(p)).collect()
 }
 
+/// One rule of `testkit/suites.json`, which CI's `scripts/ci-scope.mjs` reads too, so both pick the same suites (R163).
+#[derive(serde::Deserialize)]
+struct Rule {
+    #[serde(default)]
+    files: Vec<String>,
+    #[serde(default)]
+    prefixes: Vec<String>,
+    #[serde(default)]
+    suffixes: Vec<String>,
+    suites: Vec<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct Rules {
+    rules: Vec<Rule>,
+}
+
+fn rules() -> &'static [Rule] {
+    static RULES: std::sync::OnceLock<Rules> = std::sync::OnceLock::new();
+    &RULES.get_or_init(|| serde_json::from_str(include_str!("../suites.json")).expect("testkit/suites.json is valid")).rules
+}
+
+/// The first rule that matches wins; a path no rule matches needs every suite.
 fn suites_for_path(path: &str) -> Vec<Suite> {
-    use Suite::{Rust, Screen, Ui};
     let path = path.trim_start_matches("./");
-    let inside = |dirs: &[&str]| dirs.iter().any(|d| path.starts_with(d));
-    let is = |files: &[&str]| files.contains(&path);
-    // engine/tests/product_map.rs reads the map; every other document is only words. CI skips its build for a push of words
-    // only, by the same rule (scripts/ci-scope.mjs, R163): keep the two lists the same.
-    if path == "docs/product-map.md" {
-        vec![Rust]
-    } else if path.starts_with("docs/") || path.ends_with(".md") {
-        vec![]
-    } else if inside(&["testkit/"]) {
-        Suite::ALL.to_vec()
-    } else if inside(&["tests/ui/"]) {
-        vec![Ui]
-    } else if inside(&["tests/fixtures/", "engine/"]) {
-        vec![Rust, Screen]
-    } else if inside(&["src-tauri/", ".cargo/"]) || is(&["Cargo.toml", "Cargo.lock"]) {
-        vec![Rust, Ui, Screen]
-    } else if inside(&["ui/"]) || is(&["vite.config.ts", "tsconfig.json", "package.json", "package-lock.json"]) {
-        vec![Ui, Screen]
-    } else {
-        Suite::ALL.to_vec()
+    let matches = |rule: &&Rule| {
+        rule.files.iter().any(|f| f == path)
+            || rule.prefixes.iter().any(|p| path.starts_with(p.as_str()))
+            || rule.suffixes.iter().any(|s| path.ends_with(s.as_str()))
+    };
+    match rules().iter().find(matches) {
+        Some(rule) => rule.suites.iter().filter_map(|name| Suite::parse(name)).collect(),
+        None => Suite::ALL.to_vec(),
     }
 }
 
@@ -93,6 +103,11 @@ pub struct Options {
     pub filter: Option<String>,
     /// `--shard 2/3`: run only the second of three even parts of the screen suite, so CI can split it.
     pub shard: Option<(usize, usize)>,
+    /// `--build-only`: build the test app, the fake CLI and their helpers, run nothing. CI builds once and hands the
+    /// programs to its screen parts (R163).
+    pub build_only: bool,
+    /// `--prebuilt`: use the programs a `--build-only` run left instead of building them.
+    pub prebuilt: bool,
 }
 
 pub fn parse_args(args: &[String]) -> Result<Options, String> {
@@ -107,8 +122,17 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             }
             "--filter" => opts.filter = Some(it.next().ok_or("--filter needs some text")?.clone()),
             "--shard" => opts.shard = Some(shard(it.next().ok_or("--shard needs a part such as 1/3")?)?),
-            other => return Err(format!("unknown argument {other}: use --all, --suite <name>, --filter <text> or --shard <i/n>")),
+            "--build-only" => opts.build_only = true,
+            "--prebuilt" => opts.prebuilt = true,
+            other => {
+                return Err(format!(
+                    "unknown argument {other}: use --all, --suite <name>, --filter <text>, --shard <i/n>, --build-only or --prebuilt"
+                ));
+            }
         }
+    }
+    if opts.build_only && opts.prebuilt {
+        return Err("--build-only and --prebuilt cannot go together".into());
     }
     Ok(opts)
 }
@@ -231,6 +255,16 @@ mod tests {
     }
 
     #[test]
+    fn every_suite_the_rules_name_exists_and_every_rule_matches_something() {
+        for rule in rules() {
+            for name in &rule.suites {
+                assert!(Suite::parse(name).is_some_and(|s| s != Suite::Lint), "testkit/suites.json names {name}");
+            }
+            assert!(!(rule.files.is_empty() && rule.prefixes.is_empty() && rule.suffixes.is_empty()), "a rule that matches nothing");
+        }
+    }
+
+    #[test]
     fn documents_pick_nothing_at_any_depth_and_nothing_means_no_suites() {
         for path in ["docs/design.md", "docs/superpowers/plans/x.md", "README.md", "engine/NOTES.md", "ui/locales/README.md"] {
             assert!(suites_for(&paths(&[path])).is_empty(), "{path}");
@@ -274,7 +308,7 @@ mod tests {
         assert!(args(&["--all"]).unwrap().all);
         assert_eq!(
             args(&["--suite", "ui", "--filter", "i18n"]).unwrap(),
-            Options { all: false, suite: Some(Suite::Ui), filter: Some("i18n".into()), shard: None }
+            Options { all: false, suite: Some(Suite::Ui), filter: Some("i18n".into()), ..Options::default() }
         );
         assert!(args(&["--suite"]).is_err());
         assert!(args(&["--suite", "gpu"]).is_err());
@@ -282,6 +316,9 @@ mod tests {
         assert!(args(&["--filter"]).is_err());
         assert!(args(&["--everything"]).is_err());
         assert_eq!(args(&["--shard", "2/3"]).unwrap().shard, Some((2, 3)));
+        assert!(args(&["--build-only"]).unwrap().build_only);
+        assert!(args(&["--suite", "screen", "--prebuilt"]).unwrap().prebuilt);
+        assert!(args(&["--build-only", "--prebuilt"]).is_err());
         for wrong in [&["--shard"][..], &["--shard", "0/3"], &["--shard", "4/3"], &["--shard", "3"], &["--shard", "a/b"]] {
             assert!(args(wrong).is_err(), "{wrong:?}");
         }

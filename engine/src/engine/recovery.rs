@@ -237,6 +237,8 @@ impl Core {
 
     /// Family recovery stays on this vendor. Otherwise move to a healthy subscription, or wait.
     pub(super) fn recover(&mut self, id: &str, explicit: bool) -> Result<(), String> {
+        // The reply moves on or fails: helpers of the stopped turn stop with it, wherever recovery was called from.
+        self.stop_helpers(id, true);
         let Some(t) = self.transfers.get(id).cloned() else { return Err("error.quotaOut".into()) };
         if t.by_hand && !explicit {
             self.fail_reply(id, &t.reply, "error.quotaOut".into());
