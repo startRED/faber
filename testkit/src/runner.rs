@@ -11,7 +11,7 @@ use crate::report::{Outcome, Status, exit_code, line, quiet, summary};
 use crate::screen;
 use crate::slots;
 use crate::sweep;
-use crate::testbuild::{build_test_app, ensure_fake_cli, prebuilt};
+use crate::testbuild::{build_test_app, cargo_command, ensure_fake_cli, prebuilt};
 use faber_engine::project::proof::output::{cargo_output, died, failure_sections, parse_cargo_tests};
 use std::fs::File;
 use std::io::Write;
@@ -56,7 +56,7 @@ fn reason(errors: &[String], stderr: &str) -> String {
 }
 
 fn cargo(root: &Path, args: &[String]) -> std::io::Result<Output> {
-    Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into())).current_dir(root).args(args).output()
+    cargo_command().current_dir(root).args(args).output()
 }
 
 fn run_rust(root: &Path, jobs: usize, filter: Option<&str>, log: &mut Log) -> Vec<Outcome> {

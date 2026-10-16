@@ -61,6 +61,30 @@ pub fn fingerprint(dir: &Path) -> String {
     format!("{:x}", Sha256::digest(lines.join("\n")))
 }
 
+/// Is this one of the variables `cargo run` hands the program it runs? `cargo t` is such a program. Build scripts watch some
+/// of them (ring's: `CARGO_MANIFEST_DIR`, `CARGO_PKG_NAME`, `CARGO_PKG_VERSION_*`), so a Cargo started with them rebuilt ring
+/// and everything above it (rustls, reqwest, the engine, the app), and the next plain `cargo` rebuilt it all again.
+pub fn is_run_env(name: &str) -> bool {
+    name.starts_with("CARGO_PKG_")
+        || name.starts_with("CARGO_MANIFEST_")
+        || matches!(name, "CARGO_CRATE_NAME" | "CARGO_BIN_NAME" | "CARGO_PRIMARY_PACKAGE" | "OUT_DIR")
+}
+
+/// A command for Cargo, or for a tool that starts Cargo, without the variables of `cargo run` (`is_run_env`).
+pub fn without_run_env(mut command: Command) -> Command {
+    for (name, _) in std::env::vars_os() {
+        if name.to_str().is_some_and(is_run_env) {
+            command.env_remove(name);
+        }
+    }
+    command
+}
+
+/// Cargo, or the one Cargo that started this runner.
+pub fn cargo_command() -> Command {
+    without_run_env(Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into())))
+}
+
 fn run(what: &str, mut command: Command) -> Result<(), String> {
     let output = command.output().map_err(|e| format!("cannot start the {what}: {e}"))?;
     if output.status.success() {
@@ -76,12 +100,12 @@ fn run(what: &str, mut command: Command) -> Result<(), String> {
 
 /// Builds the fake CLI next to the runner, with `jobs` cores for Cargo. `cargo run` builds only the binary it runs.
 pub fn ensure_fake_cli(paths: &Paths, jobs: usize) -> Result<(), String> {
-    let mut command = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
+    let mut command = cargo_command();
     command.current_dir(&paths.root).args(["build", "--quiet", "-j", &jobs.to_string(), "--package", "faber-testkit", "--bin", "fake-cli"]);
     run("build of the fake CLI", command)?;
     #[cfg(windows)]
     {
-        let mut example = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
+        let mut example = cargo_command();
         // This guard-only host needs no PDB; MSVC hit LNK1318 LIMIT while generating it.
         example.current_dir(&paths.root).args([
             "rustc",
@@ -108,12 +132,7 @@ pub fn ensure_fake_cli(paths: &Paths, jobs: usize) -> Result<(), String> {
 pub fn built_programs(paths: &Paths) -> Vec<std::path::PathBuf> {
     let suffix = std::env::consts::EXE_SUFFIX;
     let debug = paths.fake_cli.parent().map(Path::to_path_buf).unwrap_or_default();
-    let mut list = vec![
-        paths.app.clone(),
-        paths.target.join(format!("debug/faber-local{suffix}")),
-        paths.fake_cli.clone(),
-        debug.join(format!("faber-test{suffix}")),
-    ];
+    let mut list = vec![paths.app.clone(), local_helper(paths), paths.fake_cli.clone(), debug.join(format!("faber-test{suffix}"))];
     if cfg!(windows) {
         list.push(debug.join(format!("examples/cache_probe{suffix}")));
     }
@@ -126,32 +145,59 @@ pub fn prebuilt(paths: &Paths) -> Result<(), String> {
     if missing.is_empty() { Ok(()) } else { Err(format!("--prebuilt, but these programs were not built: {}", missing.join(", "))) }
 }
 
-/// Builds the test app under Cargo's target directory, once per run, with `jobs` cores for Cargo.
+/// Builds the test app under Cargo's target directory, once per run, with `jobs` cores for Cargo. The Tauri build makes
+/// every program of the shell, the local rollback helper too, with the features and settings it ships with; a second
+/// plain `cargo build` of the helper rebuilt Tauri, its plugins, the engine and the shell without them.
 pub fn build_test_app(paths: &Paths, jobs: usize) -> Result<(), String> {
     let production = paths.root.join("dist");
     let before = fingerprint(&production);
     let mut vite = Command::new("node");
     vite.current_dir(&paths.root).args(vite_args());
     run("Vite build", vite)?;
-    let mut tauri = Command::new("node");
+    // A helper left by an older build must not pass for this one.
+    let helper = local_helper(paths);
+    let _ = std::fs::remove_file(&helper);
+    let mut tauri = without_run_env(Command::new("node"));
     tauri.current_dir(&paths.root).args(tauri_args(&paths.target, jobs));
     run("Tauri build", tauri)?;
-    let mut helper = Command::new("cargo");
-    helper
-        .current_dir(&paths.root)
-        .args(["build", "--quiet", "--package", "faber", "--bin", "faber-local", "--features", "test-hooks", "--target-dir"])
-        .arg(&paths.target)
-        .args(["-j", &jobs.to_string()]);
-    run("local rollback helper", helper)?;
     if fingerprint(&production) != before {
         return Err("the test build changed dist/, which only the production build may write".into());
     }
-    if paths.app.exists() { Ok(()) } else { Err(format!("the test build did not produce {}", paths.app.display())) }
+    for program in [&paths.app, &helper] {
+        if !program.exists() {
+            return Err(format!("the test build did not produce {}", program.display()));
+        }
+    }
+    Ok(())
+}
+
+/// The local rollback helper the Tauri build makes next to the test app.
+fn local_helper(paths: &Paths) -> std::path::PathBuf {
+    paths.target.join(format!("debug/faber-local{}", std::env::consts::EXE_SUFFIX))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cargo_starts_without_the_variables_cargo_run_hands_the_runner() {
+        for name in
+            ["CARGO_MANIFEST_DIR", "CARGO_MANIFEST_PATH", "CARGO_PKG_NAME", "CARGO_PKG_VERSION_MAJOR", "CARGO_CRATE_NAME", "OUT_DIR"]
+        {
+            assert!(is_run_env(name), "{name}");
+        }
+        for name in ["CARGO", "CARGO_HOME", "CARGO_TARGET_DIR", "CARGO_BUILD_JOBS", "CARGO_INCREMENTAL", "RUSTUP_TOOLCHAIN", "PATH"] {
+            assert!(!is_run_env(name), "{name}");
+        }
+        // cargo test runs this test with CARGO_MANIFEST_DIR and CARGO_PKG_NAME set, as cargo run does for the runner.
+        assert!(std::env::var_os("CARGO_MANIFEST_DIR").is_some());
+        let command = cargo_command();
+        let removed: Vec<_> = command.get_envs().filter(|(_, value)| value.is_none()).map(|(name, _)| name.to_owned()).collect();
+        for name in ["CARGO_MANIFEST_DIR", "CARGO_PKG_NAME"] {
+            assert!(removed.iter().any(|n| n == name), "{name} reaches Cargo");
+        }
+    }
 
     #[test]
     fn vite_builds_in_test_mode_into_its_own_folder_without_the_shell() {
