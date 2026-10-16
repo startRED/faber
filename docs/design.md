@@ -690,6 +690,37 @@ Many lanes run `cargo t` on one PC; each run peaks near 8 GB. Before building, a
 crash included. With all three taken it prints one waiting line and waits. `FABER_BUILD_SLOTS` sets another count for
 another PC (R129, E3).
 
+### What a run prints
+
+A run prints only what needs a look (R154): each failure with its reason, each pass that measures memory or processor
+(R125), and one summary line. A failed Rust test shows its panic from the `file:line` on; a compiler error shows as
+`file:line:col: error[code]: message`, with the compiler's suggested fix as one `help:` line under it. A reason longer
+than 15 lines keeps its first line and its error lines. Every line, every pass and Cargo's whole output included, goes
+to `target/faber-test/run.log`, which CI keeps with the screenshots. `cargo test` runs with `--no-fail-fast`, so one run
+lists every failing test. `cargo t --suite lint` runs the two Clippy proofs the same way, and a test keeps them equal to
+CI's lines. The `cargo t` alias builds the runner itself with `--message-format=short`, so a broken build of the runner
+also prints one line per error.
+
+### Lane claims
+
+Lanes that run at once (R128) say first what they will change (R154). A worktree on a branch writes `.faber-lane` at its
+root before it touches a file; git ignores the file:
+
+```text
+area: Settings screen
+own: ui/Settings.tsx
+own: engine/src/settings/
+share: ui/locales/
+```
+
+`area` is a row or heading of [product-map.md](product-map.md), or `none` for work no person sees. `own` is the lane's
+alone; `share` is a file several lanes may append to, such as the locales or the decisions. A path claims itself and
+everything under it. Before any suite, `cargo t` (`testkit/src/lanes.rs`) stops when a changed file is not claimed, when
+an area is not in the map, or when a claim overlaps another worktree's (two `share` claims may). The main checkout (the
+lead session, CI) and detached worktrees (Faber's own missions, test workspaces) need no claim. A lane deletes its claim
+once its last commit is on `phase-1-base`; a claim nobody saved for a day is stale and ignored. Claims live on one PC:
+a lane on another machine is not seen.
+
 ### UX sentinel
 
 The sentinel (`testkit/src/sentinel.rs`, `testkit/src/probe.js`, `testkit/src/screen/sentinel.rs`) judges what a person

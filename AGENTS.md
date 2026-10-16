@@ -35,6 +35,8 @@ for how Faber works today. This file stays short: each line prevents a real mist
   Commits may group related steps, but never huge: push often, roughly once an hour is the usual pace (a rough
   average, not a target), and never leave proven work unpushed. CI fast-forwards `main` to each green `phase-1-base`
   commit by itself (never force, never a red commit), so `main` keeps close behind (R126, R127, R143).
+- In a worktree on a branch, claim the areas and files you will change in `.faber-lane` before changing one
+  ([design.md](docs/design.md#lane-claims)); `cargo t` refuses unclaimed changes and files another lane claims.
 
 ## Before a change a person will see or use
 
@@ -94,13 +96,14 @@ npm run lint
 npm run typecheck
 npm run build
 cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p faber --features test-hooks -- -D warnings
+cargo t --suite lint
 cargo t
 ```
 
-`cargo t` runs only the tests that depend on the files you changed; `cargo t --all` runs everything, as CI does (the
-`rust` and `ui` suites everywhere, `screen` on Windows). Run `--all` when the screen or the shell changes. `npm run dev`
+`cargo t --suite lint` runs both Clippy proofs (`--workspace --all-targets`, and `-p faber --features test-hooks`, each
+with `-D warnings`). `cargo t` runs only the tests that depend on the files you changed; `cargo t --all` runs everything,
+as CI does (the `rust` and `ui` suites everywhere, `screen` on Windows). Run `--all` when the screen or the shell changes.
+Both print only failures, measurements and a summary; every line is in `target/faber-test/run.log`. `npm run dev`
 opens the app from source with live reload. Unit tests never spawn processes, touch real git or call a real CLI.
 
 On the maintainer's PC, Rust lives outside the default folders; export these before any `cargo` or `npm run dev`:

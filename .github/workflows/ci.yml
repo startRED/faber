@@ -58,7 +58,10 @@ jobs:
         if: always()
         with:
           name: screenshots-${{ runner.os }}-${{ strategy.job-index }}
-          path: target/faber-test/shots/
+          # The screen shows only failures; run.log has every line of the last `cargo t` (R154).
+          path: |
+            target/faber-test/shots/
+            target/faber-test/run.log
           if-no-files-found: ignore
 
   # main follows every green phase-1-base commit on its own (R127), so nobody has to remember to move it.

@@ -8,6 +8,7 @@ pub mod contain;
 pub mod desktop;
 pub mod fake;
 pub mod gate;
+pub mod lanes;
 pub mod page;
 pub mod plan;
 pub mod proctree;
