@@ -843,4 +843,5 @@ export const ptBR: Messages = {
   'error.update.busy': 'Uma resposta ainda está em andamento. Reinicie quando ela terminar.',
   'error.update.failed': 'A atualização não conseguiu começar. O Faber tenta de novo mais tarde.',
   'error.update.none': 'Não há atualização esperando.',
+'error.update.closing': 'O Faber está instalando uma atualização e abre de novo em instantes. Tente depois.',
 };

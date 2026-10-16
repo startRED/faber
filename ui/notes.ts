@@ -57,3 +57,11 @@ export const newestId = (notes: readonly Note[]): number => notes.reduce((top, n
 export function grouped(notes: readonly Note[]): Array<{ kind: Kind; notes: Note[] }> {
   return KINDS.map((kind) => ({ kind, notes: notes.filter((n) => n.kind === kind) })).filter((g) => g.notes.length > 0);
 }
+
+/**
+ * A first install has no data at all: nothing saved in the settings and no conversation. An install that has either is an
+ * existing one, even when it never saved an appearance (an old version) or never saw an entry: it is shown the newest ones.
+ */
+export function isFirstInstall(settings: object | undefined, conversations: readonly unknown[]): boolean {
+  return conversations.length === 0 && Object.values(settings ?? {}).every((value) => value === undefined);
+}

@@ -59,6 +59,9 @@ pub(crate) struct Faber {
     pub(crate) update: Mutex<Option<(Update, Vec<u8>)>>,
     /// A download started at open is running; the screen shows a calm line for it (`update.rs`).
     pub(crate) updating: std::sync::atomic::AtomicBool,
+    /// The person has typed, pasted or dropped something since Faber opened: a draft may exist only on the screen, so the
+    /// install at open waits for an idle moment (`update.rs`).
+    pub(crate) touched: std::sync::atomic::AtomicBool,
     pub(crate) data_dir: PathBuf,
     pub(crate) hidden: bool,
     /// Serialize journal snapshots and mutations, so an answer cannot overwrite a newer view.
@@ -620,6 +623,12 @@ fn halt(journal: &Journal, key: &str) {
     }
 }
 
+/// A mission does not start or resume once an update install is decided (`update.rs`): the installer ends this process, and
+/// a worker begun after the decision would be killed. The owner starts it again after Faber reopens.
+fn refuse_while_installing() -> Res<()> {
+    if update::installing() { Err("error.update.closing".into()) } else { Ok(()) }
+}
+
 /// Run a mission through the coordinator in the background until it lands or stops. Every step is saved to the journal,
 /// so a stop, a crash or a restart resumes from the facts (R135). One drive per mission at a time.
 fn drive_mission(app: &AppHandle, mission_id: String, commands: Vec<String>) {
@@ -627,6 +636,11 @@ fn drive_mission(app: &AppHandle, mission_id: String, commands: Vec<String>) {
     tauri::async_runtime::spawn(async move {
         let faber = app.state::<Faber>();
         if !lock(&faber.driving).insert(mission_id.clone()) {
+            return;
+        }
+        // An update install decided after the line above finds this mission in `driving` and waits; one decided before it is seen here.
+        if update::installing() {
+            lock(&faber.driving).remove(&mission_id);
             return;
         }
         if let Err(key) = run_mission(&app, &faber, &mission_id, commands).await {
@@ -769,6 +783,7 @@ async fn ensure_agents(app: &AppHandle, faber: &Faber) -> Res<()> {
 
 #[tauri::command]
 async fn mission_start(app: AppHandle, faber: State<'_, Faber>, project_id: String, goal: String) -> Res<String> {
+    refuse_while_installing()?;
     project_commands::id(&project_id)?;
     project_commands::text(&goal)?;
     // The cheap, certain refusals come first (a grant, the owner's confirmed checks), so no probe is spent on a mission
@@ -846,6 +861,7 @@ async fn mission_stop(app: AppHandle, faber: State<'_, Faber>, mission_id: Strin
 
 #[tauri::command]
 async fn mission_resume(app: AppHandle, faber: State<'_, Faber>, mission_id: String) -> Res<MissionView> {
+    refuse_while_installing()?;
     {
         let (project, _, mission) = find_mission_and_journal(&faber, &mission_id)?;
         project_commands::editable(&mission)?;
@@ -1040,6 +1056,13 @@ fn update_status(app: AppHandle) -> &'static str {
 #[tauri::command]
 async fn update_restart(app: AppHandle) -> Res<()> {
     update::restart_now(app).await
+}
+
+/// The screen saw the first input of the session (typing, a paste, a drop): from then on the install at open does not end
+/// the window under it.
+#[tauri::command]
+fn input_seen(faber: State<'_, Faber>) {
+    faber.touched.store(true, std::sync::atomic::Ordering::SeqCst);
 }
 
 /// The last "what's new" entry the person has seen (`ui/notes.ts`), in its own small file in the data folder. None means
@@ -1293,6 +1316,7 @@ fn main() {
             local_update_state,
             update_status,
             update_restart,
+            input_seen,
             notes_seen,
             save_notes_seen,
             setup::setup_check,
@@ -1392,6 +1416,7 @@ fn main() {
                 models: Mutex::default(),
                 update: Mutex::default(),
                 updating: std::sync::atomic::AtomicBool::new(false),
+                touched: std::sync::atomic::AtomicBool::new(false),
                 data_dir: data_dir.clone(),
                 hidden,
                 missions,

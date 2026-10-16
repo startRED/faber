@@ -856,4 +856,5 @@ export const de: Messages = {
   'error.update.busy': 'Eine Antwort läuft noch. Starte neu, wenn sie beendet ist.',
   'error.update.failed': 'Das Update konnte nicht starten. Faber versucht es später noch einmal.',
   'error.update.none': 'Es wartet kein Update.',
+'error.update.closing': 'Faber installiert ein Update und öffnet sich gleich wieder. Versuche es dann noch einmal.',
 };

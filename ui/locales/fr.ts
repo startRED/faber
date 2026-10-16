@@ -856,4 +856,5 @@ export const fr: Messages = {
   'error.update.busy': 'Une réponse est encore en cours. Redémarre quand elle sera terminée.',
   'error.update.failed': 'La mise à jour n’a pas pu démarrer. Faber réessaiera plus tard.',
   'error.update.none': 'Aucune mise à jour n’attend.',
+'error.update.closing': 'Faber installe une mise à jour et se rouvre dans un instant. Réessaie à ce moment-là.',
 };

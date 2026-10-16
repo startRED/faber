@@ -856,4 +856,5 @@ export const es: Messages = {
   'error.update.busy': 'Todavía hay una respuesta en curso. Reinicia cuando termine.',
   'error.update.failed': 'La actualización no pudo empezar. Faber lo intentará de nuevo más tarde.',
   'error.update.none': 'No hay ninguna actualización esperando.',
+'error.update.closing': 'Faber está instalando una actualización y se abre de nuevo en un momento. Inténtalo entonces.',
 };

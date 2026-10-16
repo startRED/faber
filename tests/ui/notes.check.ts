@@ -1,9 +1,9 @@
-import { createComponent } from 'solid-js';
+import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { appliedLook, applyLook } from '../../ui/appearance.ts';
 import { en } from '../../ui/locales/en.ts';
 import { t } from '../../ui/i18n.ts';
-import { grouped, NOTES, newestId, notesOf, whatsNew, type Note } from '../../ui/notes.ts';
+import { grouped, isFirstInstall, NOTES, newestId, notesOf, whatsNew, type Note } from '../../ui/notes.ts';
 import { WhatsNew } from '../../ui/WhatsNew.tsx';
 import { keepRoot, sala } from './appearance.check.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
@@ -102,14 +102,45 @@ check('notes: Esc closes it too, and the shell does not see the key', () => {
   });
 });
 
-check('notes: closing it takes the whole of it off the page', async () => {
+/** The screen as the app mounts it: shown while `open`, gone from the page when it is not. */
+async function mounted(close: (host: HTMLElement) => void) {
   const host = document.createElement('div');
   document.body.append(host);
-  const dispose = render(() => createComponent(WhatsNew, { version: '9.9.9', notes: LIST, onClose: () => {} }), host);
-  ok(document.querySelector('.notes'), 'drawn');
-  dispose();
-  equal(document.querySelector('.notes'), null, 'nothing is left behind');
-  host.remove();
+  const [open, setOpen] = createSignal(true);
+  const dispose = render(
+    () => (open() ? createComponent(WhatsNew, { version: '9.9.9', notes: LIST, onClose: () => setOpen(false) }) : undefined),
+    host,
+  );
+  try {
+    await settle();
+    ok(document.querySelector('.notes'), 'drawn');
+    close(host);
+    await settle();
+    equal(document.querySelector('.notes'), null, 'nothing of the screen is left on the page');
+    equal(host.querySelector('button'), null, 'not even its button');
+  } finally {
+    dispose();
+    host.remove();
+  }
+}
+
+check('notes: after Continue the whole screen is gone from the page', () => mounted((host) => host.querySelector('button')!.click()));
+
+check('notes: after Esc the whole screen is gone from the page', () =>
+  mounted(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))));
+
+check('notes: only an install with no data at all is a first install', () => {
+  ok(isFirstInstall({}, []), 'no settings, no conversation');
+  ok(isFirstInstall(undefined, []));
+  equal(isFirstInstall({ language: 'en' }, []), false, 'a saved choice means the app was used');
+  equal(isFirstInstall({}, [{ id: 'c1' }]), false, 'so does a conversation');
+  // The install that stayed on 0.3.14: it finished the first run long ago but never saved an appearance with a base.
+  const old = { setup: 'done', tutorialDone: true, userName: 'Erick' };
+  equal(isFirstInstall(old, [{ id: 'c1' }]), false);
+  equal(isFirstInstall(old, []), false);
+  const due = whatsNew(LIST, undefined, isFirstInstall(old, [{ id: 'c1' }]));
+  deepEqual(due.show.map((n) => n.id), [1, 2, 3, 4], 'an existing install without a seen entry is shown the entries');
+  deepEqual(whatsNew(LIST, undefined, isFirstInstall({}, [])), { show: [], remember: 4 });
 });
 
 check('notes: it arrives with a gentle entrance, and with none at all under reduced motion', async () => {

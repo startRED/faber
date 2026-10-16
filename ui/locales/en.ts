@@ -723,6 +723,7 @@ export const en = {
   'error.update.busy': 'An answer is still running. Restart when it ends.',
   'error.update.failed': 'The update could not start. Faber will try again later.',
   'error.update.none': 'There is no update waiting.',
+'error.update.closing': 'Faber is installing an update and opens again in a moment. Try again then.',
 } as const;
 
 export type Key = keyof typeof en;

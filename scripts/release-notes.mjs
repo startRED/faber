@@ -14,11 +14,12 @@ const KINDS = [
   ['better', 'Better'],
   ['fixed', 'Fixed'],
 ];
-const ENTRY = /^\s*'notes\.(\d+)\.(new|better|fixed)':\s*'((?:[^'\\]|\\.)*)',?\s*$/gm;
+// One entry per line, in either quote style (en.ts mixes them): `'notes.1.new': 'text',` or `"notes.1.new": "text",`.
+const ENTRY = /^\s*(['"])notes\.(\d+)\.(new|better|fixed)\1:\s*(['"])((?:(?!\4)[^\\\n]|\\.)*)\4,?\s*$/gm;
 
 /** `[{ id, kind, text }]` from the source of en.ts. */
 export function entries(source) {
-  return [...source.matchAll(ENTRY)].map(([, id, kind, text]) => ({ id: Number(id), kind, text: text.replace(/\\'/g, "'") }));
+  return [...source.matchAll(ENTRY)].map(([, , id, kind, , text]) => ({ id: Number(id), kind, text: text.replace(/\\(['"\\])/g, '$1') }));
 }
 
 /** The markdown body for the entries of `source` newer than the newest one in `previous` (source of an older en.ts). */

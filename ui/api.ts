@@ -504,6 +504,7 @@ export const api = {
   localUpdateState: () => invoke<BuildView | null>('local_update_state'),
   updateStatus: () => invoke<UpdateStatus>('update_status'),
   updateRestart: () => invoke<void>('update_restart'),
+  inputSeen: () => invoke<void>('input_seen'),
   onUpdate: (listener: (status: UpdateStatus) => void) => listen<UpdateStatus>('faber:update', (e) => listener(e.payload)),
   notesSeen: () => invoke<number | null>('notes_seen').then((id) => id ?? undefined),
   saveNotesSeen: (id: number) => invoke<void>('save_notes_seen', { id }),

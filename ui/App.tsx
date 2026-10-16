@@ -23,7 +23,7 @@ import { Icon, VendorMark } from './Glyphs.tsx';
 import { failureText, lang, t, templates, useLanguage } from './i18n.ts';
 import { createWidth } from './layout.ts';
 import { Lockup, Peek } from './Mark.tsx';
-import { newestId, NOTES, type Note, whatsNew } from './notes.ts';
+import { isFirstInstall, newestId, NOTES, type Note, whatsNew } from './notes.ts';
 import { Recents } from './Recents.tsx';
 import { modelOptions, prettyModel } from './models.ts';
 import { animateDetails, animateList, watchMotion } from './motion.ts';
@@ -297,7 +297,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   };
 
   onMount(() => {
-    const firstInstall = firstRunStep(props.initial.settings, props.initial.conversations) !== undefined;
+    const firstInstall = isFirstInstall(props.initial.settings, props.initial.conversations);
     void api.notesSeen().then(
       (seen) => {
         const due = whatsNew(NOTES, seen, firstInstall);
@@ -309,6 +309,15 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
     void api.updateStatus().then(setUpdate, () => {});
     const unlistenUpdate = api.onUpdate(setUpdate).catch(() => () => {});
     onCleanup(() => void unlistenUpdate.then((stop) => stop()));
+    // The first typing, paste or drop of the session tells the shell a draft may exist only here, so an update at open waits.
+    const told = () => {
+      for (const type of ['input', 'paste', 'drop']) window.removeEventListener(type, told, true);
+      void api.inputSeen().catch(() => {});
+    };
+    for (const type of ['input', 'paste', 'drop']) window.addEventListener(type, told, true);
+    onCleanup(() => {
+      for (const type of ['input', 'paste', 'drop']) window.removeEventListener(type, told, true);
+    });
     if (saved?.id && props.initial.conversations.some((c) => c.id === saved.id)) void go({ ...saved, area: saved.area ?? 'chat' });
     const stopFollowing = watchSystem();
     // The restored conversation is already opening (`go` above), so what the inbox held since the page started is kept for

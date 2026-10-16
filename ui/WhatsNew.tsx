@@ -3,22 +3,11 @@ import { keepFocusIn } from './focus.ts';
 import { t } from './i18n.ts';
 import type { Key } from './locales/en.ts';
 import { Mark } from './Mark.tsx';
-import { grouped, type Kind, type Note } from './notes.ts';
+import { Icon } from './Glyphs.tsx';
+import { grouped, type Note } from './notes.ts';
 
-// A small mark for each kind, in the stroke of the app's own icons (ui/Glyphs.tsx).
-const MARKS: Record<Kind, string> = {
-  new: 'M6 1.8v8.4M1.8 6h8.4',
-  better: 'M6 10V2.6M2.9 5.6 6 2.5l3.1 3.1',
-  fixed: 'M2.4 6.4 5 9l4.6-5.4',
-};
-
-function KindMark(props: { kind: Kind }) {
-  return (
-    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d={MARKS[props.kind]} />
-    </svg>
-  );
-}
+// A small mark for each kind, from the shell's own icons.
+const MARKS = { new: 'plus', better: 'up', fixed: 'check' } as const;
 
 /**
  * "What's new": one calm screen on the first start after an update, drawn in the stage's own surface rather than a card
@@ -65,7 +54,7 @@ export function WhatsNew(props: { version: string; notes: Note[]; onClose: () =>
           {(group) => (
             <section class="notes-group" data-kind={group.kind}>
               <h2 style={{ '--i': group.first }}>
-                <KindMark kind={group.kind} />
+                <Icon name={MARKS[group.kind]} small />
                 {t(`notes.kind.${group.kind}` as Key)}
               </h2>
               <ul>
