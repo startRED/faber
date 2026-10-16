@@ -20,7 +20,7 @@ import {
 } from './api.ts';
 import { Segmented, Toggle } from './controls.tsx';
 import { resizeComposer } from './composer-size.ts';
-import { useDraft } from './unsent.ts';
+import { keep, kept, useDraft } from './unsent.ts';
 import { Ambient } from './Ambient.tsx';
 import { Hole } from './Hole.tsx';
 import { Ghost } from './Ghost.tsx';
@@ -79,6 +79,9 @@ export function Projects(props: Props) {
   };
   const [goal, setGoal] = createSignal<string>('');
   useDraft(() => goal().trim() !== '');
+  // The proof-command editor holds unsent text while it is open (kept per project, like the goal).
+  useDraft(() => editing());
+  const proofKey = (id = props.project?.id) => `proof.${id}`;
   const [presence, setPresence] = createSignal<PresenceChoice>('continueWithout');
   const [gitMode, setGitMode] = createSignal<GitMode>('seguro');
   const [selfUpdate, setSelfUpdate] = createSignal(false);
@@ -182,6 +185,9 @@ export function Projects(props: Props) {
           return;
         }
         setGoal(recallGoal(id));
+        const unsent = kept(proofKey(id));
+        setDraft(unsent);
+        setEditing(unsent !== '');
         selectedMission = recallMission(id);
         setError(undefined);
         setBusy(true);
@@ -250,6 +256,7 @@ export function Projects(props: Props) {
       if (token !== generation) return;
       setProof(next);
       setEditing(false);
+      keep(proofKey(), '');
     } catch (err) {
       if (token === generation) setError(errorText(err));
     } finally { if (token === generation) setBusy(false); }
@@ -545,7 +552,7 @@ export function Projects(props: Props) {
                             class="proof-draft"
                             rows={Math.min(8, Math.max(3, draft().split('\n').length))}
                             value={draft()}
-                            onInput={(e) => setDraft(e.currentTarget.value)}
+                            onInput={(e) => (setDraft(e.currentTarget.value), keep(proofKey(), e.currentTarget.value))}
                           />
                           <div class="proof-actions">
                             <button
@@ -557,7 +564,7 @@ export function Projects(props: Props) {
                             >
                               {t('projects.proof.save')}
                             </button>
-                            <button type="button" class="btn" disabled={busy()} onClick={() => setEditing(false)}>
+                            <button type="button" class="btn" disabled={busy()} onClick={() => (setEditing(false), keep(proofKey(), ''))}>
                               {t('projects.proof.cancel')}
                             </button>
                           </div>

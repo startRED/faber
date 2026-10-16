@@ -614,6 +614,7 @@ export function App(props: { initial: AppState; inbox: { take: (listener: ((even
   const composer = createMemo(() => (
     <Show when={composerKey()} keyed>
       <Composer
+        draftKey={composerKey()}
         vendors={state().vendors}
         options={options()}
         choice={picked()}

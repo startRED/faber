@@ -21,3 +21,24 @@ export function useDraft(unsent: () => boolean): void {
   createEffect(() => setDirty(owner, unsent()));
   onCleanup(() => setDirty(owner, false));
 }
+
+/** What was typed and not sent, kept per field in the webview's storage, so a restart for an update (or a crash) loses nothing. */
+const KEPT = 'faber.unsent.';
+
+export function kept(key: string): string {
+  try {
+    return localStorage.getItem(KEPT + key) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+/** Keeps `text` under `key`; an empty text (sent, cleared, cancelled) forgets it. Attachments are not kept. */
+export function keep(key: string, text: string): void {
+  try {
+    if (text.trim()) localStorage.setItem(KEPT + key, text);
+    else localStorage.removeItem(KEPT + key);
+  } catch {
+    // Storage can be unavailable; the draft just lives on the screen.
+  }
+}

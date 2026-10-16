@@ -231,13 +231,16 @@ enum Who {
 /// The one admission of an install, all inside the gate's lock. `close` shuts the engine and the shell's work (None when
 /// something runs). Then, still under the lock and as late as possible, an unattended install reads whether the person has
 /// an unsent draft (`editing`, which the start also reads as any input since Faber opened) and whether its tried marker
-/// reached the disk (`mark`): in either case it gives way and the engine reopens. The person's own restart ignores both.
+/// reached the disk (`mark`): in either case it gives way and the engine reopens. The draft is read once more after the
+/// marker is flushed, the last thing before the lock opens and the shutdown starts; a refusal there takes the marker back
+/// (`unmark`), so a draft does not cost the update a day. The person's own restart ignores all of it.
 fn admit<G>(
     gate: &mut Gate,
     who: Who,
     close: impl FnOnce() -> Option<G>,
-    editing: impl FnOnce() -> bool,
+    mut editing: impl FnMut() -> bool,
     mark: impl FnOnce() -> std::io::Result<()>,
+    unmark: impl FnOnce(),
 ) -> Option<G> {
     let mut closed = None;
     gate.reserve(|| {
@@ -245,6 +248,9 @@ fn admit<G>(
         if who == Who::Owner {
             let _ = mark();
         } else if editing() || mark().is_err() {
+            return true;
+        } else if editing() {
+            unmark();
             return true;
         }
         closed = Some(guard);
@@ -468,6 +474,9 @@ impl Release for Live {
             || match lock(&faber.update).as_ref() {
                 Some((update, _)) => note_tried(&faber.data_dir, &update.version),
                 None => Err(std::io::Error::other("no update is ready")),
+            },
+            || {
+                let _ = std::fs::remove_file(faber.data_dir.join(TRIED_FILE));
             },
         );
         let Some(guard) = guard else { return false };
@@ -702,6 +711,18 @@ mod tests {
 
     /// `admit` with the given answers; the guard is a plain string so a dropped one shows in `dropped`.
     fn admission(gate: &mut Gate, who: Who, closes: bool, editing: bool, marks: bool, seen: &RefCell<Vec<&'static str>>) -> bool {
+        admission_late(gate, who, (closes, editing, false), marks, seen)
+    }
+
+    /// Like `admission`, with the draft read once more after the marker (`late`).
+    fn admission_late(
+        gate: &mut Gate,
+        who: Who,
+        (closes, editing, late): (bool, bool, bool),
+        marks: bool,
+        seen: &RefCell<Vec<&'static str>>,
+    ) -> bool {
+        let reads = Cell::new(0);
         admit(
             gate,
             who,
@@ -711,12 +732,14 @@ mod tests {
             },
             || {
                 seen.borrow_mut().push("read draft");
-                editing
+                reads.set(reads.get() + 1);
+                if reads.get() == 1 { editing } else { late }
             },
             || {
                 seen.borrow_mut().push("mark");
                 if marks { Ok(()) } else { Err(std::io::Error::other("disk")) }
             },
+            || seen.borrow_mut().push("unmark"),
         )
         .is_some()
     }
@@ -737,10 +760,26 @@ mod tests {
     fn the_draft_is_read_inside_the_decision_after_the_engine_closed() {
         let (mut gate, seen) = (Gate::default(), RefCell::new(vec![]));
         assert!(admission(&mut gate, Who::Later, true, false, true, &seen));
-        assert_eq!(*seen.borrow(), ["close", "read draft", "mark"], "no input can slip in between the read and the decision");
+        assert_eq!(
+            *seen.borrow(),
+            ["close", "read draft", "mark", "read draft"],
+            "the draft is read again after the marker, as the last thing under the lock"
+        );
         let (mut busy, seen) = (Gate::default(), RefCell::new(vec![]));
         assert!(!admission(&mut busy, Who::Later, false, false, true, &seen));
         assert_eq!(*seen.borrow(), ["close"], "work that runs stops it before the draft or the marker are touched");
+    }
+
+    #[test]
+    fn input_during_the_marker_sync_is_caught_by_the_second_read_and_takes_the_marker_back() {
+        for who in [Who::Start, Who::Later] {
+            let (mut gate, seen) = (Gate::default(), RefCell::new(vec![]));
+            assert!(!admission_late(&mut gate, who, (true, false, true), true, &seen), "{who:?}");
+            assert!(!gate.installing, "nothing is decided, so nothing shuts down");
+            assert_eq!(*seen.borrow(), ["close", "read draft", "mark", "read draft", "unmark"], "{who:?}");
+        }
+        let (mut gate, seen) = (Gate::default(), RefCell::new(vec![]));
+        assert!(admission_late(&mut gate, Who::Owner, (true, true, true), true, &seen), "the person's own restart still goes ahead");
     }
 
     #[test]

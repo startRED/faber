@@ -4,7 +4,7 @@ import { createEffect, createResource, createSignal, For, Index, onCleanup, Show
 import { api, type Choice, type Message, type QueuedTurn, type VendorUsage } from './api.ts';
 import { Asks, Parkeds } from './Ask.tsx';
 import { copyItem, openMenu } from './contextmenu.ts';
-import { useDraft } from './unsent.ts';
+import { keep, kept, useDraft } from './unsent.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
 import { untilReset } from './Sidebar.tsx';
@@ -242,9 +242,12 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
 }
 
 // The user's message; "Edit" sends the new text as a branch, keeping the original conversation as it was.
-function Mine(props: { m: Accessor<Message>; onBranch: OnBranch }) {
-  const [editing, setEditing] = createSignal<string>();
+function Mine(props: { conversationId: string; m: Accessor<Message>; onBranch: OnBranch }) {
+  const key = () => `edit.${props.conversationId}.${props.m().id}`;
+  const [editing, setEditing] = createSignal<string | undefined>(kept(key()) || undefined);
   useDraft(() => editing() !== undefined);
+  // Only text that differs from the message is a draft.
+  createEffect(() => keep(key(), editing() === props.m().text ? '' : (editing() ?? '')));
   return (
     <Show
       when={editing() !== undefined}
@@ -282,7 +285,10 @@ function Mine(props: { m: Accessor<Message>; onBranch: OnBranch }) {
         onSubmit={(e) => {
           e.preventDefault();
           const text = editing() ?? '';
-          if (text.trim()) props.onBranch(props.m().id, text);
+          if (text.trim()) {
+            props.onBranch(props.m().id, text);
+            keep(key(), '');
+          }
         }}
       >
         <textarea
@@ -354,7 +360,7 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
       <Index each={props.messages.slice(props.from)}>
         {(m, i) => (
           <Show when={m().role === 'user'} fallback={<Answer {...props} m={m} prompt={prompt(props.from + i)} last={props.from + i === props.messages.length - 1} />}>
-            <Mine m={m} onBranch={props.onBranch} />
+            <Mine conversationId={props.conversationId} m={m} onBranch={props.onBranch} />
           </Show>
         )}
       </Index>
