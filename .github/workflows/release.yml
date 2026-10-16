@@ -43,8 +43,12 @@ jobs:
         include:
           - os: windows-latest
             args: ''
+          # One build per chip: a universal build joins only the main binary, so bundling the second one (faber-local)
+          # fails.
           - os: macos-latest
-            args: --target universal-apple-darwin
+            args: --target aarch64-apple-darwin
+          - os: macos-latest
+            args: --target x86_64-apple-darwin
           - os: ubuntu-latest
             args: ''
     runs-on: ${{ matrix.os }}
