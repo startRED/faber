@@ -237,16 +237,19 @@ inside its own area.
   the amber speech bubble and "{m} needs you". Amber always comes with these words, never with a number alone. When
   something only runs, the tail shows a pulsing dot.
 - Chats are grouped as Today, This week and Earlier. Deleting a conversation asks for confirmation.
-- The footer has Settings and one line per connected vendor: its shape, its name and the used share of its tightest
-  quota window. It opens Settings > Usage limits. A vendor with no reading yet, or only an expired one, shows "—". The
-  footer shows no user name.
-- Search comes in Phase 2. The percentage and "stopped" tails come with the progress view in Phase 3.
+- The footer has Settings, the person's name when they gave one, one line per connected vendor and the version. A
+  vendor's line shows its shape, its name, the used share of its tightest quota window, how old that reading is and
+  "still counting" while the vendor has not counted Faber's latest use. It opens Settings > Usage limits. A vendor with no
+  reading yet, or only an expired one, shows "—".
+- Search filters conversation titles and project names on screen; full-text search comes in Phase 2. The percentage and
+  "stopped" tails come with the progress view in Phase 3.
 
 ### The new conversation screen
 
-- A greeting, "Where do we start?", with no name.
-- Four hand-written suggestions per language. Clicking one fills the composer and moves focus there. It sends nothing.
-- "Pick up where you left off" lists the three most recently updated conversations.
+- A greeting, "Where do we start?", ending with the person's name when they gave one.
+- Three hand-written suggestions per language. Clicking one fills the composer and moves focus there. It sends nothing.
+- "Pick up where you left off" lists up to four conversations of both areas: those that need the person first, then the
+  most recently updated.
 - The composer keeps its model picker, "AI: choose for me".
 - Auto chooses both the model and its effort. A manual model adds an adjacent low, medium or high effort choice,
   defaulting to medium (R102). Each conversation remembers its choice. Changes apply to the next message only;
@@ -285,7 +288,9 @@ projects. Faber has no worktree creation for projects, so an environment has no 
 - Settings replaces the shell, as before, with a list of five sections on the left: General, Appearance, Connected
   accounts, Usage limits and Privacy. Ctrl comma opens it on General, the quota of a vendor in the sidebar opens it on
   Usage limits, and Esc or Back closes it.
-- General has the language, name, CLI hooks switch and Permissions choice. "Don't ask" is the default for new and
+- General has, in order, the language, name, CLI hooks switch, Permissions choice, Chat working folder (with the recent
+  folders), Notifications (Notify me, Play a sound) and, on Windows, System (keep the computer awake while Faber works,
+  start Faber at sign-in). "Don't ask" is the default for new and
   existing settings; "Ask before commands" preserves the previous behavior. Choices save at once and stay at the saved
   value if the save fails. R107 applies the same default to Chat. Chat uses its chosen canonical folder
   (fixed before the first message), or private per-conversation scratch; deletion/draft cleanup never removes a chosen
@@ -389,16 +394,19 @@ projects. Faber has no worktree creation for projects, so an environment has no 
 - The first run has three steps in a window with no sidebar: connected accounts, appearance, first conversation. A stepper
   at the top shows the place. Each step is a modal dialog: its heading takes focus when it opens, and Esc and the
   shortcuts of the shell (Ctrl N, Ctrl comma, Ctrl period) do nothing until a button is used.
-- Step 1 is the account cards, with Continue and Skip; both go on to step 2. Opened later, from the no-AI state or from
+- Step 1 is the account cards, with Continue and Skip; both go on to step 2 (or straight to the Chat home when a look is
+  already saved). Opened later, from the no-AI state or from
   Settings, the same cards have no stepper and only a Close button. They save `setup` and nothing else, so reconnecting an
   account never restarts the first run or the tutorial.
 - Step 2 shows the three themes side by side, each a small live render drawn with its own tokens. A choice changes the whole
-  screen at once and saves nothing. Under the cards: text size (three "Aa" sizes), density, motion, and "Do you already use
-  AI?" (Never, A lot). Continue saves the appearance, the answer and `tutorialDone: false` in one call. Back keeps the
+  screen at once and saves nothing. Under the cards: text size (three "Aa" sizes), density, motion, "Do you already use
+  AI?" (Never, A lot) and an optional name. Continue saves the appearance, the answer, the name and, unless the tutorial
+  was already done, `tutorialDone: false`, in one call. Back keeps the
   choices. An install saved by an older version, whose appearance has no `base`, sees step 2 once.
 - The tutorial starts at the new conversation, with an AI connected, while `tutorialDone` is false. A beginner gets three
   cards (Chat, Projects, Follow along); someone who answered "A lot" gets two (Auto, the running list); no answer counts as
-  a beginner. A card has Curioso, "n of total", a title, one or two sentences, and Next (Got it on the last) and Skip.
+  a beginner. A card has Curioso, "n of total", a title, one or two sentences, Next (Got it on the last) and, except on
+  the last card, Skip.
   A ring and a pointer mark the real element the card is about (`data-tour`). When that element is missing or hidden, such
   as the Projects button below 900 px, the card is centred.
 - The tutorial is modal: the shell is inert, focus starts on Next and stays on the card, and Esc skips. Finishing or
@@ -437,6 +445,10 @@ The first screen of a project uses the layout of the Chat home (`welcome-grid`) 
 "What should we tackle?", a goal composer with its own hints, the three safety controls kept visible as quiet rows under
 "How Faber works here" (plain sentences, with the technical detail and the revision and author behind one small "Details" link), and a side column with the project and its folder in short form (the last two folder names, the full path on hover), the conversations to pick up and the other projects. The
 light leans the other way. The two layouts share classes, so a change to one home reaches the other.
+
+C011 (2026-10-16, the owner) overrides the quiet rows: the project screen shows only the work, and the grant, the checks
+and the tool choice move to Settings or to a just-in-time consent. Until that lands the code still shows them; see
+[product-map.md](product-map.md), Known incoherences.
 
 ### Records
 

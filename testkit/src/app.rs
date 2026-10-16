@@ -373,7 +373,16 @@ impl Ctx {
         let members = live.owned.members();
         if let Some(members) = &members {
             let later = snapshot()?;
-            for row in escaped(&first, &later, live.pid, members) {
+            let mut outside = escaped(&first, &later, live.pid, members);
+            if !outside.is_empty() {
+                // The app starts each child suspended and puts it in the job before it runs, so a child caught between
+                // the two is not an escape. It is only one if it is still alive and still outside a moment later.
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                let again = snapshot()?;
+                let members = live.owned.members().unwrap_or_default();
+                outside.retain(|row| same_process(row, &again) && !members.contains(&row.pid));
+            }
+            for row in outside {
                 if !same_process(&row, &live.escaped) {
                     live.escaped.push(row);
                 }

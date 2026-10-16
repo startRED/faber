@@ -1,7 +1,10 @@
 # Faber: guide for agents
 
 Faber is a source-available desktop app (FSL-1.1-ALv2) with a Chat area and a Projects area that run the official AI CLIs
-with the user's own subscriptions. Read [docs/roadmap.md](docs/roadmap.md) before changing scope.
+with the user's own subscriptions. Read [docs/roadmap.md](docs/roadmap.md) before changing scope, and
+[docs/product-map.md](docs/product-map.md) before changing anything a person sees, sets or calls.
+[docs/README.md](docs/README.md) says which page answers what; dated specs, plans and research are history, never a source
+for how Faber works today. This file stays short: each line prevents a real mistake, and a rule a test enforces leaves it.
 
 ## Rules
 
@@ -27,14 +30,51 @@ with the user's own subscriptions. Read [docs/roadmap.md](docs/roadmap.md) befor
 - One commit per coherent change, made and pushed as soon as the change is proven, without waiting for other parts.
   Commits may group related steps, but never huge: push often, roughly once an hour is the usual pace (a rough
   average, not a target), and never leave proven work unpushed. CI fast-forwards `main` to each green `phase-1-base`
-  commit by itself (never force, never a red commit), so `main` keeps close behind (R126, R127, R131).
+  commit by itself (never force, never a red commit), so `main` keeps close behind (R126, R127, R143).
+
+## Before a change a person will see or use
+
+Read [docs/product-rules.md](docs/product-rules.md) and [docs/product-map.md](docs/product-map.md) first, then:
+
+- Look in the product map for what already exists, in either area: the same setting, screen, control, words, layout,
+  stored value or shell command. Extend it; a second way to do the same thing is a bug. Check its "Known incoherences"
+  before touching those parts.
+- Place it with the table in product-rules.md. A setting never lands on a work screen, and a new first-run step needs a
+  reason no default covers.
+- Check the taste cards whose "Touches" match. The review says "cards checked: C00x ok" or names the line that breaks one.
+- Walk it as a newcomer and as a heavy user: first run, no AI connected, empty and waiting states, a 720 px window,
+  reduced motion, the longest language.
+- Something that goes against a decision ([docs/decisions.md](docs/decisions.md)) or a card goes to the owner first.
+- How it looks and moves: [docs/design.md](docs/design.md) and the checklist in `.claude/skills/faber-ui/SKILL.md`
+  (Claude loads it as a skill; other agents read the file).
+
+## Done means
+
+- The proof commands below pass, and a check fails without the change (the product map names the check per feature).
+- The same commit updates [docs/product-map.md](docs/product-map.md) when a setting, screen, stored value, shell command,
+  feature or product word appears, changes or goes (`engine/tests/product_map.rs` fails when one is missing), deletes the
+  "Known incoherences" lines it fixed, and updates [docs/design.md](docs/design.md) when how a screen looks or behaves
+  changed. A new decision gets the next R-number in [docs/decisions.md](docs/decisions.md); a finished spec or plan gets
+  its status in [docs/README.md](docs/README.md).
+- The commit type is a release decision: a `feat`, `fix` or `perf` commit that touches what ships becomes a patch release
+  by itself once CI is green (R130); `docs`, `test`, `ci`, `refactor` and `chore` do not.
+- For a change a person sees, the commit body says `Extends: <map entry>`, or `New: <the closest existing thing and why
+  it does not fit>`.
+- The commit body states the memory and processor cost measured, or why there is none (docs, tests only).
+- Code nobody can check by reading it once gets a review from a fresh session that did not write it: the other vendor
+  when it is available, the same vendor in a new read-only session when its quota is poor (R146). Security changes get
+  two. Every review follows the review rules of product-rules.md, and a change a person sees also gets its coherence
+  review.
 
 ## Stack
 
 - `engine/`: the engine in Rust (tokio). It drives the CLIs, keeps conversations as JSON files and knows nothing
   about windows.
 - `src-tauri/`: the Tauri 2 shell. One window, a tray icon, and the fixed list of commands the screen may call.
-- `winproc/`: the one unsafe call (resuming a process created suspended, so it joins its job before it runs). Everything else forbids unsafe code.
+- `winproc/`: the unsafe process calls (resuming a process created suspended, so it joins its job before it runs, and
+  lowering a mission proof to Low integrity before it runs).
+  The shell denies unsafe code except in its three Windows API files (`awake.rs`, `autostart.rs`, `tray/native.rs`);
+  everything else forbids it.
 - `ui/`: the screen in SolidJS + TypeScript, built by Vite into `dist/`.
 - `tests/`: the screen's checks (`tests/ui/*.check.ts`, run inside a hidden test build) and the recordings the fake CLI
   replays (`tests/fixtures/`). The engine's own tests replay the same fixtures (`engine/tests/`).
