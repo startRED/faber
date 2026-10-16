@@ -572,9 +572,9 @@ async fn project_grant(faber: State<'_, Faber>, project_id: String, mode: GitMod
     let mut grant = Grant::new(&common_dir, mode, revision, now);
     grant.author = repo_info.author;
     grant.self_update = self_update;
-    project.accept_grant(grant.clone()).map_err(str::to_string)?;
+    project.accept_grant(grant).map_err(str::to_string)?;
     faber.engine.update_project(&before, &project)?;
-    Ok(grant)
+    project.grant.ok_or_else(|| "reason.grant.none".into())
 }
 
 #[tauri::command]

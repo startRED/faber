@@ -266,8 +266,7 @@ ones.
 3. A left mission cannot be opened again: no list of a project's missions exists, so New mission asks first on a paused
    or blocked one.
 4. "If a tool is missing" is never sent to the engine; "Find and install it for me" only shows "not ready yet".
-5. `project_revoke` has no caller: a grant (and self-update trust) can never be withdrawn on screen, and Start grants
-   again every time.
+5. `project_revoke` has no caller: a grant (and self-update trust) can never be withdrawn on screen.
 6. (fixed by R160: a project opens a chat, not a mission start card.)
 7. Chat and Projects differ for the same things: pick-up lists (four of all areas against three of the project), the
    goal box is its own textarea instead of `ui/Composer.tsx`, no model chip in Projects, no "No AI" state in Projects.
@@ -306,8 +305,6 @@ ones.
     prompts; in Rust the idle tray tooltip, a dialog filter and `open_link`'s English error.
 24. Unused locale keys: `answer.thinking`, `set.effects`, `usage.pace`, `projects.title`,
     `projects.empty.selectProject`, `projects.receipt.verified`, `projects.gitMode.equilibrado`.
-25. Every Start grants again and bumps the grant revision, which makes earlier missions stale; `docs/design.md` says the
-    grant is given once.
 28. A project's tail in the sidebar shows the amber bubble with a bare number; design.md says amber always comes with
     words.
 

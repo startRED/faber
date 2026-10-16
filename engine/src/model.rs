@@ -387,7 +387,8 @@ impl Project {
         }
     }
 
-    /// Accept the authority shown on the start card.
+    /// Accept the authority shown on the start card. The same authority again keeps the grant as it is: a new revision
+    /// would make every earlier mission stale for nothing.
     pub fn accept_grant(&mut self, mut grant: crate::project::Grant) -> Result<(), &'static str> {
         if grant.schema > crate::project::SCHEMA || self.grant.as_ref().is_some_and(|g| g.schema > crate::project::SCHEMA) {
             return Err("reason.grant.newer");
@@ -402,6 +403,13 @@ impl Project {
         // Publication is deferred in the self-development MVP (R103).
         if grant.mode != crate::project::GitMode::Seguro {
             return Err("reason.grant.mode");
+        }
+        if self.grant.as_ref().is_some_and(|g| {
+            g.revoked_at.is_none()
+                && (&g.repo, g.mode, &g.author, &g.remote, &g.remote_account, g.self_update)
+                    == (&grant.repo, grant.mode, &grant.author, &grant.remote, &grant.remote_account, grant.self_update)
+        }) {
+            return Ok(());
         }
         if let Some(previous) = &self.grant {
             for (key, value) in &previous.extra {
