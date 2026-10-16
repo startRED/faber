@@ -6,6 +6,9 @@ const dirty = new Set<object>();
 let told = false;
 
 /** Tells the shell when the first such field appears and when the last one goes: an update never closes the window on a draft. */
+/** How many fields hold something unsent (or failed to write it). */
+export const dirtyCount = (): number => dirty.size;
+
 export function setDirty(owner: object, on: boolean): void {
   if (on) dirty.add(owner);
   else dirty.delete(owner);
@@ -33,12 +36,31 @@ export function kept(key: string): string {
   }
 }
 
-/** Keeps `text` under `key`; an empty text (sent, cleared, cancelled) forgets it. Attachments are not kept. */
+// A box whose text could not be written stays reported as dirty, so no unattended install ends the window on text that
+// lives only in memory; the next successful write, or clearing the box, lifts it.
+const unwritten = new Map<string, object>();
+function written(key: string, ok: boolean): void {
+  let owner = unwritten.get(key);
+  if (!ok && !owner) unwritten.set(key, (owner = {}));
+  if (owner) setDirty(owner, !ok);
+  if (ok) unwritten.delete(key);
+}
+
+/** Keeps `text` under `key`; an empty text (sent, cleared, cancelled) forgets it. Attachments are not kept. A failed write
+ * of text keeps the box reported as dirty until a write succeeds or the box is emptied. */
 export function keep(key: string, text: string): void {
   try {
     if (text.trim()) localStorage.setItem(KEPT + key, text);
     else localStorage.removeItem(KEPT + key);
+    written(key, true);
   } catch {
-    // Storage can be unavailable; the draft just lives on the screen.
+    written(key, !text.trim());
   }
+}
+
+/** The box that wrote under `key` is gone: its text is no longer on the screen, so a failed write stops counting. */
+export function release(key: string): void {
+  const owner = unwritten.get(key);
+  if (owner) setDirty(owner, false);
+  unwritten.delete(key);
 }

@@ -42,6 +42,7 @@ import './styles.check.ts';
 import './steer.check.ts';
 import './thread.check.ts';
 import './tutorial.check.ts';
+import './unsent.check.ts';
 
 type Vars = Record<string, string | number>;
 
