@@ -268,6 +268,9 @@ struct Core {
     mission_wake: Arc<tokio::sync::Notify>,
     /// The project each mission in `mission_sessions` belongs to, so a project can be asked whether a worker is alive in it.
     mission_projects: HashMap<String, String>,
+    /// Missions a coordinator in this process drives now, from setup through roles and proofs to the stop (see `drive`),
+    /// each with its project, so removing a project knows without reading its records.
+    driving: HashMap<String, String>,
     mission_lock: Arc<tokio::sync::Mutex<()>>,
     local_update: Option<crate::project::update::SlotLayout>,
     local_build: bool,
@@ -336,6 +339,18 @@ pub struct Engine {
     runtime: tokio::runtime::Handle,
 }
 
+/// A mission being driven, from [`Engine::drive`]; the drive ends when this drops, even if the driver panicked.
+pub struct Drive {
+    engine: Engine,
+    mission: String,
+}
+
+impl Drop for Drive {
+    fn drop(&mut self) {
+        self.engine.with(|c| c.driving.remove(&self.mission));
+    }
+}
+
 impl Engine {
     pub fn new(opts: EngineOptions, emit: Emit) -> Engine {
         crate::project::qualification::use_dir(&opts.data_dir);
@@ -375,6 +390,7 @@ impl Engine {
                 worker_closing: HashSet::new(),
                 mission_wake: Arc::new(tokio::sync::Notify::new()),
                 mission_projects: HashMap::new(),
+                driving: HashMap::new(),
                 mission_lock: Arc::new(tokio::sync::Mutex::new(())),
                 local_update: None,
                 local_build: false,
@@ -785,10 +801,20 @@ impl Engine {
             Some(TerminalCommand { command: cli.command, args, cwd: c.opts.data_dir.clone() })
         })
     }
-    /// Whether any answer is streaming or waits for the user: the running list is not empty. The shell uses it to hold back
-    /// anything that would end the process (installing an update).
+    /// Whether any answer is streaming or waits for the user (the running list is not empty), a mission worker runs, or a
+    /// mission is being driven.
+    /// The shell uses it to hold back anything that would end the process (installing an update).
     pub fn is_working(&self) -> bool {
-        self.with(|c| !c.running.items.is_empty() || c.mission_sessions.values().any(|s| !s.is_empty()))
+        self.with(|c| !c.running.items.is_empty() || c.mission_sessions.values().any(|s| !s.is_empty()) || !c.driving.is_empty())
+    }
+    /// Marks `mission` of `project` as driven by this process until the returned guard drops; `None` when it already is, so
+    /// a mission never has two drivers. While any mission is driven the engine is working.
+    pub fn drive(&self, mission: &str, project: &str) -> Option<Drive> {
+        self.with(|c| !c.driving.contains_key(mission) && c.driving.insert(mission.into(), project.into()).is_none())
+            .then(|| Drive { engine: self.clone(), mission: mission.to_string() })
+    }
+    pub fn is_driving(&self, mission: &str) -> bool {
+        self.with(|c| c.driving.contains_key(mission))
     }
     pub fn shutdown(&self) {
         self.with(|c| {

@@ -510,6 +510,19 @@ async fn the_engine_is_working_from_the_first_row_until_the_last_one_leaves() {
     engine.shutdown();
 }
 
+/// An update waits for `is_working`; a mission's roles and proofs run inside its drive, with no row in the running list.
+#[tokio::test]
+async fn a_driven_mission_counts_as_work_until_its_drive_ends() {
+    let dir = tempfile::tempdir().unwrap();
+    let (engine, _rx) = engine(dir.path(), &[], fake(vec![]).spawn, None);
+    let drive = engine.drive("m1", "p1").expect("the first drive starts");
+    assert!(engine.is_working() && engine.is_driving("m1"));
+    assert!(engine.drive("m1", "p1").is_none(), "a mission never has two drivers");
+    drop(drive);
+    assert!(!engine.is_working() && !engine.is_driving("m1"));
+    engine.shutdown();
+}
+
 #[tokio::test]
 async fn removing_a_running_conversation_drops_its_row() {
     let dir = tempfile::tempdir().unwrap();

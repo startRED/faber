@@ -73,8 +73,6 @@ pub(crate) struct Faber {
     missions: Arc<tauri::async_runtime::Mutex<()>>,
     local: Option<Development>,
     pub(crate) awake: Arc<Mutex<CountedAwake>>,
-    /// Missions the coordinator is driving in this process; a second drive of the same mission never starts.
-    driving: Mutex<HashSet<String>>,
     /// One check of the agents at a time; a second start waits for it and finds the receipts it earned.
     qualifying: tauri::async_runtime::Mutex<()>,
     _mission_events: faber_engine::project::store::MissionSubscription,
@@ -629,12 +627,15 @@ fn drive_mission(app: &AppHandle, mission_id: String, commands: Vec<String>) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let faber = app.state::<Faber>();
-        if !lock(&faber.driving).insert(mission_id.clone()) {
-            return;
-        }
-        // An update install decided after the line above finds this mission in `driving` and waits; one decided before it is seen here.
+        // While it is held, the engine counts as working, so an update never ends the drive midway (C004), and its project
+        // cannot be removed. A mission that cannot be found has nothing to drive.
+        let project = {
+            let _turn = faber.missions.lock().await;
+            find_mission_and_journal(&faber, &mission_id).map(|(project, _, _)| project.id)
+        };
+        let Some(drive) = project.ok().and_then(|project| faber.engine.drive(&mission_id, &project)) else { return };
+        // An update install decided after the line above finds this mission driven and waits; one decided before it is seen here.
         if update::installing() {
-            lock(&faber.driving).remove(&mission_id);
             return;
         }
         if let Err(key) = run_mission(&app, &faber, &mission_id, commands).await {
@@ -643,7 +644,7 @@ fn drive_mission(app: &AppHandle, mission_id: String, commands: Vec<String>) {
                 halt(&journal, &key);
             }
         }
-        lock(&faber.driving).remove(&mission_id);
+        drop(drive);
         publish(&app, &mission_id).await;
     });
 }
@@ -871,7 +872,7 @@ async fn mission_resume(app: AppHandle, faber: State<'_, Faber>, mission_id: Str
     project_commands::editable(&mission)?;
     project.allows(Effect::Worktree, mission.grant_revision).map_err(str::to_string)?;
     let commands = mission::confirmed(&project).map_err(str::to_string)?;
-    if lock(&faber.driving).contains(&mission_id) {
+    if faber.engine.is_driving(&mission_id) {
         return Err("reason.mission.driving".into());
     }
     let mut runner = Runner::load(&journal).map_err(str::to_string)?;
@@ -1488,7 +1489,6 @@ fn main() {
                 missions,
                 local: local.clone(),
                 awake,
-                driving: Mutex::default(),
                 qualifying: Default::default(),
                 _mission_events: mission_events,
                 autostart: Mutex::new(autostart_keeper),
