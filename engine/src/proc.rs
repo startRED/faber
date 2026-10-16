@@ -372,15 +372,17 @@ pub struct Containment {
     identity: crate::project::ProcessId,
 }
 
-/// One tree's job, and what besides its root it still ran when it was first ended or closed: what the CLI left running.
+/// One tree's job, and what the CLI left running in it, noted when the job was first ended or closed.
 #[cfg(windows)]
 struct Held {
     job: Option<win32job::Job>,
     root: u32,
-    /// The file names (never command lines) of those processes; set once, by the first end or close.
+    /// Only an idle job (a mission's roles and proofs, a background reader) takes the census; a chat's job does not.
+    census: bool,
+    /// The file names (never command lines) of the leftovers; set once, by the first end or close.
     leftovers: Option<Vec<String>>,
-    /// Their pids, so a retirement waits for them as well as for the root.
-    members: Vec<u32>,
+    /// Set once a retirement saw the job empty: asking again answers the same.
+    retired: bool,
 }
 
 #[cfg(windows)]
@@ -389,41 +391,56 @@ impl Held {
         held.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Notes, once, which processes besides the root the job still runs. A job that cannot be listed counts one unknown.
+    /// Notes, once, what the CLI left running: a member other than the root whose parent is no longer in the job (it was
+    /// started and then let go, like a script a shell sent to the background). A child of a live member is work still in
+    /// progress or the CLI's own helper (npm's launcher and the native CLI it runs), and is not counted. A job that cannot be
+    /// listed counts one unknown.
     fn census(&mut self) {
-        let Some(job) = &self.job else { return };
-        if self.leftovers.is_some() {
+        if !self.census || self.leftovers.is_some() {
             return;
         }
-        let (mut names, mut members) = (vec![], vec![]);
-        match job.query_process_id_list() {
-            Ok(pids) => {
-                for pid in pids.into_iter().filter_map(|p| u32::try_from(p).ok()).filter(|p| *p != self.root) {
-                    let image = faber_winproc::image_path(pid).ok();
-                    // Windows' own console host serves the tree's console and ends with it: nothing the CLI started.
-                    if image.as_deref().is_some_and(console_host) {
-                        continue;
-                    }
-                    let name = image.and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()));
-                    // A process that ended in between has no image left to read, and is no leftover.
-                    if name.is_none() && faber_winproc::process_ended(pid) {
-                        continue;
-                    }
-                    names.push(name.unwrap_or_else(|| "unknown".into()));
-                    members.push(pid);
-                }
+        let Some(job) = &self.job else { return };
+        let listed = |job: &win32job::Job| {
+            job.query_process_id_list().map(|pids| pids.into_iter().filter_map(|p| u32::try_from(p).ok()).collect::<Vec<u32>>())
+        };
+        let (Ok(before), Ok(parents)) = (listed(job), faber_winproc::parent_pids()) else {
+            self.leftovers = Some(vec!["unknown".into()]);
+            return;
+        };
+        let mut found = vec![];
+        for pid in before.iter().copied().filter(|p| *p != self.root) {
+            // The job may still list a member that has just ended, so its parent must also still run.
+            if parents.get(&pid).is_some_and(|parent| before.contains(parent) && !faber_winproc::process_ended(*parent)) {
+                continue;
             }
-            Err(_) => names.push("unknown".into()),
+            let image = faber_winproc::image_path(pid).ok();
+            // Windows' own console host serves the tree's console and ends with it: nothing the CLI started.
+            if image.as_deref().is_some_and(console_host) {
+                continue;
+            }
+            let name = image.as_deref().and_then(Path::file_name).map(|n| safe_name(&n.to_string_lossy()));
+            found.push((pid, name.unwrap_or_else(|| "unknown".into())));
         }
-        self.leftovers = Some(names);
-        self.members = members;
+        // Only a pid the job still lists afterwards is its own: one that ended in between, or a process that took its number
+        // meanwhile, is not. A second listing that fails keeps everything found.
+        let after = listed(job).ok();
+        self.leftovers =
+            Some(found.into_iter().filter(|(pid, _)| after.as_ref().is_none_or(|a| a.contains(pid))).map(|(_, n)| n).collect());
     }
 
-    /// Closes the kill-on-close job, so every member ends, after the census.
-    fn close(&mut self) {
+    /// Ends every member now, after the census; the job stays open so its emptiness can still be asked.
+    fn terminate(&mut self) {
         self.census();
-        drop(self.job.take());
+        if let Some(job) = &self.job {
+            let _ = faber_winproc::job_terminate(job.handle());
+        }
     }
+}
+
+/// A file name as a report may show it: letters, digits, `.`, `_` and `-` only (a role picks its programs' names), at most 64.
+#[cfg(windows)]
+fn safe_name(name: &str) -> String {
+    name.chars().take(64).map(|c| if c.is_ascii_alphanumeric() || "._-".contains(c) { c } else { '_' }).collect()
 }
 
 /// Whether `image` is `%SystemRoot%\System32\conhost.exe`: a copy elsewhere under that name is counted like anything else.
@@ -453,13 +470,7 @@ impl Containment {
     /// Ends every process of the job now. Closing the job does the same, but only asks: this is followed by `active`.
     fn end(&self) {
         #[cfg(windows)]
-        {
-            let mut held = Held::lock(&self.held);
-            held.census();
-            if let Some(job) = held.job.as_ref() {
-                let _ = faber_winproc::job_terminate(job.handle());
-            }
-        }
+        Held::lock(&self.held).terminate();
     }
 
     /// How many processes of the job are still running; a job that cannot be asked counts as busy.
@@ -519,8 +530,15 @@ pub fn jobs_quiet() -> bool {
 #[cfg(windows)]
 impl Drop for Containment {
     fn drop(&mut self) {
-        // The job may be shared with an `OwnedTree`: closing it here ends the processes whoever holds a clone.
-        Held::lock(&self.held).close();
+        let mut held = Held::lock(&self.held);
+        if Arc::strong_count(&self.held) > 1 {
+            // An `OwnedTree` still holds the job: its processes end now, and the job stays open until the retirement has
+            // seen it empty.
+            held.terminate();
+        } else {
+            held.census();
+            drop(held.job.take());
+        }
     }
 }
 
@@ -552,8 +570,8 @@ impl Retired {
         self.identity
     }
 
-    /// The file names of the processes besides the root that were still running when the tree was first ended or closed:
-    /// what the CLI left behind. They were ended with it; a mission reports them as a defect.
+    /// The file names of what the CLI left running (see `Held::census`) when the tree was first ended or closed. They were
+    /// ended with it; a mission reports them as a defect. Empty for a chat's tree, which takes no census.
     pub fn leftovers(&self) -> &[String] {
         &self.leftovers
     }
@@ -579,26 +597,41 @@ impl OwnedTree {
         }
     }
 
-    /// Closes the kill-on-close job, so every member ends, then waits until the root and every process the census found
-    /// have ended. Safe to repeat: a tree already retired answers with the same identity and leftovers. A pid that was
-    /// reused meanwhile only delays the answer until it fails.
+    /// Ends every member of the job, waits until the job counts none (the root included), then closes it. Safe to repeat:
+    /// a tree already retired answers with the same identity and leftovers.
     pub async fn retire(&self) -> io::Result<Retired> {
         #[cfg(windows)]
         {
-            let members = {
+            let retired = |held: &Held| Retired { identity: self.identity, leftovers: held.leftovers.clone().unwrap_or_default() };
+            {
                 let mut held = Held::lock(&self.held);
-                held.close();
-                held.members.clone()
-            };
+                if held.retired {
+                    return Ok(retired(&held));
+                }
+                held.terminate();
+            }
             let deadline = Instant::now() + Duration::from_secs(5);
-            while !faber_winproc::process_ended(self.identity.pid) || !members.iter().all(|pid| faber_winproc::process_ended(*pid)) {
+            loop {
+                let active = {
+                    let held = Held::lock(&self.held);
+                    match held.job.as_ref() {
+                        Some(job) => faber_winproc::job_active_processes(job.handle()).unwrap_or(1),
+                        // Only a job nobody else held is closed before this; its root's end is what is left to ask.
+                        None => u32::from(!faber_winproc::process_ended(self.identity.pid)),
+                    }
+                };
+                if active == 0 {
+                    break;
+                }
                 if Instant::now() >= deadline {
                     return Err(io::Error::other("owned tree did not end"));
                 }
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
-            let leftovers = Held::lock(&self.held).leftovers.clone().unwrap_or_default();
-            Ok(Retired { identity: self.identity, leftovers })
+            let mut held = Held::lock(&self.held);
+            drop(held.job.take());
+            held.retired = true;
+            Ok(retired(&held))
         }
         #[cfg(not(windows))]
         {
@@ -620,7 +653,7 @@ fn join_job(child: &Child, idle: bool) -> io::Result<Containment> {
     job.assign_process(handle as isize).map_err(io::Error::other)?;
     let started_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_micros() as u64).max(1);
     let identity = crate::project::ProcessId { pid: child.id().ok_or_else(|| io::Error::other("the process already ended"))?, started_at };
-    let held = Held { job: Some(job), root: identity.pid, leftovers: None, members: vec![] };
+    let held = Held { job: Some(job), root: identity.pid, census: idle, leftovers: None, retired: false };
     Ok(Containment { held: Arc::new(Mutex::new(held)), identity })
 }
 

@@ -605,15 +605,23 @@ Every process a mission runs, each role's CLI and every proof, build and test, r
 kill-on-close job: roles through `proc::idle_spawner`, proofs through `proc::isolated_spawner`. The job sets
 `JOB_OBJECT_LIMIT_PRIORITY_CLASS`, so whatever the process starts is idle too and cannot ask for more (a `start /normal`
 child stays idle). A game at full load therefore starves the mission, never the other way round; a role turn may take
-longer then, and its silence watch still applies. Chat CLIs get no class of their own.
+longer then, and its silence watch still applies. Chat CLIs get no class of their own. The limit needs no privilege: the
+tests pass from a Medium-integrity token without `SeIncreaseBasePriorityPrivilege`.
 
-Closing a role's lease retires its tree (`OwnedTree::retire`): the first end or close of the job notes the processes it
-still holds besides the role's own process and Windows' console host (`System32\conhost.exe`), closes the job and waits
-until the root and each of them has ended. A role that quit by itself leaves its job to close with its last holder, and
-the census runs there too. The names (file names only, at most 32, with the full count) go to the mission's private
-`leftovers/` records, and every saved `report.json` carries them under `leftovers`, a defect of the roles rather than of
-the work. Only the role's own job is touched: each role has its own Codex app-server, and Chat's shared one is never in a
-mission job. `engine/tests/project_containment.rs` measures the priority of every member and the leftovers with real
+Closing a role's lease retires its tree (`OwnedTree::retire`): it ends every member, waits until the job counts none (the
+root included, at most 5 s, or the tree is unproven and the lease stays live), and only then closes the job. The first
+end or close of an idle job takes a census of what the CLI left running: a member other than the root whose parent no
+longer runs in the job, such as a script a shell sent to the background. A child of a live member is work in progress or
+the CLI's own helper (npm's launcher and the native CLI under it) and is not counted, nor is Windows' console host
+(`System32\conhost.exe`). A pid counts only if the job still lists it after its name was read, so a number reused by an
+unrelated process is never named. A role that quits by itself is caught too: its job, still held by the lease, is ended
+and kept open for the retirement. The names (letters, digits, `._-`, at most 32, with the full count) go to the mission's
+private `leftovers/` records, and every saved `report.json` carries them under `leftovers`, a defect of the roles rather
+than of the work; a failure to write them is logged and never blocks the lease. Only the role's own job is touched: each
+role has its own Codex app-server, and Chat's shared one is never in a mission job. Residuals: a process started through
+a service (Task Scheduler, WMI, or a sandbox that launches commands under another logon) is outside any job, so "nothing
+outlives the role" means nothing in its job; whether Codex's `mxc` sandbox runs commands inside the job is not yet
+measured. `engine/tests/project_containment.rs` measures the priority of every member and the leftovers with real
 processes. Off Windows there is no job and nothing changes.
 
 The real canary is opt-in (`real-canary.json`). It runs the candidate build, untrusted until it passes, with the real

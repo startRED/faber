@@ -8,8 +8,8 @@
 
 #[cfg(windows)]
 pub use imp::{
-    image_path, job_active_processes, job_terminate, label_desktop_low, label_low, lower_to_low_integrity, priority_class, process_ended,
-    resume_process,
+    image_path, job_active_processes, job_terminate, label_desktop_low, label_low, lower_to_low_integrity, parent_pids, priority_class,
+    process_ended, resume_process,
 };
 
 #[cfg(windows)]
@@ -309,6 +309,30 @@ mod imp {
                 std::ptr::null_mut(),
             );
             if ok == 0 { Err(io::Error::last_os_error()) } else { Ok(info.ActiveProcesses) }
+        }
+    }
+
+    /// The parent pid of every running process, from one toolhelp snapshot. A parent pid may name a process that has ended
+    /// since, or another process that got its number: callers compare it with processes they know are alive.
+    pub fn parent_pids() -> io::Result<std::collections::HashMap<u32, u32>> {
+        use windows_sys::Win32::System::Diagnostics::ToolHelp::{PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS};
+        // SAFETY: the snapshot handle is opened and closed here; `entry` is a zeroed plain-data struct whose size field is set
+        // as the API requires.
+        unsafe {
+            let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+            if snapshot == INVALID_HANDLE_VALUE {
+                return Err(io::Error::last_os_error());
+            }
+            let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+            entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+            let mut parents = std::collections::HashMap::new();
+            let mut more = Process32FirstW(snapshot, &mut entry);
+            while more != 0 {
+                parents.insert(entry.th32ProcessID, entry.th32ParentProcessID);
+                more = Process32NextW(snapshot, &mut entry);
+            }
+            CloseHandle(snapshot);
+            Ok(parents)
         }
     }
 

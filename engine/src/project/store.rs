@@ -205,6 +205,9 @@ mod pending_path_tests {
         let saved = journal.report().unwrap().unwrap().leftovers;
         assert_eq!((saved.len(), saved[1].count, saved[1].processes.len()), (2, MAX_LEFTOVERS + 3, MAX_LEFTOVERS));
         assert!(journal.record_leftovers(&LeftoverReport::new("../x", &["a.exe".into()])).is_err(), "an id is never a path");
+        std::fs::write(journal.private().join("leftovers").join("t3-1.json"), "{damaged").unwrap();
+        journal.save_report(&report).unwrap();
+        assert_eq!(journal.report().unwrap().unwrap().leftovers.len(), 2, "a damaged record is skipped, never fatal");
         // A report with nothing left running keeps its old shape.
         let clean = Journal::open(&root.path().join("repo"), &root.path().join("data"), "m2").unwrap();
         clean.save_report(&MissionReport::new("m2", "goal", "done")).unwrap();
@@ -705,8 +708,12 @@ impl Journal {
         self.put(&self.private.join("leftovers").join(format!("{}.json", leftovers.invocation)), leftovers)
     }
 
+    /// Every readable leftover record. A damaged one is skipped: a diagnostic never keeps a report from being saved.
     pub fn leftovers(&self) -> Result<Vec<super::report::LeftoverReport>, JournalError> {
-        self.list_at(&self.private.join("leftovers"))
+        let Ok(entries) = fs::read_dir(self.private.join("leftovers")) else { return Ok(vec![]) };
+        let mut paths: Vec<PathBuf> = entries.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "json")).collect();
+        paths.sort();
+        Ok(paths.iter().filter_map(|path| self.get(path).ok().flatten()).collect())
     }
 
     pub fn report(&self) -> Result<Option<super::report::MissionReport>, JournalError> {

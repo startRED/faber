@@ -320,10 +320,15 @@ impl Engine {
         self.with(|c| c.mission_sessions.remove(&mission));
         let retired = tree.retire().await.map_err(|_| "reason.project.processTreeUnproven".to_string())?;
         if !retired.leftovers().is_empty() {
-            let key = |e: crate::project::store::JournalError| e.key().to_string();
-            journal.record_leftovers(&crate::project::report::LeftoverReport::new(invocation, retired.leftovers())).map_err(key)?;
-            if let Some(report) = journal.report().map_err(key)? {
-                journal.save_report(&report).map_err(key)?;
+            // A diagnostic: failing to write it never keeps the role's spending from settling or its lease from closing.
+            let recorded = journal
+                .record_leftovers(&crate::project::report::LeftoverReport::new(invocation, retired.leftovers()))
+                .and_then(|()| match journal.report()? {
+                    Some(report) => journal.save_report(&report),
+                    None => Ok(()),
+                });
+            if let Err(e) = recorded {
+                eprintln!("faber: the leftovers of {invocation} were not recorded: {}", e.key());
             }
         }
         let event = terminal.unwrap_or(EngineEvent::Error { message: "reason.interrupted".into(), fatal: true });

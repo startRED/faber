@@ -76,7 +76,7 @@ async fn a_proof_and_everything_it_starts_run_at_idle_priority() {
 #[tokio::test]
 async fn a_chat_cli_keeps_the_priority_faber_runs_at() {
     let dir = tempfile::tempdir().unwrap();
-    let (_p, tree) = run(&proc::real_spawner(), "start /b /normal ping -n 30 127.0.0.1 >nul", dir.path());
+    let (_p, tree) = run(&proc::real_spawner(), TWO_PINGS, dir.path());
     let own = faber_winproc::priority_class(std::process::id()).unwrap();
     assert_eq!(faber_winproc::priority_class(tree.identity().pid).unwrap(), own);
     if own != IDLE {
@@ -87,18 +87,40 @@ async fn a_chat_cli_keeps_the_priority_faber_runs_at() {
 }
 
 /// The leftover a lease's end finds is named (file names only, never a command line) and is gone once the tree is retired.
+/// A second cmd sends a ping to the background and quits: that ping was let go. The root's own ping is still its child.
 #[tokio::test]
 async fn what_a_role_left_running_when_its_lease_ends_is_named_and_ended() {
     let dir = tempfile::tempdir().unwrap();
-    let (_p, tree) = run(&proc::idle_spawner(proc::real_spawner()), TWO_PINGS, dir.path());
-    let found = with_pings(&tree, 2).await;
+    let line = "start /b cmd /d /c start /b ping -n 30 127.0.0.1 & ping -n 30 127.0.0.1 >nul";
+    let (_p, tree) = run(&proc::idle_spawner(proc::real_spawner()), line, dir.path());
+    let until = Instant::now() + Duration::from_secs(10);
+    let found = loop {
+        let found = with_pings(&tree, 2).await;
+        let shells = found.iter().filter(|p| faber_winproc::image_path(**p).is_ok_and(|i| i.ends_with("cmd.exe"))).count();
+        if shells == 1 || Instant::now() >= until {
+            break found;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
     let retired = tree.retire().await.unwrap();
-    assert_eq!(lower(retired.leftovers()), ["ping.exe", "ping.exe"], "both pings; not the role itself, nor its console host");
+    assert_eq!(lower(retired.leftovers()), ["ping.exe"], "the ping let go; not the root's child, the root, nor the console host");
     for pid in found {
         assert!(faber_winproc::process_ended(pid), "process {pid} outlived its lease");
     }
     // Asking again answers the same.
-    assert_eq!(tree.retire().await.unwrap().leftovers().len(), 2);
+    assert_eq!(tree.retire().await.unwrap().leftovers().len(), 1);
+}
+
+/// Work in progress is no leftover: a lease that ends while the role's own command still runs ends it without a defect.
+#[tokio::test]
+async fn a_child_of_a_live_role_is_ended_but_not_counted() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_p, tree) = run(&proc::idle_spawner(proc::real_spawner()), TWO_PINGS, dir.path());
+    let found = with_pings(&tree, 2).await;
+    assert!(tree.retire().await.unwrap().leftovers().is_empty());
+    for pid in found {
+        assert!(faber_winproc::process_ended(pid), "process {pid} outlived its lease");
+    }
 }
 
 /// A role that quits by itself and leaves a child: the job closes with its last holder, and the child is still counted.
