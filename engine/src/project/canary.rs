@@ -341,7 +341,7 @@ pub async fn run(engine: &Engine, engine_data: &Path, work: &Path, mode: Mode) -
     let repository = enroll(&mut process, &repo, "HEAD").map_err(|e| e.key().to_string())?;
     let mut grant = Grant::new(&repository.identity.common_dir, GitMode::Seguro, REVISION, 1);
     grant.author = repository.author.clone();
-    let mut project = engine.add_project(&repo.to_string_lossy());
+    let mut project = engine.add_project(&repo.to_string_lossy())?;
     let before = project.clone();
     project.repo = Some(repository.identity.clone());
     project.grant = Some(grant.clone());

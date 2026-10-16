@@ -199,8 +199,8 @@ async fn blocks_with_a_question_come_first_then_the_sidebar_order_with_chat_last
     let (engine, mut rx) = engine(dir.path(), &[Vendor::Claude], spawn, None);
     engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
     let (one, two) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    let first = engine.add_project(&one.path().to_string_lossy());
-    let second = engine.add_project(&two.path().to_string_lossy());
+    let first = engine.add_project(&one.path().to_string_lossy()).unwrap();
+    let second = engine.add_project(&two.path().to_string_lossy()).unwrap();
 
     let mut ids = Vec::new();
     for (area, project, text) in [
@@ -344,7 +344,7 @@ async fn a_start_that_fails_after_the_pick_ends_the_reply_with_an_error_and_drop
     let dir = tempfile::tempdir().unwrap();
     let ask = router(Some(Duration::from_millis(200)));
     let (engine, mut rx) = engine(dir.path(), &[Vendor::Codex], fake(fixture("codex", "chat")).spawn, Some(ask));
-    let project = engine.add_project(&dir.path().to_string_lossy());
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
     let id = engine.send(request(Area::Project, Some(&project.id), SKY, "auto")).unwrap();
     assert_eq!(engine.state().running.items.len(), 1);
     // Faber itself will not remove a project that is answering; the folder leaves the list by another way (the file is
@@ -396,7 +396,7 @@ async fn request_ids_that_repeat_in_two_conversations_are_two_questions() {
     let f = fake(fixture("codex", "tools"));
     let (engine, mut rx) = engine(dir.path(), &[Vendor::Codex], f.spawn.clone(), None);
     engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
-    let project = engine.add_project(&dir.path().to_string_lossy());
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
     let chat = engine.send(request(Area::Chat, None, TWO_FILES, "codex")).unwrap();
     let work = engine.send(request(Area::Project, Some(&project.id), TWO_FILES, "codex")).unwrap();
 
@@ -555,7 +555,7 @@ async fn a_driver_panic_removes_only_its_run_from_overlapping_chat_and_project_w
         });
         let dir = tempfile::tempdir().unwrap();
         let (engine, mut rx) = engine(dir.path(), &[vendor], spawn, None);
-        let project = engine.add_project(&dir.path().to_string_lossy());
+        let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
         let chat = engine.send(request(Area::Chat, None, SKY, vendor.name())).unwrap();
         let work = engine.send(request(Area::Project, Some(&project.id), SKY, vendor.name())).unwrap();
         lists_until(&mut rx, WAIT, |rows| rows.len() == 2).await;
@@ -572,7 +572,7 @@ async fn a_driver_panic_removes_only_its_run_from_overlapping_chat_and_project_w
 /// A project with one mission record in the given state, under the folder and the data directory the engine uses.
 fn mission_in(engine: &Engine, data: &Path, repo: &Path, state: faber_engine::project::MissionState) -> String {
     use faber_engine::project::{Mission, run::Runner, store::Journal};
-    let project = engine.add_project(&repo.to_string_lossy());
+    let project = engine.add_project(&repo.to_string_lossy()).unwrap();
     let journal = Journal::open(repo, data, "m1").unwrap();
     let mut runner = Runner::create(&journal, Mission::new("m1", &project.id, "repo", "Fix", &"1".repeat(40), 3, 1)).unwrap();
     runner.mission.state = state;
@@ -638,7 +638,7 @@ async fn a_mission_record_that_cannot_be_read_keeps_its_project_from_being_remov
 async fn a_missions_folder_that_cannot_be_listed_keeps_the_project_but_a_missing_one_does_not() {
     let (data, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let (engine, _rx) = engine(data.path(), &[Vendor::Codex], fake(fixture("codex", "chat")).spawn, None);
-    let project = engine.add_project(&repo.path().to_string_lossy());
+    let project = engine.add_project(&repo.path().to_string_lossy()).unwrap();
     // `.faber/missions` is a file, so it cannot be listed: that is not "no missions".
     std::fs::create_dir_all(repo.path().join(".faber")).unwrap();
     std::fs::write(repo.path().join(".faber").join("missions"), "x").unwrap();

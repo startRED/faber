@@ -310,8 +310,6 @@ ones.
     grant is given once.
 26. Removing a project leaves its missions, working copy and browser keys behind; adding the folder again gives it a new
     id, and its old missions fail with `error.journal.mismatch`.
-27. Adding a project reads `projects.json` without the checked reader, so a damaged file reads as empty and the next
-    write loses every grant and confirmed check.
 28. A project's tail in the sidebar shows the amber bubble with a bare number; design.md says amber always comes with
     words.
 29. An update can install while a mission runs: `install_when_idle` (`src-tauri/src/update.rs`) holds back for

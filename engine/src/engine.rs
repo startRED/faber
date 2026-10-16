@@ -653,7 +653,7 @@ impl Engine {
     pub fn workspace_file(&self, id: &str, path: &str) -> Option<PathBuf> {
         self.with(|c| c.store.get(id).is_some().then(|| inside_folder(&c.workspace_of(id), path)).flatten().filter(|p| p.is_file()))
     }
-    pub fn add_project(&self, path: &str) -> Project {
+    pub fn add_project(&self, path: &str) -> Result<Project, String> {
         self.with(|c| c.add_project(path))
     }
     pub fn project(&self, id: &str) -> Result<Project, String> {
@@ -698,7 +698,7 @@ impl Engine {
         if !Path::new(&path).is_dir() {
             return Err("error.recents.gone".into());
         }
-        Ok(self.with(|c| c.add_project(&path)))
+        self.with(|c| c.add_project(&path))
     }
     pub fn recents(&self) -> RecentsView {
         self.with(|c| c.store.recents().view())
@@ -748,14 +748,15 @@ impl Engine {
     /// running) stops the removal with `error.project.busy`: the person stops it first. Nothing on disk is deleted.
     pub fn remove_project(&self, id: &str) -> Result<(), String> {
         self.with(|c| {
-            let Some(project) = c.store.projects().into_iter().find(|p| p.id == id) else { return Err("error.project.notFound".into()) };
+            let mut projects = c.store.projects_checked().map_err(|e| e.key().to_string())?;
+            let Some(project) = projects.iter().find(|p| p.id == id).cloned() else { return Err("error.project.notFound".into()) };
             let answering = c.convs.values().any(|conv| conv.project_id.as_deref() == Some(id) && running_item(conv).is_some());
             // A worker session alive in memory counts even if its records on disk were removed or cannot be read.
             let working = c.mission_sessions.iter().any(|(m, s)| !s.is_empty() && c.mission_projects.get(m).is_some_and(|p| p == id));
             if answering || working || crate::project::has_active_mission(Path::new(&project.path), &c.opts.data_dir, id) {
                 return Err("error.project.busy".into());
             }
-            let projects: Vec<Project> = c.store.projects().into_iter().filter(|p| p.id != id).collect();
+            projects.retain(|p| p.id != id);
             c.store.save_projects(&projects).map_err(|_| "error.store.write".to_string())?;
             c.list_changed();
             Ok(())
@@ -2595,19 +2596,19 @@ impl Core {
         }
     }
 
-    fn add_project(&mut self, path: &str) -> Project {
-        let mut projects = self.store.projects();
+    /// A damaged list is an error, never an empty one: writing it back would lose every grant and confirmed check.
+    fn add_project(&mut self, path: &str) -> Result<Project, String> {
+        let mut projects = self.store.projects_checked().map_err(|e| e.key().to_string())?;
         self.note_folder(path);
         if let Some(found) = projects.iter().find(|p| crate::recents::same_place(&p.path, path)) {
-            return found.clone();
+            return Ok(found.clone());
         }
         let name = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string());
         let project = Project::new(new_id(), name, path.to_string());
         projects.push(project.clone());
-        if self.store.save_projects(&projects).is_ok() {
-            self.list_changed();
-        }
-        project
+        self.store.save_projects(&projects).map_err(|e| e.key().to_string())?;
+        self.list_changed();
+        Ok(project)
     }
 }
 

@@ -118,7 +118,7 @@ async fn r121_a_project_in_the_home_folder_starts_with_full_access() {
     let f = fake(vec![]);
     let (engine, _) = engine(dir.path(), Vendor::Claude, f.spawn);
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap();
-    let project = engine.add_project(&Path::new(&home).to_string_lossy());
+    let project = engine.add_project(&Path::new(&home).to_string_lossy()).unwrap();
     let request = SendRequest { project_id: Some(project.id), ..ask(Area::Project, "hello", choice("claude", Some("haiku"))) };
     // Before R121 the default mode refused this folder (error.workingFolder) and started no CLI.
     assert!(engine.send(request).is_ok());
@@ -549,7 +549,7 @@ async fn text_blocks_around_a_tool_are_kept_apart() {
     first.msg["params"]["delta"] = format!("🔎 {}", first.msg["params"]["delta"].as_str().unwrap()).into();
     let (engine, mut rx) = engine(dir.path(), Vendor::Codex, fake(entries).spawn);
     engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
-    let project = engine.add_project(&dir.path().to_string_lossy());
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
     let text = "Create a.txt containing one. Then create b.txt containing two. Make each file in a separate step.";
     let id = engine.send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, text, choice("codex", None)) }).unwrap();
     let mut asked: HashMap<String, bool> = HashMap::new();
@@ -676,7 +676,7 @@ async fn the_hooks_choice_is_saved_and_restarts_idle_project_clis_with_it() {
     let f = fake(fixture("claude", "chat"));
     let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
     engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
-    let project = engine.add_project(&dir.path().to_string_lossy());
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
     let warm =
         || WarmRequest { conversation_id: None, area: Area::Project, project_id: Some(project.id.clone()), choice: choice("claude", None) };
     let last_args = || f.args.lock().unwrap().last().cloned().unwrap_or_default().join(" ");
@@ -703,7 +703,7 @@ async fn permissions_default_without_a_migration_persist_and_restart_idle_projec
     }
     let f = fake(fixture("claude", "chat"));
     let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
-    let project = engine.add_project(&dir.path().to_string_lossy());
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
     let warm =
         || WarmRequest { conversation_id: None, area: Area::Project, project_id: Some(project.id.clone()), choice: choice("claude", None) };
     let last_args = || f.args.lock().unwrap().last().cloned().unwrap();
@@ -734,7 +734,7 @@ async fn r107_tightening_permissions_stops_chat_and_projects() {
     ];
     let f = fake(entries);
     let (engine, mut rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
-    let project = engine.add_project(&dir.path().to_string_lossy());
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
     let work = engine.send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, "wait", choice("claude", None)) }).unwrap();
     let chat = engine.send(ask(Area::Chat, "wait", choice("claude", None))).unwrap();
     engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
@@ -800,7 +800,7 @@ async fn a_settings_write_that_fails_keeps_the_saved_settings_and_changes_nothin
     let dir = tempfile::tempdir().unwrap();
     let f = fake(fixture("claude", "chat"));
     let (engine, _rx) = engine(dir.path(), Vendor::Claude, f.spawn.clone());
-    let project = engine.add_project(&dir.path().to_string_lossy());
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
     let saved = Settings {
         appearance: serde_json::json!({ "base": "oficina" }).as_object().cloned(),
         user_hooks: Some(false),
@@ -1118,7 +1118,7 @@ async fn a_branched_resend_sends_the_images_and_files_of_the_selected_message_ag
         let project = (area == Area::Project).then(|| {
             let folder = dir.path().join("work");
             std::fs::create_dir_all(&folder).unwrap();
-            engine.add_project(&folder.to_string_lossy()).id
+            engine.add_project(&folder.to_string_lossy()).unwrap().id
         });
         let mut req = SendRequest { project_id: project, ..ask(area, SKY, pick()) };
         req.images = vec![Image { media_type: "image/png".into(), base64: "aW1hZ2U=".into() }];
@@ -1685,7 +1685,7 @@ async fn r124_system_and_credential_folders_are_refused_as_working_folders_but_h
     assert_eq!(engine.chat_folder(None, Some(&keys)).unwrap_err(), "error.workingFolder");
     assert_eq!(engine.chat_folder(None, Some(keys.parent().unwrap())).unwrap_err(), "error.workingFolder");
     // A project saved earlier in such a folder starts nothing.
-    let project = engine.add_project(&keys.to_string_lossy());
+    let project = engine.add_project(&keys.to_string_lossy()).unwrap();
     let sent = engine.send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, "hi", choice("claude", Some("haiku"))) });
     assert_eq!(sent.unwrap_err(), "error.workingFolder");
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap();

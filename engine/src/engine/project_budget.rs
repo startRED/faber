@@ -306,7 +306,7 @@ mod tests {
     }
 
     fn runner_fixture(e: &Engine, repo: &Path) -> (crate::project::store::Journal, crate::project::run::Runner) {
-        let mut p = e.add_project(&repo.to_string_lossy());
+        let mut p = e.add_project(&repo.to_string_lossy()).unwrap();
         let before = p.clone();
         p.repo = Some(crate::project::RepoIdentity::new("repo", &repo.to_string_lossy()));
         p.grant = Some(crate::project::Grant::new("repo", crate::project::GitMode::Seguro, 3, 1));
@@ -363,7 +363,7 @@ mod tests {
         let (dir, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let e = engine(dir.path());
         // No mission record anywhere on disk: only the live session says the project is working.
-        let project = e.add_project(&repo.path().to_string_lossy());
+        let project = e.add_project(&repo.path().to_string_lossy()).unwrap();
         e.with(|c| {
             c.mission_sessions.insert("m1".into(), vec![Session::from_fn(|_| {})]);
             c.mission_projects.insert("m1".into(), project.id.clone());

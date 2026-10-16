@@ -807,7 +807,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                 onArea={switchArea}
                 onProject={(id) => (closeSide(false), void fresh({ area: 'project', projectId: id }))}
                 onNewIn={(id) => (closeSide(false), void fresh({ area: 'project', projectId: id }))}
-                onAddProject={() => void addProject()}
+                onAddProject={() => void addProject().catch(fail)}
                 onOpen={openSummary}
                 onRemove={(id) => void remove(id)}
                 onSettings={(at) => (closeSide(false), openSettings(at))}
