@@ -116,7 +116,7 @@ name. Auto aims to pick a model that does the task well, without waste and quick
   never change (done, `engine/src/nudge.rs`).
 - **Still to build.** The table learns from what the user approves or redoes. The draft is routed at most twice per
   message while the user types; today it is routed at every pause.
-- **Still to build: quota pacing** ([spec](superpowers/specs/2026-10-11-auto-quota-pacing-design.md), draft). Auto
+- **Quota pacing** (built; [spec](superpowers/specs/2026-10-11-auto-quota-pacing-design.md)). Auto
   reads each window against its reset time, the weekday and the plan (detected at start and watched while open, on a
   shared account), and spends quota that would expire on quality: one rung up when a vendor has spare quota.
 - The router is measured too: on the benchmark of real requests, its picks must match always using the strongest
@@ -124,14 +124,16 @@ name. Auto aims to pick a model that does the task well, without waste and quick
 
 ## Two areas
 
-- **Chat** works like claude.ai and ChatGPT, and must beat them. It has many conversations and no folders, and it never
-  changes files on the computer: it only reads what the user attaches. Each conversation has a hidden workspace inside
-  the app where the model runs code, draws charts and creates files. The user never sees a folder. Files show up in the
-  conversation with "download" and "take to a project", and they stay in the workspace until the user saves them or
-  moves the conversation to a project. Commands that could reach outside it ask first. The user picks any connected
+- **Chat** works like claude.ai and ChatGPT, and must beat them. It has many conversations. Each one works in a hidden
+  workspace inside the app where the model runs code, draws charts and creates files, or in a folder the person picks
+  before its first message (R107). Files show up in the conversation with Save and Show, and they stay in the workspace
+  until the user saves them; "take to a project" and moving a conversation to a project are planned, not built. "Don't
+  ask", the default, gives full access (R121); "Ask before commands" asks before file changes and commands, except plain
+  reads and what the person already allowed in the tool's own settings. The user picks any connected
   model or Auto, and every answer shows the model and, in Auto, the reason in one line.
-- **Projects** works like Claude Code: open a folder, keep many projects and many conversations per project. This is
-  where the lead agent acts. A Chat conversation can move to a project with its full context.
+- **Projects** holds many git folders. The person gives a project a goal and the lead agent's mission does it in a
+  separate copy; today that is the self-development slice of R96 (one task per mission), and no direct conversation
+  starts inside a project. Moving a Chat conversation to a project with its full context is planned.
 
 The user always sees what is happening: the model behind each answer, the remaining quota of each subscription and
 when it renews, and, for running work, who is building and who is reviewing.
@@ -295,9 +297,10 @@ Taken from Claude Code Projects and pushed further (AI proposal, not reviewed; r
    kind" on the card, and a "full trust for Faber's own setup" switch in Settings. Full trust never covers sending,
    publishing, paying or deleting. Every self-change is logged and keeps the previous version. Nothing else asks.
 4. "Done" requires evidence: a test that ran, a recording, or judge scores.
-5. Another model reviews the work. In code, the writer never reviews its own work. Self-development promotion requires
-   the other vendor; unavailable review waits. Creative work gets two judges from
-   different vendors when both are connected.
+5. Another model reviews the work. In code, the writer never reviews its own work. The reviewer is preferably the other
+   vendor; when its quota is poor or only one vendor is connected, a fresh read-only session of the same vendor reviews
+   (R146; today's coordinator still requires the other vendor). Creative work gets two judges from different vendors
+   when both are connected.
 6. A mission never stops to wait for the user. Without an answer in time, it takes the safest path and logs it.
 7. Every mission has an estimate of time and quota. Passing it by 50% only warns and moves to economy mode (see Big
    work above). Unattended missions have a fence: whatever hits it is parked with a note and the rest continues.
@@ -313,6 +316,22 @@ a minimal board and decisions, needs-you notifications (R92), and local next-bui
 Equilibrado adds only own-branch push and draft PR. Parallel writers need disjoint areas and measured qualification.
 Catalog, the remaining powers, Livre, and public release automation are deferred.
 The local development instance never touches the installed release in E:\Apps\Faber (R95).
+
+### Coherence of a project's work (R146)
+
+A mission keeps a project as coherent as the agents that build Faber keep Faber (R145). Planned, not built:
+
+- **A project map built from the code.** Extractors list what the project has (settings, routes, commands, texts,
+  exports) and stay tied to the files they came from; no AI-written overview. Roles get the index and look details up.
+- **A contract before writing.** The Lead names what the change touches, the closest thing that already exists, and
+  `Extends:` it or `New:` with why it does not fit; the Writer starts only once the contract exists.
+- **Faber decides "done".** After the Writer's turn Faber runs the project's checks and the map check itself; a Writer
+  cannot declare its own work done.
+- **Lessons need the owner's yes.** A mission's retrospective proposes rule or card changes with their evidence, and
+  each becomes a rule only after the owner's yes.
+- **Sized by risk.** A small change in one area gets the Writer and the checks; a change across areas gets the whole
+  chain.
+- **The reviewer** follows guardrail 5: the other vendor when it can, a fresh read-only session otherwise.
 
 ## Following the work
 
@@ -412,10 +431,10 @@ known defects of the old code, no new code may add to them, and each phase close
 
 | Rule | What the engine does today | Closed in |
 | :--- | :--- | :--- |
-| 2 | Chat sessions pass `--permission-mode`. Projects sessions pass none. A session may start on the account's default model or effort | Phase 2 |
+| 2 | A session may start on the account's default model or effort (Chat passes `--permission-mode` for each permission choice; Projects has no direct sessions, and mission roles run isolated) | Phase 2 |
 | 3 | Auto's move up changes the model inside a conversation | Phase 2 (check the hand-over) |
 | 4 | There is no lead agent yet, so there is no hand-over | Phase 3 |
-| 5 | Interrupt sends the CLI's control-protocol interrupt, but nothing waits for the result, nothing watches for silence, and `proc::stop` kills the child alone, not its tree | Phase 2 |
+| 5 | Interrupt waits 5 s for the CLI to stop (`engine/src/proc.rs`), and only mission roles are watched for 2 min of silence; a Chat answer that goes silent is not, and off Windows stopping ends the CLI alone, not its tree (on Windows its job object ends the whole tree) | Phase 2 |
 | 6 | `terminal_reason` or `subtype` is passed on as a raw string, and `capabilities` from `system/init` is not read | Phase 2 |
 | 7 | The engine keeps no running budget | Phase 3 |
 
@@ -478,8 +497,10 @@ promotion. Swap only with no window and no active effect. An independent helper 
 Saved data stays compatible with last good. This channel is separate from signed public updates (R93–R95;
 [spec](superpowers/specs/2026-10-12-self-development-mvp-design.md)).
 
-- **Faber itself** updates itself. Today it downloads a signed update in the background and installs it on quit, so it
-  never interrupts work.
+- **Faber itself** updates itself. Today it downloads a signed update in the background and installs it on quit or, on
+  Windows, at the first moment no conversation or CLI install runs and the window is hidden (R118). A running
+  mission does not hold it back yet (product-map incoherence 29). Installing when Faber
+  opens (R141) is not built yet.
 - **The CLIs.** Claude Code and Codex move only to versions that GitHub tested overnight with recorded conversations.
   If a version breaks, Faber stays on the previous one until a fix arrives as a published file, with no new Faber
   download.
@@ -611,7 +632,7 @@ each version, the benchmark measures it, and the version ships only with the mai
 
 | Phase | Scope | What comes with it |
 | :-- | :--- | :--- |
-| 1 | New base | the FSL-1.1-ALv2 license and these documents, Faber's own Rust test runner, the design system and themes, the identity, the shell layout and running list, the tray number and notifications, the first run and tutorial, Settings, and the CLI download written straight to disk. No public release: it is checked in the live app and a local installer build |
+| 1 | New base | the FSL-1.1-ALv2 license and these documents, Faber's own Rust test runner, the design system and themes, the identity, the shell layout and running list, the tray number and notifications, the first run and tutorial, Settings, and the CLI download written straight to disk. Every user-facing change already ships as a patch release (R130) |
 | 1a (R96) | Self-development MVP | the minimal Projects slice above ([spec](superpowers/specs/2026-10-12-self-development-mvp-design.md)); closes the project execution, handoff, stop and live-budget gaps needed to let Faber build Faber before Full Chat |
 | 2 | Full Chat | the benchmark, visual answers, asking Faber about Faber, search, moving a chat to a project, Auto learning from approvals, the draft routed at most twice per message, reporting failed writes of conversation and project files, and closing the engine gaps of rules 2, 3, 5 and 6 |
 | 3 | Projects with the lead agent | the lead agent, toolbox, 15 powers, modes, guardrails and big-work rules, the rules for running many workers, the progress view, the decision list, the catalog, learning and the `.faber/` folder, and rules 4 and 7 | |
