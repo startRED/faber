@@ -8,7 +8,8 @@
 
 #[cfg(windows)]
 pub use imp::{
-    image_path, job_active_processes, job_terminate, label_desktop_low, label_low, lower_to_low_integrity, process_ended, resume_process,
+    image_path, job_active_processes, job_terminate, label_desktop_low, label_low, lower_to_low_integrity, priority_class, process_ended,
+    resume_process,
 };
 
 #[cfg(windows)]
@@ -31,7 +32,7 @@ mod label {
         TokenIntegrityLevel, WinCreatorOwnerRightsSid, WinLowLabelSid,
     };
     use windows_sys::Win32::System::Threading::{
-        OpenProcess, OpenProcessToken, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
+        GetPriorityClass, OpenProcess, OpenProcessToken, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
     };
 
     const SE_GROUP_INTEGRITY: u32 = 0x20;
@@ -258,6 +259,15 @@ mod label {
         with_process(pid, image)
     }
 
+    /// The priority class process `pid` runs at (`IDLE_PRIORITY_CLASS` is 0x40, `NORMAL_PRIORITY_CLASS` 0x20).
+    pub fn priority_class(pid: u32) -> io::Result<u32> {
+        // SAFETY: a plain query on the handle `with_process` lends.
+        with_process(pid, |process| match unsafe { GetPriorityClass(process) } {
+            0 => Err(io::Error::last_os_error()),
+            class => Ok(class),
+        })
+    }
+
     fn image(process: HANDLE) -> io::Result<PathBuf> {
         let mut buffer = vec![0u16; 32 * 1024];
         let mut size = buffer.len() as u32;
@@ -271,7 +281,7 @@ mod label {
 
 #[cfg(windows)]
 mod imp {
-    pub use super::label::{image_path, label_desktop_low, label_low, lower_to_low_integrity};
+    pub use super::label::{image_path, label_desktop_low, label_low, lower_to_low_integrity, priority_class};
     use std::io;
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{

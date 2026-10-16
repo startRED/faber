@@ -188,6 +188,28 @@ mod pending_path_tests {
         assert_eq!(journal.pending().unwrap(), vec![intent]);
         assert!(Journal::pending_private(journal.private()).is_err());
     }
+
+    /// Lessons row 5: what a role left running is a defect every saved report carries, recorded before or after it.
+    #[test]
+    fn a_report_names_what_the_roles_left_running() {
+        use super::super::report::{LeftoverReport, MAX_LEFTOVERS, MissionReport};
+        let root = tempfile::tempdir().unwrap();
+        let journal = Journal::open(&root.path().join("repo"), &root.path().join("data"), "m1").unwrap();
+        let many: Vec<String> = (0..MAX_LEFTOVERS + 3).map(|n| format!("p{n}.exe")).collect();
+        journal.record_leftovers(&LeftoverReport::new("t1-1", &["ping.exe".into()])).unwrap();
+        journal.save_report(&MissionReport::new("m1", "goal", "done")).unwrap();
+        assert_eq!(journal.report().unwrap().unwrap().leftovers, [LeftoverReport::new("t1-1", &["ping.exe".into()])]);
+        journal.record_leftovers(&LeftoverReport::new("t2-1", &many)).unwrap();
+        let report = journal.report().unwrap().unwrap();
+        journal.save_report(&report).unwrap();
+        let saved = journal.report().unwrap().unwrap().leftovers;
+        assert_eq!((saved.len(), saved[1].count, saved[1].processes.len()), (2, MAX_LEFTOVERS + 3, MAX_LEFTOVERS));
+        assert!(journal.record_leftovers(&LeftoverReport::new("../x", &["a.exe".into()])).is_err(), "an id is never a path");
+        // A report with nothing left running keeps its old shape.
+        let clean = Journal::open(&root.path().join("repo"), &root.path().join("data"), "m2").unwrap();
+        clean.save_report(&MissionReport::new("m2", "goal", "done")).unwrap();
+        assert!(!std::fs::read_to_string(clean.records().join("report.json")).unwrap().contains("leftovers"));
+    }
 }
 
 impl Journal {
@@ -663,12 +685,28 @@ impl Journal {
         Ok(found)
     }
 
+    /// Saves the report with every leftover recorded so far (`record_leftovers`), whatever the caller put there.
     pub fn save_report(&self, report: &super::report::MissionReport) -> Result<(), JournalError> {
         self.same_mission(&report.mission)?;
         if report.schema > SCHEMA {
             return Err(JournalError::Newer);
         }
-        self.put(&self.records.join("report.json"), report)
+        let mut report = report.clone();
+        report.leftovers = self.leftovers()?;
+        self.put(&self.records.join("report.json"), &report)
+    }
+
+    /// What a role left running when its lease ended, kept privately until the next report is saved. One record per
+    /// invocation; a repeated retirement writes the same record again.
+    pub fn record_leftovers(&self, leftovers: &super::report::LeftoverReport) -> Result<(), JournalError> {
+        if !valid_id(&leftovers.invocation) || leftovers.schema != SCHEMA || leftovers.processes.len() > super::report::MAX_LEFTOVERS {
+            return Err(JournalError::Mismatch);
+        }
+        self.put(&self.private.join("leftovers").join(format!("{}.json", leftovers.invocation)), leftovers)
+    }
+
+    pub fn leftovers(&self) -> Result<Vec<super::report::LeftoverReport>, JournalError> {
+        self.list_at(&self.private.join("leftovers"))
     }
 
     pub fn report(&self) -> Result<Option<super::report::MissionReport>, JournalError> {

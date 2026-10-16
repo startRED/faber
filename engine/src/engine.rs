@@ -258,8 +258,9 @@ struct Core {
     convs: HashMap<String, Conversation>,
     live: HashMap<String, Live>,
     mission_sessions: HashMap<String, Vec<Session>>,
-    /// Owned process trees of writer roles by invocation id, and the terminal event each role reported.
-    worker_trees: HashMap<String, crate::proc::OwnedTree>,
+    /// Owned process trees of the roles by invocation id, with the journal their leftovers go to (lessons row 5), and the
+    /// terminal event each role reported.
+    worker_trees: HashMap<String, (crate::proc::OwnedTree, crate::project::store::Journal)>,
     worker_terminals: HashMap<String, EngineEvent>,
     /// Role invocations the engine itself is closing: what their processes report from then on is the shutdown.
     worker_closing: HashSet<String>,

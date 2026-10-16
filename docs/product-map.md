@@ -175,7 +175,7 @@ The data folder is `%APPDATA%\Faber` (or `FABER_DATA_DIR`). JSON files are writt
 | :--- | :--- | :--- |
 | `conversations/<id>.json` | One conversation: messages, `choice` (model and effort), `workingFolder`, `allowAlways` (tools always allowed in it), the copied `userName`, CLI sessions, queued messages, a waiting quota recovery | The engine |
 | `projects.json` | Projects: id, name, path, git identity (`repo`), `grant`, the confirmed checks (`extra.proof`) | Add, open or remove a project; Settings > Projects; the checks sheet |
-| `<project>/.faber/missions/<id>/` and `missions/<id>/` | A mission's journal (mission, plan, contracts, decisions, artifacts, report) and its run, runtime and effects records | The mission engine |
+| `<project>/.faber/missions/<id>/` and `missions/<id>/` | A mission's journal (mission, plan, contracts, decisions, artifacts, report, with what roles left running under `leftovers`) and its run, runtime, effects and `leftovers/` records (R162) | The mission engine |
 | `workspaces/<project>/` | The persistent working copy where a project's setup and checks run | The mission engine |
 | `qualification/` | Receipts of the hidden check of the installed CLIs before missions (valid 24 h) | The shell, before a mission starts |
 | `recents.json` | Recent folders and environments | Opening folders, Recents |

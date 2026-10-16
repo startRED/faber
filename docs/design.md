@@ -599,6 +599,23 @@ use the network, and on Linux nothing limits its writes. R139 accepts this for v
 (R121), which exposes strictly more, and a proof starts from a cleared environment at Low integrity. The upgrade path is an
 AppContainer (Windows), which closes reads and the network as well.
 
+### Owned process trees (R162)
+
+Every process a mission runs, each role's CLI and every proof, build and test, runs at idle priority in its own
+kill-on-close job: roles through `proc::idle_spawner`, proofs through `proc::isolated_spawner`. The job sets
+`JOB_OBJECT_LIMIT_PRIORITY_CLASS`, so whatever the process starts is idle too and cannot ask for more (a `start /normal`
+child stays idle). A game at full load therefore starves the mission, never the other way round; a role turn may take
+longer then, and its silence watch still applies. Chat CLIs get no class of their own.
+
+Closing a role's lease retires its tree (`OwnedTree::retire`): the first end or close of the job notes the processes it
+still holds besides the role's own process and Windows' console host (`System32\conhost.exe`), closes the job and waits
+until the root and each of them has ended. A role that quit by itself leaves its job to close with its last holder, and
+the census runs there too. The names (file names only, at most 32, with the full count) go to the mission's private
+`leftovers/` records, and every saved `report.json` carries them under `leftovers`, a defect of the roles rather than of
+the work. Only the role's own job is touched: each role has its own Codex app-server, and Chat's shared one is never in a
+mission job. `engine/tests/project_containment.rs` measures the priority of every member and the leftovers with real
+processes. Off Windows there is no job and nothing changes.
+
 The real canary is opt-in (`real-canary.json`). It runs the candidate build, untrusted until it passes, with the real
 Claude Code and Codex CLIs, signed in through the user's own profile and environment, with copied qualification receipts;
 only its proof runs isolated.

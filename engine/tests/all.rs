@@ -55,6 +55,8 @@ mod project_bar_regressions;
 mod project_budget;
 #[path = "project_compile.rs"]
 mod project_compile;
+#[path = "project_containment.rs"]
+mod project_containment;
 #[path = "project_git.rs"]
 mod project_git;
 #[path = "project_git_t5.rs"]

@@ -186,7 +186,8 @@ impl Engine {
         std::fs::create_dir_all(&cwd).map_err(|e| crate::store::Fault::of_write(&e).key().to_string())?;
         let (cli, spawn, windows) = self.with(|c| {
             let cli = c.opts.clis.get(&request.vendor).cloned().ok_or("error.cli.missing")?;
-            Ok::<_, String>((cli.clone(), spawner(&c.opts.spawn, &cli), c.opts.windows))
+            // A role and everything it starts run at idle priority, so a game or the person's own work never waits for it.
+            Ok::<_, String>((cli.clone(), crate::proc::idle_spawner(spawner(&c.opts.spawn, &cli)), c.opts.windows))
         })?;
         runner.prepare_dispatch(&journal, self, request.clone())?;
         runner.save(&journal).map_err(str::to_string)?;
@@ -286,7 +287,7 @@ impl Engine {
             (None, _) => Err("reason.project.processTreeUnproven".to_string()),
         };
         match attached {
-            Ok(tree) => self.with(|c| c.worker_trees.insert(request.id.clone(), tree)),
+            Ok(tree) => self.with(|c| c.worker_trees.insert(request.id.clone(), (tree, journal.clone()))),
             Err(key) => {
                 session.close();
                 if let Some(tree) = session.tree() {
@@ -306,9 +307,10 @@ impl Engine {
     /// The end of any role: its sessions are closed, its owned process tree is closed and reaped, and only then does
     /// the invocation's spending settle against what it reported (or its computed bound if it reported nothing). An
     /// unknown invocation, a recording or a platform without the job has no tree, so it has no proof and settles nothing.
+    /// Whatever the role left running when its tree was first ended goes into the mission report as a defect.
     async fn end_role(&self, invocation: &str) -> Result<crate::project::lease::Termination, String> {
-        let (tree, terminal) = self.with(|c| (c.worker_trees.get(invocation).cloned(), c.worker_terminals.get(invocation).cloned()));
-        let tree = tree.ok_or("reason.project.processTreeUnproven")?;
+        let (held, terminal) = self.with(|c| (c.worker_trees.get(invocation).cloned(), c.worker_terminals.get(invocation).cloned()));
+        let (tree, journal) = held.ok_or("reason.project.processTreeUnproven")?;
         let mission = self.mission_reservation(invocation)?.request.mission;
         // From here on whatever the processes report is their shutdown, not a new failure of a finished turn.
         self.with(|c| c.worker_closing.insert(invocation.into()));
@@ -317,6 +319,13 @@ impl Engine {
         }
         self.with(|c| c.mission_sessions.remove(&mission));
         let retired = tree.retire().await.map_err(|_| "reason.project.processTreeUnproven".to_string())?;
+        if !retired.leftovers().is_empty() {
+            let key = |e: crate::project::store::JournalError| e.key().to_string();
+            journal.record_leftovers(&crate::project::report::LeftoverReport::new(invocation, retired.leftovers())).map_err(key)?;
+            if let Some(report) = journal.report().map_err(key)? {
+                journal.save_report(&report).map_err(key)?;
+            }
+        }
         let event = terminal.unwrap_or(EngineEvent::Error { message: "reason.interrupted".into(), fatal: true });
         self.mission_budget(crate::project::budget::Change::Report { id: invocation.into(), event, terminated: true })?;
         let settled = self.mission_reservation(invocation)?.settled;

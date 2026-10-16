@@ -104,8 +104,39 @@ pub struct MissionReport {
     pub commit_receipt: Option<CommitReceiptReport>,
     pub tree_receipt: Option<TreeReceiptReport>,
     pub timings: ReportTimings,
+    /// A defect of the roles, not of the work: processes they left running when their lease ended.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub leftovers: Vec<LeftoverReport>,
     #[serde(flatten)]
     pub extra: Extra,
+}
+
+/// What one role left running when its lease ended. Its job ended those processes with it; the report names them so
+/// that whatever started them (a brief, a tool, the CLI) gets fixed. File names only, never command lines.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LeftoverReport {
+    pub schema: u32,
+    pub invocation: String,
+    /// How many there were; `processes` keeps the first `MAX_LEFTOVERS` names.
+    pub count: usize,
+    pub processes: Vec<String>,
+}
+
+pub const MAX_LEFTOVERS: usize = 32;
+
+impl LeftoverReport {
+    pub fn new(invocation: &str, processes: &[String]) -> Self {
+        let count = processes.len();
+        let processes = processes.iter().take(MAX_LEFTOVERS).map(|n| n.chars().take(128).collect()).collect();
+        Self { schema: SCHEMA, invocation: invocation.into(), count, processes }
+    }
+}
+
+impl super::Record for LeftoverReport {
+    fn schema(&self) -> u32 {
+        self.schema
+    }
 }
 
 impl MissionReport {
@@ -121,6 +152,7 @@ impl MissionReport {
             commit_receipt: None,
             tree_receipt: None,
             timings: ReportTimings::default(),
+            leftovers: Vec::new(),
             extra: Extra::new(),
         }
     }
