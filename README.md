@@ -77,12 +77,12 @@ npm run lint
 npm run typecheck
 npm run build
 cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p faber --features test-hooks -- -D warnings
+cargo t --suite lint
 cargo t
 ```
 
-`cargo t` runs only the tests that depend on the files you changed; `cargo t --all` runs everything, as CI does. On
+`cargo t --suite lint` runs both Clippy proofs. `cargo t` runs only the tests that depend on the files you changed;
+`cargo t --all` runs everything, as CI does. On
 Windows it also drives a hidden Faber through WebView2; run `cargo t --all` when the screen or the shell changes.
 
 ## License
