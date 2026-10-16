@@ -11,7 +11,7 @@ use crate::report::{Outcome, Status, exit_code, line, quiet, summary};
 use crate::screen;
 use crate::slots;
 use crate::sweep;
-use crate::testbuild::{build_test_app, ensure_fake_cli};
+use crate::testbuild::{build_test_app, ensure_fake_cli, prebuilt};
 use faber_engine::project::proof::output::{cargo_output, died, failure_sections, parse_cargo_tests};
 use std::fs::File;
 use std::io::Write;
@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::Instant;
 
-const USAGE: &str = "usage: cargo t [--all] [--suite rust|ui|screen|lint] [--filter <text>] [--shard <i/n>]";
+const USAGE: &str = "usage: cargo t [--all] [--suite rust|ui|screen|lint] [--filter <text>] [--shard <i/n>] [--build-only | --prebuilt]";
 
 /// The two Clippy proofs, as CI runs them (a test keeps them equal). `--suite lint` runs them with [`lint_args`].
 pub const LINTS: [&[&str]; 2] = [
@@ -228,6 +228,19 @@ pub fn run(args: &[String]) -> i32 {
         }
         return 1;
     }
+    let jobs = jobs();
+    if opts.build_only {
+        return match ensure_fake_cli(&paths, jobs).and_then(|()| build_test_app(&paths, jobs)) {
+            Ok(()) => {
+                println!("Built the test app and its helpers.");
+                0
+            }
+            Err(message) => {
+                println!("FAIL  build   the test app\n{message}");
+                1
+            }
+        };
+    }
     // A red phase-1-base shows before anything runs: commits pushed onto it only wait behind the failure.
     base::warn(&paths.root);
     let suites = select(&opts, &changed);
@@ -242,7 +255,6 @@ pub fn run(args: &[String]) -> i32 {
         std::process::exit(130);
     });
     let mut log = Log::create(paths.target.join("run.log"));
-    let jobs = jobs();
     let filter = opts.filter.as_deref();
     let mut outcomes: Vec<Outcome> = Vec::new();
     if suites.contains(&Suite::Lint) {
@@ -265,7 +277,9 @@ pub fn run(args: &[String]) -> i32 {
             outcomes.push(skipped);
         }
         if wants_ui || screen_runs {
-            match ensure_fake_cli(&paths, jobs).and_then(|()| build_test_app(&paths, jobs)) {
+            let built =
+                if opts.prebuilt { prebuilt(&paths) } else { ensure_fake_cli(&paths, jobs).and_then(|()| build_test_app(&paths, jobs)) };
+            match built {
                 Err(message) => {
                     for suite in [Suite::Ui, Suite::Screen].into_iter().filter(|s| suites.contains(s) && (*s == Suite::Ui || screen_runs)) {
                         let not_run = Outcome::not_run(suite, "the test app", &message);

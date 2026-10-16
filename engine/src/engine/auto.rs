@@ -285,6 +285,7 @@ impl Core {
         let session = match vendor {
             Vendor::Codex => self.codex_server(Area::Chat, false, Permissions::Isolated, &cli).open(
                 CodexThread {
+                    helper: Default::default(),
                     cwd,
                     model,
                     effort,
@@ -301,6 +302,7 @@ impl Core {
                     bin: cli.command.clone(),
                     cwd,
                     launch: ClaudeLaunch {
+                        helper: Default::default(),
                         area: Area::Chat,
                         model,
                         effort,

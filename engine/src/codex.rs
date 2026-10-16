@@ -304,7 +304,11 @@ pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<
                 .find(|v| !v.is_null())
                 .unwrap_or(item)
                 .clone();
-            let name = if kind == "dynamicToolCall" && item["tool"] == "run_command" { "Bash" } else { kind };
+            let name = match (kind, item["tool"].as_str()) {
+                ("dynamicToolCall", Some("run_command")) => "Bash",
+                ("dynamicToolCall", Some(crate::helper::NAME)) => crate::helper::TOOL,
+                _ => kind,
+            };
             vec![EngineEvent::Tool { id: s(&item["id"]), name: name.into(), input, parent: None }]
         }
         "item/completed" => {
@@ -478,6 +482,8 @@ pub struct CodexThread {
     pub user_name: Option<String>,
     pub permissions: Permissions,
     pub tuning: Tuning,
+    /// Faber's helper tool (R161), as for `ClaudeLaunch::helper`.
+    pub helper: crate::helper::Helper,
 }
 
 enum ServerCommand {
@@ -505,6 +511,8 @@ struct Thread {
     queued: Vec<UserTurn>,
     state: CodexTurnState,
     approvals: HashMap<String, Value>,
+    /// Helper calls (R161) waiting for their report: the tool call id to the id of Codex's request.
+    helpers: HashMap<String, Value>,
     watch: proc::TurnWatch,
     blocked: bool,
     closing: bool,
@@ -565,6 +573,19 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
         params.insert("developerInstructions".into(), persona(&PersonaInput { name: t.user_name.as_deref() }).into());
         if t.permissions != Permissions::Isolated {
             apply_tuning(&mut params, t.tuning);
+        }
+        // R161: the helper tool beside any tool the mode already gave; a helper itself leaves no history to resume.
+        match t.helper {
+            crate::helper::Helper::Offers => {
+                let tools = params.entry("dynamicTools").or_insert_with(|| json!([]));
+                if let Some(tools) = tools.as_array_mut() {
+                    tools.push(crate::helper::codex_tool());
+                }
+            }
+            crate::helper::Helper::Is => {
+                params.insert("ephemeral".into(), true.into());
+            }
+            crate::helper::Helper::Off => {}
         }
     }
     if t.permissions == Permissions::Isolated && t.instructions.is_none() {
@@ -638,6 +659,7 @@ pub(crate) fn project_launch_policy(roles: &[crate::project::Role]) -> Value {
     let server: Vec<String> =
         project_codex_args(cfg!(windows)).into_iter().map(|a| a.replace(&json!(catalog).to_string(), "<catalog>")).collect();
     let thread = CodexThread {
+        helper: Default::default(),
         cwd: PathBuf::from(if cfg!(windows) { r"C:\faber-role" } else { "/faber-role" }),
         model: Some("gpt-6-luna".into()),
         effort: Some("medium".into()),
@@ -988,6 +1010,21 @@ async fn serve(
                     // A request from Codex: approvals reach the user; anything else is declined politely.
                     (Some(method), Some(id)) => {
                         let thread = params["threadId"].as_str().and_then(|t| by_id.get(t)).and_then(|k| threads.get_mut(k));
+                        if method == "item/tool/call" && params["tool"] == crate::helper::NAME {
+                            // R161: the agent asked for a helper; the engine answers once the helper is done.
+                            match thread.filter(|t| t.params.helper == crate::helper::Helper::Offers && !t.blocked && !t.closing) {
+                                Some(t) => {
+                                    let call = s(&params["callId"]);
+                                    t.helpers.insert(call.clone(), id.clone());
+                                    t.watch.pause();
+                                    (t.sink)(EngineEvent::HelperCall { id: call, input: params["arguments"].clone() });
+                                }
+                                None => {
+                                    let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"No helper is available here."}]}})).await;
+                                }
+                            }
+                            continue;
+                        }
                         if method == "item/tool/call" {
                             let mut accepted = false;
                             if let Some(t) = thread && role.is_none() && t.params.permissions == Permissions::Isolated && t.params.instructions.is_none() && params["tool"] == "run_command" {
@@ -1106,7 +1143,7 @@ async fn serve(
             cmd = rx.recv(), if !stopping => match cmd {
                 Some(ServerCommand::Open { key, thread, sink }) => {
                     let state = CodexTurnState::new(thread.resume.is_some());
-                    let t = Thread { sink, params: thread, id: None, turn: None, queued: vec![], state, approvals: HashMap::new(), watch: proc::TurnWatch::default(), blocked: false, closing: false, early_completion: vec![], commands: vec![] };
+                    let t = Thread { sink, params: thread, id: None, turn: None, queued: vec![], state, approvals: HashMap::new(), helpers: HashMap::new(), watch: proc::TurnWatch::default(), blocked: false, closing: false, early_completion: vec![], commands: vec![] };
                     if ready {
                         open_thread!(key, &t);
                     } else {
@@ -1166,6 +1203,12 @@ async fn serve(
                             Some(_) => Delivery::Unknown,
                         };
                         let _ = ack.send(delivery);
+                    }
+                    SessionCommand::HelperReply { id, ok, text } => {
+                        let Some(t) = threads.get_mut(&key) else { continue };
+                        let Some(request) = t.helpers.remove(&id) else { continue };
+                        if t.helpers.is_empty() && t.approvals.is_empty() { t.watch.resume(); }
+                        let _ = proc::write_line(&mut *stdin, &json!({"id":request,"result":{"success":ok,"contentItems":[{"type":"inputText","text":text}]}})).await;
                     }
                     SessionCommand::Interrupt => {
                         if let Some(t) = threads.get_mut(&key) { for job in t.commands.drain(..) { job.abort(); } }
@@ -1361,6 +1404,7 @@ mod role_tests {
                 }
                 let session = server.open(
                     CodexThread {
+                        helper: Default::default(),
                         cwd: ".".into(),
                         model: Some("gpt-6-luna".into()),
                         effort: Some("low".into()),
@@ -1447,6 +1491,7 @@ mod role_tests {
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
             let session = server.open(
                 CodexThread {
+                    helper: Default::default(),
                     cwd: ".".into(),
                     model: Some("gpt-6-luna".into()),
                     effort: Some("low".into()),
@@ -1506,6 +1551,7 @@ mod role_tests {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let session = server.open(
             CodexThread {
+                helper: Default::default(),
                 cwd: ".".into(),
                 model: Some("gpt-6-luna".into()),
                 effort: Some("low".into()),

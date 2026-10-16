@@ -951,6 +951,7 @@ export const es: Messages = {
   'notes.16.new': 'Cuando el asistente pasa parte del trabajo a un ayudante, el ayudante aparece como un paso en su respuesta.',
   'notes.17.fixed': 'Cuando el asistente deja subagentes trabajando en segundo plano, la respuesta ahora los espera y llega completa, en vez de quedarse en “voy a esperar”.',
   'notes.18.better': 'Cada paso del trabajo ahora dice lo que hace con palabras sencillas, como Leyendo, Buscando o Cambiando, con el archivo o comando sobre el que actúa.',
+  'notes.19.new': 'En un proyecto, el asistente puede pedir ayuda a la otra IA con una parte del trabajo o una revisión, y el ayudante aparece como un paso en su respuesta.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

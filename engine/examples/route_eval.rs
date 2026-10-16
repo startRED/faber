@@ -89,6 +89,7 @@ impl Router {
                 let (_, server) = self.codex.as_ref()?;
                 server.open(
                     CodexThread {
+                        helper: Default::default(),
                         cwd: self.dir.clone(),
                         model,
                         effort,
@@ -104,6 +105,7 @@ impl Router {
             Vendor::Claude => {
                 let cli = self.claude.as_ref()?;
                 let launch = ClaudeLaunch {
+                    helper: Default::default(),
                     area: Area::Chat,
                     model,
                     effort,

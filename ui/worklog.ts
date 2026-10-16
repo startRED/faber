@@ -102,15 +102,18 @@ export const toolLine = (tool: ToolUse): string => {
   return row.detail ? `${row.label} · ${middle(row.detail)}` : row.label;
 };
 
-/** Claude Code's call that hands a piece of the work to a subagent (`Agent`; `Task` in older versions). */
-export const isAgentCall = (tool: ToolUse): boolean => !tool.parent && SUBAGENT.has(tool.name);
+/** A piece of work the agent handed on: a subagent of its own CLI (`Agent`, `Task`), or a helper from the other AI (`Helper`,
+ * Faber's own tool, R161). */
+export const isAgentCall = (tool: ToolUse): boolean => !tool.parent && (SUBAGENT.has(tool.name) || tool.name === 'Helper');
 
 export interface AgentStep {
   call: ToolUse;
   /** The few words the agent gave the piece of work, else the start of its brief. */
   title: string;
-  /** The kind of subagent (`Explore`, `Plan`, a person's own agent), when the agent named one. */
+  /** The kind of subagent (`Explore`, `Plan`, a person's own agent), when the agent named one; for a helper, the AI that ran it. */
   kind: string;
+  /** A helper from the other AI, not a subagent of the agent's own CLI. */
+  helper: boolean;
   /** What the subagent ran, in order. */
   tools: ToolUse[];
   report: string;
@@ -135,7 +138,7 @@ export function agentReport(output = ''): string {
 
 /** Each subagent the agent started, with the tools it ran under it. A subagent's own helper folds into it: its tools count
  * for the agent call the whole chain started from. */
-export function agentSteps(tools: ToolUse[] = []): AgentStep[] {
+export function agentSteps(tools: ToolUse[] = [], helperKind = ''): AgentStep[] {
   const text = (v: unknown) => (typeof v === 'string' ? v : '');
   const parents = new Map(tools.map((tool) => [tool.id, tool.parent]));
   const root = (tool: ToolUse) => {
@@ -145,10 +148,12 @@ export function agentSteps(tools: ToolUse[] = []): AgentStep[] {
   };
   return tools.filter(isAgentCall).map((call) => {
     const input = (call.input ?? {}) as Record<string, unknown>;
+    const helper = call.name === 'Helper';
     return {
       call,
-      title: text(input.description).trim() || middle(text(input.prompt), 80),
-      kind: text(input.subagent_type),
+      title: text(helper ? input.title : input.description).trim() || middle(text(helper ? input.brief : input.prompt), 80),
+      kind: helper ? helperKind : text(input.subagent_type),
+      helper,
       tools: tools.filter((tool) => tool.parent && root(tool) === call.id),
       report: agentReport(call.output),
       background: input.run_in_background === true,
