@@ -394,6 +394,56 @@ and Projects.
 - A form never sends on its own. It only fills the composer.
 - A broken piece falls back to plain text.
 - Side-by-side comparison of options is part of visual answers: images, animations or live sites, whatever fits.
+- In a project, the agent's own work shows as pieces too: a site it opened, the app it is running, a test result, a
+  changed file, each with a small picture and Open ([Watching the agent work](#watching-the-agent-work)).
+
+## Watching the agent work
+
+The owner's ask (2026-10-16): the person sees every part of the work happening and steps in as easily as reading a
+chat. Planned, not built. The design below is an AI proposal, not reviewed, picked from a divergent pass (30 ideas
+under five frames). It fills the steps of R161 and never becomes a board or an agent map.
+
+- **A living sentence per child.** When the main agent splits a step, the step opens in place into one row per child
+  (a CLI subagent or a helper): the short name the agent gave it, what it does now in plain words ("Reading
+  akitaonrails.com/en/posts", "Running the tests", "Changing 3 files"), the time, and a small picture when it has a
+  screen. The engine builds the sentence from the child's last event with no model call and returns a key with
+  arguments; each language writes its own sentence. A row changes only when its sentence does, at most about once a
+  second. Past three rows the rest fold into "+2 more", and while nothing is stuck the whole split reads as one sentence
+  ("5 collectors reading 5 sites").
+- **Stuck shows only when it matters.** The engine notices a child repeating the same action, failing the same check
+  twice, or silent longer than its kind of work allows; a child waiting on a question is "waiting for you", never
+  stuck. The main agent hears first and tries once to retry, narrow the piece or hand it to the other vendor. Only if
+  that fails does the row turn amber with "Look" and "Tell it…", and only then is the person notified. It ships after
+  the living sentence, once the recorded fixtures show no false amber.
+- **The side chat.** Clicking a row opens that child on the right as a normal conversation, live: the first message is
+  the whole brief the main agent sent, word for word, then the child's messages, steps and results as they arrive. It
+  reuses the conversation's own message parts and loads only the open child, so a closed side chat costs nothing. For a
+  helper session the box below writes to that child, and the main agent gets the message before its next step. A CLI
+  subagent cannot be messaged while it runs, so there the box writes to the main agent about that step and says so; a
+  finished subagent offers "Continue with a helper".
+- **Facts, not a verdict.** When a child ends, its row shows what it was asked, what it did (files changed, checks run,
+  steps) and anything it touched that the brief never named. The main agent grading its own helper is not trusted:
+  each brief ends with a "done when" list, and the row ticks each line the report meets.
+- **Faber's own browser and app pane.** The agent or a child opens websites in a browser pane that belongs to Faber and
+  runs the app it builds in a pane beside the chat. A card in the reply ("Site open in the browser", with a picture and
+  Open) is the way in. The pane has one owner at a time: "Take over" stops the agent at its next action, the person
+  clicks and types, and "Let it continue" hands it back with a short note of what the person changed. Logins, captchas
+  and payments are always the person's turn ("Your turn" on the card), never the agent's (guardrails).
+- **Recorded, not streamed.** Each pane keeps a log: a small picture at each page change or agent action, with the
+  action that caused it, typed secrets masked and password fields blurred. Watching live is playing the end of that
+  log, coming back later is scrubbing it, and "Take over from here" starts from the latest picture. Only the pane the
+  person opened is a real live view; every other child is a still picture that steps forward. The log lives in Faber's
+  own data, never in the project folder (R35), never leaves the PC or enters an export, is trimmed by size and goes with
+  its conversation. "While you were away" sums it up in a few pictures with one sentence each.
+- **Quiet during games.** While a game is in front (the notification detector), pictures stop, rows stop repainting and
+  events wait as one summary for the person's return. Nothing opens a window or takes focus.
+- **Cost first.** One live browser view at a time, measured against R125 before it ships. The first step is a Windows
+  spike: a hidden child webview driven by the engine, a small picture after each of 20 actions, measuring stale or
+  blank pictures, memory, processor and any focus flash while a game is in front.
+
+Parked: a floating picture over the game (takes the screen), a strip board with columns (a board, R161), a shortcut
+palette (a second way to do what the composer does), a layout that rearranges itself when the person looks away, and an
+approval counter every result must pass before it enters the project.
 
 ## Learning and memory
 
@@ -654,7 +704,7 @@ each version, the benchmark measures it, and the version ships only with the mai
 | 1 | New base | the FSL-1.1-ALv2 license and these documents, Faber's own Rust test runner, the design system and themes, the identity, the shell layout and running list, the tray number and notifications, the first run and tutorial, Settings, and the CLI download written straight to disk. Every user-facing change already ships as a patch release (R130) |
 | 1a (R96) | Self-development MVP | the minimal Projects slice above ([spec](superpowers/specs/2026-10-12-self-development-mvp-design.md)); closes the project execution, handoff, stop and live-budget gaps needed to let Faber build Faber before Full Chat |
 | 2 | Full Chat | the benchmark, visual answers, asking Faber about Faber, search, moving a chat to a project, Auto learning from approvals, the draft routed at most twice per message, reporting failed writes of conversation and project files, and closing the engine gaps of rules 2, 3, 5 and 6 |
-| 3 | Projects with the lead agent | the lead agent, toolbox, 15 powers, modes, guardrails and big-work rules, the rules for running many workers, the progress view, the decision list, the catalog, learning and the `.faber/` folder, and rules 4 and 7 | |
+| 3 | Projects with the lead agent | the lead agent, toolbox, 15 powers, modes, guardrails and big-work rules, the rules for running many workers, the progress view, watching the agent work (living sentences, side chat, Faber's browser and app pane), the decision list, the catalog, learning and the `.faber/` folder, and rules 4 and 7 | |
 | 4 | Excellent software | generalize the self-development workflow; nightly CLI version tests and the live manifest, shared project MCP infrastructure, and qualified department writers |
 | 5 | First public version | |
 | 6 | Image and design | creative drafts, blind judging and comparison views |
