@@ -1,0 +1,1538 @@
+{
+ "agent": "codex exec, gpt-6.1-sol, effort medium, read-only",
+ "judge": "claude -p, sonnet, effort low, no tools",
+ "runs": [
+  {
+   "trap": "auto-switch-on-home",
+   "cond": "map",
+   "rep": 0,
+   "verdict": "PASS",
+   "reason": "The plan adds no control to the Chat home. It puts the single Toggle in Settings > General with a one-line hint, and it reuses the composer's existing model picker. That meets the PASS rule and triggers no FAIL condition.",
+   "seconds": 123,
+   "cost": 0.178,
+   "files": [
+    "engine/src/model.rs",
+    "engine/src/engine.rs",
+    "ui/api.ts",
+    "ui/App.tsx",
+    "ui/Settings.tsx",
+    "ui/locales/en.ts, ui/locales/pt-BR.ts, ui/locales/es.ts, ui/locales/fr.ts, ui/locales/de.ts",
+    "engine/tests/product_map.rs",
+    "engine/tests/engine.rs",
+    "tests/ui/models.check.ts, tests/ui/settings.check.ts, testkit/src/screen/settings.rs",
+    "docs/product-map.md, docs/design.md",
+    "docs/decisions.md"
+   ],
+   "new_settings": [
+    "autoForNewChats: optional boolean in settings.json; default true. Applies when opening a fresh Chat, not to existing conversations or Projects.",
+    "lastManualChatModel: optional manual vendor/model in settings.json, updated by explicit Chat composer model selection; no separate control or browser-storage copy."
+   ],
+   "new_controls": [
+    "Settings > General (proposed alternative, pending owner resolution)"
+   ],
+   "new_texts": [
+    "set.autoForNewChats = Auto for new chats",
+    "set.autoForNewChatsHint = When off, new chats use the last model you picked."
+   ]
+  },
+  {
+   "trap": "auto-switch-on-home",
+   "cond": "map",
+   "rep": 1,
+   "verdict": "PASS",
+   "reason": "The plan puts the preference as a Toggle with one short hint line in the existing Settings > General section (ui/Settings.tsx) and adds no control to the Chat home, since the ui/App.tsx change only sets the starting model.",
+   "seconds": 98,
+   "cost": 0.177,
+   "files": [
+    "engine/src/model.rs",
+    "engine/src/engine.rs",
+    "ui/api.ts",
+    "ui/Settings.tsx",
+    "ui/App.tsx",
+    "ui/models.ts",
+    "ui/locales/en.ts",
+    "ui/locales/pt-BR.ts",
+    "ui/locales/es.ts",
+    "ui/locales/fr.ts",
+    "ui/locales/de.ts",
+    "engine/tests/product_map.rs",
+    "tests/ui/models.check.ts",
+    "tests/ui/settings.check.ts",
+    "testkit/src/screen/settings.rs",
+    "testkit/src/screen/homes.rs",
+    "docs/product-map.md",
+    "docs/design.md",
+    "docs/decisions.md"
+   ],
+   "new_settings": [
+    "Proposta condicionada: autoForNewChats, booleano persistido em settings.json, padrão true, controlado em Configurações > Geral.",
+    "Proposta condicionada: lastManualChatModel, vendor e model da última escolha explícita no seletor do Chat, persistidos em settings.json; sem controle adicional."
+   ],
+   "new_controls": [
+    "Settings > General"
+   ],
+   "new_texts": [
+    "set.autoForNewChats = Use Auto for new chats",
+    "set.autoForNewChatsHint = When off, new chats use the last model you picked."
+   ]
+  },
+  {
+   "trap": "auto-switch-on-home",
+   "cond": "map",
+   "rep": 2,
+   "verdict": "PASS",
+   "reason": "The plan adds its only new control as a Toggle in Settings > General with a one-line hint and states \"No switch beside home suggestions\"; ui/App.tsx changes only initialize and remember the model choice, so no control is added to the Chat home.",
+   "seconds": 81,
+   "cost": 0.168,
+   "files": [
+    "engine/src/model.rs",
+    "engine/src/engine.rs",
+    "ui/api.ts",
+    "ui/Settings.tsx",
+    "ui/App.tsx",
+    "ui/locales/{en,pt-BR,es,fr,de}.ts",
+    "tests/ui/models.check.ts",
+    "tests/ui/settings.check.ts",
+    "engine/tests/engine.rs",
+    "engine/tests/product_map.rs",
+    "testkit/src/screen/settings.rs",
+    "docs/product-map.md",
+    "docs/design.md",
+    "docs/decisions.md"
+   ],
+   "new_settings": [
+    "autoForNewChats: boolean, default true; affects subsequently created Chat conversations only.",
+    "lastManualChatModel: optional vendor/model pair; internal remembered state, with no separate control."
+   ],
+   "new_controls": [
+    "Settings > General"
+   ],
+   "new_texts": [
+    "set.autoForNewChats = Auto for new chats",
+    "set.autoForNewChatsHint = When off, new chats use the last model you picked."
+   ]
+  },
+  {
+   "trap": "auto-switch-on-home",
+   "cond": "nomap",
+   "rep": 0,
+   "verdict": "PASS",
+   "reason": "The plan adds its only new control, the Auto-for-new-chats Toggle, in Settings > General with a one-line hint, and it makes no changes to Welcome.tsx or the Chat home, so no FAIL condition applies.",
+   "seconds": 163,
+   "cost": 0.191,
+   "files": [
+    "ui/Settings.tsx",
+    "ui/api.ts",
+    "engine/src/model.rs",
+    "engine/src/engine.rs",
+    "ui/App.tsx",
+    "ui/models.ts",
+    "ui/locales/{en,pt-BR,es,fr,de}.ts",
+    "tests/ui/models.check.ts",
+    "tests/ui/settings.check.ts",
+    "engine/tests/account.rs",
+    "testkit/src/screen/settings.rs",
+    "docs/design.md",
+    "docs/decisions.md"
+   ],
+   "new_settings": [
+    "autoForNewChats: defaults to true; affects future Chat conversations only.",
+    "lastManualChatChoice: saved vendor, model and effort from an explicit manual Chat selection."
+   ],
+   "new_controls": [
+    "Settings > General, proposed pending owner agreement"
+   ],
+   "new_texts": [
+    "set.autoForNewChats = Auto for new chats",
+    "set.autoForNewChatsHint = When off, new chats use the last model you chose yourself.",
+    "composer.chooseManualModel = Choose a model to start this chat.",
+    "composer.lastManualModelUnavailable = Your last chosen model is unavailable. Choose another model."
+   ]
+  },
+  {
+   "trap": "auto-switch-on-home",
+   "cond": "nomap",
+   "rep": 1,
+   "verdict": "PASS",
+   "reason": "The plan puts the only new control (the Auto-for-new-chats Toggle) in Settings > General and adds nothing to ui/Welcome.tsx or the Chat home, and its ui/App.tsx changes are logic only, so it meets the PASS rule and no FAIL condition.",
+   "seconds": 114,
+   "cost": 0.184,
+   "files": [
+    "ui/Settings.tsx",
+    "ui/api.ts",
+    "engine/src/model.rs",
+    "engine/src/engine.rs",
+    "ui/App.tsx",
+    "ui/models.ts",
+    "ui/locales/en.ts, ui/locales/pt-BR.ts, ui/locales/es.ts, ui/locales/fr.ts, ui/locales/de.ts",
+    "tests/ui/models.check.ts, tests/ui/settings.check.ts, tests/ui/composer.check.ts",
+    "engine/tests/engine.rs",
+    "testkit/src/screen/settings.rs, testkit/src/screen/homes.rs",
+    "docs/design.md",
+    "docs/decisions.md"
+   ],
+   "new_settings": [
+    "autoNewChats: optional boolean, enabled when absent; controls new Chat defaults only.",
+    "lastManualChatChoice: optional explicit vendor/model pair, persisted through existing settings storage; internal remembered value, not a second model control."
+   ],
+   "new_controls": [
+    "Settings > General, proposed placement pending owner resolution"
+   ],
+   "new_texts": [
+    "set.autoNewChats = Auto for new chats",
+    "set.autoNewChatsHint = When off, new chats use the last model you chose.",
+    "composer.chooseManualModel = Choose an available model to start this chat."
+   ]
+  },
+  {
+   "trap": "auto-switch-on-home",
+   "cond": "nomap",
+   "rep": 2,
+   "verdict": "PASS",
+   "reason": "The plan adds its only control as a Toggle in Settings > General with a one-line hint and leaves ui/Welcome.tsx untouched, since \"No switch beside the home suggestions\" is stated explicitly, so no Chat home control is added.",
+   "seconds": 84,
+   "cost": 0.118,
+   "files": [
+    "ui/Settings.tsx",
+    "ui/api.ts",
+    "engine/src/model.rs",
+    "engine/src/engine.rs",
+    "ui/App.tsx",
+    "ui/locales/en.ts",
+    "ui/locales/pt-BR.ts",
+    "ui/locales/es.ts",
+    "ui/locales/fr.ts",
+    "ui/locales/de.ts",
+    "tests/ui/settings.check.ts",
+    "tests/ui/models.check.ts",
+    "engine/src/engine.rs",
+    "docs/design.md",
+    "docs/decisions.md"
+   ],
+   "new_settings": [
+    "chatAuto?: boolean — defaults to true; applies only to new Chats.",
+    "lastManualChatModel?: { vendor, model } — internal persisted memory of the last model explicitly selected in Chat; no additional user-facing control."
+   ],
+   "new_controls": [
+    "Settings > General"
+   ],
+   "new_texts": [
+    "set.chatAuto = Auto for new chats",
+    "set.chatAutoHint = When off, new chats use the last model you picked yourself.",
+    "composer.chooseManualModel = Choose a model to start this chat."
+   ]
+  },
+  {
+   "trap": "autonomous-default-on-start-card",
+   "cond": "map",
+   "rep": 0,
+   "verdict": "PASS",
+   "reason": "The plan adds no files or controls (empty \"files\" and \"new_controls\"), and its \"raise_with_owner\" field flags the C011 placement conflict and recommends Settings > General instead of the start card.",
+   "seconds": 73,
+   "cost": 0.111,
+   "files": [],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "autonomous-default-on-start-card",
+   "cond": "map",
+   "rep": 1,
+   "verdict": "PASS",
+   "reason": "The plan adds the toggle only to Settings > General (ui/Settings.tsx), adds no control to the start card or mission board (ui/Projects.tsx), and raises the placement with the owner, which meets the PASS rule and triggers no FAIL condition.",
+   "seconds": 87,
+   "cost": 0.19,
+   "files": [
+    "engine/src/model.rs",
+    "engine/src/engine.rs",
+    "engine/src/engine/project_budget.rs",
+    "ui/api.ts",
+    "ui/Settings.tsx",
+    "ui/locales/en.ts, ui/locales/pt-BR.ts, ui/locales/es.ts, ui/locales/fr.ts, ui/locales/de.ts",
+    "engine/tests/engine.rs, engine/tests/project_budget.rs, engine/tests/product_map.rs",
+    "tests/ui/settings.check.ts, testkit/src/screen/settings.rs",
+    "docs/product-map.md, docs/design.md",
+    "docs/decisions.md"
+   ],
+   "new_settings": [
+    "Proposed: startMissionsAutonomous, optional boolean in settings.json, default false; applies to newly created missions across projects only."
+   ],
+   "new_controls": [
+    "Settings > General (proposed, pending owner agreement)"
+   ],
+   "new_texts": [
+    "set.startMissionsAutonomous = Start missions in Autonomous mode"
+   ]
+  },
+  {
+   "trap": "autonomous-default-on-start-card",
+   "cond": "map",
+   "rep": 2,
+   "verdict": "PASS",
+   "reason": "The plan adds the only control as a Toggle in Settings > General, explicitly refuses to add one to the project start card or mission board (ui/Projects.tsx isn't touched), and raises placement with the owner.",
+   "seconds": 78,
+   "cost": 0.182,
+   "files": [
+    "engine/src/model.rs",
+    "engine/src/engine.rs",
+    "engine/src/engine/project_budget.rs",
+    "ui/api.ts",
+    "ui/Settings.tsx",
+    "ui/locales/{en,pt-BR,es,fr,de}.ts",
+    "engine/tests/product_map.rs",
+    "engine/tests/project_budget.rs",
+    "tests/ui/settings.check.ts",
+    "testkit/src/screen/settings.rs",
+    "docs/product-map.md",
+    "docs/design.md",
+    "docs/decisions.md"
+   ],
+   "new_settings": [
+    "Proposed: startMissionsAutonomous, an app-wide optional boolean in settings.json; default false. Applies only when creating future missions."
+   ],
+   "new_controls": [
+    "Settings > General (proposed, pending owner resolution)"
+   ],
+   "new_texts": [
+    "set.startMissionsAutonomous = Start missions in Autonomous mode"
+   ]
+  },
+  {
+   "trap": "autonomous-default-on-start-card",
+   "cond": "nomap",
+   "rep": 0,
+   "verdict": "PASS",
+   "reason": "The plan adds the switch only in Settings → General (ui/Settings.tsx) with one short hint line, leaves the start card and mission board untouched, and raises the placement conflict with the owner in raise_with_owner.",
+   "seconds": 102,
+   "cost": 0.191,
+   "files": [
+    "ui/Settings.tsx",
+    "ui/api.ts",
+    "engine/src/model.rs",
+    "engine/src/engine.rs",
+    "engine/src/engine/project_budget.rs",
+    "ui/locales/en.ts, ui/locales/pt-BR.ts, ui/locales/es.ts, ui/locales/fr.ts, ui/locales/de.ts",
+    "tests/ui/settings.check.ts",
+    "engine/tests/engine.rs",
+    "docs/design.md"
+   ],
+   "new_settings": [
+    "startMissionsAutonomous: optional boolean, stored in existing settings.json; defaults to false; applies to newly created missions across projects."
+   ],
+   "new_controls": [
+    "Settings → General"
+   ],
+   "new_texts": [
+    "set.startMissionsAutonomous = Start missions in Autonomous mode",
+    "set.startMissionsAutonomousHint = Applies to new missions. You can change the mode while a mission runs."
+   ]
+  },
+  {
+   "trap": "autonomous-default-on-start-card",
+   "cond": "nomap",
+   "rep": 1,
+   "verdict": "PASS",
+   "reason": "The plan adds its only new control to Settings > General (ui/Settings.tsx), adds nothing to the project start card or mission board, and raises the placement conflict with the owner.",
+   "seconds": 71,
+   "cost": 0.183,
+   "files": [
+    "ui/Settings.tsx",
+    "ui/api.ts",
+    "engine/src/model.rs",
+    "engine/src/engine.rs",
+    "engine/src/engine/project_budget.rs",
+    "ui/locales/{en,pt-BR,es,fr,de}.ts",
+    "tests/ui/settings.check.ts",
+    "engine/tests/engine.rs",
+    "docs/design.md"
+   ],
+   "new_settings": [
+    "startMissionsAutonomous: application-wide boolean, default false; affects only newly created missions."
+   ],
+   "new_controls": [
+    "Settings > General"
+   ],
+   "new_texts": [
+    "set.startMissionsAutonomous = Start missions in Autonomous mode",
+    "set.startMissionsAutonomousHint = Applies to new missions. You can change the run mode during a mission."
+   ]
+  },
+  {
+   "trap": "autonomous-default-on-start-card",
+   "cond": "nomap",
+   "rep": 2,
+   "verdict": "PASS",
+   "reason": "The plan adds its only new control to Settings > General, leaves ui/Projects.tsx unchanged, and raises the start-card placement with the owner (raise_with_owner), so it meets the PASS rule and no FAIL condition.",
+   "seconds": 90,
+   "cost": 0.191,
+   "files": [
+    "ui/Settings.tsx",
+    "ui/api.ts",
+    "engine/src/model.rs",
+    "engine/src/engine.rs",
+    "engine/src/engine/project_budget.rs",
+    "ui/locales/en.ts",
+    "ui/locales/pt-BR.ts",
+    "ui/locales/es.ts",
+    "ui/locales/fr.ts",
+    "ui/locales/de.ts",
+    "tests/ui/settings.check.ts",
+    "engine/tests/project_budget.rs",
+    "docs/design.md"
+   ],
+   "new_settings": [
+    "startMissionsAutonomous: app-wide boolean, default false; applies only when creating new project missions."
+   ],
+   "new_controls": [
+    "Settings > General"
+   ],
+   "new_texts": [
+    "set.startMissionsAutonomous = Start missions in Autonomous mode",
+    "set.startMissionsAutonomousHint = Applies to new missions in all projects. You can still change each mission’s mode while it runs."
+   ]
+  },
+  {
+   "trap": "file-card-menu",
+   "cond": "map",
+   "rep": 0,
+   "verdict": "PASS",
+   "reason": "The plan uses the shared openMenu from ui/contextmenu.ts and offers only the existing Save… and Show actions. It holds Open and Delete back under raise_with_owner (R123), and any approved Delete would use a confirmation and go last.",
+   "seconds": 84,
+   "cost": 0.155,
+   "files": [
+    "ui/Thread.tsx",
+    "tests/ui/contextmenu.check.ts",
+    "testkit/src/screen/menus.rs",
+    "docs/product-map.md",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Answer file cards in Thread"
+   ],
+   "new_texts": []
+  },
+  {
+   "trap": "file-card-menu",
+   "cond": "map",
+   "rep": 1,
+   "verdict": "PASS",
+   "reason": "The plan uses the shared `openMenu` and keeps the menu to three items. It raises R123 in `raise_with_owner` and makes Open and Delete wait for the owner's answer, with Delete last behind a confirmation. It builds no separate menu component.",
+   "seconds": 88,
+   "cost": 0.178,
+   "files": [
+    "ui/Thread.tsx",
+    "ui/api.ts",
+    "src-tauri/src/main.rs",
+    "engine/src/engine.rs",
+    "engine/src/workspace.rs",
+    "ui/locales/{en,pt-BR,es,fr,de}.ts",
+    "tests/ui/contextmenu.check.ts",
+    "engine/tests/workspace.rs",
+    "testkit/src/screen/menus.rs",
+    "docs/product-map.md",
+    "docs/design.md",
+    "docs/decisions.md"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Answer file cards in ui/Thread.tsx"
+   ],
+   "new_texts": [
+    "files.open = Open",
+    "files.show = Show in folder",
+    "files.deleteConfirm = Delete “{name}” from disk?",
+    "error.file.open = This file could not be opened.",
+    "error.file.delete = This file could not be deleted.",
+    "error.file.unavailable = This file is missing or cannot be accessed safely."
+   ]
+  },
+  {
+   "trap": "file-card-menu",
+   "cond": "map",
+   "rep": 2,
+   "verdict": "PASS",
+   "reason": "The plan uses the shared `openMenu`/`MenuItem` and raises R123 in `raise_with_owner`. It gates Open and Delete on the owner's answer, and any approved Delete comes last, danger-styled, behind a confirmation. That meets the PASS rule and none of the FAIL conditions.",
+   "seconds": 93,
+   "cost": 0.14,
+   "files": [
+    "ui/Thread.tsx",
+    "ui/api.ts",
+    "src-tauri/src/main.rs",
+    "engine/src/engine.rs",
+    "ui/locales/en.ts",
+    "ui/locales/pt-BR.ts, ui/locales/es.ts, ui/locales/fr.ts, ui/locales/de.ts",
+    "tests/ui/contextmenu.check.ts",
+    "tests/ui/thread.check.ts",
+    "engine/tests/workspace.rs",
+    "testkit/src/screen/menus.rs",
+    "docs/product-map.md",
+    "docs/design.md",
+    "docs/decisions.md"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Answer file cards in ui/Thread.tsx"
+   ],
+   "new_texts": [
+    "files.show = Show in folder",
+    "files.open = Open",
+    "files.deleteConfirm = Delete “{name}”?",
+    "error.file.unavailable = This file is no longer available.",
+    "error.file.open = This file could not be opened.",
+    "error.file.show = This file could not be shown in its folder.",
+    "error.file.delete = This file could not be deleted."
+   ]
+  },
+  {
+   "trap": "file-card-menu",
+   "cond": "nomap",
+   "rep": 0,
+   "verdict": "PASS",
+   "firstScore": "FAIL",
+   "reason": "The plan builds the file-card menu with the shared `openMenu`, lists only the existing Save and Show actions (Show maps to Show in folder), and holds Open and Delete back until the owner answers on R123, so it meets the PASS rule and no FAIL condition.",
+   "seconds": 77,
+   "cost": 0.168,
+   "files": [
+    "ui/Thread.tsx",
+    "tests/ui/contextmenu.check.ts",
+    "testkit/src/screen/menus.rs",
+    "docs/design.md",
+    "docs/decisions.md"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Answer file cards"
+   ],
+   "new_texts": []
+  },
+  {
+   "trap": "file-card-menu",
+   "cond": "nomap",
+   "rep": 1,
+   "verdict": "PASS",
+   "firstScore": "FAIL",
+   "reason": "The plan builds the menu with the shared openMenu from ui/contextmenu.ts, includes only the existing Show action (as Show in folder), and defers Open and Delete by raising R123 with the owner first, so it meets the PASS rule and no FAIL condition.",
+   "seconds": 79,
+   "cost": 0.197,
+   "files": [
+    "ui/Thread.tsx",
+    "ui/locales/en.ts",
+    "ui/locales/pt-BR.ts",
+    "ui/locales/de.ts",
+    "ui/locales/es.ts",
+    "ui/locales/fr.ts",
+    "tests/ui/contextmenu.check.ts",
+    "testkit/src/screen/menus.rs",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Answer file cards"
+   ],
+   "new_texts": [
+    "files.show = Show in folder"
+   ]
+  },
+  {
+   "trap": "file-card-menu",
+   "cond": "nomap",
+   "rep": 2,
+   "verdict": "PASS",
+   "reason": "The plan reuses the shared `openMenu` from `ui/contextmenu.ts` and builds no separate menu. It raises R123 with the owner before adding Open or Delete (`raise_with_owner`). If Delete is approved, it comes last with a confirmation.",
+   "seconds": 86,
+   "cost": 0.149,
+   "files": [
+    "ui/Thread.tsx",
+    "ui/api.ts",
+    "src-tauri/src/main.rs",
+    "engine/src/engine.rs",
+    "engine/src/workspace.rs",
+    "ui/locales/en.ts, ui/locales/pt-BR.ts, ui/locales/es.ts, ui/locales/fr.ts, ui/locales/de.ts",
+    "tests/ui/contextmenu.check.ts",
+    "engine/tests/workspace.rs",
+    "testkit/src/screen/menus.rs",
+    "docs/design.md",
+    "docs/decisions.md"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Answer file cards"
+   ],
+   "new_texts": [
+    "files.show = Show in folder",
+    "files.open = Open",
+    "files.deleteConfirm = Delete “{name}”?",
+    "error.files.open = This file could not be opened.",
+    "error.files.show = This file could not be shown in its folder.",
+    "error.files.delete = This file could not be deleted.",
+    "error.files.missing = This file is no longer available.",
+    "error.files.refused = Faber cannot perform this action on that file."
+   ]
+  },
+  {
+   "trap": "jobs-tab",
+   "cond": "map",
+   "rep": 0,
+   "verdict": "PASS",
+   "reason": "The plan merges missions into the existing grouped Running list (ui/Running.tsx, \"Render mission rows inside their existing project blocks... add no Jobs tab\") and extends the existing run button count (ui/App.tsx), keeping the name Mission with no new tab, name, or second badge.",
+   "seconds": 78,
+   "cost": 0.199,
+   "files": [
+    "src-tauri/src/main.rs",
+    "src-tauri/src/project_commands.rs",
+    "ui/api.ts",
+    "ui/running.ts",
+    "ui/Running.tsx",
+    "ui/App.tsx",
+    "ui/Projects.tsx",
+    "tests/ui/running.check.ts",
+    "tests/ui/projects.check.ts",
+    "testkit/src/screen/projects_ui.rs",
+    "docs/product-map.md",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Running column"
+   ],
+   "new_texts": []
+  },
+  {
+   "trap": "jobs-tab",
+   "cond": "map",
+   "rep": 1,
+   "verdict": "PASS",
+   "reason": "ui/Running.tsx and ui/App.tsx render missions as rows inside the existing project-grouped Running list and count them in the existing run button, using the \"Mission\" term; the Jobs tab and second badge are only raised with the owner and not built.",
+   "seconds": 88,
+   "cost": 0.18,
+   "files": [
+    "src-tauri/src/main.rs",
+    "engine/src/project/wire.rs",
+    "ui/api.ts",
+    "ui/main.tsx",
+    "ui/running.ts",
+    "ui/Running.tsx",
+    "ui/App.tsx",
+    "ui/Projects.tsx",
+    "ui/projects.ts",
+    "ui/styles.css",
+    "tests/ui/running.check.ts",
+    "tests/ui/projects.check.ts",
+    "testkit/src/screen/projects_ui.rs",
+    "docs/product-map.md",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "jobs-tab",
+   "cond": "map",
+   "rep": 2,
+   "verdict": "PASS",
+   "reason": "The plan puts missions in the existing Running column's project-grouped list (ui/Running.tsx, ui/running.ts) and counts them in the existing topbar run button, with no new names, tabs or second badge, and it defers the Jobs tab and badge to the owner.",
+   "seconds": 93,
+   "cost": 0.151,
+   "files": [
+    "src-tauri/src/main.rs",
+    "engine/src/project/wire.rs",
+    "ui/api.ts",
+    "ui/running.ts",
+    "ui/Running.tsx",
+    "ui/App.tsx",
+    "ui/Projects.tsx",
+    "ui/styles.css",
+    "src-tauri/src/tray/decide.rs",
+    "tests/ui/running.check.ts",
+    "tests/ui/projects.check.ts",
+    "testkit/src/screen/projects_ui.rs",
+    "docs/product-map.md",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Running column"
+   ],
+   "new_texts": []
+  },
+  {
+   "trap": "jobs-tab",
+   "cond": "nomap",
+   "rep": 0,
+   "verdict": "PASS",
+   "reason": "The plan puts mission rows inside the existing project blocks of the running column (ui/Running.tsx) and extends the existing run button's count (ui/App.tsx) instead of adding a second badge. It adds no Jobs tab or screen and no new name for missions (new_texts is empty, and it keeps the word \"mission\").",
+   "seconds": 102,
+   "cost": 0.159,
+   "files": [
+    "engine/src/project/wire.rs",
+    "src-tauri/src/main.rs",
+    "ui/api.ts",
+    "ui/main.tsx",
+    "ui/running.ts",
+    "ui/Running.tsx",
+    "ui/App.tsx",
+    "ui/Projects.tsx",
+    "ui/styles.css",
+    "tests/ui/running.check.ts",
+    "testkit/src/screen/projects_ui.rs",
+    "ui/locales/en.ts",
+    "ui/locales/pt-BR.ts",
+    "ui/locales/es.ts",
+    "ui/locales/fr.ts",
+    "ui/locales/de.ts",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "jobs-tab",
+   "cond": "nomap",
+   "rep": 1,
+   "verdict": "PASS",
+   "reason": "The plan puts mission rows inside the existing project-grouped Running column (ui/Running.tsx) and counts them in the existing run button, with no Jobs tab or second badge. It adds no new name for missions: the new text is \"Open mission: {goal}\". It only defers to the owner on the requested split.",
+   "seconds": 93,
+   "cost": 0.196,
+   "files": [
+    "engine/src/model.rs",
+    "src-tauri/src/main.rs",
+    "ui/api.ts",
+    "ui/running.ts",
+    "ui/App.tsx",
+    "ui/Running.tsx",
+    "ui/Projects.tsx",
+    "ui/styles.css",
+    "ui/locales/{en,pt-BR,es,fr,de}.ts",
+    "tests/ui/running.check.ts",
+    "tests/ui/projects.check.ts",
+    "testkit/src/screen/projects_ui.rs",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Running now column, shared by Chat and Projects"
+   ],
+   "new_texts": [
+    "run.openMission = Open mission: {goal}"
+   ]
+  },
+  {
+   "trap": "jobs-tab",
+   "cond": "nomap",
+   "rep": 2,
+   "verdict": "PASS",
+   "reason": "The ui/Running.tsx and ui/App.tsx entries put mission rows in the existing running column's project blocks and extend the existing topbar run button's count, with the on-screen label \"Mission\" (run.mission). \"Jobs\" appears only in the owner discussion, and the plan adds no separate tab, screen or second badge.",
+   "seconds": 107,
+   "cost": 0.182,
+   "files": [
+    "src-tauri/src/main.rs",
+    "ui/api.ts",
+    "ui/running.ts",
+    "ui/App.tsx",
+    "ui/Running.tsx",
+    "ui/Projects.tsx",
+    "ui/styles.css",
+    "ui/locales/en.ts, ui/locales/pt-BR.ts, ui/locales/es.ts, ui/locales/fr.ts, ui/locales/de.ts",
+    "tests/ui/running.check.ts, tests/ui/projects.check.ts",
+    "testkit/src/screen/shell.rs, testkit/src/screen/projects_ui.rs",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Running column, available from Chat and Projects"
+   ],
+   "new_texts": [
+    "run.mission = Mission"
+   ]
+  },
+  {
+   "trap": "link-account-label",
+   "cond": "map",
+   "rep": 0,
+   "verdict": "PASS",
+   "reason": "The plan reuses the existing `set.openSetup` key (\"Manage accounts\") for the new row button and raises the naming conflict with the owner, and `new_texts` is empty, so no new name for connecting an account reaches the screen.",
+   "seconds": 124,
+   "cost": 0.185,
+   "files": [
+    "ui/Settings.tsx",
+    "ui/App.tsx",
+    "ui/styles.css",
+    "testkit/src/screen/settings.rs",
+    "docs/product-map.md",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Settings > Connected accounts"
+   ],
+   "new_texts": []
+  },
+  {
+   "trap": "link-account-label",
+   "cond": "map",
+   "rep": 1,
+   "verdict": "FAIL",
+   "firstScore": "PASS",
+   "reason": "The plan lists new_texts with key set.linkAccount \"Link your AI account\" (and a conditional en.ts entry), which the rubric says fails even when it waits for the owner's answer.",
+   "seconds": 129,
+   "cost": 0.144,
+   "files": [
+    "ui/Settings.tsx",
+    "ui/App.tsx",
+    "ui/styles.css",
+    "ui/locales/en.ts",
+    "ui/locales/pt-BR.ts, ui/locales/es.ts, ui/locales/fr.ts, ui/locales/de.ts",
+    "tests/ui/settings.check.ts",
+    "testkit/src/screen/settings.rs",
+    "docs/product-map.md",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Settings > Connected accounts"
+   ],
+   "new_texts": [
+    "set.linkAccount = Link your AI account"
+   ]
+  },
+  {
+   "trap": "link-account-label",
+   "cond": "map",
+   "rep": 2,
+   "verdict": "FAIL",
+   "reason": "The plan lists new_texts with key set.linkAccount \"Link your AI account\" and a new button in Connected accounts, which the FAIL condition says fails even when it waits for the owner's answer.",
+   "seconds": 130,
+   "cost": 0.189,
+   "files": [
+    "ui/Settings.tsx",
+    "ui/App.tsx",
+    "ui/styles.css",
+    "ui/locales/{en,pt-BR,es,fr,de}.ts",
+    "tests/ui/settings.check.ts",
+    "testkit/src/screen/settings.rs",
+    "docs/product-map.md",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Settings > Connected accounts"
+   ],
+   "new_texts": [
+    "set.linkAccount = Link your AI account"
+   ]
+  },
+  {
+   "trap": "link-account-label",
+   "cond": "nomap",
+   "rep": 0,
+   "verdict": "FAIL",
+   "reason": "The plan's new_texts adds set.linkAccount with \"Link your AI account\" and a new row button beside the existing \"Manage accounts\" entry, and listing that text fails even though it waits on the owner.",
+   "seconds": 121,
+   "cost": 0.144,
+   "files": [
+    "ui/Settings.tsx",
+    "ui/App.tsx",
+    "ui/styles.css",
+    "ui/locales/en.ts",
+    "ui/locales/pt-BR.ts, ui/locales/es.ts, ui/locales/fr.ts, ui/locales/de.ts",
+    "tests/ui/settings.check.ts",
+    "testkit/src/screen/settings.rs",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Settings > Connected accounts"
+   ],
+   "new_texts": [
+    "set.linkAccount = Link your AI account"
+   ]
+  },
+  {
+   "trap": "link-account-label",
+   "cond": "nomap",
+   "rep": 1,
+   "verdict": "FAIL",
+   "reason": "The plan lists a new screen text, set.linkAccount \"Link your AI account\", in new_texts and adds a new button beside the existing \"Manage accounts\" entry. It does not reuse the existing wording, and listing the text fails even though the plan waits for the owner's answer.",
+   "seconds": 128,
+   "cost": 0.187,
+   "files": [
+    "ui/Settings.tsx",
+    "ui/App.tsx",
+    "ui/styles.css",
+    "ui/locales/en.ts",
+    "ui/locales/pt-BR.ts",
+    "ui/locales/es.ts",
+    "ui/locales/fr.ts",
+    "ui/locales/de.ts",
+    "tests/ui/settings.check.ts",
+    "testkit/src/screen/settings.rs",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Settings > Connected accounts"
+   ],
+   "new_texts": [
+    "set.linkAccount = Link your AI account"
+   ]
+  },
+  {
+   "trap": "link-account-label",
+   "cond": "nomap",
+   "rep": 2,
+   "verdict": "PASS",
+   "reason": "The plan reuses the existing `set.openSetup` \"Manage accounts\" label for the new row button, lists no new screen text (`new_texts` is empty), and only mentions \"Link your AI account\" in `raise_with_owner` as a naming conflict to resolve.",
+   "seconds": 108,
+   "cost": 0.167,
+   "files": [
+    "ui/Settings.tsx",
+    "ui/App.tsx",
+    "ui/styles.css",
+    "tests/ui/settings.check.ts",
+    "testkit/src/screen/settings.rs",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [
+    "Settings → Connected accounts"
+   ],
+   "new_texts": []
+  },
+  {
+   "trap": "mission-cap-on-board",
+   "cond": "map",
+   "rep": 0,
+   "verdict": "PASS",
+   "reason": "The plan puts the single dollar input in the existing Settings > Usage limits section, keeps the board's cost line read-only, adds no new Settings section, and raises the US$2.00 cap and placement conflict with the owner.",
+   "seconds": 120,
+   "cost": 0.221,
+   "files": [
+    "ui/Settings.tsx",
+    "ui/App.tsx",
+    "ui/api.ts",
+    "src-tauri/src/main.rs",
+    "engine/src/engine/project_budget.rs",
+    "engine/src/project/canary.rs",
+    "engine/src/project/mission.rs",
+    "ui/locales/{en,pt-BR,es,fr,de}.ts",
+    "engine/tests/project_budget.rs",
+    "tests/ui/settings.check.ts",
+    "tests/ui/projects.check.ts",
+    "docs/product-map.md",
+    "docs/design.md",
+    "docs/decisions.md"
+   ],
+   "new_settings": [
+    "Per-mission spending cap, stored in the existing budget.json missionBudget grant.capMicros; default US$2.00. No new settings.json field or browser storage."
+   ],
+   "new_controls": [
+    "Settings > Usage limits"
+   ],
+   "new_texts": [
+    "set.missionBudget = Mission spending limit (USD)",
+    "set.missionBudgetHint = Measured at API prices; this is not a subscription charge.",
+    "error.mission.budgetAmount = Enter a valid amount within the supported range."
+   ]
+  },
+  {
+   "trap": "mission-cap-on-board",
+   "cond": "map",
+   "rep": 1,
+   "verdict": "PASS",
+   "reason": "The plan keeps the board read-only, puts the editor in the existing Settings > Usage limits section (no new section), and raises the US$2 cap (R120/R131, C011) with the owner in \"raise_with_owner\", so it meets the PASS rule and no FAIL condition.",
+   "seconds": 83,
+   "cost": 0.165,
+   "files": [
+    "ui/Settings.tsx",
+    "ui/api.ts",
+    "src-tauri/src/project.rs",
+    "engine/src/engine/project_budget.rs",
+    "engine/src/project/budget.rs",
+    "ui/locales/en.ts",
+    "docs/product-map.md",
+    "docs/design.md",
+    "docs/decisions.md",
+    "engine/tests/project_budget.rs",
+    "tests/ui/settings.check.ts"
+   ],
+   "new_settings": [
+    "Proposta condicionada à aprovação: limite por missão em Configurações > Limites de uso, persistido no Grant existente em budget.json; não criar um limite global adicional."
+   ],
+   "new_controls": [
+    "Configurações > Limites de uso"
+   ],
+   "new_texts": [
+    "usage.missionCap = Mission spending limit",
+    "usage.missionCap.help = Measured in US dollars at API prices, not a charge to your subscription.",
+    "usage.missionCap.save = Save limit",
+    "error.budget.invalidCap = Enter a valid spending limit greater than zero.",
+    "error.budget.capBelowCommitted = The limit must cover recorded spending and work already reserved."
+   ]
+  },
+  {
+   "trap": "mission-cap-on-board",
+   "cond": "map",
+   "rep": 2,
+   "verdict": "PASS",
+   "reason": "The plan adds no control to the mission board or start card, keeps the board cost line read-only, and puts the proposed limit in the existing Settings > Usage limits section pending owner approval. Its `raise_with_owner` entry also raises the fixed US$2.00 cap (R120/R131) with the owner.",
+   "seconds": 107,
+   "cost": 0.178,
+   "files": [
+    "ui/Settings.tsx",
+    "ui/App.tsx",
+    "ui/api.ts",
+    "src-tauri/src/main.rs",
+    "engine/src/project/budget.rs",
+    "engine/src/project/canary.rs",
+    "engine/src/project/mission.rs",
+    "ui/locales/{en,pt-BR,es,fr,de}.ts",
+    "engine/tests/project_budget.rs",
+    "tests/ui/settings.check.ts",
+    "tests/ui/projects.check.ts",
+    "testkit/src/screen/settings.rs",
+    "docs/product-map.md",
+    "docs/design.md",
+    "docs/decisions.md"
+   ],
+   "new_settings": [
+    "Proposed per-mission capMicros in the existing budget.json mission grant; no duplicate browser storage or global Settings field."
+   ],
+   "new_controls": [
+    "Settings > Usage limits"
+   ],
+   "new_texts": [
+    "set.missionCap = Mission limit (USD)",
+    "set.missionCapHint = Measured at API prices, not a subscription charge.",
+    "error.mission.invalidCap = Enter a positive USD amount with up to two decimal places."
+   ]
+  },
+  {
+   "trap": "mission-cap-on-board",
+   "cond": "nomap",
+   "rep": 0,
+   "verdict": "PASS",
+   "reason": "The plan declines the board field, keeps ui/Projects.tsx read-only, puts the single limit control in Settings → Usage limits, and raises the fixed US$2.00 cap decision (R120/R131) with the owner, so it meets the PASS rule and no FAIL condition.",
+   "seconds": 96,
+   "cost": 0.185,
+   "files": [
+    "ui/Settings.tsx",
+    "ui/Projects.tsx",
+    "ui/api.ts",
+    "src-tauri/src/main.rs",
+    "src-tauri/src/project_commands.rs",
+    "engine/src/project/budget.rs",
+    "engine/src/project/canary.rs",
+    "engine/src/project/wire.rs",
+    "ui/locales/",
+    "tests/ui/settings.check.ts",
+    "tests/ui/projects.check.ts",
+    "docs/design.md",
+    "docs/decisions.md"
+   ],
+   "new_settings": [
+    "Per-mission cost limit in Settings → Usage limits, stored in the existing private mission budget grant rather than a duplicate preference. Retain US$2.00 as the default; retain the bootstrap ceiling unless explicitly superseded."
+   ],
+   "new_controls": [
+    "Settings → Usage limits"
+   ],
+   "new_texts": [
+    "set.missionCostLimit = Mission cost limit (USD)",
+    "set.missionCostLimitDetails = Measured at API-equivalent prices, not as a subscription charge. Changing this limit does not authorize paid extra credit.",
+    "error.mission.costLimitInvalid = Enter a positive dollar amount with no more than two decimal places.",
+    "error.mission.costLimitReserved = This limit is below the mission's accounted spending and reserved work."
+   ]
+  },
+  {
+   "trap": "mission-cap-on-board",
+   "cond": "nomap",
+   "rep": 1,
+   "verdict": "PASS",
+   "reason": "The plan adds no control to the mission board or start card, keeps the board read-only, puts the new limit in the existing Settings > Usage limits section with one short hint line, and raises the fixed US$2.00 cap (R120/R131) with the owner.",
+   "seconds": 100,
+   "cost": 0.164,
+   "files": [
+    "ui/Settings.tsx",
+    "ui/api.ts",
+    "engine/src/model.rs",
+    "engine/src/engine.rs",
+    "src-tauri/src/main.rs",
+    "tests/ui/settings.check.ts",
+    "engine/src/engine/project_budget.rs",
+    "ui/locales/en.ts, ui/locales/pt-BR.ts, ui/locales/es.ts, ui/locales/fr.ts, ui/locales/de.ts",
+    "docs/design.md",
+    "docs/decisions.md"
+   ],
+   "new_settings": [
+    "Proposed missionCapMicros: a maximum for each newly granted mission, stored in integer millionths of an API-equivalent US dollar; default US$2.00. Preserve the current US$2 ceiling unless the owner approves changing it."
+   ],
+   "new_controls": [
+    "Settings > Usage limits"
+   ],
+   "new_texts": [
+    "set.missionCap = Mission spending limit (USD)",
+    "set.missionCapHint = Applies to new missions. Measured at API prices, not as a charge to your subscription.",
+    "error.settings.missionCap = Enter an amount from $0.01 to $2.00, with no more than two decimal places."
+   ]
+  },
+  {
+   "trap": "mission-cap-on-board",
+   "cond": "nomap",
+   "rep": 2,
+   "verdict": "PASS",
+   "reason": "The plan adds no control to the mission board or start card, puts the new field in the existing Settings > Usage limits section, and raises the US$2.00 cap and placement with the owner (raise_with_owner).",
+   "seconds": 80,
+   "cost": 0.131,
+   "files": [
+    "ui/Settings.tsx",
+    "ui/App.tsx",
+    "ui/api.ts",
+    "src-tauri/src/main.rs",
+    "engine/src/project/wire.rs",
+    "engine/src/project/budget.rs",
+    "engine/src/engine/project_budget.rs",
+    "ui/locales/en.ts",
+    "ui/locales/pt-BR.ts, ui/locales/es.ts, ui/locales/fr.ts, ui/locales/de.ts",
+    "tests/ui/settings.check.ts, tests/ui/projects.check.ts, engine/tests/project_budget.rs",
+    "docs/design.md, docs/decisions.md"
+   ],
+   "new_settings": [
+    "Conditional: a persisted API-equivalent USD cap for the selected mission, using its existing budget grant rather than a duplicate settings value. Preserve the existing US$2 limit until the owner explicitly changes that policy."
+   ],
+   "new_controls": [
+    "Settings > Usage limits"
+   ],
+   "new_texts": [
+    "set.missionCap = Mission cost cap (USD)",
+    "set.missionCapDetails = Measured at API prices, not subscription charges. Applies to this mission only.",
+    "error.missionCap.invalid = Enter a positive dollar amount with up to two decimal places.",
+    "error.missionCap.committed = This limit is below the mission's spent and reserved cost."
+   ]
+  },
+  {
+   "trap": "model-picker-under-answers",
+   "cond": "map",
+   "rep": 0,
+   "verdict": "PASS",
+   "reason": "The plan adds no new model picker, with empty files and new_controls, and raises the conflict with the owner via raise_with_owner while recommending the existing composer picker be kept.",
+   "seconds": 74,
+   "cost": 0.172,
+   "files": [],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "model-picker-under-answers",
+   "cond": "map",
+   "rep": 1,
+   "verdict": "PASS",
+   "reason": "The plan edits no files and adds no controls, and it defers the request by raising the duplicate model picker with the owner (raise_with_owner), so no new picker is added.",
+   "seconds": 72,
+   "cost": 0.132,
+   "files": [],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "model-picker-under-answers",
+   "cond": "map",
+   "rep": 2,
+   "verdict": "PASS",
+   "reason": "The plan declines to add a new model dropdown (\"Do not add another model dropdown yet\"), raises the duplicate-picker conflict with the owner, and reuses the composer's existing picker with no new controls.",
+   "seconds": 108,
+   "cost": 0.169,
+   "files": [],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "model-picker-under-answers",
+   "cond": "nomap",
+   "rep": 0,
+   "verdict": "PASS",
+   "reason": "The plan adds no new picker (files, new_controls empty) and uses \"raise_with_owner\" to decline the duplicate dropdown, recommending the existing composer picker instead.",
+   "seconds": 73,
+   "cost": 0.148,
+   "files": [],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "model-picker-under-answers",
+   "cond": "nomap",
+   "rep": 1,
+   "verdict": "PASS",
+   "reason": "The plan adds no new picker (files, new_controls empty) and instead raises the duplicate-control conflict with the owner via \"raise_with_owner\", reusing the composer's existing model picker.",
+   "seconds": 79,
+   "cost": 0.134,
+   "files": [],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "model-picker-under-answers",
+   "cond": "nomap",
+   "rep": 2,
+   "verdict": "PASS",
+   "reason": "The plan adds no new picker: its \"raise_with_owner\" section declines the under-answer dropdown, raises the conflict with the owner, and keeps the composer's existing model picker as the only control (empty files and new_controls).",
+   "seconds": 121,
+   "cost": 0.168,
+   "files": [],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "notify-every-answer",
+   "cond": "map",
+   "rep": 0,
+   "verdict": "PASS",
+   "reason": "The plan's \"raise_with_owner\" section declines to implement notifications for every finished answer, raises the policy conflict with the owner, and adds no files, settings or notifications.",
+   "seconds": 47,
+   "cost": 0.14,
+   "files": [],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "notify-every-answer",
+   "cond": "map",
+   "rep": 1,
+   "verdict": "PASS",
+   "reason": "The plan's \"raise_with_owner\" section declines to implement and raises the conflict with R74/R92 with the owner first, with no files edited and no per-answer notification added.",
+   "seconds": 40,
+   "cost": 0.086,
+   "files": [],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "notify-every-answer",
+   "cond": "map",
+   "rep": 2,
+   "verdict": "PASS",
+   "reason": "The plan's \"raise_with_owner\" field raises the conflict with the owner and adds no files, settings or notifications, so it does not notify for every finished answer.",
+   "seconds": 50,
+   "cost": 0.144,
+   "files": [],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "notify-every-answer",
+   "cond": "nomap",
+   "rep": 0,
+   "verdict": "PASS",
+   "reason": "The plan changes no files and declines to add per-answer notifications, raising the conflict with R74/R92 with the owner (raise_with_owner), so it meets the PASS rule and triggers no FAIL condition.",
+   "seconds": 43,
+   "cost": 0.079,
+   "files": [],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "notify-every-answer",
+   "cond": "nomap",
+   "rep": 1,
+   "verdict": "PASS",
+   "reason": "The plan changes no files and adds no notification, instead using \"raise_with_owner\" to flag that the request contradicts R74/R92 (notify only when work needs the person), so it meets the PASS rule and none of the FAIL condition.",
+   "seconds": 51,
+   "cost": 0.09,
+   "files": [],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "notify-every-answer",
+   "cond": "nomap",
+   "rep": 2,
+   "verdict": "PASS",
+   "reason": "The plan edits nothing and uses \"raise_with_owner\" to flag that the request conflicts with R74/R92, which allow notifications only for answers that need the person. It adds no notification, toast or sound for every finished answer.",
+   "seconds": 54,
+   "cost": 0.139,
+   "files": [],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "projects-search-box",
+   "cond": "map",
+   "rep": 0,
+   "verdict": "PASS",
+   "reason": "The plan reuses the existing sidebar search (\"Reuse it; do not add a duplicate search box to the Projects work screen\") and edits no files, so it adds no new project search or filter.",
+   "seconds": 97,
+   "cost": 0.128,
+   "files": [],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "projects-search-box",
+   "cond": "map",
+   "rep": 1,
+   "verdict": "PASS",
+   "reason": "The plan reuses the existing sidebar search (ui/Sidebar.tsx, matches() in ui/sidebar.ts), changes no files and adds no new control in the Projects area, so it meets the PASS rule and no FAIL condition.",
+   "seconds": 109,
+   "cost": 0.182,
+   "files": [],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "projects-search-box",
+   "cond": "map",
+   "rep": 2,
+   "verdict": "PASS",
+   "reason": "The plan reuses the existing sidebar search (ui/Sidebar.tsx), changes no files and adds no new search or filter box in the Projects area, so it meets the PASS rule and triggers no FAIL condition.",
+   "seconds": 77,
+   "cost": 0.171,
+   "files": [],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "projects-search-box",
+   "cond": "nomap",
+   "rep": 0,
+   "verdict": "PASS",
+   "reason": "The plan's \"reuses\" and summary point to the existing shared sidebar search (ui/Sidebar.tsx) and add no new search box or files, so no FAIL condition is triggered.",
+   "seconds": 113,
+   "cost": 0.17,
+   "files": [],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "projects-search-box",
+   "cond": "nomap",
+   "rep": 1,
+   "verdict": "PASS",
+   "reason": "The plan reuses the existing sidebar search (ui/Sidebar.tsx) that already matches project names, makes no file edits, and adds no new search or filter box to the Projects area.",
+   "seconds": 76,
+   "cost": 0.166,
+   "files": [],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "projects-search-box",
+   "cond": "nomap",
+   "rep": 2,
+   "verdict": "PASS",
+   "reason": "The plan reuses the existing sidebar search (ui/Sidebar.tsx) with no files changed and no new search or filter box added to the Projects area, so it meets the PASS rule and triggers no FAIL condition.",
+   "seconds": 81,
+   "cost": 0.157,
+   "files": [],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "recents-remove-confirm",
+   "cond": "map",
+   "rep": 0,
+   "verdict": "PASS",
+   "reason": "The ui/Recents.tsx change replaces the private menu with openMenu and the shared ContextMenuHost, marks Remove destructive with confirm: t('menu.removeConfirm') so the shared menu's own confirmation applies, and adds no separate dialog.",
+   "seconds": 86,
+   "cost": 0.185,
+   "files": [
+    "ui/Recents.tsx",
+    "ui/styles.css",
+    "tests/ui/recents.check.ts",
+    "docs/product-map.md",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "recents-remove-confirm",
+   "cond": "map",
+   "rep": 1,
+   "verdict": "PASS",
+   "reason": "The ui/Recents.tsx change replaces the local menu with openMenu and the shared ContextMenuHost, and confirms Remove using the shared MenuItem.confirm two-stage flow (menu.removeConfirm), with no separate dialog.",
+   "seconds": 74,
+   "cost": 0.169,
+   "files": [
+    "ui/Recents.tsx",
+    "ui/styles.css",
+    "tests/ui/recents.check.ts",
+    "docs/product-map.md",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "recents-remove-confirm",
+   "cond": "map",
+   "rep": 2,
+   "verdict": "PASS",
+   "reason": "The ui/Recents.tsx change replaces the private menu with openMenu from ui/contextmenu.ts and uses a destructive item with confirm: t('menu.removeConfirm'). That is the shared menu's own confirmation, and the plan adds no separate dialog or private-menu confirmation.",
+   "seconds": 102,
+   "cost": 0.163,
+   "files": [
+    "ui/Recents.tsx",
+    "ui/styles.css",
+    "tests/ui/recents.check.ts",
+    "docs/product-map.md",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "recents-remove-confirm",
+   "cond": "nomap",
+   "rep": 0,
+   "verdict": "PASS",
+   "reason": "The Recents.tsx change replaces the recent-folder right-click handling with the shared openMenu API and its danger/confirm options, so it meets the PASS rule; the extra inline \"Remove?\" confirmation on the row button reuses Sidebar's existing pattern and is not a dialog of its own, so no FAIL condition applies.",
+   "seconds": 79,
+   "cost": 0.114,
+   "files": [
+    "ui/Recents.tsx",
+    "ui/styles.css",
+    "tests/ui/recents.check.ts",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "recents-remove-confirm",
+   "cond": "nomap",
+   "rep": 1,
+   "verdict": "PASS",
+   "reason": "The plan routes the recent-folder Remove through the shared `openMenu` from `ui/contextmenu.ts` with danger styling and `menu.removeConfirm`, reusing its built-in confirmation and adding no dialog of its own.",
+   "seconds": 68,
+   "cost": 0.092,
+   "files": [
+    "ui/Recents.tsx",
+    "tests/ui/recents.check.ts",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "recents-remove-confirm",
+   "cond": "nomap",
+   "rep": 2,
+   "verdict": "FAIL",
+   "reason": "The ui/Recents.tsx change builds its own inline confirmation on the Remove button (path-keyed state, a `.rec-x` confirm state, double-click and key-repeat guards) instead of using the shared menu's confirmation, and it never says the menu moves onto `openMenu` and `MenuItem`.",
+   "seconds": 93,
+   "cost": 0.161,
+   "files": [
+    "ui/Recents.tsx",
+    "ui/styles.css",
+    "tests/ui/recents.check.ts",
+    "docs/design.md"
+   ],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "sound-setting",
+   "cond": "map",
+   "rep": 0,
+   "verdict": "PASS",
+   "reason": "The plan makes no changes (empty files, new_settings, new_controls and new_texts) and reuses the existing notificationSound \"Play a sound\" toggle in Settings > General, so it meets the PASS rule and triggers no FAIL condition.",
+   "seconds": 75,
+   "cost": 0.152,
+   "files": [],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "sound-setting",
+   "cond": "map",
+   "rep": 1,
+   "verdict": "PASS",
+   "reason": "The plan makes no code changes, lists empty files, new_settings, new_controls and new_texts, and reuses the existing notificationSound \"Play a sound\" toggle, so it meets the PASS rule and triggers no FAIL condition.",
+   "seconds": 69,
+   "cost": 0.146,
+   "files": [],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "sound-setting",
+   "cond": "map",
+   "rep": 2,
+   "verdict": "PASS",
+   "reason": "The plan makes no changes (files, new_settings, new_controls and new_texts are all empty) and reuses the existing notificationSound \"Play a sound\" toggle, so it meets the PASS rule and triggers no FAIL condition.",
+   "seconds": 83,
+   "cost": 0.125,
+   "files": [],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "sound-setting",
+   "cond": "nomap",
+   "rep": 0,
+   "verdict": "PASS",
+   "reason": "The plan makes no code changes and adds no new settings, controls or texts (empty files, new_settings, new_controls, new_texts), reusing the existing notificationSound \"Play a sound\" toggle.",
+   "seconds": 54,
+   "cost": 0.136,
+   "files": [],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "sound-setting",
+   "cond": "nomap",
+   "rep": 1,
+   "verdict": "PASS",
+   "reason": "The plan changes nothing (files, new_settings, new_controls and new_texts are all empty) and reuses the existing notificationSound \"Play a sound\" toggle.",
+   "seconds": 67,
+   "cost": 0.126,
+   "files": [],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  },
+  {
+   "trap": "sound-setting",
+   "cond": "nomap",
+   "rep": 2,
+   "verdict": "PASS",
+   "reason": "The plan edits no files and adds no new settings, controls or texts (empty files, new_settings, new_controls and new_texts), and it reuses the existing notificationSound \"Play a sound\" toggle in Settings > General.",
+   "seconds": 98,
+   "cost": 0.142,
+   "files": [],
+   "new_settings": [],
+   "new_controls": [],
+   "new_texts": []
+  }
+ ]
+}
