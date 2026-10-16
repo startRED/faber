@@ -3,6 +3,7 @@ import { api, errorText, type EnrollView, type Project, type ProofView } from '.
 import { Toggle } from './controls.tsx';
 import { Icon } from './Glyphs.tsx';
 import { fromEngine, t } from './i18n.ts';
+import { keep, kept, release, useDraft } from './unsent.ts';
 
 // Settings, Projects: what Faber may do in each project and the checks it proves its work with. The project screen itself
 // shows none of it; it asks for the checks only once, the first time a mission starts (ui/Projects.tsx).
@@ -76,8 +77,13 @@ function Entry(props: { project: Project }) {
 function Body(props: { project: Project }) {
   const [proof, setProof] = createSignal<ProofView>();
   const [enroll, setEnroll] = createSignal<EnrollView>();
-  const [editing, setEditing] = createSignal(false);
-  const [draft, setDraft] = createSignal('');
+  // Unsent text in the proof editor is kept per project and blocks an unattended install, like the goal on the start screen.
+  const proofKey = () => `proof.${props.project.id}`;
+  const unsent = kept(proofKey());
+  const [editing, setEditing] = createSignal(unsent !== '');
+  const [draft, setDraft] = createSignal(unsent);
+  useDraft(() => editing());
+  onCleanup(() => release(proofKey()));
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<string>();
   let gone = false;
@@ -120,6 +126,7 @@ function Body(props: { project: Project }) {
       if (gone) return;
       setProof(next);
       setEditing(false);
+      keep(proofKey(), '');
     });
   // The grant keeps the mode and the self-update trust; it is written again with the new choice and a fresh revision.
   const trust = async (on: boolean) => {
@@ -187,13 +194,13 @@ function Body(props: { project: Project }) {
                     data-testid="proof-draft"
                     rows={Math.min(10, Math.max(3, draft().split('\n').length))}
                     value={draft()}
-                    onInput={(e) => setDraft(e.currentTarget.value)}
+                    onInput={(e) => (setDraft(e.currentTarget.value), keep(proofKey(), e.currentTarget.value))}
                   />
                   <span class="pset-acts">
                     <button type="button" class="btn primary" data-testid="proof-save" disabled={busy()} onClick={() => void confirm(draft().split('\n').map((l) => l.trim()).filter(Boolean))}>
                       {t('projects.proof.save')}
                     </button>
-                    <button type="button" class="btn" disabled={busy()} onClick={() => setEditing(false)}>
+                    <button type="button" class="btn" disabled={busy()} onClick={() => (setEditing(false), keep(proofKey(), ''))}>
                       {t('projects.proof.cancel')}
                     </button>
                   </span>

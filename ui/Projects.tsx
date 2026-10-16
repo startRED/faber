@@ -19,6 +19,7 @@ import {
 } from './api.ts';
 import { Segmented } from './controls.tsx';
 import { resizeComposer } from './composer-size.ts';
+import { useDraft } from './unsent.ts';
 import { Ambient } from './Ambient.tsx';
 import { Hole } from './Hole.tsx';
 import { Ghost } from './Ghost.tsx';
@@ -73,6 +74,7 @@ export function Projects(props: Props) {
     else setMissionData('view', undefined);
   };
   const [goal, setGoal] = createSignal<string>('');
+  useDraft(() => goal().trim() !== '');
   // What a mission proves its work with (R137): confirmed by the owner the first time a mission starts, or in Settings.
   const [proof, setProof] = createSignal<ProofView>();
   // Whether the start is asking for that confirmation.

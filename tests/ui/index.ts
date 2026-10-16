@@ -27,6 +27,7 @@ import './models.check.ts';
 import './mojibake.check.ts';
 import './motion.check.ts';
 import './nudge.check.ts';
+import './notes.check.ts';
 import './opening.check.ts';
 import './review-answer.check.ts';
 import './review-motion.check.ts';
@@ -41,6 +42,7 @@ import './styles.check.ts';
 import './steer.check.ts';
 import './thread.check.ts';
 import './tutorial.check.ts';
+import './unsent.check.ts';
 
 type Vars = Record<string, string | number>;
 

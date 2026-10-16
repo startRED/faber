@@ -130,7 +130,7 @@ pub async fn setup_sign_in(vendor: String) -> Res<()> {
 #[tauri::command]
 pub async fn setup_install(app: AppHandle, faber: State<'_, Faber>, vendor: String) -> Res<()> {
     // An update never ends the process in the middle of an install (update.rs).
-    let _running = crate::update::SetupRunning::begin();
+    let _running = crate::update::SetupRunning::begin()?;
     let Some(v) = parse_vendor(&vendor) else {
         let _ = app.emit(
             "faber:event",

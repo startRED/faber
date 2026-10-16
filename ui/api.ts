@@ -3,6 +3,9 @@ import { listen } from '@tauri-apps/api/event';
 
 // The shapes the engine sends (engine/src/model.rs).
 export type Vendor = 'claude' | 'codex';
+
+/** The shell's view of the update: one is downloading at open, one is kept for an install, or none. */
+export type UpdateStatus = 'none' | 'downloading' | 'ready';
 export type Effort = 'low' | 'medium' | 'high';
 export type Area = 'chat' | 'project';
 export type Status = 'streaming' | 'done' | 'stopped' | 'error';
@@ -499,6 +502,14 @@ export const api = {
   setupSignIn: (vendor: Vendor) => invoke<void>('setup_sign_in', { vendor }),
   projectEnroll: (projectId: string) => invoke<EnrollView>('project_enroll', { projectId }),
   localUpdateState: () => invoke<BuildView | null>('local_update_state'),
+  updateStatus: () => invoke<UpdateStatus>('update_status'),
+  updateRestart: () => invoke<void>('update_restart'),
+  inputSeen: () => invoke<void>('input_seen'),
+  /** Whether any field holds something typed or attached and not sent: no unattended update closes the window then. */
+  draftDirty: (dirty: boolean) => invoke<void>('draft_dirty', { dirty }),
+  onUpdate: (listener: (status: UpdateStatus) => void) => listen<UpdateStatus>('faber:update', (e) => listener(e.payload)),
+  notesSeen: () => invoke<number | null>('notes_seen').then((id) => id ?? undefined),
+  saveNotesSeen: (id: number) => invoke<void>('save_notes_seen', { id }),
   projectGrant: (projectId: string, mode: GitMode, selfUpdate: boolean, revision: number) =>
     invoke<Grant>('project_grant', { projectId, mode, selfUpdate, revision }),
   projectRevoke: (projectId: string) => invoke<void>('project_revoke', { projectId }),
