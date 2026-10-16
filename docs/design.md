@@ -304,11 +304,13 @@ projects. Faber has no worktree creation for projects, so an environment has no 
   | Full access (default, stored `dontAsk`) | `bypassPermissions` | `never` / `danger-full-access` |
 
   Rules that hold in every mode: Plan never takes a remembered "Always allow" and remembers none. Moving to a stricter mode
-  stops a running turn and revokes every remembered grant. The revocation is a time, `grantsRevokedAt`, written in the same
-  settings save that changes the mode; each grant carries the time it was made (`allowAlwaysAt`), and a grant that is older than
-  the revocation, or has no time, never counts, on every check and after every restart. The conversation files are also
-  cleaned, but only as tidiness: a write that failed cannot bring a grant back. Settings that cannot be read revoke every grant
-  too, and the next save counts as the revocation. A stricter web setting stops a running turn but does not change command grants.
+  stops a running turn and revokes every remembered grant. The revocation is a new random token, `grantsEpoch`, written in the
+  same settings save that changes the mode; each grant carries the token that was current when it was made (`allowAlwaysEpochs`),
+  and it stands only while the settings hold that same token, on every check and after every restart. No clock is involved. A
+  grant with no token (an older install) stands only while the settings have never held one. The conversation files are also
+  cleaned, but only as tidiness: a write that failed cannot bring a grant back. Settings that cannot be read start a new token,
+  and the next save keeps it, so the damaged file never lets an old grant back in. A stricter web setting stops a running turn but
+  does not change command grants.
   No mode promises zero execution: Ask lets plain reads through, Plan lets read-only commands through, and Accept edits lets
   Codex run commands inside the working folder. Leaving Claude's plan mode names `default` for the session. Settings that cannot
   be read start in Ask, not Full access (a missing file still means Full access). Every isolated or internal Codex thread has

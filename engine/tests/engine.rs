@@ -689,8 +689,8 @@ async fn the_hooks_choice_is_saved_and_restarts_idle_project_clis_with_it() {
     engine.save_settings(Settings { appearance, ..Settings::default() }).unwrap();
     engine.shutdown();
     let mut saved = read_json(&dir.path().join("settings.json"));
-    // Full access to Ask is a stricter move, so the save carries the time every earlier "Always allow" was revoked.
-    assert!(saved.as_object_mut().unwrap().remove("grantsRevokedAt").unwrap().as_u64().is_some());
+    // Full access to Ask is a stricter move, so the save carries a new grants epoch (a random token, no time).
+    assert!(saved.as_object_mut().unwrap().remove("grantsEpoch").unwrap().as_str().unwrap().len() >= 32);
     assert_eq!(saved, serde_json::json!({ "userHooks": true, "permissions":"ask", "appearance": { "base": "oficina" } }));
 }
 

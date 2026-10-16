@@ -93,8 +93,11 @@ impl Core {
             if !list.iter().any(|t| t == tool) {
                 list.push(tool.to_string());
             }
-            // The time is renewed on every grant, so one made after a revocation counts again.
-            c.allow_always_at.insert(tool.to_string(), super::now());
+            // The epoch is renewed on every grant, so one made after a revocation counts again.
+            match self.store.settings().grants_epoch {
+                Some(epoch) => c.allow_always_epochs.insert(tool.to_string(), epoch),
+                None => c.allow_always_epochs.remove(tool),
+            };
             changed = true;
         }
         if changed {
@@ -687,38 +690,46 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (first, _) = engine(dir.path());
         first.save_settings(Settings { permissions: Some(Permissions::Auto), ..Settings::default() }).unwrap();
+        let epoch = first.settings().grants_epoch.unwrap();
         let id = first.with(|c| {
             let id = c.blank(Area::Chat, None);
             let conv = c.convs.get_mut(&id).unwrap();
-            conv.allow_always = Some(vec!["Bash".into()]);
-            conv.allow_always_at.insert("Bash".into(), super::super::now());
+            conv.allow_always = Some(vec!["Bash".into(), "Write".into()]);
+            conv.allow_always_epochs.insert("Bash".into(), epoch.clone());
+            // Made while the clock ran far ahead, or with a token nobody holds: neither is ever read as a time.
+            conv.allow_always_epochs.insert("Write".into(), "9999999999999".into());
             c.save(&id);
             id
         });
         let file = dir.path().join("conversations").join(format!("{id}.json"));
         let saved = std::fs::read(&file).unwrap();
-        assert!(stands(&first, &id, "Bash"), "Auto, nothing revoked yet");
+        assert!(stands(&first, &id, "Bash"), "made under the current epoch");
+        assert!(!stands(&first, &id, "Write"), "made under another one");
         first.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+        assert_ne!(first.settings().grants_epoch, Some(epoch), "the stricter move replaced the epoch in its own save");
         // The write that failed left the old file, grant included, on disk.
         std::fs::write(&file, &saved).unwrap();
         first.shutdown();
         let (restarted, _) = engine(dir.path());
-        assert!(restarted.settings().grants_revoked_at.is_some());
-        assert!(!stands(&restarted, &id, "Bash"), "the grant is older than the revocation, so Ask asks");
+        assert!(!stands(&restarted, &id, "Bash"), "the grant belongs to the old epoch, so Ask asks");
         // A grant the person makes afterwards counts.
-        let at = restarted.settings().grants_revoked_at.unwrap();
-        restarted.with(|c| c.convs.get_mut(&id).unwrap().allow_always_at.insert("Bash".into(), at + 1));
+        restarted.with(|c| {
+            let epoch = c.store.settings().grants_epoch.unwrap();
+            c.convs.get_mut(&id).unwrap().allow_always_epochs.insert("Bash".into(), epoch);
+        });
         assert!(stands(&restarted, &id, "Bash"));
-        // Looser or equal moves keep the revocation time; a new stricter one moves it forward.
+        // A looser move keeps the epoch; a new stricter one replaces it.
+        let kept = restarted.settings().grants_epoch;
         restarted.save_settings(Settings { permissions: Some(Permissions::AcceptEdits), ..Settings::default() }).unwrap();
-        assert_eq!(restarted.settings().grants_revoked_at, Some(at));
+        assert_eq!(restarted.settings().grants_epoch, kept);
         assert!(stands(&restarted, &id, "Bash"));
         restarted.save_settings(Settings { permissions: Some(Permissions::Plan), ..Settings::default() }).unwrap();
-        assert!(restarted.settings().grants_revoked_at.unwrap() > at);
+        assert_ne!(restarted.settings().grants_epoch, kept);
+        assert!(!stands(&restarted, &id, "Bash"));
     }
 
     #[tokio::test]
-    async fn r140_old_saved_grants_are_ignored_after_a_stricter_move_and_the_card_shows() {
+    async fn r140_old_saved_grants_stand_until_the_first_revocation_and_the_card_shows_after_it() {
         let dir = tempfile::tempdir().unwrap();
         let (engine, _) = engine(dir.path());
         let s = stub(vec![]);
@@ -727,15 +738,16 @@ mod tests {
             c.convs.get_mut(&id).unwrap().allow_always = Some(vec!["Write".into(), "Bash".into()]);
             c.live.get_mut(&id).unwrap().permissions = Permissions::Ask;
         });
-        // A grant saved before this field existed has no time: it counts while nothing was ever revoked.
+        // A grant saved before epochs existed has none: it stands while the settings never held one.
         assert!(stands(&engine, &id, "Bash"));
         ask(&engine, &id, "1", "Bash");
         assert_eq!(*s.asked.lock().unwrap(), ["1"], "answered without a card");
-        // A revocation after that: the same old grants are ignored, and the request waits for the person.
+        // The first stricter move: the same old grants stop counting, and the request waits for the person.
+        // (Written straight to the store here: the real move also stops the running turn this test goes on using.)
         engine.with(|c| {
-            c.store
-                .save_settings(&Settings { permissions: Some(Permissions::Ask), grants_revoked_at: Some(5), ..Settings::default() })
-                .unwrap();
+            let moved =
+                Settings { permissions: Some(Permissions::Ask), grants_epoch: Some(crate::model::new_epoch()), ..Settings::default() };
+            c.store.save_settings(&moved).unwrap();
         });
         assert!(!stands(&engine, &id, "Bash"));
         assert!(!stands(&engine, &id, "Write"));
@@ -746,16 +758,37 @@ mod tests {
         }
         assert!(s.asked.lock().unwrap().is_empty());
         assert_eq!(waiting(&engine, &id, "t1"), ["2"]);
-        // Allowing with Always after the revocation counts again.
+        // Allowing with Always after the revocation counts, for that tool only.
         assert_eq!(engine.answer(&id, "t1", "2", true, true).await, Ok(()));
         assert!(stands(&engine, &id, "Bash"));
-        assert!(!stands(&engine, &id, "Write"), "only the tool that was allowed again");
-        // Settings that cannot be read revoke everything.
+        assert!(!stands(&engine, &id, "Write"));
+    }
+
+    #[tokio::test]
+    async fn r140_settings_that_cannot_be_read_and_the_next_save_never_revive_a_grant() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        let s = stub(vec![]);
+        let id = seed(&engine, s.session.clone(), &[("t1", &[])]);
+        engine.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+        let epoch = engine.settings().grants_epoch.unwrap();
+        engine.with(|c| {
+            let conv = c.convs.get_mut(&id).unwrap();
+            conv.allow_always = Some(vec!["Bash".into()]);
+            conv.allow_always_epochs.insert("Bash".into(), epoch);
+        });
+        assert!(stands(&engine, &id, "Bash"));
         std::fs::write(dir.path().join("settings.json"), "{ not json").unwrap();
-        assert!(!stands(&engine, &id, "Bash"));
-        // The next save counts as the revocation, so the damaged file never lets an old grant back in.
+        assert!(!stands(&engine, &id, "Bash"), "unreadable settings start a new epoch");
+        // The next save writes that new epoch (never a time that could have passed), so the grant stays gone.
         engine.save_settings(Settings { language: Some("de".into()), ..Settings::default() }).unwrap();
         assert!(!stands(&engine, &id, "Bash"));
-        assert!(engine.settings().grants_revoked_at.is_some_and(|t| t != u64::MAX));
+        assert!(engine.settings().grants_epoch.is_some());
+        // A grant made now works.
+        engine.with(|c| {
+            let epoch = c.store.settings().grants_epoch.unwrap();
+            c.convs.get_mut(&id).unwrap().allow_always_epochs.insert("Bash".into(), epoch);
+        });
+        assert!(stands(&engine, &id, "Bash"));
     }
 }

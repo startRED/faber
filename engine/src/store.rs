@@ -209,10 +209,12 @@ impl Store {
     pub fn settings(&self) -> Settings {
         match read_checked(&self.settings) {
             Ok(found) => found.unwrap_or_default(),
-            // No grant counts either: the revocation time is the largest there is.
-            Err(_) => {
-                Settings { permissions: Some(crate::model::Permissions::Ask), grants_revoked_at: Some(u64::MAX), ..Settings::default() }
-            }
+            // No earlier grant counts either: this is a new epoch, and the next save keeps it.
+            Err(_) => Settings {
+                permissions: Some(crate::model::Permissions::Ask),
+                grants_epoch: Some(crate::model::new_epoch()),
+                ..Settings::default()
+            },
         }
     }
 
@@ -225,7 +227,7 @@ impl Store {
                 && !loaded(&c.id)
             {
                 c.allow_always = None;
-                c.allow_always_at.clear();
+                c.allow_always_epochs.clear();
                 self.save(&c);
             }
         }
