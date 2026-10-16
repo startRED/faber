@@ -28,7 +28,7 @@ export function More(props: { label: string; open?: string; class?: string; chil
 }
 
 /** The commands a mission runs, the setup first. */
-export function ProofList(props: { proof: ProofView }) {
+export function ProofList(props: { proof: ProofView; setupOnly?: boolean }) {
   return (
     <div class="proof-cmds">
       <Show when={(props.proof.setup ?? []).length > 0}>
@@ -37,9 +37,11 @@ export function ProofList(props: { proof: ProofView }) {
           <For each={props.proof.setup}>{(command) => <li><code>{command}</code></li>}</For>
         </ul>
       </Show>
-      <ul class="proof-list" aria-label={t('projects.proof.title')} data-testid="proof-commands">
-        <For each={props.proof.commands}>{(command) => <li><code>{command}</code></li>}</For>
-      </ul>
+      <Show when={!props.setupOnly}>
+        <ul class="proof-list" aria-label={t('projects.proof.title')} data-testid="proof-commands">
+          <For each={props.proof.commands}>{(command) => <li><code>{command}</code></li>}</For>
+        </ul>
+      </Show>
     </div>
   );
 }
@@ -104,9 +106,13 @@ function Body(props: { project: Project }) {
       const next = await api
         .projectProofConfirm(id(), commands, proof()?.setup ?? [], proof()?.declared ?? [])
         .catch(async (err) => {
-          // The project's files moved on since the list was shown: show the new list before anything is confirmed.
+          // The project's files moved on since the list was shown: drop the edit and show the new list and setup, in full,
+          // before anything is confirmed. Edit starts again from them, so a draft never goes out against a list not seen.
           const latest = await api.projectProof(id()).catch(() => undefined);
-          if (latest && !gone) setProof(latest);
+          if (latest && !gone) {
+            setProof(latest);
+            if (['reason.proof.declaredChanged', 'reason.proof.setupChanged'].includes(errorText(err))) setEditing(false);
+          }
           throw err;
         });
       if (gone) return;
@@ -161,13 +167,17 @@ function Body(props: { project: Project }) {
                 <Show
                   when={editing()}
                   fallback={
+                    // Confirm is pressable only while the list and the setup it sends are on screen; a confirmed list may fold.
                     <Show when={p().commands.length > 0}>
-                      <More label={t('projects.proof.view')} open={t('projects.proof.hide')}>
-                        <ProofList proof={p()} />
-                      </More>
+                      <Show when={p().confirmed} fallback={<ProofList proof={p()} />}>
+                        <More label={t('projects.proof.view')} open={t('projects.proof.hide')}>
+                          <ProofList proof={p()} />
+                        </More>
+                      </Show>
                     </Show>
                   }
                 >
+                  <ProofList proof={p()} setupOnly />
                   <label class="sr-only" for={`proof-draft-${id()}`}>{t('projects.proof.edit.label')}</label>
                   <textarea
                     id={`proof-draft-${id()}`}
