@@ -766,7 +766,7 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
         synced.map_err(|key| Stop::Block(key.into()))?;
         if candidate {
             // From here the candidate's setup and proofs leave state in the copy; it is trusted again only if the candidate lands.
-            stage.workspace.taint();
+            stage.workspace.taint().map_err(|key| Stop::Block(key.into()))?;
         }
         let dir = stage.workspace.dir().to_path_buf();
         for definition in &stage.setup {
@@ -938,7 +938,7 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
         let head = runner.land(broker, &task.id, &lease, grant, &task.title, termination, |_| Ok(()))?;
         self.mark("land")?;
         if let Some(stage) = &self.setup.stage {
-            stage.workspace.release();
+            stage.workspace.release(&head);
         }
         if let Some(broker) = self.broker.take() {
             broker.finish()?;

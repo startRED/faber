@@ -28,8 +28,10 @@ fn unlink(path: &Path) -> Result<(), &'static str> {
     std::fs::remove_dir(path).or_else(|_| std::fs::remove_file(path)).map_err(|_| "reason.workspace.unsafe")
 }
 
-/// Walks `dir` without following anything and deletes every link (symbolic link or junction) it holds.
-fn strip_links(dir: &Path) -> Result<(), &'static str> {
+/// Walks `dir` without following anything and deletes every link (symbolic link or junction) it holds. `true` when it
+/// removed any (npm makes some itself, for workspace packages and `file:` dependencies, so the install is not trusted then).
+fn strip_links(dir: &Path) -> Result<bool, &'static str> {
+    let mut removed = false;
     let mut pending = vec![dir.to_path_buf()];
     while let Some(folder) = pending.pop() {
         let entries = match std::fs::read_dir(&folder) {
@@ -42,12 +44,13 @@ fn strip_links(dir: &Path) -> Result<(), &'static str> {
             let meta = entry.metadata().map_err(|_| "reason.workspace.unsafe")?;
             if reparse(&meta) {
                 unlink(&entry.path())?;
+                removed = true;
             } else if meta.is_dir() {
                 pending.push(entry.path());
             }
         }
     }
-    Ok(())
+    Ok(removed)
 }
 
 /// Empties a folder but keeps the folder itself (it carries the Low label the proofs need), links first.
@@ -71,6 +74,9 @@ pub struct Stage {
     /// The install steps, run in the copy before the proofs (see `mission::setup_commands`).
     pub setup: Vec<Definition>,
 }
+
+/// The version of what this module keeps beside the copy (the marks). A copy without it, or with another, is wiped once.
+const SCHEMA: &str = "1";
 
 fn valid_project(id: &str) -> bool {
     !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
@@ -145,7 +151,7 @@ impl Workspace {
     /// the folder it names: neither it nor any folder above it is a link (a proof can empty it and make it a junction to the
     /// owner's checkout). A link at the copy itself is deleted, never followed, and the copy is made fresh. Then every link
     /// inside the copy goes too. Nothing of the proof may still run: its job closed when `proof::execute` returned.
-    fn guard(&self) -> Result<(), &'static str> {
+    fn guard(&self) -> Result<bool, &'static str> {
         if real_path(&self.dir).is_err() {
             if std::fs::symlink_metadata(&self.dir).is_ok_and(|meta| reparse(&meta)) {
                 unlink(&self.dir)?;
@@ -156,17 +162,47 @@ impl Workspace {
     }
 
     /// The proofs ran on a candidate that has not landed: what they left in the copy and in the proofs' own folder may be
-    /// poisoned, so the next sync wipes it. `release` (the candidate landed) lifts it.
-    pub fn taint(&self) {
-        let _ = std::fs::write(self.root.join("tainted"), "");
+    /// poisoned, so the next sync wipes it. `release` (the candidate landed) lifts it. The mark is written and flushed to disk
+    /// before anything runs, and a mission that cannot write it does not run.
+    pub fn taint(&self) -> Result<(), &'static str> {
+        use std::io::Write;
+        let mut mark = std::fs::File::create(self.root.join("tainted")).map_err(|_| "reason.workspace.unsafe")?;
+        mark.write_all(b"1").and_then(|()| mark.sync_all()).map_err(|_| "reason.workspace.unsafe")
     }
 
-    pub fn release(&self) {
-        let _ = std::fs::remove_file(self.root.join("tainted"));
+    /// The candidate landed as `head`: what its proofs left is trusted again, for a base that contains `head`. If the mark
+    /// of that head cannot be written, the taint stays and the next sync wipes.
+    pub fn release(&self, head: &str) {
+        if valid_oid(head) && std::fs::write(self.root.join("landed"), head).is_ok() {
+            let _ = std::fs::remove_file(self.root.join("tainted"));
+        }
     }
 
-    fn tainted(&self) -> bool {
+    pub fn tainted(&self) -> bool {
         self.root.join("tainted").exists()
+    }
+
+    /// The head the kept state was last trusted for, if the last candidate landed.
+    pub fn landed(&self) -> Option<String> {
+        std::fs::read_to_string(self.root.join("landed")).ok().map(|text| text.trim().to_string())
+    }
+
+    /// The kept state cannot be trusted: a candidate that did not land ran here, or the one that landed is not part of this
+    /// base, or the copy was made by older code that kept no marks (exactly one wipe).
+    fn stale(&self, exec: &mut impl Executor, repo_root: &Path, base: &str) -> bool {
+        if self.tainted() || std::fs::read_to_string(self.root.join("schema")).ok().as_deref() != Some(SCHEMA) {
+            return true;
+        }
+        self.landed()
+            .is_some_and(|head| !(valid_oid(&head) && Self::git(exec, repo_root, &["merge-base", "--is-ancestor", &head, base]).is_ok()))
+    }
+
+    fn forget_setup(&self) {
+        if let Ok(entries) = std::fs::read_dir(&self.root) {
+            for entry in entries.flatten().filter(|e| e.path().extension().is_some_and(|x| x == "stamp")) {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
     }
 
     /// Bring the copy to `base` plus the candidate's changes in `from` (the lease worktree). Ignored files stay, unless the
@@ -175,7 +211,11 @@ impl Workspace {
         if !valid_oid(base) {
             return Err("reason.workspace.git");
         }
-        self.guard()?;
+        // Nothing from an earlier proof may still be running when Faber touches the copy.
+        if !crate::proc::jobs_quiet() {
+            return Err("reason.workspace.busy");
+        }
+        let stripped = self.guard()?;
         let dir = self.dir.to_string_lossy().into_owned();
         let usable = self.dir.is_dir() && self.tree_git(exec, &["rev-parse", "--is-inside-work-tree"]).is_ok();
         if !usable {
@@ -197,17 +237,19 @@ impl Workspace {
         }
         self.tree_git(exec, &["checkout", "--detach", "--force", base])?;
         self.tree_git(exec, &["reset", "--hard", base])?;
-        if self.tainted() {
+        let stale = self.stale(exec, repo_root, base);
+        if stripped || stale {
+            // An install that held a link is not trusted, and neither is a wiped one: the setup runs again.
+            self.forget_setup();
+        }
+        if stale {
             // Everything ignored goes too (installed packages, build output, nested repositories), the proofs' own folder
-            // is emptied, and the setup runs again.
+            // is emptied, and the marks start over.
             self.tree_git(exec, &["clean", "-ffdx"])?;
             empty(&self.own)?;
-            if let Ok(entries) = std::fs::read_dir(&self.root) {
-                for entry in entries.flatten().filter(|e| e.path().extension().is_some_and(|x| x == "stamp")) {
-                    let _ = std::fs::remove_file(entry.path());
-                }
-            }
-            self.release();
+            let _ = std::fs::remove_file(self.root.join("tainted"));
+            let _ = std::fs::remove_file(self.root.join("landed"));
+            std::fs::write(self.root.join("schema"), SCHEMA).map_err(|_| "reason.workspace.unsafe")?;
         } else {
             // Untracked files go; ignored ones (no -x) stay: that is the point of keeping the copy.
             self.tree_git(exec, &["clean", "-fd"])?;
@@ -285,6 +327,21 @@ mod tests {
         assert_eq!(changed(b" M src/a.rs\0?? new.txt\0 D gone.txt\0").unwrap(), ["src/a.rs", "new.txt", "gone.txt"]);
         assert_eq!(changed(b" M ../escape\0"), Err("reason.workspace.unsafe"));
         assert_eq!(changed(b"M\0"), Err("reason.workspace.unsafe"));
+    }
+
+    #[test]
+    fn a_taint_that_cannot_be_written_stops_the_mission() {
+        let data = std::env::temp_dir().join(format!("faber-taint-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data);
+        let space = Workspace::new(&data, "p1").unwrap();
+        std::fs::create_dir_all(&space.root).unwrap();
+        assert!(space.taint().is_ok() && space.tainted());
+        space.release(&"a".repeat(40));
+        assert!(!space.tainted() && space.landed().as_deref() == Some("a".repeat(40).as_str()));
+        // Something that is not a file sits where the mark goes: the write fails, and so does the start.
+        std::fs::create_dir(space.root.join("tainted")).unwrap();
+        assert_eq!(space.taint(), Err("reason.workspace.unsafe"));
+        let _ = std::fs::remove_dir_all(&data);
     }
 
     #[test]

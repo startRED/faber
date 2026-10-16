@@ -494,7 +494,12 @@ check('projects: an unconfirmed proof disables the start, and confirming it list
   equal(started, 1, 'the confirmed project starts a mission');
   }, () => {
     api.projectProof = async () => proofView(confirmed);
-    api.projectProofConfirm = async (_id, commands) => { confirmed = true; equal(commands.join('|'), declared.join('|'), 'the declared list is what gets confirmed'); return proofView(true, commands); };
+    api.projectProofConfirm = async (_id, commands, setup) => {
+      confirmed = true;
+      equal(commands.join('|'), declared.join('|'), 'the declared list is what gets confirmed');
+      equal(setup.join('|'), 'npm ci|cargo fetch', 'the setup list the owner saw is what gets confirmed');
+      return proofView(true, commands);
+    };
     api.missionStart = async () => { started += 1; return 'review-mission'; };
   });
 });

@@ -711,14 +711,19 @@ async fn project_proof(faber: State<'_, Faber>, project_id: String) -> Res<missi
 
 /// The owner confirms the commands a mission proves its work with (R137): the project's declared list, or the edited one.
 #[tauri::command]
-async fn project_proof_confirm(faber: State<'_, Faber>, project_id: String, commands: Vec<String>) -> Res<mission::ProofView> {
+async fn project_proof_confirm(
+    faber: State<'_, Faber>,
+    project_id: String,
+    commands: Vec<String>,
+    setup: Vec<String>,
+) -> Res<mission::ProofView> {
     let _turn = faber.missions.lock().await;
     project_commands::id(&project_id)?;
-    for command in &commands {
+    for command in commands.iter().chain(&setup) {
         project_commands::text(command)?;
     }
     let before = faber.engine.project(&project_id)?;
-    let after = mission::confirm(&before, &commands).map_err(str::to_string)?;
+    let after = mission::confirm(&before, &commands, &setup).map_err(str::to_string)?;
     faber.engine.update_project(&before, &after)?;
     Ok(mission::view(&after))
 }

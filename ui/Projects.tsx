@@ -244,7 +244,7 @@ export function Projects(props: Props) {
     const token = generation;
     setBusy(true); setError(undefined);
     try {
-      const next = await api.projectProofConfirm(props.project.id, commands);
+      const next = await api.projectProofConfirm(props.project.id, commands, proof()?.setup ?? []);
       if (token !== generation) return;
       setProof(next);
       setEditing(false);

@@ -463,7 +463,7 @@ async fn run_wiring(sandbox: &Path) -> Result<Value> {
     ensure(declared.commands == ["fake-proof src/a.rs"] && declared.source == "agents" && !declared.confirmed, || {
         format!("the declared proof was not read: {declared:?}")
     })?;
-    let project = mission::confirm(&project, &declared.commands).map_err(str::to_string)?;
+    let project = mission::confirm(&project, &declared.commands, &declared.setup).map_err(str::to_string)?;
     let commands = mission::confirmed(&project).map_err(str::to_string)?;
 
     let exe = std::env::current_exe().map_err(|e| e.to_string())?.to_string_lossy().into_owned();
@@ -528,6 +528,11 @@ async fn run_wiring(sandbox: &Path) -> Result<Value> {
     ensure(in_copy.trim() == landed_text.trim() && in_copy.trim() != "base", || {
         format!("the working copy does not hold the candidate: {in_copy:?}")
     })?;
+    // The candidate landed: the kept state is trusted again, for a base that contains the landed head.
+    let head = git(&w.program, &w.repo, &["rev-parse", "faber/m1"])?;
+    ensure(!space.tainted() && space.landed().as_deref() == Some(head.as_str()), || {
+        format!("a landed candidate left the working copy tainted or unmarked: {:?}", space.landed())
+    })?;
     // The next mission resets it to its base but keeps what the project ignores: the build output stays, the strays go.
     std::fs::create_dir_all(space.dir().join("cache")).map_err(|e| e.to_string())?;
     std::fs::write(space.dir().join("cache/built.bin"), "built").map_err(|e| e.to_string())?;
@@ -537,19 +542,19 @@ async fn run_wiring(sandbox: &Path) -> Result<Value> {
     std::fs::create_dir_all(&decoy).map_err(|e| e.to_string())?;
     std::fs::write(space.dir().join(".git"), format!("gitdir: {}", decoy.display())).map_err(|e| e.to_string())?;
     let mut exec = Process::find().map_err(|e| e.key())?;
-    space.sync(&mut exec, &w.repo, &w.base, &w.repo).map_err(str::to_string)?;
+    space.sync(&mut exec, &w.repo, &head, &w.repo).map_err(str::to_string)?;
     let reset = std::fs::read_to_string(space.dir().join("src/a.rs")).map_err(|e| e.to_string())?;
-    ensure(reset == "base", || format!("the working copy was not reset to the base: {reset:?}"))?;
+    ensure(reset.trim() == landed_text.trim(), || format!("the working copy was not reset to the base: {reset:?}"))?;
     ensure(space.dir().join("cache/built.bin").is_file(), || "the ignored build output was removed".into())?;
     ensure(!space.dir().join("stray.txt").exists(), || "an untracked stray survived the reset".into())?;
     // A lease with a change, a new file and a deletion is laid over the base.
     let lease = w.dir.join("lease-like");
-    git(&w.program, &w.repo, &["worktree", "add", "--detach", &lease.to_string_lossy(), &w.base])?;
+    git(&w.program, &w.repo, &["worktree", "add", "--detach", &lease.to_string_lossy(), &head])?;
     std::fs::write(lease.join("src/a.rs"), "laid over").map_err(|e| e.to_string())?;
     std::fs::create_dir_all(lease.join("new")).map_err(|e| e.to_string())?;
     std::fs::write(lease.join("new/x.txt"), "new").map_err(|e| e.to_string())?;
     std::fs::remove_file(lease.join("README.md")).map_err(|e| e.to_string())?;
-    space.sync(&mut exec, &w.repo, &w.base, &lease).map_err(str::to_string)?;
+    space.sync(&mut exec, &w.repo, &head, &lease).map_err(str::to_string)?;
     let (a, x) = (
         std::fs::read_to_string(space.dir().join("src/a.rs")).unwrap_or_default(),
         std::fs::read_to_string(space.dir().join("new/x.txt")).unwrap_or_default(),
@@ -559,6 +564,13 @@ async fn run_wiring(sandbox: &Path) -> Result<Value> {
     })?;
     ensure(space.dir().join("cache/built.bin").is_file(), || "the build output was lost on the second sync".into())?;
     git(&w.program, &w.repo, &["worktree", "remove", "--force", &lease.to_string_lossy()])?;
+    // A later base that does not contain the landed head (the owner never merged it): the kept state is stale and goes.
+    space.sync(&mut exec, &w.repo, &w.base, &w.repo).map_err(str::to_string)?;
+    ensure(!space.dir().join("cache/built.bin").exists() && space.landed().is_none(), || {
+        "state kept for a landed head the next base does not contain".into()
+    })?;
+    std::fs::create_dir_all(space.dir().join("cache")).map_err(|e| e.to_string())?;
+    std::fs::write(space.dir().join("cache/built.bin"), "built").map_err(|e| e.to_string())?;
 
     // A proof that planted a junction in an ignored folder: the next sync deletes the link and never touches its target.
     let (outside, tree) = (w.dir.join("outside"), space.dir().to_path_buf());
@@ -590,7 +602,7 @@ async fn run_wiring(sandbox: &Path) -> Result<Value> {
     std::fs::write(own.join("target/lib.bin"), "poison").map_err(|e| e.to_string())?;
     std::fs::create_dir_all(tree.join("cache")).map_err(|e| e.to_string())?;
     std::fs::write(tree.join("cache/built.bin"), "poison").map_err(|e| e.to_string())?;
-    space.taint();
+    space.taint().map_err(str::to_string)?;
     space.sync(&mut exec, &w.repo, &w.base, &w.repo).map_err(str::to_string)?;
     ensure(!tree.join("cache/built.bin").exists() && !own.join("target").exists(), || {
         "poisoned state survived a candidate that did not land".into()
@@ -600,6 +612,48 @@ async fn run_wiring(sandbox: &Path) -> Result<Value> {
     std::fs::write(tree.join("cache/built.bin"), "fine").map_err(|e| e.to_string())?;
     space.sync(&mut exec, &w.repo, &w.base, &w.repo).map_err(str::to_string)?;
     ensure(tree.join("cache/built.bin").is_file(), || "the wipe repeated although nothing was tainted".into())?;
+    // A copy made by older code has no schema mark: exactly one wipe, then the state is kept again.
+    std::fs::remove_file(w.dir.join("records/workspaces/p1/schema")).map_err(|e| e.to_string())?;
+    space.sync(&mut exec, &w.repo, &w.base, &w.repo).map_err(str::to_string)?;
+    ensure(!tree.join("cache/built.bin").exists(), || "a copy without a schema mark was kept".into())?;
+    std::fs::create_dir_all(tree.join("cache")).map_err(|e| e.to_string())?;
+    std::fs::write(tree.join("cache/built.bin"), "fine").map_err(|e| e.to_string())?;
+    space.sync(&mut exec, &w.repo, &w.base, &w.repo).map_err(str::to_string)?;
+    ensure(tree.join("cache/built.bin").is_file(), || "the schema wipe repeated".into())?;
+
+    // A candidate that did not land (the review blocks it) leaves the working copy tainted; Launch.setup alone decides what
+    // is installed.
+    let rejected = world_with(sandbox, "wiring-rejected", &[("AGENTS.md", "# Rules"), ("README.md", "A fixture project.")])?;
+    let (journal2, broker2) = open(&rejected)?;
+    let exe2 = std::env::current_exe().map_err(|e| e.to_string())?.to_string_lossy().into_owned();
+    let resolve2 = move |name: &str| (name == "fake-proof").then(|| Cli { command: exe2.clone(), prefix: vec!["--project-proof".into()] });
+    let grant2 = rejected.grant.clone();
+    let launch2 = |setup: Vec<String>| mission::Launch {
+        repository: rejected.repository.clone(),
+        commands: vec!["fake-proof src/a.rs".into()],
+        setup,
+        data: rejected.dir.join("records"),
+        project: "p1".into(),
+        pins: pins(),
+        grant: {
+            let grant = grant2.clone();
+            Arc::new(move || Ok(Some(grant.clone())))
+        },
+        revision: 3,
+        notify: None,
+    };
+    let none = mission::setup(launch2(vec![]), &mut Process::find().map_err(|e| e.key())?, &resolve2)?;
+    ensure(none.stage.as_ref().is_some_and(|stage| stage.setup.is_empty()), || "an install ran without being confirmed".into())?;
+    let some = mission::setup(launch2(vec!["fake-proof".into()]), &mut Process::find().map_err(|e| e.key())?, &resolve2)?;
+    ensure(some.stage.as_ref().is_some_and(|stage| stage.setup.len() == 1 && stage.setup[0].id == "setup-1"), || {
+        "the confirmed setup was not what gets installed".into()
+    })?;
+    let mut blocked = Coordinator::new(Scripted::new(&rejected.dir, Plot { reviewer: "reviewer-block", ..PASS }), journal2, broker2, none)
+        .map_err(str::to_string)?;
+    let outcome = blocked.drive().await;
+    ensure(outcome == Outcome::Stopped(Stop::Block("reason.queue.review".into())), || format!("the review did not block: {outcome:?}"))?;
+    let space2 = faber_engine::project::workspace::Workspace::new(&rejected.dir.join("records"), "p1").map_err(str::to_string)?;
+    ensure(space2.tainted() && space2.landed().is_none(), || "a candidate that did not land left the working copy trusted".into())?;
     Ok(json!({"ok": true, "ticks": ticks.load(Ordering::SeqCst), "report": format!("{report:?}")}))
 }
 

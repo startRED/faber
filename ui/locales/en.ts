@@ -583,6 +583,8 @@ export const en = {
   "projects.agents.checking": "Checking the agents… (~{seconds} s, step {step} of {total})",
   "projects.agents.failed": "The agents could not be checked, so no mission was started: {detail}",
   "reason.qualify.failed": "The agents could not be checked. No mission was started.",
+  "reason.proof.setupChanged": "The project's installs changed since this list was shown. Look at the list again, then confirm.",
+  "reason.workspace.busy": "A check from an earlier run is still running, so the project's working copy was not touched. Try again in a moment.",
   "reason.qualify.probe": "A check of one agent did not pass.",
   "reason.qualify.timeout": "A check of one agent took too long.",
   "reason.qualify.start": "A check of one agent could not start.",

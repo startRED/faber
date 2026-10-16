@@ -189,8 +189,9 @@ pub fn setup_definitions(
 }
 
 /// Save the owner's confirmed list for the project. The list may differ from the declared one (the edit option); what is
-/// kept is both, so a later change of the declared list asks again.
-pub fn confirm(project: &Project, commands: &[String]) -> Result<Project, &'static str> {
+/// kept is both, so a later change of the declared list asks again. `seen` is the setup the owner was shown: if what the
+/// project would install now is something else (a lock file appeared meanwhile), nothing is saved and the screen asks again.
+pub fn confirm(project: &Project, commands: &[String], seen: &[String]) -> Result<Project, &'static str> {
     if commands.is_empty() || commands.len() > MAX_COMMANDS {
         return Err("reason.proof.command");
     }
@@ -200,6 +201,9 @@ pub fn confirm(project: &Project, commands: &[String]) -> Result<Project, &'stat
     let (declared, _) = declared(Path::new(&project.path));
     let mut next = project.clone();
     let setup = setup_commands(&|path| Path::new(&project.path).join(path).is_file());
+    if setup != seen {
+        return Err("reason.proof.setupChanged");
+    }
     next.extra.insert("proof".into(), serde_json::json!({"declared": declared, "commands": commands, "setup": setup}));
     Ok(next)
 }
@@ -615,13 +619,13 @@ mod tests {
         assert_eq!((shown.confirmed, shown.changed, shown.commands.clone()), (false, false, vec!["npm test".to_string()]));
 
         // The owner confirms an edited list; it is what runs.
-        let edited = confirm(&project, &["npm test".to_string(), "npm run lint".to_string()]).unwrap();
+        let edited = confirm(&project, &["npm test".to_string(), "npm run lint".to_string()], &[]).unwrap();
         assert_eq!(confirmed(&edited).unwrap(), ["npm test", "npm run lint"]);
         assert!(view(&edited).confirmed);
 
         // A list that needs a shell is never saved.
-        assert_eq!(confirm(&project, &["npm test | tee x".to_string()]), Err("reason.proof.command"));
-        assert_eq!(confirm(&project, &[]), Err("reason.proof.command"));
+        assert_eq!(confirm(&project, &["npm test | tee x".to_string()], &[]), Err("reason.proof.command"));
+        assert_eq!(confirm(&project, &[], &[]), Err("reason.proof.command"));
 
         // The project's declaration changes: the confirmation no longer holds.
         std::fs::write(root.join("AGENTS.md"), "## Proof commands\n```\nnpm test\nnpm run e2e\n```").unwrap();
@@ -635,14 +639,16 @@ mod tests {
     fn the_setup_is_part_of_the_confirmation_and_a_change_asks_again() {
         let root = folder("setup", &[("AGENTS.md", "## Proof commands\n```\nnpm test\n```"), ("package.json", "{}")]);
         let project = Project::new("p1".into(), "P".into(), root.to_string_lossy().into_owned());
-        let confirmed_now = confirm(&project, &["npm test".to_string()]).unwrap();
+        let confirmed_now = confirm(&project, &["npm test".to_string()], &[]).unwrap();
         assert_eq!(confirmed_setup(&confirmed_now).unwrap(), Vec::<String>::new());
         // A lock file appears: npm ci would now run, which the owner never saw.
         std::fs::write(root.join("package-lock.json"), "{}").unwrap();
         assert_eq!(confirmed_setup(&confirmed_now), Err("reason.proof.unconfirmed"));
         assert_eq!(confirmed(&confirmed_now), Err("reason.proof.unconfirmed"));
         assert!(view(&confirmed_now).changed);
-        let again = confirm(&confirmed_now, &["npm test".to_string()]).unwrap();
+        // The screen still shows no setup: confirming it is refused, so the owner never approves what they did not see.
+        assert_eq!(confirm(&confirmed_now, &["npm test".to_string()], &[]), Err("reason.proof.setupChanged"));
+        let again = confirm(&confirmed_now, &["npm test".to_string()], &["npm ci".to_string()]).unwrap();
         assert_eq!(confirmed_setup(&again).unwrap(), ["npm ci"]);
         // A confirmation saved before the setup was part of it asks again.
         let mut old = again.clone();
