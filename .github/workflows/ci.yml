@@ -12,18 +12,65 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # The jobs run at once. The screen suite was 10 of Windows' 17 minutes, so it is dealt into three parts (R129, E2).
+  # A change of words only (docs/ or a .md file, scripts/ci-scope.mjs) needs no build: `cargo t` runs no suite for it either.
+  # Such a push is green in seconds, but only when the commit before it is green already, so main never reaches unproven code
+  # through a docs commit (R127, R163). Anything this job cannot tell for sure runs every check.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      full: ${{ steps.decide.outputs.full }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: scripts/ci-scope.mjs
+          sparse-checkout-cone-mode: false
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          full() { echo "full=true" >> "$GITHUB_OUTPUT"; echo "Every check runs: $1"; exit 0; }
+          [[ "$BEFORE" =~ ^[0-9a-f]{40}$ && "$BEFORE" =~ [1-9a-f] ]] || full "there is no commit before this one"
+          # Three dots: what HEAD changed since it left BEFORE. The API lists at most 300 files; more runs everything.
+          compare=$(gh api "repos/$GITHUB_REPOSITORY/compare/$BEFORE...$HEAD") || full "the change set could not be read"
+          [ "$EVENT" = pull_request ] || [ "$(jq -r .status <<<"$compare")" = ahead ] || full "the push rewrote history"
+          [ "$(jq '.files | length' <<<"$compare")" -lt 300 ] || full "300 files or more changed"
+          jq -r '.files[].filename' <<<"$compare" | node scripts/ci-scope.mjs || full "not only words"
+          if [ "$EVENT" = push ]; then
+            green=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$BEFORE&event=push&status=success" --jq .total_count) || full "the checks of $BEFORE could not be read"
+            [ "$green" -gt 0 ] || full "the commit before, $BEFORE, is not green (yet)"
+          fi
+          echo "full=false" >> "$GITHUB_OUTPUT"
+          echo "The build and the suites are skipped."
+
+  # The jobs run at once and each takes about the same time, so the slowest sets the wait (R129). The screen suite is
+  # dealt into six parts by CI seconds (testkit/src/screen/mod.rs, `SLOW`); the other suites are split by what they
+  # build, so no job builds everything.
   check:
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
     name: check (${{ matrix.os }}, ${{ matrix.part }}${{ matrix.shard && format(' {0}', matrix.shard) || '' }})
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: windows-latest, part: lints rust ui }
-          - { os: macos-latest, part: lints rust ui }
-          - { os: windows-latest, part: screen, shard: 1/3 }
-          - { os: windows-latest, part: screen, shard: 2/3 }
-          - { os: windows-latest, part: screen, shard: 3/3 }
+          - { os: windows-latest, part: lints ui }
+          - { os: windows-latest, part: rust }
+          - { os: macos-latest, part: lints ui }
+          - { os: macos-latest, part: rust }
+          - { os: windows-latest, part: screen, shard: 1/6 }
+          - { os: windows-latest, part: screen, shard: 2/6 }
+          - { os: windows-latest, part: screen, shard: 3/6 }
+          - { os: windows-latest, part: screen, shard: 4/6 }
+          - { os: windows-latest, part: screen, shard: 5/6 }
+          - { os: windows-latest, part: screen, shard: 6/6 }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -34,7 +81,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+      # One cache per part: the parts build different things (Clippy's metadata and the test app, the test programs, the
+      # test app alone). With one shared key the first job to finish saved its own build and every other part rebuilt its
+      # dependencies on each run.
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.part == 'lints ui' && 'lints-ui' || matrix.part }}
       - run: npm ci
       - run: npm run build
       # bash stops at the first failing line; PowerShell would only report the last one.
@@ -48,6 +100,9 @@ jobs:
           cargo clippy --workspace --all-targets -- -D warnings
           cargo clippy -p faber --features test-hooks -- -D warnings
       # `rust` and `ui` run on every system; `screen` needs WebView2's DevTools port, so only Windows runs it.
+      # Building apart from running shows on the job page how much of the Rust suite is the compiler (R163).
+      - if: contains(matrix.part, 'rust')
+        run: cargo test --workspace --no-run
       - if: contains(matrix.part, 'rust')
         run: cargo t --suite rust
       - if: contains(matrix.part, 'ui')
@@ -66,9 +121,13 @@ jobs:
 
   # main follows every green phase-1-base commit on its own (R127), so nobody has to remember to move it.
   # Fast-forward only: a commit that is already in main, or a main that moved on its own, stops here without failing.
+  # A run of words only skips `check` on purpose, which counts as green; a failed or cancelled `check` never does.
   main:
-    needs: check
-    if: github.event_name == 'push' && github.ref == 'refs/heads/phase-1-base'
+    needs: [changes, check]
+    if: >-
+      always() && github.event_name == 'push' && github.ref == 'refs/heads/phase-1-base' &&
+      needs.changes.result == 'success' &&
+      (needs.check.result == 'success' || (needs.check.result == 'skipped' && needs.changes.outputs.full == 'false'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
