@@ -28,7 +28,13 @@ export function useDraft(unsent: () => boolean): void {
 /** What was typed and not sent, kept per field in the webview's storage, so a restart for an update (or a crash) loses nothing. */
 const KEPT = 'faber.unsent.';
 
+// The text a failed write could not save, by the same keys: a box that is built again (scrolling that loads earlier messages)
+// reads this before the storage, so stale text never comes back over newer text. Gone on the next successful write.
+const memory = new Map<string, string>();
+
 export function kept(key: string): string {
+  const newer = memory.get(key);
+  if (newer !== undefined) return newer;
   try {
     return localStorage.getItem(KEPT + key) ?? '';
   } catch {
@@ -52,8 +58,11 @@ export function keep(key: string, text: string): void {
   try {
     if (text.trim()) localStorage.setItem(KEPT + key, text);
     else localStorage.removeItem(KEPT + key);
+    memory.delete(key);
     written(key, true);
   } catch {
+    if (text.trim()) memory.set(key, text);
+    else memory.delete(key);
     written(key, !text.trim());
   }
 }

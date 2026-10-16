@@ -20,7 +20,7 @@ import {
 } from './api.ts';
 import { Segmented, Toggle } from './controls.tsx';
 import { resizeComposer } from './composer-size.ts';
-import { keep, kept, useDraft } from './unsent.ts';
+import { keep, kept, release, useDraft } from './unsent.ts';
 import { Ambient } from './Ambient.tsx';
 import { Hole } from './Hole.tsx';
 import { Ghost } from './Ghost.tsx';
@@ -82,6 +82,7 @@ export function Projects(props: Props) {
   // The proof-command editor holds unsent text while it is open (kept per project, like the goal).
   useDraft(() => editing());
   const proofKey = (id = props.project?.id) => `proof.${id}`;
+  onCleanup(() => release(proofKey()));
   const [presence, setPresence] = createSignal<PresenceChoice>('continueWithout');
   const [gitMode, setGitMode] = createSignal<GitMode>('seguro');
   const [selfUpdate, setSelfUpdate] = createSignal(false);

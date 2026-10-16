@@ -34,6 +34,29 @@ check('unsent: a failed storage write keeps the box reported as dirty until a wr
   }
 });
 
+check('unsent: text a failed write could not save is restored over older stored text, and goes after the next good write', () => {
+  const write = Storage.prototype.setItem;
+  try {
+    keep('check-memory', 'old text');
+    Storage.prototype.setItem = () => { throw new Error('full'); };
+    keep('check-memory', 'newer text');
+    equal(kept('check-memory'), 'newer text', 'a box built again reads the newer text, not the stale stored one');
+    release('check-memory');
+    equal(kept('check-memory'), 'newer text', 'gone from the screen, the text still comes back');
+    Storage.prototype.setItem = write;
+    keep('check-memory', 'saved');
+    equal(kept('check-memory'), 'saved', 'the next good write replaces it');
+    Storage.prototype.setItem = () => { throw new Error('full'); };
+    keep('check-memory', 'unsaved');
+    keep('check-memory', '');
+    Storage.prototype.setItem = write;
+    equal(kept('check-memory'), '', 'an emptied box forgets it');
+  } finally {
+    Storage.prototype.setItem = write;
+    keep('check-memory', '');
+  }
+});
+
 check('thread: an edit box keeps its own draft when the conversation changes and comes back', async () => {
   const root = document.createElement('div');
   document.body.append(root);
