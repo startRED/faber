@@ -340,7 +340,7 @@ fn chat_is_lean_and_confined_to_its_workspace_projects_get_the_user_setup_withou
     let after = |args: &[String], flag: &str| args[args.iter().position(|a| a == flag).unwrap() + 1].clone();
     let chat = claude_args(&ClaudeLaunch { resume: Some("abc".into()), model: Some("haiku".into()), flags: NEWER, ..launch(Area::Chat) });
     assert!(chat.contains(&"--restricted".into()) && chat.contains(&"--strict-mcp-config".into()));
-    assert_eq!(after(&chat, "--tools"), "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch");
+    assert_eq!(after(&chat, "--tools"), "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch,AskUserQuestion");
     assert_eq!(after(&chat, "--permission-mode"), "default", "Ask names its mode, so a CLI default can never pick a looser one");
     assert_eq!(after(&chat, "--resume"), "abc");
     assert_eq!(after(&chat, "--model"), "haiku");
@@ -398,7 +398,7 @@ fn r121_full_access_bypasses_approvals_keeps_integrations_and_denies_only_the_cr
     }
     let chat = claude_args(&ClaudeLaunch { permissions: Permissions::FullAccess, ..launch(Area::Chat) });
     assert!(
-        chat.windows(2).any(|a| a == ["--tools", "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch"]),
+        chat.windows(2).any(|a| a == ["--tools", "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch,AskUserQuestion"]),
         "Chat keeps its lean tool list"
     );
 }
@@ -850,13 +850,15 @@ fn full(area: Area, flags: ClaudeFlags) -> Vec<String> {
 }
 
 #[test]
-fn full_access_runs_with_no_prompts_and_every_credential_deny_still_wins() {
+fn full_access_lets_the_host_answer_so_questions_reach_the_person_and_every_credential_deny_still_wins() {
     for area in [Area::Chat, Area::Project] {
         for hooks in [false, true] {
             let args = claude_args(&ClaudeLaunch { permissions: Permissions::FullAccess, flags: NEWER, user_hooks: hooks, ..launch(area) });
-            assert!(args.windows(2).any(|a| a == ["--permission-prompts", "none"]), "{area:?}");
+            assert!(
+                args.windows(2).any(|a| a == ["--permission-prompt-tool", "stdio"]) && !args.contains(&"--permission-prompts".into()),
+                "{area:?}"
+            );
             assert!(args.windows(2).any(|a| a == ["--permission-mode", "bypassPermissions"]), "an explicit mode, never the CLI's own");
-            assert!(!args.contains(&"--permission-prompt-tool".into()), "nobody answers, so no host tool is offered");
             // The credential denies are the very ones of the launch without the new flag, and none was dropped.
             let deny = deny_rules(&args);
             assert_eq!(deny, deny_rules(&full(area, ClaudeFlags::default())), "{area:?}");
@@ -872,7 +874,7 @@ fn full_access_runs_with_no_prompts_and_every_credential_deny_still_wins() {
 }
 
 #[test]
-fn a_cli_without_the_flag_starts_full_access_exactly_as_before() {
+fn full_access_starts_the_same_with_or_without_the_newer_flags() {
     for area in [Area::Chat, Area::Project] {
         let args = full(area, ClaudeFlags { autocompact: true, permission_prompts: false, auto_mode: false });
         assert!(args.windows(2).any(|a| a == ["--permission-prompt-tool", "stdio"]));
@@ -998,9 +1000,9 @@ fn a_denial_in_the_result_becomes_one_parked_request_before_done_and_never_an_al
 }
 
 #[tokio::test]
-async fn a_denial_is_parked_only_when_the_cli_ran_with_no_prompts() {
+async fn a_denial_is_never_parked_while_the_host_answers() {
     let mut asked = 0;
-    // The same recording, driven as full access on a CLI that has the flag: its one denial in the result is parked.
+    // The same recording, driven as full access: the host answered, so the denial in the result is the person's own refusal.
     let (events, _) = run_with(
         ClaudeLaunch { permissions: Permissions::FullAccess, flags: NEWER, ..launch(Area::Chat) },
         fixture("claude", "tools"),
@@ -1014,10 +1016,7 @@ async fn a_denial_is_parked_only_when_the_cli_ran_with_no_prompts() {
         },
     )
     .await;
-    let parked: Vec<_> = events.iter().filter(|e| matches!(e, EngineEvent::Parked { tool, .. } if tool == "Write")).collect();
-    assert_eq!(parked.len(), 1, "{events:?}");
-    let at = |f: fn(&EngineEvent) -> bool| events.iter().position(f).unwrap();
-    assert!(at(|e| matches!(e, EngineEvent::Parked { .. })) < at(|e| matches!(e, EngineEvent::Done { .. })));
+    assert!(events.iter().all(|e| !matches!(e, EngineEvent::Parked { .. })), "{events:?}");
 }
 
 #[test]
@@ -1046,7 +1045,8 @@ fn a_flag_named_in_a_diagnostic_or_a_description_is_no_support() {
 async fn deny_wins_in_the_no_stdio_path_a_real_recording_of_a_denied_credential_read() {
     let launch = ClaudeLaunch { permissions: Permissions::FullAccess, flags: NEWER, ..launch(Area::Project) };
     let args = claude_args(&launch);
-    assert!(args.windows(2).any(|a| a == ["--permission-prompts", "none"]) && !args.contains(&"--permission-prompt-tool".into()));
+    // Recorded with nobody answering; Faber's full access now lets the host answer (R160), and the deny rules are the same.
+    assert!(args.windows(2).any(|a| a == ["--permission-prompt-tool", "stdio"]));
     assert!(args.windows(2).any(|a| a == ["--permission-mode", "bypassPermissions"]));
     assert!(deny_rules(&args).contains(&"Read(~/.ssh/**)".to_string()), "the same kind of rule as the recording's");
 
@@ -1068,11 +1068,8 @@ async fn deny_wins_in_the_no_stdio_path_a_real_recording_of_a_denied_credential_
     assert_eq!(denied.len(), 1);
     assert!(denied[0].contains("denied by your permission settings"), "{denied:?}");
     assert!(!format!("{events:?}").contains("SYNTHETIC-CREDENTIAL"));
-    // The CLI also lists the refusal in the result; the engine drops it, because it names a credential folder.
-    let Some(EngineEvent::Parked { input, .. }) = events.iter().find(|e| matches!(e, EngineEvent::Parked { .. })) else {
-        panic!("the recorded result lists the denial: {events:?}")
-    };
-    assert!(faber_engine::permissions::touches_credentials(input, None, &|_| None), "{input}");
+    // With the host answering, the denial listed in the result is not parked: it was the deny rule's own refusal.
+    assert!(!events.iter().any(|e| matches!(e, EngineEvent::Parked { .. })), "{events:?}");
 }
 
 #[tokio::test]

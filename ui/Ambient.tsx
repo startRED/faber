@@ -118,8 +118,10 @@ export function Ambient(props: { vendors: Vendor[]; avoid: () => Element[]; vari
     onCleanup(() => resize.disconnect());
   });
 
+  // A new look, or the same layer moving between a project and Chat, can show or hide the beam.
   createEffect(() => {
     const look = appliedLook();
+    void props.variant;
     if (!look) return;
     color = look.vars.dust ?? color;
     if (layer) measure();

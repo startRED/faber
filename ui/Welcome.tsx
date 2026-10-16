@@ -5,6 +5,8 @@ import { greetingParts } from './greeting.ts';
 import { lang, t } from './i18n.ts';
 import { vendorName } from './models.ts';
 import { animateList } from './motion.ts';
+import { Peek } from './Mark.tsx';
+import { tail } from './ProjectSettings.tsx';
 import { pickUp } from './running.ts';
 
 const SUGGESTIONS = ['suggest.1', 'suggest.2', 'suggest.3'] as const;
@@ -28,6 +30,8 @@ export function Welcome(props: {
   recent: Summary[];
   running: RunningItem[];
   projects: Project[];
+  /** The project this new conversation works in, if it is one: named above the greeting, with its folder on hover. */
+  project?: Project;
   onSuggest: (text: string) => void;
   onOpen: (conversation: Summary) => void;
   children: JSX.Element;
@@ -39,6 +43,19 @@ export function Welcome(props: {
   return (
     <div class="welcome-grid" ref={animateList}>
       <div class="w-main">
+        <Show when={props.project}>
+          <Peek />
+        </Show>
+        <Show when={props.project}>
+          {(p) => (
+            <header class="p-header">
+              <h2>{p().name}</h2>
+              <div class="p-meta">
+                <span title={p().path}>{tail(p().path)}</span>
+              </div>
+            </header>
+          )}
+        </Show>
         <h1 class="display hello">
           {title()[0]}
           <Show when={title()[1]}>
@@ -46,7 +63,7 @@ export function Welcome(props: {
             <em>{title()[1]}</em>
           </Show>
         </h1>
-        <p class="lead">{t('empty.chatBody')}</p>
+        <p class="lead">{props.project ? t('projects.chat.lead') : t('empty.chatBody')}</p>
         {props.children}
         <section class="try" aria-labelledby="try-title">
           <h2 id="try-title">{t('s1.try')}</h2>

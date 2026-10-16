@@ -79,7 +79,7 @@ impl ClaudeFlags {
 
 // Chat stays lean: a fixed list of built-in tools. Ask keeps Chat restricted with no MCP servers; Isolated also drops every
 // startup customization; full access leaves the person's own integrations on.
-const CHAT_TOOLS: &str = "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch";
+const CHAT_TOOLS: &str = "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch,AskUserQuestion";
 
 /// Lean sessions and all worker roles share the same empty integration loadout.
 pub fn claude_exposure_args() -> Vec<String> {
@@ -160,8 +160,12 @@ fn web_allowed(web: WebSearch) -> Option<&'static str> {
 /// The answer that lets a request through. Leaving plan mode (the plan was approved) also names the mode the session goes on in:
 /// the CLI returns to the mode it was in before plan, which for a session that began in plan is `default` (read in the CLI),
 /// and naming it keeps the person's own `defaultMode` from ever being the one that takes over.
-fn allow_response(tool: &str, input: &Value) -> Value {
+fn allow_response(tool: &str, input: &Value, reply: Option<&Value>) -> Value {
     let mut response = json!({ "behavior": "allow", "updatedInput": input });
+    // A question the agent asked comes back with the user's choices: the question list as it was, plus `answers`.
+    if let (true, Some(answers)) = (tool == "AskUserQuestion", reply) {
+        response["updatedInput"]["answers"] = answers.clone();
+    }
     if tool == "ExitPlanMode" {
         response["updatedPermissions"] = json!([{ "type": "setMode", "mode": "default", "destination": "session" }]);
     }
@@ -195,15 +199,9 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     ]
     .map(String::from)
     .to_vec();
-    // Full access on a CLI that has the flag runs with nobody to answer: a request that would prompt is denied at once, comes
-    // back as a denial in the turn's result and is parked for the person (`EngineEvent::Parked`). Everything else (Ask, the
-    // isolated mode, a CLI without the flag) keeps the host answering over stdio.
-    let no_prompts = launch.instructions.is_none() && launch.permissions == Permissions::FullAccess && launch.flags.permission_prompts;
-    if no_prompts {
-        args.extend(["--permission-prompts".into(), "none".into()]);
-    } else {
-        args.extend(["--permission-prompt-tool".into(), "stdio".into()]);
-    }
+    // The host always answers the CLI's permission requests over stdio, Full access included: the engine denies and parks them there, as
+    // `--permission-prompts none` did, except a question the agent asks the person (`AskUserQuestion`), a card in every mode.
+    args.extend(["--permission-prompt-tool".into(), "stdio".into()]);
     let env = |name: &str| std::env::var(name).ok();
     if let Some(instructions) = &launch.instructions {
         // Whatever mode the person chose, Faber's own requests run without the person's hooks, settings files, MCP servers and
@@ -684,12 +682,12 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                     // its own after a plain reply (see tests/fixtures/claude/queued*.jsonl). Faber cannot tell which ahead of
                     // time, so it holds the message itself and never steers this CLI; if asked anyway, it was not delivered.
                     Some(SessionCommand::Steer { tag, .. }) => on_event(EngineEvent::SteerFailed { tag }),
-                    Some(SessionCommand::Answer { request_id, allow, ack }) => {
+                    Some(SessionCommand::Answer { request_id, allow, reply, ack }) => {
                         // The request stays pending until the write worked, so a failed write can be answered again.
                         let delivery = match pending.get(&request_id) {
                             None => Delivery::Unknown,
                             Some((tool, input)) => {
-                                let response = if allow { allow_response(tool, input) } else { json!({ "behavior": "deny", "message": DECLINED[0] }) };
+                                let response = if allow { allow_response(tool, input, reply.as_ref()) } else { json!({ "behavior": "deny", "message": DECLINED[0] }) };
                                 let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id, "response": response } });
                                 match proc::write_line(&mut *stdin, &msg).await {
                                     Ok(()) => {
@@ -758,14 +756,29 @@ mod allow_tests {
     use super::*;
 
     #[test]
+    fn a_question_the_person_answered_goes_back_with_the_questions_and_the_answers() {
+        let input = json!({ "questions": [{ "question": "Which stack?", "header": "Stack", "multiSelect": false, "options": [{ "label": "Rust", "description": "" }] }] });
+        let answers = json!({ "Which stack?": "Rust" });
+        let response = allow_response("AskUserQuestion", &input, Some(&answers));
+        assert_eq!(response["behavior"], "allow");
+        assert_eq!(response["updatedInput"]["questions"], input["questions"]);
+        assert_eq!(response["updatedInput"]["answers"], answers);
+        assert_eq!(
+            allow_response("Bash", &input, Some(&answers)),
+            json!({ "behavior": "allow", "updatedInput": input }),
+            "only a question carries answers"
+        );
+    }
+
+    #[test]
     fn r140_leaving_plan_names_the_mode_default_for_the_session_and_no_other_request_names_one() {
         let input = json!({ "plan": "do it" });
-        let leaving = allow_response("ExitPlanMode", &input);
+        let leaving = allow_response("ExitPlanMode", &input, None);
         assert_eq!(leaving["behavior"], "allow");
         assert_eq!(leaving["updatedInput"], input);
         assert_eq!(leaving["updatedPermissions"], json!([{ "type": "setMode", "mode": "default", "destination": "session" }]));
         for tool in ["Write", "Bash", "Edit", "WebFetch"] {
-            let plain = allow_response(tool, &input);
+            let plain = allow_response(tool, &input, None);
             assert_eq!(plain, json!({ "behavior": "allow", "updatedInput": input }), "{tool}");
         }
     }

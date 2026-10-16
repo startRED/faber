@@ -1540,6 +1540,40 @@ async fn r124_full_access_answers_yes_except_to_a_request_that_touches_a_credent
     engine.shutdown();
 }
 
+/// R160: on a CLI that has `--permission-prompts`, full access lets the host answer, so the agent's question reaches the person
+/// as a card, while anything else the CLI still holds back is denied and parked, as `--permission-prompts none` did.
+#[tokio::test]
+async fn r160_full_access_shows_the_agents_question_and_parks_every_other_request() {
+    let dir = tempfile::tempdir().unwrap();
+    let (spawn, made) = pipes();
+    let (engine, _rx) = engine(dir.path(), Vendor::Claude, with_help(spawn, Some(NEWER_HELP)));
+    engine.detect_claude_flags();
+    for _ in 0..300 {
+        if engine.claude_flags().permission_prompts {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(engine.claude_flags().permission_prompts);
+    engine.send(ask(Area::Chat, "work", choice("claude", Some("haiku")))).unwrap();
+    let mut pipe = next_pipe(&made).await;
+    pipe.say(json!({ "type": "system", "subtype": "init", "session_id": "s", "model": "haiku" })).await;
+    let question = json!({ "questions": [{ "question": "Which stack?", "header": "Stack", "multiSelect": false,
+        "options": [{ "label": "Rust", "description": "" }] }] });
+    pipe.say(can_use("held", "Write", json!({ "file_path": ".claude/settings.json", "content": "x" }))).await;
+    pipe.say(can_use("asked", "AskUserQuestion", question)).await;
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while pipe.answers().is_empty() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the held request is answered");
+    tokio::time::sleep(Duration::from_millis(60)).await;
+    assert_eq!(pipe.answers(), vec![("held".to_string(), "deny".to_string())], "never allowed on its own, and the question waits");
+    engine.shutdown();
+}
+
 /// R124b, item 1: Ask refuses a request that names a credential folder the same way full access does, with no card, and still
 /// shows a card for every other request.
 #[tokio::test]
@@ -1872,11 +1906,13 @@ async fn a_launch_while_the_help_read_is_pending_uses_exactly_the_old_args_and_a
     assert_eq!(flags, Default::default(), "nothing is known while the read is pending");
     assert_eq!(pending, never_read, "a pending read changes nothing about the launch");
     assert!(pending.windows(2).any(|a| a == ["--permission-prompt-tool", "stdio"]) && !pending.contains(&"--permission-prompts".into()));
-    // Once the help has answered with real declarations, the next launch has the flags and no host prompt tool.
+    // Once the help has answered with real declarations, the flags are known; the host still answers prompts (R160).
     let (later, flags) = first_launch_args(Some(Some(NEWER_HELP))).await;
     assert!(flags.permission_prompts && flags.autocompact);
-    assert!(later.windows(2).any(|a| a == ["--permission-prompts", "none"]), "{later:?}");
-    assert!(!later.contains(&"--permission-prompt-tool".into()));
+    assert!(
+        later.windows(2).any(|a| a == ["--permission-prompt-tool", "stdio"]) && !later.contains(&"--permission-prompts".into()),
+        "{later:?}"
+    );
     // A help whose text only mentions the flag in a diagnostic leaves the launch as it was.
     let (mention, flags) = first_launch_args(Some(Some("error: --permission-prompts is unavailable\n"))).await;
     assert_eq!((flags, mention), (Default::default(), never_read));

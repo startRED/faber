@@ -126,6 +126,12 @@ export const ptBR: Messages = {
   'ask.allow': 'Permitir',
   'ask.always': 'Sempre permitir nesta conversa',
   'ask.deny': 'Negar',
+  'ask.question.label': 'Uma pergunta do assistente',
+  'ask.question.other': 'Outra coisa…',
+  'ask.question.otherPlaceholder': 'Escreva sua resposta',
+  'ask.question.send': 'Enviar respostas',
+  'ask.question.skip': 'Pular',
+  'ask.question.many': 'Escolha quantas quiser',
   'ask.moreWaiting': { one: 'mais 1 esperando', other: 'mais {n} esperando' },
   'ask.parked': 'Retido: ninguém estava lá para responder',
   'ask.parkedHint': 'Não foi feito. Faça você mesmo, ou mude nas Configurações para "Perguntar antes de executar comandos" e peça de novo.',
@@ -378,6 +384,7 @@ export const ptBR: Messages = {
   'hint.chat.3': 'Descreva um problema e peça três saídas',
   'projects.home.title': 'O que vamos resolver?',
   'projects.home.lead': 'Dê um objetivo ao Faber para este projeto. Ele trabalha em uma cópia separada e mostra o que conferiu.',
+  'projects.chat.lead': 'Peça o que quiser nesta pasta. O assistente trabalha aqui mesmo e pergunta quando precisar.',
   'projects.gitMode.seguroTech': "Modo seguro: worktree separado, commits só locais e avanço rápido só na branch da missão.",
   'projects.selfUpdate.trustTech': "Uma versão nova só passa para o próximo espaço local depois de um teste canário e das checagens de quarentena.",
   'projects.proofs.isolationTech': "As checagens que rodam código escrito por um papel rodam com integridade baixa no Windows: só conseguem gravar na cópia da missão, na pasta de build dela e nas pastas temporárias dela. Ainda conseguem ler seus arquivos e usar a rede; uma caixa de areia mais forte (AppContainer) é o próximo passo previsto. No macOS elas também não gravam fora dessas pastas; no Linux ainda não há limite.",
@@ -718,7 +725,6 @@ export const ptBR: Messages = {
   // Native speaker must translate (needs native review).
   "reason.mission.runnerUnavailable": "A execução da missão está aguardando o executor aprovado. Nenhum trabalho foi iniciado.",
   // Native speaker must translate (needs native review).
-  "error.project.missionRequired": "Inicie uma missão para trabalhar neste projeto. Sessões diretas de projeto não estão disponíveis.",
   // Native speaker must translate (needs native review).
   "error.wire.malformed": "A solicitação contém valores inválidos ou ausentes.",
   // Native speaker must translate (needs native review).
@@ -908,6 +914,7 @@ export const ptBR: Messages = {
   'notes.10.better': "A tela do projeto não pede mais para confirmar as verificações quando o modo de permissão é Auto ou Acesso total.",
   'notes.12.better': 'O quadro da missão ficou mais calmo: o objetivo, o passo e o motivo da espera vêm primeiro, as colunas vazias sumiram e Nova missão começa outra.',
   'notes.13.new': 'Nas Configurações você pode receber prévias das versões novas alguns dias antes.',
+  'notes.14.new': 'Em um projeto você agora conversa com o assistente como em qualquer lugar, e as perguntas dele chegam como cards que você toca.',
   'notes.15.fixed': 'Quando o assistente deixa subagentes trabalhando em segundo plano, a resposta agora espera por eles e chega inteira, em vez de parar no “vou aguardar”.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',

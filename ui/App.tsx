@@ -1,5 +1,6 @@
 import { createEffect, createMemo, createSignal, Match, on, onCleanup, onMount, Show, Switch } from 'solid-js';
 import { Ambient } from './Ambient.tsx';
+import { Hole } from './Hole.tsx';
 import {
   api,
   type Appearance,
@@ -577,7 +578,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const busy = () => current()?.messages.at(-1)?.status === 'streaming';
   const needsProject = () => area() === 'project' && !project();
   // The new conversation of a chat with a connected AI is the one place the effects of a look appear.
-  const newChat = () => area() === 'chat' && state().vendors.length > 0 && !current()?.messages.length;
+  const newChat = () => (area() === 'chat' || !!project()) && state().vendors.length > 0 && !current()?.messages.length;
   // A new conversation the user is in, not a remembered one that is still on its way: the tutorial would open over it and
   // vanish when its messages arrive.
   const startsFresh = () => newChat() && !loading() && !place().id;
@@ -635,8 +636,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         options={options()}
         choice={picked()}
         onChoice={pickChoice}
-        mode={area() === 'chat' ? (state().settings.permissions ?? 'dontAsk') : undefined}
-        onMode={area() === 'chat' ? (permissions) => void saveSettings({ permissions }) : undefined}
+        mode={state().settings.permissions ?? 'dontAsk'}
+        onMode={(permissions) => void saveSettings({ permissions })}
         busy={busy() && !loading()}
         nextMessage={!!current()?.messages.length}
         locked={loading()}
@@ -846,7 +847,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                   </Switch>
                 </div>
                 <div class="right">
-                  <Show when={state().vendors.length > 0 && !newChat() && area() !== 'project'}>
+                  <Show when={state().vendors.length > 0 && !newChat()}>
                     <span class="chip" title={t('topbar.model')}>
                       <Show when={answering()} fallback={<>{options().find((o) => o.choice.vendor === picked().vendor && o.choice.model === picked().model)?.label}</>}>
                         {(m) => (
@@ -885,12 +886,16 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
               </div>
               <div class="work" classList={{ under: columnOpen() && !docked() }} ref={(el) => { work = el; animateList(el); }}>
                 <Show
-                  when={area() === 'project' && !place().id}
+                  when={needsProject()}
                   fallback={
                     <>
                       <Show when={newChat()}>
                         {/* The effects of the look sit behind the greeting; dust keeps clear of the text and the composer. */}
-                        <Ambient vendors={state().vendors} avoid={() => [...work!.querySelectorAll('.hello, .lead, .composer, .try, .resume')]} />
+                        <Ambient variant={area() === 'project' ? 'project' : 'chat'} vendors={state().vendors} avoid={() => [...work!.querySelectorAll('.hello, .lead, .composer, .try, .resume')]} />
+                        {/* A project's new conversation is a work screen: no beam, and in Dark Room the black hole sits behind its column. */}
+                        <Show when={area() === 'project'}>
+                          <Hole avoid={() => [...work!.querySelectorAll('.welcome-grid .peek, .welcome-grid .w-main')]} />
+                        </Show>
                       </Show>
                       <div class="thread" classList={{ welcome: newChat() }} ref={(el) => {
                         thread = el;
@@ -949,6 +954,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                             name={state().settings.userName}
                             running={items()}
                             projects={state().projects}
+                            project={area() === 'project' ? project() : undefined}
                             onSuggest={(text) => fill?.(text)}
                             onOpen={openSummary}
                           >
@@ -961,7 +967,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                           </Show>
                         </Show>
                       </div>
-                      <Show when={!newChat() && !needsProject() && area() !== 'project'}>
+                      <Show when={!newChat() && !needsProject()}>
                         <div class="dock" inert={trapped()}>
                           {composer()}
                         </div>

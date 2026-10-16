@@ -33,7 +33,26 @@ impl Engine {
     /// answer could not be written or was not confirmed in time. The lock is free while the engine waits, so nothing
     /// else in the engine waits for the CLI.
     pub async fn answer(&self, conv: &str, turn_id: &str, request_id: &str, allow: bool, always: bool) -> Result<(), String> {
-        let Handed { requests, tool, sid, always, epoch } = self.with(|c| c.prepare_answer(conv, turn_id, request_id, allow, always))?;
+        self.answer_with(conv, turn_id, request_id, allow, always, None).await
+    }
+
+    /// Answers a question the agent asked the user (`AskUserQuestion`) with what the user chose: each question's text to the
+    /// label picked (several labels joined by a comma). It never remembers anything.
+    pub async fn answer_question(&self, conv: &str, turn_id: &str, request_id: &str, answers: serde_json::Value) -> Result<(), String> {
+        self.answer_with(conv, turn_id, request_id, true, false, Some(answers)).await
+    }
+
+    async fn answer_with(
+        &self,
+        conv: &str,
+        turn_id: &str,
+        request_id: &str,
+        allow: bool,
+        always: bool,
+        reply: Option<serde_json::Value>,
+    ) -> Result<(), String> {
+        let Handed { requests, tool, sid, always, epoch } =
+            self.with(|c| c.prepare_answer(conv, turn_id, request_id, allow, always, reply))?;
         let deadline = Instant::now() + ACK_WAIT;
         let mut results = Vec::new();
         for (id, ack) in requests {
@@ -48,17 +67,29 @@ impl Core {
     /// Checks that the conversation is live, that `turn_id` is its current turn and that the request waits in it, then
     /// hands the answer to the session. It changes no permission. "Always" also answers the other waiting requests for
     /// the same tool.
-    fn prepare_answer(&mut self, conv: &str, turn_id: &str, request_id: &str, allow: bool, always: bool) -> Result<Handed, String> {
+    fn prepare_answer(
+        &mut self,
+        conv: &str,
+        turn_id: &str,
+        request_id: &str,
+        allow: bool,
+        always: bool,
+        choices: Option<serde_json::Value>,
+    ) -> Result<Handed, String> {
         let live = self.live.get(conv).filter(|l| l.turn.as_deref() == Some(turn_id)).ok_or(STALE)?;
         let reply = self.convs.get(conv).and_then(|c| c.messages.iter().find(|m| m.id == turn_id)).ok_or(STALE)?;
         let waiting = reply.permissions.as_deref().unwrap_or_default();
         let clicked = waiting.iter().find(|p| p.request_id == request_id).ok_or(STALE)?;
         let (tool, epoch) = (clicked.tool.clone(), clicked.epoch.clone());
         // Not in Plan, and not for a card made under an epoch that is gone: that answer lets only its own request through.
-        let always = always && live.permissions != Permissions::Plan && epoch == self.store.settings().grants_epoch;
+        // A question the agent asks is never remembered: each one is the person's to answer.
+        let always =
+            always && tool != "AskUserQuestion" && live.permissions != Permissions::Plan && epoch == self.store.settings().grants_epoch;
         let others = waiting.iter().filter(|p| allow && always && p.tool == tool && p.request_id != request_id);
         let ids = std::iter::once(request_id).chain(others.map(|p| p.request_id.as_str()));
-        let requests = ids.map(|id| (id.to_string(), live.session.answer(id, allow))).collect();
+        let requests = ids
+            .map(|id| (id.to_string(), live.session.answer_with(id, allow, (id == request_id).then(|| choices.clone()).flatten())))
+            .collect();
         Ok(Handed { requests, tool, sid: live.sid, always, epoch })
     }
 

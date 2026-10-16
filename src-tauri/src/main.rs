@@ -27,7 +27,7 @@ use faber::awake;
 use faber::local_update::{self, Development};
 use faber_engine::cli::Cli;
 use faber_engine::codex::{ModelInfo, list_codex_models, read_codex_limits};
-use faber_engine::model::{Area, Conversation, Project, Settings, Vendor};
+use faber_engine::model::{Conversation, Project, Settings, Vendor};
 use faber_engine::proc::{Spawner, real_spawner};
 use faber_engine::project::canary;
 use faber_engine::project::coordinator::{self, Coordinator};
@@ -119,16 +119,6 @@ fn main_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
 
 // The screen calls the engine through this fixed list of commands; nothing else crosses over.
 
-fn refuse_direct_project(faber: &Faber, area: Area, project: Option<&str>, conversation: Option<&str>) -> Res<()> {
-    if area == Area::Project
-        || project.is_some()
-        || conversation.and_then(|id| faber.engine.open(id)).is_some_and(|c| c.area == Area::Project)
-    {
-        return Err("error.project.missionRequired".into());
-    }
-    Ok(())
-}
-
 #[tauri::command]
 async fn state(app: AppHandle, faber: State<'_, Faber>) -> Res<FullState> {
     let mut state = faber.engine.state();
@@ -144,13 +134,11 @@ async fn open(faber: State<'_, Faber>, id: String) -> Res<Option<Conversation>> 
 
 #[tauri::command]
 async fn send(faber: State<'_, Faber>, req: SendRequest) -> Res<String> {
-    refuse_direct_project(&faber, req.area, req.project_id.as_deref(), req.conversation_id.as_deref())?;
     faber.engine.send(req)
 }
 
 #[tauri::command]
 async fn branch(faber: State<'_, Faber>, req: BranchRequest) -> Res<String> {
-    refuse_direct_project(&faber, Area::Chat, None, Some(&req.conversation_id))?;
     faber.engine.branch(req)
 }
 
@@ -171,30 +159,25 @@ fn answer_plan(faber: State<'_, Faber>, vendor: Vendor, plan: String) {
 }
 #[tauri::command]
 fn approve_credits(faber: State<'_, Faber>, id: String, turn_id: String, vendor: Vendor) -> Res<()> {
-    refuse_direct_project(&faber, Area::Chat, None, Some(&id))?;
     faber.engine.approve_credits(&id, &turn_id, vendor)
 }
 #[tauri::command]
 fn move_turn(faber: State<'_, Faber>, id: String, turn_id: String) -> Res<()> {
-    refuse_direct_project(&faber, Area::Chat, None, Some(&id))?;
     faber.engine.move_turn(&id, &turn_id)
 }
 #[tauri::command]
 fn wait_turn(faber: State<'_, Faber>, id: String, turn_id: String) -> Res<()> {
-    refuse_direct_project(&faber, Area::Chat, None, Some(&id))?;
     faber.engine.wait_turn(&id, &turn_id)
 }
 
 #[tauri::command]
 async fn warm(faber: State<'_, Faber>, req: WarmRequest) -> Res<()> {
-    refuse_direct_project(&faber, req.area, req.project_id.as_deref(), req.conversation_id.as_deref())?;
     faber.engine.warm(req);
     Ok(())
 }
 
 #[tauri::command]
 async fn route_draft(faber: State<'_, Faber>, req: WarmRequest, text: String) -> Res<()> {
-    refuse_direct_project(&faber, req.area, req.project_id.as_deref(), req.conversation_id.as_deref())?;
     faber.engine.route_draft(req, text);
     Ok(())
 }
@@ -208,6 +191,12 @@ async fn interrupt(faber: State<'_, Faber>, id: String) -> Res<()> {
 #[tauri::command]
 async fn answer(faber: State<'_, Faber>, id: String, turn_id: String, request_id: String, allow: bool, always: bool) -> Res<()> {
     faber.engine.answer(&id, &turn_id, &request_id, allow, always).await
+}
+
+/// The person's choices for a question the agent asked: each question's text to the label picked.
+#[tauri::command]
+async fn answer_question(faber: State<'_, Faber>, id: String, turn_id: String, request_id: String, answers: serde_json::Value) -> Res<()> {
+    faber.engine.answer_question(&id, &turn_id, &request_id, answers).await
 }
 
 #[tauri::command]
@@ -1334,6 +1323,7 @@ fn main() {
             route_draft,
             interrupt,
             answer,
+            answer_question,
             rename,
             remove,
             remove_queued,

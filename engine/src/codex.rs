@@ -1139,7 +1139,7 @@ async fn serve(
                             _ => (t.sink)(EngineEvent::SteerFailed { tag }),
                         }
                     }
-                    SessionCommand::Answer { request_id, allow, ack } => {
+                    SessionCommand::Answer { request_id, allow, ack, .. } => {
                         // The approval stays pending until the write worked, so a failed write can be answered again.
                         let delivery = match threads.get(&key).and_then(|t| t.approvals.get(&request_id)).cloned() {
                             None => Delivery::Unknown,
