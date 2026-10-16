@@ -3,8 +3,8 @@
 Every tool named in the rework spec section 3.3, the tool-selection spec section 19, the first-draft catalog
 (`faber-notas/catalogo-v1.md`, 123 Experimental + 28 removed, kept outside the repo) and its 2026-10-11 delta
 (`faber-notas/pesquisa/catalogo-delta.md`) was re-checked against its own repository, plus new candidates per area.
-Section 3.3 of [the rework spec](../../superpowers/specs/2026-10-12-faber-rework-design.md#33-recommended-default-kit-per-domain-verified-2026-10-14)
-now follows this document.
+Section 3.3 of [the rework spec](../../superpowers/specs/2026-10-12-faber-rework-design.md#33-recommended-default-kit-per-domain-verified-2026-10-16)
+followed this document until the [round-2 re-curation](../2026-10-16/tool-catalog-recuration.md) replaced it for verdicts on 2026-10-16.
 
 ## Method
 
