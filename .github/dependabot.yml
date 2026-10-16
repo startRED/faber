@@ -1,0 +1,35 @@
+# One pull request per ecosystem per week, into the integration branch. Each group takes every update of its ecosystem.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: phase-1-base
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci(deps)
+    groups:
+      actions:
+        patterns: ['*']
+
+  - package-ecosystem: cargo
+    directory: /
+    target-branch: phase-1-base
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      cargo:
+        patterns: ['*']
+
+  - package-ecosystem: npm
+    directory: /
+    target-branch: phase-1-base
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      npm:
+        patterns: ['*']

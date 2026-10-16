@@ -34,7 +34,9 @@ for how Faber works today. This file stays short: each line prevents a real mist
 - One commit per coherent change, made and pushed as soon as the change is proven, without waiting for other parts.
   Commits may group related steps, but never huge: push often, roughly once an hour is the usual pace (a rough
   average, not a target), and never leave proven work unpushed. CI fast-forwards `main` to each green `phase-1-base`
-  commit by itself (never force, never a red commit), so `main` keeps close behind (R126, R127, R143).
+  commit by itself (never force, never a red commit), so `main` keeps close behind (R126, R127, R143). Lane work (a
+  branch or worktree) enters `phase-1-base` as one squashed pull request that fills `.github/pull_request_template.md`
+  and whose title is a commit title (`pr-title` checks it); one small proven commit may still go straight there (R156).
 - In a worktree on a branch, claim the areas and files you will change in `.faber-lane` before changing one
   ([design.md](docs/design.md#lane-claims)); `cargo t` refuses unclaimed changes and files another lane claims.
 

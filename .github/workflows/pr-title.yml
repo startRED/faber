@@ -1,0 +1,26 @@
+name: pr-title
+
+# A pull request is squashed into one commit, and its title becomes the commit subject. The type in it decides whether
+# a release happens (R130), so a title that is not a commit type fails here.
+on:
+  pull_request:
+    branches: [phase-1-base]
+    types: [opened, edited, synchronize, reopened]
+
+permissions: {}
+
+jobs:
+  title:
+    runs-on: ubuntu-latest
+    steps:
+      # The title is attacker-controlled text: it goes through an environment variable, never into the script itself.
+      - name: Check the title follows the commit types
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        shell: bash
+        run: |
+          pattern='^(feat|fix|perf|docs|test|ci|refactor|chore|style|build|revert)(\([a-z0-9._/-]+\))?!?: .+'
+          if [[ ! "$TITLE" =~ $pattern ]]; then
+            echo "::error::The title must look like 'type(scope): summary' with type one of feat, fix, perf, docs, test, ci, refactor, chore, style, build, revert."
+            exit 1
+          fi
