@@ -1,7 +1,7 @@
 import { check, ok } from './check.ts';
 import html from '../../ui/index.html?raw';
 
-// R152: the page paints a themed, non-blank first frame before any script runs, so no reveal can show an empty window.
+// R154: the page paints a themed, non-blank first frame before any script runs, so no reveal can show an empty window.
 check('first frame: index.html paints the mark on a themed background for both schemes, with no text and no motion', () => {
   const head = html.slice(0, html.indexOf('<script'));
   ok(/<svg[^>]*>\s*<path/.test(head), 'the mark is in the page itself');
