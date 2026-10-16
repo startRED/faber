@@ -253,20 +253,19 @@ check('projects home: a project with no mission opens a home like the chat one, 
   ok(root.querySelector('.lead')?.textContent?.trim(), 'one calm line under it');
   ok(root.querySelector('.ambient.project'), 'its own light sits behind it');
   const composer = root.querySelector('.composer')!;
-  const setup = root.querySelector('.setup')!;
-  ok(composer.compareDocumentPosition(setup) & Node.DOCUMENT_POSITION_FOLLOWING, 'the goal composer comes first, the safety choices under it');
-  ok(setup.querySelector('#presence-choice') && setup.querySelector('#git-mode-choice') && setup.querySelector('input[role="switch"]'), 'every choice stays on the screen');
+  // Only the goal lives here: the settings of a project are in Settings, Projects.
+  for (const gone of ['input[role="switch"]', '.seg-ctl', '.proof-list', 'details', '.setup'])
+    equal(root.querySelector(gone), null, `the project screen has no ${gone}`);
   equal(root.querySelector('h2')?.textContent, 'Idle home', 'the project is named');
-  equal(root.querySelector('.p-side .rrow .t')?.textContent, 'An earlier talk', 'what to pick up from the other projects');
-  ok([...root.querySelectorAll('.p-side .rrow .t')].some((e) => e.textContent === 'Other project'), 'the other projects to resume');
-  // The composer sits where the chat one does: right under the lead, in the left column.
+  const resume = root.querySelector('.p-resume')!;
+  ok(composer.compareDocumentPosition(resume) & Node.DOCUMENT_POSITION_FOLLOWING, 'what to pick up comes under the composer');
+  equal(resume.querySelector('.rrow .t')?.textContent, 'An earlier talk', 'what to pick up from the projects');
+  ok(![...root.querySelectorAll('.rrow .t')].some((e) => e.textContent === 'Other project'), 'the sidebar lists the projects, this screen does not');
+  ok(root.querySelectorAll('.p-resume .rrow').length <= 3, 'at most three to pick up');
   ok(composer.getBoundingClientRect().top > root.querySelector('.lead')!.getBoundingClientRect().bottom, 'under the lead');
-  ok(composer.getBoundingClientRect().right <= root.querySelector('.p-side')!.getBoundingClientRect().left, 'left of what to pick up');
   const meta = root.querySelector<HTMLElement>('.p-meta')!;
   equal(meta.querySelectorAll('span').length, 1, 'the home names only the folder, not the revision or the author');
   ok(meta.querySelector('span')!.title.length >= meta.textContent!.length - 10, 'the full path is on hover');
-  ok(root.querySelector('.setup-more summary'), 'the technical detail sits behind one small link');
-  equal(root.querySelector('.setup-more')!.hasAttribute('open'), false, 'and starts closed');
   ok(root.querySelector('.composer .idle-box'), 'the idle composer has its hints');
 }));
 

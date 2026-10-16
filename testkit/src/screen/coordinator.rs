@@ -463,7 +463,7 @@ async fn run_wiring(sandbox: &Path) -> Result<Value> {
     ensure(declared.commands == ["fake-proof src/a.rs"] && declared.source == "agents" && !declared.confirmed, || {
         format!("the declared proof was not read: {declared:?}")
     })?;
-    let project = mission::confirm(&project, &declared.commands, &declared.setup).map_err(str::to_string)?;
+    let project = mission::confirm(&project, &declared.commands, &declared.setup, &declared.declared).map_err(str::to_string)?;
     let commands = mission::confirmed(&project).map_err(str::to_string)?;
 
     let exe = std::env::current_exe().map_err(|e| e.to_string())?.to_string_lossy().into_owned();

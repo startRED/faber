@@ -69,6 +69,8 @@ mod project_lease;
 mod project_native;
 #[path = "project_policy.rs"]
 mod project_policy;
+#[path = "project_proof_confirm.rs"]
+mod project_proof_confirm;
 #[path = "project_proof_settle.rs"]
 mod project_proof_settle;
 #[path = "project_qualification.rs"]
