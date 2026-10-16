@@ -52,7 +52,6 @@ struct Enrollment {
 
 /// Variables a running slot needs from its person's session to reach the CLIs' sign-in and the build toolchain.
 const PROFILE_AND_TOOLCHAIN: &[&str] = &[
-    "FABER_R136_ARM",
     "USERPROFILE",
     "APPDATA",
     "LOCALAPPDATA",
@@ -1269,12 +1268,8 @@ pub fn probe_canary(data: &Path, nonce: &str, output: &Path, mode: &str) -> Resu
             clis.insert(vendor, faber_engine::cli::find_cli(name).ok_or(invalid("canary CLI unavailable"))?);
         }
     }
-    // R136 (harness-built candidates only): the armed canary starts from a ledger of its own, because the day sample of the
-    // supervisor's ledger no longer matches the account after the mission that came before it.
-    if canary::HARNESS_BUILD && mode == Mode::Real && std::env::var_os("FABER_R136_ARM").is_some() {
-        let _ = fs::remove_file(data.join("data").join("budget.json"));
-    }
     let engine_data = data.join("data");
+    canary::prepare_data(&engine_data, mode).map_err(|_| invalid("canary data could not be prepared"))?;
     let engine = faber_engine::Engine::new(
         faber_engine::EngineOptions {
             data_dir: engine_data.clone(),
@@ -1399,7 +1394,6 @@ impl Runner for ProductionRunner {
         let profile: &[&str] = if real { &["USERPROFILE", "APPDATA", "LOCALAPPDATA", "HOMEDRIVE", "HOMEPATH"] } else { &[] };
         for key in profile.iter().chain(&[
             "RUSTUP_HOME",
-            "FABER_R136_ARM",
             "CARGO_HOME",
             "LIB",
             "INCLUDE",

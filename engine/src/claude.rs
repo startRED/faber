@@ -282,6 +282,23 @@ pub fn project_claude_args(launch: &ClaudeLaunch, role: crate::project::Role) ->
     Ok(args)
 }
 
+/// What every project role is launched with, the per-turn values (model, effort) replaced by fixed stand-ins. A receipt is
+/// bound to its hash (`qualification::launch_policy`), so a change to any flag or setting asks for a new qualification run.
+pub(crate) fn project_launch_policy(roles: &[crate::project::Role]) -> Value {
+    let launch = ClaudeLaunch {
+        area: Area::Project,
+        model: Some("claude-haiku-5-5".into()),
+        effort: Some("medium".into()),
+        resume: None,
+        user_hooks: false,
+        permissions: Permissions::Isolated,
+        instructions: None,
+        user_name: None,
+        flags: Default::default(),
+    };
+    json!(roles.iter().map(|role| project_claude_args(&launch, *role).ok()).collect::<Vec<_>>())
+}
+
 /// Automatic missions must never fall back to the legacy project session or its user's configuration.
 pub fn start_project_claude(
     opts: ClaudeOptions,
@@ -290,7 +307,7 @@ pub fn start_project_claude(
 ) -> Result<Session, crate::project::policy::Blocker> {
     let args = project_claude_args(&opts.launch, role)?;
     crate::project::policy::admit_launch(crate::model::Vendor::Claude, &opts.bin)
-        .map(|()| start_with_policy(opts, on_event, args, true).for_project(role))
+        .map(|image| proc::spawn_expecting(&image, || start_with_policy(opts, on_event, args, true)).for_project(role))
 }
 
 fn block_text(content: &Value) -> String {

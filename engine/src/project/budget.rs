@@ -624,11 +624,13 @@ pub fn apply(ledger: &mut Ledger, change: Change, now: f64, offset: i64) -> Resu
                 None,
             ),
         };
-        let _scope = r132::scope(context);
+        let _scope = r132::scope(context, ledger);
         let status = apply_inner(ledger, change, now, offset)?;
-        if let (Some(mission), Status::Ready) = (calibrating, status) {
-            r132::consume(&mission);
+        let calibrated = calibrating.filter(|_| status == Status::Ready);
+        if let Some(mission) = &calibrated {
+            r132::consume(mission);
         }
+        r132::remember(ledger, calibrated.as_deref());
         Ok(status)
     }
     #[cfg(not(feature = "r132-harness"))]
@@ -1004,18 +1006,53 @@ pub fn recover_unbounded(ledger: &mut Ledger) -> Result<bool, &'static str> {
     Ok(changed)
 }
 
-/// R132: a one-time exception to R88/R131 for one named self-development mission. The shipped app never calls it and
-/// the feature is on only for the qualification harness (`testkit`). It waives exactly one thing: the two-point
-/// margin under the day's cumulative line. Fresh zero-turn evidence, the weekly window, billing and the US$2.00 mission
-/// cap all still apply. It opens once per process and for one mission id: the margin is waived only inside a budget
-/// change that belongs to that mission (or a vendor/model allocation, which names no mission), never anywhere else,
-/// and the first successful calibration of the mission spends it for good. The marker file is created with
-/// `create_new` as the durable record, and the in-process state does not reopen when the marker is deleted.
+/// R132 and R136: a one-time exception to R88/R131 for one named self-development mission (R132: the first real mission;
+/// R136: the canary mission of a harness-built candidate). The shipped app never calls it and the feature is on only for
+/// the qualification harness (`testkit`) and the builds it makes. It waives exactly one thing: the two-point margin under
+/// the day's cumulative line. Fresh zero-turn evidence, the weekly window, billing and the US$2.00 mission cap all still
+/// apply. It opens once per process and for one mission id: the margin is waived only inside a budget change that belongs
+/// to that mission, or a vendor/model allocation made for it (`for_mission`), never anywhere else, and the first
+/// successful calibration of the mission spends it for good.
+///
+/// Three records keep it single-use. The marker has one fixed path per exception in the engine's data folder
+/// (`Exception::marker`), created with `create_new`, so no caller or variable can point it elsewhere. The in-process
+/// state does not reopen when the marker is deleted. And the ledger remembers the mission whose margin was waived and
+/// whether it is spent: a new process with a deleted marker can open the waiver again, but the ledger refuses it for any
+/// other mission and for a spent one.
 #[cfg(feature = "r132-harness")]
 pub mod r132 {
     use std::cell::RefCell;
     use std::path::Path;
     use std::sync::Mutex;
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Exception {
+        R132,
+        R136,
+    }
+
+    impl Exception {
+        /// The marker's one path in the engine's data folder.
+        pub fn marker(self, data_dir: &Path) -> std::path::PathBuf {
+            data_dir.join(match self {
+                Self::R132 => "r132-waiver.json",
+                Self::R136 => "r136-waiver.json",
+            })
+        }
+        /// Where the ledger remembers the waived mission.
+        fn record(self) -> &'static str {
+            match self {
+                Self::R132 => "r132Waiver",
+                Self::R136 => "r136Waiver",
+            }
+        }
+        fn name(self) -> &'static str {
+            match self {
+                Self::R132 => "R132",
+                Self::R136 => "R136",
+            }
+        }
+    }
 
     #[derive(Clone, PartialEq)]
     pub(super) enum Context {
@@ -1027,50 +1064,79 @@ pub mod r132 {
     #[derive(Clone, PartialEq)]
     enum State {
         Unused,
-        Open(String),
+        Open(Exception, String),
         Spent,
     }
 
     static WAIVER: Mutex<State> = Mutex::new(State::Unused);
     thread_local! {
         static CONTEXT: RefCell<Context> = const { RefCell::new(Context::Other) };
+        /// The mission a vendor or model allocation on this thread is made for (`for_mission`).
+        static ALLOCATING: RefCell<Option<String>> = const { RefCell::new(None) };
+        /// What the ledger of the change being applied remembers of the open exception.
+        static REMEMBERED: RefCell<Option<serde_json::Value>> = const { RefCell::new(None) };
+        /// The exception and mission whose margin the change being applied waived.
+        static USED: RefCell<Option<(Exception, String)>> = const { RefCell::new(None) };
+    }
+
+    fn open() -> Option<(Exception, String)> {
+        match &*WAIVER.lock().unwrap() {
+            State::Open(exception, mission) => Some((*exception, mission.clone())),
+            _ => None,
+        }
     }
 
     pub(super) struct Scope(Context);
     impl Drop for Scope {
         fn drop(&mut self) {
             CONTEXT.with(|c| *c.borrow_mut() = std::mem::replace(&mut self.0, Context::Other));
+            REMEMBERED.with(|r| r.borrow_mut().take());
         }
     }
-    pub(super) fn scope(context: Context) -> Scope {
+    pub(super) fn scope(context: Context, ledger: &crate::ledger::Ledger) -> Scope {
+        let remembered = open().and_then(|(exception, _)| ledger.extra.get(exception.record()).cloned());
+        REMEMBERED.with(|r| *r.borrow_mut() = remembered);
+        USED.with(|u| u.borrow_mut().take());
         Scope(CONTEXT.with(|c| c.replace(context)))
     }
 
-    /// Writes the evidence marker (what was waived, for which mission, the readings, when) and opens the waiver for this
-    /// process and this mission. A second call, in this process or against an existing marker, is refused.
-    pub fn waive(marker: &Path, mission: &str, evidence: &serde_json::Value) -> std::io::Result<()> {
+    /// While it lives, vendor and model allocations on this thread are made for `mission`.
+    pub struct ForMission(Option<String>);
+    impl Drop for ForMission {
+        fn drop(&mut self) {
+            ALLOCATING.with(|a| *a.borrow_mut() = self.0.take());
+        }
+    }
+    pub fn for_mission(mission: &str) -> ForMission {
+        ForMission(ALLOCATING.with(|a| a.replace(Some(mission.to_string()))))
+    }
+
+    /// Writes the evidence marker (what was waived, for which mission, the readings) at the exception's fixed path in
+    /// `data_dir` and opens the waiver for this process and this mission. A second call in this process, or against an
+    /// existing marker, is refused.
+    pub fn waive(exception: Exception, data_dir: &Path, mission: &str, evidence: &serde_json::Value) -> std::io::Result<()> {
         use std::io::Write;
         if !super::valid_id(mission) {
             return Err(std::io::Error::other("the waiver needs a mission id"));
         }
         let mut state = WAIVER.lock().unwrap();
         if *state != State::Unused {
-            return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "the R132 waiver was already used in this process"));
+            return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "the waiver was already used in this process"));
         }
-        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(marker)?;
+        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(exception.marker(data_dir))?;
         file.write_all(&serde_json::to_vec_pretty(&serde_json::json!({
-            "exception": "R132", "waives": "R131 two-point margin under the day line", "singleUse": true,
+            "exception": exception.name(), "waives": "R131 two-point margin under the day line", "singleUse": true,
             "mission": mission, "missionCapMicros": super::BOOTSTRAP_CAP, "evidence": evidence,
         }))?)?;
         file.sync_all()?;
-        *state = State::Open(mission.into());
+        *state = State::Open(exception, mission.into());
         Ok(())
     }
 
     /// The mission's calibration is done: the exception is spent and cannot be opened again.
     pub fn consume(mission: &str) {
         let mut state = WAIVER.lock().unwrap();
-        if *state == State::Open(mission.into()) {
+        if matches!(&*state, State::Open(_, open) if open == mission) {
             *state = State::Spent;
         }
     }
@@ -1078,29 +1144,75 @@ pub mod r132 {
     /// Ends the exception. The marker stays, so it cannot be opened again.
     pub fn close() {
         let mut state = WAIVER.lock().unwrap();
-        if matches!(*state, State::Open(_)) {
+        if matches!(*state, State::Open(..)) {
             *state = State::Spent;
         }
     }
 
-    /// Whether a budget change of this mission (`None`: a vendor or model allocation) would have its margin waived.
-    pub fn admits(mission: Option<&str>) -> bool {
-        match (&*WAIVER.lock().unwrap(), mission) {
-            (State::Open(_), None) => true,
-            (State::Open(open), Some(m)) => open == m,
-            _ => false,
+    /// Whether this process holds the waiver open for `mission`.
+    pub fn admits(mission: &str) -> bool {
+        open().is_some_and(|(_, open)| open == mission)
+    }
+
+    /// Whether the change being applied has its margin waived: the waiver is open for its mission (an allocation's is the
+    /// one it is made for), and the ledger remembers no other waived mission and no spent waiver of that exception.
+    pub(super) fn active() -> bool {
+        let mission = match CONTEXT.with(|c| c.borrow().clone()) {
+            Context::Allocation => ALLOCATING.with(|a| a.borrow().clone()),
+            Context::Mission(m) => Some(m),
+            Context::Other => None,
+        };
+        let Some((exception, open)) = open() else { return false };
+        if mission.as_deref() != Some(open.as_str()) {
+            return false;
+        }
+        if REMEMBERED.with(|r| r.borrow().clone()).is_some_and(|r| r["mission"] != open.as_str() || r["spent"] == true) {
+            return false;
+        }
+        USED.with(|u| *u.borrow_mut() = Some((exception, open)));
+        true
+    }
+
+    /// After a change was applied: the ledger remembers the mission whose margin it waived, and that the waiver is spent
+    /// once that mission's calibration is done.
+    pub(super) fn remember(ledger: &mut crate::ledger::Ledger, calibrated: Option<&str>) {
+        let used = USED.with(|u| u.borrow_mut().take());
+        let Some(exception) = used.as_ref().map(|(e, _)| *e).or_else(|| open().map(|(e, _)| e)) else { return };
+        let mut record = ledger.extra.get(exception.record()).cloned();
+        if let Some((_, mission)) = used {
+            record.get_or_insert_with(|| serde_json::json!({"mission": mission, "spent": false}));
+        }
+        if let (Some(record), Some(mission)) = (record.as_mut(), calibrated)
+            && record["mission"] == mission
+        {
+            record["spent"] = true.into();
+        }
+        if let Some(record) = record {
+            ledger.extra.insert(exception.record().into(), record);
         }
     }
 
-    pub(super) fn active() -> bool {
-        match CONTEXT.with(|c| c.borrow().clone()) {
-            Context::Allocation => admits(None),
-            Context::Mission(m) => admits(Some(&m)),
-            Context::Other => false,
+    /// R136: a harness canary starts from a ledger of its own, because the supervisor's day sample no longer matches the
+    /// account after the mission that came before it. Only the waiver records are carried over, so a fresh ledger never
+    /// reopens a waiver; a ledger that cannot be read is refused instead of being replaced.
+    pub fn fresh_ledger(data_dir: &Path) -> std::io::Result<()> {
+        let path = data_dir.join("budget.json");
+        let mut fresh = crate::ledger::Ledger::default();
+        match std::fs::read(&path) {
+            Ok(bytes) => {
+                let old: crate::ledger::Ledger = serde_json::from_slice(&bytes).map_err(std::io::Error::other)?;
+                for exception in [Exception::R132, Exception::R136] {
+                    if let Some(record) = old.extra.get(exception.record()) {
+                        fresh.extra.insert(exception.record().into(), record.clone());
+                    }
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
         }
+        std::fs::write(&path, serde_json::to_vec(&fresh).map_err(std::io::Error::other)?)
     }
 }
-
 #[cfg(feature = "r132-harness")]
 fn margin_waived() -> bool {
     r132::active()

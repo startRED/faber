@@ -15,6 +15,8 @@ pub enum GitError {
     Author,
     Command,
     Process,
+    /// An earlier effect has an intent and no receipt: its outcome is unknown until a person reconciles it. Nothing runs.
+    Pending,
     Authority(&'static str),
     Lease(LeaseError),
     Journal(JournalError),
@@ -28,6 +30,7 @@ impl GitError {
             Self::Author => "reason.grant.noAuthor",
             Self::Command => "reason.git.command",
             Self::Process => "reason.git.unknown",
+            Self::Pending => "reason.project.reconcile",
             Self::Authority(key) => key,
             Self::Lease(e) => e.key(),
             Self::Journal(e) => e.key(),
@@ -354,7 +357,7 @@ impl<E: Executor> Broker<E> {
     ) -> Result<Output, GitError> {
         self.authority(grant, kind.effect().ok_or(GitError::Command)?)?;
         if !self.journal().pending()?.is_empty() {
-            return Err(GitError::Process);
+            return Err(GitError::Pending);
         }
         let mut intent = Intent::new(id, &self.mission, kind, self.revision, now());
         intent.expected = expected.iter().map(|(k, v)| ((*k).into(), (*v).into())).collect();
@@ -489,7 +492,7 @@ impl<E: Executor> Broker<E> {
             return Err(GitError::Ref);
         }
         if !self.journal().pending()?.is_empty() {
-            return Err(GitError::Process);
+            return Err(GitError::Pending);
         }
         let branch = format!("refs/heads/faber/{}", self.mission);
         if !self.leases.owns_branch(&branch) {

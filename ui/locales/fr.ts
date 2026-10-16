@@ -347,6 +347,7 @@ export const fr: Messages = {
   'projects.home.details': "Détails",
   'projects.gitMode.seguroTech': "Mode sûr : worktree séparé, commits locaux uniquement et avance rapide seulement sur la branche de la mission.",
   'projects.selfUpdate.trustTech': "Une nouvelle version passe à l'emplacement local suivant seulement après un essai canari et les contrôles de quarantaine.",
+  'projects.proofs.isolationTech': "Les vérifications qui exécutent du code écrit par un rôle tournent en intégrité basse sous Windows : elles ne peuvent écrire que dans la copie de la mission, son dossier de compilation et ses dossiers temporaires. Elles peuvent encore lire vos fichiers et utiliser le réseau ; un bac à sable plus strict (AppContainer) est la prochaine étape prévue. Sous macOS, elles ne peuvent pas non plus écrire hors de ces dossiers ; sous Linux, rien ne les limite encore.",
   'projects.home.others': 'Autres projets',
   'projects.home.hint.1': 'Décrivez ce qu’il faut créer, corriger ou améliorer dans ce projet',
   'projects.home.hint.2': 'Corrigez le test qui échoue de temps en temps',

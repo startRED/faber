@@ -33,6 +33,7 @@ sysinfo = { version = "0.39.6", default-features = false, features = ["system"] 
 [target.'cfg(windows)'.dependencies]
 win32job = "2"
 winreg = "0.56"
+faber-winproc = { path = "../winproc" }
 winsafe = { version = "0.0.29", features = ["kernel", "user"] }
 wmi = "0.18"
 

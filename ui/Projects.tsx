@@ -624,6 +624,7 @@ export function Projects(props: Props) {
                   <summary>{t('projects.home.details')}</summary>
                   <p>{t('projects.gitMode.seguroTech')}</p>
                   <p>{t('projects.selfUpdate.trustTech')}</p>
+                  <p>{t('projects.proofs.isolationTech')}</p>
                   <p>
                     <b>{t('projects.repo')}:</b> {enroll()?.repo ?? props.project?.path}
                   </p>

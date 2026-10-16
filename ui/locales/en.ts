@@ -342,6 +342,7 @@ export const en = {
   'projects.home.details': "Details",
   'projects.gitMode.seguroTech': "Safe mode: a separate worktree, local commits only, and fast-forward only on the mission branch.",
   'projects.selfUpdate.trustTech': "A new build is promoted to the next local slot only after a canary run and quarantine checks.",
+  'projects.proofs.isolationTech': "Checks that run code a role wrote run at low integrity on Windows: they can write only in the mission's copy, its build folder and its temporary folders. They can still read your files and use the network; a stronger sandbox (AppContainer) is the planned next step. On macOS they cannot write outside those folders either; on Linux nothing limits them yet.",
   'projects.home.others': 'Other projects',
   'projects.home.hint.1': 'Describe what to build, fix or improve in this project',
   'projects.home.hint.2': 'Fix the test that fails every now and then',

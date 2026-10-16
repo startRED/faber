@@ -162,11 +162,13 @@ fn prepare(work: &Path) -> Result<PathBuf, String> {
     Ok(repo)
 }
 
-/// A cargo proof the engine runs for a mission: the named test arguments, offline and locked, in a build folder outside
-/// the checkout, with only the environment a Rust build needs. `heavy` gives it the time of a cold compile.
-pub fn cargo_proof(id: &str, test_args: &[&str], target_dir: &Path, heavy: bool) -> Result<(Definition, crate::proc::Spawner), String> {
+/// A cargo proof the engine runs for a mission: the named test arguments, offline and locked, with only the environment a
+/// Rust build needs. Everything it may write lives under `own`, a folder of the mission outside the checkout: the build
+/// folder (`target`), its own cargo home and npm cache, and its temporary folder. The proof spawner lets it write there and
+/// in the mission clone only (R138). `heavy` gives it the time of a cold compile.
+pub fn cargo_proof(id: &str, test_args: &[&str], own: &Path, heavy: bool) -> Result<(Definition, crate::proc::Spawner), String> {
     let cargo = PathBuf::from(crate::cli::find_cli("cargo").ok_or("reason.canary.cargo")?.command);
-    let mut environment = proof_environment(target_dir);
+    let (mut environment, folders) = proof_environment(own);
     environment.insert("CARGO_NET_OFFLINE".into(), "true".into());
     let definition = Definition {
         id: id.into(),
@@ -179,25 +181,24 @@ pub fn cargo_proof(id: &str, test_args: &[&str], target_dir: &Path, heavy: bool)
         environment: environment.clone(),
         heavy,
     };
-    Ok((definition, crate::proc::isolated_spawner(environment)))
+    Ok((definition, crate::proc::isolated_spawner(environment, folders)))
 }
 
-/// The only environment a proof process gets: what a Rust or Node build needs to find its toolchain, and a build folder
-/// outside the checkout. Nothing else of the engine's environment (tokens, keys, provider settings) passes.
-pub fn proof_environment(target_dir: &Path) -> BTreeMap<String, String> {
+/// The only environment a proof process gets: what a Rust or Node build needs to find its toolchain, and folders of its own
+/// under `own` outside the checkout (the build folder, a cargo home, an npm cache, a temporary folder), which the proof
+/// spawner labels writable. Nothing else of the engine's environment (tokens, keys, provider settings) passes.
+pub fn proof_environment(own: &Path) -> (BTreeMap<String, String>, Vec<PathBuf>) {
     let mut environment = BTreeMap::new();
     for name in [
         "PATH",
         "SystemRoot",
         "WINDIR",
-        "TEMP",
-        "TMP",
         "USERPROFILE",
+        "HOME",
         "ProgramData",
         "ProgramFiles",
         "ProgramFiles(x86)",
         "RUSTUP_HOME",
-        "CARGO_HOME",
         "LIB",
         "INCLUDE",
         "LIBPATH",
@@ -214,14 +215,25 @@ pub fn proof_environment(target_dir: &Path) -> BTreeMap<String, String> {
             environment.insert(name.to_string(), value);
         }
     }
-    environment.insert("CARGO_TARGET_DIR".into(), target_dir.to_string_lossy().into_owned());
+    let folders = ["target", "cargo-home", "npm-cache", "tmp"].map(|name| own.join(name));
+    let [target, cargo_home, npm_cache, tmp] = folders.clone().map(|path| path.to_string_lossy().into_owned());
+    for (name, value) in [
+        ("CARGO_TARGET_DIR", target),
+        ("CARGO_HOME", cargo_home),
+        ("npm_config_cache", npm_cache),
+        ("TEMP", tmp.clone()),
+        ("TMP", tmp.clone()),
+        ("TMPDIR", tmp),
+    ] {
+        environment.insert(name.into(), value);
+    }
     environment.insert("CARGO_INCREMENTAL".into(), "0".into());
-    environment
+    (environment, folders.to_vec())
 }
 
 /// The one proof of the canary: the named test of the frozen crate.
 fn proof_definition(work: &Path) -> Result<(Definition, crate::proc::Spawner), String> {
-    cargo_proof(PROOF, &["trims_and_lowercases"], &work.join("target"), false)
+    cargo_proof(PROOF, &["trims_and_lowercases"], &work.join("proof"), false)
 }
 
 fn goal() -> Result<String, String> {
@@ -293,6 +305,9 @@ pub fn mission_grant(cap_micros: u64) -> Budgeted {
 
 /// The caps one real mission is admitted under (after `read_accounts`).
 pub fn caps(engine: &Engine, mission: &str, cap_micros: u64) -> Result<(), String> {
+    // R132/R136 (harness builds only): these allocations are made for this mission, the only one a waiver can cover.
+    #[cfg(feature = "r132-harness")]
+    let _for = super::budget::r132::for_mission(mission);
     for (vendor, model) in [WRITER_MODEL, REVIEWER_MODEL] {
         engine.mission_budget(Change::AllocateModel { vendor, model: model.into(), cap_micros })?;
     }
@@ -336,9 +351,9 @@ pub async fn run(engine: &Engine, engine_data: &Path, work: &Path, mode: Mode) -
     };
     if mode == Mode::Real {
         read_accounts(engine).await;
-        // R136: only a build with the qualification harness feature can honor this, and only when the harness armed it.
+        // R136: only a build with the qualification harness feature has this code; a product build never waives.
         #[cfg(feature = "r132-harness")]
-        arm_waiver(&mid);
+        arm_waiver(engine_data, &mid);
         caps(engine, &mid, REAL_CAP_MICROS)?;
     }
     let journal = Journal::open(Path::new(&repository.identity.root), engine_data, &mid).map_err(|e| e.key().to_string())?;
@@ -385,17 +400,26 @@ pub async fn run(engine: &Engine, engine_data: &Path, work: &Path, mode: Mode) -
     }
 }
 
-/// Whether this build carries the qualification harness (never true for a product build).
-pub const HARNESS_BUILD: bool = cfg!(feature = "r132-harness");
-
-/// R136: the canary mission of a harness-built candidate may be admitted once without the two-point margin. The harness
-/// names the evidence marker in `FABER_R136_ARM`; the marker is created once (a second run finds it and is refused), is
-/// bound to this mission id, and the waiver closes when the mission ends. A product build has no such code.
+/// R136: the real canary mission of a harness-built candidate may be admitted once without the two-point margin. The
+/// marker has its one fixed path in the canary's data folder and is created once (a later run finds it and is refused),
+/// the waiver is bound to this mission id and its allocations, the ledger remembers it, and it closes when the mission
+/// ends. A product build has no such code and reads no variable for it.
 #[cfg(feature = "r132-harness")]
-fn arm_waiver(mission: &str) {
-    let Some(marker) = std::env::var_os("FABER_R136_ARM") else { return };
+fn arm_waiver(engine_data: &Path, mission: &str) {
+    use super::budget::r132::{Exception, waive};
     let evidence = serde_json::json!({"exception": "R136", "for": "canary mission of a harness-built candidate"});
-    let _ = super::budget::r132::waive(Path::new(&marker), mission, &evidence);
+    let _ = waive(Exception::R136, engine_data, mission, &evidence);
+}
+
+/// Prepares the canary's data folder before its engine starts. R136 (harness builds only): a real canary starts from a
+/// ledger of its own, keeping only the waiver records. A product build changes nothing.
+pub fn prepare_data(engine_data: &Path, mode: Mode) -> Result<(), String> {
+    #[cfg(feature = "r132-harness")]
+    if mode == Mode::Real {
+        super::budget::r132::fresh_ledger(engine_data).map_err(key)?;
+    }
+    let _ = (engine_data, mode);
+    Ok(())
 }
 
 /// Read the mission's journal and ledger and say what really happened. The Landing must be a Done mission with a

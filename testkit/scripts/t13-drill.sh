@@ -59,7 +59,6 @@ grep -q '"step": "landed"' "$REPORT" 2>/dev/null || { echo "the mission did not 
 # 4. Canary, promotion, probation, rollback drill.
 export FABER_T13_MISSION_REPORT=$(win "$REPORT")
 mkdir -p "$OUT/$NAME-promotion"
-export FABER_R136_ARM=$(win "$OUT/$NAME-promotion/r136-marker.json")
 "$HARNESS" --live-promote "$(win "$OUT/$NAME-promotion")" > "$OUT/$NAME-promotion.out" 2>&1
 code=$?
 cat "$OUT/$NAME-promotion.out"

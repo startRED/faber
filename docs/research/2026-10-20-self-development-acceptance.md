@@ -34,10 +34,12 @@ child process. Reduced evidence: [2026-10-15-t13-drill.json](2026-10-15-t13-dril
 
 - **R132** (single mission, testkit only): the seam mission's day-line margin.
 - **R136** (this run): the canary mission of a *harness-built* candidate, once. The candidate is built from the clone with
-  the engine's `r132-harness` feature on; a product build contains none of this code. The harness names an evidence
-  marker in `FABER_R136_ARM`; the engine creates it once (`create_new`, bound to the canary mission id, closed when the
-  mission ends), and the armed canary starts from a ledger of its own. The marker records `R132` as its exception name
-  because it reuses that machinery. The pass therefore shows the product's canary path works end to end; it does not
+  the engine's `r132-harness` feature on; a product build contains none of this code. During the drill the harness named
+  an evidence marker in `FABER_R136_ARM`; the engine created it once (`create_new`, bound to the canary mission id,
+  closed when the mission ended), and the armed canary started from a ledger of its own. After PR #19's review the
+  variable is gone: each exception has one fixed marker in the engine's data folder, the waiver covers only the bound
+  mission and the allocations made for it, the ledger remembers the waived mission (a fresh canary ledger keeps that
+  record), and product code passes no waiver variable. The pass therefore shows the product's canary path works end to end; it does not
   show that today's quota margin admits it. Without the waiver the same canary waits with `reason.budget.calibration`
   (Claude's weekly meter above the 3/7 day line, and a US$0.006 mission cannot move a 1% meter to learn a conversion).
 - **Rollback drill** uses a crashing candidate with an injected verdict: it proves recovery, not that a real bad build is
@@ -73,6 +75,17 @@ expects the old acknowledgement and its receipts must be re-earned against the n
 again; (2) a CLI no longer starts behind a per-CLI guard: it is created suspended inside its own kill-on-close job and the
 lease's release proof (`OwnedTree::retire`) now closes that job and waits until the root pid has ended (one extra safe
 query in the `winproc` crate). Unit and integration suites pass on the merged head; the real drill was not repeated.
+
+**After PR #19's security review (R138), not re-proven live.** Proofs (and the canary's build and test of the code the
+Writer changed) now run at Low integrity on Windows, writing only in the mission clone and their own folders; every
+qualification receipt binds the launch-policy revision, so the receipts of this drill, all issued before it, ask for a new
+qualification run; a pending git intent parks the mission (`reason.project.reconcile`); and the image of a started CLI is
+hashed before it runs and must match its receipt.
+
+**What the real canary is.** The real canary is opt-in (`real-canary.json`): it runs the candidate build, untrusted until it
+passes, with the real Claude Code and Codex CLIs, signed in through the user's own profile and environment, with copied
+qualification receipts, and it spends from the user's subscriptions. Its proof runs at Low integrity like any mission
+proof; the candidate process itself and its CLIs do not.
 
 **Still open**
 

@@ -344,6 +344,7 @@ export const ptBR: Messages = {
   'projects.home.details': "Detalhes",
   'projects.gitMode.seguroTech': "Modo seguro: worktree separado, commits só locais e avanço rápido só na branch da missão.",
   'projects.selfUpdate.trustTech': "Uma versão nova só passa para o próximo espaço local depois de um teste canário e das checagens de quarentena.",
+  'projects.proofs.isolationTech': "As checagens que rodam código escrito por um papel rodam com integridade baixa no Windows: só conseguem gravar na cópia da missão, na pasta de build dela e nas pastas temporárias dela. Ainda conseguem ler seus arquivos e usar a rede; uma caixa de areia mais forte (AppContainer) é o próximo passo previsto. No macOS elas também não gravam fora dessas pastas; no Linux ainda não há limite.",
   'projects.home.others': 'Outros projetos',
   'projects.home.hint.1': 'Descreva o que construir, corrigir ou melhorar neste projeto',
   'projects.home.hint.2': 'Conserte o teste que falha de vez em quando',

@@ -248,7 +248,7 @@ pub fn definitions(
     target: &Path,
     resolve: &dyn Fn(&str) -> Option<Cli>,
 ) -> Result<(Vec<Definition>, crate::proc::Spawner), &'static str> {
-    let environment = super::canary::proof_environment(target);
+    let (environment, folders) = super::canary::proof_environment(target);
     let mut out = vec![];
     for (index, line) in commands.iter().enumerate() {
         let tokens = command_tokens(line)?;
@@ -270,7 +270,7 @@ pub fn definitions(
     if out.is_empty() || out.len() > MAX_COMMANDS {
         return Err("reason.proof.command");
     }
-    Ok((out, crate::proc::isolated_spawner(environment)))
+    Ok((out, crate::proc::isolated_spawner(environment, folders)))
 }
 
 // ----- the files the roles see -----

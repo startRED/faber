@@ -59,11 +59,13 @@ pub fn blockers(_vendor: Vendor) -> &'static [Blocker] {
 /// again against the exact program it starts (`admit_launch`).
 pub fn admit(vendor: Vendor) -> Result<(), Blocker> {
     super::qualification::admitted(vendor, &|| crate::cli::find_cli(vendor.name()).filter(|c| c.prefix.is_empty()).map(|c| c.command))
+        .map(|_| ())
         .map_err(|_| blockers(vendor)[0])
 }
 
-/// The authoritative check, made by the driver constructors with the program they are about to start.
-pub fn admit_launch(vendor: Vendor, bin: &str) -> Result<(), Blocker> {
+/// The authoritative check, made by the driver constructors with the program they are about to start. Returns the
+/// SHA-256 the receipt names, for the check of the started process image before it runs (`proc::spawn_expecting`).
+pub fn admit_launch(vendor: Vendor, bin: &str) -> Result<String, Blocker> {
     super::qualification::admitted(vendor, &|| Some(bin.to_string())).map_err(|_| blockers(vendor)[0])
 }
 

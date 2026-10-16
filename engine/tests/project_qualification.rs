@@ -2,7 +2,7 @@
 use faber_engine::model::Vendor;
 use faber_engine::project::qualification::{
     CHECKS, Identity, MAX_AGE_SECS, Presence, Proof, Receipt, Reject, SourceKind, fingerprint, fingerprint_source, hook_flags,
-    identify_sources, issue, managed_policy_clear, parse_version, path_presence, session_sources, sources_unchanged, verify,
+    identify_sources, issue, launch_policy, managed_policy_clear, parse_version, path_presence, session_sources, sources_unchanged, verify,
     verify_current,
 };
 use std::collections::BTreeMap;
@@ -314,7 +314,7 @@ fn codex_receipt_with(dir: &Path, sources: Vec<faber_engine::project::qualificat
 }
 
 fn current(dir: &Path, vendor: Vendor, managed: Result<(), Reject>) -> Result<(), Reject> {
-    verify_current(dir, vendor, NOW, &|| Ok(identity()), &|| managed)
+    verify_current(dir, vendor, NOW, &|| Ok(identity()), &|| managed).map(|_| ())
 }
 
 #[test]
@@ -418,5 +418,27 @@ fn instruction_sources_match_by_the_real_path_whatever_the_case_or_prefix_of_the
             .unwrap_or_else(|e| panic!("{declared}: {e:?}"));
         assert_eq!(found[0].kind, SourceKind::Global);
         assert_eq!(session_sources(&[declared], &found), Ok(()));
+    }
+}
+
+/// A receipt proves the probes passed under the exact role launch parameters the engine used then. One issued under other
+/// parameters, or before they were recorded (every receipt from before this check), asks for a new qualification run, even
+/// for an unchanged executable; one issued now opens. Each vendor's revision is its own.
+#[test]
+fn a_receipt_from_another_launch_policy_asks_to_requalify() {
+    let dir = tempfile::tempdir().unwrap();
+    for vendor in Vendor::ALL {
+        issued(dir.path(), vendor);
+        let current = |dir: &Path| verify_current(dir, vendor, NOW, &|| Ok(identity()), &|| Ok(())).map(|_| ());
+        assert_eq!(current(dir.path()), Ok(()), "{vendor:?}");
+        rewrite(dir.path(), vendor, |v| v.as_object_mut().unwrap().remove("launch_policy").map(|_| ()).unwrap());
+        assert_eq!(current(dir.path()), Err(Reject::Requalify), "{vendor:?}: a pre-merge receipt");
+        issued(dir.path(), vendor);
+        rewrite(dir.path(), vendor, |v| v["launch_policy"] = "0".repeat(64).into());
+        assert_eq!(current(dir.path()), Err(Reject::Requalify), "{vendor:?}: another policy");
+    }
+    assert_ne!(launch_policy(Vendor::Claude), launch_policy(Vendor::Codex));
+    for vendor in Vendor::ALL {
+        assert_eq!(launch_policy(vendor), launch_policy(vendor), "{vendor:?}: stable for the same parameters");
     }
 }

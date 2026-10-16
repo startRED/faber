@@ -28,6 +28,10 @@ pub struct Receipt {
     pub binary_hash: String,
     pub issued_at: u64,
     pub checks: BTreeMap<String, bool>,
+    /// The launch policy the probes ran under (`launch_policy`). A receipt from before the field existed has none, which
+    /// never matches: it asks for a new qualification run.
+    #[serde(default)]
+    pub launch_policy: String,
     /// What the loadout probe relied on: the launch flags that switch hooks off (Claude) and the instruction files the
     /// session declared (Codex), each by path and SHA-256.
     #[serde(default)]
@@ -86,6 +90,22 @@ pub enum Reject {
     Source,
     /// A managed Claude Code policy exists, or its absence could not be proven.
     Policy,
+    /// The receipt was issued under other role launch parameters than the engine uses now (or before they were
+    /// recorded): the CLI must be qualified again.
+    Requalify,
+}
+
+/// The launch-policy revision: a SHA-256 of the effective launch parameters of every project role of `vendor`, as the engine
+/// builds them now, with fixed stand-ins for the per-turn values. Probes prove behaviour under these exact parameters, so a
+/// receipt binds them; any change to a flag, a setting or a thread parameter makes every older receipt ask to requalify.
+pub fn launch_policy(vendor: Vendor) -> String {
+    use crate::project::Role;
+    let roles = [Role::Lead, Role::Research, Role::TestProposal, Role::Writer, Role::Reviewer];
+    let parameters = match vendor {
+        Vendor::Claude => crate::claude::project_launch_policy(&roles),
+        Vendor::Codex => crate::codex::project_launch_policy(&roles),
+    };
+    format!("{:x}", Sha256::digest(parameters.to_string().as_bytes()))
 }
 
 static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
@@ -264,6 +284,9 @@ pub fn verify_receipt(dir: &Path, vendor: Vendor, now: u64, observe: &dyn Fn() -
     if receipt.issued_at > now || now - receipt.issued_at > MAX_AGE_SECS {
         return Err(Reject::Stale);
     }
+    if receipt.launch_policy != launch_policy(vendor) {
+        return Err(Reject::Requalify);
+    }
     let actual = observe().map_err(|_| Reject::Unobserved)?;
     if actual.version != receipt.version {
         return Err(Reject::Version);
@@ -348,19 +371,21 @@ pub fn session_sources(declared: &[String], recorded: &[Source]) -> Result<(), R
     if seen == known { Ok(()) } else { Err(Reject::Source) }
 }
 
-/// A matching receipt is still not enough: what it relied on must be what is there now.
+/// A matching receipt is still not enough: what it relied on must be what is there now. Hands back the SHA-256 of the
+/// executable the receipt names, which the launch checks again on the started process (`proc::spawn_expecting`).
 pub fn verify_current(
     dir: &Path,
     vendor: Vendor,
     now: u64,
     observe: &dyn Fn() -> io::Result<Identity>,
     managed: &dyn Fn() -> Result<(), Reject>,
-) -> Result<(), Reject> {
+) -> Result<String, Reject> {
     let receipt = verify_receipt(dir, vendor, now, observe)?;
     match vendor {
-        Vendor::Claude => managed(),
-        Vendor::Codex => sources_unchanged(&receipt.proof.instruction_sources),
+        Vendor::Claude => managed()?,
+        Vendor::Codex => sources_unchanged(&receipt.proof.instruction_sources)?,
     }
+    Ok(receipt.binary_hash)
 }
 
 /// Unit tests of the role loops stand in for a stored receipt with this list.
@@ -396,6 +421,7 @@ pub fn issue(dir: &Path, vendor: Vendor, identity: &Identity, checks: BTreeMap<S
         binary_hash: identity.binary_hash.clone(),
         issued_at: now,
         checks,
+        launch_policy: launch_policy(vendor),
         proof,
     };
     let temporary = dir.join(format!(".{}.{}.tmp", vendor.name(), uuid::Uuid::new_v4()));
@@ -418,7 +444,7 @@ pub fn issue(dir: &Path, vendor: Vendor, identity: &Identity, checks: BTreeMap<S
 /// The gate `policy` consults. Opens only on Windows, where hidden owned-job process control exists, and only
 /// with the engine's own receipt folder; `bin` names the program about to be launched, looked up only if a
 /// receipt is worth checking.
-pub(crate) fn admitted(vendor: Vendor, bin: &dyn Fn() -> Option<String>) -> Result<(), Reject> {
+pub(crate) fn admitted(vendor: Vendor, bin: &dyn Fn() -> Option<String>) -> Result<String, Reject> {
     if !cfg!(windows) {
         return Err(Reject::Missing);
     }

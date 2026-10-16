@@ -379,6 +379,14 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
             notify();
         }
     }
+    /// A git effect with an intent and no receipt has an unknown outcome. Whatever step comes next, the mission parks until
+    /// a person reconciles it: nothing is written, proven or landed on top of it, and nothing is repeated.
+    fn effects_settled(&self) -> Step<()> {
+        if self.j.pending()?.iter().any(|intent| intent.kind.effect().is_some()) {
+            return Err(Stop::Park("reason.project.reconcile".into()));
+        }
+        Ok(())
+    }
     fn done(&self, step: &str) -> bool {
         self.p.done.contains(step)
     }
@@ -796,6 +804,7 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
         if self.done("write") {
             return Ok(());
         }
+        self.effects_settled()?;
         let runner = self.runner()?;
         let pin = self.contract_pin()?;
         let base = runner.mission.base.clone();
@@ -833,6 +842,7 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
         if self.done("green") {
             return Ok(());
         }
+        self.effects_settled()?;
         let mut runner = self.runner()?;
         if runner.queue.get(&task.id).is_none() {
             let paths = self.broker()?.leases().audit(lease)?;
@@ -915,6 +925,7 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
     }
 
     async fn land(&mut self, task: &Task, lease: &Lease) -> Step<String> {
+        self.effects_settled()?;
         let mut runner = self.runner()?;
         let lease = self.lease_of(&lease.task)?;
         let termination = settled(&lease);

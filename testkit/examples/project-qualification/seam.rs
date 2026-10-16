@@ -205,7 +205,7 @@ fn clone_with_regression(git_program: &str, source: &Path, branch: &str, repo: &
 pub async fn run(data: &Path) -> io::Result<()> {
     let mut log = Log { steps: vec![], started: Instant::now() };
     let sampler = Sampler::start(log.started);
-    let result = drive(data, &mut log).await;
+    let result = drive(&mut log).await;
     let ram = sampler.finish();
     let verdict = match &result {
         Ok(()) => json!({"completed": true}),
@@ -217,7 +217,7 @@ pub async fn run(data: &Path) -> io::Result<()> {
     result
 }
 
-async fn drive(data: &Path, log: &mut Log) -> io::Result<()> {
+async fn drive(log: &mut Log) -> io::Result<()> {
     let engine_data = PathBuf::from(std::env::var("FABER_QUALIFICATION_ENGINE_DATA").map_err(|_| fail("no engine data folder"))?);
     let workspace = PathBuf::from(std::env::var("FABER_QUALIFICATION_WORKSPACE").map_err(|_| fail("no workspace"))?);
     let source = PathBuf::from(std::env::var("FABER_T13_SOURCE").map_err(|_| fail("no source checkout to clone"))?);
@@ -247,6 +247,19 @@ async fn drive(data: &Path, log: &mut Log) -> io::Result<()> {
     let git_program = faber_engine::cli::find_cli("git").ok_or_else(|| fail("git unavailable"))?.command;
     let repo = workspace.join("faber-clone");
     clone_with_regression(&git_program, &source, &branch, &repo)?;
+    // R138: the proof may write only in the clone and its own folders, so it has a cargo home of its own. It is filled here,
+    // from the tree the harness staged, before any role changes a file; the proof itself then stays offline.
+    let cargo = faber_engine::cli::find_cli("cargo").ok_or_else(|| fail("cargo unavailable"))?.command;
+    let mut fetch = Command::new(cargo);
+    fetch.args(["fetch", "--locked"]).current_dir(&repo).env("CARGO_HOME", proof_target.join("cargo-home")).stdin(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        fetch.creation_flags(0x0800_0000);
+    }
+    if !fetch.status()?.success() {
+        return Err(fail("the proof's cargo home could not be filled"));
+    }
     let mut process = Process::find().map_err(|e| fail(e.key()))?;
     let repository = enroll(&mut process, &repo, "HEAD").map_err(|e| fail(e.key()))?;
     let base = repository.base.clone();
@@ -268,7 +281,7 @@ async fn drive(data: &Path, log: &mut Log) -> io::Result<()> {
     log.step("account-checks", readings.clone());
     let mission = engine.new_mission(&project, GOAL, &base).map_err(fail)?;
     let mid = mission.id.clone();
-    faber_engine::project::budget::r132::waive(&data.join("r132-waiver.json"), &mid, &readings)?;
+    faber_engine::project::budget::r132::waive(faber_engine::project::budget::r132::Exception::R132, &engine_data, &mid, &readings)?;
     caps(&engine, &mid, MISSION_CEILING_MICROS).map_err(|e| fail(format!("caps: {e}")))?;
     log.step("budget", json!({"ceilingMicros": MISSION_CEILING_MICROS, "waiver": "R132"}));
 

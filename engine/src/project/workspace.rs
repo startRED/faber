@@ -74,26 +74,52 @@ impl Workspace {
         if out.success { Ok(out.stdout) } else { Err("reason.workspace.git") }
     }
 
+    /// Where the copy's git folder is, recorded outside the copy. A proof runs at Low integrity and may rewrite the copy's
+    /// own `.git` file to point git elsewhere, so Faber never lets git find the repository from inside the copy.
+    fn gitdir_file(&self) -> PathBuf {
+        self.root.join("gitdir")
+    }
+
+    /// A git command on the copy, with the repository and work tree given explicitly from the recorded location.
+    fn tree_git(&self, exec: &mut impl Executor, args: &[&str]) -> Result<Vec<u8>, &'static str> {
+        let gitdir = std::fs::read_to_string(self.gitdir_file()).map_err(|_| "reason.workspace.git")?;
+        let gitdir = gitdir.trim();
+        if gitdir.is_empty() {
+            return Err("reason.workspace.git");
+        }
+        let (git_dir, work_tree) = (format!("--git-dir={gitdir}"), format!("--work-tree={}", self.dir.display()));
+        let all: Vec<&str> = [git_dir.as_str(), work_tree.as_str()].into_iter().chain(args.iter().copied()).collect();
+        Self::git(exec, &self.dir, &all)
+    }
+
     /// Bring the copy to `base` plus the candidate's changes in `from` (the lease worktree). Ignored files stay.
     pub fn sync(&self, exec: &mut impl Executor, repo_root: &Path, base: &str, from: &Path) -> Result<(), &'static str> {
         if !valid_oid(base) {
             return Err("reason.workspace.git");
         }
         let dir = self.dir.to_string_lossy().into_owned();
-        let usable = self.dir.join(".git").exists() && Self::git(exec, &self.dir, &["rev-parse", "--is-inside-work-tree"]).is_ok();
+        let usable = self.dir.is_dir() && self.tree_git(exec, &["rev-parse", "--is-inside-work-tree"]).is_ok();
         if !usable {
             // The folder is Faber's own: whatever a failed earlier attempt left there goes.
+            let _ = std::fs::remove_file(self.gitdir_file());
             if self.dir.exists() {
                 std::fs::remove_dir_all(&self.dir).map_err(|_| "reason.workspace.git")?;
             }
             std::fs::create_dir_all(self.dir.parent().ok_or("reason.workspace.git")?).map_err(|_| "reason.workspace.git")?;
             Self::git(exec, repo_root, &["worktree", "prune"])?;
             Self::git(exec, repo_root, &["worktree", "add", "--detach", "--force", &dir, base])?;
+            // Recorded now, before any proof has run in the copy.
+            let found = Self::git(exec, &self.dir, &["rev-parse", "--absolute-git-dir"])?;
+            let found = String::from_utf8_lossy(&found).trim().to_string();
+            if found.is_empty() {
+                return Err("reason.workspace.git");
+            }
+            std::fs::write(self.gitdir_file(), found).map_err(|_| "reason.workspace.git")?;
         }
-        Self::git(exec, &self.dir, &["checkout", "--detach", "--force", base])?;
-        Self::git(exec, &self.dir, &["reset", "--hard", base])?;
+        self.tree_git(exec, &["checkout", "--detach", "--force", base])?;
+        self.tree_git(exec, &["reset", "--hard", base])?;
         // Untracked files go; ignored ones (no -x) stay: that is the point of keeping the copy.
-        Self::git(exec, &self.dir, &["clean", "-fd"])?;
+        self.tree_git(exec, &["clean", "-fd"])?;
         let status = Self::git(exec, from, &["status", "--porcelain=v1", "-z", "-uall", "--no-renames"])?;
         for path in changed(&status)? {
             let (source, target) = (from.join(&path), self.dir.join(&path));
