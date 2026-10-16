@@ -616,7 +616,7 @@ export const en = {
   "error.decision.person": "This decision needs your answer.",
 
   "reason.update.quiescence": "Promotion waits for active operations to finish and the window to close.",
-  "reason.git.repository": "Choose a folder that belongs to a Git repository.",
+  "reason.git.repository": "Faber can't use this folder as a Git repository: choose the repository's main folder, or a folder with no repository in it.",
   "reason.git.base": "The starting Git revision could not be resolved.",
   "reason.git.ref": "The mission branch reference is invalid.",
   "reason.git.command": "The Git operation failed.",
@@ -746,6 +746,7 @@ export const en = {
   'notes.27.better': "A project's first screen is calmer: one column with that project's own conversations, and a smaller black hole that stays clear of the words.",
   'notes.28.new': 'When a subagent seems stuck, its step turns amber and Faber tells you, and one waiting on your answer says so.',
   'notes.29.better': 'The Chat home is one calm column too: three short suggestions, and what to pick up under the message box.',
+  'notes.next.better': "A folder that is not a Git repository yet can now be a project: Faber makes it one by itself.",
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

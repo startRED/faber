@@ -1,5 +1,5 @@
 //! Git arguments and durable effects with a scripted executor; no processes or real repositories.
-use faber_engine::project::git::{Broker, Executor, GitError, Invocation, Output, Repository, enroll, valid_oid};
+use faber_engine::project::git::{Broker, Executor, GitError, Invocation, Output, Repository, enroll, prepare, valid_oid};
 use faber_engine::project::store::Journal;
 use faber_engine::project::{Author, GitMode, Grant, RepoIdentity};
 use std::collections::VecDeque;
@@ -220,4 +220,99 @@ fn opus_h1_and_l4_command_config_overrides_are_pure_and_fail_closed() {
     for bad in ["hook.unsafe name.command", "hook..command", "hook.x.command\nremote.x.url", "filter.bad;command.clean"] {
         assert_eq!(config_overrides(bad.as_bytes()), Err(GitError::Command));
     }
+}
+
+const TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+fn ok(stdout: &str) -> Result<Output, GitError> {
+    Ok(Output { success: true, stdout: stdout.as_bytes().to_vec() })
+}
+fn fail() -> Result<Output, GitError> {
+    Ok(Output { success: false, stdout: vec![] })
+}
+fn subcommands(fake: &Fake) -> Vec<String> {
+    fake.calls.iter().map(|c| c.args.iter().find(|a| a.as_str() != "-c" && !a.contains('=')).unwrap().clone()).collect()
+}
+/// A folder with no `.git` above it, which `prepare` would otherwise leave alone.
+fn plain() -> (tempfile::TempDir, String) {
+    let dir = tempdir();
+    let root = dir.path().canonicalize().unwrap();
+    assert!(!root.ancestors().any(|d| d.join(".git").exists()), "the temp folder sits inside a git repository");
+    (dir, root.to_string_lossy().into())
+}
+fn script(fake: &mut Fake, replies: Vec<Result<Output, GitError>>) {
+    fake.calls.clear();
+    fake.replies = replies.into();
+}
+
+#[test]
+fn a_plain_folder_becomes_a_repository_with_an_empty_first_commit() {
+    let (dir, root) = plain();
+    let mut fake = Fake::default();
+    script(&mut fake, vec![fail(), ok(""), ok(&root), fail(), ok(""), ok(TREE), fail(), fail(), ok(NEXT), ok("")]);
+    prepare(&mut fake, dir.path()).unwrap();
+    assert_eq!(
+        subcommands(&fake),
+        ["rev-parse", "init", "rev-parse", "rev-parse", "for-each-ref", "mktree", "config", "config", "commit-tree", "update-ref"]
+    );
+    assert!(fake.calls[1].args.contains(&"--initial-branch=main".into()));
+    // Nothing of the person's is staged: the commit is plumbing on the empty tree, and HEAD must not exist yet.
+    assert!(!subcommands(&fake).iter().any(|s| s == "add" || s == "commit"));
+    let starter = Some(Author { name: "Faber".into(), email: "faber@localhost".into() });
+    assert_eq!(fake.calls[8].author, starter);
+    assert!(fake.calls[8].args.ends_with(&[TREE.into()]));
+    assert!(fake.calls[9].args.ends_with(&["HEAD".into(), NEXT.into(), String::new()]));
+    assert_eq!(fake.calls[9].author, starter);
+    let root = Path::new(&root);
+    assert!(fake.calls.iter().all(|c| c.cwd == root && c.args.contains(&"core.fsmonitor=false".into())));
+}
+
+#[test]
+fn the_first_commit_carries_the_persons_own_identity() {
+    let (dir, root) = plain();
+    let mut fake = Fake::default();
+    script(&mut fake, vec![ok("true\n"), ok(&root), fail(), ok(""), ok(TREE), ok("Ana\n"), ok("ana@example.invalid\n"), ok(NEXT), ok("")]);
+    prepare(&mut fake, dir.path()).unwrap();
+    assert!(!subcommands(&fake).contains(&"init".into()));
+    assert_eq!(fake.calls[7].author, Some(Author { name: "Ana".into(), email: "ana@example.invalid".into() }));
+}
+
+#[test]
+fn a_repository_with_history_a_folder_inside_one_and_an_unreadable_one_are_left_alone() {
+    let (dir, root) = plain();
+    let mut fake = Fake::default();
+    script(&mut fake, vec![ok("true\n"), ok(&root), ok(BASE)]);
+    prepare(&mut fake, dir.path()).unwrap();
+    assert_eq!(fake.calls.len(), 3);
+    // An orphan branch in a repository with history: no commit is made on it.
+    script(&mut fake, vec![ok("true\n"), ok(&root), fail(), ok(&format!("{BASE} commit\trefs/heads/main\n"))]);
+    prepare(&mut fake, dir.path()).unwrap();
+    assert_eq!(fake.calls.len(), 4);
+
+    let inner = dir.path().join("inner");
+    std::fs::create_dir(&inner).unwrap();
+    script(&mut fake, vec![ok("true\n"), ok(&root)]);
+    prepare(&mut fake, &inner).unwrap();
+    assert_eq!(fake.calls.len(), 2);
+    // Inside a `.git` folder.
+    script(&mut fake, vec![ok("false\n")]);
+    prepare(&mut fake, dir.path()).unwrap();
+    assert_eq!(fake.calls.len(), 1);
+    // A `.git` above that git refuses to read is never initialized over.
+    std::fs::create_dir(dir.path().join(".git")).unwrap();
+    script(&mut fake, vec![fail()]);
+    prepare(&mut fake, &inner).unwrap();
+    assert_eq!(subcommands(&fake), ["rev-parse"]);
+}
+
+#[test]
+fn a_failed_init_is_a_git_failure_and_a_lost_race_for_the_first_commit_is_not() {
+    let (dir, root) = plain();
+    let mut fake = Fake::default();
+    script(&mut fake, vec![fail(), fail()]);
+    assert_eq!(prepare(&mut fake, dir.path()), Err(GitError::Command));
+    let first = || vec![ok("true"), ok(&root), fail(), ok(""), ok(TREE), fail(), fail(), ok(NEXT), fail()];
+    script(&mut fake, [first(), vec![ok(BASE)]].concat());
+    assert_eq!(prepare(&mut fake, dir.path()), Ok(()));
+    script(&mut fake, [first(), vec![fail()]].concat());
+    assert_eq!(prepare(&mut fake, dir.path()), Err(GitError::Command));
 }

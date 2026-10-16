@@ -31,7 +31,7 @@ use faber_engine::model::{Conversation, Project, Settings, Vendor};
 use faber_engine::proc::{Spawner, real_spawner};
 use faber_engine::project::canary;
 use faber_engine::project::coordinator::{self, Coordinator};
-use faber_engine::project::git::{Broker, Process, enroll};
+use faber_engine::project::git::{Broker, Process, enroll, prepare};
 use faber_engine::project::mission;
 use faber_engine::project::run::Runner;
 use faber_engine::project::store::Journal;
@@ -537,6 +537,8 @@ async fn project_enroll(faber: State<'_, Faber>, project_id: String) -> Res<Enro
     let project = faber.engine.project(&project_id)?;
     let folder = PathBuf::from(&project.path);
     let mut proc = Process::find().map_err(|e| e.key().to_string())?;
+    // A plain folder becomes a repository here, with no question to the person.
+    prepare(&mut proc, &folder).map_err(|e| e.key().to_string())?;
     let repo_info = enroll(&mut proc, &folder, "HEAD").map_err(|e| e.key().to_string())?;
     if project.repo.as_ref().is_some_and(|r| r.common_dir != repo_info.identity.common_dir) {
         return Err("reason.grant.otherRepo".into());

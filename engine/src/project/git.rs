@@ -282,6 +282,69 @@ pub fn blob(executor: &mut impl Executor, root: &Path, oid: &str) -> Result<Vec<
     if out.success { Ok(out.stdout) } else { Err(GitError::Command) }
 }
 
+/// The author of the first commit when the person has no git identity of their own.
+const STARTER: (&str, &str) = ("Faber", "faber@localhost");
+
+/// Makes a plain folder a repository `enroll` accepts: a folder with no repository in it or above it gets `git init`,
+/// and a repository of its own with no commit and no branch yet gets an empty first commit. The person's files are never staged,
+/// committed or changed, and a folder inside another repository, or one git cannot read, is left for `enroll` to refuse.
+pub fn prepare(executor: &mut impl Executor, folder: &Path) -> Result<(), GitError> {
+    let folder = real_path(folder)?.canonicalize().map_err(|_| GitError::Repository)?;
+    let inside = executor.execute(&Invocation::new(&folder, &["rev-parse", "--is-inside-work-tree"]))?;
+    if !inside.success {
+        // A `.git` here or above that git would not read (another owner, a broken file) is never initialized over.
+        if folder.ancestors().any(|dir| dir.join(".git").symlink_metadata().is_ok()) {
+            return Ok(());
+        }
+        text(executor.execute(&Invocation::new(&folder, &["init", "--quiet", "--initial-branch=main"]))?, GitError::Command)?;
+    } else if text(inside, GitError::Repository)? != "true" {
+        return Ok(());
+    }
+    let root = text(executor.execute(&Invocation::new(&folder, &["rev-parse", "--show-toplevel"]))?, GitError::Repository)?;
+    let mut born = || -> Result<bool, GitError> {
+        Ok(executor.execute(&Invocation::new(&folder, &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]))?.success)
+    };
+    if real_path(Path::new(&root))?.canonicalize().map_err(|_| GitError::Repository)? != folder || born()? {
+        return Ok(());
+    }
+    // A repository with history and an unborn branch (an orphan checkout) is the person's work in progress: left alone.
+    if !text(executor.execute(&Invocation::new(&folder, &["for-each-ref", "--count=1"]))?, GitError::Command)?.is_empty() {
+        return Ok(());
+    }
+    // Plumbing only: an empty tree and a commit on it, so the index and the working files stay as they are.
+    let tree = text(executor.execute(&Invocation::new(&folder, &["mktree"]))?, GitError::Command)?;
+    if !valid_oid(&tree) {
+        return Err(GitError::Command);
+    }
+    let mut identity = |key| -> Result<Option<String>, GitError> {
+        let mut call = Invocation::new(&folder, &["config", "--get", key]);
+        call.identity = true;
+        let output = executor.execute(&call)?;
+        Ok(if output.success { text(output, GitError::Author).ok() } else { None })
+    };
+    let author = identity("user.name")?
+        .zip(identity("user.email")?)
+        .map(|(name, email)| Author { name, email })
+        .filter(valid_author)
+        .unwrap_or_else(|| Author { name: STARTER.0.into(), email: STARTER.1.into() });
+    let mut commit = Invocation::new(&folder, &["commit-tree", "-m", "Start the repository", &tree]);
+    commit.author = Some(author.clone());
+    let oid = text(executor.execute(&commit)?, GitError::Command)?;
+    if !valid_oid(&oid) {
+        return Err(GitError::Command);
+    }
+    // The empty old value makes the update fail if a commit appeared meanwhile; one that did is as good as this one.
+    let mut update = Invocation::new(&folder, &["update-ref", "-m", "faber: first commit", "HEAD", &oid, ""]);
+    update.author = Some(author);
+    if executor.execute(&update)?.success
+        || executor.execute(&Invocation::new(&folder, &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]))?.success
+    {
+        Ok(())
+    } else {
+        Err(GitError::Command)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Repository {
     pub identity: RepoIdentity,
