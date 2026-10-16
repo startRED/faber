@@ -928,6 +928,7 @@ export const ptBR: Messages = {
   'notes.12.better': 'O quadro da missão ficou mais calmo: o objetivo, o passo e o motivo da espera vêm primeiro, as colunas vazias sumiram e Nova missão começa outra.',
   'notes.13.new': 'Nas Configurações você pode receber prévias das versões novas alguns dias antes.',
   'notes.14.new': 'Em um projeto você agora conversa com o assistente como em qualquer lugar, e as perguntas dele chegam como cards que você toca.',
+  'notes.15.fixed': 'Na primeira tela de um projeto, as palavras ficam na parte escura do buraco negro quando uma lista abre abaixo delas.',
   'notes.16.better': 'Cada passo do trabalho agora diz o que faz em palavras simples, e cada subagente aparece na sua própria linha com o que está fazendo.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',

@@ -941,6 +941,7 @@ export const fr: Messages = {
   'notes.12.better': 'Le tableau de mission est plus calme : l’objectif, son étape et ce qu’il attend passent en premier, les colonnes vides ont disparu et Nouvelle mission en lance une autre.',
   'notes.13.new': 'Dans les réglages, tu peux recevoir les nouvelles versions quelques jours à l’avance.',
   'notes.14.new': 'Dans un projet, tu discutes désormais avec l’assistant comme ailleurs, et ses questions arrivent sous forme de cartes à toucher.',
+  'notes.15.fixed': 'Sur le premier écran d’un projet, les mots restent sur la partie sombre du trou noir quand une liste s’ouvre en dessous.',
   'notes.16.better': 'Chaque étape du travail dit maintenant ce qu’elle fait en mots simples, et chaque sous-agent a sa propre ligne avec ce qu’il fait.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',

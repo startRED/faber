@@ -941,6 +941,7 @@ export const es: Messages = {
   'notes.12.better': 'El tablero de la misión es más tranquilo: el objetivo, su paso y por qué espera van primero, las columnas vacías ya no están y Nueva misión empieza otra.',
   'notes.13.new': 'En Ajustes puedes recibir versiones preliminares unos días antes.',
   'notes.14.new': 'En un proyecto ahora hablas con el asistente como en cualquier otro sitio, y sus preguntas llegan como tarjetas que tocas.',
+  'notes.15.fixed': 'En la primera pantalla de un proyecto, las palabras quedan sobre la parte oscura del agujero negro cuando se abre una lista debajo.',
   'notes.16.better': 'Cada paso del trabajo ahora dice lo que hace con palabras sencillas, y cada subagente aparece en su propia línea con lo que está haciendo.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',

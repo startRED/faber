@@ -941,6 +941,7 @@ export const de: Messages = {
   'notes.12.better': 'Die Missionsübersicht ist ruhiger: Ziel, aktueller Schritt und Wartegrund stehen oben, leere Spalten sind weg, und Neue Mission startet eine weitere.',
   'notes.13.new': 'In den Einstellungen kannst du neue Versionen einige Tage früher erhalten.',
   'notes.14.new': 'In einem Projekt unterhältst du dich jetzt wie überall mit dem Assistenten, und seine Fragen erscheinen als Karten zum Antippen.',
+  'notes.15.fixed': 'Auf dem ersten Bildschirm eines Projekts bleiben die Wörter auf dem dunklen Teil des Schwarzen Lochs, wenn sich darunter eine Liste öffnet.',
   'notes.16.better': 'Jeder Arbeitsschritt sagt jetzt in einfachen Worten, was er tut, und jeder Subagent hat eine eigene Zeile mit dem, was er gerade macht.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
