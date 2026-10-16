@@ -457,6 +457,11 @@ frames) and checked against today's code. It fills the steps of R161 and never b
    tag opens that subagent in the side chat, and clicking the outlined part says which call changed it. Several
    screens of one task sit side by side, each filling in as its subagent works, and the one the person opens is the
    only live view. Reduced motion shows the outline and the tag with no movement; during a game nothing moves.
+10. **Every kind of work has a picture.** The goal is work that is easy to follow at a glance, not any one look. Beside
+    its living sentence, each subagent row shows a small picture of what it touches: the page it reads (its title and
+    site icon), the file it changes (a few changed lines, added in green and removed in red), the checks it runs (a
+    count that ticks up, green or red), the search it makes (the words and how many results). The picture comes from
+    the call itself, with no model call and no extra process, and opening the row shows it full size.
 
 **Across all of them:**
 
