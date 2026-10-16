@@ -172,41 +172,122 @@ pub(crate) async fn command_output(mut p: Proc) -> (bool, String) {
 
 /// Starts a real process with piped stdio, no shell and, on Windows, no console window.
 pub fn real_spawner() -> Spawner {
-    configured_spawner(None)
-}
-
-/// Proof executors inherit only their recorded environment.
-pub fn isolated_spawner(environment: std::collections::BTreeMap<String, String>) -> Spawner {
-    configured_spawner(Some(environment))
-}
-
-fn configured_spawner(environment: Option<std::collections::BTreeMap<String, String>>) -> Spawner {
-    Arc::new(move |bin, args, cwd| {
+    Arc::new(|bin, args, cwd| {
         let mut cmd = Command::new(bin);
-        if let Some(environment) = &environment {
-            cmd.env_clear().envs(environment);
-        }
         cmd.args(args).current_dir(cwd);
         spawn_command(cmd)
     })
+}
+
+/// Starts a proof: code a role may have written, run by the engine. It inherits only its recorded environment and may write
+/// only in the folder it runs in (the mission clone) and in `writable` (its build folder, its own tool caches and temporary
+/// folder). On Windows the process runs at Low integrity and those folders are labelled Low, so Windows refuses its writes
+/// anywhere else: the installed app, the engine's records, the owner checkout, the user profile. On macOS `sandbox-exec`
+/// denies writes outside them. Reads and the network stay open (a residual, docs/design.md); Linux has no write limit yet.
+pub fn isolated_spawner(environment: std::collections::BTreeMap<String, String>, writable: Vec<std::path::PathBuf>) -> Spawner {
+    // ponytail: a folder is labelled once per spawner; a folder deleted and made again meanwhile stays Medium, so the proof
+    // fails (closed) instead of writing elsewhere.
+    #[cfg(windows)]
+    let labelled = Mutex::new(std::collections::HashSet::new());
+    Arc::new(move |bin, args, cwd| {
+        let mut roots = writable.clone();
+        for root in &roots {
+            std::fs::create_dir_all(root)?;
+        }
+        roots.push(cwd.to_path_buf());
+        #[cfg(windows)]
+        {
+            let mut done = labelled.lock().unwrap_or_else(|e| e.into_inner());
+            for root in &roots {
+                if !done.contains(root) {
+                    faber_winproc::label_low(root).map_err(|e| {
+                        io::Error::new(e.kind(), format!("the proof folder {} cannot be labelled Low: {e}", root.display()))
+                    })?;
+                    done.insert(root.clone());
+                }
+            }
+        }
+        #[cfg(target_os = "macos")]
+        let mut cmd = {
+            let mut cmd = Command::new("/usr/bin/sandbox-exec");
+            cmd.arg("-p").arg(write_profile(&roots)?).arg(bin);
+            cmd
+        };
+        #[cfg(not(target_os = "macos"))]
+        let mut cmd = Command::new(bin);
+        cmd.env_clear().envs(&environment).args(args).current_dir(cwd);
+        spawn_in_job(cmd, join_job, true)
+    })
+}
+
+/// The sandbox profile of a proof on macOS: everything as usual, except writing, which only `roots` (and the null and
+/// terminal devices) allow.
+#[cfg(target_os = "macos")]
+fn write_profile(roots: &[std::path::PathBuf]) -> io::Result<String> {
+    let mut allowed = String::new();
+    for root in roots {
+        let real = std::fs::canonicalize(root)?;
+        let text =
+            real.to_str().filter(|t| !t.contains(['"', '\\'])).ok_or_else(|| io::Error::other("a proof folder needs a plain path"))?;
+        allowed.push_str(&format!(" (subpath \"{text}\")"));
+    }
+    Ok(format!(
+        "(version 1)(allow default)(deny file-write* (require-not (require-any{allowed} (literal \"/dev/null\") (literal \"/dev/tty\"))))"
+    ))
+}
+
+thread_local! {
+    /// Set while a qualified CLI is being started: the SHA-256 its image must have (see `spawn_expecting`).
+    static EXPECTED_IMAGE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Starts a qualified CLI through `start`, which must spawn it on this thread (as `real_spawner` does). On Windows the
+/// process is created suspended; before it runs, the file its image came from is hashed and compared with `sha256`, the
+/// hash the qualification receipt names. Another program (a CLI swapped between admission and launch) is killed before it
+/// runs a single instruction, and the start fails.
+pub fn spawn_expecting<T>(sha256: &str, start: impl FnOnce() -> T) -> T {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            EXPECTED_IMAGE.with(|e| e.borrow_mut().take());
+        }
+    }
+    EXPECTED_IMAGE.with(|e| *e.borrow_mut() = Some(sha256.to_string()));
+    let _reset = Reset;
+    start()
 }
 
 /// Starts `cmd` with piped stdio and, on Windows, inside its own job object. The process is created suspended, put in the job
 /// and only then allowed to run, so nothing it starts can be outside the job. If that fails the process is killed and the
 /// error returned: no CLI ever runs uncontained.
 pub fn spawn_command(cmd: Command) -> io::Result<Proc> {
-    spawn_in_job(cmd, join_job)
+    spawn_in_job(cmd, join_job, false)
 }
 
-fn spawn_in_job(mut cmd: Command, join: impl FnOnce(&Child) -> io::Result<Containment>) -> io::Result<Proc> {
+/// `low`: lower the suspended process to Low integrity before it runs (Windows; a proof).
+fn spawn_in_job(mut cmd: Command, join: impl FnOnce(&Child) -> io::Result<Containment>, low: bool) -> io::Result<Proc> {
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     #[cfg(windows)]
     cmd.creation_flags(creation_flags(starting_in_background()));
+    let expected = EXPECTED_IMAGE.with(|e| e.borrow_mut().take());
+    #[cfg(not(windows))]
+    let _ = (low, expected);
     let mut child = cmd.spawn()?;
     let joined = join(&child);
     #[cfg(windows)]
     let joined = joined.and_then(|job| {
-        faber_winproc::resume_process(child.id().ok_or_else(|| io::Error::other("the process already ended"))?)?;
+        let pid = child.id().ok_or_else(|| io::Error::other("the process already ended"))?;
+        if low {
+            faber_winproc::lower_to_low_integrity(pid)
+                .map_err(|e| io::Error::new(e.kind(), format!("the proof cannot run at Low integrity: {e}")))?;
+        }
+        if let Some(expected) = expected {
+            let image = faber_winproc::image_path(pid)?;
+            if crate::project::qualification::fingerprint(&image)? != expected {
+                return Err(io::Error::other("the started program is not the qualified one"));
+            }
+        }
+        faber_winproc::resume_process(pid)?;
         Ok(job)
     });
     let contained = match joined {
@@ -480,10 +561,71 @@ mod tests {
         std::fs::write(&script, "@echo off\r\necho x> %~dp0ran.txt\r\n").unwrap();
         let mut cmd = Command::new("cmd.exe");
         cmd.args(["/c", &script.to_string_lossy()]).current_dir(dir.path());
-        let failed = spawn_in_job(cmd, |_| Err(io::Error::other("no job today")));
+        let failed = spawn_in_job(cmd, |_| Err(io::Error::other("no job today")), false);
         assert!(failed.is_err_and(|e| e.to_string().contains("no job today")));
         tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
         assert!(!marker.exists(), "the process ran although it was not contained");
+    }
+
+    /// Asks a proof process to write `target`, through the proof spawner, and says whether the file then holds its text.
+    #[cfg(any(windows, target_os = "macos"))]
+    async fn proof_writes(spawn: &Spawner, cwd: &Path, target: &Path) -> bool {
+        #[cfg(windows)]
+        let (program, args) = ("cmd.exe".to_string(), vec!["/d".into(), "/c".into(), "echo".into(), format!("proof>{}", target.display())]);
+        #[cfg(target_os = "macos")]
+        let (program, args) = ("/bin/sh".to_string(), vec!["-c".into(), format!("echo proof > '{}'", target.display())]);
+        let Ok(p) = spawn(&program, &args, cwd) else { return false };
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(10), command_output(p)).await;
+        std::fs::read_to_string(target).is_ok_and(|text| text.contains("proof"))
+    }
+
+    /// R138: a proof runs code a role wrote. It may write in the mission clone (an existing file and a new one) and in its
+    /// own folders, and nowhere else: a folder standing in for the engine's records or the installed app stays untouched.
+    #[cfg(any(windows, target_os = "macos"))]
+    #[tokio::test]
+    async fn a_proof_writes_inside_its_clone_and_own_folders_and_is_refused_everywhere_else() {
+        let (clone, own, outside) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        std::fs::write(clone.path().join("kept.txt"), "before").unwrap();
+        let mut environment = std::collections::BTreeMap::new();
+        for name in ["SystemRoot", "PATH"] {
+            if let Ok(value) = std::env::var(name) {
+                environment.insert(name.to_string(), value);
+            }
+        }
+        let tmp = own.path().join("tmp");
+        let spawn = isolated_spawner(environment, vec![tmp.clone()]);
+        assert!(proof_writes(&spawn, clone.path(), &clone.path().join("kept.txt")).await, "an existing file of the clone");
+        assert!(proof_writes(&spawn, clone.path(), &clone.path().join("new.txt")).await, "a new file in the clone");
+        assert!(proof_writes(&spawn, clone.path(), &tmp.join("scratch.txt")).await, "its own temporary folder");
+        let journal = outside.path().join("journal.json");
+        std::fs::write(&journal, "records").unwrap();
+        assert!(!proof_writes(&spawn, clone.path(), &journal).await, "an existing file outside");
+        assert_eq!(std::fs::read_to_string(&journal).unwrap(), "records");
+        assert!(!proof_writes(&spawn, clone.path(), &outside.path().join("planted.exe")).await, "a new file outside");
+        assert!(!outside.path().join("planted.exe").exists());
+    }
+
+    /// F5: a CLI swapped between its admission and its launch never runs. The image of the suspended process is hashed
+    /// before it is resumed; a hash other than the receipt's kills it, and the right one lets it run.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_program_whose_image_is_not_the_qualified_one_is_killed_before_it_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("ran.txt");
+        let cmd_exe = std::path::PathBuf::from(std::env::var("SystemRoot").unwrap()).join("System32").join("cmd.exe");
+        let args = vec!["/d".to_string(), "/c".into(), "echo".into(), format!("x>{}", marker.display())];
+        let spawn = real_spawner();
+        let wrong = "0".repeat(64);
+        let failed = spawn_expecting(&wrong, || spawn(&cmd_exe.to_string_lossy(), &args, dir.path()));
+        assert!(failed.is_err_and(|e| e.to_string().contains("not the qualified one")));
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        assert!(!marker.exists(), "the swapped program ran");
+        let right = crate::project::qualification::fingerprint(&cmd_exe).unwrap();
+        let p = spawn_expecting(&right, || spawn(&cmd_exe.to_string_lossy(), &args, dir.path())).unwrap();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(10), command_output(p)).await;
+        assert!(marker.exists(), "the qualified program did not run");
+        // The expectation covers one start only.
+        assert!(spawn(&cmd_exe.to_string_lossy(), &args, dir.path()).is_ok());
     }
     #[tokio::test]
     async fn command_output_drains_large_pipes_and_keeps_a_bounded_tail() {

@@ -122,7 +122,11 @@ fn stale_heads_and_unknown_delivery_preserve_evidence() {
     broker.create_branch(|| Ok(Some(g.clone())), "create").unwrap();
     assert_eq!(broker.fast_forward(|| Ok(Some(g.clone())), "stale", BASE, NEXT), Err(GitError::Command));
     assert_eq!(broker.fast_forward(|| Ok(Some(g.clone())), "uncertain", BASE, NEXT), Err(GitError::Process));
-    assert!(broker.fast_forward(|| Ok(Some(g.clone())), "uncertain", BASE, NEXT).is_err());
+    // The unknown outcome stays pending: the next effect parks the mission for a person (reconcile), it does not block it.
+    let again = broker.fast_forward(|| Ok(Some(g.clone())), "uncertain", BASE, NEXT);
+    assert_eq!(again, Err(GitError::Pending));
+    assert_eq!(again.unwrap_err().key(), "reason.project.reconcile");
+    assert!(matches!(faber_engine::project::coordinator::Stop::from(GitError::Pending), faber_engine::project::coordinator::Stop::Park(_)));
     assert_eq!(broker.executor().calls.len(), 7, "uncertain effects must not repeat");
 }
 

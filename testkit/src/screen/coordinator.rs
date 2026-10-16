@@ -15,7 +15,7 @@ use faber_engine::project::run::Runner;
 use faber_engine::project::store::Journal;
 use faber_engine::project::wire::Envelope;
 use faber_engine::project::worker::ModelPin;
-use faber_engine::project::{GitMode, Grant, Lease, Mission, MissionState};
+use faber_engine::project::{GitMode, Grant, Intent, IntentKind, Lease, Mission, MissionState};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -26,7 +26,7 @@ const FIXTURES: [&str; 5] = ["lead.json", "writer.json", "reviewer-pass.json", "
 
 pub fn scenarios() -> Vec<Scenario> {
     vec![Scenario {
-        name: "coordinator: a mission lands from its goal, survives a crash at every step, stops safely and waits on the budget",
+        name: "coordinator: a mission lands from its goal, survives a crash at every step, parks on an unknown git outcome, stops safely and waits on the budget",
         run: acceptance,
     }]
 }
@@ -40,7 +40,7 @@ fn acceptance(ctx: &mut Ctx) -> Result {
     run_probe_for(ctx, "--project-coordinator", Duration::from_secs(300))?;
     let report: Value = serde_json::from_slice(&std::fs::read(ctx.sb.sandbox.join("coordinator.json")).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
-    for key in ["mission", "crashes", "stops", "budget"] {
+    for key in ["mission", "crashes", "pending", "stops", "budget"] {
         ensure(report[key]["ok"] == true, || format!("coordinator {key}: {}", report[key]))?;
         ctx.notes.push(format!("coordinator {key}: {}; recorded replies, real git, real owned stand-in process", report[key]));
     }
@@ -230,7 +230,7 @@ fn setup(world: &World) -> Result<Setup> {
             environment: BTreeMap::new(),
             heavy: false,
         },
-        proof_spawn: faber_engine::proc::isolated_spawner(BTreeMap::new()),
+        proof_spawn: faber_engine::proc::isolated_spawner(BTreeMap::new(), vec![]),
         sources: vec![("src/a.rs".into(), "base".into())],
         writable: vec!["src".into()],
         grant: Arc::new(move || Ok(Some(grant.clone()))),
@@ -341,6 +341,47 @@ async fn run_crashes(sandbox: &Path) -> Result<Value> {
     Ok(json!({"ok": true, "cases": cases}))
 }
 
+/// A git effect whose outcome is unknown (its intent has no receipt, as after a power cut inside the effect) parks the
+/// mission for a person at whichever step comes next, write, green or land: no role turn starts, nothing is proven or
+/// landed, and the intent stays for reconciliation.
+async fn run_pending(sandbox: &Path) -> Result<Value> {
+    let mut cases = vec![];
+    // Marks: plan 1, arm 2, red 3, write 4, green 5, review 6, land 7. Stopping after one leaves the next step to run.
+    for (after, step, starts) in [(3, "write", &["lead-1"][..]), (4, "green", &["lead-1", "writer-1"][..]), (6, "land", &ALL[..])] {
+        let name = format!("pending-{step}");
+        let w = world(sandbox, &name)?;
+        let mut a = coordinator(&w, PASS).map_err(|e| format!("{name}: first start: {e}"))?;
+        a.crash_after(after);
+        let first = a.drive().await;
+        ensure(first == Outcome::Stopped(Stop::Crash), || format!("{name}: expected the injected crash, got {first:?}"))?;
+        drop(a);
+        let (journal, _) = open(&w)?;
+        let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_secs());
+        journal.record_intent(&Intent::new("unknown-effect", "m1", IntentKind::Worktree, 3, at)).map_err(|e| e.key())?;
+        let mut b = coordinator(&w, PASS).map_err(|e| format!("{name}: restart: {e}"))?;
+        let second = b.drive().await;
+        drop(b);
+        ensure(second == Outcome::Stopped(Stop::Park("reason.project.reconcile".into())), || {
+            format!("{name}: expected a mission parked for reconciliation, got {second:?}")
+        })?;
+        let (journal, _) = open(&w)?;
+        let runner = Runner::load(&journal).map_err(str::to_string)?;
+        ensure(
+            runner.mission.state == MissionState::Paused && runner.mission.reason.as_deref() == Some("reason.project.reconcile"),
+            || format!("{name}: the mission is not paused for reconciliation"),
+        )?;
+        ensure(journal.pending().map_err(|e| e.key())?.iter().any(|i| i.id == "unknown-effect"), || {
+            format!("{name}: the intent was dropped")
+        })?;
+        ensure(git(&w.program, &w.repo, &["rev-parse", "faber/m1"])? == w.base, || format!("{name}: something landed"))?;
+        let log = std::fs::read_to_string(w.dir.join("roles.log")).unwrap_or_default();
+        let started: Vec<&str> = log.lines().filter_map(|l| l.strip_prefix("start ")).collect();
+        ensure(started == starts, || format!("{name}: roles started {started:?}, expected {starts:?}"))?;
+        cases.push(json!({"case": name, "parked": "reason.project.reconcile"}));
+    }
+    Ok(json!({"ok": true, "cases": cases}))
+}
+
 async fn run_stops(sandbox: &Path) -> Result<Value> {
     let mut seen = vec![];
     for (name, plot, key) in [
@@ -412,6 +453,7 @@ pub fn probe(sandbox: &Path) -> Result {
     for (key, result) in [
         ("mission", runtime.block_on(run_mission(sandbox))),
         ("crashes", runtime.block_on(run_crashes(sandbox))),
+        ("pending", runtime.block_on(run_pending(sandbox))),
         ("stops", runtime.block_on(run_stops(sandbox))),
         ("budget", runtime.block_on(run_budget(sandbox))),
     ] {

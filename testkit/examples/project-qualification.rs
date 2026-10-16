@@ -295,7 +295,6 @@ fn promote_main(data: &Path) -> io::Result<()> {
         "LIBPATH",
         "VCINSTALLDIR",
         "VCToolsInstallDir",
-        "FABER_R136_ARM",
     ] {
         if let Ok(value) = std::env::var(name) {
             env.insert(name.to_string(), value);

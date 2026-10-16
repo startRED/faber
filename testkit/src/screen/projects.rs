@@ -681,7 +681,7 @@ pub fn probe_mission(sandbox: &Path) -> Result {
         heavy: false,
     };
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| e.to_string())?;
-    let proof_spawn = faber_engine::proc::isolated_spawner(definition.environment.clone());
+    let proof_spawn = faber_engine::proc::isolated_spawner(definition.environment.clone(), vec![]);
     // The writer's stand-in is a real process in an engine-owned job. Its identity comes from that job, and the landing
     // below is released only by a proof built from retiring it: a recorded literal cannot stand in for it.
     let _enter = runtime.enter();

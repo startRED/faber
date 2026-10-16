@@ -591,6 +591,38 @@ pub fn project_thread_params(
     Ok((method, params))
 }
 
+/// What every project role is launched with: the server arguments (the per-process model catalog file by its content) and
+/// each role's thread parameters, with fixed stand-ins for the per-turn values (folder, model, effort). A receipt is bound
+/// to its hash (`qualification::launch_policy`), so a change to any of them asks for a new qualification run.
+pub(crate) fn project_launch_policy(roles: &[crate::project::Role]) -> Value {
+    let catalog = project_catalog_path().to_string_lossy().into_owned();
+    let server: Vec<String> =
+        project_codex_args(cfg!(windows)).into_iter().map(|a| a.replace(&json!(catalog).to_string(), "<catalog>")).collect();
+    let thread = CodexThread {
+        cwd: PathBuf::from(if cfg!(windows) { r"C:\faber-role" } else { "/faber-role" }),
+        model: Some("gpt-6-luna".into()),
+        effort: Some("medium".into()),
+        resume: None,
+        instructions: None,
+        user_name: None,
+        permissions: Permissions::Isolated,
+    };
+    // Each thread names its permission profile with a fresh id; the profile's content is what counts.
+    let threads: Vec<Value> = roles
+        .iter()
+        .map(|role| {
+            let Ok((_, params)) = project_thread_params(&thread, *role) else { return Value::Null };
+            let text = params.to_string();
+            let text = match params["config"]["default_permissions"].as_str() {
+                Some(profile) => text.replace(profile, "<profile>"),
+                None => text,
+            };
+            serde_json::from_str(&text).unwrap_or(Value::Null)
+        })
+        .collect();
+    json!({"server": server, "catalog": project_codex_catalog(), "threads": threads})
+}
+
 /// The thread a conversation opens: a role's fixed policy, or the person's own settings.
 fn open_params(area: Area, role: Option<crate::project::Role>, t: &CodexThread) -> (&'static str, Value) {
     match role {
@@ -622,10 +654,10 @@ impl CodexServer {
         let opts = CodexServerOptions { permissions: Permissions::Isolated, ..opts };
         let thread = CodexThread { permissions: Permissions::Isolated, ..thread };
         project_thread_params(&thread, role)?;
-        crate::project::policy::admit_launch(crate::model::Vendor::Codex, &opts.cli.command)?;
+        let image = crate::project::policy::admit_launch(crate::model::Vendor::Codex, &opts.cli.command)?;
         #[cfg(windows)]
         prepare_project_codex_catalog().map_err(|_| crate::project::policy::Blocker::Restrictions)?;
-        let server = Self::start_with_policy(opts, Some(role));
+        let server = proc::spawn_expecting(&image, || Self::start_with_policy(opts, Some(role)));
         let session = server.open(thread, sink);
         server.retire();
         Ok(session.for_project(role))
