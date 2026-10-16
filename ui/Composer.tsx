@@ -68,7 +68,7 @@ async function attach(list: Iterable<File>, draft: Draft): Promise<{ draft: Draf
       const url = await readAs(file, 'dataUrl');
       images = [...images, { mediaType: file.type, base64: url.slice(url.indexOf(',') + 1) }];
     } else if ((file.type.startsWith('text/') || TEXT.test(file.name)) && file.size <= INLINE_TEXT) {
-      text = `${text}${text ? '\n\n' : ''}Attached file ${file.name}:\n\`\`\`\n${await readAs(file, 'text')}\n\`\`\``;
+      text = `${text}${text ? '\n\n' : ''}${t('composer.attachedFile', { name: file.name })}\n\`\`\`\n${await readAs(file, 'text')}\n\`\`\``;
     } else {
       const url = await readAs(file, 'dataUrl');
       files = [...files, { name: file.name, base64: url.slice(url.indexOf(',') + 1) }];

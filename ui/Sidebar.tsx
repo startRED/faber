@@ -10,6 +10,7 @@ import { animateList, keepForExit } from './motion.ts';
 import { vendorName } from './models.ts';
 import { forgetProject } from './projects.ts';
 import type { Place } from './running.ts';
+import { mac } from './WindowControls.tsx';
 import { ageOf, freshness, groupChats, matches, type Quotas, showsChats, tailOf, tightest } from './sidebar.ts';
 
 /** The name of a conversation while it is being renamed: Enter keeps it, Esc and leaving the box too when nothing changed. */
@@ -164,7 +165,7 @@ export function Sidebar(props: Props) {
         </button>
       </Show>
       <button class="x" classList={{ confirm: confirming() === row.c.id }} aria-label={t('side.delete', { title: row.c.title })} onClick={() => remove(row.c.id)}>
-        {confirming() === row.c.id ? t('side.confirmDelete') : '×'}
+        {confirming() === row.c.id ? t('side.confirmDelete') : <Icon name="close" small />}
       </button>
     </div>
   );
@@ -174,7 +175,7 @@ export function Sidebar(props: Props) {
       <button class="newchat" onClick={() => props.onNew()}>
         <Icon name="plus" />
         <span>{t('side.new')}</span>
-        <kbd>Ctrl N</kbd>
+        <kbd>{t(mac ? 'key.newMac' : 'key.new')}</kbd>
       </button>
       <div class="areas" role="group" aria-label={t('area.label')}>
         <button class="area" aria-pressed={props.place.area === 'chat'} onClick={() => props.onArea('chat')}>
@@ -329,7 +330,7 @@ export function Sidebar(props: Props) {
           </button>
         </Show>
         <div class="version num" lang={lang()}>
-          v{props.version}
+          {t('side.version', { version: props.version })}
         </div>
       </div>
     </>

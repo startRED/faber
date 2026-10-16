@@ -201,8 +201,7 @@ the real keep-awake and autostart), `FABER_HIDDEN`, `FABER_CHANNEL`, `FABER_CDP_
 
 The fixed list the screen may call (`generate_handler!` in `src-tauri/src/main.rs`; `setup_*` live in
 `src-tauri/src/setup.rs`), typed in `ui/api.ts`. Commands return error keys (`error.*`, `reason.*`), never
-sentences; `open_link`'s English error and the raw system errors some commands pass on are the exceptions (incoherence
-23). Test builds add `report_checks` and two mission probes.
+sentences. Test builds add `report_checks` and two mission probes.
 
 | Group | Commands |
 | :--- | :--- |
@@ -238,7 +237,7 @@ checks in `tests/ui/index.ts`, real-app scenarios in `testkit/src/screen/mod.rs`
 | Public self-update | Done, on two channels (R156): stable reads the latest release's `latest.json` and previews (opt-in) the `preview-channel` release's, which every release replaces with its newest build; checks at start and every 6 h; installs on quit or, on Windows, at the first moment no conversation, mission or CLI install runs and the window is hidden (R141: it also installs at start, before the first input and with no unsent draft; "What's new" shows once after) | tests inside `src-tauri/src/update.rs`; `engine/tests/running.rs` (`is_working`) |
 | First run, account cards, tutorial | Done | `tests/ui/setup.check.ts`, `tutorial.check.ts`; `testkit/src/screen/setup.rs`, `first_run.rs` |
 | Settings, looks, theme files | Done | `tests/ui/settings.check.ts`, `appearance.check.ts`; `testkit/src/screen/settings.rs` |
-| Five languages | Done; part of de, es, fr and pt-BR still awaits a native speaker's review | `tests/ui/i18n.check.ts`, `mojibake.check.ts`; `engine/tests/locales.rs` (no unused text) |
+| Five languages | Done; names (Faber, Claude, Codex, the JSON file type) stay the same in every language; part of de, es, fr and pt-BR still awaits a native speaker's review | `tests/ui/i18n.check.ts`, `mojibake.check.ts`; `engine/tests/locales.rs` (no unused text) |
 | Right-click menus, rename, remove a project | Done | `tests/ui/contextmenu.check.ts`; `testkit/src/screen/menus.rs` |
 | Recents and environments | Done | `engine/tests/recents.rs`; `tests/ui/recents.check.ts` |
 | Homes and idle motion | Done | `tests/ui/idle.check.ts`, `hole.check.ts`, `motion.check.ts`; `testkit/src/screen/homes.rs` |
@@ -277,8 +276,9 @@ ones.
    labels; three labels for picking a folder ("Choose folder", "Choose a folder", "Add project folder").
 10. Two right-click menu implementations: `ui/Recents.tsx` has its own, with no confirm on Remove (C009).
 11. Three ways to confirm a delete: the × in the sidebar, the menu's Delete, and Recents' Remove with none.
-12. Money and quota in three formats and four vocabularies ("Own cost", "Cost so far", "Faber today … API-equivalent",
-    "… at API prices"; "Account pace", "Usage limits"), not localized.
+12. Money and quota in four vocabularies ("Own cost", "Cost so far", "Faber today … API-equivalent", "… at API prices";
+    "Account pace", "Usage limits"); which words stay is the owner's call (Owner). Amounts are written the language's way
+    (`money` and `amount` in `ui/i18n.ts`).
 13. "Update itself" means three things: the silent updater, the project's self-update trust (Settings > Projects) and the Local build card
     (shown on every mission board even outside the development channel).
 14. The same option in two places with different words: the name ("How should Faber call you?" in the first run, "Your
@@ -300,9 +300,6 @@ ones.
 21. Defaults are repeated in each reader (`permissions`, `keepAwake`, `notifications`, `userHooks`, effort `medium`):
     a new setting keeps its default in one place.
 22. The tray stays in English when Faber starts hidden (autostart): its words arrive only from an open window.
-23. Text outside `ui/locales/`: the `Ctrl N` and `Esc` key labels (also on macOS), `Aa`, `×`, `v{version}`, file size
-    units, mission durations, raw vendor ids and raw JSON on task cards, `$` amounts, and "Attached file" injected into
-    prompts; in Rust the idle tray tooltip, a dialog filter and `open_link`'s English error.
 
 ## Worked example: adding a setting
 

@@ -4,7 +4,7 @@ import { AppearanceSection } from './Appearance.tsx';
 import { Choices, Learn, Segmented, Toggle } from './controls.tsx';
 import { factory } from './draft.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
-import { LANGUAGES, t } from './i18n.ts';
+import { amount, LANGUAGES, t } from './i18n.ts';
 import { vendorName } from './models.ts';
 import { animateList } from './motion.ts';
 import { accountLine, freshness, type Quotas, usageRows } from './sidebar.ts';
@@ -105,7 +105,7 @@ export function Settings(props: Props) {
       <nav class="s-nav nav" aria-label={t('set.label')}>
         <button class="item" onClick={() => props.onClose()}>
           <span>{t('set.back')}</span>
-          <kbd>Esc</kbd>
+          <kbd>{t('key.esc')}</kbd>
         </button>
         <For each={SECTIONS}>
           {([id, key, icon]) => (
@@ -277,7 +277,7 @@ export function Settings(props: Props) {
                       <PlanName u={u()} />
                       <p class="usage-state">{t(`usage.state.${u().state}`)}</p>
                       <Show when={u().counting}><p class="note counting">{t('quota.countingNote')}</p></Show>
-                      <p>{t('usage.ownSpend', { cost: u().ownSpendUsd.toFixed(4) })}</p>
+                      <p>{t('usage.ownSpend', { cost: amount(u().ownSpendUsd, 4) })}</p>
                       <p class="hint">{t('usage.shared')}</p>
                       <Show when={u().unmetered}><p class="note">{t('usage.meterIncomplete', { n: u().unmetered })}</p></Show>
                       <Show when={u().relearning}><p class="note">{t('usage.relearning')}</p></Show>

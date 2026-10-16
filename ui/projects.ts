@@ -1,4 +1,5 @@
 import type { DecisionKind, TaskState, TaskView } from './api.ts';
+import { money } from './i18n.ts';
 import { keep } from './unsent.ts';
 
 export type PresenceChoice = 'continueWithout' | 'findTools';
@@ -53,14 +54,13 @@ export function formatCost(ownMicros: number | null | undefined): { isUnknown: b
   if (ownMicros === null || ownMicros === undefined) {
     return { isUnknown: true, display: 'projects.cost.unknown' };
   }
-  const dollars = ownMicros / 1_000_000;
-  return { isUnknown: false, display: `$${dollars.toFixed(2)}` };
+  return { isUnknown: false, display: money(ownMicros / 1_000_000) };
 }
 
 /** Formats the live cap in millionths of an API-equivalent dollar. */
 export function formatCap(capMicros: number | null | undefined): string {
   if (capMicros === null || capMicros === undefined) return 'projects.cost.unknown';
-  return `$${(capMicros / 1_000_000).toFixed(2)}`;
+  return money(capMicros / 1_000_000);
 }
 
 /** Formats a fraction (0.0 to 1.0) as a percentage integer. */

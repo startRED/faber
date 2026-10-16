@@ -689,7 +689,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         <div class="toast" role="alert">
           <span>{saveError()}</span>
           <button type="button" aria-label={t('toast.dismiss')} onClick={() => setSaveError(undefined)}>
-            ×
+            <Icon name="close" small />
           </button>
         </div>
       </Show>

@@ -250,7 +250,9 @@ async fn save_settings(faber: State<'_, Faber>, mut patch: Settings) -> Result<S
 #[tauri::command]
 async fn save_theme(app: AppHandle, appearance: Map<String, Value>, name: String) -> Result<bool, Failure> {
     let json = look::write_theme_file(&appearance, &name)?;
-    let mut dialog = app.dialog().file().add_filter("JSON", &["json"]).set_file_name(format!("my-theme{}", look::theme_extension()));
+    // The dialog suggests the theme's own name, which arrives in the person's language, keeping only plain characters.
+    let stem: String = name.chars().filter(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_')).collect();
+    let mut dialog = app.dialog().file().add_filter("JSON", &["json"]).set_file_name(format!("{}{}", stem.trim(), look::theme_extension()));
     if let Some(w) = main_window(&app) {
         dialog = dialog.set_parent(&w);
     }
@@ -276,7 +278,7 @@ async fn add_project(app: AppHandle, faber: State<'_, Faber>) -> Res<Option<Proj
         dialog = dialog.set_parent(&w);
     }
     let Some(picked) = dialog.blocking_pick_folder() else { return Ok(None) };
-    let path = picked.into_path().map_err(|e| e.to_string())?;
+    let path = picked.into_path().map_err(|_| "error.folder.notLocal")?;
     faber.engine.open_folder(&path.to_string_lossy()).map(Some)
 }
 
@@ -348,14 +350,14 @@ async fn save_file(app: AppHandle, faber: State<'_, Faber>, id: String, path: St
         dialog = dialog.set_parent(&w);
     }
     let Some(target) = dialog.blocking_save_file() else { return Ok(false) };
-    std::fs::copy(&source, target.into_path().map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    std::fs::copy(&source, target.into_path().map_err(|_| "error.file.save")?).map_err(|_| "error.file.save")?;
     Ok(true)
 }
 
 #[tauri::command]
 async fn show_file(app: AppHandle, faber: State<'_, Faber>, id: String, path: String) -> Res<()> {
     let Some(source) = faber.engine.workspace_file(&id, &path) else { return Ok(()) };
-    app.opener().reveal_item_in_dir(source).map_err(|e| e.to_string())
+    app.opener().reveal_item_in_dir(source).map_err(|_| "error.file.show".into())
 }
 
 /// Shows a project's folder in the file manager. The saved path is checked first (folder.rs), and the folder is only
@@ -364,7 +366,7 @@ async fn show_file(app: AppHandle, faber: State<'_, Faber>, id: String, path: St
 async fn show_project(app: AppHandle, faber: State<'_, Faber>, id: String) -> Res<()> {
     let project = faber.engine.project(&id)?;
     let folder = folder::local_folder(&project.path)?;
-    app.opener().reveal_item_in_dir(folder).map_err(|e| e.to_string())
+    app.opener().reveal_item_in_dir(folder).map_err(|_| "error.file.show".into())
 }
 
 /// An image from a chat workspace as a data URL, so the page never reads the disk itself.
@@ -373,17 +375,18 @@ async fn read_image(faber: State<'_, Faber>, id: String, path: String) -> Res<Op
     let Some(source) = faber.engine.workspace_file(&id, &path) else { return Ok(None) };
     let ext = source.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
     let Some((_, kind)) = IMAGE_TYPES.iter().find(|(e, _)| Some(*e) == ext.as_deref()) else { return Ok(None) };
-    if std::fs::metadata(&source).map_err(|e| e.to_string())?.len() > 8_000_000 {
+    // A picture that cannot be read only has no preview.
+    if !std::fs::metadata(&source).is_ok_and(|m| m.len() <= 8_000_000) {
         return Ok(None);
     }
-    let bytes = std::fs::read(&source).map_err(|e| e.to_string())?;
+    let Ok(bytes) = std::fs::read(&source) else { return Ok(None) };
     Ok(Some(format!("data:{kind};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes))))
 }
 
 #[tauri::command]
 async fn open_terminal(faber: State<'_, Faber>, id: String) -> Res<bool> {
     let Some(cmd) = faber.engine.terminal(&id) else { return Ok(false) };
-    terminal::open(&cmd).map_err(|e| e.to_string())?;
+    terminal::open(&cmd).map_err(|_| "error.terminal.open")?;
     Ok(true)
 }
 
@@ -391,9 +394,9 @@ async fn open_terminal(faber: State<'_, Faber>, id: String) -> Res<bool> {
 #[tauri::command]
 async fn open_link(app: AppHandle, url: String) -> Res<()> {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
-        return Err("only web links open".into());
+        return Err("error.link.web".into());
     }
-    app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
+    app.opener().open_url(url, None::<&str>).map_err(|_| "error.link.open".into())
 }
 
 /// The words the shell shows by itself (tray menu, tooltip, notification), sent whenever the language changes.
