@@ -7,6 +7,8 @@ pub enum Suite {
     Rust,
     Ui,
     Screen,
+    /// The two Clippy proofs. Only `--suite lint` runs them; `--all` and the changed files never pick them.
+    Lint,
 }
 
 impl Suite {
@@ -17,11 +19,12 @@ impl Suite {
             Suite::Rust => "rust",
             Suite::Ui => "ui",
             Suite::Screen => "screen",
+            Suite::Lint => "lint",
         }
     }
 
     pub fn parse(name: &str) -> Option<Suite> {
-        Suite::ALL.into_iter().find(|s| s.name() == name)
+        Suite::ALL.into_iter().chain([Suite::Lint]).find(|s| s.name() == name)
     }
 }
 
@@ -89,8 +92,8 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         match arg.as_str() {
             "--all" => opts.all = true,
             "--suite" => {
-                let name = it.next().ok_or("--suite needs a name: rust, ui or screen")?;
-                opts.suite = Some(Suite::parse(name).ok_or_else(|| format!("unknown suite {name}: use rust, ui or screen"))?);
+                let name = it.next().ok_or("--suite needs a name: rust, ui, screen or lint")?;
+                opts.suite = Some(Suite::parse(name).ok_or_else(|| format!("unknown suite {name}: use rust, ui, screen or lint"))?);
             }
             "--filter" => opts.filter = Some(it.next().ok_or("--filter needs some text")?.clone()),
             "--shard" => opts.shard = Some(shard(it.next().ok_or("--shard needs a part such as 1/3")?)?),
@@ -260,6 +263,7 @@ mod tests {
         );
         assert!(args(&["--suite"]).is_err());
         assert!(args(&["--suite", "gpu"]).is_err());
+        assert_eq!(args(&["--suite", "lint"]).unwrap().suite, Some(Suite::Lint));
         assert!(args(&["--filter"]).is_err());
         assert!(args(&["--everything"]).is_err());
         assert_eq!(args(&["--shard", "2/3"]).unwrap().shard, Some((2, 3)));

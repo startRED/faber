@@ -1,4 +1,5 @@
-//! What the runner prints: one line per test, and a summary. Pure functions, so the format is tested.
+//! What the runner shows and logs: one line per test for the log, the failures and measurements for the screen, and a
+//! summary. Pure functions, so the format is tested.
 
 use crate::plan::Suite;
 use std::time::Duration;
@@ -72,6 +73,40 @@ pub fn line(outcome: &Outcome) -> String {
     text
 }
 
+/// The most lines of a reason the screen shows; the log keeps it whole.
+const BRIEF: usize = 15;
+
+/// A long reason cut for the screen: its first line, then its error lines (`error...`, ` --> file:line`), or its first
+/// lines when none looks like an error.
+pub fn brief(message: &str) -> String {
+    let lines: Vec<&str> = message.lines().collect();
+    if lines.len() <= BRIEF {
+        return message.to_string();
+    }
+    let errors = lines[1..].iter().filter(|l| ["error", "-->"].iter().any(|start| l.trim_start().starts_with(start)));
+    let mut kept: Vec<&str> = lines[..1].iter().chain(errors).take(BRIEF).copied().collect();
+    if kept.len() == 1 {
+        kept = lines[..BRIEF].to_vec();
+    }
+    format!("{}\n({} more lines in the log)", kept.join("\n"), lines.len() - kept.len())
+}
+
+/// Whether a pass's note measures memory or processor (`143 MB`, `8.3%`), which a change reports (R125). Other notes,
+/// such as an audit's evidence, stay in the log.
+fn measures(note: &str) -> bool {
+    ["MB", "%"].iter().any(|unit| note.match_indices(unit).any(|(at, _)| note[..at].trim_end().ends_with(|c: char| c.is_ascii_digit())))
+}
+
+/// What the screen shows of an outcome (R154): a pass only when it measures memory or processor, and anything else with
+/// its reason cut by [`brief`].
+pub fn quiet(outcome: &Outcome) -> Option<String> {
+    match outcome.status {
+        Status::Pass if measures(&outcome.message) => Some(line(outcome)),
+        Status::Pass => None,
+        _ => Some(line(&Outcome { message: brief(&outcome.message), ..outcome.clone() })),
+    }
+}
+
 pub fn summary(outcomes: &[Outcome]) -> String {
     let count = |status| outcomes.iter().filter(|o| o.status == status).count();
     format!(
@@ -124,6 +159,33 @@ mod tests {
         all.push(Outcome::fail(Suite::Ui, "b", None, ""));
         assert_eq!(summary(&all), "1 passed, 1 failed, 0 not run, 1 skipped");
         assert_eq!(exit_code(&all), 1);
+    }
+
+    #[test]
+    fn the_screen_skips_plain_passes_and_keeps_measurements_and_failures() {
+        assert_eq!(quiet(&Outcome::pass(Suite::Rust, "a", None)), None);
+        let measured = Outcome::pass_with(Suite::Screen, "idle memory", None, "idle: 143 MB");
+        assert_eq!(quiet(&measured).unwrap(), "pass  screen  idle memory  [idle: 143 MB]");
+        assert!(quiet(&Outcome::pass_with(Suite::Screen, "dust", None, "processor of one core: focused 8.3%")).is_some());
+        let evidence = Outcome::pass_with(Suite::Screen, "T13", None, "temporary repos only; no remote; MB of head=\"5a66e78\"");
+        assert_eq!(quiet(&evidence), None, "an audit's evidence is not a measurement");
+        let fail = Outcome::fail(Suite::Rust, "b", None, "panicked at engine/src/x.rs:1:2:\nboom");
+        assert_eq!(quiet(&fail).unwrap(), line(&fail));
+    }
+
+    #[test]
+    fn a_long_reason_keeps_its_first_line_and_its_errors_and_the_rest_is_in_the_log() {
+        let compiling = (0..40).map(|n| format!("   Compiling crate{n} v1.0.0")).collect::<Vec<_>>().join("\n");
+        let build =
+            format!("the shell build failed (exit code: 1)\n{compiling}\nerror[E0308]: mismatched types\n  --> src-tauri/src/x.rs:3:9\n");
+        assert_eq!(
+            brief(&build),
+            "the shell build failed (exit code: 1)\nerror[E0308]: mismatched types\n  --> src-tauri/src/x.rs:3:9\n(40 more lines in the log)"
+        );
+        let plain = (0..20).map(|n| format!("missing {n}")).collect::<Vec<_>>().join("\n");
+        assert_eq!(brief(&plain).lines().count(), BRIEF + 1, "no error lines: the first ones");
+        assert!(brief(&plain).ends_with("(5 more lines in the log)"));
+        assert_eq!(brief("short\nreason"), "short\nreason");
     }
 
     #[test]

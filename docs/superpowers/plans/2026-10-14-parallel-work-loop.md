@@ -51,7 +51,9 @@ counts, which Faber's own code never does), written as one JSON line per round t
 Each round is one working day, or about six merged chunks, whichever comes first.
 
 1. **Plan.** Pick chunks from the roadmap as big as one agent does well (big-chunks). Give each a lane: an area of
-   files it owns for the round, a vendor by pace and strength, and its proof. Two lanes never own the same files.
+   files it owns for the round, a vendor by pace and strength, and its proof. Two lanes never own the same files: the
+   brief names the lane's claim, which it writes to `.faber-lane` before its first edit and deletes once it lands, and
+   `cargo t` enforces it (R154, [design.md](../../design.md#lane-claims)).
 2. **Run.** Lanes are separate sessions (Claude) or `codex exec` runs, each in its own worktree cut from
    phase-1-base. One integrator lane merges finished parts in order and keeps main following.
 3. **Measure.** The report script fills M1 to M6 for the round.
