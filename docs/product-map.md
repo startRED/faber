@@ -16,8 +16,8 @@ that changes them updates this page too. Last full audit: 2026-10-16.
 | Projects | The area for git folders. The person gives a goal and Faber runs a mission. Nothing chats directly inside a project any more: the shell refuses it (`error.project.missionRequired`) and older project conversations open read-only. | `ui/Projects.tsx`, `engine/src/project/` |
 | Mission | One goal in one project, done by roles in a separate copy (a git worktree) and landed on Faber's own `faber/…` branch, never on the person's branch. Today (v0): one task, one Writer attempt, no repair loop, a US$2.00 cap. | `engine/src/project/coordinator.rs`, journal in `<project>/.faber/missions/<id>/` |
 | Lead, Writer, Reviewer | The roles of a mission: plans the work; changes the code; reviews the exact result. The Reviewer is always the other vendor. | `engine/src/project/` |
-| Checks | The commands a project declares under a "Proof commands" heading in its AGENTS.md or CLAUDE.md (or a detected default), confirmed by the person before the first mission (R137). Code and specs call them proofs. | `engine/src/project/mission.rs` |
-| Grant | What the person allows in a project: the git mode (Safe, `seguro`: a separate copy only; `equilibrado`, push and draft PR, exists in the engine but is not offered) and self-update trust. | `engine/src/project.rs` |
+| Checks | The commands a project declares under a "Proof commands" heading in its AGENTS.md or CLAUDE.md (or a detected default), confirmed by the person on a sheet when the first mission starts (R137), and read or edited later in Settings > Projects. Code and specs call them proofs. | `engine/src/project/mission.rs`, `ui/ProjectSettings.tsx`, `ui/Projects.tsx` |
+| Grant | What the person allows in a project: the git mode (Safe, `seguro`: a separate copy only; `equilibrado`, push and draft PR, exists in the engine but is not offered) and self-update trust. Changed in Settings > Projects. | `engine/src/project.rs`, `ui/ProjectSettings.tsx` |
 | Run mode | Normal or Autonomous on a mission. Stored; nothing reads it yet. | `ui/Projects.tsx` |
 | Auto | "AI: choose for me": a small model sorts each message and a fixed table picks the model and effort, paced by how much of each subscription's quota is left. | `engine/src/route.rs`, `engine/src/engine/auto.rs`, `engine/src/budget.rs` |
 | Effort | Low, medium or high for a model the person picked by hand; Auto picks its own. | `ui/Composer.tsx`, `engine/src/router.rs` |
@@ -61,11 +61,12 @@ replaces the shell; otherwise the shell shows the sidebar, the topbar, the work 
 | Chat conversation | A chat is open | Messages; work log; permission, held-back and quota cards; file cards (preview, save, show); answer actions (copy, step up, "Redo with…", open in terminal, cost, cache warm); one status line with "Details in Settings"; the composer below | `ui/Thread.tsx`, `ui/Ask.tsx`, `ui/QuotaCard.tsx`, `ui/worklog.ts` |
 | Composer | Chat only | Text, paste or drop files, attach, model, effort (manual model only), Stop, Send; warms the CLI on the first key and lets Auto route the draft | `ui/Composer.tsx`, `ui/models.ts`, `ui/composer-size.ts` |
 | Projects: open a project | Projects area, no project selected | "Add project folder", Recents and environments, pick up (three project conversations), other projects | `ui/Projects.tsx`, `ui/Recents.tsx` |
-| Projects: start card | A project, no mission selected | Goal box (Enter starts a mission); checks to confirm or edit; tool presence; git mode; self-update trust; Details (folder, base, author); side column with the project, pick up and other projects; black hole | `ui/Projects.tsx`, `ui/projects.ts`, `ui/Hole.tsx` |
+| Projects: start card | A project, no mission selected | Goal box (Enter starts a mission); black hole; side column with the project, pick up and other projects. Checks, tools, git mode, self-update trust and Details moved to Settings > Projects | `ui/Projects.tsx`, `ui/projects.ts`, `ui/Hole.tsx` |
+| Projects: checks sheet | First mission start in a project | The checks it was shown, to confirm and go, or later; asked once per list | `ui/Projects.tsx` |
 | Projects: mission board | A mission selected (remembered per project) | Run mode; Stop, Resume; progress line; report when done; needs-you and decision cards; tasks in Ready, Running, Review, Done, Blocked; own cost against the cap and account pace; local build | `ui/Projects.tsx`, `ui/LocalBuild.tsx` |
 | Past project conversation | Opened from the sidebar or a pick-up list | Read only: no composer | `ui/Thread.tsx` |
 | Running column | Run button, Ctrl+., or by itself 1.5 s after typing stops | Running conversations by project with their state in words; permission and held-back cards; open a conversation | `ui/Running.tsx`, `ui/running.ts` |
-| Settings | Ctrl+,, the sidebar button, a quota line (opens Usage limits), "Details in Settings" | Five sections (below); Back or Esc | `ui/Settings.tsx`, `ui/Appearance.tsx`, `ui/draft.ts` |
+| Settings | Ctrl+,, the sidebar button, a quota line (opens Usage limits), "Details in Settings" | Six sections (below); Back or Esc | `ui/Settings.tsx`, `ui/ProjectSettings.tsx`, `ui/Appearance.tsx`, `ui/draft.ts` |
 | Right-click menus | Right-click, the Menu key or Shift+F10 | Per target, below | `ui/ContextMenu.tsx`, `ui/contextmenu.ts` |
 | Save-error toast | A save fails | Read and dismiss | `ui/App.tsx` |
 | Tray | Always, outside the window | Open or Quit; a number while something needs the person; one notification per question, mission decision or held-back request, unless notifications are off | `src-tauri/src/tray.rs`, `src-tauri/src/tray/` |
@@ -103,16 +104,18 @@ adds a line. Browser keys (F5, F7, Ctrl+R, P, S, U) do nothing.
 | Tutorial | Only once an AI is signed in | `tutorialDone: true` on finish or skip |
 
 Left at their defaults, changeable later in Settings: language, permissions, hooks, notifications, keep awake, autostart.
-A project's grant and checks are asked on its start card before its first mission, not in the first run.
+A project's checks are confirmed on a sheet when its first mission starts, not in the first run; its grant lives in Settings > Projects.
 
 ## Settings screen
 
-Five sections, in this order. Nothing else is a Settings section.
+Six sections, in this order. Nothing else is a Settings section.
 
 - **General**: Language (follow the system, or one of five); Your name; Your CLI hooks (only acts under "Ask before
   commands"); Permissions for Chat and Projects ("Don't ask", "Ask before commands"); Chat working folder (with Recents;
   acts on the open chat while it has no message; its controls only appear when Settings was opened from Chat); Notifications
   (Notify me, Play a sound); System, Windows only (keep the computer awake while Faber works, start with Windows).
+- **Projects**: per project, closed until opened: checks (confirm, edit, view), "If a tool is missing" (continue without),
+  git mode, self-update trust (switch); folder, base and author under More. Applies to that project only.
 - **Appearance**: a draft with a live preview, applied only by "Use this look": six looks, accent (five swatches, any
   colour, hex), background, text font, heading font, text size, spacing, corners, motion, the fixed-meaning colours
   (read only), save or open a theme file; in the preview, contrast readings and three effect switches; Back to default.
@@ -158,7 +161,7 @@ The data folder is `%APPDATA%\Faber` (or `FABER_DATA_DIR`). JSON files are writt
 | Where | What | Written by |
 | :--- | :--- | :--- |
 | `conversations/<id>.json` | One conversation: messages, `choice` (model and effort), `workingFolder`, `allowAlways` (tools always allowed in it), the copied `userName`, CLI sessions, queued messages, a waiting quota recovery | The engine |
-| `projects.json` | Projects: id, name, path, git identity (`repo`), `grant`, the confirmed checks (`extra.proof`) | Add, open or remove a project; the start card |
+| `projects.json` | Projects: id, name, path, git identity (`repo`), `grant`, the confirmed checks (`extra.proof`) | Add, open or remove a project; Settings > Projects; the checks sheet |
 | `<project>/.faber/missions/<id>/` and `missions/<id>/` | A mission's journal (mission, plan, contracts, decisions, artifacts, report) and its run, runtime and effects records | The mission engine |
 | `workspaces/<project>/` | The persistent working copy where a project's setup and checks run | The mission engine |
 | `qualification/` | Receipts of the hidden check of the installed CLIs before missions (valid 24 h) | The shell, before a mission starts |
@@ -237,10 +240,8 @@ Found by the 2026-10-16 audit and not fixed yet. Touching one of these parts mea
 never copying it. "Owner" marks a choice of taste or direction that needs the owner first. Delete a line in the commit
 that fixes it.
 
-1. Settings on a work screen (C011): the Projects start card carries the checks list, "If a tool is missing", a git mode
-   with one option and the self-update switch, plus a technical Details block; the board carries the run mode. The owner
-   already decided (C011): they leave the work screen for Settings or a just-in-time consent. Where each one lands is
-   a design choice to make with product-rules.md.
+1. Settings on a work screen (C011): the start card is calm now (checks, tools, git mode, self-update trust and Details
+   live in Settings > Projects); the board still carries the run mode.
 2. Mission needs are invisible inside the window: the tray counts mission decisions and blocked missions, but the run
    button, the running column, the sidebar and the pick-up lists only count conversations.
 3. A mission board has no way to start another mission or leave it; the selection comes back from browser storage.
@@ -260,7 +261,7 @@ that fixes it.
 11. Three ways to confirm a delete: the × in the sidebar, the menu's Delete, and Recents' Remove with none.
 12. Money and quota in three formats and four vocabularies ("Own cost", "Cost so far", "Faber today … API-equivalent",
     "… at API prices"; "Account pace", "Usage limits"), not localized.
-13. "Update itself" means three things: the silent updater, the start card's self-update trust and the Local build card
+13. "Update itself" means three things: the silent updater, the project's self-update trust (Settings > Projects) and the Local build card
     (shown on every mission board even outside the development channel).
 14. The same option in two places with different words: the name ("How should Faber call you?" in the first run, "Your
     name" in Settings) and text size (three buttons in the first run saving 13, the theme's own or 16; a slider up to 18
