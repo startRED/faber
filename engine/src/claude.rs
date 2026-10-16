@@ -60,10 +60,6 @@ impl ClaudeFlags {
     }
 }
 
-/// Where Haiku conversations are compacted: under the 100K step above which its price rises fivefold. 100k is the lowest the
-/// CLI accepts.
-const HAIKU_AUTOCOMPACT: &str = "100k";
-
 // Chat stays lean: a fixed list of built-in tools. Ask keeps Chat restricted with no MCP servers; Isolated also drops every
 // startup customization; full access leaves the person's own integrations on.
 const CHAT_TOOLS: &str = "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch";
@@ -223,7 +219,9 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
         args.push("--append-system-prompt".into());
         args.push(persona(&PersonaInput { name: launch.user_name.as_deref() }));
     }
-    if let Some(window) = launch.instructions.is_none().then(|| launch.model.as_deref().and_then(autocompact_window)).flatten() {
+    // Side questions keep the CLI default, and an older CLI that does not list the flag would refuse to start with it.
+    let compacts = launch.flags.autocompact && launch.instructions.is_none();
+    if let Some(window) = compacts.then(|| launch.model.as_deref().and_then(autocompact_window)).flatten() {
         args.extend(["--autocompact".into(), window.into()]);
     }
     for (flag, value) in [("--model", &launch.model), ("--effort", &launch.effort), ("--resume", &launch.resume)] {
@@ -231,12 +229,6 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
             args.push(flag.into());
             args.push(v.clone());
         }
-    }
-    // Faber's own Haiku workers and roles (the isolated mode and side questions) compact early; every other model, and every
-    // conversation the person chose a model for, keeps the CLI's own default.
-    let internal = launch.instructions.is_some() || launch.permissions == Permissions::Isolated;
-    if launch.flags.autocompact && internal && launch.model.as_deref().is_some_and(|m| m.to_ascii_lowercase().contains("haiku")) {
-        args.extend(["--autocompact".into(), HAIKU_AUTOCOMPACT.into()]);
     }
     args
 }
