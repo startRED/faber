@@ -154,8 +154,10 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: cargo t --build-only
+      # `rustup run` hands the runner what `cargo t` would (RUSTUP_HOME, the toolchain): the sandbox has its own home, and a
+      # mission proof (the canary) runs cargo inside it.
       - if: needs.changes.outputs.ui == 'true'
-        run: ./target/debug/faber-test.exe --suite ui --prebuilt
+        run: rustup run stable ./target/debug/faber-test.exe --suite ui --prebuilt
       # Exactly the programs `--prebuilt` checks for (testkit/src/testbuild.rs, `built_programs`).
       - uses: actions/upload-artifact@v4
         with:
@@ -198,7 +200,8 @@ jobs:
         with:
           name: test-app
           path: target
-      - run: ./target/debug/faber-test.exe --suite screen --shard ${{ matrix.shard }} --prebuilt
+      # As in the app job: `rustup run` hands the runner the toolchain, as `cargo t` would.
+      - run: rustup run stable ./target/debug/faber-test.exe --suite screen --shard ${{ matrix.shard }} --prebuilt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
