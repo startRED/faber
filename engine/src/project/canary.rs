@@ -246,10 +246,14 @@ pub(crate) fn pin(vendor: Vendor, model: &str, version: &str) -> ModelPin {
     ModelPin { vendor, model: model.into(), effort: "medium".into(), cli_version: version.into() }
 }
 
-pub(crate) fn cli_version(vendor: Vendor) -> Result<String, String> {
-    let name = if vendor == Vendor::Claude { "claude" } else { "codex" };
-    let cli = crate::cli::find_cli(name).ok_or("error.cli.missing")?;
-    let text = super::qualification::observe(&cli.command, &cli.prefix).map(|i| i.version).map_err(|_| "error.cli.missing".to_string())?;
+pub(crate) fn cli(vendor: Vendor) -> Option<String> {
+    crate::cli::find_cli(vendor.name()).filter(|c| c.prefix.is_empty()).map(|c| c.command)
+}
+
+/// The version of a CLI the receipt admits, through the same pinned, hash-first path as a role launch: a program whose hash
+/// is not the receipt's is never asked for `--version`.
+pub(crate) fn cli_version(vendor: Vendor, bin: &dyn Fn() -> Option<String>) -> Result<String, String> {
+    let text = super::qualification::admitted(vendor, bin).map(|pinned| pinned.version).map_err(|_| "error.cli.missing".to_string())?;
     version_token(&text).ok_or_else(|| "error.cli.missing".to_string())
 }
 
@@ -267,6 +271,19 @@ mod version_tests {
         assert_eq!(super::version_token("2.1.296 (Claude Code)").as_deref(), Some("2.1.296"));
         assert_eq!(super::version_token("codex-cli 0.162.1").as_deref(), Some("0.162.1"));
         assert_eq!(super::version_token("no version here"), None);
+    }
+
+    /// Review 3, #1: the real canary takes the CLI version through the receipt's pinned, hash-first admission, so with no
+    /// admitting receipt the CLI is not even looked up, let alone asked for `--version`.
+    #[test]
+    fn the_canary_asks_no_cli_its_version_before_a_receipt_admits_it() {
+        let looked = std::cell::Cell::new(false);
+        let found = || {
+            looked.set(true);
+            Some(std::env::current_exe().unwrap().to_string_lossy().into_owned())
+        };
+        assert!(super::cli_version(super::Vendor::Claude, &found).is_err());
+        assert!(!looked.get(), "the CLI was looked up before a receipt admitted it");
     }
 }
 
@@ -344,8 +361,8 @@ pub async fn run(engine: &Engine, engine_data: &Path, work: &Path, mode: Mode) -
             Pins { lead: writer.clone(), writer, reviewer }
         }
         Mode::Real => {
-            let writer = pin(WRITER_MODEL.0, WRITER_MODEL.1, &cli_version(WRITER_MODEL.0)?);
-            let reviewer = pin(REVIEWER_MODEL.0, REVIEWER_MODEL.1, &cli_version(REVIEWER_MODEL.0)?);
+            let writer = pin(WRITER_MODEL.0, WRITER_MODEL.1, &cli_version(WRITER_MODEL.0, &|| cli(WRITER_MODEL.0))?);
+            let reviewer = pin(REVIEWER_MODEL.0, REVIEWER_MODEL.1, &cli_version(REVIEWER_MODEL.0, &|| cli(REVIEWER_MODEL.0))?);
             Pins { lead: writer.clone(), writer, reviewer }
         }
     };
@@ -355,6 +372,8 @@ pub async fn run(engine: &Engine, engine_data: &Path, work: &Path, mode: Mode) -
         #[cfg(feature = "r132-harness")]
         arm_waiver(engine_data, &mid);
         caps(engine, &mid, REAL_CAP_MICROS)?;
+        #[cfg(feature = "r132-harness")]
+        keep_waivers(engine, engine_data)?;
     }
     let journal = Journal::open(Path::new(&repository.identity.root), engine_data, &mid).map_err(|e| e.key().to_string())?;
     // A replay has no provider to qualify, so only a real run goes through the admission of a live mission.
@@ -388,6 +407,10 @@ pub async fn run(engine: &Engine, engine_data: &Path, work: &Path, mode: Mode) -
     };
     #[cfg(feature = "r132-harness")]
     super::budget::r132::close();
+    #[cfg(feature = "r132-harness")]
+    if mode == Mode::Real {
+        keep_waivers(engine, engine_data)?;
+    }
     match outcome {
         Outcome::Done { .. } => Ok(Evidence {
             mode,
@@ -400,23 +423,40 @@ pub async fn run(engine: &Engine, engine_data: &Path, work: &Path, mode: Mode) -
     }
 }
 
-/// R136: the real canary mission of a harness-built candidate may be admitted once without the two-point margin. The
-/// marker has its one fixed path in the canary's data folder and is created once (a later run finds it and is refused),
-/// the waiver is bound to this mission id and its allocations, the ledger remembers it, and it closes when the mission
-/// ends. A product build has no such code and reads no variable for it.
+/// R136: the real canary mission of a harness-built candidate may be admitted once without the two-point margin. Each
+/// run deletes the canary's data folder, so the marker and the waiver records live one folder up, in the canary folder
+/// that survives: the marker has its one fixed path there and is created once (a later run finds it and is refused),
+/// the waiver is bound to this mission id and its allocations, the ledger records are kept there after every budget step,
+/// and the waiver closes when the mission ends. A product build has no such code and reads no variable for it.
 #[cfg(feature = "r132-harness")]
 fn arm_waiver(engine_data: &Path, mission: &str) {
     use super::budget::r132::{Exception, waive};
     let evidence = serde_json::json!({"exception": "R136", "for": "canary mission of a harness-built candidate"});
-    let _ = waive(Exception::R136, engine_data, mission, &evidence);
+    let _ = waive(Exception::R136, kept_root(engine_data), mission, &evidence);
+}
+
+/// The canary folder that survives the deletion of its data folder.
+#[cfg(feature = "r132-harness")]
+fn kept_root(engine_data: &Path) -> &Path {
+    engine_data.parent().unwrap_or(engine_data)
+}
+
+#[cfg(feature = "r132-harness")]
+const KEPT: &str = "waiver-ledger.json";
+
+/// Copies the engine ledger's waiver records out of the data folder; a failure stops the mission (fail closed).
+#[cfg(feature = "r132-harness")]
+fn keep_waivers(engine: &Engine, engine_data: &Path) -> Result<(), String> {
+    super::budget::r132::save_records(&engine.ledger(), &kept_root(engine_data).join(KEPT)).map_err(key)
 }
 
 /// Prepares the canary's data folder before its engine starts. R136 (harness builds only): a real canary starts from a
-/// ledger of its own, keeping only the waiver records. A product build changes nothing.
+/// ledger of its own, keeping only the waiver records (the seeded ones and those kept outside the folder). A product
+/// build changes nothing.
 pub fn prepare_data(engine_data: &Path, mode: Mode) -> Result<(), String> {
     #[cfg(feature = "r132-harness")]
     if mode == Mode::Real {
-        super::budget::r132::fresh_ledger(engine_data).map_err(key)?;
+        super::budget::r132::fresh_ledger(engine_data, &kept_root(engine_data).join(KEPT)).map_err(key)?;
     }
     let _ = (engine_data, mode);
     Ok(())

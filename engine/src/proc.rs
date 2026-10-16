@@ -627,6 +627,28 @@ mod tests {
         // The expectation covers one start only.
         assert!(spawn(&cmd_exe.to_string_lossy(), &args, dir.path()).is_ok());
     }
+
+    /// F5, second round: between the hash and the run nothing can swap the program. The admission pins the file (no
+    /// write, rename or delete while held), hashes it through that handle, and the launch runs it while still pinned.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_pinned_program_cannot_be_swapped_until_it_has_started() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = dir.path().join("cli.exe");
+        std::fs::copy(std::path::PathBuf::from(std::env::var("SystemRoot").unwrap()).join("System32").join("cmd.exe"), &cli).unwrap();
+        let pinned = crate::project::qualification::pin(&cli).unwrap();
+        assert_eq!(pinned.sha256, crate::project::qualification::fingerprint(&cli).unwrap());
+        assert!(std::fs::OpenOptions::new().write(true).open(&cli).is_err(), "written while pinned");
+        assert!(std::fs::rename(&cli, dir.path().join("moved.exe")).is_err(), "renamed while pinned");
+        assert!(std::fs::remove_file(&cli).is_err(), "deleted while pinned");
+        let marker = dir.path().join("ran.txt");
+        let args = vec!["/d".to_string(), "/c".into(), "echo".into(), format!("x>{}", marker.display())];
+        let p = spawn_expecting(&pinned.sha256, || real_spawner()(&cli.to_string_lossy(), &args, dir.path())).unwrap();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(10), command_output(p)).await;
+        assert!(marker.exists(), "the pinned program did not run");
+        drop(pinned);
+        std::fs::rename(&cli, dir.path().join("moved.exe")).unwrap();
+    }
     #[tokio::test]
     async fn command_output_drains_large_pipes_and_keeps_a_bounded_tail() {
         let (mut write, read) = tokio::io::duplex(32);

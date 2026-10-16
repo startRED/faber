@@ -405,9 +405,9 @@ pub fn setup(launch: Launch, executor: &mut impl Executor, resolve: &dyn Fn(&str
 
 /// The models of a project mission and the CLI versions they run on: Claude plans and writes, Codex reviews.
 pub fn product_pins() -> Result<Pins, String> {
-    use super::canary::{REVIEWER_MODEL, WRITER_MODEL, cli_version, pin};
-    let writer = pin(WRITER_MODEL.0, WRITER_MODEL.1, &cli_version(WRITER_MODEL.0)?);
-    let reviewer = pin(REVIEWER_MODEL.0, REVIEWER_MODEL.1, &cli_version(REVIEWER_MODEL.0)?);
+    use super::canary::{REVIEWER_MODEL, WRITER_MODEL, cli, cli_version, pin};
+    let writer = pin(WRITER_MODEL.0, WRITER_MODEL.1, &cli_version(WRITER_MODEL.0, &|| cli(WRITER_MODEL.0))?);
+    let reviewer = pin(REVIEWER_MODEL.0, REVIEWER_MODEL.1, &cli_version(REVIEWER_MODEL.0, &|| cli(REVIEWER_MODEL.0))?);
     Ok(Pins { lead: writer.clone(), writer, reviewer })
 }
 

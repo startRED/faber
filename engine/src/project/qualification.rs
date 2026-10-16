@@ -194,15 +194,64 @@ pub fn parse_version(text: &str) -> io::Result<&str> {
     Ok(text)
 }
 
+/// A program file held open so that, until it is dropped, nobody can change, rename or delete it (on Windows other
+/// openers may only read it; the system can still load it as an image). Its hash was read through that same handle, so
+/// the bytes hashed are the bytes a process started from `path` runs while the pin is held.
+pub struct Pinned {
+    _file: std::fs::File,
+    pub path: PathBuf,
+    pub sha256: String,
+    /// The `--version` the program answered, filled only by an admission whose receipt it matched.
+    pub version: String,
+}
+
+/// Opens the resolved program file, denying writes and deletes on Windows, and hashes it through that handle.
+pub fn pin(path: &Path) -> io::Result<Pinned> {
+    let path = std::fs::canonicalize(path)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // FILE_SHARE_READ only: no writer, no rename and no delete while the pin is held.
+        options.share_mode(0x1);
+    }
+    let mut file = options.open(&path)?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0; 16 * 1024];
+    loop {
+        let size = file.read(&mut buffer)?;
+        if size == 0 {
+            break;
+        }
+        digest.update(&buffer[..size]);
+    }
+    Ok(Pinned { _file: file, path, sha256: format!("{:x}", digest.finalize()), version: String::new() })
+}
+
 /// Hashes the program and asks it for `--version`: no shell, no window, scrubbed environment, a deadline.
 /// Script launchers (`node script.js`) are not qualified: their bytes are not the program's.
 pub fn observe(command: &str, prefix: &[String]) -> io::Result<Identity> {
-    use std::process::{Command, Stdio};
-    use std::time::{Duration, Instant};
     if !prefix.is_empty() {
         return Err(io::Error::other("script launchers are not qualified"));
     }
-    let binary_hash = fingerprint(Path::new(command))?;
+    let pinned = pin(Path::new(command))?;
+    Ok(Identity { version: version_of(&pinned.path)?, binary_hash: pinned.sha256 })
+}
+
+/// The admission's observation: the program is pinned and hashed first, and asked for `--version` only when its hash is
+/// `expected` (the receipt's). Another program never runs; it answers with its hash and no version. The pin is handed
+/// back so the launch can keep the file unchanged until the started process runs (`proc::spawn_expecting`).
+pub fn observe_pinned(command: &str, expected: &str) -> io::Result<(Identity, Pinned)> {
+    let mut pinned = pin(Path::new(command))?;
+    let version = if pinned.sha256 == expected { version_of(&pinned.path)? } else { String::new() };
+    pinned.version.clone_from(&version);
+    Ok((Identity { version, binary_hash: pinned.sha256.clone() }, pinned))
+}
+
+fn version_of(command: &Path) -> io::Result<String> {
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
     let mut run = Command::new(command);
     run.arg("--version").env_clear().stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
     for name in ["PATH", "SystemRoot", "WINDIR", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "HOME", "TEMP", "TMP"] {
@@ -233,7 +282,7 @@ pub fn observe(command: &str, prefix: &[String]) -> io::Result<Identity> {
     if !status.success() {
         return Err(io::Error::other("version probe failed"));
     }
-    Ok(Identity { version: parse_version(&text)?.to_string(), binary_hash })
+    Ok(parse_version(&text)?.to_string())
 }
 
 fn read(dir: &Path, vendor: Vendor) -> Result<Receipt, Reject> {
@@ -288,11 +337,12 @@ pub fn verify_receipt(dir: &Path, vendor: Vendor, now: u64, observe: &dyn Fn() -
         return Err(Reject::Requalify);
     }
     let actual = observe().map_err(|_| Reject::Unobserved)?;
-    if actual.version != receipt.version {
-        return Err(Reject::Version);
-    }
+    // The bytes first: an observer that pins the program asks another program for nothing.
     if actual.binary_hash != receipt.binary_hash {
         return Err(Reject::Binary);
+    }
+    if actual.version != receipt.version {
+        return Err(Reject::Version);
     }
     Ok(receipt)
 }
@@ -443,16 +493,23 @@ pub fn issue(dir: &Path, vendor: Vendor, identity: &Identity, checks: BTreeMap<S
 
 /// The gate `policy` consults. Opens only on Windows, where hidden owned-job process control exists, and only
 /// with the engine's own receipt folder; `bin` names the program about to be launched, looked up only if a
-/// receipt is worth checking.
-pub(crate) fn admitted(vendor: Vendor, bin: &dyn Fn() -> Option<String>) -> Result<String, Reject> {
+/// receipt is worth checking. The program is pinned and hashed before it is asked for `--version`, and the pin is handed
+/// back: while the caller holds it, the file it launches is the file the receipt names.
+pub(crate) fn admitted(vendor: Vendor, bin: &dyn Fn() -> Option<String>) -> Result<Pinned, Reject> {
     if !cfg!(windows) {
         return Err(Reject::Missing);
     }
     let dir = DIR.get().ok_or(Reject::Missing)?;
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    verify_current(dir, vendor, now, &|| observe(&bin().ok_or_else(|| io::Error::other("CLI not found"))?, &[]), &|| {
-        managed_policy_clear(&path_presence, &registry_presence)
-    })
+    let expected = read(dir, vendor)?.binary_hash;
+    let held = std::cell::RefCell::new(None);
+    let observe = || {
+        let (identity, pinned) = observe_pinned(&bin().ok_or_else(|| io::Error::other("CLI not found"))?, &expected)?;
+        *held.borrow_mut() = Some(pinned);
+        Ok(identity)
+    };
+    let sha256 = verify_current(dir, vendor, now, &observe, &|| managed_policy_clear(&path_presence, &registry_presence))?;
+    held.into_inner().filter(|pinned| pinned.sha256 == sha256).ok_or(Reject::Binary)
 }
 
 /// Claude Code reports no effective-hooks census, so hooks are off by construction: safe mode, no settings source

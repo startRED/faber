@@ -519,8 +519,9 @@ a folder (a second drive), the folder's owner first grants itself the right to l
 writes outside the same folders.
 
 Residual in v0, disclosed on screen (`projects.proofs.isolationTech`): a proof can still read what the user can read and
-use the network, and on Linux nothing limits its writes. The upgrade path is an AppContainer (Windows), which closes reads
-and the network as well.
+use the network, and on Linux nothing limits its writes. R139 accepts this for v0: chat roles already run with full access
+(R121), which exposes strictly more, and a proof starts from a cleared environment at Low integrity. The upgrade path is an
+AppContainer (Windows), which closes reads and the network as well.
 
 The real canary is opt-in (`real-canary.json`). It runs the candidate build, untrusted until it passes, with the real
 Claude Code and Codex CLIs, signed in through the user's own profile and environment, with copied qualification receipts;
@@ -528,7 +529,14 @@ only its proof runs isolated.
 
 Two more launch checks: every qualification receipt binds the launch-policy revision (a SHA-256 of every role's launch
 parameters), so a changed flag or setting asks for a new qualification run; and a role CLI is created suspended, the file
-its image came from is hashed, and a hash other than the receipt's kills it before it runs.
+its image came from is pinned (opened with a share mode that denies write and delete) and hashed through that handle before
+`--version` runs and again before resume; the handle stays open until the process has started, so the file cannot be
+swapped in between, and a hash other than the receipt's kills it before it runs. Waiver markers and their ledger records
+live next to the canary data folder, not inside it, so deleting that folder does not revive a spent waiver, and a waiver
+is recorded as spent before the mission that uses it runs.
+
+Follow-up: a crash after a proof ran but before its progress mark was written replays the proof on resume. Proofs are
+idempotent tests, so v0 accepts the replay.
 
 ### Screen commands and event
 

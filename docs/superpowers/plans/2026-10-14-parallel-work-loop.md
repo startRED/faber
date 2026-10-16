@@ -88,15 +88,16 @@ M3 (CI), M4 and the fixed prompt size from Claude Code's local transcripts and G
 |---|---|---|---|
 | 1 | 2026-10-14 | E2 CI in five parallel jobs; sweep spares folders used in the last 6 h | CI 17-28 min to 7.6 min, green; two lanes had lost a warm build to the sweep before the fix |
 | 2 | 2026-10-14 | E3 build slots; screen parts dealt by CI time; E4 lean prompt for the owner checkout; E5, E6, E10 handed to the lead session as lane rules | Proofs green (853 tests). First CI run 11.3 min: one slow Windows runner (its part ran 318 s of scenarios against 181 and 205 s, one scenario 63 s instead of 8 s), so the dealing is judged by the median of the next runs. E4 and E5 need a day of sessions |
+| 3 | 2026-10-15 | Judged round 2 on a day of sessions; nothing new started | Kept E3 and the CI-time dealing: the last 5 green `phase-1-base` runs took 7.3 min (median), parts 5.6, 6.9 and 6.2 min against lints 7.1 and 5.5; the two slow runs (19 and 15 min) were slow in every job, macOS included, so the runner or a cold cache, not the dealing. E4 gave nothing: new owner-checkout sessions still open at 81-88k tokens (87.7k before), because the turned-off skills were a small part; tool schemas (32k), MCP tools (25k) and skills (10k) are the bulk. Cost per request rose to US$0.071 and the cache-write share to 56% (from 0.06 and 42%), which no round-2 change explains; long lane sessions are the likely cause. The report counted Faber's own test runs (missions, live tests) as sessions and must keep only development folders |
 
 Waiting, and on what:
 
 - E1: the stacked branches merge in the lead session's order once each passes its review (security reviews for #23 and #24).
-- E4, E5: compare `first_prompt_tokens_median` (87.7k on 2026-10-14), the cache-write share (42%) and US$ per request
-  (0.06) after a day of sessions.
-- E6, E8: every vendor was ahead of its weekly pace on 2026-10-14 (Claude 31/21, Codex 34/23, Antigravity's Claude/GPT
-  bucket 98%). More lanes would only end the week earlier, so the test system rework (E8) starts when one vendor is
-  back under its pace.
+- E4: judged in round 3 with no gain; the next lever is fewer MCP tools and hook text in the fixed prompt, not skills.
+- E5: cost per request and cache-write share went up on 2026-10-15; the lead session checks whether longer lanes cause it.
+- E6, E8: every vendor was still ahead of its weekly pace on 2026-10-15 (Claude 56/38, Codex 12/8 after its week
+  restarted that day). More lanes would only end the week earlier, so the test system rework (E8) starts when one vendor
+  is back under its pace.
 - E7: cloud lanes need a cloud environment for this repository, set up by Erick.
 - E9: sccache is already in place user-wide; revisit only if build slots show long waits.
 
