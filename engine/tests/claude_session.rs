@@ -705,6 +705,26 @@ async fn a_line_written_while_an_answer_streams_waits_for_the_result_and_is_a_tu
     assert!(text_of(&events).contains("The journey begins with one."));
 }
 
+// Live capture (claude 2.1.296, the flags Faber uses, Sonnet 5.5): the agent started two Explore subagents in the
+// background and ended its turn saying it would wait. Each subagent then came back as a turn the CLI started by itself,
+// with a result of its own that names the subagent's run (`origin.runId`); the answer itself is in the last one.
+#[tokio::test]
+async fn a_reply_waits_for_the_subagents_it_left_running_in_the_background() {
+    let entries = fixture("claude", "background");
+    let results: Vec<_> = entries.iter().filter(|e| e.msg["type"] == "result").map(|e| e.msg.clone()).collect();
+    assert_eq!(results.len(), 3, "the turn, then one result per background subagent");
+    let asked = entries[0].msg["message"]["content"].as_str().unwrap().to_string();
+    let (events, mismatches) = run(entries, &asked, |e, _| matches!(e, EngineEvent::Done { .. })).await;
+    assert_eq!(mismatches, Vec::<String>::new());
+    let text = text_of(&events);
+    assert!(text.contains("`route.rs` is the"), "the reply ended before the subagents were back: {text:?}");
+    let Some(EngineEvent::Done { ok, cost_total_usd, output_tokens, .. }) = events.last() else { panic!("{events:?}") };
+    assert!(ok);
+    assert_eq!(*cost_total_usd, results[2]["total_cost_usd"].as_f64(), "the CLI's total after the last result");
+    let written: u64 = results.iter().map(|r| r["usage"]["output_tokens"].as_u64().unwrap()).sum();
+    assert_eq!(*output_tokens, written, "every part of the reply counts");
+}
+
 #[test]
 fn a_line_written_during_a_tool_turn_is_folded_into_it_and_the_turn_has_one_result() {
     let events: Vec<EngineEvent> = fixture("claude", "queued-midturn")
