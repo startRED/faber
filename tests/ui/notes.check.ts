@@ -1,4 +1,4 @@
-import { createComponent, createSignal } from 'solid-js';
+import { createComponent, createSignal, Show } from 'solid-js';
 import { render } from 'solid-js/web';
 import { appliedLook, applyLook } from '../../ui/appearance.ts';
 import { en } from '../../ui/locales/en.ts';
@@ -109,8 +109,17 @@ async function mounted(close: (host: HTMLElement) => void) {
   document.body.append(host);
   const [open, setOpen] = createSignal(true);
   const dispose = render(
-    // `render` runs its callback once, so the condition goes in the returned accessor, as `<Show>` does in the app.
-    () => () => (open() ? createComponent(WhatsNew, { version: '9.9.9', notes: LIST, onClose: () => setOpen(false) }) : undefined),
+    // `render` runs its callback once, so the condition lives in `Show`, as in the app.
+    () =>
+      createComponent(Show, {
+        keyed: false as never,
+        get when() {
+          return open();
+        },
+        get children() {
+          return createComponent(WhatsNew, { version: '9.9.9', notes: LIST, onClose: () => setOpen(false) });
+        },
+      }),
     host,
   );
   try {
