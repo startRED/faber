@@ -43,6 +43,8 @@ mod paid_guard;
 mod persona;
 #[path = "plan.rs"]
 mod plan;
+#[path = "product_map.rs"]
+mod product_map;
 #[path = "project.rs"]
 mod project;
 #[path = "project_bar.rs"]

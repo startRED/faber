@@ -37,7 +37,8 @@ notify-rust = "4"
 win32job = "2"
 winsafe = { version = "0.0.29", features = ["gui"] }
 
-# Only tray/native.rs may use FFI; the engine and testkit keep the workspace's forbid.
+# Only the Windows API files (awake.rs, autostart.rs, tray/native.rs) opt in to FFI; the engine and testkit keep the
+# workspace's forbid.
 [lints.rust]
 unsafe_code = "deny"
 

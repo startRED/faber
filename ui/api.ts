@@ -450,7 +450,7 @@ export interface RecentsView {
   environments: EnvironmentView[];
 }
 
-// Typed calls into the engine (the commands in src-tauri/src/lib.rs).
+// Typed calls into the engine (the commands registered in src-tauri/src/main.rs and src-tauri/src/setup.rs).
 export const api = {
   state: () => invoke<AppState>('state'),
   open: (id: string) => invoke<Conversation | null>('open', { id }),
