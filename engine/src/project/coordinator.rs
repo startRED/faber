@@ -741,7 +741,7 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
         let mut runner = self.runner()?;
         let base = runner.mission.base.clone();
         let mut red = self.proof_set(&base, "red", task.writes.clone())?;
-        let ground = self.ground(root).await?;
+        let ground = self.ground(root, false).await?;
         self.prove(&mut runner, &task.id, &mut red, &ground).await?;
         if red.verified() {
             return Err(Stop::Block("reason.proof.notRed".into()));
@@ -751,7 +751,7 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
 
     /// The folder the setup and the proofs run in: the mission's lease worktree, or the project's persistent working copy
     /// brought to the same tree (its installed packages and build output are kept), with the setup run there first.
-    async fn ground(&self, root: &std::path::Path) -> Step<std::path::PathBuf> {
+    async fn ground(&self, root: &std::path::Path, candidate: bool) -> Step<std::path::PathBuf> {
         let Some(stage) = self.setup.stage.clone() else { return Ok(root.to_path_buf()) };
         let base = self.runner()?.mission.base.clone();
         let from = root.to_path_buf();
@@ -764,6 +764,10 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
         .await
         .map_err(|_| Stop::Block("reason.workspace.git".into()))?;
         synced.map_err(|key| Stop::Block(key.into()))?;
+        if candidate {
+            // From here the candidate's setup and proofs leave state in the copy; it is trusted again only if the candidate lands.
+            stage.workspace.taint();
+        }
         let dir = stage.workspace.dir().to_path_buf();
         for definition in &stage.setup {
             if stage.workspace.setup_current(definition) {
@@ -850,7 +854,7 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
             let tree = self.broker()?.compose_tree(grant, lease, &paths)?;
             let input = runner.workers.get(&task.id).ok_or_else(|| Stop::Block("error.wire.stale".into()))?.digest();
             let mut proof = self.proof_set(&tree, &input, paths.clone())?;
-            let ground = self.ground(root).await?;
+            let ground = self.ground(root, true).await?;
             self.prove(&mut runner, &task.id, &mut proof, &ground).await?;
             if !proof.verified() {
                 return Err(Stop::Block("reason.proof.failed".into()));
@@ -933,6 +937,9 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
         let broker = self.broker()?;
         let head = runner.land(broker, &task.id, &lease, grant, &task.title, termination, |_| Ok(()))?;
         self.mark("land")?;
+        if let Some(stage) = &self.setup.stage {
+            stage.workspace.release();
+        }
         if let Some(broker) = self.broker.take() {
             broker.finish()?;
         }

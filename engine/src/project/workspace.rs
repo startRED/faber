@@ -9,6 +9,7 @@
 //! transport is used. Its folder is Faber's own, under the engine's data folder.
 
 use super::git::{Executor, Invocation, valid_oid};
+use super::lease::{real_path, reparse};
 use super::proof::Definition;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -17,6 +18,48 @@ use std::path::{Path, PathBuf};
 pub struct Workspace {
     root: PathBuf,
     dir: PathBuf,
+    /// The proofs' own folder (build output, cargo home, npm cache, temp), see `mission::setup`.
+    own: PathBuf,
+}
+
+/// Deletes a link itself and never what it points to: a junction or directory link by `remove_dir`, a file link by
+/// `remove_file`.
+fn unlink(path: &Path) -> Result<(), &'static str> {
+    std::fs::remove_dir(path).or_else(|_| std::fs::remove_file(path)).map_err(|_| "reason.workspace.unsafe")
+}
+
+/// Walks `dir` without following anything and deletes every link (symbolic link or junction) it holds.
+fn strip_links(dir: &Path) -> Result<(), &'static str> {
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(folder) = pending.pop() {
+        let entries = match std::fs::read_dir(&folder) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => return Err("reason.workspace.unsafe"),
+        };
+        for entry in entries {
+            let entry = entry.map_err(|_| "reason.workspace.unsafe")?;
+            let meta = entry.metadata().map_err(|_| "reason.workspace.unsafe")?;
+            if reparse(&meta) {
+                unlink(&entry.path())?;
+            } else if meta.is_dir() {
+                pending.push(entry.path());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Empties a folder but keeps the folder itself (it carries the Low label the proofs need), links first.
+fn empty(dir: &Path) -> Result<(), &'static str> {
+    strip_links(dir)?;
+    let Ok(entries) = std::fs::read_dir(dir) else { return Ok(()) };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let gone = if entry.file_type().is_ok_and(|t| t.is_dir()) { std::fs::remove_dir_all(&path) } else { std::fs::remove_file(&path) };
+        gone.map_err(|_| "reason.workspace.unsafe")?;
+    }
+    Ok(())
 }
 
 /// What a mission needs of the working copy: where it is, which repository it belongs to, and the setup that fills it.
@@ -67,7 +110,8 @@ impl Workspace {
         let data =
             plain.strip_prefix(r"\\?\").filter(|rest| rest.as_bytes().get(1) == Some(&b':')).map_or(data.to_path_buf(), PathBuf::from);
         let root = data.join("workspaces").join(project);
-        Ok(Self { dir: root.join("tree"), root })
+        let own = data.join("proof-target").join(project);
+        Ok(Self { dir: root.join("tree"), root, own })
     }
 
     pub fn dir(&self) -> &Path {
@@ -97,11 +141,41 @@ impl Workspace {
         Self::git(exec, &self.dir, &all)
     }
 
-    /// Bring the copy to `base` plus the candidate's changes in `from` (the lease worktree). Ignored files stay.
+    /// The copy is where a Low-integrity proof ran, so before Faber touches it at its own integrity the copy must really be
+    /// the folder it names: neither it nor any folder above it is a link (a proof can empty it and make it a junction to the
+    /// owner's checkout). A link at the copy itself is deleted, never followed, and the copy is made fresh. Then every link
+    /// inside the copy goes too. Nothing of the proof may still run: its job closed when `proof::execute` returned.
+    fn guard(&self) -> Result<(), &'static str> {
+        if real_path(&self.dir).is_err() {
+            if std::fs::symlink_metadata(&self.dir).is_ok_and(|meta| reparse(&meta)) {
+                unlink(&self.dir)?;
+            }
+            real_path(&self.dir).map_err(|_| "reason.workspace.unsafe")?;
+        }
+        strip_links(&self.dir)
+    }
+
+    /// The proofs ran on a candidate that has not landed: what they left in the copy and in the proofs' own folder may be
+    /// poisoned, so the next sync wipes it. `release` (the candidate landed) lifts it.
+    pub fn taint(&self) {
+        let _ = std::fs::write(self.root.join("tainted"), "");
+    }
+
+    pub fn release(&self) {
+        let _ = std::fs::remove_file(self.root.join("tainted"));
+    }
+
+    fn tainted(&self) -> bool {
+        self.root.join("tainted").exists()
+    }
+
+    /// Bring the copy to `base` plus the candidate's changes in `from` (the lease worktree). Ignored files stay, unless the
+    /// last candidate proven here did not land.
     pub fn sync(&self, exec: &mut impl Executor, repo_root: &Path, base: &str, from: &Path) -> Result<(), &'static str> {
         if !valid_oid(base) {
             return Err("reason.workspace.git");
         }
+        self.guard()?;
         let dir = self.dir.to_string_lossy().into_owned();
         let usable = self.dir.is_dir() && self.tree_git(exec, &["rev-parse", "--is-inside-work-tree"]).is_ok();
         if !usable {
@@ -123,11 +197,26 @@ impl Workspace {
         }
         self.tree_git(exec, &["checkout", "--detach", "--force", base])?;
         self.tree_git(exec, &["reset", "--hard", base])?;
-        // Untracked files go; ignored ones (no -x) stay: that is the point of keeping the copy.
-        self.tree_git(exec, &["clean", "-fd"])?;
+        if self.tainted() {
+            // Everything ignored goes too (installed packages, build output, nested repositories), the proofs' own folder
+            // is emptied, and the setup runs again.
+            self.tree_git(exec, &["clean", "-ffdx"])?;
+            empty(&self.own)?;
+            if let Ok(entries) = std::fs::read_dir(&self.root) {
+                for entry in entries.flatten().filter(|e| e.path().extension().is_some_and(|x| x == "stamp")) {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+            self.release();
+        } else {
+            // Untracked files go; ignored ones (no -x) stay: that is the point of keeping the copy.
+            self.tree_git(exec, &["clean", "-fd"])?;
+        }
         let status = Self::git(exec, from, &["status", "--porcelain=v1", "-z", "-uall", "--no-renames"])?;
         for path in changed(&status)? {
             let (source, target) = (from.join(&path), self.dir.join(&path));
+            // No folder on the way to the target may be a link, so nothing is written or deleted outside the copy.
+            real_path(&target).map_err(|_| "reason.workspace.unsafe")?;
             match std::fs::symlink_metadata(&source) {
                 Ok(meta) if meta.is_file() => {
                     if target.is_dir() {

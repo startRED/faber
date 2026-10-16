@@ -134,7 +134,7 @@ pub(crate) fn hash_reader(reader: &mut impl Read) -> Result<String, LeaseError> 
     Ok(format!("{:x}", digest.finalize()))
 }
 
-fn reparse(metadata: &fs::Metadata) -> bool {
+pub(crate) fn reparse(metadata: &fs::Metadata) -> bool {
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;

@@ -7,7 +7,9 @@
 //! rows the probes left and writes a receipt only when every check passed. A failed probe means no receipt, and the
 //! reason is returned for the screen.
 
+#[cfg(windows)]
 pub mod claude;
+#[cfg(windows)]
 pub mod codex;
 pub mod judge;
 
@@ -84,28 +86,19 @@ fn child_environment(temp: &Path, probe: &str, workspace: &Path) -> io::Result<s
     Ok(env)
 }
 
-/// The sentence a failed child printed, without the wrapper; nothing else of its output is shown.
-fn failure_detail(tail: &str) -> String {
-    tail.lines()
-        .find_map(|line| {
-            line.trim()
-                .strip_prefix("Qualification failed (")
-                .and_then(|rest| rest.strip_suffix("); inspect the private receipt for requested model turns."))
-        })
-        .map_or_else(|| "the probe did not finish".to_string(), |detail| detail.chars().take(200).collect())
-}
-
-/// Runs one probe in a contained child and waits for it. `Err` carries the probe's own fixed diagnostic.
+/// Runs one probe in a contained child and waits for it. `Err` is a locale key (`reason.qualify.*`): the screen words it, and
+/// nothing a probe printed is passed on.
 async fn run_probe(exe: &Path, probe: &str, dir: &Path, workspace: &Path) -> Result<(), String> {
-    std::fs::create_dir_all(dir.join("temp")).map_err(|e| e.to_string())?;
-    let env = child_environment(&dir.join("temp"), probe, workspace).map_err(|e| e.to_string())?;
+    let data = |_: io::Error| "reason.qualify.data".to_string();
+    std::fs::create_dir_all(dir.join("temp")).map_err(data)?;
+    let env = child_environment(&dir.join("temp"), probe, workspace).map_err(data)?;
     let mut command = tokio::process::Command::new(exe);
     command.arg("--faber-qualify").arg(probe).arg(dir).env_clear().envs(env).current_dir(dir);
-    let child = crate::proc::spawn_command(command).map_err(|e| format!("the probe could not start ({e})"))?;
+    let child = crate::proc::spawn_command(command).map_err(|_| "reason.qualify.start".to_string())?;
     match tokio::time::timeout(PROBE_DEADLINE, crate::proc::command_output(child)).await {
         Ok((true, _)) => Ok(()),
-        Ok((false, tail)) => Err(failure_detail(&tail)),
-        Err(_) => Err("the probe ran past its deadline".into()),
+        Ok((false, _)) => Err("reason.qualify.probe".into()),
+        Err(_) => Err("reason.qualify.timeout".into()),
     }
 }
 
@@ -113,24 +106,20 @@ async fn run_probe(exe: &Path, probe: &str, dir: &Path, workspace: &Path) -> Res
 /// before each probe. `Ok` means both vendors now have a receipt; `Err` is the reason no mission may start.
 pub async fn earn(data: &Path, exe: &Path, progress: &(dyn Fn(usize, usize, Vendor) + Send + Sync)) -> Result<(), String> {
     if !cfg!(windows) {
-        return Err("qualification needs the Windows hidden desktop".into());
+        return Err("reason.qualify.os".into());
     }
     let run: PathBuf = data.join("qualification-run");
     // A run is never resumed or replayed: the folder is Faber's own and starts empty.
     let _ = std::fs::remove_dir_all(&run);
-    std::fs::create_dir_all(&run).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&run).map_err(|_| "reason.qualify.data".to_string())?;
     for (index, (vendor, name, probe)) in STEPS.iter().enumerate() {
         progress(index + 1, STEPS.len(), *vendor);
-        run_probe(exe, probe, &run.join(name), &run.join("work").join(name)).await.map_err(|detail| format!("{name}: {detail}"))?;
+        run_probe(exe, probe, &run.join(name), &run.join("work").join(name)).await?;
     }
-    let report = judge::issue_all(&run, data).map_err(|e| e.to_string())?;
+    let report = judge::issue_all(&run, data).map_err(|_| "reason.qualify.proof".to_string())?;
     let _ = std::fs::remove_dir_all(&run);
-    let failed: Vec<String> = report
-        .iter()
-        .flat_map(|(vendor, checks)| checks.iter().filter(|(_, ok)| !**ok).map(move |(check, _)| format!("{vendor} {check}")))
-        .collect();
-    if !failed.is_empty() {
-        return Err(format!("not proven: {}", failed.join(", ")));
+    if report.values().any(|checks| checks.values().any(|ok| !ok)) {
+        return Err("reason.qualify.proof".into());
     }
     ready().map_err(|key| key.to_string())
 }
@@ -170,10 +159,7 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_child_reports_only_its_own_sentence_and_the_probe_environment_is_scrubbed() {
-        let tail = "noise\nQualification failed (native write escaped workspace); inspect the private receipt for requested model turns.\n";
-        assert_eq!(failure_detail(tail), "native write escaped workspace");
-        assert_eq!(failure_detail("panic: secret"), "the probe did not finish");
+    fn the_probe_environment_is_scrubbed() {
         let temp = std::env::temp_dir();
         let env = child_environment(&temp, "--live-native", &temp.join("w")).unwrap();
         assert_eq!(env["FABER_QUALIFICATION_PROBE"], "--live-native");
@@ -201,7 +187,7 @@ pub struct AgentsView {
     pub vendor: Option<Vendor>,
     /// A rough time left, from the number of probes that remain.
     pub estimate_seconds: u64,
-    /// The probe's own fixed sentence when it failed.
+    /// The locale key (`reason.qualify.*`) of why the check failed.
     pub detail: Option<String>,
 }
 

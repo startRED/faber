@@ -451,8 +451,10 @@ impl Runner {
         let definition = proof.definitions().iter().find(|d| d.id == id).ok_or("reason.proof.definition")?;
         let path = format!("proofs/{receipt}.log");
         let observation = super::proof::execute(definition, cwd, spawn, path.clone()).await;
-        let mut log = observation.stdout.clone();
-        log.extend(&observation.stderr);
+        // The proof's output is code's output and may hold a printed secret, so the log keeps the exit code and the sizes only;
+        // the receipt already carries the output's SHA-256.
+        let log =
+            format!("exit {:?}\nstdout {} bytes\nstderr {} bytes\n", observation.exit, observation.stdout.len(), observation.stderr.len());
         std::fs::create_dir_all(j.private().join("proofs")).map_err(|_| "error.store.write")?;
         std::fs::write(j.private().join(path), log).map_err(|_| "error.store.write")?;
         self.finish_proof(j, task, proof, &receipt, id, observation)

@@ -419,7 +419,7 @@ export function Projects(props: Props) {
               <div class="note" classList={{ err: a().state === 'failed' }} role={a().state === 'failed' ? 'alert' : 'status'} data-testid="agents-status">
                 {a().state === 'checking'
                   ? t('projects.agents.checking', { seconds: a().estimateSeconds, step: a().step, total: a().total })
-                  : t('projects.agents.failed', { detail: a().detail ?? '' })}
+                  : t('projects.agents.failed', { detail: fromEngine(a().detail ?? undefined) })}
               </div>
             )}
           </Show>

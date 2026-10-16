@@ -127,10 +127,14 @@ pub fn command_tokens(line: &str) -> Result<Vec<String>, &'static str> {
     Ok(tokens)
 }
 
-fn stored(project: &Project) -> Option<(Vec<String>, Vec<String>)> {
+/// The saved confirmation: the declared list, the confirmed commands, and the setup commands the owner saw (`None` for a
+/// confirmation saved before the setup was part of it, which therefore asks again).
+type Saved = (Vec<String>, Vec<String>, Option<Vec<String>>);
+
+fn stored(project: &Project) -> Option<Saved> {
     let proof = project.extra.get("proof")?;
     let list = |key: &str| -> Option<Vec<String>> { proof[key].as_array()?.iter().map(|v| v.as_str().map(String::from)).collect() };
-    Some((list("declared")?, list("commands")?))
+    Some((list("declared")?, list("commands")?, list("setup")))
 }
 
 /// The proof of a project as the screen shows it.
@@ -139,7 +143,7 @@ pub fn view(project: &Project) -> ProofView {
     let (declared, source) = declared(root);
     let setup = setup_commands(&|path| root.join(path).is_file());
     match stored(project) {
-        Some((was, commands)) if was == declared && !commands.is_empty() => {
+        Some((was, commands, seen)) if was == declared && !commands.is_empty() && seen.as_ref() == Some(&setup) => {
             ProofView { commands, declared, source: source.into(), confirmed: true, changed: false, setup }
         }
         saved => {
@@ -195,7 +199,8 @@ pub fn confirm(project: &Project, commands: &[String]) -> Result<Project, &'stat
     }
     let (declared, _) = declared(Path::new(&project.path));
     let mut next = project.clone();
-    next.extra.insert("proof".into(), serde_json::json!({"declared": declared, "commands": commands}));
+    let setup = setup_commands(&|path| Path::new(&project.path).join(path).is_file());
+    next.extra.insert("proof".into(), serde_json::json!({"declared": declared, "commands": commands, "setup": setup}));
     Ok(next)
 }
 
@@ -204,6 +209,13 @@ pub fn confirm(project: &Project, commands: &[String]) -> Result<Project, &'stat
 pub fn confirmed(project: &Project) -> Result<Vec<String>, &'static str> {
     let shown = view(project);
     if shown.confirmed { Ok(shown.commands) } else { Err("reason.proof.unconfirmed") }
+}
+
+/// The setup commands the owner confirmed together with the proofs: exactly what a mission installs with, or the key that
+/// refuses it when the confirmation no longer holds (a lock file appeared or went away since).
+pub fn confirmed_setup(project: &Project) -> Result<Vec<String>, &'static str> {
+    let shown = view(project);
+    if shown.confirmed { Ok(shown.setup) } else { Err("reason.proof.unconfirmed") }
 }
 
 /// The program a proof or setup command names, found without a shell. The official CLIs and native programs resolve as
@@ -361,6 +373,8 @@ pub struct Launch {
     pub repository: Repository,
     /// The confirmed proof commands (see `confirmed`).
     pub commands: Vec<String>,
+    /// The confirmed setup commands (see `confirmed_setup`): what is installed is what the owner saw.
+    pub setup: Vec<String>,
     /// The engine's data folder: the proofs build under `proof-target/<project>` there, outside every checkout.
     pub data: PathBuf,
     pub project: String,
@@ -380,7 +394,7 @@ pub fn setup(launch: Launch, executor: &mut impl Executor, resolve: &dyn Fn(&str
     if seen.writable.is_empty() {
         return Err("reason.project.empty".into());
     }
-    let installs = setup_definitions(&setup_commands(&|path| seen.tree.iter().any(|t| t == path)), &target, resolve)?;
+    let installs = setup_definitions(&launch.setup, &target, resolve)?;
     Ok(Setup {
         pins: launch.pins,
         proofs,
@@ -615,6 +629,25 @@ mod tests {
         let again = view(&edited);
         assert!(!again.confirmed && again.changed);
         assert_eq!(again.commands, ["npm test", "npm run e2e"]);
+    }
+
+    #[test]
+    fn the_setup_is_part_of_the_confirmation_and_a_change_asks_again() {
+        let root = folder("setup", &[("AGENTS.md", "## Proof commands\n```\nnpm test\n```"), ("package.json", "{}")]);
+        let project = Project::new("p1".into(), "P".into(), root.to_string_lossy().into_owned());
+        let confirmed_now = confirm(&project, &["npm test".to_string()]).unwrap();
+        assert_eq!(confirmed_setup(&confirmed_now).unwrap(), Vec::<String>::new());
+        // A lock file appears: npm ci would now run, which the owner never saw.
+        std::fs::write(root.join("package-lock.json"), "{}").unwrap();
+        assert_eq!(confirmed_setup(&confirmed_now), Err("reason.proof.unconfirmed"));
+        assert_eq!(confirmed(&confirmed_now), Err("reason.proof.unconfirmed"));
+        assert!(view(&confirmed_now).changed);
+        let again = confirm(&confirmed_now, &["npm test".to_string()]).unwrap();
+        assert_eq!(confirmed_setup(&again).unwrap(), ["npm ci"]);
+        // A confirmation saved before the setup was part of it asks again.
+        let mut old = again.clone();
+        old.extra.insert("proof".into(), serde_json::json!({"declared": ["npm test"], "commands": ["npm test"]}));
+        assert_eq!(confirmed(&old), Err("reason.proof.unconfirmed"));
     }
 
     /// A repository that answers the two reads the module makes: the tree listing and one blob by id.

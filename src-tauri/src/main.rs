@@ -656,6 +656,7 @@ async fn run_mission(app: &AppHandle, faber: &Faber, mission_id: &str, commands:
         mission::remember_roles(&mut runner.mission, &pins);
         runner.save(&journal).map_err(str::to_string)?;
     }
+    let installs = mission::confirmed_setup(&project).map_err(str::to_string)?;
     let folder = PathBuf::from(&project.path);
     let base = mission.base.clone();
     let (revision, data, pid) = (mission.grant_revision, faber.data_dir.clone(), project.id.clone());
@@ -677,8 +678,17 @@ async fn run_mission(app: &AppHandle, faber: &Faber, mission_id: &str, commands:
         if owner.as_ref() != Some(&repository.identity) {
             return Err("reason.grant.otherRepo".to_string());
         }
-        let launch =
-            mission::Launch { repository: repository.clone(), commands, data, project: pid, pins, grant, revision, notify: Some(notify) };
+        let launch = mission::Launch {
+            repository: repository.clone(),
+            commands,
+            setup: installs,
+            data,
+            project: pid,
+            pins,
+            grant,
+            revision,
+            notify: Some(notify),
+        };
         let setup = mission::setup(launch, &mut process, &faber_engine::project::mission::resolve_tool)?;
         Ok((repository, setup))
     })

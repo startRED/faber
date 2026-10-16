@@ -479,6 +479,7 @@ async fn run_wiring(sandbox: &Path) -> Result<Value> {
     let launch = mission::Launch {
         repository: w.repository.clone(),
         commands,
+        setup: vec![],
         data: w.dir.join("records"),
         project: "p1".into(),
         pins: pins(),
@@ -558,6 +559,47 @@ async fn run_wiring(sandbox: &Path) -> Result<Value> {
     })?;
     ensure(space.dir().join("cache/built.bin").is_file(), || "the build output was lost on the second sync".into())?;
     git(&w.program, &w.repo, &["worktree", "remove", "--force", &lease.to_string_lossy()])?;
+
+    // A proof that planted a junction in an ignored folder: the next sync deletes the link and never touches its target.
+    let (outside, tree) = (w.dir.join("outside"), space.dir().to_path_buf());
+    std::fs::create_dir_all(&outside).map_err(|e| e.to_string())?;
+    std::fs::write(outside.join("keep.txt"), "mine").map_err(|e| e.to_string())?;
+    junction(&tree.join("cache/gen"), &outside)?;
+    space.sync(&mut exec, &w.repo, &w.base, &w.repo).map_err(str::to_string)?;
+    ensure(!tree.join("cache/gen").exists(), || "the planted junction survived the sync".into())?;
+    ensure(std::fs::read_to_string(outside.join("keep.txt")).is_ok_and(|t| t == "mine"), || {
+        "the sync touched the folder a junction pointed at".into()
+    })?;
+    // A proof that emptied the working copy and made it a junction to another folder (here, with a file that must survive).
+    let elsewhere = w.dir.join("elsewhere");
+    std::fs::create_dir_all(&elsewhere).map_err(|e| e.to_string())?;
+    std::fs::write(elsewhere.join("owner.txt"), "uncommitted").map_err(|e| e.to_string())?;
+    std::fs::remove_dir_all(&tree).map_err(|e| e.to_string())?;
+    junction(&tree, &elsewhere)?;
+    space.sync(&mut exec, &w.repo, &w.base, &w.repo).map_err(str::to_string)?;
+    ensure(std::fs::read_to_string(elsewhere.join("owner.txt")).is_ok_and(|t| t == "uncommitted"), || {
+        "the sync reached the folder the working copy was redirected to".into()
+    })?;
+    ensure(!elsewhere.join("src").exists(), || "the base was checked out into the folder the working copy pointed at".into())?;
+    ensure(std::fs::read_to_string(tree.join("src/a.rs")).is_ok_and(|t| t == "base"), || "the working copy was not made fresh".into())?;
+
+    // Proofs of a candidate that did not land leave poisoned state: the next sync wipes the ignored output and the proofs'
+    // own folder, and the next one after that keeps what is built again.
+    let own = w.dir.join("records/proof-target/p1");
+    std::fs::create_dir_all(own.join("target")).map_err(|e| e.to_string())?;
+    std::fs::write(own.join("target/lib.bin"), "poison").map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(tree.join("cache")).map_err(|e| e.to_string())?;
+    std::fs::write(tree.join("cache/built.bin"), "poison").map_err(|e| e.to_string())?;
+    space.taint();
+    space.sync(&mut exec, &w.repo, &w.base, &w.repo).map_err(str::to_string)?;
+    ensure(!tree.join("cache/built.bin").exists() && !own.join("target").exists(), || {
+        "poisoned state survived a candidate that did not land".into()
+    })?;
+    ensure(own.is_dir(), || "the proofs' own folder was removed instead of emptied".into())?;
+    std::fs::create_dir_all(tree.join("cache")).map_err(|e| e.to_string())?;
+    std::fs::write(tree.join("cache/built.bin"), "fine").map_err(|e| e.to_string())?;
+    space.sync(&mut exec, &w.repo, &w.base, &w.repo).map_err(str::to_string)?;
+    ensure(tree.join("cache/built.bin").is_file(), || "the wipe repeated although nothing was tainted".into())?;
     Ok(json!({"ok": true, "ticks": ticks.load(Ordering::SeqCst), "report": format!("{report:?}")}))
 }
 
@@ -678,4 +720,19 @@ fn canary_acceptance(ctx: &mut Ctx) -> Result {
         .map_err(|e| e.to_string())?;
     ctx.notes.push(format!("canary on recorded replies: {report}; real git, cargo proof, other-vendor review, landing; lies refused"));
     Ok(())
+}
+
+/// A directory junction at `link` pointing to `target` (the screen suite runs on Windows only; `mklink` is its own tool).
+fn junction(link: &Path, target: &Path) -> Result {
+    // mklink takes backslashes only.
+    let plain = |path: &Path| path.to_string_lossy().replace('/', std::path::MAIN_SEPARATOR_STR);
+    let made = std::process::Command::new("cmd")
+        .args(["/c", "mklink", "/J"])
+        .arg(plain(link))
+        .arg(plain(target))
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map_err(|e| e.to_string())?;
+    ensure(made.success() && link.exists(), || format!("could not plant a junction at {}", link.display()))
 }
