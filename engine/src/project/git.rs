@@ -83,7 +83,7 @@ pub struct Invocation {
     pub private_index: Option<PathBuf>,
 }
 impl Invocation {
-    fn new(cwd: &Path, args: &[&str]) -> Self {
+    pub(crate) fn new(cwd: &Path, args: &[&str]) -> Self {
         let null = if cfg!(windows) { "NUL" } else { "/dev/null" };
         let mut fixed = vec![];
         for config in [

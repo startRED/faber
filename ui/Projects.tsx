@@ -504,6 +504,12 @@ export function Projects(props: Props) {
                           when={editing()}
                           fallback={
                             <>
+                              <Show when={(p().setup ?? []).length > 0}>
+                                <p class="note">{t('projects.proof.setup')}</p>
+                                <ul class="proof-list" data-testid="proof-setup">
+                                  <For each={p().setup}>{(command) => <li><code>{command}</code></li>}</For>
+                                </ul>
+                              </Show>
                               <ul class="proof-list" aria-label={t('projects.proof.title')}>
                                 <For each={p().commands}>{(command) => <li><code>{command}</code></li>}</For>
                               </ul>

@@ -298,6 +298,7 @@ async fn drive(data: &Path, log: &mut Log) -> io::Result<()> {
             expect_red: true,
             tree: vec![],
             notify: None,
+        stage: None,
             proof_spawn,
             sources: vec![(FILE.into(), text.clone())],
             writable: vec!["engine/src".into()],

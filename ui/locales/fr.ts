@@ -655,6 +655,10 @@ export const fr: Messages = {
   "projects.agents.failed": "Les agents n'ont pas pu être vérifiés, donc aucune mission n'a été lancée : {detail}",
   "reason.qualify.failed": "Les agents n'ont pas pu être vérifiés. Aucune mission n'a été lancée.",
   "projects.proof.setup": "D'abord, dans la copie propre :",
+  "reason.setup.failed": "L'installation des dépendances du projet a échoué dans la copie propre, donc les vérifications n'ont pas tourné.",
+  "reason.setup.program": "Le programme qui installe les dépendances du projet est introuvable sur cet ordinateur.",
+  "reason.workspace.git": "Faber n'a pas pu préparer la copie de travail du projet. Vérifiez que git fonctionne dans le projet, puis reprenez.",
+  "reason.workspace.unsafe": "Un fichier modifié n'a pas pu être copié en toute sécurité dans la copie de travail du projet.",
   // Native speaker must translate (needs native review).
   "projects.value.missing": "\u2014",
   // Native speaker must translate (needs native review).

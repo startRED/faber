@@ -655,6 +655,10 @@ export const de: Messages = {
   "projects.agents.failed": "Die Agenten ließen sich nicht prüfen, deshalb wurde keine Mission gestartet: {detail}",
   "reason.qualify.failed": "Die Agenten ließen sich nicht prüfen. Es wurde keine Mission gestartet.",
   "projects.proof.setup": "Zuerst, in der sauberen Kopie:",
+  "reason.setup.failed": "Die Installation der Abhängigkeiten des Projekts ist in der sauberen Kopie fehlgeschlagen, deshalb liefen die Prüfungen nicht.",
+  "reason.setup.program": "Das Programm, das die Abhängigkeiten des Projekts installiert, wurde auf diesem Computer nicht gefunden.",
+  "reason.workspace.git": "Faber konnte die Arbeitskopie des Projekts nicht vorbereiten. Prüfe, ob git im Projekt funktioniert, und setze dann fort.",
+  "reason.workspace.unsafe": "Eine geänderte Datei ließ sich nicht sicher in die Arbeitskopie des Projekts kopieren.",
   // Native speaker must translate (needs native review).
   "projects.value.missing": "\u2014",
   // Native speaker must translate (needs native review).

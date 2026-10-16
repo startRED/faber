@@ -226,6 +226,7 @@ fn setup(world: &World) -> Result<Setup> {
         expect_red: true,
         tree: vec![],
         notify: None,
+        stage: None,
         proofs: vec![Definition {
             id: "fixture-check".into(),
             version: 1,
@@ -407,6 +408,8 @@ async fn run_wiring(sandbox: &Path) -> Result<Value> {
             ("AGENTS.md", "# Rules\n\n## Proof commands\n\n```\nfake-proof src/a.rs\n```\n"),
             (".env", "TOKEN=wiring-secret"),
             ("README.md", "A fixture project."),
+            (".gitignore", "cache/
+"),
         ],
     )?;
     let project = faber_engine::model::Project::new("p1".into(), "Fixture".into(), w.repo.to_string_lossy().into_owned());
@@ -473,6 +476,38 @@ async fn run_wiring(sandbox: &Path) -> Result<Value> {
     ensure(mission::progress(&journal, &runner.mission).is_none() && mission::needs(&runner.mission).is_none(), || {
         "a finished mission still shows progress or a need".into()
     })?;
+    // The proofs ran in the project's persistent working copy, on the candidate laid over the base.
+    let space = faber_engine::project::workspace::Workspace::new(&w.dir.join("records"), "p1").map_err(str::to_string)?;
+    let landed_text = git(&w.program, &w.repo, &["show", "faber/m1:src/a.rs"])?;
+    let in_copy = std::fs::read_to_string(space.dir().join("src/a.rs")).map_err(|e| e.to_string())?;
+    ensure(in_copy.trim() == landed_text.trim() && in_copy.trim() != "base", || format!("the working copy does not hold the candidate: {in_copy:?}"))?;
+    // The next mission resets it to its base but keeps what the project ignores: the build output stays, the strays go.
+    std::fs::create_dir_all(space.dir().join("cache")).map_err(|e| e.to_string())?;
+    std::fs::write(space.dir().join("cache/built.bin"), "built").map_err(|e| e.to_string())?;
+    std::fs::write(space.dir().join("stray.txt"), "left by a proof").map_err(|e| e.to_string())?;
+    let mut exec = Process::find().map_err(|e| e.key())?;
+    space.sync(&mut exec, &w.repo, &w.base, &w.repo).map_err(str::to_string)?;
+    let reset = std::fs::read_to_string(space.dir().join("src/a.rs")).map_err(|e| e.to_string())?;
+    ensure(reset == "base", || format!("the working copy was not reset to the base: {reset:?}"))?;
+    ensure(space.dir().join("cache/built.bin").is_file(), || "the ignored build output was removed".into())?;
+    ensure(!space.dir().join("stray.txt").exists(), || "an untracked stray survived the reset".into())?;
+    // A lease with a change, a new file and a deletion is laid over the base.
+    let lease = w.dir.join("lease-like");
+    git(&w.program, &w.repo, &["worktree", "add", "--detach", &lease.to_string_lossy(), &w.base])?;
+    std::fs::write(lease.join("src/a.rs"), "laid over").map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(lease.join("new")).map_err(|e| e.to_string())?;
+    std::fs::write(lease.join("new/x.txt"), "new").map_err(|e| e.to_string())?;
+    std::fs::remove_file(lease.join("README.md")).map_err(|e| e.to_string())?;
+    space.sync(&mut exec, &w.repo, &w.base, &lease).map_err(str::to_string)?;
+    let (a, x) = (
+        std::fs::read_to_string(space.dir().join("src/a.rs")).unwrap_or_default(),
+        std::fs::read_to_string(space.dir().join("new/x.txt")).unwrap_or_default(),
+    );
+    ensure(a == "laid over" && x == "new" && !space.dir().join("README.md").exists(), || {
+        "the candidate was not laid over the working copy".into()
+    })?;
+    ensure(space.dir().join("cache/built.bin").is_file(), || "the build output was lost on the second sync".into())?;
+    git(&w.program, &w.repo, &["worktree", "remove", "--force", &lease.to_string_lossy()])?;
     Ok(json!({"ok": true, "ticks": ticks.load(Ordering::SeqCst), "report": format!("{report:?}")}))
 }
 

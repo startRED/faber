@@ -217,6 +217,8 @@ export interface ProofView {
   source: 'agents' | 'claude' | 'detected' | 'none';
   confirmed: boolean;
   changed: boolean;
+  /** What installs the dependencies first, found from the lock files; shown with the checks, not confirmed separately. */
+  setup?: string[];
 }
 
 /** How the check of the agents goes (Faber earns its own role receipts before a mission, hidden). */

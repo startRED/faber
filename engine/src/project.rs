@@ -27,6 +27,7 @@ pub mod store;
 pub mod update;
 pub mod wire;
 pub mod worker;
+pub mod workspace;
 
 use crate::model::Vendor;
 use serde::{Deserialize, Serialize};

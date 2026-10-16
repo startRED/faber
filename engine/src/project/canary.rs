@@ -354,6 +354,7 @@ pub async fn run(engine: &Engine, engine_data: &Path, work: &Path, mode: Mode) -
         expect_red: true,
         tree: vec![],
         notify: None,
+        stage: None,
         proof_spawn: spawn,
         sources,
         writable: vec!["src".into()],

@@ -467,7 +467,7 @@ check('projects: goal text persists across refusal or failed start', () => {
 
 // R137: a mission starts only on checks the owner confirmed; the screen shows what runs, the step, the report and what needs the owner.
 const declared = ['npm run lint', 'cargo t'];
-const proofView = (confirmed: boolean, commands = declared) => ({ commands, declared, source: 'agents' as const, confirmed, changed: false });
+const proofView = (confirmed: boolean, commands = declared) => ({ commands, declared, source: 'agents' as const, confirmed, changed: false, setup: ['npm ci', 'cargo fetch'] });
 const click = async (el: Element | null | undefined) => { (el as HTMLElement).click(); await settle(); };
 
 check('projects: an unconfirmed proof disables the start, and confirming it lists the commands and lets the mission start', () => {
@@ -480,6 +480,8 @@ check('projects: an unconfirmed proof disables the start, and confirming it list
   const list = root.querySelector('[data-testid="proof"]');
   ok(list, 'the proof section is on the start card');
   ok(list!.textContent?.includes('npm run lint') && list!.textContent?.includes('cargo t'), 'the commands that will run are shown');
+  const setup = root.querySelector('[data-testid="proof-setup"]')?.textContent ?? '';
+  ok(setup.includes('npm ci') && setup.includes('cargo fetch') && list!.textContent?.includes('First, in the clean copy'), `the setup runs first and is shown: ${setup}`);
   ok(root.querySelector('[data-testid="proof-needed"]'), 'the screen says the checks must be confirmed');
   ok(root.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled, 'start is disabled while the proof is unconfirmed');
   root.querySelector<HTMLFormElement>('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));

@@ -652,6 +652,10 @@ export const ptBR: Messages = {
   "projects.agents.failed": "Não foi possível verificar os agentes, então nenhuma missão foi iniciada: {detail}",
   "reason.qualify.failed": "Não foi possível verificar os agentes. Nenhuma missão foi iniciada.",
   "projects.proof.setup": "Primeiro, na cópia limpa:",
+  "reason.setup.failed": "A instalação das dependências do projeto falhou na cópia limpa, então as verificações não rodaram.",
+  "reason.setup.program": "O programa que instala as dependências do projeto não foi encontrado neste computador.",
+  "reason.workspace.git": "O Faber não conseguiu preparar a cópia de trabalho do projeto. Veja se o git funciona no projeto e retome.",
+  "reason.workspace.unsafe": "Um arquivo alterado não pôde ser copiado com segurança para a cópia de trabalho do projeto.",
   // Native speaker must translate (needs native review).
   "projects.value.missing": "\u2014",
   // Native speaker must translate (needs native review).

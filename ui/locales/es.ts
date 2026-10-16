@@ -655,6 +655,10 @@ export const es: Messages = {
   "projects.agents.failed": "No se pudieron comprobar los agentes, así que no se inició ninguna misión: {detail}",
   "reason.qualify.failed": "No se pudieron comprobar los agentes. No se inició ninguna misión.",
   "projects.proof.setup": "Primero, en la copia limpia:",
+  "reason.setup.failed": "La instalación de las dependencias del proyecto falló en la copia limpia, así que las comprobaciones no se ejecutaron.",
+  "reason.setup.program": "No se encontró en este equipo el programa que instala las dependencias del proyecto.",
+  "reason.workspace.git": "Faber no pudo preparar la copia de trabajo del proyecto. Comprueba que git funcione en el proyecto y reanuda.",
+  "reason.workspace.unsafe": "Un archivo modificado no se pudo copiar con seguridad a la copia de trabajo del proyecto.",
   // Native speaker must translate (needs native review).
   "projects.value.missing": "\u2014",
   // Native speaker must translate (needs native review).

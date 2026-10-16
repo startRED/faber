@@ -49,6 +49,9 @@ pub struct ProofView {
     pub confirmed: bool,
     /// A list was confirmed before and the project declares something else now.
     pub changed: bool,
+    /// What runs first in the clean copy, found from the project's lock files (not part of what the owner confirms).
+    #[serde(default)]
+    pub setup: Vec<String>,
 }
 
 /// The lines of the first code block under a heading that says "Proof commands". A line may chain commands with `&&`.
@@ -132,13 +135,51 @@ fn stored(project: &Project) -> Option<(Vec<String>, Vec<String>)> {
 
 /// The proof of a project as the screen shows it.
 pub fn view(project: &Project) -> ProofView {
-    let (declared, source) = declared(Path::new(&project.path));
+    let root = Path::new(&project.path);
+    let (declared, source) = declared(root);
+    let setup = setup_commands(&|path| root.join(path).is_file());
     match stored(project) {
         Some((was, commands)) if was == declared && !commands.is_empty() => {
-            ProofView { commands, declared, source: source.into(), confirmed: true, changed: false }
+            ProofView { commands, declared, source: source.into(), confirmed: true, changed: false, setup }
         }
-        saved => ProofView { commands: declared.clone(), declared, source: source.into(), confirmed: false, changed: saved.is_some() },
+        saved => ProofView { commands: declared.clone(), declared, source: source.into(), confirmed: false, changed: saved.is_some(), setup },
     }
+}
+
+/// What installs the project's dependencies before the proofs, found the way the proofs are (R137): `npm ci` when there is a
+/// package lock, `cargo fetch` when there is a Cargo lock. `has` says whether a root file exists.
+pub fn setup_commands(has: &dyn Fn(&str) -> bool) -> Vec<String> {
+    let mut out = vec![];
+    if has("package.json") && has("package-lock.json") {
+        out.push("npm ci".to_string());
+    }
+    if has("Cargo.toml") && has("Cargo.lock") {
+        out.push("cargo fetch".to_string());
+    }
+    out
+}
+
+/// The setup commands as steps: run like the proofs, with quiet flags so a long install stays inside the output limit.
+pub fn setup_definitions(
+    commands: &[String],
+    target: &Path,
+    resolve: &dyn Fn(&str) -> Option<Cli>,
+) -> Result<Vec<Definition>, &'static str> {
+    if commands.is_empty() {
+        return Ok(vec![]);
+    }
+    let (mut steps, _) = definitions(commands, target, resolve).map_err(|_| "reason.setup.program")?;
+    for (index, step) in steps.iter_mut().enumerate() {
+        step.id = format!("setup-{}", index + 1);
+        step.checks = vec![format!("S{}", index + 1)];
+        match step.toolchain.as_str() {
+            "npm" => step.argv.extend(["--no-audit".to_string(), "--no-fund".to_string()]),
+            "cargo" => step.argv.push("--quiet".to_string()),
+            _ => {}
+        }
+        step.validate()?;
+    }
+    Ok(steps)
 }
 
 /// Save the owner's confirmed list for the project. The list may differ from the declared one (the edit option); what is
@@ -302,6 +343,7 @@ pub fn setup(launch: Launch, executor: &mut impl Executor, resolve: &dyn Fn(&str
     if seen.writable.is_empty() {
         return Err("reason.project.empty".into());
     }
+    let installs = setup_definitions(&setup_commands(&|path| seen.tree.iter().any(|t| t == path)), &target, resolve)?;
     Ok(Setup {
         pins: launch.pins,
         proofs,
@@ -316,6 +358,11 @@ pub fn setup(launch: Launch, executor: &mut impl Executor, resolve: &dyn Fn(&str
         turn_limit: Duration::from_secs(900),
         plan: None,
         notify: launch.notify,
+        stage: Some(super::workspace::Stage {
+            workspace: super::workspace::Workspace::new(&launch.data, &launch.project).map_err(str::to_string)?,
+            repo_root: PathBuf::from(&launch.repository.identity.root),
+            setup: installs,
+        }),
     })
 }
 

@@ -95,6 +95,9 @@ pub struct Setup {
     pub plan: Option<Task>,
     /// Called after every finished step and every stop, so the screen can show where the mission is.
     pub notify: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// Where the setup and the proofs run: a persistent working copy of the project (see `workspace`). None runs them in the
+    /// mission's own lease worktree, as the canary does.
+    pub stage: Option<super::workspace::Stage>,
 }
 
 /// Why the coordinator stopped before the end.
@@ -730,11 +733,42 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
         let mut runner = self.runner()?;
         let base = runner.mission.base.clone();
         let mut red = self.proof_set(&base, "red", task.writes.clone())?;
-        self.prove(&mut runner, &task.id, &mut red, root).await?;
+        let ground = self.ground(root).await?;
+        self.prove(&mut runner, &task.id, &mut red, &ground).await?;
         if red.verified() {
             return Err(Stop::Block("reason.proof.notRed".into()));
         }
         self.mark("red")
+    }
+
+    /// The folder the setup and the proofs run in: the mission's lease worktree, or the project's persistent working copy
+    /// brought to the same tree (its installed packages and build output are kept), with the setup run there first.
+    async fn ground(&self, root: &std::path::Path) -> Step<std::path::PathBuf> {
+        let Some(stage) = self.setup.stage.clone() else { return Ok(root.to_path_buf()) };
+        let base = self.runner()?.mission.base.clone();
+        let from = root.to_path_buf();
+        let space = stage.workspace.clone();
+        let repo = stage.repo_root.clone();
+        let synced = tokio::task::spawn_blocking(move || {
+            let mut git = super::git::Process::find().map_err(|_| "reason.workspace.git")?;
+            space.sync(&mut git, &repo, &base, &from)
+        })
+        .await
+        .map_err(|_| Stop::Block("reason.workspace.git".into()))?;
+        synced.map_err(|key| Stop::Block(key.into()))?;
+        let dir = stage.workspace.dir().to_path_buf();
+        for definition in &stage.setup {
+            if stage.workspace.setup_current(definition) {
+                continue;
+            }
+            let seen = super::proof::execute(definition, &dir, &self.setup.proof_spawn, "setup".into()).await;
+            if seen.exit != Some(0) {
+                stage.workspace.setup_forget(definition);
+                return Err(Stop::Block("reason.setup.failed".into()));
+            }
+            stage.workspace.setup_done(definition);
+        }
+        Ok(dir)
     }
 
     /// Run the proofs in order on the tree in `root`, ending at the first one that does not pass: a candidate is green only
@@ -806,7 +840,8 @@ impl<R: Roles, E: Executor> Coordinator<R, E> {
             let tree = self.broker()?.compose_tree(grant, lease, &paths)?;
             let input = runner.workers.get(&task.id).ok_or_else(|| Stop::Block("error.wire.stale".into()))?.digest();
             let mut proof = self.proof_set(&tree, &input, paths.clone())?;
-            self.prove(&mut runner, &task.id, &mut proof, root).await?;
+            let ground = self.ground(root).await?;
+            self.prove(&mut runner, &task.id, &mut proof, &ground).await?;
             if !proof.verified() {
                 return Err(Stop::Block("reason.proof.failed".into()));
             }
