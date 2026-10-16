@@ -119,7 +119,7 @@ function Body(props: { project: Project }) {
             const seen = proof();
             const moved = JSON.stringify([seen?.declared, seen?.setup]) !== JSON.stringify([latest.declared, latest.setup]);
             setProof(latest);
-            if (moved) setEditing(false);
+            if (moved) (setEditing(false), keep(proofKey(), ''));
           }
           throw err;
         });

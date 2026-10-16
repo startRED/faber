@@ -74,7 +74,6 @@ export function Projects(props: Props) {
     else setMissionData('view', undefined);
   };
   const [goal, setGoal] = createSignal<string>('');
-  useDraft(() => goal().trim() !== '');
   // What a mission proves its work with (R137): confirmed by the owner the first time a mission starts, or in Settings.
   const [proof, setProof] = createSignal<ProofView>();
   // Whether the start is asking for that confirmation.
@@ -85,6 +84,8 @@ export function Projects(props: Props) {
   const [error, setError] = createSignal<string>();
   const [customAnswers, setCustomAnswers] = createSignal<Record<string, string>>({});
   const customAnswer = (id: string) => Object.hasOwn(customAnswers(), id) ? customAnswers()[id] : '';
+  // A typed goal or decision answer is unsent text: an unattended install waits for it.
+  useDraft(() => goal().trim() !== '' || Object.values(customAnswers()).some((v) => v.trim() !== ''));
   let generation = 0;
   let selectedMission: string | undefined;
   const accept = (view: MissionView, token = generation) => {

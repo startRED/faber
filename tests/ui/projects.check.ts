@@ -7,6 +7,7 @@ import { LANGUAGES, useLanguage } from '../../ui/i18n.ts';
 import { Projects } from '../../ui/Projects.tsx';
 import { ProjectsSection } from '../../ui/ProjectSettings.tsx';
 import { formatCap, formatCost, recallGoal, saveGoal, taskReceiptStatus } from '../../ui/projects.ts';
+import { dirtyCount, kept } from '../../ui/unsent.ts';
 import { check, equal, ok } from './check.ts';
 
 const demo: Project = { id: 'review-project', name: 'Review project', path: 'C:/fixture/review' };
@@ -694,6 +695,7 @@ check('settings projects: a refusal for invalid commands that comes with a moved
     await click(root.querySelector('[data-testid="proof-save"]'));
     equal(root.querySelector('[data-testid="proof-draft"]'), null, 'the draft is gone, whatever the error was');
     ok(root.querySelector('[data-testid="proof-commands"]')?.textContent?.includes('npm run evil'), 'the new list is on screen');
+    equal(kept('proof.' + demo.id), '', 'and the stale draft is not kept for a reopen');
   });
 });
 
@@ -838,4 +840,15 @@ check('projects: the check of the agents shows its time left, then an honest fai
   agentsEmit({ state: 'ready', step: 7, total: 7, estimateSeconds: 0 });
   await settle();
   ok(!root.querySelector('[data-testid="agents-status"]'), 'nothing is shown once the agents are ready');
+}));
+
+check('projects review: a typed custom decision answer counts as unsent until it is cleared', () => withProjects(async (root, emit) => {
+  await start(root);
+  emit({ ...view(2), decisions: [{ id: 'draft-choice', kind: 'direction', question: 'Pick a direction', options: [] }] }); await settle();
+  const before = dirtyCount();
+  const field = root.querySelector<HTMLInputElement>('.ny-custom input')!;
+  field.value = 'typed, not sent'; field.dispatchEvent(new Event('input', { bubbles: true })); await settle();
+  equal(dirtyCount(), before + 1, 'an unattended install must wait for it');
+  field.value = ''; field.dispatchEvent(new Event('input', { bubbles: true })); await settle();
+  equal(dirtyCount(), before, 'an emptied field has nothing to lose');
 }));
