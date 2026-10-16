@@ -330,7 +330,8 @@ A mission keeps a project as coherent as the agents that build Faber keep Faber 
   `Extends:` it or `New:` with why it does not fit; the Writer starts only once the contract exists.
 - **Faber decides "done".** After the Writer's turn Faber runs the project's checks and the map check itself; a Writer
   cannot declare its own work done.
-- **Short check output (R155, next).** The roles read only what failed: each failure with its file and line, the tool's
+- **Short check output (R155; reading built for Cargo, tsc and oxlint, pytest, jest or vitest, eslint and go test
+  next).** The roles read only what failed: each failure with its file and line, the tool's
   suggested fix when it has one, measurements and a one-line summary. The whole output stays in the mission's log, and
   a format Faber does not know falls back to its last lines. Faber's own runner cut a passing run from about 34k tokens
   to about 50 this way (R154).

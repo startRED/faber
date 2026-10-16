@@ -1,0 +1,13 @@
+Build folder: 41.2 GB -> 38.9 GB, removed debug/incremental
+FAIL  lint    cargo clippy --workspace --all-targets -- -D warnings (48.3 s)
+          engine/src/project/run.rs:460:13: error: length comparison to zero
+              help: using `is_empty` is clearer and more explicit: `log.is_empty()`
+FAIL  rust    project::proof::output::tests::a_tsc_error_keeps_its_place
+          thread 'project::proof::output::tests::a_tsc_error_keeps_its_place' (21516) panicked at engine\src\project\proof\output.rs:512:9:
+          assertion `left == right` failed
+            left: None
+           right: Some("src/a.ts:4:3")
+pass  screen  memory: Faber idle after first run (31.4 s)  [318 MB]
+
+484 passed, 2 failed, 0 not run, 0 skipped. Every line: C:\work\faber\target\faber-test\run.log
+Screenshots of failures are in C:\work\faber\target\faber-test\shots
