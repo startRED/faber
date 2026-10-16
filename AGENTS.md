@@ -33,6 +33,18 @@ with the user's own subscriptions. Read [docs/roadmap.md](docs/roadmap.md) befor
   average, not a target), and never leave proven work unpushed. CI fast-forwards `main` to each green `phase-1-base`
   commit by itself (never force, never a red commit), so `main` keeps close behind (R126, R127, R131).
 
+## Before a change a person will see or use
+
+Read [docs/product-rules.md](docs/product-rules.md) first, then:
+
+- Place it with the map there. A setting never lands on a work screen, and a new first-run step needs a reason no
+  default covers.
+- Check the taste cards whose "Touches" match. The review says "cards checked: C00x ok" or names the line that breaks one.
+- Reuse what another area already does (control, words, layout) before inventing a second way.
+- Walk it as a newcomer and as a heavy user: first run, no AI connected, empty and waiting states, a 720 px window,
+  reduced motion, the longest language.
+- Something that goes against a decision ([docs/decisions.md](docs/decisions.md)) or a card goes to the owner first.
+
 ## Stack
 
 - `engine/`: the engine in Rust (tokio). It drives the CLIs, keeps conversations as JSON files and knows nothing
