@@ -32,7 +32,7 @@ fn empty_init(msg: &Value) -> io::Result<()> {
 /// Managed-policy settings are the one hooks source the launch flags cannot switch off. They must be confirmed absent;
 /// a location that cannot be inspected counts as present (the same check the engine repeats at every admission).
 fn managed_policy_absent() -> io::Result<()> {
-    use faber_engine::project::qualification::{managed_policy_clear, path_presence, registry_presence};
+    use crate::project::qualification::{managed_policy_clear, path_presence, registry_presence};
     managed_policy_clear(&path_presence, &registry_presence)
         .map_err(|_| io::Error::other("managed Claude Code policy exists or is unproven"))
 }
@@ -46,7 +46,7 @@ fn stream_cost(input: &Value, output: u64) -> Option<f64> {
     if total == 0 && output == 0 {
         return Some(0.0);
     }
-    faber_engine::usage::api_price("claude-haiku-5-5", total, output, read, write, hour)
+    crate::usage::api_price("claude-haiku-5-5", total, output, read, write, hour)
 }
 
 fn context_tokens(msg: &Value) -> io::Result<u64> {
@@ -73,7 +73,7 @@ fn output_limit_observed(msg: &Value, starts: u64, maximum: u64) -> bool {
 
 #[cfg(windows)]
 pub async fn run(data: &std::path::Path) -> io::Result<()> {
-    use faber_engine::{
+    use crate::{
         budget::Billing,
         model::{Area, Vendor},
         project::Role,
@@ -108,15 +108,15 @@ pub async fn run(data: &std::path::Path) -> io::Result<()> {
     if native {
         std::fs::write(&outside, "baseline\n")?;
     }
-    let cli = faber_engine::cli::find_cli("claude").ok_or_else(|| io::Error::other("CLI unavailable"))?;
-    let spawn = faber_engine::proc::real_spawner();
-    let account = faber_engine::account::claude_account(&cli, &spawn, &work, Duration::from_secs(10)).await.unwrap_or_default();
+    let cli = crate::cli::find_cli("claude").ok_or_else(|| io::Error::other("CLI unavailable"))?;
+    let spawn = crate::proc::real_spawner();
+    let account = crate::account::claude_account(&cli, &spawn, &work, Duration::from_secs(10)).await.unwrap_or_default();
     let mut row = json!({"schema":1,"measuredAt":measured,"vendor":"claude","binaryHash":super::fingerprint(Path::new(&cli.command))?,
-        "qualificationPassed":false,"modelTurns":0,"reservationMicros":faber_engine::project::budget::complete_request_maximum("claude-haiku-5-5",None,0).map_err(io::Error::other)?,
+        "qualificationPassed":false,"modelTurns":0,"reservationMicros":crate::project::budget::complete_request_maximum("claude-haiku-5-5",None,0).map_err(io::Error::other)?,
         "cliEstimateStopMicros":5000,"measuredStopReserveMicros":null,
         "billing":if account.billing==Some(Billing::Subscription){"subscription"}else{"unknownOrPaid"}});
     row["role"] = json!(role);
-    row["configuredOutputMaximum"] = json!(faber_engine::project::policy::output_maximum(Vendor::Claude, role));
+    row["configuredOutputMaximum"] = json!(crate::project::policy::output_maximum(Vendor::Claude, role));
     if account.billing != Some(Billing::Subscription) {
         row["state"] = "stopped".into();
         row["failure"] = "billing unknown or paid".into();
@@ -125,14 +125,14 @@ pub async fn run(data: &std::path::Path) -> io::Result<()> {
         receipt.sync_all()?;
         return Err(io::Error::other("billing unknown or paid"));
     }
-    let mut args = faber_engine::claude::project_claude_args(
-        &faber_engine::claude::ClaudeLaunch {
+    let mut args = crate::claude::project_claude_args(
+        &crate::claude::ClaudeLaunch {
             area: Area::Project,
             model: Some("claude-haiku-5-5".into()),
             effort: Some("low".into()),
             resume: None,
             user_hooks: false,
-            permissions: faber_engine::model::Permissions::Isolated,
+            permissions: crate::model::Permissions::Isolated,
             flags: Default::default(),
             instructions: None,
             user_name: None,
@@ -140,7 +140,7 @@ pub async fn run(data: &std::path::Path) -> io::Result<()> {
         role,
     )
     .map_err(|_| io::Error::other("invalid invocation"))?;
-    let hooks_off = faber_engine::project::qualification::hook_flags(&args)
+    let hooks_off = crate::project::qualification::hook_flags(&args)
         .ok_or_else(|| io::Error::other("launch lacks the flags that load no hooks"))
         .and_then(|flags| managed_policy_absent().map(|()| flags));
     match hooks_off {
@@ -225,7 +225,7 @@ pub async fn run(data: &std::path::Path) -> io::Result<()> {
                         .ok_or_else(||io::Error::other("context census EOF"))?;
                     if line.len()>1024*1024 {return Err(io::Error::other("oversized context message"));}
                     let msg:Value=serde_json::from_str(&line)?;
-                    if faber_engine::project::policy::reject_native(&mut *p.stdin,Vendor::Claude,&msg).await? {continue;}
+                    if crate::project::policy::reject_native(&mut *p.stdin,Vendor::Claude,&msg).await? {continue;}
                     if msg["type"]=="assistant" || msg["type"]=="stream_event" || msg["type"]=="result" {
                         return Err(io::Error::other("context-only probe unexpectedly started a model turn"));
                     }
@@ -242,7 +242,7 @@ pub async fn run(data: &std::path::Path) -> io::Result<()> {
                             "categoryCounts":response["categories"].as_array().map(|items|items.iter().map(|item|
                                 json!({"tokens":item["tokens"],"kind":item["kind"]})).collect::<Vec<_>>()),
                             "memoryFileCount":0,"mcpToolCount":0});
-                        row["contextOnlyBoundMicros"]=json!(faber_engine::project::budget::complete_request_maximum(
+                        row["contextOnlyBoundMicros"]=json!(crate::project::budget::complete_request_maximum(
                             "claude-haiku-5-5",Some(tokens),0).map_err(io::Error::other)?);
                         row["state"]="observed".into();
                         row["note"]="The count precedes the user prompt. It is not a bound for the complete upcoming request and does not open admission.".into();
@@ -279,11 +279,11 @@ pub async fn run(data: &std::path::Path) -> io::Result<()> {
                 initialized=true;
             }
             if msg["type"]=="rate_limit_event" {
-                let signals=faber_engine::signals::claude_signals(&msg);
+                let signals=crate::signals::claude_signals(&msg);
                 row["isUsingOverage"]=json!(signals.overage_active);row["paidFallback"]=json!(signals.paid_fallback);
                 if signals.overage_active==Some(true) {row["stopRule"]=2.into();return Err(io::Error::other("paid overage active"));}
             }
-            if faber_engine::project::policy::reject_native(&mut *p.stdin,Vendor::Claude,&msg).await? {row["nativePermissionDenied"]=true.into();}
+            if crate::project::policy::reject_native(&mut *p.stdin,Vendor::Claude,&msg).await? {row["nativePermissionDenied"]=true.into();}
             if msg["type"]=="assistant" {
                 for item in msg["message"]["content"].as_array().into_iter().flatten() {
                     if item["type"]=="text" {row["answer"]=json!(item["text"].as_str().unwrap_or_default().replace(&marker,"[OUTSIDE_MARKER]").chars().take(500).collect::<String>());}
@@ -329,8 +329,8 @@ pub async fn run(data: &std::path::Path) -> io::Result<()> {
                 if stopping {
                     row["afterStopTextDeltas"]=json!(after_stop_deltas);
                     row["stopToResultMs"]=json!(stopped_at.map(|at|at.elapsed().as_millis() as u64));
-                    let settled=faber_engine::claude::parse_claude_message(&msg).iter().any(|event| matches!(event,
-                        faber_engine::events::EngineEvent::Done { cost_total_usd:Some(_),.. }));
+                    let settled=crate::claude::parse_claude_message(&msg).iter().any(|event| matches!(event,
+                        crate::events::EngineEvent::Done { cost_total_usd:Some(_),.. }));
                     row["settledAfterInterrupt"]=json!(settled);
                     if stopped_at.is_none() {return Err(io::Error::other("turn completed before interruption"));}
                     row["costSource"]=json!(if settled {"settledCounters"} else {"computedBound"});
@@ -339,7 +339,7 @@ pub async fn run(data: &std::path::Path) -> io::Result<()> {
                         row["reportedOutputAfterStop"]=json!(final_output.saturating_sub(row["usageAtStop"]["outputTokens"].as_u64().unwrap_or(0)));
                     } else {
                         row["apiEquivalentUsd"]=Value::Null;
-                        row["computedBoundMicros"]=json!(faber_engine::project::budget::complete_request_maximum("claude-haiku-5-5",None,0).map_err(io::Error::other)?);
+                        row["computedBoundMicros"]=json!(crate::project::budget::complete_request_maximum("claude-haiku-5-5",None,0).map_err(io::Error::other)?);
                     }
                 }
                 if !initialized||(!stopping&&!output_control&&msg["is_error"]==true) {return Err(io::Error::other("loadout turn failed"));}
@@ -358,7 +358,7 @@ pub async fn run(data: &std::path::Path) -> io::Result<()> {
     row["elapsedMs"] = json!(started.elapsed().as_millis() as u64);
     let canary = root.join("outside-marker.txt");
     row["markerUnchanged"] = json!(std::fs::read(&canary)? == marker.as_bytes());
-    row["markerSha256Before"] = json!(faber_engine::project::lease::hash(marker.as_bytes()));
+    row["markerSha256Before"] = json!(crate::project::lease::hash(marker.as_bytes()));
     row["markerSha256After"] = json!(super::fingerprint(&canary)?);
     if native {
         row["outsideBytesBefore"] = json!(b"baseline\n");
@@ -427,7 +427,7 @@ mod tests {
     #[test]
     fn usage_prices_every_cache_kind_and_rejects_overflow() {
         let usage = json!({"input_tokens":10,"cache_read_input_tokens":20,"cache_creation_input_tokens":30});
-        assert_eq!(stream_cost(&usage, 40), faber_engine::usage::api_price("claude-haiku-5-5", 60, 40, 20, 30, 0));
+        assert_eq!(stream_cost(&usage, 40), crate::usage::api_price("claude-haiku-5-5", 60, 40, 20, 30, 0));
         assert!(stream_cost(&json!({}), 0).is_none());
         assert_eq!(stream_cost(&json!({"input_tokens":0}), 0), Some(0.0));
         assert!(stream_cost(&json!({"input_tokens":u64::MAX,"cache_read_input_tokens":1}), 1).is_none());

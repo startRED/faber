@@ -2,15 +2,9 @@
 use std::io;
 #[cfg(any(windows, test))]
 use std::path::Path;
-#[cfg(any(windows, test))]
-#[path = "project-qualification/issue.rs"]
-mod issue;
-#[cfg(any(windows, test))]
-#[path = "project-qualification/live.rs"]
-mod live;
-#[cfg(any(windows, test))]
-#[path = "project-qualification/claude.rs"]
-mod live_claude;
+// The probes and the receipt judge live in the engine: the product earns its own receipts with the same code.
+#[cfg(windows)]
+use faber_engine::project::qualify::{claude as live_claude, codex as live, judge as issue};
 #[cfg(windows)]
 #[path = "project-qualification/promote.rs"]
 mod promote;
@@ -39,15 +33,6 @@ fn protected(path: &Path) -> bool {
             .to_str()
             .is_some_and(|name| [".claude", ".codex", ".gemini"].iter().any(|blocked| name.eq_ignore_ascii_case(blocked)))
     })
-}
-
-#[cfg(any(windows, test))]
-fn random_marker() -> String {
-    use std::hash::BuildHasher;
-    // Independent randomly seeded hashers keep the sentinel absent from the prompt and executable bytes.
-    let first = std::collections::hash_map::RandomState::new().hash_one("outside-marker");
-    let second = std::collections::hash_map::RandomState::new().hash_one("outside-marker");
-    format!("T13_MARKER_{first:016x}{second:016x}")
 }
 
 #[cfg(any(windows, test))]
@@ -509,15 +494,6 @@ fn record_stop(data: &Path, records: &[serde_json::Value], reason: &str) -> io::
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn outside_marker_content_changes_without_disclosing_it_in_a_prompt() {
-        let first = random_marker();
-        let second = random_marker();
-        assert_ne!(first, second);
-        assert_eq!(first.len(), 43);
-        assert!(first.starts_with("T13_MARKER_"));
-    }
-    #[test]
     fn version_output_is_bounded_and_single_line() {
         assert_eq!(version("2.1.296 (Claude Code)\n").unwrap(), "2.1.296 (Claude Code)");
         for text in ["", "one\ntwo", "\u{1b}secret", &"x".repeat(129)] {

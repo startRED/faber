@@ -19,6 +19,7 @@ pub mod lease;
 pub mod mission;
 pub mod proof;
 pub mod qualification;
+pub mod qualify;
 pub mod queue;
 pub mod report;
 pub mod run;

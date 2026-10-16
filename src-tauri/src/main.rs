@@ -65,6 +65,8 @@ pub(crate) struct Faber {
     pub(crate) awake: Arc<Mutex<CountedAwake>>,
     /// Missions the coordinator is driving in this process; a second drive of the same mission never starts.
     driving: Mutex<HashSet<String>>,
+    /// One check of the agents at a time; a second start waits for it and finds the receipts it earned.
+    qualifying: tauri::async_runtime::Mutex<()>,
     _mission_events: faber_engine::project::store::MissionSubscription,
     pub(crate) autostart: Mutex<Arc<dyn AutostartKeeper>>,
 }
@@ -711,8 +713,48 @@ async fn project_proof_confirm(faber: State<'_, Faber>, project_id: String, comm
     Ok(mission::view(&after))
 }
 
+/// The agents a mission uses must hold fresh receipts. When one is missing, stale or for another policy, Faber earns them
+/// itself with its own contained probes (a few cents at most, hidden) and tells the screen how it goes. Nothing is forged:
+/// a failed probe means no mission, and the screen gets the probe's reason.
+async fn ensure_agents(app: &AppHandle, faber: &Faber) -> Res<()> {
+    use faber_engine::project::qualify::{self, AgentsView};
+    if qualify::ready().is_ok() {
+        return Ok(());
+    }
+    // The hidden test build runs fake CLIs: its screen tests assert the gate stays shut, so it never earns receipts.
+    if cfg!(feature = "test-hooks") {
+        return Err(faber_engine::project::policy::Blocker::Restrictions.key().into());
+    }
+    let _one = faber.qualifying.lock().await;
+    if qualify::ready().is_ok() {
+        return Ok(());
+    }
+    let tell = |view: AgentsView| {
+        let _ = app.emit("agents", &view);
+    };
+    tell(AgentsView::checking(1, faber_engine::model::Vendor::Codex));
+    let exe = std::env::current_exe().map_err(|_| "reason.qualify.failed".to_string())?;
+    let announce = app.clone();
+    let progress = move |step: usize, _total: usize, vendor: faber_engine::model::Vendor| {
+        let _ = announce.emit("agents", &AgentsView::checking(step, vendor));
+    };
+    match qualify::earn(&faber.data_dir, &exe, &progress).await {
+        Ok(()) => {
+            tell(AgentsView::ready());
+            Ok(())
+        }
+        Err(detail) => {
+            tell(AgentsView::failed(detail));
+            Err("reason.qualify.failed".into())
+        }
+    }
+}
+
 #[tauri::command]
 async fn mission_start(app: AppHandle, faber: State<'_, Faber>, project_id: String, goal: String) -> Res<String> {
+    project_commands::id(&project_id)?;
+    project_commands::text(&goal)?;
+    ensure_agents(&app, &faber).await?;
     let _turn = faber.missions.lock().await;
     project_commands::id(&project_id)?;
     let project = faber.engine.project(&project_id)?;
@@ -781,6 +823,7 @@ async fn mission_stop(app: AppHandle, faber: State<'_, Faber>, mission_id: Strin
 
 #[tauri::command]
 async fn mission_resume(app: AppHandle, faber: State<'_, Faber>, mission_id: String) -> Res<MissionView> {
+    ensure_agents(&app, &faber).await?;
     let _turn = faber.missions.lock().await;
     let (project, journal, mission) = find_mission_and_journal(&faber, &mission_id)?;
     project_commands::editable(&mission)?;
@@ -1035,6 +1078,12 @@ fn main() {
         std::process::exit(code);
     }
     let args: Vec<_> = std::env::args_os().skip(1).collect();
+    // One qualification probe, run by the check of the agents in a contained child of this program: no window, no app.
+    if let [mode, probe, data] = args.as_slice()
+        && mode == "--faber-qualify"
+    {
+        std::process::exit(faber_engine::project::qualify::child(&probe.to_string_lossy(), Path::new(data)));
+    }
     if let [mode, data, nonce, output, canary] = args.as_slice()
         && mode == "--faber-local-canary"
     {
@@ -1289,6 +1338,7 @@ fn main() {
                 local: local.clone(),
                 awake,
                 driving: Mutex::default(),
+                qualifying: Default::default(),
                 _mission_events: mission_events,
                 autostart: Mutex::new(autostart_keeper),
             });

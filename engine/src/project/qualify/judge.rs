@@ -1,9 +1,9 @@
 //! Turns live probe observations into a qualification receipt. A probe row never opens a gate; this reads the rows of
 //! one run, judges each of the five receipt checks from what the rows actually observed, and only then calls
 //! `qualification::issue`. A row for another binary, an unfinished row or a missing field fails that check.
-use faber_engine::model::Vendor;
-use faber_engine::project::qualification::{self, Proof, Source};
-use faber_engine::project::{Role, budget::role_request_maximum};
+use crate::model::Vendor;
+use crate::project::qualification::{self, Proof, Source};
+use crate::project::{Role, budget::role_request_maximum};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::io;
@@ -135,7 +135,7 @@ pub fn issue_all(probes: &Path, data: &Path) -> io::Result<BTreeMap<String, BTre
     let mut report = BTreeMap::new();
     for vendor in Vendor::ALL {
         let name = vendor.name();
-        let cli = faber_engine::cli::find_cli(name).ok_or_else(|| fail("CLI unavailable"))?;
+        let cli = crate::cli::find_cli(name).ok_or_else(|| fail("CLI unavailable"))?;
         let identity = qualification::observe(&cli.command, &cli.prefix)?;
         let rows = Rows {
             loadout: read_row(probes, &format!("{name}-loadout"))?,
