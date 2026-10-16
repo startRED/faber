@@ -313,6 +313,10 @@ pub struct Conversation {
     /// Tools the user chose to always allow in this conversation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allow_always: Option<Vec<String>>,
+    /// When each tool in `allow_always` was allowed (ms since the epoch). A grant with no time counts as older than any
+    /// revocation (`Settings::grants_revoked_at`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub allow_always_at: BTreeMap<String, u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch_of: Option<BranchOf>,
     /// What the user asked to be called when this conversation started. Kept here so the CLI gets the same instructions every
@@ -521,6 +525,11 @@ pub struct Settings {
     /// Start Faber when signing in to Windows (off by default: registered in HKCU Run).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub autostart: Option<bool>,
+    /// Written in the same save that makes the mode stricter (ms since the epoch): a remembered "Always allow" older than
+    /// this is ignored, wherever it is still stored, so a conversation file that failed to update cannot bring it back.
+    /// Only the engine sets it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grants_revoked_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

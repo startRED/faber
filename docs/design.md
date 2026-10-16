@@ -303,13 +303,18 @@ projects. Faber has no worktree creation for projects, so an environment has no 
   | Auto | `auto` (else `acceptEdits`) | `on-request` / `workspace-write` / `auto_review` |
   | Full access (default, stored `dontAsk`) | `bypassPermissions` | `never` / `danger-full-access` |
 
-  Rules that hold in every mode: Plan never takes a remembered "Always allow" and remembers none, and moving to a stricter
-  mode (or to a stricter web setting) stops a running turn and forgets every remembered grant, in memory and on disk. No
-  mode promises zero execution: Ask lets plain reads through, Plan lets read-only commands through, and Accept edits lets
+  Rules that hold in every mode: Plan never takes a remembered "Always allow" and remembers none. Moving to a stricter mode
+  stops a running turn and revokes every remembered grant. The revocation is a time, `grantsRevokedAt`, written in the same
+  settings save that changes the mode; each grant carries the time it was made (`allowAlwaysAt`), and a grant that is older than
+  the revocation, or has no time, never counts, on every check and after every restart. The conversation files are also
+  cleaned, but only as tidiness: a write that failed cannot bring a grant back. Settings that cannot be read revoke every grant
+  too, and the next save counts as the revocation. A stricter web setting stops a running turn but does not change command grants.
+  No mode promises zero execution: Ask lets plain reads through, Plan lets read-only commands through, and Accept edits lets
   Codex run commands inside the working folder. Leaving Claude's plan mode names `default` for the session. Settings that cannot
   be read start in Ask, not Full access (a missing file still means Full access). Every isolated or internal Codex thread has
-  `web_search` disabled. Credential-folder denies hold for Claude's file tools in every mode; Codex has no way to enforce them
-  in Chat in any mode (no profile, same limit as Full access) and only refuses a forwarded request that names them.
+  `web_search` disabled. Credential-folder denies hold for Claude's file tools in every mode. For Codex Chat they are not
+  applied yet: permission profiles that extend `:workspace` or `:read-only` could carry them on compatible backends, and that is
+  a follow-up. Until then Faber only refuses a forwarded request that names a credential folder.
 
   Web search (Off, Cached, Live; Live by default in the saved Chat settings, Off for any launch nobody chose for): Codex `web_search` in the thread config; Claude Code allows
   WebSearch and WebFetch (Live), only WebSearch and denies WebFetch (Cached, which it lacks), or denies both (Off).

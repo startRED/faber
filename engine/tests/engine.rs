@@ -688,10 +688,10 @@ async fn the_hooks_choice_is_saved_and_restarts_idle_project_clis_with_it() {
     let appearance = serde_json::json!({ "base": "oficina" }).as_object().cloned();
     engine.save_settings(Settings { appearance, ..Settings::default() }).unwrap();
     engine.shutdown();
-    assert_eq!(
-        read_json(&dir.path().join("settings.json")),
-        serde_json::json!({ "userHooks": true, "permissions":"ask", "appearance": { "base": "oficina" } })
-    );
+    let mut saved = read_json(&dir.path().join("settings.json"));
+    // Full access to Ask is a stricter move, so the save carries the time every earlier "Always allow" was revoked.
+    assert!(saved.as_object_mut().unwrap().remove("grantsRevokedAt").unwrap().as_u64().is_some());
+    assert_eq!(saved, serde_json::json!({ "userHooks": true, "permissions":"ask", "appearance": { "base": "oficina" } }));
 }
 
 #[tokio::test]

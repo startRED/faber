@@ -209,7 +209,10 @@ impl Store {
     pub fn settings(&self) -> Settings {
         match read_checked(&self.settings) {
             Ok(found) => found.unwrap_or_default(),
-            Err(_) => Settings { permissions: Some(crate::model::Permissions::Ask), ..Settings::default() },
+            // No grant counts either: the revocation time is the largest there is.
+            Err(_) => {
+                Settings { permissions: Some(crate::model::Permissions::Ask), grants_revoked_at: Some(u64::MAX), ..Settings::default() }
+            }
         }
     }
 
@@ -222,6 +225,7 @@ impl Store {
                 && !loaded(&c.id)
             {
                 c.allow_always = None;
+                c.allow_always_at.clear();
                 self.save(&c);
             }
         }

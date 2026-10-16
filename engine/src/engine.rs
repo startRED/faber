@@ -1121,11 +1121,21 @@ impl Core {
         }
     }
 
+    /// Whether the person's "Always allow" for this tool in this conversation still counts: it must be newer than the last
+    /// revocation. A grant with no time is older than any revocation.
+    fn grant_stands(&self, conv: &str, tool: &str) -> bool {
+        let Some(c) = self.convs.get(conv) else { return false };
+        if !c.allow_always.as_ref().is_some_and(|a| a.iter().any(|t| t == tool)) {
+            return false;
+        }
+        self.store.settings().grants_revoked_at.is_none_or(|at| c.allow_always_at.get(tool).is_some_and(|t| *t > at))
+    }
+
     /// Keeps the merged settings, or fails with `error.settings.saveFailed` before anything live changes.
     fn save_settings(&mut self, patch: Settings) -> Result<Settings, String> {
         let before = self.store.settings();
         let before_tuning = before.tuning();
-        let settings = Settings {
+        let mut settings = Settings {
             appearance: patch.appearance.or(before.appearance),
             user_hooks: patch.user_hooks.or(before.user_hooks),
             permissions: patch.permissions.or(before.permissions),
@@ -1141,18 +1151,29 @@ impl Core {
             user_name: patch.user_name.map_or(before.user_name.clone(), |name| clean_name(&name)),
             keep_awake: patch.keep_awake.or(before.keep_awake),
             autostart: patch.autostart.or(before.autostart),
+            grants_revoked_at: before.grants_revoked_at,
         };
+        // A stricter mode revokes every remembered "Always allow" in the very save that changes the mode, as a time: a grant older
+        // than it never counts again, even if a conversation file below fails to update. Settings that could not be read count
+        // as a revocation at this save (see `Store::settings`).
+        let (was, to) = (before.permissions.unwrap_or_default(), settings.permissions.unwrap_or_default());
+        let carried = match before.grants_revoked_at {
+            Some(u64::MAX) => Some(now()),
+            at => at,
+        };
+        settings.grants_revoked_at =
+            if to.strictness() > was.strictness() { Some(now().max(carried.map_or(0, |t| t + 1))) } else { carried };
         self.store.save_settings(&settings).map_err(|_| "error.settings.saveFailed".to_string())?;
         // A turn keeps the mode it started with until it ends, so moving to a stricter mode stops the turns under way (a turn
         // that began under a stricter mode keeps it; moving to a looser one does not touch it).
-        let (was, now) = (before.permissions.unwrap_or_default(), settings.permissions.unwrap_or_default());
-        let stricter = now.strictness() > was.strictness() || settings.tuning().web.strictness() > before_tuning.web.strictness();
+        let stricter = to.strictness() > was.strictness() || settings.tuning().web.strictness() > before_tuning.web.strictness();
         // A stricter mode never inherits what a looser one was told: every "Always allow" is forgotten.
-        if now.strictness() > was.strictness() {
+        if to.strictness() > was.strictness() {
             let ids: Vec<String> = self.convs.iter().filter(|(_, c)| c.allow_always.is_some()).map(|(id, _)| id.clone()).collect();
             for id in ids {
                 if let Some(c) = self.convs.get_mut(&id) {
                     c.allow_always = None;
+                    c.allow_always_at.clear();
                 }
                 self.save(&id);
             }
@@ -1382,7 +1403,7 @@ impl Core {
                 }
                 // Plan never takes a remembered grant: nothing may change under it without a card.
                 let plan = self.live.get(conv).is_some_and(|l| l.permissions == Permissions::Plan);
-                let allowed = !plan && self.convs.get(conv).and_then(|c| c.allow_always.as_ref()).is_some_and(|a| a.contains(&tool));
+                let allowed = !plan && self.grant_stands(conv, &tool);
                 if allowed {
                     return self.auto_answer(conv, vec![Permission { request_id, tool, input }]);
                 }
@@ -2223,6 +2244,7 @@ impl Core {
             command_gate: false,
             cost_base: BTreeMap::new(),
             allow_always: None,
+            allow_always_at: BTreeMap::new(),
             branch_of: None,
             user_name: self.store.settings().user_name.and_then(|name| clean_name(&name)),
             persona_version: Some(crate::persona::VERSION),

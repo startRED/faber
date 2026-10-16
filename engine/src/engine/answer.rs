@@ -88,13 +88,14 @@ impl Core {
             // The tool is allowed from now on, so a question that came in while the engine waited gets its answer too.
             if let Some(waiting) = reply.permissions.as_mut() {
                 (late, *waiting) = std::mem::take(waiting).into_iter().partition(|p| p.tool == tool);
-                changed |= !late.is_empty();
             }
             let list = c.allow_always.get_or_insert_default();
             if !list.iter().any(|t| t == tool) {
                 list.push(tool.to_string());
-                changed = true;
             }
+            // The time is renewed on every grant, so one made after a revocation counts again.
+            c.allow_always_at.insert(tool.to_string(), super::now());
+            changed = true;
         }
         if changed {
             self.save(conv);
@@ -674,5 +675,87 @@ mod tests {
         )
         .unwrap();
         assert!(saved.get("allowAlways").is_none(), "{saved}");
+    }
+
+    fn stands(engine: &Engine, id: &str, tool: &str) -> bool {
+        engine.open(id).unwrap();
+        engine.with(|c| c.grant_stands(id, tool))
+    }
+
+    #[tokio::test]
+    async fn r140_a_revocation_holds_after_a_conversation_write_that_failed_and_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let (first, _) = engine(dir.path());
+        first.save_settings(Settings { permissions: Some(Permissions::Auto), ..Settings::default() }).unwrap();
+        let id = first.with(|c| {
+            let id = c.blank(Area::Chat, None);
+            let conv = c.convs.get_mut(&id).unwrap();
+            conv.allow_always = Some(vec!["Bash".into()]);
+            conv.allow_always_at.insert("Bash".into(), super::super::now());
+            c.save(&id);
+            id
+        });
+        let file = dir.path().join("conversations").join(format!("{id}.json"));
+        let saved = std::fs::read(&file).unwrap();
+        assert!(stands(&first, &id, "Bash"), "Auto, nothing revoked yet");
+        first.save_settings(Settings { permissions: Some(Permissions::Ask), ..Settings::default() }).unwrap();
+        // The write that failed left the old file, grant included, on disk.
+        std::fs::write(&file, &saved).unwrap();
+        first.shutdown();
+        let (restarted, _) = engine(dir.path());
+        assert!(restarted.settings().grants_revoked_at.is_some());
+        assert!(!stands(&restarted, &id, "Bash"), "the grant is older than the revocation, so Ask asks");
+        // A grant the person makes afterwards counts.
+        let at = restarted.settings().grants_revoked_at.unwrap();
+        restarted.with(|c| c.convs.get_mut(&id).unwrap().allow_always_at.insert("Bash".into(), at + 1));
+        assert!(stands(&restarted, &id, "Bash"));
+        // Looser or equal moves keep the revocation time; a new stricter one moves it forward.
+        restarted.save_settings(Settings { permissions: Some(Permissions::AcceptEdits), ..Settings::default() }).unwrap();
+        assert_eq!(restarted.settings().grants_revoked_at, Some(at));
+        assert!(stands(&restarted, &id, "Bash"));
+        restarted.save_settings(Settings { permissions: Some(Permissions::Plan), ..Settings::default() }).unwrap();
+        assert!(restarted.settings().grants_revoked_at.unwrap() > at);
+    }
+
+    #[tokio::test]
+    async fn r140_old_saved_grants_are_ignored_after_a_stricter_move_and_the_card_shows() {
+        let dir = tempfile::tempdir().unwrap();
+        let (engine, _) = engine(dir.path());
+        let s = stub(vec![]);
+        let id = seed(&engine, s.session.clone(), &[("t1", &[])]);
+        engine.with(|c| {
+            c.convs.get_mut(&id).unwrap().allow_always = Some(vec!["Write".into(), "Bash".into()]);
+            c.live.get_mut(&id).unwrap().permissions = Permissions::Ask;
+        });
+        // A grant saved before this field existed has no time: it counts while nothing was ever revoked.
+        assert!(stands(&engine, &id, "Bash"));
+        ask(&engine, &id, "1", "Bash");
+        assert_eq!(*s.asked.lock().unwrap(), ["1"], "answered without a card");
+        // A revocation after that: the same old grants are ignored, and the request waits for the person.
+        engine.with(|c| {
+            c.store
+                .save_settings(&Settings { permissions: Some(Permissions::Ask), grants_revoked_at: Some(5), ..Settings::default() })
+                .unwrap();
+        });
+        assert!(!stands(&engine, &id, "Bash"));
+        assert!(!stands(&engine, &id, "Write"));
+        s.asked.lock().unwrap().clear();
+        ask(&engine, &id, "2", "Bash");
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+        }
+        assert!(s.asked.lock().unwrap().is_empty());
+        assert_eq!(waiting(&engine, &id, "t1"), ["2"]);
+        // Allowing with Always after the revocation counts again.
+        assert_eq!(engine.answer(&id, "t1", "2", true, true).await, Ok(()));
+        assert!(stands(&engine, &id, "Bash"));
+        assert!(!stands(&engine, &id, "Write"), "only the tool that was allowed again");
+        // Settings that cannot be read revoke everything.
+        std::fs::write(dir.path().join("settings.json"), "{ not json").unwrap();
+        assert!(!stands(&engine, &id, "Bash"));
+        // The next save counts as the revocation, so the damaged file never lets an old grant back in.
+        engine.save_settings(Settings { language: Some("de".into()), ..Settings::default() }).unwrap();
+        assert!(!stands(&engine, &id, "Bash"));
+        assert!(engine.settings().grants_revoked_at.is_some_and(|t| t != u64::MAX));
     }
 }
