@@ -740,6 +740,9 @@ first, each to the lightest part so far, using the CI seconds of every scenario 
 words (`docs/` or a `.md` file, except `docs/product-map.md`, which a test reads; `scripts/ci-scope.mjs`) skips the
 jobs and is green in seconds, but only when the commit before it is green (R163). CI keeps the Windows screenshots as artifacts. Anything outside the page (tray,
 notifications, installer, updates) is checked through the operating system's accessibility layer and file versions.
+The update scenario (T13 4) runs the update flow's clock five times faster from one anchor all its processes share
+(`FABER_TEST_CLOCK`, read only by the test build; a release build with the test hooks does not compile), so it proves
+the whole 300-second probation and its 30-second health window in about 100 s instead of 335 (R163).
 
 Test launches also pass the browser engine switches that turn off crash reports and SmartScreen address lookups, and the
 sandbox removes every `WEBVIEW2_*` override from the environment. That limits what a test sends; it is not a firewall.
