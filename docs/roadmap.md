@@ -448,6 +448,15 @@ frames) and checked against today's code. It fills the steps of R161 and never b
    attachments of a project conversation (`<data dir>/attachments/<conversation id>/`): Faber's own data, never the
    project folder (R35), never in an export, trimmed by size and deleted with its conversation. "While you were away"
    sums it up in a few pictures with one sentence each.
+9. **Screens that build themselves in front of you.** The owner's ask (2026-10-16), with Google Stitch as a reference
+   for the feeling, never its look: when the agent builds or changes a screen, the app pane shows that screen filling
+   in as the work lands, not a finished picture at the end. The project's own dev server reloads after each saved
+   change, so the pane follows on its own; between two pictures of the log Faber marks the part that changed with a
+   soft outline that fades. Each subagent at work has its own pointer on the pane, in its color, with a small tag
+   bearing the name from its row; a pointer moves to where that subagent last clicked or changed something. Clicking a
+   tag opens that subagent in the side chat, and clicking the outlined part says which call changed it. Several
+   screens of one task sit side by side, each filling in as its subagent works, and the one the person opens is the
+   only live view. Reduced motion shows the outline and the tag with no movement; during a game nothing moves.
 
 **Across all of them:**
 
