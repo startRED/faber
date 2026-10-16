@@ -396,6 +396,9 @@ pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
             (Some(id), Some(model)) => vec![EngineEvent::Started { session_id: id.into(), model: model.into() }],
             _ => vec![EngineEvent::Error { message: "Claude Code started without a session id.".into(), fatal: false }],
         },
+        // A subagent's own words stream too (`parent_tool_use_id` names the agent call that started it): they are its work, never
+        // the answer, so only its tool calls are shown, inside its step.
+        "stream_event" if !msg["parent_tool_use_id"].is_null() => vec![],
         "stream_event" => {
             let event = &msg["event"];
             if event["type"] == "content_block_start" && event["content_block"]["type"] == "text" {
@@ -411,11 +414,15 @@ pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
                 _ => vec![],
             }
         }
-        // Text already arrived as deltas; only finished tool calls are new here.
-        "assistant" => items(&msg["message"]["content"])
-            .filter(|c| c["type"] == "tool_use")
-            .map(|c| EngineEvent::Tool { id: s(&c["id"]), name: s(&c["name"]), input: c["input"].clone() })
-            .collect(),
+        // Text already arrived as deltas; only finished tool calls are new here. A subagent's calls name the agent call that
+        // started it.
+        "assistant" => {
+            let parent = msg["parent_tool_use_id"].as_str().map(String::from);
+            items(&msg["message"]["content"])
+                .filter(|c| c["type"] == "tool_use")
+                .map(|c| EngineEvent::Tool { id: s(&c["id"]), name: s(&c["name"]), input: c["input"].clone(), parent: parent.clone() })
+                .collect()
+        }
         "user" => items(&msg["message"]["content"])
             .filter(|c| c["type"] == "tool_result")
             .map(|c| {
@@ -428,6 +435,9 @@ pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
                 }
             })
             .collect(),
+        "system" if msg["subtype"] == "task_notification" && msg["tool_use_id"].is_string() => {
+            vec![EngineEvent::HelperDone { id: s(&msg["tool_use_id"]), ok: msg["status"] == "completed", text: s(&msg["summary"]) }]
+        }
         "control_request" if msg["request"]["subtype"] == "can_use_tool" => vec![EngineEvent::Permission {
             request_id: s(&msg["request_id"]),
             tool: s(&msg["request"]["tool_name"]),
@@ -754,6 +764,29 @@ fn user_message(turn: &UserTurn) -> Value {
 #[cfg(test)]
 mod allow_tests {
     use super::*;
+
+    #[test]
+    fn a_subagents_tool_calls_name_the_agent_call_and_its_words_never_join_the_answer() {
+        let call = |parent: Value| {
+            parse_claude_message(&json!({ "type": "assistant", "parent_tool_use_id": parent,
+                "message": { "content": [{ "type": "tool_use", "id": "t2", "name": "Grep", "input": { "pattern": "x" } }] } }))
+        };
+        let parent_of = |events: Vec<EngineEvent>| match events.as_slice() {
+            [EngineEvent::Tool { parent, .. }] => parent.clone(),
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(parent_of(call(json!("agent1"))), Some("agent1".into()));
+        assert_eq!(parent_of(call(Value::Null)), None);
+        let words = |parent: Value| {
+            parse_claude_message(&json!({ "type": "stream_event", "parent_tool_use_id": parent,
+                "event": { "type": "content_block_delta", "delta": { "type": "text_delta", "text": "inner" } } }))
+        };
+        assert!(words(json!("agent1")).is_empty(), "a subagent's text is not the answer");
+        assert!(matches!(words(Value::Null).as_slice(), [EngineEvent::Text(t)] if t == "inner"));
+        let done = parse_claude_message(&json!({ "type": "system", "subtype": "task_notification", "tool_use_id": "agent1",
+            "status": "failed", "summary": "Gave up" }));
+        assert!(matches!(done.as_slice(), [EngineEvent::HelperDone { id, ok: false, text }] if id == "agent1" && text == "Gave up"));
+    }
 
     #[test]
     fn a_question_the_person_answered_goes_back_with_the_questions_and_the_answers() {

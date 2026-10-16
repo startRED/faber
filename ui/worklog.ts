@@ -77,3 +77,57 @@ export const toolLine = (tool: ToolUse): string => {
   const row = toolRow(tool);
   return row.detail ? `${row.label} · ${middle(row.detail)}` : row.label;
 };
+
+/** Claude Code's call that hands a piece of the work to a subagent (`Agent`; `Task` in older versions). */
+export const isAgentCall = (tool: ToolUse): boolean => !tool.parent && (tool.name === 'Agent' || tool.name === 'Task');
+
+export interface AgentStep {
+  call: ToolUse;
+  /** The few words the agent gave the piece of work, else the start of its brief. */
+  title: string;
+  /** The kind of subagent (`Explore`, `Plan`, a person's own agent), when the agent named one. */
+  kind: string;
+  /** What the subagent ran, in order. */
+  tools: ToolUse[];
+  report: string;
+  /** Sent to the background: its call returned when it started, and it finishes later. */
+  background: boolean;
+}
+
+// Claude Code frames a subagent's report as model output and indents every line of it (2026-10 recording).
+const HANDBACK = /^\[Subagent hand-back\][\s\S]*?The report follows:\n/;
+
+/** The subagent's report without the frame Claude Code puts around it, its lines back at their own indent. */
+export function agentReport(output = ''): string {
+  const frame = HANDBACK.exec(output);
+  if (!frame) return output.trim();
+  return output
+    .slice(frame[0].length)
+    .split('\n')
+    .map((line) => line.replace(/^ {2}/, ''))
+    .join('\n')
+    .trim();
+}
+
+/** Each subagent the agent started, with the tools it ran under it. A subagent's own helper folds into it: its tools count
+ * for the agent call the whole chain started from. */
+export function agentSteps(tools: ToolUse[] = []): AgentStep[] {
+  const text = (v: unknown) => (typeof v === 'string' ? v : '');
+  const parents = new Map(tools.map((tool) => [tool.id, tool.parent]));
+  const root = (tool: ToolUse) => {
+    let id = tool.parent;
+    for (let hops = 0; id && parents.get(id) && hops < tools.length; hops++) id = parents.get(id);
+    return id;
+  };
+  return tools.filter(isAgentCall).map((call) => {
+    const input = (call.input ?? {}) as Record<string, unknown>;
+    return {
+      call,
+      title: text(input.description).trim() || middle(text(input.prompt), 80),
+      kind: text(input.subagent_type),
+      tools: tools.filter((tool) => tool.parent && root(tool) === call.id),
+      report: agentReport(call.output),
+      background: input.run_in_background === true,
+    };
+  });
+}

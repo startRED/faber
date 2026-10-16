@@ -266,7 +266,7 @@ mod tests {
     }
 
     fn tool(name: &str, input: Value, ok: Option<bool>) -> ToolUse {
-        ToolUse { id: format!("t{name}{input}"), name: name.into(), input, ok, output: None, declined: false }
+        ToolUse { id: format!("t{name}{input}"), name: name.into(), input, ok, output: None, declined: false, parent: None }
     }
 
     fn bash(command: &str, ok: bool) -> ToolUse {
