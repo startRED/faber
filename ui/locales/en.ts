@@ -805,6 +805,7 @@ export const en = {
   'notes.14.new': 'In a project you now chat with the assistant like anywhere else, and its questions arrive as cards you tap.',
   'notes.15.fixed': "On a project's first screen, the words stay on the dim part of the black hole when a list opens below them.",
   'notes.16.new': 'When the assistant hands part of the work to a helper, the helper shows as a step in its reply.',
+  'notes.17.fixed': 'When the assistant leaves subagents working in the background, its reply now waits for them and arrives whole instead of stopping at “I will wait”.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

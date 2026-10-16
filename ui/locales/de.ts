@@ -938,6 +938,7 @@ export const de: Messages = {
   'notes.14.new': 'In einem Projekt unterhältst du dich jetzt wie überall mit dem Assistenten, und seine Fragen erscheinen als Karten zum Antippen.',
   'notes.15.fixed': 'Auf dem ersten Bildschirm eines Projekts bleiben die Wörter auf dem dunklen Teil des Schwarzen Lochs, wenn sich darunter eine Liste öffnet.',
   'notes.16.new': 'Wenn der Assistent einen Teil der Arbeit an einen Helfer gibt, erscheint der Helfer als Schritt in seiner Antwort.',
+  'notes.17.fixed': 'Wenn der Assistent Subagenten im Hintergrund arbeiten lässt, wartet seine Antwort jetzt auf sie und kommt vollständig an, statt bei „ich warte“ stehen zu bleiben.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',
