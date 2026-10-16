@@ -99,6 +99,17 @@ check('projects: build card displays live slot status and explains why promotion
   ok(activeCard!.textContent?.includes('Running'), 'live waiting reason reflects running state');
 }));
 
+check('projects: outside the development channel a mission board has no local build card', () => withProjects(async (root, emit) => {
+  api.localUpdateState = async () => null;
+  window.dispatchEvent(new Event('focus'));
+  await settle();
+  await start(root);
+  emit({ ...view(2), state: 'running' });
+  await settle();
+  ok(root.querySelector('.cost-pace-panel'), 'the mission board is shown');
+  equal(root.querySelector('[data-testid="local-build"]'), null, 'no build card for a build Faber does not make');
+}));
+
 async function start(root: HTMLElement) {
   const field = root.querySelector<HTMLTextAreaElement>('#mission-goal')!;
   field.value = 'Review goal'; field.dispatchEvent(new Event('input', { bubbles: true }));
@@ -237,7 +248,10 @@ check('projects review: IME composition cannot submit an unfinished decision ans
   } finally { api.missionAnswer = original; }
 }));
 
-check('projects review: missing build slots stay explicit; quota freshness is separate from own cost', () => withProjects(async (root, emit) => {
+check('projects review: on the development channel unknown build slots stay explicit; quota freshness is separate from own cost', () => withProjects(async (root, emit) => {
+  api.localUpdateState = async () => ({});
+  window.dispatchEvent(new Event('focus'));
+  await settle();
   await start(root);
   emit({ ...view(2), pace: [{ vendor: 'codex', window: 'seven_day', used: 0.31, room: 0.04, readAt: 1791000000 }] });
   await settle();

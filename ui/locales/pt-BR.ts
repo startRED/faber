@@ -778,7 +778,6 @@ export const ptBR: Messages = {
   // Native speaker must translate (needs native review).
   "error.decision.person": "Esta decisão precisa da sua resposta.",
   // Native speaker must translate (needs native review).
-  "reason.build.unavailable": "Os slots de compilação local não foram inicializados.",
   // Native speaker must translate (needs native review).
   "reason.update.quiescence": "A promoção aguarda o término das operações ativas e o fechamento da janela.",
   // Native speaker must translate (needs native review).

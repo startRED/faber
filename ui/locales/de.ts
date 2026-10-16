@@ -781,7 +781,6 @@ export const de: Messages = {
   // Native speaker must translate (needs native review).
   "error.decision.person": "Diese Entscheidung erfordert deine Antwort.",
   // Native speaker must translate (needs native review).
-  "reason.build.unavailable": "Die lokalen Build-Slots wurden nicht initialisiert.",
   // Native speaker must translate (needs native review).
   "reason.update.quiescence": "Die Aktualisierung wartet auf den Abschluss aktiver Vorgänge und das Schließen des Fensters.",
   // Native speaker must translate (needs native review).

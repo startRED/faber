@@ -781,7 +781,6 @@ export const es: Messages = {
   // Native speaker must translate (needs native review).
   "error.decision.person": "Esta decisión necesita tu respuesta.",
   // Native speaker must translate (needs native review).
-  "reason.build.unavailable": "Las ranuras de compilación local no se han inicializado.",
   // Native speaker must translate (needs native review).
   "reason.update.quiescence": "La promoción espera a que finalicen las operaciones activas y se cierre la ventana.",
   // Native speaker must translate (needs native review).

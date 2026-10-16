@@ -781,7 +781,6 @@ export const fr: Messages = {
   // Native speaker must translate (needs native review).
   "error.decision.person": "Cette décision nécessite votre réponse.",
   // Native speaker must translate (needs native review).
-  "reason.build.unavailable": "Les emplacements de build local n'ont pas été initialisés.",
   // Native speaker must translate (needs native review).
   "reason.update.quiescence": "La promotion attend la fin des opérations actives et la fermeture de la fenêtre.",
   // Native speaker must translate (needs native review).

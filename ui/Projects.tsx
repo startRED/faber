@@ -401,7 +401,8 @@ export function Projects(props: Props) {
     const m = mission();
     return formatCost(m?.cost.ownMicros);
   });
-  const build = (): BuildView => localBuild() ?? mission()?.build ?? { waiting: 'reason.build.unavailable' };
+  // Only the development channel builds Faber locally; anywhere else there is no card at all.
+  const build = (): BuildView | undefined => localBuild() ?? mission()?.build ?? undefined;
 
   // The first screen of a project: no mission yet, so the screen is a home, with its own light behind it.
   const home = () => !mission();
