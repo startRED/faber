@@ -55,10 +55,10 @@ now follows this document.
   for IDA Pro, ida-free-mcp for IDA Free. REA reads .NET metadata and CIL but never produces C#; the official
   `ilspycmd` CLI is the on-demand pick for C# source, so the community ILSpy-MCP servers are not recommended. Cpp2IL,
   UnityPy, AssetRipper and gdsdecomp are the small companion set for game mods (area 7).
-- **universal-modder (Erick).** Skills only, as Erick decided. Faber installs only the skill folders that do not tell the
-  agent to add other MCP servers. Its `reverse-engineering` skill names ILSpy-MCP, Ghidra MCPs and il2cpp-frida-mcp, which
-  breaks "one Ghidra bridge" and the `ilspycmd` pick, so that skill stays out. Whether to allow its pinned `um` CLI is
-  item 2 under "Flags for Erick".
+- **universal-modder (Erick).** Its skills plus its `um` CLI at a pinned version, after one yes (Erick, R153). Faber
+  installs only the skill folders that do not tell the agent to add other MCP servers. Its `reverse-engineering` skill
+  names ILSpy-MCP, Ghidra MCPs and il2cpp-frida-mcp, which breaks "one Ghidra bridge" and the `ilspycmd` pick, so that
+  skill stays out.
 - **Browser.** `playwright-cli` is the one flow driver and chrome-devtools-mcp is the one measurement tool (area 2).
   REA's bundled `playwright-core` is for its own captures, and Playwright MCP is not installed for the same job. Tools
   that attach to the person's real signed-in browser profile (Playwriter, browser-harness) are not recommended. Claude
@@ -125,9 +125,9 @@ candidates and names each duplicate it cut.
 
 1. VoiceStudio (ER6): the default engine OmniVoice ships CC-BY-NC (non-commercial) weights. Row kept as decided.
 2. universal-modder (Erick): 20 of its skill files call its `um` CLI, so "skills only" loses most of its function.
-   Allow a pinned `um` install, or keep skills only?
+   **Answer (Erick, 2026-10-16, R153):** allow its `um` CLI at a pinned version, from its own source, after the same yes.
 3. Impeccable (R56) contacts impeccable.style when a new design starts, even with telemetry off. The opt-out stops the
-   record, and no project files are sent.
+   record, and no project files are sent. **Answer (Erick, 2026-10-16, R153):** keep it as it is.
 4. REA (R149) on Windows: Ghidra is experimental, read-only and PE only; firmware, GDB, tshark and Rizin are verified on
    Linux or macOS only. It has 1,068 open issues and one main maintainer.
 5. Sentry MCP is FSL-1.1-Apache-2.0 (the same family as Faber's own licence; use is allowed). Clerk skills have no
@@ -704,7 +704,7 @@ Re-curated 2026-10-16. Discovery sources: WebSearch (12 queries: marketing/SEO s
 | Engine skills (Godot, Unity, Unreal, Phaser, PixiJS, three.js, Bevy, Roblox...) | gamedev-skills/awesome-gamedev-agent-skills (setup) | unity-agent-plugin (Unity depth), quodsoler/unreal-engine-skills (UE C++ depth), threejs-game-skills (full three.js game workflow) | Apache-2.0, version-pinned, prompt-only, no hooks. Replaces the "no Phaser skill" gap from round 1 |
 | Minecraft mods | minecraft-dev-mcp (on demand) | Jahrome907/minecraft-agent-skills (datapacks, server plugins, art) | Decompiles and remaps, which skills cannot do |
 | Mod loaders (guides) | BepInEx (Unity Mono) (on demand) | MelonLoader (IL2CPP games or where BepInEx fails); SMAPI (Stardew); tModLoader (Terraria); UE4SS (Unreal) | One loader per engine family. Each is game-side software, Faber only guides |
-| Universal game-mod workflow | universal-modder, skills only (on demand, Erick's decision, kept) | none | Only multi-engine mod playbook found, MIT. See flags |
+| Universal game-mod workflow | universal-modder, skills plus its pinned `um` CLI (on demand, Erick, R153) | none | Only multi-engine mod playbook found, MIT. See flags |
 | Unity IL2CPP names and signatures | Cpp2IL (on demand, own games) | none | MIT, commit 2026-09-12, handles newer metadata versions. REA does not decode IL2CPP. Il2CppDumper and Il2CppInspector are stale |
 | Unity assets | UnityPy (edit and repack) (on demand) | AssetRipper (export a whole project to read) | Different jobs: write vs read. AssetStudio is archived |
 | Godot game recovery | gdsdecomp (on demand, own games) | none | Only active tool for .pck and GDScript recovery |
@@ -741,7 +741,7 @@ Re-curated 2026-10-16. Discovery sources: WebSearch (12 queries: marketing/SEO s
 | Pathoschild/SMAPI | Stardew Valley mod loader and API | Game-specific, .NET | LGPL-3.0 | 4.5.2 2026-03-22; commit 2026-09-28 | None seen | on demand (guide) | Pathoschild/SMAPI@e5b8bf3:LICENSE.txt |
 | tModLoader | Terraria mod loader and SDK; mods are C# | Needs Terraria on Steam. Third-party mods are untrusted code | MIT | v2026.08.3.0 2026-10-01; commit 2026-10-14; 612 open issues | None | on demand (guide) | tModLoader/tModLoader@fdcf523:LICENSE |
 | UE4SS-RE/RE-UE4SS (new) | Lua and C++ scripting system, SDK generator and mod loader for Unreal 4/5 games | Game-side. Latest tagged release v3.0.1 is from 2024-02-14; work continues on main. Hooks into the running game: single-player only | MIT | Commit 2026-10-14; 268 open issues | None known (not grepped) | on demand (guide, Unreal games) | UE4SS-RE/RE-UE4SS@1ba38db:LICENSE (releases and commits via API) |
-| rehan-remade/universal-modder (Erick) | Plugin: 12 skills (mod-any-game with engine playbooks, game-recon, reverse-engineering, port-a-mod, publish-mod, share-field-notes...), the `um` Python CLI, 3 agents, and a shared notes folder | Skills call `um` in 20 files (`um scan`, `um kb`, `um publish check`). SessionStart hook only appends `bin/` to PATH. `mcp.json` is one hosted fal.ai entry needing FAL_KEY: drop it. Faber installs only the skill folders that do not tell the agent to add other MCP servers. The `reverse-engineering` skill is left out: it names ILSpy-MCP, Ghidra MCPs and il2cpp-frida-mcp, which breaks the one-Ghidra-bridge rule (R149) and the `ilspycmd` pick. Whether to allow the pinned `um` CLI is a flag for Erick. Safety file refuses anti-cheat and DRM bypass in text only | MIT | Commit 2026-10-14; 22 open issues; no releases; created 2026-09-30 | None found (only mod notes mention game telemetry) | on demand, skills only (Erick, kept) | rehan-remade/universal-modder@23902ef:LICENSE,hooks/hooks.json,hooks/add-to-path.sh,mcp.json,skills/reverse-engineering/SKILL.md,skills/mod-any-game/references/safety.md,pyproject.toml |
+| rehan-remade/universal-modder (Erick) | Plugin: 12 skills (mod-any-game with engine playbooks, game-recon, reverse-engineering, port-a-mod, publish-mod, share-field-notes...), the `um` Python CLI, 3 agents, and a shared notes folder | Skills call `um` in 20 files (`um scan`, `um kb`, `um publish check`). SessionStart hook only appends `bin/` to PATH. `mcp.json` is one hosted fal.ai entry needing FAL_KEY: drop it. Faber installs only the skill folders that do not tell the agent to add other MCP servers. The `reverse-engineering` skill is left out: it names ILSpy-MCP, Ghidra MCPs and il2cpp-frida-mcp, which breaks the one-Ghidra-bridge rule (R149) and the `ilspycmd` pick. Whether to allow the pinned `um` CLI is a flag for Erick. Safety file refuses anti-cheat and DRM bypass in text only | MIT | Commit 2026-10-14; 22 open issues; no releases; created 2026-09-30 | None found (only mod notes mention game telemetry) | on demand, skills plus its pinned `um` CLI, without the `reverse-engineering` skill (Erick, R153) | rehan-remade/universal-modder@23902ef:LICENSE,hooks/hooks.json,hooks/add-to-path.sh,mcp.json,skills/reverse-engineering/SKILL.md,skills/mod-any-game/references/safety.md,pyproject.toml |
 | SamboyCoding/Cpp2IL (new) | Reverses IL2CPP builds: reads `global-metadata.dat` and the native binary, emits dummy DLLs, metadata and method dumps for Ghidra or IDA | Release tags are only pre-releases (2022.1.0-pre-release.21, 2026-02-22) but commits continue. Own games only. REA says it does not decode IL2CPP metadata, so this fills the gap. Pair it with `ilspycmd` (area 3) for the managed DLLs | MIT | Commit 2026-09-12; 46 open issues | None found | on demand (Unity IL2CPP, own games) | SamboyCoding/Cpp2IL@b5ad444:LICENSE,README.md |
 | K0lb3/UnityPy | Python library to read and edit Unity asset bundles and serialized files | Library, not MCP; saving can corrupt, back up first. REA does not read Unity bundles | MIT | Commit 2026-10-05; 27 open issues | None | on demand (own games only) | K0lb3/UnityPy@417d595:LICENSE,README.md |
 | AssetRipper/AssetRipper (new) | Extracts a Unity game's assets and rebuilds a Unity project from them (read side) | GPL-3.0: run as a separate downloaded app, never linked or bundled. Own games only. Telemetry grep hits were Unity class names | GPL-3.0 | 2.0.0 2026-08-24; commit 2026-10-09; 156 open issues | None found | on demand (own games only) | AssetRipper/AssetRipper@beeb50e:LICENSE,README.md |
