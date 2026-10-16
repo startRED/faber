@@ -3,10 +3,13 @@
 use crate::model::{PaceNote, Vendor};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+/// The default is the screen's too (`DEFAULT_EFFORT` in `ui/api.ts`, which shows it before the engine sees the choice);
+/// a test below keeps the two the same.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Effort {
     Low,
+    #[default]
     Medium,
     High,
 }
@@ -69,7 +72,7 @@ pub fn pick_model(choice: &Choice, available: &[Vendor], codex_recommended: Opti
         return available.contains(&vendor).then(|| {
             let model = choice.model.as_deref().map(|model| pinned(vendor, model));
             let mut chosen = pick(vendor, model, "reason.chosen");
-            chosen.effort = choice.effort.unwrap_or(Effort::Medium).name().into();
+            chosen.effort = choice.effort.unwrap_or_default().name().into();
             chosen
         });
     }
@@ -80,4 +83,15 @@ pub fn pick_model(choice: &Choice, available: &[Vendor], codex_recommended: Opti
         return Some(pick(Vendor::Codex, None, "reason.autoOnly"));
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Effort;
+
+    #[test]
+    fn the_screen_starts_a_model_at_the_level_the_engine_does() {
+        let wanted = format!("export const DEFAULT_EFFORT: Effort = '{}';", Effort::default().name());
+        assert!(include_str!("../../ui/api.ts").contains(&wanted), "ui/api.ts must say: {wanted}");
+    }
 }

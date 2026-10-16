@@ -144,10 +144,7 @@ pub(super) fn covers_monitor(window: Rect, monitor: Rect) -> bool {
 
 pub(super) fn delivery(focused: bool, attention: Attention, settings: &Settings) -> Delivery {
     let active = !focused && attention != Attention::Silent;
-    Delivery {
-        toast: active && attention == Attention::Normal && settings.notifications != Some(false),
-        sound: active && settings.notification_sound != Some(false),
-    }
+    Delivery { toast: active && attention == Attention::Normal && settings.notifications(), sound: active && settings.notification_sound() }
 }
 
 /// What the tray remembers between lists and mission views, to ignore old ones and to notify once per question or decision.

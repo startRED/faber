@@ -144,6 +144,10 @@ The only writer is the `save_settings` command; the merge in `Core::save_setting
 `Settings`, so a new field does not compile until it is merged. A patch sets a value and never clears one (an empty
 `userName` is the only way back to none). There is no "settings changed" event: Rust readers read the file when they need
 it, and the screen takes the saved settings from the answer of `save_settings`.
+A switch's default lives once, in `impl Settings` (`engine/src/model.rs`): Rust readers call its method, and the shell
+sends the screen every switch already filled in (`Settings::shown`), so the screen keeps no default of its own. The
+effort a model starts at is the one exception the screen shows before the engine sees it: `DEFAULT_EFFORT` in
+`ui/api.ts`, kept equal to `Effort::default()` by a test in `engine/src/router.rs`.
 
 "Lives on" is one of a closed list: a Settings section, the first run, the composer, a just-in-time card, or none. A
 choice a person makes anywhere else (a work screen, a banner) is an incoherence.
@@ -296,8 +300,6 @@ ones.
     line per option).
 20. The model and effort choice is stored twice (browser storage wins over the conversation file); autostart is stored
     twice (the setting and the Windows Run key, which the screen never reads back).
-21. Defaults are repeated in each reader (`permissions`, `keepAwake`, `notifications`, `userHooks`, effort `medium`):
-    a new setting keeps its default in one place.
 
 ## Worked example: adding a setting
 

@@ -120,6 +120,7 @@ fn main_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
 #[tauri::command]
 async fn state(app: AppHandle, faber: State<'_, Faber>) -> Res<FullState> {
     let mut state = faber.engine.state();
+    state.settings = std::mem::take(&mut state.settings).shown();
     state.settings.appearance = look::usable(state.settings.appearance.take());
     let look = look::stored(state.settings.appearance.as_ref());
     Ok(FullState { state, look, models: lock(&faber.models).clone(), version: app.package_info().version.to_string() })
@@ -240,8 +241,8 @@ async fn save_settings(faber: State<'_, Faber>, mut patch: Settings) -> Result<S
         patch.appearance = Some(look::validated(map)?.0.to_map());
     }
     let autostart = lock(&faber.autostart);
-    let mut settings = autostart::save(autostart.as_ref(), patch.autostart, || faber.engine.save_settings(patch))?;
-    lock(&faber.awake).set_enabled(settings.keep_awake.unwrap_or(true));
+    let mut settings = autostart::save(autostart.as_ref(), patch.autostart, || faber.engine.save_settings(patch))?.shown();
+    lock(&faber.awake).set_enabled(settings.keep_awake());
     settings.appearance = look::usable(settings.appearance.take());
     let look = look::stored(settings.appearance.as_ref());
     Ok(SavedSettings { settings, look })
@@ -1428,7 +1429,7 @@ fn main() {
                     Arc::new(NoopAutostart)
                 }
             };
-            let keep_awake = faber_engine::store::Store::new(&data_dir).settings().keep_awake.unwrap_or(true);
+            let keep_awake = faber_engine::store::Store::new(&data_dir).settings().keep_awake();
             let awake = Arc::new(Mutex::new(CountedAwake::new(power, keep_awake)?));
             let update_requests = Arc::new(std::sync::atomic::AtomicBool::new(true));
             let mission_updates = update_requests.clone();
@@ -1621,7 +1622,7 @@ fn headless_start(dev: &Development) -> Result<bool, faber_engine::project::upda
             Box::new(NoopPower)
         }
     };
-    let keep_awake = faber_engine::store::Store::new(&dev.data()).settings().keep_awake.unwrap_or(true);
+    let keep_awake = faber_engine::store::Store::new(&dev.data()).settings().keep_awake();
     let awake = Arc::new(Mutex::new(
         CountedAwake::new(power, keep_awake)
             .map_err(|_| faber_engine::project::update::UpdateError::InvalidState("power owner unavailable"))?,

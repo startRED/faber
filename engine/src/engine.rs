@@ -14,7 +14,7 @@ use crate::model::*;
 use crate::nudge;
 use crate::proc::Spawner;
 use crate::recents::RecentsView;
-use crate::router::{Choice, Effort, Pick, pick_model};
+use crate::router::{Choice, Pick, pick_model};
 use crate::signals::Signals;
 use crate::store::Store;
 use crate::usage;
@@ -1208,7 +1208,7 @@ impl Core {
         // A stricter mode revokes every remembered "Always allow" in the very save that changes the mode, by replacing the grants
         // epoch: a grant made under another one never counts again, even if a conversation file below fails to update.
         // Settings that could not be read already came with a fresh epoch (see `Store::settings`), and this save keeps it.
-        let (was, to) = (before.permissions.unwrap_or_default(), settings.permissions.unwrap_or_default());
+        let (was, to) = (before.permissions.unwrap_or_default(), settings.permissions());
         if to.strictness() > was.strictness() {
             settings.grants_epoch = Some(crate::model::new_epoch());
         }
@@ -1957,7 +1957,7 @@ impl Core {
         let auto = item.choice.vendor == "auto";
         let route = if auto { self.next_route(id) } else { None };
         let c = self.convs.get_mut(id).expect("checked above");
-        c.choice = Some(Choice { effort: (!auto).then(|| item.choice.effort.unwrap_or(Effort::Medium)), ..item.choice.clone() });
+        c.choice = Some(Choice { effort: (!auto).then(|| item.choice.effort.unwrap_or_default()), ..item.choice.clone() });
         let routing = route.is_some();
         let pick = match &route {
             Some(Some(before)) => before.clone(),
@@ -2162,7 +2162,7 @@ impl Core {
         self.tick += 1;
         let cli = self.opts.clis.get(&pick.vendor).cloned();
         let settings = self.store.settings();
-        let (permissions, tuning) = (settings.permissions.unwrap_or_default(), settings.tuning());
+        let (permissions, tuning) = (settings.permissions(), settings.tuning());
         let flags = match &cli {
             Some(cli) if pick.vendor == Vendor::Claude => self.claude_flags_for(cli),
             _ => Default::default(),
@@ -2233,7 +2233,7 @@ impl Core {
             }
         });
         // The hooks switch matters only while asking; with full access the person's hooks always run, as in the CLI itself.
-        let user_hooks = settings.user_hooks == Some(true) && permissions.guarded();
+        let user_hooks = settings.user_hooks() && permissions.guarded();
         let resume = c.resumable(pick.vendor).cloned();
         let resumed = resume.is_some();
         let area = c.area;
@@ -2387,7 +2387,7 @@ impl Core {
         let auto = req.choice.vendor == "auto";
         let route = if auto { self.next_route(&id) } else { None };
         let c = self.convs.get_mut(&id).ok_or("error.conversationGone")?;
-        c.choice = Some(Choice { effort: (!auto).then(|| req.choice.effort.unwrap_or(Effort::Medium)), ..req.choice.clone() });
+        c.choice = Some(Choice { effort: (!auto).then(|| req.choice.effort.unwrap_or_default()), ..req.choice.clone() });
         let routing = route.is_some();
         let pick = match &route {
             Some(Some(before)) => before.clone(),
