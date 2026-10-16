@@ -109,7 +109,7 @@ const IMAGE_TYPES: [(&str, &str); 6] = [
     ("svg", "image/svg+xml"),
 ];
 
-fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+pub(crate) fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -975,13 +975,29 @@ fn data_dir(app: &AppHandle) -> tauri::Result<PathBuf> {
     }
 }
 
-/// Asks Codex for this account's models in the background; the picker fills in when it answers.
+/// Set while Codex is being asked for its limits and models, which starts two Codex processes: one asking at a time is enough.
+static LOADING_MODELS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Asks Codex for this account's models in the background; the picker fills in when it answers. A call while an asking is
+/// under way does nothing: that asking answers for both.
 pub(crate) fn load_models(app: &AppHandle, codex: Cli, cwd: PathBuf) {
+    use std::sync::atomic::Ordering;
+    struct Done;
+    impl Drop for Done {
+        fn drop(&mut self) {
+            LOADING_MODELS.store(false, Ordering::Release);
+        }
+    }
+    if LOADING_MODELS.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let done = Done;
     let real = real_spawner();
     let prefix = codex.prefix.clone();
     let spawn: Spawner = Arc::new(move |bin, args, cwd| real(bin, &prefix.iter().chain(args).cloned().collect::<Vec<_>>(), cwd));
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
+        let _done = done;
         let events = read_codex_limits(&codex.command, &cwd, cfg!(windows), spawn.clone(), Duration::from_secs(20)).await;
         app.state::<Faber>().engine.note_account_events(Vendor::Codex, events);
         let list = list_codex_models(&codex.command, &cwd, cfg!(windows), spawn, Duration::from_secs(20)).await;

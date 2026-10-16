@@ -99,7 +99,8 @@ pub async fn setup_check(app: AppHandle, faber: State<'_, Faber>, vendor: String
         if faber.engine.ledger().of(v).billing == faber_engine::budget::Billing::Unknown {
             faber.engine.check_plans(Duration::from_secs(5)).await;
         }
-        if let Some(codex) = updated.get(&Vendor::Codex) {
+        // The guide and the tutorial check again on every focus and step; the models are asked for only while Faber has none.
+        if let Some(codex) = updated.get(&Vendor::Codex).filter(|_| crate::lock(&faber.models).is_empty()) {
             crate::load_models(&app, codex.clone(), faber.data_dir.clone());
         }
         let _ = app.emit("faber:event", AppEvent::List);

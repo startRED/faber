@@ -370,7 +370,11 @@ projects. Faber has no worktree creation for projects, so an environment has no 
   `untrusted`) and carries the same credential denies and the same refusal of forwarded credential requests; it asks except for
   what the person pre-allowed in the tool's own settings. The system and credential folders are refused as working folders, judged
   by their resolved path (R124, R124b), and Faber's own requests never run the person's hooks. A CLI and everything it started
-  end together (a Windows job object made before the CLI runs, failing closed; R124b, R124c). Settings shows the
+  end together (a Windows job object made before the CLI runs, failing closed; R124b, R124c). Known residual: the CLI is
+  created suspended and joins its job a moment later (about 100 ms, measured on Windows 11), so if Faber ends in that
+  moment the CLI stays suspended, outside any job, until the PC restarts. It never runs a single instruction. Std Rust
+  cannot create a process inside a job yet (`raw_attribute` is unstable), so Faber starts as few CLIs as it can: Codex is
+  asked for its models only while Faber has none, one asking at a time. Settings shows the
   details; the thread shows one calm line with a link to them. The isolated mode below is `Permissions::Isolated`: Faber's
   own model list, router, internal checks and self-development roles use it, and the person cannot pick it.
 - No prompt can block a full-access turn. Where the installed Claude Code declares `--permission-prompts` as an option line in a successful `claude --help` (read once

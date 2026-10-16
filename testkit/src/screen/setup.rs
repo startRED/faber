@@ -198,6 +198,12 @@ fn none_then_connect(ctx: &mut Ctx) -> Result {
             .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
             .is_some_and(|settings| settings["tutorialDone"] == true)
     })?;
+    // Asking Codex for its limits and models starts app servers. The checks that follow every focus and step ask again only
+    // while the models are missing, one asking at a time: this run starts 3, against 4 to 10 when every check asked. A burst
+    // of starts also made this check flaky: the runner ends the app at once, and a CLI caught between being created
+    // (suspended) and joining its job was left behind, suspended, outside any job.
+    let servers = ctx.records()?.iter().filter(|c| c.args.first().is_some_and(|a| a == "app-server")).count();
+    ensure(servers <= 3, || format!("Codex was asked for its models too often: {servers} app servers"))?;
     ctx.close(app.id)
 }
 
