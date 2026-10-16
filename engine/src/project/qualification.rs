@@ -201,6 +201,8 @@ pub struct Pinned {
     _file: std::fs::File,
     pub path: PathBuf,
     pub sha256: String,
+    /// The `--version` the program answered, filled only by an admission whose receipt it matched.
+    pub version: String,
 }
 
 /// Opens the resolved program file, denying writes and deletes on Windows, and hashes it through that handle.
@@ -224,7 +226,7 @@ pub fn pin(path: &Path) -> io::Result<Pinned> {
         }
         digest.update(&buffer[..size]);
     }
-    Ok(Pinned { _file: file, path, sha256: format!("{:x}", digest.finalize()) })
+    Ok(Pinned { _file: file, path, sha256: format!("{:x}", digest.finalize()), version: String::new() })
 }
 
 /// Hashes the program and asks it for `--version`: no shell, no window, scrubbed environment, a deadline.
@@ -241,8 +243,9 @@ pub fn observe(command: &str, prefix: &[String]) -> io::Result<Identity> {
 /// `expected` (the receipt's). Another program never runs; it answers with its hash and no version. The pin is handed
 /// back so the launch can keep the file unchanged until the started process runs (`proc::spawn_expecting`).
 pub fn observe_pinned(command: &str, expected: &str) -> io::Result<(Identity, Pinned)> {
-    let pinned = pin(Path::new(command))?;
+    let mut pinned = pin(Path::new(command))?;
     let version = if pinned.sha256 == expected { version_of(&pinned.path)? } else { String::new() };
+    pinned.version.clone_from(&version);
     Ok((Identity { version, binary_hash: pinned.sha256.clone() }, pinned))
 }
 

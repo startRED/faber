@@ -112,7 +112,14 @@ fn the_waiver_is_explicit_single_use_recorded_bound_to_one_mission_and_only_move
     r132::consume("m2");
     assert!(allocate(&mut uncalibrated(0.45)).is_ok());
     r132::consume("m1");
-    // The calibration that spends it is written to the ledger although the waiver is no longer open, and a ledger that    // never saw it records it spent too (review 2, #1).    let mut ledger = remembering(json!({"mission": "m1", "spent": false}));    r132::remember(&mut ledger, Some("m1"));    assert_eq!(ledger.extra["r132Waiver"], json!({"mission": "m1", "spent": true}));    let mut unseen = uncalibrated(0.45);    r132::remember(&mut unseen, Some("m1"));    assert_eq!(unseen.extra["r132Waiver"], json!({"mission": "m1", "spent": true}));
+    // The calibration that spends it is written to the ledger although the waiver is no longer open, and a ledger that
+    // never saw it records it spent too (review 2, #1).
+    let mut ledger = remembering(json!({"mission": "m1", "spent": false}));
+    r132::remember(&mut ledger, Some("m1"));
+    assert_eq!(ledger.extra["r132Waiver"], json!({"mission": "m1", "spent": true}));
+    let mut unseen = uncalibrated(0.45);
+    r132::remember(&mut unseen, Some("m1"));
+    assert_eq!(unseen.extra["r132Waiver"], json!({"mission": "m1", "spent": true}));
     assert!(allocate(&mut uncalibrated(0.45)).is_err(), "spent");
     assert!(!r132::admits("m1"));
     assert!(r132::waive(Exception::R132, other.path(), "m1", &json!({})).is_err(), "single use survives being spent");

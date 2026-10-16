@@ -232,10 +232,14 @@ fn pin(vendor: Vendor, model: &str, version: &str) -> ModelPin {
     ModelPin { vendor, model: model.into(), effort: "medium".into(), cli_version: version.into() }
 }
 
-fn cli_version(vendor: Vendor) -> Result<String, String> {
-    let name = if vendor == Vendor::Claude { "claude" } else { "codex" };
-    let cli = crate::cli::find_cli(name).ok_or("error.cli.missing")?;
-    let text = super::qualification::observe(&cli.command, &cli.prefix).map(|i| i.version).map_err(|_| "error.cli.missing".to_string())?;
+fn cli(vendor: Vendor) -> Option<String> {
+    crate::cli::find_cli(vendor.name()).filter(|c| c.prefix.is_empty()).map(|c| c.command)
+}
+
+/// The version of a CLI the receipt admits, through the same pinned, hash-first path as a role launch: a program whose hash
+/// is not the receipt's is never asked for `--version`.
+fn cli_version(vendor: Vendor, bin: &dyn Fn() -> Option<String>) -> Result<String, String> {
+    let text = super::qualification::admitted(vendor, bin).map(|pinned| pinned.version).map_err(|_| "error.cli.missing".to_string())?;
     version_token(&text).ok_or_else(|| "error.cli.missing".to_string())
 }
 
@@ -253,6 +257,19 @@ mod version_tests {
         assert_eq!(super::version_token("2.1.296 (Claude Code)").as_deref(), Some("2.1.296"));
         assert_eq!(super::version_token("codex-cli 0.162.1").as_deref(), Some("0.162.1"));
         assert_eq!(super::version_token("no version here"), None);
+    }
+
+    /// Review 3, #1: the real canary takes the CLI version through the receipt's pinned, hash-first admission, so with no
+    /// admitting receipt the CLI is not even looked up, let alone asked for `--version`.
+    #[test]
+    fn the_canary_asks_no_cli_its_version_before_a_receipt_admits_it() {
+        let looked = std::cell::Cell::new(false);
+        let found = || {
+            looked.set(true);
+            Some(std::env::current_exe().unwrap().to_string_lossy().into_owned())
+        };
+        assert!(super::cli_version(super::Vendor::Claude, &found).is_err());
+        assert!(!looked.get(), "the CLI was looked up before a receipt admitted it");
     }
 }
 
@@ -330,8 +347,8 @@ pub async fn run(engine: &Engine, engine_data: &Path, work: &Path, mode: Mode) -
             Pins { lead: writer.clone(), writer, reviewer }
         }
         Mode::Real => {
-            let writer = pin(WRITER_MODEL.0, WRITER_MODEL.1, &cli_version(WRITER_MODEL.0)?);
-            let reviewer = pin(REVIEWER_MODEL.0, REVIEWER_MODEL.1, &cli_version(REVIEWER_MODEL.0)?);
+            let writer = pin(WRITER_MODEL.0, WRITER_MODEL.1, &cli_version(WRITER_MODEL.0, &|| cli(WRITER_MODEL.0))?);
+            let reviewer = pin(REVIEWER_MODEL.0, REVIEWER_MODEL.1, &cli_version(REVIEWER_MODEL.0, &|| cli(REVIEWER_MODEL.0))?);
             Pins { lead: writer.clone(), writer, reviewer }
         }
     };
