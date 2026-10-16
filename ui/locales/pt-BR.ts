@@ -702,6 +702,16 @@ export const ptBR: Messages = {
   "projects.details.noEvidence": "Nenhuma evidência verificada pelo motor está disponível.",
   // Native speaker must translate (needs native review).
   "projects.pace.freshness": "Leitura: {when}",
+  'reason.budget.calibration': 'O Faber ainda está aprendendo quanto da sua cota uma missão usa. Ele espera mais algumas leituras e continua.',
+  'reason.budget.other': 'O Faber está esperando sua cota permitir o próximo passo.',
+  'reason.other': 'O Faber parou aqui por um motivo que ainda não sabe descrever. Os detalhes estão no log.',
+  'projects.board.new': 'Nova missão',
+  'projects.board.leave': 'Sair desta missão? Ela fica como está, mas não dá para abri-la daqui de novo.',
+  'projects.board.leaveYes': 'Sair',
+  'projects.board.stay': 'Ficar',
+  'projects.board.more': 'Modo, custo e compilação',
+  'projects.tasks.none': 'Nenhuma tarefa ainda. O Faber divide o objetivo em tarefas enquanto planeja.',
+  'projects.tasks.count': '{done} de {total} concluídas',
   // Native speaker must translate (needs native review).
   "reason.mission.runnerUnavailable": "A execução da missão está aguardando o executor aprovado. Nenhum trabalho foi iniciado.",
   // Native speaker must translate (needs native review).
@@ -890,6 +900,8 @@ export const ptBR: Messages = {
   'notes.6.better': "A tela do projeto ficou mais calma, e as configurações agora ficam em Configurações > Projetos.",
   'notes.7.new': "O Chat agora tem modos de permissão (Perguntar, Aceitar edições, Plano, Auto, Acesso total) e uma configuração de busca na web.",
   'notes.8.better': 'O progresso da atualização aparece na tela, e o Faber nunca abre como uma janela em branco.',
+  'notes.9.better': 'A tela de projetos não tem mais o facho de luz, e o buraco negro aparece inteiro e se mistura suavemente atrás do texto.',
+  'notes.12.better': 'O quadro da missão ficou mais calmo: o objetivo, o passo e o motivo da espera vêm primeiro, as colunas vazias sumiram e Nova missão começa outra.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

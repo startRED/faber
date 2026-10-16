@@ -121,8 +121,9 @@ own inks.
   focus (`html.away-win`), and they are gone with reduced or no motion.
 - Slow ambient loops step on a shared 1 s beat (`steps()`) instead of drawing 60 frames a second: idle CPU follows the
   frames per second, not what changes in them. Dark Room's idle home costs about 10% of one core against 49% before.
-- The Projects home has its own light: the beam leans the other way, the loom runs slower and the flow line reads
-  "Your goal". A look with no effect of its own gets a faint drifting light when the ambient switch is on.
+- The Projects home is a place to work, like a terminal: it has no beam, dust or drifting light. Its loom runs slower
+  and its flow line reads "Your goal". A look with no effect of its own gets a faint drifting light when the ambient
+  switch is on.
 - The empty composer idles (`ui/Ghost.tsx`): a blinking typing bar and a hint that changes every 8 s. It renders
   nothing while the field has text or focus, with reduced or no motion, or while the window is hidden; the plain
   placeholder stays underneath for assistive technology.
@@ -133,11 +134,11 @@ own inks.
   - **Workbench:** a flow line at the top right reading "Your idea → Claude and Codex → Done, with proof". It names only
     the vendors that are connected.
 - The first screen of a project (where a new session starts) in Dark Room also shows a black hole drawn in monospace
-  characters on one canvas (ui/Hole.tsx, --amb-hole and --hole-colors): a huge shadow cut by the right edge, an amber disk sweeping in from the lower left
+  characters on one canvas (ui/Hole.tsx, --amb-hole and --hole-colors): the whole shadow, centred in the room from 150 px right of the column with its arc clear of every edge (16% to 30% of the height), an amber disk sweeping in from the lower left
   with fibres that turn faster near the hole, the far side of the disk bent over the top as a cool arc, a photon ring, a
-  dim glow, a small planet below it and stars. It lives only right of the column of words: it starts 32 px past the
-  column, fades in over 160 px and dims within 280 px, across the whole height, so words that scroll in the column never
-  pass over it. With less than 400 px of room it does not show or run.
+  dim glow, a small planet below it and stars. It has no hard edge beside the column of words: behind the column it keeps 14% of its light, comes up to full
+  from 40 px left of the column's edge to 240 px right of it and dims the hole a little more within 320 px, across the
+  whole height, so words that scroll in the column always sit on the same veil. The project screens show no beam of light. With less than 400 px of room it does not show or run.
   Ten times a second it works out again only the cells the hole can reach and repaints those that changed; stars
   twinkle every 700 ms and now and then one shoots across. A click on an empty spot sends a ring of the accent for
   1.3 s. It stops when the window is hidden or unfocused; reduced or no motion draws one still frame and no ripple.
@@ -422,16 +423,20 @@ screen work may start against it with mock data before the engine runs missions.
 
 ### Screen inventory
 
-The board keeps the titlebar, sidebar, topbar, running column, tokens, type and Curioso empty states, and uses the stage
-width rather than the 660 px reading column. Below the available width the state groups stack into one scrolling list;
-nothing needs a horizontal drag.
+The board keeps the titlebar, sidebar, topbar, running column, tokens, type and Curioso empty states, and reads like the
+start card it came from: one column up to 860 px, no cards around the header. First the state (a dot and a word) with
+"New mission" beside it once the mission is done, paused or blocked (a paused or blocked one asks first, since nothing
+lists it later), then the goal (at most three lines, the rest on hover), the step it is on in one line, why it waits in
+one line, and the one action that moves it (Stop or Resume). Then the needs-you cards, the report, and the tasks as one
+list grouped by state, only the groups that hold something; before the plan, one line says there are no tasks yet. Run
+mode, cost, account pace and the local build sit folded under "Run mode, cost and build". Nothing needs a horizontal drag.
 
 | Surface | Minimum behaviour |
 | :--- | :--- |
 | Goal | The composer's styling: the goal, a short plan and Start. The text stays after a refused enrollment or start |
 | Start card | Repository, starting revision, git mode (Seguro selected), author and self-update trust; granted once, never per step |
-| Board | Ready, Running, Review, Done and Blocked; stable task rows with builder, reviewer and reason |
-| Cost | Own cost against the live cap; the account's daily pace and its freshness beside it, separately; unknown says unknown |
+| Board | Ready, Running, Review, Done and Blocked groups, empty ones hidden; stable task rows with builder, reviewer and reason |
+| Cost | Own cost against the live cap; the account's daily pace and its freshness beside it, separately; unknown says unknown, folded away; the step line shows the cost only once it is known |
 | Decisions | The Ask and running cards, with author and default; nothing approves an effect by itself |
 | Stop | A keyboard-reachable button while running; then the paused checkpoint and Resume |
 | Task detail | Scope, diff and artifacts, command results, missing checks and risks; technical logs behind a click |
@@ -451,11 +456,11 @@ project with one short line per option and the rest behind "Learn more". The che
 first start on checks nobody confirmed opens a compact sheet with their count and source, every command (and the setup)
 listed in full with no collapse, a long list scrolling inside it, and "Confirm and start"; what is confirmed is exactly the list
 shown, and a project that changed it meanwhile is refused so the sheet shows the new list. It does not come back until
-the checks change. The light leans the other way. The two layouts share classes, so a change to one home reaches the other.
+the checks change. No beam of light: a project screen is a place to work. The two layouts share classes, so a change to one home reaches the other.
 
 C011 (2026-10-16, the owner) overrides the quiet rows: the project screen shows only the work, and the grant, the checks
-and the tool choice live in Settings or in a just-in-time consent. The start card is done; the mission board still carries
-the run mode (product-map.md, Known incoherences, 1).
+and the tool choice live in Settings or in a just-in-time consent. The start card is done; the mission board keeps
+the run mode folded under "Run mode, cost and build" (product-map.md, Known incoherences, 1).
 
 ### Records
 

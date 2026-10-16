@@ -30,9 +30,9 @@ const FADE = 28; // a grain fades to nothing within this many pixels of a text b
 const TILT = (22 * Math.PI) / 180;
 const [COS, SIN] = [Math.cos(TILT), Math.sin(TILT)];
 const [DUST_W, DUST_H] = [760, 320];
-// The beam leaves the top of the greeting area, 80 px above it, 120 px in from the right edge but never past 740 px. In
-// a project it leaves from the left instead, 380 px in, and leans the other way: the lamp over the desk, not the window.
-const [BEAM_TOP, BEAM_RIGHT, BEAM_MAX, BEAM_LEFT] = [-80, 120, 740, 380];
+// The beam leaves the top of the greeting area, 80 px above it, 120 px in from the right edge but never past 740 px.
+// A project screen has no beam (styles.css).
+const [BEAM_TOP, BEAM_RIGHT, BEAM_MAX] = [-80, 120, 740];
 
 export type Box = { l: number; t: number; r: number; b: number };
 export type Grain = { x: number; y: number; r: number; alpha: number };
@@ -60,12 +60,12 @@ export function clearance(boxes: Box[], x: number, y: number): number {
 /** The dust as `box-shadow` lists, one per twinkling layer. Every grain is a shadow of a 1 px dot; a grain within `FADE` of a
  * text block is dimmed to nothing, so the dust never lies behind words. `originX` is where the beam starts, in the
  * coordinates of the greeting area. */
-export function dustShadows(grains: Grain[], boxes: Box[], originX: number, color: string, layers = 3, lean = 1): string[] {
+export function dustShadows(grains: Grain[], boxes: Box[], originX: number, color: string, layers = 3): string[] {
   const out: string[][] = Array.from({ length: layers }, () => []);
   grains.forEach((g, i) => {
     const local = g.x - DUST_W / 2;
-    // Where the grain lands on the screen: the beam is turned by 22 degrees (the other way when `lean` is -1) around its top centre.
-    const k = clearance(boxes, originX + local * COS - lean * g.y * SIN, BEAM_TOP + lean * local * SIN + g.y * COS);
+    // Where the grain lands on the screen: the beam is turned by 22 degrees around its top centre.
+    const k = clearance(boxes, originX + local * COS - g.y * SIN, BEAM_TOP + local * SIN + g.y * COS);
     if (k <= 0) return;
     out[i % layers]!.push(`${g.x.toFixed(1)}px ${g.y.toFixed(1)}px 0 ${(g.r - 0.5).toFixed(2)}px rgba(${color},${(g.alpha * k).toFixed(3)})`);
   });
@@ -81,8 +81,8 @@ const BOTH =
 /** The loom's thread rows, bottom to top, each a little fainter than the one below. */
 const ROWS = Array.from({ length: 10 }, (_, j) => ({ y: 600 - 16 * j, odd: j % 2 === 1, opacity: (0.25 + 0.75 * Math.min(1, (16 * j) / 120) * 0.7).toFixed(2) }));
 
-/** `variant` is the home it sits behind: the new conversation of Chat, or the first screen of a project (its own light,
- * leaning the other way, and its own words on the flow line). */
+/** `variant` is the home it sits behind: the new conversation of Chat, or the first screen of a project (no beam,
+ * dust or drifting light, and its own words on the flow line). */
 export function Ambient(props: { vendors: Vendor[]; avoid: () => Element[]; variant?: 'chat' | 'project' }) {
   let layer!: HTMLDivElement;
   let boxes: Box[] = [];
@@ -96,7 +96,7 @@ export function Ambient(props: { vendors: Vendor[]; avoid: () => Element[]; vari
 
   const project = () => props.variant === 'project';
   const paint = () =>
-    setShadows(dustShadows(grains, boxes, project() ? Math.min(BEAM_LEFT, width - BEAM_RIGHT) : Math.min(width - BEAM_RIGHT, BEAM_MAX), color, 3, project() ? -1 : 1));
+    setShadows(dustShadows(grains, boxes, Math.min(width - BEAM_RIGHT, BEAM_MAX), color));
 
   // Where the text blocks are, in the coordinates of the greeting area.
   const measure = () => {
@@ -128,7 +128,7 @@ export function Ambient(props: { vendors: Vendor[]; avoid: () => Element[]; vari
   // A look with none of its own effects (and the ambient switch on) gets one soft light that drifts, so no home stands still.
   const bare = () => {
     const vars = appliedLook()?.vars;
-    return !!vars && vars['amb-beam'] === 'none' && vars['amb-loom'] === 'none' && vars['amb-flow'] === 'none';
+    return !project() && !!vars && vars['amb-beam'] === 'none' && vars['amb-loom'] === 'none' && vars['amb-flow'] === 'none';
   };
 
   // The breath keeps its place while it pauses, so it goes on from there; with less motion the dust stands lit and the glow off.

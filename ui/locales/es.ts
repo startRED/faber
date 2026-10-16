@@ -705,6 +705,16 @@ export const es: Messages = {
   "projects.details.noEvidence": "No hay evidencias verificadas por el motor disponibles.",
   // Native speaker must translate (needs native review).
   "projects.pace.freshness": "Lectura: {when}",
+  'reason.budget.calibration': 'Faber todavía está aprendiendo cuánto de tu cuota usa una misión. Espera unas lecturas más y sigue.',
+  'reason.budget.other': 'Faber está esperando a que tu cuota permita el siguiente paso.',
+  'reason.other': 'Faber se detuvo aquí por un motivo que todavía no sabe describir. Los detalles están en el registro.',
+  'projects.board.new': 'Nueva misión',
+  'projects.board.leave': '¿Salir de esta misión? Se queda como está, pero no podrás abrirla desde aquí otra vez.',
+  'projects.board.leaveYes': 'Salir',
+  'projects.board.stay': 'Quedarse',
+  'projects.board.more': 'Modo, costo y compilación',
+  'projects.tasks.none': 'Todavía no hay tareas. Faber divide el objetivo en tareas mientras planifica.',
+  'projects.tasks.count': '{done} de {total} terminadas',
   // Native speaker must translate (needs native review).
   "reason.mission.runnerUnavailable": "La ejecución de la misión está esperando al ejecutor aprobado. No se ha iniciado ningún trabajo.",
   // Native speaker must translate (needs native review).
@@ -903,6 +913,8 @@ export const es: Messages = {
   'notes.6.better': "La pantalla del proyecto es más tranquila, y sus ajustes ahora están en Ajustes > Proyectos.",
   'notes.7.new': "El Chat ahora tiene modos de permiso (Preguntar, Aceptar ediciones, Plan, Auto, Acceso total) y un ajuste de búsqueda web.",
   'notes.8.better': 'El progreso de la actualización se ve en pantalla, y Faber nunca se abre como una ventana en blanco.',
+  'notes.9.better': 'La pantalla de proyectos ya no tiene el foco de luz, y el agujero negro se ve entero y se funde suavemente detrás del texto.',
+  'notes.12.better': 'El tablero de la misión es más tranquilo: el objetivo, su paso y por qué espera van primero, las columnas vacías ya no están y Nueva misión empieza otra.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

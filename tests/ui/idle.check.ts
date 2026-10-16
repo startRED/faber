@@ -187,18 +187,17 @@ check('idle: a look with no effects of its own gets a drifting light, off with t
   }
 });
 
-check('idle: a project home has its own light, leaning the other way from the chat home', async () => {
+check('idle: a project home has no beam of light, the chat home keeps its own', async () => {
   const restore = keepRoot();
   const saved = appliedLook();
-  const lean = async (variant: 'chat' | 'project') => {
+  const beam = async (variant: 'chat' | 'project') => {
     const host = document.createElement('div');
     host.style.cssText = 'position:fixed;left:0;top:0;width:1200px;height:600px';
     document.body.append(host);
     const dispose = render(() => createComponent(Ambient, { vendors: [], avoid: () => [], variant }), host);
     try {
       await settle();
-      const beam = host.querySelector<HTMLElement>('.amb-beam')!;
-      return { b: new DOMMatrix(getComputedStyle(beam).transform).b, x: beam.getBoundingClientRect().x };
+      return [...host.querySelectorAll<HTMLElement>('.amb-beam, .amb-glow')].filter((el) => el.getClientRects().length > 0).length;
     } finally {
       dispose();
       host.remove();
@@ -206,10 +205,8 @@ check('idle: a project home has its own light, leaning the other way from the ch
   };
   try {
     await applyLook(sala());
-    const chat = await lean('chat');
-    const project = await lean('project');
-    ok(chat.b > 0 && project.b < 0, 'the beams lean opposite ways');
-    ok(project.x < chat.x, 'the project beam leaves from the left of the chat one');
+    ok((await beam('chat')) > 0, 'the chat home has its beam');
+    equal(await beam('project'), 0, 'a project screen is a place to work: no beam and no glow');
   } finally {
     if (saved) await applyLook(saved);
     restore();

@@ -39,6 +39,7 @@ import {
   formatPercent,
   isHumanDecision,
   recallGoal,
+  forgetMission,
   recallMission,
   saveGoal,
   saveMission,
@@ -62,7 +63,8 @@ interface Props {
   onError?: (error: unknown) => void;
 }
 
-const TASK_STATES: TaskState[] = ['ready', 'running', 'review', 'done', 'blocked'];
+// The board reads what moves first: running, then what waits on someone, then what is queued, then what is finished.
+const TASK_STATES: TaskState[] = ['running', 'blocked', 'review', 'ready', 'done'];
 
 export function Projects(props: Props) {
   const [enroll, setEnroll] = createSignal<EnrollView>();
@@ -352,6 +354,22 @@ export function Projects(props: Props) {
     } finally { if (token === generation) setBusy(false); }
   };
 
+  // A mission that does not move can be left for a new one; a paused or blocked one asks first, since nothing lists it later.
+  const [leaving, setLeaving] = createSignal(false);
+  const leavable = () => ['done', 'paused', 'blocked'].includes(mission()?.state ?? '');
+  const leave = () => {
+    const id = props.project?.id;
+    if (id) forgetMission(id);
+    generation++;
+    selectedMission = undefined;
+    setLeaving(false);
+    setError(undefined);
+    setMission(undefined);
+    queueMicrotask(() => field?.focus());
+  };
+  const askLeave = () => (mission()?.state === 'done' ? leave() : setLeaving(true));
+  createEffect(on(() => mission()?.missionId, () => setLeaving(false), { defer: true }));
+
   const humanDecisions = createMemo(() => {
     const m = mission();
     if (!m) return [];
@@ -389,12 +407,12 @@ export function Projects(props: Props) {
 
   return (
     <div class="projects-root" ref={(el) => (root = el)}>
-      {/* The light behind a project's first screen; a mission board has none. */}
+      {/* The effects behind a project's first screen (no beam of light here); a mission board has none. */}
       <Show when={home()}>
         <Ambient variant="project" vendors={props.vendors} avoid={avoid} />
         {/* A project's first screen is where a new session starts: in Dark Room the black hole sits behind it too. */}
         <Show when={props.project}>
-          {/* It stays right of the column: everything the column holds, scrolled or not, sits on the stage's own ground. */}
+          {/* It sits right of the column and runs behind it under a soft veil, so the words stay easy to read. */}
           <Hole avoid={() => (root ? [...root.querySelectorAll('.start-card .peek, .start-card .w-main')] : [])} />
         </Show>
       </Show>
@@ -554,49 +572,64 @@ export function Projects(props: Props) {
             {/* Active Mission Board */}
             {(m) => (
               <div class="mission-board" data-testid="mission-board">
+                {/* One calm block: where the mission stands, the goal, the step it is on, why it waits, and the one action that moves it. */}
                 <header class="m-header">
-                  <div class="m-title-row">
-                    <h2 class="m-goal">{m().goal}</h2>
-                    <span class="badge" classList={{ [m().state]: true }}>
+                  <div class="m-top">
+                    <span class="m-state" data-state={m().state} data-testid="mission-state">
+                      <i aria-hidden="true" />
                       {fromEngine(`projects.state.${m().state}`)}
                     </span>
-                  </div>
-                  <div class="m-controls">
-                    <Segmented<RunMode>
-                      id="run-mode"
-                      label={t('projects.mode.label')}
-                      value={m().mode}
-                      options={[
-                        ['normal', t('projects.mode.normal')],
-                        ['autonomous', t('projects.mode.autonomous')],
-                      ]}
-                      onPick={(mode) => void toggleRunMode(mode)}
-                    />
-                    <Show when={m().state === 'running'}>
-                      <button type="button" class="btn" disabled={busy()} onClick={() => void stopMission()}>
-                        {t('projects.action.stop')}
-                      </button>
-                    </Show>
-                    <Show when={m().state === 'paused' || m().state === 'blocked'}>
-                      <button type="button" class="btn primary" disabled={busy()} onClick={() => void resumeMission()}>
-                        {t('projects.action.resume')}
+                    <Show when={leavable()}>
+                      <button type="button" class="btn ghost m-new" disabled={busy()} onClick={() => askLeave()} data-testid="mission-leave">
+                        <Icon name="plus" small />
+                        {t('projects.board.new')}
                       </button>
                     </Show>
                   </div>
+                  <h2 class="m-goal" title={m().goal}>{m().goal}</h2>
                   <Show when={m().progress}>
                     {(p) => (
                       <p class="m-progress" role="status" data-testid="mission-progress">
                         <span>{t('projects.progress.step', { number: p().number, total: p().total, step: t(`projects.progress.${p().step}` as any) })}</span>
                         <Show when={p().role && p().vendor}>
-                          <span class="chip">{t('projects.progress.by', { role: t(`projects.role.${p().role}` as any), vendor: p().vendor! })}</span>
+                          <span>{t('projects.progress.by', { role: t(`projects.role.${p().role}` as any), vendor: p().vendor! })}</span>
                         </Show>
-                        <span class="note">{t('projects.progress.cost', { cost: costDisplay().isUnknown ? t('projects.cost.unknown') : costDisplay().display })}</span>
+                        <Show when={!costDisplay().isUnknown}>
+                          <span>{t('projects.progress.cost', { cost: costDisplay().display })}</span>
+                        </Show>
                       </p>
                     )}
                   </Show>
                   <Show when={m().reason && !m().needs}>
-                    <div class="note" role="status">
+                    <p class="m-reason" role="status">
                       {fromEngine(m().reason ?? undefined)}
+                    </p>
+                  </Show>
+                  <Show when={leaving()}>
+                    <div class="m-leave" role="alertdialog" aria-labelledby="leave-text" onKeyDown={(e) => e.key === 'Escape' && setLeaving(false)}>
+                      <p id="leave-text">{t('projects.board.leave')}</p>
+                      <div class="proof-actions">
+                        <button type="button" class="btn primary" ref={(el) => queueMicrotask(() => el.focus())} onClick={() => setLeaving(false)}>
+                          {t('projects.board.stay')}
+                        </button>
+                        <button type="button" class="btn" data-testid="mission-leave-yes" onClick={() => leave()}>
+                          {t('projects.board.leaveYes')}
+                        </button>
+                      </div>
+                    </div>
+                  </Show>
+                  <Show when={!leaving() && (m().state === 'running' || m().state === 'paused' || m().state === 'blocked')}>
+                    <div class="m-controls">
+                      <Show when={m().state === 'running'}>
+                        <button type="button" class="btn" disabled={busy()} onClick={() => void stopMission()}>
+                          {t('projects.action.stop')}
+                        </button>
+                      </Show>
+                      <Show when={m().state === 'paused' || m().state === 'blocked'}>
+                        <button type="button" class="btn primary" disabled={busy()} onClick={() => void resumeMission()}>
+                          {t('projects.action.resume')}
+                        </button>
+                      </Show>
                     </div>
                   </Show>
                 </header>
@@ -712,13 +745,23 @@ export function Projects(props: Props) {
                   </section>
                 </Show>
 
-                {/* Tasks Board by State */}
-                <section class="tasks-section" aria-label={t('projects.tasks.title')}>
+                {/* The tasks, one list grouped by state, the groups that hold something only; before the plan, one quiet line. */}
+                <section class="tasks-section" aria-labelledby="tasks-title">
+                  <h3 class="m-section" id="tasks-title">
+                    {t('projects.tasks.title')}
+                    <Show when={m().tasks.length > 0}>
+                      <span>{t('projects.tasks.count', { done: m().tasks.filter((task) => task.state === 'done').length, total: m().tasks.length })}</span>
+                    </Show>
+                  </h3>
+                  <Show when={m().tasks.length === 0}>
+                    <p class="m-empty">{t('projects.tasks.none')}</p>
+                  </Show>
                   <div class="task-columns">
                     <For each={TASK_STATES}>
                       {(state) => {
                         const stateTasks = () => m().tasks.filter((task) => task.state === state);
                         return (
+                          <Show when={stateTasks().length > 0}>
                           <div class="task-col" classList={{ [state]: true }}>
                             <div class="task-col-header">
                               <b>{t(taskStateKey(state) as any)}</b>
@@ -778,13 +821,30 @@ export function Projects(props: Props) {
                               </For>
                             </div>
                           </div>
+                          </Show>
                         );
                       }}
                     </For>
                   </div>
                 </section>
 
-                {/* Live Cost & Account Pace Panel */}
+                {/* What tunes or measures the mission, folded away: the work above stays the screen (C011). */}
+                <details class="m-more">
+                  <summary>
+                    <Icon name="right" small />
+                    {t('projects.board.more')}
+                  </summary>
+                  <div class="m-more-body">
+                    <Segmented<RunMode>
+                      id="run-mode"
+                      label={t('projects.mode.label')}
+                      value={m().mode}
+                      options={[
+                        ['normal', t('projects.mode.normal')],
+                        ['autonomous', t('projects.mode.autonomous')],
+                      ]}
+                      onPick={(mode) => void toggleRunMode(mode)}
+                    />
                 <div class="cost-pace-panel">
                   <div class="cost-card">
                     <h3>{t('projects.cost.title')}</h3>
@@ -825,6 +885,8 @@ export function Projects(props: Props) {
                     )}
                   </Show>
                 </div>
+                  </div>
+                </details>
               </div>
             )}
           </Show>

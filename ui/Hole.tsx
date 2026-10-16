@@ -22,11 +22,18 @@ const RIPPLE_REACH = RIPPLE_MS * RIPPLE_SPEED + RIPPLE_BAND;
 const BUSY = 'button, a, input, textarea, select, label, [contenteditable], .composer, .runcol';
 /** The light the owner picked on the prototype (115%). */
 const BRIGHT = 1.15;
-/** The scene starts this far right of the column of words, fades in over FADE px and is dimmed over CALM px. It is a
- * band across the whole height, so words that scroll in the column never pass over it. */
-const [GAP, FADE, CALM] = [32, 160, 280];
+/** No hard edge where the column of words ends: the scene runs behind it at FLOOR of its light, and comes up to full
+ * from FROM px left of the column's edge to TO px right of it. The hole itself is dimmed a little more within CALM px.
+ * It is a band across the whole height, so words that scroll in the column always sit on the same veil. */
+const [FLOOR, FROM, TO, CALM] = [0.14, 40, 240, 320];
+/** The shadow keeps this far right of the column, so its arc sits where the scene is nearly at full light. */
+const SIDE = 150;
+/** How much of its light the scene keeps at `x` px, for a column of words ending at `edge` px. */
+export const veil = (x: number, edge: number) => FLOOR + (1 - FLOOR) * smooth(edge - FROM, edge + TO, x);
 /** Less room than this right of the column and the scene does not show at all, nor run: a sliver of it reads as broken. */
 const ROOM = 400;
+/** How far the arc around the shadow reaches across and up, in radii, and the margin it keeps from the stage's edges, in px. */
+const [WIDE, TALL, EDGE] = [1.6, 1.8, 28];
 
 // The entrance, in ms: Curioso rises and leans toward the hole (styles.css, "wake"), a spark leaves his eyes and lands in
 // the shadow, and the scene lights up from there outward at SPEED px/ms, each character scrambling in the accent before
@@ -83,13 +90,15 @@ export function sky(i: number, out: Cell): Cell {
   return hash(i) < 0.009 ? set(out, 0.25 + 0.75 * hash(i + 7), STAR) : set(out, 0, STAR);
 }
 
-/** Where the scene sits in a `w` by `h` stage whose words end at `words` px from the left, framed like a film shot:
- * the shadow high on the right and cut by the edge, its radius as big as the room right of the words allows (its arc
- * keeps 30 px off them), between 22% and 40% of the height; and the small planet below it, clear of the disk. */
+/** Where the scene sits in a `w` by `h` stage whose words end at `words` px from the left: the whole shadow and its
+ * arc in view, centred in the room from SIDE px right of the words, its radius as big as that room allows,
+ * between 16% and 30% of the height; and the small planet below it, clear of the disk. The disk alone runs off the edges. */
 export type Frame = { cx: number; cy: number; R: number; qx: number; qy: number; qr: number };
 export function frame(w: number, h: number, words: number): Frame {
-  const R = Math.max(0.22 * h, Math.min(0.4 * h, (w - words - 30) / 2.2));
-  const [cx, cy] = [w - 0.6 * R, 0.36 * h];
+  const lit = words + SIDE;
+  // Tall enough for the arc above and the planet below (1.45 R down, 0.08 R wide), each EDGE px off the stage edge.
+  const R = Math.max(0.16 * h, Math.min(0.3 * h, (w - lit - 2 * EDGE) / (2 * WIDE), (h - 2 * EDGE) / (TALL + 1.53)));
+  const [cx, cy] = [(lit + w) / 2, Math.max(0.45 * h, TALL * R + EDGE)];
   return { cx, cy, R, qx: cx + 0.1 * R, qy: cy + 1.45 * R, qr: Math.max(9, 0.08 * R) };
 }
 
@@ -176,8 +185,8 @@ export function Hole(props: { avoid: () => Element[] }) {
   let dirs = new Uint8Array(0);
   let tint = new Float32Array(0);
   let glyph: string[] = [];
-  let clear = new Float32Array(0); // 0 over the column of words, 1 from GAP + FADE px right of it: nothing lies behind words
-  let calm = new Float32Array(0); // 0 near the column, 1 from GAP + CALM px right of it: the hole is dimmed beside it
+  let clear = new Float32Array(0); // FLOOR behind the column of words, 1 from TO px right of it (veil)
+  let calm = new Float32Array(0); // 0 at the column's edge, 1 from CALM px right of it: the hole is dimmed beside it
   let moving: number[] = []; // the cells the hole can reach; the rest is sky, still but for the stars
   let stars: number[] = [];
   let colors: string[] = [];
@@ -322,10 +331,9 @@ export function Hole(props: { avoid: () => Element[] }) {
     clear = new Float32Array(n);
     calm = new Float32Array(n);
     for (let i = 0; i < n; i++) {
-      // A cell's left edge, so no glyph straddles the line where the scene starts.
-      const x = (i % cols) * CELL;
-      clear[i] = smooth(edge + GAP, edge + GAP + FADE, x);
-      calm[i] = smooth(edge + GAP, edge + GAP + CALM, x);
+      const x = (i % cols) * CELL + CELL / 2;
+      clear[i] = veil(x, edge);
+      calm[i] = smooth(edge, edge + CALM, x);
     }
     ctx = canvas.getContext('2d');
     if (!ctx) return;

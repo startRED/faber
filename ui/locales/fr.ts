@@ -705,6 +705,16 @@ export const fr: Messages = {
   "projects.details.noEvidence": "Aucune preuve vérifiée par le moteur n'est disponible.",
   // Native speaker must translate (needs native review).
   "projects.pace.freshness": "Relevé : {when}",
+  'reason.budget.calibration': 'Faber apprend encore quelle part de votre quota une mission utilise. Il attend quelques relevés de plus, puis continue.',
+  'reason.budget.other': 'Faber attend que votre quota permette l’étape suivante.',
+  'reason.other': 'Faber s’est arrêté ici pour une raison qu’il ne sait pas encore décrire. Les détails sont dans le journal.',
+  'projects.board.new': 'Nouvelle mission',
+  'projects.board.leave': 'Quitter cette mission ? Elle reste telle quelle, mais vous ne pourrez plus l’ouvrir d’ici.',
+  'projects.board.leaveYes': 'Quitter',
+  'projects.board.stay': 'Rester',
+  'projects.board.more': 'Mode, coût et compilation',
+  'projects.tasks.none': 'Aucune tâche pour l’instant. Faber découpe l’objectif en tâches pendant qu’il planifie.',
+  'projects.tasks.count': '{done} sur {total} terminées',
   // Native speaker must translate (needs native review).
   "reason.mission.runnerUnavailable": "L'exécution de la mission attend l'exécuteur approuvé. Aucun travail n'a commencé.",
   // Native speaker must translate (needs native review).
@@ -903,6 +913,8 @@ export const fr: Messages = {
   'notes.6.better': "L’écran du projet est plus calme, et ses réglages se trouvent désormais dans Réglages > Projets.",
   'notes.7.new': "Le Chat a désormais des modes d’autorisation (Demander, Accepter les modifications, Plan, Auto, Accès total) et un réglage de recherche web.",
   'notes.8.better': 'La progression de la mise à jour s’affiche à l’écran, et Faber ne s’ouvre jamais en fenêtre vide.',
+  'notes.9.better': 'L’écran des projets n’a plus de faisceau de lumière, et le trou noir s’affiche en entier et se fond doucement derrière le texte.',
+  'notes.12.better': 'Le tableau de mission est plus calme : l’objectif, son étape et ce qu’il attend passent en premier, les colonnes vides ont disparu et Nouvelle mission en lance une autre.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',
