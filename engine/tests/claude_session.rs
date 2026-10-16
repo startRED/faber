@@ -344,7 +344,12 @@ fn chat_is_lean_and_confined_to_its_workspace_projects_get_the_user_setup_withou
     assert_eq!(after(&chat, "--permission-mode"), "default", "Ask names its mode, so a CLI default can never pick a looser one");
     assert_eq!(after(&chat, "--resume"), "abc");
     assert_eq!(after(&chat, "--model"), "haiku");
+    // Each model compacts at its own window; an unknown model keeps the CLI default.
+    assert_eq!(after(&chat, "--autocompact"), "130k");
+    let window = |model: &str| after(&claude_args(&ClaudeLaunch { model: Some(model.into()), ..launch(Area::Chat) }), "--autocompact");
+    assert_eq!((window("claude-sonnet-5-5"), window("claude-opus-5-5")), ("300k".into(), "400k".into()));
     let project = claude_args(&launch(Area::Project));
+    assert!(!project.contains(&"--autocompact".into()));
     assert!(!project.contains(&"--restricted".into()) && !project.contains(&"--strict-mcp-config".into()));
     // Hooks stay off until the switch is on; the settings carry the credential denies in every case (R124b).
     let off = settings_of(&project);
@@ -874,30 +879,6 @@ fn ask_the_isolated_mode_and_side_questions_never_change_with_the_new_flags() {
     }
     let ask = claude_args(&ClaudeLaunch { permissions: Permissions::Ask, flags: NEWER, ..launch(Area::Project) });
     assert!(ask.windows(2).any(|a| a == ["--permission-mode", "default"]));
-}
-
-#[test]
-fn only_fabers_own_haiku_launches_compact_early_and_only_where_the_cli_has_the_flag() {
-    let with = |model: &str, permissions, instructions: Option<&str>, flags| {
-        claude_args(&ClaudeLaunch {
-            model: Some(model.into()),
-            permissions,
-            instructions: instructions.map(Into::into),
-            flags,
-            ..launch(Area::Project)
-        })
-    };
-    let compacts = |args: &[String]| args.windows(2).any(|a| a == ["--autocompact", "100k"]);
-    for model in ["haiku", "claude-haiku-5-5", "Haiku[1m]"] {
-        assert!(compacts(&with(model, Permissions::Isolated, None, NEWER)), "{model}");
-        assert!(compacts(&with(model, Permissions::FullAccess, Some("Route."), NEWER)), "{model}");
-        assert!(!compacts(&with(model, Permissions::Isolated, None, ClaudeFlags::default())), "an older CLI is not given the flag");
-        assert!(!compacts(&with(model, Permissions::Ask, None, NEWER)), "a conversation the person chose keeps the CLI default");
-        assert!(!compacts(&with(model, Permissions::FullAccess, None, NEWER)));
-    }
-    for model in ["sonnet", "opus", "claude-sonnet-5-5", "fable"] {
-        assert!(!with(model, Permissions::Isolated, None, NEWER).contains(&"--autocompact".into()), "{model}");
-    }
 }
 
 #[test]

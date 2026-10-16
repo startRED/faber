@@ -75,10 +75,6 @@ impl ClaudeFlags {
     }
 }
 
-/// Where Haiku conversations are compacted: under the 100K step above which its price rises fivefold. 100k is the lowest the
-/// CLI accepts.
-const HAIKU_AUTOCOMPACT: &str = "100k";
-
 // Chat stays lean: a fixed list of built-in tools. Ask keeps Chat restricted with no MCP servers; Isolated also drops every
 // startup customization; full access leaves the person's own integrations on.
 const CHAT_TOOLS: &str = "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch";
@@ -168,6 +164,14 @@ fn allow_response(tool: &str, input: &Value) -> Value {
         response["updatedPermissions"] = json!([{ "type": "setMode", "mode": "default", "destination": "session" }]);
     }
     response
+}
+
+/// How full a conversation gets before Claude Code compacts it. All three models hold 1M and the CLI compacts near 967K,
+/// deep into context rot. Haiku thrashes at 100K (the base context eats the room, measured) and at 130K stays under its
+/// 100K price step; Opus and Sonnet are starting points to measure, not proven optima. Unknown models keep the CLI's own.
+fn autocompact_window(model: &str) -> Option<&'static str> {
+    let model = model.to_ascii_lowercase();
+    [("haiku", "130k"), ("sonnet", "300k"), ("opus", "400k")].into_iter().find(|(name, _)| model.contains(name)).map(|(_, w)| w)
 }
 
 /// Arguments for one long-lived Claude Code process that takes many turns over stdin.
@@ -273,17 +277,14 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
         args.push("--append-system-prompt".into());
         args.push(persona(&PersonaInput { name: launch.user_name.as_deref() }));
     }
+    if let Some(window) = launch.instructions.is_none().then(|| launch.model.as_deref().and_then(autocompact_window)).flatten() {
+        args.extend(["--autocompact".into(), window.into()]);
+    }
     for (flag, value) in [("--model", &launch.model), ("--effort", &launch.effort), ("--resume", &launch.resume)] {
         if let Some(v) = value {
             args.push(flag.into());
             args.push(v.clone());
         }
-    }
-    // Faber's own Haiku workers and roles (the isolated mode and side questions) compact early; every other model, and every
-    // conversation the person chose a model for, keeps the CLI's own default.
-    let internal = launch.instructions.is_some() || launch.permissions == Permissions::Isolated;
-    if launch.flags.autocompact && internal && launch.model.as_deref().is_some_and(|m| m.to_ascii_lowercase().contains("haiku")) {
-        args.extend(["--autocompact".into(), HAIKU_AUTOCOMPACT.into()]);
     }
     args
 }
