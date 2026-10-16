@@ -827,6 +827,36 @@ lead session, CI) and detached worktrees (Faber's own missions, test workspaces)
 once its last commit is on `phase-1-base`; a claim nobody saved for a day is stale and ignored. Claims live on one PC:
 a lane on another machine is not seen.
 
+### Red base
+
+A commit pushed onto a red `phase-1-base` waits behind the failure, and `main` cannot follow it (R127); on 2026-10-16 a
+macOS-only check kept it red for three hours while ten commits landed on top. So the red base shows before a push
+(R164). `scripts/base.mjs` asks GitHub through `gh` for the newest finished push run of `ci.yml` on `phase-1-base`
+(cancelled runs say nothing) and, when it failed, reads the runner's `FAIL` lines and compiler errors from its failed log,
+each with its job, or the failed jobs and steps when the log names none. It keeps the answer three minutes in the shared
+git folder (`.git/faber-base.json`). Every `cargo t` outside CI prints those lines first, marked `BASE`, and writes the
+`pre-push` hook (`testkit/src/base.rs`) unless the person has a hook of their own. The hook refuses a push to
+`phase-1-base` while it is red, or one that carries a number placeholder; `FABER_PUSH_ON_RED=1 git push` pushes the fix,
+and a push to any other branch only prints the warning. Offline, signed out, or without Node or `gh`, it says nothing and
+refuses nothing: it is a warning light, not a gate.
+
+Local proofs run on Windows, so a check that holds only there turns the base red on macOS. A check that measures text or
+pixels measures the glyphs (`Range.getBoundingClientRect()`), never the box that holds them, waits for
+`document.fonts.ready`, and keeps a margin wide enough for the other system's font rendering; the bound and the worst
+value seen on Windows go in its comment.
+
+### Numbers
+
+Decision numbers (`docs/decisions.md`) and what's-new ids (`notes.<id>.<kind>`) are given at merge time, never in a
+branch (R164): lanes that each took "the next one" collided at every merge, and one decision went through four numbers.
+A branch writes `R-next` for its decision (`R-next-2` for a second) and `notes.next.<kind>` for its entry (`notes.next-2`
+for a second id), in every place that refers to them. Quoted in backticks they are only words, as here. Right before the
+merge, on a branch that already holds a fresh `origin/phase-1-base`, `node scripts/numbers.mjs assign` gives each the
+next free number after the base's and commits the change; the pull request then merges as usual. If another lane took the
+number meanwhile, the merge conflicts or the base's check fails, and the command runs again. `scripts/numbers.test.mjs`
+fails on a decision number used twice everywhere, and on any placeholder when CI runs on `phase-1-base` or `main`; the
+`pre-push` hook refuses the same before it leaves the PC.
+
 ### UX sentinel
 
 The sentinel (`testkit/src/sentinel.rs`, `testkit/src/probe.js`, `testkit/src/screen/sentinel.rs`) judges what a person

@@ -22,9 +22,9 @@ for how Faber works today. This file stays short: each line prevents a real mist
 - Every text on screen lives in `ui/locales/`. Each language is written by hand, never machine-translated; English
   (`en.ts`) is the source, and a new language needs a native speaker to review it. The engine returns keys
   (`error.*`, `reason.*`) instead of sentences.
-- Every change a person would notice adds the next numbered entry (`notes.<id>.<new|better|fixed>`) to every
-  `ui/locales/*.ts` file in the same pull request: one short sentence in plain words, written by hand. The id only grows
-  and never depends on the version. After an update the screen shows what is newer than the last entry seen, and the
+- Every change a person would notice adds an entry (`notes.next.<new|better|fixed>`) to every `ui/locales/*.ts` file
+  in the same pull request: one short sentence in plain words, written by hand. The id only grows, never depends on the
+  version, and is given at merge time with the decision numbers ([design.md](docs/design.md#numbers)). After an update the screen shows what is newer than the last entry seen, and the
   release body is built from the English entries (R142, `scripts/release-notes.mjs`).
 - Memory is a feature: Faber with no CLI running stays under 500 MB when complete, and the end-to-end test fails above
   400 MB (R125). The limit is a safety net, not the goal: every change aims at the lightest and most responsive result
@@ -38,7 +38,11 @@ for how Faber works today. This file stays short: each line prevents a real mist
   branch or worktree) enters `phase-1-base` as one squashed pull request that fills `.github/pull_request_template.md`
   and whose title is a commit title (`pr-title` checks it). A small proven commit goes through the queue instead of
   straight there: `git push origin HEAD:refs/heads/queue/<name>`; CI lands it on `phase-1-base` and `main` only when
-  every system is green, and a red one waits on its queue branch for its author to fix (R162).
+  every system is green, and a red one waits on its queue branch for its author to fix (R162). Right before a merge,
+  `node scripts/numbers.mjs assign` turns `R-next` and `notes.next` into real numbers.
+- A red `phase-1-base` comes first: fix it, or keep your commits until it is green. `cargo t` shows it (`BASE` lines)
+  and its `pre-push` hook refuses a push onto it ([design.md](docs/design.md#red-base)); `FABER_PUSH_ON_RED=1` pushes
+  the fix.
 - In a worktree on a branch, claim the areas and files you will change in `.faber-lane` before changing one
   ([design.md](docs/design.md#lane-claims)); `cargo t` refuses unclaimed changes and files another lane claims.
 
@@ -64,7 +68,7 @@ Read [docs/product-rules.md](docs/product-rules.md) and [docs/product-map.md](do
 - The same commit updates [docs/product-map.md](docs/product-map.md) when a setting, screen, stored value, shell command,
   feature or product word appears, changes or goes (`engine/tests/product_map.rs` fails when one is missing), deletes the
   "Known incoherences" lines it fixed, and updates [docs/design.md](docs/design.md) when how a screen looks or behaves
-  changed. A new decision gets the next R-number in [docs/decisions.md](docs/decisions.md); a finished spec or plan gets
+  changed. A new decision is written as `R-next` in [docs/decisions.md](docs/decisions.md) and numbered at merge; a finished spec or plan gets
   its status in [docs/README.md](docs/README.md).
 - The commit type is a release decision: a `feat`, `fix` or `perf` commit that touches what ships becomes a patch release
   by itself once CI is green (R130); `docs`, `test`, `ci`, `refactor` and `chore` do not.

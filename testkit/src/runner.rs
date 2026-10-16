@@ -3,6 +3,7 @@
 //! functions that read a mission's checks (`engine/src/project/proof/output.rs`, R155).
 
 use crate::app::{Paths, emergency_cleanup};
+use crate::base;
 use crate::checks;
 use crate::lanes;
 use crate::plan::{Options, Suite, changed_paths, jobs, parse_args, select};
@@ -240,6 +241,8 @@ pub fn run(args: &[String]) -> i32 {
             }
         };
     }
+    // A red phase-1-base shows before anything runs: commits pushed onto it only wait behind the failure.
+    base::warn(&paths.root);
     let suites = select(&opts, &changed);
     if suites.is_empty() {
         println!("Nothing changed that needs a test (use --all to run everything).");
