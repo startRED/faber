@@ -753,7 +753,6 @@ export const en = {
   "error.folder.missing": "That folder is not there any more.",
   "error.folder.link": "That folder is a link to somewhere else, so Faber will not open it. Open the real folder from the file manager.",
   "recents.title": "Recent folders",
-  "recents.choose": "Choose a folder",
   "recents.select": "Select {name}",
   "recents.forget": "Remove from recents",
   "reason.recents.gone": "Folder not found",

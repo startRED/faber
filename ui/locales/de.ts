@@ -886,7 +886,6 @@ export const de: Messages = {
   "error.folder.link": "Dieser Ordner ist eine Verknüpfung zu einem anderen Ort, deshalb öffnet Faber ihn nicht. Öffne den echten Ordner im Dateimanager.",
   // Recent folders and environments: handwritten wording; native-speaker review pending (English is the source).
   "recents.title": "Zuletzt verwendete Ordner",
-  "recents.choose": "Ordner wählen",
   "recents.select": "{name} auswählen",
   "recents.forget": "Aus der Liste entfernen",
   "reason.recents.gone": "Ordner nicht gefunden",

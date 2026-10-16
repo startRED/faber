@@ -25,7 +25,6 @@ import { failureText, lang, t, templates, useLanguage } from './i18n.ts';
 import { createWidth } from './layout.ts';
 import { Lockup, Peek } from './Mark.tsx';
 import { isFirstInstall, newestId, NOTES, type Note, whatsNew } from './notes.ts';
-import { Recents } from './Recents.tsx';
 import { modelOptions, prettyModel } from './models.ts';
 import { animateDetails, animateList, watchMotion } from './motion.ts';
 import { Projects } from './Projects.tsx';
@@ -925,7 +924,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                               </Show>
                               <Show
                                 when={current()?.messages.length ? current() : undefined}
-                                fallback={<Empty vendors={state().vendors.length} area={area()} project={project()} onConnect={openSetup} onChoose={() => void addProject().catch(fail)} onOpened={openProjects} onError={fail} />}
+                                fallback={<Empty vendors={state().vendors.length} area={area()} project={project()} onConnect={openSetup} />}
                               >
                                 {(c) => (
                                   <Thread
@@ -1015,9 +1014,6 @@ function Empty(props: {
   area: Place['area'];
   project?: { name: string; path: string };
   onConnect: () => void;
-  onChoose: () => void;
-  onOpened: (projects: Project[]) => void;
-  onError: (error: unknown) => void;
 }) {
   return (
     <div class="empty">
@@ -1029,21 +1025,6 @@ function Empty(props: {
           <button class="btn primary" data-restore="connect" onClick={() => props.onConnect()}>
             {t('empty.noAiButton')}
           </button>
-        </Match>
-        <Match when={props.area === 'project' && !props.project}>
-          <Peek />
-          <h1 class="display">{t('empty.openProjectTitle')}</h1>
-          <p>{t('empty.openProjectBody')}</p>
-          <button class="btn" onClick={() => props.onChoose()}>
-            <Icon name="folder" small />
-            {t('recents.choose')}
-          </button>
-          <Recents
-            mode="project"
-            onPick={(path) => void api.openFolders([path]).then(props.onOpened, props.onError)}
-            onOpened={props.onOpened}
-            onError={props.onError}
-          />
         </Match>
         <Match when={props.area === 'project'}>
           <Peek />

@@ -64,10 +64,10 @@ check('recents: a recent folder opens as a project in one click, a saved environ
       appearance: { base: 'sala', ground: 'sala', accent: '#f3f0e8', textFont: 'archivo', headingFont: 'narrow', textSize: 14, density: 1, corners: 1, motion: 'none', effects },
     },
   };
-  const mount = async (area: 'project' | 'chat' = 'project') => {
+  const mount = async (area: 'project' | 'chat' = 'project', place: object = { area }) => {
     view = fresh();
     failRemoval = false;
-    localStorage.setItem('faber.place', JSON.stringify({ area }));
+    localStorage.setItem('faber.place', JSON.stringify(place));
     const root = document.createElement('div');
     root.style.cssText = 'position:fixed;inset:0';
     root.dataset.motion = 'none';
@@ -218,6 +218,14 @@ check('recents: a recent folder opens as a project in one click, a saved environ
       await settle();
       deepEqual(calls.at(-1), ['forget', 'X:/work/alpha']);
       equal(document.querySelector('.cmenu:not(.leaving)'), null);
+    } finally {
+      screen.done();
+    }
+    // A conversation whose project left Faber opens the one "Open a project" screen, never a second one of its own.
+    api.open = async (id) => ({ id, title: 'Old', area: 'project', projectId: 'gone', sessions: {}, createdAt: 0, updatedAt: 0, messages: [] });
+    screen = await mount('project', { area: 'project', projectId: 'gone', id: 'c-old' });
+    try {
+      ok(screen.root.querySelector('.projects-stage h1')?.textContent === t('empty.openProjectTitle'), 'the Projects area shows it');
     } finally {
       screen.done();
     }

@@ -886,7 +886,6 @@ export const fr: Messages = {
   "error.folder.link": "Ce dossier est un lien vers un autre endroit, Faber ne l'ouvrira donc pas. Ouvrez le vrai dossier depuis l'explorateur de fichiers.",
   // Recent folders and environments: handwritten wording; native-speaker review pending (English is the source).
   "recents.title": "Dossiers récents",
-  "recents.choose": "Choisir un dossier",
   "recents.select": "Sélectionner {name}",
   "recents.forget": "Retirer des récents",
   "reason.recents.gone": "Dossier introuvable",

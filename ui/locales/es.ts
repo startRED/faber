@@ -886,7 +886,6 @@ export const es: Messages = {
   "error.folder.link": "Esa carpeta es un enlace a otro lugar, así que Faber no la abrirá. Abre la carpeta real desde el explorador de archivos.",
   // Recent folders and environments: handwritten wording; native-speaker review pending (English is the source).
   "recents.title": "Carpetas recientes",
-  "recents.choose": "Elegir una carpeta",
   "recents.select": "Seleccionar {name}",
   "recents.forget": "Quitar de recientes",
   "reason.recents.gone": "Carpeta no encontrada",

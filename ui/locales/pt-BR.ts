@@ -873,7 +873,6 @@ export const ptBR: Messages = {
   // Native speaker must translate (needs native review).
   "error.folder.link": "Essa pasta é um atalho para outro lugar, então o Faber não vai abri-la. Abra a pasta de verdade pelo gerenciador de arquivos.",
   "recents.title": "Pastas recentes",
-  "recents.choose": "Escolher uma pasta",
   "recents.select": "Selecionar {name}",
   "recents.forget": "Remover dos recentes",
   "reason.recents.gone": "Pasta não encontrada",
