@@ -9,6 +9,9 @@ use std::fs;
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+/// How much faster the update clock runs in the probation scenario: the health window of 30 s becomes 6 s of real time.
+const CLOCK_SPEED: u64 = 5;
+
 pub fn scenarios() -> Vec<Scenario> {
     vec![
         Scenario { name: "local_update: candidate starts hidden and returns a real canary handshake without inventing Pass", run: canary },
@@ -229,7 +232,12 @@ fn handoff(ctx: &mut Ctx) -> Result {
         fs::write(dir.join("faber-local.exe"), &helper_bytes).map_err(|e| e.to_string())?;
         fs::write(dir.join("helper.sha256"), ExactTree::compute_build_hash(&helper_bytes)).map_err(|e| e.to_string())?;
     }
-    let now = || SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    // The update flow runs its clock CLOCK_SPEED times faster from here (test builds only, R163), and this scenario writes
+    // its own manifest changes on the same clock, so the 300-second probation and its 30-second health window are proven
+    // whole in a fifth of the time.
+    let real_ms = || u64::try_from(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis()).unwrap();
+    let anchor = real_ms();
+    let now = || anchor.saturating_add(real_ms().saturating_sub(anchor).saturating_mul(CLOCK_SPEED)) / 1000;
     manager.adopt_baseline(Slot::A, tree.clone(), &payload, now()).map_err(|e| e.key())?;
     let repo = RepoIdentity::new("repo", "checkout");
     let mut grant = Grant::new("repo", GitMode::Seguro, 1, now());
@@ -267,6 +275,7 @@ fn handoff(ctx: &mut Ctx) -> Result {
     ] {
         env.insert(key.into(), value);
     }
+    env.insert("FABER_TEST_CLOCK".into(), format!("{anchor}:{CLOCK_SPEED}"));
     let start = |arg: &str| {
         Owned::start(&launcher, &[arg.into()], &env, &ctx.sb.sandbox, &ctx.paths.fake_cli).map(|v| v.0).map_err(|e| e.to_string())
     };
@@ -345,9 +354,11 @@ fn handoff(ctx: &mut Ctx) -> Result {
             fs::write(&output, b"cleanup must not kill healthy next").map_err(|e| e.to_string())?;
             use std::os::windows::fs::OpenOptionsExt;
             let held = fs::OpenOptions::new().read(true).share_mode(1).open(&output).map_err(|e| e.to_string())?;
-            eventually("five minute wall-clock promotion despite failed cleanup", Duration::from_secs(320), || {
-                manager.manifest().is_ok_and(|m| m.is_some_and(|m| m.state == UpdateState::Healthy))
-            })?;
+            eventually(
+                "five minute promotion on the test clock despite failed cleanup",
+                Duration::from_secs(320 / CLOCK_SPEED + 20),
+                || manager.manifest().is_ok_and(|m| m.is_some_and(|m| m.state == UpdateState::Healthy)),
+            )?;
             let healthy = manager.manifest().map_err(|e| e.key())?.ok_or("missing healthy manifest")?;
             ensure(
                 healthy.active_slot == Slot::B
@@ -417,7 +428,7 @@ fn handoff(ctx: &mut Ctx) -> Result {
     first.terminate();
     baseline.terminate();
     if result.is_ok() {
-        ctx.notes.push("running mission refuses transition; old engine pauses through T5 stop; probation refuses admission; clean quit without rollback/relaunch; full 300 s probation; cleanup failure cannot kill healthy child; second transition while B lives; immutable launcher; saved spend/grants unchanged".into());
+        ctx.notes.push("running mission refuses transition; old engine pauses through T5 stop; probation refuses admission; clean quit without rollback/relaunch; full 300 s probation on a clock five times faster; cleanup failure cannot kill healthy child; second transition while B lives; immutable launcher; saved spend/grants unchanged".into());
     }
     result
 }

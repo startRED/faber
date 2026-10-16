@@ -750,6 +750,9 @@ each to the lightest part so far, using the CI seconds of every scenario that ta
 (`testkit/src/screen/mod.rs`, `SLOW`); any other counts as 5 s. A slow scenario left out of `SLOW` makes its part late (on
 2026-10-16 one part took 17 minutes against 8 for the others), and a renamed one fails a test. CI keeps the Windows screenshots as artifacts. Anything outside the page (tray,
 notifications, installer, updates) is checked through the operating system's accessibility layer and file versions.
+The update scenario (T13 4) runs the update flow's clock five times faster from one anchor all its processes share
+(`FABER_TEST_CLOCK`, read only by the test build; a release build with the test hooks does not compile), so it proves
+the whole 300-second probation and its 30-second health window in about 100 s instead of 335 (R163).
 
 Test launches also pass the browser engine switches that turn off crash reports and SmartScreen address lookups, and the
 sandbox removes every `WEBVIEW2_*` override from the environment. That limits what a test sends; it is not a firewall.
