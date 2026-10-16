@@ -305,6 +305,9 @@ struct Core {
     usage_command_spent: bool,
     /// The newer flags the installed Claude Code takes; none until `detect_claude_flags` has read them.
     claude_flags: crate::claude::ClaudeFlags,
+    /// The `Cli::stamp` the flags above were read under (or are being read under): a different one means the CLI was updated or
+    /// downgraded since, and what it takes is unknown until the help is read again.
+    claude_stamp: Option<String>,
     /// When a failed Codex read last counted against the plan check.
     codex_failed_at: f64,
     /// The PC's offset from UTC in seconds, as the screen reports it.
@@ -390,6 +393,7 @@ impl Engine {
                 closing: false,
                 usage_command_spent: false,
                 claude_flags: Default::default(),
+                claude_stamp: None,
                 codex_failed_at: f64::MIN,
                 utc_offset: 0,
                 offset_known: false,
@@ -1186,15 +1190,32 @@ impl Core {
     }
 
     /// Starts the hidden `--help` read (see `Engine::detect_claude_flags`); its answer replaces the flags known so far.
-    fn probe_claude_flags(&self) {
+    fn probe_claude_flags(&mut self) {
         let Some(cli) = self.opts.clis.get(&Vendor::Claude).cloned() else { return };
+        // The answer belongs to the CLI as it is now: if it changes again before the read ends, the newer read decides.
+        let stamp = cli.stamp();
+        self.claude_stamp = Some(stamp.clone());
         let (me, spawn, cwd) = (self.me.clone(), self.opts.spawn.clone(), self.opts.data_dir.clone());
         self.opts.runtime.spawn(async move {
             let Some(flags) = account::claude_flags(&cli, &spawn, &cwd, Duration::from_secs(20)).await else { return };
             if let Some(core) = me.upgrade() {
-                core.lock().unwrap_or_else(|e| e.into_inner()).claude_flags = flags;
+                let mut core = core.lock().unwrap_or_else(|e| e.into_inner());
+                if core.claude_stamp.as_ref() == Some(&stamp) {
+                    core.claude_flags = flags;
+                }
             }
         });
+    }
+
+    /// The newer flags to pass to a Claude Code launch. When the CLI is not the one the flags were read from (an update, or a
+    /// downgrade to a version that lacks one), none are passed on this launch and the help is read again for the next ones. Before
+    /// the first read there is nothing to compare with, and nothing is known either.
+    fn claude_flags_for(&mut self, cli: &Cli) -> crate::claude::ClaudeFlags {
+        if self.claude_stamp.as_ref().is_some_and(|read| *read != cli.stamp()) {
+            self.claude_flags = Default::default();
+            self.probe_claude_flags();
+        }
+        self.claude_flags
     }
 
     fn turn(&mut self, conv: &str) -> Option<&mut Message> {
@@ -2034,6 +2055,10 @@ impl Core {
             l.session.close();
             self.live.remove(conv);
         }
+        let flags = match &cli {
+            Some(cli) if pick.vendor == Vendor::Claude => self.claude_flags_for(cli),
+            _ => Default::default(),
+        };
         let c = self.convs.get(conv).ok_or("error.conversationGone")?;
         let cwd_used = cwd.clone();
         let cli = cli.ok_or("error.notConnected")?;
@@ -2083,17 +2108,7 @@ impl Core {
                 ClaudeOptions {
                     bin: cli.command.clone(),
                     cwd,
-                    launch: ClaudeLaunch {
-                        area,
-                        model,
-                        effort,
-                        resume,
-                        user_hooks,
-                        permissions,
-                        instructions: None,
-                        user_name,
-                        flags: self.claude_flags,
-                    },
+                    launch: ClaudeLaunch { area, model, effort, resume, user_hooks, permissions, instructions: None, user_name, flags },
                     spawn,
                     sandbox: self.opts.clis.get(&Vendor::Codex).cloned(),
                 },
