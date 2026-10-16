@@ -401,7 +401,7 @@ pub struct Definition {
     pub heavy: bool,
 }
 impl Definition {
-    fn validate(&self) -> Result<(), &'static str> {
+    pub fn validate(&self) -> Result<(), &'static str> {
         wire::check_id(&self.id).map_err(|e| e.key())?;
         let name = self.program.file_name().and_then(|s| s.to_str()).ok_or("reason.proof.command")?.to_ascii_lowercase();
         let stem = name.trim_end_matches(".exe");

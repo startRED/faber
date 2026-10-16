@@ -223,6 +223,47 @@ fn text(output: Output, error: GitError) -> Result<String, GitError> {
     String::from_utf8(output.stdout).map(|s| s.trim_end_matches(['\r', '\n']).into()).map_err(|_| error)
 }
 
+/// One regular file of a commit's tree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tracked {
+    pub path: String,
+    pub oid: String,
+    pub size: u64,
+}
+
+/// The regular files tracked at `base` (symbolic links and submodules are left out), read with fixed argv. The owner's
+/// working folder is never read: this is the committed tree the mission clone starts from.
+pub fn tracked(executor: &mut impl Executor, root: &Path, base: &str) -> Result<Vec<Tracked>, GitError> {
+    if !valid_oid(base) {
+        return Err(GitError::Base);
+    }
+    let out = executor.execute(&Invocation::new(root, &["ls-tree", "-r", "-l", "-z", "--full-tree", "--end-of-options", base]))?;
+    if !out.success {
+        return Err(GitError::Command);
+    }
+    let mut files = vec![];
+    for record in out.stdout.split(|b| *b == 0).filter(|r| !r.is_empty()) {
+        let record = std::str::from_utf8(record).map_err(|_| GitError::Command)?;
+        let (meta, path) = record.split_once('\t').ok_or(GitError::Command)?;
+        let mut fields = meta.split_whitespace();
+        let (mode, kind, oid, size) = (fields.next(), fields.next(), fields.next(), fields.next());
+        if kind == Some("blob") && matches!(mode, Some("100644" | "100755")) {
+            let size = size.and_then(|s| s.parse().ok()).ok_or(GitError::Command)?;
+            files.push(Tracked { path: path.into(), oid: oid.ok_or(GitError::Command)?.into(), size });
+        }
+    }
+    Ok(files)
+}
+
+/// The content of one tracked blob.
+pub fn blob(executor: &mut impl Executor, root: &Path, oid: &str) -> Result<Vec<u8>, GitError> {
+    if !valid_oid(oid) {
+        return Err(GitError::Command);
+    }
+    let out = executor.execute(&Invocation::new(root, &["cat-file", "blob", oid]))?;
+    if out.success { Ok(out.stdout) } else { Err(GitError::Command) }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Repository {
     pub identity: RepoIdentity,

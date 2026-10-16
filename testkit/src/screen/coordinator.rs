@@ -219,7 +219,10 @@ fn setup(world: &World) -> Result<Setup> {
             writer: pin(Vendor::Claude, "claude-haiku-5-5"),
             reviewer: pin(Vendor::Codex, "gpt-6-luna"),
         },
-        proof: Definition {
+        expect_red: true,
+        tree: vec![],
+        notify: None,
+        proofs: vec![Definition {
             id: "fixture-check".into(),
             version: 1,
             program: std::env::current_exe().map_err(|e| e.to_string())?,
@@ -229,7 +232,7 @@ fn setup(world: &World) -> Result<Setup> {
             dependencies: "none".into(),
             environment: BTreeMap::new(),
             heavy: false,
-        },
+        }],
         proof_spawn: faber_engine::proc::isolated_spawner(BTreeMap::new()),
         sources: vec![("src/a.rs".into(), "base".into())],
         writable: vec!["src".into()],

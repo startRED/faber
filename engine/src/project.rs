@@ -16,6 +16,7 @@ pub mod git;
 pub mod kit;
 pub mod lead;
 pub mod lease;
+pub mod mission;
 pub mod proof;
 pub mod qualification;
 pub mod queue;

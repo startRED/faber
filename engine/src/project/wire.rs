@@ -619,6 +619,15 @@ pub struct MissionView {
     pub build: Option<BuildView>,
     /// A `reason.*` key while paused or blocked.
     pub reason: Option<String>,
+    /// The step a running mission is on, and the role and vendor working on it.
+    #[serde(default)]
+    pub progress: Option<super::mission::ProgressView>,
+    /// What a finished mission leaves: the branch that holds the work and what was proven.
+    #[serde(default)]
+    pub report: Option<super::mission::ReportView>,
+    /// The `reason.*` key of something only the owner can settle (a blocked review, a parked effect).
+    #[serde(default)]
+    pub needs: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

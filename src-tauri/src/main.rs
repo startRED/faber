@@ -29,7 +29,10 @@ use faber_engine::cli::Cli;
 use faber_engine::codex::{ModelInfo, list_codex_models, read_codex_limits};
 use faber_engine::model::{Area, Conversation, Project, Settings, Vendor};
 use faber_engine::proc::{Spawner, real_spawner};
-use faber_engine::project::git::{Process, enroll};
+use faber_engine::project::canary;
+use faber_engine::project::coordinator::{self, Coordinator};
+use faber_engine::project::git::{Broker, Process, enroll};
+use faber_engine::project::mission;
 use faber_engine::project::run::Runner;
 use faber_engine::project::store::Journal;
 use faber_engine::project::wire::{DecisionView, EnrollView, MissionView, TaskView};
@@ -60,6 +63,8 @@ pub(crate) struct Faber {
     missions: Arc<tauri::async_runtime::Mutex<()>>,
     local: Option<Development>,
     pub(crate) awake: Arc<Mutex<CountedAwake>>,
+    /// Missions the coordinator is driving in this process; a second drive of the same mission never starts.
+    driving: Mutex<HashSet<String>>,
     _mission_events: faber_engine::project::store::MissionSubscription,
     pub(crate) autostart: Mutex<Arc<dyn AutostartKeeper>>,
 }
@@ -452,6 +457,9 @@ fn build_mission_view(faber: &Faber, mission: &Mission, journal: &Journal, grant
         decisions: decision_views,
         build: None,
         reason: mission.reason.clone(),
+        progress: faber_engine::project::mission::progress(journal, mission),
+        report: faber_engine::project::mission::report_view(journal, mission),
+        needs: faber_engine::project::mission::needs(mission),
     })
 }
 
@@ -583,6 +591,125 @@ async fn project_revoke(faber: State<'_, Faber>, project_id: String) -> Res<()> 
     Ok(())
 }
 
+/// Tell the screen and the tray where a mission is now. Called after every step the coordinator finishes.
+async fn publish(app: &AppHandle, mission_id: &str) {
+    let faber = app.state::<Faber>();
+    let _turn = faber.missions.lock().await;
+    let Ok((project, journal, mission)) = find_mission_and_journal(&faber, mission_id) else { return };
+    sync_mission_awake(&faber, &mission.id, mission.state);
+    let grant = project.grant.unwrap_or_else(|| Grant::new(&mission.repo, GitMode::Seguro, mission.grant_revision, mission.created_at));
+    if let Ok(view) = build_mission_view(&faber, &mission, &journal, &grant) {
+        let _ = app.emit("mission", &view);
+        tray::on_mission(app, &view);
+    }
+}
+
+/// End a mission that could not even begin the way the coordinator would: a wait for the owner or a block, with the key.
+fn halt(journal: &Journal, key: &str) {
+    let Ok(mut runner) = Runner::load(journal) else { return };
+    runner.mission.reason = Some(key.to_string());
+    if matches!(coordinator::classify(key), coordinator::Stop::Block(_)) {
+        runner.mission.state = faber_engine::project::MissionState::Blocked;
+        let _ = runner.save(journal);
+    } else {
+        let _ = runner.pause(journal);
+    }
+}
+
+/// Run a mission through the coordinator in the background until it lands or stops. Every step is saved to the journal,
+/// so a stop, a crash or a restart resumes from the facts (R135). One drive per mission at a time.
+fn drive_mission(app: &AppHandle, mission_id: String, commands: Vec<String>) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let faber = app.state::<Faber>();
+        if !lock(&faber.driving).insert(mission_id.clone()) {
+            return;
+        }
+        if let Err(key) = run_mission(&app, &faber, &mission_id, commands).await {
+            let _turn = faber.missions.lock().await;
+            if let Ok((_, journal, _)) = find_mission_and_journal(&faber, &mission_id) {
+                halt(&journal, &key);
+            }
+        }
+        lock(&faber.driving).remove(&mission_id);
+        publish(&app, &mission_id).await;
+    });
+}
+
+async fn run_mission(app: &AppHandle, faber: &Faber, mission_id: &str, commands: Vec<String>) -> Result<(), String> {
+    let (project, journal, mission) = {
+        let _turn = faber.missions.lock().await;
+        find_mission_and_journal(faber, mission_id)?
+    };
+    let engine = faber.engine.clone();
+    // The ceiling and the fresh account readings it is admitted on (R131). A refusal here is a saved wait, not a failure.
+    if engine.mission_readings(mission_id)?.0.cap_micros.is_none() {
+        canary::read_accounts(&engine).await;
+        canary::caps(&engine, mission_id, mission::MISSION_CAP_MICROS)?;
+    }
+    let pins = tauri::async_runtime::spawn_blocking(mission::product_pins).await.map_err(|_| "error.wire.stale".to_string())??;
+    {
+        let _turn = faber.missions.lock().await;
+        let mut runner = Runner::load(&journal).map_err(str::to_string)?;
+        mission::remember_roles(&mut runner.mission, &pins);
+        runner.save(&journal).map_err(str::to_string)?;
+    }
+    let folder = PathBuf::from(&project.path);
+    let base = mission.base.clone();
+    let (revision, data, pid) = (mission.grant_revision, faber.data_dir.clone(), project.id.clone());
+    let notify: Arc<dyn Fn() + Send + Sync> = {
+        let (app, id) = (app.clone(), mission_id.to_string());
+        Arc::new(move || {
+            let (app, id) = (app.clone(), id.clone());
+            tauri::async_runtime::spawn(async move { publish(&app, &id).await });
+        })
+    };
+    let grant: Arc<dyn Fn() -> Result<Option<Grant>, faber_engine::project::git::GitError> + Send + Sync> = {
+        let (engine, id) = (engine.clone(), project.id.clone());
+        Arc::new(move || Ok(engine.project(&id).ok().and_then(|p| p.grant)))
+    };
+    let owner = project.repo.clone();
+    let (repository, setup) = tauri::async_runtime::spawn_blocking(move || {
+        let mut process = Process::find().map_err(|e| e.key().to_string())?;
+        let repository = enroll(&mut process, &folder, &base).map_err(|e| e.key().to_string())?;
+        if owner.as_ref() != Some(&repository.identity) {
+            return Err("reason.grant.otherRepo".to_string());
+        }
+        let launch = mission::Launch { repository: repository.clone(), commands, data, project: pid, pins, grant, revision, notify: Some(notify) };
+        let setup = mission::setup(launch, &mut process, &|name| faber_engine::cli::find_cli(name))?;
+        Ok((repository, setup))
+    })
+    .await
+    .map_err(|_| "error.wire.stale".to_string())??;
+    let broker = Broker::open(repository, journal.clone(), mission_id, revision, Process::find().map_err(|e| e.key().to_string())?)
+        .map_err(|e| e.key().to_string())?;
+    let outcome = Coordinator::new(engine, journal, broker, setup)?.drive().await;
+    if let coordinator::Outcome::Stopped(coordinator::Stop::Crash) = outcome {
+        return Err("reason.interrupted".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn project_proof(faber: State<'_, Faber>, project_id: String) -> Res<mission::ProofView> {
+    project_commands::id(&project_id)?;
+    Ok(mission::view(&faber.engine.project(&project_id)?))
+}
+
+/// The owner confirms the commands a mission proves its work with (R137): the project's declared list, or the edited one.
+#[tauri::command]
+async fn project_proof_confirm(faber: State<'_, Faber>, project_id: String, commands: Vec<String>) -> Res<mission::ProofView> {
+    let _turn = faber.missions.lock().await;
+    project_commands::id(&project_id)?;
+    for command in &commands {
+        project_commands::text(command)?;
+    }
+    let before = faber.engine.project(&project_id)?;
+    let after = mission::confirm(&before, &commands).map_err(str::to_string)?;
+    faber.engine.update_project(&before, &after)?;
+    Ok(mission::view(&after))
+}
+
 #[tauri::command]
 async fn mission_start(app: AppHandle, faber: State<'_, Faber>, project_id: String, goal: String) -> Res<String> {
     let _turn = faber.missions.lock().await;
@@ -592,6 +719,8 @@ async fn mission_start(app: AppHandle, faber: State<'_, Faber>, project_id: Stri
     project.allows(Effect::Worktree, grant.revision).map_err(|k| k.to_string())?;
     project_commands::text(&goal)?;
     Runner::role_vendor(&faber.engine)?;
+    // R137: a mission proves its work only with the commands the project declared and its owner confirmed.
+    let commands = mission::confirmed(&project).map_err(str::to_string)?;
     let mut process = Process::find().map_err(|e| e.key().to_string())?;
     let repo = enroll(&mut process, Path::new(&project.path), "HEAD").map_err(|e| e.key().to_string())?;
     if project.repo.as_ref() != Some(&repo.identity) {
@@ -604,6 +733,7 @@ async fn mission_start(app: AppHandle, faber: State<'_, Faber>, project_id: Stri
     let view = build_mission_view(&faber, &runner.mission, &journal, grant)?;
     let _ = app.emit("mission", &view);
     tray::on_mission(&app, &view);
+    drive_mission(&app, runner.mission.id.clone(), commands);
     Ok(runner.mission.id)
 }
 
@@ -654,6 +784,10 @@ async fn mission_resume(app: AppHandle, faber: State<'_, Faber>, mission_id: Str
     let (project, journal, mission) = find_mission_and_journal(&faber, &mission_id)?;
     project_commands::editable(&mission)?;
     project.allows(Effect::Worktree, mission.grant_revision).map_err(str::to_string)?;
+    let commands = mission::confirmed(&project).map_err(str::to_string)?;
+    if lock(&faber.driving).contains(&mission_id) {
+        return Err("reason.mission.driving".into());
+    }
     let mut runner = Runner::load(&journal).map_err(str::to_string)?;
     runner.resume(&journal, &faber.engine)?;
     let mission = runner.mission;
@@ -662,6 +796,7 @@ async fn mission_resume(app: AppHandle, faber: State<'_, Faber>, mission_id: Str
     let view = build_mission_view(&faber, &mission, &journal, &grant)?;
     let _ = app.emit("mission", &view);
     tray::on_mission(&app, &view);
+    drive_mission(&app, mission_id, commands);
     Ok(view)
 }
 
@@ -1042,6 +1177,8 @@ fn main() {
             project_enroll,
             project_grant,
             project_revoke,
+            project_proof,
+            project_proof_confirm,
             mission_start,
             mission_state,
             mission_mode,
@@ -1150,17 +1287,17 @@ fn main() {
                 missions,
                 local: local.clone(),
                 awake,
+                driving: Mutex::default(),
                 _mission_events: mission_events,
                 autostart: Mutex::new(autostart_keeper),
             });
-            if hidden {
-                let handle = app.handle().clone();
-                tauri::async_runtime::spawn_blocking(move || {
-                    if let Err(error) = restore_mission_notices(&handle) {
-                        eprintln!("faber: interrupted missions could not restore ({error})");
-                    }
-                });
-            }
+            // A mission the last run left running has no driver now: it waits, paused, for the owner's Resume.
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                if let Err(error) = restore_mission_notices(&handle) {
+                    eprintln!("faber: interrupted missions could not restore ({error})");
+                }
+            });
             app.state::<Faber>().engine.watch_accounts();
             app.state::<Faber>().engine.detect_claude_flags();
             if let Some(codex) = clis.get(&Vendor::Codex) {
