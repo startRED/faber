@@ -121,6 +121,7 @@ fn main_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
 async fn state(app: AppHandle, faber: State<'_, Faber>) -> Res<FullState> {
     let mut state = faber.engine.state();
     state.settings = std::mem::take(&mut state.settings).shown();
+    state.settings.autostart = Some(autostart::shown(lock(&faber.autostart).as_ref(), state.settings.autostart()));
     state.settings.appearance = look::usable(state.settings.appearance.take());
     let look = look::stored(state.settings.appearance.as_ref());
     Ok(FullState { state, look, models: lock(&faber.models).clone(), version: app.package_info().version.to_string() })

@@ -167,7 +167,7 @@ choice a person makes anywhere else (a work screen, a banner) is an incoherence.
 | `notificationSound` | true, false (true) | Settings > General | The tray |
 | `previews` | true, false (false) | Settings > General (Updates, "Receive previews") | `src-tauri/src/update.rs`, at every update check: on reads the preview manifest, off the stable one; a version that is not newer is never installed |
 | `keepAwake` | true, false (true) | Settings > General (System) | `src-tauri/src/awake.rs` |
-| `autostart` | true, false (false) | Settings > General (System) | `src-tauri/src/autostart.rs`, which also writes the Windows Run key |
+| `autostart` | true, false (false) | Settings > General (System) | `src-tauri/src/autostart.rs`, which also writes the Windows Run key; the switch shows the key as it is (`autostart::shown`), so a key removed outside Faber reads as off |
 | `setup` | `done`, `skipped` (none: the first run is due) | The first run (the account cards' Close also writes it) | `ui/setup.ts` only |
 | `experience` | `beginner`, `experienced` (none counts as beginner) | The first run only | The tutorial |
 | `tutorialDone` | true, false (none before the first run) | The first run and the tutorial's end | The tutorial |
@@ -192,7 +192,7 @@ The data folder is `%APPDATA%\Faber` (or `FABER_DATA_DIR`). JSON files are writt
 | `cache-health.jsonl` | A local log of cache misses, never sent anywhere | The engine |
 | `chat/<id>/`, `attachments/<id>/` | A chat's private folder; a project conversation's attachments | The engine |
 | Browser storage `faber.place` | The last area, project and conversation | `ui/App.tsx` |
-| Browser storage `faber.choice.<conversationId>` | The model and effort picked for a conversation (the conversation file keeps a copy) | `ui/App.tsx` |
+| Browser storage `faber.choice.<conversationId>` | The model and effort picked for a conversation, kept from the moment of the pick; the conversation file keeps the one the last message used, so the screen's copy is never older and wins (the file is the fallback when browser storage is empty) | `ui/App.tsx` |
 | Browser storage `faber.project.goal.<projectId>` | The goal being typed on a start card (cleared when the project is removed) | `ui/projects.ts` |
 | Browser storage `faber.project.mission.<projectId>` | The mission shown on a project's board; New mission clears it, and so does removing the project | `ui/projects.ts` |
 | Browser storage `faber.unsent.<field>` | Text typed and not sent, so an update restart or a crash loses nothing (a project's go when it is removed) | `ui/unsent.ts` |
@@ -298,8 +298,6 @@ ones.
     Projects" reads as if it governed missions, which run isolated.
 19. Settings has no "Learn more" pattern: General shows paragraphs of three to five sentences (product-rules: one short
     line per option).
-20. The model and effort choice is stored twice (browser storage wins over the conversation file); autostart is stored
-    twice (the setting and the Windows Run key, which the screen never reads back).
 
 ## Worked example: adding a setting
 
