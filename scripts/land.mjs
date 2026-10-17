@@ -50,16 +50,21 @@ const run = (cmd, args, options = {}) => execFileSync(cmd, args, { encoding: 'ut
 const git = (...args) => run('git', args);
 
 function land(number, dry, given) {
+  // What the queue holds before anything is read: the push below replaces only that, so a run that read an older head
+  // never overwrites the commit a newer run queued meanwhile.
+  const queue = `refs/heads/queue/pr-${number}`;
+  const queued = git('ls-remote', 'origin', queue).split(/\s/)[0];
   const pr = JSON.parse(run('gh', ['pr', 'view', number, '--json', 'number,title,body,state,isDraft,baseRefName,isCrossRepository,headRefOid']));
   const refused = refusal(pr);
   if (refused) {
     console.error(`#${pr.number} cannot land: ${refused}.`);
     return 1;
   }
+  if (given && given !== pr.headRefOid) {
+    console.error(`#${pr.number} was pushed again after ${given.slice(0, 9)} was queued: queue it again, without --head.`);
+    return 1;
+  }
   const head = given ?? pr.headRefOid;
-  // What the queue holds now: the push below replaces only that, so an older run never overwrites a newer one's commit.
-  const queue = `refs/heads/queue/pr-${pr.number}`;
-  const queued = git('ls-remote', 'origin', queue).split(/\s/)[0];
   git('fetch', '--quiet', 'origin', BASE, given ?? `refs/pull/${pr.number}/head`);
   const base = git('rev-parse', `origin/${BASE}`).trim();
   let tree;
