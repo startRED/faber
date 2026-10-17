@@ -420,7 +420,7 @@ async fn an_environment_override_cannot_be_overruled_by_a_subscription_signal() 
 
 #[tokio::test]
 async fn a_week_spent_faster_than_one_seventh_a_day_is_priced_up_on_either_vendor() {
-    // One day of seven gone and a fifth of the week used (14.3% a day would be 14.3%): the vendor is left for the other.
+    // One day of seven gone and a fifth of the week used (the daily line is 14.3%): the vendor is left for the other.
     for (spent, other) in [(Vendor::Claude, Vendor::Codex), (Vendor::Codex, Vendor::Claude)] {
         let dir = tempfile::tempdir().unwrap();
         let r = both(dir.path(), verdicts(vec![("code", "medium")]));
