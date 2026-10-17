@@ -126,6 +126,7 @@ fn looks(ctx: &mut Ctx) -> Result {
     ensure(project["projectLight"] == true && project["chatLight"] == false, || format!("the Projects home has its own light: {project}"))?;
     ensure(moves(&project), || format!("something moves on the Projects home: {project}"))?;
     ensure(app.page.count(&css(".welcome-grid .hello"))? == 1, || "the Projects home has the greeting of a home".into())?;
+    identity(&mut app)?;
     ctx.shot(&mut app, "homes-project")?;
     // With reduced motion both homes stand completely still and the fields show their plain placeholders.
     system_motion(&mut app.page, true)?;
@@ -146,6 +147,34 @@ fn looks(ctx: &mut Ctx) -> Result {
     pause(0.6);
     let again = life(&mut app)?;
     ensure(again["ghost"] == true && moves(&again), || format!("motion did not come back: {again}"))
+}
+
+/// What the page shows of a home's words: its greeting, its composer's hints, all its text, and the titles to pick up.
+const WORDS: &str = r#"(() => {
+  const words = (el) => (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
+  return {
+    hello: words(document.querySelector('.welcome-grid .hello')),
+    hints: [...document.querySelectorAll('.composer .g-hint')].map(words),
+    text: words(document.querySelector('.welcome-grid')),
+    rows: [...document.querySelectorAll('.welcome-grid .resume .rrow .t')].map(words),
+  };
+})()"#;
+
+/// A project's home speaks its own words (C005, docs/design.md "The Projects home"): its greeting and its composer's
+/// hints, none of Chat's suggestions, and only this project's conversations to pick up (Demo has one, "Olá").
+fn identity(app: &mut Opened) -> Result {
+    let norm = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let greeting = norm(&app.page.text_of("projects.home.title")?);
+    let hints = (1..=3).map(|i| app.page.text_of(&format!("projects.home.hint.{i}")).map(|t| norm(&t))).collect::<Result<Vec<_>>>()?;
+    let chat = (1..=3).map(|i| app.page.text_of(&format!("suggest.{i}"))).collect::<Result<Vec<_>>>()?;
+    let shown = app.page.eval(WORDS)?;
+    ensure(shown["hello"].as_str() == Some(greeting.as_str()), || {
+        format!("the project home greets with Chat's words, not {greeting:?}: {shown}")
+    })?;
+    ensure(shown["hints"] == json!(hints), || format!("the project home's composer hints are not the project's own {hints:?}: {shown}"))?;
+    let text = shown["text"].as_str().unwrap_or_default();
+    ensure(!chat.iter().any(|s| text.contains(s.as_str())), || format!("the project home shows Chat's suggestions: {shown}"))?;
+    ensure(shown["rows"] == json!(["Olá"]), || format!("the project home lists conversations of other places to pick up: {shown}"))
 }
 
 /// The cost of standing still, in percent of one processor core, over `seconds` with nobody touching the window.
