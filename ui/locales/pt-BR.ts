@@ -944,6 +944,7 @@ export const ptBR: Messages = {
   'notes.19.new': 'Num projeto, o assistente pode pedir ajuda à outra IA com uma parte do trabalho ou uma revisão, e o ajudante aparece como uma etapa na resposta.',
   'notes.20.fixed': 'No Mac, o Faber agora se atualiza sozinho como no Windows e no Linux, e as prévias chegam a quem as ativou.',
   'notes.21.fixed': 'Uma lista de projetos danificada não esvazia mais os seus projetos, e remover um projeto agora também apaga a cópia que o Faber guardava dele.',
+  'notes.22.new': 'Quando o Codex passa uma parte do trabalho a um subagente, ele aparece como uma etapa na resposta, e as autorizações dele chegam até você.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

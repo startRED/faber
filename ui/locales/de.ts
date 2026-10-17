@@ -957,6 +957,7 @@ export const de: Messages = {
   'notes.19.new': 'In einem Projekt kann der Assistent die andere KI um Hilfe bei einem Teil der Arbeit oder einer Prüfung bitten, und der Helfer erscheint als Schritt in seiner Antwort.',
   'notes.20.fixed': 'Auf dem Mac aktualisiert sich Faber jetzt selbst wie unter Windows und Linux, und Vorabversionen erreichen alle, die sie eingeschaltet haben.',
   'notes.21.fixed': 'Eine beschädigte Projektliste leert deine Projekte nicht mehr, und beim Entfernen eines Projekts löscht Faber jetzt auch seine eigene Kopie davon.',
+  'notes.22.new': 'Wenn Codex einen Teil der Arbeit an einen Subagenten gibt, erscheint er als Schritt in der Antwort, und seine Freigaben erreichen dich.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',
