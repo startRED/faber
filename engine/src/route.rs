@@ -29,7 +29,7 @@ const fn p(vendor: Vendor, model: &'static str, effort: &'static str, iq: u8, ag
 }
 
 // No maximum effort (minutes per answer at two to three times the cost) and no model another one here beats on every
-// number. ponytail: compiled in; it moves to the live manifest (phase F11) so a new model joins without a release.
+// number. ponytail: compiled in; it moves to the live manifest (roadmap phase 4) so a new model joins without a release.
 pub const PROFILES: [Profile; 9] = [
     p(Vendor::Claude, "claude-opus-5-5", "high", 54, 57, 44.2, 1.82),
     p(Vendor::Claude, "claude-opus-5-5", "medium", 51, 53, 27.9, 1.34),
