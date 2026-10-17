@@ -82,7 +82,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   // The text of the last refused or failed save of settings; the page stays as it was.
   const [saveError, setSaveError] = createSignal<string>();
   const [settingsOpen, setSettingsOpen] = createSignal(false);
-  // The section a link into Settings names (the quota in the sidebar names the usage limits), and what Settings kept while
+  // The section a link into Settings names (the quota in the sidebar names the accounts and limits), and what Settings kept while
   // the account cards were open from it: closing them brings Settings back as it was.
   const [settingsAt, setSettingsAt] = createSignal<Section>();
   const [back, setBack] = createSignal<Keep>();
@@ -172,8 +172,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       });
     });
   const fail = (err: unknown) => setError(failureText(err));
-  const openSettings = (at?: Section) => {
-    setSettingsAt(at);
+  // The sidebar's quota line still names the old usage section: accounts and their limits are one section now.
+  const openSettings = (at?: Section | 'usage') => {
+    setSettingsAt(at === 'usage' ? 'accounts' : at);
     setSettingsOpen(true);
   };
   const closeSettings = () => {
@@ -736,6 +737,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
               usage={state().usage ?? []}
               projects={state().projects}
               now={clock()}
+              version={state().version}
               start={back()?.section ?? settingsAt()}
               kept={back()?.draft}
               onSave={saveSettings}

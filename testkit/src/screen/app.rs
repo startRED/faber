@@ -709,6 +709,10 @@ fn recovers_old_appearance(ctx: &mut Ctx) -> Result {
     page.click(&reduced)?;
     use_look(page)?;
     page.wait_for("reduced motion", "document.documentElement.dataset.motion === 'reduced'")?;
+    // The effect switches sit in the closed Advanced fold.
+    let advanced = page.named("button", "set.advanced")?;
+    page.click(&advanced)?;
+    page.wait_visible(&css(".sw2"))?;
     let seen = page.eval(
         r#"(() => {
           const thumb = getComputedStyle(document.querySelector('.sw2'), '::after');
