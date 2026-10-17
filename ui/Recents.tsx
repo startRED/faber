@@ -98,7 +98,7 @@ export function Recents(props: {
           }}
         >
           <p class="hint">{t('env.selected', { names: selected().map((f) => f.name).join(', ') })}</p>
-          <input type="text" value={name()} maxLength={60} placeholder={t('env.name')} aria-label={t('env.name')} onInput={(e) => setName(e.currentTarget.value)} />
+          <input class="field" type="text" value={name()} maxLength={60} placeholder={t('env.name')} aria-label={t('env.name')} onInput={(e) => setName(e.currentTarget.value)} />
           <button type="submit" class="btn" disabled={!name().trim()}>
             {t('env.save')}
           </button>

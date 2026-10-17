@@ -6,6 +6,10 @@ const active = new Set<Animation>();
 let exitLayer: HTMLDivElement | undefined;
 let resizeUntil = 0;
 
+/** A timing token of the page, in milliseconds (or its text, for a curve). The theme owns the values; the numbers here are only the fallback. */
+const curve = (el: Element, name: string, fallback: string) => getComputedStyle(el).getPropertyValue(name).trim() || fallback;
+const millis = (el: Element, name: string, fallback: number) => parseFloat(getComputedStyle(el).getPropertyValue(name)) || fallback;
+
 function exitSurface(): ShadowRoot {
   if (!exitLayer) {
     exitLayer = document.createElement('div');
@@ -38,7 +42,7 @@ export function keepForExit(open: Accessor<boolean>): Accessor<boolean> {
     const full = motion() === 'full';
     clearTimeout(timer);
     if (visible) setShown(true);
-    else if (full && shown()) timer = setTimeout(() => setShown(false), 180);
+    else if (full && shown()) timer = setTimeout(() => setShown(false), millis(document.documentElement, '--dur-exit', 180));
     else setShown(false);
   });
   onCleanup(() => clearTimeout(timer));
@@ -56,13 +60,12 @@ const offsetOf = (el: HTMLElement) => el.matches('.side') ? 'translateX(calc(-1 
 function play(el: HTMLElement, frames: Keyframe[], exit = false, delay = 0): Animation | undefined {
   const motion = level(el);
   if (motion !== 'full') return;
-  const style = getComputedStyle(el);
-  const duration = Math.min(250, Math.max(150, parseFloat(style.getPropertyValue(exit ? '--motion-exit' : '--motion-enter')) || (exit ? 180 : 220)));
+  const duration = Math.min(250, Math.max(150, millis(el, exit ? '--dur-exit' : '--dur-ui', exit ? 180 : 220)));
   if (el.matches('.ask, .coach, .setup-card')) frames = frames.map((frame, i) => ({ ...frame, filter: (exit ? i === 0 : i !== 0) ? 'blur(0px)' : 'blur(var(--motion-blur))' }));
   // Large moving stages raster slowly with blurred shadows and rounded clipping; restore them at rest.
   if (el.matches('.runcol')) frames = frames.map((frame) => ({ ...frame, boxShadow: 'none', borderRadius: '0px' }));
   const animation = el.animate(frames, {
-    duration, delay: Math.min(48, delay), fill: 'backwards', easing: style.getPropertyValue(exit ? '--motion-ease-in' : '--motion-spring').trim() || (exit ? 'ease-in' : 'ease-out'),
+    duration, delay: Math.min(48, delay), fill: 'backwards', easing: curve(el, exit ? '--ease-in' : '--ease-spring', exit ? 'ease-in' : 'ease-out'),
   });
   active.add(animation);
   void animation.finished.then(() => active.delete(animation), () => active.delete(animation));
@@ -275,7 +278,7 @@ export function animateDetails(root: HTMLElement): void {
     details.open = true;
     const to = opening ? details.getBoundingClientRect().height : summary!.getBoundingClientRect().height;
     const animation = details.animate([{ height: `${from}px`, overflow: 'hidden' }, { height: `${to}px`, overflow: 'hidden' }], {
-      duration: opening ? 220 : 180, easing: opening ? 'ease-out' : 'ease-in',
+      duration: millis(details, opening ? '--dur-ui' : '--dur-exit', opening ? 220 : 180), easing: curve(details, opening ? '--ease' : '--ease-in', opening ? 'ease-out' : 'ease-in'),
     });
     active.add(animation);
     running.set(details, { animation, opening });

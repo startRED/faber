@@ -43,6 +43,7 @@ import './quota.check.ts';
 import './recents.check.ts';
 import './setup.check.ts';
 import './styles.check.ts';
+import './grammar.check.ts';
 import './steer.check.ts';
 import './thread.check.ts';
 import './tutorial.check.ts';

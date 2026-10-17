@@ -86,15 +86,18 @@ own inks.
 - **Others:** Bodoni Moda for Cobalt, IBM Plex Mono, and Geist Mono for keyboard shortcuts.
 - Fonts come from Fontsource, latin and latin-ext subsets only. The webview downloads a font file only when a face is
   used. No other font family ships.
-- Every interface size is the base text size plus or minus a few pixels. Reading text is 1.5 px larger than the base.
+- Every size is a token that follows the text-size setting: `--fs-xs` (small print and counts), `--fs-sm` (secondary
+  lines and fields), `--fs-ui` (the interface), `--fs-read` (reading text), `--fs-lead`, and the heading and display
+  tokens. A style never writes a pixel text size or `calc()` around one (a check reads the real stylesheet).
 - Display headings are clamped to `9vw`, so an 86 px heading fits small windows.
 
 ### Motion
 
-- Chrome uses the `--motion-*` tokens in `ui/styles.css`: 150 ms feedback, 180 ms exits, theme-controlled 200–240 ms
-  entrances and a 220 ms theme cross-fade. No chrome animation, including its stagger, exceeds 300 ms. The enter curve
-  has a soft spring-like settle; exits ease in. Travel is 24 px for the running column, up to 6 px for content and a
-  0.97 scale for cards and menus. Cards use a 2 px arrival blur; overlays use an 8 px static backdrop blur.
+- Chrome has one timing family (see "One grammar"): `--dur-fast` feedback, `--dur-ui` entrances and the theme
+  cross-fade, `--dur-exit` exits, `--dur-move` and `--dur-arrive` for travel, with the curves `--ease` (a soft
+  spring-like settle), `--ease-in` (exits) and `--ease-spring`. No chrome animation, including its stagger, exceeds
+  300 ms. Travel is 24 px for the running column, up to 6 px for content and a 0.97 scale for cards and menus. Cards use
+  a 2 px arrival blur; only the scrim has a backdrop blur.
 - New items rise up to 6 px over 200 to 240 ms; exits take 180 ms. Buttons respond in 140 to 240 ms. The "running" dot pulses every 1.6 to 2 s.
   Workshop only fades and never moves anything vertically.
 - Frequency decides whether something moves at all. Anything the user does dozens of times a minute (a keystroke, a
@@ -113,6 +116,28 @@ own inks.
   per list exit together; no component or process is kept alive for an exit. Native dropdown pickers animate where the
   webview supports customizable selects, with the usual native control as the fallback. Theme changes use native
   View Transitions when available and apply immediately otherwise; no dependency or retained screen is needed.
+
+### One grammar
+
+Every control, text size and timing comes from a short list of tokens in `ui/styles.css`, so two screens never differ by
+accident. `tests/ui/grammar.check.ts` reads the real stylesheet and fails on a break.
+
+- **Control heights:** `--h-sm` 28 px (chips, pills, the plus, the rename field, small icons), `--h-md` 32 px (buttons,
+  selects, fields, the segmented control, the send button, sidebar rows) and `--h-lg` 40 px (the big button, the new
+  conversation button, the bottom bars of overlays). No button, select, chip, input or segmented control has a height
+  of its own. A row that scales with density adds `2px * var(--dens)` to a token.
+- **Text sizes:** only the `--fs-*` tokens above; a size that is not a token is written in `em` of its parent.
+- **Timing:** `--dur-fast`, `--dur-ui`, `--dur-exit` and the two travel durations come with the curves `--ease`,
+  `--ease-io`, `--ease-in` and `--ease-spring`. A transition or animation never writes a literal duration or curve.
+  Scenes that loop or play once on the home (the wake, the blinking caret, the weave and the drift of the effects) use
+  the `--dur-wake`, `--dur-blink`, `--dur-pulse`, `--dur-weave`, `--dur-weave-slow` and `--dur-drift` tokens: they
+  are not interface timing.
+- **One text field:** `.field` is the text input and textarea of every screen outside the composer (first run, setup,
+  Settings, the project's proof commands, the plan question, the rename of a row, the folder set name, a question's
+  own answer). `.field.sm` is the 28 px one, `.field.hex` the colour code and `.field.search` the sidebar search, a
+  box that holds an icon and an input. The composer and the edit box of a sent message sit inside their own bubbles.
+- **Hover:** a row or a button changes its background or its colour on hover and never its brightness.
+- **Blur:** a panel that is at least 94 % opaque draws no backdrop blur; only the scrim has one.
 
 ### Effects
 - Effects appear only on the two homes (the new conversation of Chat and the first screen of a project) and behind a new
