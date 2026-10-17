@@ -248,9 +248,36 @@ pub struct CodexTurnState {
     prompt: Option<u64>,
     /// User messages seen in the current turn: the first is the turn's own prompt, any later one was steered in.
     users: u32,
+    /// What the turn's subagents used, which Codex counts in their own threads.
+    subagents: Totals,
+    subagents_cost: Option<f64>,
+    subagents_incomplete: bool,
 }
 
 impl CodexTurnState {
+    /// A subagent of the turn is still at work, so the turn's usage misses what it used.
+    pub fn subagent_running(&mut self) {
+        self.subagents_incomplete = true;
+    }
+
+    /// A subagent's turn ended: what it used counts for the turn of the conversation that started it.
+    pub fn add_subagent(&mut self, done: &EngineEvent) {
+        let EngineEvent::Done { cost_total_usd, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, incomplete, .. } = done
+        else {
+            return;
+        };
+        let sub = &mut self.subagents;
+        sub.input += input_tokens;
+        sub.output += output_tokens;
+        sub.cached += cache_read_tokens;
+        sub.written = Some(sub.written.unwrap_or(0) + cache_write_tokens);
+        match cost_total_usd {
+            Some(cost) => *self.subagents_cost.get_or_insert(0.0) += cost,
+            None => self.subagents_incomplete = true,
+        }
+        self.subagents_incomplete |= incomplete;
+    }
+
     /// A thread that starts empty has used nothing yet; a resumed one learns its total from the update that comes first.
     pub fn new(resumed: bool) -> Self {
         CodexTurnState { total: (!resumed).then(|| Totals { written: Some(0), ..Totals::default() }), ..Default::default() }
@@ -258,6 +285,140 @@ impl CodexTurnState {
 }
 
 const NOT_TOOLS: [&str; 3] = ["userMessage", "agentMessage", "reasoning"];
+
+/// The name a subagent's call takes on screen, the same as Claude Code's.
+const SUBAGENT: &str = "Agent";
+/// A stop sent to a subagent's turn, whose answer nobody waits for.
+const SUBAGENT_STOP: &str = "subagent/interrupt";
+
+/// The few words for a subagent: the last part of the path Codex gives it (`/root/read_docs` reads "read docs").
+fn subagent_title(path: &str) -> String {
+    path.rsplit('/').next().unwrap_or_default().replace(['_', '-'], " ").trim().to_string()
+}
+
+/// Codex's own subagents (its `multi_agent` feature, R161). Each works in a thread of its own that Faber never opened: the
+/// thread that started it reports it as `subAgentActivity` items, and its own notifications name its thread.
+#[derive(Default)]
+pub struct Subagents(HashMap<String, Subagent>);
+
+struct Subagent {
+    /// The conversation it works for.
+    key: u64,
+    /// The call that started it, under which its tools show.
+    call: String,
+    /// Its latest words, which become its report.
+    report: String,
+    state: CodexTurnState,
+    /// The conversation's turn it works for. Its approvals and usage belong to that turn only: once the turn is over they
+    /// reach no other reply.
+    turn: Option<String>,
+    /// Its own turn, while one is under way.
+    own: Option<String>,
+}
+
+/// What one notification of a subagent's thread means for its conversation.
+pub struct ChildNews {
+    pub key: u64,
+    /// The conversation's turn the subagent serves.
+    pub turn: Option<String>,
+    pub events: Vec<EngineEvent>,
+    /// Its own turn ended with this usage (a `Done`), which counts for `turn`.
+    pub used: Option<EngineEvent>,
+}
+
+impl Subagents {
+    /// The conversation a subagent's thread works for, and the turn of it.
+    pub fn owner(&self, thread: &str) -> Option<(u64, Option<String>)> {
+        self.0.get(thread).map(|sub| (sub.key, sub.turn.clone()))
+    }
+
+    /// Whether a subagent of conversation `key` is still at work for its turn `turn`.
+    pub fn running(&self, key: u64, turn: &str) -> bool {
+        self.0.values().any(|sub| sub.key == key && sub.own.is_some() && sub.turn.as_deref() == Some(turn))
+    }
+
+    /// The subagents of conversation `key` at work now, as their thread and turn, so a stop reaches them too.
+    pub fn at_work(&self, key: u64) -> Vec<(String, String)> {
+        self.0.iter().filter(|(_, sub)| sub.key == key).filter_map(|(thread, sub)| Some((thread.clone(), sub.own.clone()?))).collect()
+    }
+
+    /// Follows the subagents a notification of conversation `key`, sent for its turn `turn`, starts and ends. One that ends
+    /// settles the call that started it, with its report.
+    pub fn track(&mut self, key: u64, turn: Option<&str>, msg: &Value) -> Option<EngineEvent> {
+        let item = &msg["params"]["item"];
+        if item["type"] != "subAgentActivity" {
+            return None;
+        }
+        let thread = s(&item["agentThreadId"]);
+        match (msg["method"].as_str(), item["kind"].as_str()) {
+            (Some("item/started"), Some("started")) if !thread.is_empty() => {
+                // A subagent's thread starts empty; its model prices what it uses.
+                let state = CodexTurnState { model: s(&item["model"]), ..CodexTurnState::new(false) };
+                let turn = turn.map(String::from);
+                self.0.entry(thread).or_insert_with(|| Subagent {
+                    key,
+                    call: s(&item["id"]),
+                    report: String::new(),
+                    state,
+                    turn,
+                    own: None,
+                });
+                None
+            }
+            (Some("item/completed"), Some(end @ ("completed" | "interrupted"))) => {
+                let sub = self.0.get(&thread).filter(|sub| sub.key == key)?;
+                Some(EngineEvent::ToolResult { id: sub.call.clone(), ok: end == "completed", declined: false, text: sub.report.clone() })
+            }
+            _ => None,
+        }
+    }
+
+    /// A notification from a subagent's own thread: the tools it ran, under the call that started it, for its conversation.
+    /// Its words are kept as its report and never join the answer. None when the thread is no subagent's.
+    pub fn child(&mut self, msg: &Value) -> Option<ChildNews> {
+        let sub = self.0.get_mut(msg["params"]["threadId"].as_str()?)?;
+        match msg["method"].as_str() {
+            // Each turn of a subagent names the conversation's turn it serves (a later message to it starts a new one).
+            Some("turn/started") => {
+                sub.own = msg["params"]["turn"]["id"].as_str().map(String::from);
+                sub.report.clear();
+                if let Some(root) = msg["params"]["turn"]["rootTurnId"].as_str() {
+                    sub.turn = Some(root.to_string());
+                }
+            }
+            Some("turn/completed") => sub.own = None,
+            _ => {}
+        }
+        let (key, call, turn) = (sub.key, sub.call.clone(), sub.turn.clone());
+        let item = &msg["params"]["item"];
+        if msg["method"] == "item/completed" && item["type"] == "agentMessage" && item["text"].as_str().is_some_and(|t| !t.is_empty()) {
+            sub.report = s(&item["text"]);
+        }
+        let mut used = None;
+        let mut events: Vec<EngineEvent> = parse_codex_notification(msg, &mut sub.state)
+            .into_iter()
+            .filter_map(|event| match event {
+                done @ EngineEvent::Done { .. } => {
+                    used = Some(done);
+                    None
+                }
+                EngineEvent::Tool { id, name, input, parent } => {
+                    Some(EngineEvent::Tool { id, name, input, parent: parent.or(Some(call.clone())) })
+                }
+                result @ EngineEvent::ToolResult { .. } => Some(result),
+                _ => None,
+            })
+            .collect();
+        // A subagent's own subagent works for the same conversation and folds into the step it started from.
+        events.extend(self.track(key, turn.as_deref(), msg));
+        Some(ChildNews { key, turn, events, used })
+    }
+
+    /// The conversation closed: its subagents' threads are no longer followed.
+    pub fn forget(&mut self, key: u64) {
+        self.0.retain(|_, sub| sub.key != key);
+    }
+}
 
 // Codex reports a limit window by its length; Faber names the ones it knows.
 fn window_name(mins: i64) -> String {
@@ -296,8 +457,20 @@ pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<
                 let tag = item["clientId"].as_str().filter(|t| !t.is_empty()).map(String::from);
                 return if tag.is_some() || state.users > 1 { vec![EngineEvent::Injected { tag }] } else { vec![] };
             }
-            if NOT_TOOLS.contains(&kind) {
+            if NOT_TOOLS.contains(&kind) || kind == "collabAgentToolCall" {
                 return vec![];
+            }
+            // A subagent the agent started reads as Claude Code's `Agent` call, so the screen shows one step for both CLIs.
+            if kind == "subAgentActivity" {
+                return match item["kind"].as_str() {
+                    Some("started") => vec![EngineEvent::Tool {
+                        id: s(&item["id"]),
+                        name: SUBAGENT.into(),
+                        input: json!({ "description": subagent_title(&s(&item["agentPath"])) }),
+                        parent: None,
+                    }],
+                    _ => vec![],
+                };
             }
             let input = [&item["command"], &item["query"], &item["changes"], &item["arguments"]]
                 .into_iter()
@@ -319,7 +492,8 @@ pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<
                 let text = s(&item["text"]);
                 return if !text.is_empty() && !state.streamed.contains(&id) { vec![EngineEvent::Text(text)] } else { vec![] };
             }
-            if NOT_TOOLS.contains(&kind) {
+            // A subagent's end settles its call with its report (`Subagents`); the agent's waits on it are bookkeeping.
+            if NOT_TOOLS.contains(&kind) || kind == "collabAgentToolCall" || kind == "subAgentActivity" {
                 return vec![];
             }
             let ok = item["status"] == "completed" && item["success"] != false && (item["exitCode"].is_null() || item["exitCode"] == 0);
@@ -343,6 +517,9 @@ pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<
             state.price_incomplete = false;
             state.prompt = None;
             state.users = 0;
+            state.subagents = Totals::default();
+            state.subagents_cost = None;
+            state.subagents_incomplete = false;
             vec![]
         }
         "thread/tokenUsage/updated" => {
@@ -411,16 +588,18 @@ pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<
             // measure from, the turn reports no usage (and says so) rather than the whole thread.
             let used = state.total.zip(state.base).map(|(total, base)| total.since(base));
             let u = used.unwrap_or_default();
+            let sub = state.subagents;
+            let cost = state.priced.then(|| state.cost + state.subagents_cost.unwrap_or(0.0));
             vec![EngineEvent::Done {
                 ok: status == "completed",
                 reason: p["turn"]["error"]["message"].as_str().map(String::from).unwrap_or(status),
-                cost_total_usd: state.priced.then_some(state.cost),
-                input_tokens: u.input,
-                output_tokens: u.output,
-                cache_read_tokens: u.cached,
-                cache_write_tokens: u.written.unwrap_or(0),
+                cost_total_usd: cost,
+                input_tokens: u.input + sub.input,
+                output_tokens: u.output + sub.output,
+                cache_read_tokens: u.cached + sub.cached,
+                cache_write_tokens: u.written.unwrap_or(0) + sub.written.unwrap_or(0),
                 cache_write_1h_tokens: 0,
-                incomplete: used.is_none() || u.written.is_none() || state.price_incomplete,
+                incomplete: used.is_none() || u.written.is_none() || state.price_incomplete || state.subagents_incomplete,
             }]
         }
         "error" => {
@@ -792,6 +971,7 @@ async fn serve(
     let mut job = p.contained;
     let mut threads: HashMap<u64, Thread> = HashMap::new();
     let mut by_id: HashMap<String, u64> = HashMap::new();
+    let mut subagents = Subagents::default();
     // Opened before Codex finished starting, in order, so request ids stay predictable.
     let mut pending: Vec<u64> = Vec::new();
     let mut waiting: HashMap<u64, Waiting> = HashMap::new();
@@ -938,6 +1118,9 @@ async fn serve(
                     (None, Some(id)) => {
                         let Some(kind) = id.as_u64().and_then(|id| waiting.remove(&id)) else { continue };
                         if let Some(error) = msg.get("error") {
+                            if matches!(kind, Waiting::Other(_, SUBAGENT_STOP)) {
+                                continue;
+                            }
                             // The turn ended, or cannot take a message: not an error of the conversation. The engine keeps the
                             // message for the next turn.
                             if let Waiting::Steer(key, tag) = kind {
@@ -1009,7 +1192,8 @@ async fn serve(
                     }
                     // A request from Codex: approvals reach the user; anything else is declined politely.
                     (Some(method), Some(id)) => {
-                        let thread = params["threadId"].as_str().and_then(|t| by_id.get(t)).and_then(|k| threads.get_mut(k));
+                        let top = params["threadId"].as_str().and_then(|t| by_id.get(t)).copied();
+                        let thread = top.and_then(|k| threads.get_mut(&k));
                         if method == "item/tool/call" && params["tool"] == crate::helper::NAME {
                             // R161: the agent asked for a helper; the engine answers once the helper is done.
                             match thread.filter(|t| t.params.helper == crate::helper::Helper::Offers && !t.blocked && !t.closing) {
@@ -1047,6 +1231,14 @@ async fn serve(
                             }
                             continue;
                         }
+                        // A subagent's approval is its conversation's: the person answers it on the same card, by the same rules.
+                        let thread = match top {
+                            Some(_) => thread,
+                            // Only while the turn it serves is under way: a late request reaches no other reply, and is refused.
+                            None => params["threadId"].as_str().and_then(|t| subagents.owner(t)).and_then(|(k, turn)| {
+                                threads.get_mut(&k).filter(|t| turn.is_some() && t.turn == turn)
+                            }),
+                        };
                         match (method.ends_with("requestApproval"), thread) {
                             // Full access never shows a card: Codex does not ask under the "never" policy, and if it still does, the
                             // engine answers (yes, unless the request touches a credential folder) with the mode in force at that
@@ -1086,9 +1278,24 @@ async fn serve(
                         }
                     }
                     _ => {
+                        // A subagent's own thread speaks for the conversation that started it.
+                        if let Some(ChildNews { key, turn, events, used }) = subagents.child(&msg) {
+                            if let Some(t) = threads.get_mut(&key) {
+                                t.watch.activity();
+                                // A subagent belongs to the reply it serves: once that reply is over, what it still does or uses
+                                // reaches no other reply.
+                                let current = turn.is_some() && turn == t.turn;
+                                if let Some(done) = used && current { t.state.add_subagent(&done); }
+                                if current && !t.blocked {
+                                    for event in events { (t.sink)(event); }
+                                }
+                            }
+                            continue;
+                        }
                         let thread_id = params["threadId"].as_str().or_else(|| params["thread"]["id"].as_str());
-                        match thread_id.and_then(|t| by_id.get(t)).and_then(|k| threads.get_mut(k)) {
-                            Some(t) => {
+                        let key = thread_id.and_then(|t| by_id.get(t)).copied();
+                        match key.and_then(|k| threads.get_mut(&k).map(|t| (k, t))) {
+                            Some((key, t)) => {
                                 if method == Some("turn/completed") && params["turn"]["id"].as_str() != t.turn.as_deref() {
                                     if t.turn.is_none() && waiting.values().any(|w| matches!(w,Waiting::Other(key,"turn/start") if Some(key) == thread_id.and_then(|id|by_id.get(id)))) {
                                         if t.early_completion.len() < 2 { t.early_completion.push(msg); }
@@ -1108,10 +1315,19 @@ async fn serve(
                                     }
                                 }
                                 if method == Some("turn/completed") {
+                                    // A subagent still at work has not reported what it used: the reply's usage says so.
+                                    if t.turn.as_deref().is_some_and(|turn| subagents.running(key, turn)) {
+                                        t.state.subagent_running();
+                                    }
+                                    // Only a subagent can still be waiting on an approval once the turn is over; its card goes with
+                                    // the reply, so the request is refused instead of hanging unseen.
+                                    for (_, id) in t.approvals.drain() {
+                                        let _ = proc::write_line(&mut *stdin, &json!({ "id": id, "result": { "decision": "decline" } })).await;
+                                    }
                                     t.turn = None;
                                     t.watch.finish();
                                 }
-                                for event in parse_codex_notification(&msg, &mut t.state) {
+                                for event in parse_codex_notification(&msg, &mut t.state).into_iter().chain(subagents.track(key, params["turnId"].as_str(), &msg)) {
                                     if !t.blocked { (t.sink)(event); }
                                 }
                                 if method == Some("turn/completed") && !t.blocked && !t.closing && let Some(id) = t.id.clone() {
@@ -1134,6 +1350,7 @@ async fn serve(
                         }
                         let closed: Vec<u64> = threads.iter().filter(|(_, t)| t.closing && t.turn.is_none() && !t.watch.active()).map(|(&k, _)| k).collect();
                         for key in closed {
+                            subagents.forget(key);
                             if let Some(t) = threads.remove(&key) && let Some(id) = t.id { by_id.remove(&id); }
                         }
                         if retired && threads.is_empty() { stop!(); }
@@ -1218,10 +1435,18 @@ async fn serve(
                             t.watch.interrupt();
                             request!("turn/interrupt", json!({ "threadId": thread, "turnId": turn }), Waiting::Other(key, "turn/interrupt"));
                         }
+                        // Stop reaches the conversation's subagents too; one that just ended answers with an error nobody needs.
+                        for (thread, turn) in subagents.at_work(key) {
+                            request!("turn/interrupt", json!({ "threadId": thread, "turnId": turn }), Waiting::Other(key, SUBAGENT_STOP));
+                        }
                     }
                     // Keep an active thread until completion acknowledges the stop; its peers keep running.
                     SessionCommand::Close => {
                         pending.retain(|k| *k != key);
+                        // A subagent can outlive its reply; closing the conversation stops it either way.
+                        for (thread, turn) in subagents.at_work(key) {
+                            request!("turn/interrupt", json!({ "threadId": thread, "turnId": turn }), Waiting::Other(key, SUBAGENT_STOP));
+                        }
                         if let Some(t) = threads.get_mut(&key) {
                             for job in t.commands.drain(..) { job.abort(); }
                             if t.watch.active() || t.turn.is_some() {
@@ -1233,6 +1458,7 @@ async fn serve(
                                     }
                                 }
                             } else if let Some(t) = threads.remove(&key) && let Some(id) = t.id {
+                                subagents.forget(key);
                                 by_id.remove(&id);
                             }
                         }

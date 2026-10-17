@@ -953,6 +953,7 @@ export const de: Messages = {
   'notes.18.better': 'Jeder Arbeitsschritt sagt jetzt in einfachen Worten, was er tut, etwa Liest, Durchsucht oder Ändert, mit der Datei oder dem Befehl, um die es geht.',
   'notes.19.new': 'In einem Projekt kann der Assistent die andere KI um Hilfe bei einem Teil der Arbeit oder einer Prüfung bitten, und der Helfer erscheint als Schritt in seiner Antwort.',
   'notes.20.fixed': 'Auf dem Mac aktualisiert sich Faber jetzt selbst wie unter Windows und Linux, und Vorabversionen erreichen alle, die sie eingeschaltet haben.',
+  'notes.next.new': 'Wenn Codex einen Teil der Arbeit an einen Subagenten gibt, erscheint er als Schritt in der Antwort, und seine Freigaben erreichen dich.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

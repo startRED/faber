@@ -820,6 +820,7 @@ export const en = {
   'notes.18.better': 'Every step of the work now says what it does in plain words, such as Reading, Searching or Changing, with the file or command it acts on.',
   'notes.19.new': 'In a project, the assistant can ask the other AI for help with a piece of work or a review, and the helper shows as a step in its reply.',
   'notes.20.fixed': 'On a Mac, Faber now updates itself like it does on Windows and Linux, and previews reach everyone who turned them on.',
+  'notes.next.new': 'When Codex hands part of the work to a subagent, the subagent shows as a step in its reply, and its approvals reach you.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',
