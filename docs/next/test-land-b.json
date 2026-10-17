@@ -1,0 +1,4 @@
+{
+  "notes": { "fixed": { "en": "Test B: a crash is gone.", "pt-BR": "Teste b.", "es": "Prueba b.", "fr": "Essai b.", "de": "Test b." } },
+  "decisions": ["| R-next | 2026-10-17 | Test decision b, never merged. | AI |"]
+}
