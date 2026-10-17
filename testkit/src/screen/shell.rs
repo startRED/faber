@@ -979,14 +979,16 @@ fn subagent_step(ctx: &mut Ctx) -> Result {
     let actions = page.named("article", "answer.label")?.css(".actions");
     page.wait_visible(&actions)?;
     // The step names the piece of work (waited for: the reply may still be settling in).
-    page.wait_visible(&step.clone().css("summary b").has_text("Find file defining load_config"))?;
+    page.wait_visible(&step.clone().css("b").has_text("Find file defining load_config"))?;
     ensure(!page.inner_text(&css("article.ai > .md"))?.contains("search recursively"), || "the subagent's brief joined the answer".into())?;
-    page.click(&step.clone().css("summary"))?;
-    page.wait_visible(&step.clone().css(".agent-report"))?;
-    ensure(!page.inner_text(&step)?.contains("Subagent hand-back"), || "the report kept its frame".into())?;
-    // The disclosure finishes opening before the picture.
+    // A click opens it in the running column (R161 step 3), with its report and without the CLI's frame.
+    page.click(&step)?;
+    let side = css("#running .side-body");
+    page.wait_visible(&side.clone().css(".agent-report"))?;
+    ensure(!page.inner_text(&side)?.contains("Subagent hand-back"), || "the report kept its frame".into())?;
+    // The column finishes arriving before the picture.
     pause(0.6);
-    // Opened, the step keeps inside the answer's column even with a long tool line in it.
+    // The step keeps inside the answer's column even with a long tool line in it.
     let spill = page.eval("(() => { const a = document.querySelector('article.ai').getBoundingClientRect(); const s = document.querySelector('.agents .agent'); return Math.max(s.getBoundingClientRect().right - a.right, s.scrollWidth - s.clientWidth); })()")?;
     ensure(spill.as_f64().is_some_and(|px| px <= 1.0), || format!("the opened step spills out of the column by {spill} px"))?;
     ctx.shot(&mut app, "subagent-step")

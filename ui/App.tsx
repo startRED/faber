@@ -263,7 +263,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   });
   createEffect(on(openedAgent, (open) => {
     if (!open) return;
-    if (current()?.id !== open.conversationId) return showAgent(undefined);
+    // One of another conversation is never shown (`sideAgent`); it goes when the conversation on screen changes.
+    if (current()?.id !== open.conversationId) return;
     if (!columnOpen()) return openColumn(true);
     // A column that opened by itself becomes the person's: over the stage it is now a modal dialog, like one they opened.
     if (!byUser()) {
