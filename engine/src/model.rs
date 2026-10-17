@@ -360,6 +360,10 @@ pub struct Conversation {
     pub allow_always_epochs: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch_of: Option<BranchOf>,
+    /// The conversation whose agent started this one with Faber's conversation tool (`crate::sibling`). Such a conversation
+    /// cannot start conversations of its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_by: Option<String>,
     /// What the user asked to be called when this conversation started. Kept here so the CLI gets the same instructions every
     /// time the conversation resumes, whatever Settings says by then; a conversation saved before this field has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]

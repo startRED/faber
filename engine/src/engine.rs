@@ -39,6 +39,7 @@ mod project_budget;
 mod project_sessions;
 mod quota_watch;
 mod recovery;
+mod siblings;
 mod stuck_watch;
 mod usage_view;
 pub use usage_view::{VendorUsage, WindowUsage};
@@ -1512,6 +1513,7 @@ impl Core {
             }
             EngineEvent::HelperCall { id, input } => return self.start_helper(conv, id, input),
             EngineEvent::BrowseCall { id, input } => return self.browse(conv, id, input),
+            EngineEvent::ConversationCall { id, input } => return self.conversation_call(conv, id, input),
             EngineEvent::Permission { request_id, tool, input } => {
                 // A request that touches a credential folder is refused in both modes, with no card (best effort for a command
                 // line: see `touches_credentials`). Full access never shows a card. The answer is decided here, under the lock
@@ -2308,6 +2310,7 @@ impl Core {
         let (model, effort) = (pick.model.clone(), Some(pick.effort.clone()));
         let helper = self.offers_helper(area, pick.vendor);
         let browse = self.offers_browser(area, permissions);
+        let conversations = siblings::offers(area, c.started_by.is_some());
         let session = match pick.vendor {
             Vendor::Claude => start_claude(
                 ClaudeOptions {
@@ -2316,6 +2319,7 @@ impl Core {
                     launch: ClaudeLaunch {
                         helper,
                         browse,
+                        conversations,
                         area,
                         model,
                         effort,
@@ -2332,9 +2336,22 @@ impl Core {
                 },
                 sink,
             ),
-            Vendor::Codex => self
-                .codex_server(area, user_hooks, permissions, &cli)
-                .open(CodexThread { helper, browse, cwd, model, effort, resume, instructions: None, user_name, permissions, tuning }, sink),
+            Vendor::Codex => self.codex_server(area, user_hooks, permissions, &cli).open(
+                CodexThread {
+                    helper,
+                    browse,
+                    conversations,
+                    cwd,
+                    model,
+                    effort,
+                    resume,
+                    instructions: None,
+                    user_name,
+                    permissions,
+                    tuning,
+                },
+                sink,
+            ),
         };
         self.live.insert(
             conv.to_string(),
@@ -2400,6 +2417,7 @@ impl Core {
             allow_always: None,
             allow_always_epochs: BTreeMap::new(),
             branch_of: None,
+            started_by: None,
             user_name: self.store.settings().user_name.and_then(|name| clean_name(&name)),
             persona_version: Some(crate::persona::VERSION),
             created_at: at,

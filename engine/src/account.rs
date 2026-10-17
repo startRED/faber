@@ -205,6 +205,7 @@ pub(crate) async fn claude_limits(cli: &Cli, spawn: &Spawner, cwd: &Path, timeou
     let launch = ClaudeLaunch {
         helper: Default::default(),
         browse: false,
+        conversations: false,
         area: Area::Project,
         model: Some("claude-haiku-5-5".into()),
         effort: Some("low".into()),

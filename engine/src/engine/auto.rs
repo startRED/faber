@@ -287,6 +287,7 @@ impl Core {
                 CodexThread {
                     helper: Default::default(),
                     browse: false,
+                    conversations: false,
                     cwd,
                     model,
                     effort,
@@ -305,6 +306,7 @@ impl Core {
                     launch: ClaudeLaunch {
                         helper: Default::default(),
                         browse: false,
+                        conversations: false,
                         area: Area::Chat,
                         model,
                         effort,

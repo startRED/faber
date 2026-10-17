@@ -1728,6 +1728,7 @@ async fn stop_leaves_no_worker(parent_script: &str, why: &str) {
             launch: ClaudeLaunch {
                 helper: Default::default(),
                 browse: false,
+                conversations: false,
                 area: Area::Project,
                 model: None,
                 effort: None,
@@ -2283,6 +2284,109 @@ async fn r161_a_running_helper_counts_on_its_quota_and_stops_when_its_vendor_wou
     let result = &answer.expect("the agent is answered")["response"]["response"]["mcp_response"]["result"];
     assert_eq!(result["isError"], true);
     assert!(result["content"][0]["text"].as_str().unwrap().contains("billed beyond its subscription"), "{result}");
+    engine.shutdown();
+}
+
+/// The answer Faber wrote to a driven Claude Code for one control request, once it is there.
+async fn mcp_answer(pipe: &support::Pipe, request: &str) -> serde_json::Value {
+    for _ in 0..300 {
+        if let Some(m) = pipe.lines.lock().unwrap().iter().find(|m| m["response"]["request_id"] == request) {
+            return m["response"]["response"]["mcp_response"].clone();
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("{request} was never answered");
+}
+
+/// Self-development: a project's agent starts a conversation of its own for a separate piece of work. The call answers at
+/// once with the new id, the new conversation runs the brief beside it in the same project, a read says where it stands,
+/// and a conversation an agent started cannot start more.
+#[tokio::test]
+async fn the_agent_starts_a_conversation_of_its_own_and_reads_where_it_stands() {
+    let dir = tempfile::tempdir().unwrap();
+    let (spawn, made) = pipes();
+    let engine = two_vendors(dir.path(), spawn);
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    let parent = engine
+        .send(SendRequest { project_id: Some(project.id.clone()), ..ask(Area::Project, "split it", choice("claude", Some("haiku"))) })
+        .unwrap();
+    let mut agent = next_pipe(&made).await;
+    agent.say(json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-haiku-5-5"})).await;
+    let list = |id: u64| json!({"type":"control_request","request_id":format!("l{id}"),"request":{"subtype":"mcp_message","server_name":"faber","message":{"jsonrpc":"2.0","id":id,"method":"tools/list"}}});
+    let names = |answer: &serde_json::Value| {
+        answer["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect::<Vec<_>>()
+    };
+    agent.say(list(1)).await;
+    assert!(names(&mcp_answer(&agent, "l1").await).contains(&"conversation".to_string()), "a project's own agent gets the tool");
+
+    let input = json!({"title":"Docs","brief":"Write the docs page for the parser."});
+    agent.say(json!({"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"tool_use","id":"toolu_c","name":"mcp__faber__conversation","input":input}]}})).await;
+    let call = |rpc: u64, tool: &str, args: &serde_json::Value| {
+        json!({"type":"control_request","request_id":format!("r{rpc}"),"request":{"subtype":"mcp_message","server_name":"faber",
+        "message":{"jsonrpc":"2.0","id":rpc,"method":"tools/call","params":{"name":"conversation","arguments":args,"_meta":{"claudecode/toolUseId":tool}}}}})
+    };
+    agent.say(call(2, "toolu_c", &input)).await;
+    let started = mcp_answer(&agent, "r2").await;
+    let text = started["result"]["content"][0]["text"].as_str().unwrap().to_string();
+    assert_eq!(started["result"]["isError"], false, "{text}");
+    let child = engine.state().conversations.into_iter().find(|c| c.title == "Docs").expect("the new conversation is listed");
+    assert!(child.id != parent && child.project_id.as_deref() == Some(project.id.as_str()) && text.contains(&child.id), "{text}");
+
+    // The new conversation is its own process, sent the agent's brief.
+    let mut sibling = next_pipe(&made).await;
+    for _ in 0..300 {
+        if sibling.lines.lock().unwrap().iter().any(|m| m["type"] == "user") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let first = sibling.lines.lock().unwrap().iter().find(|m| m["type"] == "user").cloned().expect("the brief is sent");
+    assert!(first.to_string().contains("Write the docs page for the parser."), "{first}");
+    sibling.say(list(1)).await;
+    assert!(!names(&mcp_answer(&sibling, "l1").await).contains(&"conversation".to_string()), "one level only");
+
+    agent.say(call(3, "toolu_r", &json!({"id": child.id}))).await;
+    let read = mcp_answer(&agent, "r3").await;
+    assert_eq!(read["result"]["content"][0]["text"], "The conversation \"Docs\" is still working.");
+    agent.say(call(4, "toolu_x", &json!({"id": parent}))).await;
+    assert_eq!(mcp_answer(&agent, "r4").await["result"]["isError"], true, "only a conversation started here is read");
+
+    // Three at once per project, counted from their first message, before their CLI answers anything.
+    for rpc in [5, 6] {
+        agent.say(call(rpc, &format!("toolu_{rpc}"), &json!({"title":format!("Part {rpc}"),"brief":"Do a part."}))).await;
+        assert_eq!(mcp_answer(&agent, &format!("r{rpc}")).await["result"]["isError"], false);
+    }
+    agent.say(call(7, "toolu_7", &json!({"title":"Part 7","brief":"Do a part."}))).await;
+    let refused = mcp_answer(&agent, "r7").await;
+    assert!(refused["result"]["content"][0]["text"].as_str().unwrap().contains("three conversations"), "{refused}");
+    assert!(engine.state().conversations.iter().all(|c| c.title != "Part 7"), "a refused start leaves nothing behind");
+    engine.shutdown();
+}
+
+/// A conversation an agent started is never the person's own turn, even on a model picked by hand: once its AI turns out
+/// billed per use, it stops like a helper, while the person's own conversation on the same model goes on.
+#[tokio::test]
+async fn a_conversation_the_agent_started_stops_when_its_ai_turns_out_billed_per_use() {
+    let dir = tempfile::tempdir().unwrap();
+    let (spawn, made) = pipes();
+    let engine = two_vendors(dir.path(), spawn);
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    let parent = engine
+        .send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, "split it", choice("claude", Some("haiku"))) })
+        .unwrap();
+    let mut agent = next_pipe(&made).await;
+    agent.say(json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-haiku-5-5"})).await;
+    let input = json!({"title":"Docs","brief":"Write the docs."});
+    agent.say(json!({"type":"control_request","request_id":"r1","request":{"subtype":"mcp_message","server_name":"faber",
+        "message":{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"conversation","arguments":input,"_meta":{"claudecode/toolUseId":"toolu_c"}}}}})).await;
+    assert_eq!(mcp_answer(&agent, "r1").await["result"]["isError"], false);
+    let _sibling = next_pipe(&made).await;
+    let child = engine.state().conversations.into_iter().find(|c| c.title == "Docs").unwrap().id;
+    let billed = faber_engine::signals::Signals { billing: Some(faber_engine::budget::Billing::UsageBilled), ..Default::default() };
+    engine.note_account_events(Vendor::Claude, vec![faber_engine::events::EngineEvent::Signals(billed)]);
+    let last = |id: &str| engine.open(id).and_then(|c| c.messages.last().and_then(|m| m.status));
+    assert_eq!(last(&child), Some(Status::Stopped), "the started conversation stops");
+    assert_eq!(last(&parent), Some(Status::Streaming), "the person's own conversation goes on");
     engine.shutdown();
 }
 

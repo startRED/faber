@@ -14,6 +14,9 @@ check('worklog: every Claude Code tool reads as what it does, in words', () => {
   // A helper started by a helper shows as a step inside the first one's row (R161), named by the words it was given.
   deepEqual(toolRow({ id: '5', name: 'Agent', input: { description: 'reader-a', prompt: 'Read a.txt' }, parent: 'x' }), { label: t('tool.agent'), detail: 'reader-a' });
   equal(toolRow({ id: '6', name: 'SomeNewTool', input: {} }).label, 'SomeNewTool', 'a tool Faber does not know keeps its name');
+  // A conversation the agent starts by itself reads as its title, and one it reads back as its id.
+  deepEqual(toolRow({ id: '7', name: 'Conversation', input: { title: 'Docs', brief: 'Write the page.' } }), { label: t('tool.conversation'), detail: 'Docs' });
+  equal(toolRow({ id: '8', name: 'Conversation', input: { id: 'c1' } }).detail, 'c1');
 });
 
 // R161 step 9: while a reply runs, the checks it ran tick up under the status line, marked by the engine, never guessed here.

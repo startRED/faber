@@ -12,6 +12,7 @@ fn launch(area: Area) -> ClaudeLaunch {
     ClaudeLaunch {
         helper: Default::default(),
         browse: false,
+        conversations: false,
         area,
         model: None,
         effort: None,

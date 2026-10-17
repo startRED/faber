@@ -131,6 +131,7 @@ impl Probe {
         let launch = ClaudeLaunch {
             helper: Default::default(),
             browse: false,
+            conversations: false,
             area: Area::Chat,
             model: Some(CLAUDE_MODEL.into()),
             effort: Some(effort.into()),
@@ -157,6 +158,7 @@ impl Probe {
         let launch = ClaudeLaunch {
             helper: Default::default(),
             browse: false,
+            conversations: false,
             area: Area::Chat,
             model: Some("claude-haiku-5-5".into()),
             effort: Some("low".into()),
@@ -194,6 +196,7 @@ impl Probe {
         let thread = CodexThread {
             helper: Default::default(),
             browse: false,
+            conversations: false,
             cwd: self.dir.clone(),
             model: Some(CODEX_MODEL.into()),
             effort: Some(effort.into()),

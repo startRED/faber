@@ -71,6 +71,12 @@ pub enum EngineEvent {
         id: String,
         input: Value,
     },
+    /// The agent called Faber's conversation tool (`crate::sibling`): it starts a conversation or reads one it started. The
+    /// engine answers at once with `Session::helper_reply`.
+    ConversationCall {
+        id: String,
+        input: Value,
+    },
     /// The agent called Faber's helper tool (R161, `crate::helper`): `id` is that tool call. The CLI waits for the answer,
     /// which the engine sends with `Session::helper_reply` once the helper is done.
     HelperCall {

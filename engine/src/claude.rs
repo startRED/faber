@@ -35,11 +35,17 @@ pub struct ClaudeLaunch {
     pub helper: crate::helper::Helper,
     /// Faber's own browser (R161 step 7): offered to a project's own agent in full access, where the shell has one.
     pub browse: bool,
+    /// Faber's conversation tool (`crate::sibling`): a project's own agent that no other agent started.
+    pub conversations: bool,
 }
 
 /// The tools Faber's MCP server holds for a launch: the helper for a project's own agent, the browser where it is offered.
 fn mcp_tools(launch: &ClaudeLaunch) -> crate::helper::Tools {
-    crate::helper::Tools { helper: launch.helper == crate::helper::Helper::Offers, browse: launch.browse }
+    crate::helper::Tools {
+        helper: launch.helper == crate::helper::Helper::Offers,
+        browse: launch.browse,
+        conversation: launch.conversations,
+    }
 }
 
 /// Flags that only newer CLIs take, read once from `claude --help` (`from_help`). A flag the CLI does not list is never
@@ -367,6 +373,7 @@ pub(crate) fn project_launch_policy(roles: &[crate::project::Role]) -> Value {
     let launch = ClaudeLaunch {
         helper: Default::default(),
         browse: false,
+        conversations: false,
         area: Area::Project,
         model: Some("claude-haiku-5-5".into()),
         effort: Some("medium".into()),
@@ -444,6 +451,7 @@ pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
                     let name = match c["name"].as_str() {
                         Some(crate::helper::CLAUDE_NAME) => crate::helper::TOOL.to_string(),
                         Some(crate::browser::CLAUDE_NAME) => crate::browser::TOOL.to_string(),
+                        Some(crate::sibling::CLAUDE_NAME) => crate::sibling::TOOL.to_string(),
                         _ => s(&c["name"]),
                     };
                     EngineEvent::Tool { id: s(&c["id"]), name, input: c["input"].clone(), parent: parent.clone() }
@@ -673,7 +681,11 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                                         // Both answers come back as a `HelperReply` for the call's id.
                                         helpers.insert(id.clone(), (s(&msg["request_id"]), rpc));
                                         watch.pause();
-                                        on_event(if tool == crate::browser::NAME { EngineEvent::BrowseCall { id, input } } else { EngineEvent::HelperCall { id, input } });
+                                        on_event(match tool {
+                                            crate::browser::NAME => EngineEvent::BrowseCall { id, input },
+                                            crate::sibling::NAME => EngineEvent::ConversationCall { id, input },
+                                            _ => EngineEvent::HelperCall { id, input },
+                                        });
                                     }
                                 }
                                 continue;
@@ -699,6 +711,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                                     // browser is offered only in full access, which asks nothing, and the engine checks every address.
                                     if (tool == crate::helper::CLAUDE_NAME && opts.launch.helper == crate::helper::Helper::Offers)
                                         || (tool == crate::browser::CLAUDE_NAME && opts.launch.browse)
+                                        || (tool == crate::sibling::CLAUDE_NAME && opts.launch.conversations)
                                     {
                                         let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id,
                                             "response": { "behavior": "allow", "updatedInput": input } } });
@@ -938,6 +951,7 @@ mod role_tests {
             launch: ClaudeLaunch {
                 helper: Default::default(),
                 browse: false,
+                conversations: false,
                 area: Area::Project,
                 model: None,
                 effort: None,

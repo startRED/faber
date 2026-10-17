@@ -7,6 +7,7 @@ fn launch(area: Area, permissions: Permissions) -> ClaudeLaunch {
     ClaudeLaunch {
         helper: Default::default(),
         browse: false,
+        conversations: false,
         area,
         permissions,
         model: None,
@@ -49,6 +50,7 @@ fn review3_codex_credential_denies_survive_in_both_areas_and_on_resume() {
                 &CodexThread {
                     helper: Default::default(),
                     browse: false,
+                    conversations: false,
                     cwd: "project".into(),
                     model: None,
                     effort: None,
@@ -105,6 +107,7 @@ fn review3_codex_shells_use_the_shared_git_gate_instead_of_native_execution() {
             &CodexThread {
                 helper: Default::default(),
                 browse: false,
+                conversations: false,
                 cwd: ".".into(),
                 model: None,
                 effort: None,
@@ -221,6 +224,7 @@ fn c1_h4_codex_network_is_off_on_start_and_resume_even_if_user_settings_enable_i
         let t = CodexThread {
             helper: Default::default(),
             browse: false,
+            conversations: false,
             cwd: "project".into(),
             model: None,
             effort: None,
@@ -283,6 +287,7 @@ fn review2_h2_codex_selects_a_restricted_read_profile_on_start_and_resume() {
         let t = CodexThread {
             helper: Default::default(),
             browse: false,
+            conversations: false,
             cwd: "project".into(),
             model: None,
             effort: None,
@@ -332,6 +337,7 @@ fn m6_sandbox_failures_are_intended_and_writable_roots_must_not_expand_into_user
     let t = CodexThread {
         helper: Default::default(),
         browse: false,
+        conversations: false,
         cwd: "project".into(),
         model: None,
         effort: None,
@@ -367,6 +373,7 @@ fn r107_internal_questions_restrict_reads_and_never_grant_workspace_writes() {
                 &CodexThread {
                     helper: Default::default(),
                     browse: false,
+                    conversations: false,
                     cwd: "private-question".into(),
                     model: None,
                     effort: None,

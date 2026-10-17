@@ -56,7 +56,7 @@ pub fn codex_tool() -> Value {
 pub enum Mcp {
     /// The answer goes back at once (`mcp_response`).
     Answer(Value),
-    /// A call of one of its tools (`NAME` or `crate::browser::NAME`): the answer waits for the work. `id` is the tool
+    /// A call of one of its tools (`NAME`, `crate::browser::NAME` or `crate::sibling::NAME`): the answer waits for the work. `id` is the tool
     /// call's own id, which names the call on screen.
     Call { tool: &'static str, id: String, rpc: Value, input: Value },
 }
@@ -66,11 +66,13 @@ pub enum Mcp {
 pub struct Tools {
     pub helper: bool,
     pub browse: bool,
+    /// Conversations the agent starts by itself (`crate::sibling`).
+    pub conversation: bool,
 }
 
 impl Tools {
     pub fn any(self) -> bool {
-        self.helper || self.browse
+        self.helper || self.browse || self.conversation
     }
 }
 
@@ -93,6 +95,9 @@ pub fn mcp(message: &Value, tools: Tools) -> Mcp {
             if tools.browse {
                 list.push(crate::browser::mcp_tool());
             }
+            if tools.conversation {
+                list.push(crate::sibling::mcp_tool());
+            }
             answer(json!({ "tools": list }))
         }
         "tools/call" if let Some(tool) = called(&message["params"]["name"], tools) => {
@@ -113,6 +118,7 @@ fn called(name: &Value, tools: Tools) -> Option<&'static str> {
     match name.as_str()? {
         NAME if tools.helper => Some(NAME),
         crate::browser::NAME if tools.browse => Some(crate::browser::NAME),
+        crate::sibling::NAME if tools.conversation => Some(crate::sibling::NAME),
         _ => None,
     }
 }
@@ -203,7 +209,7 @@ mod tests {
 
     #[test]
     fn the_mcp_server_lists_one_tool_and_hands_its_call_on_with_the_tool_call_id() {
-        let mcp = |m: &Value| mcp(m, Tools { helper: true, browse: false });
+        let mcp = |m: &Value| mcp(m, Tools { helper: true, browse: false, conversation: false });
         let init = json!({"method":"initialize","params":{"protocolVersion":"2025-11-25"},"jsonrpc":"2.0","id":0});
         let Mcp::Answer(a) = mcp(&init) else { panic!() };
         assert_eq!((a["id"].clone(), a["result"]["protocolVersion"].clone()), (json!(0), json!("2025-11-25")));
@@ -232,15 +238,17 @@ mod tests {
             }
             Mcp::Call { .. } => panic!(),
         };
-        assert_eq!(list(Tools { helper: true, browse: true }), ["helper", "browse"]);
-        assert_eq!(list(Tools { helper: false, browse: true }), ["browse"]);
+        assert_eq!(list(Tools { helper: true, browse: true, conversation: false }), ["helper", "browse"]);
+        assert_eq!(list(Tools { helper: false, browse: true, conversation: false }), ["browse"]);
         let call = json!({"method":"tools/call","params":{"name":"browse","arguments":{"url":"https://a.org"},
             "_meta":{"claudecode/toolUseId":"toolu_2"}},"jsonrpc":"2.0","id":4});
         assert_eq!(
-            mcp(&call, Tools { helper: false, browse: true }),
+            mcp(&call, Tools { helper: false, browse: true, conversation: false }),
             Mcp::Call { tool: crate::browser::NAME, id: "toolu_2".into(), rpc: json!(4), input: json!({"url":"https://a.org"}) }
         );
-        let Mcp::Answer(refused) = mcp(&call, Tools { helper: true, browse: false }) else { panic!("a tool not offered is never called") };
+        let Mcp::Answer(refused) = mcp(&call, Tools { helper: true, browse: false, conversation: false }) else {
+            panic!("a tool not offered is never called")
+        };
         assert_eq!(refused["error"]["code"], -32601);
     }
 

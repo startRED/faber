@@ -131,6 +131,7 @@ pub async fn run(data: &std::path::Path) -> io::Result<()> {
         &crate::claude::ClaudeLaunch {
             helper: Default::default(),
             browse: false,
+            conversations: false,
             area: Area::Project,
             model: Some("claude-haiku-5-5".into()),
             effort: Some("low".into()),

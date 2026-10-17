@@ -45,6 +45,7 @@ const KINDS: Record<string, Key> = {
   WebSearch: 'tool.webSearch',
   WebFetch: 'tool.webFetch',
   Browser: 'tool.browse',
+  Conversation: 'tool.conversation',
   Agent: 'tool.agent',
   Task: 'tool.agent',
   TodoWrite: 'tool.plan',
@@ -69,7 +70,9 @@ function detailOf(input: unknown): string {
 }
 
 export function toolRow(tool: ToolUse): ToolRow {
-  const named = SUBAGENT.has(tool.name) && (tool.input as { description?: unknown } | undefined)?.description;
+  const input = tool.input as { description?: unknown; title?: unknown; id?: unknown } | undefined;
+  // A conversation the agent starts reads as its title; one it reads back, as its id.
+  const named = SUBAGENT.has(tool.name) ? input?.description : tool.name === 'Conversation' ? (input?.title ?? input?.id) : undefined;
   const raw = typeof named === 'string' ? named : detailOf(tool.input);
   const camel = /^[a-z]+[A-Z]/.test(tool.name);
   // An MCP tool (`mcp__server__tool`) reads as using a tool, with the server's name when the call names nothing else.

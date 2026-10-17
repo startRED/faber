@@ -246,6 +246,7 @@ fn launch(resume: Option<&str>) -> ClaudeLaunch {
     ClaudeLaunch {
         helper: Default::default(),
         browse: false,
+        conversations: false,
         area: Area::Project,
         model: Some("claude-sonnet-4-6".into()),
         effort: Some("high".into()),
@@ -269,6 +270,7 @@ fn thread(resume: Option<&str>) -> CodexThread {
     CodexThread {
         helper: Default::default(),
         browse: false,
+        conversations: false,
         cwd: ".".into(),
         model: Some("gpt-6".into()),
         effort: Some("high".into()),

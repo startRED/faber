@@ -92,6 +92,12 @@ Equilibrado adds only own-branch push and draft PR. Parallel writers need disjoi
 Catalog, the remaining powers, Livre, and public release automation are deferred.
 The local development instance never touches the installed release in E:\Apps\Faber (R95).
 
+Since R160 the person reaches this through the project conversation, not a mission screen: Faber builds Faber the way
+the sessions that build it work. The project's agent starts conversations of its own for separate pieces (R198,
+"Conversation started by the agent" in the product map), each conversation can work in its own copy of the folder, a
+conversation can keep going while the person is away, and a red check on its pull request wakes it. A landed change
+reaches the installed app through the public updater (R156).
+
 Approved, not built (R190): the serial proof queue, `cargo t`'s plan and R146's "Faber decides done" become one
 verifier in the engine. It checks each change in seconds on the PC with no extra process while idle, posts the result
 to GitHub so CI only confirms, and later serves every project
