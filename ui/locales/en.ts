@@ -514,6 +514,8 @@ export const en = {
   "usage.pill.low": "Low",
   "usage.pill.out": "Out",
   "usage.pill.unknown": "Unknown",
+  "usage.pill.billed": "Billed per use",
+  "usage.pill.unconfirmed": "Not confirmed",
   "usage.learning": "Still learning your account usage pattern",
   "usage.relearning": "Learning again after a plan change",
   "usage.outside": "Use outside Faber: at least {share} of observed account movement.",

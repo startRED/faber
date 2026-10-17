@@ -519,6 +519,8 @@ export const es: Messages = {
   "usage.pill.low": "Baja",
   "usage.pill.out": "Agotada",
   "usage.pill.unknown": "Desconocida",
+  "usage.pill.billed": "Cobro por uso",
+  "usage.pill.unconfirmed": "Sin confirmar",
   "usage.learning": "Aprendiendo el patrón de uso de tu cuenta",
   "usage.relearning": "Aprendiendo de nuevo tras el cambio de plan",
   "usage.outside": "Uso fuera de Faber: al menos {share} del movimiento observado en la cuenta.",

@@ -68,8 +68,11 @@ function Card(props: { vendor: Vendor; check: CheckResult | 'failed' | undefined
   const line = () => accountLine(props.check);
   const u = () => props.usage?.find((x) => x.vendor === v());
   const rows = () => usageRows(props.quotas, v(), props.now);
-  const word = () => (line() === 'connected' && u() ? t(`usage.pill.${u()!.state}`) : t(WORDS[line()]));
-  const warn = () => line() === 'connected' && !!u() && WARN.has(u()!.state);
+  // A sign-in billed per use, or one the CLI has not confirmed, is refused by Auto and reads "out" in the engine, but it has no
+  // quota to run out of: say what it is, calmly (C002).
+  const billing = () => (u()?.billedPerUse ? 'billed' : u()?.billingUnknown ? 'unconfirmed' : undefined);
+  const word = () => (line() === 'connected' && u() ? t(`usage.pill.${billing() ?? u()!.state}`) : t(WORDS[line()]));
+  const warn = () => line() === 'connected' && !!u() && !billing() && WARN.has(u()!.state);
   return (
     <section class="st-card acct" data-vendor={v()} data-state={line()} aria-labelledby={`acct-${v()}-name`}>
       <header class="acct-head">
@@ -78,7 +81,7 @@ function Card(props: { vendor: Vendor; check: CheckResult | 'failed' | undefined
           {vendorName(v())}
         </h3>
         <Show when={props.shown && u()}>{(x) => <span class="acct-plan">{x().plan ? t('usage.plan', { plan: planName(x().plan!) }) : t('usage.planUnknown')}</span>}</Show>
-        <span class="acct-pill" classList={{ on: line() === 'connected', warn: warn() }} title={u() && line() === 'connected' ? t(`usage.state.${u()!.state}`) : undefined}>
+        <span class="acct-pill" classList={{ on: line() === 'connected', warn: warn() }} title={u() && line() === 'connected' ? (billing() ? t(billing() === 'billed' ? 'usage.billedPerUse' : 'usage.authNeeded') : t(`usage.state.${u()!.state}`)) : undefined}>
           {word()}
         </span>
       </header>
@@ -94,10 +97,18 @@ function Card(props: { vendor: Vendor; check: CheckResult | 'failed' | undefined
               <For each={rows()}>
                 {(row) => {
                   const w = () => x().windows.find((win) => win.name === row.window);
+                  // A share that may still rise reads "at least" (C010); the long explanation stays in Details.
+                  const fresh = () => freshness(props.usage, v(), row.window);
+                  const open = () => fresh().counting || !!fresh().uncountedPoints;
                   return (
                     <div class="urow">
                       <span class="uname">{row.window ? t('quota.window', { window: windowName(row.window) }) : t('usage.noReading')}</span>
-                      <span class="share num">{row.used === undefined ? t('quota.unknown') : percent(row.used)}</span>
+                      <span class="share num">
+                        {row.used === undefined ? t('quota.unknown') : open() ? t('quota.atLeast', { share: percent(row.used) }) : percent(row.used)}
+                        <Show when={row.used !== undefined && fresh().counting}>
+                          <span class="sr-only"> {t('quota.counting')}</span>
+                        </Show>
+                      </span>
                       <span class="meter" aria-hidden="true">
                         <Show when={w()}>{(win) => <b class="expected" style={{ left: `${Math.round(win().expected * 100)}%` }} />}</Show>
                         <i style={{ width: `${Math.round(Math.min(1, Math.max(0, row.used ?? 0)) * 100)}%` }} />

@@ -519,6 +519,8 @@ export const de: Messages = {
   "usage.pill.low": "Knapp",
   "usage.pill.out": "Leer",
   "usage.pill.unknown": "Unbekannt",
+  "usage.pill.billed": "Nach Verbrauch",
+  "usage.pill.unconfirmed": "Nicht bestätigt",
   "usage.learning": "Das Nutzungsmuster des Kontos wird noch gelernt",
   "usage.relearning": "Nach dem Tarifwechsel wird neu gelernt",
   "usage.outside": "Nutzung außerhalb von Faber: mindestens {share} der beobachteten Kontobewegung.",

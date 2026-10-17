@@ -519,6 +519,8 @@ export const fr: Messages = {
   "usage.pill.low": "Faible",
   "usage.pill.out": "Épuisé",
   "usage.pill.unknown": "Inconnu",
+  "usage.pill.billed": "À l’usage",
+  "usage.pill.unconfirmed": "Non confirmé",
   "usage.learning": "Apprentissage du rythme d’utilisation de votre compte",
   "usage.relearning": "Nouvel apprentissage après un changement de forfait",
   "usage.outside": "Utilisation hors Faber : au moins {share} du mouvement observé sur le compte.",

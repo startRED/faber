@@ -516,6 +516,8 @@ export const ptBR: Messages = {
   "usage.pill.low": "Baixa",
   "usage.pill.out": "Esgotada",
   "usage.pill.unknown": "Desconhecida",
+  "usage.pill.billed": "Cobrada por uso",
+  "usage.pill.unconfirmed": "Não confirmada",
   "usage.learning": "Ainda aprendendo seu padrão de uso da conta",
   "usage.relearning": "Aprendendo novamente após a mudança de plano",
   "usage.outside": "Uso fora do Faber: pelo menos {share} da variação observada na conta.",

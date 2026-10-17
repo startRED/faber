@@ -718,3 +718,58 @@ check('settings: one card per AI with a capitalised plan, one status word, the r
     ok(en['set.openSetup'] === 'Manage accounts' && en['empty.noAiButton'] === 'Manage accounts', 'one label opens the account cards everywhere');
   } finally { view.stop(); }
 }));
+
+check('settings: a window still counting, or with an uncounted share, reads at least beside its number, not only inside Details (C010)', () => signedIn(async () => {
+  useLanguage('en');
+  const until = Math.floor(Date.now() / 1000) + 7 * 3600;
+  const usage = (counting: boolean, uncounted: number | null) => [{ vendor: 'claude', plan: 'max', state: 'ok', learning: false, relearning: false, foreignUse: false, overageOn: false,
+    billedPerUse: false, billingUnknown: false, askForPlan: false, paidPossible: false, ownSpendUsd: 0, unmetered: 0, counting,
+    windows: [{ name: 'seven_day', used: 0.44, elapsed: 0.5, expected: 0.5, resetsAt: until, readAt: Date.now(), uncounted }] }] as unknown as VendorUsage[];
+  const share = async (u: VendorUsage[]) => {
+    const view = mount(() => createComponent(Settings, {
+      look: look(), saved: {}, vendors: ['claude'], start: 'accounts', now: Date.now(), usage: u,
+      quotas: { 'claude:seven_day': { vendor: 'claude', window: 'seven_day', used: 0.44, resetsAt: until } },
+      onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+    }));
+    try {
+      await tick();
+      await tick();
+      const cell = view.host.querySelector<HTMLElement>('.acct[data-vendor="claude"] .urow .share')!;
+      ok(cell.scrollWidth <= cell.clientWidth + 1, `the share fits its cell (${cell.scrollWidth} > ${cell.clientWidth})`);
+      return cell.textContent!.trim();
+    } finally { view.stop(); }
+  };
+  const counting = await share(usage(true, null));
+  ok(counting.startsWith('≥ 44%'), `"${counting}" does not read at least 44%`);
+  ok(counting.includes(en['quota.counting']), 'screen readers still hear that it is counting');
+  const extra = await share(usage(false, 0.12));
+  ok(extra.startsWith('≥ 44%') && !extra.includes(en['quota.counting']), `an uncounted share alone reads at least: "${extra}"`);
+  const calm = await share(usage(false, null));
+  equal(calm, '44%', 'a settled reading shows the number alone');
+}));
+
+check('settings: a billed-per-use or unconfirmed account says so calmly and is never amber; a really low one stays amber (C002)', () => signedIn(async () => {
+  useLanguage('en');
+  const card = async (flags: Record<string, boolean>, state: string) => {
+    const usage = [{ vendor: 'claude', plan: 'max', state, learning: false, relearning: false, foreignUse: false, overageOn: false, billedPerUse: false,
+      billingUnknown: false, askForPlan: false, paidPossible: false, ownSpendUsd: 0, unmetered: 0, counting: false, windows: [], ...flags }] as unknown as VendorUsage[];
+    const view = mount(() => createComponent(Settings, {
+      look: look(), saved: {}, vendors: ['claude'], start: 'accounts', now: Date.now(), usage, quotas: {},
+      onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+    }));
+    try {
+      await tick();
+      await tick();
+      const pill = view.host.querySelector<HTMLElement>('.acct[data-vendor="claude"] .acct-pill')!;
+      return { text: pill.textContent!, warn: pill.classList.contains('warn') };
+    } finally { view.stop(); }
+  };
+  deepEqual(await card({ billedPerUse: true }, 'out'), { text: en['usage.pill.billed'], warn: false });
+  deepEqual(await card({ billingUnknown: true }, 'unknown'), { text: en['usage.pill.unconfirmed'], warn: false });
+  deepEqual(await card({ billingUnknown: true }, 'out'), { text: en['usage.pill.unconfirmed'], warn: false });
+  deepEqual(await card({}, 'out'), { text: en['usage.pill.out'], warn: true }, 'a really exhausted quota stays amber');
+  const others = { 'pt-BR': ptBR, es, fr, de } as const;
+  for (const key of ['usage.pill.billed', 'usage.pill.unconfirmed'] as const) {
+    for (const [code, messages] of Object.entries(others)) ok(messages[key] !== undefined && messages[key] !== en[key], `${code} has its own ${key}`);
+  }
+}));
