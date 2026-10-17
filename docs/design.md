@@ -979,15 +979,44 @@ value seen on Windows go in its comment.
 
 ### Numbers
 
-Decision numbers (`docs/decisions.md`) and what's-new ids (`notes.<id>.<kind>`) are given at merge time, never in a
-branch (R164): lanes that each took "the next one" collided at every merge, and one decision went through four numbers.
-A branch writes `R-next` for its decision (`R-next-2` for a second) and `notes.next.<kind>` for its entry (`notes.next-2`
-for a second id), in every place that refers to them. Quoted in backticks they are only words, as here. Right before the
-merge, on a branch that already holds a fresh `origin/phase-1-base`, `node scripts/numbers.mjs assign` gives each the
-next free number after the base's and commits the change; the pull request then merges as usual. If another lane took the
-number meanwhile, the merge conflicts or the base's check fails, and the command runs again. `scripts/numbers.test.mjs`
-fails on a decision number used twice everywhere, and on any placeholder when CI runs on `phase-1-base` or `main`; the
-`pre-push` hook refuses the same before it leaves the PC.
+Decision numbers (`docs/decisions.md`) and what's-new ids (`notes.<id>.<kind>`) are given when a change lands, never in
+a branch (R164, R-next): lanes that each took "the next one" collided at every merge, and lanes that each appended to the
+end of the decisions table and of the five locales' entries conflicted at every merge. On 2026-10-16 and 17 that loop
+(merge the base in, wait for CI, find the base moved again) cost 590 session-minutes, more than any other step.
+
+So a branch never touches those shared lines. Its entry and its decision rows go in a file of its own,
+`docs/next/<branch>.json` (a branch named `a/b` writes `a-b.json`):
+
+```json
+{
+  "notes": { "better": { "en": "…", "pt-BR": "…", "es": "…", "fr": "…", "de": "…" } },
+  "decisions": ["| <placeholder> | 2026-10-17 | The decision. | AI |"]
+}
+```
+
+`notes` holds an entry per kind it names, each with an id of its own and a text in every language of `ui/locales/`,
+each written by hand. A row of `decisions` is written like the table's, with `R-next` for its number. Elsewhere the
+branch writes `R-next` for its decision (`R-next-2` for a second) in every place that refers to it, the pull request
+title included. Quoted in backticks the placeholders are only words, as here. Two branches then conflict only where they
+change the same lines for real.
+
+`node scripts/land.mjs <pull request>` lands it: it squashes the pull request onto the newest `phase-1-base` with
+`git merge-tree` (the working tree is never touched) and names the commit after the title and number. In a throwaway
+worktree, `node scripts/numbers.mjs assign --amend` folds the fragment in after the last entry of each locale and the
+last row of the table, and every placeholder, the commit message's too, takes the next free number after that base. The
+numbered commit goes to `queue/pr-<number>`, where the queue checks that very commit (R162), so the base and the
+required `gate` (R173) only ever see checked commits. Its land job, one landing at a time, moves the pull request's branch
+to the landed commit from the head that was squashed (the commit's `Pull-request-head` line; a later push stops the
+landing), so GitHub shows the pull request merged. When `phase-1-base` moved during the checks, the land job runs
+`land.mjs --head` again on the new base instead of a rebase, whose numbers would collide, and the queue checks it again.
+`--dry-run` shows the commit it would queue and pushes nothing. A fragment that cannot fold stops `land.mjs` with its
+reasons, and `scripts/numbers.test.mjs` checks every waiting fragment wherever the lints run.
+It also fails on a decision number used twice, and on any placeholder or fragment left when CI runs on `phase-1-base` or
+`main`; the `pre-push` hook refuses the same before it leaves the PC. The older form, `notes.next.<kind>` written
+straight into the locales and `node scripts/numbers.mjs assign` run on the branch, still works.
+
+A pull request with numbers never sets `gh pr merge --auto` (R173): GitHub would squash the placeholders onto
+`phase-1-base` unnumbered, and the base's check would fail.
 
 ### UX sentinel
 

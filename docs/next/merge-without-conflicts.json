@@ -1,0 +1,5 @@
+{
+  "decisions": [
+    "| R-next | 2026-10-17 | Pull requests land without merging by hand and without number conflicts. A branch writes its what's-new entry and its decision rows in a file of its own (`docs/next/<branch>.json`) instead of the shared lines of the locales and `docs/decisions.md`; `node scripts/land.mjs <number>` squashes the pull request onto `phase-1-base`, folds the file in, gives every number there and queues that commit; the queue checks it, lands it and marks the pull request merged, and squashes and numbers it again when the base moved meanwhile. A pull request with numbers lands this way, never with `gh pr merge --auto`. Amends R162, R164 and R173. | AI (owner delegated) |"
+  ]
+}

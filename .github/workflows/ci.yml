@@ -382,6 +382,10 @@ jobs:
   # releases behind it. One landing at a time. When phase-1-base moved while the checks ran, the commit is rebased onto it
   # and checked again; a conflict stops here and the queue branch waits for its author.
   # Green is the gate's green. It runs after the gate, because phase-1-base takes only a commit whose gate passed.
+  # queue/pr-<n> is a pull request that scripts/land.mjs squashed and numbered (docs/design.md#numbers): when it lands, its
+  # branch moves to the landed commit so GitHub shows it merged, from the head that was squashed only (the commit's
+  # Pull-request-head line), so a later push stops the landing instead of being lost. When phase-1-base moved, it is
+  # squashed and numbered again on the new base rather than rebased, since its numbers would collide.
   land:
     needs: gate
     if: >-
@@ -393,15 +397,26 @@ jobs:
     permissions:
       contents: write
       actions: write
+      pull-requests: read
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           branch=${GITHUB_REF#refs/heads/}
+          pr=""; oid=""
+          if [[ "$branch" =~ ^queue/pr-([0-9]+)$ ]]; then
+            pr=${BASH_REMATCH[1]}
+            oid=$(git log -1 --format='%(trailers:key=Pull-request-head,valueonly)' "$GITHUB_SHA" | tr -d '[:space:]')
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git fetch --quiet origin phase-1-base main "$branch"
           # A newer push to the queue branch has its own run.
           if [ "$(git rev-parse "origin/$branch")" != "$GITHUB_SHA" ]; then echo "A newer commit is queued."; exit 0; fi
@@ -409,6 +424,11 @@ jobs:
             git push origin --delete "$branch"; echo "Already on phase-1-base."; exit 0
           fi
           if git merge-base --is-ancestor origin/phase-1-base "$GITHUB_SHA"; then
+            if [ -n "$pr" ] && [ -n "$oid" ]; then
+              head=$(gh pr view "$pr" --json state,isCrossRepository,headRefName \
+                --jq 'select(.state == "OPEN" and (.isCrossRepository | not)) | .headRefName')
+              if [ -n "$head" ]; then git push --force-with-lease="refs/heads/$head:$oid" origin "$GITHUB_SHA:refs/heads/$head"; fi
+            fi
             git push origin "$GITHUB_SHA:refs/heads/phase-1-base"
             # Green on top of the whole phase-1-base, so main follows at once (R127).
             if git merge-base --is-ancestor origin/main "$GITHUB_SHA"; then
@@ -421,8 +441,11 @@ jobs:
             gh workflow run auto-release.yml --ref phase-1-base -f sha="$GITHUB_SHA"
             echo "Landed $GITHUB_SHA."; exit 0
           fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if [ -n "$pr" ] && [ -n "$oid" ]; then
+            node scripts/land.mjs "$pr" --head "$oid"
+            gh workflow run ci.yml --ref "$branch"
+            echo "phase-1-base moved; #$pr was squashed and numbered again on it and is checked again."; exit 0
+          fi
           if ! git rebase --quiet origin/phase-1-base; then
             echo "::error::$branch conflicts with phase-1-base. Rebase it by hand and push it again."; exit 1
           fi
