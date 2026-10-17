@@ -1,5 +1,5 @@
 // Is phase-1-base red? A commit pushed onto a red base waits behind the failure, and main cannot follow (R127), so a
-// session sees the red run and its failing checks before it pushes (docs/design.md#red-base).
+// session sees the red run and its failing checks before it pushes (docs/dev/workflow.md#red-base).
 //
 //   node scripts/base.mjs             prints the red base and what failed, or nothing when it is green or unknown
 //   node scripts/base.mjs pre-push    the git hook `cargo t` installs: refuses a push to phase-1-base while it is red,

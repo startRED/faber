@@ -1,7 +1,7 @@
 import { createEffect, createSignal, onCleanup, untrack, type Accessor } from 'solid-js';
 import { motion, windowHidden } from './appearance.ts';
 
-// The quiet life of empty and waiting screens (docs/design.md, "Motion": empty states are the expressive tier). It runs
+// The quiet life of empty and waiting screens (docs/design/looks.md, "Motion": empty states are the expressive tier). It runs
 // only at full motion and only while the window is shown: reduced motion and none render none of it, and a hidden or
 // minimized window has no timer left running.
 

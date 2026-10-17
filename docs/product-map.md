@@ -2,7 +2,7 @@
 
 What Faber has today, for whoever builds the next part. [product-rules.md](product-rules.md) says where a new thing goes;
 this page says what is already there, so a new part extends it instead of adding a second way to do the same thing. How
-each part looks and moves is in [design.md](design.md); where Faber is going is in [roadmap.md](roadmap.md).
+each part looks and moves is in [design/](design/README.md); where Faber is going is in [product/](product/README.md).
 
 The map names files and keys, never line numbers. `engine/tests/product_map.rs` fails when a setting, a `ui/*.tsx` file,
 a shell command or a browser storage key is missing from it; words, flows and features stay true because the commit

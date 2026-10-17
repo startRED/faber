@@ -5,7 +5,7 @@ description: Use when adding, changing or reviewing anything the user sees or fe
 
 # Faber screen: motion and polish
 
-The rules and numbers live in `docs/design.md` ("Looks" and "Motion"); the tokens live in `ui/styles.css` and
+The rules and numbers live in `docs/design/looks.md` ("One structure, many looks" and "Motion"); the tokens live in `ui/styles.css` and
 `src-tauri/src/themes.json`. This skill is the order to think in and the list to check. If it disagrees with the docs, the
 docs win.
 
@@ -56,7 +56,7 @@ Code checks and motion checks do not see the whole screen. Look at a screenshot 
 - Neighbouring columns share a baseline: their bottoms (or their first lines) line up.
 - A screen of one area never borrows another area's words, hints or rows (the Projects home says nothing of Chat).
 
-The UX sentinel catches art under text, a name in three places and uneven columns (`docs/design.md`, UX sentinel); the
+The UX sentinel catches art under text, a name in three places and uneven columns (`docs/dev/sentinel.md`); the
 rest needs the visual critique (`.claude/skills/visual-critique/SKILL.md`).
 
 ## 5. Before you finish
@@ -64,7 +64,7 @@ rest needs the visual critique (`.claude/skills/visual-critique/SKILL.md`).
 - Every motion has its reduced/none path and a static cue (colour, icon or label); motion is never the only signal.
 - Every new word is a key in `ui/locales/` (English first), not a string in the component.
 - Run the screen check for what you touched (`cargo t`; `cargo t --all` when the screen or shell changed) and play any new
-  motion slowed down (the test build has the 0.25x playback described in `docs/design.md`) before calling it done.
+  motion slowed down (the test build has the 0.25x playback described in `docs/dev/testing.md`) before calling it done.
 - Say what you could not check. Feel (a spring, a crossfade) cannot be judged from code: say so instead of guessing.
 
 ## Reviewing instead of building

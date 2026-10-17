@@ -17,7 +17,7 @@ It has two areas:
 Faber works with Claude only, Codex only, or both. It supports no other vendor. The subscription is the main path, so
 nobody needs an API key. Faber never reads or stores your logins: you sign in through each tool's own flow.
 
-> **Status:** early development. Nothing to install yet. Follow the [roadmap](docs/roadmap.md).
+> **Status:** early development. Nothing to install yet. Follow the [roadmap](docs/product/README.md).
 
 ## What works today
 

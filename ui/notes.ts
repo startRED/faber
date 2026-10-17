@@ -1,6 +1,6 @@
 import { en, type Key } from './locales/en.ts';
 
-// "What's new": the short list shown once after an update (docs/design.md). The entries live in every `ui/locales/*.ts`
+// "What's new": the short list shown once after an update (docs/product-map.md). The entries live in every `ui/locales/*.ts`
 // as `notes.<id>.<kind>`, written by hand in each language. The id only grows; a change a person would notice adds the
 // next one in the same pull request, so the list never depends on the version number. The screen keeps the last id seen
 // (the shell's `notes_seen`) and shows only newer ones. `scripts/release-notes.mjs` builds the release body from the same

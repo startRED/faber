@@ -1,7 +1,7 @@
 import { createSignal } from 'solid-js';
 import type { Appearance, AppState, Look, Motion, SavedSettings, Settings } from './api.ts';
 
-// Applying a look (docs/design.md, "Looks"). The shell computes every look; this module only writes it to the page.
+// Applying a look (docs/design/looks.md). The shell computes every look; this module only writes it to the page.
 
 const systemReduces = matchMedia('(prefers-reduced-motion: reduce)');
 

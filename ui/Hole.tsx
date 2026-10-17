@@ -2,7 +2,7 @@ import { createEffect, createSignal, onCleanup, onMount } from 'solid-js';
 import type { Box } from './Ambient.tsx';
 import { appliedLook, motion, windowFocused, windowHidden } from './appearance.ts';
 
-// The black hole behind a new project session (docs/design.md, "Effects"): one canvas of monospace characters, kept to
+// The black hole behind a new project session (docs/design/looks.md, "Effects"): one canvas of monospace characters, kept to
 // the room right of the words. A shadow clear of every edge, an accretion disk sweeping in from the lower left on a tilted
 // plane, the far side of the disk bent over the top as an arc, a thin photon ring, a dim glow, a small planet and stars. The
 // disk's fibres turn faster near the hole, the arc and the ring shimmer, stars twinkle and now and then one shoots across; a click

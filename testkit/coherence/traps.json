@@ -136,8 +136,8 @@
     "replace": [
       [
         "AGENTS.md",
-        "before changing scope, and\n[docs/product-map.md](docs/product-map.md) before changing anything a person sees, sets or calls.",
-        "before changing scope."
+        "; before\nchanging anything a person sees, sets or calls, [docs/product-map.md](docs/product-map.md).",
+        "."
       ],
       [
         "AGENTS.md",
@@ -161,8 +161,8 @@
       ],
       [
         "AGENTS.md",
-        "updates [docs/product-map.md](docs/product-map.md) when a setting, screen, stored value, shell command,\n  feature or product word appears, changes or goes (`engine/tests/product_map.rs` fails when one is missing), deletes the\n  \"Known incoherences\" lines it fixed, and updates [docs/design.md]",
-        "updates [docs/design.md]"
+        "updates [docs/product-map.md](docs/product-map.md) when a setting, screen, stored value, shell command,\n  feature or product word appears, changes or goes (`engine/tests/product_map.rs` fails when one is missing), deletes the\n  \"Known incoherences\" lines it fixed, and updates the [docs/design/]",
+        "updates the [docs/design/]"
       ],
       [
         "AGENTS.md",
@@ -171,23 +171,13 @@
       ],
       [
         "docs/README.md",
-        "moves into product-map.md and design.md",
-        "moves into design.md"
+        "moves into product-map.md and the design/ or product/ page",
+        "moves into the design/ or product/ page"
       ],
       [
-        "docs/design.md",
-        "the run mode (product-map.md, Known incoherences, 1).",
-        "the run mode."
-      ],
-      [
-        "docs/design.md",
-        "`area` is a row or heading of [product-map.md](product-map.md), or",
+        "docs/dev/workflow.md",
+        "`area` is a row or heading of [product-map.md](../product-map.md), or",
         "`area` names the part of the product it changes, or"
-      ],
-      [
-        "docs/roadmap.md",
-        " (product-map incoherence 29)",
-        ""
       ],
       [
         "docs/product-rules.md",
@@ -225,6 +215,8 @@
       "docs/research/",
       "docs/superpowers/",
       "engine/src/project/kit/inventory.rs",
+      "scripts/docs.mjs",
+      "scripts/docs.test.mjs",
       "testkit/src/lanes.rs"
     ]
   }

@@ -1,7 +1,7 @@
 import { createSignal } from 'solid-js';
 import { type Area, errorText, type RunningItem, type RunningList } from './api.ts';
 
-// The running list on the screen (docs/design.md, "Running list"). The engine builds and orders the list; the screen
+// The running list on the screen (docs/design/layout.md, "Running column"). The engine builds and orders the list; the screen
 // keeps the newest one it has seen, groups it into blocks and decides when the column opens by itself.
 
 /** The newer of two lists. The same revision keeps the one already held. */

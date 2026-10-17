@@ -4,7 +4,7 @@ import { Peek } from './Mark.tsx';
 
 /**
  * The one empty state: the peeking mark, a title in the heading size, one short line and at most one button. It is used
- * for no AI, no project and a project with nothing in it yet (docs/design.md, "Empty states"). The line never names a
+ * for no AI, no project and a project with nothing in it yet (docs/design/brand.md, "Identity"). The line never names a
  * path through Settings: the button goes there. `children` sit under the button, for a list that belongs to the same place.
  */
 export function Empty(props: {

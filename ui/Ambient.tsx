@@ -4,7 +4,7 @@ import { appliedLook, motion, windowFocused, windowHidden } from './appearance.t
 import { t } from './i18n.ts';
 import { vendorName } from './models.ts';
 
-// The effects of the new conversation (docs/design.md, "Ambient"). Which one shows comes from the look: the tokens
+// The effects of the new conversation (docs/design/looks.md, "Effects"). Which one shows comes from the look: the tokens
 // --amb-beam, --amb-loom and --amb-flow are `none` for a theme that does not have it, and for every theme when the
 // ambient switch is off. Effects sit behind the greeting and never behind text the user reads. Nothing here runs a frame
 // loop: the beam and the dust are CSS, and only a slow timer moves the dust's and the glow's opacity.

@@ -120,7 +120,7 @@ pub fn check(root: &Path, porcelain: &str, changed: &[String]) -> Vec<String> {
         None if changed.is_empty() => return Vec::new(),
         None => {
             return vec![format!(
-                "this worktree changes files but claims none: write {FILE} at its root first (docs/design.md#lane-claims)"
+                "this worktree changes files but claims none: write {FILE} at its root first (docs/dev/workflow.md#lane-claims)"
             )];
         }
         Some((_, Err(e))) => return vec![format!("{FILE}: {e}")],

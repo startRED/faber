@@ -27,8 +27,8 @@ Visual critique: before X/40, after Y/40, by <session>
 
 ## Proofs run
 
-- [ ] `npm run lint`, `npm run typecheck`, `npm run build`
+- [ ] `npm run lint`, `npm run typecheck`, `npm run docs`, `npm run build`
 - [ ] `cargo fmt --all --check`, `npm run test:scripts`, `cargo t --claims`
 - [ ] The heavy suites and Clippy run in CI on the queued commit (AGENTS.md, Proof commands)
-- [ ] `docs/product-map.md` and `docs/design.md` updated when they needed it
+- [ ] `docs/product-map.md` and the `docs/design/` pages updated when they needed it
 - [ ] Queued with `node scripts/land.mjs <number>` right after opening; CI lands it, nobody waits on it

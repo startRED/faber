@@ -1,6 +1,6 @@
 //! Self-development missions (R96): what a project may do, the records a mission keeps, and its task graph.
 //! The design is `docs/superpowers/specs/2026-10-12-self-development-mvp-design.md`; the published contracts are in
-//! `docs/design.md` (Projects: self-development missions).
+//! `docs/design/projects.md` (Projects: self-development missions).
 //!
 //! Every record carries a schema version and keeps the fields a newer Faber wrote in `extra`, so a last-good build can
 //! read and rewrite them during a rollback without dropping anything. A record whose schema is newer than this build's

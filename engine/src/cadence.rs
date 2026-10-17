@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 
 /// How often the loop looks at the clock.
 pub const TICK: f64 = 30.0;
-/// Between two timed readings. The owner’s ceiling is 30 minutes of delay; the vendors count within five (docs/design.md).
+/// Between two timed readings. The owner’s ceiling is 30 minutes of delay; the vendors count within five (docs/product/quota-pacing.md).
 pub const EVERY: f64 = 15.0 * 60.0;
 /// The shared debounce of event readings (end of a request, focus, wake): at least this long since the last reading.
 pub const CLAUDE_GAP: f64 = 5.0 * 60.0;

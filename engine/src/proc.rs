@@ -183,7 +183,7 @@ pub fn real_spawner() -> Spawner {
 /// only in the folder it runs in (the mission clone) and in `writable` (its build folder, its own tool caches and temporary
 /// folder). On Windows the process runs at Low integrity and those folders are labelled Low, so Windows refuses its writes
 /// anywhere else: the installed app, the engine's records, the owner checkout, the user profile. On macOS `sandbox-exec`
-/// denies writes outside them. Reads and the network stay open (a residual, docs/design.md); Linux has no write limit yet.
+/// denies writes outside them. Reads and the network stay open (a residual, docs/design/projects.md); Linux has no write limit yet.
 pub fn isolated_spawner(environment: std::collections::BTreeMap<String, String>, writable: Vec<std::path::PathBuf>) -> Spawner {
     // ponytail: a folder is labelled once per spawner; a folder deleted and made again meanwhile stays Medium, so the proof
     // fails (closed) instead of writing elsewhere.

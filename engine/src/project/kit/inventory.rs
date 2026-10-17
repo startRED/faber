@@ -479,8 +479,9 @@ pub fn project_inventory(files: &[SourceFile], proofs: &[String]) -> Result<Vec<
             return Err(WireError::TooBig);
         }
         let relevant = file.path == "AGENTS.md"
-            || file.path == "docs/design.md"
-            || file.path == "docs/roadmap.md"
+            || file.path.starts_with("docs/design/")
+            || file.path.starts_with("docs/product/")
+            || file.path.starts_with("docs/dev/")
             || file.path.contains("tokens")
             || file.path.contains("product-map");
         if !relevant {

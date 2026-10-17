@@ -7,7 +7,7 @@ import { Composer } from '../../ui/Composer.tsx';
 import { keepRoot, sala } from './appearance.check.ts';
 import { check, equal, ok } from './check.ts';
 
-// The quiet life of the two homes (docs/design.md, "Motion"): a typing bar and hints in the idle composer, a light behind
+// The quiet life of the two homes (docs/design/looks.md, "Motion"): a typing bar and hints in the idle composer, a light behind
 // each home, and none of it with reduced motion, with no motion, or while the window is hidden.
 
 const settle = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));

@@ -6,7 +6,7 @@
 //! - The screen calls the fixed [`COMMANDS`] with the request types below and receives [`MissionView`] on the
 //!   [`EVENT`] event. Commands fail with a key string (`error.*`), as the other shell commands do.
 //!
-//! Both are versioned and documented with examples in `docs/design.md`.
+//! Both are versioned and documented with examples in `docs/design/projects.md`.
 
 use super::{
     Author, DecisionKind, GitMode, GraphError, MAX_TASKS, MissionState, Plan, Role, RunMode, Task, TaskKind, TaskState, clean_path,
@@ -517,7 +517,7 @@ impl Envelope {
 
 // The screen contract
 
-/// The shell commands of Projects, in the order of `docs/design.md`.
+/// The shell commands of Projects, in the order of `docs/design/projects.md`.
 pub const COMMANDS: [&str; 9] = [
     "project_enroll",
     "project_grant",
@@ -696,7 +696,7 @@ pub struct BuildView {
     pub waiting: Option<String>,
 }
 
-/// A full [`MissionView`], like the shorter example in `docs/design.md`, kept here so a test proves the shape parses.
+/// A full [`MissionView`], like the shorter example in `docs/design/projects.md`, kept here so a test proves the shape parses.
 pub const MISSION_EXAMPLE: &str = r#"{
   "missionId": "m1",
   "revision": 7,

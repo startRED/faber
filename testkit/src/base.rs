@@ -1,4 +1,4 @@
-//! The red base (docs/design.md#red-base): before its suites, a run outside CI says when phase-1-base's last CI run
+//! The red base (docs/dev/workflow.md#red-base): before its suites, a run outside CI says when phase-1-base's last CI run
 //! failed and what failed in it, and installs the git hook that refuses a push onto it. Both are `scripts/base.mjs`; this
 //! only calls it, prints its lines and keeps the hook in place. Offline, or without Node or `gh`, it says nothing.
 
@@ -13,7 +13,7 @@ const MARK: &str = "# faber: red base guard";
 pub const HOOK: &str = "#!/bin/sh\n\
 # faber: red base guard\n\
 # Written by `cargo t` (testkit/src/base.rs). Refuses a push onto a red phase-1-base, or one that carries a number\n\
-# placeholder (docs/design.md#red-base). `FABER_PUSH_ON_RED=1 git push` pushes the fix.\n\
+# placeholder (docs/dev/workflow.md#red-base). `FABER_PUSH_ON_RED=1 git push` pushes the fix.\n\
 [ -f scripts/base.mjs ] && command -v node >/dev/null 2>&1 || exit 0\n\
 exec node scripts/base.mjs pre-push \"$@\"\n";
 

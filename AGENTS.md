@@ -1,10 +1,11 @@
 # Faber: guide for agents
 
 Faber is a source-available desktop app (FSL-1.1-ALv2) with a Chat area and a Projects area that run the official AI CLIs
-with the user's own subscriptions. Read [docs/roadmap.md](docs/roadmap.md) before changing scope, and
-[docs/product-map.md](docs/product-map.md) before changing anything a person sees, sets or calls.
-[docs/README.md](docs/README.md) says which page answers what; dated specs, plans and research are history, never a source
-for how Faber works today. This file stays short: each line prevents a real mistake, and a rule a test enforces leaves it.
+with the user's own subscriptions. [docs/README.md](docs/README.md) lists every living page and when to read it: read the
+pages your task needs, never a whole folder. Before changing scope read [docs/product/](docs/product/README.md); before
+changing anything a person sees, sets or calls, [docs/product-map.md](docs/product-map.md). Dated specs, plans and
+research are history, never a source for how Faber works today. This file stays short: each line prevents a real
+mistake, and a rule a test enforces leaves it.
 
 ## Rules
 
@@ -25,12 +26,12 @@ for how Faber works today. This file stays short: each line prevents a real mist
 - Every change a person would notice adds a what's-new entry in every language, in the same pull request: one short
   sentence in plain words, written by hand, in its own `docs/next/<branch>.json` (never in the locale files, whose
   shared lines conflict). The id only grows, never depends on the version, and is given when the change lands, with
-  the decision numbers ([design.md](docs/design.md#numbers)). After an update the screen shows what is newer than the
+  the decision numbers ([workflow](docs/dev/workflow.md#numbers)). After an update the screen shows what is newer than the
   last entry seen, and the release body is built from the English entries (R142, `scripts/release-notes.mjs`).
 - Memory is a feature: Faber with no CLI running stays under 500 MB when complete, and the end-to-end test fails above
   400 MB (R125). The limit is a safety net, not the goal: every change aims at the lightest and most responsive result
   it can reach and reports its memory and processor cost. Anything that keeps a process or a big DOM alive needs a
-  reason and a measurement ([docs/roadmap.md](docs/roadmap.md#architecture)).
+  reason and a measurement ([architecture](docs/product/architecture.md#architecture)).
 - Telemetry stays off by default.
 - One commit per coherent change, made and pushed as soon as the change is proven, without waiting for other parts.
   Commits may group related steps, but never huge: push often, roughly once an hour is the usual pace (a rough
@@ -41,19 +42,19 @@ for how Faber works today. This file stays short: each line prevents a real mist
   queues it: it squashes it onto `phase-1-base`, gives its numbers there, and CI lands it and marks it merged once every
   system is green. Then the lane goes on to its next task and never watches CI: a red queue run turns the pull
   request's `queue` check red, which wakes its session, and the fix is pushed and queued again with `land.mjs`
-  (R182). Queue once, with the fix complete: each push to a queue branch cancels the run before it. `land.mjs` is the
+  (R182; [workflow](docs/dev/workflow.md#merge-on-green)). Queue once, with the fix complete: each push to a queue branch cancels the run before it. `land.mjs` is the
   only way in: never the merge button or `gh pr merge` (a pull request's own run checks only the lints).
   A small proven commit goes through the queue too: `git push origin
   HEAD:refs/heads/queue/<name>`; CI lands it on `phase-1-base` and `main` only when every system is green, and a red
   one waits on its queue branch for its author to fix (R162). Nobody merges the base into a branch only to keep up,
   and a conflict only in `.md` files where both sides added lines needs nothing: the landing keeps both (R184).
 - A red `phase-1-base` comes first: fix it, or keep your commits until it is green. `cargo t` shows it (`BASE` lines)
-  and its `pre-push` hook refuses a push onto it ([design.md](docs/design.md#red-base)); `FABER_PUSH_ON_RED=1` pushes
+  and its `pre-push` hook refuses a push onto it ([workflow](docs/dev/workflow.md#red-base)); `FABER_PUSH_ON_RED=1` pushes
   the fix.
 - In a worktree on a branch, claim the areas and files you will change in `.faber-lane` before changing one
-  ([design.md](docs/design.md#lane-claims)); `cargo t` refuses unclaimed changes and files another lane claims.
+  ([workflow](docs/dev/workflow.md#lane-claims)); `cargo t` refuses unclaimed changes and files another lane claims.
 - When a task is done (its pull request queued), take the next with `node scripts/tasks.mjs next` and start it without
-  asking ([design.md](docs/design.md#task-queue)). Ask the owner only what is theirs (direction, taste, money), in a
+  asking ([workflow](docs/dev/workflow.md#task-queue)). Ask the owner only what is theirs (direction, taste, money), in a
   short card, and go on with the next task meanwhile; stop when no task is free.
 - Never wait idle, on a helper (a subagent, a Codex run, another session) or on a run. The main session hands out only
   pieces its own next step does not need, runs them in the background, keeps working and reads each result when its
@@ -75,9 +76,10 @@ Read [docs/product-rules.md](docs/product-rules.md) and [docs/product-map.md](do
 - Check the taste cards whose "Touches" match. The review says "cards checked: C00x ok" or names the line that breaks one.
 - Walk it as a newcomer and as a heavy user: first run, no AI connected, empty and waiting states, a 720 px window,
   reduced motion, the longest language.
-- Something that goes against a decision ([docs/decisions.md](docs/decisions.md)) or a card goes to the owner first.
-- How it looks and moves: [docs/design.md](docs/design.md) and the checklist in `.claude/skills/faber-ui/SKILL.md`
-  (Claude loads it as a skill; other agents read the file).
+- Something that goes against a decision ([docs/decisions.md](docs/decisions.md): search it for the words of the change)
+  or a card goes to the owner first.
+- How it looks and moves: [docs/design/](docs/design/README.md) (its README and the page of the part you change) and the
+  checklist in `.claude/skills/faber-ui/SKILL.md` (Claude loads it as a skill; other agents read the file).
 
 ## Done means
 
@@ -85,9 +87,10 @@ Read [docs/product-rules.md](docs/product-rules.md) and [docs/product-map.md](do
   without the change (the product map names the check per feature).
 - The same commit updates [docs/product-map.md](docs/product-map.md) when a setting, screen, stored value, shell command,
   feature or product word appears, changes or goes (`engine/tests/product_map.rs` fails when one is missing), deletes the
-  "Known incoherences" lines it fixed, and updates [docs/design.md](docs/design.md) when how a screen looks or behaves
-  changed. A new decision is a `R-next` row in the branch's `docs/next/<branch>.json`, numbered when it lands; a finished spec or plan gets
-  its status in [docs/README.md](docs/README.md).
+  "Known incoherences" lines it fixed, and updates the [docs/design/](docs/design/README.md) page of a screen whose look
+  or behaviour changed. A new decision is a `R-next` row in the branch's `docs/next/<branch>.json`, numbered when it
+  lands; a finished spec or plan gets its status in [docs/README.md](docs/README.md). A living page that would pass its
+  size limit splits by topic instead (`npm run docs` says so).
 - The commit type is a release decision: a `feat`, `fix` or `perf` commit that touches what ships becomes a patch release
   by itself once CI is green (R130); `docs`, `test`, `ci`, `refactor` and `chore` do not.
 - For a change a person sees, the commit body says `Extends: <map entry>`, or `New: <the closest existing thing and why
@@ -112,7 +115,7 @@ Read [docs/product-rules.md](docs/product-rules.md) and [docs/product-map.md](do
 - `tests/`: the screen's checks (`tests/ui/*.check.ts`, run inside a hidden test build) and the recordings the fake CLI
   replays (`tests/fixtures/`). The engine's own tests replay the same fixtures (`engine/tests/`).
 - `testkit/`: Faber's own test runner (`cargo t`) and the fake CLI. It runs only the tests that depend on what changed,
-  launches a hidden test build inside a sandbox and audits every run ([docs/design.md](docs/design.md#screen-tests)).
+  launches a hidden test build inside a sandbox and audits every run ([testing](docs/dev/testing.md#screen-tests)).
 
 ## Proof commands
 
@@ -121,6 +124,7 @@ All exit 0 before any commit. None builds the app or waits for a build slot, so 
 ```bash
 npm run lint
 npm run typecheck
+npm run docs
 npm run build
 cargo fmt --all --check
 npm run test:scripts
@@ -131,7 +135,7 @@ cargo t --claims
 in CI on the queued commit, never on the PC by habit: the `rust`, `ui` and `screen` suites (`cargo t --all`, the
 memory limit of R125 included) and the Clippy proofs (`cargo t --suite lint`: `--workspace --all-targets` and `-p faber
 --features test-hooks`, each with `-D warnings`, plus macOS on Windows through zig,
-[design.md](docs/design.md#what-a-run-prints)). A red one wakes the lane ([design.md](docs/design.md#merge-on-green)).
+[testing](docs/dev/testing.md#what-a-run-prints)). A red one wakes the lane ([workflow](docs/dev/workflow.md#merge-on-green)).
 Run a suite on the PC only to see a new check fail before the change (`cargo t --filter <name>`) or to look closer at a
 failure CI reported; it runs only the tests that depend on the files you changed and prints only failures, measurements
 and a summary (every line in `target/faber-test/run.log`). A command that may take over two minutes (`cargo t`, a

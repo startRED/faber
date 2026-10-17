@@ -1,4 +1,4 @@
-// The task queue (docs/design.md#task-queue): what a session does next when it finishes a task, without asking.
+// The task queue (docs/dev/workflow.md#task-queue): what a session does next when it finishes a task, without asking.
 //
 //   node scripts/tasks.mjs next [--who <name>]   claims the first free task on origin/phase-1-base and prints its brief
 //   node scripts/tasks.mjs list                  every task, in order, with who holds it
@@ -16,7 +16,7 @@ import { resolve, join } from 'node:path';
 
 const BASE = 'origin/phase-1-base';
 export const TASKS = 'docs/tasks';
-/** A claim nobody renewed for this long is stale (the same day as lane claims, docs/design.md#lane-claims). */
+/** A claim nobody renewed for this long is stale (the same day as lane claims, docs/dev/workflow.md#lane-claims). */
 export const STALE_MS = 24 * 60 * 60 * 1000;
 const FILE = /^(\d+)-([a-z0-9][a-z0-9-]*)\.md$/;
 

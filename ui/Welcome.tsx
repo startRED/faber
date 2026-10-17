@@ -22,7 +22,7 @@ export function when(ms: number): string {
   return new Intl.DateTimeFormat(lang(), { day: 'numeric', month: 'short' }).format(ms);
 }
 
-/** The new conversation (s1), one column in both areas (docs/design.md, "The homes"): the greeting, the composer it was
+/** The new conversation (s1), one column in both areas (docs/design/layout.md): the greeting, the composer it was
  * given, and the three conversations to pick up, those that wait for the user first. In Chat three short suggestions sit
  * under the composer and fill it without sending anything; the effects of the look sit behind (ui/Ambient.tsx). In a
  * project Curioso and a quiet line with the project and its folder come first, one line says where the agent works, and

@@ -20,5 +20,5 @@ src-tauri/gen/
 # Impeccable keeps its detector config in git; its hook cache is local.
 /.impeccable/hook.cache.json
 
-# A lane's claim of the areas and files it changes (docs/design.md#lane-claims).
+# A lane's claim of the areas and files it changes (docs/dev/workflow.md#lane-claims).
 /.faber-lane

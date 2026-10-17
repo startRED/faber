@@ -1,0 +1,148 @@
+# Testing
+
+Faber's own test system: `cargo t`, screen tests, the build folder and what a run prints.
+
+## Screen tests
+
+Faber's own test runner (`cargo t`, the `testkit/` crate) tests the screen in two ways, both against a hidden test build
+of the app. `FABER_HIDDEN=1` keeps the window offscreen with its own browser profile, so it never takes the user's screen.
+
+- **Checks** (`tests/ui/*.check.ts`) test the screen's own logic. The test build opens `index.html?checks`, runs them when
+  the page loads, writes the result to the file named by `FABER_CHECKS_OUT` and exits. No DevTools port is involved, so
+  they run on Windows, macOS and Linux (Linux under `xvfb-run -a`).
+- **Scenarios** (`testkit/src/screen/`, written in Rust) drive the real app like a person: they read the page, click and
+  type, and save screenshots (named checkpoints, and every failure) to `target/faber-test/shots/`. On Windows the UI
+  runs in WebView2, which exposes Chromium's DevTools port (`FABER_CDP_PORT`); the macOS and Linux webviews have no such
+  port, so those systems skip this suite and run every other check.
+
+**The window never reaches the person's desktop (Windows).** `FABER_HIDDEN=1` alone is not enough: an offscreen window can
+still become visible and take focus, which matters to someone playing full screen. So the runner (`testkit/src/desktop.rs`)
+makes a separate Windows desktop once per run (`CreateDesktopW`, named `faber-test-<pid>-...`), which no monitor shows and
+no input reaches, and every app launch starts on it (`STARTUPINFO.lpDesktop`, through the gate helper, still inside its
+job object and with no console window). The app's window and its WebView2 processes inherit that desktop, so they cannot
+be seen or steal focus; the DevTools port is a TCP port and does not care which desktop the page lives on. Two safety
+nets: if the desktop cannot be made or assigned, nothing is launched and the run fails (there is no fallback to the
+normal desktop); and after launch, and at every audit point, the runner lists the visible top-level windows on the
+desktop in use and, if one belongs to the app's job, ends the job at once and fails. The scenario `hidden desktop:
+...` proves the mechanism without Faber: a helper started like the app lists the windows of its own desktop, and none of
+them is a window of the desktop in use.
+
+Every launch is sandboxed: a temporary home, an empty `PATH`, no provider variables, a dead proxy and no real CLI (a fake
+CLI replays the recordings in `tests/fixtures/`). Each scenario is audited afterwards for leaked processes, writes outside
+the sandbox and a changed environment. The checks and the hooks that report them exist only in the test build
+(`--features test-hooks`, `vite build --mode test`); the production app and its `dist/` contain none of them. CI runs
+only the jobs a change needs (R163). A first job reads the changed files and picks the suites by the same rules as
+`cargo t` (`testkit/suites.json`, read by `testkit/src/plan.rs` and `scripts/ci-scope.mjs`): words only (`docs/` or a
+`.md` file) need none, `docs/product-map.md` needs the `rust` suite because a test reads it, the test files of the engine
+and the shell need only the `rust` suite, a manifest, the runner, CI or a file no rule knows needs every suite, and any
+file that is not words runs the lints. A push is compared with the commit before it, and a queue commit with
+`phase-1-base`, where it lands; either may skip a suite only when the commit it builds on is green, and anything the job
+cannot tell runs everything (R165). Every suite still runs once a day on `main`, and on a commit before it becomes
+stable (`promote-stable.yml` starts the run and waits for it). The lints and the `rust` suite run on Windows and on macOS
+(macOS adds the `ui` suite to its lints). One Windows job builds the test app once (`cargo t --build-only`, the fake
+CLI and the cache example at the same time in Cargo's own folder) and hands its programs (`built_programs` in
+`testkit/src/testbuild.rs`) to a `ui` part and eight `screen` parts, which build nothing
+(`--suite screen --shard 2/8 --prebuilt`) and use the Rust the runner image has. On CI the runner uses every core; on a
+person's PC it keeps to half. Every Cargo the runner starts goes without the variables `cargo run` gave it, which made
+ring's build script, and everything above it, build again. Each kind of job keeps its own Rust cache, and only `main`
+saves it: a run can read only the caches of its own branch and of `main`, and branches that each saved their own pushed
+the others out of the 10 GB GitHub keeps. Since pushes made by CI start no run, the `land` and `main` jobs start a warm run
+on `main` after it moves, which builds what each kind of job builds and saves it when the dependencies changed. The runner
+deals the scenarios so the parts take about the same time: the slowest first, each to the lightest part so far, by the CI
+seconds of each scenario. A `costs` job reads them from the logs of the newest green runs (`scripts/screen-costs.mjs`) and
+hands every part the same table (`--costs`), so the dealing never ages; without those logs, and on a person's PC, the copy
+in `testkit/screen-costs.json` counts, and a scenario missing from it counts as 5 s. CI keeps the Windows screenshots as artifacts.
+Anything outside the page (tray, notifications, installer, updates) is checked through the operating system's accessibility layer and file versions.
+The update scenario (T13 4) runs the update flow's clock five times faster from one anchor all its processes share
+(`FABER_TEST_CLOCK`, read only by the test build; a release build with the test hooks does not compile), so it proves
+the whole 300-second probation and its 30-second health window in about 100 s instead of 335 (R163).
+
+Test launches also pass the browser engine switches that turn off crash reports and SmartScreen address lookups, and the
+sandbox removes every `WEBVIEW2_*` override from the environment. That limits what a test sends; it is not a firewall.
+Nothing blocks the network at the operating system, and WebView2 has no documented switch for crash uploads, so a request
+that bypasses the switches is not seen. The audit sees only requests that reach the fake release server.
+Known limit: the loopback-only rule is not enforced. Test processes get dead proxy variables and the switches above, but
+nothing stops a program from opening its own connection; blocking outbound traffic for test processes is deferred.
+
+### Build folder budget
+
+Each worktree builds into `target/<name>` of the main checkout (`faber-wt-projhome` into `target/projhome`), and Cargo
+never deletes old artifacts. The runner (`testkit/src/sweep.rs`, R106) sweeps that `target` before choosing the suites, at
+most once an hour (the `target/.faber-sweep` stamp), and prints a line only when it freed space:
+
+1. A `target/<name>` folder with a `CACHEDIR.TAG` whose worktree is gone (no `git worktree list` entry named `<name>` or
+   `*-<name>`) and that nothing used for a day is removed whole.
+2. In every build profile (a folder with `.fingerprint`, nested ones included), a file in `deps/` that a newer build of
+   the same crate and kind replaced more than a day ago is removed, and so is an `incremental/` folder a newer one of the
+   same crate replaced. A crate's newest build stays however old it is. Measured on 2026-10-14, `debug/incremental` held
+   52 folders for `faber_engine` alone, all but one dead.
+3. If `target` is still above 60 GB, whole worktree folders are removed, the least recently used first, until it fits.
+   A folder used in the last six hours belongs to a lane still at work and stays (a cold rebuild costs it ten minutes).
+   The main checkout's own folders (`debug`, `release`, `faber-test`) and this run's own folder are never removed whole;
+   if they alone exceed the cap, the runner says so.
+
+A folder is in use while Cargo holds one of its lock files (`.cargo-lock`, `.cargo-build-lock`, `.cargo-artifact-lock`)
+or, on Windows, while a program in one of its profiles runs (Windows refuses to open it for writing). In use, it is
+neither swept nor removed. The sweep holds the profile's locks while it deletes, so a build that starts meanwhile waits.
+sccache (user-wide, outside the repository) makes the rebuild of a swept dependency cheap.
+
+### Build slots
+
+Many lanes run `cargo t` on one PC; each run peaks near 8 GB. On 2026-10-16 and 17 lanes spent 441 minutes waiting for a
+slot, so the suites now run in CI on the queued commit and a lane runs `cargo t --claims` before a commit, which builds
+only the runner, takes no slot and checks the claims and the red base (R183). Before building, a run takes one of three slots
+(`testkit/src/slots.rs`): a locked file `target/.faber-slots/slot-<n>` of the main checkout, held until the run ends,
+crash included. With all three taken it prints one waiting line and waits. `FABER_BUILD_SLOTS` sets another count for
+another PC (R129, E3).
+
+### What a run prints
+
+A run prints only what needs a look (R154): each failure with its reason, each pass that measures memory or processor
+(R125), and one summary line. A failed Rust test shows its panic from the `file:line` on; a compiler error shows as
+`file:line:col: error[code]: message`, with the compiler's suggested fix as one `help:` line under it. A reason longer
+than 15 lines keeps its first line and its error lines. Every line, every pass and Cargo's whole output included, goes
+to `target/faber-test/run.log`, which CI keeps with the screenshots. `cargo test` runs with `--no-fail-fast`, so one run
+lists every failing test. `cargo t --suite lint` runs the two Clippy proofs the same way, and a test keeps them equal to
+CI's lines. The `cargo t` alias builds the runner itself with `--message-format=short`, so a broken build of the runner
+also prints one line per error.
+
+On Windows the lint suite adds a third proof: Clippy for macOS (`aarch64-apple-darwin`) on the engine and the runner, so
+code behind `cfg(unix)` or `cfg(target_os = "macos")` breaks before the push, not a CI round later (R166,
+`testkit/src/cross.rs`). Clippy links nothing, but `aws-lc-sys` compiles C, so zig stands in for the Mac's C compiler:
+Cargo calls the runner as `CC` and `AR` and the runner hands the call to zig. It needs zig on `PATH` and
+`rustup target add aarch64-apple-darwin`; without zig the proof is skipped and says so. The shell is left out, since its
+Objective-C needs Apple's SDK; CI's Mac still checks everything.
+
+A mission reads its checks the same way (R155, `engine/src/project/proof/output.rs`, which `cargo t` also uses for
+Cargo). The roles get each failure with its `file:line` and the tool's fix, the measurements and one summary line, at
+most 20 failures of 8 lines; the whole output stays in the mission's private `proofs/` folder. It reads `cargo t`,
+rustc and Clippy, `cargo test`, `cargo fmt --check`, tsc and oxlint; any other format gives its last 20 lines when the
+check fails. A new format is one more parser in that file's list. Lines that look like a secret are withheld first.
+
+## Faber's own test system
+
+One Rust program replaces the whole Node test suite. The reason is to avoid the CPU and RAM load that a heavy test
+suite causes. Node stays a development tool for Vite, `tsc` and `oxlint`; it never runs tests and never ships.
+The program is `faber-test`, run as `cargo t`.
+
+1. **One light program.** It compiles with half the cores. Locally it runs only the tests that depend on the files a
+   change touched. The full set runs on GitHub, on Windows, macOS and Linux.
+2. **Fake CLIs that replay recorded conversations.** No test calls a real model or spends quota, and each runs in
+   milliseconds. Changing one field of a recording must turn its test red.
+3. **Screen tests run inside a hidden Faber**, opened only when needed. On Windows they drive the real app through the
+   WebView2 DevTools port; the checks that need no such port run on every system.
+4. **Unit tests never spawn processes, touch real git or call a real CLI.**
+5. **The benchmark of ~40 real requests** that measures the goals against plain Claude Code and plain Codex before
+   each version.
+6. **Still to build: faster and lighter than TL-ADE's suite, measured fairly** (R113, R115, R116, owner;
+   [spec](../superpowers/specs/2026-10-14-test-system-rework-design.md),
+   [plan](../superpowers/plans/2026-10-14-test-system-rework.md)). A job-object meter measures both projects the same way:
+   the warm suites, 8 matched scenarios and 7 real-work tasks, never compilation. The floor is 5x less time and
+   processes and 3x less memory and CPU, with no ceiling; no test is weakened. Steps: one engine test program, the
+   `rust-lld` linker, lighter debug info and below-normal priority (landed 2026-10-14), then event waits,
+   parallel lanes, skipping unchanged builds and a shared running app for the screen scenarios.
+7. **The build folder has a budget** (R106). Every worktree builds into a folder of the main checkout's `target`, and
+   Cargo never deletes anything there, so it grew to 123 GB and once filled the disk. `cargo t` sweeps it at start, at
+   most once an hour: folders of removed worktrees and builds replaced more than a day ago go, and above 60 GB
+   the least recently used worktree folders go too. A folder in use is never touched
+   ([design](#build-folder-budget)).

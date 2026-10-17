@@ -2,7 +2,7 @@
 
 Instructions for the scheduled task `faber-coerencia` (R151). It reads them from `origin/phase-1-base` on every run, so
 a change here reaches the next run without touching the task. The pass compares the code with
-[docs/product-map.md](../../docs/product-map.md) and [docs/design.md](../../docs/design.md) and proposes lines for the
+[docs/product-map.md](../../docs/product-map.md) and [docs/design/](../../docs/design/README.md) and proposes lines for the
 map's "Known incoherences": new ones, and removals of the ones the code has fixed. It never edits code.
 
 ## Rules
@@ -25,7 +25,7 @@ map's "Known incoherences": new ones, and removals of the ones the code has fixe
    `git -C E:/Documentos/ProjetosIA/faber archive --format=tar -o <tmp>/head.tar origin/phase-1-base` into a new
    folder under the system temp folder and `tar -xf head.tar` there (a relative name, so no tar reads `E:` as a host).
 3. What changed. `git -C E:/Documentos/ProjetosIA/faber log --since=<cut-off> --name-only --format="%h %s"
-   origin/phase-1-base -- ui src-tauri/src engine/src docs/product-map.md docs/design.md docs/product-rules.md`.
+   origin/phase-1-base -- ui src-tauri/src engine/src docs/product-map.md docs/design docs/product-rules.md`.
    No change since the cut-off: append the run line to `vistos.md` (step 7) and end with
    "Coerência: nada mudou desde <cut-off>."
 4. Collect, in parallel Haiku subagents, each with the export path and one job:
@@ -33,7 +33,7 @@ map's "Known incoherences": new ones, and removals of the ones the code has fixe
      or the change that fixed it.
    - Changed files: for each file from step 3, list every setting, control, screen text key, product word, browser
      storage key, shell command and right-click item it adds or changes, with `file:line`.
-   - Map and design statements: for the map sections and the design.md sections that name a changed file, list each
+   - Map and design statements: for the map sections and the docs/design/ sections that name a changed file, list each
      statement the code now contradicts, with `file:line`.
 5. Judge, in one Sonnet subagent at medium effort, with the collected facts, `docs/product-map.md`,
    `docs/product-rules.md` (the "Where things go" table, Chat and Projects alike, the taste cards) and `vistos.md`:
@@ -41,7 +41,7 @@ map's "Known incoherences": new ones, and removals of the ones the code has fixe
    - a second way to do something the map already has, a setting outside its "lives on" place, a new name for an
      existing thing, a Chat and Projects difference, or a broken card becomes a new line, in the map's style (one or
      two sentences, plain words, "Owner" when it needs a taste or direction call);
-   - a map or design.md statement the code contradicts becomes a correction;
+   - a map or design statement the code contradicts becomes a correction;
    - anything already in `vistos.md` is skipped unless the code changed at that spot since.
 6. Report. Write `<date>.md` in the notes folder: first a summary in plain Portuguese for the owner (at most five
    lines: how many lines to add, remove or correct, and the one that matters most), then the exact English lines to

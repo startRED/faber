@@ -1,7 +1,7 @@
 # Product rules
 
 Faber has to feel like one product, whoever builds the next part. This page says where a new thing goes and which lessons
-it must not break. The details live in [design.md](design.md) and [roadmap.md](roadmap.md); R-numbers are the decisions
+it must not break. The details live in [design/](design/README.md) and [product/](product/README.md); R-numbers are the decisions
 in [decisions.md](decisions.md) and C-numbers are the taste cards below. When a change would break one of them, ask the
 owner first; never ship it and explain later. A new decision takes the next R-number in decisions.md, in the same commit
 as the change it governs.
@@ -34,7 +34,7 @@ blocks; anything else is optional, and the review names about three findings at 
 1. Did it already exist? Name the [product-map.md](product-map.md) entry it extends, or the closest one and why it does
    not fit.
 2. Is it where the table above puts it?
-3. Are the map, the five locales and design.md updated in the same change?
+3. Are the map, the five locales and the design/ pages updated in the same change?
 4. Which cards did it touch, and does each still hold?
 5. Does it work the same in Chat and Projects where both have it?
 

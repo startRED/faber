@@ -1,6 +1,6 @@
 import { type Accessor, createSignal, onCleanup } from 'solid-js';
 
-// The window widths where the shell changes (docs/design.md, "Layout"). ui/styles.css repeats the same two numbers in its
+// The window widths where the shell changes (docs/design/layout.md). ui/styles.css repeats the same two numbers in its
 // media queries, so the first paint is right before any script runs; a screen test checks both sides of each edge.
 //   wide:   1,100 px and more. The sidebar and an open running column sit beside the stage.
 //   mid:    900 to 1,099 px. The sidebar sits beside the stage; an open running column overlays it.

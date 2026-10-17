@@ -1,7 +1,7 @@
 import themes from '../../src-tauri/src/themes.json';
 import { check, equal, ok } from './check.ts';
 
-// One grammar (docs/design.md, "One grammar"): the same control heights, text sizes and timings everywhere, read from the real
+// One grammar (docs/design/looks.md, "One grammar"): the same control heights, text sizes and timings everywhere, read from the real
 // stylesheet, and the timers and observers that must not run while nobody looks.
 
 /** Every style rule of the page, with the groups (media, supports, container) opened. */

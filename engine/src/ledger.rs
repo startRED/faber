@@ -13,7 +13,7 @@ const KEEP_POINTS: usize = 200;
 const KEEP_SPANS: usize = 200;
 const KEEP_STRETCHES: usize = 60;
 /// How long a vendor's counter may trail real use: measured at 4.1 min (Claude) and under 0.5 min (Codex), with margin
-/// (docs/design.md "Quota lag, measured"). Work that ended
+/// (docs/product/quota-pacing.md "Quota lag, measured"). Work that ended
 /// within this long ago may not be in the reading yet.
 pub const LAG_CLAUDE: f64 = 10.0 * 60.0;
 pub const LAG_CODEX: f64 = 5.0 * 60.0;

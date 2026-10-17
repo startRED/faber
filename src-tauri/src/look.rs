@@ -1,6 +1,6 @@
 //! The look engine: it turns the user's appearance choices into CSS variables. Every colour rule lives here, so the
 //! screen never computes a colour and `cargo test` covers the rules with no window. The tokens come from
-//! `themes.json` (docs/design.md, "Looks").
+//! `themes.json` (docs/design/looks.md).
 
 use serde::Serialize;
 use serde_json::{Map, Value};

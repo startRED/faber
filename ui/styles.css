@@ -1,4 +1,4 @@
-/* The screen (docs/design.md, "Looks"). One structure for every look: every colour, size, radius, duration and shadow is a
+/* The screen (docs/design/looks.md). One structure for every look: every colour, size, radius, duration and shadow is a
    token. The look engine in the shell writes the tokens on <html> (src-tauri/src/themes.json is their only source), so
    a theme, a preset and a theme file are only different values for the same names. */
 

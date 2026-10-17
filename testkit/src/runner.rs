@@ -107,7 +107,7 @@ fn run_lint(root: &Path, jobs: usize, log: &mut Log) -> Vec<Outcome> {
         let name = format!("cargo {}", cross::PROOF.join(" "));
         let mut command = cargo_command();
         outcomes.push(match cross::find_zig() {
-            None => Outcome::skipped(Suite::Lint, &name, "needs zig on PATH (docs/design.md#screen-tests)"),
+            None => Outcome::skipped(Suite::Lint, &name, "needs zig on PATH (docs/dev/testing.md#screen-tests)"),
             Some(zig) => match cross::use_zig(&mut command, &zig) {
                 Ok(()) => lint(command, root, cross::PROOF, jobs, log),
                 Err(e) => Outcome::fail(Suite::Lint, &name, None, &format!("cannot find the runner: {e}")),

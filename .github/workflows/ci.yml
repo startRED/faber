@@ -337,16 +337,27 @@ jobs:
             app) cargo t --build-only ;;
           esac
 
+  # The living documents stay small, listed in docs/README.md and linked right (scripts/docs.mjs). It runs for every
+  # change, words only included, and takes seconds, so it needs no plan.
+  docs:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - run: node scripts/docs.mjs
+
   # One check that is green only when CI is (R174): phase-1-base requires it, so a pull request set to merge by itself
   # lands the moment every part passed, and never on a red, cancelled or wrongly skipped one. Green means what it means
   # for main below: every job passed, or the plan left it out on purpose.
   gate:
-    needs: [changes, check, app, screen]
+    needs: [changes, docs, check, app, screen]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - env:
           CHANGES: ${{ needs.changes.result }}
+          DOCS: ${{ needs.docs.result }}
           CHECK: ${{ needs.check.result }}
           APP: ${{ needs.app.result }}
           SCREEN: ${{ needs.screen.result }}
@@ -357,6 +368,7 @@ jobs:
         run: |
           ok() { [ "$1" = success ] || { [ "$1" = skipped ] && [ "$2" = false ]; }; }
           [ "$CHANGES" = success ] || { echo "::error::changes: $CHANGES"; exit 1; }
+          [ "$DOCS" = success ] || { echo "::error::docs: $DOCS"; exit 1; }
           ok "$CHECK" "$PLAN_CHECK" || { echo "::error::check: $CHECK"; exit 1; }
           ok "$APP" "$PLAN_APP" || { echo "::error::app: $APP"; exit 1; }
           ok "$SCREEN" "$PLAN_TESTED" || { echo "::error::screen: $SCREEN"; exit 1; }
@@ -391,8 +403,8 @@ jobs:
   # releases behind it. One landing at a time. When phase-1-base moved while the checks ran, the commit is rebased onto it
   # and checked again; a conflict stops here and the queue branch waits for its author.
   # Green is the gate's green. It runs after the gate, because phase-1-base takes only a commit whose gate passed.
-  # queue/pr-<n> is a pull request that scripts/land.mjs squashed and numbered (docs/design.md#numbers): when it lands, its
-  # branch moves to the landed commit so GitHub shows it merged, from the head that was squashed only (the commit's
+  # queue/pr-<n> is a pull request that scripts/land.mjs squashed and numbered (docs/dev/workflow.md#numbers): when it
+  # lands, its branch moves to the landed commit so GitHub shows it merged, from the head that was squashed only (the commit's
   # Pull-request-head line), so a later push stops the landing instead of being lost. When phase-1-base moved, it is
   # squashed and numbered again on the new base rather than rebased, since its numbers would collide.
   land:
@@ -446,7 +458,7 @@ jobs:
             fi
           fi
           # GitHub refuses this run's token any push of a commit that changes a workflow file, so such a landing ends on
-          # the PC that queued it: `land.mjs --finish` there, once this gate is green (docs/design.md#numbers).
+          # the PC that queued it: `land.mjs --finish` there, once this gate is green (docs/dev/workflow.md#numbers).
           if git diff --name-only origin/phase-1-base "$GITHUB_SHA" -- .github/workflows | grep -q .; then
             if [ -n "$pr" ] && git merge-base --is-ancestor origin/phase-1-base "$GITHUB_SHA"; then
               echo "::error::#$pr changes a workflow, which this token may not push. Its gate is green: land it with node scripts/land.mjs $pr --finish"

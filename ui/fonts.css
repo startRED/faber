@@ -1,4 +1,4 @@
-/* The fonts of the looks (docs/design.md, "Looks"). Latin and latin-extended only: they cover English, Portuguese,
+/* The fonts of the looks (docs/design/looks.md). Latin and latin-extended only: they cover English, Portuguese,
    Spanish, French and German. A face downloads only when a look draws with it. The static families come from their
    packages as they are; the variable ones are written out here so that only those two subsets are bundled. */
 @import '@fontsource/ibm-plex-sans/latin-400.css';

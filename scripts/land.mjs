@@ -1,6 +1,6 @@
 // Lands a pull request through the queue (R162): squashed into one commit on top of the newest phase-1-base and numbered
 // there, so its numbers are given only when it lands and two pull requests never wait on each other's
-// (docs/design.md#numbers).
+// (docs/dev/workflow.md#numbers).
 //
 //   node scripts/land.mjs <pull request> [--dry-run] [--head <commit>]
 //
@@ -37,7 +37,7 @@ export function message(title, number, body, head) {
 export const conflicts = (output) => [...new Set(output.split('\n').slice(1).map((l) => l.trim()).filter(Boolean))];
 
 /** Files whose conflicts land settles itself: words only, where two lanes adding rows or paragraphs at one place is
- * the usual case and never a contradiction (docs/design.md#numbers). */
+ * the usual case and never a contradiction (docs/dev/workflow.md#numbers). */
 export const WORDS = /\.md$/;
 
 /**

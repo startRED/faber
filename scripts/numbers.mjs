@@ -1,6 +1,6 @@
 // Decision numbers (docs/decisions.md) and what's-new ids (`notes.<id>.<kind>` in ui/locales/*.ts) are given when a
 // change lands, never in a branch: parallel lanes that each took "the next one" collided at every merge, and lanes that
-// each appended to the same lines conflicted at every merge (docs/design.md#numbers).
+// each appended to the same lines conflicted at every merge (docs/dev/workflow.md#numbers).
 //
 //   node scripts/numbers.mjs assign [--amend]   folds docs/next/*.json in, numbers every placeholder after a fresh
 //                                               origin/phase-1-base, and commits; --amend puts it in the last commit and

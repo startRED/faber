@@ -1,6 +1,6 @@
 # Task queue
 
-What a session does next when it finishes a task, without asking (docs/design.md#task-queue). One file per task:
+What a session does next when it finishes a task, without asking (docs/dev/workflow.md#task-queue). One file per task:
 `<order>-<name>.md`, lowest order first (`010-`, `020-`; leave gaps to slot one in). The file holds a `# Title` line and
 then the brief a fresh session needs: the task, the files or area, what done looks like. The owner decides what goes here
 and in what order; a session may add a follow-up it found, after the owner's tasks.

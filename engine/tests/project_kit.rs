@@ -328,6 +328,11 @@ fn scoped_project_sections_and_named_proofs_generate_inventory_without_fixed_loa
     assert_eq!(tools.len(), 4);
     assert_eq!(tools.iter().filter(|t| t.form == Form::Check).count(), 2);
     assert_ne!(tools[0].content_hash, tools[1].content_hash);
+    // The design and roadmap live in folders of small pages.
+    for path in ["docs/design/looks.md", "docs/product/areas.md", "docs/dev/testing.md"] {
+        let page = vec![SourceFile { path: path.into(), text: "# Page\n## Part\nA rule.\n".into() }];
+        assert_eq!(project_inventory(&page, &[]).unwrap().len(), 2, "{path}");
+    }
     assert!(project_inventory(&[SourceFile { path: ".claude/config.json".into(), text: "do not read".into() }], &[]).is_err());
 }
 

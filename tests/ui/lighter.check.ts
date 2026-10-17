@@ -8,7 +8,7 @@ import { Projects } from '../../ui/Projects.tsx';
 import { Running } from '../../ui/Running.tsx';
 import { check, equal, ok } from './check.ts';
 
-// Lighter code (docs/design.md, "One grammar"): no timer runs while nobody looks, animated lists share what they can, and
+// Lighter code (docs/design/looks.md, "One grammar"): no timer runs while nobody looks, animated lists share what they can, and
 // the mission screens that nothing opened are gone from the page.
 
 const settle = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
