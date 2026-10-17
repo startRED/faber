@@ -1,0 +1,5 @@
+{
+  "decisions": [
+    "| R-next | 2026-10-17 | Nobody waits on CI. Right after opening a pull request its lane queues it with `node scripts/land.mjs <number>` and goes on to the next task; it never watches CI. `land.mjs` puts a pending `queue` status on the pull request, and when the queued commit fails its checks or cannot land, CI's `report` job turns that status red and comments on the pull request, which wakes the session that opened it. The fix is pushed and queued again. `gh pr merge --auto --squash` stays only for a pull request `land.mjs` cannot take. Amends R173. Measured on 2026-10-17: CI, merges and conflicts took 590 session-minutes of the last 20 hours. | Owner (2026-10-17: end every wait), details AI |"
+  ]
+}

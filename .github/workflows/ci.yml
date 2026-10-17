@@ -398,6 +398,7 @@ jobs:
       contents: write
       actions: write
       pull-requests: read
+      statuses: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -484,3 +485,31 @@ jobs:
           git push --force origin "HEAD:refs/heads/$branch"
           gh workflow run ci.yml --ref "$branch"
           echo "phase-1-base moved; $branch was rebased and is checked again."
+
+  # A queued pull request (queue/pr-<n>) whose checks or landing failed says so on the pull request itself: a red `queue`
+  # status on the head that was queued and a comment, which wake the session that opened it, so nobody watches the queue
+  # (R-next). The fix is pushed to the pull request and queued again with scripts/land.mjs.
+  report:
+    needs: [gate, land]
+    if: >-
+      always() && startsWith(github.ref, 'refs/heads/queue/pr-') && github.event_name != 'pull_request' &&
+      (needs.gate.result == 'failure' || needs.land.result == 'failure')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v5
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          FAILED: ${{ needs.gate.result == 'failure' && 'its checks failed' || 'it could not land on phase-1-base' }}
+        run: |
+          set -euo pipefail
+          pr=${GITHUB_REF#refs/heads/queue/pr-}
+          oid=$(git log -1 --format='%(trailers:key=Pull-request-head,valueonly)' "$GITHUB_SHA" | tr -d '[:space:]')
+          if [ -z "$oid" ]; then echo "No Pull-request-head line: nothing to report."; exit 0; fi
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$oid" -f state=failure -f context=queue -f target_url="$RUN" \
+            -f description="Queued, but $FAILED. Fix, push, then: node scripts/land.mjs $pr"
+          gh pr comment "$pr" --body "Queued as \`$GITHUB_SHA\`, but $FAILED: $RUN. Push the fix, then queue it again with \`node scripts/land.mjs $pr\`."

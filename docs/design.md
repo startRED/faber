@@ -959,11 +959,17 @@ a lane on another machine is not seen.
 ### Merge on green
 
 `phase-1-base` requires one check, `gate` (R173): a job in `ci.yml` that is green only when `changes`, `check`, `app` and
-`screen` passed or were left out on purpose by the plan. A pull request is set to merge itself with
-`gh pr merge --auto --squash` once its local proofs pass; GitHub squashes it the moment the gate is green, and nobody waits
-on CI. The rule is not strict, so a pull request behind `phase-1-base` still merges; the run on `phase-1-base` that
-follows is what `main` waits for (R127). `main` and the queue (R162) run after the gate, so the queue only pushes a
-commit whose gate passed.
+`screen` passed or were left out on purpose by the plan. The rule is not strict, so a commit behind `phase-1-base` still
+lands; the run on `phase-1-base` that follows is what `main` waits for (R127). `main` and the queue (R162) run after the
+gate, so the queue only pushes a commit whose gate passed.
+
+Nobody waits on CI (R-next). Right after opening a pull request, its lane runs `node scripts/land.mjs <number>`
+([Numbers](#numbers)) and goes on to its next task. `land.mjs` puts a pending `queue` status on the pull request's head.
+When the queued commit's gate or its landing fails, the `report` job turns that status red and comments on the pull
+request with the run, which wakes the session that watches it (the app's auto-fix). The fix is pushed to the pull
+request and queued again with `land.mjs`; a push alone never lands, since the landing stops at a head it did not squash.
+`gh pr merge --auto --squash` still works for a pull request without numbers or conflicts that `land.mjs` cannot take,
+such as one from a fork: GitHub squashes it the moment the gate is green.
 
 ### Red base
 
