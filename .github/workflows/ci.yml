@@ -328,17 +328,38 @@ jobs:
             app) cargo t --build-only ;;
           esac
 
+  # One check that is green only when CI is (R-next): phase-1-base requires it, so a pull request set to merge by itself
+  # lands the moment every part passed, and never on a red, cancelled or wrongly skipped one. Green means what it means
+  # for main below: every job passed, or the plan left it out on purpose.
+  gate:
+    needs: [changes, check, app, screen]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          CHANGES: ${{ needs.changes.result }}
+          CHECK: ${{ needs.check.result }}
+          APP: ${{ needs.app.result }}
+          SCREEN: ${{ needs.screen.result }}
+          PLAN_CHECK: ${{ needs.changes.outputs.check }}
+          PLAN_APP: ${{ needs.changes.outputs.app }}
+          PLAN_TESTED: ${{ needs.changes.outputs.tested }}
+        shell: bash
+        run: |
+          ok() { [ "$1" = success ] || { [ "$1" = skipped ] && [ "$2" = false ]; }; }
+          [ "$CHANGES" = success ] || { echo "::error::changes: $CHANGES"; exit 1; }
+          ok "$CHECK" "$PLAN_CHECK" || { echo "::error::check: $CHECK"; exit 1; }
+          ok "$APP" "$PLAN_APP" || { echo "::error::app: $APP"; exit 1; }
+          ok "$SCREEN" "$PLAN_TESTED" || { echo "::error::screen: $SCREEN"; exit 1; }
+          echo "Every part the plan chose passed."
+
   # main follows every green phase-1-base commit on its own (R127), so nobody has to remember to move it.
   # Fast-forward only: a commit that is already in main, or a main that moved on its own, stops here without failing.
-  # A job the plan left out is skipped on purpose and counts as green; a failed, cancelled or wrongly skipped one never does.
   main:
-    needs: [changes, check, app, screen]
+    needs: gate
     if: >-
       always() && github.event_name == 'push' && github.ref == 'refs/heads/phase-1-base' &&
-      needs.changes.result == 'success' &&
-      (needs.check.result == 'success' || (needs.check.result == 'skipped' && needs.changes.outputs.check == 'false')) &&
-      (needs.app.result == 'success' || (needs.app.result == 'skipped' && needs.changes.outputs.app == 'false')) &&
-      (needs.screen.result == 'success' || (needs.screen.result == 'skipped' && needs.changes.outputs.tested == 'false'))
+      needs.gate.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -360,15 +381,12 @@ jobs:
   # newest phase-1-base, so a commit that is red on one system never reaches the shared branch and never stalls the
   # releases behind it. One landing at a time. When phase-1-base moved while the checks ran, the commit is rebased onto it
   # and checked again; a conflict stops here and the queue branch waits for its author.
-  # Green means what it means for main above: every job passed, or the plan left it out on purpose.
+  # Green is the gate's green. It runs after the gate, because phase-1-base takes only a commit whose gate passed.
   land:
-    needs: [changes, check, app, screen]
+    needs: gate
     if: >-
       always() && startsWith(github.ref, 'refs/heads/queue/') && github.event_name != 'pull_request' &&
-      needs.changes.result == 'success' &&
-      (needs.check.result == 'success' || (needs.check.result == 'skipped' && needs.changes.outputs.check == 'false')) &&
-      (needs.app.result == 'success' || (needs.app.result == 'skipped' && needs.changes.outputs.app == 'false')) &&
-      (needs.screen.result == 'success' || (needs.screen.result == 'skipped' && needs.changes.outputs.tested == 'false'))
+      needs.gate.result == 'success'
     runs-on: ubuntu-latest
     concurrency:
       group: land

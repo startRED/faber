@@ -22,6 +22,14 @@ check('hole: the shadow is dark, the photon ring around it is lit, and the disk 
   ok(lit > 10, `the disk should be lit along its plane, ${lit} of 40 samples were`);
 });
 
+check('hole: the disk keeps close to the shadow instead of filling the stage', () => {
+  const { cx, cy, R } = F;
+  for (const k of [3.8, 4.5, 5.5]) {
+    const c = at(cx - k * R * Math.cos(0.42), cy + k * R * Math.sin(0.42));
+    ok(!(c.tone >= DISK && c.tone < DISK + 5 && c.d > 0.08), `${k} radii out along its plane the disk is dark, got ${c.d} in tone ${c.tone}`);
+  }
+});
+
 check('hole: the scene moves with time and is the same at the same moment', () => {
   const { cx, cy, R } = F;
   const points = Array.from({ length: 40 }, (_, k) => [cx - (2 + k * 0.05) * R * Math.cos(0.42), cy + (2 + k * 0.05) * R * Math.sin(0.42)] as const);
@@ -33,9 +41,9 @@ check('hole: the scene moves with time and is the same at the same moment', () =
 check('hole: the whole shadow and its arc show right of the words, cut by no edge', () => {
   for (const [w, h, words] of [[1660, 935, 720], [1660, 935, 870], [1600, 1000, 640], [1200, 800, 700], [2400, 1300, 900]] as const) {
     const f = frame(w, h, words);
-    ok(f.R >= 0.16 * h - 0.01 && f.R <= 0.3 * h + 0.01, `${w}x${h}: the radius stays between 16% and 30% of the height`);
+    ok(f.R >= 0.14 * h - 0.01 && f.R <= 0.22 * h + 0.01, `${w}x${h}: the radius stays between 14% and 22% of the height`);
     const inside = f.cx - 1.6 * f.R >= words + 150 - 0.01 && f.cx + 1.6 * f.R <= w - 27;
-    ok(inside || f.R <= 0.16 * h + 0.01, `${w}x${h}: the arc stays clear of the column and off the right edge unless the room is too small`);
+    ok(inside || f.R <= 0.14 * h + 0.01, `${w}x${h}: the arc stays clear of the column and off the right edge unless the room is too small`);
     ok(f.cy - 1.8 * f.R >= 27, `${w}x${h}: the arc stays off the top edge`);
     ok(f.qx > words && f.qx < w && f.qy + f.qr < h, `${w}x${h}: the planet sits inside the room, right of the words`);
   }

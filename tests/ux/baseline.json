@@ -1,3 +1,11 @@
 {
-  "known": []
+  "note": "Composition findings of 2026-10-16 (V1 to V3). The lane project-home-calm removes the project home's lines when it lands; the Chat home's uneven columns are a task of their own.",
+  "known": [
+    { "fingerprint": "3f1cb9f2395717cf", "what": "V1 project.new h2: the pick-up heading sits on the black hole's light (1920x1080)" },
+    { "fingerprint": "0d80c399590ca79d", "what": "V1 project.new span.t: the pick-up titles sit on the black hole's lit disk (1920x1080)" },
+    { "fingerprint": "72c1b773b20681fb", "what": "V1 project.new span.s: the pick-up rows' second lines sit on the black hole's light (1920x1080)" },
+    { "fingerprint": "7f03e3b5af0f9a79", "what": "V2 project.new demo: the project's name in four places (sidebar, crumb, header, pick-up row)" },
+    { "fingerprint": "db1d0f7e08c3d3e2", "what": "V3 project.new div.welcome-grid: the two columns end 40 px apart (1920x1080)" },
+    { "fingerprint": "5abdff2f87e48241", "what": "V3 chat.new div.welcome-grid: the Chat home's two columns end 40 px apart (1920x1080)" }
+  ]
 }

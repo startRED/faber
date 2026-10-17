@@ -170,9 +170,9 @@ accident. `tests/ui/grammar.check.ts` reads the real stylesheet and fails on a b
   - **Workbench:** a flow line at the top right reading "Your idea → Claude and Codex → Done, with proof". It names only
     the vendors that are connected.
 - The first screen of a project (where a new session starts) in Dark Room also shows a black hole drawn in monospace
-  characters on one canvas (ui/Hole.tsx, --amb-hole and --hole-colors): the whole shadow, centred in the room from 150 px right of the column with its arc clear of every edge (16% to 30% of the height), an amber disk sweeping in from the lower left
+  characters on one canvas (ui/Hole.tsx, --amb-hole and --hole-colors): the whole shadow, centred in the room from 150 px right of the column with its arc clear of every edge (14% to 22% of the height), an amber disk sweeping in from the lower left that reaches 3.6 radii and fades from 2.6, so the scene keeps to the room beside the column instead of filling the stage,
   with fibres that turn faster near the hole, the far side of the disk bent over the top as a cool arc, a photon ring, a
-  dim glow, a small planet below it and stars. It has no hard edge beside the column of words: behind the column it keeps 14% of its light, comes up to full
+  dim glow, a small planet below it and stars. It has no hard edge beside the column of words: behind the column it keeps 6% of its light, comes up to full
   from 40 px left of the column's edge to 240 px right of it and dims the hole a little more within 320 px, across the
   whole height, so words that scroll in the column always sit on the same veil. The veil follows the edge of the words, not only the window: when the column's words change (a list opens, a longer name shows) it is laid again, once a frame at most and only when that edge moved. The project screens show no beam of light. With less than 400 px of room it does not show or run.
   Ten times a second it works out again only the cells the hole can reach and repaints those that changed; stars
@@ -266,7 +266,9 @@ inside its own area.
 - The titlebar has the lockup and the window controls. Dragging and double-click maximize keep working, and macOS keeps
   its native buttons.
 - The topbar has a crumb ("Chat › title" or "Project › title") and the run button. The model is not shown there: it is
-  chosen in the composer and each answer names the one it used (R168). With nothing running the button reads "Nothing running". Otherwise it reads "{n} running". When an
+  chosen in the composer and each answer names the one it used (R168). With nothing running the button reads "Nothing running" as quiet second-ink words with no outline or
+  fill (styled from the absence of the live mark, `.run-btn:not(:has(.live))`); the outline comes back on hover,
+  keyboard focus and while the column is open. Otherwise it reads "{n} running". When an
   item needs the user it turns amber, shows the speech bubble and reads "{n} running · {m} needs you". The words are
   always visible.
 
@@ -563,12 +565,15 @@ machinery and the shell its commands (product-map.md, Shell commands). The Proje
 
 - With no project open, the small "Open a project" screen (`ui/Projects.tsx`): the empty state with its one button, the
   recent folders and saved environments, and at most three project conversations to pick up.
-- With a project open, the new-conversation screen of Chat (`welcome-grid`) scoped to the folder: Curioso, the project and
-  its folder in short form (the last two folder names, the full path on hover), the greeting, the shared composer, and at
-  most three conversations to pick up. No beam of light: a project screen is a place to work; in Dark Room the black hole
-  sits behind it. The sidebar lists the projects, and every setting of a project (the tool policy, the code access, the
-  self-update switch and the checks) is in Settings, Projects (C011), one closed entry per project with one row per option
-  with one short line and the rest behind the "?" of the row.
+- With a project open, the new-conversation screen of Chat (`welcome-grid project`) scoped to the folder, in one column:
+  Curioso, the project and its folder in short form as one quiet line in the interface size (the last two folder names,
+  the full path on hover; the sidebar and the crumb already name it), the greeting "What should we tackle?", the shared
+  composer, and under it at most three of this project's own conversations to pick up, each saying only when. No
+  suggestions (the composer's hints show what to ask) and no second column. No beam of light: a project screen is a place
+  to work; in Dark Room the black hole keeps to the room on the right, so no words sit on its bright part. The sidebar
+  lists the projects, and every setting of a project (the tool policy, the code access, the self-update switch and the
+  checks) is in Settings, Projects (C011), one closed entry per project with one row per option with one short line and
+  the rest behind the "?" of the row.
 
 ### Records
 
@@ -789,6 +794,23 @@ screen, which owns the locale files.
   itself: it moves no focus at any width, nothing behind it becomes inert, and it ends above the composer so the
   composer is never covered. Opened by the user, the overlay is modal.
 
+## Screen cards
+
+One card per main screen: what it is for, the one action that leads, what never goes on it, and the photo a critique
+compares against (R172). What the screen holds is in [product-map.md](product-map.md#screens-and-surfaces) and how it
+looks in the sections above; a card only says what must not drift. The approved photo is the one the UX sentinel's
+composition scenario takes (`target/faber-test/shots/`, kept by CI with every run), at 1920x1080 and at 1280x800 in Dark
+Room. A change that moves a card's line updates the card in the same commit and says so in its visual critique. Today's
+photo of a project's home breaks its card (the findings in `tests/ux/baseline.json`); the first one after the lane
+project-home-calm lands, with those lines gone, is its approved photo.
+
+| Screen | For | Main action | Never on it | Approved photo |
+| :--- | :--- | :--- | :--- | :--- |
+| Chat home ([map](product-map.md#screens-and-surfaces), [layout](#the-new-conversation-screen)) | Starting or picking up a conversation | Writing in the composer | Settings, switches, a second model picker, another area's rows | `critique-chat-home-1920x1080.png`, `-1280x800.png` |
+| A project's home ([map](product-map.md#screens-and-surfaces), [layout](#the-projects-home)) | Giving the agent work in this project's folder | Writing the goal in the composer | Chat's suggestions, hints or conversations; the project's settings (Settings, Projects); art behind the words; the project's name more than twice | `critique-project-home-1920x1080.png`, `-1280x800.png` |
+| An open conversation ([map](product-map.md#screens-and-surfaces), [work log](#work-log)) | Reading the work and answering it | Answering in the composer, or the card that needs the person | Settings beyond one status line; technical logs outside a fold; motion on text being read | `critique-conversation-1920x1080.png`, `-1280x800.png` |
+| Settings ([map](product-map.md#settings-screen), [layout](#settings)) | Changing how Faber behaves, one short line per option | Choosing an option in the section that is open | Work (a conversation, a goal); explanations longer than a line outside "Learn more"; a new section where one fits | `critique-settings-1920x1080.png`, `-1280x800.png` |
+
 ## Screen tests
 
 Faber's own test runner (`cargo t`, the `testkit/` crate) tests the screen in two ways, both against a hidden test build
@@ -924,6 +946,15 @@ lead session, CI) and detached worktrees (Faber's own missions, test workspaces)
 once its last commit is on `phase-1-base`; a claim nobody saved for a day is stale and ignored. Claims live on one PC:
 a lane on another machine is not seen.
 
+### Merge on green
+
+`phase-1-base` requires one check, `gate` (R173): a job in `ci.yml` that is green only when `changes`, `check`, `app` and
+`screen` passed or were left out on purpose by the plan. A pull request is set to merge itself with
+`gh pr merge --auto --squash` once its local proofs pass; GitHub squashes it the moment the gate is green, and nobody waits
+on CI. The rule is not strict, so a pull request behind `phase-1-base` still merges; the run on `phase-1-base` that
+follows is what `main` waits for (R127). `main` and the queue (R162) run after the gate, so the queue only pushes a
+commit whose gate passed.
+
 ### Red base
 
 A commit pushed onto a red `phase-1-base` waits behind the failure, and `main` cannot follow it (R127); on 2026-10-16 a
@@ -972,12 +1003,29 @@ rest. The design is in `docs/superpowers/specs/2026-10-12-ux-sentinel-design.md`
 - **Scenarios.** Panels move through frames and reduced motion moves nothing (M1, M6). A permission card arrives
   through frames (M1, dialogs). The composer grows and shrinks and the end of the thread stays clear (I1 to I5, L4,
   L5; the cap is measured against the window height, 40vh). No text is garbled in five languages, and a title with `› « » ß ç ã` survives the engine's file (T1; the static scan in
-  `tests/ui/mojibake.check.ts` covers every locale and source string).
+  `tests/ui/mojibake.check.ts` covers every locale and source string). The main screens keep their composition at
+  1920x1080 and 1280x800 (V1 to V3, below).
+- **Composition.** V1: no text a person reads sits on lit art. The screen is photographed twice with its letters made
+  transparent, with and without the art (`.ambient`, `canvas.amb-hole`), and the light the art adds under each text's
+  glyph boxes (`Range.getClientRects()`, 99th percentile of the brightest channel, so a grain of dust does not count)
+  stays at or under 77 of 255, the bound of `tests/ui/hole.check.ts`. V2: a name the person gave (a project, a
+  conversation) or a heading shows in at most two places; a kind of element is one place, so a list naming the project
+  on each row is one. V3: two side-by-side columns of a grid, each at least 240x120 px, end within 8 px of each other;
+  a frame that runs to the window's bottom, or a column that scrolls, does not count. All three are high.
 - **Findings and the gate.** A finding is the hash of kind, screen, surface and element. Only critical and high
   findings whose hash is not in `tests/ux/baseline.json` fail a run; medium ones are written down and become tasks. The
   file is a ratchet: it lists what is known, and a fix removes its line. Findings go to
   `target/faber-test/ux/<scenario>.json` and raw frame traces to `target/faber-test/ux/traces/`. Nothing records the
   person's screen.
+
+### Visual critique
+
+Checks see code and motion, not a screen as a whole (R172). The sentinel's scenario "the main screens keep their
+composition" photographs the Chat home, a project's home, an open conversation and Settings at 1920x1080 and 1280x800 in
+Dark Room and pt-BR (`target/faber-test/shots/critique-<screen>-<size>.png`). `node scripts/shots.mjs <label>` runs it and
+copies the photos of the screens the diff touches into `target/faber-test/critique/<label>/` with an index;
+`scripts/shots.test.mjs` keeps the choice of screens. A fresh session scores the `before` and `after` folders out of 40
+with `.claude/skills/visual-critique/SKILL.md`; the score never drops and a touched screen reaches 32.
 
 
 ## Auto quota pacing

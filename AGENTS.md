@@ -36,7 +36,8 @@ for how Faber works today. This file stays short: each line prevents a real mist
   average, not a target), and never leave proven work unpushed. CI fast-forwards `main` to each green `phase-1-base`
   commit by itself (never force, never a red commit), so `main` keeps close behind (R126, R127, R143). Lane work (a
   branch or worktree) enters `phase-1-base` as one squashed pull request that fills `.github/pull_request_template.md`
-  and whose title is a commit title (`pr-title` checks it). A small proven commit goes through the queue instead of
+  and whose title is a commit title (`pr-title` checks it), set to merge itself once CI is green
+  (`gh pr merge --auto --squash`, R173). A small proven commit goes through the queue instead of
   straight there: `git push origin HEAD:refs/heads/queue/<name>`; CI lands it on `phase-1-base` and `main` only when
   every system is green, and a red one waits on its queue branch for its author to fix (R162). Right before a merge,
   `node scripts/numbers.mjs assign` turns `R-next` and `notes.next` into real numbers.
