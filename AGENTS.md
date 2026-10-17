@@ -37,10 +37,12 @@ for how Faber works today. This file stays short: each line prevents a real mist
   average, not a target), and never leave proven work unpushed. CI fast-forwards `main` to each green `phase-1-base`
   commit by itself (never force, never a red commit), so `main` keeps close behind (R126, R127, R143). Lane work (a
   branch or worktree) enters `phase-1-base` as one squashed pull request that fills `.github/pull_request_template.md`
-  and whose title is a commit title (`pr-title` checks it), set to merge itself once CI is green
-  (`gh pr merge --auto --squash`, R173). A pull request that carries numbers (a `docs/next/` file or `R-next`) lands
-  with `node scripts/land.mjs <number>` instead: it squashes and numbers it on `phase-1-base` and queues it, and CI
-  lands it and marks it merged. A small proven commit goes through the queue too: `git push origin
+  and whose title is a commit title (`pr-title` checks it). Right after opening it, `node scripts/land.mjs <number>`
+  queues it: it squashes it onto `phase-1-base`, gives its numbers there, and CI lands it and marks it merged once every
+  system is green. Then the lane goes on to its next task and never watches CI: a red queue run turns the pull
+  request's `queue` check red, which wakes its session, and the fix is pushed and queued again with `land.mjs`
+  (R-next). `gh pr merge --auto --squash` (R173) stays for a pull request `land.mjs` cannot take, such as one from a
+  fork. A small proven commit goes through the queue too: `git push origin
   HEAD:refs/heads/queue/<name>`; CI lands it on `phase-1-base` and `main` only when every system is green, and a red
   one waits on its queue branch for its author to fix (R162). Nobody merges the base into a branch only to keep up.
 - A red `phase-1-base` comes first: fix it, or keep your commits until it is green. `cargo t` shows it (`BASE` lines)

@@ -91,6 +91,12 @@ function land(number, dry, given) {
     console.error(`queue/pr-${pr.number} was not replaced: when another landing of #${pr.number} queued it meanwhile, that newer one stands.`);
     return 1;
   }
+  // A `queue` status on the pull request shows it is queued; the report job of ci.yml turns it red if the queue fails.
+  try {
+    run('gh', ['api', `repos/{owner}/{repo}/statuses/${head}`, '-f', 'state=pending', '-f', 'context=queue', '-f', `description=Queued as ${commit.slice(0, 9)}; CI lands it once green`]);
+  } catch {
+    // Only a light on the pull request: the landing goes on without it.
+  }
   console.log(`#${pr.number} is queued as ${commit.slice(0, 9)} on queue/pr-${pr.number}. CI checks it, lands it and marks the pull request merged.`);
   return 0;
 }

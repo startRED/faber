@@ -31,3 +31,4 @@ Visual critique: before X/40, after Y/40, by <session>
 - [ ] `cargo fmt --all --check`, both `cargo clippy` commands
 - [ ] `cargo t` (`cargo t --all` when the screen or the shell changed)
 - [ ] `docs/product-map.md` and `docs/design.md` updated when they needed it
+- [ ] Queued with `node scripts/land.mjs <number>` right after opening; CI lands it, nobody waits on it
