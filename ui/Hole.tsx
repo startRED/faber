@@ -2,9 +2,9 @@ import { createEffect, createSignal, onCleanup, onMount } from 'solid-js';
 import type { Box } from './Ambient.tsx';
 import { appliedLook, motion, windowFocused, windowHidden } from './appearance.ts';
 
-// The black hole behind a new project session (docs/design.md, "Effects"): one canvas of monospace characters. A huge
-// shadow clear of every edge, an accretion disk sweeping in from the lower left on a tilted plane, the far side of the
-// disk bent over the top as an arc, a thin photon ring, a dim glow, a small planet and stars. The
+// The black hole behind a new project session (docs/design.md, "Effects"): one canvas of monospace characters, kept to
+// the room right of the words. A shadow clear of every edge, an accretion disk sweeping in from the lower left on a tilted
+// plane, the far side of the disk bent over the top as an arc, a thin photon ring, a dim glow, a small planet and stars. The
 // disk's fibres turn faster near the hole, the arc and the ring shimmer, stars twinkle and now and then one shoots across; a click
 // on an empty spot sends a ring of the accent. The look's --amb-hole token shows it (Dark Room only) and --hole-colors
 // colours it.
@@ -25,7 +25,7 @@ const BRIGHT = 1.15;
 /** No hard edge where the column of words ends: the scene runs behind it at FLOOR of its light, and comes up to full
  * from FROM px left of the column's edge to TO px right of it. The hole itself is dimmed a little more within CALM px.
  * It is a band across the whole height, so words that scroll in the column always sit on the same veil. */
-const [FLOOR, FROM, TO, CALM] = [0.14, 40, 240, 320];
+const [FLOOR, FROM, TO, CALM] = [0.06, 40, 240, 320];
 /** The shadow keeps this far right of the column, so its arc sits where the scene is nearly at full light. */
 const SIDE = 150;
 /** How much of its light the scene keeps at `x` px, for a column of words ending at `edge` px. */
@@ -34,6 +34,11 @@ export const veil = (x: number, edge: number) => FLOOR + (1 - FLOOR) * smooth(ed
 const ROOM = 400;
 /** How far the arc around the shadow reaches across and up, in radii, and the margin it keeps from the stage's edges, in px. */
 const [WIDE, TALL, EDGE] = [1.6, 1.8, 28];
+/** The disk reaches this far from the centre, in radii, and fades out from FADE: small enough that the scene keeps to the
+ * room right of the words instead of filling the stage. */
+const [REACH, FADE] = [3.6, 2.6];
+/** The shadow's radius, as a share of the stage's height. */
+const [SMALL, LARGE] = [0.14, 0.22];
 
 // The entrance, in ms: Curioso rises and leans toward the hole (styles.css, "wake"), a spark leaves his eyes and lands in
 // the shadow, and the scene lights up from there outward at SPEED px/ms, each character scrambling in the accent before
@@ -92,12 +97,12 @@ export function sky(i: number, out: Cell): Cell {
 
 /** Where the scene sits in a `w` by `h` stage whose words end at `words` px from the left: the whole shadow and its
  * arc in view, centred in the room from SIDE px right of the words, its radius as big as that room allows,
- * between 16% and 30% of the height; and the small planet below it, clear of the disk. The disk alone runs off the edges. */
+ * between 14% and 22% of the height; and the small planet below it, clear of the disk. The disk alone runs off the edges. */
 export type Frame = { cx: number; cy: number; R: number; qx: number; qy: number; qr: number };
 export function frame(w: number, h: number, words: number): Frame {
   const lit = words + SIDE;
   // Tall enough for the arc above and the planet below (1.45 R down, 0.08 R wide), each EDGE px off the stage edge.
-  const R = Math.max(0.16 * h, Math.min(0.3 * h, (w - lit - 2 * EDGE) / (2 * WIDE), (h - 2 * EDGE) / (TALL + 1.53)));
+  const R = Math.max(SMALL * h, Math.min(LARGE * h, (w - lit - 2 * EDGE) / (2 * WIDE), (h - 2 * EDGE) / (TALL + 1.53)));
   const [cx, cy] = [(lit + w) / 2, Math.max(0.45 * h, TALL * R + EDGE)];
   return { cx, cy, R, qx: cx + 0.1 * R, qy: cy + 1.45 * R, qr: Math.max(9, 0.08 * R) };
 }
@@ -122,10 +127,10 @@ export function hole(x: number, y: number, i: number, t: number, f: Frame, out: 
   let [d, a, arc] = [0, 0, false];
   // The disk: brighter on the side that comes at us, its fibres turning faster near the hole.
   const front = Y > 0;
-  if (rd > 1.45 && rd < 6.5 && (front || r > 1)) {
+  if (rd > 1.45 && rd < REACH && (front || r > 1)) {
     const omega = 1.2 * Math.pow(rd, -1.5);
     const fib = fbm(rd * 7.5 + Math.sin(ph * 2) * 0.4, ph * 2.2 - t * omega * 2.4);
-    const profile = smooth(1.42, 1.8, rd) * (0.35 + 0.65 * Math.exp(-(rd - 1.8) / 1.1)) * smooth(6.5, 4.2, rd);
+    const profile = smooth(1.42, 1.8, rd) * (0.35 + 0.65 * Math.exp(-(rd - 1.8) / 1.1)) * smooth(REACH, FADE, rd);
     const disk = profile * (0.45 + 0.75 * fib) * (1 - 0.3 * Math.cos(ph)) * 1.25;
     if (disk > d) {
       d = disk;
@@ -153,7 +158,7 @@ export function hole(x: number, y: number, i: number, t: number, f: Frame, out: 
     return set(out, d, tone, along(a));
   }
   // A dim, sparse, warm glow around the light.
-  const glow = 0.55 * Math.exp(-Math.abs(r - 1.3) / 1.3) * smooth(9, 1.5, rd) + 0.35 * Math.exp(-Math.abs(v) / 0.12) * smooth(7, 2, rd);
+  const glow = 0.55 * Math.exp(-Math.abs(r - 1.3) / 1.3) * smooth(REACH + 1.4, 1.5, rd) + 0.35 * Math.exp(-Math.abs(v) / 0.12) * smooth(REACH + 0.9, 2, rd);
   if (r > 1 && hash(i + 29) < glow * 1.6) return set(out, 0.12 + glow * 0.55, GLOW);
   if (r < 1) return set(out, 0, STAR);
   return sky(i, out);
@@ -357,7 +362,7 @@ export function Hole(props: { avoid: () => Element[] }) {
       const [px, py] = [(x - place.cx) / place.R, (y - place.cy) / place.R];
       const [u, v] = [px * Math.cos(-0.42) + py * Math.sin(-0.42), -px * Math.sin(-0.42) + py * Math.cos(-0.42)];
       const [r, rd] = [Math.hypot(px, py), Math.hypot(u, v / 0.13)];
-      if ((rd > 1.4 && rd < 6.6) || (r > 0.98 && r < 1.9)) moving.push(i);
+      if ((rd > 1.4 && rd < REACH + 0.1) || (r > 0.98 && r < 1.9)) moving.push(i);
       else if (tone[i] === STAR && light[i]! >= 0.05) stars.push(i);
     }
     const now = performance.now();

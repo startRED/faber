@@ -126,6 +126,10 @@ fn looks(ctx: &mut Ctx) -> Result {
     ensure(project["projectLight"] == true && project["chatLight"] == false, || format!("the Projects home has its own light: {project}"))?;
     ensure(moves(&project), || format!("something moves on the Projects home: {project}"))?;
     ensure(app.page.count(&css(".welcome-grid .hello"))? == 1, || "the Projects home has the greeting of a home".into())?;
+    // One column: no suggestions, and under the composer only this project's own conversations (Demo has one).
+    ensure(app.page.count(&css(".welcome-grid .try"))? == 0, || "the Projects home shows the Chat suggestions".into())?;
+    let rows = app.page.count(&css(".welcome-grid .w-main .resume .rrow"))?;
+    ensure(rows == 1, || format!("the Projects home lists {rows} conversations to pick up under its composer, expected exactly 1"))?;
     ctx.shot(&mut app, "homes-project")?;
     // With reduced motion both homes stand completely still and the fields show their plain placeholders.
     system_motion(&mut app.page, true)?;
