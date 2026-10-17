@@ -1,0 +1,5 @@
+{
+  "decisions": [
+    "| R-next | 2026-10-17 | A session that finished a task takes the next one by itself. The list is `docs/tasks/`, one file per task (`<order>-<name>.md`, lowest first, the brief inside), decided by the owner. `node scripts/tasks.mjs next` claims the first free one by creating the branch `claim/<name>` on GitHub, which a second session cannot create again, so two sessions never take one task; a claim older than a day is stale. The pull request that finishes a task deletes its file. The session asks the owner only direction, taste or money, in a short card, and goes on meanwhile. Measured on 2026-10-16 and 17: 416 session-minutes went idle at night between tasks. | Owner (2026-10-17: a continuous queue), details AI |"
+  ]
+}

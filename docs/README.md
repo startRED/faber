@@ -16,6 +16,7 @@ They describe Faber as it is now, so a change updates them in its own commit.
 | [design.md](design.md) | How Faber looks, moves and lays out each screen; the screen tests and their budgets |
 | [roadmap.md](roadmap.md) | Where Faber is going and why: principles, Auto, the two areas, guardrails, architecture, phases |
 | [security-r97-review.md](security-r97-review.md) | The verified security review; its R121/R124 section is kept current |
+| [tasks/](tasks/) | What a session does next, in order, one file per task (`node scripts/tasks.mjs next`) |
 | [brand/](brand/) | Logo sources |
 
 ## Dated pages

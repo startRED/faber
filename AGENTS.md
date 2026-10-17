@@ -48,6 +48,9 @@ for how Faber works today. This file stays short: each line prevents a real mist
   the fix.
 - In a worktree on a branch, claim the areas and files you will change in `.faber-lane` before changing one
   ([design.md](docs/design.md#lane-claims)); `cargo t` refuses unclaimed changes and files another lane claims.
+- When a task is done (its pull request queued), take the next with `node scripts/tasks.mjs next` and start it without
+  asking ([design.md](docs/design.md#task-queue)). Ask the owner only what is theirs (direction, taste, money), in a
+  short card, and go on with the next task meanwhile; stop when no task is free.
 
 ## Before a change a person will see or use
 
