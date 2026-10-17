@@ -31,6 +31,7 @@ use uuid::Uuid;
 
 mod answer;
 mod auto;
+mod browse;
 pub mod facts;
 mod helpers;
 mod parked;
@@ -259,6 +260,8 @@ struct Core {
     me: Weak<Mutex<Core>>,
     /// Conversations in use, the source of truth while the app runs; every change is written through to disk.
     convs: HashMap<String, Conversation>,
+    /// Faber's own browser (R161 step 7), given by the shell where it has one; without it the tool is not offered.
+    browser: Option<std::sync::Arc<dyn crate::browser::Browser>>,
     live: HashMap<String, Live>,
     mission_sessions: HashMap<String, Vec<Session>>,
     /// Owned process trees of writer roles by invocation id, and the terminal event each role reported.
@@ -430,6 +433,7 @@ impl Engine {
                 credit: None,
                 helpers: HashMap::new(),
                 watched: HashMap::new(),
+                browser: None,
             })
         });
         Engine { core, runtime }
@@ -671,6 +675,14 @@ impl Engine {
         self.with(|c| c.terminal(id))
     }
     /// The absolute path of a file in a chat workspace, or None if the path points outside it or is missing.
+    /// Gives the engine Faber's own browser (R161 step 7). Sessions that start afterwards offer it to a project's agent.
+    pub fn set_browser(&self, browser: std::sync::Arc<dyn crate::browser::Browser>) {
+        self.with(|c| c.browser = Some(browser));
+    }
+    /// The picture Faber's browser took for a call, when there is one.
+    pub fn site_picture(&self, id: &str, call: &str) -> Option<PathBuf> {
+        self.with(|c| c.site_picture(id, call))
+    }
     pub fn workspace_file(&self, id: &str, path: &str) -> Option<PathBuf> {
         self.with(|c| c.store.get(id).is_some().then(|| inside_folder(&c.workspace_of(id), path)).flatten().filter(|p| p.is_file()))
     }
@@ -1494,6 +1506,7 @@ impl Core {
                 self.watch_ended(conv, &id);
             }
             EngineEvent::HelperCall { id, input } => return self.start_helper(conv, id, input),
+            EngineEvent::BrowseCall { id, input } => return self.browse(conv, id, input),
             EngineEvent::Permission { request_id, tool, input } => {
                 // A request that touches a credential folder is refused in both modes, with no card (best effort for a command
                 // line: see `touches_credentials`). Full access never shows a card. The answer is decided here, under the lock
@@ -2289,6 +2302,7 @@ impl Core {
         let user_name = c.user_name.clone();
         let (model, effort) = (pick.model.clone(), Some(pick.effort.clone()));
         let helper = self.offers_helper(area, pick.vendor);
+        let browse = self.offers_browser(area, permissions);
         let session = match pick.vendor {
             Vendor::Claude => start_claude(
                 ClaudeOptions {
@@ -2296,6 +2310,7 @@ impl Core {
                     cwd,
                     launch: ClaudeLaunch {
                         helper,
+                        browse,
                         area,
                         model,
                         effort,
@@ -2314,7 +2329,7 @@ impl Core {
             ),
             Vendor::Codex => self
                 .codex_server(area, user_hooks, permissions, &cli)
-                .open(CodexThread { helper, cwd, model, effort, resume, instructions: None, user_name, permissions, tuning }, sink),
+                .open(CodexThread { helper, browse, cwd, model, effort, resume, instructions: None, user_name, permissions, tuning }, sink),
         };
         self.live.insert(
             conv.to_string(),

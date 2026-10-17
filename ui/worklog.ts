@@ -44,6 +44,7 @@ const KINDS: Record<string, Key> = {
   Grep: 'tool.grep',
   WebSearch: 'tool.webSearch',
   WebFetch: 'tool.webFetch',
+  Browser: 'tool.webFetch',
   Agent: 'tool.agent',
   Task: 'tool.agent',
   TodoWrite: 'tool.plan',

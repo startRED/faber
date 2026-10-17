@@ -1727,6 +1727,7 @@ async fn stop_leaves_no_worker(parent_script: &str, why: &str) {
             cwd: dir.path().into(),
             launch: ClaudeLaunch {
                 helper: Default::default(),
+                browse: false,
                 area: Area::Project,
                 model: None,
                 effort: None,

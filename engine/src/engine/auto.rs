@@ -286,6 +286,7 @@ impl Core {
             Vendor::Codex => self.codex_server(Area::Chat, false, Permissions::Isolated, &cli).open(
                 CodexThread {
                     helper: Default::default(),
+                    browse: false,
                     cwd,
                     model,
                     effort,
@@ -303,6 +304,7 @@ impl Core {
                     cwd,
                     launch: ClaudeLaunch {
                         helper: Default::default(),
+                        browse: false,
                         area: Area::Chat,
                         model,
                         effort,

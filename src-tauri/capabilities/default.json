@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The main window listens to engine events and runs its own title bar; every other call goes through Faber's own commands.",
-  "windows": ["main"],
+  "description": "The main screen listens to engine events and runs its own title bar; every other call goes through Faber's own commands. Only the screen's own webview: a page in the browser pane gets nothing.",
+  "webviews": ["main"],
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",

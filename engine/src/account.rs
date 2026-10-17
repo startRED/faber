@@ -204,6 +204,7 @@ pub(crate) async fn claude_limits(cli: &Cli, spawn: &Spawner, cwd: &Path, timeou
     use tokio::io::{AsyncBufReadExt, BufReader};
     let launch = ClaudeLaunch {
         helper: Default::default(),
+        browse: false,
         area: Area::Project,
         model: Some("claude-haiku-5-5".into()),
         effort: Some("low".into()),

@@ -3,6 +3,7 @@
 
 pub mod account;
 pub mod book;
+pub mod browser;
 pub mod budget;
 pub mod cadence;
 pub mod claude;

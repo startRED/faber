@@ -415,6 +415,14 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 .file div { display: flex; align-items: center; gap: 10px; font-size: var(--fs-sm); min-width: 0; }
 .file span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file small { color: var(--ink-3); }
+/* A page Faber's browser opened (R161 step 7): its picture, then its title over its site. */
+.site span { display: grid; }
+.site span b, .site span small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.site span b { font-weight: 500; }
+.site img { width: 100%; max-width: 480px; aspect-ratio: 16 / 10; object-fit: cover; object-position: top; }
+/* The box Faber's browser is placed over: it fills the column and never scrolls, so the page stays where it is drawn. */
+.site-body { display: flex; flex-direction: column; overflow: hidden; }
+.site-view { flex: 1; min-height: 0; border-radius: var(--r-sm); background: var(--s3); box-shadow: inset 0 0 0 1px var(--line-2); }
 .note { font-size: var(--fs-xs); color: var(--ink-3); }
 .note.err { color: var(--ink); padding-left: 10px; box-shadow: inset 2px 0 0 var(--danger); }
 .actions { display: flex; gap: 14px; align-items: center; font-size: var(--fs-xs); color: var(--ink-3); }

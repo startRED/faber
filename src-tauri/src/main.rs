@@ -8,6 +8,8 @@ compile_error!("the `test-hooks` feature is for debug test builds only; it must 
 
 mod folder;
 mod look;
+#[cfg(windows)]
+mod pane;
 mod project_commands;
 mod setup;
 mod terminal;
@@ -111,8 +113,10 @@ pub(crate) fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-fn main_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
-    app.get_webview_window("main")
+/// The one window. Once the browser pane (R161 step 7) is a second webview in it, Tauri no longer counts it as a webview
+/// window, so it is found as a window.
+fn main_window(app: &AppHandle) -> Option<tauri::Window> {
+    app.get_window("main")
 }
 
 // The screen calls the engine through this fixed list of commands; nothing else crosses over.
@@ -385,6 +389,49 @@ async fn read_image(faber: State<'_, Faber>, id: String, path: String) -> Res<Op
     }
     let Ok(bytes) = std::fs::read(&source) else { return Ok(None) };
     Ok(Some(format!("data:{kind};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes))))
+}
+
+/// Faber's browser pane (R161 step 7) over the screen's own rectangle for it, in the page's logical pixels.
+#[tauri::command]
+async fn site_place(app: AppHandle, x: f64, y: f64, width: f64, height: f64) -> bool {
+    #[cfg(windows)]
+    if let Some(pane) = app.try_state::<Arc<pane::Pane>>() {
+        return pane.place(x, y, width, height);
+    }
+    let _ = (app, x, y, width, height);
+    false
+}
+
+/// The browser pane leaves the screen; it keeps its page.
+#[tauri::command]
+async fn site_park(app: AppHandle) {
+    #[cfg(windows)]
+    if let Some(pane) = app.try_state::<Arc<pane::Pane>>() {
+        pane.park();
+    }
+    let _ = app;
+}
+
+/// The person opens a page from a reply's card in the browser pane.
+#[tauri::command]
+async fn site_open(app: AppHandle, url: String) -> bool {
+    #[cfg(windows)]
+    if let Some(pane) = app.try_state::<Arc<pane::Pane>>().map(|p| p.inner().clone()) {
+        return pane.show_page(&url).await;
+    }
+    let _ = (app, url);
+    false
+}
+
+/// The picture the browser took for a call, as a data URL, so the page never reads the disk itself.
+#[tauri::command]
+async fn site_picture(faber: State<'_, Faber>, id: String, call: String) -> Res<Option<String>> {
+    let Some(source) = faber.engine.site_picture(&id, &call) else { return Ok(None) };
+    if !std::fs::metadata(&source).is_ok_and(|m| m.len() <= 2_000_000) {
+        return Ok(None);
+    }
+    let Ok(bytes) = std::fs::read(&source) else { return Ok(None) };
+    Ok(Some(format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes))))
 }
 
 #[tauri::command]
@@ -1043,7 +1090,7 @@ fn show(app: &AppHandle) {
     let fresh = existing.is_none();
     let window = existing.or_else(|| {
         let faber = app.state::<Faber>();
-        create_window(app, faber.hidden, &faber.data_dir).ok()
+        create_window(app, faber.hidden, &faber.data_dir).ok().map(|w| w.as_ref().window())
     });
     // A window not shown yet (built just now, or a second launch before its first paint) shows through `reveal`, which also
     // brings it forward; the page paints its own static frame, so even the failsafe never shows a blank one (R157).
@@ -1340,76 +1387,90 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![
-            state,
-            open,
-            send,
-            branch,
-            warm,
-            set_clock,
-            quota_attention,
-            answer_plan,
-            approve_credits,
-            move_turn,
-            wait_turn,
-            route_draft,
-            interrupt,
-            answer,
-            answer_question,
-            rename,
-            remove,
-            remove_queued,
-            send_queued,
-            remove_project,
-            preview_look,
-            save_settings,
-            save_theme,
-            open_theme,
-            add_project,
-            recents,
-            open_folders,
-            forget_recent,
-            save_environment,
-            forget_environment,
-            start_environment,
-            chat_folder,
-            save_file,
-            show_file,
-            show_project,
-            read_image,
-            open_terminal,
-            open_link,
-            set_shell_texts,
-            project_enroll,
-            project_grant,
-            project_revoke,
-            project_proof,
-            project_proof_confirm,
-            mission_start,
-            mission_state,
-            mission_mode,
-            mission_stop,
-            mission_resume,
-            mission_answer,
-            local_update_state,
-            update_status,
-            screen_ready,
-            update_restart,
-            input_seen,
-            draft_dirty,
-            game_in_front,
-            notes_seen,
-            save_notes_seen,
-            setup::setup_check,
-            setup::setup_install,
-            setup::setup_sign_in,
-            #[cfg(feature = "test-hooks")]
-            probe_mission_attention,
-            #[cfg(feature = "test-hooks")]
-            probe_mission_power,
-            #[cfg(feature = "test-hooks")]
-            report_checks
-        ])
+        .invoke_handler({
+            let handler: fn(tauri::ipc::Invoke) -> bool = tauri::generate_handler![
+                site_place,
+                site_park,
+                site_open,
+                site_picture,
+                state,
+                open,
+                send,
+                branch,
+                warm,
+                set_clock,
+                quota_attention,
+                answer_plan,
+                approve_credits,
+                move_turn,
+                wait_turn,
+                route_draft,
+                interrupt,
+                answer,
+                answer_question,
+                rename,
+                remove,
+                remove_queued,
+                send_queued,
+                remove_project,
+                preview_look,
+                save_settings,
+                save_theme,
+                open_theme,
+                add_project,
+                recents,
+                open_folders,
+                forget_recent,
+                save_environment,
+                forget_environment,
+                start_environment,
+                chat_folder,
+                save_file,
+                show_file,
+                show_project,
+                read_image,
+                open_terminal,
+                open_link,
+                set_shell_texts,
+                project_enroll,
+                project_grant,
+                project_revoke,
+                project_proof,
+                project_proof_confirm,
+                mission_start,
+                mission_state,
+                mission_mode,
+                mission_stop,
+                mission_resume,
+                mission_answer,
+                local_update_state,
+                update_status,
+                screen_ready,
+                update_restart,
+                input_seen,
+                draft_dirty,
+                game_in_front,
+                notes_seen,
+                save_notes_seen,
+                setup::setup_check,
+                setup::setup_install,
+                setup::setup_sign_in,
+                #[cfg(feature = "test-hooks")]
+                probe_mission_attention,
+                #[cfg(feature = "test-hooks")]
+                probe_mission_power,
+                #[cfg(feature = "test-hooks")]
+                report_checks
+            ];
+            // Only the screen calls Faber: a web page in the browser pane (R161 step 7) is refused before any command runs.
+            move |invoke: tauri::ipc::Invoke| {
+                if invoke.message.webview().label() != "main" {
+                    invoke.resolver.reject("Faber answers only its own screen");
+                    return true;
+                }
+                handler(invoke)
+            }
+        })
         .setup(move |app| {
             let data_dir = local.as_ref().map(|dev| Ok(dev.data())).unwrap_or_else(|| data_dir(app.handle()))?;
             std::fs::create_dir_all(&data_dir)?;
@@ -1516,6 +1577,13 @@ fn main() {
                     eprintln!("faber: interrupted missions could not restore ({error})");
                 }
             });
+            // R161 step 7: Faber's own browser, for a project's agent. Windows only for now: its page is driven through WebView2.
+            #[cfg(windows)]
+            {
+                let pane = pane::Pane::new(app.handle().clone());
+                app.state::<Faber>().engine.set_browser(Arc::new(pane::PaneBrowser(pane.clone())));
+                app.manage(pane);
+            }
             app.state::<Faber>().engine.watch_accounts();
             app.state::<Faber>().engine.detect_claude_flags();
             if let Some(codex) = clis.get(&Vendor::Codex) {
@@ -1529,7 +1597,7 @@ fn main() {
             }
             #[cfg(feature = "test-hooks")]
             if autostart_launch && let Some(out) = std::env::var_os("FABER_CHECKS_OUT") {
-                std::fs::write(out, serde_json::json!({ "windowCount": app.webview_windows().len() }).to_string())?;
+                std::fs::write(out, serde_json::json!({ "windowCount": app.windows().len() }).to_string())?;
             }
             // Only installed builds update themselves; source runs and test runs never do.
             if !cfg!(debug_assertions)

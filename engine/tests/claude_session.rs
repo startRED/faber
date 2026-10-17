@@ -11,6 +11,7 @@ use support::{Entry, drive, fake, fixture, next_permission, text_of};
 fn launch(area: Area) -> ClaudeLaunch {
     ClaudeLaunch {
         helper: Default::default(),
+        browse: false,
         area,
         model: None,
         effort: None,
@@ -1276,6 +1277,21 @@ fn r161_the_helper_tool_reaches_only_the_project_agent() {
     assert!(!args(Helper::Offers, Some("Route.")).iter().any(|a| a == CLAUDE_MCP_CONFIG), "a side question has no tools at all");
     let helper = args(Helper::Is, None);
     assert!(helper.iter().any(|a| a == "--no-session-persistence") && !helper.iter().any(|a| a == CLAUDE_MCP_CONFIG));
+}
+
+/// R161 step 7: Faber's MCP server is there for the browser alone too, never for a side question, and a helper keeps no
+/// history whether or not it browses.
+#[test]
+fn r161_the_browser_rides_faber_s_mcp_server_with_or_without_the_helper() {
+    use faber_engine::helper::{CLAUDE_MCP_CONFIG, Helper};
+    let args = |helper, browse, instructions: Option<&str>| {
+        claude_args(&ClaudeLaunch { helper, browse, instructions: instructions.map(String::from), ..launch(Area::Project) })
+    };
+    let has = |a: &[String], pair: [&str; 2]| a.windows(2).any(|w| w == pair);
+    assert!(has(&args(Helper::Off, true, None), ["--mcp-config", CLAUDE_MCP_CONFIG]), "the browser alone needs the server");
+    assert_eq!(args(Helper::Offers, true, None).iter().filter(|a| *a == CLAUDE_MCP_CONFIG).count(), 1, "one server for both");
+    assert!(!args(Helper::Off, false, None).iter().any(|a| a == CLAUDE_MCP_CONFIG));
+    assert!(!args(Helper::Off, true, Some("Route.")).iter().any(|a| a == CLAUDE_MCP_CONFIG), "a side question has no tools");
 }
 
 /// R161: Faber answers its MCP server's handshake itself, hands the helper call to the engine, and writes the report back

@@ -130,6 +130,7 @@ impl Probe {
         let sink: EventSink = Arc::new(move |e| drop(tx.send(e)));
         let launch = ClaudeLaunch {
             helper: Default::default(),
+            browse: false,
             area: Area::Chat,
             model: Some(CLAUDE_MODEL.into()),
             effort: Some(effort.into()),
@@ -155,6 +156,7 @@ impl Probe {
         let sink: EventSink = Arc::new(move |e| drop(tx.send(e)));
         let launch = ClaudeLaunch {
             helper: Default::default(),
+            browse: false,
             area: Area::Chat,
             model: Some("claude-haiku-5-5".into()),
             effort: Some("low".into()),
@@ -191,6 +193,7 @@ impl Probe {
         let sink: EventSink = Arc::new(move |e| drop(tx.send(e)));
         let thread = CodexThread {
             helper: Default::default(),
+            browse: false,
             cwd: self.dir.clone(),
             model: Some(CODEX_MODEL.into()),
             effort: Some(effort.into()),

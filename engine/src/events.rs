@@ -66,6 +66,11 @@ pub enum EngineEvent {
         ok: bool,
         text: String,
     },
+    /// The agent asked Faber's browser to open a page (R161 step 7); the engine answers with `Session::helper_reply`.
+    BrowseCall {
+        id: String,
+        input: Value,
+    },
     /// The agent called Faber's helper tool (R161, `crate::helper`): `id` is that tool call. The CLI waits for the answer,
     /// which the engine sends with `Session::helper_reply` once the helper is done.
     HelperCall {

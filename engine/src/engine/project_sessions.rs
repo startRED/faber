@@ -232,6 +232,7 @@ impl Engine {
                     cwd,
                     launch: ClaudeLaunch {
                         helper: Default::default(),
+                        browse: false,
                         area: Area::Project,
                         model: Some(worker.pin.model.clone()),
                         effort: Some(worker.pin.effort.clone()),
@@ -262,6 +263,7 @@ impl Engine {
                 },
                 CodexThread {
                     helper: Default::default(),
+                    browse: false,
                     cwd,
                     model: Some(worker.pin.model.clone()),
                     effort: Some(worker.pin.effort.clone()),

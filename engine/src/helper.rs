@@ -56,12 +56,27 @@ pub fn codex_tool() -> Value {
 pub enum Mcp {
     /// The answer goes back at once (`mcp_response`).
     Answer(Value),
-    /// A call of the tool: the answer waits for the helper. `id` is the tool call's own id, which names the call on screen.
-    Call { id: String, rpc: Value, input: Value },
+    /// A call of one of its tools (`NAME` or `crate::browser::NAME`): the answer waits for the work. `id` is the tool
+    /// call's own id, which names the call on screen.
+    Call { tool: &'static str, id: String, rpc: Value, input: Value },
 }
 
-/// Faber's MCP server, which has one tool. Claude Code sends its JSON-RPC messages inside `mcp_message` control requests.
-pub fn mcp(message: &Value) -> Mcp {
+/// The tools Faber's MCP server holds for one session.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Tools {
+    pub helper: bool,
+    pub browse: bool,
+}
+
+impl Tools {
+    pub fn any(self) -> bool {
+        self.helper || self.browse
+    }
+}
+
+/// Faber's MCP server, which holds the tools the session offers. Claude Code sends its JSON-RPC messages inside
+/// `mcp_message` control requests.
+pub fn mcp(message: &Value, tools: Tools) -> Mcp {
     let rpc = message["id"].clone();
     let answer = |result: Value| Mcp::Answer(json!({ "jsonrpc": "2.0", "id": rpc, "result": result }));
     match message["method"].as_str().unwrap_or_default() {
@@ -70,16 +85,35 @@ pub fn mcp(message: &Value) -> Mcp {
             "capabilities": { "tools": {} },
             "serverInfo": { "name": "faber", "version": env!("CARGO_PKG_VERSION") }
         })),
-        "tools/list" => answer(json!({ "tools": [{ "name": NAME, "description": DESCRIPTION, "inputSchema": schema() }] })),
-        "tools/call" if message["params"]["name"] == NAME => {
+        "tools/list" => {
+            let mut list = vec![];
+            if tools.helper {
+                list.push(json!({ "name": NAME, "description": DESCRIPTION, "inputSchema": schema() }));
+            }
+            if tools.browse {
+                list.push(crate::browser::mcp_tool());
+            }
+            answer(json!({ "tools": list }))
+        }
+        "tools/call" if let Some(tool) = called(&message["params"]["name"], tools) => {
             let meta = &message["params"]["_meta"]["claudecode/toolUseId"];
-            // The tool call's id came in `_meta` on every CLI recorded (2.1.296); without it the JSON-RPC id still tells calls apart.
-            let id = meta.as_str().map(String::from).unwrap_or_else(|| format!("helper-{rpc}"));
-            Mcp::Call { id, rpc, input: message["params"]["arguments"].clone() }
+            // The tool call's id came in `_meta` on every CLI recorded (2.1.296); without it a fresh id tells calls apart, since the
+            // JSON-RPC ids start again in every process and a resumed conversation would reuse them.
+            let id = meta.as_str().map(String::from).unwrap_or_else(|| format!("{tool}-{}", uuid::Uuid::new_v4().simple()));
+            Mcp::Call { tool, id, rpc, input: message["params"]["arguments"].clone() }
         }
         // A notification needs no answer, but the control request that carried it does.
         _ if rpc.is_null() => answer(json!({})),
         _ => Mcp::Answer(json!({ "jsonrpc": "2.0", "id": rpc, "error": { "code": -32601, "message": "Faber has no such method" } })),
+    }
+}
+
+/// The offered tool a call names, if any.
+fn called(name: &Value, tools: Tools) -> Option<&'static str> {
+    match name.as_str()? {
+        NAME if tools.helper => Some(NAME),
+        crate::browser::NAME if tools.browse => Some(crate::browser::NAME),
+        _ => None,
     }
 }
 
@@ -146,6 +180,7 @@ mod tests {
 
     #[test]
     fn the_mcp_server_lists_one_tool_and_hands_its_call_on_with_the_tool_call_id() {
+        let mcp = |m: &Value| mcp(m, Tools { helper: true, browse: false });
         let init = json!({"method":"initialize","params":{"protocolVersion":"2025-11-25"},"jsonrpc":"2.0","id":0});
         let Mcp::Answer(a) = mcp(&init) else { panic!() };
         assert_eq!((a["id"].clone(), a["result"]["protocolVersion"].clone()), (json!(0), json!("2025-11-25")));
@@ -157,9 +192,33 @@ mod tests {
         );
         let call = json!({"method":"tools/call","params":{"name":"helper","arguments":{"title":"Check","brief":"Look."},
             "_meta":{"claudecode/toolUseId":"toolu_1","progressToken":2}},"jsonrpc":"2.0","id":2});
-        assert_eq!(mcp(&call), Mcp::Call { id: "toolu_1".into(), rpc: json!(2), input: json!({"title":"Check","brief":"Look."}) });
+        assert_eq!(
+            mcp(&call),
+            Mcp::Call { tool: NAME, id: "toolu_1".into(), rpc: json!(2), input: json!({"title":"Check","brief":"Look."}) }
+        );
         let Mcp::Answer(unknown) = mcp(&json!({"method":"tools/call","params":{"name":"other"},"jsonrpc":"2.0","id":3})) else { panic!() };
         assert_eq!(unknown["error"]["code"], -32601);
+    }
+
+    // R161 step 7: the browser sits beside the helper, and a session lists and answers only the tools it offers.
+    #[test]
+    fn the_mcp_server_holds_only_the_tools_the_session_offers() {
+        let list = |tools| match mcp(&json!({"method":"tools/list","jsonrpc":"2.0","id":1}), tools) {
+            Mcp::Answer(a) => {
+                a["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect::<Vec<_>>()
+            }
+            Mcp::Call { .. } => panic!(),
+        };
+        assert_eq!(list(Tools { helper: true, browse: true }), ["helper", "browse"]);
+        assert_eq!(list(Tools { helper: false, browse: true }), ["browse"]);
+        let call = json!({"method":"tools/call","params":{"name":"browse","arguments":{"url":"https://a.org"},
+            "_meta":{"claudecode/toolUseId":"toolu_2"}},"jsonrpc":"2.0","id":4});
+        assert_eq!(
+            mcp(&call, Tools { helper: false, browse: true }),
+            Mcp::Call { tool: crate::browser::NAME, id: "toolu_2".into(), rpc: json!(4), input: json!({"url":"https://a.org"}) }
+        );
+        let Mcp::Answer(refused) = mcp(&call, Tools { helper: true, browse: false }) else { panic!("a tool not offered is never called") };
+        assert_eq!(refused["error"]["code"], -32601);
     }
 
     #[test]

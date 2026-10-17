@@ -186,6 +186,7 @@ fn inline_prompt_keeps_role_control_and_rejects_changed_hash_and_credential_path
     let args = faber_engine::claude::project_claude_args(
         &faber_engine::claude::ClaudeLaunch {
             helper: Default::default(),
+            browse: false,
             area: faber_engine::model::Area::Project,
             model: Some("claude-sonnet-5-5".into()),
             effort: Some("medium".into()),

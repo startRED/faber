@@ -301,6 +301,7 @@ mod live {
             let mut args = project_claude_args(
                 &ClaudeLaunch {
                     helper: Default::default(),
+                    browse: false,
                     area: Area::Project,
                     model: Some("claude-haiku-5-5".into()),
                     effort: Some("low".into()),
@@ -346,7 +347,7 @@ mod live {
                     let msg:Value = serde_json::from_str(&line)?;
                     if msg["id"] == 2 { if msg["result"]["account"]["type"] != "chatgpt" { return Err(io::Error::other("confirmed subscription required")); } break; }
                 }
-                let (_,mut params) = project_thread_params(&CodexThread { helper: Default::default(), cwd:repo.clone(),model:Some("gpt-6-luna".into()),effort:Some("low".into()),resume:None,instructions:None,user_name:None,permissions:faber_engine::model::Permissions::Isolated, tuning: Default::default() },Role::Writer).map_err(|_|io::Error::other("invalid invocation"))?;
+                let (_,mut params) = project_thread_params(&CodexThread { helper: Default::default(), browse: false, cwd:repo.clone(),model:Some("gpt-6-luna".into()),effort:Some("low".into()),resume:None,instructions:None,user_name:None,permissions:faber_engine::model::Permissions::Isolated, tuning: Default::default() },Role::Writer).map_err(|_|io::Error::other("invalid invocation"))?;
                 params["baseInstructions"] = ADVERSARIAL.into();
                 params["ephemeral"] = true.into();
                 write(&mut p,&json!({"id":3,"method":"thread/start","params":params})).await?;

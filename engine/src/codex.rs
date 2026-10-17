@@ -480,6 +480,7 @@ pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<
             let name = match (kind, item["tool"].as_str()) {
                 ("dynamicToolCall", Some("run_command")) => "Bash",
                 ("dynamicToolCall", Some(crate::helper::NAME)) => crate::helper::TOOL,
+                ("dynamicToolCall", Some(crate::browser::NAME)) => crate::browser::TOOL,
                 _ => kind,
             };
             vec![EngineEvent::Tool { id: s(&item["id"]), name: name.into(), input, parent: None }]
@@ -663,6 +664,8 @@ pub struct CodexThread {
     pub tuning: Tuning,
     /// Faber's helper tool (R161), as for `ClaudeLaunch::helper`.
     pub helper: crate::helper::Helper,
+    /// Faber's own browser (R161 step 7), as for `ClaudeLaunch::browse`.
+    pub browse: bool,
 }
 
 enum ServerCommand {
@@ -766,6 +769,13 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
             }
             crate::helper::Helper::Off => {}
         }
+        // R161 step 7: Faber's own browser, where it is offered.
+        if t.browse {
+            let tools = params.entry("dynamicTools").or_insert_with(|| json!([]));
+            if let Some(tools) = tools.as_array_mut() {
+                tools.push(crate::browser::codex_tool());
+            }
+        }
     }
     if t.permissions == Permissions::Isolated && t.instructions.is_none() {
         params.insert("config".into(), crate::permissions::sandbox_config(&t.cwd, true).into());
@@ -839,6 +849,7 @@ pub(crate) fn project_launch_policy(roles: &[crate::project::Role]) -> Value {
         project_codex_args(cfg!(windows)).into_iter().map(|a| a.replace(&json!(catalog).to_string(), "<catalog>")).collect();
     let thread = CodexThread {
         helper: Default::default(),
+        browse: false,
         cwd: PathBuf::from(if cfg!(windows) { r"C:\faber-role" } else { "/faber-role" }),
         model: Some("gpt-6-luna".into()),
         effort: Some("medium".into()),
@@ -1205,6 +1216,21 @@ async fn serve(
                                 }
                                 None => {
                                     let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"No helper is available here."}]}})).await;
+                                }
+                            }
+                            continue;
+                        }
+                        if method == "item/tool/call" && params["tool"] == crate::browser::NAME {
+                            // R161 step 7: the agent opens a page in Faber's browser; the engine answers once it has loaded.
+                            match thread.filter(|t| t.params.browse && !t.blocked && !t.closing) {
+                                Some(t) => {
+                                    let call = s(&params["callId"]);
+                                    t.helpers.insert(call.clone(), id.clone());
+                                    t.watch.pause();
+                                    (t.sink)(EngineEvent::BrowseCall { id: call, input: params["arguments"].clone() });
+                                }
+                                None => {
+                                    let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"Faber's browser is not available here."}]}})).await;
                                 }
                             }
                             continue;
@@ -1631,6 +1657,7 @@ mod role_tests {
                 let session = server.open(
                     CodexThread {
                         helper: Default::default(),
+                        browse: false,
                         cwd: ".".into(),
                         model: Some("gpt-6-luna".into()),
                         effort: Some("low".into()),
@@ -1718,6 +1745,7 @@ mod role_tests {
             let session = server.open(
                 CodexThread {
                     helper: Default::default(),
+                    browse: false,
                     cwd: ".".into(),
                     model: Some("gpt-6-luna".into()),
                     effort: Some("low".into()),
@@ -1778,6 +1806,7 @@ mod role_tests {
         let session = server.open(
             CodexThread {
                 helper: Default::default(),
+                browse: false,
                 cwd: ".".into(),
                 model: Some("gpt-6-luna".into()),
                 effort: Some("low".into()),

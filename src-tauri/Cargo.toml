@@ -23,7 +23,8 @@ faber-engine = { path = "../engine" }
 semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tauri = { version = "2", features = ["tray-icon", "image-png"] }
+# `unstable` gives the window a second webview, Faber's own browser pane (R161 step 7).
+tauri = { version = "2", features = ["tray-icon", "image-png", "unstable"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
@@ -39,8 +40,11 @@ notify-rust = "4"
 [target.'cfg(windows)'.dependencies]
 win32job = "2"
 winsafe = { version = "0.0.29", features = ["gui"] }
+# The browser pane drives its page through WebView2's own DevTools call (pane/native.rs); the same versions Tauri uses.
+webview2-com = "0.39"
+windows-core = "0.62"
 
-# Only the Windows API files (awake.rs, autostart.rs, tray/native.rs) opt in to FFI; the engine and testkit keep the
+# Only the Windows API files (awake.rs, autostart.rs, tray/native.rs, pane/native.rs) opt in to FFI; the engine and testkit keep the
 # workspace's forbid.
 [lints.rust]
 unsafe_code = "deny"

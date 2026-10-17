@@ -435,6 +435,13 @@ export const api = {
   saveFile: (id: string, path: string) => invoke<boolean>('save_file', { id, path }),
   showFile: (id: string, path: string) => invoke<void>('show_file', { id, path }),
   readImage: (id: string, path: string) => invoke<string | null>('read_image', { id, path }),
+  /** Faber's browser pane (R161 step 7): over a box of the screen, off it, a page the person opens, a call's picture. */
+  sitePlace: (x: number, y: number, width: number, height: number) => invoke<boolean>('site_place', { x, y, width, height }),
+  sitePark: () => invoke<void>('site_park'),
+  siteOpen: (url: string) => invoke<boolean>('site_open', { url }),
+  sitePicture: (id: string, call: string) => invoke<string | null>('site_picture', { id, call }),
+  /** Where the page in Faber's browser is now, at every page it finishes loading. */
+  onSite: (listener: (url: string) => void) => listen<string>('faber:site', (e) => listener(e.payload)),
   openTerminal: (id: string) => invoke<boolean>('open_terminal', { id }),
   openLink: (url: string) => invoke<void>('open_link', { url }),
   setShellTexts: (texts: ShellTexts) => invoke<void>('set_shell_texts', { texts }),

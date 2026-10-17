@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 fn launch(area: Area, permissions: Permissions) -> ClaudeLaunch {
     ClaudeLaunch {
         helper: Default::default(),
+        browse: false,
         area,
         permissions,
         model: None,
@@ -47,6 +48,7 @@ fn review3_codex_credential_denies_survive_in_both_areas_and_on_resume() {
                 area,
                 &CodexThread {
                     helper: Default::default(),
+                    browse: false,
                     cwd: "project".into(),
                     model: None,
                     effort: None,
@@ -102,6 +104,7 @@ fn review3_codex_shells_use_the_shared_git_gate_instead_of_native_execution() {
             area,
             &CodexThread {
                 helper: Default::default(),
+                browse: false,
                 cwd: ".".into(),
                 model: None,
                 effort: None,
@@ -217,6 +220,7 @@ fn c1_h4_codex_network_is_off_on_start_and_resume_even_if_user_settings_enable_i
     for resume in [None, Some("thread".into())] {
         let t = CodexThread {
             helper: Default::default(),
+            browse: false,
             cwd: "project".into(),
             model: None,
             effort: None,
@@ -278,6 +282,7 @@ fn review2_h2_codex_selects_a_restricted_read_profile_on_start_and_resume() {
     for resume in [None, Some("thread".into())] {
         let t = CodexThread {
             helper: Default::default(),
+            browse: false,
             cwd: "project".into(),
             model: None,
             effort: None,
@@ -326,6 +331,7 @@ fn r107_isolated_chat_reuses_project_protections_and_existing_users_default_to_f
 fn m6_sandbox_failures_are_intended_and_writable_roots_must_not_expand_into_user_caches() {
     let t = CodexThread {
         helper: Default::default(),
+        browse: false,
         cwd: "project".into(),
         model: None,
         effort: None,
@@ -360,6 +366,7 @@ fn r107_internal_questions_restrict_reads_and_never_grant_workspace_writes() {
                 area,
                 &CodexThread {
                     helper: Default::default(),
+                    browse: false,
                     cwd: "private-question".into(),
                     model: None,
                     effort: None,

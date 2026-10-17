@@ -97,8 +97,12 @@ frames) and checked against today's code. It fills the steps of R161 and never b
    that fails does the row turn amber with "Look" and "Tell it…", and only then is the person notified. It ships once
    the recorded fixtures show no false amber. Built (R174): neither CLI can be told about its subagent while the main agent waits for it, so
    the main agent's chance is the retry the thresholds leave (a check shows only after it failed three times).
-7. **Faber's own browser and app pane (R161 step 4, the largest piece).** Nothing exists yet: the shell has one
-   webview. The agent or a child opens websites in a pane that belongs to Faber and runs the app it builds beside the
+7. **Faber's own browser and app pane (R161 step 4, the largest piece).** Built (R195): Faber's own browser, a
+   second webview of the window on the same WebView2 (Windows only). A project's agent in full access gets a `browse`
+   tool (Faber's MCP server for Claude Code, a dynamic tool for Codex) that opens a page there, answers with its visible
+   text marked as the site's words, and keeps a picture in the conversation's attachments; the reply shows a card with
+   it, and "See the page" puts the page over the running column. Pages are read-only for now: taking over, the agent's
+   clicks and typing, the app pane and "Your turn" are still to come. The rest of the plan: The agent or a child opens websites in a pane that belongs to Faber and runs the app it builds beside the
    chat, through a Faber tool the CLI calls. A card in the reply ("Site open in the browser", with a picture and Open)
    is the way in, next to the file and question cards that already exist. The pane has one owner at a time: "Take over"
    stops the agent at its next action, the person clicks and types, and "Let it continue" hands it back with a short

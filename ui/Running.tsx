@@ -6,6 +6,7 @@ import { Icon, VendorMark } from './Glyphs.tsx';
 import { everyWhileShown } from './idle.ts';
 import { t } from './i18n.ts';
 import { Peek } from './Mark.tsx';
+import { SitePane, type OpenSite } from './Site.tsx';
 import { vendorName } from './models.ts';
 import { animateList } from './motion.ts';
 import { untilReset } from './Sidebar.tsx';
@@ -23,6 +24,8 @@ export function Running(props: {
   modal: boolean;
   /** A subagent the person opened from its reply: the column shows it instead of the list until "back". */
   agent?: { step: AgentStep; streaming: boolean };
+  /** A page of Faber's browser the person opened from a reply, shown the same way. */
+  site?: OpenSite;
   onBack?: () => void;
   /** "Tell it…" from the open subagent: the conversation's box, reached through the column. */
   onTell?: (title: string) => void;
@@ -43,7 +46,7 @@ export function Running(props: {
       <Show
         when={props.agent}
         fallback={
-          <>
+          <Show when={props.site} fallback={<>
             <div class="rc-head">
               <button class="iconbtn" aria-label={t('run.close')} title={t('run.close')} onClick={() => props.onClose()}>
                 <Icon name="close" />
@@ -113,7 +116,9 @@ export function Running(props: {
                 </For>
               </Show>
             </div>
-          </>
+          </>}>
+            {(site) => <SitePane site={site()} onBack={() => props.onBack?.()} onClose={props.onClose} />}
+          </Show>
         }
       >
         {(agent) => <AgentChat step={agent().step} streaming={agent().streaming} onBack={() => props.onBack?.()} onTell={(title) => props.onTell?.(title)} onClose={props.onClose} />}

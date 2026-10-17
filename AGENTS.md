@@ -109,7 +109,8 @@ Read [docs/product-rules.md](docs/product-rules.md) and [docs/product-map.md](do
 - `src-tauri/`: the Tauri 2 shell. One window, a tray icon, and the fixed list of commands the screen may call.
 - `winproc/`: the unsafe process calls (resuming a process created suspended, so it joins its job before it runs, and
   lowering a mission proof to Low integrity before it runs).
-  The shell denies unsafe code except in its three Windows API files (`awake.rs`, `autostart.rs`, `tray/native.rs`);
+  The shell denies unsafe code except in its four Windows API files (`awake.rs`, `autostart.rs`, `tray/native.rs`,
+  `pane/native.rs`);
   everything else forbids it.
 - `ui/`: the screen in SolidJS + TypeScript, built by Vite into `dist/`.
 - `tests/`: the screen's checks (`tests/ui/*.check.ts`, run inside a hidden test build) and the recordings the fake CLI

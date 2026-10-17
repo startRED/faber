@@ -39,6 +39,7 @@ import './pace.check.ts';
 import './question.check.ts';
 import './quiet.check.ts';
 import './agents.check.ts';
+import './site.check.ts';
 import './worklog.check.ts';
 import './quota.check.ts';
 import './recents.check.ts';

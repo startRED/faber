@@ -270,6 +270,7 @@ pub async fn run(data: &Path) -> io::Result<()> {
         if signals.paid_fallback != Some(false) { return Err(io::Error::other("credit fallback not disabled")); }
         let (_,mut params) = crate::codex::project_thread_params(&crate::codex::CodexThread {
             helper: Default::default(),
+            browse: false,
             cwd:work.clone(),model:Some("gpt-6-luna".into()),effort:Some("low".into()),resume:None,instructions:None,user_name:None,permissions:crate::model::Permissions::Isolated,
             tuning: Default::default(),
         },Role::Writer).map_err(|_|io::Error::other("invalid invocation"))?;

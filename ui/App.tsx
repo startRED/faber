@@ -33,6 +33,7 @@ import { Projects } from './Projects.tsx';
 import { createOpening, upsert } from './opening.ts';
 import { Running } from './Running.tsx';
 import { openedAgent, showAgent, tellAbout } from './AgentChat.tsx';
+import { openedSite, showSite } from './Site.tsx';
 import { agentSteps } from './worklog.ts';
 import { createAutoOpen, openPlace, type Place, placeOfRunning, store, waitingKeys } from './running.ts';
 import { type Keep, type Section, Settings } from './Settings.tsx';
@@ -241,6 +242,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   };
   const closeColumn = () => {
     showAgent(undefined);
+    showSite(undefined);
     if (!columnOpen()) return;
     // Closed while it was waiting for the typing to stop, or after it: the questions seen stay seen.
     autoOpen.seen(waitingKeys(items()));
@@ -261,7 +263,14 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     const step = agentSteps(m?.tools, helperKind).find((s) => s.call.id === open.callId);
     return step && { step, streaming: m?.status === 'streaming' };
   });
-  createEffect(on(openedAgent, (open) => {
+  // A page of Faber's browser (R161 step 7) opens in the column the same way, and one of the two shows at a time.
+  const sideSite = () => {
+    const open = openedSite();
+    return open && current()?.id === open.conversationId ? open : undefined;
+  };
+  createEffect(on(openedAgent, (open) => open && showSite(undefined), { defer: true }));
+  createEffect(on(openedSite, (open) => open && showAgent(undefined), { defer: true }));
+  createEffect(on(() => openedAgent() ?? openedSite(), (open) => {
     if (!open) return;
     // One of another conversation is never shown (`sideAgent`); it goes when the conversation on screen changes.
     if (current()?.id !== open.conversationId) return;
@@ -275,6 +284,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   }, { defer: true }));
   createEffect(on(() => current()?.id, (id) => {
     if (openedAgent() && openedAgent()!.conversationId !== id) showAgent(undefined);
+    if (openedSite() && openedSite()!.conversationId !== id) showSite(undefined);
   }, { defer: true }));
   // The window changes width while the column is open: it becomes a modal dialog or stops being one, and its element is
   // drawn again, so focus goes where the new state wants it.
@@ -693,9 +703,11 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       onOpen={openRunning}
       onClose={closeColumn}
       agent={sideAgent()}
+      site={sideSite()}
       onBack={() => {
         showAgent(undefined);
-        // The back button is gone with the subagent: focus stays in the column, on the list's first control.
+        showSite(undefined);
+        // The back button is gone with the subagent or the page: focus stays in the column, on the list's first control.
         queueMicrotask(() => column?.querySelector<HTMLElement>('button')?.focus());
       }}
       onTell={(title) => {

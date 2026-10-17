@@ -90,6 +90,7 @@ impl Router {
                 server.open(
                     CodexThread {
                         helper: Default::default(),
+                        browse: false,
                         cwd: self.dir.clone(),
                         model,
                         effort,
@@ -106,6 +107,7 @@ impl Router {
                 let cli = self.claude.as_ref()?;
                 let launch = ClaudeLaunch {
                     helper: Default::default(),
+                    browse: false,
                     area: Area::Chat,
                     model,
                     effort,
