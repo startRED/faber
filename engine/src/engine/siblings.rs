@@ -1,6 +1,8 @@
 //! Conversations a project's agent starts by itself (`crate::sibling`): the engine makes a new conversation in the same
 //! project, sends it the agent's brief as its first message on the conversation's own model choice, and answers the call
-//! at once with the new id. A read answers with where that conversation stands and its latest answer.
+//! at once with the new id. In a project that keeps separate copies (R201) the brief waits for the new conversation's own
+//! copy, made away from the engine's lock like the person's own first message, so it never runs in the project folder. A
+//! read answers with where that conversation stands and its latest answer.
 use super::*;
 use crate::sibling::{self, Request, State};
 
@@ -38,8 +40,8 @@ impl Core {
         }
         let project = parent.project_id.clone().ok_or("this conversation has no project")?;
         let choice = parent.choice.clone().ok_or("this conversation has no model chosen")?;
-        // The cap is on what agents start: a conversation counts from its first message on, routing and waiting for quota
-        // included, not only once its CLI runs. A message the person sends to one is the person's own.
+        // The cap is on what agents start: a conversation counts from the call on, its copy still being made, routing and
+        // waiting for quota included, not only once its CLI runs. A message the person sends to one is the person's own.
         let running = self
             .convs
             .values()
@@ -47,6 +49,7 @@ impl Core {
             .filter(|c| {
                 self.live.get(&c.id).is_some_and(|l| l.turn.is_some())
                     || !c.queued.is_empty()
+                    || c.messages.is_empty()
                     || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming))
             })
             .count();
@@ -54,13 +57,8 @@ impl Core {
             return Err("three conversations started by agents are already working in this project; wait for one to finish");
         }
         // A conversation an agent starts is never the person's own turn: the same quota rules as a helper hold.
-        if let Some(l) = self.live.get(conv) {
-            let family = l.model.as_deref().and_then(family_of);
-            self.allows(l.vendor, family, Purpose::UserTurn { by_hand: false }, false).map_err(|why| match why {
-                Why::Billing => "this AI may be billed per use, so Faber does not start conversations on it by itself",
-                _ => "this AI has no quota left right now",
-            })?;
-        }
+        let ai = self.live.get(conv).map(|l| (l.vendor, l.model.as_deref().and_then(family_of).map(str::to_string)));
+        self.sibling_allowed(&ai)?;
         let id = self.blank(Area::Project, Some(project.clone()));
         if let Some(c) = self.convs.get_mut(&id) {
             c.started_by = Some(conv.to_string());
@@ -75,24 +73,83 @@ impl Core {
             files: vec![],
             choice,
         };
-        match self.send(req) {
-            Ok(_) => {
-                // The agent's brief is never the person's own turn, whatever model it runs: billing stops it like a helper. A
-                // message the person writes to the conversation later is theirs.
-                if let Some(t) = self.transfers.get_mut(&id) {
-                    t.by_hand = false;
-                }
-                if let Some(l) = self.live.get_mut(&id) {
-                    l.by_hand = false;
-                }
-                Ok((id, true))
-            }
+        // Git can take seconds, so the copy is made away from the lock and the brief follows it; the call is answered now.
+        if let Some(plan) = self.copy_plan(&req) {
+            let (me, runtime, child) = (self.me.clone(), self.opts.runtime.clone(), id.clone());
+            // A copy that came back for nothing (the conversation is gone, the person wrote to it first, Faber is
+            // closing) is removed again, and an empty conversation left waiting goes with it.
+            self.opts.runtime.spawn_blocking(move || {
+                let made = Engine::make_copy(Some(plan));
+                let Some(core) = me.upgrade() else { return };
+                let engine = Engine { core, runtime };
+                let stray = engine.with(|c| {
+                    let waiting = !c.closing && c.convs.get(&child).is_some_and(|c| c.messages.is_empty());
+                    let (made, failed) = match made {
+                        Ok(made) => (made, false),
+                        Err(_) => (None, true),
+                    };
+                    if !waiting {
+                        // The person's own send may have taken this very copy meanwhile (its folder is the conversation's):
+                        // then it stays.
+                        return made
+                            .filter(|(id, copy)| !c.convs.get(id).and_then(|c| c.copy.as_ref()).is_some_and(|had| had.path == copy.path));
+                    }
+                    if let Some((id, copy)) = made
+                        && let Some(back) = c.attach_copy(&id, copy)
+                    {
+                        return Some(back);
+                    }
+                    // Billing may have changed while git worked: the brief goes only if the rules still allow it, under
+                    // the same lock as its send. A copy git could not make sends nothing.
+                    if !failed && c.sibling_allowed(&ai).is_ok() && c.launch_sibling(&child, req).is_ok() {
+                        return None;
+                    }
+                    if !c.convs.get(&child).is_some_and(|c| c.messages.is_empty()) {
+                        return None;
+                    }
+                    let copy = c.convs.get_mut(&child).and_then(|c| c.copy.take()).map(|copy| (child.clone(), copy));
+                    c.remove(&child);
+                    copy
+                });
+                engine.drop_copy(stray);
+            });
+            return Ok((id, true));
+        }
+        match self.launch_sibling(&id, req) {
+            Ok(()) => Ok((id, true)),
             // Saved with its first message before it failed: it stays, with the error in its reply, and the agent is told.
             Err(_) if self.convs.get(&id).is_some_and(|c| !c.messages.is_empty()) => Ok((id, false)),
             Err(_) => {
                 self.convs.remove(&id);
                 Err("the conversation could not start")
             }
+        }
+    }
+
+    /// Whether the parent's AI may run work an agent started (a helper's rules); no live process means nothing to check.
+    fn sibling_allowed(&self, ai: &Option<(Vendor, Option<String>)>) -> Result<(), &'static str> {
+        let Some((vendor, family)) = ai else { return Ok(()) };
+        self.allows(*vendor, family.as_deref(), Purpose::UserTurn { by_hand: false }, false).map_err(|why| match why {
+            Why::Billing => "this AI may be billed per use, so Faber does not start conversations on it by itself",
+            _ => "this AI has no quota left right now",
+        })
+    }
+
+    /// Sends the agent's brief as the new conversation's first message.
+    fn launch_sibling(&mut self, id: &str, req: SendRequest) -> Result<(), String> {
+        match self.send(req) {
+            Ok(_) => {
+                // The agent's brief is never the person's own turn, whatever model it runs: billing stops it like a helper. A
+                // message the person writes to the conversation later is theirs.
+                if let Some(t) = self.transfers.get_mut(id) {
+                    t.by_hand = false;
+                }
+                if let Some(l) = self.live.get_mut(id) {
+                    l.by_hand = false;
+                }
+                Ok(())
+            }
+            Err(why) => Err(why),
         }
     }
 
@@ -103,6 +160,8 @@ impl Core {
         let asking = last.is_some_and(|m| m.permissions.as_ref().is_some_and(|p| !p.is_empty()));
         let state = match last.and_then(|m| m.status.as_ref()) {
             _ if asking => State::Waiting,
+            // Its copy is still being made: the brief follows it.
+            _ if c.messages.is_empty() => State::Working,
             Some(Status::Streaming) => State::Working,
             _ if busy || !c.queued.is_empty() => State::Working,
             Some(Status::Error) => State::Failed,

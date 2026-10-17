@@ -334,3 +334,61 @@ impl Executor for DirtyIn {
         self.0.execute(call)
     }
 }
+
+/// A conversation the project's agent starts by itself (R198) works in a copy of its own too, named after its title, and
+/// its brief reaches it only there: three agents' pieces and the person's checkout never share a folder.
+#[tokio::test]
+async fn r_next_a_conversation_the_agent_starts_works_in_a_copy_of_its_own() {
+    let data = support::canonical_tempdir().unwrap();
+    let folder = support::canonical_tempdir().unwrap();
+    let cwds: Arc<Mutex<Vec<PathBuf>>> = Arc::default();
+    let git = Arc::new(Mutex::new(Repo { root: folder.path().into(), ..Repo::default() }));
+    let (inner, made) = support::pipes();
+    let seen = cwds.clone();
+    let spawn: Spawner = Arc::new(move |bin, argv, cwd| {
+        seen.lock().unwrap().push(cwd.to_path_buf());
+        inner(bin, argv, cwd)
+    });
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<AppEvent>();
+    let opts = EngineOptions {
+        data_dir: data.path().into(),
+        clis: BTreeMap::from([(Vendor::Claude, Cli { command: "claude".into(), prefix: vec![] })]),
+        spawn,
+        windows: false,
+        claude_env_billed: false,
+        max_warm: 3,
+        idle: Duration::from_secs(120),
+        runtime: tokio::runtime::Handle::current(),
+        ask: None,
+    };
+    let engine = Engine::new(opts, Arc::new(move |e| drop(tx.send(e))));
+    // Faber starts a conversation on its own only on a known subscription.
+    let plan = faber_engine::signals::Signals { billing: Some(faber_engine::budget::Billing::Subscription), ..Default::default() };
+    engine.note_account_events(Vendor::Claude, vec![faber_engine::events::EngineEvent::Signals(plan)]);
+    let runner = Git(git.clone());
+    engine.set_git(Arc::new(move || Some(Box::new(runner.clone()) as Box<dyn Executor + Send>)));
+    let project = engine.add_project(&folder.path().to_string_lossy()).unwrap().id;
+    let parent = engine.send(ask(&project, "Split the work")).unwrap();
+    let mut agent = support::next_pipe(&made).await;
+    agent.say(serde_json::json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-haiku-5-5"})).await;
+    let input = serde_json::json!({"title":"Docs page","brief":"Write the docs page for the parser."});
+    agent.say(serde_json::json!({"type":"control_request","request_id":"r1","request":{"subtype":"mcp_message","server_name":"faber",
+        "message":{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"conversation","arguments":input,"_meta":{"claudecode/toolUseId":"toolu_c"}}}}})).await;
+    let mut sibling = support::next_pipe(&made).await;
+    for _ in 0..300 {
+        if sibling.lines.lock().unwrap().iter().any(|m| m["type"] == "user") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let brief = sibling.lines.lock().unwrap().iter().find(|m| m["type"] == "user").cloned().expect("the brief is sent");
+    assert!(brief.to_string().contains("Write the docs page for the parser."), "{brief}");
+    let child = engine.state().conversations.into_iter().find(|c| c.title == "Docs page").expect("the new conversation is listed").id;
+    let (own, theirs) = (engine.open(&parent).unwrap().copy.unwrap(), engine.open(&child).unwrap().copy.expect("a copy of its own"));
+    assert!(theirs.branch.starts_with("faber/docs-page-") && theirs.path != own.path, "{own:?} {theirs:?}");
+    let cwds = cwds.lock().unwrap().clone();
+    assert_eq!(cwds.len(), 2, "{cwds:?}");
+    assert_eq!(cwds[1].canonicalize().unwrap(), PathBuf::from(&theirs.path).canonicalize().unwrap(), "never the project folder");
+    sibling.say(serde_json::json!({"type":"system","subtype":"init","session_id":"s2","model":"claude-haiku-5-5"})).await;
+    engine.shutdown();
+}

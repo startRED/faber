@@ -27,7 +27,7 @@ impl Engine {
         self.with(|c| c.git = Some(run));
     }
 
-    fn make_copy(plan: Option<Plan>) -> Result<Made, String> {
+    pub(super) fn make_copy(plan: Option<Plan>) -> Result<Made, String> {
         let Some(plan) = plan else { return Ok(None) };
         let Some(mut exec) = (plan.run)() else { return Ok(None) };
         copy::make(&mut *exec, &plan.folder, &plan.data, &plan.id, &plan.branch, plan.from.as_deref())
@@ -105,7 +105,7 @@ impl Engine {
 
     /// Removes a copy away from the lock. The conversation's CLI has just been closed and may still hold its files for a
     /// moment, so it tries again a few times.
-    fn drop_copy(&self, made: Made) {
+    pub(super) fn drop_copy(&self, made: Made) {
         let Some((id, copy)) = made else { return };
         let Some((run, data)) = self.with(|c| c.git.clone().map(|run| (run, c.opts.data_dir.clone()))) else { return };
         std::thread::spawn(move || {
@@ -172,7 +172,7 @@ impl Core {
     /// What a send needs made first: a copy for a project conversation's first message, while the project keeps separate
     /// copies, or the copy of a conversation that was removed once merged. A conversation that began in the folder stays
     /// there.
-    fn copy_plan(&mut self, req: &SendRequest) -> Option<Plan> {
+    pub(super) fn copy_plan(&mut self, req: &SendRequest) -> Option<Plan> {
         if req.area != Area::Project || self.local_build {
             return None;
         }
@@ -225,7 +225,7 @@ impl Core {
     }
 
     /// Records a copy on its conversation; one that no longer fits (another send got there first) comes back to be removed.
-    fn attach_copy(&mut self, id: &str, copy: WorkCopy) -> Made {
+    pub(super) fn attach_copy(&mut self, id: &str, copy: WorkCopy) -> Made {
         match self.convs.get_mut(id) {
             Some(c) if c.copy.as_ref().map_or(c.messages.is_empty(), |had| had.path == copy.path) => {
                 c.copy = Some(copy);

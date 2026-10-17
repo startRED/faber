@@ -828,6 +828,7 @@ export const en = {
   'notes.41.new': 'With Keep going, a project conversation goes on by itself while you are away, and Faber tells you why when it stops.',
   'notes.42.new': 'When the agent opens a pull request, the conversation follows it: if its checks fail, Faber asks the agent to fix them.',
   'notes.43.new': 'Each project conversation now works in a separate copy of your repository, on a branch of its own, so two conversations never change the same files.',
+  'notes.44.fixed': 'A conversation the agent starts by itself now gets its own separate copy too, instead of working in your project folder.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

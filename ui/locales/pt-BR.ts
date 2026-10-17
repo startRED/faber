@@ -947,6 +947,7 @@ export const ptBR: Messages = {
   'notes.41.new': 'Com Continuar sozinho, uma conversa de projeto segue por conta própria enquanto você está fora, e o Faber avisa por que parou.',
   'notes.42.new': 'Quando o agente abre um pull request, a conversa acompanha: se as verificações falham, o Faber pede ao agente que as corrija.',
   'notes.43.new': 'Cada conversa de projeto agora trabalha numa cópia separada do seu repositório, num branch próprio, então duas conversas nunca mexem nos mesmos arquivos.',
+  'notes.44.fixed': 'Uma conversa que o agente abre sozinho agora também ganha a sua própria cópia separada, em vez de trabalhar na pasta do seu projeto.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

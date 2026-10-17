@@ -960,6 +960,7 @@ export const es: Messages = {
   'notes.41.new': 'Con Seguir solo, una conversación de proyecto sigue por su cuenta mientras no estás, y Faber te dice por qué se detuvo.',
   'notes.42.new': 'Cuando el agente abre una pull request, la conversación la sigue: si fallan sus comprobaciones, Faber le pide al agente que las arregle.',
   'notes.43.new': 'Cada conversación de un proyecto ahora trabaja en una copia aparte de tu repositorio, en una rama propia, así que dos conversaciones nunca cambian los mismos archivos.',
+  'notes.44.fixed': 'Una conversación que el agente abre por su cuenta ahora también tiene su propia copia separada, en lugar de trabajar en la carpeta de tu proyecto.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

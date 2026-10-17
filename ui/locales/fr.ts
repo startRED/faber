@@ -960,6 +960,7 @@ export const fr: Messages = {
   'notes.41.new': 'Avec Continuer seul, une conversation de projet continue d’elle-même pendant votre absence, et Faber vous dit pourquoi elle s’arrête.',
   'notes.42.new': 'Quand l’agent ouvre une pull request, la conversation la suit : si ses vérifications échouent, Faber demande à l’agent de les corriger.',
   'notes.43.new': 'Chaque conversation de projet travaille maintenant dans une copie à part de votre dépôt, sur sa propre branche : deux conversations ne modifient jamais les mêmes fichiers.',
+  'notes.44.fixed': "Une conversation que l'agent ouvre de lui-même a désormais elle aussi sa propre copie séparée, au lieu de travailler dans le dossier de votre projet.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

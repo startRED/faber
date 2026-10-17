@@ -960,6 +960,7 @@ export const de: Messages = {
   'notes.41.new': 'Mit Selbst weitermachen läuft eine Projektunterhaltung allein weiter, während du weg bist, und Faber sagt dir, warum sie aufhört.',
   'notes.42.new': 'Wenn der Agent einen Pull Request öffnet, verfolgt die Unterhaltung ihn: Schlagen seine Prüfungen fehl, bittet Faber den Agenten, sie zu beheben.',
   'notes.43.new': 'Jedes Projektgespräch arbeitet jetzt in einer eigenen Kopie deines Repositorys, auf einem eigenen Branch, damit zwei Gespräche nie dieselben Dateien ändern.',
+  'notes.44.fixed': 'Ein Gespräch, das der Agent selbst beginnt, bekommt jetzt ebenfalls eine eigene getrennte Kopie, statt im Ordner deines Projekts zu arbeiten.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',
