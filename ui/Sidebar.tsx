@@ -8,7 +8,9 @@ import { en, type Key } from './locales/en.ts';
 import { Peek } from './Mark.tsx';
 import { animateList, keepForExit } from './motion.ts';
 import { vendorName } from './models.ts';
+import { forgetProject } from './projects.ts';
 import type { Place } from './running.ts';
+import { mac } from './WindowControls.tsx';
 import { ageOf, freshness, groupChats, matches, type Quotas, showsChats, tailOf, tightest } from './sidebar.ts';
 
 /** The name of a conversation while it is being renamed: Enter keeps it, Esc and leaving the box too when nothing changed. */
@@ -163,7 +165,7 @@ export function Sidebar(props: Props) {
         </button>
       </Show>
       <button class="x" classList={{ confirm: confirming() === row.c.id }} aria-label={t('side.delete', { title: row.c.title })} onClick={() => remove(row.c.id)}>
-        {confirming() === row.c.id ? t('side.confirmDelete') : '×'}
+        {confirming() === row.c.id ? t('side.confirmDelete') : <Icon name="close" small />}
       </button>
     </div>
   );
@@ -173,7 +175,7 @@ export function Sidebar(props: Props) {
       <button class="newchat" onClick={() => props.onNew()}>
         <Icon name="plus" />
         <span>{t('side.new')}</span>
-        <kbd>Ctrl N</kbd>
+        <kbd>{t(mac ? 'key.newMac' : 'key.new')}</kbd>
       </button>
       <div class="areas" role="group" aria-label={t('area.label')}>
         <button class="area" aria-pressed={props.place.area === 'chat'} onClick={() => props.onArea('chat')}>
@@ -220,7 +222,7 @@ export function Sidebar(props: Props) {
                         openMenu(e, [
                           { id: 'new', label: t('menu.newHere'), run: () => (toggle(p.id, true), props.onNewIn(p.id)) },
                           { id: 'open', label: t('menu.openFolder'), run: () => void api.showProject(p.id).catch((err) => props.onError?.(err)) },
-                          { id: 'remove', label: t('menu.removeProject'), danger: true, confirm: t('menu.removeConfirm'), disabled: () => tail().running, run: () => void api.removeProject(p.id).catch((err) => props.onError?.(err)) },
+                          { id: 'remove', label: t('menu.removeProject'), danger: true, confirm: t('menu.removeConfirm'), disabled: () => tail().running, run: () => void api.removeProject(p.id).then(() => forgetProject(p.id), (err) => props.onError?.(err)) },
                         ])
                       }
                     >
@@ -239,13 +241,11 @@ export function Sidebar(props: Props) {
                         <Show when={tail().running && tail().needs === 0}>
                           <span class="tail run-dot" role="img" aria-label={t('side.running')} />
                         </Show>
-                        {/* Amber is a bubble and the words; in a row this narrow the words are the label and the tooltip. */}
+                        {/* Amber always comes with its words, as on the run button and in the running column. */}
                         <Show when={tail().needs > 0}>
-                          <span class="tail amber-tag" role="img" aria-label={t('run.needs', { n: tail().needs })} title={t('run.needs', { n: tail().needs })}>
+                          <span class="tail amber-tag">
                             <Icon name="ask" small />
-                            <span class="num" aria-hidden="true">
-                              {tail().needs}
-                            </span>
+                            {t('run.needs', { n: tail().needs })}
                           </span>
                         </Show>
                       </button>
@@ -330,7 +330,7 @@ export function Sidebar(props: Props) {
           </button>
         </Show>
         <div class="version num" lang={lang()}>
-          v{props.version}
+          {t('side.version', { version: props.version })}
         </div>
       </div>
     </>

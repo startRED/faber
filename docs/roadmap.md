@@ -590,9 +590,8 @@ Saved data stays compatible with last good. This channel is separate from signed
 [spec](superpowers/specs/2026-10-12-self-development-mvp-design.md)).
 
 - **Faber itself** updates itself. Today it downloads a signed update in the background and installs it on quit or, on
-  Windows, at the first moment no conversation or CLI install runs and the window is hidden (R118). A running
-  mission does not hold it back yet (product-map incoherence 29). Installing when Faber
-  opens (R141) is not built yet.
+  Windows, at the first moment no conversation, mission or CLI install runs and the window is hidden (R118). Installing
+  when Faber opens (R141) is not built yet.
 - **The CLIs.** Claude Code and Codex move only to versions that GitHub tested overnight with recorded conversations.
   If a version breaks, Faber stays on the previous one until a fix arrives as a published file, with no new Faber
   download.

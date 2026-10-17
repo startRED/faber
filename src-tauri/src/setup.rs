@@ -125,7 +125,7 @@ pub async fn setup_sign_in(vendor: String) -> Res<()> {
     if !terminal::is_safe(&cmd) {
         return Err("error.setup.signIn".into());
     }
-    terminal::open(&cmd).map_err(|e| e.to_string())
+    terminal::open(&cmd).map_err(|_| "error.setup.signIn".into())
 }
 
 #[tauri::command]

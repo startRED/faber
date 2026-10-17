@@ -1,5 +1,6 @@
-import { createResource, createSignal, For, onCleanup, Show } from 'solid-js';
+import { createResource, createSignal, For, Show } from 'solid-js';
 import { api, type FolderView, type Project } from './api.ts';
+import { openMenu } from './contextmenu.ts';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 import type { Key } from './locales/en.ts';
@@ -12,7 +13,6 @@ export function shortPath(path: string): string {
   return [parts[0], '…', ...parts.slice(-2)].join(sep);
 }
 
-type MenuState = { x: number; y: number; label: Key; run: () => Promise<unknown>; opener?: HTMLElement; section: Section; index: number };
 type Section = 'rec' | 'env';
 
 /** The last five folders (one click each) and, in the project area, the saved environments and the tray that builds a new one.
@@ -29,28 +29,7 @@ export function Recents(props: {
   const [data, { refetch }] = createResource(() => api.recents());
   const [selected, setSelected] = createSignal<FolderView[]>([]);
   const [name, setName] = createSignal('');
-  const [menu, setMenu] = createSignal<MenuState>();
   let box: HTMLDivElement | undefined;
-  /** Closing with the keyboard puts focus back where the menu came from; a click elsewhere leaves it where the person clicked. */
-  const closeMenu = (restore = false) => {
-    const open = menu();
-    setMenu(undefined);
-    if (restore) open?.opener?.focus();
-  };
-  // Captured before the screen's own Escape (which closes Settings): with a menu open, Escape belongs to the menu alone.
-  const key = (e: KeyboardEvent) => {
-    if (e.key !== 'Escape' || !menu()) return;
-    e.stopPropagation();
-    e.preventDefault();
-    closeMenu(true);
-  };
-  const away = () => closeMenu();
-  addEventListener('pointerdown', away);
-  addEventListener('keydown', key, true);
-  onCleanup(() => {
-    removeEventListener('pointerdown', away);
-    removeEventListener('keydown', key, true);
-  });
   const guard = async (run: () => Promise<unknown>) => {
     try {
       await run();
@@ -67,13 +46,12 @@ export function Recents(props: {
       (buttons?.[Math.min(index, buttons.length - 1)] ?? box)?.focus();
     }, 0);
   };
+  /** Faber's own menu (C009): the one destructive item, armed first and confirmed by a second choice. */
   const menuAt = (e: MouseEvent, label: Key, run: () => Promise<unknown>, section: Section, index: number) => {
-    e.preventDefault();
     const row = e.currentTarget as HTMLElement;
-    const at = row.getBoundingClientRect();
     const active = document.activeElement;
-    const opener = active instanceof HTMLElement && row.contains(active) ? active : (row.querySelector<HTMLElement>('.rec-x') ?? undefined);
-    setMenu({ x: e.clientX || at.left + 24, y: e.clientY || at.bottom, label, run, opener, section, index });
+    const focus = active instanceof HTMLElement && row.contains(active) ? active : row.querySelector<HTMLElement>('.rec-x');
+    openMenu(e, [{ id: 'remove', label: t(label), danger: true, confirm: t('menu.removeConfirm'), run: () => void remove(section, index, run) }], focus);
   };
   const chosen = (f: FolderView) => selected().some((s) => s.path === f.path);
   const toggle = (f: FolderView) => setSelected((all) => (chosen(f) ? all.filter((s) => s.path !== f.path) : [...all, f]));
@@ -162,24 +140,6 @@ export function Recents(props: {
             </For>
           </ul>
         </section>
-      </Show>
-      <Show when={menu()}>
-        {(m) => (
-          <div class="rec-menu" role="menu" style={{ left: `${m().x}px`, top: `${m().y}px` }} onPointerDown={(e) => e.stopPropagation()}>
-            <button
-              type="button"
-              role="menuitem"
-              ref={(el) => queueMicrotask(() => el.focus())}
-              onClick={() => {
-                const { run, section, index } = m();
-                closeMenu();
-                void remove(section, index, run);
-              }}
-            >
-              {t(m().label)}
-            </button>
-          </div>
-        )}
       </Show>
     </div>
   );

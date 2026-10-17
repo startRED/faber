@@ -39,6 +39,10 @@ export const ptBR: Messages = {
   'side.delete': 'Apagar {title}',
   'side.confirmDelete': 'Apagar?',
   'side.new': 'Nova conversa',
+  'key.new': 'Ctrl N',
+  'key.newMac': '⌘N',
+  'key.esc': 'Esc',
+  'side.version': 'v{version}',
   'side.label': 'Barra lateral',
   'side.hide': 'Fechar a barra lateral',
   'side.show': 'Abrir a barra lateral',
@@ -90,6 +94,7 @@ export const ptBR: Messages = {
   'composer.projectPlaceholder': 'Peça ao Faber para fazer algo nesta pasta',
   'composer.message': 'Mensagem',
   'composer.attach': 'Anexar',
+  'composer.attachedFile': 'Arquivo anexado {name}:',
   'composer.clear': 'limpar ×',
   'composer.removeAttachments': 'Remover anexos',
   'composer.model': 'Modelo',
@@ -141,7 +146,6 @@ export const ptBR: Messages = {
   'parked.other': '{tool}',
   'parked.more': '+{n} a mais',
   'answer.label': 'Resposta',
-  'answer.thinking': 'Raciocínio',
   'activity.working': 'Trabalhando · {steps} · {commands}',
   'activity.done': 'Trabalho realizado · {steps} · {commands}',
   'activity.steps': { one: '{n} etapa', other: '{n} etapas' },
@@ -181,6 +185,7 @@ export const ptBR: Messages = {
   'nudge.failedCheck': 'A última verificação falhou. Refaz esta mensagem com {to}.',
   'nudge.noCheck': 'O código mudou, mas nada o verificou. Refaz esta mensagem com {to}.',
   'answer.cost': 'US$ {cost} a preço de API',
+  'money.usd': 'US$ {amount}',
   'answer.tokens': '{input} mil de entrada · {output} de saída',
   'answer.cacheWarm': 'cache quente até {time}',
   'files.label': 'Arquivos',
@@ -210,6 +215,11 @@ export const ptBR: Messages = {
   'error.look.fileInvalid': 'Este arquivo de tema não é válido ({detail}).',
   'error.look.fileTooBig': 'Este arquivo de tema é grande demais.',
   'error.theme.write': 'Não foi possível salvar o arquivo de tema. O arquivo antigo continua intacto. Confira o disco e a pasta e tente de novo.',
+  'error.link.web': 'Daqui só se abrem links da web.',
+  'error.link.open': 'Não foi possível abrir o link.',
+  'error.file.save': 'Não foi possível salvar o arquivo ali. Verifique a pasta e o disco e tente de novo.',
+  'error.file.show': 'O gerenciador de arquivos não conseguiu mostrá-lo.',
+  'error.terminal.open': 'Não foi possível abrir o console.',
   'error.theme.read': 'Não foi possível ler o arquivo de tema.',
   'error.settings.saveFailed': 'O Faber não conseguiu salvar as configurações. Nada foi alterado.',
   'error.settings.autostartFailed': 'O Faber não conseguiu alterar a inicialização ao entrar no Windows. Suas configurações não foram alteradas.',
@@ -251,7 +261,6 @@ export const ptBR: Messages = {
   'set.cornersSquare': 'Retos',
   'set.cornersSoft': 'Suaves',
   'set.motion': 'Movimento',
-  'set.effects': 'Efeitos',
   'set.themeHint': 'Muda só o visual. Conversas e projetos continuam iguais.',
   'error.permission.undelivered': "O Faber não conseguiu enviar a resposta de permissão. Tente novamente.",
   // R107: handwritten wording; native-speaker review pending (English is the source).
@@ -450,6 +459,7 @@ export const ptBR: Messages = {
   'first.mini.codex': 'Codex',
   'first.mini.input': 'Escreva aqui',
   'first.size.small': 'Texto pequeno',
+  'first.size.sample': 'Aa',
   'first.size.normal': 'Texto normal',
   'first.size.large': 'Texto grande',
   'first.motionHint': 'Se o sistema pedir menos movimento, já começa em Reduzido.',
@@ -511,7 +521,6 @@ export const ptBR: Messages = {
   "usage.outside": "Uso fora do Faber: pelo menos {share} da variação observada na conta.",
   "usage.overageOn": "Esta conta permite uso extra pago. O Faber pergunta antes de usá-lo; desligar essa opção no provedor impede que a ferramenta mude sozinha.",
   "usage.billedPerUse": "Este login cobra por uso, então o Automático não o usa.",
-  "usage.pace": "Uso esperado da conta",
   "usage.expect": "Já passaram {elapsed} desta janela · projeção de cerca de {share} até a renovação",
   "usage.authNeeded": "A ferramenta precisa confirmar a cobrança por assinatura para o Automático. Informar o plano não confirma isso.",
   "usage.ownSpend": "Faber hoje: US$ {cost} equivalentes na API",
@@ -523,9 +532,7 @@ export const ptBR: Messages = {
   "quota.seven_day_sonnet": "Sonnet · 7 dias",
   "quota.seven_day_haiku": "Haiku · 7 dias",
   // Native speaker must translate (needs native review).
-  "projects.title": "Projetos",
   // Native speaker must translate (needs native review).
-  "projects.empty.selectProject": "Selecione a pasta de um projeto para iniciar uma missão.",
   // Native speaker must translate (needs native review).
   "projects.repo": "Pasta",
   // Native speaker must translate (needs native review).
@@ -546,8 +553,8 @@ export const ptBR: Messages = {
   // Native speaker must translate (needs native review).
   "projects.gitMode.seguroDesc": "O Faber trabalha numa cópia separada do projeto. Não mexe no GitHub nem em nada na internet.",
   // Native speaker must translate (needs native review).
-  "projects.gitMode.equilibrado": "Equilibrado (Commits locais + draft PR)",
   // Native speaker must translate (needs native review).
+  "projects.gitMode.equilibrado": "Equilibrado (Commits locais + draft PR)",
   "projects.gitMode.equilibradoDesc": "Seguro mais o envio da branch da missão e a criação de um draft PR.",
   // Native speaker must translate (needs native review).
   "projects.selfUpdate.trust": "Permitir que o Faber atualize a si mesmo",
@@ -608,7 +615,6 @@ export const ptBR: Messages = {
   // Native speaker must translate (needs native review).
   "projects.receipt.notRun": "Não executado",
   // Native speaker must translate (needs native review).
-  "projects.receipt.verified": "Verificado",
   // Native speaker must translate (needs native review).
   "projects.cost.title": "Custo próprio",
   // Native speaker must translate (needs native review).
@@ -742,7 +748,6 @@ export const ptBR: Messages = {
   'projects.tasks.none': 'Nenhuma tarefa ainda. O Faber divide o objetivo em tarefas enquanto planeja.',
   'projects.tasks.count': '{done} de {total} concluídas',
   // Native speaker must translate (needs native review).
-  "reason.mission.runnerUnavailable": "A execução da missão está aguardando o executor aprovado. Nenhum trabalho foi iniciado.",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   "error.wire.malformed": "A solicitação contém valores inválidos ou ausentes.",
@@ -773,7 +778,6 @@ export const ptBR: Messages = {
   // Native speaker must translate (needs native review).
   "error.decision.person": "Esta decisão precisa da sua resposta.",
   // Native speaker must translate (needs native review).
-  "reason.build.unavailable": "Os slots de compilação local não foram inicializados.",
   // Native speaker must translate (needs native review).
   "reason.update.quiescence": "A promoção aguarda o término das operações ativas e o fechamento da janela.",
   // Native speaker must translate (needs native review).
@@ -869,7 +873,6 @@ export const ptBR: Messages = {
   // Native speaker must translate (needs native review).
   "error.folder.link": "Essa pasta é um atalho para outro lugar, então o Faber não vai abri-la. Abra a pasta de verdade pelo gerenciador de arquivos.",
   "recents.title": "Pastas recentes",
-  "recents.choose": "Escolher uma pasta",
   "recents.select": "Selecionar {name}",
   "recents.forget": "Remover dos recentes",
   "reason.recents.gone": "Pasta não encontrada",
@@ -940,6 +943,7 @@ export const ptBR: Messages = {
   'notes.18.better': 'Cada passo do trabalho agora diz o que faz em palavras simples, como Lendo, Buscando ou Alterando, com o arquivo ou comando em que atua.',
   'notes.19.new': 'Num projeto, o assistente pode pedir ajuda à outra IA com uma parte do trabalho ou uma revisão, e o ajudante aparece como uma etapa na resposta.',
   'notes.20.fixed': 'No Mac, o Faber agora se atualiza sozinho como no Windows e no Linux, e as prévias chegam a quem as ativou.',
+  'notes.21.fixed': 'Uma lista de projetos danificada não esvazia mais os seus projetos, e remover um projeto agora também apaga a cópia que o Faber guardava dele.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

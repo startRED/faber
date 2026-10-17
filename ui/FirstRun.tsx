@@ -235,7 +235,7 @@ export function LookStep(props: {
                   style={{ 'font-size': `${SIZE_PX[size]}px` }}
                   onClick={() => change(withSize(draft(), size))}
                 >
-                  Aa
+                  {t('first.size.sample')}
                 </button>
               )}
             </For>

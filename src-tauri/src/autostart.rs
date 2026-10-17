@@ -29,7 +29,6 @@ pub fn launch_command(
 pub trait AutostartKeeper: Send + Sync {
     fn register(&self) -> Result<(), String>;
     fn unregister(&self) -> Result<(), String>;
-    #[allow(dead_code)]
     fn is_registered(&self) -> Result<bool, String>;
 }
 
@@ -184,7 +183,6 @@ fn delete_run_value() -> Result<(), String> {
 }
 
 #[cfg(windows)]
-#[allow(dead_code)]
 fn has_run_value() -> Result<bool, String> {
     #[link(name = "advapi32")]
     unsafe extern "system" {
@@ -237,6 +235,12 @@ pub fn creates_window(args: impl IntoIterator<Item = String>) -> bool {
 }
 
 /// Changes the registration and settings together; tests supply both operations.
+/// What the switch shows: whether Windows will really start Faber. The key can go without Faber (a cleanup tool, another
+/// account tool), and the setting alone would then still say on. A key that cannot be read leaves the setting as saved.
+pub fn shown(keeper: &dyn AutostartKeeper, saved: bool) -> bool {
+    keeper.is_registered().unwrap_or(saved)
+}
+
 pub fn save<T>(keeper: &dyn AutostartKeeper, enabled: Option<bool>, persist: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
     let Some(enabled) = enabled else { return persist() };
     let failed = |error| {
@@ -295,6 +299,26 @@ mod tests {
             );
             assert_eq!(keeper.is_registered(), Ok(before));
         }
+    }
+
+    #[test]
+    fn the_switch_shows_the_run_key_and_the_setting_only_when_the_key_cannot_be_read() {
+        assert!(!shown(&FakeAutostart::new(false), true), "a key removed outside Faber turns the switch off");
+        assert!(shown(&FakeAutostart::new(true), false));
+        struct Unreadable;
+        impl AutostartKeeper for Unreadable {
+            fn register(&self) -> Result<(), String> {
+                Ok(())
+            }
+            fn unregister(&self) -> Result<(), String> {
+                Ok(())
+            }
+            fn is_registered(&self) -> Result<bool, String> {
+                Err("access denied".into())
+            }
+        }
+        assert!(shown(&Unreadable, true));
+        assert!(!shown(&Unreadable, false));
     }
 
     #[test]

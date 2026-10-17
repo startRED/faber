@@ -14,7 +14,7 @@ use crate::model::*;
 use crate::nudge;
 use crate::proc::Spawner;
 use crate::recents::RecentsView;
-use crate::router::{Choice, Effort, Pick, pick_model};
+use crate::router::{Choice, Pick, pick_model};
 use crate::signals::Signals;
 use crate::store::Store;
 use crate::usage;
@@ -268,6 +268,9 @@ struct Core {
     mission_wake: Arc<tokio::sync::Notify>,
     /// The project each mission in `mission_sessions` belongs to, so a project can be asked whether a worker is alive in it.
     mission_projects: HashMap<String, String>,
+    /// Missions a coordinator in this process drives now, from setup through roles and proofs to the stop (see `drive`),
+    /// each with its project, so removing a project knows without reading its records.
+    driving: HashMap<String, String>,
     mission_lock: Arc<tokio::sync::Mutex<()>>,
     local_update: Option<crate::project::update::SlotLayout>,
     local_build: bool,
@@ -336,6 +339,18 @@ pub struct Engine {
     runtime: tokio::runtime::Handle,
 }
 
+/// A mission being driven, from [`Engine::drive`]; the drive ends when this drops, even if the driver panicked.
+pub struct Drive {
+    engine: Engine,
+    mission: String,
+}
+
+impl Drop for Drive {
+    fn drop(&mut self) {
+        self.engine.with(|c| c.driving.remove(&self.mission));
+    }
+}
+
 impl Engine {
     pub fn new(opts: EngineOptions, emit: Emit) -> Engine {
         crate::project::qualification::use_dir(&opts.data_dir);
@@ -375,6 +390,7 @@ impl Engine {
                 worker_closing: HashSet::new(),
                 mission_wake: Arc::new(tokio::sync::Notify::new()),
                 mission_projects: HashMap::new(),
+                driving: HashMap::new(),
                 mission_lock: Arc::new(tokio::sync::Mutex::new(())),
                 local_update: None,
                 local_build: false,
@@ -653,7 +669,7 @@ impl Engine {
     pub fn workspace_file(&self, id: &str, path: &str) -> Option<PathBuf> {
         self.with(|c| c.store.get(id).is_some().then(|| inside_folder(&c.workspace_of(id), path)).flatten().filter(|p| p.is_file()))
     }
-    pub fn add_project(&self, path: &str) -> Project {
+    pub fn add_project(&self, path: &str) -> Result<Project, String> {
         self.with(|c| c.add_project(path))
     }
     pub fn project(&self, id: &str) -> Result<Project, String> {
@@ -698,7 +714,7 @@ impl Engine {
         if !Path::new(&path).is_dir() {
             return Err("error.recents.gone".into());
         }
-        Ok(self.with(|c| c.add_project(&path)))
+        self.with(|c| c.add_project(&path))
     }
     pub fn recents(&self) -> RecentsView {
         self.with(|c| c.store.recents().view())
@@ -745,21 +761,34 @@ impl Engine {
         if projects.is_empty() { Err(failure) } else { Ok(projects) }
     }
     /// Takes a project out of the list. Anything still working in it (a conversation answering, a mission planning or
-    /// running) stops the removal with `error.project.busy`: the person stops it first. Nothing on disk is deleted.
+    /// running) stops the removal with `error.project.busy`: the person stops it first. Faber's own copy of the project goes;
+    /// the person's folder and the mission journals in it stay.
     pub fn remove_project(&self, id: &str) -> Result<(), String> {
-        self.with(|c| {
-            let Some(project) = c.store.projects().into_iter().find(|p| p.id == id) else { return Err("error.project.notFound".into()) };
+        let data = self.with(|c| {
+            let mut projects = c.store.projects_checked().map_err(|e| e.key().to_string())?;
+            let Some(project) = projects.iter().find(|p| p.id == id).cloned() else { return Err("error.project.notFound".into()) };
             let answering = c.convs.values().any(|conv| conv.project_id.as_deref() == Some(id) && running_item(conv).is_some());
             // A worker session alive in memory counts even if its records on disk were removed or cannot be read.
             let working = c.mission_sessions.iter().any(|(m, s)| !s.is_empty() && c.mission_projects.get(m).is_some_and(|p| p == id));
-            if answering || working || crate::project::has_active_mission(Path::new(&project.path), &c.opts.data_dir, id) {
+            // A paused mission can still be finishing a setup or a proof in the copy until its drive ends.
+            let driven = c.driving.values().any(|p| p == id);
+            if answering || working || driven || crate::project::has_active_mission(Path::new(&project.path), &c.opts.data_dir, id) {
                 return Err("error.project.busy".into());
             }
-            let projects: Vec<Project> = c.store.projects().into_iter().filter(|p| p.id != id).collect();
+            projects.retain(|p| p.id != id);
             c.store.save_projects(&projects).map_err(|_| "error.store.write".to_string())?;
             c.list_changed();
-            Ok(())
-        })
+            Ok::<_, String>(c.opts.data_dir.clone())
+        })?;
+        // Away from the lock: deleting a big copy takes a while, and nothing works in it any more.
+        if let Ok(copy) = crate::project::workspace::Workspace::new(&data, id) {
+            std::thread::spawn(move || {
+                if let Err(reason) = copy.discard() {
+                    eprintln!("faber: the copy of a removed project stays ({reason})");
+                }
+            });
+        }
+        Ok(())
     }
     /// Swaps the CLIs in use, for example after one was installed or signed in to. Idle processes of a changed CLI
     /// close and the shared Codex processes retire, so the next turn starts the new one; a turn in flight finishes
@@ -784,10 +813,20 @@ impl Engine {
             Some(TerminalCommand { command: cli.command, args, cwd: c.opts.data_dir.clone() })
         })
     }
-    /// Whether any answer is streaming or waits for the user: the running list is not empty. The shell uses it to hold back
-    /// anything that would end the process (installing an update).
+    /// Whether any answer is streaming or waits for the user (the running list is not empty), a mission worker runs, or a
+    /// mission is being driven.
+    /// The shell uses it to hold back anything that would end the process (installing an update).
     pub fn is_working(&self) -> bool {
-        self.with(|c| !c.running.items.is_empty() || c.mission_sessions.values().any(|s| !s.is_empty()))
+        self.with(|c| !c.running.items.is_empty() || c.mission_sessions.values().any(|s| !s.is_empty()) || !c.driving.is_empty())
+    }
+    /// Marks `mission` of `project` as driven by this process until the returned guard drops; `None` when it already is, so
+    /// a mission never has two drivers. While any mission is driven the engine is working.
+    pub fn drive(&self, mission: &str, project: &str) -> Option<Drive> {
+        self.with(|c| !c.driving.contains_key(mission) && c.driving.insert(mission.into(), project.into()).is_none())
+            .then(|| Drive { engine: self.clone(), mission: mission.to_string() })
+    }
+    pub fn is_driving(&self, mission: &str) -> bool {
+        self.with(|c| c.driving.contains_key(mission))
     }
     pub fn shutdown(&self) {
         self.with(|c| {
@@ -1169,7 +1208,7 @@ impl Core {
         // A stricter mode revokes every remembered "Always allow" in the very save that changes the mode, by replacing the grants
         // epoch: a grant made under another one never counts again, even if a conversation file below fails to update.
         // Settings that could not be read already came with a fresh epoch (see `Store::settings`), and this save keeps it.
-        let (was, to) = (before.permissions.unwrap_or_default(), settings.permissions.unwrap_or_default());
+        let (was, to) = (before.permissions.unwrap_or_default(), settings.permissions());
         if to.strictness() > was.strictness() {
             settings.grants_epoch = Some(crate::model::new_epoch());
         }
@@ -1918,7 +1957,7 @@ impl Core {
         let auto = item.choice.vendor == "auto";
         let route = if auto { self.next_route(id) } else { None };
         let c = self.convs.get_mut(id).expect("checked above");
-        c.choice = Some(Choice { effort: (!auto).then(|| item.choice.effort.unwrap_or(Effort::Medium)), ..item.choice.clone() });
+        c.choice = Some(Choice { effort: (!auto).then(|| item.choice.effort.unwrap_or_default()), ..item.choice.clone() });
         let routing = route.is_some();
         let pick = match &route {
             Some(Some(before)) => before.clone(),
@@ -2123,7 +2162,7 @@ impl Core {
         self.tick += 1;
         let cli = self.opts.clis.get(&pick.vendor).cloned();
         let settings = self.store.settings();
-        let (permissions, tuning) = (settings.permissions.unwrap_or_default(), settings.tuning());
+        let (permissions, tuning) = (settings.permissions(), settings.tuning());
         let flags = match &cli {
             Some(cli) if pick.vendor == Vendor::Claude => self.claude_flags_for(cli),
             _ => Default::default(),
@@ -2194,7 +2233,7 @@ impl Core {
             }
         });
         // The hooks switch matters only while asking; with full access the person's hooks always run, as in the CLI itself.
-        let user_hooks = settings.user_hooks == Some(true) && permissions.guarded();
+        let user_hooks = settings.user_hooks() && permissions.guarded();
         let resume = c.resumable(pick.vendor).cloned();
         let resumed = resume.is_some();
         let area = c.area;
@@ -2348,7 +2387,7 @@ impl Core {
         let auto = req.choice.vendor == "auto";
         let route = if auto { self.next_route(&id) } else { None };
         let c = self.convs.get_mut(&id).ok_or("error.conversationGone")?;
-        c.choice = Some(Choice { effort: (!auto).then(|| req.choice.effort.unwrap_or(Effort::Medium)), ..req.choice.clone() });
+        c.choice = Some(Choice { effort: (!auto).then(|| req.choice.effort.unwrap_or_default()), ..req.choice.clone() });
         let routing = route.is_some();
         let pick = match &route {
             Some(Some(before)) => before.clone(),
@@ -2595,19 +2634,19 @@ impl Core {
         }
     }
 
-    fn add_project(&mut self, path: &str) -> Project {
-        let mut projects = self.store.projects();
+    /// A damaged list is an error, never an empty one: writing it back would lose every grant and confirmed check.
+    fn add_project(&mut self, path: &str) -> Result<Project, String> {
+        let mut projects = self.store.projects_checked().map_err(|e| e.key().to_string())?;
         self.note_folder(path);
         if let Some(found) = projects.iter().find(|p| crate::recents::same_place(&p.path, path)) {
-            return found.clone();
+            return Ok(found.clone());
         }
         let name = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string());
         let project = Project::new(new_id(), name, path.to_string());
         projects.push(project.clone());
-        if self.store.save_projects(&projects).is_ok() {
-            self.list_changed();
-        }
-        project
+        self.store.save_projects(&projects).map_err(|e| e.key().to_string())?;
+        self.list_changed();
+        Ok(project)
     }
 }
 

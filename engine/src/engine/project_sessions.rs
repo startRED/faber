@@ -100,7 +100,8 @@ impl Engine {
                 .ok_or("error.store.corrupt")?
                 .0;
             let recorded: Runner = serde_json::from_slice(&bytes).map_err(|_| "error.store.corrupt")?;
-            let project = projects.iter().find(|p| p.id == recorded.mission.project_id).ok_or("error.journal.mismatch")?;
+            // A mission of a project that left Faber cannot be running (removal waits for it to stop): nothing to pause.
+            let Some(project) = projects.iter().find(|p| p.id == recorded.mission.project_id) else { continue };
             let journal =
                 Journal::open(std::path::Path::new(&project.path), &data, &recorded.mission.id).map_err(|e| e.key().to_string())?;
             let mut runner = Runner::load(&journal).map_err(str::to_string)?;
