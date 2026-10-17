@@ -102,6 +102,10 @@ inside its own area.
   "Opened 5 sites", then "+N" for any past four, then the four last opened, joined by middle dots in the third ink, the
   one it reads now last and in the first ink. A site opened again moves to the end. It goes when the reply ends; nothing moves,
   and the status line already says the page, so the list is hidden from a screen reader.
+- A step that has run for half a minute says for how long at the end of the status line (R161 step 9): " · 2 min" in the
+  same ink, in tabular figures, from when the engine saw it start. A long command cuts its own words, never its time.
+  The clock ticks every 15 s only while such a step runs and the window shows; the time is hidden from a screen reader,
+  since a live region that changed that often would keep talking.
 
 ### Subagent steps
 

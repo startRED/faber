@@ -277,6 +277,7 @@ mod tests {
             sign: None,
             facts: None,
             check: false,
+            started: None,
         }
     }
 

@@ -208,6 +208,8 @@ async fn r161_a_stuck_subagent_shows_on_its_step_and_needs_the_person() {
     let checks: Vec<bool> = reply.tools.iter().flatten().filter(|t| t.name == "Bash").map(|t| t.check).collect();
     assert_eq!(checks.iter().filter(|c| **c).count(), 3, "the three cargo test runs are checks: {checks:?}");
     assert!(checks.iter().any(|c| !c), "npm install is no check: {checks:?}");
+    // And every step keeps when it started, so the screen can say how long a long one has run.
+    assert!(reply.tools.iter().flatten().all(|t| t.started.is_some_and(|ms| ms > 1_700_000_000_000)), "every step is stamped");
 }
 
 /// The same step started six times in a row is a loop; the sign goes away when the subagent does something else.

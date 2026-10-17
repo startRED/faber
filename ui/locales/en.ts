@@ -767,6 +767,7 @@ export const en = {
   'notes.33.new': 'Faber goes still while a game is in front: nothing moves or repaints, and what happened meanwhile shows when you come back.',
   'notes.34.better': 'While a reply runs, the checks it ran count up under the status line, with how many failed.',
   'notes.35.better': 'While a reply reads the web, the sites it opened show under the status line, with the one it reads now.',
+  'notes.36.better': 'A step that runs long says on the status line how long it has been running.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

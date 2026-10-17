@@ -886,6 +886,7 @@ export const ptBR: Messages = {
   'notes.33.new': 'O Faber fica parado enquanto um jogo está na frente: nada se mexe nem é redesenhado, e o que aconteceu nesse meio-tempo aparece quando você volta.',
   'notes.34.better': 'Enquanto uma resposta trabalha, as verificações que ela rodou aparecem contadas sob a linha de status, com quantas falharam.',
   'notes.35.better': 'Enquanto uma resposta lê a web, os sites que ela abriu aparecem sob a linha de status, com o que ela lê agora.',
+  'notes.36.better': 'Um passo demorado diz na linha de status há quanto tempo está rodando.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

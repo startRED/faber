@@ -360,7 +360,10 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 .activity-thinking { display: grid; gap: 4px; color: var(--ink-3); }
 .activity-thinking p { margin: 0; white-space: pre-wrap; }
 .activity-thinking b { font-weight: 600; color: var(--ink-2); }
-.activity-latest { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: var(--fs-sm); }
+.activity-latest { display: flex; min-width: 0; white-space: nowrap; color: var(--ink-3); font-size: var(--fs-sm); }
+/* The step is cut, never its time. */
+.activity-latest .step { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.activity-latest .long { flex: none; white-space: pre; font-variant-numeric: tabular-nums; }
 /* The checks a running reply ran: one quiet line, a check mark while none failed, the error note's 2 px edge once one did. */
 .tally { display: flex; align-items: center; gap: 6px; margin: -4px 0 0; color: var(--ink-3); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
 .tally svg { color: var(--accent-text); }

@@ -1464,6 +1464,7 @@ impl Core {
                         sign: None,
                         facts: None,
                         check: false,
+                        started: Some(now()),
                     };
                     tool.check = crate::nudge::is_check(&tool);
                     m.tools.get_or_insert_default().push(tool);

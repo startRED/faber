@@ -106,6 +106,10 @@ pub struct ToolUse {
     /// the checks a reply ran without a second list of what a check is (R161 step 9).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub check: bool,
+    /// When the engine saw the call start, in Unix milliseconds, so the screen can say how long a long step has run without
+    /// a clock of its own (R161 step 9). Absent on calls recorded before it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started: Option<u64>,
 }
 
 /// A helper the agent sent to the background (Claude Code's `Agent` call with `run_in_background`): its call returns when it

@@ -899,6 +899,7 @@ export const de: Messages = {
   'notes.33.new': 'Faber hält still, solange ein Spiel im Vordergrund läuft: Nichts bewegt sich oder wird neu gezeichnet, und was inzwischen passiert ist, siehst du, wenn du zurückkommst.',
   'notes.34.better': 'Während eine Antwort arbeitet, zählen die Prüfungen, die sie ausgeführt hat, unter der Statuszeile mit, samt der fehlgeschlagenen.',
   'notes.35.better': 'Während eine Antwort im Web liest, stehen die Websites, die sie geöffnet hat, unter der Statuszeile, samt der, die sie gerade liest.',
+  'notes.36.better': 'Ein langer Schritt zeigt in der Statuszeile, wie lange er schon läuft.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

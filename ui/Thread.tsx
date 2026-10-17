@@ -11,7 +11,8 @@ import { untilReset } from './Sidebar.tsx';
 import { bytes, compact, fromEngine, money, t } from './i18n.ts';
 import { prettyModel, vendorName, type Option } from './models.ts';
 import { animateList } from './motion.ts';
-import { warmLeft } from './running.ts';
+import { windowHidden } from './appearance.ts';
+import { elapsed, warmLeft } from './running.ts';
 import { quotaPending } from './QuotaCard.tsx';
 import { agentState, agentSteps, changeOf, isAgentCall, middle, sameTools, sourcesOf, thinkingParts, toolLine, type AgentStep } from './worklog.ts';
 
@@ -167,6 +168,28 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
     if (finalText().trim()) return '';
     return tool ? toolLine(tool) : middle(thinking().at(-1)?.text ?? '');
   });
+  // A long step says how long it has run, from when the engine saw it start (R161 step 9). Only past half a minute, so a
+  // quick step never shows a number that changes before it can be read; the clock ticks only while such a step runs and
+  // the window shows.
+  const LONG = 30_000;
+  const [clock, setClock] = createSignal(Date.now());
+  // A memo, so the timer is made again only when another step starts, not on every tick of the stream.
+  const runningSince = createMemo(() => {
+    const tool = tools().at(-1);
+    return streaming() && tool && tool.ok === undefined ? tool.started : undefined;
+  });
+  createEffect(() => {
+    if (runningSince() === undefined || windowHidden()) return;
+    setClock(Date.now());
+    const timer = setInterval(() => setClock(Date.now()), 15_000);
+    onCleanup(() => clearInterval(timer));
+  });
+  const longFor = () => {
+    const since = runningSince();
+    if (since === undefined || clock() - since < LONG) return '';
+    const e = elapsed(since, clock());
+    return t(e.key, { n: e.n });
+  };
   // While the newest step is an edit, the lines it changed sit under the status line until the next step or the answer:
   // the view fits the work (R161 step 9). Text before the newest step's end is narration, not the answer.
   const answering = () => {
@@ -240,7 +263,13 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
         </div>
       </Show>
       <Show when={(steps() || agents().length) && streaming() && latest()}>
-        <div class="activity-latest" role="status" aria-live="polite" aria-atomic="true" title={latest()}>{latest()}</div>
+        <div class="activity-latest" role="status" aria-live="polite" aria-atomic="true" title={latest()}>
+          <span class="step">{latest()}</span>
+          {/* The time is for the eye: a live region that changed every few seconds would keep talking. */}
+          <Show when={longFor()}>
+            <span class="long" aria-hidden="true"> · {longFor()}</span>
+          </Show>
+        </div>
       </Show>
       {/* One polite region for the whole reply, so a screen reader hears each check end and the first failure. */}
       <Show when={streaming()}>

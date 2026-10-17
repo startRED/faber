@@ -899,6 +899,7 @@ export const fr: Messages = {
   'notes.33.new': 'Faber reste immobile quand un jeu est au premier plan : rien ne bouge ni ne se redessine, et ce qui s’est passé entre-temps apparaît à votre retour.',
   'notes.34.better': 'Pendant qu’une réponse travaille, les vérifications qu’elle a lancées se comptent sous la ligne d’état, avec combien ont échoué.',
   'notes.35.better': 'Pendant qu’une réponse lit le web, les sites qu’elle a ouverts s’affichent sous la ligne d’état, avec celui qu’elle lit maintenant.',
+  'notes.36.better': 'Une étape longue indique sur la ligne d’état depuis combien de temps elle tourne.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

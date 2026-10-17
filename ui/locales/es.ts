@@ -899,6 +899,7 @@ export const es: Messages = {
   'notes.33.new': 'Faber se queda quieto mientras un juego está delante: nada se mueve ni se vuelve a dibujar, y lo que pasó mientras tanto aparece cuando vuelves.',
   'notes.34.better': 'Mientras una respuesta trabaja, las comprobaciones que hizo se cuentan bajo la línea de estado, con cuántas fallaron.',
   'notes.35.better': 'Mientras una respuesta lee la web, los sitios que abrió aparecen bajo la línea de estado, con el que lee ahora.',
+  'notes.36.better': 'Un paso que tarda dice en la línea de estado cuánto tiempo lleva.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

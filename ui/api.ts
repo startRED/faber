@@ -38,6 +38,8 @@ export interface ToolUse {
   facts?: { edited?: string[]; checks: number; failed: number; unnamed?: string[] };
   /** A command that runs the project's tests, lint or build, as the engine marks it when it starts. */
   check?: boolean;
+  /** When the engine saw the call start, in Unix milliseconds; absent on older conversations. */
+  started?: number;
 }
 export interface Permission {
   requestId: string;

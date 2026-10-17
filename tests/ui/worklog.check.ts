@@ -117,3 +117,28 @@ check('worklog: a reply that reads the web lists the sites it opened and the one
     root.remove();
   }
 });
+
+// R161 step 9: long or hidden work reads as the living sentence and its time, from when the engine saw the step start.
+check('worklog: a step that runs long says for how long, and a quick one never does', () => {
+  useLanguage('en');
+  const root = document.createElement('div');
+  document.body.append(root);
+  const build = (ago: number, ok?: boolean, id = 'quick') => ({ id, name: 'Bash', input: { command: 'cargo build' }, started: Date.now() - ago, ok });
+  const [message, setMessage] = createSignal<Message>({ id: 'long', role: 'assistant', at: 0, status: 'streaming', text: '', tools: [build(5_000)] });
+  const dispose = render(() => createComponent(Thread, { get messages() { return [message()]; }, from: 0, conversationId: 'long', options: [], onBranch: () => {} }), root);
+  try {
+    const long = () => root.querySelector('.activity-latest .long');
+    equal(long(), null, 'five seconds is no long step');
+    setMessage({ ...message(), tools: [build(150_000, undefined, 'slow')] });
+    equal(long()!.textContent, ' · 2 min');
+    equal(long()!.getAttribute('aria-hidden'), 'true', 'the live region says the step, not a clock');
+    equal(root.querySelector('.activity-latest .step')!.textContent, 'Running · cargo build', 'the step keeps its words');
+    setMessage({ ...message(), tools: [build(150_000, true, 'slow')] });
+    equal(long(), null, 'an ended step has no running time');
+    setMessage({ ...message(), tools: [{ id: 'old', name: 'Bash', input: { command: 'cargo build' } }] });
+    equal(long(), null, 'a step recorded before the stamp existed shows none');
+  } finally {
+    dispose();
+    root.remove();
+  }
+});
