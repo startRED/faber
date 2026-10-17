@@ -855,7 +855,7 @@ export const ptBR: Messages = {
   'notes.24.better': "As Configurações ficaram mais fáceis de ler: uma linha por opção, e suas contas e os limites delas ficam juntos.",
   'notes.25.better': 'As telas vazias, o tutorial e esta lista ficaram mais curtos e dizem cada coisa uma vez.',
   'notes.26.better': 'O Faber descansa enquanto a janela está escondida, e botões e campos têm o mesmo aspecto em todas as telas.',
-  'notes.next.better': 'A primeira tela de um projeto ficou mais calma: uma coluna só, com as conversas do próprio projeto, e um buraco negro menor que fica longe das palavras.',
+  'notes.27.better': 'A primeira tela de um projeto ficou mais calma: uma coluna só, com as conversas do próprio projeto, e um buraco negro menor que fica longe das palavras.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

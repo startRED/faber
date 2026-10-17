@@ -736,7 +736,7 @@ export const en = {
   'notes.24.better': "Settings are easier to scan: one line per option, and your accounts and their limits are together.",
   'notes.25.better': 'The empty screens, the tutorial and this list are shorter and say each thing once.',
   'notes.26.better': 'Faber rests while its window is hidden, and buttons and fields look the same on every screen.',
-  'notes.next.better': "A project's first screen is calmer: one column with that project's own conversations, and a smaller black hole that stays clear of the words.",
+  'notes.27.better': "A project's first screen is calmer: one column with that project's own conversations, and a smaller black hole that stays clear of the words.",
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

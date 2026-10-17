@@ -868,7 +868,7 @@ export const es: Messages = {
   'notes.24.better': "Los Ajustes se leen mejor: una línea por opción, y tus cuentas y sus límites están juntos.",
   'notes.25.better': 'Las pantallas vacías, el tutorial y esta lista son más cortos y dicen cada cosa una vez.',
   'notes.26.better': 'Faber descansa mientras su ventana está oculta, y los botones y los campos se ven igual en todas las pantallas.',
-  'notes.next.better': 'La primera pantalla de un proyecto es más tranquila: una sola columna con las conversaciones de ese proyecto, y un agujero negro más pequeño que queda lejos del texto.',
+  'notes.27.better': 'La primera pantalla de un proyecto es más tranquila: una sola columna con las conversaciones de ese proyecto, y un agujero negro más pequeño que queda lejos del texto.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

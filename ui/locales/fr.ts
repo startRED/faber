@@ -868,7 +868,7 @@ export const fr: Messages = {
   'notes.24.better': "Les Réglages se lisent mieux : une ligne par option, et vos comptes et leurs limites sont réunis.",
   'notes.25.better': 'Les écrans vides, le tutoriel et cette liste sont plus courts et disent chaque chose une fois.',
   'notes.26.better': 'Faber se met au repos quand sa fenêtre est cachée, et les boutons et les champs ont le même aspect sur tous les écrans.',
-  'notes.next.better': 'Le premier écran d’un projet est plus calme : une seule colonne avec les conversations de ce projet, et un trou noir plus petit qui reste loin du texte.',
+  'notes.27.better': 'Le premier écran d’un projet est plus calme : une seule colonne avec les conversations de ce projet, et un trou noir plus petit qui reste loin du texte.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',
