@@ -47,6 +47,7 @@ mod recovery;
 mod siblings;
 mod stuck_watch;
 mod usage_view;
+mod verifying;
 pub use pr_watch::{PrReader, gh_reader};
 pub use usage_view::{VendorUsage, WindowUsage};
 
@@ -294,6 +295,8 @@ struct Core {
     git: Option<copies::GitRunner>,
     /// Faber's own browser (R161 step 7), given by the shell where it has one; without it the tool is not offered.
     browser: Option<std::sync::Arc<dyn crate::browser::Browser>>,
+    /// Runs a project's checks (`crate::verify`), given by the shell; without it the tool is not offered.
+    verifier: Option<std::sync::Arc<crate::verify::Verifier>>,
     live: HashMap<String, Live>,
     mission_sessions: HashMap<String, Vec<Session>>,
     /// Owned process trees of writer roles by invocation id, and the terminal event each role reported.
@@ -472,6 +475,7 @@ impl Engine {
                 follows: HashMap::new(),
                 pr_reader,
                 browser: None,
+                verifier: None,
                 git: None,
             })
         });
@@ -1559,6 +1563,7 @@ impl Core {
             EngineEvent::HelperCall { id, input } => return self.start_helper(conv, id, input),
             EngineEvent::BrowseCall { id, input } => return self.browse(conv, id, input),
             EngineEvent::ConversationCall { id, input } => return self.conversation_call(conv, id, input),
+            EngineEvent::VerifyCall { id, input } => return self.verify_call(conv, id, input),
             EngineEvent::Permission { request_id, tool, input } => {
                 // A request that touches a credential folder is refused in both modes, with no card (best effort for a command
                 // line: see `touches_credentials`). Full access never shows a card. The answer is decided here, under the lock
@@ -2364,6 +2369,7 @@ impl Core {
         let helper = self.offers_helper(area, pick.vendor);
         let browse = self.offers_browser(area, permissions);
         let conversations = siblings::offers(area, c.started_by.is_some());
+        let verify = self.offers_verify(area, permissions);
         let session = match pick.vendor {
             Vendor::Claude => start_claude(
                 ClaudeOptions {
@@ -2373,6 +2379,7 @@ impl Core {
                         helper,
                         browse,
                         conversations,
+                        verify,
                         area,
                         model,
                         effort,
@@ -2394,6 +2401,7 @@ impl Core {
                     helper,
                     browse,
                     conversations,
+                    verify,
                     cwd,
                     model,
                     effort,

@@ -264,11 +264,35 @@ pub fn spawn_command(cmd: Command) -> io::Result<Proc> {
     spawn_in_job(cmd, join_job, false)
 }
 
+thread_local! {
+    /// Set while a project check (`crate::verify`) is being started: the process is created at below-normal priority.
+    static CHECK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Starts a project check like `spawn_command` (no window, its own kill-on-close job), at below-normal priority on Windows
+/// so a build never makes the person's apps or a game stutter. Elsewhere it runs at the normal priority.
+pub fn spawn_check(cmd: Command) -> io::Result<Proc> {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            CHECK.with(|c| c.set(false));
+        }
+    }
+    CHECK.with(|c| c.set(true));
+    let _reset = Reset;
+    spawn_command(cmd)
+}
+
 /// `low`: lower the suspended process to Low integrity before it runs (Windows; a proof).
 fn spawn_in_job(mut cmd: Command, join: impl FnOnce(&Child) -> io::Result<Containment>, low: bool) -> io::Result<Proc> {
     cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     #[cfg(windows)]
-    cmd.creation_flags(creation_flags(starting_in_background()));
+    {
+        const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
+        let background = starting_in_background();
+        let below = !background && CHECK.with(|c| c.get());
+        cmd.creation_flags(creation_flags(background) | if below { BELOW_NORMAL_PRIORITY_CLASS } else { 0 });
+    }
     let expected = EXPECTED_IMAGE.with(|e| e.borrow_mut().take());
     #[cfg(not(windows))]
     let _ = (low, expected);

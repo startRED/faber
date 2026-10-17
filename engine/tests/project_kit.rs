@@ -188,6 +188,7 @@ fn inline_prompt_keeps_role_control_and_rejects_changed_hash_and_credential_path
             helper: Default::default(),
             browse: false,
             conversations: false,
+            verify: false,
             area: faber_engine::model::Area::Project,
             model: Some("claude-sonnet-5-5".into()),
             effort: Some("medium".into()),

@@ -132,6 +132,7 @@ pub async fn run(data: &std::path::Path) -> io::Result<()> {
             helper: Default::default(),
             browse: false,
             conversations: false,
+            verify: false,
             area: Area::Project,
             model: Some("claude-haiku-5-5".into()),
             effort: Some("low".into()),

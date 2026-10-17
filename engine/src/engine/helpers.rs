@@ -114,6 +114,7 @@ impl Core {
                             helper: Helper::Is,
                             browse: false,
                             conversations: false,
+                            verify: false,
                         },
                         spawn: spawner(&self.opts.spawn, &cli),
                         sandbox: self.opts.clis.get(&Vendor::Codex).cloned(),
@@ -134,6 +135,7 @@ impl Core {
                     helper: Helper::Is,
                     browse: false,
                     conversations: false,
+                    verify: false,
                 },
                 sink,
             ),
@@ -350,6 +352,8 @@ impl Core {
 
     /// The agent's turn stopped or ended: its helpers stop with it. An interrupted helper still reports what it had.
     pub(super) fn stop_helpers(&mut self, conv: &str, close: bool) {
+        // The checks it was waiting for stop too (`verifying.rs`).
+        self.stop_verify(conv);
         let calls: Vec<String> = self.helpers.iter().filter(|(_, h)| h.conv == conv).map(|(call, _)| call.clone()).collect();
         for call in calls {
             if close {

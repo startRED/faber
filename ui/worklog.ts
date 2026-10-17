@@ -70,7 +70,9 @@ function detailOf(input: unknown): string {
 }
 
 export function toolRow(tool: ToolUse): ToolRow {
-  const input = tool.input as { description?: unknown; title?: unknown; id?: unknown } | undefined;
+  const input = tool.input as { description?: unknown; title?: unknown; id?: unknown; level?: unknown } | undefined;
+  // Faber's checks (R190) read as what they run, with nothing after: the folder is the conversation's own.
+  if (tool.name === 'Verify') return { label: t(input?.level === 'full' ? 'tool.verifyFull' : 'tool.verify'), detail: '' };
   // A conversation the agent starts reads as its title; one it reads back, as its id.
   const named = SUBAGENT.has(tool.name) ? input?.description : tool.name === 'Conversation' ? (input?.title ?? input?.id) : undefined;
   const raw = typeof named === 'string' ? named : detailOf(tool.input);

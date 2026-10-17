@@ -238,7 +238,7 @@ pub fn resolve_tool(name: &str) -> Option<Cli> {
     node_tool(name, &path, cfg!(windows), &|p| Path::new(p).is_file())
 }
 
-fn node_tool(name: &str, path_var: &str, windows: bool, exists: &dyn Fn(&str) -> bool) -> Option<Cli> {
+pub(crate) fn node_tool(name: &str, path_var: &str, windows: bool, exists: &dyn Fn(&str) -> bool) -> Option<Cli> {
     let script = match name {
         "npm" => "npm-cli.js",
         "npx" => "npx-cli.js",

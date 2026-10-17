@@ -129,6 +129,8 @@ mod stuck;
 mod turn_usage;
 #[path = "usage_view.rs"]
 mod usage_view;
+#[path = "verify.rs"]
+mod verify;
 #[path = "waiting.rs"]
 mod waiting;
 #[path = "workspace.rs"]

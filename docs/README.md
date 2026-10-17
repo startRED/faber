@@ -27,7 +27,8 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [design/README.md](design/README.md) | Before any screen change: the design in short, rules for every screen, the first frame, the screen cards |
 | [design/looks.md](design/looks.md) | Themes, presets, colour, type, motion, the one grammar, idle cost, effects |
 | [design/brand.md](design/brand.md) | The mark, the app icon, empty states, brand rules |
-| [design/layout.md](design/layout.md) | Window widths, titlebar, sidebar, the homes, answers, the work log, subagent steps, the running column |
+| [design/layout.md](design/layout.md) | Window widths, titlebar, sidebar, the homes, answers, the work log, the running column |
+| [design/subagents.md](design/subagents.md) | A reply's subagent and helper rows, their running-column view and the stuck signs |
 | [design/settings.md](design/settings.md) | The Settings screen, the first run and the tutorial |
 | [design/projects.md](design/projects.md) | The mission engine's published contract: records, worker envelope, kits, proof isolation, commands |
 | [dev/testing.md](dev/testing.md) | Tests: `cargo t`, screen tests, build folder and slots, what a run prints |
@@ -58,7 +59,7 @@ one is never touched again, and its boxes say nothing.
 | superpowers/specs/2026-10-16-browser-preview.md | Proposal, nothing built (recommends yes, after a week of visual critiques) |
 | superpowers/plans/2026-10-14-parallel-work-loop.md | The development loop (R128, R129); its rounds table is kept current |
 | superpowers/specs/2026-10-16-own-lessons-into-faber.md | Proposal, nothing built (lessons from building Faber by hand, mapped to features for 1a) |
-| superpowers/specs/2026-10-17-built-in-verifier.md | Approved (R190), in progress: V0 measured ([research/2026-10-17-verifier-v0-measurements.md](research/2026-10-17-verifier-v0-measurements.md)), V1 next. Faber's own verifier in the engine, checks in seconds on the PC, GitHub only confirms |
+| superpowers/specs/2026-10-17-built-in-verifier.md | Approved (R190), in progress: V0 measured ([research/2026-10-17-verifier-v0-measurements.md](research/2026-10-17-verifier-v0-measurements.md)), V1 started (the `verify` tool, R203). Faber's own verifier in the engine, checks in seconds on the PC, GitHub only confirms |
 | superpowers/specs/2026-10-17-agent-pane-webview-spike.md | Spike done: go for step 7 of "Watching the agent work", with the five rules in its Recommendation |
 | research/ | Measurements, probes and reviews of the day in their name; model names and prices in them go stale fast. The UX, notification and screen-flake reviews of 2026-10-12 live here; their conclusions are in design/ and product/ |
 

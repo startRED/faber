@@ -17,6 +17,9 @@ check('worklog: every Claude Code tool reads as what it does, in words', () => {
   // A conversation the agent starts by itself reads as its title, and one it reads back as its id.
   deepEqual(toolRow({ id: '7', name: 'Conversation', input: { title: 'Docs', brief: 'Write the page.' } }), { label: t('tool.conversation'), detail: 'Docs' });
   equal(toolRow({ id: '8', name: 'Conversation', input: { id: 'c1' } }).detail, 'c1');
+  // Faber's checks (R190) read as the level they run, with nothing after.
+  deepEqual(toolRow({ id: '9', name: 'Verify', input: {} }), { label: t('tool.verify'), detail: '' });
+  deepEqual(toolRow({ id: '10', name: 'Verify', input: { level: 'full' } }), { label: t('tool.verifyFull'), detail: '' });
 });
 
 // R161 step 9: while a reply runs, the checks it ran tick up under the status line, marked by the engine, never guessed here.

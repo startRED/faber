@@ -200,6 +200,9 @@ Each step lands on its own, proves itself with the checks above, and reports its
   - every check of section 5;
   - test folders outside the worktree, so a local run agrees with CI (V0 found 22 tests that do not).
   - Lanes then see their result in seconds without a push. It replaces the three build slots.
+  - Built first (R203): the `verify` tool, fast and full, on the project's own Checks of R137 (no second checks file),
+    selection found from each command, content-hash cutoff, one kill-on-close job per check below normal priority, one
+    Cargo build at a time, logs on disk; the change feed is git asked at each call, with no watcher yet.
 - [ ] **V2. GitHub confirms.** `land.mjs` asks the verifier for a full check on the squashed tree and posts
   `faber/verify`. The `changes` job leaves out the suites the status covers. The daily run reports misses.
   - Result: most queued runs shrink from about 18 jobs to the lints.

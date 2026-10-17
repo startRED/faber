@@ -482,6 +482,7 @@ pub fn parse_codex_notification(msg: &Value, state: &mut CodexTurnState) -> Vec<
                 ("dynamicToolCall", Some(crate::helper::NAME)) => crate::helper::TOOL,
                 ("dynamicToolCall", Some(crate::browser::NAME)) => crate::browser::TOOL,
                 ("dynamicToolCall", Some(crate::sibling::NAME)) => crate::sibling::TOOL,
+                ("dynamicToolCall", Some(crate::verify::NAME)) => crate::verify::TOOL,
                 _ => kind,
             };
             vec![EngineEvent::Tool { id: s(&item["id"]), name: name.into(), input, parent: None }]
@@ -669,6 +670,8 @@ pub struct CodexThread {
     pub browse: bool,
     /// Faber's conversation tool, as for `ClaudeLaunch::conversations`.
     pub conversations: bool,
+    /// Faber's checks, as for `ClaudeLaunch::verify`.
+    pub verify: bool,
 }
 
 enum ServerCommand {
@@ -785,6 +788,12 @@ pub fn thread_params(area: Area, t: &CodexThread) -> (&'static str, Value) {
                 tools.push(crate::sibling::codex_tool());
             }
         }
+        if t.verify {
+            let tools = params.entry("dynamicTools").or_insert_with(|| json!([]));
+            if let Some(tools) = tools.as_array_mut() {
+                tools.push(crate::verify::codex_tool());
+            }
+        }
     }
     if t.permissions == Permissions::Isolated && t.instructions.is_none() {
         params.insert("config".into(), crate::permissions::sandbox_config(&t.cwd, true).into());
@@ -860,6 +869,7 @@ pub(crate) fn project_launch_policy(roles: &[crate::project::Role]) -> Value {
         helper: Default::default(),
         browse: false,
         conversations: false,
+        verify: false,
         cwd: PathBuf::from(if cfg!(windows) { r"C:\faber-role" } else { "/faber-role" }),
         model: Some("gpt-6-luna".into()),
         effort: Some("medium".into()),
@@ -1241,6 +1251,21 @@ async fn serve(
                                 }
                                 None => {
                                     let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"Starting a conversation is not available here."}]}})).await;
+                                }
+                            }
+                            continue;
+                        }
+                        if method == "item/tool/call" && params["tool"] == crate::verify::NAME {
+                            // The agent asks Faber to run the project's checks; the engine answers once they ended.
+                            match thread.filter(|t| t.params.verify && !t.blocked && !t.closing) {
+                                Some(t) => {
+                                    let call = s(&params["callId"]);
+                                    t.helpers.insert(call.clone(), id.clone());
+                                    t.watch.pause();
+                                    (t.sink)(EngineEvent::VerifyCall { id: call, input: params["arguments"].clone() });
+                                }
+                                None => {
+                                    let _ = proc::write_line(&mut *stdin, &json!({"id":id,"result":{"success":false,"contentItems":[{"type":"inputText","text":"Faber's checks are not available here."}]}})).await;
                                 }
                             }
                             continue;
@@ -1684,6 +1709,7 @@ mod role_tests {
                         helper: Default::default(),
                         browse: false,
                         conversations: false,
+                        verify: false,
                         cwd: ".".into(),
                         model: Some("gpt-6-luna".into()),
                         effort: Some("low".into()),
@@ -1773,6 +1799,7 @@ mod role_tests {
                     helper: Default::default(),
                     browse: false,
                     conversations: false,
+                    verify: false,
                     cwd: ".".into(),
                     model: Some("gpt-6-luna".into()),
                     effort: Some("low".into()),
@@ -1835,6 +1862,7 @@ mod role_tests {
                 helper: Default::default(),
                 browse: false,
                 conversations: false,
+                verify: false,
                 cwd: ".".into(),
                 model: Some("gpt-6-luna".into()),
                 effort: Some("low".into()),

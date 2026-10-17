@@ -37,6 +37,8 @@ pub struct ClaudeLaunch {
     pub browse: bool,
     /// Faber's conversation tool (`crate::sibling`): a project's own agent that no other agent started.
     pub conversations: bool,
+    /// Faber's checks (`crate::verify`): a project's agent in full access, where the shell gives a runner.
+    pub verify: bool,
 }
 
 /// The tools Faber's MCP server holds for a launch: the helper for a project's own agent, the browser where it is offered.
@@ -45,6 +47,7 @@ fn mcp_tools(launch: &ClaudeLaunch) -> crate::helper::Tools {
         helper: launch.helper == crate::helper::Helper::Offers,
         browse: launch.browse,
         conversation: launch.conversations,
+        verify: launch.verify,
     }
 }
 
@@ -374,6 +377,7 @@ pub(crate) fn project_launch_policy(roles: &[crate::project::Role]) -> Value {
         helper: Default::default(),
         browse: false,
         conversations: false,
+        verify: false,
         area: Area::Project,
         model: Some("claude-haiku-5-5".into()),
         effort: Some("medium".into()),
@@ -452,6 +456,7 @@ pub fn parse_claude_message(msg: &Value) -> Vec<EngineEvent> {
                         Some(crate::helper::CLAUDE_NAME) => crate::helper::TOOL.to_string(),
                         Some(crate::browser::CLAUDE_NAME) => crate::browser::TOOL.to_string(),
                         Some(crate::sibling::CLAUDE_NAME) => crate::sibling::TOOL.to_string(),
+                        Some(crate::verify::CLAUDE_NAME) => crate::verify::TOOL.to_string(),
                         _ => s(&c["name"]),
                     };
                     EngineEvent::Tool { id: s(&c["id"]), name, input: c["input"].clone(), parent: parent.clone() }
@@ -684,6 +689,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                                         on_event(match tool {
                                             crate::browser::NAME => EngineEvent::BrowseCall { id, input },
                                             crate::sibling::NAME => EngineEvent::ConversationCall { id, input },
+                                            crate::verify::NAME => EngineEvent::VerifyCall { id, input },
                                             _ => EngineEvent::HelperCall { id, input },
                                         });
                                     }
@@ -712,6 +718,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                                     if (tool == crate::helper::CLAUDE_NAME && opts.launch.helper == crate::helper::Helper::Offers)
                                         || (tool == crate::browser::CLAUDE_NAME && opts.launch.browse)
                                         || (tool == crate::sibling::CLAUDE_NAME && opts.launch.conversations)
+                                        || (tool == crate::verify::CLAUDE_NAME && opts.launch.verify)
                                     {
                                         let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id,
                                             "response": { "behavior": "allow", "updatedInput": input } } });
@@ -952,6 +959,7 @@ mod role_tests {
                 helper: Default::default(),
                 browse: false,
                 conversations: false,
+                verify: false,
                 area: Area::Project,
                 model: None,
                 effort: None,

@@ -206,6 +206,7 @@ pub(crate) async fn claude_limits(cli: &Cli, spawn: &Spawner, cwd: &Path, timeou
         helper: Default::default(),
         browse: false,
         conversations: false,
+        verify: false,
         area: Area::Project,
         model: Some("claude-haiku-5-5".into()),
         effort: Some("low".into()),
