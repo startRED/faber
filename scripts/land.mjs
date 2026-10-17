@@ -145,7 +145,19 @@ function finish(number) {
     console.error(`#${number} was closed, retargeted or pushed again after it was queued: queue it again.`);
     return 1;
   }
-  git('push', '--quiet', '--atomic', `--force-with-lease=refs/heads/${pr.headRefName}:${oid}`, 'origin', `${sha}:refs/heads/${pr.headRefName}`, `${sha}:refs/heads/${BASE}`);
+  // The branch first, then the base, as the land job does: GitHub marks the pull request merged only when the base takes
+  // the head it already has. A base that refuses puts the branch back.
+  const branch = `refs/heads/${pr.headRefName}`;
+  git('push', '--quiet', `--force-with-lease=${branch}:${oid}`, 'origin', `${sha}:${branch}`);
+  execFileSync(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { windowsHide: true });
+  try {
+    git('push', '--quiet', 'origin', `${sha}:refs/heads/${BASE}`);
+  } catch (error) {
+    git('push', '--quiet', `--force-with-lease=${branch}:${sha}`, 'origin', `${oid}:${branch}`);
+    console.error(String(error.stderr || error.message).trim());
+    console.error(`${BASE} refused it, so #${number}'s branch is back where it was: queue it again.`);
+    return 1;
+  }
   try {
     git('merge-base', '--is-ancestor', 'origin/main', sha);
     git('push', '--quiet', 'origin', `${sha}:refs/heads/main`);

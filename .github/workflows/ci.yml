@@ -447,12 +447,19 @@ jobs:
             exit 1
           fi
           if git merge-base --is-ancestor origin/phase-1-base "$GITHUB_SHA"; then
-            # One atomic push moves the pull request's branch (so GitHub shows it merged) and phase-1-base together or not
-            # at all: when the base moved meanwhile, both stay as they were and the landing below starts again.
+            # The pull request's branch moves first, then phase-1-base: GitHub marks a pull request merged only when the base
+            # takes the head it already has (one atomic push of both closed #64 instead). A base that refuses, because it
+            # moved meanwhile, puts the branch back, and the landing below starts again.
             landed=false; before=$(git rev-parse origin/phase-1-base)
             if [ -n "$head" ]; then
-              git push --atomic --force-with-lease="refs/heads/$head:$oid" origin \
-                "$GITHUB_SHA:refs/heads/$head" "$GITHUB_SHA:refs/heads/phase-1-base" && landed=true
+              if git push --force-with-lease="refs/heads/$head:$oid" origin "$GITHUB_SHA:refs/heads/$head"; then
+                sleep 5
+                if git push origin "$GITHUB_SHA:refs/heads/phase-1-base"; then
+                  landed=true
+                else
+                  git push --force-with-lease="refs/heads/$head:$GITHUB_SHA" origin "$oid:refs/heads/$head" || true
+                fi
+              fi
             else
               git push origin "$GITHUB_SHA:refs/heads/phase-1-base" && landed=true
             fi

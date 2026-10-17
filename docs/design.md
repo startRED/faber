@@ -1017,9 +1017,10 @@ change the same lines for real.
 worktree, `node scripts/numbers.mjs assign --amend` folds the fragment in after the last entry of each locale and the
 last row of the table, and every placeholder, the commit message's too, takes the next free number after that base. The
 numbered commit goes to `queue/pr-<number>`, where the queue checks that very commit (R162), so the base and the
-required `gate` (R173) only ever see checked commits. Its land job, one landing at a time, moves `phase-1-base` and the
-pull request's branch to the landed commit in one atomic push, from the head that was squashed only (the commit's
-`Pull-request-head` line), so GitHub shows the pull request merged; a later push, a close or another target stops the
+required `gate` (R173) only ever see checked commits. Its land job, one landing at a time, moves the pull
+request's branch to the landed commit, from the head that was squashed only (the commit's `Pull-request-head` line),
+and then `phase-1-base`, so GitHub shows the pull request merged (one atomic push of both closed #64 instead); a base
+that refuses puts the branch back; a later push, a close or another target stops the
 landing, and `land.mjs` replaces a queued commit only when nothing newer was queued meanwhile. Two decision rows that
 share a placeholder stop the numbering. When `phase-1-base` moved during the checks, the land job runs
 `land.mjs --head` again on the new base instead of a rebase, whose numbers would collide, and the queue checks it again.
