@@ -815,7 +815,7 @@ CI's lines. The `cargo t` alias builds the runner itself with `--message-format=
 also prints one line per error.
 
 On Windows the lint suite adds a third proof: Clippy for macOS (`aarch64-apple-darwin`) on the engine and the runner, so
-code behind `cfg(unix)` or `cfg(target_os = "macos")` breaks before the push, not a CI round later (R-next,
+code behind `cfg(unix)` or `cfg(target_os = "macos")` breaks before the push, not a CI round later (R166,
 `testkit/src/cross.rs`). Clippy links nothing, but `aws-lc-sys` compiles C, so zig stands in for the Mac's C compiler:
 Cargo calls the runner as `CC` and `AR` and the runner hands the call to zig. It needs zig on `PATH` and
 `rustup target add aarch64-apple-darwin`; without zig the proof is skipped and says so. The shell is left out, since its
