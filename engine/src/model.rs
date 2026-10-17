@@ -387,7 +387,8 @@ impl Project {
         }
     }
 
-    /// Accept the authority shown on the start card.
+    /// Accept the authority shown on the start card. The same authority again keeps the grant as it is: a new revision
+    /// would make every earlier mission stale for nothing.
     pub fn accept_grant(&mut self, mut grant: crate::project::Grant) -> Result<(), &'static str> {
         if grant.schema > crate::project::SCHEMA || self.grant.as_ref().is_some_and(|g| g.schema > crate::project::SCHEMA) {
             return Err("reason.grant.newer");
@@ -402,6 +403,13 @@ impl Project {
         // Publication is deferred in the self-development MVP (R103).
         if grant.mode != crate::project::GitMode::Seguro {
             return Err("reason.grant.mode");
+        }
+        if self.grant.as_ref().is_some_and(|g| {
+            g.revoked_at.is_none()
+                && (&g.repo, g.mode, &g.author, &g.remote, &g.remote_account, g.self_update)
+                    == (&grant.repo, grant.mode, &grant.author, &grant.remote, &grant.remote_account, grant.self_update)
+        }) {
+            return Ok(());
         }
         if let Some(previous) = &self.grant {
             for (key, value) in &previous.extra {
@@ -554,6 +562,48 @@ pub struct Settings {
 /// A fresh grants epoch: 244 random bits as hex.
 pub fn new_epoch() -> String {
     format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple())
+}
+
+/// Each switch's default lives here and nowhere else: the engine and the shell read these, and the screen is sent
+/// [`Settings::shown`].
+impl Settings {
+    pub fn user_hooks(&self) -> bool {
+        self.user_hooks.unwrap_or(false)
+    }
+
+    pub fn permissions(&self) -> Permissions {
+        self.permissions.unwrap_or_default()
+    }
+
+    pub fn notifications(&self) -> bool {
+        self.notifications.unwrap_or(true)
+    }
+
+    pub fn notification_sound(&self) -> bool {
+        self.notification_sound.unwrap_or(true)
+    }
+
+    pub fn keep_awake(&self) -> bool {
+        self.keep_awake.unwrap_or(true)
+    }
+
+    pub fn autostart(&self) -> bool {
+        self.autostart.unwrap_or(false)
+    }
+
+    /// What the screen is sent: every switch with its value, so the screen keeps no default of its own. The file keeps
+    /// only what the person changed, since saving is a patch.
+    pub fn shown(self) -> Self {
+        Settings {
+            user_hooks: Some(self.user_hooks()),
+            permissions: Some(self.permissions()),
+            notifications: Some(self.notifications()),
+            notification_sound: Some(self.notification_sound()),
+            keep_awake: Some(self.keep_awake()),
+            autostart: Some(self.autostart()),
+            ..self
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -717,6 +767,18 @@ impl Conversation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_screen_is_sent_every_switch_and_the_file_keeps_only_what_the_person_changed() {
+        assert_eq!(
+            serde_json::to_value(Settings::default().shown()).unwrap(),
+            serde_json::json!({ "userHooks": false, "permissions": "dontAsk", "notifications": true, "notificationSound": true, "keepAwake": true, "autostart": false })
+        );
+        let mine = Settings { keep_awake: Some(false), language: Some("de".into()), ..Settings::default() };
+        assert_eq!(serde_json::to_value(&mine).unwrap(), serde_json::json!({ "keepAwake": false, "language": "de" }));
+        let shown = mine.shown();
+        assert_eq!((shown.keep_awake, shown.notifications, shown.language.as_deref()), (Some(false), Some(true), Some("de")));
+    }
 
     #[test]
     fn a_name_is_trimmed_without_control_characters_and_cut_at_forty_characters() {

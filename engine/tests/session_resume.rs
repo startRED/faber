@@ -362,7 +362,7 @@ async fn a_fresh_launch_that_fails_at_once_fails_the_reply() {
     std::fs::create_dir_all(&root).unwrap();
     let folder = tempfile::tempdir_in(root).unwrap();
     let (engine, mut rx) = start(dir.path(), &disk);
-    let project = engine.add_project(&folder.path().to_string_lossy()).id;
+    let project = engine.add_project(&folder.path().to_string_lossy()).unwrap().id;
     let ask = |text: &str, id: Option<&str>| SendRequest {
         area: Area::Project,
         project_id: Some(project.clone()),

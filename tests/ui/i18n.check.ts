@@ -3,7 +3,7 @@ import { en } from '../../ui/locales/en.ts';
 import { es } from '../../ui/locales/es.ts';
 import { fr } from '../../ui/locales/fr.ts';
 import { ptBR } from '../../ui/locales/pt-BR.ts';
-import { fromEngine, lang, LANGUAGES, templates, useLanguage } from '../../ui/i18n.ts';
+import { amount, bytes, duration, fromEngine, lang, LANGUAGES, money, t, templates, useLanguage } from '../../ui/i18n.ts';
 import { check, deepEqual, ok } from './check.ts';
 
 const LOCALES = { 'pt-BR': ptBR, es, fr, de };
@@ -38,6 +38,22 @@ check('i18n: every language fills every text and keeps the same placeholders as 
       }
       deepEqual(slots(forms(entry).at(-1)!), wanted, `${code} ${key} lost a placeholder`);
     }
+  }
+});
+
+check('i18n: sizes, times, amounts and key names are written the way each language writes them', () => {
+  const before = lang();
+  try {
+    useLanguage('en');
+    ok(bytes(1536).startsWith('1.5'), bytes(1536));
+    useLanguage('pt-BR');
+    ok(bytes(1536).startsWith('1,5'), bytes(1536));
+    ok(duration(200).startsWith('3') && duration(200).includes('20'), duration(200));
+    ok(amount(0.0123, 4) === '0,0123', amount(0.0123, 4));
+    useLanguage('de');
+    ok(t('key.new') === 'Strg N' && money(2) === '2,00 US$', `${t('key.new')} ${money(2)}`);
+  } finally {
+    useLanguage(before);
   }
 });
 

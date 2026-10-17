@@ -1,4 +1,6 @@
 import type { DecisionKind, TaskState, TaskView } from './api.ts';
+import { money } from './i18n.ts';
+import { keep } from './unsent.ts';
 
 export type PresenceChoice = 'continueWithout' | 'findTools';
 
@@ -37,20 +39,28 @@ export function forgetMission(projectId: string): void {
   try { localStorage.removeItem('faber.project.mission.' + projectId); } catch { /* Nothing to forget. */ }
 }
 
+/** The project left Faber: the goal being typed, the mission shown and the unsent checks for it go too. */
+export function forgetProject(projectId: string): void {
+  try {
+    localStorage.removeItem(GOAL_KEY_PREFIX + projectId);
+    localStorage.removeItem('faber.project.mission.' + projectId);
+  } catch { /* Storage can be unavailable. */ }
+  keep(`proof.${projectId}`, '');
+}
+
 /** Formats own cost in millionths of an API-equivalent dollar.
  * None/null/undefined is unknown, NEVER zero. */
 export function formatCost(ownMicros: number | null | undefined): { isUnknown: boolean; display: string } {
   if (ownMicros === null || ownMicros === undefined) {
     return { isUnknown: true, display: 'projects.cost.unknown' };
   }
-  const dollars = ownMicros / 1_000_000;
-  return { isUnknown: false, display: `$${dollars.toFixed(2)}` };
+  return { isUnknown: false, display: money(ownMicros / 1_000_000) };
 }
 
 /** Formats the live cap in millionths of an API-equivalent dollar. */
 export function formatCap(capMicros: number | null | undefined): string {
   if (capMicros === null || capMicros === undefined) return 'projects.cost.unknown';
-  return `$${(capMicros / 1_000_000).toFixed(2)}`;
+  return money(capMicros / 1_000_000);
 }
 
 /** Formats a fraction (0.0 to 1.0) as a percentage integer. */

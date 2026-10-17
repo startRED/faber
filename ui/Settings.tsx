@@ -4,7 +4,7 @@ import { AppearanceSection } from './Appearance.tsx';
 import { Choices, Learn, Segmented, Toggle } from './controls.tsx';
 import { factory } from './draft.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
-import { LANGUAGES, t } from './i18n.ts';
+import { amount, LANGUAGES, t } from './i18n.ts';
 import { vendorName } from './models.ts';
 import { animateList } from './motion.ts';
 import { accountLine, freshness, type Quotas, usageRows } from './sidebar.ts';
@@ -105,7 +105,7 @@ export function Settings(props: Props) {
       <nav class="s-nav nav" aria-label={t('set.label')}>
         <button class="item" onClick={() => props.onClose()}>
           <span>{t('set.back')}</span>
-          <kbd>Esc</kbd>
+          <kbd>{t('key.esc')}</kbd>
         </button>
         <For each={SECTIONS}>
           {([id, key, icon]) => (
@@ -213,8 +213,8 @@ export function Settings(props: Props) {
             </Row>
             <Row label={t('set.notifications')}>
               <div class="toggles">
-                <Toggle label={t('set.notifyMe')} hint={t('set.notifyHint')} checked={props.saved.notifications !== false} onChange={(on) => props.onSave({ notifications: on })} />
-                <Toggle label={t('set.playSound')} hint={t('set.soundHint')} checked={props.saved.notificationSound !== false} onChange={(on) => props.onSave({ notificationSound: on })} />
+                <Toggle label={t('set.notifyMe')} hint={t('set.notifyHint')} checked={props.saved.notifications === true} onChange={(on) => props.onSave({ notifications: on })} />
+                <Toggle label={t('set.playSound')} hint={t('set.soundHint')} checked={props.saved.notificationSound === true} onChange={(on) => props.onSave({ notificationSound: on })} />
               </div>
             </Row>
             <Row label={t('set.updates')}>
@@ -225,7 +225,7 @@ export function Settings(props: Props) {
             <Show when={navigator.userAgent.includes('Windows')}>
               <Row label={t('set.system')}>
                 <div class="toggles">
-                  <Toggle label={t('set.keepAwake')} hint={t('set.keepAwakeHint')} checked={props.saved.keepAwake !== false} onChange={(on) => props.onSave({ keepAwake: on })} />
+                  <Toggle label={t('set.keepAwake')} hint={t('set.keepAwakeHint')} checked={props.saved.keepAwake === true} onChange={(on) => props.onSave({ keepAwake: on })} />
                   <Toggle label={t('set.autostart')} hint={t('set.autostartHint')} checked={props.saved.autostart === true} onChange={(on) => props.onSave({ autostart: on })} />
                 </div>
               </Row>
@@ -277,7 +277,7 @@ export function Settings(props: Props) {
                       <PlanName u={u()} />
                       <p class="usage-state">{t(`usage.state.${u().state}`)}</p>
                       <Show when={u().counting}><p class="note counting">{t('quota.countingNote')}</p></Show>
-                      <p>{t('usage.ownSpend', { cost: u().ownSpendUsd.toFixed(4) })}</p>
+                      <p>{t('usage.ownSpend', { cost: amount(u().ownSpendUsd, 4) })}</p>
                       <p class="hint">{t('usage.shared')}</p>
                       <Show when={u().unmetered}><p class="note">{t('usage.meterIncomplete', { n: u().unmetered })}</p></Show>
                       <Show when={u().relearning}><p class="note">{t('usage.relearning')}</p></Show>

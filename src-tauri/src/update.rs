@@ -6,8 +6,8 @@
 //! before the download ends gets the idle install below instead, and a running turn is never ended.
 //!
 //! Later, every six hours, a newer release is downloaded and kept. It installs at the first idle moment: no answer
-//! running, no CLI install from the setup screen, and the window closed to the tray or minimized; or at once when the
-//! person presses "Update ready, restart" (`restart_now`). It never shows a window on its own.
+//! running, no mission driven, no CLI install from the setup screen, and the window closed to the tray or minimized; or
+//! at once when the person presses "Update ready, restart" (`restart_now`). It never shows a window on its own.
 //!
 //! On Windows the plugin's `install` starts the NSIS installer with `/S /UPDATE /R /ARGS <args>` (`updater.rs`
 //! `updater_parameters`, `config.rs` `nsis_args`) and then ends the process with `exit(0)`. Silent (`/S`) shows no window
@@ -171,7 +171,7 @@ fn was_tried(data_dir: &Path, version: &str) -> bool {
     std::fs::read_to_string(data_dir.join(TRIED_FILE)).is_ok_and(|text| tried_recently(&text, version, now_secs()))
 }
 
-/// A downloaded update installs only when it is ready, no answer is running, and the window is not visible.
+/// A downloaded update installs only when it is ready, no answer or mission is running, and the window is not visible.
 pub(crate) fn may_install(ready: bool, busy: bool, window_visible: bool) -> bool {
     ready && !busy && !window_visible
 }
@@ -591,10 +591,11 @@ impl Release for Live {
             who,
             || {
                 // The engine's own admission closes first (it refuses when an answer or a mission worker runs, and refuses
-                // every new one after), then the shell's work is read: a mission being driven. A check of the agents is a
-                // `SetupRunning` and is read by the gate itself. A mission that starts after this finds the engine closed.
+                // every new one after), then a mission being driven is read (the engine's drive registry). A check of the
+                // agents is a `SetupRunning` and is read by the gate itself. A mission that starts after this finds the engine
+                // closed.
                 let closed = faber.engine.local_build_admission().ok()?;
-                lock(&faber.driving).is_empty().then_some(closed)
+                (!faber.engine.is_working()).then_some(closed)
             },
             || faber.draft_dirty.load(Ordering::SeqCst) || (who == Who::Start && faber.touched.load(Ordering::SeqCst)),
             || match lock(&faber.update).as_ref() {

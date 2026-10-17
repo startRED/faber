@@ -40,6 +40,10 @@ export const fr: Messages = {
   'side.delete': 'Supprimer {title}',
   'side.confirmDelete': 'Supprimer ?',
   'side.new': 'Nouvelle conversation',
+  'key.new': 'Ctrl N',
+  'key.newMac': '⌘N',
+  'key.esc': 'Échap',
+  'side.version': 'v{version}',
   'side.label': 'Barre latérale',
   'side.hide': 'Fermer la barre latérale',
   'side.show': 'Ouvrir la barre latérale',
@@ -91,6 +95,7 @@ export const fr: Messages = {
   'composer.projectPlaceholder': 'Demandez à Faber de faire quelque chose dans ce dossier',
   'composer.message': 'Message',
   'composer.attach': 'Joindre',
+  'composer.attachedFile': 'Fichier joint {name} :',
   'composer.clear': 'retirer ×',
   'composer.removeAttachments': 'Retirer les pièces jointes',
   'composer.model': 'Modèle',
@@ -143,7 +148,6 @@ export const fr: Messages = {
   'parked.other': '{tool}',
   'parked.more': '+{n} de plus',
   'answer.label': 'Réponse',
-  'answer.thinking': 'Réflexion',
   'activity.working': 'En cours · {steps} · {commands}',
   'activity.done': 'Travail effectué · {steps} · {commands}',
   'activity.steps': { one: '{n} étape', other: '{n} étapes' },
@@ -183,6 +187,7 @@ export const fr: Messages = {
   'nudge.failedCheck': 'La dernière vérification a échoué. Relance ce message avec {to}.',
   'nudge.noCheck': 'Le code a changé, mais rien ne l’a vérifié. Relance ce message avec {to}.',
   'answer.cost': '{cost} $ US au tarif de l’API',
+  'money.usd': '{amount} $ US',
   'answer.tokens': '{input} k en entrée · {output} en sortie',
   // Handwritten wording; native-speaker review pending (English is the source).
   'answer.cacheWarm': 'cache chaud jusqu’à {time}',
@@ -213,6 +218,11 @@ export const fr: Messages = {
   'error.look.fileInvalid': 'Ce fichier de thème n’est pas valide ({detail}).',
   'error.look.fileTooBig': 'Ce fichier de thème est trop volumineux.',
   'error.theme.write': "Le fichier de thème n'a pas pu être enregistré. L'ancien fichier reste intact. Vérifiez le disque et le dossier, puis réessayez.",
+  'error.link.web': 'Seuls les liens web s’ouvrent d’ici.',
+  'error.link.open': 'Le lien n’a pas pu s’ouvrir.',
+  'error.file.save': 'Le fichier n’a pas pu être enregistré à cet endroit. Vérifiez le dossier et le disque, puis réessayez.',
+  'error.file.show': 'L’explorateur de fichiers n’a pas pu l’afficher.',
+  'error.terminal.open': 'La console n’a pas pu s’ouvrir.',
   'error.theme.read': "Le fichier de thème n'a pas pu être lu.",
   'error.settings.saveFailed': 'Faber n’a pas pu enregistrer vos réglages. Rien n’a été modifié.',
   'error.settings.autostartFailed': 'Faber n’a pas pu modifier le lancement à l’ouverture de session. Tes réglages n’ont pas été modifiés.',
@@ -254,7 +264,6 @@ export const fr: Messages = {
   'set.cornersSquare': 'Droits',
   'set.cornersSoft': 'Doux',
   'set.motion': 'Mouvement',
-  'set.effects': 'Effets',
   'set.themeHint': 'Seul le style change. Vos chats et vos projets restent tels quels.',
   'error.permission.undelivered': "Faber n’a pas pu envoyer la réponse à la demande d’autorisation. Réessayez.",
   // R107: handwritten wording; native-speaker review pending (English is the source).
@@ -453,6 +462,7 @@ export const fr: Messages = {
   'first.mini.codex': 'Codex',
   'first.mini.input': 'Écrivez ici',
   'first.size.small': 'Petit texte',
+  'first.size.sample': 'Aa',
   'first.size.normal': 'Texte normal',
   'first.size.large': 'Grand texte',
   'first.motionHint': 'Si votre système demande moins de mouvement, cela commence sur Réduit.',
@@ -514,7 +524,6 @@ export const fr: Messages = {
   "usage.outside": "Utilisation hors Faber : au moins {share} du mouvement observé sur le compte.",
   "usage.overageOn": "L’utilisation supplémentaire payante est disponible sur ce compte. Faber demande votre accord ; la désactiver chez le fournisseur empêche l’outil de basculer seul.",
   "usage.billedPerUse": "Cette connexion est facturée à l’usage, donc Auto ne l’utilise pas.",
-  "usage.pace": "Utilisation attendue du compte",
   "usage.expect": "{elapsed} de cette période sont écoulés · environ {share} prévus à la remise à zéro",
   "usage.authNeeded": "L’outil doit confirmer la facturation par abonnement pour Auto. Indiquer un forfait ne la confirme pas.",
   "usage.ownSpend": "Faber aujourd’hui : ${cost} équivalents API",
@@ -526,9 +535,7 @@ export const fr: Messages = {
   "quota.seven_day_sonnet": "Sonnet · 7 jours",
   "quota.seven_day_haiku": "Haiku · 7 jours",
   // Native speaker must translate (needs native review).
-  "projects.title": "Projets",
   // Native speaker must translate (needs native review).
-  "projects.empty.selectProject": "Sélectionnez un dossier de projet pour démarrer une mission.",
   // Native speaker must translate (needs native review).
   "projects.repo": "Dossier",
   // Native speaker must translate (needs native review).
@@ -549,8 +556,8 @@ export const fr: Messages = {
   // Native speaker must translate (needs native review).
   "projects.gitMode.seguroDesc": "Faber travaille sur une copie séparée de votre projet. Il ne touche ni à GitHub ni à rien en ligne.",
   // Native speaker must translate (needs native review).
-  "projects.gitMode.equilibrado": "Equilibrado (Commits locaux + draft PR)",
   // Native speaker must translate (needs native review).
+  "projects.gitMode.equilibrado": "Equilibrado (Commits locaux + draft PR)",
   "projects.gitMode.equilibradoDesc": "Seguro avec envoi de la branche de la mission et création d'une draft PR.",
   // Native speaker must translate (needs native review).
   "projects.selfUpdate.trust": "Autoriser Faber à se mettre à jour lui-même",
@@ -611,7 +618,6 @@ export const fr: Messages = {
   // Native speaker must translate (needs native review).
   "projects.receipt.notRun": "Non exécuté",
   // Native speaker must translate (needs native review).
-  "projects.receipt.verified": "Vérifié",
   // Native speaker must translate (needs native review).
   "projects.cost.title": "Coût propre",
   // Native speaker must translate (needs native review).
@@ -745,7 +751,6 @@ export const fr: Messages = {
   'projects.tasks.none': 'Aucune tâche pour l’instant. Faber découpe l’objectif en tâches pendant qu’il planifie.',
   'projects.tasks.count': '{done} sur {total} terminées',
   // Native speaker must translate (needs native review).
-  "reason.mission.runnerUnavailable": "L'exécution de la mission attend l'exécuteur approuvé. Aucun travail n'a commencé.",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   "error.wire.malformed": "La requête contient des valeurs non valides ou manquantes.",
@@ -776,7 +781,6 @@ export const fr: Messages = {
   // Native speaker must translate (needs native review).
   "error.decision.person": "Cette décision nécessite votre réponse.",
   // Native speaker must translate (needs native review).
-  "reason.build.unavailable": "Les emplacements de build local n'ont pas été initialisés.",
   // Native speaker must translate (needs native review).
   "reason.update.quiescence": "La promotion attend la fin des opérations actives et la fermeture de la fenêtre.",
   // Native speaker must translate (needs native review).
@@ -882,7 +886,6 @@ export const fr: Messages = {
   "error.folder.link": "Ce dossier est un lien vers un autre endroit, Faber ne l'ouvrira donc pas. Ouvrez le vrai dossier depuis l'explorateur de fichiers.",
   // Recent folders and environments: handwritten wording; native-speaker review pending (English is the source).
   "recents.title": "Dossiers récents",
-  "recents.choose": "Choisir un dossier",
   "recents.select": "Sélectionner {name}",
   "recents.forget": "Retirer des récents",
   "reason.recents.gone": "Dossier introuvable",
@@ -953,6 +956,7 @@ export const fr: Messages = {
   'notes.18.better': 'Chaque étape du travail dit maintenant ce qu’elle fait en mots simples, comme Lecture, Recherche ou Modification, avec le fichier ou la commande concernés.',
   'notes.19.new': 'Dans un projet, l’assistant peut demander à l’autre IA de l’aider sur une partie du travail ou une relecture, et cette aide apparaît comme une étape de sa réponse.',
   'notes.20.fixed': 'Sur Mac, Faber se met maintenant à jour tout seul comme sous Windows et Linux, et les préversions arrivent à ceux qui les ont activées.',
+  'notes.21.fixed': 'Une liste de projets abîmée ne vide plus vos projets, et retirer un projet supprime maintenant aussi la copie que Faber en gardait.',
   'notes.next.new': 'Quand Codex confie une partie du travail à un sous-agent, celui-ci apparaît comme une étape de sa réponse, et ses demandes d’accord vous parviennent.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',

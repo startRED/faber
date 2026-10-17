@@ -30,7 +30,8 @@ import { Recents } from './Recents.tsx';
 import { Icon } from './Glyphs.tsx';
 import { LocalBuild } from './LocalBuild.tsx';
 import { ProofList, proofCount, tail } from './ProjectSettings.tsx';
-import { fromEngine, lang, t } from './i18n.ts';
+import { duration, fromEngine, lang, t } from './i18n.ts';
+import { vendorName } from './models.ts';
 import { animateList } from './motion.ts';
 import { pickUp } from './running.ts';
 import { ResumeRow } from './Welcome.tsx';
@@ -400,7 +401,8 @@ export function Projects(props: Props) {
     const m = mission();
     return formatCost(m?.cost.ownMicros);
   });
-  const build = (): BuildView => localBuild() ?? mission()?.build ?? { waiting: 'reason.build.unavailable' };
+  // Only the development channel builds Faber locally; anywhere else there is no card at all.
+  const build = (): BuildView | undefined => localBuild() ?? mission()?.build ?? undefined;
 
   // The first screen of a project: no mission yet, so the screen is a home, with its own light behind it.
   const home = () => !mission();
@@ -612,7 +614,7 @@ export function Projects(props: Props) {
                       <p class="m-progress" role="status" data-testid="mission-progress">
                         <span>{t('projects.progress.step', { number: p().number, total: p().total, step: t(`projects.progress.${p().step}` as any) })}</span>
                         <Show when={p().role && p().vendor}>
-                          <span>{t('projects.progress.by', { role: t(`projects.role.${p().role}` as any), vendor: p().vendor! })}</span>
+                          <span>{t('projects.progress.by', { role: t(`projects.role.${p().role}` as any), vendor: vendorName(p().vendor!) })}</span>
                         </Show>
                         <Show when={!costDisplay().isUnknown}>
                           <span>{t('projects.progress.cost', { cost: costDisplay().display })}</span>
@@ -663,7 +665,7 @@ export function Projects(props: Props) {
                       <p><b>{t('projects.report.branch', { branch: r().branch })}</b></p>
                       <Show when={r().head}>{(head) => <p class="note">{t('projects.report.head', { head: head().slice(0, 8) })}</p>}</Show>
                       <Show when={r().seconds != null}>
-                        <p class="note">{t('projects.report.duration', { time: r().seconds! < 60 ? `${r().seconds} s` : `${Math.floor(r().seconds! / 60)} min ${r().seconds! % 60} s` })}</p>
+                        <p class="note">{t('projects.report.duration', { time: duration(r().seconds!) })}</p>
                       </Show>
                       <Show when={r().checks.length > 0}>
                         <h4>{t('projects.report.checks')}</h4>
@@ -829,7 +831,6 @@ export function Projects(props: Props) {
                                             <Show when={detail().artifacts.length > 0} fallback={<p>{t('projects.details.noEvidence')}</p>}>
                                               <For each={detail().artifacts}>{(artifact) => <div>
                                                 <p>{artifact.summary}</p>
-                                                <pre>{JSON.stringify(artifact, null, 2)}</pre>
                                               </div>}</For>
                                             </Show>
                                           </>}
@@ -884,7 +885,7 @@ export function Projects(props: Props) {
                       <For each={m().pace}>
                         {(p) => (
                           <div class="pace-item">
-                            <span class="chip">{p.vendor}</span>
+                            <span class="chip">{vendorName(p.vendor)}</span>
                             <span class="pace-window">{fromEngine(`quota.${p.window}`)}</span>
                             <span class="pace-stat">
                               {formatPercent(p.used)} {t('projects.pace.used')}

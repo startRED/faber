@@ -3,7 +3,7 @@ import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
 import { api, type AgentsView, type AppState, type MissionView, type PermissionMode, type Project } from '../../ui/api.ts';
 import { App } from '../../ui/App.tsx';
-import { fromEngine, LANGUAGES, useLanguage } from '../../ui/i18n.ts';
+import { fromEngine, lang, LANGUAGES, useLanguage } from '../../ui/i18n.ts';
 import { Projects } from '../../ui/Projects.tsx';
 import { ProjectsSection } from '../../ui/ProjectSettings.tsx';
 import { formatCap, formatCost, recallGoal, saveGoal, taskReceiptStatus } from '../../ui/projects.ts';
@@ -97,6 +97,17 @@ check('projects: build card displays live slot status and explains why promotion
   ok(activeCard, 'active mission displays build card in side panel');
   ok(activeCard!.textContent?.includes('B · 777788889999'), 'live slot update reflects new next slot');
   ok(activeCard!.textContent?.includes('Running'), 'live waiting reason reflects running state');
+}));
+
+check('projects: outside the development channel a mission board has no local build card', () => withProjects(async (root, emit) => {
+  api.localUpdateState = async () => null;
+  window.dispatchEvent(new Event('focus'));
+  await settle();
+  await start(root);
+  emit({ ...view(2), state: 'running' });
+  await settle();
+  ok(root.querySelector('.cost-pace-panel'), 'the mission board is shown');
+  equal(root.querySelector('[data-testid="local-build"]'), null, 'no build card for a build Faber does not make');
 }));
 
 async function start(root: HTMLElement) {
@@ -237,7 +248,10 @@ check('projects review: IME composition cannot submit an unfinished decision ans
   } finally { api.missionAnswer = original; }
 }));
 
-check('projects review: missing build slots stay explicit; quota freshness is separate from own cost', () => withProjects(async (root, emit) => {
+check('projects review: on the development channel unknown build slots stay explicit; quota freshness is separate from own cost', () => withProjects(async (root, emit) => {
+  api.localUpdateState = async () => ({});
+  window.dispatchEvent(new Event('focus'));
+  await settle();
   await start(root);
   emit({ ...view(2), pace: [{ vendor: 'codex', window: 'seven_day', used: 0.31, room: 0.04, readAt: 1791000000 }] });
   await settle();
@@ -415,7 +429,9 @@ check('projects: honest receipts show unverified and not run without fake claims
 });
 
 // Cost formatting
-check('projects: null own cost shows unknown and never zero', () => {
+check('projects: null own cost shows unknown and never zero, and a known one is written the way the language writes it', () => {
+  const before = lang();
+  useLanguage('en');
   const unknownCost = formatCost(null);
   equal(unknownCost.isUnknown, true);
   equal(unknownCost.display, 'projects.cost.unknown');
@@ -427,6 +443,10 @@ check('projects: null own cost shows unknown and never zero', () => {
   const normalCost = formatCost(1_500_000);
   equal(normalCost.isUnknown, false);
   equal(normalCost.display, '$1.50');
+  useLanguage('pt-BR');
+  equal(formatCost(1_500_000).display, 'US$ 1,50');
+  equal(formatCap(2_000_000), 'US$ 2,00');
+  useLanguage(before);
 });
 
 // Goal persistence
@@ -813,7 +833,7 @@ check('projects: a running mission shows its step, role, vendor and cost so far,
   await settle();
   const line = root.querySelector('[data-testid="mission-progress"]')?.textContent ?? '';
   ok(line.includes('Step 4 of 7') && line.includes('Writing the change'), `the step is shown: ${line}`);
-  ok(line.includes('Writer') && line.includes('claude'), `role and vendor are shown: ${line}`);
+  ok(line.includes('Writer') && line.includes('Claude'), `role and vendor are shown, the vendor by name: ${line}`);
   ok(line.includes('$0.25'), `the cost so far is shown: ${line}`);
   ok(!root.querySelector('[data-testid="mission-report"]'), 'no report while it runs');
   emit({

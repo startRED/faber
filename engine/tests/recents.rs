@@ -167,3 +167,16 @@ async fn another_spelling_of_a_stored_folder_is_the_same_recent_and_the_same_pro
     assert_eq!(e.recents().folders.len(), 1);
     e.shutdown();
 }
+
+#[tokio::test]
+async fn a_damaged_project_list_refuses_to_open_or_remove_and_keeps_every_byte() {
+    let data = tempfile::tempdir().unwrap();
+    let (_root, f) = folders(1);
+    let e = engine(data.path());
+    let damaged = r#"[{"id":"p1","name":"kept","path":"C:/kept","grant":"#;
+    std::fs::write(data.path().join("projects.json"), damaged).unwrap();
+    assert_eq!(e.open_folder(&f[0]).unwrap_err(), "error.store.corrupt");
+    assert_eq!(e.remove_project("p1").unwrap_err(), "error.store.corrupt");
+    assert_eq!(std::fs::read_to_string(data.path().join("projects.json")).unwrap(), damaged, "the grants it held are not overwritten");
+    e.shutdown();
+}
