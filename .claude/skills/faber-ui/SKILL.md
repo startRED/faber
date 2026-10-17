@@ -45,7 +45,18 @@ Name what the motion is for: feedback, where something came from or went, a stat
   surface, stroke matches the text beside it, and the words beside the icon carry the meaning (the icon is decoration).
 - An icon that swaps on a rare state change cross-fades; one that swaps on a tab or row change swaps instantly.
 
-## 4. Before you finish
+## 4. Composition
+
+Code checks and motion checks do not see the whole screen. Look at a screenshot at 1920x1080 and 1280x800, and check:
+
+- One main action per screen. Everything else is quieter than it.
+- Each piece of information shows once: the sidebar, the crumb and the heading never all repeat the same name.
+- At most three strong text weights in view (a heading, a label, the body); the rest is regular or muted.
+- Decorative art (the black hole, the light, the dust) is never behind text a person reads: under it, only a faint veil.
+- Neighbouring columns share a baseline: their bottoms (or their first lines) line up.
+- A screen of one area never borrows another area's words, hints or rows (the Projects home says nothing of Chat).
+
+## 5. Before you finish
 
 - Every motion has its reduced/none path and a static cue (colour, icon or label); motion is never the only signal.
 - Every new word is a key in `ui/locales/` (English first), not a string in the component.
