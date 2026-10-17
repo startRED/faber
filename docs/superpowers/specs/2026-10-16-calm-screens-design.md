@@ -75,6 +75,9 @@ available).
   chips (no "To start" heading), "Recent" under them in the same column.
 - One empty state (the peeking mark, a title, one line, one button) for no AI, no project and an empty list.
 
+3a (done, R-next): the one empty state (`ui/Empty.tsx`), the tutorial's third card pinned under its target from 720 px, and
+the two near-duplicate what's-new entries. 3b, the Chat home in one column, waits for PR #56 (`project-home-calm`).
+
 ### 4. One grammar and lighter code
 
 - Control heights from three tokens (28/32/40); text sizes from `--fs-xs`, `--fs-sm`, `--fs-ui` only; one timing family.

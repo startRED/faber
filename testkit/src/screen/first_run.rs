@@ -417,6 +417,12 @@ fn tutorial_fits_the_window(ctx: &mut Ctx) -> Result {
                          && Math.abs(r.x + r.width / 2 - innerWidth / 2) <= 1.5 && Math.abs(r.y + r.height / 2 - innerHeight / 2) <= 1.5; })()";
                 app.page.wait_for(&format!("the Projects card centred, with no pointer, at {width} px"), centred)?;
             }
+            if step == 2 {
+                // The running button is in the corner, so the card sits under it with its pointer on it at every width, even
+                // where the greeting is in the way: it never floats in the middle.
+                let under = "(() => { const c = document.querySelector('.coach'); const b = document.querySelector('[data-tour=run]').getBoundingClientRect();                        const r = c.getBoundingClientRect(); const x = r.x + parseFloat(c.style.getPropertyValue('--pointer'));                        return c.getAttribute('data-side') === 'top' && r.y >= b.bottom && x >= b.left - 1 && x <= b.right + 1; })()";
+                app.page.wait_for(&format!("the Follow along card under the running button at {width} px"), under)?;
+            }
             if step == 1 && (width == 1100 || width == 720) {
                 shot(ctx, &mut app, &format!("b7-tour-2-at-{width}"))?;
             }
