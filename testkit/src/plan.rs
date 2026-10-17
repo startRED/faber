@@ -263,7 +263,7 @@ mod tests {
     // rule knows runs everything.
     #[test]
     fn a_small_change_runs_only_its_suites_and_the_tools_the_build_or_an_unknown_file_run_everything() {
-        let only: [(&str, &[&str]); 9] = [
+        let only: [(&str, &[&str]); 11] = [
             ("ui/Thread.tsx", &["ui", "screen"]),
             ("ui/locales/en.ts", &["ui", "screen"]),
             ("engine/src/codex.rs", &["rust", "screen"]),
@@ -273,6 +273,8 @@ mod tests {
             ("engine/examples/route_eval.rs", &["rust"]),
             ("src-tauri/tests/local_update.rs", &["rust"]),
             ("tests/ui/thread.check.ts", &["ui"]),
+            (".github/workflows/tidy.yml", &[]),
+            (".github/dependabot.yml", &[]),
         ];
         for (path, want) in only {
             assert_eq!(names(&suites_for(&paths(&[path]))), want, "{path}");
