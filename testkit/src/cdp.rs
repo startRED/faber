@@ -71,9 +71,14 @@ impl Cdp {
     /// Waits for the app's DevTools port to list a page, then connects to it. The whole of it, every connect, write and
     /// read, shares one deadline.
     pub fn connect(port: u16, timeout: Duration) -> Result<Cdp, String> {
+        Cdp::connect_where(port, timeout, |url| app_url(&Value::from(url)))
+    }
+
+    /// The same, for the first page whose address `wanted` accepts: a second webview on the same port, for example.
+    pub fn connect_where(port: u16, timeout: Duration, wanted: fn(&str) -> bool) -> Result<Cdp, String> {
         let deadline = Instant::now() + timeout;
         loop {
-            let error = match page_url(port, deadline).and_then(|url| open(&url, deadline)) {
+            let error = match page_url(port, deadline, wanted).and_then(|url| open(&url, deadline)) {
                 Ok(mut cdp) => {
                     // An offscreen window is never focused; without this it ignores keys until someone clicks it.
                     cdp.set_deadline(Some(deadline));
@@ -454,7 +459,7 @@ fn key_info(key: &str) -> Result<(String, String, u32, Option<&'static str>), St
 }
 
 /// The page's own address on the DevTools socket, from `GET /json/list`.
-fn page_url(port: u16, deadline: Instant) -> Result<String, String> {
+fn page_url(port: u16, deadline: Instant, wanted: fn(&str) -> bool) -> Result<String, String> {
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
     // One request gets 3 s at most, and never more than what is left of the caller's deadline; all of it, the headers
     // and the body included, is inside that.
@@ -492,7 +497,7 @@ fn page_url(port: u16, deadline: Instant) -> Result<String, String> {
     let targets: Vec<Value> = serde_json::from_slice(&body).map_err(|e| format!("the target list is not JSON: {e}"))?;
     targets
         .iter()
-        .filter(|t| t["type"] == "page" && app_url(&t["url"]))
+        .filter(|t| t["type"] == "page" && t["url"].as_str().is_some_and(wanted))
         .find_map(|t| t["webSocketDebuggerUrl"].as_str())
         .map(str::to_string)
         .ok_or_else(|| "no page is listed yet".to_string())

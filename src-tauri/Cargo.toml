@@ -11,6 +11,8 @@ default-run = "faber"
 [features]
 # Test builds only (testkit/): a command the screen's checks report through, and the page that runs them. Never default.
 test-hooks = []
+# The manual webview spike only (examples/pane-spike-host.rs): Tauri's child webviews are behind its `unstable` feature.
+pane-spike = ["tauri/unstable"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -52,3 +54,7 @@ tempfile = "3"
 [target.'cfg(windows)'.dev-dependencies]
 # Standard Rust cannot create junctions on stable; the overlap guard in update.rs is tested with one.
 junction = "2"
+
+[[example]]
+name = "pane-spike-host"
+required-features = ["pane-spike"]

@@ -37,6 +37,7 @@ faber-winproc = { path = "../winproc" }
 winsafe = { version = "0.0.29", features = ["kernel", "user"] }
 
 [dev-dependencies]
+png = "0.18"
 toml = "1.1"
 
 [lints]
