@@ -933,7 +933,7 @@ export const ptBR: Messages = {
   'notes.20.fixed': 'No Mac, o Faber agora se atualiza sozinho como no Windows e no Linux, e as prévias chegam a quem as ativou.',
   'notes.21.fixed': 'Uma lista de projetos danificada não esvazia mais os seus projetos, e remover um projeto agora também apaga a cópia que o Faber guardava dele.',
   'notes.22.new': 'Quando o Codex passa uma parte do trabalho a um subagente, ele aparece como uma etapa na resposta, e as autorizações dele chegam até você.',
-  'notes.next.better': 'As conversas ficaram mais calmas: menos linhas em volta de cada resposta, e o modelo se escolhe em um só lugar.',
+  'notes.23.better': 'As conversas ficaram mais calmas: menos linhas em volta de cada resposta, e o modelo se escolhe em um só lugar.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

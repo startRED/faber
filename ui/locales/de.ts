@@ -946,7 +946,7 @@ export const de: Messages = {
   'notes.20.fixed': 'Auf dem Mac aktualisiert sich Faber jetzt selbst wie unter Windows und Linux, und Vorabversionen erreichen alle, die sie eingeschaltet haben.',
   'notes.21.fixed': 'Eine beschädigte Projektliste leert deine Projekte nicht mehr, und beim Entfernen eines Projekts löscht Faber jetzt auch seine eigene Kopie davon.',
   'notes.22.new': 'Wenn Codex einen Teil der Arbeit an einen Subagenten gibt, erscheint er als Schritt in der Antwort, und seine Freigaben erreichen dich.',
-  'notes.next.better': 'Unterhaltungen sind ruhiger: weniger Zeilen um jede Antwort, und das Modell wählst du an einer einzigen Stelle.',
+  'notes.23.better': 'Unterhaltungen sind ruhiger: weniger Zeilen um jede Antwort, und das Modell wählst du an einer einzigen Stelle.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

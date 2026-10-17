@@ -322,4 +322,4 @@ Say people want to turn off the cache-warm note.
 8. Add its row to "Every setting" above, in the same commit.
 
 What not to do: a second control for something that already has one, like a model select under every answer next to the
-composer's model picker (R-next removed it). That is the mistake this page exists to prevent.
+composer's model picker (R168 removed it). That is the mistake this page exists to prevent.

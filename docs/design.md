@@ -228,14 +228,14 @@ inside its own area.
 - The titlebar has the lockup and the window controls. Dragging and double-click maximize keep working, and macOS keeps
   its native buttons.
 - The topbar has a crumb ("Chat › title" or "Project › title") and the run button. The model is not shown there: it is
-  chosen in the composer and each answer names the one it used (R-next). With nothing running the button reads "Nothing running". Otherwise it reads "{n} running". When an
+  chosen in the composer and each answer names the one it used (R168). With nothing running the button reads "Nothing running". Otherwise it reads "{n} running". When an
   item needs the user it turns amber, shows the speech bubble and reads "{n} running · {m} needs you". The words are
   always visible.
 
 ### Sidebar
 
 - At the top: "New conversation" (Ctrl N), then the two areas, Chat and Projects, the latter with a count.
-- The sidebar lists only the open area's items (R-next): Chat lists the chats and no Projects block, not even an empty
+- The sidebar lists only the open area's items (R168): Chat lists the chats and no Projects block, not even an empty
   one; Projects lists the projects with their conversations and the add-folder control, and no chats. Rows keep their DOM
   when the list refreshes, so a refresh moves nothing the person is pointing at.
 - Each project expands to show its conversations, and has a "+". When items in a project need the user, its tail shows
@@ -408,7 +408,7 @@ projects. Faber has no worktree creation for projects, so an environment has no 
   moment the CLI stays suspended, outside any job, until the PC restarts. It never runs a single instruction. Std Rust
   cannot create a process inside a job yet (`raw_attribute` is unstable), so Faber starts as few CLIs as it can: Codex is
   asked for its models only while Faber has none, one asking at a time. Settings shows the
-  details; the thread shows nothing about it (R-next). The isolated mode below is `Permissions::Isolated`: Faber's
+  details; the thread shows nothing about it (R168). The isolated mode below is `Permissions::Isolated`: Faber's
   own model list, router, internal checks and self-development roles use it, and the person cannot pick it.
 - No prompt can block a full-access turn. Where the installed Claude Code declares `--permission-prompts` as an option line in a successful `claude --help` (read once
   at start, and again when a launch fails with "unknown option", which also drops the newer flags at once; present on 2.1.296), full access starts it with `--permission-mode bypassPermissions --permission-prompts none` and no host prompt
