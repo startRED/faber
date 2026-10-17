@@ -51,7 +51,7 @@ available).
 - Work log, agent and helper steps: one disclosure style (`details.activity` and `details.agent` share one rule); raw
   agent kinds (`general-purpose`) show as words; counts pluralise ("0 steps", not "0 step").
 - Performance: the answer's HTML is memoised per text and only the open tail block re-renders while streaming (C1); the
-  draft write to browser storage waits for a pause and flushes on send, blur and page hide; the composer re-measures at
+  draft is still written on every change (a debounce lost text on a crash, found in review); the composer re-measures at
   most once per frame (C2); sidebar rows keep their nodes when the list refreshes (C4).
 
 ### 2. Settings

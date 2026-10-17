@@ -118,7 +118,6 @@ input, textarea { caret-color: var(--accent); }
 .vendor:hover { background: var(--s2); color: var(--ink); }
 .vendor .meter { flex: 1; min-width: 0; height: 3px; }
 .vendor .share { flex: none; min-width: 3.5ch; text-align: right; color: var(--ink-2); }
-.vendor .counting { flex: none; margin-left: -4px; font-style: italic; }
 .vendor.low .meter i { background: var(--amber-ink); }
 .foot-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .foot-row .area { flex: none; width: auto; }

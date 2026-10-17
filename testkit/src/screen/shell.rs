@@ -601,12 +601,12 @@ fn shows_the_quota(ctx: &mut Ctx) -> Result {
     let actions = page.named("article", "answer.label")?.css(".actions");
     page.wait_visible(&actions)?;
     // The tightest window of the vendor: 47 % of the 7-day one, not 7 % of the 5-hour one.
-    page.wait_for("the quota to show", "document.querySelector('.usage .share')?.textContent === '47%'")?;
+    page.wait_for("the quota to show", "/^(≥ )?47%$/.test(document.querySelector('.usage .share')?.textContent ?? '')")?;
     ctx.shot(&mut app, "quota")?;
     let page = &mut app.page;
     // A screen that loads again asks the engine and shows the same reading.
     page.reload()?;
-    page.wait_for("the quota after a reload", "document.querySelector('.usage .share')?.textContent === '47%'")
+    page.wait_for("the quota after a reload", "/^(≥ )?47%$/.test(document.querySelector('.usage .share')?.textContent ?? '')")
 }
 
 // ---- Seeded conversations and the checks of the second pass of the review.

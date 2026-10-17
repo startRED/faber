@@ -1,5 +1,5 @@
 import DOMPurify from 'dompurify';
-import { marked, type Token } from 'marked';
+import { type Links, marked, type Token } from 'marked';
 import { createRenderEffect } from 'solid-js';
 
 // Model output is untrusted: rendered as Markdown, then stripped of anything that could run. Every piece of HTML that reaches
@@ -31,15 +31,19 @@ export function html(text: string): string {
 interface Shown {
   raws: string[];
   nodes: ChildNode[][];
+  // The reference link definitions (`[1]: https://…`) the blocks were drawn with: one that appears later changes how an
+  // earlier block reads, so a change here draws every block again.
+  links: string;
 }
 const shown = new WeakMap<HTMLElement, Shown>();
 
 /** The top-level blocks of a text: one entry per paragraph, list, code block, quote or table. A block of raw HTML can open in
  * one block and close in another, so a text that has one is a single block, sanitised whole. */
-function blocksOf(text: string): { raw: string; token?: Token }[] {
-  const tokens = marked.lexer(text, OPTIONS).filter((token) => token.type !== 'space');
-  if (tokens.some((token) => token.type === 'html')) return [{ raw: text }];
-  return tokens.map((token) => ({ raw: token.raw, token }));
+function blocksOf(text: string): { blocks: { raw: string; token?: Token }[]; links: Links } {
+  const lexed = marked.lexer(text, OPTIONS);
+  const tokens = lexed.filter((token) => token.type !== 'space');
+  if (tokens.some((token) => token.type === 'html')) return { blocks: [{ raw: text }], links: lexed.links };
+  return { blocks: tokens.map((token) => ({ raw: token.raw, token })), links: lexed.links };
 }
 
 /**
@@ -48,21 +52,22 @@ function blocksOf(text: string): { raw: string; token?: Token }[] {
  * stay where they are.
  */
 export function renderMarkdown(root: HTMLElement, text: string): void {
-  const blocks = blocksOf(text);
-  const before = shown.get(root) ?? { raws: [], nodes: [] };
+  const { blocks, links } = blocksOf(text);
+  const linked = JSON.stringify(links);
+  const before = shown.get(root) ?? { raws: [], nodes: [], links: linked };
   let same = 0;
-  while (same < blocks.length && same < before.raws.length && before.raws[same] === blocks[same]!.raw) same++;
+  while (before.links === linked && same < blocks.length && same < before.raws.length && before.raws[same] === blocks[same]!.raw) same++;
   for (const stale of before.nodes.slice(same)) for (const node of stale) node.remove();
   const raws = before.raws.slice(0, same);
   const nodes = before.nodes.slice(0, same);
   for (const block of blocks.slice(same)) {
     const template = document.createElement('template');
-    template.innerHTML = tidy(block.token ? marked.parser([block.token], OPTIONS) : marked.parse(block.raw, OPTIONS));
+    template.innerHTML = tidy(block.token ? marked.parser(Object.assign([block.token], { links }), OPTIONS) : marked.parse(block.raw, OPTIONS));
     raws.push(block.raw);
     nodes.push([...template.content.childNodes]);
     root.append(template.content);
   }
-  shown.set(root, { raws, nodes });
+  shown.set(root, { raws, nodes, links: linked });
 }
 
 /** An answer's Markdown. The element it makes holds the blocks; `text` is read on its own, so a change elsewhere in the

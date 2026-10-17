@@ -18,6 +18,7 @@ export const de: Messages = {
   'quota.age.day': 'vor {n} T.',
   'quota.read': 'Aktualisiert {when}',
   'quota.counting': 'wird noch gezählt',
+  'quota.atLeast': '≥ {share}',
   'quota.countingNote': 'Die Zahl kann noch steigen: Der Anbieter zählt mit Verzögerung, und die jüngste Arbeit von Faber ist vielleicht noch nicht enthalten.',
   'quota.uncounted': '+ ~{share} noch nicht gezählt',
   'quota.uncountedShort': '+~{share}',

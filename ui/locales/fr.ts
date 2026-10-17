@@ -18,6 +18,7 @@ export const fr: Messages = {
   'quota.age.day': 'il y a {n} j',
   'quota.read': 'Mis à jour {when}',
   'quota.counting': 'comptage en cours',
+  'quota.atLeast': '≥ {share}',
   'quota.countingNote': 'Le chiffre peut encore monter : le fournisseur compte avec du retard et le travail récent de Faber n’y figure peut-être pas encore.',
   'quota.uncounted': '+ ~{share} pas encore compté',
   'quota.uncountedShort': '+~{share}',

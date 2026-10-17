@@ -18,6 +18,7 @@ export const ptBR: Messages = {
   'quota.age.day': 'há {n} d',
   'quota.read': 'Atualizado {when}',
   'quota.counting': 'ainda contando',
+  'quota.atLeast': '≥ {share}',
   'quota.countingNote': 'O número ainda pode subir: o que o Faber usou há pouco talvez ainda não tenha entrado na contagem do provedor.',
   'quota.uncounted': '+ ~{share} ainda vai entrar na conta',
   'quota.uncountedShort': '+~{share}',

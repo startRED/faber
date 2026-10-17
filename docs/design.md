@@ -244,10 +244,11 @@ inside its own area.
 - Chats are grouped as Today, This week and Earlier. Deleting a conversation asks for confirmation.
 - The footer is one row, the person's name when they gave one and Settings, then one thin line per connected vendor: its
   shape, a 3 px bar and the used share of its tightest quota window, in the small size. Nothing on the line wraps. The
-  window, the reset, how old the reading is, the not-yet-counted estimate and the vendor's name are its tooltip; "still
-  counting" is a small "…" mark beside the share, with the words in the tooltip (C010). The bar is amber only when the
-  engine says the quota is nearly used. The line opens Settings > Usage limits. A vendor with no reading yet, or only an
-  expired one, shows "—". The version is not on the sidebar: it is the tooltip of the Settings button.
+  window, the reset, how old the reading is, the not-yet-counted estimate and the vendor's name are its tooltip. While
+  use is still being counted the share reads "≥ 44%" (the real share can only be higher), with the words in the tooltip
+  (C010). The bar is amber only when the engine says the quota is nearly used. The line opens Settings > Usage limits.
+  A vendor with no reading yet, or only an expired one, shows "—". The version is not on the sidebar: it is the
+  tooltip of the Settings button.
 - Search filters conversation titles and project names on screen; full-text search comes in Phase 2. The percentage and
   "stopped" tails come with the progress view in Phase 3.
 

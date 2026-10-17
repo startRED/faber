@@ -19,6 +19,7 @@ export const en = {
   'quota.age.day': '{n} d ago',
   'quota.read': 'Updated {when}',
   'quota.counting': 'still counting',
+  'quota.atLeast': '≥ {share}',
   'quota.countingNote': 'The number may still rise: the provider counts with a delay, and Faber’s recent work may not be in it yet.',
   'quota.uncounted': '+ ~{share} not counted yet',
   'quota.uncountedShort': '+~{share}',

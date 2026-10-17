@@ -18,6 +18,7 @@ export const es: Messages = {
   'quota.age.day': 'hace {n} d',
   'quota.read': 'Actualizado {when}',
   'quota.counting': 'aún contando',
+  'quota.atLeast': '≥ {share}',
   'quota.countingNote': 'La cifra aún puede subir: el proveedor cuenta con retraso y el trabajo reciente de Faber puede no estar incluido.',
   'quota.uncounted': '+ ~{share} aún sin contar',
   'quota.uncountedShort': '+~{share}',

@@ -5,7 +5,7 @@ import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 import type { Option } from './models.ts';
 import { resizeComposer } from './composer-size.ts';
-import { flushKept, keepSoon, kept, release, useDraft } from './unsent.ts';
+import { keep, kept, release, useDraft } from './unsent.ts';
 
 export interface Draft {
   text: string;
@@ -126,7 +126,7 @@ export function Composer(props: Props) {
   const hasContent = () => draft().text.trim() !== '' || draft().images.length > 0 || draft().files.length > 0;
   const canSend = () => !props.locked && hasContent() && props.vendors.length > 0;
   useDraft(hasContent);
-  createEffect(() => props.draftKey && keepSoon(props.draftKey, draft().text));
+  createEffect(() => props.draftKey && keep(props.draftKey, draft().text));
   onCleanup(() => props.draftKey && release(props.draftKey));
 
   // The first keystroke starts the CLI, not focus: the box is focused as soon as Faber opens, and an unused Claude
@@ -196,7 +196,7 @@ export function Composer(props: Props) {
         placeholder={props.placeholder}
         value={draft().text}
         onFocus={() => setFocused(true)}
-        onBlur={() => (setFocused(false), props.draftKey && flushKept(props.draftKey))}
+        onBlur={() => setFocused(false)}
         onInput={(e) => {
           const text = e.currentTarget.value;
           setDraft((d) => ({ ...d, text }));

@@ -9,7 +9,7 @@ import { Running } from '../../ui/Running.tsx';
 import { Sidebar } from '../../ui/Sidebar.tsx';
 import { keepRows } from '../../ui/sidebar.ts';
 import { Thread } from '../../ui/Thread.tsx';
-import { flushKept, keepSoon, kept, release } from '../../ui/unsent.ts';
+import { keep, kept, release } from '../../ui/unsent.ts';
 import { agentKind } from '../../ui/worklog.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
@@ -144,31 +144,36 @@ check('calm: the answer is still sanitised block by block, raw HTML included, an
   equal((window as unknown as { __calmXss?: number }).__calmXss, undefined);
 });
 
-check('calm: the unsent text is written once after a pause, at once when the box loses focus or goes away, and read back before that', async () => {
+check('calm: a reference link whose definition streams in later becomes a link, and stays one when the answer ends', () => {
+  const [message, setMessage] = createSignal<Message>(answer({ status: 'streaming', text: 'See [docs][1] here.' }));
+  const root = surface();
+  const dispose = render(() => createComponent(Thread, { get messages() { return [question, message()]; }, from: 0, conversationId: 'calm-links', options: [], onBranch: () => {} }), root);
+  try {
+    equal(root.querySelector('.ai .md a'), null, 'no definition yet, no link');
+    setMessage({ ...message(), text: 'See [docs][1] here.\n\n[1]: https://example.com/docs' });
+    ok(root.querySelector('.ai .md a[href="https://example.com/docs"]'), 'the earlier block is drawn again with the definition');
+    setMessage({ ...message(), status: 'done', text: 'See [docs][1] here.\n\n[1]: https://example.com/docs\n\nMore.' });
+    ok(root.querySelector('.ai .md a[href="https://example.com/docs"]'), 'a new block after it keeps the link');
+  } finally {
+    dispose();
+    root.remove();
+  }
+});
+
+check('calm: the unsent text is written on every change, so a crash right after a key loses nothing', () => {
   const key = 'calm-draft';
   const writes: string[] = [];
   const original = Storage.prototype.setItem;
   Storage.prototype.setItem = function (name: string, value: string) { if (name.endsWith(key)) writes.push(value); return original.call(this, name, value); };
   try {
-    for (const text of ['a', 'ab', 'abc', 'abcd', 'abcde']) keepSoon(key, text);
-    equal(writes.length, 0, 'a key press writes nothing');
-    equal(kept(key), 'abcde', 'but what was typed is what comes back');
-    await settle(550);
-    deepEqual(writes, ['abcde'], 'one write after the pause');
-    keepSoon(key, 'later');
-    flushKept(key);
-    deepEqual(writes, ['abcde', 'later'], 'a blur writes at once');
-    keepSoon(key, 'hidden');
-    window.dispatchEvent(new Event('pagehide'));
-    equal(writes.at(-1), 'hidden', 'so does the end of the page');
-    keepSoon(key, 'going away');
-    release(key);
-    equal(writes.at(-1), 'going away', 'and the box going away');
-    keepSoon(key, '');
+    for (const text of ['a', 'ab', 'abc']) keep(key, text);
+    deepEqual(writes, ['a', 'ab', 'abc'], 'each change is in storage before the next key');
+    equal(localStorage.getItem(`faber.unsent.${key}`), 'abc', 'what a restart reads is what was typed last');
+    keep(key, '');
     equal(kept(key), '', 'an emptied box forgets at once');
   } finally {
     Storage.prototype.setItem = original;
-    flushKept();
+    release(key);
     localStorage.removeItem(`faber.unsent.${key}`);
   }
 });
@@ -268,13 +273,14 @@ check('calm: the sidebar footer is one row with the name and Settings, then one 
   }
 });
 
-check('calm: the usage line never wraps, "still counting" is a small mark with the words in the tooltip, and amber appears only near the limit', () => {
+check('calm: the usage line never wraps, "still counting" reads "≥ share" with the words in the tooltip, and amber appears only near the limit', () => {
   useLanguage('pt-BR');
   const view = sidebar('chat', { usage: usageOf('low', true) });
   try {
     const line = view.root.querySelector<HTMLElement>('.usage .vendor')!;
     ok(line.classList.contains('low'), 'the engine says it is nearly used');
-    ok(line.querySelector('.counting') && line.title.includes(t('quota.counting')), `the mark and the words: ${line.title}`);
+    ok(line.querySelector('.share')!.textContent!.startsWith('≥ ') && line.title.includes(t('quota.counting')), `"≥" and the words: ${line.title}`);
+    ok(!line.textContent!.includes('…'), 'nothing that reads as cut text');
     ok(line.getBoundingClientRect().height <= 32, `one line even in Portuguese: ${line.getBoundingClientRect().height}`);
     ok(line.textContent!.includes('Codex'), 'the vendor name stays for screen readers');
   } finally {

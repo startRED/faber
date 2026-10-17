@@ -2,7 +2,7 @@ import { createEffect, createMemo, createResource, createSignal, For, Index, onC
 import { api, type Choice, type Message, type QueuedTurn, type ToolUse, type VendorUsage } from './api.ts';
 import { Asks, Parkeds } from './Ask.tsx';
 import { copyItem, openMenu } from './contextmenu.ts';
-import { keep, keepSoon, kept, release, useDraft } from './unsent.ts';
+import { keep, kept, release, useDraft } from './unsent.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
 import { html, Markdown } from './markdown.tsx';
@@ -309,7 +309,7 @@ function Mine(props: { editKey: string; m: Accessor<Message>; onBranch: OnBranch
   const [editing, setEditing] = createSignal<string | undefined>(kept(key()) || undefined);
   useDraft(() => editing() !== undefined);
   // Only text that differs from the message is a draft.
-  createEffect(() => keepSoon(key(), editing() === original ? '' : (editing() ?? '')));
+  createEffect(() => keep(key(), editing() === original ? '' : (editing() ?? '')));
   return (
     <Show
       when={editing() !== undefined}

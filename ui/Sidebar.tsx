@@ -306,8 +306,9 @@ export function Sidebar(props: Props) {
           <For each={props.vendors}>
             {(v) => {
               const q = () => tightest(props.quotas, v, props.now);
-              const share = () => (q() ? percent(q()!.used) : t('quota.unknown'));
               const fresh = () => freshness(props.usage, v, q()?.window);
+              // While use is still being counted the real share can only be higher, so it reads "≥ 44%" (C010).
+              const share = () => (!q() ? t('quota.unknown') : fresh().counting ? t('quota.atLeast', { share: percent(q()!.used) }) : percent(q()!.used));
               const low = () => props.usage?.find((u) => u.vendor === v)?.state === 'low';
               const details = () =>
                 q()
@@ -326,9 +327,6 @@ export function Sidebar(props: Props) {
                     <i style={{ width: `${Math.round(Math.min(1, Math.max(0, q()?.used ?? 0)) * 100)}%` }} />
                   </span>
                   <span class="share num">{share()}</span>
-                  <Show when={q() && fresh().counting}>
-                    <span class="counting" aria-hidden="true">…</span>
-                  </Show>
                   <Show when={q() && fresh().counting}>
                     <span class="sr">{t('quota.counting')}</span>
                   </Show>
