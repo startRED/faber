@@ -18,6 +18,7 @@ pub fn scenarios() -> Vec<Scenario> {
         Scenario { name: "sentinel: a permission card arrives through frames", run: permission },
         Scenario { name: "sentinel: the composer grows and shrinks, and the end of the thread stays clear", run: composer },
         Scenario { name: "sentinel: no text is garbled in five languages, and titles survive the engine's files", run: text },
+        Scenario { name: "sentinel: the main screens keep their composition, at 1920x1080 and 1280x800", run: composition },
     ]
 }
 
@@ -675,5 +676,104 @@ fn text(ctx: &mut Ctx) -> Result {
 
     ctx.notes.push(format!("{} garbled texts in {} screens", found.len(), sweep.len() * 5 + 1));
     gate(ctx, "text", &found)?;
+    ctx.close(app.id)
+}
+
+// 4. Composition.
+
+/// The owner's own screens: two projects, conversations in Chat and in each project, the owner's name and Dark Room.
+const OWNED: [(&str, &str, Option<&str>); 4] = [
+    ("Quero uma reformulação completa do Iridium", "project", Some("iridium")),
+    ("Configure o projeto para atualizar no momento certo", "project", Some("iridium")),
+    ("Revisar o teste que falha às vezes", "project", Some("demo")),
+    ("Explique a cota em palavras simples", "chat", None),
+];
+
+fn seed_owner(ctx: &mut Ctx) -> Result<Launch> {
+    let fixture = super::projects_ui::fixture(ctx)?;
+    let projects = ctx.sb.data.join("projects.json");
+    let mut list: Vec<Value> = serde_json::from_slice(&std::fs::read(&projects).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    let folder = ctx.sb.data.join("iridium");
+    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    list.push(json!({ "id": "iridium", "name": "Iridium", "path": folder.to_string_lossy() }));
+    std::fs::write(&projects, serde_json::to_vec(&list).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    let folder = ctx.sb.data.join("conversations");
+    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e| e.to_string())?.as_millis() as u64;
+    for (i, (title, area, project)) in OWNED.into_iter().enumerate() {
+        let at = now - 3_600_000 * (i as u64 + 1);
+        // The first message is not the title, so an open conversation does not show its name a third time by itself.
+        let mut body = json!({ "id": format!("o{i}"), "title": title, "area": area, "sessions": {}, "createdAt": at, "updatedAt": at,
+            "messages": [{ "id": format!("o{i}-q"), "role": "user", "text": "Uma pergunta.", "at": at, "status": "done" },
+                         { "id": format!("o{i}-a"), "role": "assistant", "text": "Uma resposta curta.", "at": at, "status": "done" }] });
+        if let Some(project) = project {
+            body["projectId"] = json!(project);
+        }
+        std::fs::write(folder.join(format!("o{i}.json")), body.to_string()).map_err(|e| e.to_string())?;
+    }
+    let mut launch = claude_chat(ctx);
+    launch.git_bin = fixture.git_bin;
+    Ok(launch)
+}
+
+/// Lets the screen come to rest before it is judged or photographed: the fonts, the lists that animate in, and the
+/// black hole's entrance, which lights the scene within three seconds.
+fn settle(page: &mut Page) -> Result {
+    page.eval("document.fonts.ready.then(() => true)")?;
+    pause(3.5);
+    page.wait_for(
+        "the page to rest",
+        "document.getAnimations().every((a) => a.effect.getTiming().iterations === Infinity || a.playState !== 'running')",
+    )
+}
+
+/// The main screens a visual critique looks at (`scripts/shots.mjs`, R-next), photographed at the two sizes the owner
+/// uses: `critique-<screen>-<width>x<height>.png`.
+fn composition(ctx: &mut Ctx) -> Result {
+    let launch = seed_owner(ctx)?;
+    let mut app = ctx.launch(launch)?;
+    // The owner's language and name, saved through the shell's own command as a person would, then the screen again.
+    let page = &mut app.page;
+    page.eval("window.__TAURI_INTERNALS__.invoke('save_settings', { patch: { language: 'pt-BR', userName: 'Erick' } }).then(() => true)")?;
+    page.reload()?;
+    page.wait_for("the owner's language", "document.documentElement.lang === 'pt-BR'")?;
+    system_motion(&mut app.page, false)?;
+    // The effects rest while another app has the focus; the hidden test window never has it on its own.
+    super::app::focus(&mut app.page, true)?;
+    for (width, height) in [(1920, 1080), (1280, 800)] {
+        viewport(&mut app.page, width, height)?;
+        let size = format!("{width}x{height}");
+        let page = &mut app.page;
+        let chat = page.named("button", "area.chat")?.exact();
+        page.click(&chat)?;
+        // A new conversation, whatever the last turn of the loop left open.
+        page.press("Control+n")?;
+        page.wait_visible(&css(".hello"))?;
+        settle(page)?;
+        ctx.shot(&mut app, &format!("critique-chat-home-{size}"))?;
+
+        let page = &mut app.page;
+        let projects = page.named("button", "area.projects")?;
+        page.click(&projects)?;
+        page.click(&css(".prow .item").has_text("Demo"))?;
+        page.wait_visible(&css(".welcome-grid .hello"))?;
+        settle(page)?;
+        ctx.shot(&mut app, &format!("critique-project-home-{size}"))?;
+
+        let page = &mut app.page;
+        page.click(&chat)?;
+        page.click(&css(".list .item").has_text(OWNED[3].0))?;
+        page.wait_visible(&css(".col > article.ai"))?;
+        settle(page)?;
+        ctx.shot(&mut app, &format!("critique-conversation-{size}"))?;
+
+        let page = &mut app.page;
+        page.press("Control+,")?;
+        let general = page.named("heading", "set.general")?;
+        page.wait_visible(&general)?;
+        settle(page)?;
+        ctx.shot(&mut app, &format!("critique-settings-{size}"))?;
+        app.page.press("Escape")?;
+    }
     ctx.close(app.id)
 }

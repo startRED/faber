@@ -13,6 +13,14 @@
 <!-- A change a person sees: `Extends: <product-map entry>` or `New: <closest existing thing and why it does not fit>`.
      Anything else: "Not a change a person sees." -->
 
+## Visual critique
+
+<!-- A change a person sees (R-next, `.claude/skills/visual-critique/SKILL.md`): the lowest screen of each, scored by a
+     fresh session from `node scripts/shots.mjs before` and `after`. The score never drops; a touched screen reaches 32.
+     Anything else: "Not a change a person sees." -->
+
+Visual critique: before X/40, after Y/40, by <session>
+
 ## Cost
 
 <!-- Memory and processor cost measured, or why there is none (docs, tests only). -->

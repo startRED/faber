@@ -902,6 +902,15 @@ rest. The design is in `docs/superpowers/specs/2026-10-12-ux-sentinel-design.md`
   `target/faber-test/ux/<scenario>.json` and raw frame traces to `target/faber-test/ux/traces/`. Nothing records the
   person's screen.
 
+### Visual critique
+
+Checks see code and motion, not a screen as a whole (R-next). The sentinel's scenario "the main screens keep their
+composition" photographs the Chat home, a project's home, an open conversation and Settings at 1920x1080 and 1280x800 in
+Dark Room and pt-BR (`target/faber-test/shots/critique-<screen>-<size>.png`). `node scripts/shots.mjs <label>` runs it and
+copies the photos of the screens the diff touches into `target/faber-test/critique/<label>/` with an index;
+`scripts/shots.test.mjs` keeps the choice of screens. A fresh session scores the `before` and `after` folders out of 40
+with `.claude/skills/visual-critique/SKILL.md`; the score never drops and a touched screen reaches 32.
+
 
 ## Auto quota pacing
 
