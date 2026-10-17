@@ -2217,7 +2217,7 @@ async fn r161_the_agent_hands_a_piece_of_work_to_the_other_vendor_and_gets_its_r
     let (to_claude, to_codex) = (claude.spawn.clone(), codex.spawn.clone());
     let spawn: Spawner = Arc::new(move |bin, argv, cwd| if bin == "codex" { to_codex(bin, argv, cwd) } else { to_claude(bin, argv, cwd) });
     let engine = two_vendors(dir.path(), spawn);
-    let project = engine.add_project(&dir.path().to_string_lossy());
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
     let text = "Call the helper tool once with title \"Check\" and brief \"What is the answer?\". Then tell me in one line what it said.";
     let id =
         engine.send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, text, choice("claude", Some("haiku"))) }).unwrap();
@@ -2252,7 +2252,7 @@ async fn r161_a_running_helper_counts_on_its_quota_and_stops_when_its_vendor_wou
     let dir = tempfile::tempdir().unwrap();
     let (spawn, made) = pipes();
     let engine = two_vendors(dir.path(), spawn);
-    let project = engine.add_project(&dir.path().to_string_lossy());
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
     engine.send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, "check it", choice("claude", Some("haiku"))) }).unwrap();
     let mut claude = next_pipe(&made).await;
     let counting = |engine: &Engine| engine.state().usage.iter().any(|u| u.vendor == Vendor::Codex && u.counting);

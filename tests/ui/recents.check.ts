@@ -177,6 +177,8 @@ check('recents: a recent folder opens as a project in one click, a saved environ
       const opener = screen.root.querySelector<HTMLButtonElement>('.recents .rec-x')!;
       ok(opener, 'Settings lists the recent folders');
       opener.focus();
+      // Focusing a button in the scrolling panel scrolls it a frame later, and any scroll closes a menu: let that settle first.
+      await settle();
       screen.root.querySelector<HTMLElement>('.recents .rec')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
       await settle();
       (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
