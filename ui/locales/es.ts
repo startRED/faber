@@ -956,7 +956,7 @@ export const es: Messages = {
   'notes.21.fixed': 'Una lista de proyectos dañada ya no vacía tus proyectos, y quitar un proyecto ahora también borra la copia que Faber guardaba de él.',
   'notes.22.new': 'Cuando Codex pasa una parte del trabajo a un subagente, este aparece como un paso en su respuesta y sus permisos te llegan a ti.',
   'notes.23.better': 'Las conversaciones son más tranquilas: menos líneas alrededor de cada respuesta, y el modelo se elige en un solo lugar.',
-  'notes.next.better': "Los Ajustes se leen mejor: una línea por opción, y tus cuentas y sus límites están juntos.",
+  'notes.24.better': "Los Ajustes se leen mejor: una línea por opción, y tus cuentas y sus límites están juntos.",
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

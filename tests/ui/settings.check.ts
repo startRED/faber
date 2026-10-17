@@ -173,7 +173,7 @@ check('settings: the new sections are written in every language, and the file hi
     'usage.pill.low',
     'usage.pill.out',
     'usage.pill.unknown',
-    'notes.next.better',
+    'notes.24.better',
     'set.notifyMe',
     'set.notifyHint',
     'set.playSound',

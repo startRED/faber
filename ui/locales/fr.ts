@@ -956,7 +956,7 @@ export const fr: Messages = {
   'notes.21.fixed': 'Une liste de projets abîmée ne vide plus vos projets, et retirer un projet supprime maintenant aussi la copie que Faber en gardait.',
   'notes.22.new': 'Quand Codex confie une partie du travail à un sous-agent, celui-ci apparaît comme une étape de sa réponse, et ses demandes d’accord vous parviennent.',
   'notes.23.better': 'Les conversations sont plus calmes : moins de lignes autour de chaque réponse, et le modèle se choisit à un seul endroit.',
-  'notes.next.better': "Les Réglages se lisent mieux : une ligne par option, et vos comptes et leurs limites sont réunis.",
+  'notes.24.better': "Les Réglages se lisent mieux : une ligne par option, et vos comptes et leurs limites sont réunis.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

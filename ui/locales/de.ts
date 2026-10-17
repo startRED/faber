@@ -956,7 +956,7 @@ export const de: Messages = {
   'notes.21.fixed': 'Eine beschädigte Projektliste leert deine Projekte nicht mehr, und beim Entfernen eines Projekts löscht Faber jetzt auch seine eigene Kopie davon.',
   'notes.22.new': 'Wenn Codex einen Teil der Arbeit an einen Subagenten gibt, erscheint er als Schritt in der Antwort, und seine Freigaben erreichen dich.',
   'notes.23.better': 'Unterhaltungen sind ruhiger: weniger Zeilen um jede Antwort, und das Modell wählst du an einer einzigen Stelle.',
-  'notes.next.better': "Die Einstellungen sind übersichtlicher: eine Zeile pro Option, und deine Konten samt Limits stehen zusammen.",
+  'notes.24.better': "Die Einstellungen sind übersichtlicher: eine Zeile pro Option, und deine Konten samt Limits stehen zusammen.",
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

@@ -824,7 +824,7 @@ export const en = {
   'notes.21.fixed': 'A damaged project list no longer empties your projects, and removing a project now also deletes Faber’s own copy of it.',
   'notes.22.new': 'When Codex hands part of the work to a subagent, the subagent shows as a step in its reply, and its approvals reach you.',
   'notes.23.better': 'Conversations are calmer: fewer lines around each answer, and the model is chosen in one place.',
-  'notes.next.better': "Settings are easier to scan: one line per option, and your accounts and their limits are together.",
+  'notes.24.better': "Settings are easier to scan: one line per option, and your accounts and their limits are together.",
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

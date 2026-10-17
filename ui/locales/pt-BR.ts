@@ -943,7 +943,7 @@ export const ptBR: Messages = {
   'notes.21.fixed': 'Uma lista de projetos danificada não esvazia mais os seus projetos, e remover um projeto agora também apaga a cópia que o Faber guardava dele.',
   'notes.22.new': 'Quando o Codex passa uma parte do trabalho a um subagente, ele aparece como uma etapa na resposta, e as autorizações dele chegam até você.',
   'notes.23.better': 'As conversas ficaram mais calmas: menos linhas em volta de cada resposta, e o modelo se escolhe em um só lugar.',
-  'notes.next.better': "As Configurações ficaram mais fáceis de ler: uma linha por opção, e suas contas e os limites delas ficam juntos.",
+  'notes.24.better': "As Configurações ficaram mais fáceis de ler: uma linha por opção, e suas contas e os limites delas ficam juntos.",
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',
