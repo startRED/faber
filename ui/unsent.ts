@@ -28,11 +28,18 @@ export function useDraft(unsent: () => boolean): void {
 /** What was typed and not sent, kept per field in the webview's storage, so a restart for an update (or a crash) loses nothing. */
 const KEPT = 'faber.unsent.';
 
+// Text typed a moment ago and not written yet, by the same keys: a write per key press would cost a storage write each, so a
+// pause, a blur, the end of the page or the box going away writes it. `kept` reads it first, so nothing is ever older than what was typed.
+const SOON_MS = 400;
+const soon = new Map<string, { text: string; timer: ReturnType<typeof setTimeout> }>();
+
 // The text a failed write could not save, by the same keys: a box that is built again (scrolling that loads earlier messages)
 // reads this before the storage, so stale text never comes back over newer text. Gone on the next successful write.
 const memory = new Map<string, string>();
 
 export function kept(key: string): string {
+  const typed = soon.get(key);
+  if (typed) return typed.text;
   const newer = memory.get(key);
   if (newer !== undefined) return newer;
   try {
@@ -55,6 +62,11 @@ function written(key: string, ok: boolean): void {
 /** Keeps `text` under `key`; an empty text (sent, cleared, cancelled) forgets it. Attachments are not kept. A failed write
  * of text keeps the box reported as dirty until a write succeeds or the box is emptied. */
 export function keep(key: string, text: string): void {
+  const typed = soon.get(key);
+  if (typed) {
+    clearTimeout(typed.timer);
+    soon.delete(key);
+  }
   try {
     if (text.trim()) localStorage.setItem(KEPT + key, text);
     else localStorage.removeItem(KEPT + key);
@@ -67,8 +79,32 @@ export function keep(key: string, text: string): void {
   }
 }
 
+/** `keep` for text that is still being typed: written when the typing pauses, or at once by `flushKept`. An emptied box (sent,
+ * cleared, cancelled) forgets its text at once. */
+export function keepSoon(key: string, text: string): void {
+  const typed = soon.get(key);
+  if (typed) clearTimeout(typed.timer);
+  if (!text.trim()) return keep(key, text);
+  soon.set(key, { text, timer: setTimeout(() => flushKept(key), SOON_MS) });
+}
+
+/** Writes what `keepSoon` is holding: for one key (the box lost focus or is going away), or for all (the window hides or closes). */
+export function flushKept(key?: string): void {
+  for (const k of key === undefined ? [...soon.keys()] : [key]) {
+    const typed = soon.get(k);
+    if (typed) keep(k, typed.text);
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', () => flushKept());
+  window.addEventListener('blur', () => flushKept());
+  document.addEventListener('visibilitychange', () => document.hidden && flushKept());
+}
+
 /** The box that wrote under `key` is gone: its text is no longer on the screen, so a failed write stops counting. */
 export function release(key: string): void {
+  flushKept(key);
   const owner = unwritten.get(key);
   if (owner) setDirty(owner, false);
   unwritten.delete(key);
