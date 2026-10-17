@@ -1,0 +1,4 @@
+{
+  "notes": { "better": { "en": "Test A: the list is calmer.", "pt-BR": "Teste a.", "es": "Prueba a.", "fr": "Essai a.", "de": "Test a." } },
+  "decisions": ["| R-next | 2026-10-17 | Test decision a, never merged. | AI |"]
+}
