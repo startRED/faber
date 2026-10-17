@@ -48,6 +48,13 @@ for how Faber works today. This file stays short: each line prevents a real mist
   the fix.
 - In a worktree on a branch, claim the areas and files you will change in `.faber-lane` before changing one
   ([design.md](docs/design.md#lane-claims)); `cargo t` refuses unclaimed changes and files another lane claims.
+- Never wait idle, on a helper (a subagent, a Codex run, another session) or on a run. The main session hands out only
+  pieces its own next step does not need, runs them in the background, keeps working and reads each result when its
+  notice comes; work it cannot go on without, it does itself. Research and collecting go to Haiku or Codex
+  `gpt-6-luna`; a review goes to Codex `gpt-6.1-sol` in a fresh read-only session (R146), started together with the
+  local proofs. While proofs, a review or CI run, the next item is already being built, in another worktree or session
+  when it touches other files; work that needs an unmerged branch starts from that branch. A turn ends only when nothing
+  is left, never to wait: notices wake the session (R181).
 
 ## Before a change a person will see or use
 
@@ -119,12 +126,6 @@ Both print only failures, measurements and a summary; every line is in `target/f
 take over two minutes (`cargo t`, a build) runs in the background while you keep working; wait for its notice or the
 Monitor tool, never a `sleep` or `until` loop, and never poll CI (the app watches it). `npm run dev`
 opens the app from source with live reload. Unit tests never spawn processes, touch real git or call a real CLI.
-
-Never wait idle. While proofs, a review or CI run, the next item is already being built: in another worktree, or in a
-new session when it touches other files. A review starts with the proofs, not after them; the pull request opens and is
-set to merge itself as soon as the local proofs pass, and the gate is the last word. Work that needs an unmerged branch
-starts from that branch instead of waiting for it to land. A turn ends only when nothing is left to do, never to wait
-for a run, a review or CI: their notices wake the session.
 
 On the maintainer's PC, Rust lives outside the default folders; export these before any `cargo` or `npm run dev`:
 
