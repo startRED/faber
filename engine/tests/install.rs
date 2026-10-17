@@ -95,7 +95,7 @@ fn scripted_download(responses: &BTreeMap<String, Vec<u8>>) -> impl Fn(&str, &Pa
         }
         let body = responses.get(url).ok_or_else(|| io::Error::other(format!("Unscripted network request: {url}")))?;
         std::fs::write(path, body)?;
-        Ok(format!("{:x}", Sha256::digest(body)))
+        Ok(faber_engine::hex(&Sha256::digest(body)))
     }
 }
 
@@ -510,7 +510,7 @@ async fn F03_deflated_archive() {
         buffer.into_inner()
     };
     use sha2::{Digest, Sha256};
-    let digest = format!("sha256:{:x}", Sha256::digest(&archive));
+    let digest = format!("sha256:{}", faber_engine::hex(&Sha256::digest(&archive)));
     let mut release: Value = serde_json::from_slice(&rig.responses[RELEASE]).unwrap();
     release["assets"][1]["digest"] = json!(digest);
     rig.responses.insert(RELEASE.into(), serde_json::to_vec(&release).unwrap());
@@ -567,7 +567,7 @@ async fn F06_release_asset_selection() {
     }
     let app_server_zip = buffer.into_inner();
     use sha2::{Digest, Sha256};
-    let app_server_digest = format!("sha256:{:x}", Sha256::digest(&app_server_zip));
+    let app_server_digest = format!("sha256:{}", faber_engine::hex(&Sha256::digest(&app_server_zip)));
     rig.responses.insert(app_server_url.into(), app_server_zip);
 
     assets.insert(
@@ -607,7 +607,7 @@ async fn F07_package_resources() {
     }
     let archive = buffer.into_inner();
     use sha2::{Digest, Sha256};
-    let digest = format!("sha256:{:x}", Sha256::digest(&archive));
+    let digest = format!("sha256:{}", faber_engine::hex(&Sha256::digest(&archive)));
     let mut release: Value = serde_json::from_slice(&rig.responses[RELEASE]).unwrap();
     release["assets"][1]["digest"] = json!(digest);
     rig.responses.insert(RELEASE.into(), serde_json::to_vec(&release).unwrap());
@@ -648,7 +648,7 @@ async fn F09_bin_path_detection() {
     }
     let archive = buffer.into_inner();
     use sha2::{Digest, Sha256};
-    let digest = format!("sha256:{:x}", Sha256::digest(&archive));
+    let digest = format!("sha256:{}", faber_engine::hex(&Sha256::digest(&archive)));
     let mut release: Value = serde_json::from_slice(&rig.responses[RELEASE]).unwrap();
     release["assets"][1]["digest"] = json!(digest);
     rig.responses.insert(RELEASE.into(), serde_json::to_vec(&release).unwrap());
@@ -741,7 +741,7 @@ async fn an_install_whose_source_is_not_loopback_stops_before_any_download() {
 
 fn sha_hex(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
-    format!("{:x}", Sha256::digest(bytes))
+    faber_engine::hex(&Sha256::digest(bytes))
 }
 
 /// Opens the file for writing and lets nobody else share it, which fails while any other handle to it is open.
@@ -870,7 +870,7 @@ async fn part_file_grows_with_the_body() {
     for step in 1..=STEPS {
         sent.update(block(step));
     }
-    assert_eq!(hash, format!("{:x}", sent.finalize()));
+    assert_eq!(hash, faber_engine::hex(&sent.finalize()));
 }
 
 #[tokio::test]

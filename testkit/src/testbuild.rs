@@ -58,7 +58,7 @@ pub fn fingerprint(dir: &Path) -> String {
     let mut lines = Vec::new();
     walk(dir, dir, &mut lines);
     lines.sort();
-    format!("{:x}", Sha256::digest(lines.join("\n")))
+    faber_engine::hex(&Sha256::digest(lines.join("\n")))
 }
 
 /// Is this one of the variables `cargo run` hands the program it runs? `cargo t` is such a program. Build scripts watch some

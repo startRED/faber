@@ -51,7 +51,7 @@ fn fingerprint(path: &Path) -> io::Result<String> {
         }
         digest.update(&buffer[..size]);
     }
-    Ok(format!("{:x}", digest.finalize()))
+    Ok(faber_engine::hex(&digest.finalize()))
 }
 
 #[cfg(any(windows, test))]

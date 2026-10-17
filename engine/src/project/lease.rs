@@ -114,7 +114,7 @@ fn coordinator_lock(common: &Path) -> Result<(File, Option<File>), LeaseError> {
 }
 
 pub fn hash(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    crate::hex(&Sha256::digest(bytes))
 }
 fn file_hash(path: &Path) -> Result<String, LeaseError> {
     let mut file = File::open(path).map_err(|_| Fault::Read)?;
@@ -131,7 +131,7 @@ pub(crate) fn hash_reader(reader: &mut impl Read) -> Result<String, LeaseError> 
         }
         digest.update(&buffer[..read]);
     }
-    Ok(format!("{:x}", digest.finalize()))
+    Ok(crate::hex(&digest.finalize()))
 }
 
 pub(crate) fn reparse(metadata: &fs::Metadata) -> bool {

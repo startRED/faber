@@ -23,7 +23,7 @@ use std::time::Instant;
 use wire::{Fresh, Labels, Verb, WireError, normalize_need};
 
 pub fn digest(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    crate::hex(&Sha256::digest(bytes))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

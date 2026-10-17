@@ -32,3 +32,8 @@ pub mod workspace;
 
 pub use account::AccountStatus;
 pub use engine::{AppEvent, AppState, BranchRequest, Clock, Engine, EngineOptions, SendRequest, TerminalCommand, WarmRequest};
+
+/// Lowercase hex of a digest or any bytes, the form every stored and compared hash uses.
+pub fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}

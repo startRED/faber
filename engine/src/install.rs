@@ -790,7 +790,7 @@ async fn stream_to<W: Write>(
     }
     out.flush().map_err(write_failure)?;
     // `out` is dropped here, before the caller sees the hash, so Windows lets the file be renamed, run or deleted.
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(crate::hex(&hasher.finalize()))
 }
 
 /// A release version such as `2.1.80` or `2.1.80-beta+1`: nothing that could leave the folder it names a file in.

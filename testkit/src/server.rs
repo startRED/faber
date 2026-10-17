@@ -40,7 +40,7 @@ impl Server {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
         listener.set_nonblocking(true)?;
         let origin = format!("http://127.0.0.1:{}", listener.local_addr()?.port());
-        let digest = format!("{:x}", Sha256::digest(&archive));
+        let digest = faber_engine::hex(&Sha256::digest(&archive));
         let release = json!({
             "tag_name": "setup-replay",
             "assets": [{ "name": ASSET, "browser_download_url": format!("{origin}/codex.zip"), "digest": format!("sha256:{digest}") }],
@@ -145,7 +145,7 @@ mod tests {
         let release: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(release["assets"][0]["name"], ASSET);
         assert_eq!(release["assets"][0]["browser_download_url"], format!("{}/codex.zip", server.origin));
-        assert_eq!(release["assets"][0]["digest"], format!("sha256:{:x}", Sha256::digest(&archive)));
+        assert_eq!(release["assets"][0]["digest"], format!("sha256:{}", faber_engine::hex(&Sha256::digest(&archive))));
         let (head, body) = get(&server.origin, "/codex.zip");
         assert!(head.contains("application/zip"), "{head}");
         assert_eq!(body, archive);
