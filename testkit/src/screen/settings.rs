@@ -90,7 +90,7 @@ fn walks_the_sections(ctx: &mut Ctx) -> Result {
     ask(page, QUESTION)?;
     let actions = page.named("article", "answer.label")?.css(".actions");
     page.wait_visible(&actions)?;
-    page.wait_for("the quota to show", "document.querySelector('.usage .share')?.textContent === '47%'")?;
+    page.wait_for("the quota to show", "/^(≥ )?47%$/.test(document.querySelector('.usage .share')?.textContent ?? '')")?;
     open_settings(page)?;
 
     // General: the language, hooks, both notification switches, keep-awake and autostart.
@@ -167,7 +167,7 @@ fn opens_at_usage(ctx: &mut Ctx) -> Result {
     ask(page, QUESTION)?;
     let actions = page.named("article", "answer.label")?.css(".actions");
     page.wait_visible(&actions)?;
-    page.wait_for("the quota to show", "document.querySelector('.usage .share')?.textContent === '47%'")?;
+    page.wait_for("the quota to show", "/^(≥ )?47%$/.test(document.querySelector('.usage .share')?.textContent ?? '')")?;
     let vendor = css(".usage .vendor").has_text("Claude");
     page.click(&vendor)?;
     let heading = page.named("heading", "set.usage")?;
@@ -176,7 +176,7 @@ fn opens_at_usage(ctx: &mut Ctx) -> Result {
     same(page.eval(shares)?.as_str(), Some("7% 47%"), "the figures at the usage limits")?;
     // A screen that loads again asks the engine and shows the same readings.
     page.reload()?;
-    page.wait_for("the quota after a reload", "document.querySelector('.usage .share')?.textContent === '47%'")?;
+    page.wait_for("the quota after a reload", "/^(≥ )?47%$/.test(document.querySelector('.usage .share')?.textContent ?? '')")?;
     // Quota is seeded before the remembered conversation's asynchronous snapshot has rendered.
     page.wait_visible(&actions)?;
     // DOM readiness can precede the new document's native pointer hit-test frame.

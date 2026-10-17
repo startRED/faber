@@ -174,11 +174,11 @@ fn none_then_connect(ctx: &mut Ctx) -> Result {
     click_in_guide(&mut app, "setup.none")?;
     finish(&mut app)?;
     pass_look(&mut app.page)?;
-    // With no AI connected the new conversation gives way to the empty state, and the tutorial does not start. Focus went to
-    // the composer when step 2 closed.
+    // With no AI connected the new conversation gives way to the empty state, with no composer to type in, and the tutorial
+    // does not start.
     let title = app.page.named("heading", "empty.noAiTitle")?;
     app.page.wait_visible(&title)?;
-    app.page.wait_for("focus in the composer", "document.activeElement === document.querySelector('.composer textarea')")?;
+    same(app.page.count(&css(".composer"))?, 0, "no composer with no AI")?;
     pause(0.5);
     same(app.page.count(&css(".tour"))?, 0, "no tutorial with no AI")?;
     // The button of the empty state opens the account cards in their plain mode; connecting there brings the tutorial.

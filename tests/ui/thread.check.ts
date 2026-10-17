@@ -43,7 +43,7 @@ check('thread: ten tool steps and narration fold into one activity row above the
   }
 });
 
-check('thread: with Auto the model name shows as soon as it is chosen, while the answer streams, and stays the same at the end', () => {
+check('thread: with Auto the model name shows as soon as it is chosen, while the answer streams, and stays the same at the end; effort sits in the tooltip', () => {
   const root = document.createElement('div');
   document.body.append(root);
   const [message, setMessage] = createSignal<Message>({ id: 'auto-name', role: 'assistant', at: 0, status: 'streaming', text: '', reason: 'reason.routing' });
@@ -51,14 +51,17 @@ check('thread: with Auto the model name shows as soon as it is chosen, while the
     get messages() { return [message()]; }, from: 0, conversationId: 'auto-name', options: [], onBranch: () => {},
   }), root);
   const header = () => root.querySelector<HTMLElement>('.model')!;
-  const name = () => header().children[1]!.textContent;
+  const name = () => header().querySelector('b')!.textContent;
   try {
-    equal(header().querySelector('b')!.textContent, 'Auto');
+    equal(name(), 'Auto');
     equal(header().querySelector('em')!.textContent, `· ${t('reason.routing')}`, 'while Auto is still choosing it says only that');
-    equal(header().children.length, 2, 'with no name slot yet');
+    equal(header().children.length, 2, 'the mark with its name, and the reason');
     const choosing = header().getBoundingClientRect().height;
     setMessage({ ...message(), vendor: 'claude', model: 'claude-haiku-5-5', effort: 'medium' });
     equal(name(), 'Haiku 5.5', 'the name shows before the first word');
+    equal(header().querySelector('em'), null, 'the reason is said while Auto chooses, and after that it is the tooltip');
+    equal(header().textContent, 'Haiku 5.5', 'the header is the mark and the model, nothing else');
+    ok(header().title.includes(`${t('effort.label')}: ${t('effort.medium')}`) && header().title.includes(t('reason.routing')), `effort and the reason are in the tooltip: ${header().title}`);
     equal(header().getBoundingClientRect().height, choosing, 'and the header keeps its height');
     setMessage({ ...message(), text: 'Sunlight cont' });
     equal(name(), 'Haiku 5.5', 'and stays while the words arrive');
@@ -77,13 +80,13 @@ check('thread: a model the CLI never named reads the same while streaming and at
   const dispose = render(() => createComponent(Thread, {
     get messages() { return [message()]; }, from: 0, conversationId: 'codex-name', options: [], onBranch: () => {},
   }), root);
-  const name = () => root.querySelector<HTMLElement>('.model')!.children[1]!.textContent;
+  const name = () => root.querySelector<HTMLElement>('.model b')!.textContent;
   try {
-    equal(name(), t('model.default'));
+    equal(name(), 'Codex', 'a model the CLI never named reads as its vendor');
     setMessage({ ...message(), model: 'codex' });
-    equal(name(), t('model.default'), "the engine's stand-in id is no name");
+    equal(name(), 'Codex', "the engine's stand-in id is no name");
     setMessage({ ...message(), status: 'done' });
-    equal(name(), t('model.default'), 'and the end changes nothing');
+    equal(name(), 'Codex', 'and the end changes nothing');
     setMessage({ ...message(), model: 'gpt-6-luna' });
     equal(name(), 'GPT-6 Luna');
   } finally {

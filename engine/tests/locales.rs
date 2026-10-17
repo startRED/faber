@@ -67,9 +67,13 @@ fn every_english_text_is_shown_somewhere() {
     code.extend(sources("engine/src", &["rs"], ""));
     code.extend(sources("src-tauri/src", &["rs"], ""));
     let starts = built_starts(&code);
-    // "What's new" reads every `notes.<id>.<kind>` from the English file itself (`ui/notes.ts`): its keys are the list.
-    let listed =
-        |key: &str| key.strip_prefix("notes.").and_then(|rest| rest.split_once('.')).is_some_and(|(id, _)| id.parse::<u32>().is_ok());
+    // "What's new" reads every `notes.<id>.<kind>` from the English file itself (`ui/notes.ts`): its keys are the list. In a
+    // branch the id is still the placeholder `next` or `next-2` (R164) until `scripts/numbers.mjs` gives it its number.
+    let listed = |key: &str| {
+        key.strip_prefix("notes.").and_then(|rest| rest.split_once('.')).is_some_and(|(id, _)| {
+            id.parse::<u32>().is_ok() || id == "next" || id.strip_prefix("next-").is_some_and(|n| n.parse::<u32>().is_ok())
+        })
+    };
     let unused: Vec<&String> = keys
         .iter()
         .filter(|key| {

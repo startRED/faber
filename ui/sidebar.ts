@@ -26,6 +26,17 @@ export function groupChats<T extends { updatedAt: number }>(chats: T[], now: num
   return (['today', 'week', 'earlier'] as const).filter((g) => groups[g].length > 0).map((g) => ({ group: g, chats: groups[g] }));
 }
 
+/** A refreshed list with every item that did not change replaced by the one already held, so the sidebar keeps the nodes of the
+ * rows that are the same (a refresh while a rename or a hover is open leaves them alone, and no row is built and animated again). */
+export function keepRows<T extends { id: string }>(held: readonly T[], fresh: T[]): T[] {
+  const known = new Map(held.map((item) => [item.id, item]));
+  const rows = fresh.map((item) => {
+    const old = known.get(item.id);
+    return old && JSON.stringify(old) === JSON.stringify(item) ? old : item;
+  });
+  return rows.length === held.length && rows.every((row, i) => row === held[i]) ? (held as T[]) : rows;
+}
+
 /** Whether a project shows its conversations: the user opened it, or the search found some in it. The sidebar draws the list
  * and sets `aria-expanded` from this one answer, so a screen reader never hears a different one. */
 export const showsChats = (opened: boolean, searching: boolean, found: number) => opened || (searching && found > 0);

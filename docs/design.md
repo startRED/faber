@@ -227,8 +227,8 @@ inside its own area.
 
 - The titlebar has the lockup and the window controls. Dragging and double-click maximize keep working, and macOS keeps
   its native buttons.
-- The topbar has a crumb ("Chat › title" or "Project › title"), a read-only model chip for the open conversation, and
-  the run button. With nothing running the button reads "Nothing running" as quiet second-ink words with no outline or
+- The topbar has a crumb ("Chat › title" or "Project › title") and the run button. The model is not shown there: it is
+  chosen in the composer and each answer names the one it used (R168). With nothing running the button reads "Nothing running" as quiet second-ink words with no outline or
   fill (styled from the absence of the live mark, `.run-btn:not(:has(.live))`); the outline comes back on hover,
   keyboard focus and while the column is open. Otherwise it reads "{n} running". When an
   item needs the user it turns amber, shows the speech bubble and reads "{n} running · {m} needs you". The words are
@@ -237,14 +237,20 @@ inside its own area.
 ### Sidebar
 
 - At the top: "New conversation" (Ctrl N), then the two areas, Chat and Projects, the latter with a count.
+- The sidebar lists only the open area's items (R168): Chat lists the chats and no Projects block, not even an empty
+  one; Projects lists the projects with their conversations and the add-folder control, and no chats. Rows keep their DOM
+  when the list refreshes, so a refresh moves nothing the person is pointing at.
 - Each project expands to show its conversations, and has a "+". When items in a project need the user, its tail shows
   the amber speech bubble and "{m} needs you". Amber always comes with these words, never with a number alone. When
   something only runs, the tail shows a pulsing dot.
 - Chats are grouped as Today, This week and Earlier. Deleting a conversation asks for confirmation.
-- The footer has Settings, the person's name when they gave one, one line per connected vendor and the version. A
-  vendor's line shows its shape, its name, the used share of its tightest quota window, how old that reading is and
-  "still counting" while the vendor has not counted Faber's latest use. It opens Settings > Usage limits. A vendor with no
-  reading yet, or only an expired one, shows "—".
+- The footer is one row, the person's name when they gave one and Settings, then one thin line per connected vendor: its
+  shape, a 3 px bar and the used share of its tightest quota window, in the small size. Nothing on the line wraps. The
+  window, the reset, how old the reading is, the not-yet-counted estimate and the vendor's name are its tooltip. While
+  use is still being counted the share reads "≥ 44%" (the real share can only be higher), with the words in the tooltip
+  (C010). The bar is amber only when the engine says the quota is nearly used. The line opens Settings > Usage limits.
+  A vendor with no reading yet, or only an expired one, shows "—". The version is not on the sidebar: it is the
+  tooltip of the Settings button.
 - Search filters conversation titles and project names on screen; full-text search comes in Phase 2. The percentage and
   "stopped" tails come with the progress view in Phase 3.
 
@@ -256,14 +262,31 @@ inside its own area.
   most recently updated.
 - The composer keeps its model picker, "AI: choose for me".
 - Auto chooses both the model and its effort. A manual model adds an adjacent low, medium or high effort choice,
-  defaulting to medium (R102). Each conversation remembers its choice. Changes apply to the next message only;
-  the composer says so, and each answer keeps the effort actually used. Both CLI drivers always receive that effort.
+  defaulting to medium (R102). Each conversation remembers its choice. Changes apply to the next message only (the
+  composer does not repeat it), and each answer keeps the effort actually used, in its header's tooltip. Both CLI drivers always receive that effort.
 - The ambient effect of the theme runs here, and the empty composer idles with a typing bar and rotating hints.
 - With no AI connected, the greeting, the suggestions and the list give way to an empty state with Curioso and a button
-  that opens account management. The composer stays on screen but cannot send.
+  that opens account management. The composer stays on screen but cannot send. An open conversation with no AI connected
+  shows no composer and no permission line.
+
+### Answers
+
+- The header is the vendor's mark and the model's name, nothing else (Auto shows its reason beside the name only while it is
+  still choosing). The effort and Auto's reason are its tooltip. The pace line stays (C002). A wait for quota is told once,
+  by the quota card, never also in the header or the red note.
+- Under the answer, one line that never wraps, at a 660 px column or a 720 px window: three icon buttons from
+  `ui/Glyphs.tsx` (copy, retry, open in terminal, each with a tooltip and an accessible name), a short "Retry stronger"
+  when a step up is offered, then the cost in the faint data style. The tokens and how long the cache stays warm are the
+  cost's tooltip. There is no model select under an answer: a retry (and the right-click Redo, which names the model)
+  uses the composer's current choice.
+- There is no permission sentence over a conversation: the mode is a Settings matter.
+- While an answer streams the engine sends the whole message every 33 ms, so the text is drawn block by block
+  (`ui/markdown.tsx`): a block whose source did not change keeps its DOM and only the open one is parsed and sanitised
+  again. A tick that changed only the tools builds no text. Everything that reaches the page passes DOMPurify.
 
 ### Work log
 
+- The work log and a helper's row share one disclosure style (`.disclosure`: a quiet card, a chevron, the hover).
 - Each step is a quiet chip: a verb in the ink color ("Reading", "Running") and what it acts on in the mono face, cut
   in the middle. A tool Faber does not know keeps its own name; an MCP tool reads "Using a tool" with its server's name.
 
@@ -274,7 +297,7 @@ the answer, in the work log's surface and type: a check, a cross or the live mar
 on the right its kind, its state and its step count in the third ink. The row opens like every disclosure (`animateDetails`)
 to the tool chips it ran and its report as Markdown; nothing else moves. Rows sit in a `minmax(0, 1fr)` grid, so a long
 tool line ellipsizes instead of widening the reply. A helper that never finished reads "stopped" once the reply has
-ended; one sent to the background keeps the live mark until its task notice arrives; a refused one reads "declined" in
+ended; one sent to the background keeps the live mark until its task notice arrives (a ring, never the square of a stop button); a refused one reads "declined" in
 the third ink, never as a failure. Known limit: when a reply moves to another AI after a quota stop, its open tools,
 helpers included, read as working again with the new reply.
 
@@ -306,6 +329,7 @@ projects. Faber has no worktree creation for projects, so an environment has no 
 
 ### Running column
 
+- With nothing running it says "Nothing running" once and has no footer sentence.
 - One block per project, plus one "Chat" block. Each row shows the vendor's shape (a neutral dot while Auto is still
   choosing the model), the conversation title, the state in words ("Working", "Needs you" or "Choosing the model") and
   the time since the turn started.
@@ -386,7 +410,7 @@ projects. Faber has no worktree creation for projects, so an environment has no 
   moment the CLI stays suspended, outside any job, until the PC restarts. It never runs a single instruction. Std Rust
   cannot create a process inside a job yet (`raw_attribute` is unstable), so Faber starts as few CLIs as it can: Codex is
   asked for its models only while Faber has none, one asking at a time. Settings shows the
-  details; the thread shows one calm line with a link to them. The isolated mode below is `Permissions::Isolated`: Faber's
+  details; the thread shows nothing about it (R168). The isolated mode below is `Permissions::Isolated`: Faber's
   own model list, router, internal checks and self-development roles use it, and the person cannot pick it.
 - No prompt can block a full-access turn. Where the installed Claude Code declares `--permission-prompts` as an option line in a successful `claude --help` (read once
   at start, and again when a launch fails with "unknown option", which also drops the newer flags at once; present on 2.1.296), full access starts it with `--permission-mode bypassPermissions --permission-prompts none` and no host prompt
@@ -1048,7 +1072,7 @@ next message therefore needs no deferral to a natural break. A change of model s
 
 The result of every Claude turn names which bucket its cache writes went into (`usage.cache_creation.ephemeral_1h_input_tokens` and
 `ephemeral_5m_input_tokens`). Faber keeps "warm until" on the reply (`Message::cache_warm_until`: an hour for the 1-hour bucket, five
-minutes for the 5-minute one, nothing when neither is named) and the latest reply shows it quietly in its usage line, hidden when
+minutes for the 5-minute one, nothing when neither is named) and the latest reply shows it in the tooltip of its cost, hidden when
 unknown or cold. The lifetime counts from the start of the last request (its assistant message start in the stream, less a 5 s margin),
 not from the result; a turn whose start was not seen shows nothing. It is display only: Auto does not route by it, because a change of model starts a new cache anyway. Codex names no
 lifetime, so it shows nothing.
