@@ -25,10 +25,10 @@ jobs:
     steps:
       # The body is the English "what's new" entries newer than the previous release (scripts/release-notes.mjs), which is
       # why the whole history is fetched: the previous tag holds the last entry it shipped.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - id: release
@@ -72,11 +72,11 @@ jobs:
             args: ''
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: webview libraries (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -89,7 +89,7 @@ jobs:
       # The tag is the version; package.json only moves on hand-made bumps.
       - run: npm pkg set version="${GITHUB_REF_NAME#v}"
         shell: bash
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Signs the update files; each build also merges its platform into the release's latest.json.
@@ -131,7 +131,7 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: checksums
         run: |
           set -euo pipefail
@@ -162,10 +162,10 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       # It holds the newest build of either channel: a preview install takes a stable too, but never one built from older code
@@ -199,7 +199,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - run: |
