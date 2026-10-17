@@ -97,7 +97,11 @@ the sessions that build it work. The project's agent starts conversations of its
 conversation can keep going while the person is away, and a red check on its pull request wakes it. A landed change
 reaches the installed app through the public updater (R156). A live probe on the real Claude Code CLI
 (`engine/examples/selfdev_probe.rs`, two small Haiku turns) checked it on 2026-10-17: the agent started a conversation,
-read it back, and the new conversation wrote its file in 16 s.
+read it back, and the new conversation wrote its file in 16 s. A second probe (`engine/examples/selfdev_accept.rs`, by
+hand, never in CI) runs one whole task: the agent fixes a failing test in a throwaway crate in its own separate copy,
+runs the project's checks and commits on its `faber/…` branch while the person's checkout stays untouched. On
+2026-10-17 it passed on Haiku in 27 s for US$0.009, and with `--review` the helper from the other AI sent its report
+back.
 
 Approved, not built (R190): the serial proof queue, `cargo t`'s plan and R146's "Faber decides done" become one
 verifier in the engine. It checks each change in seconds on the PC with no extra process while idle, posts the result
