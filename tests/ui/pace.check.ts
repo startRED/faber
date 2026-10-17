@@ -34,15 +34,17 @@ check('pace: quota reasons, manual effort and grouped activity coexist without h
   }
 });
 
-check('pace: Settings separates own USD from shared quota and marks the daily line at fifty percent', () => {
+check('pace: Settings separates own USD from shared quota and marks the daily line at fifty percent', async () => {
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
   useLanguage('en');
   const host = document.createElement('div');
+  document.body.append(host);
   const until = Date.now() / 1000 + 3600;
   const usage = [{ vendor: 'claude', plan: 'max', state: 'ok', learning: false, relearning: false, outsideShare: 0.25,
     foreignUse: true, overageOn: false, billedPerUse: false, billingUnknown: false, askForPlan: false,
     paidPossible: false, ownSpendUsd: 1.25, unmetered: 0, counting: false,
     windows: [{ name: 'five_hour', used: 0.3, elapsed: 0.5, expected: 0.5, resetsAt: until }] }];
-  const props = { start: 'usage', look: { appearance: { base: 'sala' }, vars: {}, scheme: 'dark', motion: 'none', effects: {}, checks: [], notices: [] }, saved: {}, vendors: ['claude'],
+  const props = { start: 'accounts', look: { appearance: { base: 'sala' }, vars: {}, scheme: 'dark', motion: 'none', effects: {}, checks: [], notices: [] }, saved: {}, vendors: ['claude'],
     quotas: { 'claude:five_hour': { vendor: 'claude', window: 'five_hour', used: 0.3, resetsAt: until } },
     now: Date.now(), usage, onClose: () => {}, onSave: async () => true, onOpenSetup: () => {} } as unknown as Parameters<typeof Settings>[0];
   const dispose = render(() => createComponent(Settings, props), host);
@@ -50,9 +52,11 @@ check('pace: Settings separates own USD from shared quota and marks the daily li
     ok(host.textContent!.includes('30%'));
     ok(host.textContent!.includes('5-hour'));
     equal((host.querySelector('.expected') as HTMLElement | null)?.style.left, '50%');
-    ok(host.textContent!.includes('$1.2500'));
+    ok(host.textContent!.includes('$1.25') && !host.textContent!.includes('1.2500'), 'two decimals, never four');
+    host.querySelector<HTMLButtonElement>('#acct-claude-details')!.click();
+    await tick();
     ok(host.textContent!.includes('whole account'));
-  } finally { dispose(); }
+  } finally { dispose(); host.remove(); }
 });
 
 check('pace: paid credits require two clicks and name one vendor and one reply', async () => {

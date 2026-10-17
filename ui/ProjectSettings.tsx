@@ -1,6 +1,6 @@
 import { createSignal, For, type JSX, onCleanup, onMount, Show } from 'solid-js';
 import { api, errorText, type EnrollView, type Project, type ProofView } from './api.ts';
-import { Toggle } from './controls.tsx';
+import { Opt, Toggle } from './controls.tsx';
 import { Icon } from './Glyphs.tsx';
 import { fromEngine, t } from './i18n.ts';
 import { keep, kept, release, useDraft } from './unsent.ts';
@@ -57,11 +57,12 @@ export function ProjectsSection(props: { projects: Project[] }) {
   );
 }
 
-/** One project, closed until it is opened; it reads its checks and its grant only then. */
+/** One project, closed until it is opened; it reads its checks and its grant only then. It is a card of rows like the rest of
+ * Settings. */
 function Entry(props: { project: Project }) {
   const [open, setOpen] = createSignal(false);
   return (
-    <section class="pset" data-project={props.project.id}>
+    <section class="pset st-card" data-project={props.project.id}>
       <button type="button" class="pset-head" aria-expanded={open()} onClick={() => setOpen(!open())}>
         <span class="t">{props.project.name}</span>
         <span class="s" title={props.project.path}>{tail(props.project.path)}</span>
@@ -140,117 +141,107 @@ function Body(props: { project: Project }) {
     return saved;
   };
 
+  const checksHint = () => {
+    const p = proof();
+    if (!p) return t('projects.status.reading');
+    if (p.commands.length === 0) return t('set.projects.noChecks');
+    return `${proofCount(p)} · ${p.confirmed ? t('projects.proof.confirmed') : t('projects.proof.unconfirmed')}`;
+  };
+  const row = (name: string) => `pset-${props.project.id}-${name}`;
+
   return (
     <div class="pset-body">
       <Show when={error()}>
         <p class="note err" role="alert">{fromEngine(error())}</p>
       </Show>
-      <div class="row">
-        <span>{t('set.projects.checks')}</span>
-        <div class="pset-line" data-testid="pset-checks">
-          <Show when={proof()} fallback={<span class="hint">{t('projects.status.reading')}</span>}>
+      <div class="pset-checks" data-testid="pset-checks">
+        <Opt id={row('checks')} label={t('set.projects.checks')} hint={checksHint()} more={[t('projects.proof.desc'), t('projects.proofs.isolationTech')]}>
+          <Show when={proof()}>
             {(p) => (
-              <>
-                <span class="v">
-                  {p().commands.length > 0 ? proofCount(p()) : t('set.projects.noChecks')}
-                  <Show when={p().commands.length > 0}>
-                    {' · '}
-                    {p().confirmed ? t('projects.proof.confirmed') : t('projects.proof.unconfirmed')}
-                  </Show>
-                </span>
-                <span class="pset-acts">
-                  <Show when={!p().confirmed && p().commands.length > 0 && !editing()}>
-                    <button type="button" class="btn primary" data-testid="proof-confirm" disabled={busy()} onClick={() => void confirm(p().declared.length ? p().declared : p().commands)}>
-                      {t('projects.proof.confirm')}
-                    </button>
-                  </Show>
-                  <Show when={!editing()}>
-                    <button type="button" class="btn" data-testid="proof-edit" disabled={busy()} onClick={() => { setDraft(p().commands.join('\n')); setEditing(true); }}>
-                      {t('projects.proof.edit')}
-                    </button>
-                  </Show>
-                </span>
-                <Show when={p().changed}>
-                  <p class="hint" role="status">{t('projects.proof.changed')}</p>
+              <span class="pset-acts">
+                <Show when={!p().confirmed && p().commands.length > 0 && !editing()}>
+                  <button type="button" class="btn primary" data-testid="proof-confirm" disabled={busy()} onClick={() => void confirm(p().declared.length ? p().declared : p().commands)}>
+                    {t('projects.proof.confirm')}
+                  </button>
                 </Show>
-                <Show
-                  when={editing()}
-                  fallback={
-                    // Confirm is pressable only while the list and the setup it sends are on screen; a confirmed list may fold.
-                    <Show when={p().commands.length > 0}>
-                      <Show when={p().confirmed} fallback={<ProofList proof={p()} />}>
-                        <More label={t('projects.proof.view')} open={t('projects.proof.hide')}>
-                          <ProofList proof={p()} />
-                        </More>
-                      </Show>
-                    </Show>
-                  }
-                >
-                  <ProofList proof={p()} setupOnly />
-                  <label class="sr-only" for={`proof-draft-${id()}`}>{t('projects.proof.edit.label')}</label>
-                  <textarea
-                    id={`proof-draft-${id()}`}
-                    class="proof-draft"
-                    data-testid="proof-draft"
-                    rows={Math.min(10, Math.max(3, draft().split('\n').length))}
-                    value={draft()}
-                    onInput={(e) => (setDraft(e.currentTarget.value), keep(proofKey(), e.currentTarget.value))}
-                  />
-                  <span class="pset-acts">
-                    <button type="button" class="btn primary" data-testid="proof-save" disabled={busy()} onClick={() => void confirm(draft().split('\n').map((l) => l.trim()).filter(Boolean))}>
-                      {t('projects.proof.save')}
-                    </button>
-                    <button type="button" class="btn" disabled={busy()} onClick={() => (setEditing(false), keep(proofKey(), ''))}>
-                      {t('projects.proof.cancel')}
-                    </button>
-                  </span>
+                <Show when={!editing()}>
+                  <button type="button" class="btn" data-testid="proof-edit" disabled={busy()} onClick={() => { setDraft(p().commands.join('\n')); setEditing(true); }}>
+                    {t('projects.proof.edit')}
+                  </button>
                 </Show>
-                <More label={t('set.more')}>
-                  <p class="hint">{t('projects.proof.desc')}</p>
-                  <p class="hint">{t('projects.proofs.isolationTech')}</p>
-                </More>
-              </>
+              </span>
             )}
           </Show>
-        </div>
+        </Opt>
+        <Show when={proof()}>
+          {(p) => (
+            <div class="st-extra">
+              <Show when={p().changed}>
+                <p class="hint" role="status">{t('projects.proof.changed')}</p>
+              </Show>
+              <Show
+                when={editing()}
+                fallback={
+                  // Confirm is pressable only while the list and the setup it sends are on screen; a confirmed list may fold.
+                  <Show when={p().commands.length > 0}>
+                    <Show when={p().confirmed} fallback={<ProofList proof={p()} />}>
+                      <More label={t('projects.proof.view')} open={t('projects.proof.hide')}>
+                        <ProofList proof={p()} />
+                      </More>
+                    </Show>
+                  </Show>
+                }
+              >
+                <ProofList proof={p()} setupOnly />
+                <label class="sr-only" for={`proof-draft-${id()}`}>{t('projects.proof.edit.label')}</label>
+                <textarea
+                  id={`proof-draft-${id()}`}
+                  class="proof-draft"
+                  data-testid="proof-draft"
+                  rows={Math.min(10, Math.max(3, draft().split('\n').length))}
+                  value={draft()}
+                  onInput={(e) => (setDraft(e.currentTarget.value), keep(proofKey(), e.currentTarget.value))}
+                />
+                <span class="pset-acts">
+                  <button type="button" class="btn primary" data-testid="proof-save" disabled={busy()} onClick={() => void confirm(draft().split('\n').map((l) => l.trim()).filter(Boolean))}>
+                    {t('projects.proof.save')}
+                  </button>
+                  <button type="button" class="btn" disabled={busy()} onClick={() => (setEditing(false), keep(proofKey(), ''))}>
+                    {t('projects.proof.cancel')}
+                  </button>
+                </span>
+              </Show>
+            </div>
+          )}
+        </Show>
       </div>
-      <div class="row">
-        <span>{t('set.projects.tools')}</span>
-        <div class="pset-line">
-          <span class="v">{t('projects.presence.continueWithout')}</span>
-          <More label={t('set.more')}>
-            <p class="hint">{t('reason.kit.continueWithout')}</p>
-            <p class="hint">{t('reason.kit.findToolsInstallParked')}</p>
-          </More>
-        </div>
-      </div>
-      <div class="row">
-        <span>{t('set.projects.code')}</span>
-        <div class="pset-line">
-          <span class="v">{enroll()?.mode === 'equilibrado' ? t('projects.gitMode.equilibrado') : t('projects.gitMode.seguro')}</span>
-          <More label={t('set.more')}>
-            <p class="hint">{enroll()?.mode === 'equilibrado' ? t('projects.gitMode.equilibradoDesc') : t('projects.gitMode.seguroDesc')}</p>
-            <p class="hint">{t('projects.gitMode.seguroTech')}</p>
-            <p class="hint">
-              {t('projects.repo')}: {enroll()?.repo ?? props.project.path}
-            </p>
-            <Show when={enroll()?.base}>{(base) => <p class="hint">{t('projects.base')}: {base()}</p>}</Show>
-            <Show when={enroll()?.author}>{(a) => <p class="hint">{t('projects.author')}: {a().name} &lt;{a().email}&gt;</p>}</Show>
-          </More>
-        </div>
-      </div>
-      <div class="row">
-        <span>{t('set.projects.faber')}</span>
-        <div class="pset-line">
-          <Show when={enroll()} fallback={<span class="hint">{t('projects.status.reading')}</span>}>
-            {(e) => <Toggle label={t('projects.selfUpdate.trust')} checked={e().selfUpdate} onChange={trust} />}
-          </Show>
-          <More label={t('set.more')}>
-            <p class="hint">{t('projects.selfUpdate.trustDesc')}</p>
-            <p class="hint">{t('projects.selfUpdate.trustTech')}</p>
-          </More>
-        </div>
-      </div>
+      <Opt id={row('tools')} label={t('set.projects.tools')} more={[t('reason.kit.continueWithout'), t('reason.kit.findToolsInstallParked')]}>
+        <span class="st-val">{t('projects.presence.continueWithout')}</span>
+      </Opt>
+      <Opt
+        id={row('code')}
+        label={t('set.projects.code')}
+        more={[
+          enroll()?.mode === 'equilibrado' ? t('projects.gitMode.equilibradoDesc') : t('projects.gitMode.seguroDesc'),
+          t('projects.gitMode.seguroTech'),
+          `${t('projects.repo')}: ${enroll()?.repo ?? props.project.path}`,
+          ...(enroll()?.base ? [`${t('projects.base')}: ${enroll()!.base}`] : []),
+          ...(enroll()?.author ? [`${t('projects.author')}: ${enroll()!.author!.name} <${enroll()!.author!.email}>`] : []),
+        ]}
+      >
+        <span class="st-val">{enroll()?.mode === 'equilibrado' ? t('projects.gitMode.equilibrado') : t('projects.gitMode.seguro')}</span>
+      </Opt>
+      <Show when={enroll()} fallback={<Opt id={row('faber')} label={t('projects.selfUpdate.trust')} hint={t('projects.status.reading')} />}>
+        {(e) => (
+          <Toggle
+            id={row('faber')}
+            label={t('projects.selfUpdate.trust')}
+            more={[t('projects.selfUpdate.trustDesc'), t('projects.selfUpdate.trustTech')]}
+            checked={e().selfUpdate}
+            onChange={trust}
+          />
+        )}
+      </Show>
     </div>
   );
 }

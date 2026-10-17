@@ -3,7 +3,7 @@
 
 use super::{Result, Scenario, ask, ensure, same, start_settings};
 use crate::app::Ctx;
-use crate::page::css;
+use crate::page::{Page, css};
 use crate::sandbox::{CliSlot, Launch};
 
 /// The request of the recording `claude/tools.jsonl`, which allows the first Write and denies the second.
@@ -42,21 +42,29 @@ fn do_not_ask_text(ctx: &mut Ctx) -> Result {
     let settings = page.named("button", "settings.open")?.exact();
     page.click(&settings)?;
     let dont_ask_body = page.text_of("set.permissionsDontAskBody")?;
-    // The long text sits behind "Learn more": it is not on the page until that is opened (R140).
+    // The long text sits behind the "?" of the row: it is not on the page until that is opened (R140).
     ensure(page.count(&css(".hint").has_text(&dont_ask_body))? == 0, || "the long risk text is on the page while closed".into())?;
-    page.click(&css("#set-permissions-more"))?;
+    page.click(&css("#set-permissions-q"))?;
     page.wait_visible(&css(".hint").has_text(&dont_ask_body))?;
-    let dont_ask = css("#set-permissions + .choices button:nth-child(5)");
-    same(page.attr(&dont_ask, "aria-pressed")?, Some("true".into()), "Do not ask is the default")?;
+    let full_access = page.text_of("set.permissions.dontAsk")?;
+    same(page.eval(PICKED)?.as_str(), Some(full_access.as_str()), "Do not ask is the default")?;
     // Choosing the other mode swaps the details; choosing this one again brings them back.
-    let ask_button = css("#set-permissions + .choices button:nth-child(1)");
-    page.click(&ask_button)?;
+    pick_mode(page, 1)?;
     let ask_body = page.text_of("set.permissionsAskBody")?;
     page.wait_visible(&css(".hint").has_text(&ask_body))?;
     ensure(page.count(&css(".hint").has_text(&dont_ask_body))? == 0, || "the old details are still on screen".into())?;
-    page.click(&dont_ask)?;
+    pick_mode(page, 5)?;
     page.wait_visible(&css(".hint").has_text(&dont_ask_body))?;
     ensure(page.count(&css(".hint").has_text(&ask_body))? == 0, || "the details of the other mode are still on screen".into())
+}
+
+/// The mode the permissions menu shows as picked.
+const PICKED: &str = "document.querySelector('#set-permissions-pick').textContent.trim()";
+
+/// Opens the permissions menu and picks the mode at that place in its list (1 = Ask, 5 = Full access).
+fn pick_mode(page: &mut Page, place: usize) -> Result {
+    page.click(&css("#set-permissions-pick"))?;
+    page.click(&css(&format!("#set-permissions-pick-list [role=option]:nth-child({place})")))
 }
 
 fn chat_without_cards(ctx: &mut Ctx) -> Result {
@@ -83,9 +91,10 @@ fn chat_without_cards(ctx: &mut Ctx) -> Result {
     ensure(page.count(&css("div.ask"))? == 0, || "the answered question must not stay on screen".into())?;
     let settings = page.named("button", "settings.open")?.exact();
     page.click(&settings)?;
-    let hint = page.text_of("set.chatFolderHint")?;
-    page.wait_visible(&css(".hint").has_text(&hint))?;
     let folder = page.named("button", "set.chooseFolder")?;
+    page.wait_visible(&folder)?;
+    let locked = page.text_of("error.chatFolderLocked")?;
+    page.wait_visible(&css("#set-folder-hint").has_text(&locked))?;
     same(page.attr(&folder, "disabled")?, Some("".into()), "the folder is fixed once messages exist")
 }
 
@@ -101,20 +110,17 @@ fn answers_a_card(ctx: &mut Ctx) -> Result {
     let page = &mut app.page;
     let settings = page.named("button", "settings.open")?.exact();
     page.click(&settings)?;
-    let dont_ask = css("#set-permissions + .choices button:nth-child(5)");
-    page.wait_visible(&dont_ask)?;
-    same(page.attr(&dont_ask, "aria-pressed")?, Some("true".into()), "older settings default to Don't ask")?;
-    let ask_first = css("#set-permissions + .choices button:nth-child(1)");
-    page.click(&ask_first)?;
-    page.wait_for(
-        "the permissions choice to be saved",
-        "document.querySelector('#set-permissions + .choices button[aria-pressed=true] b')?.textContent === 'Ask'",
-    )?;
+    let pick = css("#set-permissions-pick");
+    page.wait_visible(&pick)?;
+    let (full_access, ask_mode) = (page.text_of("set.permissions.dontAsk")?, page.text_of("set.permissions.ask")?);
+    same(page.eval(PICKED)?.as_str(), Some(full_access.as_str()), "older settings default to Don't ask")?;
+    pick_mode(page, 1)?;
+    page.wait_for("the permissions choice to be saved", &format!("({PICKED}) === {}", serde_json::json!(ask_mode)))?;
     page.cdp.call("Page.reload", serde_json::json!({}))?;
     page.wait_visible(&settings)?;
     page.click(&settings)?;
-    page.wait_visible(&ask_first)?;
-    same(page.attr(&ask_first, "aria-pressed")?, Some("true".into()), "the permissions choice survives reload")?;
+    page.wait_visible(&pick)?;
+    same(page.eval(PICKED)?.as_str(), Some(ask_mode.as_str()), "the permissions choice survives reload")?;
     let back = page.named("button", "set.back")?;
     page.click(&back)?;
     // Projects run only missions, so the mode is a Chat matter: a chat says it over its thread.

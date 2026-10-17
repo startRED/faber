@@ -1,6 +1,6 @@
 import { createComponent } from 'solid-js';
 import { render } from 'solid-js/web';
-import type { Message, VendorUsage } from '../../ui/api.ts';
+import { api, type Message, type VendorUsage } from '../../ui/api.ts';
 import { useLanguage } from '../../ui/i18n.ts';
 import { Settings } from '../../ui/Settings.tsx';
 import { Sidebar } from '../../ui/Sidebar.tsx';
@@ -81,52 +81,76 @@ check('quota: without recent work the number is final, and without a conversion 
   } finally { unread.dispose(); }
 });
 
-check('quota: Settings spells out the estimate and the age', () => {
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+/** Runs a check with both CLIs saying someone is signed in, as the accounts section asks them when it opens. */
+async function signedIn<T>(run: () => Promise<T> | T): Promise<T> {
+  const was = api.setupCheck;
+  api.setupCheck = async (vendor) => ({ vendor, installed: true, account: 'signedIn', canInstall: false });
+  try { return await run(); } finally { api.setupCheck = was; }
+}
+
+check('quota: Settings spells out the estimate and the age, behind the Details of the account', async () => {
   useLanguage('pt-BR');
   const host = document.createElement('div');
-  const props = { start: 'usage', look: { appearance: { base: 'sala' }, vars: {}, scheme: 'dark', motion: 'none', effects: {}, checks: [], notices: [] }, saved: {}, vendors: ['codex'],
+  document.body.append(host);
+  const props = { start: 'accounts', look: { appearance: { base: 'sala' }, vars: {}, scheme: 'dark', motion: 'none', effects: {}, checks: [], notices: [] }, saved: {}, vendors: ['codex'],
     quotas, now: NOW, usage: usage({ counting: true, uncounted: 0.02 }), onClose: () => {}, onSave: async () => true, onOpenSetup: () => {} } as unknown as Parameters<typeof Settings>[0];
   const dispose = render(() => createComponent(Settings, props), host);
   try {
+    ok(!host.textContent!.includes('Atualizado há 4 min'), 'the notes are closed until Details opens');
+    host.querySelector<HTMLButtonElement>('#acct-codex-details')!.click();
+    await tick();
     const text = host.textContent!;
     ok(text.includes('+ ~2% ainda vai entrar na conta'), text);
     ok(text.includes('Atualizado há 4 min'), text);
     ok(text.includes('O número ainda pode subir'), text);
-  } finally { dispose(); }
+  } finally { dispose(); host.remove(); }
 });
 
-check('quota: Settings gives each window its own age, never the newest one', () => {
+check('quota: Settings gives each window its own age, never the newest one', async () => {
   useLanguage('pt-BR');
   const two = usage({ readAt: at(10) });
   two[0].windows.push({ name: 'five_hour', used: 0.1, elapsed: 0.5, expected: 0.5, resetsAt: NOW / 1000 + 3600, readAt: at(3 * 3600), uncounted: null });
   const host = document.createElement('div');
-  const props = { start: 'usage', look: { appearance: { base: 'sala' }, vars: {}, scheme: 'dark', motion: 'none', effects: {}, checks: [], notices: [] }, saved: {}, vendors: ['codex'],
+  document.body.append(host);
+  const props = { start: 'accounts', look: { appearance: { base: 'sala' }, vars: {}, scheme: 'dark', motion: 'none', effects: {}, checks: [], notices: [] }, saved: {}, vendors: ['codex'],
     quotas: { ...quotas, 'codex:five_hour': { vendor: 'codex' as const, window: 'five_hour', used: 0.1, resetsAt: NOW / 1000 + 3600 } }, now: NOW, usage: two, onClose: () => {}, onSave: async () => true, onOpenSetup: () => {} } as unknown as Parameters<typeof Settings>[0];
   const dispose = render(() => createComponent(Settings, props), host);
   try {
-    const ages = [...host.querySelectorAll('.urow .age')].map((e) => e.textContent);
+    host.querySelector<HTMLButtonElement>('#acct-codex-details')!.click();
+    await tick();
+    const ages = [...host.querySelectorAll('.wnote .age')].map((e) => e.textContent);
     deepEqual(ages.sort(), ['Atualizado agora', 'Atualizado há 3 h'].sort());
-  } finally { dispose(); }
+  } finally { dispose(); host.remove(); }
 });
 
-check('quota: Settings says running low only for a nearly used window, and fast use calmly (C002)', () => {
-  const stateText = (state: VendorUsage['state']) => {
+check('quota: Settings says running low only for a nearly used window, and fast use calmly (C002)', () => signedIn(async () => {
+  const stateText = async (state: VendorUsage['state']) => {
     const u = usage();
     u[0].state = state;
     const host = document.createElement('div');
-    const props = { start: 'usage', look: { appearance: { base: 'sala' }, vars: {}, scheme: 'dark', motion: 'none', effects: {}, checks: [], notices: [] }, saved: {}, vendors: ['codex'],
+    document.body.append(host);
+    const props = { start: 'accounts', look: { appearance: { base: 'sala' }, vars: {}, scheme: 'dark', motion: 'none', effects: {}, checks: [], notices: [] }, saved: {}, vendors: ['codex'],
       quotas, now: NOW, usage: u, onClose: () => {}, onSave: async () => true, onOpenSetup: () => {} } as unknown as Parameters<typeof Settings>[0];
     const dispose = render(() => createComponent(Settings, props), host);
-    try { return host.querySelector('.usage-state')!.textContent!; } finally { dispose(); }
+    try {
+      await tick();
+      await tick();
+      const pill = host.querySelector('.acct[data-vendor="codex"] .acct-pill')!;
+      return { text: pill.textContent!, amber: pill.classList.contains('warn') };
+    } finally { dispose(); host.remove(); }
   };
   useLanguage('pt-BR');
-  equal(stateText('fast'), 'Gastando rápido');
-  equal(stateText('low'), 'Cota acabando');
+  deepEqual(await stateText('fast'), { text: 'Rápido', amber: false });
+  deepEqual(await stateText('low'), { text: 'Baixa', amber: true });
+  deepEqual(await stateText('out'), { text: 'Esgotada', amber: true });
   for (const language of ['en', 'pt-BR', 'es', 'fr', 'de'] as const) {
     useLanguage(language);
-    ok(!/acabando|running low|poca cuota|faible|knapp/i.test(stateText('fast')), `${language}: "${stateText('fast')}" must not alarm`);
+    const fast = await stateText('fast');
+    ok(!fast.amber && !/acabando|running low|poca cuota|faible|knapp|baja|baixa|low|out|épuis/i.test(fast.text), `${language}: "${fast.text}" must not alarm`);
   }
-});
+}));
 
 check('quota: Auto never alarms about quota that is far from the limit (C002)', () => {
   const reply = (kind: 'fast' | 'low') => ({ id: 'reply', role: 'assistant', text: 'Answer', at: 1, status: 'done', vendor: 'claude',

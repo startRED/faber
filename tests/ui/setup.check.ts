@@ -1,8 +1,11 @@
+import { createComponent } from 'solid-js';
+import { render } from 'solid-js/web';
 import { de } from '../../ui/locales/de.ts';
 import { en } from '../../ui/locales/en.ts';
 import { es } from '../../ui/locales/es.ts';
 import { fr } from '../../ui/locales/fr.ts';
 import { ptBR } from '../../ui/locales/pt-BR.ts';
+import { Setup } from '../../ui/Setup.tsx';
 import { continuePatch, firstRunStep, lookDue, setupCard, setupPatch, shouldOpenSetup, sizeOf, toggleSubscription, withSize, type Subscription } from '../../ui/setup.ts';
 import { check, deepEqual, doesNotMatch, equal, notEqual, ok } from './check.ts';
 
@@ -169,4 +172,24 @@ check('setup first run: the setup cards save the setup decision and never the ap
     deepEqual(patch, { setup: result });
     for (const field of ['appearance', 'experience', 'tutorialDone']) equal(field in patch, false, field);
   }
+});
+
+check('setup: the AI that is picked is filled and ticked, and the other ones are not; one name for Codex', () => {
+  const host = document.createElement('div');
+  document.body.append(host);
+  const dispose = render(() => createComponent(Setup, { mode: 'manage', onFinish: () => {} }), host);
+  try {
+    const picks = [...host.querySelectorAll<HTMLButtonElement>('.pick')];
+    equal(picks.length, 3);
+    ok(picks.every((b) => b.getAttribute('aria-pressed') === 'false' && !b.querySelector('.tick')), 'nothing is picked at first');
+    const codex = picks.find((b) => b.textContent!.includes('Codex'))!;
+    ok(codex, 'Codex is called Codex');
+    codex.click();
+    const now = [...host.querySelectorAll<HTMLButtonElement>('.pick')];
+    const on = now.filter((b) => b.getAttribute('aria-pressed') === 'true');
+    equal(on.length, 1);
+    ok(on[0]!.querySelector('.tick svg, .tick .i'), 'the picked AI shows a check, not only a colour');
+    equal(now.filter((b) => b.querySelector('.tick')).length, 1);
+    ok(!/ChatGPT/.test(host.textContent!), 'no ChatGPT on the cards');
+  } finally { dispose(); host.remove(); }
 });
