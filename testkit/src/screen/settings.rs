@@ -75,9 +75,8 @@ fn open_section(page: &mut Page, key: &str) -> Result {
     page.wait_visible(&heading)
 }
 
-/// What the line of Claude in Connected accounts says.
-const CLAUDE_STATE: &str =
-    "[...document.querySelectorAll('.accounts li')].find((li) => li.textContent.includes('Claude'))?.querySelector('.state').textContent";
+/// What the card of Claude in Accounts and limits says about the account (connected, notConnected, unsure, checking).
+const CLAUDE_STATE: &str = "document.querySelector('.acct[data-vendor=claude]')?.dataset.state";
 const BASE: &str = "document.documentElement.dataset.base";
 /// The background the preview panel draws with.
 const PREVIEW_BG: &str = "getComputedStyle(document.querySelector('.pvbox .mini')).getPropertyValue('--bg').trim()";
@@ -130,23 +129,25 @@ fn walks_the_sections(ctx: &mut Ctx) -> Result {
     ctx.shot(&mut app, "settings-appearance-narrow")?;
     app.page.cdp.call("Emulation.clearDeviceMetricsOverride", json!({}))?;
 
-    // Connected accounts: Claude is connected, Codex is not.
+    // Accounts and limits: one card per AI. Claude is connected, Codex is not, and Claude's card holds the 5-hour window then
+    // the 7-day one, with the shares the sidebar shows.
     let page = &mut app.page;
     open_section(page, "set.subscriptions")?;
-    let (on, off) = (page.text_of("set.connected")?, page.text_of("set.notConnected")?);
-    same(page.count(&css(".accounts li"))?, 2, "the accounts listed")?;
-    page.wait_for("Claude to be connected", &format!("({CLAUDE_STATE}) === {}", json!(on)))?;
-    same(page.inner_text(&css(".accounts li").has_text("Codex").css(".state"))?, off, "Codex is not connected")?;
-    ctx.shot(&mut app, "settings-accounts")?;
-
-    // Usage limits: the 5-hour window then the 7-day one, with the shares the sidebar shows.
-    let page = &mut app.page;
-    open_section(page, "set.usage")?;
-    let shares = page.eval("[...document.querySelectorAll('.usage-v .urow .share')].map((e) => e.textContent)")?;
-    same(shares.to_string(), r#"["7%","47%"]"#.to_string(), "the shares of the two windows")?;
-    let names = page.eval("[...document.querySelectorAll('.usage-v .urow .uname')].map((e) => e.textContent)")?;
+    same(page.count(&css(".acct"))?, 2, "the accounts listed")?;
+    page.wait_for("Claude to be connected", &format!("({CLAUDE_STATE}) === 'connected'"))?;
+    same(
+        page.eval("document.querySelector('.acct[data-vendor=codex]').dataset.state")?.as_str(),
+        Some("notConnected"),
+        "Codex is not connected",
+    )?;
+    let shares =
+        page.eval("[...document.querySelectorAll('.acct[data-vendor=claude] .urow .share')].map((e) => e.childNodes[0].textContent)")?;
+    same(shares.to_string(), r#"["≥ 7%","≥ 47%"]"#.to_string(), "the shares of the two windows")?;
+    let names =
+        page.eval("[...document.querySelectorAll('.acct[data-vendor=claude] .urow .uname')].map((e) => e.childNodes[0].textContent)")?;
     same(names.to_string(), r#"["5-hour window","7-day window"]"#.to_string(), "the windows")?;
-    ctx.shot(&mut app, "settings-usage")?;
+    same(page.count(&css("[data-restore=manage]"))?, 1, "Manage accounts once in the section")?;
+    ctx.shot(&mut app, "settings-accounts")?;
 
     // Privacy: three plain statements.
     let page = &mut app.page;
@@ -170,10 +171,11 @@ fn opens_at_usage(ctx: &mut Ctx) -> Result {
     page.wait_for("the quota to show", "/^(≥ )?47%$/.test(document.querySelector('.usage .share')?.textContent ?? '')")?;
     let vendor = css(".usage .vendor").has_text("Claude");
     page.click(&vendor)?;
-    let heading = page.named("heading", "set.usage")?;
+    let heading = page.named("heading", "set.subscriptions")?;
     page.wait_visible(&heading)?;
-    let shares = "[...document.querySelectorAll('.usage-v .urow .share')].map((e) => e.textContent).join(' ')";
-    same(page.eval(shares)?.as_str(), Some("7% 47%"), "the figures at the usage limits")?;
+    let shares =
+        "[...document.querySelectorAll('.acct[data-vendor=claude] .urow .share')].map((e) => e.childNodes[0].textContent).join(' ')";
+    same(page.eval(shares)?.as_str(), Some("≥ 7% ≥ 47%"), "the figures at the usage limits")?;
     // A screen that loads again asks the engine and shows the same readings.
     page.reload()?;
     page.wait_for("the quota after a reload", "/^(≥ )?47%$/.test(document.querySelector('.usage .share')?.textContent ?? '')")?;
@@ -182,8 +184,8 @@ fn opens_at_usage(ctx: &mut Ctx) -> Result {
     // DOM readiness can precede the new document's native pointer hit-test frame.
     page.eval("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")?;
     open_settings(page)?;
-    open_section(page, "set.usage")?;
-    page.wait_for("the same figures", &format!("({shares}) === '7% 47%'"))
+    open_section(page, "set.subscriptions")?;
+    page.wait_for("the same figures", &format!("({shares}) === '≥ 7% ≥ 47%'"))
 }
 
 fn clicks_rendered_target(ctx: &mut Ctx) -> Result {
@@ -333,15 +335,14 @@ fn installed_is_not_connected(ctx: &mut Ctx) -> Result {
     let page = &mut app.page;
     open_settings(page)?;
     open_section(page, "set.subscriptions")?;
-    let (on, off) = (page.text_of("set.connected")?, page.text_of("set.notConnected")?);
     // The CLI is installed, and says nobody is signed in.
-    page.wait_for("Claude to be not connected", &format!("({CLAUDE_STATE}) === {}", json!(off)))?;
+    page.wait_for("Claude to be not connected", &format!("({CLAUDE_STATE}) === 'notConnected'"))?;
     // Signing in somewhere else; the section asks again the next time it opens.
     std::fs::write(ctx.sb.state.join("claude.signed-in"), "true").map_err(|e| e.to_string())?;
     let page = &mut app.page;
-    open_section(page, "set.usage")?;
+    open_section(page, "set.privacy")?;
     open_section(page, "set.subscriptions")?;
-    page.wait_for("Claude to be connected", &format!("({CLAUDE_STATE}) === {}", json!(on)))?;
+    page.wait_for("Claude to be connected", &format!("({CLAUDE_STATE}) === 'connected'"))?;
     ctx.close(app.id)
 }
 

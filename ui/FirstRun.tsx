@@ -2,6 +2,7 @@ import { createEffect, createSignal, For, type JSX, onCleanup, onMount, Show } f
 import themes from '../src-tauri/src/themes.json';
 import { api, type Appearance, type Experience, type Look, type Motion } from './api.ts';
 import { appliedLook, applyLook, motion as motionNow, previewer, switchTheme } from './appearance.ts';
+import { Segmented } from './controls.tsx';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 import type { Key } from './locales/en.ts';
@@ -126,22 +127,59 @@ export function Mini(props: { base?: string; look?: Look }) {
   );
 }
 
-function Segmented<T extends string | number>(props: { id: string; label: string; value: T; options: [T, string][]; onPick: (v: T) => void }) {
+/** One look to choose, in both places that offer one. `sm` is Settings: a small picture with its name and its kind under it.
+ * `lg` is the first run: a larger card with the description beside a radio. The ids start with `prefix`, so a screen can
+ * hold both. */
+export function LookCard(props: { id: string; prefix: string; size: 'sm' | 'lg'; selected: boolean; onPick: () => void }) {
+  const large = () => props.size === 'lg';
+  const name = () => t(`look.${props.id}.name` as Key);
+  const desc = () => t(`look.${props.id}.desc` as Key);
+  const ids = (part: string) => `${props.prefix}-${props.id}-${part}`;
+  const kind = () => t(props.id === themes.default ? 'set.kindDefault' : themes['user-controls'].themes.includes(props.id) ? 'set.kindTheme' : 'set.kindPreset');
   return (
-    <div class="ctl">
-      <span class="lbl" id={props.id}>
-        {props.label}
-      </span>
-      <div class="seg-ctl" role="group" aria-labelledby={props.id}>
-        <For each={props.options}>
-          {([v, text]) => (
-            <button type="button" aria-pressed={v === props.value} onClick={() => props.onPick(v)}>
-              {text}
-            </button>
-          )}
-        </For>
-      </div>
-    </div>
+    <button
+      type="button"
+      class={large() ? 'tcard' : 'preset'}
+      aria-pressed={props.selected}
+      aria-labelledby={ids('name')}
+      aria-describedby={ids('desc')}
+      title={large() ? undefined : desc()}
+      onClick={() => props.onPick()}
+    >
+      <Show
+        when={large()}
+        fallback={
+          <>
+            <span class="thumb" aria-hidden="true">
+              <Mini base={props.id} />
+            </span>
+            <span class="nm" id={ids('name')}>
+              {name()}
+            </span>
+            <span class="kind">{kind()}</span>
+            <span class="sr" id={ids('desc')}>
+              {desc()}
+            </span>
+          </>
+        }
+      >
+        <Mini base={props.id} />
+        <span class="meta">
+          <span class="radio" aria-hidden="true" />
+          <span class="txt">
+            <span class="nm" id={ids('name')}>
+              {name()}
+              <Show when={props.id === themes.default}>
+                <small>{t('look.default')}</small>
+              </Show>
+            </span>
+            <span class="ds" id={ids('desc')}>
+              {desc()}
+            </span>
+          </span>
+        </span>
+      </Show>
+    </button>
   );
 }
 
@@ -193,30 +231,7 @@ export function LookStep(props: {
       <div class="themes" role="group" aria-labelledby="fr-title" inert={busy()}>
         <For each={THEMES}>
           {(id) => (
-            <button
-              type="button"
-              class="tcard"
-              aria-pressed={draft().base === id}
-              aria-labelledby={`fr-${id}-name`}
-              aria-describedby={`fr-${id}-desc`}
-              onClick={() => change(switchTheme(draft(), id))}
-            >
-              <Mini base={id} />
-              <span class="meta">
-                <span class="radio" aria-hidden="true" />
-                <span class="txt">
-                  <span class="nm" id={`fr-${id}-name`}>
-                    {t(`look.${id}.name` as Key)}
-                    <Show when={id === themes.default}>
-                      <small>{t('look.default')}</small>
-                    </Show>
-                  </span>
-                  <span class="ds" id={`fr-${id}-desc`}>
-                    {t(`look.${id}.desc` as Key)}
-                  </span>
-                </span>
-              </span>
-            </button>
+            <LookCard id={id} prefix="fr" size="lg" selected={draft().base === id} onPick={() => change(switchTheme(draft(), id))} />
           )}
         </For>
       </div>
@@ -282,7 +297,7 @@ export function LookStep(props: {
           </label>
           <input
             id="fr-name"
-            class="name-in"
+            class="field"
             type="text"
             maxLength={40}
             autocomplete="off"

@@ -640,11 +640,11 @@ check('settings projects: entries and every Learn more start closed, and closed 
     const body = root.querySelector('.pset-body')!;
     ok(body.querySelector('[data-testid="pset-checks"]')?.textContent?.includes('2 checks read from AGENTS.md · not confirmed yet'), 'the checks in one line');
     ok(body.querySelector('[data-testid="proof-commands"]'), 'unconfirmed checks show their commands: Confirm never acts on a hidden list');
-    const more = [...body.querySelectorAll<HTMLButtonElement>('button.more')];
-    ok(more.length >= 4, 'every option keeps its long text behind a disclosure');
-    equal(more.some((b) => b.textContent === 'View commands'), false, 'no View while the list is pending: it is already shown');
-    ok(more.every((b) => b.getAttribute('aria-expanded') === 'false'), 'all closed');
-    equal(body.querySelector('.pset-line > p.hint'), null, 'no long text shows until asked');
+    const marks = [...body.querySelectorAll<HTMLButtonElement>('.st-q')];
+    ok(marks.length >= 3, 'every option keeps its long text behind its "?"');
+    ok(marks.every((b) => b.getAttribute('aria-expanded') === 'false'), 'all closed');
+    equal(body.querySelector('.st-more'), null, 'no long text shows until asked');
+    equal([...body.querySelectorAll<HTMLButtonElement>('button.more')].some((b) => b.textContent === 'View commands'), false, 'no View while the list is pending: it is already shown');
   });
 });
 

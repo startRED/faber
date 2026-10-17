@@ -1,7 +1,7 @@
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
-import type { Appearance, CheckResult, Look, QuotaReading, Settings as Saved, Vendor } from '../../ui/api.ts';
+import { api, type Appearance, type CheckResult, type Look, type QuotaReading, type Settings as Saved, type Vendor, type VendorUsage } from '../../ui/api.ts';
 import { AppearanceSection } from '../../ui/Appearance.tsx';
 import { previewer } from '../../ui/appearance.ts';
 import { Mini } from '../../ui/FirstRun.tsx';
@@ -11,6 +11,7 @@ import { en } from '../../ui/locales/en.ts';
 import { es } from '../../ui/locales/es.ts';
 import { fr } from '../../ui/locales/fr.ts';
 import { ptBR } from '../../ui/locales/pt-BR.ts';
+import { useLanguage } from '../../ui/i18n.ts';
 import { accountLine, seedQuotas, usageRows } from '../../ui/sidebar.ts';
 import { Settings } from '../../ui/Settings.tsx';
 import { check, deepEqual, equal, ok } from './check.ts';
@@ -18,9 +19,10 @@ import { check, deepEqual, equal, ok } from './check.ts';
 check('R107: Settings names Chat and Projects and discloses the shared default', () => {
   ok(en['set.permissions'].includes('Chat'));
   ok(en['set.permissions'].includes('Projects'));
-  ok(en['set.chatFolderHint'].includes('first message'));
-  ok(en['set.chatFolderHint'].includes('private folder'));
-  ok(en['set.chatFolderHint'].includes('delete the conversation'));
+  ok(en['set.chatFolderMore'].includes('first message'));
+  ok(en['set.chatFolderMore'].includes('private folder'));
+  ok(en['set.chatFolderMore'].includes('delete the conversation'));
+  ok(en['set.chatFolderHint'].length < 50, 'the row keeps one short line');
 });
 
 check('R121: the risk and the credential limits of Do not ask are spelled out in Settings, not over every thread', () => {
@@ -152,12 +154,30 @@ check('settings: usage lines are the short window first; an old reading keeps it
 
 check('settings: the new sections are written in every language, and the file hint, the locks and the privacy facts are not left in English', () => {
   const keys = [
-    'set.notifications',
+    'set.group.you',
+    'set.group.ai',
+    'set.group.system',
+    'set.group.type',
+    'set.advanced',
+    'set.contrast',
+    'set.file',
+    'set.hooksHint',
+    'set.hooksMore',
+    'set.soundLine',
+    'set.previewsMore',
+    'set.chatFolderMore',
+    'usage.details',
+    'usage.pill.ok',
+    'usage.pill.spare',
+    'usage.pill.fast',
+    'usage.pill.low',
+    'usage.pill.out',
+    'usage.pill.unknown',
+    'notes.24.better',
     'set.notifyMe',
     'set.notifyHint',
     'set.playSound',
     'set.soundHint',
-    'set.system',
     'set.keepAwake',
     'set.keepAwakeHint',
     'set.autostart',
@@ -165,12 +185,10 @@ check('settings: the new sections are written in every language, and the file hi
     'set.updates',
     'set.previews',
     'set.previewsHint',
-    'set.usage',
     'set.privacy',
     'set.accountsHint',
     'set.connected',
     'set.notConnected',
-    'set.usageHint',
     'usage.noReading',
     'usage.resets',
     'set.privacy.telemetry',
@@ -183,10 +201,8 @@ check('settings: the new sections are written in every language, and the file hi
     'set.contrast.faint',
     'set.contrast.accent',
     'set.lockedTitle',
-    'set.lockedHint',
     'set.saveFile',
     'set.openFile',
-    'set.fileHint',
     'set.reset',
     'set.use',
     'look.effect.ambientHint',
@@ -243,10 +259,9 @@ check('settings: notification switches show what the engine sends, save separate
     },
   }));
   try {
-    const switches = view.host.querySelectorAll('.toggles')[1]!.querySelectorAll<HTMLInputElement>('input[role="switch"]');
-    equal(switches.length, 2);
-    const notify = switches[0]!;
-    const sound = switches[1]!;
+    const notify = view.host.querySelector<HTMLInputElement>('#set-notify-switch')!;
+    const sound = view.host.querySelector<HTMLInputElement>('#set-sound-switch')!;
+    ok(notify && sound, 'two switches in Notifications and system');
     equal(notify.checked, true);
     equal(sound.checked, true);
     notify.click();
@@ -283,10 +298,9 @@ check('settings: keep-awake and autostart show what the engine sends, saving sep
     },
   }));
   try {
-    const switches = view.host.querySelectorAll<HTMLInputElement>('.row:last-child input[role="switch"]');
-    equal(switches.length, 2);
-    const awake = switches[0]!;
-    const autostart = switches[1]!;
+    const awake = view.host.querySelector<HTMLInputElement>('#set-awake-switch')!;
+    const autostart = view.host.querySelector<HTMLInputElement>('#set-autostart-switch')!;
+    ok(awake && autostart, 'the two system switches are there on Windows');
     equal(awake.checked, true);
     equal(autostart.checked, false);
     awake.click();
@@ -323,9 +337,9 @@ check('settings: receive previews defaults off, saves on its own and is restored
     },
   }));
   try {
-    const row = [...view.host.querySelectorAll<HTMLElement>('.row')].find((r) => r.querySelector('span')?.textContent === en['set.updates']);
-    ok(row, 'General has an Updates row');
-    const previews = row!.querySelectorAll<HTMLInputElement>('input[role="switch"]');
+    const group = [...view.host.querySelectorAll<HTMLElement>('.st-group')].find((g) => g.querySelector('.st-title')?.textContent === en['set.updates']);
+    ok(group, 'General has an Updates group');
+    const previews = group!.querySelectorAll<HTMLInputElement>('input[role="switch"]');
     equal(previews.length, 1, 'one switch, no second way');
     equal(previews[0]!.checked, false, 'previews default off');
     previews[0]!.click();
@@ -436,7 +450,7 @@ check('settings: unsupported system controls are absent outside Windows', () => 
   }
 });
 
-check('R140: the chooser lists five modes with one plain line each, and the long text stays out of the page until Learn more opens it', async () => {
+check('R140: the permission menu lists five modes with one plain line each, and the long text stays out of the page until the "?" opens it', async () => {
   const [saved, setSaved] = createSignal<Saved>({});
   const [vendors, setVendors] = createSignal<Vendor[]>(['claude']);
   const patches: Saved[] = [];
@@ -446,46 +460,84 @@ check('R140: the chooser lists five modes with one plain line each, and the long
     onSave: async (patch) => { patches.push(patch); setSaved({ ...saved(), ...patch }); return true; },
   }));
   try {
-    const rows = () => [...view.host.querySelectorAll<HTMLButtonElement>('#set-permissions + .choices button')];
-    deepEqual(rows().map((r) => r.querySelector('b')!.textContent), [en['set.permissions.ask'], en['set.permissions.acceptEdits'], en['set.permissions.plan'], en['set.permissions.auto'], en['set.permissions.dontAsk']]);
-    deepEqual(rows().map((r) => r.querySelector('small')!.textContent), [en['set.permissions.ask.line'], en['set.permissions.acceptEdits.line'], en['set.permissions.plan.line'], en['set.permissions.auto.line'], en['set.permissions.dontAsk.line']]);
-    for (const row of rows()) ok(row.querySelector('small')!.textContent!.length < 70, 'one short line');
-    deepEqual(rows().map((r) => r.getAttribute('aria-pressed')), ['false', 'false', 'false', 'false', 'true'], 'full access is on when nothing is saved');
+    const pick = () => view.host.querySelector<HTMLButtonElement>('#set-permissions-pick')!;
+    const options = () => [...view.host.querySelectorAll<HTMLElement>('#set-permissions-pick-list [role="option"]')];
+    equal(pick().textContent, en['set.permissions.dontAsk'], 'full access is on when nothing is saved');
+    equal(view.host.querySelector('[role="listbox"]'), null, 'the menu is closed until it is asked for');
+    equal(view.host.querySelector('#set-permissions-hint')!.textContent, en['set.permissions.dontAsk.line'], 'the row says the line of the mode that is on');
+    pick().click();
+    await tick();
+    deepEqual(options().map((o) => o.querySelector('b')!.textContent), [en['set.permissions.ask'], en['set.permissions.acceptEdits'], en['set.permissions.plan'], en['set.permissions.auto'], en['set.permissions.dontAsk']]);
+    deepEqual(options().map((o) => o.querySelector('small')!.textContent), [en['set.permissions.ask.line'], en['set.permissions.acceptEdits.line'], en['set.permissions.plan.line'], en['set.permissions.auto.line'], en['set.permissions.dontAsk.line']]);
+    for (const row of options()) ok(row.querySelector('small')!.textContent!.length < 70, 'one short line');
+    deepEqual(options().map((o) => o.getAttribute('aria-selected')), ['false', 'false', 'false', 'false', 'true']);
     const body = (key: 'set.permissionsDontAskBody' | 'set.permissionsAskBody' | 'set.permissions.auto.more') => view.host.textContent!.includes(en[key]);
     equal(body('set.permissionsDontAskBody'), false, 'the long risk text is not on the page');
-    const more = view.host.querySelector<HTMLButtonElement>('#set-permissions-more')!;
+    const more = view.host.querySelector<HTMLButtonElement>('#set-permissions-q')!;
     equal(more.getAttribute('aria-expanded'), 'false');
+    equal(more.textContent, '?');
+    equal(more.getAttribute('aria-label'), en['set.learnMore']);
     more.click();
     await tick();
     equal(body('set.permissionsDontAskBody'), true);
-    rows()[3]!.click();
+    equal(more.getAttribute('aria-expanded'), 'true');
+    options()[3]!.click();
     await tick();
     deepEqual(patches, [{ permissions: 'auto' }]);
-    equal(rows()[3]!.getAttribute('aria-pressed'), 'true');
+    equal(view.host.querySelector('[role="listbox"]'), null, 'picking closes the menu');
+    equal(pick().textContent, en['set.permissions.auto']);
+    equal(view.host.querySelector('#set-permissions-hint')!.textContent, en['set.permissions.auto.line']);
     equal(body('set.permissions.auto.more'), true, 'the open text follows the mode');
     more.click();
     await tick();
     equal(body('set.permissions.auto.more'), false, 'closed, it leaves the page');
+    // The keyboard opens the menu, and Esc closes it without reaching the page behind (which would leave Settings).
+    let escapes = 0;
+    const seen = (e: Event) => { if ((e as KeyboardEvent).key === 'Escape') escapes++; };
+    window.addEventListener('keydown', seen);
+    try {
+      pick().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      await tick();
+      equal(options().length, 5, 'ArrowDown opens the menu');
+      pick().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await tick();
+      equal(view.host.querySelector('[role="listbox"]'), null, 'Esc closes it');
+      equal(escapes, 0, 'and stays inside the menu');
+      pick().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      equal(escapes, 1, 'with the menu shut, Esc goes on to the page as before');
+    } finally { window.removeEventListener('keydown', seen); }
     // Web search: Cached and the Codex-only choices exist only where Codex is connected.
-    const labels = (id: string) => [...view.host.querySelectorAll<HTMLButtonElement>(`#${id} + .seg-ctl button`)].map((b) => b.textContent);
-    deepEqual(labels('set-web'), [en['set.webSearch.off'], en['set.webSearch.live']]);
-    equal(view.host.querySelector('#set-summary'), null);
-    equal(view.host.querySelector('#set-verbosity'), null);
-    equal(view.host.querySelector('#set-web + .seg-ctl button[aria-pressed="true"]')!.textContent, en['set.webSearch.live'], 'live is the default');
+    const labels = (id: string) => [...view.host.querySelectorAll<HTMLButtonElement>(`#${id} button`)].map((b) => b.textContent);
+    deepEqual(labels('set-web-pick'), [en['set.webSearch.off'], en['set.webSearch.live']]);
+    equal(view.host.querySelector('#set-codex'), null);
+    equal(view.host.querySelector('#set-web-pick button[aria-pressed="true"]')!.textContent, en['set.webSearch.live'], 'live is the default');
     setVendors(['claude', 'codex']);
     await tick();
-    deepEqual(labels('set-web'), [en['set.webSearch.off'], en['set.webSearch.cached'], en['set.webSearch.live']]);
-    deepEqual(labels('set-summary'), [en['set.default'], en['set.summary.auto'], en['set.summary.concise'], en['set.summary.detailed'], en['set.summary.none']]);
-    deepEqual(labels('set-verbosity'), [en['set.default'], en['set.verbosity.low'], en['set.verbosity.medium'], en['set.verbosity.high']]);
-    equal(view.host.querySelector('#set-summary + .seg-ctl button[aria-pressed="true"]')!.textContent, en['set.default']);
-    equal(body('set.permissions.auto.more'), false);
+    deepEqual(labels('set-web-pick'), [en['set.webSearch.off'], en['set.webSearch.cached'], en['set.webSearch.live']]);
+    // The Codex group starts closed and is not in the page until it is opened.
+    const fold = view.host.querySelector<HTMLButtonElement>('#set-codex')!;
+    equal(fold.getAttribute('aria-expanded'), 'false', 'the Codex group is closed by default');
+    equal(view.host.querySelector('[data-opt="set-summary"]'), null);
+    equal(view.host.querySelector('[data-opt="set-verbosity"]'), null);
+    fold.click();
+    await tick();
+    equal(fold.getAttribute('aria-expanded'), 'true');
+    const choices = (id: string) => [...view.host.querySelectorAll<HTMLOptionElement>(`[data-opt="${id}"] select option`)].map((o) => o.textContent);
+    deepEqual(choices('set-summary'), [en['set.default'], en['set.summary.auto'], en['set.summary.concise'], en['set.summary.detailed'], en['set.summary.none']]);
+    deepEqual(choices('set-verbosity'), [en['set.default'], en['set.verbosity.low'], en['set.verbosity.medium'], en['set.verbosity.high']]);
+    equal(view.host.querySelector<HTMLSelectElement>('[data-opt="set-summary"] select')!.value, 'default');
     equal(view.host.textContent!.includes(en['set.webSearch.more']), false, 'the web details are closed too');
-    view.host.querySelector<HTMLButtonElement>('#set-web-more')!.click();
+    view.host.querySelector<HTMLButtonElement>('#set-web-q')!.click();
     await tick();
     equal(view.host.textContent!.includes(en['set.webSearch.more']), true);
-    view.host.querySelector<HTMLButtonElement>('#set-web + .seg-ctl button')!.click();
-    view.host.querySelectorAll<HTMLButtonElement>('#set-summary + .seg-ctl button')[3]!.click();
-    view.host.querySelectorAll<HTMLButtonElement>('#set-verbosity + .seg-ctl button')[1]!.click();
+    view.host.querySelector<HTMLButtonElement>('#set-web-pick button')!.click();
+    const choose = (id: string, value: string) => {
+      const list = view.host.querySelector<HTMLSelectElement>(`[data-opt="${id}"] select`)!;
+      list.value = value;
+      list.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    choose('set-summary', 'detailed');
+    choose('set-verbosity', 'low');
     await tick();
     deepEqual(patches.slice(1), [{ webSearch: 'off' }, { reasoningSummary: 'detailed' }, { verbosity: 'low' }]);
   } finally { view.stop(); }
@@ -500,3 +552,223 @@ check('R140: every mode has a name, a line and, for the three new ones, details,
   }
   equal(en['set.permissions.dontAsk'], 'Full access');
 });
+
+// ---- the calm grammar (calm screens, delivery 2) ----
+
+const SECTION_IDS = ['set.general', 'set.projects', 'set.appearance', 'set.subscriptions', 'set.privacy'] as const;
+const navButton = (host: HTMLElement, key: (typeof SECTION_IDS)[number]) => [...host.querySelectorAll<HTMLButtonElement>('.s-nav .item')].find((b) => b.textContent!.includes(en[key]))!;
+
+check('settings: five sections remain, accounts and their limits are one, and Faber\'s version closes the list once', () => {
+  const view = mount(() => createComponent(Settings, {
+    look: look(), saved: {}, vendors: [], quotas: {}, now: 0, version: '9.9.9',
+    onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+  }));
+  try {
+    const items = [...view.host.querySelectorAll<HTMLButtonElement>('.s-nav .item')].slice(1).map((b) => b.textContent!.trim());
+    deepEqual(items, [en['set.general'], en['set.projects'], en['set.appearance'], 'Accounts and limits', en['set.privacy']]);
+    equal(en['set.subscriptions'], 'Accounts and limits');
+    ok(!('set.usage' in en), 'the usage limits section is gone');
+    equal(view.host.querySelectorAll('.s-version').length, 1);
+    equal(view.host.querySelector('.s-nav')!.lastElementChild!.textContent, 'Faber 9.9.9', 'at the bottom of the list');
+  } finally { view.stop(); }
+});
+
+check('settings: no section has a "Learn more" link, and every long text sits behind the "?" of its own row', async () => {
+  const view = mount(() => createComponent(Settings, {
+    look: look(), saved: {}, vendors: ['claude', 'codex'], quotas: {}, now: 0,
+    usage: [{ vendor: 'claude', state: 'ok', ownSpendUsd: 0, windows: [] }] as unknown as VendorUsage[],
+    projects: [{ id: 'p1', name: 'Demo', path: 'C:/fixture/demo' }],
+    onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true, onChatFolder: async () => {},
+  }));
+  try {
+    for (const key of SECTION_IDS) {
+      navButton(view.host, key).click();
+      await tick();
+      const links = [...view.host.querySelectorAll<HTMLElement>('button, a')].filter((e) => e.textContent!.trim() === en['set.learnMore']);
+      equal(links.length, 0, `${key}: a "Learn more" link is still on the page`);
+    }
+    navButton(view.host, 'set.general').click();
+    await tick();
+    const marks = [...view.host.querySelectorAll<HTMLButtonElement>('.st-q')];
+    ok(marks.length >= 5, `the long texts have their "?" (${marks.length})`);
+    for (const mark of marks) {
+      equal(mark.getAttribute('aria-label'), en['set.learnMore'], 'one accessible name, one key');
+      equal(mark.getAttribute('aria-expanded'), 'false');
+      ok(mark.getAttribute('aria-controls'), 'it says what it opens');
+    }
+    // A row's hint is one short line; the paragraphs are not on the page until the "?" opens one.
+    for (const hint of view.host.querySelectorAll('.st-hint')) ok(hint.textContent!.length <= 70, `a hint is one short line: ${hint.textContent}`);
+    equal(view.host.querySelectorAll('.st-more').length, 0, 'nothing is unfolded');
+    marks[0]!.click();
+    await tick();
+    equal(view.host.querySelectorAll('.st-more').length, 1);
+    equal(!('set.more' in en), true, 'the second "Learn more" key is gone');
+  } finally { view.stop(); }
+});
+
+check('settings: the chat working folder is one row, and only where its control exists', async () => {
+  const withFolder = mount(() => createComponent(Settings, {
+    look: look(), saved: {}, vendors: [], quotas: {}, now: 0, chatFolder: 'C:/work',
+    onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true, onChatFolder: async () => {},
+  }));
+  const without = mount(() => createComponent(Settings, {
+    look: look(), saved: {}, vendors: [], quotas: {}, now: 0,
+    onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+  }));
+  try {
+    equal(withFolder.host.querySelectorAll('[data-opt="set-folder"]').length, 1);
+    ok(withFolder.host.querySelector('[data-opt="set-folder"] .btn'), 'the row carries its control');
+    equal(without.host.querySelector('[data-opt="set-folder"]'), null, 'no label and no explanation without a control');
+    ok(!without.host.textContent!.includes(en['set.chatFolder']));
+  } finally { withFolder.stop(); without.stop(); }
+});
+
+check('settings: switching sections is instant (no exit copies, nothing animates) and the new section opens at its top', async () => {
+  const view = mount(() => createComponent(Settings, {
+    look: look(), saved: {}, vendors: ['claude', 'codex'], quotas: {}, now: 0,
+    onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+  }));
+  const was = document.documentElement.dataset.motion;
+  document.documentElement.dataset.motion = 'full';
+  try {
+    const settings = view.host.querySelector<HTMLElement>('.settings')!;
+    settings.style.cssText = 'position:fixed;left:0;top:0;width:1100px;height:240px';
+    const main = view.host.querySelector<HTMLElement>('.s-main')!;
+    ok(!main.hasAttribute('data-motion-list'), '.s-main is not an animated list: it would keep exit copies of the old section');
+    ok(main.scrollHeight > main.clientHeight, 'General is taller than the window here');
+    main.scrollTop = 200;
+    ok(main.scrollTop > 0, 'the section is scrolled down');
+    navButton(view.host, 'set.privacy').click();
+    await tick();
+    equal(main.scrollTop, 0, 'a section opens at its top');
+    equal(document.querySelector('.motion-exit'), null, 'no exit copy of the old section');
+    equal(view.host.querySelectorAll('.facts').length, 1, 'only the new section is in the page');
+    equal(view.host.querySelectorAll('.st-group').length, 0, 'and none of General');
+    for (const frame of [0, 1, 2]) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      equal(main.getAnimations({ subtree: true }).length, 0, `nothing on the stage animates (frame ${frame})`);
+    }
+  } finally {
+    if (was === undefined) delete document.documentElement.dataset.motion;
+    else document.documentElement.dataset.motion = was;
+    view.stop();
+  }
+});
+
+/** Runs a check with both CLIs saying someone is signed in, as the accounts section asks them when it opens. */
+async function signedIn<T>(run: () => Promise<T> | T): Promise<T> {
+  const was = api.setupCheck;
+  api.setupCheck = async (vendor) => ({ vendor, installed: true, account: 'signedIn', canInstall: false });
+  try { return await run(); } finally { api.setupCheck = was; }
+}
+
+check('settings: the accounts card writes Faber\'s spend in the person\'s format, never four decimals', () => {
+  const usage = [{ vendor: 'claude', plan: 'max', state: 'ok', learning: false, relearning: false, foreignUse: false, overageOn: false, billedPerUse: false,
+    billingUnknown: false, askForPlan: false, paidPossible: false, ownSpendUsd: 3.2, unmetered: 0, counting: false, windows: [] }] as unknown as VendorUsage[];
+  const text = (language: 'en' | 'pt-BR' | 'de') => {
+    useLanguage(language);
+    const view = mount(() => createComponent(Settings, {
+      look: look(), saved: {}, vendors: ['claude'], quotas: {}, now: 0, usage, start: 'accounts',
+      onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+    }));
+    try { return view.host.querySelector('.acct-foot')!.textContent!; } finally { view.stop(); }
+  };
+  try {
+    ok(text('en').includes('$3.20'), text('en'));
+    ok(text('pt-BR').includes('US$ 3,20'), text('pt-BR'));
+    ok(text('de').includes('3,20 US$'), text('de'));
+    for (const language of ['en', 'pt-BR', 'de'] as const) ok(!/\d[.,]\d{4}/.test(text(language)), `${language}: "${text(language)}" shows four decimals`);
+  } finally { useLanguage('en'); }
+});
+
+check('settings: one card per AI with a capitalised plan, one status word, the reset time in full and the notes behind one Details fold', () => signedIn(async () => {
+  useLanguage('en');
+  const until = Math.floor(Date.now() / 1000) + 7 * 3600;
+  const usage = [{ vendor: 'claude', plan: 'max', state: 'low', learning: true, relearning: false, outsideShare: 0.2, foreignUse: true, overageOn: true, billedPerUse: false,
+    billingUnknown: false, askForPlan: false, paidPossible: false, ownSpendUsd: 1, unmetered: 2, counting: true,
+    windows: [{ name: 'seven_day', used: 0.4, elapsed: 0.5, expected: 0.5, resetsAt: until, readAt: Date.now(), uncounted: null }] }] as unknown as VendorUsage[];
+  const view = mount(() => createComponent(Settings, {
+    look: look(), saved: {}, vendors: ['claude'], start: 'accounts', now: Date.now(), usage,
+    quotas: { 'claude:seven_day': { vendor: 'claude', window: 'seven_day', used: 0.4, resetsAt: until } },
+    onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+  }));
+  try {
+    await tick();
+    await tick();
+    equal(view.host.querySelectorAll('.acct').length, 2, 'one card for each AI');
+    const card = view.host.querySelector<HTMLElement>('.acct[data-vendor="claude"]')!;
+    ok(card.textContent!.includes('Plan: Max'), 'the plan is capitalised');
+    const pill = card.querySelector('.acct-pill')!;
+    equal(pill.textContent, en['usage.pill.low']);
+    equal(card.dataset.state, 'connected');
+    ok(pill.classList.contains('warn'), 'amber for a window that is really near its limit (C002)');
+    const reset = card.querySelector<HTMLElement>('.urow .reset')!;
+    ok(reset.textContent!.startsWith('resets in '), reset.textContent!);
+    ok(reset.scrollWidth <= reset.clientWidth + 1, 'the reset time is not cut');
+    equal(card.querySelectorAll('.hint').length, 0, 'every note is behind the fold');
+    const fold = card.querySelector<HTMLButtonElement>('.st-fold-head')!;
+    equal(fold.getAttribute('aria-expanded'), 'false');
+    fold.click();
+    await tick();
+    const notes = [...card.querySelectorAll('.acct-details .hint')].map((n) => n.textContent!);
+    for (const key of ['quota.countingNote', 'usage.shared', 'usage.learning', 'usage.foreign', 'usage.overageOn'] as const) ok(notes.includes(en[key]), key);
+    ok(notes.some((n) => n.includes('2 requests')), 'the incomplete meter');
+    equal(view.host.querySelectorAll('[data-restore="manage"]').length, 1, 'Manage accounts appears once in the section');
+    equal(en['set.openSetup'], 'Manage accounts', 'one label opens the account cards from Settings');
+  } finally { view.stop(); }
+}));
+
+check('settings: a window still counting, or with an uncounted share, reads at least beside its number, not only inside Details (C010)', () => signedIn(async () => {
+  useLanguage('en');
+  const until = Math.floor(Date.now() / 1000) + 7 * 3600;
+  const usage = (counting: boolean, uncounted: number | null) => [{ vendor: 'claude', plan: 'max', state: 'ok', learning: false, relearning: false, foreignUse: false, overageOn: false,
+    billedPerUse: false, billingUnknown: false, askForPlan: false, paidPossible: false, ownSpendUsd: 0, unmetered: 0, counting,
+    windows: [{ name: 'seven_day', used: 0.44, elapsed: 0.5, expected: 0.5, resetsAt: until, readAt: Date.now(), uncounted }] }] as unknown as VendorUsage[];
+  const share = async (u: VendorUsage[]) => {
+    const view = mount(() => createComponent(Settings, {
+      look: look(), saved: {}, vendors: ['claude'], start: 'accounts', now: Date.now(), usage: u,
+      quotas: { 'claude:seven_day': { vendor: 'claude', window: 'seven_day', used: 0.44, resetsAt: until } },
+      onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+    }));
+    try {
+      await tick();
+      await tick();
+      const cell = view.host.querySelector<HTMLElement>('.acct[data-vendor="claude"] .urow .share')!;
+      ok(cell.scrollWidth <= cell.clientWidth + 1, `the share fits its cell (${cell.scrollWidth} > ${cell.clientWidth})`);
+      return cell.textContent!.trim();
+    } finally { view.stop(); }
+  };
+  const counting = await share(usage(true, null));
+  ok(counting.startsWith('≥ 44%'), `"${counting}" does not read at least 44%`);
+  ok(counting.includes(en['quota.counting']), 'screen readers still hear that it is counting');
+  const extra = await share(usage(false, 0.12));
+  ok(extra.startsWith('≥ 44%') && !extra.includes(en['quota.counting']), `an uncounted share alone reads at least: "${extra}"`);
+  const calm = await share(usage(false, null));
+  equal(calm, '44%', 'a settled reading shows the number alone');
+}));
+
+check('settings: a billed-per-use or unconfirmed account says so calmly and is never amber; a really low one stays amber (C002)', () => signedIn(async () => {
+  useLanguage('en');
+  const card = async (flags: Record<string, boolean>, state: string) => {
+    const usage = [{ vendor: 'claude', plan: 'max', state, learning: false, relearning: false, foreignUse: false, overageOn: false, billedPerUse: false,
+      billingUnknown: false, askForPlan: false, paidPossible: false, ownSpendUsd: 0, unmetered: 0, counting: false, windows: [], ...flags }] as unknown as VendorUsage[];
+    const view = mount(() => createComponent(Settings, {
+      look: look(), saved: {}, vendors: ['claude'], start: 'accounts', now: Date.now(), usage, quotas: {},
+      onClose: () => {}, onOpenSetup: () => {}, onSave: async () => true,
+    }));
+    try {
+      await tick();
+      await tick();
+      const pill = view.host.querySelector<HTMLElement>('.acct[data-vendor="claude"] .acct-pill')!;
+      return { text: pill.textContent!, warn: pill.classList.contains('warn') };
+    } finally { view.stop(); }
+  };
+  deepEqual(await card({ billedPerUse: true }, 'out'), { text: en['usage.pill.billed'], warn: false });
+  deepEqual(await card({ billingUnknown: true }, 'unknown'), { text: en['usage.pill.unconfirmed'], warn: false });
+  deepEqual(await card({ billingUnknown: true }, 'out'), { text: en['usage.pill.unconfirmed'], warn: false });
+  deepEqual(await card({}, 'out'), { text: en['usage.pill.out'], warn: true }, 'a really exhausted quota stays amber');
+  const others = { 'pt-BR': ptBR, es, fr, de } as const;
+  for (const key of ['usage.pill.billed', 'usage.pill.unconfirmed'] as const) {
+    for (const [code, messages] of Object.entries(others)) ok(messages[key] !== undefined && messages[key] !== en[key], `${code} has its own ${key}`);
+  }
+}));

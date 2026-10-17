@@ -55,7 +55,7 @@ replaces the shell; otherwise the shell shows the sidebar, the topbar, the work 
 | First run: accounts | `setup` unset and no conversation yet | Pick Claude, Codex or "None for now"; install, sign in (the CLI's own login, in a console), check again; Skip or Continue | `ui/FirstRun.tsx`, `ui/Setup.tsx`, `ui/setup.ts` |
 | First run: look | After accounts, or once on an older install with no look | Three looks with a live preview, text size, spacing, motion, "Do you already use AI?", an optional name; Back, Continue | `ui/FirstRun.tsx` |
 | Tutorial | First fresh chat with a signed-in AI while `tutorialDone` is false | Three cards for a beginner, two for an experienced person; Next, Skip | `ui/Tutorial.tsx`, `ui/tour.ts` |
-| Account cards, later | "Connect a subscription" (no AI), or "Manage accounts" in Settings > Connected accounts or Usage limits | The same cards; Close returns where it came from | `ui/Setup.tsx` |
+| Account cards, later | "Connect a subscription" (no AI), or "Manage accounts" in Settings > Accounts and limits | The same cards; Close returns where it came from | `ui/Setup.tsx` |
 | Sidebar | The shell | New conversation (Ctrl+N); Chat or Projects; search over titles and project names; it lists only the open area (Chat: chats grouped by day with × delete, no Projects block; Projects: the project rows with their conversations and the add-folder control); footer of one row (the name when there is one, Settings, whose tooltip holds the version) and one thin line per connected AI (mark, bar, share; the window, reset, age and "still counting" are its tooltip, amber only near the limit); rows keep their DOM when the list refreshes (`keepRows`) | `ui/Sidebar.tsx`, `ui/sidebar.ts` |
 | Topbar | The shell | Crumb; run button "{n} running · {m} need you" (Ctrl+.) | `ui/App.tsx` |
 | Chat home | Chat area, an AI installed, an empty conversation | Greeting, composer with Ghost hints, three suggestions that fill the composer, "Pick up where you left off" (four, waiting ones first, both areas), Ambient | `ui/Welcome.tsx`, `ui/Composer.tsx`, `ui/Ghost.tsx`, `ui/Ambient.tsx` |
@@ -72,7 +72,7 @@ replaces the shell; otherwise the shell shows the sidebar, the topbar, the work 
 | Projects: mission board (no longer reachable: no mission starts on screen) | A mission selected | One column: state, New mission (done, paused or blocked; asks first unless done), goal, step line, why it waits, Stop or Resume; needs-you and decision cards; report when done; tasks grouped by Ready, Running, Review, Done, Blocked, empty groups hidden, one line before the plan; folded "Run mode, cost and build" with run mode, own cost against the cap, account pace and local build (development channel only) | `ui/Projects.tsx`, `ui/LocalBuild.tsx` |
 | Past project conversation | Opened from the sidebar or a pick-up list | Read only: no composer | `ui/Thread.tsx` |
 | Running column | Run button, Ctrl+., or by itself 1.5 s after typing stops | Running conversations by project with their state in words (one "Nothing running" when empty, no footer sentence); permission and held-back cards; open a conversation | `ui/Running.tsx`, `ui/running.ts` |
-| Settings | Ctrl+,, the sidebar button, a quota line (opens Usage limits), "Details in Settings" | Six sections (below); Back or Esc | `ui/Settings.tsx`, `ui/ProjectSettings.tsx`, `ui/Appearance.tsx`, `ui/draft.ts` |
+| Settings | Ctrl+,, the sidebar button, a quota line (opens Accounts and limits), "Details in Settings" | Five sections (below); Back or Esc | `ui/Settings.tsx`, `ui/Accounts.tsx`, `ui/controls.tsx`, `ui/ProjectSettings.tsx`, `ui/Appearance.tsx`, `ui/draft.ts` |
 | Right-click menus | Right-click, the Menu key or Shift+F10 | Per target, below | `ui/ContextMenu.tsx`, `ui/contextmenu.ts` |
 | Save-error toast | A save fails | Read and dismiss | `ui/App.tsx` |
 | Update opening screen | A window that opens while Faber looks for, downloads or installs an update (R157) | The mark, "Looking for an update…", then "Downloading update… 42%" (megabytes when the size is unknown) with a thin bar, then "Installing…"; nothing to press, the window's buttons stay in reach. The sidebar shows the same words as a quiet line when the window opens in the middle of a download or an install | `ui/UpdateStage.tsx` |
@@ -116,22 +116,29 @@ A project's checks are confirmed on a sheet when its first mission starts (in Au
 
 ## Settings screen
 
-Six sections, in this order. Nothing else is a Settings section.
+Five sections, in this order, all at one width (720 px). Nothing else is a Settings section. Every section speaks one grammar: a
+group is a card, an option is one row (its name and one short line at the left, its control at the right), and a longer
+text unfolds under the row from a small "?" beside the name (keyboard reachable, closed by default, not in the page while
+closed). There is no "Learn more" link. The version ("Faber 1.2.3") closes the list of sections, once.
 
-- **General**: Language (follow the system, or one of five); Your name; Your CLI hooks (only acts in the guarded modes, not "Full access");
-  Permissions for Chat and Projects (five modes, "Full access" by default), Web search; reasoning summary and answer length (Codex only); Chat working folder (with Recents;
-  acts on the open chat while it has no message; its controls only appear when Settings was opened from Chat); Notifications
-  (Notify me, Play a sound); Updates (Receive previews, off by default, R156); System, Windows only (keep the computer awake
-  while Faber works, start with Windows).
-- **Projects**: per project, closed until opened: checks (confirm, edit, view), "If a tool is missing" (continue without),
-  git mode, self-update trust (switch); folder, base and author under More. Applies to that project only.
-- **Appearance**: a draft with a live preview, applied only by "Use this look": six looks, accent (five swatches, any
-  colour, hex), background, text font, heading font, text size, spacing, corners, motion, the fixed-meaning colours
-  (read only), save or open a theme file; in the preview, contrast readings and three effect switches; Back to default.
-- **Connected accounts**: each AI's state; "Manage accounts" opens the account cards.
-- **Usage limits**: per connected AI, the plan (a question when the CLI cannot tell), the state in words, Faber's own
-  spend in API-equivalent dollars, notes, and each window's use, pace marker, projection, reset time, last reading and
-  share not counted yet.
+- **General**, in groups. *You*: Language (follow the system, or one of five), Your name. *How the AI works*: Permissions
+  for Chat and Projects (a menu of five modes, each with its one line; "Full access" by default), Web search, Your CLI
+  hooks (only acts in the guarded modes, not "Full access"), Chat working folder (with Recents; acts on the open chat
+  while it has no message; the row exists only when Settings was opened from Chat, where its control does), and a folded
+  "Codex" group (reasoning summary, answer length; Codex only, closed by default). *Notifications and system*: Notify me,
+  Play a sound, and on Windows keep the computer awake while Faber works and start with Windows. *Updates*: Receive
+  previews (off by default, R156).
+- **Projects**: per project, closed until opened, in the same cards and rows: checks (confirm, edit, view), "If a tool is
+  missing" (continue without), git mode, self-update trust (switch); folder, base and author under More. Applies to that
+  project only.
+- **Appearance**: a draft with a live preview, applied only by "Use this look". *Look*: six looks and the accent (five
+  swatches, any colour, hex). *Text and layout*: background, text font, heading font, text size, spacing, corners,
+  motion. A closed "Advanced" fold holds the contrast readings, the three effect switches, the fixed-meaning colours (read
+  only) and the theme file (save or open). Back to default.
+- **Accounts and limits**: one card per AI: its mark, name, plan (capitalised; a question when the CLI cannot tell), one
+  status word (amber only near a real limit), one row per quota window (name, share, bar with the expected-pace mark,
+  reset time) and Faber's own spend today at API prices. Every note about how the figures are read sits behind one
+  "Details" fold per card. "Manage accounts" opens the account cards, once, at the top.
 - **Privacy**: three statements (no telemetry, history stays on this PC, CLI logins are never read). No controls.
 
 Choices that live elsewhere on purpose: model and effort (the composer, per conversation); paying with credits, moving to
@@ -155,19 +162,19 @@ choice a person makes anywhere else (a work screen, a banner) is an incoherence.
 | Key | Values (default) | Lives on | Read by |
 | :--- | :--- | :--- | :--- |
 | `appearance` | A look: `base`, `accent`, `ground`, `textFont`, `headingFont`, `textSize`, `density`, `corners`, `motion`, `effects`, `colors` (Dark Room) | Settings > Appearance; the first run (`base`, `textSize`, `density`, `motion`); `colors` only arrives in a theme file opened there | `src-tauri/src/look.rs`, then the screen |
-| `language` | `""` follows the system, `en`, `pt-BR`, `es`, `fr`, `de` (none: the system) | Settings > General | `ui/i18n.ts`; the tray through `set_shell_texts` |
-| `userName` | Up to 40 characters (none) | Settings > General; the first run | Greeting, sidebar footer, and both CLIs (copied into each new conversation) |
-| `permissions` | `ask`, `acceptEdits`, `plan`, `auto`, `dontAsk` (`dontAsk`) | Settings > General; the composer chip in Chat | The engine at every turn; the status line in a conversation |
-| `webSearch` | `off`, `cached` (Codex only), `live` (`live`) | Settings > General | The engine at every turn, for Chat and the person's own project sessions |
-| `reasoningSummary` | `default`, `auto`, `concise`, `detailed`, `none` (`default`: the model's own) | Settings > General (Codex only) | The engine at every Codex turn |
-| `verbosity` | `default`, `low`, `medium`, `high` (`default`: the model's own) | Settings > General (Codex only) | The engine at every Codex turn |
+| `language` | `""` follows the system, `en`, `pt-BR`, `es`, `fr`, `de` (none: the system) | Settings > General (You) | `ui/i18n.ts`; the tray through `set_shell_texts` |
+| `userName` | Up to 40 characters (none) | Settings > General (You); the first run | Greeting, sidebar footer, and both CLIs (copied into each new conversation) |
+| `permissions` | `ask`, `acceptEdits`, `plan`, `auto`, `dontAsk` (`dontAsk`) | Settings > General (How the AI works); the composer chip in Chat | The engine at every turn; the status line in a conversation |
+| `webSearch` | `off`, `cached` (Codex only), `live` (`live`) | Settings > General (How the AI works) | The engine at every turn, for Chat and the person's own project sessions |
+| `reasoningSummary` | `default`, `auto`, `concise`, `detailed`, `none` (`default`: the model's own) | Settings > General > Codex (Codex only) | The engine at every Codex turn |
+| `verbosity` | `default`, `low`, `medium`, `high` (`default`: the model's own) | Settings > General > Codex (Codex only) | The engine at every Codex turn |
 | `grantsEpoch` | A random token (none). Internal state: a person never sets it | None; only the engine writes it, when a stricter mode replaces the old one | The engine, to drop an "Always allow" made under a looser mode |
-| `userHooks` | true, false (false) | Settings > General | The engine; acts only in the guarded modes (not "Full access") |
-| `notifications` | true, false (true) | Settings > General | The tray |
-| `notificationSound` | true, false (true) | Settings > General | The tray |
+| `userHooks` | true, false (false) | Settings > General (How the AI works) | The engine; acts only in the guarded modes (not "Full access") |
+| `notifications` | true, false (true) | Settings > General (Notifications and system) | The tray |
+| `notificationSound` | true, false (true) | Settings > General (Notifications and system) | The tray |
 | `previews` | true, false (false) | Settings > General (Updates, "Receive previews") | `src-tauri/src/update.rs`, at every update check: on reads the preview manifest, off the stable one; a version that is not newer is never installed |
-| `keepAwake` | true, false (true) | Settings > General (System) | `src-tauri/src/awake.rs` |
-| `autostart` | true, false (false) | Settings > General (System) | `src-tauri/src/autostart.rs`, which also writes the Windows Run key; the switch shows the key as it is (`autostart::shown`), so a key removed outside Faber reads as off |
+| `keepAwake` | true, false (true) | Settings > General (Notifications and system) | `src-tauri/src/awake.rs` |
+| `autostart` | true, false (false) | Settings > General (Notifications and system) | `src-tauri/src/autostart.rs`, which also writes the Windows Run key; the switch shows the key as it is (`autostart::shown`), so a key removed outside Faber reads as off |
 | `setup` | `done`, `skipped` (none: the first run is due) | The first run (the account cards' Close also writes it) | `ui/setup.ts` only |
 | `experience` | `beginner`, `experienced` (none counts as beginner) | The first run only | The tutorial |
 | `tutorialDone` | true, false (none before the first run) | The first run and the tutorial's end | The tutorial |
@@ -248,8 +255,8 @@ checks in `tests/ui/index.ts`, real-app scenarios in `testkit/src/screen/mod.rs`
 | Homes and idle motion | Done | `tests/ui/idle.check.ts`, `hole.check.ts`, `motion.check.ts`; `testkit/src/screen/homes.rs` |
 | Missions | v0 (see Words) | `engine/tests/project_*.rs`; `tests/fixtures/projects/`; `tests/ui/projects.check.ts`; `testkit/src/screen/coordinator.rs`, `projects.rs`, `projects_ui.rs` |
 | Local build (development channel) | Done, developer only | `engine/tests/local_update.rs`, `src-tauri/tests/local_update.rs`, `testkit/src/screen/local_update.rs` |
-| UX sentinel and memory budget | Done; composition (art under text, a name in three places, uneven columns) since R169 | `testkit/src/sentinel.rs`, `testkit/src/screen/sentinel.rs`, `tests/ux/baseline.json`, `testkit/src/screen/app.rs` (400 MB) |
-| Visual critique (R169) | Done, a step of the process: `node scripts/shots.mjs before` and `after`, scored by a fresh session | `scripts/shots.test.mjs`; the sentinel's composition scenario in `testkit/src/screen/sentinel.rs` |
+| UX sentinel and memory budget | Done; composition (art under text, a name in three places, uneven columns) since R170 | `testkit/src/sentinel.rs`, `testkit/src/screen/sentinel.rs`, `tests/ux/baseline.json`, `testkit/src/screen/app.rs` (400 MB) |
+| Visual critique (R170) | Done, a step of the process: `node scripts/shots.mjs before` and `after`, scored by a fresh session | `scripts/shots.test.mjs`; the sentinel's composition scenario in `testkit/src/screen/sentinel.rs` |
 | This map | Done | `engine/tests/product_map.rs`; the trap tasks and the weekly coherence pass in `testkit/coherence/` (R151) |
 
 Not built yet, so nothing may assume it: the catalog and live manifest, the toolbox, Livre, snapshots and undo, visual
@@ -283,7 +290,7 @@ lines and the removal of fixed ones.
 11. Two ways to remove a row: the sidebar's × and every menu ask first, while Recents' × forgets at once. Whether
     forgetting a recent entry (it comes back when the folder opens again) needs a confirm is the owner's call (Owner).
 12. Money and quota in four vocabularies ("Own cost", "Cost so far", "Faber today … API-equivalent", "… at API prices";
-    "Account pace", "Usage limits"); which words stay is the owner's call (Owner). Amounts are written the language's way
+    "Account pace", "Accounts and limits"); which words stay is the owner's call (Owner). Amounts are written the language's way
     (`money` and `amount` in `ui/i18n.ts`).
 13. "Update itself" means three things: the silent updater, the project's self-update trust (Settings > Projects) and the
     Local build card (development channel only); which words tell them apart is the owner's call (Owner).
@@ -293,18 +300,11 @@ lines and the removal of fixed ones.
 15. First-run answers that cannot change later: "Do you already use AI?" has no control and the tutorial cannot be
     replayed, yet the first run's footer says everything can be changed in Settings > Appearance. Adding the controls or
     changing the footer is the owner's call (Owner).
-16. The account cards have three entry labels ("Connect a subscription", "Manage accounts" twice) and two names for one
-    account ("Codex" on the card, "ChatGPT" in the no-AI text); Skip and Continue save different values nothing reads
-    differently; Close writes `done` even after a Skip. Which label stays, and whether Skip should mean something, is
-    the owner's call (Owner).
-17. The chat working folder sits in global Settings but changes only the open, still empty chat; opened from Projects,
-    the row keeps its label and explanation with no control under them. Where the folder choice lives is the owner's
-    call (Owner).
+16. Skip and Continue on the account cards save different values nothing reads differently; Close writes `done`
+    even after a Skip. Whether Skip should mean something is the owner's call (Owner).
 18. The hooks switch is always enabled but acts only in the guarded modes (all but "Full access"); Settings' "Permissions for Chat and
     Projects" reads as if it governed missions, which run isolated. Whether the switch hides or locks, and the words,
     are the owner's call (Owner).
-19. Settings has no "Learn more" pattern: General shows paragraphs of three to five sentences (product-rules: one short
-    line per option). The short lines are new words in five languages, so the owner reviews them (Owner).
 
 ## Worked example: adding a setting
 

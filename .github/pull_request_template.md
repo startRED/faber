@@ -15,7 +15,7 @@
 
 ## Visual critique
 
-<!-- A change a person sees (R169, `.claude/skills/visual-critique/SKILL.md`): the lowest screen of each, scored by a
+<!-- A change a person sees (R170, `.claude/skills/visual-critique/SKILL.md`): the lowest screen of each, scored by a
      fresh session from `node scripts/shots.mjs before` and `after`. The score never drops; a touched screen reaches 32.
      Anything else: "Not a change a person sees." -->
 

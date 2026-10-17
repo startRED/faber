@@ -117,6 +117,11 @@ export function Setup(props: SetupProps) {
                   <VendorMark vendor={option as Vendor} />
                 </Show>
                 {label}
+                <Show when={selected().includes(option)}>
+                  <span class="tick" aria-hidden="true">
+                    <Icon name="check" small />
+                  </span>
+                </Show>
               </button>
             )}
           </For>
@@ -183,7 +188,7 @@ export function Setup(props: SetupProps) {
                       <Show when={card().actions.includes('officialPage')}>
                         <button
                           type="button"
-                          class="btn secondary"
+                          class="btn"
                           onClick={() => void api.openLink(OFFICIAL_PAGES[vendor])}
                         >
                           {t('setup.officialPage')}
@@ -201,7 +206,7 @@ export function Setup(props: SetupProps) {
                       <Show when={card().actions.includes('checkAgain')}>
                         <button
                           type="button"
-                          class="btn secondary"
+                          class="btn"
                           onClick={() => void checkVendor(vendor)}
                         >
                           {t('setup.checkAgain')}
