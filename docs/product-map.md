@@ -295,8 +295,8 @@ lines and the removal of fixed ones.
     Projects" reads as if it governed missions, which run isolated. Whether the switch hides or locks, and the words,
     are the owner's call (Owner).
 20. The composer of a project's new conversation idles with the Chat hints ("Paste a text and ask what it really
-    says"), not the project hints (`projects.home.hint.*`): `ui/App.tsx` passes the Chat list whenever the conversation
-    is new.
+    says"), which are not about a project: `ui/App.tsx` passes the Chat list whenever the conversation is new, and the
+    project hints went with the mission screens (R171). Which words a project composer shows is the owner's call (Owner).
 
 ## Worked example: adding a setting
 

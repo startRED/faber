@@ -406,6 +406,7 @@ export const de: Messages = {
   'ambient.goal': 'Dein Ziel',
   'hint.chat.2': 'Füge einen Text ein und frag, was er sagt',
   'hint.chat.3': 'Beschreibe ein Problem und bitte um drei Auswege',
+  'projects.home.title': 'Was packen wir an?',
   'projects.chat.lead': 'Bitte um alles in diesem Ordner. Der Assistent arbeitet direkt hier und fragt dich, wenn er etwas braucht.',
   'projects.gitMode.seguroTech': "Sicherer Modus: getrennter Worktree, nur lokale Commits und Vorspulen nur auf dem Missions-Branch.",
   'projects.selfUpdate.trustTech': "Ein neuer Build rückt erst nach einem Canary-Lauf und den Quarantäneprüfungen in den nächsten lokalen Slot vor.",

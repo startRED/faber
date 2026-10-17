@@ -403,6 +403,7 @@ export const ptBR: Messages = {
   'ambient.goal': 'Seu objetivo',
   'hint.chat.2': 'Cole um texto e pergunte o que diz',
   'hint.chat.3': 'Descreva um problema e peça três saídas',
+  'projects.home.title': 'O que vamos resolver?',
   'projects.chat.lead': 'Peça o que quiser nesta pasta. O assistente trabalha aqui mesmo e pergunta quando precisar.',
   'projects.gitMode.seguroTech': "Modo seguro: worktree separado, commits só locais e avanço rápido só na branch da missão.",
   'projects.selfUpdate.trustTech': "Uma versão nova só passa para o próximo espaço local depois de um teste canário e das checagens de quarentena.",

@@ -406,6 +406,7 @@ export const es: Messages = {
   'ambient.goal': 'Tu objetivo',
   'hint.chat.2': 'Pega un texto y pregunta qué dice',
   'hint.chat.3': 'Describe un problema y pide tres salidas',
+  'projects.home.title': '¿Qué resolvemos?',
   'projects.chat.lead': 'Pide lo que quieras en esta carpeta. El asistente trabaja aquí mismo y te pregunta cuando lo necesita.',
   'projects.gitMode.seguroTech': "Modo seguro: worktree separado, solo commits locales y avance rápido solo en la rama de la misión.",
   'projects.selfUpdate.trustTech': "Una versión nueva pasa a la siguiente ranura local solo tras una prueba canario y las comprobaciones de cuarentena.",

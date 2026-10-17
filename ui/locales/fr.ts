@@ -406,6 +406,7 @@ export const fr: Messages = {
   'ambient.goal': 'Votre objectif',
   'hint.chat.2': 'Collez un texte, demandez ce qu’il dit',
   'hint.chat.3': 'Décrivez un problème et demandez trois pistes',
+  'projects.home.title': 'Que faisons-nous ?',
   'projects.chat.lead': 'Demande ce que tu veux dans ce dossier. L’assistant travaille ici même et te pose la question quand il en a besoin.',
   'projects.gitMode.seguroTech': "Mode sûr : worktree séparé, commits locaux uniquement et avance rapide seulement sur la branche de la mission.",
   'projects.selfUpdate.trustTech': "Une nouvelle version passe à l'emplacement local suivant seulement après un essai canari et les contrôles de quarantaine.",

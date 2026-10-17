@@ -401,6 +401,7 @@ export const en = {
   'ambient.goal': 'Your goal',
   'hint.chat.2': 'Paste a text, ask what it says',
   'hint.chat.3': 'Describe a problem and ask for three ways out',
+  'projects.home.title': 'What should we tackle?',
   'projects.chat.lead': 'Ask for anything in this folder. The assistant works right here and asks you when it needs to.',
   'projects.gitMode.seguroTech': "Safe mode: a separate worktree, local commits only, and fast-forward only on the mission branch.",
   'projects.selfUpdate.trustTech': "A new build is promoted to the next local slot only after a canary run and quarantine checks.",
