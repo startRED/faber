@@ -1,0 +1,5 @@
+{
+  "decisions": [
+    "| R-next | 2026-10-17 | The main session never waits on a helper. It hands a subagent, a Codex run or another session only a piece its own next step does not need, runs it in the background and keeps working; work it cannot go on without, it does itself. Research and collecting go to Haiku or Codex `gpt-6-luna`; a review goes to Codex `gpt-6.1-sol` in a fresh read-only session, started once the change is pushed, while the next task begins. Measured on 2026-10-16 and 17: 443 session-minutes went to waiting on background subagents. | Owner (2026-10-17: never wait on a subagent), details AI |"
+  ]
+}
