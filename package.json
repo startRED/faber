@@ -22,7 +22,7 @@
     "dist": "tauri build",
     "lint": "oxlint ui tests/ui",
     "typecheck": "tsc --noEmit",
-    "test:scripts": "node --test scripts/release-notes.test.mjs scripts/channel.test.mjs scripts/ci-scope.test.mjs scripts/base.test.mjs scripts/numbers.test.mjs scripts/screen-costs.test.mjs scripts/woff2-only.test.mjs",
+    "test:scripts": "node --test scripts/release-notes.test.mjs scripts/channel.test.mjs scripts/shots.test.mjs scripts/ci-scope.test.mjs scripts/base.test.mjs scripts/numbers.test.mjs scripts/screen-costs.test.mjs scripts/woff2-only.test.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

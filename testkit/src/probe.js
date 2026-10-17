@@ -98,5 +98,115 @@
     poll();
   });
 
-  window.__sx = { clock, start, finish, stateOf };
+  // Composition (V1 to V3). The art is the look's effects; `data-sx-art` marks the art a planted twin brings.
+  const ART = '.ambient, canvas.amb-hole, [data-sx-art]';
+  const describe = (el) => el.tagName.toLowerCase() + (typeof el.className === 'string' && el.className.trim() ? '.' + el.className.trim().split(/\s+/)[0] : '');
+  const inView = (r) => r.width > 0 && r.height > 0 && r.right > 0 && r.bottom > 0 && r.left < innerWidth && r.top < innerHeight;
+  // Every text a person can read now: its element, its words and the boxes of its letters, line by line.
+  const shown = () => {
+    const out = [];
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      const el = node.parentElement;
+      const text = node.nodeValue.replace(/\s+/g, ' ').trim();
+      if (!el || !text || el.closest(`script, style, ${ART}`) || !el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) || effective(el) < 0.1) continue;
+      // Text clipped to a pixel (the screen-reader-only pattern) is not read by the eye.
+      const box = el.getBoundingClientRect();
+      if (box.width < 2 || box.height < 2) continue;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const rects = [...range.getClientRects()].filter((r) => inView(r) && r.width >= 2 && r.height >= 2);
+      if (rects.length) out.push({ el, text, rects });
+    }
+    return out;
+  };
+  const texts = () => shown().map(({ el, text }) => [describe(el), text]);
+  const headings = () => [...new Set(shown().filter(({ el }) => el.closest('h1, h2, h3')).map(({ text }) => text))];
+  const hasArt = () => [...document.querySelectorAll(ART)].some((el) => inView(el.getBoundingClientRect()) && effective(el) > 0);
+
+  // Takes the letters away (`text`), and the art too (`text art`), while the screen is photographed; '' puts both back.
+  // Nothing transitions meanwhile, so each photo shows a state, not a step between two. The letters go by their fill only:
+  // `color` stays, so a surface or an icon drawn in `currentColor` is the same in both photos.
+  let hiding = null;
+  const hide = (what) => {
+    hiding?.remove();
+    hiding = null;
+    if (!what) return true;
+    hiding = document.createElement('style');
+    hiding.textContent = '*, *::before, *::after { transition: none !important; } '
+      + '*, *::before, *::after, ::placeholder { -webkit-text-fill-color: transparent !important; text-shadow: none !important; caret-color: transparent !important; text-decoration-color: transparent !important; }'
+      + (what.includes('art') ? ` :is(${ART}) { opacity: 0 !important; }` : '');
+    document.head.append(hiding);
+    return true;
+  };
+
+  // The light the art adds under each text: the brightest channel of the difference between the two photos, at the
+  // 99th percentile of the letters' pixels (a grain of dust does not count, a lit band does).
+  const light = async (withArt, without) => {
+    const pixels = async (data) => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${data}`;
+      await img.decode();
+      const canvas = document.createElement('canvas');
+      [canvas.width, canvas.height] = [img.naturalWidth, img.naturalHeight];
+      const g = canvas.getContext('2d', { willReadFrequently: true });
+      g.drawImage(img, 0, 0);
+      return g.getImageData(0, 0, canvas.width, canvas.height);
+    };
+    const [a, b] = [await pixels(withArt), await pixels(without)];
+    const scale = a.width / innerWidth;
+    const out = [];
+    for (const { el, text, rects } of shown()) {
+      const values = [];
+      for (const r of rects) {
+        const [x0, x1] = [Math.max(0, Math.floor(r.left * scale)), Math.min(a.width, Math.ceil(r.right * scale))];
+        const [y0, y1] = [Math.max(0, Math.floor(r.top * scale)), Math.min(a.height, Math.ceil(r.bottom * scale))];
+        for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+          const i = (y * a.width + x) * 4;
+          values.push(Math.max(Math.abs(a.data[i] - b.data[i]), Math.abs(a.data[i + 1] - b.data[i + 1]), Math.abs(a.data[i + 2] - b.data[i + 2])));
+        }
+      }
+      if (!values.length) continue;
+      values.sort((p, q) => p - q);
+      out.push({ element: describe(el), text: text.slice(0, 80), light: values[Math.floor(0.99 * (values.length - 1))] });
+    }
+    return out;
+  };
+
+  // Each grid that sets two columns side by side, at least 240 px wide and 120 px tall each (a row of a label and its
+  // switch is not two columns), and where the content of each ends. A frame of the window (it runs to the window's
+  // bottom edge, as the shell of sidebar and stage does) or a column that scrolls ends where the window does, so neither
+  // counts.
+  const columns = () => {
+    const flows = (el) => [...el.children].filter((k) => {
+      const s = getComputedStyle(k);
+      return s.position !== 'absolute' && s.position !== 'fixed' && k.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) && k.getBoundingClientRect().height > 0;
+    });
+    // The column itself is stretched by the grid; its content is not. One child that fills it is looked into.
+    const end = (el) => {
+      const kids = flows(el);
+      if (!kids.length) return el.getBoundingClientRect().bottom;
+      if (kids.length === 1 && Math.abs(kids[0].getBoundingClientRect().bottom - el.getBoundingClientRect().bottom) < 1) return end(kids[0]);
+      return Math.max(...kids.map((k) => k.getBoundingClientRect().bottom));
+    };
+    const out = [];
+    for (const grid of document.body.querySelectorAll('*')) {
+      const frame = grid.getBoundingClientRect();
+      if (!/grid/.test(getComputedStyle(grid).display) || (frame.bottom >= innerHeight - 2 && frame.height >= 0.8 * innerHeight)) continue;
+      if (!grid.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) continue;
+      const kids = flows(grid);
+      if (kids.length !== 2) continue;
+      const [l, r] = kids.map((k) => k.getBoundingClientRect());
+      const beside = (l.right <= r.left + 1 || r.right <= l.left + 1) && Math.min(l.bottom, r.bottom) > Math.max(l.top, r.top);
+      const big = [l, r].every((box) => box.width >= 240 && box.height >= 120);
+      const scrolls = kids.some((k) => /auto|scroll/.test(getComputedStyle(k).overflowY) && k.scrollHeight > k.clientHeight + 1);
+      if (!beside || !big || scrolls || !inView(grid.getBoundingClientRect())) continue;
+      const [left, right] = l.left <= r.left ? [end(kids[0]), end(kids[1])] : [end(kids[1]), end(kids[0])];
+      out.push({ grid: describe(grid), left, right });
+    }
+    return out;
+  };
+
+  window.__sx = { clock, start, finish, stateOf, texts, headings, hasArt, hide, light, columns };
 })();
