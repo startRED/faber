@@ -69,7 +69,8 @@ Read [docs/product-rules.md](docs/product-rules.md) and [docs/product-map.md](do
 
 ## Done means
 
-- The proof commands below pass, and a check fails without the change (the product map names the check per feature).
+- The local proofs below pass, the queued commit's `gate` is green in CI (it lands only then), and a check fails
+  without the change (the product map names the check per feature).
 - The same commit updates [docs/product-map.md](docs/product-map.md) when a setting, screen, stored value, shell command,
   feature or product word appears, changes or goes (`engine/tests/product_map.rs` fails when one is missing), deletes the
   "Known incoherences" lines it fixed, and updates [docs/design.md](docs/design.md) when how a screen looks or behaves
@@ -79,7 +80,8 @@ Read [docs/product-rules.md](docs/product-rules.md) and [docs/product-map.md](do
   by itself once CI is green (R130); `docs`, `test`, `ci`, `refactor` and `chore` do not.
 - For a change a person sees, the commit body says `Extends: <map entry>`, or `New: <the closest existing thing and why
   it does not fit>`.
-- The commit body states the memory and processor cost measured, or why there is none (docs, tests only).
+- The commit body states the memory and processor cost, or why there is none (docs, tests only). CI measures it on
+  the queued commit and fails above the R125 limit; a change that can move it names the CI run that measured it.
 - Code nobody can check by reading it once gets a review from a fresh session that did not write it: the other vendor
   when it is available, the same vendor in a new read-only session when its quota is poor (R146). Security changes get
   two. Every review follows the review rules of product-rules.md, and a change a person sees also gets its coherence
@@ -102,25 +104,28 @@ Read [docs/product-rules.md](docs/product-rules.md) and [docs/product-map.md](do
 
 ## Proof commands
 
-All exit 0 before any commit:
+All exit 0 before any commit. None builds the app or waits for a build slot, so they take seconds to a minute:
 
 ```bash
 npm run lint
 npm run typecheck
 npm run build
 cargo fmt --all --check
-cargo t --suite lint
-cargo t
+npm run test:scripts
+cargo t --claims
 ```
 
-`cargo t --suite lint` runs both Clippy proofs (`--workspace --all-targets`, and `-p faber --features test-hooks`, each
-with `-D warnings`), and on Windows a third for macOS through zig ([design.md](docs/design.md#what-a-run-prints)). `cargo t` runs only the tests that depend on the files you changed; `cargo t --all` runs everything,
-as CI does (the `rust` and `ui` suites everywhere, `screen` on Windows). `--all` is CI's job: the required `gate` runs it
-on every pull request, so a lane pushes after `cargo t` and runs `--all` locally only to chase a failure CI found.
-Both print only failures, measurements and a summary; every line is in `target/faber-test/run.log`. A command that may
-take over two minutes (`cargo t`, a build) runs in the background while you keep working; wait for its notice or the
-Monitor tool, never a `sleep` or `until` loop, and never poll CI (the app watches it). `npm run dev`
-opens the app from source with live reload. Unit tests never spawn processes, touch real git or call a real CLI.
+`cargo t --claims` checks the lane's claims and shows a red `phase-1-base`; it builds only the runner. The heavy proofs run
+in CI on the queued commit, never on the PC by habit: the `rust`, `ui` and `screen` suites (`cargo t --all`, the
+memory limit of R125 included) and the Clippy proofs (`cargo t --suite lint`: `--workspace --all-targets` and `-p faber
+--features test-hooks`, each with `-D warnings`, plus macOS on Windows through zig,
+[design.md](docs/design.md#what-a-run-prints)). A red one wakes the lane ([design.md](docs/design.md#merge-on-green)).
+Run a suite on the PC only to see a new check fail before the change (`cargo t --filter <name>`) or to look closer at a
+failure CI reported; it runs only the tests that depend on the files you changed and prints only failures, measurements
+and a summary (every line in `target/faber-test/run.log`). A command that may take over two minutes (`cargo t`, a
+build) runs in the background while you keep working; wait for its notice or the Monitor tool, never a `sleep` or
+`until` loop, and never poll CI (the app watches it). `npm run dev` opens the app from source with live reload. Unit
+tests never spawn processes, touch real git or call a real CLI.
 
 Never wait idle. While proofs, a review or CI run, the next item is already being built: in another worktree, or in a
 new session when it touches other files. A review starts with the proofs, not after them; the pull request opens and is

@@ -1,0 +1,5 @@
+{
+  "decisions": [
+    "| R-next | 2026-10-17 | Local proofs stay light. Before a commit a lane runs only `npm run lint`, `typecheck`, `build`, `cargo fmt --all --check`, `npm run test:scripts` and `cargo t --claims` (claims and the red base, no build slot). `cargo t` and its lint suite, with the R125 memory limit, run in CI on the queued commit, and a red run wakes the lane; a suite runs on the PC only to see a new check fail first or to look closer at a CI failure. Measured on 2026-10-16 and 17: 441 session-minutes went to `cargo t` waiting for a build slot. | Owner (2026-10-17: heavy tests in CI), details AI |"
+  ]
+}
