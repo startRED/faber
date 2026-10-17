@@ -5,10 +5,10 @@ import { api } from './api.ts';
 const dirty = new Set<object>();
 let told = false;
 
-/** Tells the shell when the first such field appears and when the last one goes: an update never closes the window on a draft. */
 /** How many fields hold something unsent (or failed to write it). */
 export const dirtyCount = (): number => dirty.size;
 
+/** Tells the shell when the first such field appears and when the last one goes: an update never closes the window on a draft. */
 export function setDirty(owner: object, on: boolean): void {
   if (on) dirty.add(owner);
   else dirty.delete(owner);
