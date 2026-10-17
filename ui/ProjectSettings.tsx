@@ -141,6 +141,18 @@ function Body(props: { project: Project }) {
     return saved;
   };
 
+  // Whether each new conversation works in a separate copy; the conversations that already have one keep it.
+  const [separate, setSeparate] = createSignal(props.project.separateCopies !== false);
+  const copies = async (on: boolean) => {
+    let saved = false;
+    await run(async () => {
+      await api.projectCopies(id(), on);
+      if (!gone) setSeparate(on);
+      saved = true;
+    });
+    return saved;
+  };
+
   const checksHint = () => {
     const p = proof();
     if (!p) return t('projects.status.reading');
@@ -154,6 +166,13 @@ function Body(props: { project: Project }) {
       <Show when={error()}>
         <p class="note err" role="alert">{fromEngine(error())}</p>
       </Show>
+      <Toggle
+        id={row('copies')}
+        label={t('set.projects.copies')}
+        more={[t('set.projects.copiesDesc'), t('set.projects.copiesTech')]}
+        checked={separate()}
+        onChange={copies}
+      />
       <div class="pset-checks" data-testid="pset-checks">
         <Opt id={row('checks')} label={t('set.projects.checks')} hint={checksHint()} more={[t('projects.proof.desc'), t('projects.proofs.isolationTech')]}>
           <Show when={proof()}>

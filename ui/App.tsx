@@ -3,6 +3,7 @@ import { Ambient } from './Ambient.tsx';
 import { Hole } from './Hole.tsx';
 import {
   api,
+  errorText,
   type Appearance,
   type AppState,
   type Choice,
@@ -605,8 +606,15 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     closeSide(false);
     void fresh({ area: 'project', projectId: projects[0].id });
   };
-  const remove = async (id: string) => {
-    await api.remove(id);
+  /** Deletes a conversation; `'unsaved'` when its copy holds work found nowhere else and the person must say so first. */
+  const remove = async (id: string, discard = false): Promise<'unsaved' | undefined> => {
+    try {
+      await api.remove(id, discard);
+    } catch (err) {
+      if (errorText(err) === 'error.copy.unsaved') return 'unsaved';
+      setSaveError(failureText(err));
+      return;
+    }
     try { localStorage.removeItem(`faber.choice.${id}`); } catch { /* Storage can be unavailable. */ }
     if (opening.id === id) void fresh(place());
   };
@@ -868,7 +876,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                 onNewIn={(id) => (closeSide(false), void fresh({ area: 'project', projectId: id }))}
                 onAddProject={() => void addProject().catch(fail)}
                 onOpen={openSummary}
-                onRemove={(id) => void remove(id)}
+                onRemove={remove}
                 onSettings={(at) => (closeSide(false), openSettings(at))}
                 onError={(err) => setSaveError(failureText(err))}
               />
@@ -891,6 +899,20 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                         {t('crumb.separator')}
                       </span>
                       <b>{title() ?? ''}</b>
+                      {/* A project conversation in a copy of its own says which branch, quietly; the path is the tooltip. */}
+                      <Show when={current()?.id === place().id && current()?.copy}>
+                        {(copy) => (
+                          <>
+                            <span class="sep" aria-hidden="true">
+                              {t('crumb.separator')}
+                            </span>
+                            <span class="copy" data-testid="crumb-copy" title={`${t('crumb.copy')}
+${copy().path}`}>
+                              {copy().branch}
+                            </span>
+                          </>
+                        )}
+                      </Show>
                     </Match>
                     <Match when={area() === 'project' && project()}>
                       {t('crumb.project')}

@@ -375,6 +375,7 @@ fn seed(dir: &Path, long: bool) -> Conversation {
     answer.reason = Some("reason.route.chat.hard".into());
     let c = Conversation {
         working_folder: None,
+        copy: None,
         choice: None,
         id: "seeded".into(),
         title: "Existing chat".into(),

@@ -33,6 +33,8 @@ mod answer;
 mod auto;
 mod browse;
 mod by_itself;
+mod copies;
+pub use copies::GitRunner;
 pub mod facts;
 mod helpers;
 mod keep_going;
@@ -288,6 +290,8 @@ struct Core {
     me: Weak<Mutex<Core>>,
     /// Conversations in use, the source of truth while the app runs; every change is written through to disk.
     convs: HashMap<String, Conversation>,
+    /// Runs git for the copies of project conversations (R201), given by the shell; without it they work in the folder.
+    git: Option<copies::GitRunner>,
     /// Faber's own browser (R161 step 7), given by the shell where it has one; without it the tool is not offered.
     browser: Option<std::sync::Arc<dyn crate::browser::Browser>>,
     live: HashMap<String, Live>,
@@ -468,6 +472,7 @@ impl Engine {
                 follows: HashMap::new(),
                 pr_reader,
                 browser: None,
+                git: None,
             })
         });
         Engine { core, runtime }
@@ -631,12 +636,6 @@ impl Engine {
     pub fn open(&self, id: &str) -> Option<Conversation> {
         self.with(|c| c.load(id).cloned())
     }
-    pub fn send(&self, req: SendRequest) -> Result<String, String> {
-        self.with(|c| c.send(req))
-    }
-    pub fn branch(&self, req: BranchRequest) -> Result<String, String> {
-        self.with(|c| c.branch(req))
-    }
     pub fn remove_queued(&self, id: &str, turn_id: &str) {
         self.with(|c| c.remove_queued(id, turn_id))
     }
@@ -707,8 +706,9 @@ impl Engine {
             Ok(result)
         })
     }
+    /// Deletes a conversation, unless its copy holds work found nowhere else (see `remove_with`).
     pub fn remove(&self, id: &str) {
-        self.with(|c| c.remove(id))
+        let _ = self.remove_with(id, false);
     }
     pub fn terminal(&self, id: &str) -> Option<TerminalCommand> {
         self.with(|c| c.terminal(id))
@@ -1158,7 +1158,9 @@ impl Core {
             .projects()
             .into_iter()
             .find(|p| Some(&p.id) == c.project_id.as_ref())
-            .map(|p| PathBuf::from(p.path))
+            // A conversation with a copy of its own works there; one removed after its work was merged comes back at the
+            // next message, before anything runs.
+            .map(|p| c.copy.as_ref().map_or_else(|| PathBuf::from(p.path), |copy| copy.folder()))
             .ok_or_else(|| "error.projectGone".to_string())
             .and_then(|path| crate::permissions::checked_folder(&path).ok_or_else(|| "error.workingFolder".to_string()))
     }
@@ -2453,14 +2455,19 @@ impl Core {
     }
 
     fn blank(&mut self, area: Area, project_id: Option<String>) -> String {
+        self.blank_as(new_id(), area, project_id)
+    }
+
+    fn blank_as(&mut self, id: String, area: Area, project_id: Option<String>) -> String {
         let at = now();
         let c = Conversation {
-            id: new_id(),
+            id,
             title: String::new(),
             choice: None,
             area,
             project_id,
             working_folder: None,
+            copy: None,
             sessions: BTreeMap::new(),
             tentative: BTreeMap::new(),
             command_gate: false,
@@ -2612,13 +2619,20 @@ impl Core {
 
     // Edit a message or redo an answer with another model: a new conversation keeps everything before that message,
     // with the chat workspace copied, and sends the new text. The original stays as it was.
-    fn branch(&mut self, req: BranchRequest) -> Result<String, String> {
+    fn branch(&mut self, req: BranchRequest, copy: Option<(String, crate::project::copy::WorkCopy)>) -> Result<String, String> {
         if self.local_build {
             return Err("error.update.activeOperations".into());
         }
         let source = self.load(&req.conversation_id).cloned().ok_or("error.messageGone")?;
         let at = source.messages.iter().position(|m| m.id == req.message_id).ok_or("error.messageGone")?;
-        let id = self.blank(source.area, source.project_id.clone());
+        let id = match copy {
+            Some((id, copy)) => {
+                let id = self.blank_as(id, source.area, source.project_id.clone());
+                self.convs.get_mut(&id).expect("just created").copy = Some(copy);
+                id
+            }
+            None => self.blank(source.area, source.project_id.clone()),
+        };
         let from = self.workspace_of(&source.id);
         let to = self.workspace_of(&id);
         let c = self.convs.get_mut(&id).expect("just created");
@@ -2690,6 +2704,9 @@ impl Core {
             }
             _ => fallback,
         };
+        if self.copy_due(&id) {
+            return;
+        }
         let _ = self.launch(&id, &pick);
     }
 

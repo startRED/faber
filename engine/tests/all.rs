@@ -21,6 +21,8 @@ mod cache_health;
 mod claude_session;
 #[path = "codex_session.rs"]
 mod codex_session;
+#[path = "conversation_copy.rs"]
+mod conversation_copy;
 #[path = "engine.rs"]
 mod engine;
 #[path = "handover.rs"]

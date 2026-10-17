@@ -10,6 +10,7 @@ pub mod bar;
 pub mod budget;
 pub mod canary;
 pub mod coordinator;
+pub mod copy;
 pub mod disk;
 pub mod files;
 pub mod git;

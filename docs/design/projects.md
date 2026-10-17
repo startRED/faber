@@ -22,9 +22,24 @@ machinery and the shell its commands (product-map.md, Shell commands). The Proje
   composer, and under it at most three of this project's own conversations to pick up, each saying only when. No
   suggestions (the composer's hints show what to ask) and no second column. No beam of light: a project screen is a place
   to work; in Dark Room the black hole keeps to the room on the right, so no words sit on its bright part. The sidebar
-  lists the projects, and every setting of a project (the tool policy, the code access, the self-update switch and the
-  checks) is in Settings, Projects (C011), one closed entry per project with one row per option with one short line and
+  lists the projects, and every setting of a project (the tool policy, the code access, the self-update switch, the
+  separate-copies switch and the checks) is in Settings, Projects (C011), one closed entry per project with one row per option with one short line and
   the rest behind the "?" of the row.
+
+### Separate copies
+
+A project conversation works in a separate copy of the repository (R201, `engine/src/project/copy.rs`): a git
+worktree in `<data>/copies/<conversation id>` on the branch `faber/<a few words>-<4 characters of the id>`, made with the
+mission broker's git runner (fixed argv, no shell, hooks and filters off) from the head the person has checked out, before
+the first message reaches the CLI. The agent starts in the same place of the copy as the project folder is in the
+repository. The copy is made outside the engine's lock and in a blocking task of the shell, so a slow checkout holds
+neither the screen nor the other conversations. Nothing polls: a copy is removed when its conversation is deleted, and
+once at start (`Engine::sweep_copies`) when it is clean and every file its branch changed is the same in the person's
+branch or its upstream, which a merge, a fast-forward and a squash all satisfy. Uncommitted changes, or commits no other
+branch holds, refuse the delete with `error.copy.unsaved` until the person discards them: the row's × then asks once more,
+"Discard changes?", with the reason as its label and tooltip, and only that click discards. The topbar crumb adds
+"› faber/…", the branch, in the extra-small data font and the crumb's quiet ink, cut before the title is; the copy's
+folder is its tooltip.
 
 ### Records
 

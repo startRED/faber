@@ -138,6 +138,8 @@ export interface Conversation {
   area: Area;
   projectId?: string;
   workingFolder?: string;
+  /** A project conversation's own copy (a git worktree on its own branch), made at its first message. */
+  copy?: WorkCopy;
   sessions: Partial<Record<Vendor, string>>;
   allowAlways?: string[];
   branchOf?: { conversationId: string; messageId: string };
@@ -157,10 +159,17 @@ export interface Summary {
   /** "Keep going" is on. */
   keepGoing?: boolean;
 }
+export interface WorkCopy {
+  path: string;
+  branch: string;
+}
+
 export interface Project {
   id: string;
   name: string;
   path: string;
+  /** Each new conversation works in a separate copy (Settings > Projects). The engine always sends it, default filled. */
+  separateCopies?: boolean;
 }
 
 export type GitMode = 'seguro' | 'equilibrado';
@@ -455,7 +464,8 @@ export const api = {
   answerQuestion: (id: string, turnId: string, requestId: string, answers: Record<string, string>) =>
     invoke<void>('answer_question', { id, turnId, requestId, answers }),
   rename: (id: string, title: string) => invoke<void>('rename', { id, title }),
-  remove: (id: string) => invoke<void>('remove', { id }),
+  /** Refused with `error.copy.unsaved` while its copy holds work found nowhere else, unless `discard`. */
+  remove: (id: string, discard = false) => invoke<void>('remove', { id, discard }),
   removeQueued: (id: string, turnId: string) => invoke<void>('remove_queued', { id, turnId }),
   sendQueued: (id: string, turnId: string) => invoke<void>('send_queued', { id, turnId }),
   tellHelper: (id: string, callId: string, text: string) => invoke<void>('tell_helper', { id, callId, text }),
@@ -511,6 +521,7 @@ export const api = {
   onUpdate: (listener: (status: UpdateStatus) => void) => listen<UpdateStatus>('faber:update', (e) => listener(e.payload)),
   notesSeen: () => invoke<number | null>('notes_seen').then((id) => id ?? undefined),
   saveNotesSeen: (id: number) => invoke<void>('save_notes_seen', { id }),
+  projectCopies: (projectId: string, on: boolean) => invoke<void>('project_copies', { projectId, on }),
   projectGrant: (projectId: string, mode: GitMode, selfUpdate: boolean, revision: number) =>
     invoke<Grant>('project_grant', { projectId, mode, selfUpdate, revision }),
   projectProof: (projectId: string) => invoke<ProofView>('project_proof', { projectId }),

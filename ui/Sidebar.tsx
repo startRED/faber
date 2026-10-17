@@ -89,7 +89,8 @@ interface Props {
   onNewIn: (id: string) => void;
   onAddProject: () => void;
   onOpen: (conversation: Summary) => void;
-  onRemove: (id: string) => void;
+  /** Deletes a conversation; `'unsaved'` when its copy holds work found nowhere else, which needs `discard`. */
+  onRemove: (id: string, discard?: boolean) => Promise<'unsaved' | undefined> | void;
   /** Opens Settings; the quota of a vendor opens it at the usage limits. */
   onSettings: (section?: 'usage') => void;
   /** Something a menu asked for was refused (a folder that is gone, a project still working). */
@@ -100,6 +101,8 @@ interface Props {
  * bottom Settings and the quota of each connected vendor. */
 export function Sidebar(props: Props) {
   const [confirming, setConfirming] = createSignal<string>();
+  // A delete refused because the conversation's copy holds work found nowhere else: the same row asks once more.
+  const [losing, setLosing] = createSignal<string>();
   const [renaming, setRenaming] = createSignal<string>();
   // The search box filters the titles on screen; it never leaves the window and nothing is asked of the engine.
   const [query, setQuery] = createSignal('');
@@ -132,11 +135,18 @@ export function Sidebar(props: Props) {
   // Each area lists only its own: Chat its conversations, Projects its projects with theirs.
   const inChat = () => props.place.area === 'chat';
   const nothing = () => searching() && (inChat() ? chats().length === 0 : projects().length === 0);
-  // The first click asks, the second deletes.
+  // The first click asks, the second deletes. When the copy holds unsaved work the row asks a third time, saying so.
   const remove = (id: string) => {
+    if (losing() === id) {
+      setLosing(undefined);
+      return void props.onRemove(id, true);
+    }
     if (confirming() !== id) return setConfirming(id);
     setConfirming(undefined);
-    props.onRemove(id);
+    void ask(id);
+  };
+  const ask = async (id: string) => {
+    if ((await props.onRemove(id)) === 'unsaved') setLosing(id);
   };
 
   const Row = (row: { c: Summary }) => (
@@ -145,7 +155,7 @@ export function Sidebar(props: Props) {
       onContextMenu={(e) =>
         openMenu(e, [
           { id: 'rename', label: t('menu.rename'), run: () => setRenaming(row.c.id) },
-          { id: 'delete', label: t('menu.delete'), danger: true, confirm: t('side.confirmDelete'), run: () => props.onRemove(row.c.id) },
+          { id: 'delete', label: t('menu.delete'), danger: true, confirm: t('side.confirmDelete'), run: () => void ask(row.c.id) },
         ])
       }
     >
@@ -166,8 +176,14 @@ export function Sidebar(props: Props) {
           <Show when={props.running.find((r) => r.conversationId === row.c.id)?.waitUntil}>{(at) => <span class="waiting-label" title={t('run.waiting', { when: untilReset(at()) })}>{t('run.waiting', { when: untilReset(at()) })}</span>}</Show>
         </button>
       </Show>
-      <button class="x" classList={{ confirm: confirming() === row.c.id }} aria-label={t('side.delete', { title: row.c.title })} onClick={() => remove(row.c.id)}>
-        {confirming() === row.c.id ? t('side.confirmDelete') : <Icon name="close" small />}
+      <button
+        class="x"
+        classList={{ confirm: confirming() === row.c.id || losing() === row.c.id }}
+        aria-label={losing() === row.c.id ? t('side.unsavedCopy') : t('side.delete', { title: row.c.title })}
+        title={losing() === row.c.id ? t('side.unsavedCopy') : undefined}
+        onClick={() => remove(row.c.id)}
+      >
+        {losing() === row.c.id ? t('side.confirmDiscard') : confirming() === row.c.id ? t('side.confirmDelete') : <Icon name="close" small />}
       </button>
     </div>
   );
@@ -194,7 +210,7 @@ export function Sidebar(props: Props) {
         <Icon name="search" small />
         <input type="search" placeholder={t('side.search')} aria-label={t('side.search')} value={query()} onInput={(e) => setQuery(e.currentTarget.value)} />
       </label>
-      <div class="side-scroll" onMouseLeave={() => setConfirming(undefined)} ref={(el) => animateList(el, true)}>
+      <div class="side-scroll" onMouseLeave={() => (setConfirming(undefined), setLosing(undefined))} ref={(el) => animateList(el, true)}>
         <Show when={!inChat()}>
         <section class="projects" aria-labelledby="side-projects" ref={(el) => animateList(el, true)}>
           <div class="group-h">

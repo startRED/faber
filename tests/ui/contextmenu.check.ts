@@ -53,13 +53,19 @@ const working = (projectId: string): RunningItem => ({
 
 // Each area lists only its own: chats in Chat, projects with their conversations in Projects.
 const [area, setArea] = createSignal<Area>('chat');
-function sidebar(root: HTMLElement, calls: string[], running: Accessor<RunningItem[]> = () => [], onError: (err: unknown) => void = () => {}) {
+function sidebar(
+  root: HTMLElement,
+  calls: string[],
+  running: Accessor<RunningItem[]> = () => [],
+  onError: (err: unknown) => void = () => {},
+  onRemove: (id: string, discard?: boolean) => Promise<'unsaved' | undefined> | void = (id) => void calls.push(`remove ${id}`),
+) {
   return render(
     () => [
       createComponent(Sidebar, {
         conversations: chats, projects, vendors: [], version: '0', get place() { return { area: area() }; }, get running() { return running(); }, quotas: {}, now: Date.now(), onError,
         onNew: () => {}, onArea: () => {}, onProject: () => {}, onNewIn: (id: string) => calls.push(`new ${id}`), onAddProject: () => {}, onOpen: () => {},
-        onRemove: (id: string) => calls.push(`remove ${id}`), onSettings: () => {},
+        onRemove, onSettings: () => {},
       }),
       createComponent(ContextMenuHost, {}),
     ],
@@ -382,6 +388,44 @@ check('right-click: your message offers Copy and Edit, an answer offers Copy and
     deepEqual(labels(), [t('menu.copy')]);
   } finally {
     restoreClipboard();
+    dispose();
+    root.remove();
+  }
+});
+
+check('a conversation whose copy holds unsaved work is deleted only after its row asks once more (R201)', async () => {
+  const root = stage();
+  const calls: string[] = [];
+  // The engine refuses the first delete: its copy has changes found nowhere else.
+  const dispose = sidebar(root, calls, () => [], () => {}, async (id, discard) => {
+    calls.push(discard ? `discard ${id}` : `remove ${id}`);
+    return discard ? undefined : 'unsaved';
+  });
+  try {
+    const x = root.querySelector<HTMLButtonElement>('.crow .x')!;
+    x.click();
+    await settle();
+    equal(x.textContent, t('side.confirmDelete'), 'the first click asks as always');
+    x.click();
+    await settle();
+    deepEqual(calls, ['remove c1']);
+    equal(x.textContent, t('side.confirmDiscard'), 'refused: the row now says what would be lost');
+    equal(x.getAttribute('aria-label'), t('side.unsavedCopy'));
+    x.click();
+    await settle();
+    deepEqual(calls, ['remove c1', 'discard c1'], 'only the click on that question discards');
+
+    calls.length = 0;
+    rightClick(root.querySelector('.crow')!);
+    await settle();
+    entry(t('menu.delete')).click();
+    await settle();
+    await deliberate();
+    entry(t('side.confirmDelete')).click();
+    await settle();
+    deepEqual(calls, ['remove c1'], 'the menu asks the engine the same way');
+    equal(x.textContent, t('side.confirmDiscard'), 'and the row asks the question');
+  } finally {
     dispose();
     root.remove();
   }

@@ -150,10 +150,26 @@ check('settings projects: the self-update switch saves the grant with a fresh re
     api.projectGrant = async (...args) => { granted = args; return { repo: demo.path, mode: 'seguro', revision: 5, grantedAt: 1, selfUpdate: true }; };
   }, async (root) => {
     await click(root.querySelector('.pset-head'));
-    const box = root.querySelector<HTMLInputElement>('input[role="switch"]')!;
+    const box = root.querySelector<HTMLInputElement>(`#pset-${demo.id}-faber-switch`)!;
     box.click();
     await settle();
     equal(JSON.stringify(granted), JSON.stringify([demo.id, 'seguro', true, 5]));
     ok(box.checked, 'the switch stays on');
+  });
+});
+
+check('settings projects: the separate copies switch is on by default and turns off for this project (R201)', () => {
+  let saved: unknown[] = [];
+  return withProjectSettings(() => {
+    api.projectProof = async () => proofView(true);
+    api.projectCopies = async (...args) => { saved = args; };
+  }, async (root) => {
+    await click(root.querySelector('.pset-head'));
+    const box = root.querySelector<HTMLInputElement>(`#pset-${demo.id}-copies-switch`)!;
+    ok(box.checked, 'on by default');
+    box.click();
+    await settle();
+    equal(JSON.stringify(saved), JSON.stringify([demo.id, false]));
+    ok(!box.checked, 'the switch stays off');
   });
 });

@@ -429,6 +429,9 @@ pub struct Conversation {
     /// Chat's canonical folder, chosen before its first message. None uses Faber-owned scratch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_folder: Option<String>,
+    /// A project conversation's own copy, made at its first message (R201). None works in the project folder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copy: Option<crate::project::copy::WorkCopy>,
     /// One CLI session per vendor, so switching models keeps each vendor's own history and cache.
     #[serde(default)]
     pub sessions: BTreeMap<Vendor, String>,
@@ -495,14 +498,22 @@ pub struct Project {
     /// What the person granted at mission start. None grants no effect: planning stays read-only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grant: Option<crate::project::Grant>,
+    /// Each conversation works in a separate copy of its own (R201): on by default, switched in Settings > Projects. It
+    /// acts only in a git repository with a commit; elsewhere conversations work in the folder.
+    #[serde(rename = "separateCopies", default = "separate_by_default")]
+    pub separate_copies: bool,
     /// Fields written by a newer Faber, kept as they were so this version never drops them.
     #[serde(flatten)]
     pub extra: crate::project::Extra,
 }
 
+fn separate_by_default() -> bool {
+    true
+}
+
 impl Project {
     pub fn new(id: String, name: String, path: String) -> Self {
-        Project { id, name, path, repo: None, grant: None, extra: Default::default() }
+        Project { id, name, path, repo: None, grant: None, separate_copies: separate_by_default(), extra: Default::default() }
     }
 
     /// Whether this project may take `effect` under the grant revision the work was admitted with. A key says why not.

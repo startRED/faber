@@ -138,12 +138,15 @@ async fn open(faber: State<'_, Faber>, id: String) -> Res<Option<Conversation>> 
 
 #[tauri::command]
 async fn send(faber: State<'_, Faber>, req: SendRequest) -> Res<String> {
-    faber.engine.send(req)
+    // A project conversation's first message may make its copy first (R201): a checkout, away from the async workers.
+    let engine = faber.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || engine.send(req)).await.map_err(|_| "error.copy.failed".to_string())?
 }
 
 #[tauri::command]
 async fn branch(faber: State<'_, Faber>, req: BranchRequest) -> Res<String> {
-    faber.engine.branch(req)
+    let engine = faber.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || engine.branch(req)).await.map_err(|_| "error.copy.failed".to_string())?
 }
 
 #[tauri::command]
@@ -210,9 +213,12 @@ async fn rename(faber: State<'_, Faber>, id: String, title: String) -> Res<()> {
 }
 
 #[tauri::command]
-async fn remove(faber: State<'_, Faber>, id: String) -> Res<()> {
-    faber.engine.remove(&id);
-    Ok(())
+async fn remove(faber: State<'_, Faber>, id: String, discard: Option<bool>) -> Res<()> {
+    // `error.copy.unsaved`: its copy holds work found nowhere else, and the screen asks before `discard` (R201).
+    let engine = faber.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || engine.remove_with(&id, discard.unwrap_or(false)))
+        .await
+        .map_err(|_| "error.copy.failed".to_string())?
 }
 
 #[tauri::command]
@@ -646,6 +652,16 @@ async fn project_grant(faber: State<'_, Faber>, project_id: String, mode: GitMod
     project.accept_grant(grant).map_err(str::to_string)?;
     faber.engine.update_project(&before, &project)?;
     project.grant.ok_or_else(|| "reason.grant.none".into())
+}
+
+/// Settings > Projects: whether each new conversation of this project works in a separate copy (R201).
+#[tauri::command]
+async fn project_copies(faber: State<'_, Faber>, project_id: String, on: bool) -> Res<()> {
+    project_commands::id(&project_id)?;
+    let project = faber.engine.project(&project_id)?;
+    let mut updated = project.clone();
+    updated.separate_copies = on;
+    faber.engine.update_project(&project, &updated)
 }
 
 #[tauri::command]
@@ -1454,6 +1470,7 @@ fn main() {
                 set_shell_texts,
                 project_enroll,
                 project_grant,
+                project_copies,
                 project_revoke,
                 project_proof,
                 project_proof_confirm,
@@ -1575,6 +1592,17 @@ fn main() {
                 ask: None,
             };
             let engine = Engine::new(opts, emit);
+            // Project conversations work in copies of their own (R201), made with the native git only, never a shell.
+            engine.set_git(Arc::new(|| {
+                faber_engine::project::git::Process::find()
+                    .ok()
+                    .map(|git| Box::new(git) as Box<dyn faber_engine::project::git::Executor + Send>)
+            }));
+            {
+                // Once, at start: copies of deleted conversations, and merged clean ones, go.
+                let engine = engine.clone();
+                tauri::async_runtime::spawn_blocking(move || engine.sweep_copies());
+            }
             if let Some(dev) = &local {
                 engine.set_local_update(dev.manager().map_err(|e| std::io::Error::other(e.key()))?.layout().clone());
             }

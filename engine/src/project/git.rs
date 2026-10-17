@@ -67,7 +67,7 @@ fn valid_author(author: &Author) -> bool {
         .iter()
         .all(|s| !s.trim().is_empty() && s.len() <= 256 && !s.chars().any(|c| c.is_control() || matches!(c, '<' | '>')))
 }
-fn native_path(path: &Path) -> String {
+pub(crate) fn native_path(path: &Path) -> String {
     let raw = path.to_string_lossy();
     if let Some(unc) = raw.strip_prefix("\\\\?\\UNC\\") { format!("\\\\{unc}") } else { raw.strip_prefix("\\\\?\\").unwrap_or(&raw).into() }
 }

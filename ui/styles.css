@@ -152,6 +152,7 @@ input, textarea { caret-color: var(--accent); }
 .crumb { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--ink-3); font-size: var(--fs-sm); white-space: nowrap; overflow: hidden; }
 .crumb b { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink); font-weight: 500; }
 .crumb .sep { flex: none; }
+.crumb .copy { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-data); font-size: var(--fs-xs); }
 .topbar .right { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
 .work { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; min-height: 0; min-width: 0; }
 .thread { position: relative; z-index: 1; grid-column: 1; grid-row: 1; overflow-y: auto; overflow-x: hidden; padding: calc(22px * var(--dens)) 24px var(--thread-tail); contain: strict; }
