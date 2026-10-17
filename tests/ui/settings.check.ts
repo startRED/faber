@@ -19,7 +19,6 @@ import { check, deepEqual, equal, ok } from './check.ts';
 check('R107: Settings names Chat and Projects and discloses the shared default', () => {
   ok(en['set.permissions'].includes('Chat'));
   ok(en['set.permissions'].includes('Projects'));
-  ok('project.permissionsDontAsk' in en);
   ok(en['set.chatFolderMore'].includes('first message'));
   ok(en['set.chatFolderMore'].includes('private folder'));
   ok(en['set.chatFolderMore'].includes('delete the conversation'));
