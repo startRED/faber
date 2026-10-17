@@ -27,7 +27,7 @@ function RenameBox(props: { title: string; onDone: (title?: string) => void }) {
   };
   return (
     <input
-      class="rename"
+      class="field sm rename"
       value={props.title}
       maxLength={120}
       aria-label={t('menu.renameLabel')}
@@ -190,7 +190,7 @@ export function Sidebar(props: Props) {
           <span class="count num">{props.projects.length}</span>
         </button>
       </div>
-      <label class="search">
+      <label class="field search">
         <Icon name="search" small />
         <input type="search" placeholder={t('side.search')} aria-label={t('side.search')} value={query()} onInput={(e) => setQuery(e.currentTarget.value)} />
       </label>

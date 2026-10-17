@@ -1,7 +1,8 @@
-import { createSignal, For, onCleanup, Show } from 'solid-js';
+import { createSignal, For, Show } from 'solid-js';
 import type { Project, RunningItem } from './api.ts';
 import { Asks, Parkeds } from './Ask.tsx';
 import { Icon, VendorMark } from './Glyphs.tsx';
+import { everyWhileShown } from './idle.ts';
 import { t } from './i18n.ts';
 import { Peek } from './Mark.tsx';
 import { vendorName } from './models.ts';
@@ -22,8 +23,7 @@ export function Running(props: {
 }) {
   // The times move while the column is open and stop with it.
   const [now, setNow] = createSignal(Date.now());
-  const tick = setInterval(() => setNow(Date.now()), 15_000);
-  onCleanup(() => clearInterval(tick));
+  everyWhileShown(15_000, () => setNow(Date.now()));
   const blocks = () => blocksOf(props.items);
   const nameOf = (key: string) => (key === 'chat' ? t('area.chat') : (props.projects.find((p) => p.id === key)?.name ?? t('area.projects')));
   const words = (item: RunningItem) => (item.waitUntil ? t('run.waiting', { when: untilReset(item.waitUntil) }) : item.state === 'needsYou' ? t('run.needsYou') : item.vendor ? t('run.working') : t('run.routing'));

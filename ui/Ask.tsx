@@ -112,7 +112,7 @@ function QuestionCard(props: { conversationId: string; turnId: string; permissio
                 </For>
               </div>
               <input
-                class="q-other"
+                class="field q-other"
                 type="text"
                 aria-label={t('ask.question.other')}
                 placeholder={t('ask.question.otherPlaceholder')}
