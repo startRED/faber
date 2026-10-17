@@ -6,6 +6,15 @@ const active = new Set<Animation>();
 let exitLayer: HTMLDivElement | undefined;
 let resizeUntil = 0;
 
+/** A timing token of the page, in milliseconds (or its text, for a curve). The theme owns the values; the numbers here are only the fallback. */
+const curve = (el: Element, name: string, fallback: string) => getComputedStyle(el).getPropertyValue(name).trim() || fallback;
+export const millis = (el: Element, name: string, fallback: number) => {
+  // The browser may hand a custom property back in seconds (180ms reads as .18s).
+  const value = getComputedStyle(el).getPropertyValue(name).trim();
+  const number = parseFloat(value);
+  return number > 0 ? (value.endsWith('ms') ? number : value.endsWith('s') ? number * 1000 : number) : fallback;
+};
+
 function exitSurface(): ShadowRoot {
   if (!exitLayer) {
     exitLayer = document.createElement('div');
@@ -38,7 +47,7 @@ export function keepForExit(open: Accessor<boolean>): Accessor<boolean> {
     const full = motion() === 'full';
     clearTimeout(timer);
     if (visible) setShown(true);
-    else if (full && shown()) timer = setTimeout(() => setShown(false), 180);
+    else if (full && shown()) timer = setTimeout(() => setShown(false), millis(document.documentElement, '--dur-exit', 180));
     else setShown(false);
   });
   onCleanup(() => clearTimeout(timer));
@@ -56,13 +65,12 @@ const offsetOf = (el: HTMLElement) => el.matches('.side') ? 'translateX(calc(-1 
 function play(el: HTMLElement, frames: Keyframe[], exit = false, delay = 0): Animation | undefined {
   const motion = level(el);
   if (motion !== 'full') return;
-  const style = getComputedStyle(el);
-  const duration = Math.min(250, Math.max(150, parseFloat(style.getPropertyValue(exit ? '--motion-exit' : '--motion-enter')) || (exit ? 180 : 220)));
+  const duration = Math.min(250, Math.max(150, millis(el, exit ? '--dur-exit' : '--dur-ui', exit ? 180 : 220)));
   if (el.matches('.ask, .coach, .setup-card')) frames = frames.map((frame, i) => ({ ...frame, filter: (exit ? i === 0 : i !== 0) ? 'blur(0px)' : 'blur(var(--motion-blur))' }));
   // Large moving stages raster slowly with blurred shadows and rounded clipping; restore them at rest.
   if (el.matches('.runcol')) frames = frames.map((frame) => ({ ...frame, boxShadow: 'none', borderRadius: '0px' }));
   const animation = el.animate(frames, {
-    duration, delay: Math.min(48, delay), fill: 'backwards', easing: style.getPropertyValue(exit ? '--motion-ease-in' : '--motion-spring').trim() || (exit ? 'ease-in' : 'ease-out'),
+    duration, delay: Math.min(48, delay), fill: 'backwards', easing: curve(el, exit ? '--ease-in' : '--ease-spring', exit ? 'ease-in' : 'ease-out'),
   });
   active.add(animation);
   void animation.finished.then(() => active.delete(animation), () => active.delete(animation));
@@ -111,6 +119,21 @@ export function watchMotion(): void {
   });
 }
 
+// Every animated list needs to hear the window resize. They share one listener, which exists while any list does.
+const resizers = new Set<() => void>();
+const onWindowResize = () => { for (const resize of resizers) resize(); };
+function watchResize(resize: () => void): () => void {
+  if (!resizers.size) window.addEventListener('resize', onWindowResize);
+  resizers.add(resize);
+  return () => {
+    resizers.delete(resize);
+    if (!resizers.size) window.removeEventListener('resize', onWindowResize);
+  };
+}
+
+// A transition that only changes how something is painted moves nothing, so a list does not measure its children after it.
+const PAINT_ONLY = new Set(['opacity', 'color', 'background-color', 'border-color', 'outline-color', 'box-shadow', 'filter', 'fill', 'stroke']);
+
 /** Small lists and view boundaries: arrivals, inert exit copies and FLIP for the surviving rows. No streaming observer. */
 export function animateList(root: HTMLElement, subtree = false): void {
   onMount(() => {
@@ -129,6 +152,7 @@ export function animateList(root: HTMLElement, subtree = false): void {
     let before = new Map(children().map((el) => [el, el.getBoundingClientRect()]));
     const capture = () => { if (!animations.size) before = new Map(children().map((el) => [el, el.getBoundingClientRect()])); };
     const resize = () => { viewWidth = innerWidth; viewHeight = innerHeight; capture(); };
+    const transitioned = (event: TransitionEvent) => { if (!PAINT_ONLY.has(event.propertyName)) capture(); };
     const update = () => {
       const items = children();
       // Viewport reflow must never animate content from a position outside the new window.
@@ -244,16 +268,16 @@ export function animateList(root: HTMLElement, subtree = false): void {
     observer.observe(root, { childList: true, subtree, ...(root.matches('.shell') ? { attributes: true, attributeFilter: ['class'] } : {}) });
     if (root.matches('.rc-body, .s-main, .tour')) { before.clear(); update(); }
     root.addEventListener('scroll', capture, true);
-    root.addEventListener('transitionend', capture);
-    window.addEventListener('resize', resize);
+    root.addEventListener('transitionend', transitioned);
+    const unwatchResize = watchResize(resize);
     onCleanup(() => {
       observer.disconnect();
       sideObserver?.disconnect();
       reflow?.disconnect();
       delete root.dataset.motionList;
       root.removeEventListener('scroll', capture, true);
-      root.removeEventListener('transitionend', capture);
-      window.removeEventListener('resize', resize);
+      root.removeEventListener('transitionend', transitioned);
+      unwatchResize();
       for (const animation of animations.values()) animation.cancel();
       for (const ghost of ghosts) removeExit(ghost);
     });
@@ -275,7 +299,7 @@ export function animateDetails(root: HTMLElement): void {
     details.open = true;
     const to = opening ? details.getBoundingClientRect().height : summary!.getBoundingClientRect().height;
     const animation = details.animate([{ height: `${from}px`, overflow: 'hidden' }, { height: `${to}px`, overflow: 'hidden' }], {
-      duration: opening ? 220 : 180, easing: opening ? 'ease-out' : 'ease-in',
+      duration: millis(details, opening ? '--dur-ui' : '--dur-exit', opening ? 220 : 180), easing: curve(details, opening ? '--ease' : '--ease-in', opening ? 'ease-out' : 'ease-in'),
     });
     active.add(animation);
     running.set(details, { animation, opening });

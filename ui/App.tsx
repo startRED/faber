@@ -17,6 +17,7 @@ import {
   type Vendor,
 } from './api.ts';
 import { inOrder, refreshed, saveAndApply, watchSystem } from './appearance.ts';
+import { useClock } from './clock.ts';
 import { Composer, type Draft } from './Composer.tsx';
 import { Empty } from './Empty.tsx';
 import { LookStep } from './FirstRun.tsx';
@@ -78,7 +79,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const [current, setCurrent] = createSignal<Conversation>();
   const [choice, setChoice] = createSignal<Choice>({ vendor: 'auto' });
   const [quotas, setQuotas] = createSignal(seedQuotas(props.initial.quotas));
-  const [clock, setClock] = createSignal(Date.now());
+  const clock = useClock();
   const [error, setError] = createSignal<string>();
   // The text of the last refused or failed save of settings; the page stays as it was.
   const [saveError, setSaveError] = createSignal<string>();
@@ -156,6 +157,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   };
   let fill: ((text: string) => void) | undefined;
   let stick = true;
+  // One observer keeps the tail visible when the thread box or the column inside it changes size.
+  let tail: ResizeObserver | undefined;
+  const tailWatch = () => (tail ??= new ResizeObserver(() => { if (thread && stick) thread.scrollTop = thread.scrollHeight; }));
   let lastScrollTop = 0;
   // Where focus was, until the tutorial took it. Weak, so a control that left the page (Settings closed with the focus in
   // it) is not kept alive, with everything it hangs from, until focus moves again.
@@ -347,10 +351,6 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         setCurrent((c) => (c?.id === e.conversationId ? { ...c, queued: e.queued } : c));
       }
     });
-    const minute = setInterval(() => {
-      setClock(Date.now());
-      void api.setClock(-new Date().getTimezoneOffset() * 60);
-    }, 60_000);
     // Any key in a text field holds the running column back for a moment, whether or not the text changed (the arrows
     // move the caret), and so does an input method that is composing.
     const typing = (e: Event) => {
@@ -414,7 +414,6 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     onCleanup(() => {
       stopFollowing();
       props.inbox.take(undefined);
-      clearInterval(minute);
       clearTimeout(retry);
       for (const type of typingEvents) window.removeEventListener(type, typing, true);
       window.removeEventListener('keydown', onKey);
@@ -882,9 +881,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                         thread = el;
                         onMount(() => {
                           // Keep the tail visible as the composer grows, without pulling a reader back down.
-                          const observer = new ResizeObserver(() => { if (stick) el.scrollTop = el.scrollHeight; });
-                          observer.observe(el);
-                          onCleanup(() => observer.disconnect());
+                          tailWatch().observe(el);
+                          onCleanup(() => tailWatch().unobserve(el));
                         });
                       }} onScroll={(e) => onScroll(e.currentTarget)} inert={trapped()}>
                         <Show
@@ -893,9 +891,8 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                             <div class="col" ref={(el) => {
                               animateList(el);
                               onMount(() => {
-                                const observer = new ResizeObserver(() => { if (thread && stick) thread.scrollTop = thread.scrollHeight; });
-                                observer.observe(el);
-                                onCleanup(() => observer.disconnect());
+                                tailWatch().observe(el);
+                                onCleanup(() => tailWatch().unobserve(el));
                               });
                             }}>
                               <Show
@@ -952,18 +949,14 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                   }
                 >
                   <Projects
-                    project={project()}
                     vendors={state().vendors}
-                    now={clock()}
                     projects={state().projects}
                     recent={state().conversations}
                     running={items()}
                     onOpen={openSummary}
-                    onProject={(id) => void fresh({ area: 'project', projectId: id })}
                     onAdd={() => void addProject().catch(fail)}
                     onOpened={openProjects}
                     onError={fail}
-                    permissions={state().settings.permissions}
                   />
                 </Show>
                 <Show when={columnOpen() && !docked()}>{runningColumn()}</Show>
