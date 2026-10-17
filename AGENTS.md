@@ -24,7 +24,7 @@ mistake, and a rule a test enforces leaves it.
   (`en.ts`) is the source, and a new language needs a native speaker to review it. The engine returns keys
   (`error.*`, `reason.*`) instead of sentences.
 - Every change a person would notice adds a what's-new entry in every language, in the same pull request: one short
-  sentence in plain words, written by hand, in its own `docs/next/<branch>.json` (never in the locale files, whose
+  sentence in plain words, written by hand ([how](docs/dev/whats-new.md)), in its own `docs/next/<branch>.json` (never in the locale files, whose
   shared lines conflict). The id only grows, never depends on the version, and is given when the change lands, with
   the decision numbers ([workflow](docs/dev/workflow.md#numbers)). After an update the screen shows what is newer than the
   last entry seen, and the release body is built from the English entries (R142, `scripts/release-notes.mjs`).
