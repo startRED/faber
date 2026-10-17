@@ -26,3 +26,4 @@ src-tauri/gen/
 # What one PC adds to the checks Faber runs (RUSTUP_HOME, CARGO_HOME, PATH; R190), and their logs.
 /.faber/*.local.json
 .faber/verify/
+.faber/verify.local.json
