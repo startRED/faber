@@ -746,7 +746,7 @@ export const en = {
   'notes.27.better': "A project's first screen is calmer: one column with that project's own conversations, and a smaller black hole that stays clear of the words.",
   'notes.28.new': 'When a subagent seems stuck, its step turns amber and Faber tells you, and one waiting on your answer says so.',
   'notes.29.better': 'The Chat home is one calm column too: three short suggestions, and what to pick up under the message box.',
-  'notes.next.better': "A folder that is not a Git repository yet can now be a project: Faber makes it one by itself.",
+  'notes.30.better': "A folder that is not a Git repository yet can now be a project: Faber makes it one by itself.",
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

@@ -878,7 +878,7 @@ export const de: Messages = {
   'notes.27.better': 'Der erste Bildschirm eines Projekts ist ruhiger: eine Spalte mit den eigenen Unterhaltungen des Projekts und ein kleineres Schwarzes Loch, das Abstand zum Text hält.',
   'notes.28.new': 'Wenn ein Subagent festzuhängen scheint, wird sein Schritt bernsteinfarben und Faber sagt dir Bescheid; wartet er auf deine Antwort, steht das im Schritt.',
   'notes.29.better': 'Die Chat-Startseite ist jetzt auch eine ruhige Spalte: drei kurze Vorschläge, und was du fortsetzen kannst, unter dem Eingabefeld.',
-  'notes.next.better': "Ein Ordner, der noch kein Git-Repository ist, kann jetzt ein Projekt sein: Faber macht ihn selbst zu einem.",
+  'notes.30.better': "Ein Ordner, der noch kein Git-Repository ist, kann jetzt ein Projekt sein: Faber macht ihn selbst zu einem.",
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

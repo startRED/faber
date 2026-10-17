@@ -878,7 +878,7 @@ export const fr: Messages = {
   'notes.27.better': 'Le premier écran d’un projet est plus calme : une seule colonne avec les conversations de ce projet, et un trou noir plus petit qui reste loin du texte.',
   'notes.28.new': 'Quand un sous-agent semble bloqué, son étape passe en ambre et Faber vous prévient ; s’il attend votre réponse, l’étape le dit.',
   'notes.29.better': 'L’accueil du Chat est lui aussi une colonne calme : trois suggestions courtes, et ce qu’il faut reprendre sous la zone de message.',
-  'notes.next.better': "Un dossier qui n’est pas encore un dépôt Git peut désormais être un projet : Faber en fait un dépôt tout seul.",
+  'notes.30.better': "Un dossier qui n’est pas encore un dépôt Git peut désormais être un projet : Faber en fait un dépôt tout seul.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',
