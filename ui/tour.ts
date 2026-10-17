@@ -12,13 +12,16 @@ export interface TourStep {
   anchor: string;
   /** Where the card likes to sit, most wanted first. */
   sides: Side[];
+  /** The target is in a corner of the window and is the whole point of the card (the running button): when no side clears
+   * the main heading the card still sits beside its target, over the heading, instead of floating in the middle. */
+  pin?: boolean;
 }
 
 const CHAT: TourStep = { id: 'chat', anchor: 'composer', sides: ['bottom', 'top'] };
 const PROJECTS: TourStep = { id: 'projects', anchor: 'projects', sides: ['right', 'bottom'] };
-const FOLLOW: TourStep = { id: 'follow', anchor: 'run', sides: ['bottom', 'left'] };
+const FOLLOW: TourStep = { id: 'follow', anchor: 'run', sides: ['bottom', 'left'], pin: true };
 const AUTO: TourStep = { id: 'auto', anchor: 'auto', sides: ['bottom', 'left', 'top'] };
-const RUNNING: TourStep = { id: 'running', anchor: 'run', sides: ['bottom', 'left'] };
+const RUNNING: TourStep = { id: 'running', anchor: 'run', sides: ['bottom', 'left'], pin: true };
 
 /** A beginner gets three cards. An experienced person gets two, for what is new to them: Auto and the running list. No
  * answer to the first-run question counts as a beginner. */
@@ -103,4 +106,11 @@ export function placeCard(
     return { x: Math.round(x), y: Math.round(y), side: side === 'right' ? 'left' : 'right', pointer: Math.round(clamp(middle.y - y, 20, card.h - 20)) };
   }
   return centred;
+}
+
+/** Where the card of `step` goes: as `placeCard` says, and a pinned card that found no clear side sits under its target all the
+ * same, over the heading, so it keeps its pointer at every width. */
+export function placeStep(step: TourStep, anchor: Box | undefined, card: Size, view: Size, headings: readonly Box[]): Placement {
+  const at = placeCard(anchor, card, view, step.sides, headings);
+  return step.pin && anchor && at.side === undefined ? placeCard(anchor, card, view, step.sides) : at;
 }

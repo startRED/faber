@@ -22,6 +22,7 @@ import { Segmented } from './controls.tsx';
 import { resizeComposer } from './composer-size.ts';
 import { useDraft } from './unsent.ts';
 import { Ambient } from './Ambient.tsx';
+import { Empty } from './Empty.tsx';
 import { Hole } from './Hole.tsx';
 import { Ghost } from './Ghost.tsx';
 import { greetingParts } from './greeting.ts';
@@ -443,20 +444,19 @@ export function Projects(props: Props) {
           when={props.project}
           fallback={
             <div class="welcome-grid">
-              <div class="w-main empty">
-                <Peek />
-                <h1 class="display hello">{t('empty.openProjectTitle')}</h1>
-                <p class="lead">{t('empty.openProjectBody')}</p>
-                <button type="button" class="btn primary" onClick={() => props.onAdd?.()}>
-                  {t('side.addProject')}
-                </button>
+              <Empty
+                class="w-main"
+                title={t('empty.openProjectTitle')}
+                line={t('empty.openProjectBody')}
+                button={{ label: t('side.addProject'), onClick: () => props.onAdd?.() }}
+              >
                 <Recents
                   mode="project"
                   onPick={(path) => void api.openFolders([path]).then(props.onOpened, (error) => props.onError?.(error))}
                   onOpened={props.onOpened}
                   onError={(error) => props.onError?.(error)}
                 />
-              </div>
+              </Empty>
               <Show when={conversations().length > 0}>
                 <div class="p-side">{pickUpList()}</div>
               </Show>

@@ -75,11 +75,13 @@ check('setup C4.4: a failed installation translates the error key and keeps tech
   }
 });
 
-check('setup C4.5: the empty state directs people to Settings subscriptions without asking them to reopen Faber', () => {
-  const body = en['empty.noAiBody'];
-  doesNotMatch(body, /reopen|restart|relaunch/i, 'connecting a subscription must work in the running app');
-  ok(body.includes(en['settings.open']), 'the empty state must name Settings');
-  ok(body.includes(text(en, 'set.subscriptions')), 'the empty state must name the Subscriptions section');
+check('setup C4.5: the empty state tells people to connect without asking them to reopen Faber or naming a Settings path', () => {
+  for (const [language, messages] of Object.entries(languages)) {
+    const body = text(messages, 'empty.noAiBody');
+    doesNotMatch(body, /reopen|restart|relaunch|reiniciar|redémarrer|neu starten|reabra|reabrir|rouvrez/i, `${language}: connecting a subscription must work in the running app`);
+    ok(!body.includes('→'), `${language}: no path through Settings`);
+    ok(!body.includes(text(messages, 'settings.open')) && !body.includes(text(messages, 'set.subscriptions')), `${language}: the button goes to Settings, the line does not name it`);
+  }
 });
 
 check('setup C4.6: all five languages fill every guide key and preserve English placeholders', () => {

@@ -366,9 +366,10 @@ fn says_what_to_do(ctx: &mut Ctx) -> Result {
     page.wait_visible(&title)?;
     let body = page.inner_text(&css(".empty p"))?;
     same(body.clone(), page.text_of("empty.noAiBody")?, "the empty state says what to do")?;
-    ensure(body.contains("Settings"), || format!("it should point to Settings: {body}"))?;
+    // The line never names a path through Settings (its sections are renamed over time): the one button goes there.
     let section = page.text_of("set.subscriptions")?;
-    ensure(body.contains(&section), || format!("it should name the section {section}: {body}"))?;
+    ensure(!body.contains("Settings") && !body.contains(&section), || format!("it should not name a Settings path: {body}"))?;
+    same(page.count(&css(".empty button"))?, 1, "one button")?;
     let lower = body.to_lowercase();
     ensure(!["reopen", "restart", "relaunch"].iter().any(|w| lower.contains(w)), || format!("it should not ask to restart: {body}"))?;
     // There is nothing to type into: no composer, so no permission line or model choice either.

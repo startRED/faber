@@ -5,7 +5,7 @@ import { t } from './i18n.ts';
 import type { Key } from './locales/en.ts';
 import { Mark } from './Mark.tsx';
 import { animateList } from './motion.ts';
-import { type Box, type Placement, placeCard, type TourStep, tourFor } from './tour.ts';
+import { type Box, type Placement, placeStep, type TourStep, tourFor } from './tour.ts';
 
 /** Where the element a card points at is on screen now, or none when it is missing or hidden (the Projects button below
  * 900 px, where the sidebar is behind its button). */
@@ -34,7 +34,7 @@ function Card(props: { step: TourStep; n: number; total: number; onNext: () => v
       .filter((r) => r.width > 0)
       .map((r): Box => ({ x: r.x, y: r.y, w: r.width, h: r.height }));
     const view = { w: window.innerWidth, h: window.innerHeight };
-    setAt(placeCard(box, { w: size.width, h: size.height }, view, props.step.sides, headings));
+    setAt(placeStep(props.step, box, { w: size.width, h: size.height }, view, headings));
   };
   onMount(() => {
     measure();
