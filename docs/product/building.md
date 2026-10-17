@@ -82,15 +82,14 @@ Taken from Claude Code Projects and pushed further (AI proposal, not reviewed; r
 - **One question explains a stall:** for every worker, what it was asked, what it assumed, what it could not reach and
   what it waits on.
 
-## Self-development before Full Chat (R96)
+## Self-development (R96, through the project conversation)
 
-A minimal Projects slice comes after the new base and before Phase 2. Target: 2026-10-20 to 22.
-It includes a lead, contracts and ready dispatch, Seguro by default, worker worktrees and leases,
-a serial proof/review/fast-forward queue, Studio v0 read-only fan-out, daily own-cost grants,
-a minimal board and decisions, needs-you notifications (R92), and local next-build promotion/rollback (R93).
-Equilibrado adds only own-branch push and draft PR. Parallel writers need disjoint areas and measured qualification.
-Catalog, the remaining powers, Livre, and public release automation are deferred.
-The local development instance never touches the installed release in E:\Apps\Faber (R95).
+R96 put a minimal Projects slice for self-development before Full Chat. It was first planned as missions (a lead,
+roles, a board and a serial proof queue; [spec](../superpowers/specs/2026-10-12-self-development-mvp-design.md)), and
+R202 replaces that shape: self-development is the project conversation of R160 and R161, and the mission machinery
+stays in the engine only for what still uses it, with no way to start one. How to start it, step by step:
+[dev/self-development.md](../dev/self-development.md). The local development instance never touches the installed
+release in E:\Apps\Faber (R95).
 
 Since R160 the person reaches this through the project conversation, not a mission screen: Faber builds Faber the way
 the sessions that build it work. The project's agent starts conversations of its own for separate pieces (R198,

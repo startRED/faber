@@ -56,8 +56,8 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
 
 ## Updates
 
-Local self-development uses current/next slots and a retained last good. Exact-tree proofs and a small canary gate
-promotion. Swap only with no window and no active effect. An independent helper rolls back an early failure.
+Local builds (R93; no screen today, and landed changes reach the installed app through the public updater) use
+current/next slots and a retained last good. Exact-tree proofs and a small canary gate promotion. Swap only with no window and no active effect. An independent helper rolls back an early failure.
 Saved data stays compatible with last good. This channel is separate from signed public updates (R93–R95;
 [spec](../superpowers/specs/2026-10-12-self-development-mvp-design.md)).
 
