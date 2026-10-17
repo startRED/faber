@@ -243,6 +243,8 @@ async fn save_settings(faber: State<'_, Faber>, mut patch: Settings) -> Result<S
     }
     let autostart = lock(&faber.autostart);
     let mut settings = autostart::save(autostart.as_ref(), patch.autostart, || faber.engine.save_settings(patch))?.shown();
+    // The answer replaces the settings on screen, so the switch shows what Windows will do, as `state` does.
+    settings.autostart = Some(autostart::shown(autostart.as_ref(), settings.autostart()));
     lock(&faber.awake).set_enabled(settings.keep_awake());
     settings.appearance = look::usable(settings.appearance.take());
     let look = look::stored(settings.appearance.as_ref());
