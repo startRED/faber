@@ -335,10 +335,16 @@ pub struct Verifier {
     /// One Cargo build at a time, across every folder.
     heavy: Arc<tokio::sync::Semaphore>,
     passed: Mutex<Passed>,
-    /// The run of each folder, which a newer one stops.
-    running: Mutex<HashMap<PathBuf, (u64, tokio::task::AbortHandle)>>,
+    /// The run of each folder, which a newer one stops, with who started it (a conversation's id).
+    running: Mutex<HashMap<PathBuf, Running>>,
     next: AtomicU64,
     clock: fn() -> u64,
+}
+
+struct Running {
+    id: u64,
+    owner: String,
+    task: tokio::task::AbortHandle,
 }
 
 fn now_millis() -> u64 {
@@ -371,41 +377,48 @@ impl Verifier {
     /// Runs `request` to its end. A newer verify of the same folder stops this one, which then ends `reason.verify.stopped`.
     pub async fn verify(self: &Arc<Self>, request: Request) -> Outcome {
         let (folder, level) = (request.folder.clone(), request.level.unwrap_or(Level::Fast));
-        self.start(&tokio::runtime::Handle::current(), folder, level, async move { request }).await
+        self.start(&tokio::runtime::Handle::current(), folder, "", level, async move { request }).await
     }
 
-    /// Starts a verify of `folder` now, on `runtime`, whose request is still being made (git is asked what changed): it
-    /// counts as running from this call, so a stop or a newer verify that comes while git answers stops it too, and no
-    /// check of it ever starts. The future returned ends with its outcome.
+    /// Starts a verify of `folder` for `owner` now, on `runtime`, whose request is still being made (git is asked what
+    /// changed): it counts as running from this call, so a stop or a newer verify that comes while git answers stops it
+    /// too, and no check of it ever starts. The future returned ends with its outcome.
     pub fn start<F: Future<Output = Request> + Send + 'static>(
         self: &Arc<Self>,
         runtime: &tokio::runtime::Handle,
         folder: PathBuf,
+        owner: &str,
         level: Level,
         request: F,
     ) -> impl Future<Output = Outcome> + Send + 'static + use<F> {
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let me = self.clone();
         let task = runtime.spawn(async move { me.run(request.await).await });
-        if let Some((_, older)) = self.running.lock().unwrap_or_else(|e| e.into_inner()).insert(folder.clone(), (id, task.abort_handle())) {
-            older.abort();
+        let run = Running { id, owner: owner.to_string(), task: task.abort_handle() };
+        if let Some(older) = self.running.lock().unwrap_or_else(|e| e.into_inner()).insert(folder.clone(), run) {
+            older.task.abort();
         }
         let me = self.clone();
         async move {
             let outcome = task.await.unwrap_or_else(|_| Outcome::nothing(level, "reason.verify.stopped"));
             let mut running = me.running.lock().unwrap_or_else(|e| e.into_inner());
-            if running.get(&folder).is_some_and(|(at, _)| *at == id) {
+            if running.get(&folder).is_some_and(|r| r.id == id) {
                 running.remove(&folder);
             }
             outcome
         }
     }
 
-    /// Stops the verify of `folder`, if one runs: its processes end with their job.
-    pub fn stop(&self, folder: &Path) {
-        if let Some((_, task)) = self.running.lock().unwrap_or_else(|e| e.into_inner()).remove(folder) {
-            task.abort();
+    /// Stops the verify of `folder` that `owner` started, if one runs: its processes end with their job. Another's run of
+    /// the same folder (two conversations of one project without a copy share it) goes on. True when one was stopped.
+    pub fn stop(&self, folder: &Path, owner: &str) -> bool {
+        let mut running = self.running.lock().unwrap_or_else(|e| e.into_inner());
+        if running.get(folder).is_none_or(|r| r.owner != owner) {
+            return false;
         }
+        let Some(r) = running.remove(folder) else { return false };
+        r.task.abort();
+        true
     }
 
     /// Whether no verify runs anywhere.
@@ -415,7 +428,7 @@ impl Verifier {
 
     /// Whether a verify of `folder` runs now.
     pub fn busy(&self, folder: &Path) -> bool {
-        self.running.lock().unwrap_or_else(|e| e.into_inner()).get(folder).is_some_and(|(_, t)| !t.is_finished())
+        self.running.lock().unwrap_or_else(|e| e.into_inner()).get(folder).is_some_and(|r| !r.task.is_finished())
     }
 
     async fn run(&self, request: Request) -> Outcome {
@@ -825,12 +838,14 @@ mod tests {
         let rt = rt();
         let (tx, rx) = tokio::sync::oneshot::channel::<()>();
         let req = request(dir.path(), Level::Full, &[("a.rs", "h")]);
-        let pending = v.start(rt.handle(), dir.path().to_path_buf(), Level::Full, async move {
+        let pending = v.start(rt.handle(), dir.path().to_path_buf(), "a", Level::Full, async move {
             let _ = rx.await;
             req
         });
         assert!(v.busy(dir.path()), "it counts as running while its request is made");
-        v.stop(dir.path());
+        assert!(!v.stop(dir.path(), "b"), "another's stop leaves it running");
+        assert!(v.busy(dir.path()));
+        assert!(v.stop(dir.path(), "a"));
         drop(tx);
         let out = rt.block_on(pending);
         assert_eq!(out.reason.as_deref(), Some("reason.verify.stopped"));

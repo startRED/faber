@@ -14,7 +14,9 @@ impl Core {
         let c = self.load(conv).ok_or("error.conversationGone")?;
         let choice = c.choice.clone().unwrap_or(Choice { vendor: "auto".into(), model: None, effort: None });
         let item = QueuedTurn { id: new_id(), text, images: None, attachments: None, choice, at: now(), sending: false, wake: Some(wake) };
-        if busy || !c.queued.is_empty() || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming)) {
+        // Faber's checks of the last reply count as a turn that runs (`verifying.rs`).
+        if busy || !c.queued.is_empty() || verifying::checking(c) || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming))
+        {
             if c.queued.len() >= MAX_QUEUED {
                 return Err("error.queueFull".into());
             }

@@ -621,7 +621,11 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
 
   const options = createMemo(() => (lang(), modelOptions(state().vendors, state().models)));
   const project = () => state().projects.find((p) => p.id === projectId());
-  const busy = () => current()?.messages.at(-1)?.status === 'streaming';
+  // Faber's checks of the last reply (R146) keep the conversation at work: what is written waits for them, and Stop ends them.
+  const busy = () => {
+    const last = current()?.messages.at(-1);
+    return last?.status === 'streaming' || last?.checks?.state === 'running';
+  };
   // "Keep going" (R199): a project conversation under way can go on by itself. The engine keeps the switch; the list says it.
   const keepGoing = () => {
     const c = current();

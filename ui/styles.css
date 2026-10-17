@@ -909,6 +909,15 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 .follow a:hover { text-decoration-color: currentColor; }
 .follow .btn { height: var(--h-sm); }
 .follow.need, .run-held { color: var(--amber-ink); }
+/* Faber's own checks of a reply (R146): the same quiet line, amber only when they wait for the person; what failed sits
+   behind the work log's disclosure, in the data face. */
+.checks { margin: 6px 0 0; }
+.checks > p { margin: 0; }
+.checks.need > p { color: var(--amber-ink); }
+.checks .disclosure { margin-top: 6px; }
+.checks-failed { padding: 0 12px 10px; }
+.checks-failed code { font: 500 var(--fs-xs) var(--font-data); color: var(--ink); }
+.checks-failed pre { margin: 4px 0 0; font: var(--fs-xs) / 1.5 var(--font-data); color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
 .run-held { margin: 0; font-size: var(--fs-sm); }
 .waiting-label { font-size: var(--fs-xs); }
 .quota-card { padding: 12px; border: 1px solid var(--line); margin: 12px 0; }

@@ -88,6 +88,14 @@ inside its own area.
   pull request #93: checks running.") link to the page, and "Stop following" sits beside them while it is open. Only checks
   that wait for the person turn it amber. When the checks fail, Faber's own message is Keep
   going's quiet line, naming the pull request and its failed checks.
+- A project reply that changed files, in full access, ends with Faber's own checks (R146) in the same pace-style line,
+  above the pull request's: "Faber is running the checks on these changes…", then "Faber's checks passed (3 checks)." or
+  "Faber's checks failed: npm run lint." with "What failed" under it, the work log's disclosure holding each failed check's
+  first three short failures in the data face. Faber's fix turn is Keep going's quiet line ("Faber's checks failed (npm run
+  lint). Faber asked the agent to fix them."); after two in a row, or where Faber does not ask (the reply asked the
+  person something, Keep going stopped on it, the pace is used up), the line turns amber and says it needs the person.
+  While the checks run the conversation reads as at work: the composer shows Stop, and a message written then waits in
+  the queue. Nothing moves, and no setting or first-run step comes with it.
 - While an answer streams the engine sends the whole message every 33 ms, so the text is drawn block by block
   (`ui/markdown.tsx`): a block whose source did not change keeps its DOM and only the open one is parsed and sanitised
   again. A tick that changed only the tools builds no text. Everything that reaches the page passes DOMPurify.

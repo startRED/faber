@@ -50,6 +50,7 @@ mod usage_view;
 mod verifying;
 pub use pr_watch::{PrReader, gh_reader};
 pub use usage_view::{VendorUsage, WindowUsage};
+pub use verifying::{FIX, MAX_FIXES};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
@@ -654,13 +655,20 @@ impl Engine {
         self.with(|c| c.warm(req))
     }
     pub fn interrupt(&self, id: &str) {
-        self.with(|c| c.keep_going_off(id));
-        self.with(|c| match c.live.get(id).filter(|l| l.turn.is_some()) {
-            Some(l) => {
-                l.session.interrupt();
-                c.stop_helpers(id, false);
+        // One lock for all of it: the end of Faber's checks waits for it, and never sends a turn in between.
+        self.with(|c| {
+            c.keep_going_off(id);
+            match c.live.get(id).filter(|l| l.turn.is_some()) {
+                Some(l) => {
+                    l.session.interrupt();
+                    c.stop_helpers(id, false);
+                }
+                None => {
+                    // Faber's checks of the reply that just ended stop too; the reply then keeps no row.
+                    c.stop_checks(id);
+                    c.stop_waiting(id)
+                }
             }
-            None => c.stop_waiting(id),
         })
     }
     pub fn rename(&self, id: &str, title: &str) {
@@ -1803,6 +1811,8 @@ impl Core {
             return;
         };
         let keep_going = self.keep_going_ended(conv, turn_id.as_deref());
+        // A project reply that changed files is done once Faber's checks say so (R146): the queue and keep going wait.
+        let checking = completed_ok && turn_id.as_deref().is_some_and(|reply| self.check_done(conv, reply, keep_going.clone()));
         self.save(conv);
         self.save_ledger(false);
         self.push(conv, turn_id.as_deref(), true);
@@ -1816,10 +1826,12 @@ impl Core {
             l.session.close();
         }
         // After the CLI check above: a changed CLI is replaced before the next turn starts, never under it.
-        if completed_ok {
+        if completed_ok && !checking {
             self.drain(conv);
         }
-        self.keep_going_after(conv, keep_going);
+        if !checking {
+            self.keep_going_after(conv, keep_going);
+        }
         self.close_when_idle(conv);
     }
 
@@ -2025,7 +2037,7 @@ impl Core {
     fn drain(&mut self, conv: &str) {
         let idle = !self.live.get(conv).is_some_and(|l| l.turn.is_some());
         let Some(c) = self.convs.get_mut(conv) else { return };
-        if !idle || c.messages.last().is_none_or(|m| m.status != Some(Status::Done)) || c.queued.is_empty() {
+        if !idle || c.messages.last().is_none_or(|m| m.status != Some(Status::Done)) || c.queued.is_empty() || verifying::checking(c) {
             return;
         }
         let next = c.queued.remove(0);
@@ -2048,7 +2060,10 @@ impl Core {
 
     fn send_queued(&mut self, id: &str, turn_id: &str) -> Result<(), String> {
         let busy = self.live.get(id).is_some_and(|l| l.turn.is_some())
-            || self.convs.get(id).and_then(|c| c.messages.last()).is_some_and(|m| m.status == Some(Status::Streaming));
+            || self
+                .convs
+                .get(id)
+                .is_some_and(|c| verifying::checking(c) || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming)));
         if busy {
             return Err("error.busy".into());
         }
@@ -2505,7 +2520,10 @@ impl Core {
         let existing = req.conversation_id.as_deref().and_then(|id| self.load(id).map(|c| c.id.clone()));
         if let Some(id) = &existing
             && (self.live.get(id).is_some_and(|l| l.turn.is_some())
-                || self.convs.get(id).and_then(|c| c.messages.last()).is_some_and(|m| m.status == Some(Status::Streaming)))
+                || self
+                    .convs
+                    .get(id)
+                    .is_some_and(|c| verifying::checking(c) || c.messages.last().is_some_and(|m| m.status == Some(Status::Streaming))))
         {
             return self.enqueue(id, req);
         }
@@ -2845,6 +2863,7 @@ fn unseen(c: char) -> bool {
 
 /// The row of the running list for a conversation, if its latest reply is streaming, has unanswered permissions or has parked
 /// requests (denied for want of anyone to answer; they wait for the person until the next message, and count as "needs you").
+/// Faber's checks of it count too: running, it is at work; failing with no fix asked, it needs the person (R146).
 /// Cache warmth is not here: it is a quiet note on the reply itself.
 fn running_item(c: &Conversation) -> Option<RunningItem> {
     let reply = c.messages.last().filter(|m| m.role == Role::Assistant)?;
@@ -2854,7 +2873,16 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
     let stuck: Vec<String> =
         reply.tools.iter().flatten().filter(|t| t.sign.is_some_and(crate::stuck::Sign::stuck)).map(|t| t.id.clone()).collect();
     let held = reply.follow.as_ref().filter(|f| f.held && f.state.open()).map(|f| (f.number, f.head.clone().unwrap_or_default()));
-    if reply.status != Some(Status::Streaming) && permissions.is_empty() && parked.is_empty() && parked_more == 0 && held.is_none() {
+    let checks = reply.checks.as_ref().map(|k| k.state);
+    let checks_need = checks == Some(ChecksState::NeedsYou);
+    if reply.status != Some(Status::Streaming)
+        && permissions.is_empty()
+        && parked.is_empty()
+        && parked_more == 0
+        && held.is_none()
+        && checks != Some(ChecksState::Running)
+        && !checks_need
+    {
         return None;
     }
     Some(RunningItem {
@@ -2865,7 +2893,7 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
         project_id: c.project_id.clone(),
         vendor: reply.vendor,
         model: reply.model.clone(),
-        state: if permissions.is_empty() && parked.is_empty() && parked_more == 0 && stuck.is_empty() && held.is_none() {
+        state: if permissions.is_empty() && parked.is_empty() && parked_more == 0 && stuck.is_empty() && held.is_none() && !checks_need {
             RunState::Working
         } else {
             RunState::NeedsYou

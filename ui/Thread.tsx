@@ -1,5 +1,5 @@
 import { createEffect, createMemo, createResource, createSignal, For, Index, onCleanup, Show, type Accessor } from 'solid-js';
-import { api, type Choice, type Follow, type Message, type QueuedTurn, type VendorUsage } from './api.ts';
+import { api, type Checks, type Choice, type Follow, type Message, type QueuedTurn, type VendorUsage } from './api.ts';
 import { Asks, Parkeds } from './Ask.tsx';
 import { copyItem, openMenu } from './contextmenu.ts';
 import { keep, kept, release, useDraft } from './unsent.ts';
@@ -309,6 +309,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
           <For each={sites()}>{(s) => <SiteCard conversationId={props.conversationId} tool={s.tool} site={s.site} />}</For>
         </div>
       </Show>
+      <Show when={m().checks}>{(c) => <ChecksLine c={c()} />}</Show>
       <Show when={m().follow}>{(f) => <FollowLine conversationId={props.conversationId} f={f()} />}</Show>
       <Show when={m().status === 'stopped'}>
         <div class="note">{t('answer.stopped')}</div>
@@ -355,6 +356,31 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
         </div>
       </Show>
     </article>
+  );
+}
+
+// Faber's own checks of a reply that changed files (R146): one quiet line while they run and once they ended, the failed
+// checks' first failures behind a disclosure. Checks that still fail after Faber's fixes wait for the person, in amber.
+function ChecksLine(props: { c: Checks }) {
+  const failed = () => props.c.failed ?? [];
+  const words = () => t(`checks.${props.c.state}` as Parameters<typeof t>[0], { n: props.c.passed, checks: failed().map((f) => f.command).join(', ') });
+  return (
+    <div class="pace checks" classList={{ need: props.c.state === 'needsYou' }} data-state={props.c.state}>
+      <p>{words()}</p>
+      <Show when={props.c.state !== 'running' && failed().length}>
+        <details class="disclosure">
+          <summary>{t('checks.why')}</summary>
+          <For each={failed()}>
+            {(f) => (
+              <div class="checks-failed">
+                <code>{f.command}</code>
+                <pre>{(f.lines ?? []).join('')}</pre>
+              </div>
+            )}
+          </For>
+        </details>
+      </Show>
+    </div>
   );
 }
 

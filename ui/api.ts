@@ -105,6 +105,15 @@ export interface Message {
   wake?: { why: string; pr?: number; checks?: string[] };
   /** On a reply: "keep going" stopped after it, and why (a `reason.keepGoing.*` key). */
   halt?: string;
+  /** On a project reply that changed files: Faber's own run of the fast checks once it ended (R146). */
+  checks?: Checks;
+}
+export type ChecksState = 'running' | 'passed' | 'failed' | 'needsYou';
+export interface Checks {
+  state: ChecksState;
+  passed: number;
+  /** The checks that failed, each with its first short failures. */
+  failed?: { command: string; lines?: string[] }[];
 }
 export type FollowState = 'pending' | 'failing' | 'conflict' | 'passing' | 'merged' | 'closed' | 'stopped';
 export interface Follow {

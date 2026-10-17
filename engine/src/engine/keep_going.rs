@@ -95,8 +95,12 @@ impl Core {
         }
         c.keep_going = on.then(KeepGoing::default);
         drop_own_turns(c);
-        let idle_reply =
-            c.messages.last().filter(|m| m.role == Role::Assistant && m.status != Some(Status::Streaming)).map(|m| m.id.clone());
+        // While Faber's checks of the reply run, their end goes on instead (`verifying.rs`).
+        let idle_reply = c
+            .messages
+            .last()
+            .filter(|m| m.role == Role::Assistant && m.status != Some(Status::Streaming) && !verifying::checking(c))
+            .map(|m| m.id.clone());
         self.save(id);
         self.emit_queue(id);
         self.list_changed();
@@ -190,7 +194,7 @@ impl Core {
 
     /// Turned on after a reply that ended (done, failed or stopped): only the pacing can hold it back, and a message the
     /// person left goes first.
-    fn go_on(&mut self, conv: &str, reply_id: &str) {
+    pub(super) fn go_on(&mut self, conv: &str, reply_id: &str) {
         match self.room_next(conv, reply_id) {
             Ok(()) => self.keep_going_after(conv, Some(reply_id.into())),
             Err(why) => self.halt(conv, reply_id, why),
@@ -210,7 +214,7 @@ impl Core {
 
     /// The room of the AI the next turn goes to: the one picked by hand when the conversation has one, otherwise the one
     /// that answered last (Auto's router then picks among those it lets in).
-    fn room_next(&self, conv: &str, reply_id: &str) -> Result<(), &'static str> {
+    pub(super) fn room_next(&self, conv: &str, reply_id: &str) -> Result<(), &'static str> {
         let Some(c) = self.convs.get(conv) else { return Ok(()) };
         let to = match c.choice.as_ref().filter(|ch| ch.vendor != "auto") {
             Some(choice) => pick_model(choice, &self.vendors(), self.codex_recommended.as_deref()).map(|p| (p.vendor, p.model)),
@@ -235,7 +239,7 @@ impl Core {
     }
 
     /// It stops by itself: the reply says why, and the shell tells the person.
-    fn halt(&mut self, conv: &str, reply_id: &str, why: &'static str) {
+    pub(super) fn halt(&mut self, conv: &str, reply_id: &str, why: &'static str) {
         let Some(c) = self.convs.get_mut(conv).filter(|c| c.keep_going.is_some()) else { return };
         c.keep_going = None;
         drop_own_turns(c);

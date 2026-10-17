@@ -262,6 +262,47 @@ pub struct Message {
     /// On a reply: "keep going" stopped after it, and why (a `reason.keepGoing.*` key).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub halt: Option<String>,
+    /// On a project reply that changed files: Faber's own run of the fast checks once it ended (R146, "Faber decides done").
+    /// A run that was going on when Faber closed is not read back: nothing would end it.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "settled_checks")]
+    pub checks: Option<Checks>,
+}
+
+/// Faber's checks of a reply (`engine/src/engine/verifying.rs`): running, passed, or what failed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Checks {
+    pub state: ChecksState,
+    /// How many checks passed or were unchanged since they passed.
+    #[serde(default)]
+    pub passed: u32,
+    /// The checks that failed or did not finish, in the order the project declares them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failed: Vec<FailedCheck>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ChecksState {
+    Running,
+    Passed,
+    /// Failed, and Faber asked the agent to fix it.
+    Failed,
+    /// Still failed after the automatic fixes: the person decides.
+    NeedsYou,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FailedCheck {
+    pub command: String,
+    /// Its first short failures (R155), for the screen; the agent reads them all.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lines: Vec<String>,
+}
+
+fn settled_checks<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Checks>, D::Error> {
+    Ok(Option::<Checks>::deserialize(d)?.filter(|c| c.state != ChecksState::Running))
 }
 
 /// A pull request a project conversation follows (R200): one line under the reply that opened or last pushed it.
@@ -381,6 +422,7 @@ impl Message {
             follow: None,
             wake: None,
             halt: None,
+            checks: None,
         }
     }
 }
