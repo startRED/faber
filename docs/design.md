@@ -814,6 +814,13 @@ lists every failing test. `cargo t --suite lint` runs the two Clippy proofs the 
 CI's lines. The `cargo t` alias builds the runner itself with `--message-format=short`, so a broken build of the runner
 also prints one line per error.
 
+On Windows the lint suite adds a third proof: Clippy for macOS (`aarch64-apple-darwin`) on the engine and the runner, so
+code behind `cfg(unix)` or `cfg(target_os = "macos")` breaks before the push, not a CI round later (R-next,
+`testkit/src/cross.rs`). Clippy links nothing, but `aws-lc-sys` compiles C, so zig stands in for the Mac's C compiler:
+Cargo calls the runner as `CC` and `AR` and the runner hands the call to zig. It needs zig on `PATH` and
+`rustup target add aarch64-apple-darwin`; without zig the proof is skipped and says so. The shell is left out, since its
+Objective-C needs Apple's SDK; CI's Mac still checks everything.
+
 A mission reads its checks the same way (R155, `engine/src/project/proof/output.rs`, which `cargo t` also uses for
 Cargo). The roles get each failure with its `file:line` and the tool's fix, the measurements and one summary line, at
 most 20 failures of 8 lines; the whole output stays in the mission's private `proofs/` folder. It reads `cargo t`,

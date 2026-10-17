@@ -5,6 +5,7 @@ pub mod base;
 pub mod cdp;
 pub mod checks;
 pub mod contain;
+pub mod cross;
 #[cfg(windows)]
 pub mod desktop;
 pub mod fake;

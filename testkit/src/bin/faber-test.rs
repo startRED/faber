@@ -1,6 +1,9 @@
 //! The runner: `cargo t` (see `.cargo/config.toml`). All of it is in `faber_testkit::runner`.
 
 fn main() {
+    if let Some(code) = faber_testkit::cross::zig_mode() {
+        std::process::exit(code);
+    }
     if let Some(code) = faber_engine::proc::guard_mode() {
         std::process::exit(code);
     }

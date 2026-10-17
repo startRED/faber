@@ -109,13 +109,15 @@ cargo t
 ```
 
 `cargo t --suite lint` runs both Clippy proofs (`--workspace --all-targets`, and `-p faber --features test-hooks`, each
-with `-D warnings`). `cargo t` runs only the tests that depend on the files you changed; `cargo t --all` runs everything,
+with `-D warnings`), and on Windows a third for macOS through zig ([design.md](docs/design.md#what-a-run-prints)). `cargo t` runs only the tests that depend on the files you changed; `cargo t --all` runs everything,
 as CI does (the `rust` and `ui` suites everywhere, `screen` on Windows). Run `--all` when the screen or the shell changes.
-Both print only failures, measurements and a summary; every line is in `target/faber-test/run.log`. `npm run dev`
+Both print only failures, measurements and a summary; every line is in `target/faber-test/run.log`. A command that may
+take over two minutes (`cargo t`, a build) runs in the background while you keep working; wait for its notice or the
+Monitor tool, never a `sleep` or `until` loop, and never poll CI (the app watches it). `npm run dev`
 opens the app from source with live reload. Unit tests never spawn processes, touch real git or call a real CLI.
 
 On the maintainer's PC, Rust lives outside the default folders; export these before any `cargo` or `npm run dev`:
 
 ```bash
-export RUSTUP_HOME='E:\Apps\rust\rustup' CARGO_HOME='E:\Apps\rust\cargo' PATH="/e/Apps/rust/cargo/bin:$PATH"
+export RUSTUP_HOME='E:\Apps\rust\rustup' CARGO_HOME='E:\Apps\rust\cargo' PATH="/e/Apps/zig:/e/Apps/rust/cargo/bin:$PATH"
 ```
