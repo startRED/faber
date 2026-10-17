@@ -438,7 +438,7 @@ jobs:
           if git merge-base --is-ancestor origin/phase-1-base "$GITHUB_SHA"; then
             # One atomic push moves the pull request's branch (so GitHub shows it merged) and phase-1-base together or not
             # at all: when the base moved meanwhile, both stay as they were and the landing below starts again.
-            landed=false
+            landed=false; before=$(git rev-parse origin/phase-1-base)
             if [ -n "$head" ]; then
               git push --atomic --force-with-lease="refs/heads/$head:$oid" origin \
                 "$GITHUB_SHA:refs/heads/$head" "$GITHUB_SHA:refs/heads/phase-1-base" && landed=true
@@ -457,7 +457,11 @@ jobs:
               gh workflow run auto-release.yml --ref phase-1-base -f sha="$GITHUB_SHA"
               echo "Landed $GITHUB_SHA."; exit 0
             fi
+            # Only a base that moved is worth another landing; any other refusal would only repeat itself.
             git fetch --quiet origin phase-1-base
+            if [ "$(git rev-parse origin/phase-1-base)" = "$before" ]; then
+              echo "::error::The push was refused although phase-1-base did not move; the push error is above."; exit 1
+            fi
           fi
           if [ -n "$head" ]; then
             node scripts/land.mjs "$pr" --head "$oid"
