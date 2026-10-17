@@ -945,7 +945,7 @@ export const ptBR: Messages = {
   'notes.23.better': 'As conversas ficaram mais calmas: menos linhas em volta de cada resposta, e o modelo se escolhe em um só lugar.',
   'notes.24.better': "As Configurações ficaram mais fáceis de ler: uma linha por opção, e suas contas e os limites delas ficam juntos.",
   'notes.25.better': 'As telas vazias, o tutorial e esta lista ficaram mais curtos e dizem cada coisa uma vez.',
-  'notes.next.better': 'A primeira tela de um projeto ficou mais calma: uma coluna só, com as conversas do próprio projeto, e um buraco negro menor que fica longe das palavras.',
+  'notes.26.better': 'A primeira tela de um projeto ficou mais calma: uma coluna só, com as conversas do próprio projeto, e um buraco negro menor que fica longe das palavras.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

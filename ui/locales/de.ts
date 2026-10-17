@@ -958,7 +958,7 @@ export const de: Messages = {
   'notes.23.better': 'Unterhaltungen sind ruhiger: weniger Zeilen um jede Antwort, und das Modell wählst du an einer einzigen Stelle.',
   'notes.24.better': "Die Einstellungen sind übersichtlicher: eine Zeile pro Option, und deine Konten samt Limits stehen zusammen.",
   'notes.25.better': 'Die leeren Bildschirme, das Tutorial und diese Liste sind kürzer und nennen alles nur einmal.',
-  'notes.next.better': 'Der erste Bildschirm eines Projekts ist ruhiger: eine Spalte mit den eigenen Unterhaltungen des Projekts und ein kleineres Schwarzes Loch, das Abstand zum Text hält.',
+  'notes.26.better': 'Der erste Bildschirm eines Projekts ist ruhiger: eine Spalte mit den eigenen Unterhaltungen des Projekts und ein kleineres Schwarzes Loch, das Abstand zum Text hält.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

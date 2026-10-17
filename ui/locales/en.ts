@@ -826,7 +826,7 @@ export const en = {
   'notes.23.better': 'Conversations are calmer: fewer lines around each answer, and the model is chosen in one place.',
   'notes.24.better': "Settings are easier to scan: one line per option, and your accounts and their limits are together.",
   'notes.25.better': 'The empty screens, the tutorial and this list are shorter and say each thing once.',
-  'notes.next.better': "A project's first screen is calmer: one column with that project's own conversations, and a smaller black hole that stays clear of the words.",
+  'notes.26.better': "A project's first screen is calmer: one column with that project's own conversations, and a smaller black hole that stays clear of the words.",
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',
