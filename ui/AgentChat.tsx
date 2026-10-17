@@ -3,7 +3,7 @@ import type { ToolUse } from './api.ts';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 import { Markdown, openLinks } from './markdown.tsx';
-import { agentKind, agentState, middle, toolRow, type AgentStep } from './worklog.ts';
+import { agentKind, agentState, changeOf, middle, toolRow, type AgentStep, type Change } from './worklog.ts';
 
 // A subagent opened in the running column (R161 step 3): its brief word for word, the steps it ran and its report, drawn
 // with the conversation's own parts. The column is the one place on the right, so this replaces its list until "back".
@@ -30,7 +30,31 @@ export function ToolChip(props: { tool: ToolUse }) {
       </Show>
       <b>{toolRow(props.tool).label}</b>
       <Show when={toolRow(props.tool).detail}><i>{middle(toolRow(props.tool).detail)}</i></Show>
+      <Show when={changeOf(props.tool)}>{(change) => <Delta change={change()} />}</Show>
     </span>
+  );
+}
+
+/** How many lines an edit added and removed, said in words for a screen reader. */
+export function Delta(props: { change: Change }) {
+  const said = () => [props.change.added && t('tool.added', { n: props.change.added }), props.change.removed && t('tool.removed', { n: props.change.removed })].filter(Boolean).join(', ');
+  return (
+    <em class="delta" role="img" aria-label={said()} title={said()}>
+      <Show when={props.change.added}><span class="add">+{props.change.added}</span></Show>
+      <Show when={props.change.removed}><span class="del">−{props.change.removed}</span></Show>
+    </em>
+  );
+}
+
+/** The few lines an edit is changing, while it runs (R161 step 9): removed lines first, then added, past four the count of the rest. */
+export function ChangedLines(props: { change: Change }) {
+  const SHOWN = 4;
+  const rest = () => props.change.lines.length - SHOWN;
+  return (
+    <div class="changed" aria-hidden="true">
+      <For each={props.change.lines.slice(0, SHOWN)}>{(line) => <div classList={{ add: line.added, del: !line.added }}><b>{line.added ? '+' : '−'}</b>{line.text || ' '}</div>}</For>
+      <Show when={rest() > 0}><p>{t('tool.moreLines', { n: rest() })}</p></Show>
+    </div>
   );
 }
 

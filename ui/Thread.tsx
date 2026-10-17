@@ -6,14 +6,14 @@ import { keep, kept, release, useDraft } from './unsent.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
 import { html, Markdown, openLinks } from './markdown.tsx';
-import { agentMeta, openedAgent, showAgent, tellAbout, ToolChip } from './AgentChat.tsx';
+import { agentMeta, ChangedLines, openedAgent, showAgent, tellAbout, ToolChip } from './AgentChat.tsx';
 import { untilReset } from './Sidebar.tsx';
 import { bytes, compact, fromEngine, money, t } from './i18n.ts';
 import { prettyModel, vendorName, type Option } from './models.ts';
 import { animateList } from './motion.ts';
 import { warmLeft } from './running.ts';
 import { quotaPending } from './QuotaCard.tsx';
-import { agentState, agentSteps, isAgentCall, middle, sameTools, thinkingParts, toolLine, type AgentStep } from './worklog.ts';
+import { agentState, agentSteps, changeOf, isAgentCall, middle, sameTools, thinkingParts, toolLine, type AgentStep } from './worklog.ts';
 
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
 
@@ -159,6 +159,16 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
     if (finalText().trim()) return '';
     return tool ? toolLine(tool) : middle(thinking().at(-1)?.text ?? '');
   });
+  // While the newest step is an edit, the lines it changed sit under the status line until the next step or the answer:
+  // the view fits the work (R161 step 9). Text before the newest step's end is narration, not the answer.
+  const answering = () => {
+    const end = m().activityEnd;
+    return Number.isInteger(end) ? !!text().slice(end).trim() : !!finalText().trim();
+  };
+  const changing = createMemo(() => {
+    const tool = tools().at(-1);
+    return streaming() && tool && (tool.ok === undefined || !answering()) ? changeOf(tool) : undefined;
+  });
   // The header says which model answers, and nothing more: the vendor's mark and the model's name from the moment it is known
   // to the end and after reopening (a model the CLI never named reads as the vendor's name). Effort and Auto's reason sit in
   // its tooltip; the reason shows only while Auto is still choosing and when the answer moved to the other AI. A wait for
@@ -224,6 +234,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
       <Show when={(steps() || agents().length) && streaming() && latest()}>
         <div class="activity-latest" role="status" aria-live="polite" aria-atomic="true" title={latest()}>{latest()}</div>
       </Show>
+      <Show when={changing()}>{(change) => <ChangedLines change={change()} />}</Show>
       <Asks conversationId={props.conversationId} turnId={m().id} permissions={waiting()} surface="ask" />
       <Parkeds parked={m().parked ?? []} more={m().parkedMore} surface="ask" />
       <div class="md" aria-busy={streaming()} onClick={openLinks}>

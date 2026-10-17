@@ -194,3 +194,92 @@ export function agentSteps(tools: ToolUse[] = [], helperKind = ''): AgentStep[] 
     };
   });
 }
+
+/** A line an edit step added or removed. */
+export interface ChangedLine {
+  added: boolean;
+  text: string;
+}
+/** What an edit step changed, read from its own input with no model call (R161 step 9): how many lines it added and
+ * removed, and the changed lines themselves. */
+export interface Change {
+  added: number;
+  removed: number;
+  lines: ChangedLine[];
+}
+
+const lines = (text: string) => (text ? text.replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n') : []);
+
+/** Past this many lines on a side, a replacement is compared only at its ends: the longest common run is quadratic. */
+const COMPARED = 400;
+
+/** One replacement as the lines it changed: a line both sides keep, in order, is not a change. */
+function replaced(before: string, after: string): ChangedLine[] {
+  const a = lines(before);
+  const b = lines(after);
+  let start = 0;
+  while (start < a.length && start < b.length && a[start] === b[start]) start++;
+  let end = 0;
+  while (end < a.length - start && end < b.length - start && a[a.length - 1 - end] === b[b.length - 1 - end]) end++;
+  const x = a.slice(start, a.length - end);
+  const y = b.slice(start, b.length - end);
+  const gone = (text: string) => ({ added: false, text });
+  const came = (text: string) => ({ added: true, text });
+  if (x.length > COMPARED || y.length > COMPARED) return [...x.map(gone), ...y.map(came)];
+  // keep[i][j]: how many lines x[i..] and y[j..] keep in common.
+  const keep = Array.from({ length: x.length + 1 }, () => Array.from<number>({ length: y.length + 1 }).fill(0));
+  for (let i = x.length - 1; i >= 0; i--)
+    for (let j = y.length - 1; j >= 0; j--) keep[i]![j] = x[i] === y[j] ? keep[i + 1]![j + 1]! + 1 : Math.max(keep[i + 1]![j]!, keep[i]![j + 1]!);
+  const out: ChangedLine[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < x.length || j < y.length) {
+    if (i < x.length && j < y.length && x[i] === y[j]) {
+      i++;
+      j++;
+    } else if (j < y.length && (i === x.length || keep[i]![j + 1]! >= keep[i + 1]![j]!)) out.push(came(y[j++]!));
+    else out.push(gone(x[i++]!));
+  }
+  // Removed lines read before the lines that replace them, as in a diff.
+  return [...out.filter((line) => !line.added), ...out.filter((line) => line.added)];
+}
+
+/** A unified diff's own lines. Its file headers (`---`, `+++`) come before the first hunk; inside a hunk every `+` or `-`
+ * line is content, even one that starts with three of them. */
+function diffed(diff: string): ChangedLine[] {
+  const all = lines(diff);
+  let inHunk = !all.some((line) => line.startsWith('@@'));
+  const out: ChangedLine[] = [];
+  for (const line of all) {
+    if (line.startsWith('@@')) inHunk = true;
+    else if (inHunk && /^[+-]/.test(line)) out.push({ added: line[0] === '+', text: line.slice(1) });
+  }
+  return out;
+}
+
+/** One of Codex's file changes: a list item with its `diff`, or a value keyed by its path that holds a unified diff or,
+ * for a new file, its content, directly or under its kind (`{ update: { unified_diff } }`, `{ add: { content } }`). */
+function codexChange(change: unknown): ChangedLine[] {
+  const o = change as Record<string, unknown> | undefined;
+  if (!o || typeof o !== 'object') return [];
+  const diff = o.diff ?? o.unified_diff;
+  if (typeof diff === 'string') return diffed(diff);
+  if (typeof o.content === 'string') return lines(o.content).map((text) => ({ added: true, text }));
+  return Object.values(o).flatMap((inner) => (inner && typeof inner === 'object' && !Array.isArray(inner) ? codexChange(inner) : []));
+}
+
+/** The lines an edit step changed: Claude Code's Edit, MultiEdit and Write, and Codex's file changes. Anything else, or an
+ * edit that changed nothing, has none. */
+export function changeOf(tool: ToolUse): Change | undefined {
+  const text = (v: unknown) => (typeof v === 'string' ? v : '');
+  const input = tool.input as Record<string, unknown> | unknown[] | undefined;
+  let changed: ChangedLine[] = [];
+  if (tool.name === 'Edit' && input && !Array.isArray(input)) changed = replaced(text(input.old_string), text(input.new_string));
+  else if (tool.name === 'MultiEdit' && input && !Array.isArray(input) && Array.isArray(input.edits))
+    changed = (input.edits as Record<string, unknown>[]).flatMap((edit) => replaced(text(edit?.old_string), text(edit?.new_string)));
+  else if (tool.name === 'Write' && input && !Array.isArray(input)) changed = lines(text(input.content)).map((line) => ({ added: true, text: line }));
+  else if (tool.name === 'fileChange' && input) changed = (Array.isArray(input) ? input : Object.values(input)).flatMap(codexChange);
+  if (!changed.length) return undefined;
+  const added = changed.filter((line) => line.added).length;
+  return { added, removed: changed.length - added, lines: changed };
+}

@@ -124,6 +124,8 @@ frames) and checked against today's code. It fills the steps of R161 and never b
    Each view is built from the agent's own calls and the pane's log, with no model call and no extra process; only the
    view the person opens is live. Reduced motion keeps the outlines and tags without movement; during a game nothing
    moves.
+   Built (R188): changing files, as a line count on the step and the changed lines under the status line while it is
+   the newest step.
 
 **Across all of them:**
 
