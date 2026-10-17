@@ -139,6 +139,17 @@ accident. `tests/ui/grammar.check.ts` reads the real stylesheet and fails on a b
 - **Hover:** a row or a button changes its background or its colour on hover and never its brightness.
 - **Blur:** a panel that is at least 94 % opaque draws no backdrop blur; only the scrim has one.
 
+### Idle cost
+
+- Nothing keeps a timer while the window is hidden or minimized: the one-minute clock (which also tells the engine the
+  time zone) and the running column's 15 s tick are made by `everyWhileShown` (`ui/idle.ts`), end when the window hides
+  and run once at once when it returns. The Dark Room dust reads its nodes once, not ten times a second.
+- Animated lists share one `resize` listener and do not measure their children after a transition that only paints
+  (colour, opacity, shadow). The thread and its column share one `ResizeObserver`. `tests/ui/lighter.check.ts` fails
+  when one of these comes back.
+- Fonts ship as woff2 only: a PostCSS plugin (`scripts/woff2-only.mjs`) drops the woff fallback that Fontsource lists,
+  which the webview never reads.
+
 ### Effects
 - Effects appear only on the two homes (the new conversation of Chat and the first screen of a project) and behind a new
   project session, never behind text the user reads. Every animation, including the composer's idle life, pauses while the

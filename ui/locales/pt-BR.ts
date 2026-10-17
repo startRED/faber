@@ -853,6 +853,7 @@ export const ptBR: Messages = {
   'notes.23.better': 'As conversas ficaram mais calmas: menos linhas em volta de cada resposta, e o modelo se escolhe em um só lugar.',
   'notes.24.better': "As Configurações ficaram mais fáceis de ler: uma linha por opção, e suas contas e os limites delas ficam juntos.",
   'notes.25.better': 'As telas vazias, o tutorial e esta lista ficaram mais curtos e dizem cada coisa uma vez.',
+  'notes.next-2.better': 'O Faber descansa enquanto a janela está escondida, e botões e campos têm o mesmo aspecto em todas as telas.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',
