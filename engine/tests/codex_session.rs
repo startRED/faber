@@ -369,6 +369,124 @@ async fn r124b_a_command_run_inside_a_credential_folder_is_refused_without_a_car
     assert!(!asks[0].contains("auth.json"));
 }
 
+/// R161: a Codex subagent (recorded with codex-cli 0.162.1, Ask mode) is the agent's `Agent` step. Its command runs under that
+/// step, its approval is the conversation's card, its last words are the step's report, and none of its words join the answer.
+#[tokio::test]
+async fn r161_a_codex_subagent_is_a_step_of_the_reply_and_its_approval_is_the_conversations() {
+    let entries = fixture("codex", "subagent");
+    let mut asks = Vec::new();
+    let (events, mismatches) = run(
+        entries,
+        "Spawn exactly one subagent named copier. Its task: create the file c.txt containing the word gamma using a shell command, then reply with the word done. Wait for it, then answer with its reply. Do not do the work yourself.",
+        None,
+        |e, s| {
+            if let EngineEvent::Permission { request_id, tool, .. } = e {
+                asks.push(tool.clone());
+                drop(s.answer(request_id, true));
+            }
+            matches!(e, EngineEvent::Done { .. })
+        },
+    )
+    .await;
+    assert_eq!(mismatches, Vec::<String>::new());
+    assert_eq!(asks, ["command"]);
+    let call = "call_abd8fed50e4141a6b7feaebc0a02089c";
+    let tools: Vec<(&str, &str, Option<&str>)> = events
+        .iter()
+        .filter_map(|e| match e {
+            EngineEvent::Tool { id, name, parent, .. } => Some((id.as_str(), name.as_str(), parent.as_deref())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(tools.len(), 2, "only the subagent and its command, no bookkeeping: {tools:?}");
+    assert_eq!(tools[0], (call, "Agent", None));
+    assert_eq!((tools[1].1, tools[1].2), ("commandExecution", Some(call)));
+    assert!(events.iter().any(|e| matches!(e, EngineEvent::Tool { input, .. } if input["description"] == "copier")));
+    assert!(
+        events.iter().any(|e| matches!(e, EngineEvent::ToolResult { id, ok: true, text, .. } if id == call && text == "done")),
+        "the subagent's last words settle its step"
+    );
+    assert_eq!(text_of(&events), "done", "the subagent's own words never join the answer");
+    // Codex counts the subagent's thread on its own (59420 in, 108 out); the reply's usage holds both threads.
+    let done = events.iter().find(|e| matches!(e, EngineEvent::Done { .. })).unwrap();
+    assert!(matches!(done, EngineEvent::Done { input_tokens: 129_470, output_tokens: 199, cost_total_usd: Some(_), .. }), "{done:?}");
+}
+
+/// R161: a subagent's approval belongs to the turn it serves. One still open when that turn ends, and one that arrives after
+/// it, are refused on the wire: neither hangs unseen nor becomes a card of another reply.
+#[tokio::test]
+async fn r161_a_codex_subagent_approval_outside_its_turn_is_refused() {
+    let recorded = fixture("codex", "subagent");
+    let ask = recorded.iter().position(|e| !e.input && e.msg["method"] == "item/commandExecution/requestApproval").unwrap();
+    let parent = recorded.iter().find_map(|e| e.msg["result"]["thread"]["id"].as_str()).unwrap();
+    let end =
+        recorded.iter().rposition(|e| !e.input && e.msg["method"] == "turn/completed" && e.msg["params"]["threadId"] == parent).unwrap();
+    // The subagent's command starts just before it asks.
+    let command = (0..ask).rev().find(|&i| recorded[i].msg["params"]["item"]["type"] == "commandExecution").unwrap();
+    let decline = Entry { input: true, msg: json!({"id":0,"result":{"decision":"decline"}}) };
+    // Open when the turn ends: the request, then the parent's end. Late: the parent's end, then the command and the request.
+    for late in [false, true] {
+        let mut entries = recorded[..if late { command } else { ask }].to_vec();
+        if late {
+            entries.extend([recorded[end].clone(), recorded[command].clone(), recorded[ask].clone()]);
+        } else {
+            entries.extend([recorded[ask].clone(), recorded[end].clone()]);
+        }
+        entries.push(decline.clone());
+        let f = fake(entries);
+        let opts = CodexServerOptions {
+            permissions: Permissions::Ask,
+            cli: faber_engine::cli::Cli { command: "codex".into(), prefix: vec![] },
+            cwd: ".".into(),
+            area: Area::Chat,
+            user_hooks: false,
+            windows: false,
+            spawn: f.spawn.clone(),
+        };
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let thread = CodexThread {
+            helper: Default::default(),
+            cwd: ".".into(),
+            model: None,
+            effort: None,
+            resume: None,
+            instructions: None,
+            user_name: None,
+            permissions: Permissions::Ask,
+            tuning: Default::default(),
+        };
+        let session = CodexServer::start(opts).open(thread, Arc::new(move |e| drop(tx.send(e))));
+        session.send(UserTurn::text(
+            recorded.iter().find(|e| e.msg["method"] == "turn/start").unwrap().msg["params"]["input"][0]["text"].as_str().unwrap(),
+        ));
+        let mut cards = 0;
+        loop {
+            match tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.expect("stalled").expect("ended") {
+                EngineEvent::Permission { .. } => cards += 1,
+                EngineEvent::Done { incomplete, .. } => {
+                    assert!(incomplete, "late={late}: a subagent still at work leaves the reply's usage incomplete");
+                    break;
+                }
+                _ => {}
+            }
+        }
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while f.wire.lines_with("\"decision\":\"decline\"") == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("late={late}: the request was left unanswered"));
+        assert_eq!(f.wire.lines_with("\"decision\":\"accept\""), 0);
+        while let Ok(event) = rx.try_recv() {
+            assert!(!matches!(event, EngineEvent::Tool { .. }), "late={late}: a subagent's late step reaches no reply: {event:?}");
+        }
+        assert_eq!(cards, usize::from(!late), "late={late}: a late request shows no card");
+        session.close();
+        assert_eq!(*f.mismatches.lock().unwrap(), Vec::<String>::new(), "late={late}");
+    }
+}
+
 #[tokio::test]
 async fn codex_an_answer_that_fails_to_write_keeps_the_approval_and_the_retry_is_written_once() {
     let f = fake(fixture("codex", "tools"));

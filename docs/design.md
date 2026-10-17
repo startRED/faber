@@ -278,6 +278,14 @@ ended; one sent to the background keeps the live mark until its task notice arri
 the third ink, never as a failure. Known limit: when a reply moves to another AI after a quota stop, its open tools,
 helpers included, read as working again with the new reply.
 
+A Codex subagent (`spawn_agent`, started only when the person asks for one) is the same row. Codex gives it a path instead of a description, so its title is the
+path's last part with spaces (`/root/read_docs` reads "read docs"), and it has no kind. Its approvals show on the
+conversation's own card, since the person cannot open the subagent; one that arrives after the reply ended is refused,
+and Stop and closing the conversation reach the subagent too. What a subagent still does after its reply ended reaches
+no reply, so its step reads "stopped". Codex counts each thread's usage on its own, so the
+engine adds the subagent's tokens and cost to the reply that started it, and marks the reply's usage incomplete when a
+subagent is still at work as it ends.
+
 A helper from the other AI (Faber's helper tool, R161) is the same row: its title in bold and, as its kind, the AI that
 ran it, so a Claude Code reply reads "Codex". Its commands show under it and its report is its final words. The person
 never sees its approval cards: in a mode that asks, what the helper needed approval for is refused and named in its
