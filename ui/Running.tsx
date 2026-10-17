@@ -1,5 +1,6 @@
 import { createSignal, For, Show } from 'solid-js';
 import type { Project, RunningItem } from './api.ts';
+import { AgentChat } from './AgentChat.tsx';
 import { Asks, Parkeds } from './Ask.tsx';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { everyWhileShown } from './idle.ts';
@@ -9,6 +10,7 @@ import { vendorName } from './models.ts';
 import { animateList } from './motion.ts';
 import { untilReset } from './Sidebar.tsx';
 import { blocksOf, elapsed } from './running.ts';
+import type { AgentStep } from './worklog.ts';
 
 /** The running column: what runs now, one block per project and one for Chat, in the order the engine sent. A question
  * that waits is answered here, in place; a click on a row opens its conversation. */
@@ -19,6 +21,11 @@ export function Running(props: {
   onClose: () => void;
   /** Opened by the user over the stage: it is a modal dialog. Docked, or opened by itself, it is not. */
   modal: boolean;
+  /** A subagent the person opened from its reply: the column shows it instead of the list until "back". */
+  agent?: { step: AgentStep; streaming: boolean };
+  onBack?: () => void;
+  /** "Tell it…" from the open subagent: the conversation's box, reached through the column. */
+  onTell?: (title: string) => void;
   ref: (el: HTMLElement) => void;
 }) {
   // The times move while the column is open and stop with it.
@@ -33,75 +40,84 @@ export function Running(props: {
   };
   return (
     <aside id="running" class="runcol" data-surface="running" aria-labelledby="running-title" role={props.modal ? 'dialog' : undefined} aria-modal={props.modal ? 'true' : undefined} ref={props.ref}>
-      <div class="rc-head">
-        <button class="iconbtn" aria-label={t('run.close')} title={t('run.close')} onClick={() => props.onClose()}>
-          <Icon name="close" />
-        </button>
-        <h2 id="running-title" class="display">
-          {t('run.title')}
-        </h2>
-        <span class="n num">{props.items.length}</span>
-      </div>
-      <div class="rc-body" ref={animateList}>
-        <Show
-          when={props.items.length > 0}
-          fallback={
-            <div class="rc-empty">
-              <Peek />
-              <p>{t('run.none')}</p>
+      <Show
+        when={props.agent}
+        fallback={
+          <>
+            <div class="rc-head">
+              <button class="iconbtn" aria-label={t('run.close')} title={t('run.close')} onClick={() => props.onClose()}>
+                <Icon name="close" />
+              </button>
+              <h2 id="running-title" class="display">
+                {t('run.title')}
+              </h2>
+              <span class="n num">{props.items.length}</span>
             </div>
-          }
-        >
-          <For each={blocks()}>
-            {(block) => (
-              <section class="proj-g">
-                <h3>
-                  <span class="t">{nameOf(block.key)}</span>
-                  <Show when={block.needs > 0}>
-                    <span class="amber-tag">
-                      <Icon name="ask" small />
-                      {t('run.needs', { n: block.needs })}
-                    </span>
-                  </Show>
-                </h3>
-                <ul class="ritems" ref={animateList}>
-                  <For each={block.items}>
-                    {(item) => (
-                      <li class="ri" classList={{ need: item.state === 'needsYou' }} ref={animateList}>
-                        <div class="rhead">
-                          <Show when={item.state === 'needsYou'}>
-                            <span class="ask-label">
-                              <Icon name="ask" small />
-                              {words(item)}
-                            </span>
-                          </Show>
-                          <span class="vm" classList={{ claude: item.vendor === 'claude', codex: item.vendor === 'codex' }}>
-                            <VendorMark vendor={item.vendor} />
-                            <Show when={item.vendor}>{(v) => <b>{vendorName(v())}</b>}</Show>
-                            <Show when={item.state !== 'needsYou'}>
-                              <span class="verb">{words(item)}</span>
-                            </Show>
+            <div class="rc-body" ref={animateList}>
+              <Show
+                when={props.items.length > 0}
+                fallback={
+                  <div class="rc-empty">
+                    <Peek />
+                    <p>{t('run.none')}</p>
+                  </div>
+                }
+              >
+                <For each={blocks()}>
+                  {(block) => (
+                    <section class="proj-g">
+                      <h3>
+                        <span class="t">{nameOf(block.key)}</span>
+                        <Show when={block.needs > 0}>
+                          <span class="amber-tag">
+                            <Icon name="ask" small />
+                            {t('run.needs', { n: block.needs })}
                           </span>
-                          <span class="time num">{since(item)}</span>
-                        </div>
-                        <button class="name" onClick={() => props.onOpen(item)}>
-                          {item.title || t('run.untitled')}
-                        </button>
-                        <Show when={item.permissions.length > 0}>
-                          <Asks conversationId={item.conversationId} turnId={item.turnId} permissions={item.permissions} />
                         </Show>
-                        <Show when={item.parked?.length || item.parkedMore}>
-                          <Parkeds parked={item.parked ?? []} more={item.parkedMore} />
-                        </Show>
-                      </li>
-                    )}
-                  </For>
-                </ul>
-              </section>
-            )}
-          </For>
-        </Show>
-      </div>
+                      </h3>
+                      <ul class="ritems" ref={animateList}>
+                        <For each={block.items}>
+                          {(item) => (
+                            <li class="ri" classList={{ need: item.state === 'needsYou' }} ref={animateList}>
+                              <div class="rhead">
+                                <Show when={item.state === 'needsYou'}>
+                                  <span class="ask-label">
+                                    <Icon name="ask" small />
+                                    {words(item)}
+                                  </span>
+                                </Show>
+                                <span class="vm" classList={{ claude: item.vendor === 'claude', codex: item.vendor === 'codex' }}>
+                                  <VendorMark vendor={item.vendor} />
+                                  <Show when={item.vendor}>{(v) => <b>{vendorName(v())}</b>}</Show>
+                                  <Show when={item.state !== 'needsYou'}>
+                                    <span class="verb">{words(item)}</span>
+                                  </Show>
+                                </span>
+                                <span class="time num">{since(item)}</span>
+                              </div>
+                              <button class="name" onClick={() => props.onOpen(item)}>
+                                {item.title || t('run.untitled')}
+                              </button>
+                              <Show when={item.permissions.length > 0}>
+                                <Asks conversationId={item.conversationId} turnId={item.turnId} permissions={item.permissions} />
+                              </Show>
+                              <Show when={item.parked?.length || item.parkedMore}>
+                                <Parkeds parked={item.parked ?? []} more={item.parkedMore} />
+                              </Show>
+                            </li>
+                          )}
+                        </For>
+                      </ul>
+                    </section>
+                  )}
+                </For>
+              </Show>
+            </div>
+          </>
+        }
+      >
+        {(agent) => <AgentChat step={agent().step} streaming={agent().streaming} onBack={() => props.onBack?.()} onTell={(title) => props.onTell?.(title)} onClose={props.onClose} />}
+      </Show>
     </aside>
   );
 }

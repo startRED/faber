@@ -114,6 +114,8 @@ export interface AgentStep {
   kind: string;
   /** A helper from the other AI, not a subagent of the agent's own CLI. */
   helper: boolean;
+  /** The whole brief the agent sent it, word for word; empty when the CLI gives none (Codex names its subagents only). */
+  brief: string;
   /** What the subagent ran, in order. */
   tools: ToolUse[];
   report: string;
@@ -147,6 +149,20 @@ export function agentKind(kind: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
+/** Where a subagent is, in one word: still at work (in the background, waiting on the person, or seemingly stuck), or how it
+ * ended. A call left open after its reply ended was stopped with it, unless it was sent to the background. */
+export type AgentState = 'running' | 'background' | 'waiting' | 'stuck' | 'stopped' | 'declined' | 'done' | 'failed';
+export function agentState(step: AgentStep, streaming: boolean): AgentState {
+  const { ok, declined, sign } = step.call;
+  if (ok === undefined) {
+    if (!streaming) return step.background ? 'background' : 'stopped';
+    if (sign) return sign === 'waiting' ? 'waiting' : 'stuck';
+    return step.background ? 'background' : 'running';
+  }
+  if (declined) return 'declined';
+  return ok ? 'done' : 'failed';
+}
+
 /** Whether two lists hold the same tools in the same state, so a message that only grew in text leaves the rows of its tools
  * alone while it streams. A tool is the same while its id, name, outcome, sign and output length are. */
 export function sameTools(a: ToolUse[], b: ToolUse[]): boolean {
@@ -171,6 +187,7 @@ export function agentSteps(tools: ToolUse[] = [], helperKind = ''): AgentStep[] 
       title: text(helper ? input.title : input.description).trim() || middle(text(helper ? input.brief : input.prompt), 80),
       kind: helper ? helperKind : text(input.subagent_type),
       helper,
+      brief: text(helper ? input.brief : input.prompt).trim(),
       tools: tools.filter((tool) => tool.parent && root(tool) === call.id),
       report: agentReport(call.output),
       background: input.run_in_background === true,

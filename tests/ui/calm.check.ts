@@ -375,7 +375,7 @@ check('calm: numbers are written the way each language writes them', () => {
   }
 });
 
-check('calm: a helper sent to the background is a ring and a running one a dot, never the square of a stop button; both disclosures share one rule', () => {
+check('calm: a helper sent to the background is a ring and a running one a dot, never the square of a stop button; the row lines up with the work log', () => {
   useLanguage('en');
   const agent = { id: 'a1', name: 'Agent', input: { description: 'Audit the docs', subagent_type: 'general-purpose', run_in_background: true } };
   const view = thread([question, answer({ status: 'streaming', text: '', tools: [{ id: 'b1', name: 'Bash', input: { command: 'ls' }, ok: true }, agent] })]);
@@ -387,10 +387,11 @@ check('calm: a helper sent to the background is a ring and a running one a dot, 
     equal(style.borderRadius, '50%', 'round, not square');
     equal(style.backgroundColor, 'rgba(0, 0, 0, 0)', 'hollow while it works in the background');
     equal(row.querySelector('.agent-meta')!.textContent, [t('agent.kind.general'), t('agent.background'), t('activity.steps', { n: 0 })].join(' · '));
-    ok(row.classList.contains('disclosure') && view.root.querySelector('.activity')!.classList.contains('disclosure'), 'one rule for both');
-    const a = getComputedStyle(row.querySelector('summary')!);
+    // The row opens the subagent in the running column (R161 step 3), and still lines up with the work log's summary.
+    const a = getComputedStyle(row);
     const b = getComputedStyle(view.root.querySelector('.activity summary')!);
-    deepEqual([a.paddingTop, a.paddingLeft, a.display, a.cursor], [b.paddingTop, b.paddingLeft, b.display, b.cursor]);
+    const inset = (s: CSSStyleDeclaration, side: 'Top' | 'Left') => parseFloat(s[`padding${side}`]) + parseFloat(s[`border${side}Width`]);
+    deepEqual([inset(a, 'Top'), inset(a, 'Left'), a.display, a.cursor], [inset(b, 'Top'), inset(b, 'Left'), b.display, b.cursor]);
   } finally {
     view.close();
   }

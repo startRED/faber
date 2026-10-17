@@ -27,11 +27,13 @@ import { failureText, lang, t, templates, useLanguage } from './i18n.ts';
 import { createWidth } from './layout.ts';
 import { Lockup } from './Mark.tsx';
 import { isFirstInstall, newestId, NOTES, type Note, whatsNew } from './notes.ts';
-import { modelOptions } from './models.ts';
+import { modelOptions, vendorName } from './models.ts';
 import { animateDetails, animateList, watchMotion } from './motion.ts';
 import { Projects } from './Projects.tsx';
 import { createOpening, upsert } from './opening.ts';
 import { Running } from './Running.tsx';
+import { openedAgent, showAgent, tellAbout } from './AgentChat.tsx';
+import { agentSteps } from './worklog.ts';
 import { createAutoOpen, openPlace, type Place, placeOfRunning, store, waitingKeys } from './running.ts';
 import { type Keep, type Section, Settings } from './Settings.tsx';
 import { Setup } from './Setup.tsx';
@@ -238,6 +240,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     if (user && !docked()) queueMicrotask(() => column?.querySelector<HTMLElement>('button')?.focus());
   };
   const closeColumn = () => {
+    showAgent(undefined);
     if (!columnOpen()) return;
     // Closed while it was waiting for the typing to stop, or after it: the questions seen stay seen.
     autoOpen.seen(waitingKeys(items()));
@@ -247,6 +250,32 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     runButton?.focus();
   };
   const toggleColumn = () => (columnOpen() ? closeColumn() : openColumn(true));
+  // A subagent the person opened (R161 step 3) is the column's content until "back"; it belongs to the conversation on
+  // screen, so opening another one goes back to the list.
+  const sideAgent = createMemo(() => {
+    const open = openedAgent();
+    const conversation = current();
+    if (!open || conversation?.id !== open.conversationId) return undefined;
+    const m = conversation.messages.find((message) => message.id === open.messageId);
+    const helperKind = m?.vendor ? vendorName(m.vendor === 'claude' ? 'codex' : 'claude') : '';
+    const step = agentSteps(m?.tools, helperKind).find((s) => s.call.id === open.callId);
+    return step && { step, streaming: m?.status === 'streaming' };
+  });
+  createEffect(on(openedAgent, (open) => {
+    if (!open) return;
+    // One of another conversation is never shown (`sideAgent`); it goes when the conversation on screen changes.
+    if (current()?.id !== open.conversationId) return;
+    if (!columnOpen()) return openColumn(true);
+    // A column that opened by itself becomes the person's: over the stage it is now a modal dialog, like one they opened.
+    if (!byUser()) {
+      closeSide(false);
+      setByUser(true);
+    }
+    queueMicrotask(() => column?.querySelector<HTMLElement>('button')?.focus());
+  }, { defer: true }));
+  createEffect(on(() => current()?.id, (id) => {
+    if (openedAgent() && openedAgent()!.conversationId !== id) showAgent(undefined);
+  }, { defer: true }));
   // The window changes width while the column is open: it becomes a modal dialog or stops being one, and its element is
   // drawn again, so focus goes where the new state wants it.
   createEffect(
@@ -663,6 +692,17 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
       modal={trapped()}
       onOpen={openRunning}
       onClose={closeColumn}
+      agent={sideAgent()}
+      onBack={() => {
+        showAgent(undefined);
+        // The back button is gone with the subagent: focus stays in the column, on the list's first control.
+        queueMicrotask(() => column?.querySelector<HTMLElement>('button')?.focus());
+      }}
+      onTell={(title) => {
+        // The box sits behind a modal column: the column makes way first, so the box can take focus.
+        if (trapped()) closeColumn();
+        queueMicrotask(() => tellAbout(title));
+      }}
       ref={(el) => (column = el)}
     />
   );
