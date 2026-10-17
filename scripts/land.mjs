@@ -16,7 +16,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 const BASE = 'phase-1-base';
 
@@ -35,6 +35,74 @@ export function message(title, number, body, head) {
 
 /** The files `git merge-tree --write-tree --name-only --no-messages` lists after the tree when the merge conflicts. */
 export const conflicts = (output) => [...new Set(output.split('\n').slice(1).map((l) => l.trim()).filter(Boolean))];
+
+/** Files whose conflicts land settles itself: words only, where two lanes adding rows or paragraphs at one place is
+ * the usual case and never a contradiction (docs/design.md#numbers). */
+export const WORDS = /\.md$/;
+
+/**
+ * `text` (merged with diff3 markers) with every conflict in which neither side changed a line of the base settled as
+ * the base's new lines, then the pull request's; null when a conflict changed a line the base had, which only a person
+ * or the lane can settle.
+ */
+export function insertions(text) {
+  const lines = text.split('\n');
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].startsWith('<<<<<<< ')) {
+      out.push(lines[i]);
+      continue;
+    }
+    const sides = [[], [], []];
+    let side = 0;
+    for (i++; i < lines.length; i++) {
+      // A file with CRLF lines gets CRLF markers: a marker is read without its \r, a line is kept as it is.
+      const line = lines[i].replace(/\r$/, '');
+      if (side === 0 && line.startsWith('||||||| ')) side = 1;
+      else if (side === 1 && line === '=======') side = 2;
+      else if (side === 2 && line.startsWith('>>>>>>> ')) break;
+      else sides[side].push(lines[i]);
+    }
+    if (i >= lines.length || side !== 2 || sides[1].length) return null;
+    out.push(...sides[0], ...sides[2]);
+  }
+  return out.join('\n');
+}
+
+/**
+ * The tree of a squash that `git merge-tree` left in conflict, settled: every conflict is a content conflict in a file of
+ * words where both sides only added lines. `output` is merge-tree's, messages included. Returns `{ tree }`, or
+ * `{ refused }` with the files nobody may settle by machine.
+ */
+export function settle(output) {
+  const [tree, ...rest] = output.split('\n');
+  const files = conflicts(output.split('\n\n')[0]);
+  // Every conflict must be a content conflict in a listed file of words: a rename, a deletion, a file moved into a new
+  // folder or a folder in the way says something else, and nothing settles it by machine.
+  const content = /^CONFLICT \(content\): Merge conflict in (.+)$/;
+  const records = rest.slice(rest.indexOf('') + 1).filter((l) => l.startsWith('CONFLICT'));
+  const named = new Set(records.map((l) => content.exec(l)?.[1]).filter(Boolean));
+  const odd = records.filter((l) => !content.test(l)).map((l) => l.replace(/^CONFLICT /, ''));
+  const refused = [...files.filter((f) => !WORDS.test(f) || !named.has(f)), ...odd];
+  if (!files.length && !odd.length) refused.push('a conflict git did not name a file for');
+  if (refused.length) return { refused };
+  const index = join(mkdtempSync(join(tmpdir(), 'faber-index-')), 'index');
+  const env = { ...process.env, GIT_INDEX_FILE: index };
+  try {
+    run('git', ['read-tree', tree.trim()], { env });
+    for (const file of files) {
+      const settled = insertions(git('cat-file', '-p', `${tree.trim()}:${file}`));
+      if (settled === null) refused.push(file);
+      else {
+        const blob = run('git', ['hash-object', '-w', '--no-filters', '--stdin'], { input: settled, stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+        run('git', ['update-index', '--cacheinfo', `100644,${blob},${file}`], { env });
+      }
+    }
+    return refused.length ? { refused } : { tree: run('git', ['write-tree'], { env }).trim() };
+  } finally {
+    rmSync(dirname(index), { recursive: true, force: true });
+  }
+}
 
 /** Why this pull request cannot land, or nothing. `pr` is `gh pr view --json state,isDraft,baseRefName,isCrossRepository`. */
 export function refusal(pr) {
@@ -69,12 +137,17 @@ function land(number, dry, given) {
   const base = git('rev-parse', `origin/${BASE}`).trim();
   let tree;
   try {
-    tree = git('merge-tree', '--write-tree', '--name-only', '--no-messages', base, head).split('\n')[0].trim();
+    tree = git('-c', 'merge.conflictStyle=diff3', 'merge-tree', '--write-tree', '--name-only', base, head).split('\n')[0].trim();
   } catch (error) {
     if (error.status !== 1) throw error;
-    console.error(`#${pr.number} conflicts with ${BASE} in:\n  ${conflicts(String(error.stdout)).join('\n  ')}`);
-    console.error(`Merge origin/${BASE} into its branch, settle them, push, and run this again.`);
-    return 1;
+    const settled = settle(String(error.stdout));
+    if (settled.refused) {
+      console.error(`#${pr.number} conflicts with ${BASE} in:\n  ${settled.refused.join('\n  ')}`);
+      console.error(`Merge origin/${BASE} into its branch, settle them, push, and run this again.`);
+      return 1;
+    }
+    tree = settled.tree;
+    console.log(`Lines both sides added at one place in ${conflicts(String(error.stdout).split('\n\n')[0]).join(', ')} are kept, the base's first.`);
   }
   const squashed = run('git', ['commit-tree', tree, '-p', base, '-F', '-'], { input: message(pr.title, pr.number, pr.body, head), stdio: ['pipe', 'pipe', 'pipe'] }).trim();
   const commit = numberedCommit(squashed);
