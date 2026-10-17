@@ -940,7 +940,7 @@ export const ptBR: Messages = {
   'notes.18.better': 'Cada passo do trabalho agora diz o que faz em palavras simples, como Lendo, Buscando ou Alterando, com o arquivo ou comando em que atua.',
   'notes.19.new': 'Num projeto, o assistente pode pedir ajuda à outra IA com uma parte do trabalho ou uma revisão, e o ajudante aparece como uma etapa na resposta.',
   'notes.20.fixed': 'No Mac, o Faber agora se atualiza sozinho como no Windows e no Linux, e as prévias chegam a quem as ativou.',
-  'notes.next.better': 'A primeira tela de um projeto ficou mais calma: uma coluna só, com as conversas do próprio projeto, e um buraco negro menor que fica longe das palavras.',
+  'notes.21.better': 'A primeira tela de um projeto ficou mais calma: uma coluna só, com as conversas do próprio projeto, e um buraco negro menor que fica longe das palavras.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

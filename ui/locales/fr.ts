@@ -953,7 +953,7 @@ export const fr: Messages = {
   'notes.18.better': 'Chaque étape du travail dit maintenant ce qu’elle fait en mots simples, comme Lecture, Recherche ou Modification, avec le fichier ou la commande concernés.',
   'notes.19.new': 'Dans un projet, l’assistant peut demander à l’autre IA de l’aider sur une partie du travail ou une relecture, et cette aide apparaît comme une étape de sa réponse.',
   'notes.20.fixed': 'Sur Mac, Faber se met maintenant à jour tout seul comme sous Windows et Linux, et les préversions arrivent à ceux qui les ont activées.',
-  'notes.next.better': 'Le premier écran d’un projet est plus calme : une seule colonne avec les conversations de ce projet, et un trou noir plus petit qui reste loin du texte.',
+  'notes.21.better': 'Le premier écran d’un projet est plus calme : une seule colonne avec les conversations de ce projet, et un trou noir plus petit qui reste loin du texte.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',
