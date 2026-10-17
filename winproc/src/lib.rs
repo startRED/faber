@@ -5,6 +5,8 @@
 //!
 //! While a process is still suspended, two more calls act on it: lowering its token to Low integrity (a proof of code a
 //! role wrote may then write only into folders labelled Low, `label_low`) and reading which file its image came from.
+//!
+//! The test runner reads the system's process list here too (`processes`): one call, where WMI took 100 ms or more.
 
 #[cfg(windows)]
 pub use imp::{
@@ -355,3 +357,127 @@ mod imp {
         }
     }
 }
+
+/// Every process on the computer in one system call, with what the test runner's audit and measurements read: its id, its
+/// parent's id, its name, when it was created, the processor time it used and its private working set. The test runner
+/// used to ask WMI for the same columns, which opened a new COM connection and took 100 ms or more per question.
+#[cfg(windows)]
+mod processes {
+    use std::io;
+    use windows_sys::Wdk::System::SystemInformation::{NtQuerySystemInformation, SystemProcessInformation};
+    use windows_sys::Win32::Foundation::{HANDLE, UNICODE_STRING};
+
+    const STATUS_INFO_LENGTH_MISMATCH: i32 = 0xC000_0004_u32 as i32;
+
+    /// One process as the system lists it. Times are in 100 ns ticks; `created` counts from 1601, as `FILETIME` does.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct ProcessInfo {
+        pub pid: u32,
+        pub parent: u32,
+        pub name: String,
+        pub created: u64,
+        pub cpu: u64,
+        pub private_bytes: u64,
+    }
+
+    /// The start of `SYSTEM_PROCESS_INFORMATION`, with the fields windows-sys leaves named `Reserved` (the layout of the
+    /// Windows Driver Kit's `ntexapi.h`). Only this prefix is read; every entry the system writes is longer.
+    #[repr(C)]
+    struct Entry {
+        next_entry_offset: u32,
+        number_of_threads: u32,
+        working_set_private_size: i64,
+        hard_fault_count: u32,
+        number_of_threads_high_watermark: u32,
+        cycle_time: u64,
+        create_time: i64,
+        user_time: i64,
+        kernel_time: i64,
+        image_name: UNICODE_STRING,
+        base_priority: i32,
+        unique_process_id: HANDLE,
+        inherited_from_unique_process_id: HANDLE,
+    }
+
+    pub fn processes() -> io::Result<Vec<ProcessInfo>> {
+        // 8-byte words, so every entry the system writes is aligned for `Entry`.
+        let mut buffer: Vec<u64> = vec![0; 128 * 1024];
+        loop {
+            let bytes = u32::try_from(buffer.len() * 8).map_err(|_| io::Error::other("the process list is too large"))?;
+            let mut needed = 0u32;
+            // SAFETY: the buffer is writable for `bytes` bytes and outlives the call; `needed` is a plain integer.
+            let status = unsafe { NtQuerySystemInformation(SystemProcessInformation, buffer.as_mut_ptr().cast(), bytes, &mut needed) };
+            if status == STATUS_INFO_LENGTH_MISMATCH {
+                // Processes may start between two calls; leave room for them.
+                buffer.resize(needed as usize / 8 + 8 * 1024, 0);
+                continue;
+            }
+            if status < 0 {
+                return Err(io::Error::other(format!("NtQuerySystemInformation failed with status {status:#x}")));
+            }
+            return Ok(read(&buffer, (needed as usize).min(buffer.len() * 8)));
+        }
+    }
+
+    /// Walks the entries the call wrote into the first `filled` bytes of `buffer`.
+    fn read(buffer: &[u64], filled: usize) -> Vec<ProcessInfo> {
+        let base = buffer.as_ptr().cast::<u8>();
+        let (mut offset, mut list) = (0usize, Vec::new());
+        while offset % 8 == 0 && offset + std::mem::size_of::<Entry>() <= filled {
+            // SAFETY: `offset` is a sum of the system's own entry offsets, checked to stay 8-byte aligned, and the check above
+            // keeps the whole prefix inside the filled part of the buffer.
+            let entry = unsafe { &*base.add(offset).cast::<Entry>() };
+            let name = if entry.image_name.Buffer.is_null() || entry.image_name.Length == 0 {
+                // The idle process has no name; WMI called it this.
+                if entry.unique_process_id.is_null() { "System Idle Process".to_string() } else { String::new() }
+            } else {
+                // SAFETY: the system points the name into the same buffer, `Length` bytes long.
+                let units = unsafe { std::slice::from_raw_parts(entry.image_name.Buffer, usize::from(entry.image_name.Length) / 2) };
+                String::from_utf16_lossy(units)
+            };
+            list.push(ProcessInfo {
+                pid: entry.unique_process_id as usize as u32,
+                parent: entry.inherited_from_unique_process_id as usize as u32,
+                name,
+                created: entry.create_time.max(0) as u64,
+                cpu: (entry.user_time.max(0) + entry.kernel_time.max(0)) as u64,
+                private_bytes: entry.working_set_private_size.max(0) as u64,
+            });
+            if entry.next_entry_offset == 0 {
+                break;
+            }
+            offset += entry.next_entry_offset as usize;
+        }
+        list
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn the_list_holds_this_process_with_its_parent_name_creation_time_and_memory() {
+            let list = processes().unwrap();
+            assert!(list.len() > 20, "{} processes", list.len());
+            let me = list.iter().find(|p| p.pid == std::process::id()).expect("this process is in the list");
+            assert!(me.parent != 0 && me.name.to_lowercase().ends_with(".exe") && me.created > 0, "{me:?}");
+            assert!(me.private_bytes > 64 * 1024, "{me:?}");
+            assert!(list.iter().any(|p| p.pid == 4 && p.name == "System"), "the System process");
+        }
+
+        #[test]
+        fn processor_time_grows_while_this_process_works() {
+            let cpu = || processes().unwrap().into_iter().find(|p| p.pid == std::process::id()).unwrap().cpu;
+            let before = cpu();
+            let started = std::time::Instant::now();
+            let mut x = 0u64;
+            while started.elapsed() < std::time::Duration::from_millis(200) {
+                x = std::hint::black_box(x.wrapping_mul(31).wrapping_add(7));
+            }
+            assert!(cpu() > before, "{x}");
+        }
+    }
+}
+
+#[cfg(windows)]
+pub use processes::{ProcessInfo, processes};

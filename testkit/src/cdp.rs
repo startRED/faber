@@ -195,27 +195,69 @@ impl Cdp {
         Ok(result["result"]["value"].clone())
     }
 
-    /// Polls a script every 100 ms until it returns something truthy. On the deadline it fails with `what`, the
-    /// condition's own message.
+    /// Waits until a script returns something truthy. On the deadline it fails with `what`, the condition's own message.
     pub fn wait_for(&mut self, what: &str, expression: &str, timeout: Duration) -> Result<(), String> {
+        let started = Instant::now();
         let deadline = Instant::now() + timeout;
         let outer = self.set_deadline(Some(self.deadline.map_or(deadline, |o| o.min(deadline))));
         let timed_out = || format!("timed out after {} s waiting for {what}", timeout.as_secs());
-        let result = loop {
-            match self.eval(expression) {
-                Ok(value) if truthy(&value) => break Ok(()),
-                Ok(_) => {}
-                // A call cut short by this deadline is the wait running out, said in the wait's own words.
-                Err(_) if Instant::now() >= deadline => break Err(timed_out()),
-                Err(e) => break Err(e),
-            }
-            if Instant::now() >= deadline {
-                break Err(timed_out());
-            }
-            std::thread::sleep(Duration::from_millis(100));
+        let result = match self.settle(expression, Accept::Truthy, deadline) {
+            Ok(Settled::Accepted(_)) => Ok(()),
+            Ok(Settled::TimedOut(_)) => Err(timed_out()),
+            // A call cut short by this deadline is the wait running out, said in the wait's own words.
+            Err(_) if Instant::now() >= deadline => Err(timed_out()),
+            Err(e) => Err(e),
         };
         self.deadline = outer;
+        crate::timing::step("page-wait", started.elapsed());
         result
+    }
+
+    /// Reads `expression` in the page until `accept` holds for its value or `deadline` passes. The page itself reads it
+    /// again at every change of the document, and at least every 50 ms, inside one protocol call of up to two seconds;
+    /// asking from here every 100 ms cost a round trip each time and saw a change up to 100 ms late. A script the page
+    /// cannot wrap (statements rather than one expression) is asked from here every 100 ms, as before. A script that throws
+    /// fails at once, with what it threw.
+    pub fn settle(&mut self, expression: &str, accept: Accept, deadline: Instant) -> Result<Settled, String> {
+        // In parentheses a script that starts with `{` is an object, which is always true; on its own it is a block.
+        let mut wrapped = !expression.trim_start().starts_with('{');
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if !wrapped {
+                let value = self.eval(expression)?;
+                if accept.holds(&value) {
+                    return Ok(Settled::Accepted(value));
+                }
+                if Instant::now() + Duration::from_millis(100) >= deadline {
+                    return Ok(Settled::TimedOut(value));
+                }
+                std::thread::sleep(Duration::from_millis(100));
+                continue;
+            }
+            // The page answers a little before the deadline, so the answer is never cut off by it.
+            let budget = left.saturating_sub(Duration::from_millis(150)).min(Duration::from_secs(2));
+            let params = json!({ "expression": waiter(expression, accept, budget), "returnByValue": true, "awaitPromise": true });
+            let result = self.call("Runtime.evaluate", params)?;
+            if let Some(thrown) = result.get("exceptionDetails") {
+                let text = thrown["exception"]["description"].as_str().or(thrown["text"].as_str()).unwrap_or("the script threw");
+                if text.starts_with("SyntaxError") {
+                    wrapped = false;
+                    continue;
+                }
+                return Err(format!("page script failed: {text}"));
+            }
+            let answer = &result["result"]["value"];
+            if let Some(error) = answer["error"].as_str() {
+                return Err(format!("page script failed: {error}"));
+            }
+            let value = answer["value"].clone();
+            if answer["done"] == true {
+                return Ok(Settled::Accepted(value));
+            }
+            if Instant::now() + Duration::from_millis(150) >= deadline {
+                return Ok(Settled::TimedOut(value));
+            }
+        }
     }
 
     pub fn move_to(&mut self, x: f64, y: f64) -> Result<(), String> {
@@ -287,11 +329,100 @@ impl Cdp {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         }
-        std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))
+        // Scenarios on different workers may name the same checkpoint: write beside it and rename, so a picture is never half
+        // of one and never two writers on one file.
+        static COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let mut name = path.file_name().unwrap_or_default().to_os_string();
+        name.push(format!(".{}-{}.tmp", std::process::id(), COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst)));
+        let temp = path.with_file_name(name);
+        std::fs::write(&temp, bytes).map_err(|e| format!("{}: {e}", temp.display()))?;
+        let mut moved = std::fs::rename(&temp, path);
+        for _ in 0..5 {
+            if moved.is_ok() {
+                break;
+            }
+            // Windows refuses to replace a file another writer is replacing at that moment.
+            std::thread::sleep(Duration::from_millis(20));
+            moved = std::fs::rename(&temp, path);
+        }
+        moved.map_err(|e| {
+            let _ = std::fs::remove_file(&temp);
+            format!("{}: {e}", path.display())
+        })
     }
 }
 
 /// JavaScript's idea of true, for the value a waiting script returns.
+/// When a value read in the page is the one a wait waits for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Accept {
+    /// Anything JavaScript calls true (and [`truthy`] agrees with).
+    Truthy,
+    /// A value with no `why`: the locator found its one element.
+    NoWhy,
+}
+
+impl Accept {
+    fn holds(self, value: &Value) -> bool {
+        match self {
+            Accept::Truthy => truthy(value),
+            Accept::NoWhy => value["why"].is_null(),
+        }
+    }
+
+    fn script(self) -> &'static str {
+        match self {
+            Accept::Truthy => "(value) => !!value",
+            Accept::NoWhy => "(value) => value == null || value.why == null",
+        }
+    }
+}
+
+/// How a wait ended: with the value it waited for, or with the last value it read when time ran out.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Settled {
+    Accepted(Value),
+    TimedOut(Value),
+}
+
+/// The page's side of [`Cdp::settle`]: it reads the expression, and until `accept` holds and `budget` lasts, reads it again
+/// after each change of the document (at most once per 16 ms) or after 50 ms without one. It answers `{ done, value }`, or
+/// `{ error }` when the expression threw. The expression goes in as code, as `Runtime.evaluate` would run it; the
+/// markers let the test double find it.
+fn waiter(expression: &str, accept: Accept, budget: Duration) -> String {
+    format!(
+        "/*faber-wait*/(async () => {{
+  const read = async () => ({expression}) /*end*/;
+  const accept = {accept};
+  const until = performance.now() + {budget};
+  // A read that never settles ends the wait at its budget, so the observer below is always let go.
+  const late = Symbol('late');
+  const budgetEnds = new Promise((r) => setTimeout(() => r(late), Math.max(0, until - performance.now())));
+  let changed = false;
+  let wake = null;
+  const observer = new MutationObserver(() => {{ changed = true; if (wake) wake(); }});
+  observer.observe(document, {{ subtree: true, childList: true, attributes: true, characterData: true }});
+  try {{
+    for (;;) {{
+      changed = false;
+      let value;
+      try {{ value = await Promise.race([read(), budgetEnds]); }} catch (e) {{ return {{ error: String((e && e.stack) || e) }}; }}
+      if (value === late) return {{ done: false, value: null }};
+      if (accept(value)) return {{ done: true, value }};
+      if (until - performance.now() <= 0) return {{ done: false, value }};
+      await new Promise((r) => setTimeout(r, Math.min(16, Math.max(0, until - performance.now()))));
+      if (!changed) await new Promise((r) => {{ wake = r; setTimeout(r, Math.min(50, Math.max(0, until - performance.now()))); }});
+      wake = null;
+    }}
+  }} finally {{
+    observer.disconnect();
+  }}
+}})()",
+        accept = accept.script(),
+        budget = budget.as_millis()
+    )
+}
+
 fn truthy(value: &Value) -> bool {
     match value {
         Value::Null => false,
@@ -443,13 +574,26 @@ mod tests {
                                 socket.send(Message::text(json!({ "method": "Page.lifecycleEvent", "params": { "frameId": "main", "loaderId": "first", "name": "load" } }).to_string())).unwrap();
                                 json!({})
                             }
-                            "Runtime.evaluate" => match request["params"]["expression"].as_str().unwrap() {
-                                "boom" => {
+                            "Runtime.evaluate" => match inner(request["params"]["expression"].as_str().unwrap()) {
+                                Wrapped("late") => {
+                                    let done = request["id"].as_u64().unwrap() > 6;
+                                    json!({ "result": { "type": "object", "value": { "done": done, "value": done } } })
+                                }
+                                Wrapped("boom") => json!({ "result": { "type": "object", "value": { "error": "Error: boom" } } }),
+                                Wrapped("a; b") => {
+                                    json!({ "result": { "type": "object" }, "exceptionDetails": { "text": "Uncaught", "exception": { "description": "SyntaxError: Unexpected token ';'" } } })
+                                }
+                                // In parentheses it is an object, which a page calls true.
+                                Wrapped("{ ready: false }") => {
+                                    json!({ "result": { "type": "object", "value": { "done": true, "value": { "ready": false } } } })
+                                }
+                                Wrapped(_) => json!({ "result": { "type": "object", "value": { "done": false } } }),
+                                Plain("a; b") => json!({ "result": { "type": "boolean", "value": request["id"].as_u64().unwrap() > 4 } }),
+                                Plain("boom") => {
                                     json!({ "result": { "type": "object" }, "exceptionDetails": { "text": "Uncaught", "exception": { "description": "Error: boom" } } })
                                 }
-                                "1 + 1" => json!({ "result": { "type": "number", "value": 2 } }),
-                                "late" => json!({ "result": { "type": "boolean", "value": request["id"].as_u64().unwrap() > 6 } }),
-                                _ => json!({ "result": { "type": "undefined" } }),
+                                Plain("1 + 1") => json!({ "result": { "type": "number", "value": 2 } }),
+                                Plain(_) => json!({ "result": { "type": "undefined" } }),
                             },
                             "Page.captureScreenshot" => json!({ "data": "iVBORw0KGgo=" }),
                             _ => json!({}),
@@ -622,13 +766,52 @@ mod tests {
         assert!(error.contains("did not offer a page"), "{error}");
     }
 
+    /// What the test double was asked to evaluate: a wait's expression, or a plain one.
+    enum Asked<'a> {
+        Wrapped(&'a str),
+        Plain(&'a str),
+    }
+    use Asked::{Plain, Wrapped};
+
+    fn inner(script: &str) -> Asked<'_> {
+        match script.strip_prefix("/*faber-wait*/") {
+            Some(rest) => {
+                let start = rest.find("const read = async () => (").unwrap() + "const read = async () => (".len();
+                Wrapped(&rest[start..rest.find(") /*end*/").unwrap()])
+            }
+            None => Plain(script),
+        }
+    }
+
     #[test]
-    fn wait_for_polls_until_the_condition_holds_and_fails_with_its_own_message() {
-        let (port, _) = mock();
+    fn wait_for_waits_until_the_condition_holds_and_fails_with_its_own_message() {
+        let (port, seen) = mock();
         let mut cdp = Cdp::connect(port, Duration::from_secs(5)).unwrap();
         cdp.wait_for("the late condition", "late", Duration::from_secs(5)).unwrap();
         let error = cdp.wait_for("the heading to appear", "nothing", Duration::from_millis(250)).unwrap_err();
         assert!(error.contains("waiting for the heading to appear"), "{error}");
+        let error = cdp.wait_for("a broken condition", "boom", Duration::from_secs(5)).unwrap_err();
+        assert!(error.contains("page script failed: Error: boom"), "a script that throws fails at once: {error}");
+        // Statements cannot be wrapped as one expression: they are asked from here, as before.
+        cdp.wait_for("statements", "a; b", Duration::from_secs(5)).unwrap();
+        // A block is not wrapped into an object, which would pass at once.
+        let error = cdp.wait_for("a block", "{ ready: false }", Duration::from_millis(400)).unwrap_err();
+        assert!(error.contains("waiting for a block"), "{error}");
+        let asked: Vec<String> =
+            seen.lock().unwrap().iter().filter_map(|r| r["params"]["expression"].as_str().map(str::to_string)).collect();
+        assert!(asked.iter().any(|e| e == "a; b") && asked.iter().any(|e| e.starts_with("/*faber-wait*/")), "{asked:?}");
+    }
+
+    #[test]
+    fn the_page_side_of_a_wait_reads_the_expression_as_code_with_its_budget() {
+        let script = waiter("document.title === 'x'", Accept::NoWhy, Duration::from_millis(1850));
+        assert!(script.contains("const read = async () => (document.title === 'x') /*end*/;"));
+        assert!(script.contains("const accept = (value) => value == null || value.why == null;"));
+        assert!(script.contains("performance.now() + 1850;"));
+        assert!(script.contains("observer.disconnect()"), "the observer never outlives the wait");
+        assert!(script.contains("await Promise.race([read(), budgetEnds])"), "a read that never settles ends at the budget");
+        assert!(Accept::NoWhy.holds(&json!({ "x": 1 })) && !Accept::NoWhy.holds(&json!({ "why": "two match" })));
+        assert!(Accept::Truthy.holds(&json!([])) && !Accept::Truthy.holds(&json!("")) && !Accept::Truthy.holds(&Value::Null));
     }
 
     #[test]

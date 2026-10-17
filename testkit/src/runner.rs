@@ -7,12 +7,13 @@ use crate::base;
 use crate::checks;
 use crate::cross;
 use crate::lanes;
-use crate::plan::{Options, Suite, changed_paths, jobs, parse_args, select};
+use crate::plan::{Options, Suite, changed_paths, jobs, parse_args, parse_failed, select};
 use crate::report::{Outcome, Status, exit_code, line, quiet, summary};
 use crate::screen;
 use crate::slots;
 use crate::sweep;
-use crate::testbuild::{build_side_by_side, build_test_app, cargo_command, ensure_fake_cli, prebuilt};
+use crate::testbuild::{build_for_run, build_side_by_side, cargo_command, prebuilt, streamed};
+use crate::timing;
 use faber_engine::project::proof::output::{cargo_output, died, failure_sections, parse_cargo_tests};
 use std::fs::File;
 use std::io::Write;
@@ -20,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::Instant;
 
-const USAGE: &str = "usage: cargo t [--all] [--suite rust|ui|screen|lint] [--filter <text>] [--shard <i/n> [--costs <file>]] [--build-only | --prebuilt] [--claims]";
+const USAGE: &str = "usage: cargo t [--all] [--suite rust|ui|screen|lint] [--filter <text> | --failed] [--shard <i/n> [--costs <file>]] [--build-only | --prebuilt] [--claims]";
 
 /// The two Clippy proofs, as CI runs them (a test keeps them equal). `--suite lint` runs them with [`lint_args`].
 pub const LINTS: [&[&str]; 2] = [
@@ -35,6 +36,16 @@ pub fn cargo_test_args(jobs: usize, filter: Option<&str>) -> Vec<String> {
     args.push(jobs.to_string());
     args.extend(filter.map(str::to_string));
     args.extend(["--".to_string(), "--test-threads".into(), jobs.to_string()]);
+    args
+}
+
+/// The same, for exactly these tests (`--failed`): libtest takes several names, and `--exact` makes each one a whole name.
+pub fn cargo_test_exact_args(jobs: usize, names: &[String]) -> Vec<String> {
+    let mut args = ["test", "--workspace", "--no-fail-fast", "--message-format=json", "-j"].map(String::from).to_vec();
+    args.push(jobs.to_string());
+    // Cargo takes one test name before `--`; the test programs take any number after it.
+    args.extend(["--".to_string(), "--test-threads".into(), jobs.to_string(), "--exact".into()]);
+    args.extend(names.iter().cloned());
     args
 }
 
@@ -56,13 +67,28 @@ fn reason(errors: &[String], stderr: &str) -> String {
     lines[lines.len().saturating_sub(20)..].join("\n")
 }
 
-fn cargo(root: &Path, args: &[String]) -> std::io::Result<Output> {
-    cargo_command().current_dir(root).args(args).output()
+/// Runs Cargo and reads its output as it comes, so the log tells how long the build took before the first test ran.
+fn cargo(mut command: Command, root: &Path, args: &[String], what: &str) -> std::io::Result<Output> {
+    let started = Instant::now();
+    let mut built = false;
+    command.current_dir(root).args(args);
+    let output = streamed(&mut command, |line| {
+        if !built && line.contains("\"reason\":\"build-finished\"") {
+            built = true;
+            timing::record("compile", what, started.elapsed());
+        }
+    });
+    if !built {
+        timing::record("compile", what, started.elapsed());
+    }
+    output
 }
 
-fn run_rust(root: &Path, jobs: usize, filter: Option<&str>, log: &mut Log) -> Vec<Outcome> {
+fn run_rust(root: &Path, jobs: usize, filter: Option<&str>, exact: &[String], log: &mut Log) -> Vec<Outcome> {
+    let _rust = timing::span("rust", "cargo test --workspace");
     let started = Instant::now();
-    let output = match cargo(root, &cargo_test_args(jobs, filter)) {
+    let args = if exact.is_empty() { cargo_test_args(jobs, filter) } else { cargo_test_exact_args(jobs, exact) };
+    let output = match cargo(cargo_command(), root, &args, "cargo test --workspace") {
         Ok(output) => output,
         Err(e) => return vec![Outcome::fail(Suite::Rust, "cargo test --workspace", None, &format!("cannot start cargo: {e}"))],
     };
@@ -117,9 +143,10 @@ fn run_lint(root: &Path, jobs: usize, log: &mut Log) -> Vec<Outcome> {
     outcomes
 }
 
-fn lint(mut command: Command, root: &Path, proof: &[&str], jobs: usize, log: &mut Log) -> Outcome {
+fn lint(command: Command, root: &Path, proof: &[&str], jobs: usize, log: &mut Log) -> Outcome {
     let (started, name) = (Instant::now(), format!("cargo {}", proof.join(" ")));
-    let output = match command.current_dir(root).args(lint_args(proof, jobs)).output() {
+    let _lint = timing::span("lint", &name);
+    let output = match cargo(command, root, &lint_args(proof, jobs), &name) {
         Ok(output) => output,
         Err(e) => return Outcome::fail(Suite::Lint, &name, None, &format!("cannot start cargo: {e}")),
     };
@@ -152,6 +179,9 @@ impl Log {
     }
 
     fn show(&mut self, outcomes: &[Outcome]) {
+        for timed in timing::drain() {
+            self.write(&timed);
+        }
         for outcome in outcomes {
             self.write(&line(outcome));
             if let Some(text) = quiet(outcome) {
@@ -211,6 +241,28 @@ pub fn nothing_matched(outcomes: &[Outcome], filter: Option<&str>) -> bool {
 
 /// Runs the runner. Returns the exit code.
 pub fn run(args: &[String]) -> i32 {
+    let started = Instant::now();
+    let mut log = None;
+    let code = run_suites(args, &mut log);
+    let (line, json) = timing::totals(started.elapsed());
+    if let Some(log) = &mut log {
+        for timed in timing::drain() {
+            log.write(&timed);
+        }
+        log.write(&timing::steps_line());
+        log.write(&line);
+    }
+    if let Ok(paths) = Paths::discover() {
+        let _ = std::fs::write(paths.target.join("timing.json"), serde_json::to_string_pretty(&json).unwrap_or_default());
+    }
+    if code != 2 {
+        println!("{line}");
+    }
+    code
+}
+
+/// The run itself. The log it opens is handed back, so the timing lines go at its end.
+fn run_suites(args: &[String], log_out: &mut Option<Log>) -> i32 {
     let opts: Options = match parse_args(args) {
         Ok(opts) => opts,
         Err(e) => {
@@ -261,7 +313,12 @@ pub fn run(args: &[String]) -> i32 {
     }
     // A red phase-1-base shows before anything runs: commits pushed onto it only wait behind the failure.
     base::warn(&paths.root);
-    let suites = select(&opts, &changed);
+    let failed =
+        if opts.failed { Some(parse_failed(&std::fs::read_to_string(paths.target.join("run.log")).unwrap_or_default())) } else { None };
+    let suites = match &failed {
+        Some(failed) => failed.suites().into_iter().filter(|suite| opts.suite.is_none_or(|only| only == *suite)).collect(),
+        None => select(&opts, &changed),
+    };
     let costs = match opts.costs.as_deref().map(screen::Costs::read).unwrap_or_else(|| Ok(screen::Costs::committed())) {
         Ok(costs) => costs,
         Err(e) => {
@@ -269,6 +326,10 @@ pub fn run(args: &[String]) -> i32 {
             return 2;
         }
     };
+    if suites.is_empty() && failed.is_some() {
+        println!("No failed test is recorded in {}. Nothing ran.", paths.target.join("run.log").display());
+        return 0;
+    }
     if suites.is_empty() {
         println!("Nothing changed that needs a test (use --all to run everything).");
         return 0;
@@ -279,16 +340,18 @@ pub fn run(args: &[String]) -> i32 {
         emergency_cleanup();
         std::process::exit(130);
     });
-    let mut log = Log::create(paths.target.join("run.log"));
+    let log = log_out.insert(Log::create(paths.target.join("run.log")));
     let filter = opts.filter.as_deref();
     let mut outcomes: Vec<Outcome> = Vec::new();
     if suites.contains(&Suite::Lint) {
-        let found = run_lint(&paths.root, jobs, &mut log);
+        let found = run_lint(&paths.root, jobs, log);
         log.show(&found);
         outcomes.extend(found);
     }
     if suites.contains(&Suite::Rust) {
-        let found = run_rust(&paths.root, jobs, filter, &mut log);
+        // A failed build or a dead test program names no test, so the whole suite runs again.
+        let exact: &[String] = failed.as_ref().filter(|f| !f.rust_whole).map_or(&[], |f| f.rust.as_slice());
+        let found = run_rust(&paths.root, jobs, filter, exact, log);
         log.show(&found);
         outcomes.extend(found);
     }
@@ -302,8 +365,7 @@ pub fn run(args: &[String]) -> i32 {
             outcomes.push(skipped);
         }
         if wants_ui || screen_runs {
-            let built =
-                if opts.prebuilt { prebuilt(&paths) } else { ensure_fake_cli(&paths, jobs).and_then(|()| build_test_app(&paths, jobs)) };
+            let built = if opts.prebuilt { prebuilt(&paths) } else { build_for_run(&paths, jobs) };
             match built {
                 Err(message) => {
                     for suite in [Suite::Ui, Suite::Screen].into_iter().filter(|s| suites.contains(s) && (*s == Suite::Ui || screen_runs)) {
@@ -314,15 +376,28 @@ pub fn run(args: &[String]) -> i32 {
                 }
                 Ok(()) => {
                     if wants_ui {
+                        let _ui = timing::span("ui", "checks");
                         let found = checks::run(&paths, filter);
                         log.show(&found);
                         outcomes.extend(found);
                     }
                     if screen_runs {
+                        let _screen = timing::span("screen", "scenarios");
                         // Each scenario is logged as it ends, and a failure shows at once: the suite takes minutes.
-                        outcomes.extend(screen::run_all(&paths, filter, opts.shard, &costs, &mut |outcome| {
+                        let only = failed.as_ref().map(|f| f.screen.as_slice());
+                        let found = screen::run_all(&paths, filter, only, opts.shard, &costs, &mut |outcome| {
                             log.show(std::slice::from_ref(outcome))
-                        }));
+                        });
+                        // A name the log holds that no scenario has any more (it was renamed) is never a quiet pass.
+                        let missing: Vec<Outcome> = only
+                            .into_iter()
+                            .flatten()
+                            .filter(|name| !found.iter().any(|o| &o.name == *name))
+                            .map(|name| Outcome::not_run(Suite::Screen, name, "no scenario has this name any more"))
+                            .collect();
+                        log.show(&missing);
+                        outcomes.extend(found);
+                        outcomes.extend(missing);
                     }
                 }
             }
@@ -359,6 +434,28 @@ mod tests {
         let start = ["test", "--workspace", "--no-fail-fast", "--message-format=json", "-j"];
         assert_eq!(cargo_test_args(3, None), [&start[..], &["3", "--", "--test-threads", "3"]].concat());
         assert_eq!(cargo_test_args(1, Some("fake")), [&start[..], &["1", "fake", "--", "--test-threads", "1"]].concat());
+    }
+
+    #[test]
+    fn failed_rust_tests_run_again_by_their_exact_names() {
+        let names = ["a::b::one".to_string(), "c::two".to_string()];
+        assert_eq!(
+            cargo_test_exact_args(2, &names),
+            [
+                "test",
+                "--workspace",
+                "--no-fail-fast",
+                "--message-format=json",
+                "-j",
+                "2",
+                "--",
+                "--test-threads",
+                "2",
+                "--exact",
+                "a::b::one",
+                "c::two"
+            ]
+        );
     }
 
     #[test]

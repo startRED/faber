@@ -711,7 +711,9 @@ fn cases(sandbox: &Path) -> Vec<(&'static str, Job<'_>)> {
 /// Runs the jobs a few at a time, each on a thread of its own sharing the runtime, and returns their results in the jobs'
 /// order. A case mostly waits on git and proof processes, so one after the other took 116 to 191 s on the same runner.
 fn side_by_side(runtime: &tokio::runtime::Runtime, jobs: Vec<Job<'_>>) -> Vec<Result<Value>> {
-    let lanes = std::thread::available_parallelism().map_or(2, |n| n.get()).clamp(2, 4);
+    // Twice the cores: a case waits on its processes far more than it computes. On a 4-core CI runner, 4 lanes took
+    // 116 s, about the sum of the cases over four.
+    let lanes = std::thread::available_parallelism().map_or(2, |n| n.get() * 2).clamp(2, 8);
     let count = jobs.len();
     let queue = Mutex::new(jobs.into_iter().enumerate().collect::<std::collections::VecDeque<_>>());
     let results = Mutex::new((0..count).map(|_| None).collect::<Vec<Option<Result<Value>>>>());

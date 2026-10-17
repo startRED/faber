@@ -28,6 +28,7 @@ use crate::sandbox::{CliSlot, Launch};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 pub type Result<T = ()> = std::result::Result<T, String>;
@@ -94,32 +95,160 @@ impl Costs {
     }
 }
 
-/// Runs each scenario (those whose name contains `filter`, if there is one) and audits it. A scenario fails if its own
-/// checks fail or if its audit finds a leaked process, an outside write or a changed environment. `done` hears of each
-/// outcome as soon as its scenario ends, so the runner can print it while the next one runs.
+/// The scenarios whose result depends on the machine being quiet, with the reason. They run one at a time, after the
+/// parallel batch, with nothing else running. The rule: a scenario that reads the processor or memory of the app, that
+/// counts frames or times a motion, that depends on which window is shown or focused, that waits for the quota (read by a
+/// background process at idle priority, which a busy processor starves), or that uses a resource the whole PC shares (the
+/// clipboard) is listed here. A scenario that only checks what the page shows is not, and goes to a worker.
+/// When unsure, list it: a wrong entry costs a few seconds, a missing one costs a flaky run. A test fails when a name says
+/// "memory", "processor", "CPU", "MB", "budget", "frame", "focused", "quota" or "usage limits" and is not listed.
+pub const SOLO: &[(&str, &str)] = &[
+    ("with no CLI running, Faber stays within its memory budget", "memory"),
+    ("with reduced motion on, the dust stays off and Faber stays within its memory budget", "memory"),
+    (
+        "a new project session shows the black hole, which moves only in a shown and focused window, within the memory budget",
+        "processor, memory, window focus",
+    ),
+    ("after the six looks were applied in turn, Faber stays within its memory budget", "memory"),
+    ("a conversation with a thousand messages opens quickly and stays within the budget", "time to open, memory"),
+    ("homes: idle life costs the processor little, and nothing while the window is hidden", "processor, window state"),
+    ("homes: the Chat home and the Projects home look alive, and stand still with reduced motion", "animations running, window state"),
+    ("C5.4: the open guide and the look step, with no conversation, use at most 400 MB", "memory"),
+    ("projects: a warm CLI runs straight under the app, with no guard process, and its memory is measured", "memory"),
+    ("review 2: rapid column toggles on a large thread stay below 400 MB without stage clones", "memory"),
+    ("review 12: natural column motion has intermediate frames without stretching text", "frame intervals"),
+    ("review 5: retained layout motion stays within the frame budget on a large thread", "frame intervals"),
+    ("pointer respects delayed finite layout motion before clicking", "motion timing"),
+    ("sentinel: panels move through frames, and reduced motion moves nothing", "frame clock"),
+    ("sentinel: a permission card arrives through frames", "frame clock"),
+    ("the quota of each vendor shows in the footer, and comes back after the screen reloads", "quota reading at idle priority"),
+    ("the quota in the sidebar opens Settings on the usage limits, and a reload shows the same figures", "quota reading at idle priority"),
+    ("every section of Settings says its part: the accounts, the usage limits and what stays on this PC", "quota reading at idle priority"),
+    ("right-click opens Faber's short menus on a chat and a text field, and nothing anywhere else", "the PC's one clipboard"),
+    (
+        "with Auto, the answer names its model as soon as it starts, keeps the name to the end and after reopening",
+        "reads Auto's 30 s routing state, which ended early beside three other scenarios (4 workers, 2026-10-17)",
+    ),
+];
+
+/// Phrases that look like a word of the rule above and are not about the machine: focus inside the page (`activeElement`),
+/// which each page has on its own, and the money a mission may spend, which is a number in the engine.
+#[cfg(test)]
+const NOT_ABOUT_THE_MACHINE: &[&str] = &["a focused heading", "waits on the budget"];
+
+/// Whether the scenario `name` runs alone, after the parallel batch.
+pub fn is_solo(name: &str) -> bool {
+    SOLO.iter().any(|(solo, _)| *solo == name)
+}
+
+/// How many scenarios run at once when `FABER_SCREEN_WORKERS` does not say. Measured on the maintainer's PC (docs/dev/testing.md,
+/// "Screen tests"). On GitHub Actions each part already runs on a small machine with seven others beside it, so it stays at
+/// one there unless the workflow sets the variable.
+const DEFAULT_WORKERS: usize = 4;
+
+/// The workers a run uses: `FABER_SCREEN_WORKERS` when it is a number above zero, else the default.
+pub fn workers(setting: Option<&str>, actions: bool) -> usize {
+    setting.and_then(|v| v.trim().parse::<usize>().ok()).filter(|n| *n > 0).unwrap_or(if actions { 1 } else { DEFAULT_WORKERS })
+}
+
+/// What runs when: the scenarios for the workers (the slowest first, so no long one starts last) and the ones that run
+/// alone after them, each as an index into the chosen scenarios.
+#[derive(Debug, PartialEq, Eq)]
+struct Batches {
+    parallel: Vec<usize>,
+    alone: Vec<usize>,
+}
+
+/// Splits the chosen scenarios (`(seconds, solo)` each) into the two batches. `dealt` is the shard: its part, and the part
+/// each scenario belongs to; a scenario of another part is in neither batch.
+fn batches(chosen: &[(u32, bool)], dealt: Option<(usize, &[usize])>) -> Batches {
+    let mine = |index: &usize| dealt.is_none_or(|(part, to)| to[*index] == part);
+    let (alone, mut parallel): (Vec<usize>, Vec<usize>) = (0..chosen.len()).filter(mine).partition(|index| chosen[*index].1);
+    parallel.sort_by_key(|index| (std::cmp::Reverse(chosen[*index].0), *index));
+    Batches { parallel, alone }
+}
+
+/// Runs the batches: the first on `workers` threads, each taking the next scenario when it is free; then the second, one at
+/// a time, on this thread. `done` hears of each result on this thread as soon as it is in. The results come back in the
+/// order of the scenarios, whatever order they ended in; a scenario in neither batch has none.
+fn execute<T: Send>(
+    batches: &Batches,
+    total: usize,
+    workers: usize,
+    run: &(dyn Fn(usize) -> T + Sync),
+    done: &mut dyn FnMut(&T),
+) -> Vec<Option<T>> {
+    let mut results: Vec<Option<T>> = (0..total).map(|_| None).collect();
+    let next = AtomicUsize::new(0);
+    let (next, parallel) = (&next, &batches.parallel);
+    let (send, receive) = std::sync::mpsc::channel::<(usize, T)>();
+    std::thread::scope(|scope| {
+        for _ in 0..workers.min(parallel.len()) {
+            let send = send.clone();
+            scope.spawn(move || {
+                while let Some(&index) = parallel.get(next.fetch_add(1, Ordering::SeqCst)) {
+                    if send.send((index, run(index))).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+        drop(send);
+        for (index, outcome) in receive {
+            done(&outcome);
+            results[index] = Some(outcome);
+        }
+    });
+    for &index in &batches.alone {
+        let outcome = run(index);
+        done(&outcome);
+        results[index] = Some(outcome);
+    }
+    results
+}
+
+/// Runs each scenario (those whose name contains `filter`, if there is one, and is one of `only`, if there is a list of exact
+/// names) and audits it. A scenario fails if its own
+/// checks fail or if its audit finds a leaked process, an outside write or a changed environment. `shard` keeps only the
+/// scenarios dealt to one part. The scenarios that measure the machine run alone at the end (`SOLO`); the others run on
+/// several workers at once (`workers`), each in a sandbox, on a DevTools port and in a process tree of its own. `done`
+/// hears of each outcome as soon as its scenario ends, so the runner can print it while the next ones run; the list that
+/// comes back keeps the order of the scenarios.
 pub fn run_all(
     paths: &Paths,
     filter: Option<&str>,
+    only: Option<&[String]>,
     shard: Option<(usize, usize)>,
     costs: &Costs,
     done: &mut dyn FnMut(&Outcome),
 ) -> Vec<Outcome> {
-    let mut outcomes = Vec::new();
-    let chosen: Vec<Scenario> = all().into_iter().filter(|s| filter.is_none_or(|f| s.name.contains(f))).collect();
+    let chosen: Vec<Scenario> = all()
+        .into_iter()
+        .filter(|s| filter.is_none_or(|f| s.name.contains(f)) && only.is_none_or(|names| names.iter().any(|n| n == s.name)))
+        .collect();
     let seconds: Vec<u32> = chosen.iter().map(|s| costs.of(s.name)).collect();
     let dealt = shard.map(|(part, parts)| (part - 1, deal(&seconds, parts)));
-    for (index, scenario) in chosen.iter().enumerate() {
-        if dealt.as_ref().is_some_and(|(part, to)| to[index] != *part) {
-            continue;
-        }
-        let outcome = run_one(paths, scenario);
-        done(&outcome);
-        outcomes.push(outcome);
-    }
-    outcomes
+    let table: Vec<(u32, bool)> = chosen.iter().zip(&seconds).map(|(s, seconds)| (*seconds, is_solo(s.name))).collect();
+    let plan = batches(&table, dealt.as_ref().map(|(part, to)| (*part, to.as_slice())));
+    let actions = std::env::var("GITHUB_ACTIONS").is_ok_and(|v| v == "true");
+    let count = workers(std::env::var("FABER_SCREEN_WORKERS").ok().as_deref(), actions);
+    let run = |index: usize| {
+        let scenario = &chosen[index];
+        // A panic outside the scenario's own call (the sandbox, the audit) fails that scenario, never the other workers.
+        catch_unwind(AssertUnwindSafe(|| run_one(paths, scenario)))
+            .unwrap_or_else(|_| Outcome::fail(Suite::Screen, scenario.name, None, "the runner panicked while running the scenario"))
+    };
+    execute(&plan, chosen.len(), count, &run, done).into_iter().flatten().collect()
 }
 
 fn run_one(paths: &Paths, scenario: &Scenario) -> Outcome {
+    crate::timing::scenario_begins();
+    let outcome = run_timed(paths, scenario);
+    crate::timing::scenario_ends(scenario.name, outcome.time.unwrap_or_default());
+    outcome
+}
+
+fn run_timed(paths: &Paths, scenario: &Scenario) -> Outcome {
     let started = Instant::now();
     let mut ctx = match Ctx::new(paths) {
         Ok(ctx) => ctx,
@@ -230,21 +359,23 @@ pub fn system_motion(page: &mut Page, reduce: bool) -> Result {
 }
 
 pub fn pause(seconds: f64) {
-    std::thread::sleep(Duration::from_secs_f64(seconds));
+    crate::timing::timed("pause", || std::thread::sleep(Duration::from_secs_f64(seconds)));
 }
 
 /// Waits until `check` is true, for up to `wait`, polling every 20 ms. For things outside the page, such as a file.
 pub fn eventually(what: &str, wait: Duration, mut check: impl FnMut() -> bool) -> Result {
-    let deadline = Instant::now() + wait;
-    loop {
-        if check() {
-            return Ok(());
+    crate::timing::timed("eventually", || {
+        let deadline = Instant::now() + wait;
+        loop {
+            if check() {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(format!("timed out after {} s waiting for {what}", wait.as_secs()));
+            }
+            std::thread::sleep(Duration::from_millis(20));
         }
-        if Instant::now() >= deadline {
-            return Err(format!("timed out after {} s waiting for {what}", wait.as_secs()));
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    })
 }
 
 #[cfg(test)]
@@ -313,6 +444,129 @@ mod tests {
         names.sort();
         names.dedup();
         assert!(names.len() == count, "{count} scenarios, {} different names", names.len());
+    }
+
+    // Windows has every scenario; elsewhere the Windows-only ones are not in the list to match.
+    #[cfg(windows)]
+    #[test]
+    fn every_solo_scenario_exists() {
+        let names: Vec<&str> = all().iter().map(|s| s.name).collect();
+        for (name, why) in SOLO {
+            assert!(names.contains(name), "SOLO names {name:?} ({why}), which is no scenario: it was renamed, so it would run in parallel");
+        }
+    }
+
+    #[test]
+    fn a_scenario_that_says_it_measures_the_machine_runs_alone() {
+        const WORDS: [&str; 9] = ["memory", "processor", "CPU", "MB", "budget", "frame", "focused", "quota", "usage limits"];
+        for scenario in all() {
+            let mut name = scenario.name.to_string();
+            for phrase in NOT_ABOUT_THE_MACHINE {
+                name = name.replace(phrase, "");
+            }
+            if let Some(word) = WORDS.iter().find(|w| name.contains(*w)) {
+                assert!(is_solo(scenario.name), "{:?} says {word:?}, so it must be in SOLO (it measures the machine)", scenario.name);
+            }
+        }
+        let mut names: Vec<&str> = SOLO.iter().map(|(name, _)| *name).collect();
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), SOLO.len(), "a scenario is listed twice");
+    }
+
+    #[test]
+    fn the_worker_count_is_the_setting_when_it_is_a_number_above_zero_and_else_the_default() {
+        assert_eq!(workers(Some("2"), false), 2);
+        assert_eq!(workers(Some(" 6 "), false), 6);
+        assert_eq!(workers(Some("2"), true), 2, "a workflow can ask for more");
+        for bad in [None, Some("0"), Some("-1"), Some("many"), Some("")] {
+            assert_eq!(workers(bad, false), DEFAULT_WORKERS, "{bad:?}");
+            assert_eq!(workers(bad, true), 1, "CI stays serial unless told: {bad:?}");
+        }
+    }
+
+    #[test]
+    fn the_slowest_scenario_starts_first_and_the_ones_that_measure_start_none() {
+        // (seconds, solo)
+        let chosen = [(5, false), (50, true), (30, false), (30, false), (9, true), (116, false)];
+        let plan = batches(&chosen, None);
+        assert_eq!(plan.parallel, [5, 2, 3, 0], "longest first; equal ones keep their order");
+        assert_eq!(plan.alone, [1, 4], "alone: in the order of the scenarios");
+    }
+
+    #[test]
+    fn a_shard_picks_the_scenarios_and_the_workers_run_what_it_picked() {
+        let chosen = [(5, false), (50, true), (30, false), (30, false), (9, true), (116, false)];
+        let to = [0, 1, 0, 1, 1, 0];
+        let first = batches(&chosen, Some((0, &to)));
+        let second = batches(&chosen, Some((1, &to)));
+        assert_eq!((first.parallel.as_slice(), first.alone.as_slice()), (&[5, 2, 0][..], &[][..]));
+        assert_eq!((second.parallel.as_slice(), second.alone.as_slice()), (&[3][..], &[1, 4][..]));
+        let mut every: Vec<usize> = [first, second].iter().flat_map(|b| b.parallel.iter().chain(&b.alone)).copied().collect();
+        every.sort();
+        assert_eq!(every, [0, 1, 2, 3, 4, 5], "together the parts run each scenario once");
+    }
+
+    /// What a stand-in scenario saw: its index, how many ran at once with it, and how many had ended before it ended.
+    type Seen = (usize, usize, usize);
+
+    /// Runs `chosen` through `execute` with a stand-in for a scenario, and reports for each how many ran at once with it.
+    fn trial(chosen: &[(u32, bool)], workers: usize) -> (Vec<Option<Seen>>, Vec<usize>, usize) {
+        use std::sync::atomic::AtomicUsize;
+        let (active, ended, widest) = (AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0));
+        let plan = batches(chosen, None);
+        let run = |index: usize| {
+            let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+            widest.fetch_max(now, Ordering::SeqCst);
+            // A scenario that is further down the list takes longer, so they end out of order.
+            std::thread::sleep(Duration::from_millis(5 * (chosen.len() - index) as u64));
+            let before = ended.load(Ordering::SeqCst);
+            active.fetch_sub(1, Ordering::SeqCst);
+            ended.fetch_add(1, Ordering::SeqCst);
+            (index, now, before)
+        };
+        let mut heard = Vec::new();
+        let results = execute(&plan, chosen.len(), workers, &run, &mut |outcome: &Seen| heard.push(outcome.0));
+        (results, heard, widest.load(Ordering::SeqCst))
+    }
+
+    #[test]
+    fn at_most_the_workers_run_at_once_and_a_solo_scenario_runs_after_all_of_them_and_alone() {
+        let chosen = [(5, false), (50, true), (30, false), (30, false), (9, true), (116, false), (2, false), (1, false)];
+        let (results, heard, widest) = trial(&chosen, 3);
+        assert_eq!(widest, 3, "three workers were busy at once");
+        for (index, (_, solo)) in chosen.iter().enumerate().filter(|(_, (_, solo))| *solo) {
+            let (at, together, ended_before) = results[index].unwrap();
+            assert_eq!((at, solo), (index, &true));
+            assert_eq!(together, 1, "scenario {index} had company");
+            assert_eq!(
+                ended_before,
+                6 + [1, 4].iter().take_while(|s| **s != index).count(),
+                "scenario {index} did not wait for the others"
+            );
+        }
+        assert_eq!(heard.len(), chosen.len(), "done heard of each one");
+        assert!(heard[6..].iter().eq([1, 4].iter()), "the solo ones are the last two to be heard: {heard:?}");
+    }
+
+    #[test]
+    fn the_results_come_back_in_the_order_of_the_scenarios_whatever_order_they_ended_in() {
+        let chosen = [(1, false), (2, false), (3, true), (4, false), (5, false)];
+        let (results, heard, _) = trial(&chosen, 4);
+        let order: Vec<usize> = results.iter().map(|r| r.unwrap().0).collect();
+        assert_eq!(order, [0, 1, 2, 3, 4]);
+        assert_ne!(heard, order, "they did end in another order, or the test proves nothing");
+        let (one, _, widest) = trial(&chosen, 1);
+        assert_eq!(widest, 1);
+        assert_eq!(one.iter().map(|r| r.unwrap().0).collect::<Vec<_>>(), [0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn a_scenario_in_another_shard_has_no_result() {
+        let chosen = [(1, false), (2, false), (3, true)];
+        let plan = batches(&chosen, Some((0, &[0, 1, 0])));
+        let results = execute(&plan, 3, 2, &|index| index, &mut |_| {});
+        assert_eq!(results, [Some(0), None, Some(2)]);
     }
 }
 

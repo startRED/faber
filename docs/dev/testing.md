@@ -29,7 +29,13 @@ them is a window of the desktop in use.
 
 Every launch is sandboxed: a temporary home, an empty `PATH`, no provider variables, a dead proxy and no real CLI (a fake
 CLI replays the recordings in `tests/fixtures/`). Each scenario is audited afterwards for leaked processes, writes outside
-the sandbox and a changed environment. The checks and the hooks that report them exist only in the test build
+the sandbox and a changed environment. On Windows the runner lists processes (pid, parent, start time, processor time,
+private memory) with one `NtQuerySystemInformation` call (`faber_winproc::processes`, the one crate allowed unsafe code),
+which takes a few milliseconds; the WMI query it replaced took 150-200 ms, and a scenario takes 9 to 49 of these lists.
+The tree is still followed by parent and start time, so a pid the system reused is never mistaken for one of the app's.
+A page wait (`Cdp::settle`) runs inside the page: one DevTools call of up to two seconds reads the condition again at
+every change of the document (at most every 16 ms, and every 50 ms without a change), instead of one call every 100 ms
+from the runner. A condition the page cannot wrap, statements rather than one expression, is asked every 100 ms as before. The checks and the hooks that report them exist only in the test build
 (`--features test-hooks`, `vite build --mode test`); the production app and its `dist/` contain none of them. CI runs
 only the jobs a change needs (R163). A first job reads the changed files and picks the suites by the same rules as
 `cargo t` (`testkit/suites.json`, read by `testkit/src/plan.rs` and `scripts/ci-scope.mjs`): words only (`docs/` or a
@@ -43,7 +49,11 @@ stable (`promote-stable.yml` starts the run and waits for it). The lints and the
 CLI and the cache example at the same time in Cargo's own folder) and hands its programs (`built_programs` in
 `testkit/src/testbuild.rs`) to a `ui` part and eight `screen` parts, which build nothing
 (`--suite screen --shard 2/8 --prebuilt`) and use the Rust the runner image has. On CI the runner uses every core; on a
-person's PC it keeps to half. Every Cargo the runner starts goes without the variables `cargo run` gave it, which made
+person's PC it keeps to half, and every build it starts there (Cargo, Vite, Tauri) runs at idle priority with no
+console window, so a game in front keeps the processor. A local run builds the test screen with Vite while Cargo builds
+the fake CLI, then the shell; Vite is skipped when `dist-test` already holds the build of the same inputs (by
+content: the screen, its checks, the shell file they import, and the build's configuration and packages; a test fails
+when an import reaches a file outside that list). Every Cargo the runner starts goes without the variables `cargo run` gave it, which made
 ring's build script, and everything above it, build again. Each kind of job keeps its own Rust cache, and only `main`
 saves it: a run can read only the caches of its own branch and of `main`, and branches that each saved their own pushed
 the others out of the 10 GB GitHub keeps. Since pushes made by CI start no run, the `land` and `main` jobs start a warm run
@@ -63,6 +73,26 @@ Nothing blocks the network at the operating system, and WebView2 has no document
 that bypasses the switches is not seen. The audit sees only requests that reach the fake release server.
 Known limit: the loopback-only rule is not enforced. Test processes get dead proxy variables and the switches above, but
 nothing stops a program from opening its own connection; blocking outbound traffic for test processes is deferred.
+
+### Parallel scenarios
+
+On a person's PC the screen suite runs several scenarios at once, so a full run takes a fraction of the time it took one
+after the other (1432 s before, 497 s after with four workers, on the maintainer's PC, 2026-10-17). `FABER_SCREEN_WORKERS` sets how many
+(a number above zero); without it a PC uses 4 workers and GitHub Actions uses 1, since each CI part already shares a small
+machine. Each worker takes the next scenario when it is free, the slowest first (by `testkit/screen-costs.json`), and
+each scenario has what it had before: its own sandbox, its own DevTools port (the runner never hands one port to two
+scenarios), its own job object and process tree (the audit looks only at the processes its scenario recorded), and a
+fake release server of its own. `--shard` still picks the scenarios of a part; the workers run what it picked. A
+screenshot is written beside its name and renamed into place, so two scenarios that name one checkpoint never mix them. The
+outcomes print as they end, but the list and the summary keep the order of the scenarios.
+
+Scenarios whose result depends on the machine being quiet run alone, one at a time, after the parallel batch, with
+nothing else running (`SOLO` in `testkit/src/screen/mod.rs`, each with its reason). They are the ones that read the
+processor or memory of the app, count frames or time a motion, depend on which window is shown or has the focus, wait
+for the quota (a background reading at idle priority, which a busy processor starves) or use the PC's one clipboard. When
+unsure, a scenario goes in that list. A test fails when a scenario whose name says "memory", "processor", "CPU", "MB",
+"budget", "frame", "focused", "quota" or "usage limits" is not in it, and when a name in the list is no scenario any more.
+A scenario that fails only in parallel is added to the list, or its race is fixed.
 
 ### Build folder budget
 
@@ -101,10 +131,15 @@ A run prints only what needs a look (R154): each failure with its reason, each p
 (R125), and one summary line. A failed Rust test shows its panic from the `file:line` on; a compiler error shows as
 `file:line:col: error[code]: message`, with the compiler's suggested fix as one `help:` line under it. A reason longer
 than 15 lines keeps its first line and its error lines. Every line, every pass and Cargo's whole output included, goes
-to `target/faber-test/run.log`, which CI keeps with the screenshots. `cargo test` runs with `--no-fail-fast`, so one run
+to `target/faber-test/run.log`, which CI keeps with the screenshots. Cargo's output is read as it comes, so a long
+build shows in the log while it runs. The run also times itself: the summary ends with one `Time:` line (the whole run,
+then build, lint, rust, ui and screen), `run.log` gets a `time` line per scenario with its steps (launch, process lists,
+page waits, pauses, audit, cleanup) and one line with the totals of every step, and `target/faber-test/timing.json`
+keeps the same numbers for a script (`testkit/src/timing.rs`). `cargo test` runs with `--no-fail-fast`, so one run
 lists every failing test. `cargo t --suite lint` runs the two Clippy proofs the same way, and a test keeps them equal to
 CI's lines. The `cargo t` alias builds the runner itself with `--message-format=short`, so a broken build of the runner
-also prints one line per error.
+also prints one line per error. `cargo t --failed` runs again only what failed in the last run, read from the `FAIL` lines of
+`run.log` (screen scenarios and Rust tests by exact name, the `ui` and `lint` suites whole); with none recorded it says so and runs nothing.
 
 On Windows the lint suite adds a third proof: Clippy for macOS (`aarch64-apple-darwin`) on the engine and the runner, so
 code behind `cfg(unix)` or `cfg(target_os = "macos")` breaks before the push, not a CI round later (R166,

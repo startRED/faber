@@ -256,14 +256,25 @@ fn user_path() -> Result<Option<String>, String> {
     Ok(None)
 }
 
+/// A port nothing listens on and no other scenario of this run was given. The port is free only until the listener closes, so
+/// two workers that ask at the same time could be handed the same one, and one of them would drive the other's app.
 fn free_port() -> Result<u16, String> {
-    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).map_err(|e| format!("no free port: {e}"))?;
-    listener.local_addr().map(|a| a.port()).map_err(|e| e.to_string())
+    static GIVEN: Mutex<Vec<u16>> = Mutex::new(Vec::new());
+    for _ in 0..100 {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).map_err(|e| format!("no free port: {e}"))?;
+        let port = listener.local_addr().map(|a| a.port()).map_err(|e| e.to_string())?;
+        let mut given = GIVEN.lock().unwrap_or_else(|e| e.into_inner());
+        if !given.contains(&port) {
+            given.push(port);
+            return Ok(port);
+        }
+    }
+    Err("no free port that was not given already".into())
 }
 
 impl Ctx {
     pub fn new(paths: &Paths) -> Result<Ctx, String> {
-        let sb = Sandbox::new().map_err(|e| format!("cannot create the sandbox: {e}"))?;
+        let sb = crate::timing::timed("sandbox", Sandbox::new).map_err(|e| format!("cannot create the sandbox: {e}"))?;
         registry().folders.push(sb.root.clone());
         Ok(Ctx {
             paths: paths.clone(),
@@ -318,6 +329,7 @@ impl Ctx {
 
     /// Launches the app with its DevTools port and waits for its window.
     pub fn launch(&mut self, mut launch: Launch) -> Result<Opened, String> {
+        let _launch = crate::timing::span("launch", "the app");
         let port = free_port()?;
         launch.cdp_port = Some(port);
         let id = self.spawn(launch)?;
@@ -590,11 +602,13 @@ impl Ctx {
             let _ = self.close(id);
         }
         let deadline = Instant::now() + Duration::from_secs(15);
-        while self.survivors().is_ok_and(|rows| !rows.is_empty()) && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(100));
-        }
-        let verdict = self.audit();
-        let cleaned = self.cleanup();
+        crate::timing::timed("exit-wait", || {
+            while self.survivors().is_ok_and(|rows| !rows.is_empty()) && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        });
+        let verdict = crate::timing::timed("audit", || self.audit());
+        let cleaned = crate::timing::timed("cleanup", || self.cleanup());
         match (verdict, cleaned) {
             (Ok(()), Ok(())) => Ok(()),
             (Err(a), Ok(())) => Err(a),

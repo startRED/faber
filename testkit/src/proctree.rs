@@ -77,42 +77,36 @@ pub fn current_birth() -> Result<u64, std::io::Error> {
     }
 }
 
-/// Every process on this computer right now. Windows asks WMI (`Win32_Process`), whose creation date has microseconds.
-#[cfg(windows)]
-fn wmi_birth(date: &str) -> Result<u64, String> {
-    let parsed: wmi::WMIDateTime = date.parse().map_err(|e| format!("WMI creation time: {e}"))?;
-    let seconds = u64::try_from(parsed.0.timestamp()).map_err(|e| format!("WMI creation time: {e}"))?;
-    // WMIDateTime parses the six-digit CIM fraction as nanoseconds; retain the original microseconds.
-    let micros =
-        date.get(15..21).ok_or("WMI creation time has no fraction")?.parse::<u64>().map_err(|e| format!("WMI creation time: {e}"))?;
-    Ok(seconds * 1_000_000 + micros)
-}
-
-/// Every process on this computer right now, with exact creation times.
+/// Every process on this computer right now, with exact creation times. Windows lists them in one system call
+/// (`faber_winproc::processes`), which also carries each one's processor time and private working set; it takes a few
+/// milliseconds, where the WMI query it replaced took a new COM connection and 100 ms or more.
 #[cfg(windows)]
 pub fn snapshot() -> Result<Vec<ProcRow>, String> {
-    use serde::Deserialize;
-    #[derive(Deserialize)]
-    #[serde(rename = "Win32_Process", rename_all = "PascalCase")]
-    struct Row {
-        process_id: u32,
-        parent_process_id: u32,
-        name: String,
-        creation_date: Option<String>,
-    }
-    let wmi = wmi::WMIConnection::new().map_err(|e| format!("WMI: {e}"))?;
-    let rows = wmi.query::<Row>().map_err(|e| format!("WMI process query: {e}"))?;
-    rows.into_iter()
-        .map(|r| {
-            Ok(ProcRow {
-                pid: r.process_id,
-                parent: r.parent_process_id,
-                name: r.name,
-                // The idle process has no creation date; 0 sorts before everything, as it should.
-                born: r.creation_date.as_deref().map(wmi_birth).transpose()?.unwrap_or(0),
-            })
+    native().map(|list| list.into_iter().map(|(row, _, _)| row).collect())
+}
+
+/// The system's list, each row with its processor time (100 ns ticks) and private working set (bytes).
+#[cfg(windows)]
+fn native() -> Result<Vec<(ProcRow, u64, u64)>, String> {
+    let list = crate::timing::timed("snapshot", faber_winproc::processes).map_err(|e| format!("process list: {e}"))?;
+    Ok(list
+        .into_iter()
+        .map(|p| {
+            // 100 ns ticks since 1601 become microseconds since 1970, as `current_birth` reads its own. The idle process has
+            // no creation time; 0 sorts before everything, as it should.
+            let born = (p.created / 10).saturating_sub(11_644_473_600_000_000);
+            (ProcRow { pid: p.pid, parent: p.parent, name: p.name, born }, p.cpu, p.private_bytes)
         })
-        .collect()
+        .collect())
+}
+
+/// The sum of a column over the live tree of `root`, all from one list.
+#[cfg(windows)]
+fn tree_sum(root: u32, column: impl Fn(&(ProcRow, u64, u64)) -> u64) -> Result<u64, String> {
+    let list = native()?;
+    let rows: Vec<ProcRow> = list.iter().map(|(row, _, _)| row.clone()).collect();
+    let tree = live_tree(&rows, root);
+    Ok(list.iter().filter(|entry| same_process(&entry.0, &tree)).map(column).sum())
 }
 
 /// Every process on this computer right now, from the `sysinfo` crate (whole-second start times).
@@ -134,47 +128,23 @@ pub fn snapshot() -> Result<Vec<ProcRow>, String> {
 }
 
 /// The private working set, in MiB, of the app and its whole tree, as Task Manager counts it. Windows only: the number
-/// comes from `Win32_PerfRawData_PerfProc_Process`, and only the memory scenarios of `screen` read it.
+/// comes from the same system list as the tree, and only the memory scenarios of `screen` read it.
 #[cfg(windows)]
 pub fn private_mb(root: u32) -> Result<f64, String> {
-    use serde::Deserialize;
-    #[derive(Deserialize)]
-    #[serde(rename = "Win32_PerfRawData_PerfProc_Process", rename_all = "PascalCase")]
-    struct Perf {
-        #[serde(rename = "IDProcess")]
-        id_process: u32,
-        working_set_private: u64,
-    }
-    let ids: Vec<u32> = live_tree(&snapshot()?, root).iter().map(|r| r.pid).collect();
-    let wmi = wmi::WMIConnection::new().map_err(|e| format!("WMI: {e}"))?;
-    let rows = wmi.query::<Perf>().map_err(|e| format!("WMI memory query: {e}"))?;
-    let bytes: u64 = rows.iter().filter(|p| ids.contains(&p.id_process)).map(|p| p.working_set_private).sum();
-    Ok(bytes as f64 / (1024.0 * 1024.0))
+    Ok(tree_sum(root, |entry| entry.2)? as f64 / (1024.0 * 1024.0))
 }
 
-/// The processor time, in milliseconds, the app and its whole tree have used so far. Windows only, from the same WMI
-/// class; two readings a few seconds apart give the cost of what ran between them.
+/// The processor time, in milliseconds, the app and its whole tree have used so far. Windows only, from the same list;
+/// two readings a few seconds apart give the cost of what ran between them.
 #[cfg(windows)]
 pub fn cpu_ms(root: u32) -> Result<f64, String> {
-    use serde::Deserialize;
-    #[derive(Deserialize)]
-    #[serde(rename = "Win32_PerfRawData_PerfProc_Process", rename_all = "PascalCase")]
-    struct Perf {
-        #[serde(rename = "IDProcess")]
-        id_process: u32,
-        percent_processor_time: u64,
-    }
-    let ids: Vec<u32> = live_tree(&snapshot()?, root).iter().map(|r| r.pid).collect();
-    let wmi = wmi::WMIConnection::new().map_err(|e| format!("WMI: {e}"))?;
-    let rows = wmi.query::<Perf>().map_err(|e| format!("WMI processor query: {e}"))?;
-    // The raw counter is in 100 ns ticks.
-    let ticks: u64 = rows.iter().filter(|p| ids.contains(&p.id_process)).map(|p| p.percent_processor_time).sum();
-    Ok(ticks as f64 / 10_000.0)
+    // The system counts in 100 ns ticks.
+    Ok(tree_sum(root, |entry| entry.1)? as f64 / 10_000.0)
 }
 
 #[cfg(not(windows))]
 pub fn cpu_ms(_root: u32) -> Result<f64, String> {
-    Err("processor times are read through WMI, which only Windows has".into())
+    Err("processor times are read from the system's process list, which is only read on Windows".into())
 }
 
 /// The same reading in seconds.
@@ -184,7 +154,7 @@ pub fn cpu_seconds(root: u32) -> Result<f64, String> {
 
 #[cfg(not(windows))]
 pub fn private_mb(_root: u32) -> Result<f64, String> {
-    Err("private working sets are read through WMI, which only Windows has".into())
+    Err("private working sets are read from the system's process list, which is only read on Windows".into())
 }
 
 #[cfg(test)]

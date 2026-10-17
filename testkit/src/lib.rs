@@ -25,3 +25,4 @@ pub mod server;
 pub mod slots;
 pub mod sweep;
 pub mod testbuild;
+pub mod timing;

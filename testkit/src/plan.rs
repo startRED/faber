@@ -114,6 +114,8 @@ pub struct Options {
     /// `--claims`: check the lane's claims and show a red `phase-1-base`, build and run nothing. It is the local proof
     /// that takes no build slot; the suites run in CI on the queued commit (R183).
     pub claims: bool,
+    /// `--failed`: run only what failed in the last run (`target/faber-test/run.log`), see [`Failed`].
+    pub failed: bool,
 }
 
 pub fn parse_args(args: &[String]) -> Result<Options, String> {
@@ -131,10 +133,11 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--build-only" => opts.build_only = true,
             "--prebuilt" => opts.prebuilt = true,
             "--claims" => opts.claims = true,
+            "--failed" => opts.failed = true,
             "--costs" => opts.costs = Some(it.next().ok_or("--costs needs a file such as target/screen-costs.json")?.into()),
             other => {
                 return Err(format!(
-                    "unknown argument {other}: use --all, --suite <name>, --filter <text>, --shard <i/n>, --costs <file>, --build-only, --prebuilt or --claims"
+                    "unknown argument {other}: use --all, --suite <name>, --filter <text>, --failed, --shard <i/n>, --costs <file>, --build-only, --prebuilt or --claims"
                 ));
             }
         }
@@ -142,7 +145,69 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
     if opts.build_only && opts.prebuilt {
         return Err("--build-only and --prebuilt cannot go together".into());
     }
+    if opts.failed && (opts.all || opts.filter.is_some() || opts.shard.is_some() || opts.build_only) {
+        return Err("--failed picks what to run by itself: it goes with --suite and --prebuilt only".into());
+    }
     Ok(opts)
+}
+
+/// What failed in the last run, read from the `FAIL  <suite>  <name>` lines of its log (`report::line`).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Failed {
+    /// The exact names of the `rust` tests that failed.
+    pub rust: Vec<String>,
+    /// `cargo test` itself failed (it did not build, or a test program died): the whole suite runs again.
+    pub rust_whole: bool,
+    /// A `ui` check failed, or its launch did: the suite is short, so it runs whole.
+    pub ui: bool,
+    pub lint: bool,
+    /// The exact names of the `screen` scenarios that failed.
+    pub screen: Vec<String>,
+}
+
+impl Failed {
+    pub fn suites(&self) -> BTreeSet<Suite> {
+        [
+            (Suite::Rust, self.rust_whole || !self.rust.is_empty()),
+            (Suite::Ui, self.ui),
+            (Suite::Screen, !self.screen.is_empty()),
+            (Suite::Lint, self.lint),
+        ]
+        .into_iter()
+        .filter_map(|(suite, any)| any.then_some(suite))
+        .collect()
+    }
+}
+
+/// The name of a logged line without the time `report::line` adds (` (4.2 s)`, ` (31 ms)`). A name that ends in
+/// parentheses of its own keeps them.
+fn without_time(name: &str) -> &str {
+    let timed = name.strip_suffix(')').and_then(|rest| rest.rsplit_once(" (")).and_then(|(name, time)| {
+        let number = time.strip_suffix(" ms").or_else(|| time.strip_suffix(" s"))?;
+        (!number.is_empty() && number.bytes().all(|b| b.is_ascii_digit() || b == b'.')).then_some(name)
+    });
+    timed.unwrap_or(name)
+}
+
+/// The tests that failed in a run, from its log: the lines that start with `FAIL`, a suite name padded to six letters, and
+/// the test's name. The reasons under a failure and the output of Cargo that the log also holds are not read.
+pub fn parse_failed(log: &str) -> Failed {
+    let mut failed = Failed::default();
+    for line in log.lines().filter_map(|l| l.strip_prefix("FAIL  ")) {
+        let (Some(suite), Some(name)) = (line.get(..6).map(str::trim), line.get(6..).and_then(|rest| rest.strip_prefix("  "))) else {
+            continue;
+        };
+        let name = without_time(name.trim_end()).trim();
+        match suite {
+            "rust" if name == "cargo test --workspace" => failed.rust_whole = true,
+            "rust" => failed.rust.push(name.to_string()),
+            "ui" => failed.ui = true,
+            "lint" => failed.lint = true,
+            "screen" => failed.screen.push(name.to_string()),
+            _ => {}
+        }
+    }
+    failed
 }
 
 fn shard(text: &str) -> Result<(usize, usize), String> {
@@ -390,5 +455,45 @@ mod tests {
         assert_eq!(select(&Options { all: true, ..Options::default() }, &changed).len(), 3);
         let one = Options { all: true, suite: Some(Suite::Screen), ..Options::default() };
         assert_eq!(names(&select(&one, &changed)), ["screen"]);
+    }
+
+    #[test]
+    fn failed_reads_the_names_of_the_tests_that_failed_from_a_log() {
+        let log = "pass  ui      i18n: keys (4 ms)\n\
+                   FAIL  ui      models: ids (1 ms)\n          bad\n\
+                   FAIL  rust    project::budget::tests::spends_once\n          panicked at engine/src/x.rs:1\n\
+                   FAIL  rust    cargo test --workspace (1.5 s)\n\
+                   FAIL  screen  a chat streams an answer with the model and the reason, and lands in the sidebar (6.2 s)\n          the reason\n\
+                   FAIL  screen  a project conversation opens as a chat with its composer, and opening it starts no CLI (R160) (31 ms)\n\
+                   FAIL  lint    cargo clippy --workspace --all-targets -- -D warnings (40.0 s)\n\
+                   FAIL  lane    `x` overlaps something\n\
+                   test result: FAILED. 1 passed; 1 failed\n";
+        let failed = parse_failed(log);
+        assert_eq!(failed.rust, ["project::budget::tests::spends_once"]);
+        assert!(failed.rust_whole && failed.ui && failed.lint);
+        assert_eq!(
+            failed.screen,
+            [
+                "a chat streams an answer with the model and the reason, and lands in the sidebar",
+                "a project conversation opens as a chat with its composer, and opening it starts no CLI (R160)"
+            ],
+            "the time goes, the parentheses of a name stay"
+        );
+        assert_eq!(names(&failed.suites()), ["rust", "ui", "screen", "lint"]);
+        let none = parse_failed("pass  ui      i18n: keys (4 ms)\n0 passed, 0 failed, 0 not run, 0 skipped\n");
+        assert_eq!(none, Failed::default());
+        assert!(none.suites().is_empty());
+    }
+
+    #[test]
+    fn failed_goes_only_with_a_suite_and_prebuilt() {
+        let args = |list: &[&str]| parse_args(&paths(list));
+        assert!(args(&["--failed"]).unwrap().failed);
+        assert!(args(&["--failed", "--suite", "screen", "--prebuilt"]).is_ok());
+        for wrong in
+            [&["--failed", "--all"][..], &["--failed", "--filter", "x"], &["--failed", "--shard", "1/2"], &["--failed", "--build-only"]]
+        {
+            assert!(args(wrong).is_err(), "{wrong:?}");
+        }
     }
 }

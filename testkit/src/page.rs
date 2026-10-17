@@ -1,7 +1,7 @@
 //! The page, as a scenario sees it: elements found by role, label, text or CSS, and things a person does to them.
 //! Everything here goes through `cdp`; the finding itself is `locator.js`, which runs inside the page.
 
-use crate::cdp::{Cdp, DEFAULT_WAIT};
+use crate::cdp::{Accept, Cdp, DEFAULT_WAIT, Settled};
 use serde_json::{Value, json};
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -216,22 +216,16 @@ impl Page {
             "(() => {{ {LOCATOR}\n const found = window.__tk.one({}, '{need}'); if (!found.el) return {{ why: found.why }}; const el = found.el; {body} }})()",
             loc.steps_json()
         );
-        let deadline = Instant::now() + DEFAULT_WAIT;
+        let started = Instant::now();
+        let deadline = started + DEFAULT_WAIT;
         let outer = self.cdp.set_deadline(Some(deadline));
-        let result = loop {
-            let value = match self.cdp.eval(&script) {
-                Ok(value) => value,
-                Err(e) => break Err(e),
-            };
-            if value["why"].is_null() {
-                break Ok(value);
-            }
-            if Instant::now() >= deadline {
-                break Err(format!("{}: {}", loc.describe(), value["why"].as_str().unwrap_or("not ready")));
-            }
-            std::thread::sleep(Duration::from_millis(100));
+        let result = match self.cdp.settle(&script, Accept::NoWhy, deadline) {
+            Ok(Settled::Accepted(value)) => Ok(value),
+            Ok(Settled::TimedOut(value)) => Err(format!("{}: {}", loc.describe(), value["why"].as_str().unwrap_or("not ready"))),
+            Err(e) => Err(e),
         };
         self.cdp.set_deadline(outer);
+        crate::timing::step("page-act", started.elapsed());
         result
     }
 
