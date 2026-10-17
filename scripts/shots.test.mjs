@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { SCREENS, affected, index, pick, pngSize } from './shots.mjs';
+import { LABEL, SCREENS, affected, index, keep, pick, pngSize, statusPaths } from './shots.mjs';
 
 test('a change to one screen photographs that screen, a shared file photographs them all, the engine none', () => {
   assert.deepEqual(affected(['ui/Settings.tsx']), ['settings']);
@@ -43,4 +43,21 @@ test('the size is read from the PNG header, and the index names every photo', ()
   assert.match(text, /Screens the diff touches: settings\./);
   assert.match(text, /\| critique-settings-1920x1080\.png \| 1920x1080 \|/);
   assert.match(index('before', [], []), /touches: none/);
+});
+
+test('changed paths are read whole from git status, and a label never leaves the critique folder', () => {
+  assert.deepEqual(statusPaths(' M ui/Settings.tsx\nA  scripts/shots.mjs\n?? docs/x.md\nR  ui/Old.tsx -> ui/New.tsx\n'), [
+    'ui/Settings.tsx',
+    'scripts/shots.mjs',
+    'docs/x.md',
+    'ui/New.tsx',
+  ]);
+  assert.ok(LABEL.test('before') && LABEL.test('after-2'));
+  for (const bad of ['../../..', '..', '.', '/tmp', 'a/b', 'a\b', '-x', '']) assert.ok(!LABEL.test(bad), bad);
+});
+
+test('a diff that touches no screen, as before the first edit, keeps all four', () => {
+  assert.deepEqual(keep([]), SCREENS);
+  assert.deepEqual(keep(['engine/src/engine.rs']), SCREENS);
+  assert.deepEqual(keep(['ui/Settings.tsx']), ['settings']);
 });

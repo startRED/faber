@@ -895,7 +895,15 @@ rest. The design is in `docs/superpowers/specs/2026-10-12-ux-sentinel-design.md`
 - **Scenarios.** Panels move through frames and reduced motion moves nothing (M1, M6). A permission card arrives
   through frames (M1, dialogs). The composer grows and shrinks and the end of the thread stays clear (I1 to I5, L4,
   L5; the cap is measured against the window height, 40vh). No text is garbled in five languages, and a title with `› « » ß ç ã` survives the engine's file (T1; the static scan in
-  `tests/ui/mojibake.check.ts` covers every locale and source string).
+  `tests/ui/mojibake.check.ts` covers every locale and source string). The main screens keep their composition at
+  1920x1080 and 1280x800 (V1 to V3, below).
+- **Composition.** V1: no text a person reads sits on lit art. The screen is photographed twice with its letters made
+  transparent, with and without the art (`.ambient`, `canvas.amb-hole`), and the light the art adds under each text's
+  glyph boxes (`Range.getClientRects()`, 99th percentile of the brightest channel, so a grain of dust does not count)
+  stays at or under 77 of 255, the bound of `tests/ui/hole.check.ts`. V2: a name the person gave (a project, a
+  conversation) or a heading shows in at most two places; a kind of element is one place, so a list naming the project
+  on each row is one. V3: two side-by-side columns of a grid, each at least 240x120 px, end within 8 px of each other;
+  a frame that runs to the window's bottom, or a column that scrolls, does not count. All three are high.
 - **Findings and the gate.** A finding is the hash of kind, screen, surface and element. Only critical and high
   findings whose hash is not in `tests/ux/baseline.json` fail a run; medium ones are written down and become tasks. The
   file is a ratchet: it lists what is known, and a fix removes its line. Findings go to

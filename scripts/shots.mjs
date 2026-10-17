@@ -37,6 +37,12 @@ export function affected(files) {
   return hit.has(ALL) ? [...SCREENS] : SCREENS.filter((s) => hit.has(s));
 }
 
+/** The screens to keep: those the diff touches, or all four when it touches none (a `before` on a clean checkout). */
+export function keep(files) {
+  const touched = affected(files);
+  return touched.length ? touched : [...SCREENS];
+}
+
 /** Width and height of a PNG, from its header. */
 export function pngSize(bytes) {
   const signature = [0x89, 0x50, 0x4e, 0x47];
@@ -65,27 +71,37 @@ export function index(label, screens, files) {
   return `${lines.join('\n')}\n`;
 }
 
+/** The paths of `git status --porcelain`: two status letters, a space, the path (the new one of a rename). */
+export function statusPaths(text) {
+  return text
+    .split('\n')
+    .filter((line) => line.length > 3)
+    .map((line) => line.slice(3).split(' -> ').pop());
+}
+
+/** A label names one folder inside the critique folder, nothing else. */
+export const LABEL = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+
 function git(root, args) {
   const out = spawnSync('git', ['-c', 'core.quotepath=false', ...args], { cwd: root, encoding: 'utf8', windowsHide: true });
-  return out.status === 0 ? out.stdout.split('\n').map((l) => l.trim()).filter(Boolean) : [];
+  return out.status === 0 ? out.stdout : '';
 }
 
 function changed(root) {
-  const base = git(root, ['merge-base', 'HEAD', 'origin/phase-1-base'])[0];
-  const committed = base ? git(root, ['diff', '--name-only', base, 'HEAD']) : [];
-  const working = git(root, ['status', '--porcelain', '-uall']).map((l) => l.slice(3));
-  return [...new Set([...committed, ...working])];
+  const base = git(root, ['merge-base', 'HEAD', 'origin/phase-1-base']).trim();
+  const committed = base ? git(root, ['diff', '--name-only', base, 'HEAD']).split('\n').filter(Boolean) : [];
+  return [...new Set([...committed, ...statusPaths(git(root, ['status', '--porcelain', '-uall']))])];
 }
 
 function main(argv) {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
   const label = argv[0];
-  if (!label || label.startsWith('-')) {
+  if (!label || !LABEL.test(label)) {
     console.error('usage: node scripts/shots.mjs <label> [--filter <scenario text>] [--every-screen]');
     return 2;
   }
   const extra = argv.includes('--filter') ? argv[argv.indexOf('--filter') + 1] : undefined;
-  const screens = argv.includes('--every-screen') ? [...SCREENS] : affected(changed(root));
+  const screens = argv.includes('--every-screen') ? [...SCREENS] : keep(changed(root));
   const configured = process.env.CARGO_TARGET_DIR;
   const target = join(configured ? (isAbsolute(configured) ? configured : join(root, configured)) : join(root, 'target'), 'faber-test');
   const since = Date.now();

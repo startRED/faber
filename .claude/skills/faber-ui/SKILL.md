@@ -56,6 +56,9 @@ Code checks and motion checks do not see the whole screen. Look at a screenshot 
 - Neighbouring columns share a baseline: their bottoms (or their first lines) line up.
 - A screen of one area never borrows another area's words, hints or rows (the Projects home says nothing of Chat).
 
+The UX sentinel catches art under text, a name in three places and uneven columns (`docs/design.md`, UX sentinel); the
+rest needs the visual critique (`.claude/skills/visual-critique/SKILL.md`).
+
 ## 5. Before you finish
 
 - Every motion has its reduced/none path and a static cue (colour, icon or label); motion is never the only signal.

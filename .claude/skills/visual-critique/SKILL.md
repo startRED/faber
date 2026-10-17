@@ -17,7 +17,8 @@ node scripts/shots.mjs before
 
 Run it before the first edit (or in a detached worktree of the base commit), then again with `after` when the change is
 done. It runs the UX sentinel's composition scenario, which photographs the Chat home, a project's home, an open
-conversation and Settings at 1920x1080 and 1280x800 in Dark Room, and keeps the screens the diff touches, in
+conversation and Settings at 1920x1080 and 1280x800 in Dark Room, and keeps the screens the diff touches (all four when
+it touches none, as before the first edit), in
 `<target>/faber-test/critique/<label>/` with an `index.md`. `--filter <scenario>` adds the photos of another screen test
 (`--filter homes:`); `--every-screen` keeps all four. It runs hidden like every screen test.
 

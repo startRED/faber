@@ -716,11 +716,98 @@ fn seed_owner(ctx: &mut Ctx) -> Result<Launch> {
     Ok(launch)
 }
 
+/// The names the person gave that the screens may show: the projects and the conversations.
+fn owned_names() -> Vec<String> {
+    let mut names: Vec<String> = OWNED.iter().map(|(title, _, _)| (*title).to_string()).collect();
+    names.extend(["Demo".to_string(), "Iridium".to_string()]);
+    names
+}
+
+/// V1, V2 and V3 on the screen as it is now. For V1 the screen is photographed twice without its letters, with and
+/// without its art, and the difference under each text is the light the art adds there.
+fn compose(page: &mut Page, config: &str, found: &mut Vec<Finding>) -> Result {
+    let screen = screen_of(page)?;
+    let photo = |page: &mut Page| -> Result<String> {
+        let shot = page.cdp.call("Page.captureScreenshot", json!({ "format": "png" }))?;
+        Ok(shot["data"].as_str().ok_or("the screenshot had no data")?.to_string())
+    };
+    if page.eval("window.__sx.hasArt()")? == json!(true) {
+        page.eval("window.__sx.hide('text')")?;
+        pause(0.1);
+        let with = photo(page)?;
+        page.eval("window.__sx.hide('text art')")?;
+        pause(0.1);
+        let without = photo(page)?;
+        page.eval("window.__sx.hide('')")?;
+        // The letters come back in one step; nothing may still be fading in when the screen is photographed next.
+        rest(page)?;
+        let measured = page.eval(&format!("window.__sx.light({}, {})", json!(with), json!(without)))?;
+        for (element, metric) in sentinel::art_problems(&sentinel::lit(&measured)) {
+            found.push(Finding::new("V1", &screen, "art", &element, config, metric));
+        }
+    }
+    let seen: Vec<(String, String)> = page
+        .eval("window.__sx.texts()")?
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|r| Some((r[0].as_str()?.to_string(), r[1].as_str()?.to_string())))
+        .collect();
+    let mut labels = owned_names();
+    labels.extend(page.eval("window.__sx.headings()")?.as_array().into_iter().flatten().filter_map(|h| h.as_str().map(String::from)));
+    for (label, metric) in sentinel::repeated(&seen, &labels) {
+        found.push(Finding::new("V2", &screen, "text", &label, config, metric));
+    }
+    for (grid, metric) in sentinel::uneven(&sentinel::columns(&page.eval("window.__sx.columns()")?)) {
+        found.push(Finding::new("V3", &screen, "columns", &grid, config, metric));
+    }
+    Ok(())
+}
+
+/// The planted twins, on a project's home: a line of text over a lit band of art, the project's name three more
+/// times, and two columns that end 40 px apart. Each must be found by the same code that judged the screens.
+fn composition_twins(page: &mut Page) -> Result {
+    page.eval(
+        "(() => { const art = document.createElement('div'); art.dataset.sxArt = ''; art.id = 'sx-twin-art';
+          art.style.cssText = 'position:fixed;left:700px;top:480px;width:460px;height:64px;background:#fff;z-index:40;pointer-events:none';
+          const p = document.createElement('p'); p.id = 'sx-twin-text'; p.textContent = 'Texto legível sobre a arte';
+          p.style.cssText = 'position:fixed;left:720px;top:496px;margin:0;font:600 24px/1.3 sans-serif;color:#fff;z-index:41;pointer-events:none';
+          document.body.append(art, p);
+          for (let i = 0; i < 3; i++) { const s = document.createElement('span'); s.className = 'sx-twin-name'; s.textContent = 'Demo';
+            s.style.cssText = `position:fixed;left:${400 + i * 80}px;top:120px;z-index:41`; document.body.append(s); }
+          const g = document.createElement('div'); g.id = 'sx-twin-grid';
+          g.style.cssText = 'position:fixed;left:400px;top:600px;width:640px;display:grid;grid-template-columns:300px 300px;gap:40px;z-index:41';
+          g.innerHTML = '<div><div style=\"height:160px\"></div></div><div><div style=\"height:200px\"></div></div>';
+          document.body.append(g); return true; })()",
+    )?;
+    pause(0.3);
+    let mut twin = Vec::new();
+    let result = compose(page, "planted", &mut twin);
+    page.eval("document.querySelectorAll('#sx-twin-art, #sx-twin-text, .sx-twin-name, #sx-twin-grid').forEach((el) => el.remove()); true")?;
+    result?;
+    let seen: Vec<String> = twin.iter().map(|f| format!("{} {} {}", f.kind, f.element, f.metric)).collect();
+    caught(&format!("a line of text on lit art (V1), found {seen:?}"), twin.iter().any(|f| f.kind == "V1" && f.element == "p"))?;
+    caught(
+        &format!("the project's name three more times (V2), found {seen:?}"),
+        twin.iter().any(|f| f.kind == "V2" && f.element == "demo" && f.metric.contains("span.sx-twin-name")),
+    )?;
+    caught(
+        &format!("two columns that end 40 px apart (V3), found {seen:?}"),
+        twin.iter().any(|f| f.kind == "V3" && f.element == "div" && f.metric.contains("40 px")),
+    )
+}
+
 /// Lets the screen come to rest before it is judged or photographed: the fonts, the lists that animate in, and the
 /// black hole's entrance, which lights the scene within three seconds.
 fn settle(page: &mut Page) -> Result {
     page.eval("document.fonts.ready.then(() => true)")?;
     pause(3.5);
+    rest(page)
+}
+
+/// No animation or transition runs, except the endless ones of the look's effects.
+fn rest(page: &mut Page) -> Result {
+    pause(0.1);
     page.wait_for(
         "the page to rest",
         "document.getAnimations().every((a) => a.effect.getTiming().iterations === Infinity || a.playState !== 'running')",
@@ -728,7 +815,7 @@ fn settle(page: &mut Page) -> Result {
 }
 
 /// The main screens a visual critique looks at (`scripts/shots.mjs`, R-next), photographed at the two sizes the owner
-/// uses: `critique-<screen>-<width>x<height>.png`.
+/// uses (`critique-<screen>-<width>x<height>.png`) and judged for their composition (V1 to V3).
 fn composition(ctx: &mut Ctx) -> Result {
     let launch = seed_owner(ctx)?;
     let mut app = ctx.launch(launch)?;
@@ -740,9 +827,12 @@ fn composition(ctx: &mut Ctx) -> Result {
     system_motion(&mut app.page, false)?;
     // The effects rest while another app has the focus; the hidden test window never has it on its own.
     super::app::focus(&mut app.page, true)?;
+    inject(&mut app.page)?;
+    let mut found = Vec::new();
     for (width, height) in [(1920, 1080), (1280, 800)] {
         viewport(&mut app.page, width, height)?;
         let size = format!("{width}x{height}");
+        let config = Config { width, height, look: "sala", language: "pt-BR", size: 15, motion: "full" }.label();
         let page = &mut app.page;
         let chat = page.named("button", "area.chat")?.exact();
         page.click(&chat)?;
@@ -750,6 +840,7 @@ fn composition(ctx: &mut Ctx) -> Result {
         page.press("Control+n")?;
         page.wait_visible(&css(".hello"))?;
         settle(page)?;
+        compose(page, &format!("{config}, chat home"), &mut found)?;
         ctx.shot(&mut app, &format!("critique-chat-home-{size}"))?;
 
         let page = &mut app.page;
@@ -758,6 +849,7 @@ fn composition(ctx: &mut Ctx) -> Result {
         page.click(&css(".prow .item").has_text("Demo"))?;
         page.wait_visible(&css(".welcome-grid .hello"))?;
         settle(page)?;
+        compose(page, &format!("{config}, project home"), &mut found)?;
         ctx.shot(&mut app, &format!("critique-project-home-{size}"))?;
 
         let page = &mut app.page;
@@ -765,6 +857,7 @@ fn composition(ctx: &mut Ctx) -> Result {
         page.click(&css(".list .item").has_text(OWNED[3].0))?;
         page.wait_visible(&css(".col > article.ai"))?;
         settle(page)?;
+        compose(page, &format!("{config}, conversation"), &mut found)?;
         ctx.shot(&mut app, &format!("critique-conversation-{size}"))?;
 
         let page = &mut app.page;
@@ -772,8 +865,18 @@ fn composition(ctx: &mut Ctx) -> Result {
         let general = page.named("heading", "set.general")?;
         page.wait_visible(&general)?;
         settle(page)?;
+        compose(page, &format!("{config}, settings"), &mut found)?;
         ctx.shot(&mut app, &format!("critique-settings-{size}"))?;
         app.page.press("Escape")?;
     }
+    let page = &mut app.page;
+    viewport(page, 1920, 1080)?;
+    let projects = page.named("button", "area.projects")?;
+    page.click(&projects)?;
+    page.click(&css(".prow .item").has_text("Demo"))?;
+    page.wait_visible(&css(".welcome-grid .hello"))?;
+    settle(page)?;
+    composition_twins(page)?;
+    gate(ctx, "composition", &found)?;
     ctx.close(app.id)
 }
