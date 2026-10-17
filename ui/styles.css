@@ -157,7 +157,7 @@ input, textarea { caret-color: var(--accent); }
 .dock { position: relative; z-index: 1; grid-column: 1; grid-row: 2; }
 .col { width: min(100%, 660px); margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(18px * var(--dens)); }
 .empty { display: grid; justify-items: start; gap: 16px; padding-top: 14vh; }
-.empty h1 { font-size: min(var(--fs-display), 9vw); max-width: 8.4em; overflow-wrap: anywhere; }
+.empty h1 { font-size: min(var(--fs-h2), 9vw); max-width: 16em; overflow-wrap: anywhere; } /* the heading size, never the display one: an empty state is a short note, not a greeting */
 .empty p { margin: 0; color: var(--ink-2); font-size: var(--fs-lead); max-width: 44ch; line-height: 1.5; overflow-wrap: anywhere; }
 /* Curioso peeks over a ledge: only the top 44 of his 64 px show, with both eyes, above a hairline. */
 .peek { width: min(100%, 44ch); height: 45px; overflow: hidden; color: var(--ink-3); border-bottom: 1px solid var(--line-2); }

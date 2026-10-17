@@ -18,12 +18,13 @@ import {
 } from './api.ts';
 import { inOrder, refreshed, saveAndApply, watchSystem } from './appearance.ts';
 import { Composer, type Draft } from './Composer.tsx';
+import { Empty } from './Empty.tsx';
 import { LookStep } from './FirstRun.tsx';
 import { keepFocusIn } from './focus.ts';
 import { Icon } from './Glyphs.tsx';
 import { failureText, lang, t, templates, useLanguage } from './i18n.ts';
 import { createWidth } from './layout.ts';
-import { Lockup, Peek } from './Mark.tsx';
+import { Lockup } from './Mark.tsx';
 import { isFirstInstall, newestId, NOTES, type Note, whatsNew } from './notes.ts';
 import { modelOptions } from './models.ts';
 import { animateDetails, animateList, watchMotion } from './motion.ts';
@@ -899,7 +900,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                             }}>
                               <Show
                                 when={current()?.messages.length ? current() : undefined}
-                                fallback={<Empty vendors={state().vendors.length} area={area()} project={project()} onConnect={openSetup} />}
+                                fallback={<NoAiOrProject vendors={state().vendors.length} area={area()} project={project()} onConnect={openSetup} />}
                               >
                                 {(c) => (
                                   <Thread
@@ -985,29 +986,24 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   );
 }
 
-function Empty(props: {
+function NoAiOrProject(props: {
   vendors: number;
   area: Place['area'];
   project?: { name: string; path: string };
   onConnect: () => void;
 }) {
   return (
-    <div class="empty">
-      <Switch>
-        <Match when={props.vendors === 0}>
-          <Peek />
-          <h1 class="display">{t('empty.noAiTitle')}</h1>
-          <p>{t('empty.noAiBody')}</p>
-          <button class="btn primary" data-restore="connect" onClick={() => props.onConnect()}>
-            {t('empty.noAiButton')}
-          </button>
-        </Match>
-        <Match when={props.area === 'project'}>
-          <Peek />
-          <h1 class="display">{props.project?.name}</h1>
-          <p>{t('empty.projectBody', { path: props.project?.path ?? '' })}</p>
-        </Match>
-      </Switch>
-    </div>
+    <Switch>
+      <Match when={props.vendors === 0}>
+        <Empty
+          title={t('empty.noAiTitle')}
+          line={t('empty.noAiBody')}
+          button={{ label: t('empty.noAiButton'), onClick: props.onConnect, restore: 'connect' }}
+        />
+      </Match>
+      <Match when={props.area === 'project'}>
+        <Empty title={props.project?.name ?? ''} line={t('empty.projectBody', { path: props.project?.path ?? '' })} />
+      </Match>
+    </Switch>
   );
 }
