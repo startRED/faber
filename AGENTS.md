@@ -42,7 +42,8 @@ for how Faber works today. This file stays short: each line prevents a real mist
   with `node scripts/land.mjs <number>` instead: it squashes and numbers it on `phase-1-base` and queues it, and CI
   lands it and marks it merged. A small proven commit goes through the queue too: `git push origin
   HEAD:refs/heads/queue/<name>`; CI lands it on `phase-1-base` and `main` only when every system is green, and a red
-  one waits on its queue branch for its author to fix (R162). Nobody merges the base into a branch only to keep up.
+  one waits on its queue branch for its author to fix (R162). Nobody merges the base into a branch only to keep up,
+  and a conflict only in `.md` files where both sides added lines needs nothing: the landing keeps both (R-next).
 - A red `phase-1-base` comes first: fix it, or keep your commits until it is green. `cargo t` shows it (`BASE` lines)
   and its `pre-push` hook refuses a push onto it ([design.md](docs/design.md#red-base)); `FABER_PUSH_ON_RED=1` pushes
   the fix.

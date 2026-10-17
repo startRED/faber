@@ -1,0 +1,5 @@
+{
+  "decisions": [
+    "| R-next | 2026-10-17 | The shared docs merge themselves. When a landing squash conflicts only in `.md` files and in each conflict neither side changed a line the base had (two lanes adding rows or paragraphs at one place of `docs/product-map.md`, `docs/design.md` or another doc), `scripts/land.mjs` keeps both, the base's lines first. A conflict in code, a deleted file or a line both sides changed still stops the landing for the lane to settle. With numbers given at landing, two pull requests that touch notes, decisions, the product map and the design doc land without a conflict and without a merge by hand. | Owner (2026-10-17: no conflicts in the shared docs), details AI |"
+  ]
+}

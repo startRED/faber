@@ -1029,6 +1029,14 @@ straight into the locales and `node scripts/numbers.mjs assign` run on the branc
 A pull request with numbers never sets `gh pr merge --auto` (R173): GitHub would squash the placeholders onto
 `phase-1-base` unnumbered, and the base's check would fail.
 
+The shared docs merge themselves too (R-next). Two lanes that each add a row, a line or a paragraph at the same place of
+`docs/product-map.md`, `docs/design.md` or any other `.md` file conflict in plain git, though both additions belong. So
+`land.mjs` squashes with `merge.conflictStyle=diff3` and settles each conflict in which neither side changed a line the
+base had: the base's new lines first, then the pull request's (`insertions` in `scripts/land.mjs`). Anything else stops
+the landing with its files: a conflict in code, a file one side deleted, or a line both sides changed, which is a real
+disagreement for the lane to settle. The squash is checked like any other, `engine/tests/product_map.rs` included. A
+conflict that GitHub shows on a pull request in those files alone needs nothing: the landing settles it.
+
 ### UX sentinel
 
 The sentinel (`testkit/src/sentinel.rs`, `testkit/src/probe.js`, `testkit/src/screen/sentinel.rs`) judges what a person
