@@ -20,8 +20,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::Instant;
 
-const USAGE: &str =
-    "usage: cargo t [--all] [--suite rust|ui|screen|lint] [--filter <text>] [--shard <i/n> [--costs <file>]] [--build-only | --prebuilt]";
+const USAGE: &str = "usage: cargo t [--all] [--suite rust|ui|screen|lint] [--filter <text>] [--shard <i/n> [--costs <file>]] [--build-only | --prebuilt] [--claims]";
 
 /// The two Clippy proofs, as CI runs them (a test keeps them equal). `--suite lint` runs them with [`lint_args`].
 pub const LINTS: [&[&str]; 2] = [
@@ -241,6 +240,11 @@ pub fn run(args: &[String]) -> i32 {
             println!("FAIL  lane    {problem}");
         }
         return 1;
+    }
+    if opts.claims {
+        base::warn(&paths.root);
+        println!("Claims hold; nothing was built. The suites run in CI on the queued commit.");
+        return 0;
     }
     let jobs = jobs();
     if opts.build_only {

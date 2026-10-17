@@ -907,7 +907,9 @@ sccache (user-wide, outside the repository) makes the rebuild of a swept depende
 
 ### Build slots
 
-Many lanes run `cargo t` on one PC; each run peaks near 8 GB. Before building, a run takes one of three slots
+Many lanes run `cargo t` on one PC; each run peaks near 8 GB. On 2026-10-16 and 17 lanes spent 441 minutes waiting for a
+slot, so the suites now run in CI on the queued commit and a lane runs `cargo t --claims` before a commit, which builds
+only the runner, takes no slot and checks the claims and the red base (R-next). Before building, a run takes one of three slots
 (`testkit/src/slots.rs`): a locked file `target/.faber-slots/slot-<n>` of the main checkout, held until the run ends,
 crash included. With all three taken it prints one waiting line and waits. `FABER_BUILD_SLOTS` sets another count for
 another PC (R129, E3).

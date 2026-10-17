@@ -28,6 +28,6 @@ Visual critique: before X/40, after Y/40, by <session>
 ## Proofs run
 
 - [ ] `npm run lint`, `npm run typecheck`, `npm run build`
-- [ ] `cargo fmt --all --check`, both `cargo clippy` commands
-- [ ] `cargo t` (`cargo t --all` when the screen or the shell changed)
+- [ ] `cargo fmt --all --check`, `npm run test:scripts`, `cargo t --claims`
+- [ ] The heavy suites and Clippy run in CI on the queued commit (AGENTS.md, Proof commands)
 - [ ] `docs/product-map.md` and `docs/design.md` updated when they needed it
