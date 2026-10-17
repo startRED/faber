@@ -20,7 +20,7 @@ pub enum Severity {
 pub fn severity_of(kind: &str) -> Severity {
     match kind {
         "T1" | "M6" | "CLOCK" => Severity::Critical,
-        "M1" | "I1" | "I2" | "I3" | "I4" | "I5" | "L4" => Severity::High,
+        "M1" | "I1" | "I2" | "I3" | "I4" | "I5" | "L4" | "V1" | "V2" | "V3" => Severity::High,
         _ => Severity::Medium,
     }
 }
@@ -316,6 +316,106 @@ pub fn cut_problem(last_item_bottom: f64, area_bottom: f64, covered: bool) -> Op
     }
 }
 
+// V1 to V3: the composition of a screen, which no check of code or motion sees.
+
+/// The most light the art may add under text: the same bound as the black hole's own check (`tests/ui/hole.check.ts`),
+/// a third of full light.
+pub const ART_LIGHT: f64 = 77.0;
+
+/// A text a person reads, with the light the art adds under its letters: the 99th percentile of the brightest channel
+/// of (page with art) minus (page without art), over the letters' boxes, with the text itself made transparent. A stray
+/// grain of dust does not count; a lit disk behind a line does.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Lit {
+    pub element: String,
+    pub text: String,
+    pub light: f64,
+}
+
+pub fn lit(rows: &Value) -> Vec<Lit> {
+    rows.as_array()
+        .into_iter()
+        .flatten()
+        .map(|r| Lit {
+            element: r["element"].as_str().unwrap_or("?").into(),
+            text: r["text"].as_str().unwrap_or_default().into(),
+            light: r["light"].as_f64().unwrap_or_default(),
+        })
+        .collect()
+}
+
+/// V1. Decorative art is never behind text a person reads: under the letters it adds at most [`ART_LIGHT`].
+pub fn art_problems(texts: &[Lit]) -> Vec<(String, String)> {
+    texts
+        .iter()
+        .filter(|t| t.light > ART_LIGHT)
+        .map(|t| (t.element.clone(), format!("\"{}\" sits on art lit {:.0} of 255, {ART_LIGHT:.0} at most", short(&t.text), t.light)))
+        .collect()
+}
+
+fn short(text: &str) -> String {
+    let mut out: String = text.chars().take(40).collect();
+    if text.chars().count() > 40 {
+        out.push('…');
+    }
+    out
+}
+
+/// V2. A name the person gave (a project, a conversation) or a heading shows in at most two places on one screen: the
+/// sidebar and the screen may both name it, a third place is noise. `seen` holds every visible text as (element, text);
+/// `labels` are the names and headings to count. A place is a kind of element, so a list that names the project on each
+/// row is one place. Case and spaces do not make a different label.
+pub fn repeated(seen: &[(String, String)], labels: &[String]) -> Vec<(String, String)> {
+    let norm = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+    let mut wanted: Vec<String> = labels.iter().map(|l| norm(l)).filter(|l| !l.is_empty()).collect();
+    wanted.sort();
+    wanted.dedup();
+    wanted
+        .into_iter()
+        .filter_map(|label| {
+            let mut at: Vec<&str> = seen.iter().filter(|(_, text)| norm(text) == label).map(|(el, _)| el.as_str()).collect();
+            at.dedup();
+            at.sort_unstable();
+            at.dedup();
+            (at.len() >= 3).then(|| (label.clone(), format!("\"{}\" shows in {} places ({})", short(&label), at.len(), at.join(", "))))
+        })
+        .collect()
+}
+
+/// Two columns side by side in one grid, and where the content of each ends.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Columns {
+    pub grid: String,
+    pub left: f64,
+    pub right: f64,
+}
+
+pub fn columns(rows: &Value) -> Vec<Columns> {
+    rows.as_array()
+        .into_iter()
+        .flatten()
+        .map(|r| Columns {
+            grid: r["grid"].as_str().unwrap_or("?").into(),
+            left: r["left"].as_f64().unwrap_or_default(),
+            right: r["right"].as_f64().unwrap_or_default(),
+        })
+        .collect()
+}
+
+/// V3. Neighbouring columns share a baseline: the content of the two ends within 8 px of each other.
+pub fn uneven(found: &[Columns]) -> Vec<(String, String)> {
+    found
+        .iter()
+        .filter(|c| (c.left - c.right).abs() > 8.0)
+        .map(|c| {
+            (
+                c.grid.clone(),
+                format!("the columns end {:.0} px apart (left {:.0}, right {:.0}), 8 at most", (c.left - c.right).abs(), c.left, c.right),
+            )
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -499,5 +599,54 @@ mod tests {
             kept_problem(180.0).unwrap().contains("180 px"),
             "planted twin: the thread stays where it was and the composer covers its end"
         );
+    }
+
+    fn lit_text(element: &str, light: f64) -> Lit {
+        Lit { element: element.into(), text: "Continuar de onde parou".into(), light }
+    }
+
+    #[test]
+    fn text_on_a_faint_veil_passes_and_text_on_lit_art_is_found() {
+        assert!(art_problems(&[lit_text("h1.display", 0.0), lit_text("span.t", 77.0)]).is_empty(), "77 of 255 is the veil's limit");
+        // The planted twin of the owner's finding: the pick-up list over the black hole's lit disk.
+        let found = art_problems(&[lit_text("span.t", 140.0), lit_text("h1.display", 20.0)]);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].0, "span.t");
+        assert!(found[0].1.contains("140 of 255"), "{found:?}");
+        let rows = json!([{ "element": "span.t", "text": "Quero", "light": 140 }]);
+        assert_eq!(lit(&rows), vec![Lit { element: "span.t".into(), text: "Quero".into(), light: 140.0 }]);
+    }
+
+    #[test]
+    fn a_name_twice_is_fine_and_a_name_three_times_is_found() {
+        let seen = |texts: &[(&str, &str)]| texts.iter().map(|(e, t)| ((*e).to_string(), (*t).to_string())).collect::<Vec<_>>();
+        let labels = vec!["Demo".to_string(), "Iridium".to_string()];
+        // The sidebar and the crumb may both name the project.
+        assert!(repeated(&seen(&[("span.item", "Demo"), ("b", "Demo"), ("span.s", "Demo · hoje")]), &labels).is_empty());
+        // The planted twin of the owner's finding: the sidebar, the crumb, the header and a heading, case and spaces aside.
+        let found = repeated(
+            &seen(&[("span.item", "Demo"), ("b", "Demo"), ("h2", " demo "), ("h1.display", "DEMO"), ("span.item", "Iridium")]),
+            &labels,
+        );
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].0, "demo");
+        assert!(found[0].1.contains("4 places"), "{found:?}");
+        // A list that names a project on each of its rows is one place, with the sidebar two.
+        assert!(repeated(&seen(&[("span.t", "Iridium"), ("span.s", "Iridium"), ("span.s", "Iridium")]), &labels).is_empty());
+        // A text that is not a name or a heading may repeat: three "Learn more" links are not a defect of this rule.
+        assert!(repeated(&seen(&[("a", "Learn more"), ("a", "Learn more"), ("a", "Learn more")]), &labels).is_empty());
+        assert!(repeated(&[], &[String::new()]).is_empty());
+    }
+
+    #[test]
+    fn columns_that_end_together_pass_and_columns_40_px_apart_are_found() {
+        let even = Columns { grid: "div.welcome-grid".into(), left: 860.0, right: 866.0 };
+        assert!(uneven(std::slice::from_ref(&even)).is_empty(), "8 px is the tolerance of a baseline");
+        // The planted twin of the owner's finding: the main column ends well below the list beside it.
+        let apart = Columns { grid: "div.welcome-grid".into(), left: 900.0, right: 860.0 };
+        let found = uneven(&[even, apart]);
+        assert_eq!(found.len(), 1);
+        assert!(found[0].1.contains("40 px apart"), "{found:?}");
+        assert_eq!(columns(&json!([{ "grid": "div.g", "left": 1, "right": 2 }]))[0].right, 2.0);
     }
 }

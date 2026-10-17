@@ -782,6 +782,23 @@ screen, which owns the locale files.
   itself: it moves no focus at any width, nothing behind it becomes inert, and it ends above the composer so the
   composer is never covered. Opened by the user, the overlay is modal.
 
+## Screen cards
+
+One card per main screen: what it is for, the one action that leads, what never goes on it, and the photo a critique
+compares against (R172). What the screen holds is in [product-map.md](product-map.md#screens-and-surfaces) and how it
+looks in the sections above; a card only says what must not drift. The approved photo is the one the UX sentinel's
+composition scenario takes (`target/faber-test/shots/`, kept by CI with every run), at 1920x1080 and at 1280x800 in Dark
+Room. A change that moves a card's line updates the card in the same commit and says so in its visual critique. Today's
+photo of a project's home breaks its card (the findings in `tests/ux/baseline.json`); the first one after the lane
+project-home-calm lands, with those lines gone, is its approved photo.
+
+| Screen | For | Main action | Never on it | Approved photo |
+| :--- | :--- | :--- | :--- | :--- |
+| Chat home ([map](product-map.md#screens-and-surfaces), [layout](#the-new-conversation-screen)) | Starting or picking up a conversation | Writing in the composer | Settings, switches, a second model picker, another area's rows | `critique-chat-home-1920x1080.png`, `-1280x800.png` |
+| A project's home ([map](product-map.md#screens-and-surfaces), [layout](#the-projects-home)) | Giving the agent work in this project's folder | Writing the goal in the composer | Chat's suggestions, hints or conversations; the project's settings (Settings, Projects); art behind the words; the project's name more than twice | `critique-project-home-1920x1080.png`, `-1280x800.png` |
+| An open conversation ([map](product-map.md#screens-and-surfaces), [work log](#work-log)) | Reading the work and answering it | Answering in the composer, or the card that needs the person | Settings beyond one status line; technical logs outside a fold; motion on text being read | `critique-conversation-1920x1080.png`, `-1280x800.png` |
+| Settings ([map](product-map.md#settings-screen), [layout](#settings)) | Changing how Faber behaves, one short line per option | Choosing an option in the section that is open | Work (a conversation, a goal); explanations longer than a line outside "Learn more"; a new section where one fits | `critique-settings-1920x1080.png`, `-1280x800.png` |
+
 ## Screen tests
 
 Faber's own test runner (`cargo t`, the `testkit/` crate) tests the screen in two ways, both against a hidden test build
@@ -965,12 +982,29 @@ rest. The design is in `docs/superpowers/specs/2026-10-12-ux-sentinel-design.md`
 - **Scenarios.** Panels move through frames and reduced motion moves nothing (M1, M6). A permission card arrives
   through frames (M1, dialogs). The composer grows and shrinks and the end of the thread stays clear (I1 to I5, L4,
   L5; the cap is measured against the window height, 40vh). No text is garbled in five languages, and a title with `› « » ß ç ã` survives the engine's file (T1; the static scan in
-  `tests/ui/mojibake.check.ts` covers every locale and source string).
+  `tests/ui/mojibake.check.ts` covers every locale and source string). The main screens keep their composition at
+  1920x1080 and 1280x800 (V1 to V3, below).
+- **Composition.** V1: no text a person reads sits on lit art. The screen is photographed twice with its letters made
+  transparent, with and without the art (`.ambient`, `canvas.amb-hole`), and the light the art adds under each text's
+  glyph boxes (`Range.getClientRects()`, 99th percentile of the brightest channel, so a grain of dust does not count)
+  stays at or under 77 of 255, the bound of `tests/ui/hole.check.ts`. V2: a name the person gave (a project, a
+  conversation) or a heading shows in at most two places; a kind of element is one place, so a list naming the project
+  on each row is one. V3: two side-by-side columns of a grid, each at least 240x120 px, end within 8 px of each other;
+  a frame that runs to the window's bottom, or a column that scrolls, does not count. All three are high.
 - **Findings and the gate.** A finding is the hash of kind, screen, surface and element. Only critical and high
   findings whose hash is not in `tests/ux/baseline.json` fail a run; medium ones are written down and become tasks. The
   file is a ratchet: it lists what is known, and a fix removes its line. Findings go to
   `target/faber-test/ux/<scenario>.json` and raw frame traces to `target/faber-test/ux/traces/`. Nothing records the
   person's screen.
+
+### Visual critique
+
+Checks see code and motion, not a screen as a whole (R172). The sentinel's scenario "the main screens keep their
+composition" photographs the Chat home, a project's home, an open conversation and Settings at 1920x1080 and 1280x800 in
+Dark Room and pt-BR (`target/faber-test/shots/critique-<screen>-<size>.png`). `node scripts/shots.mjs <label>` runs it and
+copies the photos of the screens the diff touches into `target/faber-test/critique/<label>/` with an index;
+`scripts/shots.test.mjs` keeps the choice of screens. A fresh session scores the `before` and `after` folders out of 40
+with `.claude/skills/visual-critique/SKILL.md`; the score never drops and a touched screen reaches 32.
 
 
 ## Auto quota pacing
