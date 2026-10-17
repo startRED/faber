@@ -350,7 +350,18 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 .agent[data-state='background'] .agent-mark .live { background: transparent; box-shadow: inset 0 0 0 1.5px var(--accent); }
 .agent-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 0 12px 12px; }
 .agent-report { color: var(--ink-2); }
-/* A question waiting for the user is the one place the amber meaning appears in a conversation. */
+/* Waiting for the person's answer and seeming stuck are the conversation's amber (R161 step 6): the dot, and for a stuck one
+   the row's edge and one line under it with what the engine saw and two ways in. */
+.agent-item { display: grid; grid-template-columns: minmax(0, 1fr); }
+.agent:is([data-state='waiting'], [data-state='stuck']) .agent-mark .live { background: var(--amber); }
+.agent:is([data-state='waiting'], [data-state='stuck']) .agent-mark .live::after { border-color: var(--amber); }
+.agent[data-state='stuck'] { box-shadow: inset 0 0 0 1px var(--amber-line); }
+.agent[data-state='stuck'] .agent-meta { color: var(--amber-ink); }
+.agent-stuck { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; padding: 8px 10px 8px 12px; border-radius: var(--r-sm); background: linear-gradient(var(--amber-soft), var(--amber-soft)), var(--card-bg); box-shadow: inset 0 0 0 1px var(--amber-line); animation: arrive var(--dur-arrive) var(--ease) both; }
+.agent-why { flex: 1; min-width: 12em; color: var(--amber-ink); font-size: var(--fs-sm); }
+.agent-stuck .btn { height: var(--h-sm); }
+/* Amber in a conversation means the person is needed: a question waiting for them, and the subagent rows above (waiting
+   for you, seems stuck). */
 .ask { display: grid; gap: 8px; padding: 12px 14px; border-radius: var(--r-md); background: linear-gradient(180deg, var(--amber-soft), transparent 120%), var(--card-bg); box-shadow: inset 0 0 0 1px var(--amber-line), var(--amber-light); animation: arrive var(--dur-arrive) var(--ease) both; }
 .ask b { color: var(--amber-ink); font-weight: 600; font-size: var(--fs-sm); }
 .ask pre { margin: 0; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow-y: auto; }
@@ -775,7 +786,7 @@ html[data-ambient='on'] .ambient.bare .amb-drift { display: block; }
 :is(button, select, .plus, .x) { transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease); }
 button:active:not(:disabled) { transform: translateY(1px) scale(.98); }
 [data-base='oficina'] button:active { transform: scale(.98); }
-:is(.ask, .toast, .ri.need, .coach) { animation-duration: var(--dur-ui); }
+:is(.ask, .toast, .ri.need, .coach, .agent-stuck) { animation-duration: var(--dur-ui); }
 .tour-ring { transition-duration: var(--dur-ui); }
 [data-motion-list] > :is(.ask, .toast, .ri.need, .coach) { animation: none; }
 .motion-exit { animation: none !important; }

@@ -148,9 +148,9 @@ export function agentKind(kind: string): string {
 }
 
 /** Whether two lists hold the same tools in the same state, so a message that only grew in text leaves the rows of its tools
- * alone while it streams. A tool is the same while its id, name, outcome and output length are. */
+ * alone while it streams. A tool is the same while its id, name, outcome, sign and output length are. */
 export function sameTools(a: ToolUse[], b: ToolUse[]): boolean {
-  return a.length === b.length && a.every((tool, i) => tool.id === b[i]!.id && tool.name === b[i]!.name && tool.ok === b[i]!.ok && (tool.output?.length ?? 0) === (b[i]!.output?.length ?? 0));
+  return a.length === b.length && a.every((tool, i) => tool.id === b[i]!.id && tool.name === b[i]!.name && tool.ok === b[i]!.ok && tool.sign === b[i]!.sign && (tool.output?.length ?? 0) === (b[i]!.output?.length ?? 0));
 }
 
 /** Each subagent the agent started, with the tools it ran under it. A subagent's own helper folds into it: its tools count

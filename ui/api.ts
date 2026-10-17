@@ -32,6 +32,8 @@ export interface ToolUse {
   parent?: string;
   /** Refused before it ran: not a failure of the work. */
   declined?: boolean;
+  /** On a subagent's call while the reply runs: waiting for the person's answer, or a sign it seems stuck. */
+  sign?: "waiting" | "repeat" | "failing" | "silent";
 }
 export interface Permission {
   requestId: string;
@@ -276,6 +278,8 @@ export interface RunningItem {
   parked?: Parked[];
   /** How many more were denied beyond the few kept. */
   parkedMore?: number;
+  /** The subagent calls of the reply that seem stuck: each needs the person like a question. */
+  stuck?: string[];
   waitUntil?: number;
 }
 /** The running list in the engine's order, with a revision that grows by one with every list the engine sends. */

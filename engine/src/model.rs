@@ -95,6 +95,10 @@ pub struct ToolUse {
     /// The subagent that ran this tool: the id of the agent tool call that started it. None for the agent's own tools.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
+    /// On a subagent's call while the reply runs: waiting for the person, or seeming stuck (`stuck.rs`). Never read back
+    /// from disk, so a sign can outlive neither its reply nor Faber.
+    #[serde(skip_deserializing, skip_serializing_if = "Option::is_none")]
+    pub sign: Option<crate::stuck::Sign>,
 }
 
 /// A helper the agent sent to the background (Claude Code's `Agent` call with `run_in_background`): its call returns when it
@@ -467,6 +471,9 @@ pub struct RunningItem {
     pub parked: Vec<Parked>,
     #[serde(skip_serializing_if = "is_zero")]
     pub parked_more: u32,
+    /// The subagent calls of the reply that seem stuck: each needs the person like a question does.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stuck: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wait_until: Option<f64>,
 }

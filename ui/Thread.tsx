@@ -78,40 +78,81 @@ function ToolChip(props: { tool: ToolUse }) {
 
 // A subagent the agent handed part of the work to (R161): one quiet row in the reply with what it was asked and whether it
 // is still working; opened, what it ran and the report it gave back. Never a board: the agent decides, this only shows it.
+// One that seems stuck turns amber with what the engine saw and two ways in (R161 step 6); one waiting on the person's
+// answer says so, and the card below the rows is that answer.
 function AgentRow(props: { step: Accessor<AgentStep>; streaming: boolean }) {
   const step = () => props.step();
   const state = () => {
-    const { ok, declined } = step().call;
-    if (ok === undefined) return step().background ? 'background' : props.streaming ? 'running' : 'stopped';
+    const { ok, declined, sign } = step().call;
+    if (ok === undefined) {
+      if (!props.streaming) return step().background ? 'background' : 'stopped';
+      if (sign) return sign === 'waiting' ? 'waiting' : 'stuck';
+      return step().background ? 'background' : 'running';
+    }
     if (declined) return 'declined';
     return ok ? 'done' : 'failed';
   };
-  const live = () => state() === 'running' || state() === 'background';
+  const live = () => ['running', 'background', 'waiting', 'stuck'].includes(state());
+  let details: HTMLDetailsElement | undefined;
+  const look = () => {
+    const summary = details?.querySelector<HTMLElement>('summary');
+    if (!details || !summary) return;
+    // Through the summary, so it opens the way every disclosure does (`animateDetails`, none in reduced motion).
+    if (!details.open) summary.click();
+    details.scrollIntoView({ block: 'nearest' });
+    summary.focus({ preventScroll: true });
+  };
   return (
-    <details class="agent disclosure" role="listitem" data-state={state()}>
-      <summary>
-        <span class="agent-mark" aria-hidden="true">
-          <Show when={live()} fallback={<Show when={state() === 'done' || state() === 'failed'}><Icon name={state() === 'done' ? 'check' : 'close'} small /></Show>}>
-            <span class="live" />
+    <div class="agent-item" role="listitem">
+      <details class="agent disclosure" data-state={state()} ref={(el) => (details = el)}>
+        <summary>
+          <span class="agent-mark" aria-hidden="true">
+            <Show when={live()} fallback={<Show when={state() === 'done' || state() === 'failed'}><Icon name={state() === 'done' ? 'check' : 'close'} small /></Show>}>
+              <span class="live" />
+            </Show>
+          </span>
+          <b>{step().title || t('agent.untitled')}</b>
+          <span class="agent-meta">{[agentKind(step().kind), t(`agent.${state()}`), t('activity.steps', { n: step().tools.length })].filter(Boolean).join(' · ')}</span>
+        </summary>
+        <div class="agent-body">
+          <Show when={step().tools.length}>
+            <div class="tools">
+              <For each={step().tools}>{(tool) => <ToolChip tool={tool} />}</For>
+            </div>
           </Show>
-        </span>
-        <b>{step().title || t('agent.untitled')}</b>
-        <span class="agent-meta">{[agentKind(step().kind), t(`agent.${state()}`), t('activity.steps', { n: step().tools.length })].filter(Boolean).join(' · ')}</span>
-      </summary>
-      <div class="agent-body">
-        <Show when={step().tools.length}>
-          <div class="tools">
-            <For each={step().tools}>{(tool) => <ToolChip tool={tool} />}</For>
+          <Show when={step().report}>
+            <div class="md agent-report" onClick={openLinks}>
+              <Markdown text={step().report} />
+            </div>
+          </Show>
+        </div>
+      </details>
+      <Show when={state() === 'stuck' && step().call.sign}>
+        {(sign) => (
+          <div class="agent-stuck" role="status">
+            <span class="agent-why">{t(`agent.stuck.${sign() as 'repeat' | 'failing' | 'silent'}`)}</span>
+            <button type="button" class="btn" onClick={look}>{t('agent.look')}</button>
+            <button type="button" class="btn" onClick={() => tellAbout(step().title || t('agent.untitled'))}>{t('agent.tell')}</button>
           </div>
-        </Show>
-        <Show when={step().report}>
-          <div class="md agent-report" onClick={openLinks}>
-            <Markdown text={step().report} />
-          </div>
-        </Show>
-      </div>
-    </details>
+        )}
+      </Show>
+    </div>
   );
+}
+
+/** "Tell it…": the conversation's own box, started with the step's name. While Codex works the message goes into its turn;
+ * Claude Code takes it after the turn, or at once with "Send now". */
+function tellAbout(title: string) {
+  const box = document.querySelector<HTMLTextAreaElement>('.composer textarea');
+  if (!box) return;
+  const text = t('agent.tellAbout', { title });
+  box.focus();
+  if (box.value.startsWith(text)) return;
+  box.setSelectionRange(0, 0);
+  // insertText keeps the field's undo history; the fallback writes the text itself and tells the page.
+  if (document.execCommand('insertText', false, text)) return;
+  box.value = text + box.value;
+  box.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
 type OnBranch =(messageId: string, text: string, choice?: Choice) => void;
