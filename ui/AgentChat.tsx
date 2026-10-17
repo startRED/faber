@@ -1,8 +1,9 @@
 import { createSignal, For, Show } from 'solid-js';
-import type { ToolUse } from './api.ts';
+import { api, errorText, type ToolUse } from './api.ts';
 import { Icon } from './Glyphs.tsx';
-import { t } from './i18n.ts';
+import { fromEngine, t } from './i18n.ts';
 import { Markdown, openLinks } from './markdown.tsx';
+import { useDraft } from './unsent.ts';
 import { agentKind, agentState, changeOf, middle, toolRow, type AgentStep, type Change, type Sources } from './worklog.ts';
 
 // A subagent opened in the running column (R161 step 3): its brief word for word, the steps it ran and its report, drawn
@@ -77,10 +78,13 @@ export function SourceList(props: { sources: Sources }) {
 /** "Tell it…": the conversation's own box, started with the step's name. A CLI subagent cannot be written to while it runs,
  * so the message goes to the main agent: while Codex works it goes into its turn; Claude Code takes it after the turn, or at
  * once with "Send now". */
-export function tellAbout(title: string) {
+export const tellAbout = (title: string) => startMessage(t('agent.tellAbout', { title }));
+
+/** Starts the conversation's box with `text`, ahead of anything already written there. "Continue with a helper" (R161
+ * step 5) starts it the same way, asking the main agent to hand the rest of a piece of work to a helper from the other AI. */
+export function startMessage(text: string) {
   const box = document.querySelector<HTMLTextAreaElement>('.composer textarea');
   if (!box) return;
-  const text = t('agent.tellAbout', { title });
   box.focus();
   if (box.value.startsWith(text)) return;
   box.setSelectionRange(0, 0);
@@ -123,10 +127,102 @@ function Facts(props: { facts: NonNullable<ToolUse['facts']> }) {
   );
 }
 
-/** The open subagent, as the running column's content: a head with the way back, then the subagent's own thread. */
-export function AgentChat(props: { step: AgentStep; streaming: boolean; onBack: () => void; onTell?: (title: string) => void; onClose: () => void }) {
+/** What the person wrote to a helper at work, each with where it got to. */
+function Told(props: { told: NonNullable<ToolUse['told']> }) {
+  return (
+    <For each={props.told}>
+      {(told) => (
+        <section class="side-told" aria-label={t('agent.helper.you')}>
+          <div class="you">{told.text}</div>
+          <p classList={{ bad: told.taken === false }}>
+            {t(told.taken === undefined ? 'agent.helper.sent' : told.taken ? 'agent.helper.taken' : 'agent.helper.missed')}
+          </p>
+        </section>
+      )}
+    </For>
+  );
+}
+
+/** Unsent words per helper's call, so switching to another helper or closing the view never loses them or sends them elsewhere. */
+const helperDrafts = new Map<string, string>();
+
+/** A helper at work is a session of its own (R161 step 5), so this box writes to it: Enter sends, Shift+Enter breaks the line.
+ * It is made again for each helper (keyed by its call). */
+function HelperBox(props: { callId: string }) {
+  const [text, setTextNow] = createSignal(helperDrafts.get(props.callId) ?? '');
+  const setText = (words: string) => {
+    setTextNow(words);
+    if (words) helperDrafts.set(props.callId, words);
+    else helperDrafts.delete(props.callId);
+  };
+  const [error, setError] = createSignal('');
+  const [sending, setSending] = createSignal(false);
+  // Like every box, unsent words keep an update from closing the window over them.
+  useDraft(() => text().trim().length > 0);
+  const send = async () => {
+    const words = text().trim();
+    const open = opened();
+    if (!words || !open || sending()) return;
+    setSending(true);
+    setError('');
+    try {
+      await api.tellHelper(open.conversationId, props.callId, words);
+      setText('');
+    } catch (err) {
+      setError(fromEngine(errorText(err)));
+    } finally {
+      setSending(false);
+    }
+  };
+  return (
+    <form
+      class="side-write"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void send();
+      }}
+    >
+      <label for="helper-box">{t('agent.helper.note')}</label>
+      <textarea
+        id="helper-box"
+        class="field"
+        rows={2}
+        value={text()}
+        placeholder={t('agent.helper.placeholder')}
+        onInput={(e) => setText(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+          e.preventDefault();
+          void send();
+        }}
+      />
+      <button type="submit" class="btn" disabled={!text().trim() || sending()}>
+        {t('agent.helper.send')}
+      </button>
+      <Show when={error()}>
+        <p class="bad" role="alert">
+          {error()}
+        </p>
+      </Show>
+    </form>
+  );
+}
+
+/** The open subagent, as the running column's content: a head with the way back, then the subagent's own thread. `helpable`:
+ * a helper from the other AI can take on a piece of work here (a project with both AIs connected). `onTell` gets the words
+ * that start the conversation's box. */
+export function AgentChat(props: {
+  step: AgentStep;
+  streaming: boolean;
+  helpable?: boolean;
+  onBack: () => void;
+  onTell?: (text: string) => void;
+  onClose: () => void;
+}) {
   const state = () => agentState(props.step, props.streaming);
   const title = () => props.step.title || t('agent.untitled');
+  const working = () => ['running', 'waiting', 'stuck'].includes(state());
+  const start = (text: string) => (props.onTell ? props.onTell(text) : startMessage(text));
   return (
     <>
       <div class="rc-head side-head">
@@ -161,17 +257,31 @@ export function AgentChat(props: { step: AgentStep; streaming: boolean; onBack: 
             <For each={props.step.tools}>{(tool) => <ToolChip tool={tool} />}</For>
           </div>
         </Show>
+        <Show when={props.step.call.told?.length}>
+          <Told told={props.step.call.told!} />
+        </Show>
         <Show when={props.step.call.facts}>{(facts) => <Facts facts={facts()} />}</Show>
         <Show when={props.step.report}>
           <div class="md agent-report" onClick={openLinks}>
             <Markdown text={props.step.report} />
           </div>
         </Show>
-        <Show when={['running', 'waiting', 'stuck'].includes(state())}>
+        <Show when={working() && props.step.helper && props.step.call.id} keyed>
+          {(callId) => <HelperBox callId={callId} />}
+        </Show>
+        <Show when={working() && !props.step.helper}>
           <div class="side-tell">
             <p>{t('agent.side.note')}</p>
-            <button type="button" class="btn" onClick={() => (props.onTell ?? tellAbout)(title())}>
+            <button type="button" class="btn" onClick={() => start(t('agent.tellAbout', { title: title() }))}>
               {t('agent.tell')}
+            </button>
+          </div>
+        </Show>
+        <Show when={!working() && state() !== 'background' && props.helpable}>
+          <div class="side-tell">
+            <p>{t('agent.continue.note')}</p>
+            <button type="button" class="btn" onClick={() => start(t('agent.continueAbout', { title: title() }))}>
+              {t('agent.continue')}
             </button>
           </div>
         </Show>

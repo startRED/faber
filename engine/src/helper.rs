@@ -153,6 +153,29 @@ pub fn prompt(input: &Value) -> Option<String> {
     ))
 }
 
+/// A message the person wrote to a helper at work (R161 step 5), as the helper reads it: it still reports to the agent.
+pub fn from_person(text: &str) -> String {
+    format!(
+        "The person following your work writes to you:
+
+{}
+
+Take it into account, and still finish with your short report for the agent.",
+        text.trim()
+    )
+}
+
+/// What the agent reads under the report when the person wrote to the helper: words the agent itself never saw.
+pub fn told_note(told: &[String]) -> String {
+    let quoted: Vec<String> = told.iter().map(|t| format!("\"{}\"", t.trim())).collect();
+    format!(
+        "
+
+While it worked, the person wrote to the helper: {}.",
+        quoted.join("; ")
+    )
+}
+
 /// What goes back to the agent when the helper ends: its report, plus what it was not allowed to do, which the agent can do
 /// itself, where the person approves it.
 pub fn report(ok: bool, text: &str, refused: &[String], error: Option<&str>) -> (bool, String) {

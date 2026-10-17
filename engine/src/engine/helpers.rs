@@ -24,6 +24,23 @@ pub(super) struct Run {
     new_block: bool,
     /// Tools the helper was not allowed to use without the person's approval.
     refused: Vec<String>,
+    /// Messages the person wrote to it that it has not taken in yet (their ids), and the words of those it took (R161 step 5).
+    waiting: Vec<String>,
+    told: Vec<String>,
+    /// A turn that ended while a message was still on its way: the end, kept until the message is taken in (another turn
+    /// follows, and its end is the helper's) or refused (this end was the last).
+    held: Option<Ended>,
+    /// A turn of this helper ended before the one now running: Claude's total then covers both, a price from tokens one.
+    earlier_turn: bool,
+    /// The agent stopped: the turn that ends now is the last, whatever is still on its way.
+    stopping: bool,
+}
+
+struct Ended {
+    ok: bool,
+    error: Option<String>,
+    cost: Option<f64>,
+    incomplete: bool,
 }
 
 impl Core {
@@ -132,12 +149,68 @@ impl Core {
             report: String::new(),
             new_block: false,
             refused: vec![],
+            waiting: vec![],
+            told: vec![],
+            held: None,
+            earlier_turn: false,
+            stopping: false,
         };
         if let Some(old) = self.helpers.insert(call.to_string(), run) {
             old.session.close();
         }
         self.expire_helper(call, hsid, MAX_RUN, "it ran out of time");
         Ok(())
+    }
+
+    /// The person wrote to a helper at work (R161 step 5). Codex takes the message into its running turn; Claude Code reads it
+    /// at its next step, or as a turn of its own right after the one that is ending. The message shows on the helper's call.
+    pub(super) fn tell_helper(&mut self, conv: &str, call: &str, text: &str) -> Result<(), String> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Err("error.helperEmpty".into());
+        }
+        let h = self.helpers.get_mut(call).filter(|h| h.conv == conv).ok_or("error.helperDone")?;
+        let id = new_id();
+        h.waiting.push(id.clone());
+        h.session.steer(UserTurn::text(helper::from_person(text)), &id);
+        self.mark_told(conv, call, |told| told.push(Told { id, text: text.to_string(), taken: None }));
+        Ok(())
+    }
+
+    /// Changes what the person wrote to a helper, on its call in the conversation, and shows it.
+    fn mark_told(&mut self, conv: &str, call: &str, change: impl FnOnce(&mut Vec<Told>)) {
+        let Some(c) = self.convs.get_mut(conv) else { return };
+        let Some(m) = c.messages.iter_mut().rev().find(|m| m.tools.iter().flatten().any(|t| t.id == call)) else { return };
+        let Some(tool) = m.tools.iter_mut().flatten().find(|t| t.id == call) else { return };
+        change(&mut tool.told);
+        let id = m.id.clone();
+        self.save(conv);
+        self.push(conv, Some(&id), true);
+    }
+
+    /// A message to the helper reached it, or did not: `taken` says which, and `tag` names it when the CLI echoes it.
+    fn helper_took(&mut self, call: &str, tag: Option<String>, taken: bool) {
+        let Some(h) = self.helpers.get_mut(call) else { return };
+        let Some(at) = tag.and_then(|t| h.waiting.iter().position(|w| *w == t)).or((!h.waiting.is_empty()).then_some(0)) else { return };
+        let id = h.waiting.remove(at);
+        let conv = h.conv.clone();
+        let mut words = None;
+        self.mark_told(&conv, call, |told| {
+            if let Some(t) = told.iter_mut().find(|t| t.id == id) {
+                t.taken = Some(taken);
+                words = Some(t.text.clone());
+            }
+        });
+        let Some(h) = self.helpers.get_mut(call) else { return };
+        if taken {
+            h.told.extend(words);
+            // A turn that ended before this message was read is not the last: the message is a turn of its own now.
+            h.held = None;
+        } else if h.waiting.is_empty()
+            && let Some(e) = h.held.take()
+        {
+            self.end_helper(call, e.ok, e.error.as_deref(), e.cost, e.incomplete);
+        }
     }
 
     /// What a helper's own session reports. Its tools show inside the agent's call; nobody answers its approvals, because the
@@ -163,6 +236,8 @@ impl Core {
                     h.refused.push(tool);
                 }
             }
+            EngineEvent::Injected { tag } => self.helper_took(call, tag, true),
+            EngineEvent::SteerFailed { tag } => self.helper_took(call, Some(tag), false),
             EngineEvent::Quota { window, used, resets_at } => self.note_quota(vendor, &window, used, resets_at),
             EngineEvent::Signals(s) => self.apply_signals(vendor, s),
             EngineEvent::Done {
@@ -177,8 +252,10 @@ impl Core {
                 reason,
             } => {
                 let model = h.model.clone();
-                // A helper's session is new, so Claude's running total is this turn's cost; Codex prices each turn.
-                let cost = cost_total_usd.filter(|c| c.is_finite() && *c >= 0.0).or_else(|| {
+                // A helper's session is new, so Claude's running total is the cost of its turns so far; Codex prices each turn,
+                // and a message steered into a Codex turn stays in it. A price from tokens covers only the last turn.
+                let total = cost_total_usd.filter(|c| c.is_finite() && *c >= 0.0);
+                let cost = total.or_else(|| {
                     usage::api_price_for_prompt(
                         &model,
                         input_tokens,
@@ -189,7 +266,15 @@ impl Core {
                         0,
                     )
                 });
-                self.end_helper(call, ok, (!ok).then_some(reason.as_str()), cost, incomplete || cost.is_none());
+                let incomplete = incomplete || cost.is_none() || (h.earlier_turn && total.is_none());
+                let error = (!ok).then_some(reason);
+                // A message to the helper still on its way: this end waits to see whether another turn follows.
+                if let Some(h) = self.helpers.get_mut(call).filter(|h| !h.waiting.is_empty() && !h.stopping) {
+                    (h.new_block, h.earlier_turn) = (true, true);
+                    h.held = Some(Ended { ok, error, cost, incomplete });
+                    return;
+                }
+                self.end_helper(call, ok, error.as_deref(), cost, incomplete);
             }
             // A turn Codex refused to start never ends on its own: it is the helper's end too.
             EngineEvent::Error { message, fatal } if fatal || message.starts_with("Codex turn/start failed") => {
@@ -203,11 +288,26 @@ impl Core {
         let Some(h) = self.helpers.remove(call) else { return };
         h.session.close();
         self.note_span(h.vendor, h.started, &h.model, cost, incomplete);
-        let (ok, text) = helper::report(ok, &h.report, &h.refused, error);
+        let (ok, mut text) = helper::report(ok, &h.report, &h.refused, error);
+        if !h.told.is_empty() {
+            text.push_str(&helper::told_note(&h.told));
+        }
+        self.never_read(&h.conv, call, &h.waiting);
         let Some(l) = self.live.get(&h.conv).filter(|l| l.sid == h.sid) else { return };
         l.session.helper_reply(call, ok, text);
         if let (Some(cost), Some(m)) = (cost, self.turn(&h.conv)) {
             m.cost_usd = Some(m.cost_usd.unwrap_or(0.0) + cost);
+        }
+    }
+
+    /// A message still on its way when the helper ended never reached it.
+    fn never_read(&mut self, conv: &str, call: &str, waiting: &[String]) {
+        if !waiting.is_empty() {
+            self.mark_told(conv, call, |told| {
+                for t in told.iter_mut().filter(|t| waiting.contains(&t.id)) {
+                    t.taken = Some(false);
+                }
+            });
         }
     }
 
@@ -254,8 +354,10 @@ impl Core {
                 if let Some(h) = self.helpers.remove(&call) {
                     h.session.close();
                     self.note_span(h.vendor, h.started, &h.model, None, true);
+                    self.never_read(&h.conv, &call, &h.waiting);
                 }
-            } else if let Some(h) = self.helpers.get(&call) {
+            } else if let Some(h) = self.helpers.get_mut(&call) {
+                h.stopping = true;
                 h.session.interrupt();
                 // A helper whose turn had not begun cannot be interrupted: it ends here if it has not reported by then.
                 let hsid = h.hsid;

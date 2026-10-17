@@ -227,6 +227,11 @@ async fn send_queued(faber: State<'_, Faber>, id: String, turn_id: String) -> Re
 }
 
 #[tauri::command]
+async fn tell_helper(faber: State<'_, Faber>, id: String, call_id: String, text: String) -> Res<()> {
+    faber.engine.tell_helper(&id, &call_id, &text)
+}
+
+#[tauri::command]
 async fn remove_project(faber: State<'_, Faber>, id: String) -> Res<()> {
     // One turn at a time with the mission commands, so a mission cannot start between the check and the removal.
     let _turn = faber.missions.lock().await;
@@ -1412,6 +1417,7 @@ fn main() {
                 remove,
                 remove_queued,
                 send_queued,
+                tell_helper,
                 remove_project,
                 preview_look,
                 save_settings,

@@ -38,6 +38,8 @@ export interface ToolUse {
   facts?: { edited?: string[]; checks: number; failed: number; unnamed?: string[] };
   /** A command that runs the project's tests, lint or build, as the engine marks it when it starts. */
   check?: boolean;
+  /** On a helper's call: what the person wrote to it while it worked (R161 step 5); `taken` is absent while on its way. */
+  told?: { id: string; text: string; taken?: boolean }[];
   /** When the engine saw the call start, in Unix milliseconds; absent on older conversations. */
   started?: number;
 }
@@ -417,6 +419,7 @@ export const api = {
   remove: (id: string) => invoke<void>('remove', { id }),
   removeQueued: (id: string, turnId: string) => invoke<void>('remove_queued', { id, turnId }),
   sendQueued: (id: string, turnId: string) => invoke<void>('send_queued', { id, turnId }),
+  tellHelper: (id: string, callId: string, text: string) => invoke<void>('tell_helper', { id, callId, text }),
   removeProject: (id: string) => invoke<void>('remove_project', { id }),
   showProject: (id: string) => invoke<void>('show_project', { id }),
   addProject: () => invoke<Project | null>('add_project'),

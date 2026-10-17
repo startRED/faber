@@ -1,6 +1,6 @@
 import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
-import type { Message, ToolUse } from '../../ui/api.ts';
+import { api, type Message, type ToolUse } from '../../ui/api.ts';
 import { useLanguage } from '../../ui/i18n.ts';
 import { AgentChat, openedAgent, showAgent } from '../../ui/AgentChat.tsx';
 import { Running } from '../../ui/Running.tsx';
@@ -177,10 +177,10 @@ check('subagent in the column: its brief, steps and report, back to the list, an
         onOpen: () => {},
         onClose: () => closed++,
         onBack: () => back++,
-        onTell: (title) => told.push(title),
+        onTell: (text) => told.push(text),
         ref: () => {},
         get agent() {
-          return { step: agentSteps(tools())[0]!, streaming: streaming() };
+          return { step: agentSteps(tools())[0]!, streaming: streaming(), helpable: false };
         },
       }),
     root,
@@ -193,7 +193,7 @@ check('subagent in the column: its brief, steps and report, back to the list, an
     equal(root.querySelectorAll('.side-body .tools > span').length, 1);
     equal(root.querySelector('.side-tell p')!.textContent, "A subagent can't be written to while it works, so what you say goes to the main agent.");
     root.querySelector<HTMLButtonElement>('.side-tell .btn')!.click();
-    deepEqual(told, ['Find file defining load_config'], 'Tell it goes through the app, which makes way for the box');
+    deepEqual(told, ['About “Find file defining load_config”: '], 'Tell it goes through the app, which makes way for the box');
     setTools([{ ...AGENT, ok: true, output: FRAMED }, { ...GREP, ok: true }]);
     ok(root.querySelector('.agent-report')!.textContent!.startsWith('The definition is in one file'), 'the report shows without its frame');
     ok(!root.textContent!.includes('Subagent hand-back'));
@@ -251,6 +251,87 @@ check('subagent in the column: what it did, from its steps', () => {
     setCall({ ...AGENT });
     equal(root.querySelector('.side-facts'), null, 'a call that has not ended has no facts');
   } finally {
+    dispose();
+    root.remove();
+  }
+});
+
+// R161 step 5: a helper is a session of its own, so its view has a box that writes to it; what was written shows with where
+// it got to. A finished subagent offers "Continue with a helper" where a helper can work, through the conversation's box.
+check('helper in the column: a box that writes to it, its messages, and Continue with a helper once it ended', async () => {
+  useLanguage('en');
+  const root = document.createElement('div');
+  document.body.append(root);
+  const HELPER: ToolUse = { id: 'h1', name: 'Helper', input: { title: 'Check config', brief: 'Check config.toml.' } };
+  const RUN: ToolUse = { id: 'c1', name: 'commandExecution', input: { command: 'cat config.toml' }, parent: 'h1' };
+  const [tools, setTools] = createSignal<ToolUse[]>([HELPER, RUN]);
+  const [helpable, setHelpable] = createSignal(true);
+  const started: string[] = [];
+  const sent: string[][] = [];
+  const before = api.tellHelper;
+  api.tellHelper = async (id: string, callId: string, text: string) => {
+    sent.push([id, callId, text]);
+  };
+  showAgent({ conversationId: 'p1', messageId: 'm1', callId: 'h1' });
+  const dispose = render(
+    () =>
+      createComponent(AgentChat, {
+        streaming: true,
+        onBack: () => {},
+        onClose: () => {},
+        onTell: (text) => started.push(text),
+        get helpable() {
+          return helpable();
+        },
+        get step() {
+          return agentSteps(tools(), 'Codex')[0]!;
+        },
+      }),
+    root,
+  );
+  const settle = () => new Promise((done) => setTimeout(done, 0));
+  try {
+    equal(root.querySelector('.side-tell'), null, 'a helper at work is written to, not told about');
+    const area = root.querySelector<HTMLTextAreaElement>('.side-write textarea')!;
+    equal(root.querySelector('.side-write label')!.textContent, 'This helper is a session of its own, so what you write here goes straight to it.');
+    const send = root.querySelector<HTMLButtonElement>('.side-write .btn')!;
+    ok(send.disabled, 'nothing to send yet');
+    area.value = '  Also check the retries.  ';
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+    area.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await settle();
+    deepEqual(sent, [['p1', 'h1', 'Also check the retries.']], 'Enter sends it to that helper of that conversation');
+    equal(area.value, '', 'the box empties once the helper has it');
+    setTools([{ ...HELPER, told: [{ id: 't1', text: 'Also check the retries.' }] }, RUN]);
+    equal(root.querySelector('.side-told .you')!.textContent, 'Also check the retries.');
+    equal(root.querySelector('.side-told p')!.textContent, 'Sent to the helper');
+    setTools([{ ...HELPER, told: [{ id: 't1', text: 'Also check the retries.', taken: true }] }, RUN]);
+    equal(root.querySelector('.side-told p')!.textContent, 'The helper read it');
+    api.tellHelper = async () => {
+      throw 'error.helperDone';
+    };
+    area.value = 'One more thing';
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+    root.querySelector<HTMLFormElement>('.side-write')!.requestSubmit();
+    await settle();
+    equal(root.querySelector('.side-write [role=alert]')!.textContent!.trim(), 'This helper has finished, so it can no longer be written to.');
+    equal(area.value, 'One more thing', 'what was not sent stays in the box');
+    const box = () => root.querySelector<HTMLTextAreaElement>('.side-write textarea')!.value;
+    setTools([{ ...HELPER, id: 'h2' }, { ...RUN, parent: 'h2' }]);
+    equal(box(), '', 'another helper opened: its own box, never the words meant for the first');
+    setTools([HELPER, RUN]);
+    equal(box(), 'One more thing', 'back on the first helper, its unsent words are there again');
+    setTools([{ ...HELPER, ok: true, output: 'Nothing risky.', told: [{ id: 't1', text: 'Also check the retries.', taken: false }] }, { ...RUN, ok: true }]);
+    equal(root.querySelector('.side-write'), null, 'an ended helper cannot be written to');
+    equal(root.querySelector('.side-told p')!.textContent, 'The helper had finished, so it never read it');
+    equal(root.querySelector('.side-tell p')!.textContent, 'A helper from the other AI can pick up where this one stopped.');
+    root.querySelector<HTMLButtonElement>('.side-tell .btn')!.click();
+    deepEqual(started, ['Have a helper from the other AI continue “Check config”: '], 'Continue starts the conversation box, through the app');
+    setHelpable(false);
+    equal(root.querySelector('.side-tell'), null, 'no helper can work here: nothing is offered');
+  } finally {
+    api.tellHelper = before;
+    showAgent(undefined);
     dispose();
     root.remove();
   }

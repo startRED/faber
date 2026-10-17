@@ -120,7 +120,11 @@ ran, then, once it ended, "What it did" (R161 step 4): a quiet block in the work
 in the data face, its checks and how many failed (a failed count gets the error note's 2 px edge), and the changed files
 its brief never named. These are counted by the engine from its steps (`engine/src/engine/facts.rs`), never taken from the
 main agent's word. Then its report as Markdown. While it works, a quiet line says a CLI subagent cannot be written to while it runs and
-"Tell it…" starts a message to the main agent. The row open there has the hover surface and a 2 px accent edge on its
+"Tell it…" starts a message to the main agent. A helper from the other AI is a session of its own, so it gets a box
+instead (R196): a line saying the words go straight to it, a field and "Send" (Enter sends, Shift+Enter breaks the
+line). What the person wrote stays above the box in their own bubble, with a line in the third ink under it: sent, read,
+or never read because the helper had finished. Once a subagent ended, in a project with both AIs connected, a quiet line
+and "Continue with a helper" start the conversation's box asking the main agent to hand the rest to a helper. The row open there has the hover surface and a 2 px accent edge on its
 left (amber on a stuck row). The column opens the way it always does; the content swaps without motion, since it is a
 click the person just made. Opening another conversation goes back to the list. Rows sit in a `minmax(0, 1fr)` grid, so a long
 tool line ellipsizes instead of widening the reply. A helper that never finished reads "stopped" once the reply has

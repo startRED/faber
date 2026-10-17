@@ -23,12 +23,12 @@ export function Running(props: {
   /** Opened by the user over the stage: it is a modal dialog. Docked, or opened by itself, it is not. */
   modal: boolean;
   /** A subagent the person opened from its reply: the column shows it instead of the list until "back". */
-  agent?: { step: AgentStep; streaming: boolean };
+  agent?: { step: AgentStep; streaming: boolean; helpable: boolean };
   /** A page of Faber's browser the person opened from a reply, shown the same way. */
   site?: OpenSite;
   onBack?: () => void;
   /** "Tell it…" from the open subagent: the conversation's box, reached through the column. */
-  onTell?: (title: string) => void;
+  onTell?: (text: string) => void;
   ref: (el: HTMLElement) => void;
 }) {
   // The times move while the column is open and stop with it.
@@ -121,7 +121,7 @@ export function Running(props: {
           </Show>
         }
       >
-        {(agent) => <AgentChat step={agent().step} streaming={agent().streaming} onBack={() => props.onBack?.()} onTell={(title) => props.onTell?.(title)} onClose={props.onClose} />}
+        {(agent) => <AgentChat step={agent().step} streaming={agent().streaming} helpable={agent().helpable} onBack={() => props.onBack?.()} onTell={(text) => props.onTell?.(text)} onClose={props.onClose} />}
       </Show>
     </aside>
   );

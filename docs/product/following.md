@@ -90,7 +90,9 @@ frames) and checked against today's code. It fills the steps of R161 and never b
    brief's lines to a report would be a guess.
 5. **Helpers talk back (R161 step 3).** A helper is a real Faber session on the other vendor, so in the side chat the
    box writes to that child, and the main agent gets the message before its next step. A finished subagent offers
-   "Continue with a helper".
+   "Continue with a helper". Built (R196): the box writes to the helper (Codex in its turn, Claude Code at its next
+   step or right after), and the main agent reads the person's words under the helper's report, not before its own next
+   step: it is waiting on the helper then. "Continue with a helper" starts a message to the main agent.
 6. **Stuck shows only when it matters.** The engine notices a child repeating the same action, failing the same check
    twice, or silent longer than its kind of work allows; a child waiting on a question is "waiting for you", never
    stuck. The main agent hears first and tries once to retry, narrow the piece or hand it to the other vendor. Only if

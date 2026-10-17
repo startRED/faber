@@ -2286,6 +2286,95 @@ async fn r161_a_running_helper_counts_on_its_quota_and_stops_when_its_vendor_wou
     engine.shutdown();
 }
 
+/// What the person writes to a helper in its view (R161 step 5), in the recordings `helper-told*`.
+const TOLD: &str = "Also say whether retries above 5 would be risky.";
+
+/// R161 step 5: a project's agent on `main` calls a helper; once the helper's recording stops for the person's message (it
+/// waits for that line), the person writes to the helper. Returns the helper's call, the report Faber gave the agent, and
+/// what each recording saw differently from what Faber sent.
+async fn tell_a_helper(main: &str, prompt: &str, helper: (&str, &str)) -> (faber_engine::model::ToolUse, String, Vec<String>, Vec<String>) {
+    let dir = tempfile::tempdir().unwrap();
+    let (agent, other) = (fake(fixture(main, "helper-call")), fake(fixture(helper.0, helper.1)));
+    let (to_agent, to_other, main_bin) = (agent.spawn.clone(), other.spawn.clone(), main.to_string());
+    let spawn: Spawner = Arc::new(move |bin, argv, cwd| if bin == main_bin { to_agent(bin, argv, cwd) } else { to_other(bin, argv, cwd) });
+    let engine = two_vendors(dir.path(), spawn);
+    let project = engine.add_project(&dir.path().to_string_lossy()).unwrap();
+    let model = if main == "claude" { "haiku" } else { "gpt-6.1-sol" };
+    let id = engine.send(SendRequest { project_id: Some(project.id), ..ask(Area::Project, prompt, choice(main, Some(model))) }).unwrap();
+    let helper_call = |c: &faber_engine::model::Conversation| {
+        c.messages.iter().flat_map(|m| m.tools.iter().flatten()).find(|t| t.name == "Helper").map(|t| t.id.clone())
+    };
+    let call = helper_call(&until(&engine, &id, |c| helper_call(c).is_some()).await).unwrap();
+    assert_eq!(engine.tell_helper(&id, &call, "  "), Err("error.helperEmpty".into()), "an empty message is not sent");
+    assert_eq!(engine.tell_helper(&id, "other", TOLD), Err("error.helperDone".into()), "only a helper at work is written to");
+    engine.tell_helper(&id, &call, TOLD).unwrap();
+    let c = until(&engine, &id, |c| settled(c, 2)).await;
+    engine.shutdown();
+    if helper.0 == "claude" {
+        let args = other.args.lock().unwrap()[0].clone();
+        assert!(args.iter().any(|a| a == "--replay-user-messages"), "a helper echoes what it takes in: {args:?}");
+    }
+    let tool = c.messages[1].tools.iter().flatten().find(|t| t.id == call).unwrap().clone();
+    assert_eq!(engine.tell_helper(&id, &call, TOLD), Err("error.helperDone".into()), "an ended helper is not written to");
+    // The report as Faber wrote it to the agent's CLI: Claude Code's MCP answer, or Codex's dynamic tool answer.
+    let report = agent
+        .wire
+        .messages()
+        .into_iter()
+        .find_map(|m| {
+            let claude = &m["response"]["response"]["mcp_response"]["result"]["content"][0]["text"];
+            claude.as_str().or(m["result"]["contentItems"][0]["text"].as_str()).map(String::from)
+        })
+        .expect("the agent hears back");
+    let (a, o) = (agent.mismatches.lock().unwrap().clone(), other.mismatches.lock().unwrap().clone());
+    (tool, report, a, o)
+}
+
+fn told_was_taken(tool: &faber_engine::model::ToolUse, report: &str) {
+    assert_eq!(tool.told.len(), 1, "{tool:?}");
+    assert_eq!((tool.told[0].text.as_str(), tool.told[0].taken), (TOLD, Some(true)), "the message shows on the call, read");
+    assert!(report.ends_with(&format!("While it worked, the person wrote to the helper: \"{TOLD}\".")), "the agent hears it: {report}");
+}
+
+/// R161 step 5: Codex takes the person's message into the helper's running turn (`turn/steer`), and its final words are
+/// still the report the agent gets.
+#[tokio::test]
+async fn r161_the_person_writes_to_a_codex_helper_at_work_and_it_takes_the_message_into_its_turn() {
+    let text = "Call the helper tool once with title \"Check\" and brief \"What is the answer?\". Then tell me in one line what it said.";
+    let (tool, report, agent, helper) = tell_a_helper("claude", text, ("codex", "helper-told")).await;
+    assert_eq!(agent, Vec::<String>::new());
+    assert_eq!(helper, Vec::<String>::new(), "the message is steered into the helper's turn, in the helper's own words");
+    told_was_taken(&tool, &report);
+    assert!(report.starts_with("`config.toml` tem `timeout = 30`"), "its final words are the report: {report}");
+}
+
+/// R161 step 5: Claude Code reads a line written during a tool step at its next step, with one result for both, and echoes
+/// it then: the helper ends at that result, its last words the report.
+#[tokio::test]
+async fn r161_the_person_writes_to_a_claude_helper_during_a_tool_step_and_it_reads_it_at_its_next_step() {
+    let text =
+        "Ask the helper tool to check config.toml for risky values (title \"Check config\"). Then tell me in one sentence what it found.";
+    let (tool, report, agent, helper) = tell_a_helper("codex", text, ("claude", "helper-told")).await;
+    assert_eq!(agent, Vec::<String>::new());
+    assert_eq!(helper, Vec::<String>::new());
+    told_was_taken(&tool, &report);
+    assert!(report.starts_with("**Config check: no risky values found.**"), "its final words are the report: {report}");
+}
+
+/// R161 step 5: a line written while Claude Code writes its final words becomes a turn of its own after that result. The
+/// first result does not end the helper: the second turn answers the person, and its words are the report.
+#[tokio::test]
+async fn r161_a_claude_helper_told_during_its_last_words_answers_in_a_second_turn_and_that_is_its_report() {
+    let text =
+        "Ask the helper tool to check config.toml for risky values (title \"Check config\"). Then tell me in one sentence what it found.";
+    let (tool, report, agent, helper) = tell_a_helper("codex", text, ("claude", "helper-told-later")).await;
+    assert_eq!(agent, Vec::<String>::new());
+    assert_eq!(helper, Vec::<String>::new());
+    told_was_taken(&tool, &report);
+    assert!(report.starts_with("Retries above 5 aren't dangerous in themselves"), "the second turn's words: {report}");
+    assert!(!report.contains("The config check found nothing risky"), "the first turn's words were not the last: {report}");
+}
+
 /// Removing a project deletes Faber's own working copy and proofs' folder for it, and never what a link inside points at.
 #[tokio::test]
 async fn removing_a_project_deletes_its_working_copy_but_nothing_a_link_inside_points_at() {

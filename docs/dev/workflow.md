@@ -98,7 +98,7 @@ So a branch never touches those shared lines. Its entry and its decision rows go
 
 `notes` holds an entry per kind it names, each with an id of its own and a text in every language of `ui/locales/`,
 each written by hand. A row of `decisions` is written like the table's, with `R-next` for its number. Elsewhere the
-branch writes `R-next` for its decision (`R-next-2` for a second) in every place that refers to it, the pull request
+branch writes `R-next` for its decision (`R-next` for a second) in every place that refers to it, the pull request
 title included. Quoted in backticks the placeholders are only words, as here. Two branches then conflict only where they
 change the same lines for real.
 

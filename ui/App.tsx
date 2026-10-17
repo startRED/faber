@@ -32,7 +32,7 @@ import { animateDetails, animateList, watchMotion } from './motion.ts';
 import { Projects } from './Projects.tsx';
 import { createOpening, upsert } from './opening.ts';
 import { Running } from './Running.tsx';
-import { openedAgent, showAgent, tellAbout } from './AgentChat.tsx';
+import { openedAgent, showAgent, startMessage } from './AgentChat.tsx';
 import { openedSite, showSite } from './Site.tsx';
 import { agentSteps } from './worklog.ts';
 import { createAutoOpen, openPlace, type Place, placeOfRunning, store, waitingKeys } from './running.ts';
@@ -261,7 +261,9 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
     const m = conversation.messages.find((message) => message.id === open.messageId);
     const helperKind = m?.vendor ? vendorName(m.vendor === 'claude' ? 'codex' : 'claude') : '';
     const step = agentSteps(m?.tools, helperKind).find((s) => s.call.id === open.callId);
-    return step && { step, streaming: m?.status === 'streaming' };
+    // A helper works only in a project whose agent can reach the other AI (both connected), as the engine offers it.
+    const helpable = conversation.area === 'project' && state().vendors.length > 1;
+    return step && { step, streaming: m?.status === 'streaming', helpable };
   });
   // A page of Faber's browser (R161 step 7) opens in the column the same way, and one of the two shows at a time.
   const sideSite = () => {
@@ -710,10 +712,10 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         // The back button is gone with the subagent or the page: focus stays in the column, on the list's first control.
         queueMicrotask(() => column?.querySelector<HTMLElement>('button')?.focus());
       }}
-      onTell={(title) => {
+      onTell={(text) => {
         // The box sits behind a modal column: the column makes way first, so the box can take focus.
         if (trapped()) closeColumn();
-        queueMicrotask(() => tellAbout(title));
+        queueMicrotask(() => startMessage(text));
       }}
       ref={(el) => (column = el)}
     />

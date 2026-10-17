@@ -30,6 +30,7 @@ fn a_partial_answer_keeps_tool_effects_and_explicitly_continues_instead_of_repea
         parent: None,
         sign: None,
         facts: None,
+        told: vec![],
         check: false,
         started: None,
     }]);

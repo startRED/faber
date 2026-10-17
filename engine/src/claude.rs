@@ -8,7 +8,7 @@ use crate::persona::{PersonaInput, persona, worker_contract};
 use crate::proc::{self, Spawner};
 use crate::signals::claude_signals;
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -286,12 +286,13 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
         args.push("--append-system-prompt".into());
         args.push(persona(&PersonaInput { name: launch.user_name.as_deref() }));
         // R161: Faber's own MCP server, answered by this driver over stdio, holds the helper tool and the browser. A helper
-        // keeps no history.
+        // keeps no history, and echoes each line it is given when it takes it in, so a line the person wrote while it works is
+        // known to be read.
         if mcp_tools(launch).any() {
             args.extend(["--mcp-config".into(), crate::helper::CLAUDE_MCP_CONFIG.into()]);
         }
         if launch.helper == crate::helper::Helper::Is {
-            args.push("--no-session-persistence".into());
+            args.extend(["--no-session-persistence".into(), "--replay-user-messages".into()]);
         }
     }
     // Side questions keep the CLI default, and an older CLI that does not list the flag would refuse to start with it.
@@ -594,6 +595,9 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
         let mut quota_seen = false;
         let mut watch = proc::TurnWatch::default();
         let mut queued = vec![];
+        // A helper's lines not yet echoed back, in order: the tag of one the person wrote while it worked, none for a turn's own.
+        let replay = opts.launch.helper == crate::helper::Helper::Is;
+        let mut unread: VecDeque<Option<String>> = VecDeque::new();
         // When the latest request of the running turn began: the cache lifetime counts from it, not from the result.
         let mut request_began: Option<u64> = None;
         // When the running turn was handed to the CLI: its request goes out at that moment. Set once per turn and never moved by
@@ -646,6 +650,12 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                             }
                             watch.activity();
                             if finished { watch.finish(); }
+                            if replay && msg["type"] == "user" && msg["isReplay"] == true {
+                                if let Some(Some(tag)) = unread.pop_front() {
+                                    on_event(EngineEvent::Injected { tag: Some(tag) });
+                                }
+                                continue;
+                            }
                             // R161: Faber's MCP server. Only a session that offers one of its tools has it; the CLI waits for each answer.
                             if msg["type"] == "control_request" && msg["request"]["subtype"] == "mcp_message" {
                                 let tools = mcp_tools(&opts.launch);
@@ -728,10 +738,13 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                                 break;
                             }
                             if finished {
+                                // A line still unread after the result is a turn of its own, and it starts now.
+                                if !unread.is_empty() { watch.begin(project); }
                                 for turn in std::mem::take(&mut queued) {
                                     quota_seen = false;
                                     watch.begin(project);
                                     turn_sent_ms = unix_ms();
+                                    if replay { unread.push_back(None); }
                                     let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
                                 }
                             }
@@ -746,12 +759,20 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                         watch.begin(project);
                         request_began = None;
                         turn_sent_ms = unix_ms();
+                        if replay { unread.push_back(None); }
                         let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
                     }
                     // A line written mid-turn is folded into a turn that uses tools (one result for both) and becomes a turn of
                     // its own after a plain reply (see tests/fixtures/claude/queued*.jsonl). Faber cannot tell which ahead of
                     // time, so it holds the message itself and never steers this CLI; if asked anyway, it was not delivered.
-                    Some(SessionCommand::Steer { tag, .. }) => on_event(EngineEvent::SteerFailed { tag }),
+                    // A helper is the exception (R161 step 5): its echo says which turn took the line (fixtures `helper-told*`).
+                    Some(SessionCommand::Steer { turn, tag }) => {
+                        if replay && watch.active() && !watch.stopping() && proc::write_line(&mut *stdin, &user_message(&turn)).await.is_ok() {
+                            unread.push_back(Some(tag));
+                        } else {
+                            on_event(EngineEvent::SteerFailed { tag });
+                        }
+                    }
                     Some(SessionCommand::Answer { request_id, allow, reply, ack }) => {
                         // The request stays pending until the write worked, so a failed write can be answered again.
                         let delivery = match pending.get(&request_id) {

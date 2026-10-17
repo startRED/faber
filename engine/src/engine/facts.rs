@@ -85,6 +85,7 @@ mod tests {
             parent: parent.map(String::from),
             sign: None,
             facts: None,
+            told: vec![],
             check: false,
             started: None,
         }

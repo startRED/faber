@@ -261,6 +261,15 @@ svg.i.sm { width: 14px; height: 14px; }
 .side-tell { display: grid; justify-items: start; gap: 8px; padding-top: 4px; color: var(--ink-3); }
 .side-tell p { margin: 0; }
 .side-tell .btn { height: var(--h-sm); }
+/* A helper at work is written to here (R161 step 5); what was written stays above the box, with where it got to. */
+.side-told { display: grid; gap: 4px; }
+.side-told .you { max-width: 100%; font-size: var(--fs-sm); white-space: pre-wrap; }
+.side-told p { margin: 0; font-size: var(--fs-xs); color: var(--ink-3); }
+.side-told p.bad { color: var(--ink-2); }
+.side-write { display: grid; justify-items: start; gap: 8px; padding-top: 4px; color: var(--ink-3); }
+.side-write .field { max-width: none; height: auto; padding: 8px 10px; resize: vertical; line-height: 1.5; }
+.side-write .btn { height: var(--h-sm); }
+.side-write .bad { margin: 0; color: var(--ink-2); }
 .rc-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0 12px 12px; display: grid; align-content: start; gap: 16px; scrollbar-width: thin; scrollbar-color: var(--line-3) transparent; }
 .proj-g h3 { display: flex; align-items: center; gap: 8px; margin: 0; padding: 0 6px 8px; font: 600 var(--fs-sm) var(--font-ui); color: var(--ink-2); }
 .proj-g h3 .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

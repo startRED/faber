@@ -276,6 +276,7 @@ mod tests {
             parent: None,
             sign: None,
             facts: None,
+            told: vec![],
             check: false,
             started: None,
         }

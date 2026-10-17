@@ -609,6 +609,10 @@ impl Engine {
     pub fn send_queued(&self, id: &str, turn_id: &str) -> Result<(), String> {
         self.with(|c| c.send_queued(id, turn_id))
     }
+    /// Writes to a helper at work (R161 step 5): `call_id` is the agent's helper call in conversation `id`.
+    pub fn tell_helper(&self, id: &str, call_id: &str, text: &str) -> Result<(), String> {
+        self.with(|c| c.tell_helper(id, call_id, text))
+    }
     pub fn warm(&self, req: WarmRequest) {
         self.with(|c| c.warm(req))
     }
@@ -1475,6 +1479,7 @@ impl Core {
                         parent,
                         sign: None,
                         facts: None,
+                        told: vec![],
                         check: false,
                         started: Some(now()),
                     };

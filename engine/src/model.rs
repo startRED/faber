@@ -110,6 +110,19 @@ pub struct ToolUse {
     /// a clock of its own (R161 step 9). Absent on calls recorded before it existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started: Option<u64>,
+    /// On a helper's call: what the person wrote to the helper while it worked (R161 step 5), oldest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub told: Vec<Told>,
+}
+
+/// A message the person wrote to a helper at work. `taken` is empty while it is on its way, true once the helper took it
+/// in, and false when the helper had finished first, so it never read it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Told {
+    pub id: String,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub taken: Option<bool>,
 }
 
 /// A helper the agent sent to the background (Claude Code's `Agent` call with `run_in_background`): its call returns when it
