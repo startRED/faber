@@ -4,6 +4,7 @@ import themes from '../../src-tauri/src/themes.json';
 import { api, type AppState, type Choice, type Conversation, type Message, type Summary, type VendorUsage } from '../../ui/api.ts';
 import { App } from '../../ui/App.tsx';
 import { Composer } from '../../ui/Composer.tsx';
+import { closeMenu, menu } from '../../ui/contextmenu.ts';
 import { amount, compact, lang, money, percent, t, useLanguage } from '../../ui/i18n.ts';
 import { Running } from '../../ui/Running.tsx';
 import { Sidebar } from '../../ui/Sidebar.tsx';
@@ -69,7 +70,7 @@ check('calm: under an answer, three icon buttons with names, a step up when offe
   }
 });
 
-check('calm: a retry says which model it goes to, the one the composer has, in its tooltip and in the right-click menu', async () => {
+check('calm: a retry says which model it goes to, the one the composer has, in its tooltip and in the right-click menu', () => {
   useLanguage('en');
   const calls: Array<[string, string, Choice | undefined]> = [];
   const choice: Choice = { vendor: 'claude', model: 'sonnet' };
@@ -80,9 +81,9 @@ check('calm: a retry says which model it goes to, the one the composer has, in i
     retry.click();
     deepEqual(calls, [['q', 'Fix the parser', undefined]], 'the retry carries no model of its own: the screen uses the composer');
     view.root.querySelector('article')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
-    await settle();
-    ok([...document.querySelectorAll('[role=menuitem]')].some((el) => el.textContent === t('answer.retry', { model: 'Claude Sonnet' })), 'the menu item names the model too');
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    // The menu's items, not its drawing: whether a menu host is on the page depends on which checks ran before.
+    ok(menu()?.items.some((item) => item.label === t('answer.retry', { model: 'Claude Sonnet' })), 'the menu item names the model too');
+    closeMenu();
   } finally {
     view.close();
   }
