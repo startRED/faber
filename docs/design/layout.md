@@ -95,6 +95,13 @@ inside its own area.
   line until the next step or the answer: at most four, one line each in the data face and the third ink, the sign in
   the count's ink, then "N more lines". Nothing moves; the status line already says the step, so the lines are hidden
   from a screen reader.
+- While a reply runs and has ended at least one check, a quiet line under the status line counts them (R161 step 9):
+  "Ran 3 checks · none failed" after a check mark in the accent's text ink, or "· 1 failed" with the error note's 2 px
+  edge and no mark. The words are the subagent facts' own. It goes when the reply ends; nothing moves.
+- While a reply runs and has read a web page, a quiet line under the status line names the sites it opened (R161 step 9):
+  "Opened 5 sites", then "+N" for any past four, then the four last opened, joined by middle dots in the third ink, the
+  one it reads now last and in the first ink. A site opened again moves to the end. It goes when the reply ends; nothing moves,
+  and the status line already says the page, so the list is hidden from a screen reader.
 
 ### Subagent steps
 

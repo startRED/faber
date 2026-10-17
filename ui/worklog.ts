@@ -200,6 +200,40 @@ export interface ChangedLine {
   added: boolean;
   text: string;
 }
+/** The sites a reply opened, the one it opened last at the end, and the one it reads now (R161 step 9). Only a page read
+ * names a site: a search names a query, and Codex reports its searches only. */
+export interface Sources {
+  hosts: string[];
+  now?: string;
+}
+
+function hostOf(url: unknown): string {
+  if (typeof url !== 'string') return '';
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
+export function sourcesOf(tools: ToolUse[]): Sources {
+  const hosts: string[] = [];
+  let now: string | undefined;
+  for (const tool of tools) {
+    if (tool.name !== 'WebFetch' || tool.declined) continue;
+    const host = hostOf((tool.input as { url?: unknown } | undefined)?.url);
+    if (!host) continue;
+    // Opened again, it moves to the end, so the one it reads now is always in view.
+    const at = hosts.indexOf(host);
+    if (at >= 0) hosts.splice(at, 1);
+    hosts.push(host);
+    if (tool.ok === undefined) now = host;
+  }
+  // Still loading while later ones ended, it moves to the end too, so it never falls out of the four in view.
+  if (now) hosts.push(...hosts.splice(hosts.indexOf(now), 1));
+  return { hosts, now };
+}
+
 /** What an edit step changed, read from its own input with no model call (R161 step 9): how many lines it added and
  * removed, and the changed lines themselves. */
 export interface Change {

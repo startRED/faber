@@ -364,6 +364,10 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 /* The checks a running reply ran: one quiet line, a check mark while none failed, the error note's 2 px edge once one did. */
 .tally { display: flex; align-items: center; gap: 6px; margin: -4px 0 0; color: var(--ink-3); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
 .tally svg { color: var(--accent-text); }
+.sources { display: flex; flex-wrap: wrap; gap: 0 6px; margin: -4px 0 0; color: var(--ink-3); font-size: var(--fs-sm); }
+.sources span { overflow-wrap: anywhere; }
+.sources span + span::before { content: '·'; margin-right: 6px; }
+.sources .now { color: var(--ink); }
 .tally.bad { padding-left: 8px; color: var(--ink-2); box-shadow: inset 2px 0 0 var(--danger); }
 /* A subagent the agent started (R161): a row like the activity's, one per helper, that opens it in the running column
    (R161 step 3); the row open there is marked, and its arrow points the way it goes. */

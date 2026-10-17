@@ -3,7 +3,7 @@ import { render } from 'solid-js/web';
 import { Thread } from '../../ui/Thread.tsx';
 import type { Message } from '../../ui/api.ts';
 import { t, useLanguage } from '../../ui/i18n.ts';
-import { changeOf, toolRow } from '../../ui/worklog.ts';
+import { changeOf, sourcesOf, toolRow } from '../../ui/worklog.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
 check('worklog: every Claude Code tool reads as what it does, in words', () => {
@@ -90,3 +90,30 @@ check('worklog: an edit in flight shows its lines under the status line, and its
   }
 });
 
+// R161 step 9: research reads as the sites it opened, from its own page reads: a site opened again moves to the end, and
+// the one still loading is the one it reads now.
+check('worklog: a reply that reads the web lists the sites it opened and the one it reads now', () => {
+  const read = (id: string, url: string, ok?: boolean) => ({ id, name: 'WebFetch', input: { url }, ok });
+  deepEqual(sourcesOf([read('a', 'https://www.docs.rs/tokio', true), { id: 's', name: 'WebSearch', input: { query: 'tokio' }, ok: true }, read('b', 'https://github.com/x', true), read('c', 'https://docs.rs/serde')]), { hosts: ['github.com', 'docs.rs'], now: 'docs.rs' }, 'a search names no site, and www is the same site');
+  deepEqual(sourcesOf([read('a', 'not a url', true), { ...read('b', 'https://x.org'), declined: true }]), { hosts: [], now: undefined }, 'a page never read names nothing');
+  deepEqual(sourcesOf([read('s', 'https://slow.dev'), ...['a', 'b', 'c', 'd'].map((h) => read(h, `https://${h}.dev`, true))]).hosts.at(-1), 'slow.dev', 'a slow page still loading stays in view');
+  useLanguage('en');
+  const root = document.createElement('div');
+  document.body.append(root);
+  const reads = Array.from({ length: 5 }, (_, i) => read(`r${i}`, `https://site${i}.dev/page`, true));
+  const [message, setMessage] = createSignal<Message>({ id: 'sources', role: 'assistant', at: 0, status: 'streaming', text: '', tools: reads.slice(0, 1) });
+  const dispose = render(() => createComponent(Thread, { get messages() { return [message()]; }, from: 0, conversationId: 'sources', options: [], onBranch: () => {} }), root);
+  try {
+    const shown = () => [...root.querySelectorAll('.sources span')].map((s) => s.textContent);
+    deepEqual(shown(), ['Opened 1 site', 'site0.dev']);
+    setMessage({ ...message(), tools: [...reads.slice(0, 4), read('r5', 'https://site5.dev/now')] });
+    deepEqual(shown(), ['Opened 5 sites', '+1', 'site1.dev', 'site2.dev', 'site3.dev', 'site5.dev'], 'at most four, the newest last');
+    equal(root.querySelector('.sources .now')!.textContent, 'site5.dev', 'the page still loading is the one it reads now');
+    equal(root.querySelector('.sources')!.getAttribute('aria-hidden'), 'true', 'the status line already says the page');
+    setMessage({ ...message(), status: 'done' });
+    equal(root.querySelector('.sources'), null, 'the list is for a reply at work');
+  } finally {
+    dispose();
+    root.remove();
+  }
+});

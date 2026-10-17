@@ -3,7 +3,7 @@ import type { ToolUse } from './api.ts';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 import { Markdown, openLinks } from './markdown.tsx';
-import { agentKind, agentState, changeOf, middle, toolRow, type AgentStep, type Change } from './worklog.ts';
+import { agentKind, agentState, changeOf, middle, toolRow, type AgentStep, type Change, type Sources } from './worklog.ts';
 
 // A subagent opened in the running column (R161 step 3): its brief word for word, the steps it ran and its report, drawn
 // with the conversation's own parts. The column is the one place on the right, so this replaces its list until "back".
@@ -55,6 +55,22 @@ export function ChangedLines(props: { change: Change }) {
       <For each={props.change.lines.slice(0, SHOWN)}>{(line) => <div classList={{ add: line.added, del: !line.added }}><b>{line.added ? '+' : '−'}</b>{line.text || ' '}</div>}</For>
       <Show when={rest() > 0}><p>{t('tool.moreLines', { n: rest() })}</p></Show>
     </div>
+  );
+}
+
+/** The sites a running reply opened, the newest last and the one it reads now in the first ink (R161 step 9). The status
+ * line already says the page it reads, so the list is for the eye. */
+export function SourceList(props: { sources: Sources }) {
+  const SHOWN = 4;
+  const rest = () => props.sources.hosts.length - SHOWN;
+  return (
+    <p class="sources" aria-hidden="true">
+      <span>{t('tool.sources', { n: props.sources.hosts.length })}</span>
+      <Show when={rest() > 0}>
+        <span>+{rest()}</span>
+      </Show>
+      <For each={props.sources.hosts.slice(-SHOWN)}>{(host) => <span classList={{ now: host === props.sources.now }}>{host}</span>}</For>
+    </p>
   );
 }
 

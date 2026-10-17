@@ -6,14 +6,14 @@ import { keep, kept, release, useDraft } from './unsent.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
 import { html, Markdown, openLinks } from './markdown.tsx';
-import { agentMeta, ChangedLines, openedAgent, showAgent, tellAbout, ToolChip } from './AgentChat.tsx';
+import { agentMeta, ChangedLines, openedAgent, SourceList, showAgent, tellAbout, ToolChip } from './AgentChat.tsx';
 import { untilReset } from './Sidebar.tsx';
 import { bytes, compact, fromEngine, money, t } from './i18n.ts';
 import { prettyModel, vendorName, type Option } from './models.ts';
 import { animateList } from './motion.ts';
 import { warmLeft } from './running.ts';
 import { quotaPending } from './QuotaCard.tsx';
-import { agentState, agentSteps, changeOf, isAgentCall, middle, sameTools, thinkingParts, toolLine, type AgentStep } from './worklog.ts';
+import { agentState, agentSteps, changeOf, isAgentCall, middle, sameTools, sourcesOf, thinkingParts, toolLine, type AgentStep } from './worklog.ts';
 
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
 
@@ -159,6 +159,8 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
     const ended = own().filter((tool) => tool.check && tool.ok !== undefined && !tool.declined);
     return { ran: ended.length, failed: ended.filter((tool) => tool.ok === false).length };
   });
+  // The sites it opened, for research (R161 step 9); a subagent's reading stays in its own step.
+  const sources = createMemo(() => sourcesOf(own()));
   const latest = createMemo(() => {
     const tool = tools().at(-1);
     if (tool && tool.ok === undefined) return toolLine(tool);
@@ -252,6 +254,9 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
             </p>
           </Show>
         </div>
+      </Show>
+      <Show when={streaming() && sources().hosts.length}>
+        <SourceList sources={sources()} />
       </Show>
       <Show when={changing()}>{(change) => <ChangedLines change={change()} />}</Show>
       <Asks conversationId={props.conversationId} turnId={m().id} permissions={waiting()} surface="ask" />

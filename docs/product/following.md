@@ -127,6 +127,8 @@ frames) and checked against today's code. It fills the steps of R161 and never b
    Built (R188): changing files, as a line count on the step and the changed lines under the status line while it is
    the newest step.
    Built (R192): running checks, as a count under the status line that ticks up with how many failed.
+   Built (R193): researching, as the sites the reply opened under the status line, the one it reads now in the first
+   ink. Codex reports its searches only, so its replies list no site yet.
 
 **Across all of them:**
 
