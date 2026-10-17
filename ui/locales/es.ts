@@ -712,7 +712,7 @@ export const es: Messages = {
   // Native speaker must translate (needs native review).
   "reason.update.quiescence": "La promoción espera a que finalicen las operaciones activas y se cierre la ventana.",
   // Native speaker must translate (needs native review).
-  "reason.git.repository": "Elige una carpeta que pertenezca a un repositorio Git.",
+  "reason.git.repository": "Faber no puede usar esta carpeta como repositorio Git: elige la carpeta principal del repositorio o una carpeta sin repositorio.",
   // Native speaker must translate (needs native review).
   "reason.git.base": "No se pudo resolver la revisión inicial de Git.",
   // Native speaker must translate (needs native review).
@@ -878,6 +878,7 @@ export const es: Messages = {
   'notes.27.better': 'La primera pantalla de un proyecto es más tranquila: una sola columna con las conversaciones de ese proyecto, y un agujero negro más pequeño que queda lejos del texto.',
   'notes.28.new': 'Cuando un subagente parece atascado, su paso se pone ámbar y Faber te avisa; si espera tu respuesta, el paso lo dice.',
   'notes.29.better': 'El inicio del Chat también es una columna tranquila: tres sugerencias cortas, y lo que retomar bajo el cuadro de mensaje.',
+  'notes.30.better': "Una carpeta que aún no es un repositorio Git ya puede ser un proyecto: Faber la convierte en uno por sí solo.",
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

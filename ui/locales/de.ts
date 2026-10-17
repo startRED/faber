@@ -712,7 +712,7 @@ export const de: Messages = {
   // Native speaker must translate (needs native review).
   "reason.update.quiescence": "Die Aktualisierung wartet auf den Abschluss aktiver Vorgänge und das Schließen des Fensters.",
   // Native speaker must translate (needs native review).
-  "reason.git.repository": "Wähle einen Ordner, der zu einem Git-Repository gehört.",
+  "reason.git.repository": "Faber kann diesen Ordner nicht als Git-Repository nutzen: Wähle den Hauptordner des Repositorys oder einen Ordner ohne Repository.",
   // Native speaker must translate (needs native review).
   "reason.git.base": "Die Git-Ausgangsrevision konnte nicht aufgelöst werden.",
   // Native speaker must translate (needs native review).
@@ -878,6 +878,7 @@ export const de: Messages = {
   'notes.27.better': 'Der erste Bildschirm eines Projekts ist ruhiger: eine Spalte mit den eigenen Unterhaltungen des Projekts und ein kleineres Schwarzes Loch, das Abstand zum Text hält.',
   'notes.28.new': 'Wenn ein Subagent festzuhängen scheint, wird sein Schritt bernsteinfarben und Faber sagt dir Bescheid; wartet er auf deine Antwort, steht das im Schritt.',
   'notes.29.better': 'Die Chat-Startseite ist jetzt auch eine ruhige Spalte: drei kurze Vorschläge, und was du fortsetzen kannst, unter dem Eingabefeld.',
+  'notes.30.better': "Ein Ordner, der noch kein Git-Repository ist, kann jetzt ein Projekt sein: Faber macht ihn selbst zu einem.",
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

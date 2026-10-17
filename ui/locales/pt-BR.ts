@@ -709,7 +709,7 @@ export const ptBR: Messages = {
   // Native speaker must translate (needs native review).
   "reason.update.quiescence": "A promoção aguarda o término das operações ativas e o fechamento da janela.",
   // Native speaker must translate (needs native review).
-  "reason.git.repository": "Escolha uma pasta que pertença a um repositório Git.",
+  "reason.git.repository": "O Faber não consegue usar esta pasta como repositório Git: escolha a pasta principal do repositório ou uma pasta sem repositório.",
   // Native speaker must translate (needs native review).
   "reason.git.base": "A revisão inicial do Git não pôde ser resolvida.",
   // Native speaker must translate (needs native review).
@@ -865,6 +865,7 @@ export const ptBR: Messages = {
   'notes.27.better': 'A primeira tela de um projeto ficou mais calma: uma coluna só, com as conversas do próprio projeto, e um buraco negro menor que fica longe das palavras.',
   'notes.28.new': 'Quando um subagente parece travado, a etapa dele fica âmbar e o Faber avisa você; quando ele espera a sua resposta, a etapa diz isso.',
   'notes.29.better': 'O início do Chat também virou uma coluna calma: três sugestões curtas, e o que retomar embaixo da caixa de mensagem.',
+  'notes.30.better': "Uma pasta que ainda não é um repositório Git agora pode ser um projeto: o Faber cria o repositório sozinho.",
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',
