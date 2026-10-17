@@ -507,46 +507,20 @@ The minimal Projects slice of R96 ([spec](superpowers/specs/2026-10-12-self-deve
 live in `engine/src/project.rs`, `project/store.rs` and `project/wire.rs`; this section is their published contract, and
 screen work may start against it with mock data before the engine runs missions.
 
-### Screen inventory
+### Screens
 
-The board keeps the titlebar, sidebar, topbar, running column, tokens, type and Curioso empty states, and reads like the
-start card it came from: one column up to 860 px, no cards around the header. First the state (a dot and a word) with
-"New mission" beside it once the mission is done, paused or blocked (a paused or blocked one asks first, since nothing
-lists it later), then the goal (at most three lines, the rest on hover), the step it is on in one line, why it waits in
-one line, and the one action that moves it (Stop or Resume). Then the needs-you cards, the report, and the tasks as one
-list grouped by state, only the groups that hold something; before the plan, one line says there are no tasks yet. Run
-mode, cost, account pace and the local build sit folded under "Run mode, cost and build". Nothing needs a horizontal drag.
+A mission has no screen: a project is worked in by talking to its agent (R160), and the start card, the checks sheet, the
+mission board and the local build card left the bundle with their 30 s poll (R-next-2). The engine keeps the mission
+machinery and the shell its commands (product-map.md, Shell commands). The Projects area shows one of two things:
 
-| Surface | Minimum behaviour |
-| :--- | :--- |
-| Goal | The composer's styling: the goal, a short plan and Start. The text stays after a refused enrollment or start |
-| Start card | Repository, starting revision, git mode (Seguro selected), author and self-update trust; granted once, never per step |
-| Board | Ready, Running, Review, Done and Blocked groups, empty ones hidden; stable task rows with builder, reviewer and reason |
-| Cost | Own cost against the live cap; the account's daily pace and its freshness beside it, separately; unknown says unknown, folded away; the step line shows the cost only once it is known |
-| Decisions | The Ask and running cards, with author and default; nothing approves an effect by itself |
-| Stop | A keyboard-reachable button while running; then the paused checkpoint and Resume |
-| Task detail | Scope, diff and artifacts, command results, missing checks and risks; technical logs behind a click |
-| Local build | Current, next and last good, and why promotion waits; no completion toast |
-
-Status colours always come with words and shapes. Amber stays for needs-you only: a quota wait or a dependency is not
-shown as a decision.
-
-### The Projects home
-
-The first screen of a project uses the layout of the Chat home (`welcome-grid`) with its own identity: the greeting
-"What should we tackle?", one column: Curioso, the project and its folder in short form (the last two folder names, the
-full path on hover), the greeting, a goal composer with its own hints and one quiet status line beside its button, and at
-most three conversations to pick up. Nothing else: the sidebar lists the projects, and every setting of a project (the
-tool policy, the code access, the self-update switch and the checks) is in Settings, Projects, one closed entry per
-project with one row per option with one short line and the rest behind the "?" of the row. The checks are asked for just in time: the
-first start on checks nobody confirmed opens a compact sheet with their count and source, every command (and the setup)
-listed in full with no collapse, a long list scrolling inside it, and "Confirm and start"; what is confirmed is exactly the list
-shown, and a project that changed it meanwhile is refused so the sheet shows the new list. It does not come back until
-the checks change. No beam of light: a project screen is a place to work. The two layouts share classes, so a change to one home reaches the other.
-
-C011 (2026-10-16, the owner) overrides the quiet rows: the project screen shows only the work, and the grant, the checks
-and the tool choice live in Settings or in a just-in-time consent. The start card is done; the mission board keeps
-the run mode folded under "Run mode, cost and build" (product-map.md, Known incoherences, 1).
+- With no project open, the small "Open a project" screen (`ui/Projects.tsx`): the empty state with its one button, the
+  recent folders and saved environments, and at most three project conversations to pick up.
+- With a project open, the new-conversation screen of Chat (`welcome-grid`) scoped to the folder: Curioso, the project and
+  its folder in short form (the last two folder names, the full path on hover), the greeting, the shared composer, and at
+  most three conversations to pick up. No beam of light: a project screen is a place to work; in Dark Room the black hole
+  sits behind it. The sidebar lists the projects, and every setting of a project (the tool policy, the code access, the
+  self-update switch and the checks) is in Settings, Projects (C011), one closed entry per project with one row per option
+  with one short line and the rest behind the "?" of the row.
 
 ### Records
 
@@ -690,7 +664,7 @@ The commands fail with a key string, like the other shell commands, and never re
 
 | Command | Request | Returns |
 | :--- | :--- | :--- |
-| `project_enroll` | `{projectId}` | the start card: repository, base, author, selected mode, revision, self-update, remote |
+| `project_enroll` | `{projectId}` | Settings, Projects: repository, base, author, selected mode, revision, self-update, remote |
 | `project_grant` | `{projectId, mode, selfUpdate, revision}` | the grant |
 | `project_revoke` | `{projectId}` | nothing |
 | `mission_start` | `{projectId, goal}` | the mission id |
@@ -712,7 +686,7 @@ The board restores the selected mission, rejects other mission identities and ol
 behind a keyboard-reachable disclosure. `TaskView.detail` is an optional additive field containing scope, required
 proof IDs and durable artifacts; absence never means verified. Build slots without a T11 snapshot remain visibly
 unknown. The cap, measured spend, daily room and reading time come from the existing admission ledger, with unknown
-values preserved. The start card reuses the composer's height measurement and the 64 px tail token. Stages narrower
+values preserved. Stages narrower
 than 760 px use one scrolling list. Mission notification receipts use the existing atomic store and R92 policy;
 hidden test builds inspect that policy without submitting OS notifications or playing audio.
 

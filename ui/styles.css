@@ -122,7 +122,6 @@ input, textarea { caret-color: var(--accent); }
 .foot-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .foot-row .area { flex: none; width: auto; }
 .urow .uncounted { grid-column: 1 / -1; }
-.usage-v .counting { font-style: italic; }
 .usage .note { padding: 4px 6px; }
 .who { flex: 1; min-width: 0; padding: 0 10px; color: var(--ink); font-size: var(--fs-ui); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .upd { padding: 2px 10px; font-size: calc(var(--fs-ui) - 2px); color: var(--ink-3); }
@@ -807,121 +806,32 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
   .first-ctl { margin-top: 16px; padding-top: 14px; }
 }
 
-.pace, .pace-projection, .waiting-label { color: var(--ink-2); font-size: .85em; }
+.pace, .waiting-label { color: var(--ink-2); font-size: .85em; }
 .quota-card { padding: 12px; border: 1px solid var(--line); margin: 12px 0; }
 .quota-card .btn { margin: 4px; }
 .plan-form { display: flex; gap: 8px; align-items: end; }
 .plan-form label { display: grid; gap: 4px; }
 .urow .meter { position: relative; overflow: visible; }
 .urow .expected { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--ink); }
-.pace-projection { grid-column: 1 / -1; }
 .waiting-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Projects board and start card */
-.projects-stage { display: flex; flex-direction: column; height: 100%; overflow-y: auto; padding: 24px; gap: 20px; }
-/* The first screen of a project: the structure of the new conversation (.welcome-grid, .hello, .lead, .composer, .rrow), the goal
-   composer where the chat composer is, the safety choices as quiet rows under it, and what to pick up on the right. */
+/* The Projects area with no project open (ui/Projects.tsx): the empty state, the recent folders and at most three conversations
+   to pick up on the right. A project that is open is a conversation: it uses the screen of the new conversation (.welcome-grid). */
+.projects-stage { position: relative; z-index: 1; display: flex; flex-direction: column; flex: 1; min-width: 0; height: 100%; overflow-y: auto; padding: 24px; gap: 0; container-type: inline-size; }
 .projects-root { position: relative; grid-column: 1; grid-row: 1; height: 100%; min-height: 0; min-width: 0; overflow: hidden; }
-.projects-stage { position: relative; z-index: 1; }
-.projects-stage.home { gap: 0; }
 .projects-stage.home .empty { padding-top: 0; }
-.start-card.welcome-grid { display: grid; width: auto; max-width: none; margin: 0; gap: 40px 64px; }
-.setup { display: grid; margin-top: 28px; }
-.setup h3, .p-side h3 { margin: 0; font: 600 calc(var(--fs-ui) - 1px) var(--font-ui); color: var(--ink-2); }
-.setup h3 { padding-bottom: 6px; }
-.p-side h3 { padding-bottom: 10px; border-bottom: 1px solid var(--line); }
-.setup .ctl-section { padding: calc(12px * var(--dens)) 0; border-radius: 0; background: none; box-shadow: none; border-top: 1px solid var(--line); }
-.setup .ctl-section:last-of-type { border-bottom: 1px solid var(--line); }
-.setup .setup-more { padding: calc(10px * var(--dens)) 0; }
-.setup .setup-more p { margin: 6px 0 0; overflow-wrap: anywhere; }
+.p-side h3 { margin: 0; padding-bottom: 10px; border-bottom: 1px solid var(--line); font: 600 calc(var(--fs-ui) - 1px) var(--font-ui); color: var(--ink-2); }
 .p-side { position: relative; z-index: 2; display: grid; align-content: start; gap: 28px; min-width: 0; }
 @container (min-width: 1000px) { .p-side { align-self: end; padding-bottom: 40px; } }
 .main:has(.projects-stage.home) .topbar { border-bottom-color: transparent; }
-.projects-stage { min-width: 0; flex: 1; container-type: inline-size; }
-.projects-stage .p-meta > span, .m-goal, .tc-title, .ny-question { min-width: 0; overflow-wrap: anywhere; }
-.projects-stage .m-controls, .projects-stage .ny-header, .projects-stage .pace-item { flex-wrap: wrap; }
-.projects-stage .ny-custom input { min-width: 0; }
-.projects-stage .p-header .peek { margin-bottom: 12px; color: var(--ink-3); }
-.projects-stage .note, .projects-stage .p-meta, .projects-stage .task-col-header, .projects-stage .cost-cap,
-.projects-stage .cost-card h3, .projects-stage .pace-card h3, .projects-stage .build-card h3,
-.projects-stage .pace-item, .projects-stage .build-slots { font-size: max(13px, calc(var(--fs-ui) - 1px)); }
 .p-header h2 { margin: 0 0 8px; font-size: var(--fs-h2); color: var(--ink); }
 .p-meta { display: flex; flex-wrap: wrap; gap: 16px; font-size: calc(var(--fs-ui) - 1px); color: var(--ink-2); }
-.ctl-section { display: flex; flex-direction: column; gap: 8px; padding: 14px; background: var(--card-bg); border-radius: var(--r-md); box-shadow: inset 0 0 0 1px var(--line-2); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0; }
-/* A mission board reads like the start card it came from: one column, the state and the goal first, the step it is on and
-   why it waits in one line each, the one action that moves it, then the tasks; what tunes or measures it is folded away. */
-.mission-board { display: flex; flex-direction: column; gap: 32px; width: 100%; max-width: 860px; }
-.m-header { display: grid; gap: 12px; }
-.m-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 32px; }
-.m-state { display: inline-flex; align-items: center; gap: 8px; font-size: max(13px, calc(var(--fs-ui) - 1px)); font-weight: 500; color: var(--ink-2); }
-.m-state i { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); }
-.m-state:is([data-state='running'], [data-state='planning'], [data-state='done']) i { background: var(--accent); }
-.m-state[data-state='blocked'] i { background: var(--amber-ink); }
-.m-new { gap: 6px; color: var(--ink-2); }
-.m-goal { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; margin: 0; font: 600 clamp(20px, 1.2vw + 12px, 28px)/1.3 var(--font-ui); letter-spacing: -0.01em; color: var(--ink); text-wrap: pretty; }
-.m-reason { margin: 0; padding-left: 12px; border-left: 2px solid var(--line-3); color: var(--ink-2); font-size: calc(var(--fs-ui) - 0.5px); max-width: 64ch; }
-.m-leave { display: grid; gap: 10px; padding: 14px 16px; border-radius: var(--r-md); background: var(--card-bg); box-shadow: inset 0 0 0 1px var(--line-2); }
-.m-leave p { margin: 0; color: var(--ink); }
-.m-section { display: flex; align-items: baseline; gap: 10px; margin: 0 0 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line); font: 600 calc(var(--fs-ui) - 1px) var(--font-ui); color: var(--ink-2); }
-.m-section span { font-weight: 400; color: var(--ink-3); }
-.m-empty { margin: 0; color: var(--ink-3); font-size: calc(var(--fs-ui) - 0.5px); }
-.m-more { border-top: 1px solid var(--line); padding-top: 12px; }
-.m-more summary { width: fit-content; min-height: 28px; display: flex; align-items: center; gap: 6px; list-style: none; cursor: pointer; color: var(--ink-2); font-size: calc(var(--fs-ui) - 1px); }
-.m-more summary:hover { color: var(--ink); }
-.m-more summary::-webkit-details-marker { display: none; }
-.m-more summary .i { transition: transform var(--dur-fast) var(--ease); }
-.m-more[open] summary .i { transform: rotate(90deg); }
-.m-more-body { display: grid; gap: 16px; padding-top: 12px; }
-.m-more-body > .ctl { justify-self: start; min-width: min(100%, 320px); }
-.m-controls { display: flex; align-items: center; gap: 12px; }
-/* The checks a mission proves its work with (R137), the step it is on, and the report it leaves. No motion: all of it is text that is read. */
+/* The checks a project declares, in Settings, Projects: shown as a list, edited as text. */
 .proof-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .proof-list li { min-width: 0; overflow-wrap: anywhere; }
 .proof-list code { font: 13px var(--font-mono); color: var(--ink); }
-.proof-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .proof-draft { width: 100%; box-sizing: border-box; padding: 8px 10px; resize: vertical; font: 13px var(--font-mono); color: var(--ink); background: var(--bg); border: 1px solid var(--line-2); border-radius: var(--r-sm); }
-.m-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0; color: var(--ink-2); font-size: calc(var(--fs-ui) - 1px); }
-.m-report { display: flex; flex-direction: column; gap: 8px; padding: 16px 20px; background: var(--card-bg); border-radius: var(--r-md); box-shadow: inset 0 0 0 1px var(--line-2); }
-.m-report h3, .m-report h4, .m-report p { margin: 0; }
-.m-report h3 { font-size: var(--fs-h2); color: var(--ink); }
-.m-report h4 { font: 600 calc(var(--fs-ui) - 1px) var(--font-ui); color: var(--ink-2); }
-.m-report p { overflow-wrap: anywhere; }
-.needs-you { display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: var(--r-md); background: linear-gradient(180deg, var(--amber-soft), transparent 150%), var(--card-bg); box-shadow: inset 0 0 0 1px var(--amber-line), var(--amber-light); }
-.ny-header { display: flex; align-items: center; gap: 8px; color: var(--amber-ink); }
-.ny-card { display: flex; flex-direction: column; gap: 10px; padding: 12px; background: var(--card-bg); border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--amber-line); }
-.ny-question { display: flex; align-items: center; gap: 8px; }
-.ny-options { display: flex; flex-wrap: wrap; gap: 8px; }
-.ny-custom { display: flex; gap: 8px; align-items: center; }
-.ny-custom input { flex: 1; height: 32px; padding: 0 10px; background: var(--bg); border: 1px solid var(--line-2); border-radius: var(--r-sm); color: var(--ink); }
-.task-columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
-.task-col { display: flex; flex-direction: column; gap: 8px; }
-.task-col-header { display: flex; align-items: center; gap: 8px; font-size: calc(var(--fs-ui) - 1px); color: var(--ink-2); }
-.task-count { font-size: max(13px, calc(var(--fs-ui) - 2px)); background: var(--s2); padding: 1px 6px; border-radius: var(--r-pill); }
-.task-list { display: flex; flex-direction: column; gap: 8px; }
-.task-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; padding: 10px 14px; background: var(--s1); border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--line); content-visibility: auto; contain-intrinsic-block-size: auto 150px; }
-.tc-title { font-size: calc(var(--fs-ui) - 0.5px); font-weight: 500; color: var(--ink); }
-.tc-meta { display: flex; flex-wrap: wrap; gap: 6px; }
-.task-card > :not(.tc-top, .tc-footer) { grid-column: 1 / -1; }
-.tc-top { grid-column: 1; grid-row: 1; min-width: 0; }
-.tc-footer { display: flex; align-items: center; grid-column: 2; grid-row: 1; }
-.task-card summary { color: var(--ink-3); font-size: calc(var(--fs-ui) - 1.5px); }
-.receipt-badge { font-size: max(13px, calc(var(--fs-ui) - 2.5px)); padding: 2px 6px; border-radius: var(--r-xs); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-2); }
-.task-card pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
-.task-card summary { min-height: 24px; cursor: pointer; }
-.cost-pace-panel { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
-.cost-card, .pace-card, .build-card { display: flex; flex-direction: column; gap: 8px; padding: 14px; background: var(--card-bg); border-radius: var(--r-md); box-shadow: inset 0 0 0 1px var(--line-2); }
-.cost-card h3, .pace-card h3, .build-card h3 { margin: 0; font-size: calc(var(--fs-ui) - 1px); color: var(--ink-2); }
-.cost-reading { display: flex; align-items: baseline; gap: 12px; }
-.cost-value { font-size: calc(var(--fs-h2) * 0.8); font-weight: 600; color: var(--ink); }
-.cost-cap { font-size: calc(var(--fs-ui) - 1px); color: var(--ink-3); }
-.pace-list { display: flex; flex-direction: column; gap: 6px; }
-.pace-item { display: flex; align-items: center; gap: 8px; font-size: calc(var(--fs-ui) - 1px); }
-.pace-stat { color: var(--ink-2); margin-left: auto; }
-.build-slots { display: flex; flex-direction: column; gap: 4px; font-size: calc(var(--fs-ui) - 1px); }
-@container (max-width: 760px) {
-  .cost-pace-panel { grid-template-columns: minmax(0, 1fr); }
-}
 
 
 /* Right-click menus (ui/ContextMenu.tsx): the look of the native pickers above, drawn by the page. Reduced and no motion are
@@ -957,22 +867,8 @@ input.rename { width: 100%; height: calc(28px + 2px * var(--dens)); padding: 0 1
 .env-tray input { flex: 1; min-width: 140px; height: 32px; padding: 0 10px; border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink); font-size: calc(var(--fs-ui) - 0.5px); }
 .empty:has(.recents) { padding-top: 4vh; gap: 12px; }
 
-/* A project's first screen, calm (ui/Projects.tsx): one column of the mark, the project, the greeting, the composer with its
-   one status line, the checks asked for just in time and at most three sessions to pick up. Every setting of a project is
-   in Settings, Projects (ui/ProjectSettings.tsx). The black hole sits right of this column and runs behind it dimmed (ui/Hole.tsx). */
 .projects-stage.home { padding-top: clamp(32px, 7vh, 72px); }
-.projects-stage.home > :not(.start-card) { max-width: 640px; }
-.start-card .p-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin: 14px 0 22px; }
-.start-card .p-header h2 { margin: 0; font: 600 calc(var(--fs-ui) + 0.5px) var(--font-ui); color: var(--ink); }
-.start-card .p-meta { font-size: calc(var(--fs-ui) - 1px); color: var(--ink-3); }
-.p-cbar { justify-content: space-between; gap: 12px; padding-left: 18px; }
-.p-cbar .btn { flex: none; margin-left: auto; }
-.p-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(var(--fs-ui) - 1.5px); color: var(--ink-3); }
-.p-sheet { display: grid; justify-items: start; gap: 8px; margin-top: 16px; padding: 16px 18px; border-radius: var(--r-md); background: var(--card-bg); box-shadow: inset 0 0 0 1px var(--line-2); }
-.p-sheet h3 { margin: 0; font: 600 var(--fs-ui) var(--font-ui); color: var(--ink); }
-.p-sheet-count { margin: 0; color: var(--ink-2); }
-.p-sheet .proof-actions { margin-top: 6px; }
-.p-sheet .proof-cmds { justify-self: stretch; }
+.projects-stage.home > .welcome-grid { max-width: 640px; }
 .p-resume { margin-top: 44px; }
 .p-resume h3 { margin: 0; padding-bottom: 10px; border-bottom: 1px solid var(--line); font: 600 calc(var(--fs-ui) - 1px) var(--font-ui); color: var(--ink-2); }
 .proof-cmds { display: grid; gap: 6px; max-height: 240px; overflow-y: auto; padding: 10px 12px; border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--line); scrollbar-width: thin; }

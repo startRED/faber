@@ -2,11 +2,8 @@ import { createComponent } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
 import { Ambient } from '../../ui/Ambient.tsx';
-import { api, type Project } from '../../ui/api.ts';
 import { appliedLook, applyLook, watchSystem } from '../../ui/appearance.ts';
 import { Composer } from '../../ui/Composer.tsx';
-import { useLanguage } from '../../ui/i18n.ts';
-import { Projects } from '../../ui/Projects.tsx';
 import { keepRoot, sala } from './appearance.check.ts';
 import { check, equal, ok } from './check.ts';
 
@@ -212,62 +209,3 @@ check('idle: a project home has no beam of light, the chat home keeps its own', 
     restore();
   }
 });
-
-const demo: Project = { id: 'idle-home', name: 'Idle home', path: 'C:/fixture/idle-home' };
-
-async function withProjectHome(motion: 'full' | 'none', body: (root: HTMLElement) => Promise<void>) {
-  if (motion === 'full' && systemReduces.matches) return;
-  const originals = { ...api };
-  useLanguage('en');
-  Object.assign(api, { localUpdateState: async () => null });
-  api.projectEnroll = async (id) => ({ projectId: id, repo: demo.path, base: 'base', mode: 'seguro', revision: 1, selfUpdate: false });
-  api.onMission = async () => () => {};
-  const root = document.createElement('div');
-  root.style.cssText = 'position:fixed;left:0;top:0;width:1400px;height:800px';
-  root.dataset.motion = motion;
-  for (const [key, value] of Object.entries(themes.css.base)) root.style.setProperty(`--${key}`, value);
-  document.body.append(root);
-  const other: Project = { id: 'other', name: 'Other project', path: 'C:/fixture/other' };
-  const dispose = render(() => createComponent(Projects, {
-    project: demo, vendors: ['claude'], now: Date.now(), projects: [demo, other],
-    recent: [{ id: 'c1', title: 'An earlier talk', area: 'project', projectId: 'other', updatedAt: Date.now() - 60_000 }],
-    running: [], onOpen: () => {}, onProject: () => {}, onAdd: () => {},
-  }), root);
-  try {
-    await settle();
-    await body(root);
-  } finally {
-    dispose();
-    root.remove();
-    Object.assign(api, originals);
-  }
-}
-
-check('projects home: a project with no mission opens a home like the chat one, not a bare card', () => withProjectHome('full', async (root) => {
-  const card = root.querySelector('.start-card')!;
-  ok(card.classList.contains('welcome-grid'), 'it uses the structure of the new conversation');
-  equal(root.querySelector('.hello')?.tagName, 'H1', 'a display greeting');
-  ok(root.querySelector('.lead')?.textContent?.trim(), 'one calm line under it');
-  ok(root.querySelector('.ambient.project'), 'its own light sits behind it');
-  const composer = root.querySelector('.composer')!;
-  // Only the goal lives here: the settings of a project are in Settings, Projects.
-  for (const gone of ['input[role="switch"]', '.seg-ctl', '.proof-list', 'details', '.setup'])
-    equal(root.querySelector(gone), null, `the project screen has no ${gone}`);
-  equal(root.querySelector('h2')?.textContent, 'Idle home', 'the project is named');
-  const resume = root.querySelector('.p-resume')!;
-  ok(composer.compareDocumentPosition(resume) & Node.DOCUMENT_POSITION_FOLLOWING, 'what to pick up comes under the composer');
-  equal(resume.querySelector('.rrow .t')?.textContent, 'An earlier talk', 'what to pick up from the projects');
-  ok(![...root.querySelectorAll('.rrow .t')].some((e) => e.textContent === 'Other project'), 'the sidebar lists the projects, this screen does not');
-  ok(root.querySelectorAll('.p-resume .rrow').length <= 3, 'at most three to pick up');
-  ok(composer.getBoundingClientRect().top > root.querySelector('.lead')!.getBoundingClientRect().bottom, 'under the lead');
-  const meta = root.querySelector<HTMLElement>('.p-meta')!;
-  equal(meta.querySelectorAll('span').length, 1, 'the home names only the folder, not the revision or the author');
-  ok(meta.querySelector('span')!.title.length >= meta.textContent!.length - 10, 'the full path is on hover');
-  ok(root.querySelector('.composer .idle-box'), 'the idle composer has its hints');
-}));
-
-check('projects home: with no motion the home is as still as the chat one, and the field keeps its placeholder', () => withMotion('none', () => withProjectHome('none', async (root) => {
-  equal(root.querySelector('.composer .idle-box'), null);
-  ok(root.querySelector('#mission-goal')?.getAttribute('placeholder'), 'the plain placeholder');
-  equal(root.querySelector('.hello')?.tagName, 'H1', 'the home itself stays');
-})));

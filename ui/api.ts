@@ -129,10 +129,6 @@ export interface Project {
 }
 
 export type GitMode = 'seguro' | 'equilibrado';
-export type RunMode = 'normal' | 'autonomous';
-export type MissionState = 'planning' | 'running' | 'paused' | 'blocked' | 'done';
-export type TaskState = 'ready' | 'running' | 'review' | 'done' | 'blocked';
-export type DecisionKind = 'direction' | 'taste' | 'money' | 'legal' | 'technical';
 
 export interface Author {
   name: string;
@@ -163,71 +159,6 @@ export interface EnrollView {
   remoteAccount?: string;
 }
 
-export interface TaskView {
-  id: string;
-  title: string;
-  state: TaskState;
-  reason?: string;
-  builder?: Vendor;
-  reviewer?: Vendor;
-  detail?: { scope: string[]; proofs: string[]; artifacts: ArtifactView[] };
-}
-
-export interface ArtifactView {
-  id: string; summary: string; changed: string[]; files: string[]; tree?: string;
-  commands: { proof: string; argv: string[]; exit?: number; log?: string }[];
-  notRun: string[]; assumptions: string[]; risks: string[];
-}
-
-export interface CostView {
-  ownMicros?: number | null;
-  capMicros?: number | null;
-  complete: boolean;
-}
-
-export interface PaceView {
-  vendor: Vendor;
-  window: string;
-  used?: number | null;
-  room?: number | null;
-  readAt?: number | null;
-}
-
-export interface DecisionView {
-  id: string;
-  question: string;
-  kind: DecisionKind;
-  options: string[];
-  default?: string | null;
-  task?: string | null;
-}
-
-export interface BuildView {
-  current?: string | null;
-  next?: string | null;
-  lastGood?: string | null;
-  waiting?: string | null;
-}
-
-export interface MissionView {
-  missionId: string;
-  revision: number;
-  state: MissionState;
-  mode: RunMode;
-  gitMode: GitMode;
-  goal: string;
-  plan?: string | null;
-  tasks: TaskView[];
-  cost: CostView;
-  pace: PaceView[];
-  decisions: DecisionView[];
-  build?: BuildView | null;
-  reason?: string | null;
-  progress?: ProgressView | null;
-  report?: ReportView | null;
-  needs?: string | null;
-}
-
 /** What a project mission proves its work with (R137): the commands, where they were declared, and whether the owner confirmed them. */
 export interface ProofView {
   commands: string[];
@@ -239,31 +170,6 @@ export interface ProofView {
   setup?: string[];
 }
 
-/** How the check of the agents goes (Faber earns its own role receipts before a mission, hidden). */
-export interface AgentsView {
-  state: 'checking' | 'ready' | 'failed';
-  step: number;
-  total: number;
-  vendor?: Vendor | null;
-  estimateSeconds: number;
-  detail?: string | null;
-}
-
-export interface ProgressView {
-  step: string;
-  number: number;
-  total: number;
-  role?: string | null;
-  vendor?: Vendor | null;
-  model?: string | null;
-}
-
-export interface ReportView {
-  branch: string;
-  head?: string | null;
-  checks: { id: string; result: string }[];
-  seconds?: number | null;
-}
 // The shapes the look engine sends and takes (src-tauri/src/look.rs). The screen never computes a colour.
 export type Motion = 'full' | 'reduced' | 'none';
 export interface Effects {
@@ -533,7 +439,6 @@ export const api = {
   setupInstall: (vendor: Vendor) => invoke<void>('setup_install', { vendor }),
   setupSignIn: (vendor: Vendor) => invoke<void>('setup_sign_in', { vendor }),
   projectEnroll: (projectId: string) => invoke<EnrollView>('project_enroll', { projectId }),
-  localUpdateState: () => invoke<BuildView | null>('local_update_state'),
   updateStatus: () => invoke<UpdateStatus>('update_status'),
   /** The first frame is painted: the shell may show the window (it stays hidden until then). */
   screenReady: () => invoke<void>('screen_ready'),
@@ -546,19 +451,9 @@ export const api = {
   saveNotesSeen: (id: number) => invoke<void>('save_notes_seen', { id }),
   projectGrant: (projectId: string, mode: GitMode, selfUpdate: boolean, revision: number) =>
     invoke<Grant>('project_grant', { projectId, mode, selfUpdate, revision }),
-  projectRevoke: (projectId: string) => invoke<void>('project_revoke', { projectId }),
   projectProof: (projectId: string) => invoke<ProofView>('project_proof', { projectId }),
   projectProofConfirm: (projectId: string, commands: string[], setup: string[], declared: string[]) =>
     invoke<ProofView>('project_proof_confirm', { projectId, commands, setup, declared }),
-  missionStart: (projectId: string, goal: string) => invoke<string>('mission_start', { projectId, goal }),
-  missionState: (missionId: string) => invoke<MissionView>('mission_state', { missionId }),
-  missionMode: (missionId: string, mode: RunMode) => invoke<MissionView>('mission_mode', { missionId, mode }),
-  missionStop: (missionId: string) => invoke<MissionView>('mission_stop', { missionId }),
-  missionResume: (missionId: string) => invoke<MissionView>('mission_resume', { missionId }),
-  missionAnswer: (missionId: string, decisionId: string, answer: string) =>
-    invoke<MissionView>('mission_answer', { missionId, decisionId, answer }),
-  onAgents: (listener: (view: AgentsView) => void) => listen<AgentsView>('agents', (e) => listener(e.payload)),
-  onMission: (listener: (view: MissionView) => void) => listen<MissionView>('mission', (e) => listener(e.payload)),
   on: (listener: (event: AppEvent) => void) => listen<AppEvent>('faber:event', (e) => listener(e.payload)),
 };
 

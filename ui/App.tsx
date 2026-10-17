@@ -952,18 +952,14 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                   }
                 >
                   <Projects
-                    project={project()}
                     vendors={state().vendors}
-                    now={clock()}
                     projects={state().projects}
                     recent={state().conversations}
                     running={items()}
                     onOpen={openSummary}
-                    onProject={(id) => void fresh({ area: 'project', projectId: id })}
                     onAdd={() => void addProject().catch(fail)}
                     onOpened={openProjects}
                     onError={fail}
-                    permissions={state().settings.permissions}
                   />
                 </Show>
                 <Show when={columnOpen() && !docked()}>{runningColumn()}</Show>
