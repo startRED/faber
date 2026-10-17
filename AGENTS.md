@@ -120,7 +120,8 @@ Read [docs/product-rules.md](docs/product-rules.md) and [docs/product-map.md](do
 
 ## Proof commands
 
-All exit 0 before any commit. None builds the app or waits for a build slot, so they take seconds to a minute:
+All exit 0 before any commit. None builds the app or waits for a build slot, so they take seconds to a minute. Inside
+Faber, run them with Faber's `verify` tool (fast while working, full before the commit), not one by one:
 
 ```bash
 npm run lint
