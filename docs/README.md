@@ -56,6 +56,7 @@ one is never touched again, and its boxes say nothing.
 | superpowers/specs/2026-10-16-browser-preview.md | Proposal, nothing built (recommends yes, after a week of visual critiques) |
 | superpowers/plans/2026-10-14-parallel-work-loop.md | The development loop (R128, R129); its rounds table is kept current |
 | superpowers/specs/2026-10-16-own-lessons-into-faber.md | Proposal, nothing built (lessons from building Faber by hand, mapped to features for 1a) |
+| superpowers/specs/2026-10-17-built-in-verifier.md | Approved, nothing built (R190): Faber's own verifier in the engine, checks in seconds on the PC, GitHub only confirms |
 | research/ | Measurements, probes and reviews of the day in their name; model names and prices in them go stale fast. The UX, notification and screen-flake reviews of 2026-10-12 live here; their conclusions are in design/ and product/ |
 
 A new spec or plan goes to `superpowers/specs` or `superpowers/plans` with the date in its name and a `Status:` line at the

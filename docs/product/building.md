@@ -92,6 +92,11 @@ Equilibrado adds only own-branch push and draft PR. Parallel writers need disjoi
 Catalog, the remaining powers, Livre, and public release automation are deferred.
 The local development instance never touches the installed release in E:\Apps\Faber (R95).
 
+Approved, not built (R190): the serial proof queue, `cargo t`'s plan and R146's "Faber decides done" become one
+verifier in the engine. It checks each change in seconds on the PC with no extra process while idle, posts the result
+to GitHub so CI only confirms, and later serves every project
+([spec](../superpowers/specs/2026-10-17-built-in-verifier.md)).
+
 ## Coherence of a project's work (R146)
 
 A mission keeps a project as coherent as the agents that build Faber keep Faber (R145). Planned, not built:
