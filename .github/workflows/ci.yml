@@ -382,6 +382,10 @@ jobs:
   # releases behind it. One landing at a time. When phase-1-base moved while the checks ran, the commit is rebased onto it
   # and checked again; a conflict stops here and the queue branch waits for its author.
   # Green is the gate's green. It runs after the gate, because phase-1-base takes only a commit whose gate passed.
+  # queue/pr-<n> is a pull request that scripts/land.mjs squashed and numbered (docs/design.md#numbers): when it lands, its
+  # branch moves to the landed commit so GitHub shows it merged, from the head that was squashed only (the commit's
+  # Pull-request-head line), so a later push stops the landing instead of being lost. When phase-1-base moved, it is
+  # squashed and numbered again on the new base rather than rebased, since its numbers would collide.
   land:
     needs: gate
     if: >-
@@ -393,36 +397,87 @@ jobs:
     permissions:
       contents: write
       actions: write
+      pull-requests: read
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           branch=${GITHUB_REF#refs/heads/}
+          pr=""; oid=""
+          if [[ "$branch" =~ ^queue/pr-([0-9]+)$ ]]; then
+            pr=${BASH_REMATCH[1]}
+            oid=$(git log -1 --format='%(trailers:key=Pull-request-head,valueonly)' "$GITHUB_SHA" | tr -d '[:space:]')
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git fetch --quiet origin phase-1-base main "$branch"
           # A newer push to the queue branch has its own run.
           if [ "$(git rev-parse "origin/$branch")" != "$GITHUB_SHA" ]; then echo "A newer commit is queued."; exit 0; fi
           if git merge-base --is-ancestor "$GITHUB_SHA" origin/phase-1-base; then
             git push origin --delete "$branch"; echo "Already on phase-1-base."; exit 0
           fi
-          if git merge-base --is-ancestor origin/phase-1-base "$GITHUB_SHA"; then
-            git push origin "$GITHUB_SHA:refs/heads/phase-1-base"
-            # Green on top of the whole phase-1-base, so main follows at once (R127).
-            if git merge-base --is-ancestor origin/main "$GITHUB_SHA"; then
-              git push origin "$GITHUB_SHA:refs/heads/main"
-              # Pushes made with this token start no workflow, so main's warm run is started by hand (R165).
-              gh workflow run ci.yml --ref main -f warm=true
+          # A pull request lands only while it is open on phase-1-base and still at the head that was squashed: a close or
+          # a later push stops it here, and its author queues it again.
+          head=""
+          if [ -n "$pr" ] && [ -n "$oid" ]; then
+            head=$(gh pr view "$pr" --json state,isCrossRepository,baseRefName,headRefName,headRefOid --jq \
+              "select(.state == \"OPEN\" and (.isCrossRepository | not) and .baseRefName == \"phase-1-base\" and .headRefOid == \"$oid\") | .headRefName")
+            if [ -z "$head" ]; then
+              git push origin --delete "$branch"
+              echo "::warning::#$pr was closed, retargeted or pushed again after it was queued. Queue it again: node scripts/land.mjs $pr"
+              exit 0
             fi
-            git push origin --delete "$branch"
-            # The same goes for the preview release (R130, R156).
-            gh workflow run auto-release.yml --ref phase-1-base -f sha="$GITHUB_SHA"
-            echo "Landed $GITHUB_SHA."; exit 0
           fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          # GitHub refuses this run's token any push of a commit that changes a workflow file, so such a landing ends on
+          # the PC that queued it: `land.mjs --finish` there, once this gate is green (docs/design.md#numbers).
+          if git diff --name-only origin/phase-1-base "$GITHUB_SHA" -- .github/workflows | grep -q .; then
+            if [ -n "$pr" ] && git merge-base --is-ancestor origin/phase-1-base "$GITHUB_SHA"; then
+              echo "::error::#$pr changes a workflow, which this token may not push. Its gate is green: land it with node scripts/land.mjs $pr --finish"
+            else
+              echo "::error::$branch changes a workflow, which this token may not push, and phase-1-base moved: queue it again from a PC (node scripts/land.mjs <number>), then --finish once green."
+            fi
+            exit 1
+          fi
+          if git merge-base --is-ancestor origin/phase-1-base "$GITHUB_SHA"; then
+            # One atomic push moves the pull request's branch (so GitHub shows it merged) and phase-1-base together or not
+            # at all: when the base moved meanwhile, both stay as they were and the landing below starts again.
+            landed=false; before=$(git rev-parse origin/phase-1-base)
+            if [ -n "$head" ]; then
+              git push --atomic --force-with-lease="refs/heads/$head:$oid" origin \
+                "$GITHUB_SHA:refs/heads/$head" "$GITHUB_SHA:refs/heads/phase-1-base" && landed=true
+            else
+              git push origin "$GITHUB_SHA:refs/heads/phase-1-base" && landed=true
+            fi
+            if [ "$landed" = true ]; then
+              # Green on top of the whole phase-1-base, so main follows at once (R127).
+              if git merge-base --is-ancestor origin/main "$GITHUB_SHA"; then
+                git push origin "$GITHUB_SHA:refs/heads/main"
+                # Pushes made with this token start no workflow, so main's warm run is started by hand (R165).
+                gh workflow run ci.yml --ref main -f warm=true
+              fi
+              git push origin --delete "$branch"
+              # The same goes for the preview release (R130, R156).
+              gh workflow run auto-release.yml --ref phase-1-base -f sha="$GITHUB_SHA"
+              echo "Landed $GITHUB_SHA."; exit 0
+            fi
+            # Only a base that moved is worth another landing; any other refusal would only repeat itself.
+            git fetch --quiet origin phase-1-base
+            if [ "$(git rev-parse origin/phase-1-base)" = "$before" ]; then
+              echo "::error::The push was refused although phase-1-base did not move; the push error is above."; exit 1
+            fi
+          fi
+          if [ -n "$head" ]; then
+            node scripts/land.mjs "$pr" --head "$oid"
+            gh workflow run ci.yml --ref "$branch"
+            echo "phase-1-base moved; #$pr was squashed and numbered again on it and is checked again."; exit 0
+          fi
           if ! git rebase --quiet origin/phase-1-base; then
             echo "::error::$branch conflicts with phase-1-base. Rebase it by hand and push it again."; exit 1
           fi

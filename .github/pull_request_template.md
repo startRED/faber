@@ -4,7 +4,7 @@
 
 ## For you
 
-<!-- Paste the English `notes.next` entry this pull request adds to every `ui/locales/*.ts` file (R142); the release
+<!-- Paste the English entry of this pull request's docs/next/<branch>.json (R142); the release
      notes and the what's-new screen are built from those entries, not from this text.
      Write "Nothing a person sees." when that is true. -->
 
