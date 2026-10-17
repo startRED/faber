@@ -48,6 +48,23 @@ export function t(key: Key, vars: Record<string, string | number> = {}): string 
   return fill(form, vars);
 }
 
+/** A number written the person's way ("0.12", "0,12"). */
+export const amount = (value: number, digits: number) => new Intl.NumberFormat(lang(), { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
+
+/** US dollars, the currency of API prices, with the sign where the language puts it. */
+export const money = (usd: number, digits = 2) => t('money.usd', { amount: amount(usd, digits) });
+
+const unit = (value: number, name: string, digits = 0) =>
+  new Intl.NumberFormat(lang(), { style: 'unit', unit: name, unitDisplay: 'short', maximumFractionDigits: digits }).format(value);
+
+/** A file size in the person's language ("1.5 MB", "1,5 MB"). */
+export const bytes = (n: number) =>
+  n < 1024 ? unit(n, 'byte') : n < 1024 * 1024 ? unit(n / 1024, 'kilobyte', 1) : unit(n / 1024 / 1024, 'megabyte', 1);
+
+/** A short span of time in the person's language ("45 sec", "3 min 20 sec"). */
+export const duration = (seconds: number) =>
+  seconds < 60 ? unit(seconds, 'second') : `${unit(Math.floor(seconds / 60), 'minute')} ${unit(seconds % 60, 'second')}`;
+
 /** A text with its placeholders still in it, as `{one, other}`. The tray is outside the page, so the shell fills them. */
 export function templates(key: Key, code: Lang = lang()): { one: string; other: string } {
   const entry = (LANGUAGES.find((l) => l.code === code)?.messages ?? en)[key];

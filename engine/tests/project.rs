@@ -50,6 +50,23 @@ fn screen_grant_refuses_newer_authority_and_preserves_additive_metadata() {
     assert_eq!(p, before);
 }
 
+#[test]
+fn starting_again_with_the_same_authority_keeps_the_grant_and_its_revision() {
+    let mut p = enrolled(GitMode::Seguro);
+    let kept = p.clone();
+    let mut later = grant(GitMode::Seguro, 4);
+    later.granted_at += 600;
+    assert_eq!(p.accept_grant(later.clone()), Ok(()));
+    assert_eq!(p, kept, "missions admitted under revision 3 stay current");
+    later.self_update = true;
+    p.accept_grant(later.clone()).unwrap();
+    assert_eq!(p.grant.as_ref().map(|g| (g.revision, g.self_update)), Some((4, true)), "a changed trust is a new revision");
+    p.grant.as_mut().unwrap().revoked_at = Some(1);
+    later.revision = 5;
+    p.accept_grant(later).unwrap();
+    assert_eq!(p.grant.as_ref().map(|g| (g.revision, g.revoked_at)), Some((5, None)), "a revoked grant is given again");
+}
+
 fn repo() -> RepoIdentity {
     RepoIdentity::new(COMMON, "E:/src/faber")
 }

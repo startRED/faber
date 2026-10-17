@@ -96,7 +96,7 @@ input, textarea { caret-color: var(--accent); }
 .prow:hover .plus, .prow:focus-within .plus { opacity: 1; }
 /* What a project says on its own row, at the right: the amber bubble and how many wait, or a square while it runs. */
 .item .tail { flex: none; margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font: 400 calc(var(--fs-ui) - 2px) var(--font-data); color: var(--ink-3); }
-.item .amber-tag.tail { color: var(--amber-ink); font-weight: 500; }
+.item .amber-tag.tail { color: var(--amber-ink); font-family: var(--font-ui); font-weight: 500; }
 .prow:hover .tail, .prow:has(:focus-visible) .tail { opacity: 0; }
 .run-dot { flex: none; width: 7px; height: 7px; border-radius: 1px; background: var(--accent); animation: var(--live-anim); }
 .proj-chats { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; padding-left: 10px; }
@@ -914,9 +914,6 @@ input.rename { width: 100%; height: calc(28px + 2px * var(--dens)); padding: 0 1
 .env-tray { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .env-tray .hint { flex-basis: 100%; }
 .env-tray input { flex: 1; min-width: 140px; height: 32px; padding: 0 10px; border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink); font-size: calc(var(--fs-ui) - 0.5px); }
-.rec-menu { position: fixed; z-index: 30; min-width: 170px; padding: 4px; border-radius: var(--r-md); background: var(--s3); box-shadow: inset 0 0 0 1px var(--line-2), var(--lift-shadow); animation: arrive var(--dur-arrive) var(--ease) both; }
-.rec-menu button { display: block; width: 100%; height: 30px; padding: 0 10px; border-radius: var(--r-xs); color: var(--ink); text-align: left; font-size: calc(var(--fs-ui) - 0.5px); transition: background var(--dur-fast); }
-.rec-menu button:hover, .rec-menu button:focus-visible { background: var(--s1); }
 .empty:has(.recents) { padding-top: 4vh; gap: 12px; }
 
 /* A project's first screen, calm (ui/Projects.tsx): one column of the mark, the project, the greeting, the composer with its

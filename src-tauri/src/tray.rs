@@ -113,6 +113,17 @@ fn save_seen_decisions(data_dir: &Path, seen: &HashSet<(String, String)>) -> Res
     faber_engine::store::replace(&faber_engine::store::RealDisk, &path, &json).map_err(|e| e.key().into())
 }
 
+/// The words the screen sent last, so a Faber started hidden (with Windows) speaks the person's language; English until
+/// a window has opened once.
+fn load_texts(data_dir: &Path) -> ShellTexts {
+    std::fs::read(data_dir.join("shell-texts.json")).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default()
+}
+
+fn save_texts(data_dir: &Path, texts: &ShellTexts) -> Result<(), String> {
+    let json = serde_json::to_vec(texts).map_err(|_| "error.store.write")?;
+    faber_engine::store::replace(&faber_engine::store::RealDisk, &data_dir.join("shell-texts.json"), &json).map_err(|e| e.key().into())
+}
+
 pub(crate) fn create(app: &tauri::App) -> tauri::Result<()> {
     let handle = app.handle();
     let data_dir = handle.state::<crate::Faber>().data_dir.clone();
@@ -122,6 +133,7 @@ pub(crate) fn create(app: &tauri::App) -> tauri::Result<()> {
     }
     let tray = handle.state::<Tray>();
     let mut s = lock(&tray);
+    s.texts = load_texts(&data_dir);
     match load_seen_decisions(&data_dir) {
         Ok(seen) => {
             s.watch = Watch::with_seen_decisions(seen);
@@ -172,7 +184,12 @@ pub(crate) fn create(app: &tauri::App) -> tauri::Result<()> {
 pub(crate) fn set_texts(app: &AppHandle, texts: ShellTexts) -> Result<(), String> {
     let tray = app.state::<Tray>();
     let mut s = lock(&tray);
-    s.texts = texts;
+    if s.texts != texts {
+        if let Err(error) = save_texts(&app.state::<crate::Faber>().data_dir, &texts) {
+            eprintln!("faber: the tray's words could not be kept ({error})");
+        }
+        s.texts = texts;
+    }
     if let Some([open, quit]) = &s.menu {
         open.set_text(&s.texts.open).map_err(|e| e.to_string())?;
         quit.set_text(&s.texts.quit).map_err(|e| e.to_string())?;
@@ -317,4 +334,26 @@ pub(crate) fn probe_mission(app: &AppHandle, view: &MissionView, focused: bool, 
     Ok(
         serde_json::json!({"toast": policy.toast && !update.notices.is_empty(), "sound":policy.sound && !update.notices.is_empty(), "needsYou":update.counts.needs_you}),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ShellTexts, load_texts, save_texts};
+
+    #[test]
+    fn the_words_the_screen_sent_last_are_there_after_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(load_texts(dir.path()), ShellTexts::default(), "English before any window has opened");
+        let texts: ShellTexts = serde_json::from_value(serde_json::json!({
+            "open": "Abrir", "quit": "Sair",
+            "running": { "one": "Faber: {n} em andamento", "other": "Faber: {n} em andamento" },
+            "needsYou": { "one": ", {n} precisa de você", "other": ", {n} precisam de você" },
+            "notify": "{title} precisa de você", "notifyMany": "{title}: {n} pedidos precisam de você"
+        }))
+        .unwrap();
+        save_texts(dir.path(), &texts).unwrap();
+        assert_eq!(load_texts(dir.path()), texts);
+        std::fs::write(dir.path().join("shell-texts.json"), b"{ damaged").unwrap();
+        assert_eq!(load_texts(dir.path()), ShellTexts::default(), "damaged words fall back to English");
+    }
 }

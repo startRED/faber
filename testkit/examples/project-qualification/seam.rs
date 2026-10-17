@@ -266,7 +266,7 @@ async fn drive(log: &mut Log) -> io::Result<()> {
     let mut grant = Grant::new(&repository.identity.common_dir, GitMode::Seguro, 3, 1);
     grant.author = repository.author.clone();
     grant.self_update = true;
-    let mut project = engine.add_project(&repo.to_string_lossy());
+    let mut project = engine.add_project(&repo.to_string_lossy()).unwrap();
     let before = project.clone();
     project.repo = Some(repository.identity.clone());
     project.grant = Some(grant.clone());

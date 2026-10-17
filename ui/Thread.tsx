@@ -8,18 +8,13 @@ import { keep, kept, release, useDraft } from './unsent.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
 import { untilReset } from './Sidebar.tsx';
-import { fromEngine, t } from './i18n.ts';
+import { amount, bytes, fromEngine, t } from './i18n.ts';
 import { prettyModel, vendorName, type Option } from './models.ts';
 import { animateList } from './motion.ts';
 import { warmLeft } from './running.ts';
 import { agentSteps, isAgentCall, middle, thinkingParts, toolLine, toolRow, type AgentStep } from './worklog.ts';
 
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
-
-function size(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  return bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
 
 // Model output is untrusted: rendered as Markdown, then stripped of anything that could run.
 // The last two words of a plain heading go in `em`, which the look draws in its quieter tone.
@@ -48,7 +43,7 @@ function FileCard(props: { conversationId: string; file: { path: string; size: n
       <Show when={preview()}>{(src) => <img src={src()} alt={props.file.path} />}</Show>
       <div>
         <span>{props.file.path}</span>
-        <small>{size(props.file.size)}</small>
+        <small>{bytes(props.file.size)}</small>
         <button class="btn" onClick={() => void api.saveFile(props.conversationId, props.file.path)}>
           {t('files.save')}
         </button>
@@ -62,8 +57,8 @@ function FileCard(props: { conversationId: string; file: { path: string; size: n
 
 function usage(m: Message): string {
   const parts: string[] = [];
-  if (m.costUsd) parts.push(t('answer.cost', { cost: m.costUsd.toFixed(4) }));
-  if (m.inputTokens) parts.push(t('answer.tokens', { input: (m.inputTokens / 1000).toFixed(1), output: m.outputTokens ?? 0 }));
+  if (m.costUsd) parts.push(t('answer.cost', { cost: amount(m.costUsd, 4) }));
+  if (m.inputTokens) parts.push(t('answer.tokens', { input: amount(m.inputTokens / 1000, 1), output: m.outputTokens ?? 0 }));
   return parts.join(' · ');
 }
 

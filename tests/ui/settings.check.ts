@@ -229,9 +229,11 @@ type AppearanceProps = Parameters<typeof AppearanceSection>[0];
 const section = (props: AppearanceProps) => mount(() => createComponent(AppearanceSection, props));
 const useButton = (host: HTMLElement) => host.querySelector<HTMLButtonElement>('.ap-bar .btn.primary')!;
 const presetButton = (host: HTMLElement, id: string) => host.querySelector<HTMLButtonElement>(`[aria-labelledby="look-${id}-name"]`)!;
+// What the shell sends for a settings file nobody changed: each default lives in the engine (`Settings::shown`), never here.
+const SHOWN: Saved = { userHooks: false, permissions: 'dontAsk', notifications: true, notificationSound: true, keepAwake: true, autostart: false };
 
-check('settings: notification switches default on, save separately and restore a refused change without playing anything', async () => {
-  const [saved, setSaved] = createSignal<Saved>({});
+check('settings: notification switches show what the engine sends, save separately and restore a refused change without playing anything', async () => {
+  const [saved, setSaved] = createSignal<Saved>(SHOWN);
   const patches: Saved[] = [];
   let accept = false;
   const view = mount(() => createComponent(Settings, {
@@ -253,7 +255,7 @@ check('settings: notification switches default on, save separately and restore a
     notify.click();
     await tick();
     equal(notify.checked, true, 'a refused save restores the switch');
-    deepEqual(saved(), {});
+    deepEqual(saved(), SHOWN);
     accept = true;
     notify.click();
     await tick();
@@ -263,15 +265,15 @@ check('settings: notification switches default on, save separately and restore a
     await tick();
     notify.click();
     await tick();
-    deepEqual(saved(), { notifications: true, notificationSound: false });
+    deepEqual(saved(), { ...SHOWN, notifications: true, notificationSound: false });
     deepEqual(patches, [{ notifications: false }, { notifications: false }, { notificationSound: false }, { notifications: true }]);
   } finally { view.stop(); }
 });
 
-check('settings: keep-awake defaults on and autostart defaults off, saving separately and restoring on refusal', async () => {
+check('settings: keep-awake and autostart show what the engine sends, saving separately and restoring on refusal', async () => {
   const original = Object.getOwnPropertyDescriptor(navigator, 'userAgent');
   Object.defineProperty(navigator, 'userAgent', { configurable: true, value: 'Windows' });
-  const [saved, setSaved] = createSignal<Saved>({});
+  const [saved, setSaved] = createSignal<Saved>(SHOWN);
   const patches: Saved[] = [];
   let accept = false;
   const view = mount(() => createComponent(Settings, {
@@ -288,12 +290,12 @@ check('settings: keep-awake defaults on and autostart defaults off, saving separ
     equal(switches.length, 2);
     const awake = switches[0]!;
     const autostart = switches[1]!;
-    equal(awake.checked, true, 'keep-awake defaults on');
-    equal(autostart.checked, false, 'autostart defaults off');
+    equal(awake.checked, true);
+    equal(autostart.checked, false);
     awake.click();
     await tick();
     equal(awake.checked, true, 'a refused save restores the keep-awake switch');
-    deepEqual(saved(), {});
+    deepEqual(saved(), SHOWN);
     accept = true;
     awake.click();
     await tick();
@@ -301,7 +303,7 @@ check('settings: keep-awake defaults on and autostart defaults off, saving separ
     autostart.click();
     await tick();
     equal(autostart.checked, true);
-    deepEqual(saved(), { keepAwake: false, autostart: true });
+    deepEqual(saved(), { ...SHOWN, keepAwake: false, autostart: true });
     deepEqual(patches, [{ keepAwake: false }, { keepAwake: false }, { autostart: true }]);
   } finally {
     view.stop();
