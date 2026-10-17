@@ -134,9 +134,9 @@ own inks.
   - **Workbench:** a flow line at the top right reading "Your idea → Claude and Codex → Done, with proof". It names only
     the vendors that are connected.
 - The first screen of a project (where a new session starts) in Dark Room also shows a black hole drawn in monospace
-  characters on one canvas (ui/Hole.tsx, --amb-hole and --hole-colors): the whole shadow, centred in the room from 150 px right of the column with its arc clear of every edge (16% to 30% of the height), an amber disk sweeping in from the lower left
+  characters on one canvas (ui/Hole.tsx, --amb-hole and --hole-colors): the whole shadow, centred in the room from 150 px right of the column with its arc clear of every edge (14% to 22% of the height), an amber disk sweeping in from the lower left that reaches 3.6 radii and fades from 2.6, so the scene keeps to the room beside the column instead of filling the stage,
   with fibres that turn faster near the hole, the far side of the disk bent over the top as a cool arc, a photon ring, a
-  dim glow, a small planet below it and stars. It has no hard edge beside the column of words: behind the column it keeps 14% of its light, comes up to full
+  dim glow, a small planet below it and stars. It has no hard edge beside the column of words: behind the column it keeps 6% of its light, comes up to full
   from 40 px left of the column's edge to 240 px right of it and dims the hole a little more within 320 px, across the
   whole height, so words that scroll in the column always sit on the same veil. The veil follows the edge of the words, not only the window: when the column's words change (a list opens, a longer name shows) it is laid again, once a frame at most and only when that edge moved. The project screens show no beam of light. With less than 400 px of room it does not show or run.
   Ten times a second it works out again only the cells the hole can reach and repaints those that changed; stars
@@ -228,7 +228,9 @@ inside its own area.
 - The titlebar has the lockup and the window controls. Dragging and double-click maximize keep working, and macOS keeps
   its native buttons.
 - The topbar has a crumb ("Chat › title" or "Project › title"), a read-only model chip for the open conversation, and
-  the run button. With nothing running the button reads "Nothing running". Otherwise it reads "{n} running". When an
+  the run button. With nothing running the button reads "Nothing running" as quiet second-ink words with no outline or
+  fill (styled from the absence of the live mark, `.run-btn:not(:has(.live))`); the outline comes back on hover,
+  keyboard focus and while the column is open. Otherwise it reads "{n} running". When an
   item needs the user it turns amber, shows the speech bubble and reads "{n} running · {m} needs you". The words are
   always visible.
 
@@ -478,10 +480,12 @@ shown as a decision.
 
 ### The Projects home
 
-The first screen of a project uses the layout of the Chat home (`welcome-grid`) with its own identity: the greeting
-"What should we tackle?", one column: Curioso, the project and its folder in short form (the last two folder names, the
-full path on hover), the greeting, a goal composer with its own hints and one quiet status line beside its button, and at
-most three conversations to pick up. Nothing else: the sidebar lists the projects, and every setting of a project (the
+The first screen of a project is the Chat home (`ui/Welcome.tsx`, `welcome-grid project`) with its own identity, in one
+column: Curioso over his ledge, the project's name and its folder in short form as one quiet line in the interface size
+(the last two folder names, the full path on hover; the sidebar and the crumb already name it), the greeting "What should
+we tackle?", the lead, the composer, and under it at most three of this project's own conversations to pick up, each
+saying only when. No suggestions (the composer's hints show what to ask) and no second column: the
+room on the right is the black hole's, so no words sit on its bright part. Nothing else: the sidebar lists the projects, and every setting of a project (the
 tool policy, the code access, the self-update switch and the checks) is in Settings, Projects, one closed entry per
 project with one short line per option and the rest behind "Learn more". The checks are asked for just in time: the
 first start on checks nobody confirmed opens a compact sheet with their count and source, every command (and the setup)
