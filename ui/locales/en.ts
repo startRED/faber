@@ -745,7 +745,7 @@ export const en = {
   'notes.25.better': 'The empty screens, the tutorial and this list are shorter and say each thing once.',
   'notes.26.better': 'Faber rests while its window is hidden, and buttons and fields look the same on every screen.',
   'notes.27.better': "A project's first screen is calmer: one column with that project's own conversations, and a smaller black hole that stays clear of the words.",
-  'notes.next.new': 'When a subagent seems stuck, its step turns amber and Faber tells you, and one waiting on your answer says so.',
+  'notes.28.new': 'When a subagent seems stuck, its step turns amber and Faber tells you, and one waiting on your answer says so.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

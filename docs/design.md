@@ -348,7 +348,7 @@ engine adds the subagent's tokens and cost to the reply that started it, and mar
 subagent is still at work as it ends.
 
 A subagent waiting on the person's answer reads "waiting for you" with its live mark in amber; the card under the rows is
-that answer. One that seems stuck (R161 step 6, R-next) is the conversation's other amber: the mark and the row's edge
+that answer. One that seems stuck (R161 step 6, R174) is the conversation's other amber: the mark and the row's edge
 turn amber, its state reads "seems stuck", and one line under the row says in plain words what the engine saw, with
 "Look", which opens the row to what it ran, and "Tell it…", which focuses the conversation's box with "About “title”: " at
 its start (Codex takes it into the running turn; Claude Code after it, or at once with "Send now"). The line arrives with

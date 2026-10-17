@@ -877,7 +877,7 @@ export const de: Messages = {
   'notes.25.better': 'Die leeren Bildschirme, das Tutorial und diese Liste sind kürzer und nennen alles nur einmal.',
   'notes.26.better': 'Faber ruht, solange sein Fenster verborgen ist, und Schaltflächen und Felder sehen auf jedem Bildschirm gleich aus.',
   'notes.27.better': 'Der erste Bildschirm eines Projekts ist ruhiger: eine Spalte mit den eigenen Unterhaltungen des Projekts und ein kleineres Schwarzes Loch, das Abstand zum Text hält.',
-  'notes.next.new': 'Wenn ein Subagent festzuhängen scheint, wird sein Schritt bernsteinfarben und Faber sagt dir Bescheid; wartet er auf deine Antwort, steht das im Schritt.',
+  'notes.28.new': 'Wenn ein Subagent festzuhängen scheint, wird sein Schritt bernsteinfarben und Faber sagt dir Bescheid; wartet er auf deine Antwort, steht das im Schritt.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

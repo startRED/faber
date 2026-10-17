@@ -877,7 +877,7 @@ export const fr: Messages = {
   'notes.25.better': 'Les écrans vides, le tutoriel et cette liste sont plus courts et disent chaque chose une fois.',
   'notes.26.better': 'Faber se met au repos quand sa fenêtre est cachée, et les boutons et les champs ont le même aspect sur tous les écrans.',
   'notes.27.better': 'Le premier écran d’un projet est plus calme : une seule colonne avec les conversations de ce projet, et un trou noir plus petit qui reste loin du texte.',
-  'notes.next.new': 'Quand un sous-agent semble bloqué, son étape passe en ambre et Faber vous prévient ; s’il attend votre réponse, l’étape le dit.',
+  'notes.28.new': 'Quand un sous-agent semble bloqué, son étape passe en ambre et Faber vous prévient ; s’il attend votre réponse, l’étape le dit.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

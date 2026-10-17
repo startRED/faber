@@ -877,7 +877,7 @@ export const es: Messages = {
   'notes.25.better': 'Las pantallas vacías, el tutorial y esta lista son más cortos y dicen cada cosa una vez.',
   'notes.26.better': 'Faber descansa mientras su ventana está oculta, y los botones y los campos se ven igual en todas las pantallas.',
   'notes.27.better': 'La primera pantalla de un proyecto es más tranquila: una sola columna con las conversaciones de ese proyecto, y un agujero negro más pequeño que queda lejos del texto.',
-  'notes.next.new': 'Cuando un subagente parece atascado, su paso se pone ámbar y Faber te avisa; si espera tu respuesta, el paso lo dice.',
+  'notes.28.new': 'Cuando un subagente parece atascado, su paso se pone ámbar y Faber te avisa; si espera tu respuesta, el paso lo dice.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

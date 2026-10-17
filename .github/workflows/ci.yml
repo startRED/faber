@@ -328,7 +328,7 @@ jobs:
             app) cargo t --build-only ;;
           esac
 
-  # One check that is green only when CI is (R-next): phase-1-base requires it, so a pull request set to merge by itself
+  # One check that is green only when CI is (R174): phase-1-base requires it, so a pull request set to merge by itself
   # lands the moment every part passed, and never on a red, cancelled or wrongly skipped one. Green means what it means
   # for main below: every job passed, or the plan left it out on purpose.
   gate:

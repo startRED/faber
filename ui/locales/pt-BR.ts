@@ -864,7 +864,7 @@ export const ptBR: Messages = {
   'notes.25.better': 'As telas vazias, o tutorial e esta lista ficaram mais curtos e dizem cada coisa uma vez.',
   'notes.26.better': 'O Faber descansa enquanto a janela está escondida, e botões e campos têm o mesmo aspecto em todas as telas.',
   'notes.27.better': 'A primeira tela de um projeto ficou mais calma: uma coluna só, com as conversas do próprio projeto, e um buraco negro menor que fica longe das palavras.',
-  'notes.next.new': 'Quando um subagente parece travado, a etapa dele fica âmbar e o Faber avisa você; quando ele espera a sua resposta, a etapa diz isso.',
+  'notes.28.new': 'Quando um subagente parece travado, a etapa dele fica âmbar e o Faber avisa você; quando ele espera a sua resposta, a etapa diz isso.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

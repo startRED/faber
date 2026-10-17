@@ -434,7 +434,7 @@ frames) and checked against today's code. It fills the steps of R161 and never b
    twice, or silent longer than its kind of work allows; a child waiting on a question is "waiting for you", never
    stuck. The main agent hears first and tries once to retry, narrow the piece or hand it to the other vendor. Only if
    that fails does the row turn amber with "Look" and "Tell it…", and only then is the person notified. It ships once
-   the recorded fixtures show no false amber. Built (R-next): neither CLI can be told about its subagent while the main agent waits for it, so
+   the recorded fixtures show no false amber. Built (R174): neither CLI can be told about its subagent while the main agent waits for it, so
    the main agent's chance is the retry the thresholds leave (a check shows only after it failed three times).
 7. **Faber's own browser and app pane (R161 step 4, the largest piece).** Nothing exists yet: the shell has one
    webview. The agent or a child opens websites in a pane that belongs to Faber and runs the app it builds beside the
