@@ -37,6 +37,7 @@ mod project_budget;
 mod project_sessions;
 mod quota_watch;
 mod recovery;
+mod stuck_watch;
 mod usage_view;
 pub use usage_view::{VendorUsage, WindowUsage};
 
@@ -327,6 +328,8 @@ struct Core {
     credit: Option<(String, String, Vendor)>,
     /// Helpers at work (R161), by the agent's tool call that started each.
     helpers: HashMap<String, helpers::Run>,
+    /// The subagents of each running reply, followed for signs of being stuck.
+    watched: HashMap<String, stuck_watch::Watched>,
 }
 
 /// How often Claude's plan is checked again.
@@ -425,6 +428,7 @@ impl Engine {
                 transfers: HashMap::new(),
                 credit: None,
                 helpers: HashMap::new(),
+                watched: HashMap::new(),
             })
         });
         Engine { core, runtime }
@@ -1428,8 +1432,18 @@ impl Core {
                     if !final_answer && parent.is_none() {
                         m.activity_end = Some(m.text.encode_utf16().count());
                     }
-                    m.tools.get_or_insert_default().push(ToolUse { id, name, input, ok: None, output: None, declined: false, parent });
+                    m.tools.get_or_insert_default().push(ToolUse {
+                        id: id.clone(),
+                        name,
+                        input,
+                        ok: None,
+                        output: None,
+                        declined: false,
+                        parent,
+                        sign: None,
+                    });
                 }
+                self.watch_started(conv, &id);
             }
             EngineEvent::ToolResult { id, ok, declined, text } => {
                 if let Some(tool) = self.tool_of(conv, &id) {
@@ -1441,6 +1455,7 @@ impl Core {
                     tool.declined = declined;
                     tool.output = Some(text.chars().take(4000).collect());
                 }
+                self.watch_ended(conv, &id);
             }
             EngineEvent::HelperDone { id, ok, text } => {
                 // A helper that ran with its call is already settled by the call's own result, its full report included.
@@ -1448,6 +1463,7 @@ impl Core {
                     tool.ok = Some(ok);
                     tool.output = Some(text.chars().take(4000).collect());
                 }
+                self.watch_ended(conv, &id);
             }
             EngineEvent::HelperCall { id, input } => return self.start_helper(conv, id, input),
             EngineEvent::Permission { request_id, tool, input } => {
@@ -1490,6 +1506,7 @@ impl Core {
                 if let Some(m) = self.turn(conv) {
                     m.permissions.get_or_insert_default().push(Permission { request_id, tool, input, epoch });
                 }
+                self.weigh(conv);
                 return self.push(conv, turn_id.as_deref(), true);
             }
             EngineEvent::CacheWarm { secs, started_ms } => {
@@ -1553,6 +1570,7 @@ impl Core {
                         "resumed": resumed,
                     }));
                 }
+                self.unwatch(conv);
                 let missing = cost.is_none() || ((native.is_none() || vendor == Vendor::Codex) && incomplete);
                 self.note_turn(conv, cost, missing);
                 let can_run = crate::route::candidates(&self.vendors(), &self.codex_models);
@@ -1625,6 +1643,7 @@ impl Core {
                     }
                 }
                 if fatal {
+                    self.unwatch(conv);
                     self.note_turn(conv, None, true);
                     self.stop_helpers(conv, true);
                     if let Some(l) = self.live.remove(conv) {
@@ -1654,6 +1673,7 @@ impl Core {
     }
 
     fn finish(&mut self, conv: &str, turn_id: Option<String>) {
+        self.unwatch(conv);
         self.transfers.remove(conv);
         self.stop_helpers(conv, true);
         if let Some(l) = self.live.get_mut(conv) {
@@ -2685,6 +2705,8 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
     let permissions = reply.permissions.clone().unwrap_or_default();
     let parked = reply.parked.clone().unwrap_or_default();
     let parked_more = reply.parked_more.unwrap_or(0);
+    let stuck: Vec<String> =
+        reply.tools.iter().flatten().filter(|t| t.sign.is_some_and(crate::stuck::Sign::stuck)).map(|t| t.id.clone()).collect();
     if reply.status != Some(Status::Streaming) && permissions.is_empty() && parked.is_empty() && parked_more == 0 {
         return None;
     }
@@ -2696,11 +2718,16 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
         project_id: c.project_id.clone(),
         vendor: reply.vendor,
         model: reply.model.clone(),
-        state: if permissions.is_empty() && parked.is_empty() && parked_more == 0 { RunState::Working } else { RunState::NeedsYou },
+        state: if permissions.is_empty() && parked.is_empty() && parked_more == 0 && stuck.is_empty() {
+            RunState::Working
+        } else {
+            RunState::NeedsYou
+        },
         since: reply.at,
         permissions,
         parked,
         parked_more,
+        stuck,
         wait_until: reply.wait_until.filter(|_| reply.status == Some(Status::Streaming)),
     })
 }

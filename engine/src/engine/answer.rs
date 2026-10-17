@@ -140,6 +140,7 @@ impl Core {
         }
         if changed {
             self.save(conv);
+            self.weigh(conv);
             self.push(conv, Some(turn_id), true);
         }
         self.auto_answer(conv, late);

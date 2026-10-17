@@ -206,6 +206,14 @@ impl Watch {
                     notices.push(item.title.clone());
                 }
             }
+            // A subagent that seems stuck needs the person like a question does (R161 step 6): one notice per subagent and turn,
+            // even if it gets going and stops again.
+            for call in &item.stuck {
+                let key = (item.conversation_id.clone(), item.turn_id.clone(), format!("stuck:{call}"));
+                if self.seen.insert(key) && !window_focused {
+                    notices.push(item.title.clone());
+                }
+            }
             // Requests the CLI denied for want of anyone to answer them are blocked requests too (R92), named by their tool call.
             // A turn is one notice however many it had, and a notice waits out the cooldown after the last one: a flood of
             // denials is one line, not a hundred. The tray number still counts them all.
@@ -469,6 +477,19 @@ mod tests {
         assert!(watch.take(4, &[], false).unwrap().notices.is_empty(), "finishing work is not an attention request");
     }
 
+    #[test]
+    fn a_stuck_subagent_notifies_once_per_subagent_and_turn() {
+        let mut watch = Watch::default();
+        let mut stuck = item("a", "t1", "Fix the tests", &[]);
+        stuck.state = RunState::NeedsYou;
+        stuck.stuck = vec!["call".into()];
+        let first = watch.take_at(1, std::slice::from_ref(&stuck), false, 0.0).unwrap();
+        assert_eq!((first.notices, first.counts.needs_you), (vec!["Fix the tests".to_string()], 1));
+        assert!(watch.take_at(2, &[item("a", "t1", "Fix the tests", &[])], false, 1.0).unwrap().notices.is_empty());
+        assert!(watch.take_at(3, std::slice::from_ref(&stuck), false, 2.0).unwrap().notices.is_empty(), "stuck again is not news");
+        assert!(Watch::default().take_at(1, &[stuck], true, 0.0).unwrap().notices.is_empty(), "never while the window is focused");
+    }
+
     fn parked_item(conversation: &str, turn: &str, title: &str, ids: &[&str], more: u32) -> RunningItem {
         let mut i = item(conversation, turn, title, &[]);
         i.state = RunState::NeedsYou;
@@ -553,6 +574,7 @@ mod tests {
                 .collect(),
             parked: vec![],
             parked_more: 0,
+            stuck: vec![],
         }
     }
 

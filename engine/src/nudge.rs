@@ -177,7 +177,7 @@ fn is_check(tool: &ToolUse) -> bool {
 }
 
 /// The paths a file-editing tool touched: Claude's `file_path`, Codex's `changes` (a list of `{path}`, or keyed by path).
-fn edited(tool: &ToolUse) -> Vec<&str> {
+pub(crate) fn edited(tool: &ToolUse) -> Vec<&str> {
     match tool.name.as_str() {
         "Edit" | "Write" | "MultiEdit" => tool.input["file_path"].as_str().into_iter().collect(),
         "fileChange" => match &tool.input {
@@ -266,7 +266,7 @@ mod tests {
     }
 
     fn tool(name: &str, input: Value, ok: Option<bool>) -> ToolUse {
-        ToolUse { id: format!("t{name}{input}"), name: name.into(), input, ok, output: None, declined: false, parent: None }
+        ToolUse { id: format!("t{name}{input}"), name: name.into(), input, ok, output: None, declined: false, parent: None, sign: None }
     }
 
     fn bash(command: &str, ok: bool) -> ToolUse {

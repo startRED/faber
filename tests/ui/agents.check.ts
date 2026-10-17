@@ -104,3 +104,50 @@ check('helper step: in a reply on Claude Code the helper row names Codex, and it
     root.remove();
   }
 });
+
+// R161 step 6: a subagent waiting on the person's answer says so, and one that seems stuck turns amber with what the engine
+// saw, "Look" (opens its row) and "Tell it…" (starts a message in the conversation's box). Nothing of it outlives the reply.
+check('subagent step: waiting for you, and a stuck subagent is amber with Look and Tell it', () => {
+  useLanguage('en');
+  const root = document.createElement('div');
+  const box = document.createElement('div');
+  box.className = 'composer';
+  box.append(document.createElement('textarea'));
+  document.body.append(root, box);
+  const [message, setMessage] = createSignal<Message>({ id: 'stuck', role: 'assistant', at: 0, status: 'streaming', text: '', tools: [{ ...AGENT, sign: 'waiting' }, GREP] });
+  const dispose = render(
+    () => createComponent(Thread, { get messages() { return [message()]; }, from: 0, conversationId: 'stuck', options: [], onBranch: () => {} }),
+    root,
+  );
+  try {
+    const row = () => root.querySelector<HTMLDetailsElement>('.agents .agent')!;
+    equal(row().dataset.state, 'waiting');
+    equal(row().querySelector('.agent-meta')!.textContent, 'Explore · waiting for you · 1 step');
+    equal(root.querySelector('.agent-stuck'), null, 'waiting for the person is never stuck');
+    setMessage({ ...message(), tools: [{ ...AGENT, sign: 'failing' }, GREP] });
+    equal(row().dataset.state, 'stuck');
+    equal(row().querySelector('.agent-meta')!.textContent, 'Explore · seems stuck · 1 step');
+    const line = root.querySelector('.agent-stuck')!;
+    equal(line.querySelector('.agent-why')!.textContent, 'The same check failed three times with nothing changed.');
+    const [look, tell] = [...line.querySelectorAll('button')];
+    deepEqual([look!.textContent, tell!.textContent], ['Look', 'Tell it…']);
+    equal(row().open, false);
+    look!.click();
+    equal(row().open, true, 'Look opens the row to what it ran');
+    tell!.click();
+    const area = box.querySelector('textarea')!;
+    equal(area.value, 'About “Find file defining load_config”: ');
+    equal(document.activeElement, area);
+    tell!.click();
+    equal(area.value, 'About “Find file defining load_config”: ', 'a second click does not write it twice');
+    setMessage({ ...message(), tools: [{ ...AGENT, sign: 'silent' }, GREP] });
+    equal(root.querySelector('.agent-why')!.textContent, 'It has done nothing for a long while.');
+    setMessage({ ...message(), status: 'stopped', tools: [{ ...AGENT, sign: 'silent' }, GREP] });
+    equal(row().dataset.state, 'stopped', 'a reply that ended shows no sign');
+    equal(root.querySelector('.agent-stuck'), null);
+  } finally {
+    dispose();
+    root.remove();
+    box.remove();
+  }
+});

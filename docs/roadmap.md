@@ -417,7 +417,7 @@ frames) and checked against today's code. It fills the steps of R161 and never b
    brief in its input. The engine keeps that mark on `Tool`, `Text` and `ToolResult`; the screen groups a child's
    events under its Task step, which opens into one row per child: the short name the agent gave it, its living
    sentence and its time. Past three rows the rest fold into "+2 more", and while nothing is stuck the whole split
-   reads as one sentence ("5 collectors reading 5 sites"). Codex has no subagents, so for Codex only helpers show.
+   reads as one sentence ("5 collectors reading 5 sites"). Codex's own subagents show the same way (R167).
 3. **The side chat lives in the right column.** The running column (`ui/App.tsx`, `ui/Running.tsx`) is already the one
    place on the right; clicking a child row opens that child there as a normal conversation, with a back arrow to the
    running list, so there is no second column. Its first message is the whole brief the main agent sent, word for word,
@@ -434,7 +434,8 @@ frames) and checked against today's code. It fills the steps of R161 and never b
    twice, or silent longer than its kind of work allows; a child waiting on a question is "waiting for you", never
    stuck. The main agent hears first and tries once to retry, narrow the piece or hand it to the other vendor. Only if
    that fails does the row turn amber with "Look" and "Tell it…", and only then is the person notified. It ships once
-   the recorded fixtures show no false amber.
+   the recorded fixtures show no false amber. Built (R174): neither CLI can be told about its subagent while the main agent waits for it, so
+   the main agent's chance is the retry the thresholds leave (a check shows only after it failed three times).
 7. **Faber's own browser and app pane (R161 step 4, the largest piece).** Nothing exists yet: the shell has one
    webview. The agent or a child opens websites in a pane that belongs to Faber and runs the app it builds beside the
    chat, through a Faber tool the CLI calls. A card in the reply ("Site open in the browser", with a picture and Open)

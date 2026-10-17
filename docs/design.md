@@ -57,7 +57,7 @@ These colours are fixed meanings, not decoration:
 
 | Meaning | Colour | Hue | Shape |
 | :--- | :--- | :--- | :--- |
-| Needs you | Amber | 40 | Speech bubble, always shown with the words "needs you" |
+| Needs you | Amber | 40 | Speech bubble, always shown with the words "needs you" (inside a reply, a subagent's row says "waiting for you" or "seems stuck") |
 | Claude | Coral | 14 | Square |
 | Codex | Violet | 245 | Diamond |
 
@@ -346,6 +346,18 @@ and Stop and closing the conversation reach the subagent too. What a subagent st
 no reply, so its step reads "stopped". Codex counts each thread's usage on its own, so the
 engine adds the subagent's tokens and cost to the reply that started it, and marks the reply's usage incomplete when a
 subagent is still at work as it ends.
+
+A subagent waiting on the person's answer reads "waiting for you" with its live mark in amber; the card under the rows is
+that answer. One that seems stuck (R161 step 6, R174) is the conversation's other amber: the mark and the row's edge
+turn amber, its state reads "seems stuck", and one line under the row says in plain words what the engine saw, with
+"Look", which opens the row to what it ran, and "Tell it…", which focuses the conversation's box with "About “title”: " at
+its start (Codex takes it into the running turn; Claude Code after it, or at once with "Send now"). The line arrives with
+the normal entrance (`--dur-arrive`, none in reduced motion) and goes when the subagent moves again or the reply ends; the
+words carry the meaning, the amber only repeats it. The signs are counted by the engine (`engine/src/stuck.rs`): the
+same step six times in a row, the same step failing three times with no file changed between (twice and its retry), or
+no step for 10 minutes (30 while a command runs, since builds say nothing until they end). The time a question waits for
+the person never counts. Neither CLI lets Faber speak to the main agent while it waits for its subagent, so the main
+agent's own chance is the retry the numbers leave it. Background subagents are not followed.
 
 A helper from the other AI (Faber's helper tool, R161) is the same row: its title in bold and, as its kind, the AI that
 ran it, so a Claude Code reply reads "Codex". Its commands show under it and its report is its final words. The person
