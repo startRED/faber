@@ -50,7 +50,8 @@ pub struct DailySample {
 }
 
 /// One request Faber made, with the moment it really ended (a `Span`'s end is the moment of the reading taken during it, which
-/// is what the learning needs). Kept for a few hours: it is what tells whether the vendor's counter has caught up.
+/// is what the learning needs). Kept until every live window was read after it ended plus the lag: it is what tells
+/// whether the vendor's counter has caught up.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Work {
     pub start: f64,
