@@ -114,6 +114,21 @@ export function watchMotion(): void {
   });
 }
 
+// Every animated list needs to hear the window resize. They share one listener, which exists while any list does.
+const resizers = new Set<() => void>();
+const onWindowResize = () => { for (const resize of resizers) resize(); };
+function watchResize(resize: () => void): () => void {
+  if (!resizers.size) window.addEventListener('resize', onWindowResize);
+  resizers.add(resize);
+  return () => {
+    resizers.delete(resize);
+    if (!resizers.size) window.removeEventListener('resize', onWindowResize);
+  };
+}
+
+// A transition that only changes how something is painted moves nothing, so a list does not measure its children after it.
+const PAINT_ONLY = new Set(['opacity', 'color', 'background-color', 'border-color', 'outline-color', 'box-shadow', 'filter', 'fill', 'stroke']);
+
 /** Small lists and view boundaries: arrivals, inert exit copies and FLIP for the surviving rows. No streaming observer. */
 export function animateList(root: HTMLElement, subtree = false): void {
   onMount(() => {
@@ -132,6 +147,7 @@ export function animateList(root: HTMLElement, subtree = false): void {
     let before = new Map(children().map((el) => [el, el.getBoundingClientRect()]));
     const capture = () => { if (!animations.size) before = new Map(children().map((el) => [el, el.getBoundingClientRect()])); };
     const resize = () => { viewWidth = innerWidth; viewHeight = innerHeight; capture(); };
+    const transitioned = (event: TransitionEvent) => { if (!PAINT_ONLY.has(event.propertyName)) capture(); };
     const update = () => {
       const items = children();
       // Viewport reflow must never animate content from a position outside the new window.
@@ -247,16 +263,16 @@ export function animateList(root: HTMLElement, subtree = false): void {
     observer.observe(root, { childList: true, subtree, ...(root.matches('.shell') ? { attributes: true, attributeFilter: ['class'] } : {}) });
     if (root.matches('.rc-body, .s-main, .tour')) { before.clear(); update(); }
     root.addEventListener('scroll', capture, true);
-    root.addEventListener('transitionend', capture);
-    window.addEventListener('resize', resize);
+    root.addEventListener('transitionend', transitioned);
+    const unwatchResize = watchResize(resize);
     onCleanup(() => {
       observer.disconnect();
       sideObserver?.disconnect();
       reflow?.disconnect();
       delete root.dataset.motionList;
       root.removeEventListener('scroll', capture, true);
-      root.removeEventListener('transitionend', capture);
-      window.removeEventListener('resize', resize);
+      root.removeEventListener('transitionend', transitioned);
+      unwatchResize();
       for (const animation of animations.values()) animation.cancel();
       for (const ghost of ghosts) removeExit(ghost);
     });

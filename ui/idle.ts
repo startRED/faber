@@ -1,4 +1,4 @@
-import { createEffect, createSignal, onCleanup, type Accessor } from 'solid-js';
+import { createEffect, createSignal, onCleanup, untrack, type Accessor } from 'solid-js';
 import { motion, windowHidden } from './appearance.ts';
 
 // The quiet life of empty and waiting screens (docs/design.md, "Motion": empty states are the expressive tier). It runs
@@ -24,4 +24,24 @@ export function slowTick(ms: number, enabled: Accessor<boolean> = () => true): A
     onCleanup(() => clearInterval(timer));
   });
   return n;
+}
+
+/**
+ * Runs `run` every `ms` while the window is shown. The timer does not exist while the window is hidden or minimized, and it
+ * is made again when the window comes back, which runs `run` once at once because the time moved on while nobody looked.
+ */
+export function everyWhileShown(ms: number, run: () => void): void {
+  let wasHidden = false;
+  createEffect(() => {
+    if (windowHidden()) {
+      wasHidden = true;
+      return;
+    }
+    if (wasHidden) {
+      wasHidden = false;
+      untrack(run);
+    }
+    const timer = setInterval(run, ms);
+    onCleanup(() => clearInterval(timer));
+  });
 }
