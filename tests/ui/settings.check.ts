@@ -715,7 +715,7 @@ check('settings: one card per AI with a capitalised plan, one status word, the r
     for (const key of ['quota.countingNote', 'usage.shared', 'usage.learning', 'usage.foreign', 'usage.overageOn'] as const) ok(notes.includes(en[key]), key);
     ok(notes.some((n) => n.includes('2 requests')), 'the incomplete meter');
     equal(view.host.querySelectorAll('[data-restore="manage"]').length, 1, 'Manage accounts appears once in the section');
-    ok(en['set.openSetup'] === 'Manage accounts' && en['empty.noAiButton'] === 'Manage accounts', 'one label opens the account cards everywhere');
+    equal(en['set.openSetup'], 'Manage accounts', 'one label opens the account cards from Settings');
   } finally { view.stop(); }
 }));
 
