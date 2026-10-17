@@ -1,7 +1,7 @@
 import { type Accessor, createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import themes from '../../src-tauri/src/themes.json';
-import { api, type Message, type Project, type RunningItem, type Summary } from '../../ui/api.ts';
+import { api, type Area, type Message, type Project, type RunningItem, type Summary } from '../../ui/api.ts';
 import { ContextMenuHost } from '../../ui/ContextMenu.tsx';
 import { installContextMenu } from '../../ui/contextmenu.ts';
 import { Sidebar } from '../../ui/Sidebar.tsx';
@@ -27,6 +27,7 @@ const clickOutside = () => document.body.dispatchEvent(new PointerEvent('pointer
 
 /** A screen with room for a menu, in the look's own colours and with no motion. */
 function stage() {
+  setArea('chat');
   installContextMenu();
   const root = document.createElement('div');
   root.style.cssText = 'position:fixed;left:0;top:0;width:360px;height:520px';
@@ -50,11 +51,13 @@ const working = (projectId: string): RunningItem => ({
   conversationId: 'w1', turnId: 't1', title: 'Busy', area: 'project', projectId, state: 'working', since: 0, permissions: [],
 });
 
+// Each area lists only its own: chats in Chat, projects with their conversations in Projects.
+const [area, setArea] = createSignal<Area>('chat');
 function sidebar(root: HTMLElement, calls: string[], running: Accessor<RunningItem[]> = () => [], onError: (err: unknown) => void = () => {}) {
   return render(
     () => [
       createComponent(Sidebar, {
-        conversations: chats, projects, vendors: [], version: '0', place: { area: 'chat' }, get running() { return running(); }, quotas: {}, now: Date.now(), onError,
+        conversations: chats, projects, vendors: [], version: '0', get place() { return { area: area() }; }, get running() { return running(); }, quotas: {}, now: Date.now(), onError,
         onNew: () => {}, onArea: () => {}, onProject: () => {}, onNewIn: (id: string) => calls.push(`new ${id}`), onAddProject: () => {}, onOpen: () => {},
         onRemove: (id: string) => calls.push(`remove ${id}`), onSettings: () => {},
       }),
@@ -147,6 +150,7 @@ check('right-click: a chat offers Rename and Delete, Delete asks twice, Rename e
 
 check('right-click: a project offers a new conversation, its folder and removal, which asks twice', async () => {
   const root = stage();
+  setArea('project');
   const calls: string[] = [];
   const original = { remove: api.removeProject, show: api.showProject };
   api.removeProject = async (id) => void calls.push(`removeProject ${id}`);
@@ -189,6 +193,7 @@ check('right-click: a project offers a new conversation, its folder and removal,
 
 check('sidebar: a project that needs the person says so in words beside the amber mark, never with a bare number', async () => {
   const root = stage();
+  setArea('project');
   const dispose = sidebar(root, [], () => [{ ...working('p1'), state: 'needsYou' }]);
   try {
     await settle();
@@ -366,8 +371,9 @@ check('right-click: your message offers Copy and Edit, an answer offers Copy and
     const [done, running] = [...root.querySelectorAll('.ai')];
     rightClick(done!);
     await settle();
-    deepEqual(labels(), [t('menu.copy'), t('menu.redo')]);
-    entry(t('menu.redo')).click();
+    // The menu says which model the retry uses: the composer's choice, here Auto.
+    deepEqual(labels(), [t('menu.copy'), t('answer.retry', { model: t('model.auto') })]);
+    entry(t('answer.retry', { model: t('model.auto') })).click();
     await settle();
     deepEqual(branches, [['u1', 'Make a plan', undefined]]);
 
@@ -405,6 +411,8 @@ check('right-click: a double click on Delete or Remove arms the item but never c
     await settle();
     deepEqual(calls, ['remove c1'], 'a later click does');
 
+    setArea('project');
+    await settle();
     await open(root.querySelector('.prow')!, t('menu.removeProject'));
     deepEqual(calls, ['remove c1'], 'two quick clicks do not remove the project');
     equal(menus().length, 1);
@@ -417,6 +425,7 @@ check('right-click: a double click on Delete or Remove arms the item but never c
 
 check('right-click: a project with work running cannot be removed, also when the work starts while the menu is open', async () => {
   const root = stage();
+  setArea('project');
   const calls: string[] = [];
   const original = api.removeProject;
   api.removeProject = async (id) => void calls.push(`removeProject ${id}`);
@@ -457,6 +466,7 @@ check('right-click: a project with work running cannot be removed, also when the
 
 check('right-click: what the engine refuses (a project still working, a folder that is gone) reaches the screen', async () => {
   const root = stage();
+  setArea('project');
   const refused: unknown[] = [];
   const original = { remove: api.removeProject, show: api.showProject };
   api.removeProject = async () => Promise.reject('error.project.busy');

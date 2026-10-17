@@ -136,6 +136,23 @@ export function agentReport(output = ''): string {
     .trim();
 }
 
+/** A kind of subagent as words: the CLI's general one is "General", and a person's own agent (`code-reviewer`) reads "Code reviewer". The
+ * names Explore and Plan, and the AI that ran a helper, are words already. */
+export function agentKind(kind: string): string {
+  if (kind === 'general-purpose') return t('agent.kind.general');
+  const words = kind
+    .replace(/[-_]+/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** Whether two lists hold the same tools in the same state, so a message that only grew in text leaves the rows of its tools
+ * alone while it streams. A tool is the same while its id, name, outcome and output length are. */
+export function sameTools(a: ToolUse[], b: ToolUse[]): boolean {
+  return a.length === b.length && a.every((tool, i) => tool.id === b[i]!.id && tool.name === b[i]!.name && tool.ok === b[i]!.ok && (tool.output?.length ?? 0) === (b[i]!.output?.length ?? 0));
+}
+
 /** Each subagent the agent started, with the tools it ran under it. A subagent's own helper folds into it: its tools count
  * for the agent call the whole chain started from. */
 export function agentSteps(tools: ToolUse[] = [], helperKind = ''): AgentStep[] {

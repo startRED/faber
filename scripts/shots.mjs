@@ -1,4 +1,4 @@
-// The screenshots a visual critique looks at (R168, `.claude/skills/visual-critique/SKILL.md`). Runs the composition
+// The screenshots a visual critique looks at (R169, `.claude/skills/visual-critique/SKILL.md`). Runs the composition
 // scenario of the UX sentinel, which photographs the main screens at 1920x1080 and 1280x800 in Dark Room, plus any
 // scenario named with `--filter`, and copies the photos of the screens the diff touches into one folder with an index:
 //

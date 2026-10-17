@@ -44,12 +44,21 @@ export function t(key: Key, vars: Record<string, string | number> = {}): string 
   const messages = LANGUAGES.find((l) => l.code === lang())?.messages ?? en;
   const entry = messages[key];
   if (typeof entry === 'string') return fill(entry, vars);
-  const form = new Intl.PluralRules(lang()).select(Number(vars.n ?? 0)) === 'one' ? entry.one : entry.other;
-  return fill(form, vars);
+  return fill(one(Number(vars.n ?? 0)) ? entry.one : entry.other, vars);
 }
+
+/** Whether `n` takes the singular form. Zero counts as plural everywhere ("0 steps"), though Portuguese and French grammar put it
+ * with the singular. */
+const one = (n: number) => n !== 0 && new Intl.PluralRules(lang()).select(n) === 'one';
 
 /** A number written the person's way ("0.12", "0,12"). */
 export const amount = (value: number, digits: number) => new Intl.NumberFormat(lang(), { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
+
+/** A share from 0 to 1 as a whole percentage, written the person's way ("72%", "72 %"). */
+export const percent = (share: number) => new Intl.NumberFormat(lang(), { style: 'percent', maximumFractionDigits: 0 }).format(share);
+
+/** A large count in few characters ("22k", "22 mil"), in the person's language. */
+export const compact = (n: number) => new Intl.NumberFormat(lang(), { notation: 'compact', maximumFractionDigits: 1 }).format(n);
 
 /** US dollars, the currency of API prices, with the sign where the language puts it. */
 export const money = (usd: number, digits = 2) => t('money.usd', { amount: amount(usd, digits) });

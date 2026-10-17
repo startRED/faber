@@ -208,7 +208,7 @@ fn layout_motion(ctx: &mut Ctx) -> Result {
       const field = document.querySelector('.composer textarea');
       const card = field.closest('.composer');
       const type = (lines) => { field.value = 'line\n'.repeat(lines); field.dispatchEvent(new Event('input', { bubbles: true })); };
-      if (view === 'fold') document.querySelector('.projects').append(fold);
+      if (view === 'fold') document.querySelector('.side-scroll').append(fold);
       if (view === 'disclosure') {
         const answer = document.querySelector('.col > article.ai:last-child');
         answer.insertBefore(details, answer.querySelector(':scope > .md'));

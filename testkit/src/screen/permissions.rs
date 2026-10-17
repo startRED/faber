@@ -20,8 +20,8 @@ pub fn scenarios() -> Vec<Scenario> {
     ]
 }
 
-/// The default mode, read like a person would: the line over the thread, its link to Settings, the details there, and the
-/// details changing with the choice.
+/// The default mode, read like a person would: no sentence over the thread (the mode is a Settings matter), the details in
+/// Settings, and the details changing with the choice.
 fn do_not_ask_text(ctx: &mut Ctx) -> Result {
     start_settings(ctx, "en")?;
     let launch = Launch {
@@ -35,16 +35,12 @@ fn do_not_ask_text(ctx: &mut Ctx) -> Result {
     let model = page.labelled("composer.model")?;
     page.select_option(&model, "Claude Haiku")?;
     ask(page, TWO_WRITES)?;
-    let line = page.text_of("project.permissionsDontAsk")?;
-    let status = css("[role=status]").has_text(&line);
-    page.wait_visible(&status)?;
-    // Calm and short: no error vocabulary, no block of technical text over every thread.
-    ensure(line.chars().count() < 60, || format!("the thread line is too long: {line}"))?;
-    let shown = page.inner_text(&status)?;
-    ensure(!shown.to_lowercase().contains("error") && !shown.contains("sandbox"), || format!("the line reads like an error: {shown}"))?;
-    // The link opens Settings, where the details are.
-    let details = page.named("button", "project.permissionsDetails")?;
-    page.click(&details)?;
+    // Calm: no permission sentence over the conversation, whatever the mode.
+    page.wait_visible(&css("article .ai, article.ai"))?;
+    ensure(page.count(&css(".col .hint[role=status]"))? == 0, || "a permission sentence sits over the thread".into())?;
+    // The details are in Settings.
+    let settings = page.named("button", "settings.open")?.exact();
+    page.click(&settings)?;
     let dont_ask_body = page.text_of("set.permissionsDontAskBody")?;
     // The long text sits behind "Learn more": it is not on the page until that is opened (R140).
     ensure(page.count(&css(".hint").has_text(&dont_ask_body))? == 0, || "the long risk text is on the page while closed".into())?;
@@ -126,8 +122,7 @@ fn answers_a_card(ctx: &mut Ctx) -> Result {
     let model = page.labelled("composer.model")?;
     page.select_option(&model, "Claude Haiku")?;
     ask(page, TWO_WRITES)?;
-    let notice = page.text_of("project.permissionsAsk")?;
-    page.wait_visible(&css("[role=status]").has_text(&notice))?;
+    ensure(page.count(&css(".col .hint[role=status]"))? == 0, || "a permission sentence sits over the thread".into())?;
 
     // The CLI asks to write a.txt. Allow it ("Always allow" holds the same word, so the name must match exactly); the card for b.txt follows, and the recording denies that one.
     let first = css("article .ask").has_text("a.txt");

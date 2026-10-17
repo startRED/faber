@@ -4,7 +4,7 @@ import themes from '../../src-tauri/src/themes.json';
 import { App } from '../../ui/App.tsx';
 import { Composer } from '../../ui/Composer.tsx';
 import { api, type AppState, type Choice, type Conversation } from '../../ui/api.ts';
-import { lang, t, useLanguage } from '../../ui/i18n.ts';
+import { lang, useLanguage } from '../../ui/i18n.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
@@ -19,7 +19,7 @@ check('effort: only a manual model shows low, medium and high; medium is the def
   let sends = 0;
   const dispose = render(() => createComponent(Composer, {
     vendors: ['claude'], options: [{ label: 'Auto', choice: { vendor: 'auto' } }, { label: 'Haiku', choice: { vendor: 'claude', model: 'haiku' } }, { label: 'Sonnet', choice: { vendor: 'claude', model: 'sonnet' } }],
-    get choice() { return choice(); }, busy: true, nextMessage: true, placeholder: '',
+    get choice() { return choice(); }, busy: true, placeholder: '',
     onChoice: setChoice, onSend: () => { sends++; }, onWarm: () => { warms++; }, onStop: () => {}, onPause: () => {},
   }), root);
   try {
@@ -34,7 +34,7 @@ check('effort: only a manual model shows low, medium and high; medium is the def
     effort.value = 'high';
     effort.dispatchEvent(new Event('change', { bubbles: true }));
     equal(choice().effort, 'high');
-    equal(root.querySelector('.effort-hint')?.textContent, t('effort.nextMessage'));
+    equal(root.querySelector('.effort-hint'), null, 'no permanent sentence under the composer: the choice is for the next message and the menu does not say so');
     equal(warms, 0, 'changing the choice alone never launches a session');
     equal(sends, 0);
     model.value = '2';
@@ -92,7 +92,7 @@ check('effort: choices restore independently; review 8: successful deletion remo
         if (id === 'effort-one') {
           const expected = localStorage.getItem('faber.choice.effort-one') ? 'low' : 'high';
           equal(effort?.value, expected);
-          ok(root.querySelector('.effort-hint'));
+          equal(root.querySelector('.effort-hint'), null);
           effort!.value = 'low';
           effort!.dispatchEvent(new Event('change', { bubbles: true }));
           equal(JSON.parse(localStorage.getItem('faber.choice.effort-one')!).effort, 'low');

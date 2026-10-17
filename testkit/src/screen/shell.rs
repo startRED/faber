@@ -478,6 +478,8 @@ fn opens_a_project_conversation(ctx: &mut Ctx) -> Result {
     std::fs::write(conversations.join("legacy.json"), saved.to_string()).map_err(|e| e.to_string())?;
     let mut app = ctx.launch(claude_chat(ctx))?;
     let page = &mut app.page;
+    let projects = page.named("button", "area.projects")?;
+    page.click(&projects)?;
     page.click(&css(".prow .item").has_text("Demo"))?;
     page.wait_visible(&css(".welcome-grid .p-header h2").has_text("Demo"))?;
     page.click(&css(".proj-chats .item").has_text("Legacy history"))?;
@@ -599,12 +601,12 @@ fn shows_the_quota(ctx: &mut Ctx) -> Result {
     let actions = page.named("article", "answer.label")?.css(".actions");
     page.wait_visible(&actions)?;
     // The tightest window of the vendor: 47 % of the 7-day one, not 7 % of the 5-hour one.
-    page.wait_for("the quota to show", "document.querySelector('.usage .share')?.textContent === '47%'")?;
+    page.wait_for("the quota to show", "/^(≥ )?47%$/.test(document.querySelector('.usage .share')?.textContent ?? '')")?;
     ctx.shot(&mut app, "quota")?;
     let page = &mut app.page;
     // A screen that loads again asks the engine and shows the same reading.
     page.reload()?;
-    page.wait_for("the quota after a reload", "document.querySelector('.usage .share')?.textContent === '47%'")
+    page.wait_for("the quota after a reload", "/^(≥ )?47%$/.test(document.querySelector('.usage .share')?.textContent ?? '')")
 }
 
 // ---- Seeded conversations and the checks of the second pass of the review.
@@ -932,23 +934,33 @@ fn keeps_long_titles_inside(ctx: &mut Ctx) -> Result {
     let launch = claude_chat(ctx);
     let mut app = ctx.launch(launch)?;
     let page = &mut app.page;
-    page.click(&css(".prow .item"))?;
-    page.wait_visible(&css(".proj-chats .item"))?;
     pause(0.3);
     // Every row ends inside the sidebar, and its title is cut with an ellipsis. The button on the right shows when the row is
     // hovered or holds the focus, and the title then makes room for it, so each row takes the focus before it is measured.
-    let found = page.eval(
-        "(() => { const sc = document.querySelector('.side-scroll'); const edge = sc.getBoundingClientRect().right; const bad = []; \
+    let measure = "(() => { const sc = document.querySelector('.side-scroll'); const edge = sc.getBoundingClientRect().right; const bad = []; \
          for (const row of document.querySelectorAll('.side .crow, .side .prow')) { \
            const item = row.querySelector('.item'); item.focus(); const title = item.querySelector(':scope > span'); const button = row.querySelector('.x, .plus'); \
            const r = row.getBoundingClientRect(), t = title.getBoundingClientRect(), b = button.getBoundingClientRect(); \
            if (r.right > edge + 0.5) bad.push('row ends at ' + r.right); \
            if (getComputedStyle(title).textOverflow !== 'ellipsis' || title.scrollWidth <= title.clientWidth) bad.push('no ellipsis: ' + title.textContent.slice(0, 12)); \
            if (t.right > b.left + 0.5) bad.push('title runs under the button: ' + t.right + ' > ' + b.left); } \
-         return { bad, rows: document.querySelectorAll('.side .crow, .side .prow').length, still: sc.scrollWidth <= sc.clientWidth + 1 }; })()",
-    )?;
-    ensure(num(&found, &["rows"]) >= 3.0, || format!("expected the project and two conversations: {found}"))?;
-    ensure(found["bad"].as_array().is_some_and(Vec::is_empty) && found["still"] == true, || format!("the sidebar: {found}"))
+         return { bad, rows: document.querySelectorAll('.side .crow, .side .prow').length, still: sc.scrollWidth <= sc.clientWidth + 1 }; })()";
+    // Each area lists only its own: the chat in Chat, then the project with its conversation in Projects.
+    let in_chat = page.eval(measure)?;
+    ensure(num(&in_chat, &["rows"]) >= 1.0 && page.count(&css(".side .prow"))? == 0, || format!("Chat lists only chats: {in_chat}"))?;
+    let projects = page.named("button", "area.projects")?;
+    page.click(&projects)?;
+    page.click(&css(".prow .item"))?;
+    page.wait_visible(&css(".proj-chats .item"))?;
+    pause(0.3);
+    let in_projects = page.eval(measure)?;
+    ensure(num(&in_projects, &["rows"]) >= 2.0 && page.count(&css(".side .list .crow"))? == 0, || {
+        format!("Projects lists the project and its conversation: {in_projects}")
+    })?;
+    for found in [in_chat, in_projects] {
+        ensure(found["bad"].as_array().is_some_and(Vec::is_empty) && found["still"] == true, || format!("the sidebar: {found}"))?;
+    }
+    Ok(())
 }
 
 /// The recording `claude/subagent.jsonl`: a real turn in which the agent hands a search to an Explore subagent.
