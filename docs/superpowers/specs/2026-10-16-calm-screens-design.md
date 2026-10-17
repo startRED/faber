@@ -86,7 +86,7 @@ the two near-duplicate what's-new entries. 3b, the Chat home in one column, wait
   screen) together with their 30 s poll; "Open a project" stays.
 - Timers stop while the window is hidden; animated lists do not nest observers; the blur behind near-opaque panels goes.
 
-4 (done, R-next-2): the three heights, the `--fs-*` sizes, one `--dur-*` / `--ease*` family and `.field` for every text
+4 (done, R171): the three heights, the `--fs-*` sizes, one `--dur-*` / `--ease*` family and `.field` for every text
 field outside the composer; no hover brightness and no blur behind near-opaque panels; the mission screens, their poll
 and 92 locale keys per language are gone; the clock and the running column's tick stop while hidden, the dust reads its
 nodes once, animated lists share one resize listener, the thread and its column share one observer; fonts are woff2

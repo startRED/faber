@@ -866,7 +866,7 @@ export const es: Messages = {
   'notes.23.better': 'Las conversaciones son más tranquilas: menos líneas alrededor de cada respuesta, y el modelo se elige en un solo lugar.',
   'notes.24.better': "Los Ajustes se leen mejor: una línea por opción, y tus cuentas y sus límites están juntos.",
   'notes.25.better': 'Las pantallas vacías, el tutorial y esta lista son más cortos y dicen cada cosa una vez.',
-  'notes.next-2.better': 'Faber descansa mientras su ventana está oculta, y los botones y los campos se ven igual en todas las pantallas.',
+  'notes.26.better': 'Faber descansa mientras su ventana está oculta, y los botones y los campos se ven igual en todas las pantallas.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

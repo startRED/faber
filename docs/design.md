@@ -546,7 +546,7 @@ screen work may start against it with mock data before the engine runs missions.
 ### Screens
 
 A mission has no screen: a project is worked in by talking to its agent (R160), and the start card, the checks sheet, the
-mission board and the local build card left the bundle with their 30 s poll (R-next-2). The engine keeps the mission
+mission board and the local build card left the bundle with their 30 s poll (R171). The engine keeps the mission
 machinery and the shell its commands (product-map.md, Shell commands). The Projects area shows one of two things:
 
 - With no project open, the small "Open a project" screen (`ui/Projects.tsx`): the empty state with its one button, the
