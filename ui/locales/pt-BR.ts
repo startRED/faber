@@ -869,7 +869,7 @@ export const ptBR: Messages = {
   'notes.27.better': 'A primeira tela de um projeto ficou mais calma: uma coluna só, com as conversas do próprio projeto, e um buraco negro menor que fica longe das palavras.',
   'notes.28.new': 'Quando um subagente parece travado, a etapa dele fica âmbar e o Faber avisa você; quando ele espera a sua resposta, a etapa diz isso.',
   'notes.29.better': 'O início do Chat também virou uma coluna calma: três sugestões curtas, e o que retomar embaixo da caixa de mensagem.',
-  'notes.next.new': 'Um subagente abre à direita, com o que pediram a ele, as etapas que fez e o relatório dele.',
+  'notes.30.new': 'Um subagente abre à direita, com o que pediram a ele, as etapas que fez e o relatório dele.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

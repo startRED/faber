@@ -337,7 +337,7 @@ inside its own area.
 When the agent hands part of the work to a subagent (R161), the reply shows one row per helper between the work log and
 the answer, in the work log's surface and type: a check, a cross or the live mark, the few words it was given in bold, and
 on the right its kind, its state and its step count in the third ink, and an arrow pointing right. A click opens the
-subagent in the running column (R161 step 3, R-next), which is the one place on the right: its head has a back arrow to
+subagent in the running column (R161 step 3, R176), which is the one place on the right: its head has a back arrow to
 the running list, the subagent's title and the column's close; under it the meta line, the brief word for word in the
 person's own bubble (the agent wrote it to the subagent; Codex gives none, and then nothing shows), the tool chips it
 ran and its report as Markdown. While it works, a quiet line says a CLI subagent cannot be written to while it runs and

@@ -882,7 +882,7 @@ export const es: Messages = {
   'notes.27.better': 'La primera pantalla de un proyecto es más tranquila: una sola columna con las conversaciones de ese proyecto, y un agujero negro más pequeño que queda lejos del texto.',
   'notes.28.new': 'Cuando un subagente parece atascado, su paso se pone ámbar y Faber te avisa; si espera tu respuesta, el paso lo dice.',
   'notes.29.better': 'El inicio del Chat también es una columna tranquila: tres sugerencias cortas, y lo que retomar bajo el cuadro de mensaje.',
-  'notes.next.new': 'Un subagente se abre a la derecha, con lo que se le pidió, los pasos que dio y su informe.',
+  'notes.30.new': 'Un subagente se abre a la derecha, con lo que se le pidió, los pasos que dio y su informe.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

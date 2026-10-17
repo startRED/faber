@@ -750,7 +750,7 @@ export const en = {
   'notes.27.better': "A project's first screen is calmer: one column with that project's own conversations, and a smaller black hole that stays clear of the words.",
   'notes.28.new': 'When a subagent seems stuck, its step turns amber and Faber tells you, and one waiting on your answer says so.',
   'notes.29.better': 'The Chat home is one calm column too: three short suggestions, and what to pick up under the message box.',
-  'notes.next.new': 'A subagent opens on the right, with what it was asked, the steps it ran and its report.',
+  'notes.30.new': 'A subagent opens on the right, with what it was asked, the steps it ran and its report.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',
