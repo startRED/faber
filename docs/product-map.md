@@ -13,12 +13,12 @@ that changes them updates this page too. Last full audit: 2026-10-16.
 | Word | What it means | Where it lives |
 | :--- | :--- | :--- |
 | Chat | The area for conversations with one AI at a time. A chat works in a private folder of its own, or in a folder picked before its first message. | `ui/Welcome.tsx`, `ui/Thread.tsx`, `ui/Composer.tsx` |
-| Projects | The area for git folders. Inside a project the person talks to an AI agent that works in the folder, with the same permission modes as Chat (R160). The mission machinery stays in the engine, with no way to start one on screen. | `ui/App.tsx`, `ui/Projects.tsx`, `engine/src/project/` |
+| Projects | The area for git folders. Inside a project the person talks to an AI agent that works in the folder, with the same permission modes as Chat (R160). The mission machinery stays in the engine, with no way to start one on screen and no screen for one (the start card, the checks sheet, the mission board and the local build card are gone). | `ui/App.tsx`, `ui/Projects.tsx`, `engine/src/project/` |
 | Mission | One goal in one project, done by roles in a separate copy (a git worktree) and landed on Faber's own `faber/…` branch, never on the person's branch. Today (v0): one task, one Writer attempt, no repair loop, a US$2.00 cap. | `engine/src/project/coordinator.rs`, journal in `<project>/.faber/missions/<id>/` |
 | Lead, Writer, Reviewer | The roles of a mission: plans the work; changes the code; reviews the exact result. The Reviewer is always the other vendor. | `engine/src/project/` |
 | Checks | The commands a project declares under a "Proof commands" heading in its AGENTS.md or CLAUDE.md (or a detected default), confirmed by the person on a sheet when the first mission starts (R137), and read or edited later in Settings > Projects, where Confirm and Save are offered only with the full list and setup on screen (a confirmed list may fold behind "View commands"). Code and specs call them proofs. | `engine/src/project/mission.rs`, `ui/ProjectSettings.tsx`, `ui/Projects.tsx` |
 | Grant | What the person allows in a project: the git mode (Safe, `seguro`: a separate copy only; `equilibrado`, push and draft PR, exists in the engine but is not offered) and self-update trust. Changed in Settings > Projects. | `engine/src/project.rs`, `ui/ProjectSettings.tsx` |
-| Run mode | Normal or Autonomous on a mission. Stored; nothing reads it yet. | `ui/Projects.tsx` |
+| Run mode | Normal or Autonomous on a mission. Stored; nothing reads it yet, and no screen shows it. | `engine/src/project/` |
 | Auto | "AI: choose for me": a small model sorts each message and a fixed table picks the model and effort, paced by how much of each subscription's quota is left. | `engine/src/route.rs`, `engine/src/engine/auto.rs`, `engine/src/budget.rs` |
 | Effort | Low, medium or high for a model the person picked by hand; Auto picks its own. | `ui/Composer.tsx`, `engine/src/router.rs` |
 | Step up | "Try again one step up": the same question as a branch one effort up on the same model, or on the next stronger model of the same vendor when that rung is not available, offered when a check failed or code changed unchecked. | `engine/src/nudge.rs` |
@@ -33,11 +33,11 @@ that changes them updates this page too. Last full audit: 2026-10-16.
 | First run, tutorial | The two steps a new person goes through, and the cards that follow on the first chat. | `ui/FirstRun.tsx`, `ui/Tutorial.tsx`, `ui/tour.ts` |
 | Look | A theme (Dark Room `sala`, Workshop `oficina`, Workbench `bancada`) or a preset (Morning `manha`, High contrast `alto`, Cobalt `cobalto`), plus accent, background, fonts, text size, spacing, corners, motion and effects. | `src-tauri/src/themes.json`, `src-tauri/src/look.rs`, `ui/Appearance.tsx` |
 | Curioso | Faber's mascot, the small mark that peeks into empty states. | `ui/Mark.tsx` (`Peek`) |
-| Black hole, spark | The Dark Room scene of characters behind a project's start card, lit by a spark when it opens. | `ui/Hole.tsx` |
+| Black hole, spark | The Dark Room scene of characters behind a project's new conversation, lit by a spark when it opens. | `ui/Hole.tsx` |
 | Ambient | The quiet living backdrop of the Chat home and the Projects home. | `ui/Ambient.tsx` |
 | Ghost | The blinking caret and rotating hints inside an empty composer. | `ui/Ghost.tsx`, `ui/idle.ts` |
 | Recents, environment | The last folders opened, and a named set of folders opened together. | `ui/Recents.tsx`, `engine/src/recents.rs` |
-| Local build | Faber building and promoting itself from landed missions (slots A and B, a canary, a last good build). Only when started as the development channel. | `ui/LocalBuild.tsx`, `src-tauri/src/local_update.rs`, `engine/src/project/update.rs` |
+| Local build | Faber building and promoting itself from landed missions (slots A and B, a canary, a last good build). Only when started as the development channel; no screen shows it (the card went with the mission screens). | `src-tauri/src/local_update.rs`, `engine/src/project/update.rs` |
 | Right-click menu | Faber's own short menu; the browser's menu never shows. | `ui/ContextMenu.tsx`, `ui/contextmenu.ts` |
 | Work log | The folded activity under an answer: steps, commands, thinking. Each step says what it does in plain words ("Reading", "Running") and what it acts on; a subagent is its own step row (Subagent step). | `ui/worklog.ts` |
 | Helper, subagent | A short-lived agent the assistant starts by itself for a piece of the work: a subagent of its own CLI (Claude Code's `Agent` tool, Codex's `spawn_agent`), or the other AI through Faber's helper tool (R161); on screen both are a "helper". | `ui/worklog.ts`, `engine/src/claude.rs`, `engine/src/codex.rs` (`Subagents`), `engine/src/helper.rs` |
@@ -66,10 +66,7 @@ replaces the shell; otherwise the shell shows the sidebar, the topbar, the work 
 | Helper from the other AI | In a project whose other AI is connected, the agent calls Faber's helper tool (R161; Claude Code sees it as `mcp__faber__helper` from an MCP server the engine answers over stdio, Codex as the dynamic tool `helper`). Never in Chat or Faber's own questions | The same row as a subagent step, its kind the AI that ran it ("Codex" in a Claude Code reply). The other AI runs the title and brief in a session of its own, in the same folder and permission mode, with the cheapest model that clears Terminal-Bench 44 (Sonnet high, Sol medium); its commands show under the row, its final words are the call's result and its cost joins the reply's. It needs a known subscription and quota, at most 2 run per conversation, and it stops with the reply. Its own approvals are refused and listed in its report, so the agent does those steps itself | `engine/src/helper.rs`, `engine/src/engine/helpers.rs`, `ui/worklog.ts` (`agentSteps`), `engine/tests/engine.rs` (`r161_the_agent_hands_a_piece_of_work_to_the_other_vendor_and_gets_its_report_back`), `tests/ui/agents.check.ts` |
 | Composer | Chat only | Text, paste or drop files, attach, the only place that chooses the model, effort (manual model only), Stop, Send; the draft is kept on every change; warms the CLI on the first key and lets Auto route the draft | `ui/Composer.tsx`, `ui/models.ts`, `ui/composer-size.ts` |
 | Projects: open a project | Projects area, no project selected (also a past conversation whose project left Faber) | The same empty state as No AI (title, one line, the button "Add project folder"), then Recents and environments, pick up (three project conversations) | `ui/Empty.tsx`, `ui/Projects.tsx`, `ui/Recents.tsx` |
-| Projects: new conversation | A project, no conversation selected | The new-conversation screen of Chat (greeting, composer, suggestions, pick-up list) scoped to the project's folder: the chat placeholder names the folder, and the model and permission mode work as in Chat | `ui/App.tsx`, `ui/Welcome.tsx`, `ui/Composer.tsx` |
-| Projects: start card (no longer reachable: a selected project opens a conversation) | Was: a project with no mission selected | Greeting, goal box with Start, black hole behind, up to three conversations to pick up; still in the code until the mission screens go | `ui/Projects.tsx`, `ui/projects.ts`, `ui/Hole.tsx` |
-| Projects: checks sheet (no longer reachable: no mission starts on screen) | First mission start in a project, only in Ask, Accept edits or Plan (Auto and Full access confirm the declared list by themselves, R159) | A compact panel with the check count and source and every command (and the setup that runs first) listed in full, never collapsed, a long list scrolling inside it; Confirm and start, or Not now. Confirming sends exactly the list and declaration shown, and the engine refuses it if the project changed them meanwhile; the panel then shows the new list. A refused start on changed checks reopens it. Asked once per list | `ui/Projects.tsx` |
-| Projects: mission board (no longer reachable: no mission starts on screen) | A mission selected | One column: state, New mission (done, paused or blocked; asks first unless done), goal, step line, why it waits, Stop or Resume; needs-you and decision cards; report when done; tasks grouped by Ready, Running, Review, Done, Blocked, empty groups hidden, one line before the plan; folded "Run mode, cost and build" with run mode, own cost against the cap, account pace and local build (development channel only) | `ui/Projects.tsx`, `ui/LocalBuild.tsx` |
+| Projects: new conversation | A project, no conversation selected | The new-conversation screen of Chat (greeting, composer, suggestions, pick-up list) scoped to the project's folder: the chat placeholder names the folder, and the model and permission mode work as in Chat; in Dark Room the black hole sits behind it | `ui/App.tsx`, `ui/Welcome.tsx`, `ui/Composer.tsx`, `ui/Hole.tsx` |
 | Past project conversation | Opened from the sidebar or a pick-up list | Read only: no composer | `ui/Thread.tsx` |
 | Running column | Run button, Ctrl+., or by itself 1.5 s after typing stops | Running conversations by project with their state in words (one "Nothing running" when empty, no footer sentence); permission and held-back cards; open a conversation | `ui/Running.tsx`, `ui/running.ts` |
 | Settings | Ctrl+,, the sidebar button, a quota line (opens Accounts and limits), "Details in Settings" | Five sections (below); Back or Esc | `ui/Settings.tsx`, `ui/Accounts.tsx`, `ui/controls.tsx`, `ui/ProjectSettings.tsx`, `ui/Appearance.tsx`, `ui/draft.ts` |
@@ -90,14 +87,14 @@ Right-click menus:
 | Target | Items |
 | :--- | :--- |
 | A conversation row | Rename, Delete (confirm) |
-| A project row | New conversation in this project (opens its start card), Open folder, Remove from Faber (confirm; refused while it runs; deletes Faber's own working copy of it, while the folder and the mission journals in it stay) |
+| A project row | New conversation in this project (opens a new conversation in it), Open folder, Remove from Faber (confirm; refused while it runs; deletes Faber's own working copy of it, while the folder and the mission journals in it stay) |
 | Your message | Copy, Edit |
 | An answer | Copy, "Retry with {model}" (as a branch, with the composer's current choice, which the label names) |
 | Selected text | Copy |
 | A text field | Cut, Copy, Paste, Select all |
 | A recent folder or environment | Remove from recents, or Remove environment (confirm) |
 
-Keys: Ctrl+N new conversation (in Projects: the current project's start card), Ctrl+, Settings, Ctrl+. running column,
+Keys: Ctrl+N new conversation (in Projects: a new conversation in the current project), Ctrl+, Settings, Ctrl+. running column,
 Esc closes the top layer (menu, sidebar overlay, running column, account cards, Settings), Enter sends and Shift+Enter
 adds a line. Browser keys (F5, F7, Ctrl+R, P, S, U) do nothing.
 
@@ -200,8 +197,8 @@ The data folder is `%APPDATA%\Faber` (or `FABER_DATA_DIR`). JSON files are writt
 | `chat/<id>/`, `attachments/<id>/` | A chat's private folder; a project conversation's attachments | The engine |
 | Browser storage `faber.place` | The last area, project and conversation | `ui/App.tsx` |
 | Browser storage `faber.choice.<conversationId>` | The model and effort picked for a conversation, kept from the moment of the pick; the conversation file keeps the one the last message used, so the screen's copy is never older and wins (the file is the fallback when browser storage is empty) | `ui/App.tsx` |
-| Browser storage `faber.project.goal.<projectId>` | The goal being typed on a start card (cleared when the project is removed) | `ui/projects.ts` |
-| Browser storage `faber.project.mission.<projectId>` | The mission shown on a project's board; New mission clears it, and so does removing the project | `ui/projects.ts` |
+| Browser storage `faber.project.goal.<projectId>` | Nothing writes it any more (the goal typed on the old start card); an old install may still hold one, cleared when the project is removed | `ui/projects.ts` |
+| Browser storage `faber.project.mission.<projectId>` | Nothing writes it any more (the mission shown on the old board); an old install may still hold one, cleared when the project is removed | `ui/projects.ts` |
 | Browser storage `faber.unsent.<field>` | Text typed and not sent, so an update restart or a crash loses nothing (a project's go when it is removed) | `ui/unsent.ts` |
 | Outside Faber's folders | The Windows Run key (autostart); CLIs installed in `~/.local/bin` and added to the user PATH | `src-tauri/src/autostart.rs`, `engine/src/install.rs` |
 
@@ -222,13 +219,13 @@ sentences. Test builds add `report_checks` and two mission probes.
 | Files and links | `save_file`, `show_file`, `read_image`, `open_link` |
 | Settings and looks | `save_settings`, `preview_look`, `save_theme`, `open_theme`, `set_shell_texts` |
 | Projects and folders | `add_project`, `remove_project`, `show_project`, `recents`, `open_folders`, `forget_recent`, `save_environment`, `forget_environment`, `start_environment` |
-| Missions | `project_enroll`, `project_grant`, `project_revoke` (no caller on screen yet), `project_proof`, `project_proof_confirm`, `mission_start`, `mission_state`, `mission_mode`, `mission_stop`, `mission_resume`, `mission_answer`, `local_update_state` |
+| Missions | `project_enroll`, `project_grant`, `project_revoke` (no caller on screen yet), `project_proof`, `project_proof_confirm`, `mission_start`, `mission_state`, `mission_mode`, `mission_stop`, `mission_resume`, `mission_answer`, `local_update_state` (no caller on screen: the mission screens are gone) |
 | Updates | `update_status` (phase and progress), `screen_ready` (the first frame is painted: the window, built hidden, shows; a failsafe shows it after 3 s; the page paints its own mark on the theme colour before any script, so neither shows a blank window), `update_restart` (the "Update ready, restart" button), `input_seen` (first typing, paste or drop), `draft_dirty` (a field holds an unsent draft), `notes_seen`, `save_notes_seen` |
 | Accounts | `setup_check`, `setup_install`, `setup_sign_in` |
 
 Events: `faber:event` carries `message`, `queue`, `quota`, `usage`, `running`, `list` and the account cards' `setup`
-progress; `mission` carries a mission's view after every step; `agents` carries the check of the CLIs before a first
-mission.
+progress; `mission` carries a mission's view after every step and `agents` the check of the CLIs before a first mission
+(no screen listens to either).
 
 ## Features and their checks
 
@@ -253,10 +250,10 @@ checks in `tests/ui/index.ts`, real-app scenarios in `testkit/src/screen/mod.rs`
 | Right-click menus, rename, remove a project | Done | `tests/ui/contextmenu.check.ts`; `testkit/src/screen/menus.rs` |
 | Recents and environments | Done | `engine/tests/recents.rs`; `tests/ui/recents.check.ts` |
 | Homes and idle motion | Done | `tests/ui/idle.check.ts`, `hole.check.ts`, `motion.check.ts`, `homes.check.ts`; `testkit/src/screen/homes.rs` |
-| Missions | v0 (see Words) | `engine/tests/project_*.rs`; `tests/fixtures/projects/`; `tests/ui/projects.check.ts`; `testkit/src/screen/coordinator.rs`, `projects.rs`, `projects_ui.rs` |
+| Missions | v0 (see Words); engine only, no screen | `engine/tests/project_*.rs`; `tests/fixtures/projects/`; `testkit/src/screen/coordinator.rs`, `projects.rs`, `projects_ui.rs` |
 | Local build (development channel) | Done, developer only | `engine/tests/local_update.rs`, `src-tauri/tests/local_update.rs`, `testkit/src/screen/local_update.rs` |
-| UX sentinel and memory budget | Done; composition (art under text, a name in three places, uneven columns) since R171 | `testkit/src/sentinel.rs`, `testkit/src/screen/sentinel.rs`, `tests/ux/baseline.json`, `testkit/src/screen/app.rs` (400 MB) |
-| Visual critique (R171) | Done, a step of the process: `node scripts/shots.mjs before` and `after`, scored by a fresh session | `scripts/shots.test.mjs`; the sentinel's composition scenario in `testkit/src/screen/sentinel.rs` |
+| UX sentinel and memory budget | Done; composition (art under text, a name in three places, uneven columns) since R172 | `testkit/src/sentinel.rs`, `testkit/src/screen/sentinel.rs`, `tests/ux/baseline.json`, `testkit/src/screen/app.rs` (400 MB) |
+| Visual critique (R172) | Done, a step of the process: `node scripts/shots.mjs before` and `after`, scored by a fresh session | `scripts/shots.test.mjs`; the sentinel's composition scenario in `testkit/src/screen/sentinel.rs` |
 | This map | Done | `engine/tests/product_map.rs`; the trap tasks and the weekly coherence pass in `testkit/coherence/` (R151) |
 
 Not built yet, so nothing may assume it: the catalog and live manifest, the toolbox, Livre, snapshots and undo, visual
@@ -271,29 +268,22 @@ never copying it. "Owner" marks a choice of taste or direction that needs the ow
 one. Delete a line in the commit that fixes it. The weekly coherence pass (`testkit/coherence/weekly.md`) proposes new
 lines and the removal of fixed ones.
 
-1. Settings on a work screen (C011): the start card is calm now (checks, tools, git mode, self-update trust and Details
-   live in Settings > Projects); the board still carries the run mode, folded under "Run mode, cost and build". Where it
-   lands is a design choice to make with product-rules.md (Owner).
 2. Mission needs are invisible inside the window: the tray counts mission decisions and blocked missions, but the run
    button, the running column, the sidebar and the pick-up lists only count conversations. How missions show there is
    a design choice (Owner).
-3. A left mission cannot be opened again: no list of a project's missions exists, so New mission asks first on a paused
-   or blocked one. Where such a list lives is a design choice (Owner).
-4. "If a tool is missing" is never sent to the engine; "Find and install it for me" only shows "not ready yet". It goes
-   with 1, and the install it promises is roadmap work (Owner).
 5. `project_revoke` has no caller: a grant (and self-update trust) can never be withdrawn on screen. Where the control
    lives is the owner's call (Owner).
 6. (fixed by R160: a project opens a chat, not a mission start card.)
-7. Chat and Projects differ for the same things: pick-up lists (four of all areas against three of the project), the
-   goal box is its own textarea instead of `ui/Composer.tsx`, no model chip in Projects, no "No AI" state in Projects.
+7. Chat and Projects differ for the same things: pick-up lists (four of all areas against three of the project), no
+   model chip in Projects, no "No AI" state in Projects.
    Which way each one goes is a design choice (Owner).
 11. Two ways to remove a row: the sidebar's × and every menu ask first, while Recents' × forgets at once. Whether
     forgetting a recent entry (it comes back when the folder opens again) needs a confirm is the owner's call (Owner).
 12. Money and quota in four vocabularies ("Own cost", "Cost so far", "Faber today … API-equivalent", "… at API prices";
     "Account pace", "Accounts and limits"); which words stay is the owner's call (Owner). Amounts are written the language's way
     (`money` and `amount` in `ui/i18n.ts`).
-13. "Update itself" means three things: the silent updater, the project's self-update trust (Settings > Projects) and the
-    Local build card (development channel only); which words tell them apart is the owner's call (Owner).
+13. "Update itself" means two things: the silent updater and the project's self-update trust (Settings > Projects); which
+    words tell them apart is the owner's call (Owner).
 14. The same option in two places with different words: the name ("How should Faber call you?" in the first run, "Your
     name" in Settings) and text size (three buttons in the first run saving 13, the theme's own or 16; a slider up to 18
     in Settings). Which words and which range stay is the owner's call (Owner).

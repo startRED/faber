@@ -1,4 +1,4 @@
-// node --test scripts: the screenshots of a visual critique (R171) are those of the screens the diff touches.
+// node --test scripts: the screenshots of a visual critique (R172) are those of the screens the diff touches.
 
 import assert from 'node:assert/strict';
 import test from 'node:test';

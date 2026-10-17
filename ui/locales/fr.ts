@@ -406,15 +406,10 @@ export const fr: Messages = {
   'ambient.goal': 'Votre objectif',
   'hint.chat.2': 'Collez un texte, demandez ce qu’il dit',
   'hint.chat.3': 'Décrivez un problème et demandez trois pistes',
-  'projects.home.title': 'Que faisons-nous ?',
-  'projects.home.lead': 'Donnez un objectif à Faber pour ce projet. Il travaille sur une copie séparée et montre ce qu’il a vérifié.',
   'projects.chat.lead': 'Demande ce que tu veux dans ce dossier. L’assistant travaille ici même et te pose la question quand il en a besoin.',
   'projects.gitMode.seguroTech': "Mode sûr : worktree séparé, commits locaux uniquement et avance rapide seulement sur la branche de la mission.",
   'projects.selfUpdate.trustTech': "Une nouvelle version passe à l'emplacement local suivant seulement après un essai canari et les contrôles de quarantaine.",
   'projects.proofs.isolationTech': "Les vérifications qui exécutent du code écrit par un rôle tournent en intégrité basse sous Windows : elles ne peuvent écrire que dans la copie de la mission, son dossier de compilation et ses dossiers temporaires. Elles peuvent encore lire vos fichiers et utiliser le réseau ; un bac à sable plus strict (AppContainer) est la prochaine étape prévue. Sous macOS, elles ne peuvent pas non plus écrire hors de ces dossiers ; sous Linux, rien ne les limite encore.",
-  'projects.home.hint.1': 'Décrivez ce qu’il faut créer, corriger ou améliorer dans ce projet',
-  'projects.home.hint.2': 'Corrigez le test qui échoue de temps en temps',
-  'projects.home.hint.3': 'Ajoutez une option dans les réglages et prouvez qu’elle fonctionne',
   'setup.title': 'Connectez vos abonnements',
   'setup.body': 'Choisissez les outils d’IA officiels que vous souhaitez utiliser avec vos propres abonnements.',
   'setup.claude': 'Claude',
@@ -566,82 +561,45 @@ export const fr: Messages = {
   // Native speaker must translate (needs native review).
   "projects.selfUpdate.trustDesc": "Installe une nouvelle version de Faber seulement après avoir vérifié qu'elle fonctionne.",
   // Native speaker must translate (needs native review).
-  "projects.goal.label": "Objectif de la mission",
   // Native speaker must translate (needs native review).
-  "projects.goal.placeholder": "Décrivez ce que vous souhaitez que Faber construise, corrige ou améliore dans ce projet...",
   // Native speaker must translate (needs native review).
-  "projects.action.start": "Démarrer la mission",
   // Native speaker must translate (needs native review).
-  "projects.action.stop": "Arrêter",
   // Native speaker must translate (needs native review).
-  "projects.action.resume": "Reprendre",
   // Native speaker must translate (needs native review).
-  "projects.mode.normal": "Normal",
   // Native speaker must translate (needs native review).
-  "projects.mode.autonomous": "Autonome",
   // Native speaker must translate (needs native review).
-  "projects.needsYou": "Besoin de vous",
   // Native speaker must translate (needs native review).
-  "projects.needsYou.desc": "Faber attend votre décision avant de continuer.",
   // Native speaker must translate (needs native review).
-  "projects.decision.default": "Par défaut",
   // Native speaker must translate (needs native review).
-  "projects.decision.customPlaceholder": "Ou saisissez une réponse personnalisée…",
   // Native speaker must translate (needs native review).
-  "projects.decision.answer": "Répondre",
   // Native speaker must translate (needs native review).
-  "decision.kind.direction": "Orientation",
   // Native speaker must translate (needs native review).
-  "decision.kind.taste": "Style",
   // Native speaker must translate (needs native review).
-  "decision.kind.money": "Budget",
   // Native speaker must translate (needs native review).
-  "decision.kind.legal": "Juridique",
   // Native speaker must translate (needs native review).
-  "decision.kind.technical": "Technique",
   // Native speaker must translate (needs native review).
-  "projects.tasks.title": "Tâches",
   // Native speaker must translate (needs native review).
-  "projects.task.ready": "Prêt",
   // Native speaker must translate (needs native review).
-  "projects.task.running": "En cours",
   // Native speaker must translate (needs native review).
   "projects.task.review": "Revue",
   // Native speaker must translate (needs native review).
-  "projects.task.done": "Terminé",
-  // Native speaker must translate (needs native review).
-  "projects.task.blocked": "Bloqué",
-  // Native speaker must translate (needs native review).
-  "projects.task.builder": "Constructeur",
-  // Native speaker must translate (needs native review).
-  "projects.task.reviewer": "Réviseur",
-  // Native speaker must translate (needs native review).
-  "projects.receipt.unverified": "Non vérifié",
-  // Native speaker must translate (needs native review).
-  "projects.receipt.notRun": "Non exécuté",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "projects.cost.title": "Coût propre",
   // Native speaker must translate (needs native review).
-  "projects.cost.unknown": "Inconnu",
   // Native speaker must translate (needs native review).
-  "projects.cost.cap": "Plafond",
   // Native speaker must translate (needs native review).
-  "projects.pace.title": "Rythme du compte",
   // Native speaker must translate (needs native review).
-  "projects.pace.used": "utilisé",
   // Native speaker must translate (needs native review).
-  "projects.pace.room": "marge quotidienne",
   // Native speaker must translate (needs native review).
-  "projects.build.title": "Build local",
   // Native speaker must translate (needs native review).
-  "projects.build.current": "Actuel",
   // Native speaker must translate (needs native review).
-  "projects.build.next": "Suivant",
   // Native speaker must translate (needs native review).
-  "projects.build.lastGood": "Dernier stable",
   // Native speaker must translate (needs native review).
-  "projects.build.waiting": "En attente de",
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
+  // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   "reason.task.waiting": "En attente des dépendances",
   // Native speaker must translate (needs native review).
@@ -651,9 +609,7 @@ export const fr: Messages = {
   // Native speaker must translate (needs native review).
   "reason.grant.none": "Le projet n'a aucune autorisation Git active",
   // Native speaker must translate (needs native review).
-  "projects.mode.label": "Mode d'exécution",
   // Native speaker must translate (needs native review).
-  "projects.state.planning": "Planification",
   // Native speaker must translate (needs native review).
   "projects.state.running": "En cours",
   // Native speaker must translate (needs native review).
@@ -661,7 +617,6 @@ export const fr: Messages = {
   // Native speaker must translate (needs native review).
   "projects.state.blocked": "Bloqué",
   // Native speaker must translate (needs native review).
-  "projects.state.done": "Terminé",
   // Native speaker must review these (needs native review).
   "projects.proof.title": "Vérifications de ce projet",
   "projects.proof.desc": "Une mission prouve son travail en lançant ces commandes dans une copie propre du projet. Confirmez-les une fois ; Faber redemande si le projet les change.",
@@ -672,28 +627,6 @@ export const fr: Messages = {
   "projects.proof.save": "Enregistrer et confirmer",
   "projects.proof.cancel": "Annuler",
   "projects.proof.changed": "Les vérifications du projet ont changé depuis votre confirmation. Confirmez-les à nouveau.",
-  "projects.progress.step": "Étape {number} sur {total} : {step}",
-  "projects.progress.by": "{role}, {vendor}",
-  "projects.progress.cost": "Coût jusqu'ici : {cost}",
-  "projects.progress.plan": "Planification",
-  "projects.progress.arm": "Préparation d'une copie propre",
-  "projects.progress.red": "Vérifications d'abord",
-  "projects.progress.write": "Écriture du changement",
-  "projects.progress.green": "Lancement des vérifications",
-  "projects.progress.review": "Relecture",
-  "projects.progress.land": "Sauvegarde du travail",
-  "projects.role.lead": "Chef",
-  "projects.role.writer": "Auteur",
-  "projects.role.reviewer": "Relecteur",
-  "projects.report.title": "Rapport de la mission",
-  "projects.report.branch": "Le travail est sur la branche {branch}",
-  "projects.report.head": "Commit {head}",
-  "projects.report.checks": "Vérifications",
-  "projects.report.pass": "réussie",
-  "projects.report.fail": "échouée",
-  "projects.report.duration": "Durée : {time}",
-  "projects.report.untouched": "Votre propre branche n'a pas été touchée. Regardez la branche et fusionnez-la quand vous voulez.",
-  "projects.needs.desc": "Cette mission ne continue pas sans vous.",
   "error.wire.path": "Un rôle a demandé de modifier un fichier hors des dossiers autorisés.",
   "error.wire.role": "Un rôle a répondu avec le mauvais type de réponse.",
   "error.project.invocation": "L'exécution de l'assistant a échoué.",
@@ -713,8 +646,6 @@ export const fr: Messages = {
   "reason.project.reconcile": "Faber n'a pas pu faire concorder les registres de ce projet avec son dépôt. Vérifiez puis reprenez.",
   "reason.project.processTreeUnproven": "Faber n'a pas pu prouver que tout ce qu'il a lancé est terminé. Vérifiez les programmes en cours puis reprenez.",
   "reason.disk.needed": "Il n'y a pas assez d'espace disque libre pour une copie propre.",
-  "projects.agents.checking": "Vérification des agents… (~{seconds} s, étape {step} sur {total})",
-  "projects.agents.failed": "Les agents n'ont pas pu être vérifiés, donc aucune mission n'a été lancée : {detail}",
   "reason.qualify.failed": "Les agents n'ont pas pu être vérifiés. Aucune mission n'a été lancée.",
   "reason.proof.setupChanged": "Les installations du projet ont changé depuis l'affichage de cette liste. Relisez la liste, puis confirmez.",
   "reason.proof.declaredChanged": "Les vérifications du projet ont changé depuis l'affichage de cette liste. La liste ci-dessous est la nouvelle ; relisez-la, puis confirmez.",
@@ -731,27 +662,14 @@ export const fr: Messages = {
   "reason.workspace.git": "Faber n'a pas pu préparer la copie de travail du projet. Vérifiez que git fonctionne dans le projet, puis reprenez.",
   "reason.workspace.unsafe": "Un fichier modifié n'a pas pu être copié en toute sécurité dans la copie de travail du projet.",
   // Native speaker must translate (needs native review).
-  "projects.value.missing": "\u2014",
   // Native speaker must translate (needs native review).
-  "projects.details": "Détails et preuves",
   // Native speaker must translate (needs native review).
-  "projects.details.scope": "Périmètre",
   // Native speaker must translate (needs native review).
-  "projects.details.proofs": "Contrôles requis",
   // Native speaker must translate (needs native review).
-  "projects.details.noEvidence": "Aucune preuve vérifiée par le moteur n'est disponible.",
   // Native speaker must translate (needs native review).
-  "projects.pace.freshness": "Relevé : {when}",
   'reason.budget.calibration': 'Faber apprend encore quelle part de votre quota une mission utilise. Il attend quelques relevés de plus, puis continue.',
   'reason.budget.other': 'Faber attend que votre quota permette l’étape suivante.',
   'reason.other': 'Faber s’est arrêté ici pour une raison qu’il ne sait pas encore décrire. Les détails sont dans le journal.',
-  'projects.board.new': 'Nouvelle mission',
-  'projects.board.leave': 'Quitter cette mission ? Elle reste telle quelle, mais vous ne pourrez plus l’ouvrir d’ici.',
-  'projects.board.leaveYes': 'Quitter',
-  'projects.board.stay': 'Rester',
-  'projects.board.more': 'Mode, coût et compilation',
-  'projects.tasks.none': 'Aucune tâche pour l’instant. Faber découpe l’objectif en tâches pendant qu’il planifie.',
-  'projects.tasks.count': '{done} sur {total} terminées',
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
@@ -911,17 +829,7 @@ export const fr: Messages = {
   "projects.proof.view": "Voir les commandes",
   "projects.proof.hide": "Masquer les commandes",
   "projects.status.reading": "Lecture du projet…",
-  "projects.status.starting": "Démarrage…",
-  "projects.status.ready": "Prêt pour les missions",
   "projects.status.none": "Aucune vérification pour l’instant · à ajouter dans Réglages, Projets",
-  'projects.status.byMode': "validées par votre mode d’autorisation",
-  "projects.status.atStart": "confirmation au démarrage",
-  "projects.status.changed": "modifiées, confirmation au démarrage",
-  "projects.sheet.title": "D’abord, confirmer les vérifications",
-  "projects.sheet.body": "Une mission prouve son travail en les lançant dans une copie propre. Faber ne redemande que si elles changent.",
-  "projects.sheet.go": "Confirmer et démarrer",
-  "projects.sheet.later": "Pas maintenant",
-  "projects.sheet.none": "Ce projet n’a pas encore de vérifications. Elles s’ajoutent dans Réglages, Projets.",
   "set.projects": "Projets",
   "set.projects.none": "Aucun projet pour l’instant. Ouvrez-en un dans Projets.",
   "set.projects.checks": "Vérifications",
@@ -958,6 +866,7 @@ export const fr: Messages = {
   'notes.23.better': 'Les conversations sont plus calmes : moins de lignes autour de chaque réponse, et le modèle se choisit à un seul endroit.',
   'notes.24.better': "Les Réglages se lisent mieux : une ligne par option, et vos comptes et leurs limites sont réunis.",
   'notes.25.better': 'Les écrans vides, le tutoriel et cette liste sont plus courts et disent chaque chose une fois.',
+  'notes.26.better': 'Faber se met au repos quand sa fenêtre est cachée, et les boutons et les champs ont le même aspect sur tous les écrans.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

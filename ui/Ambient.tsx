@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
+import { createEffect, createSignal, For, Index, onCleanup, onMount, Show } from 'solid-js';
 import type { Vendor } from './api.ts';
 import { appliedLook, motion, windowFocused, windowHidden } from './appearance.ts';
 import { t } from './i18n.ts';
@@ -140,11 +140,14 @@ export function Ambient(props: { vendors: Vendor[]; avoid: () => Element[]; vari
       return;
     }
     let last = performance.now();
+    // The grains keep their elements (only their shadows change), so the list is read once, not ten times a second.
+    let nodes: HTMLElement[] = [];
     const timer = window.setInterval(() => {
       const now = performance.now();
       breathed += now - last;
       last = now;
-      layer.querySelectorAll<HTMLElement>('.dust i, .amb-glow').forEach((el, i) => {
+      if (nodes.length !== BREATHS.length || !nodes[0]!.isConnected) nodes = [...layer.querySelectorAll<HTMLElement>('.dust i, .amb-glow')];
+      nodes.forEach((el, i) => {
         const b = BREATHS[i];
         if (b) el.style.opacity = (b.from + (b.to - b.from) * breath(breathed + b.offset, b.period)).toFixed(3);
       });
@@ -166,7 +169,7 @@ export function Ambient(props: { vendors: Vendor[]; avoid: () => Element[]; vari
           <i />
         </div>
         <div class="dust" aria-hidden="true" data-live={breathes() ? 'on' : 'off'}>
-          <For each={shadows()}>{(shadow) => <i style={{ 'box-shadow': shadow }} />}</For>
+          <Index each={shadows()}>{(shadow) => <i style={{ 'box-shadow': shadow() }} />}</Index>
         </div>
       </div>
       <div class="amb amb-glow">

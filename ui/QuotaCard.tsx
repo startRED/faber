@@ -55,7 +55,7 @@ export function PlanName(props: { u: VendorUsage }) {
         e.preventDefault();
         void api.answerPlan(props.u.vendor, plan()).catch((e: unknown) => setError(fromEngine(String(e))));
       }}>
-        <label>{t('usage.planAsk')}<input value={plan()} maxLength={40} onInput={(e) => setPlan(e.currentTarget.value)} /></label>
+        <label>{t('usage.planAsk')}<input class="field" value={plan()} maxLength={40} onInput={(e) => setPlan(e.currentTarget.value)} /></label>
         <button class="btn" disabled={!plan().trim()}>{t('usage.planSave')}</button>
       </form>
     </Show>

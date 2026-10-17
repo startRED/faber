@@ -1,6 +1,6 @@
 # Browser preview: the screen without the shell
 
-Status: proposal, nothing built. Recommendation: yes, as a small developer tool, behind the visual critique (R171).
+Status: proposal, nothing built. Recommendation: yes, as a small developer tool, behind the visual critique (R172).
 
 ## The question
 

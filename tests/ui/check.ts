@@ -1,6 +1,8 @@
 // A tiny check registry for the screen's own logic. The checks run inside a hidden test build of Faber (see
 // testkit/src/checks.rs), so nothing here may use Node. A check throws to fail; the assertions below do that.
 
+import { useLanguage } from '../../ui/i18n.ts';
+
 export type Result = { name: string; ok: boolean; message: string; ms: number };
 
 const registry: Array<{ name: string; run: () => void | Promise<void> }> = [];
@@ -13,6 +15,8 @@ export function check(name: string, run: () => void | Promise<void>): void {
 export async function runAll(): Promise<Result[]> {
   const results: Result[] = [];
   for (const { name, run } of registry) {
+    // Every check starts in English: the language the system starts with (a Portuguese PC), or one a check before it left, must not decide which pass.
+    useLanguage('en');
     const started = performance.now();
     try {
       await run();

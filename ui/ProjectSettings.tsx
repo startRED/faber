@@ -196,7 +196,7 @@ function Body(props: { project: Project }) {
                 <label class="sr-only" for={`proof-draft-${id()}`}>{t('projects.proof.edit.label')}</label>
                 <textarea
                   id={`proof-draft-${id()}`}
-                  class="proof-draft"
+                  class="field proof-draft"
                   data-testid="proof-draft"
                   rows={Math.min(10, Math.max(3, draft().split('\n').length))}
                   value={draft()}

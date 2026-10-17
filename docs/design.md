@@ -86,15 +86,18 @@ own inks.
 - **Others:** Bodoni Moda for Cobalt, IBM Plex Mono, and Geist Mono for keyboard shortcuts.
 - Fonts come from Fontsource, latin and latin-ext subsets only. The webview downloads a font file only when a face is
   used. No other font family ships.
-- Every interface size is the base text size plus or minus a few pixels. Reading text is 1.5 px larger than the base.
+- Every size is a token that follows the text-size setting: `--fs-xs` (small print and counts), `--fs-sm` (secondary
+  lines and fields), `--fs-ui` (the interface), `--fs-read` (reading text), `--fs-lead`, and the heading and display
+  tokens. A style never writes a pixel text size or `calc()` around one (a check reads the real stylesheet).
 - Display headings are clamped to `9vw`, so an 86 px heading fits small windows.
 
 ### Motion
 
-- Chrome uses the `--motion-*` tokens in `ui/styles.css`: 150 ms feedback, 180 ms exits, theme-controlled 200–240 ms
-  entrances and a 220 ms theme cross-fade. No chrome animation, including its stagger, exceeds 300 ms. The enter curve
-  has a soft spring-like settle; exits ease in. Travel is 24 px for the running column, up to 6 px for content and a
-  0.97 scale for cards and menus. Cards use a 2 px arrival blur; overlays use an 8 px static backdrop blur.
+- Chrome has one timing family (see "One grammar"): `--dur-fast` feedback, `--dur-ui` entrances and the theme
+  cross-fade, `--dur-exit` exits, `--dur-move` and `--dur-arrive` for travel, with the curves `--ease` (a soft
+  spring-like settle), `--ease-in` (exits) and `--ease-spring`. No chrome animation, including its stagger, exceeds
+  300 ms. Travel is 24 px for the running column, up to 6 px for content and a 0.97 scale for cards and menus. Cards use
+  a 2 px arrival blur; only the scrim has a backdrop blur.
 - New items rise up to 6 px over 200 to 240 ms; exits take 180 ms. Buttons respond in 140 to 240 ms. The "running" dot pulses every 1.6 to 2 s.
   Workshop only fades and never moves anything vertically.
 - Frequency decides whether something moves at all. Anything the user does dozens of times a minute (a keystroke, a
@@ -113,6 +116,39 @@ own inks.
   per list exit together; no component or process is kept alive for an exit. Native dropdown pickers animate where the
   webview supports customizable selects, with the usual native control as the fallback. Theme changes use native
   View Transitions when available and apply immediately otherwise; no dependency or retained screen is needed.
+
+### One grammar
+
+Every control, text size and timing comes from a short list of tokens in `ui/styles.css`, so two screens never differ by
+accident. `tests/ui/grammar.check.ts` reads the real stylesheet and fails on a break.
+
+- **Control heights:** `--h-sm` 28 px (chips, pills, the plus, the rename field, small icons), `--h-md` 32 px (buttons,
+  selects, fields, the segmented control, the send button, sidebar rows) and `--h-lg` 40 px (the big button, the new
+  conversation button, the bottom bars of overlays). No button, select, chip, input or segmented control has a height
+  of its own. A row that scales with density adds `2px * var(--dens)` to a token.
+- **Text sizes:** only the `--fs-*` tokens above; a size that is not a token is written in `em` of its parent.
+- **Timing:** `--dur-fast`, `--dur-ui`, `--dur-exit` and the two travel durations come with the curves `--ease`,
+  `--ease-io`, `--ease-in` and `--ease-spring`. A transition or animation never writes a literal duration or curve.
+  Scenes that loop or play once on the home (the wake, the blinking caret, the weave and the drift of the effects) use
+  the `--dur-wake`, `--dur-blink`, `--dur-pulse`, `--dur-weave`, `--dur-weave-slow` and `--dur-drift` tokens: they
+  are not interface timing.
+- **One text field:** `.field` is the text input and textarea of every screen outside the composer (first run, setup,
+  Settings, the project's proof commands, the plan question, the rename of a row, the folder set name, a question's
+  own answer). `.field.sm` is the 28 px one, `.field.hex` the colour code and `.field.search` the sidebar search, a
+  box that holds an icon and an input. The composer and the edit box of a sent message sit inside their own bubbles.
+- **Hover:** a row or a button changes its background or its colour on hover and never its brightness.
+- **Blur:** a panel that is at least 94 % opaque draws no backdrop blur; only the scrim has one.
+
+### Idle cost
+
+- Nothing keeps a timer while the window is hidden or minimized: the one-minute clock (which also tells the engine the
+  time zone) and the running column's 15 s tick are made by `everyWhileShown` (`ui/idle.ts`), end when the window hides
+  and run once at once when it returns. The Dark Room dust reads its nodes once, not ten times a second.
+- Animated lists share one `resize` listener and do not measure their children after a transition that only paints
+  (colour, opacity, shadow). The thread and its column share one `ResizeObserver`. `tests/ui/lighter.check.ts` fails
+  when one of these comes back.
+- Fonts ship as woff2 only: a PostCSS plugin (`scripts/woff2-only.mjs`) drops the woff fallback that Fontsource lists,
+  which the webview never reads.
 
 ### Effects
 - Effects appear only on the two homes (the new conversation of Chat and the first screen of a project) and behind a new
@@ -507,46 +543,20 @@ The minimal Projects slice of R96 ([spec](superpowers/specs/2026-10-12-self-deve
 live in `engine/src/project.rs`, `project/store.rs` and `project/wire.rs`; this section is their published contract, and
 screen work may start against it with mock data before the engine runs missions.
 
-### Screen inventory
+### Screens
 
-The board keeps the titlebar, sidebar, topbar, running column, tokens, type and Curioso empty states, and reads like the
-start card it came from: one column up to 860 px, no cards around the header. First the state (a dot and a word) with
-"New mission" beside it once the mission is done, paused or blocked (a paused or blocked one asks first, since nothing
-lists it later), then the goal (at most three lines, the rest on hover), the step it is on in one line, why it waits in
-one line, and the one action that moves it (Stop or Resume). Then the needs-you cards, the report, and the tasks as one
-list grouped by state, only the groups that hold something; before the plan, one line says there are no tasks yet. Run
-mode, cost, account pace and the local build sit folded under "Run mode, cost and build". Nothing needs a horizontal drag.
+A mission has no screen: a project is worked in by talking to its agent (R160), and the start card, the checks sheet, the
+mission board and the local build card left the bundle with their 30 s poll (R171). The engine keeps the mission
+machinery and the shell its commands (product-map.md, Shell commands). The Projects area shows one of two things:
 
-| Surface | Minimum behaviour |
-| :--- | :--- |
-| Goal | The composer's styling: the goal, a short plan and Start. The text stays after a refused enrollment or start |
-| Start card | Repository, starting revision, git mode (Seguro selected), author and self-update trust; granted once, never per step |
-| Board | Ready, Running, Review, Done and Blocked groups, empty ones hidden; stable task rows with builder, reviewer and reason |
-| Cost | Own cost against the live cap; the account's daily pace and its freshness beside it, separately; unknown says unknown, folded away; the step line shows the cost only once it is known |
-| Decisions | The Ask and running cards, with author and default; nothing approves an effect by itself |
-| Stop | A keyboard-reachable button while running; then the paused checkpoint and Resume |
-| Task detail | Scope, diff and artifacts, command results, missing checks and risks; technical logs behind a click |
-| Local build | Current, next and last good, and why promotion waits; no completion toast |
-
-Status colours always come with words and shapes. Amber stays for needs-you only: a quota wait or a dependency is not
-shown as a decision.
-
-### The Projects home
-
-The first screen of a project uses the layout of the Chat home (`welcome-grid`) with its own identity: the greeting
-"What should we tackle?", one column: Curioso, the project and its folder in short form (the last two folder names, the
-full path on hover), the greeting, a goal composer with its own hints and one quiet status line beside its button, and at
-most three conversations to pick up. Nothing else: the sidebar lists the projects, and every setting of a project (the
-tool policy, the code access, the self-update switch and the checks) is in Settings, Projects, one closed entry per
-project with one row per option with one short line and the rest behind the "?" of the row. The checks are asked for just in time: the
-first start on checks nobody confirmed opens a compact sheet with their count and source, every command (and the setup)
-listed in full with no collapse, a long list scrolling inside it, and "Confirm and start"; what is confirmed is exactly the list
-shown, and a project that changed it meanwhile is refused so the sheet shows the new list. It does not come back until
-the checks change. No beam of light: a project screen is a place to work. The two layouts share classes, so a change to one home reaches the other.
-
-C011 (2026-10-16, the owner) overrides the quiet rows: the project screen shows only the work, and the grant, the checks
-and the tool choice live in Settings or in a just-in-time consent. The start card is done; the mission board keeps
-the run mode folded under "Run mode, cost and build" (product-map.md, Known incoherences, 1).
+- With no project open, the small "Open a project" screen (`ui/Projects.tsx`): the empty state with its one button, the
+  recent folders and saved environments, and at most three project conversations to pick up.
+- With a project open, the new-conversation screen of Chat (`welcome-grid`) scoped to the folder: Curioso, the project and
+  its folder in short form (the last two folder names, the full path on hover), the greeting, the shared composer, and at
+  most three conversations to pick up. No beam of light: a project screen is a place to work; in Dark Room the black hole
+  sits behind it. The sidebar lists the projects, and every setting of a project (the tool policy, the code access, the
+  self-update switch and the checks) is in Settings, Projects (C011), one closed entry per project with one row per option
+  with one short line and the rest behind the "?" of the row.
 
 ### Records
 
@@ -690,7 +700,7 @@ The commands fail with a key string, like the other shell commands, and never re
 
 | Command | Request | Returns |
 | :--- | :--- | :--- |
-| `project_enroll` | `{projectId}` | the start card: repository, base, author, selected mode, revision, self-update, remote |
+| `project_enroll` | `{projectId}` | Settings, Projects: repository, base, author, selected mode, revision, self-update, remote |
 | `project_grant` | `{projectId, mode, selfUpdate, revision}` | the grant |
 | `project_revoke` | `{projectId}` | nothing |
 | `mission_start` | `{projectId, goal}` | the mission id |
@@ -712,7 +722,7 @@ The board restores the selected mission, rejects other mission identities and ol
 behind a keyboard-reachable disclosure. `TaskView.detail` is an optional additive field containing scope, required
 proof IDs and durable artifacts; absence never means verified. Build slots without a T11 snapshot remain visibly
 unknown. The cap, measured spend, daily room and reading time come from the existing admission ledger, with unknown
-values preserved. The start card reuses the composer's height measurement and the 64 px tail token. Stages narrower
+values preserved. Stages narrower
 than 760 px use one scrolling list. Mission notification receipts use the existing atomic store and R92 policy;
 hidden test builds inspect that policy without submitting OS notifications or playing audio.
 
@@ -770,7 +780,7 @@ screen, which owns the locale files.
 ## Screen cards
 
 One card per main screen: what it is for, the one action that leads, what never goes on it, and the photo a critique
-compares against (R171). What the screen holds is in [product-map.md](product-map.md#screens-and-surfaces) and how it
+compares against (R172). What the screen holds is in [product-map.md](product-map.md#screens-and-surfaces) and how it
 looks in the sections above; a card only says what must not drift. The approved photo is the one the UX sentinel's
 composition scenario takes (`target/faber-test/shots/`, kept by CI with every run), at 1920x1080 and at 1280x800 in Dark
 Room. A change that moves a card's line updates the card in the same commit and says so in its visual critique. Today's
@@ -984,7 +994,7 @@ rest. The design is in `docs/superpowers/specs/2026-10-12-ux-sentinel-design.md`
 
 ### Visual critique
 
-Checks see code and motion, not a screen as a whole (R171). The sentinel's scenario "the main screens keep their
+Checks see code and motion, not a screen as a whole (R172). The sentinel's scenario "the main screens keep their
 composition" photographs the Chat home, a project's home, an open conversation and Settings at 1920x1080 and 1280x800 in
 Dark Room and pt-BR (`target/faber-test/shots/critique-<screen>-<size>.png`). `node scripts/shots.mjs <label>` runs it and
 copies the photos of the screens the diff touches into `target/faber-test/critique/<label>/` with an index;
