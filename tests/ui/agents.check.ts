@@ -2,6 +2,8 @@ import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import type { Message, ToolUse } from '../../ui/api.ts';
 import { useLanguage } from '../../ui/i18n.ts';
+import { AgentChat, openedAgent, showAgent } from '../../ui/AgentChat.tsx';
+import { Running } from '../../ui/Running.tsx';
 import { Thread } from '../../ui/Thread.tsx';
 import { agentReport, agentSteps } from '../../ui/worklog.ts';
 import { check, deepEqual, equal, ok } from './check.ts';
@@ -34,7 +36,7 @@ check('subagent step: each agent call collects the tools its subagent ran, and t
   deepEqual(nested.map((s) => s.tools.map((t) => t.id)), [['a3', 'r1']]);
 });
 
-check('subagent step: a running helper is its own row in the reply, apart from the agent’s own steps, and opens to its tools and report', async () => {
+check('subagent step: a running helper is its own row in the reply, apart from the agent’s own steps, and opens in the running column', async () => {
   useLanguage('en');
   const root = document.createElement('div');
   document.body.append(root);
@@ -44,22 +46,26 @@ check('subagent step: a running helper is its own row in the reply, apart from t
     root,
   );
   try {
-    const row = () => root.querySelector<HTMLDetailsElement>('.agents .agent')!;
+    const row = () => root.querySelector<HTMLButtonElement>('.agents .agent')!;
     equal(root.querySelectorAll('.agents .agent').length, 1);
     equal(row().dataset.state, 'running');
     ok(row().querySelector('.live'), 'a running helper shows the live mark');
-    equal(row().querySelector('summary b')!.textContent, 'Find file defining load_config');
+    equal(row().querySelector('b')!.textContent, 'Find file defining load_config');
     equal(row().querySelector('.agent-meta')!.textContent, 'Explore · working · 1 step');
     equal(root.querySelector('.activity summary')!.textContent, 'Working · 1 step · 1 command', 'the helper and its tools are not counted twice');
     equal(root.querySelectorAll('.activity .tools > span').length, 1, 'only the agent’s own tool is in its activity');
-    row().open = true;
-    // The row survives the helper's progress, so an opened row stays open.
+    equal(row().getAttribute('aria-current'), null);
+    row().click();
+    deepEqual(openedAgent(), { conversationId: 'sub', messageId: 'sub', callId: 'a1' }, 'a click opens the subagent in the column');
+    equal(row().getAttribute('aria-current'), 'true', 'the row open in the column is marked');
+    // The row survives the helper's progress, so it stays marked.
+    const before = row();
     setMessage({ ...message(), tools: [OWN, { ...AGENT, ok: true, output: FRAMED }, { ...GREP, ok: true }] });
-    equal(row().open, true);
+    equal(row(), before);
     equal(row().dataset.state, 'done');
-    equal(row().querySelectorAll('.tools > span').length, 1);
-    ok(row().querySelector('.agent-report')!.textContent!.startsWith('The definition is in one file'), 'the report shows without its frame');
-    ok(!row().textContent!.includes('Subagent hand-back'));
+    equal(row().getAttribute('aria-current'), 'true');
+    showAgent(undefined);
+    equal(row().getAttribute('aria-current'), null);
     setMessage({ ...message(), status: 'stopped', tools: [OWN, AGENT, GREP] });
     equal(row().dataset.state, 'stopped', 'a helper that never finished is not shown as working once the reply ended');
     equal(row().querySelector('.live'), null);
@@ -95,10 +101,9 @@ check('helper step: in a reply on Claude Code the helper row names Codex, and it
   const message: Message = { id: 'help', role: 'assistant', at: 0, status: 'done', vendor: 'claude', text: 'Done.', tools };
   const dispose = render(() => createComponent(Thread, { messages: [message], from: 0, conversationId: 'help', options: [], onBranch: () => {} }), root);
   try {
-    const row = root.querySelector<HTMLDetailsElement>('.agents .agent')!;
-    equal(row.querySelector('summary b')!.textContent, 'Review the parser');
+    const row = root.querySelector<HTMLButtonElement>('.agents .agent')!;
+    equal(row.querySelector('b')!.textContent, 'Review the parser');
     equal(row.querySelector('.agent-meta')!.textContent, 'Codex · done · 1 step');
-    equal(row.querySelector('.agent-report')!.textContent!.trim(), 'Two mistakes in parser.rs.');
   } finally {
     dispose();
     root.remove();
@@ -106,7 +111,7 @@ check('helper step: in a reply on Claude Code the helper row names Codex, and it
 });
 
 // R161 step 6: a subagent waiting on the person's answer says so, and one that seems stuck turns amber with what the engine
-// saw, "Look" (opens its row) and "Tell it…" (starts a message in the conversation's box). Nothing of it outlives the reply.
+// saw, "Look" (opens it in the running column) and "Tell it…" (starts a message in the conversation's box). Nothing of it outlives the reply.
 check('subagent step: waiting for you, and a stuck subagent is amber with Look and Tell it', () => {
   useLanguage('en');
   const root = document.createElement('div');
@@ -120,7 +125,7 @@ check('subagent step: waiting for you, and a stuck subagent is amber with Look a
     root,
   );
   try {
-    const row = () => root.querySelector<HTMLDetailsElement>('.agents .agent')!;
+    const row = () => root.querySelector<HTMLButtonElement>('.agents .agent')!;
     equal(row().dataset.state, 'waiting');
     equal(row().querySelector('.agent-meta')!.textContent, 'Explore · waiting for you · 1 step');
     equal(root.querySelector('.agent-stuck'), null, 'waiting for the person is never stuck');
@@ -131,9 +136,9 @@ check('subagent step: waiting for you, and a stuck subagent is amber with Look a
     equal(line.querySelector('.agent-why')!.textContent, 'The same check failed three times with nothing changed.');
     const [look, tell] = [...line.querySelectorAll('button')];
     deepEqual([look!.textContent, tell!.textContent], ['Look', 'Tell it…']);
-    equal(row().open, false);
     look!.click();
-    equal(row().open, true, 'Look opens the row to what it ran');
+    deepEqual(openedAgent(), { conversationId: 'stuck', messageId: 'stuck', callId: 'a1' }, 'Look opens it in the running column');
+    showAgent(undefined);
     tell!.click();
     const area = box.querySelector('textarea')!;
     equal(area.value, 'About “Find file defining load_config”: ');
@@ -149,5 +154,77 @@ check('subagent step: waiting for you, and a stuck subagent is amber with Look a
     dispose();
     root.remove();
     box.remove();
+  }
+});
+
+// R161 step 3: an opened subagent is the running column's content, with the way back to the list: its brief word for word,
+// the steps it ran and its report without the hand-back frame; while it works, "Tell it…" says where the words go.
+check('subagent in the column: its brief, steps and report, back to the list, and Tell it only while it works', () => {
+  useLanguage('en');
+  const root = document.createElement('div');
+  document.body.append(root);
+  const [tools, setTools] = createSignal<ToolUse[]>([AGENT, GREP]);
+  const [streaming, setStreaming] = createSignal(true);
+  let back = 0;
+  let closed = 0;
+  const told: string[] = [];
+  const dispose = render(
+    () =>
+      createComponent(Running, {
+        items: [],
+        projects: [],
+        modal: false,
+        onOpen: () => {},
+        onClose: () => closed++,
+        onBack: () => back++,
+        onTell: (title) => told.push(title),
+        ref: () => {},
+        get agent() {
+          return { step: agentSteps(tools())[0]!, streaming: streaming() };
+        },
+      }),
+    root,
+  );
+  try {
+    equal(root.querySelector('.rc-empty'), null, 'the list makes way for the subagent');
+    equal(root.querySelector('#running-title')!.textContent!.trim(), 'Find file defining load_config');
+    equal(root.querySelector('.side-meta')!.textContent, 'Explore · working · 1 step');
+    equal(root.querySelector('.side-brief .you')!.textContent!.trim(), 'Search the folder.', 'the brief, word for word');
+    equal(root.querySelectorAll('.side-body .tools > span').length, 1);
+    equal(root.querySelector('.side-tell p')!.textContent, "A subagent can't be written to while it works, so what you say goes to the main agent.");
+    root.querySelector<HTMLButtonElement>('.side-tell .btn')!.click();
+    deepEqual(told, ['Find file defining load_config'], 'Tell it goes through the app, which makes way for the box');
+    setTools([{ ...AGENT, ok: true, output: FRAMED }, { ...GREP, ok: true }]);
+    ok(root.querySelector('.agent-report')!.textContent!.startsWith('The definition is in one file'), 'the report shows without its frame');
+    ok(!root.textContent!.includes('Subagent hand-back'));
+    equal(root.querySelector('.side-tell'), null, 'a finished subagent has nothing to be told');
+    setTools([{ ...AGENT, sign: 'repeat' }, GREP]);
+    equal(root.querySelector('.side-body')!.getAttribute('data-state'), 'stuck');
+    equal(root.querySelector('.side-body .agent-why')!.textContent, 'It keeps starting the same step.');
+    const [backButton, close] = [...root.querySelectorAll<HTMLButtonElement>('.side-head button')];
+    equal(backButton!.getAttribute('aria-label'), "Back to what's running");
+    backButton!.click();
+    close!.click();
+    deepEqual([back, closed], [1, 1]);
+    setStreaming(false);
+    equal(root.querySelector('.side-meta')!.textContent, 'Explore · stopped · 1 step');
+  } finally {
+    dispose();
+    root.remove();
+  }
+});
+
+check('subagent in the column: a Codex subagent with no brief shows no empty bubble', () => {
+  useLanguage('en');
+  const root = document.createElement('div');
+  document.body.append(root);
+  const call: ToolUse = { id: 'c', name: 'Agent', input: { description: 'read docs' } };
+  const dispose = render(() => createComponent(AgentChat, { step: agentSteps([call])[0]!, streaming: true, onBack: () => {}, onClose: () => {} }), root);
+  try {
+    equal(root.querySelector('.side-brief'), null);
+    equal(agentSteps([call])[0]!.brief, '');
+  } finally {
+    dispose();
+    root.remove();
   }
 });

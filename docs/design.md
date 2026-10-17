@@ -332,8 +332,14 @@ inside its own area.
 
 When the agent hands part of the work to a subagent (R161), the reply shows one row per helper between the work log and
 the answer, in the work log's surface and type: a check, a cross or the live mark, the few words it was given in bold, and
-on the right its kind, its state and its step count in the third ink. The row opens like every disclosure (`animateDetails`)
-to the tool chips it ran and its report as Markdown; nothing else moves. Rows sit in a `minmax(0, 1fr)` grid, so a long
+on the right its kind, its state and its step count in the third ink, and an arrow pointing right. A click opens the
+subagent in the running column (R161 step 3, R-next), which is the one place on the right: its head has a back arrow to
+the running list, the subagent's title and the column's close; under it the meta line, the brief word for word in the
+person's own bubble (the agent wrote it to the subagent; Codex gives none, and then nothing shows), the tool chips it
+ran and its report as Markdown. While it works, a quiet line says a CLI subagent cannot be written to while it runs and
+"Tell it…" starts a message to the main agent. The row open there has the hover surface and a 2 px accent edge on its
+left (amber on a stuck row). The column opens the way it always does; the content swaps without motion, since it is a
+click the person just made. Opening another conversation goes back to the list. Rows sit in a `minmax(0, 1fr)` grid, so a long
 tool line ellipsizes instead of widening the reply. A helper that never finished reads "stopped" once the reply has
 ended; one sent to the background keeps the live mark until its task notice arrives (a ring, never the square of a stop button); a refused one reads "declined" in
 the third ink, never as a failure. Known limit: when a reply moves to another AI after a quota stop, its open tools,
@@ -350,7 +356,7 @@ subagent is still at work as it ends.
 A subagent waiting on the person's answer reads "waiting for you" with its live mark in amber; the card under the rows is
 that answer. One that seems stuck (R161 step 6, R174) is the conversation's other amber: the mark and the row's edge
 turn amber, its state reads "seems stuck", and one line under the row says in plain words what the engine saw, with
-"Look", which opens the row to what it ran, and "Tell it…", which focuses the conversation's box with "About “title”: " at
+"Look", which opens it in the running column, and "Tell it…", which focuses the conversation's box with "About “title”: " at
 its start (Codex takes it into the running turn; Claude Code after it, or at once with "Send now"). The line arrives with
 the normal entrance (`--dur-arrive`, none in reduced motion) and goes when the subagent moves again or the reply ends; the
 words carry the meaning, the amber only repeats it. The signs are counted by the engine (`engine/src/stuck.rs`): the

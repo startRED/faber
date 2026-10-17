@@ -252,6 +252,18 @@ svg.i.sm { width: 14px; height: 14px; }
 .rc-head h2 { font-size: var(--fs-lead); }
 .rc-head .n { color: var(--ink-3); font-size: var(--fs-sm); }
 .rc-head .iconbtn { order: 3; margin-left: auto; }
+/* An open subagent in the column: back on the left, its name, close on the right; then its own thread. */
+.side-head .iconbtn.back { order: 0; margin-left: -6px; }
+.side-head h2 { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-head .iconbtn:last-child { margin-left: 0; }
+.side-body { gap: 12px; font-size: var(--fs-sm); }
+.side-meta { margin: 0; color: var(--ink-3); }
+.side-body[data-state='stuck'] .side-meta, .side-body .agent-why { color: var(--amber-ink); }
+.side-body .agent-why { margin: 0; }
+.side-brief .you { max-width: 100%; font-size: var(--fs-sm); }
+.side-tell { display: grid; justify-items: start; gap: 8px; padding-top: 4px; color: var(--ink-3); }
+.side-tell p { margin: 0; }
+.side-tell .btn { height: var(--h-sm); }
 .rc-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0 12px 12px; display: grid; align-content: start; gap: 16px; scrollbar-width: thin; scrollbar-color: var(--line-3) transparent; }
 .proj-g h3 { display: flex; align-items: center; gap: 8px; margin: 0; padding: 0 6px 8px; font: 600 var(--fs-sm) var(--font-ui); color: var(--ink-2); }
 .proj-g h3 .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -343,9 +355,14 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 .activity-thinking p { margin: 0; white-space: pre-wrap; }
 .activity-thinking b { font-weight: 600; color: var(--ink-2); }
 .activity-latest { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: var(--fs-sm); }
-/* A subagent the agent started (R161): a row like the activity's, one per helper, opened for what it ran and its report. */
+/* A subagent the agent started (R161): a row like the activity's, one per helper, that opens it in the running column
+   (R161 step 3); the row open there is marked, and its arrow points the way it goes. */
 .agents { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
-.agent summary b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--ink); }
+.agent { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 9px 11px; border: 1px solid transparent; border-radius: var(--r-sm); background: var(--s1); color: var(--ink-2); font: inherit; font-size: var(--fs-sm); text-align: left; cursor: pointer; transition: background-color var(--dur-fast) var(--ease); }
+.agent::after { content: ''; flex: none; margin: 0 2px 0 auto; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; opacity: 0.6; transform: rotate(-45deg); }
+.agent:hover, .agent[aria-current='true'] { background: var(--s2); }
+.agent[aria-current='true'] { box-shadow: inset 2px 0 0 var(--accent); }
+.agent b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--ink); }
 .agent-mark { display: grid; flex: none; place-items: center; width: 14px; height: 14px; color: var(--accent-text); }
 .agent:is([data-state='failed'], [data-state='stopped'], [data-state='declined']) .agent-mark { color: var(--ink-3); }
 .agent-meta { flex: none; color: var(--ink-3); white-space: nowrap; }
@@ -353,7 +370,6 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 .agent-mark .live { width: 6px; height: 6px; border-radius: 50%; }
 .agent-mark .live::after { inset: -3px; border-radius: 50%; }
 .agent[data-state='background'] .agent-mark .live { background: transparent; box-shadow: inset 0 0 0 1.5px var(--accent); }
-.agent-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 0 12px 12px; }
 .agent-report { color: var(--ink-2); }
 /* Waiting for the person's answer and seeming stuck are the conversation's amber (R161 step 6): the dot, and for a stuck one
    the row's edge and one line under it with what the engine saw and two ways in. */
@@ -361,6 +377,10 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 .agent:is([data-state='waiting'], [data-state='stuck']) .agent-mark .live { background: var(--amber); }
 .agent:is([data-state='waiting'], [data-state='stuck']) .agent-mark .live::after { border-color: var(--amber); }
 .agent[data-state='stuck'] { box-shadow: inset 0 0 0 1px var(--amber-line); }
+@media (forced-colors: active) {
+  .agent[aria-current='true'] { border-color: Highlight; }
+}
+.agent[data-state='stuck'][aria-current='true'] { box-shadow: inset 2px 0 0 var(--amber), inset 0 0 0 1px var(--amber-line); }
 .agent[data-state='stuck'] .agent-meta { color: var(--amber-ink); }
 .agent-stuck { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; padding: 8px 10px 8px 12px; border-radius: var(--r-sm); background: linear-gradient(var(--amber-soft), var(--amber-soft)), var(--card-bg); box-shadow: inset 0 0 0 1px var(--amber-line); animation: arrive var(--dur-arrive) var(--ease) both; }
 .agent-why { flex: 1; min-width: 12em; color: var(--amber-ink); font-size: var(--fs-sm); }

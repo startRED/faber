@@ -1,6 +1,7 @@
 import DOMPurify from 'dompurify';
 import { type Links, marked, type Token } from 'marked';
 import { createRenderEffect } from 'solid-js';
+import { api } from './api.ts';
 
 // Model output is untrusted: rendered as Markdown, then stripped of anything that could run. Every piece of HTML that reaches
 // the page passes through DOMPurify here, and nowhere else.
@@ -17,6 +18,14 @@ const tidy = (markup: string) => DOMPurify.sanitize(markup).replace(/<h3>([^<]*)
 // of the thread.
 const parsed = new Map<string, string>();
 const LIMIT = 64;
+
+/** Links in answers open in the person's browser, never inside Faber. */
+export function openLinks(e: MouseEvent) {
+  const a = (e.target as HTMLElement).closest('a');
+  if (!a) return;
+  e.preventDefault();
+  if (/^https?:\/\//.test(a.href)) void api.openLink(a.href);
+}
 
 /** The safe HTML of a whole text. */
 export function html(text: string): string {

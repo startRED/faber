@@ -423,7 +423,8 @@ frames) and checked against today's code. It fills the steps of R161 and never b
    running list, so there is no second column. Its first message is the whole brief the main agent sent, word for word,
    then the child's messages, steps and results as they arrive, drawn with the conversation's own message parts and
    loaded only while open. A CLI subagent cannot be messaged while it runs, so its box writes to the main agent about
-   that step and says so.
+   that step and says so. Built (R-next): the brief, the steps and the report; the child's own words between steps are not
+   kept by the engine yet, and "Tell it…" in the conversation's box is the way to write.
 4. **Facts, not a verdict.** When a child ends, its row shows what it was asked, what it did (files changed, checks run,
    steps) and anything it touched that the brief never named. The main agent grading its own helper is not trusted:
    each brief ends with a "done when" list, and the row ticks each line the report meets.

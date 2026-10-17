@@ -1,28 +1,21 @@
 import { createEffect, createMemo, createResource, createSignal, For, Index, onCleanup, Show, type Accessor } from 'solid-js';
-import { api, type Choice, type Message, type QueuedTurn, type ToolUse, type VendorUsage } from './api.ts';
+import { api, type Choice, type Message, type QueuedTurn, type VendorUsage } from './api.ts';
 import { Asks, Parkeds } from './Ask.tsx';
 import { copyItem, openMenu } from './contextmenu.ts';
 import { keep, kept, release, useDraft } from './unsent.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
-import { html, Markdown } from './markdown.tsx';
+import { html, Markdown, openLinks } from './markdown.tsx';
+import { agentMeta, openedAgent, showAgent, tellAbout, ToolChip } from './AgentChat.tsx';
 import { untilReset } from './Sidebar.tsx';
 import { bytes, compact, fromEngine, money, t } from './i18n.ts';
 import { prettyModel, vendorName, type Option } from './models.ts';
 import { animateList } from './motion.ts';
 import { warmLeft } from './running.ts';
 import { quotaPending } from './QuotaCard.tsx';
-import { agentKind, agentSteps, isAgentCall, middle, sameTools, thinkingParts, toolLine, toolRow, type AgentStep } from './worklog.ts';
+import { agentState, agentSteps, isAgentCall, middle, sameTools, thinkingParts, toolLine, type AgentStep } from './worklog.ts';
 
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
-
-// Links in answers open in the user's browser, never inside Faber.
-function openLinks(e: MouseEvent) {
-  const a = (e.target as HTMLElement).closest('a');
-  if (!a) return;
-  e.preventDefault();
-  if (/^https?:\/\//.test(a.href)) void api.openLink(a.href);
-}
 
 // A file the answer created in the chat workspace: images show inline; anything can be saved to the computer.
 function FileCard(props: { conversationId: string; file: { path: string; size: number } }) {
@@ -63,96 +56,41 @@ function rung(nudge: NonNullable<Message['nudge']>, options: Option[]): Choice {
   return { ...(entry?.choice ?? { vendor: nudge.vendor, model: nudge.model }), effort: nudge.effort };
 }
 
-// One tool the turn ran: its kind and what it ran on, struck through when it failed.
-function ToolChip(props: { tool: ToolUse }) {
-  return (
-    <span class={props.tool.ok === false ? 'bad' : ''} title={toolRow(props.tool).detail || props.tool.output}>
-      <Show when={props.tool.ok === true}>
-        <Icon name="check" small />
-      </Show>
-      <b>{toolRow(props.tool).label}</b>
-      <Show when={toolRow(props.tool).detail}><i>{middle(toolRow(props.tool).detail)}</i></Show>
-    </span>
-  );
-}
-
 // A subagent the agent handed part of the work to (R161): one quiet row in the reply with what it was asked and whether it
 // is still working; opened, what it ran and the report it gave back. Never a board: the agent decides, this only shows it.
 // One that seems stuck turns amber with what the engine saw and two ways in (R161 step 6); one waiting on the person's
 // answer says so, and the card below the rows is that answer.
-function AgentRow(props: { step: Accessor<AgentStep>; streaming: boolean }) {
+function AgentRow(props: { step: Accessor<AgentStep>; streaming: boolean; conversationId: string; messageId: string }) {
   const step = () => props.step();
-  const state = () => {
-    const { ok, declined, sign } = step().call;
-    if (ok === undefined) {
-      if (!props.streaming) return step().background ? 'background' : 'stopped';
-      if (sign) return sign === 'waiting' ? 'waiting' : 'stuck';
-      return step().background ? 'background' : 'running';
-    }
-    if (declined) return 'declined';
-    return ok ? 'done' : 'failed';
-  };
+  const state = () => agentState(step(), props.streaming);
   const live = () => ['running', 'background', 'waiting', 'stuck'].includes(state());
-  let details: HTMLDetailsElement | undefined;
-  const look = () => {
-    const summary = details?.querySelector<HTMLElement>('summary');
-    if (!details || !summary) return;
-    // Through the summary, so it opens the way every disclosure does (`animateDetails`, none in reduced motion).
-    if (!details.open) summary.click();
-    details.scrollIntoView({ block: 'nearest' });
-    summary.focus({ preventScroll: true });
+  const open = () => showAgent({ conversationId: props.conversationId, messageId: props.messageId, callId: step().call.id });
+  const shown = () => {
+    const agent = openedAgent();
+    return agent?.conversationId === props.conversationId && agent.callId === step().call.id;
   };
   return (
     <div class="agent-item" role="listitem">
-      <details class="agent disclosure" data-state={state()} ref={(el) => (details = el)}>
-        <summary>
-          <span class="agent-mark" aria-hidden="true">
-            <Show when={live()} fallback={<Show when={state() === 'done' || state() === 'failed'}><Icon name={state() === 'done' ? 'check' : 'close'} small /></Show>}>
-              <span class="live" />
-            </Show>
-          </span>
-          <b>{step().title || t('agent.untitled')}</b>
-          <span class="agent-meta">{[agentKind(step().kind), t(`agent.${state()}`), t('activity.steps', { n: step().tools.length })].filter(Boolean).join(' · ')}</span>
-        </summary>
-        <div class="agent-body">
-          <Show when={step().tools.length}>
-            <div class="tools">
-              <For each={step().tools}>{(tool) => <ToolChip tool={tool} />}</For>
-            </div>
+      <button type="button" class="agent" data-state={state()} aria-controls="running" aria-current={shown() ? 'true' : undefined} onClick={open}>
+        <span class="agent-mark" aria-hidden="true">
+          <Show when={live()} fallback={<Show when={state() === 'done' || state() === 'failed'}><Icon name={state() === 'done' ? 'check' : 'close'} small /></Show>}>
+            <span class="live" />
           </Show>
-          <Show when={step().report}>
-            <div class="md agent-report" onClick={openLinks}>
-              <Markdown text={step().report} />
-            </div>
-          </Show>
-        </div>
-      </details>
+        </span>
+        <b>{step().title || t('agent.untitled')}</b>
+        <span class="agent-meta">{agentMeta(step(), props.streaming)}</span>
+      </button>
       <Show when={state() === 'stuck' && step().call.sign}>
         {(sign) => (
           <div class="agent-stuck" role="status">
             <span class="agent-why">{t(`agent.stuck.${sign() as 'repeat' | 'failing' | 'silent'}`)}</span>
-            <button type="button" class="btn" onClick={look}>{t('agent.look')}</button>
+            <button type="button" class="btn" onClick={open}>{t('agent.look')}</button>
             <button type="button" class="btn" onClick={() => tellAbout(step().title || t('agent.untitled'))}>{t('agent.tell')}</button>
           </div>
         )}
       </Show>
     </div>
   );
-}
-
-/** "Tell it…": the conversation's own box, started with the step's name. While Codex works the message goes into its turn;
- * Claude Code takes it after the turn, or at once with "Send now". */
-function tellAbout(title: string) {
-  const box = document.querySelector<HTMLTextAreaElement>('.composer textarea');
-  if (!box) return;
-  const text = t('agent.tellAbout', { title });
-  box.focus();
-  if (box.value.startsWith(text)) return;
-  box.setSelectionRange(0, 0);
-  // insertText keeps the field's undo history; the fallback writes the text itself and tells the page.
-  if (document.execCommand('insertText', false, text)) return;
-  box.value = text + box.value;
-  box.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
 type OnBranch =(messageId: string, text: string, choice?: Choice) => void;
@@ -280,7 +218,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
       </Show>
       <Show when={agents().length}>
         <div class="agents" role="list" aria-label={t('agent.label')}>
-          <Index each={agents()}>{(step) => <AgentRow step={step} streaming={streaming()} />}</Index>
+          <Index each={agents()}>{(step) => <AgentRow step={step} streaming={streaming()} conversationId={props.conversationId} messageId={m().id} />}</Index>
         </div>
       </Show>
       <Show when={(steps() || agents().length) && streaming() && latest()}>
