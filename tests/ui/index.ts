@@ -48,6 +48,7 @@ import './thread.check.ts';
 import './tutorial.check.ts';
 import './unsent.check.ts';
 import './calm.check.ts';
+import './homes.check.ts';
 import './update.check.ts';
 
 type Vars = Record<string, string | number>;

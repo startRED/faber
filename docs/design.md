@@ -173,7 +173,9 @@ own inks.
   amber for the colour validator. The titlebar shows the lockup in every theme.
 - **Empty states and the tutorial** use Curioso, static, for example peeking into an empty screen. The new conversation
   screen has none. He moves only in the entrance of a new project session in Dark Room (below). He is 64 px, in the third ink, peeking over a hairline: only his top 44 px
-  show, eyes included (`Peek` in `ui/Mark.tsx`). Today he is in the two Projects empty states.
+  show, eyes included (`Peek` in `ui/Mark.tsx`). He is in the one empty state (`ui/Empty.tsx`, R170): Curioso, a title in
+  the heading size (`--fs-h2`, never the display size), one short line and at most one button, for no AI, no project and a
+  project with nothing in it. The line never names a path through Settings, whose sections change names; the button goes there.
 - **The wordmark** is "Faber" in Rubik Bold, converted to outlines. No font file ships.
 
 ## Brand
@@ -263,8 +265,8 @@ inside its own area.
   defaulting to medium (R102). Each conversation remembers its choice. Changes apply to the next message only (the
   composer does not repeat it), and each answer keeps the effort actually used, in its header's tooltip. Both CLI drivers always receive that effort.
 - The ambient effect of the theme runs here, and the empty composer idles with a typing bar and rotating hints.
-- With no AI connected, the greeting, the suggestions and the list give way to an empty state with Curioso and a button
-  that opens account management. The composer stays on screen but cannot send. An open conversation with no AI connected
+- With no AI connected, the greeting, the suggestions and the list give way to the empty state (Curioso, "No AI connected",
+  one line and the button "Connect", which opens account management). The composer stays on screen but cannot send. An open conversation with no AI connected
   shows no composer and no permission line.
 
 ### Answers
@@ -492,7 +494,9 @@ projects. Faber has no worktree creation for projects, so an environment has no 
   a beginner. A card has Curioso, "n of total", a title, one or two sentences, Next (Got it on the last) and, except on
   the last card, Skip.
   A ring and a pointer mark the real element the card is about (`data-tour`). When that element is missing or hidden, such
-  as the Projects button below 900 px, the card is centred.
+  as the Projects button below 900 px, the card is centred. The cards for the running button are pinned: that button is in
+  the corner and is what they are about, so when the greeting is in the way they still sit under it with their pointer, at
+  every width from 720 px, instead of floating in the middle (`placeStep` in `ui/tour.ts`).
 - The tutorial is modal: the shell is inert, focus starts on Next and stays on the card, and Esc skips. Finishing or
   skipping saves `tutorialDone: true` and gives focus back to where it was, or to the composer. It never reopens. If the
   save fails it still ends for that window and may show once more at the next launch.
