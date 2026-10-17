@@ -57,6 +57,9 @@ jobs:
           WARM: ${{ github.event_name == 'workflow_dispatch' && inputs.warm && github.ref == 'refs/heads/main' }}
           BEFORE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          LIGHT: >-
+            ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
+            github.event.pull_request.user.login != 'dependabot[bot]' }}
         shell: bash
         run: |
           set -uo pipefail
@@ -99,6 +102,12 @@ jobs:
             decide
           fi
           [ -n "$scope" ] || scope=$(printf 'lints=true\nrust=true\nui=true\nscreen=true')
+          # A pull request of this repository lands only through scripts/land.mjs, whose queue run checks the very commit
+          # that lands, so its own run keeps only the lints (R-next). Dependabot's still runs every suite it needs.
+          if [ "$LIGHT" = true ]; then
+            echo "A pull request: the queue runs the suites on the commit that lands, so this run checks the lints only"
+            scope=$(grep '^lints=' <<<"$scope"; printf 'rust=false\nui=false\nscreen=false')
+          fi
           echo "$scope"
           get() { if grep -q "^$1=true$" <<<"$scope"; then echo true; else echo false; fi; }
           lints=$(get lints); rust=$(get rust); ui=$(get ui); screen=$(get screen)

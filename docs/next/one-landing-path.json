@@ -1,0 +1,5 @@
+{
+  "decisions": [
+    "| R-next | 2026-10-17 | `scripts/land.mjs` is the only way a pull request lands: never the merge button or `gh pr merge`. A pull request's own CI run checks only `changes`, the title and the lints, since the queue checks the very commit that lands; Dependabot's still runs every suite until it lands through `land.mjs` too. A lane pushes a queue branch once, with its fix complete, since each push cancels the run before it. Measured on 2026-10-17: the suites ran twice per change (about 36 jobs), and five runs at once left screen parts waiting up to 226 s for a runner. Amends R173. | Owner (2026-10-17: fix these bottlenecks for good), details AI |"
+  ]
+}

@@ -964,8 +964,12 @@ Nobody waits on CI (R-next). Right after opening a pull request, its lane runs `
 When the queued commit's gate or its landing fails, the `report` job turns that status red and comments on the pull
 request with the run, which wakes the session that watches it (the app's auto-fix). The fix is pushed to the pull
 request and queued again with `land.mjs`; a push alone never lands, since the landing stops at a head it did not squash.
-`gh pr merge --auto --squash` still works for a pull request without numbers or conflicts that `land.mjs` cannot take,
-such as one from a fork: GitHub squashes it the moment the gate is green.
+`land.mjs` is the only way in (R-next). A pull request's own run checks only `changes`, the title and the lints, since
+the queue checks the very commit that lands; the suites ran twice per change before, once on the pull request and
+once on its squash or its queue commit, and five landings at once left screen parts waiting up to 226 s for a runner.
+So a pull request is never merged with the button or `gh pr merge`: its green says only that the lints passed. A
+Dependabot pull request still runs every suite on its own, until it lands through `land.mjs` too. Each push to a queue
+branch cancels the run before it, so a lane queues once, with its fix complete.
 
 ### Task queue
 
@@ -1044,7 +1048,7 @@ It also fails on a decision number used twice, and on any placeholder or fragmen
 `main`; the `pre-push` hook refuses the same before it leaves the PC. The older form, `notes.next.<kind>` written
 straight into the locales and `node scripts/numbers.mjs assign` run on the branch, still works.
 
-A pull request with numbers never sets `gh pr merge --auto` (R173): GitHub would squash the placeholders onto
+A pull request never lands with `gh pr merge` (R173 is amended): GitHub would squash the placeholders onto
 `phase-1-base` unnumbered, and the base's check would fail.
 
 The shared docs merge themselves too (R-next). Two lanes that each add a row, a line or a paragraph at the same place of
