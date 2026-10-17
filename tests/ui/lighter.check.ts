@@ -3,7 +3,7 @@ import { render } from 'solid-js/web';
 import { api } from '../../ui/api.ts';
 import { watchSystem } from '../../ui/appearance.ts';
 import { useClock } from '../../ui/clock.ts';
-import { animateList } from '../../ui/motion.ts';
+import { animateList, millis } from '../../ui/motion.ts';
 import { Projects } from '../../ui/Projects.tsx';
 import { Running } from '../../ui/Running.tsx';
 import { check, equal, ok } from './check.ts';
@@ -140,4 +140,18 @@ check('mission screens: the Projects screen is one "Open a project" screen with 
   for (const sheet of document.styleSheets) for (const rule of sheet.cssRules) if (rule instanceof CSSStyleRule) selectors.add(rule.selectorText);
   const left = ['.start-card', '.mission-board', '.task-card', '.task-col', '.ny-card', '.cost-card', '.m-goal', '.build-slots'].filter((s) => [...selectors].some((sel) => sel.includes(s)));
   equal(left.join(', '), '', 'the stylesheet holds no style of the removed screens');
+});
+
+check('motion: a timing token reads in milliseconds whether the browser hands it back as 180ms or as .18s', () => {
+  const el = document.createElement('div');
+  document.body.append(el);
+  try {
+    equal(millis(el, '--dur-test', 7), 7, 'a token that is not set gives the fallback');
+    for (const [written, expected] of [['180ms', 180], ['.18s', 180], ['0.22s', 220], ['220ms', 220], ['2s', 2000]] as const) {
+      el.style.setProperty('--dur-test', written);
+      equal(millis(el, '--dur-test', 7), expected, written);
+    }
+  } finally {
+    el.remove();
+  }
 });

@@ -8,7 +8,12 @@ let resizeUntil = 0;
 
 /** A timing token of the page, in milliseconds (or its text, for a curve). The theme owns the values; the numbers here are only the fallback. */
 const curve = (el: Element, name: string, fallback: string) => getComputedStyle(el).getPropertyValue(name).trim() || fallback;
-const millis = (el: Element, name: string, fallback: number) => parseFloat(getComputedStyle(el).getPropertyValue(name)) || fallback;
+export const millis = (el: Element, name: string, fallback: number) => {
+  // The browser may hand a custom property back in seconds (180ms reads as .18s).
+  const value = getComputedStyle(el).getPropertyValue(name).trim();
+  const number = parseFloat(value);
+  return number > 0 ? (value.endsWith('ms') ? number : value.endsWith('s') ? number * 1000 : number) : fallback;
+};
 
 function exitSurface(): ShadowRoot {
   if (!exitLayer) {
