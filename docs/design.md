@@ -967,6 +967,25 @@ request and queued again with `land.mjs`; a push alone never lands, since the la
 `gh pr merge --auto --squash` still works for a pull request without numbers or conflicts that `land.mjs` cannot take,
 such as one from a fork: GitHub squashes it the moment the gate is green.
 
+### Task queue
+
+A session that finished a task takes the next one by itself, without asking, the way it does when the owner says "I am
+going to sleep, keep going" (R-next). The list is `docs/tasks/`: one file per task, `<order>-<name>.md`, lowest order
+first, with a `# Title` line and the brief a fresh session needs. One file each means adding, reordering or finishing a
+task never touches another's lines. The owner decides what goes there; a session may add a follow-up it found after
+the owner's tasks.
+
+`node scripts/tasks.mjs next` reads the list on `origin/phase-1-base` and claims the first free task by creating the
+branch `claim/<name>` on GitHub. A push without force fails when that branch is already there, so two sessions never
+get the same task, whatever PC they run on. The claim is a commit of its own whose message says who holds it and since
+when; one older than a day is stale, and the next session takes it over (the same day as lane claims). The session
+works on a branch named after the task, and its pull request deletes the task's file, so the task is gone once it lands;
+the next `next` deletes the claims of tasks that left the list. `list` shows who holds what, `release <name>` gives a
+task back. CI never runs on `claim/` branches.
+
+A session asks the owner only what is the owner's to decide (direction, taste, money), in one short card, and takes the
+next task while the question waits. It stops when `next` says no task is free.
+
 ### Red base
 
 A commit pushed onto a red `phase-1-base` waits behind the failure, and `main` cannot follow it (R127); on 2026-10-16 a
