@@ -1,28 +1,20 @@
-import DOMPurify from 'dompurify';
-import { marked } from 'marked';
-import { createEffect, createResource, createSignal, For, Index, onCleanup, Show, type Accessor } from 'solid-js';
+import { createEffect, createMemo, createResource, createSignal, For, Index, onCleanup, Show, type Accessor } from 'solid-js';
 import { api, type Choice, type Message, type QueuedTurn, type ToolUse, type VendorUsage } from './api.ts';
 import { Asks, Parkeds } from './Ask.tsx';
 import { copyItem, openMenu } from './contextmenu.ts';
 import { keep, kept, release, useDraft } from './unsent.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { QuotaCard } from './QuotaCard.tsx';
+import { html, Markdown } from './markdown.tsx';
 import { untilReset } from './Sidebar.tsx';
-import { amount, bytes, fromEngine, t } from './i18n.ts';
+import { bytes, compact, fromEngine, money, t } from './i18n.ts';
 import { prettyModel, vendorName, type Option } from './models.ts';
 import { animateList } from './motion.ts';
 import { warmLeft } from './running.ts';
-import { agentSteps, isAgentCall, middle, thinkingParts, toolLine, toolRow, type AgentStep } from './worklog.ts';
+import { quotaPending } from './QuotaCard.tsx';
+import { agentKind, agentSteps, isAgentCall, middle, sameTools, thinkingParts, toolLine, toolRow, type AgentStep } from './worklog.ts';
 
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
-
-// Model output is untrusted: rendered as Markdown, then stripped of anything that could run.
-// The last two words of a plain heading go in `em`, which the look draws in its quieter tone.
-const quiet = (h3: string, text: string) => {
-  const words = text.split(' ');
-  return words.length < 3 ? h3 : `<h3>${words.slice(0, -2).join(' ')} <em>${words.slice(-2).join(' ')}</em></h3>`;
-};
-const html = (text: string) => DOMPurify.sanitize(marked.parse(text, { async: false, gfm: true })).replace(/<h3>([^<]*)<\/h3>/g, quiet);
 
 // Links in answers open in the user's browser, never inside Faber.
 function openLinks(e: MouseEvent) {
@@ -55,10 +47,13 @@ function FileCard(props: { conversationId: string; file: { path: string; size: n
   );
 }
 
-function usage(m: Message): string {
-  const parts: string[] = [];
-  if (m.costUsd) parts.push(t('answer.cost', { cost: amount(m.costUsd, 4) }));
-  if (m.inputTokens) parts.push(t('answer.tokens', { input: amount(m.inputTokens / 1000, 1), output: m.outputTokens ?? 0 }));
+// What an answer cost at API prices, small: the visible number is the cost, and the tooltip holds the rest (what it counted and,
+// on the latest answer, how long the prompt cache stays warm).
+const costOf = (m: Message) => (m.costUsd ? money(m.costUsd, m.costUsd < 0.01 ? 4 : 2) : '');
+function costTitle(m: Message, warm: string): string {
+  const parts = [t('answer.cost', { cost: money(m.costUsd ?? 0, 4) })];
+  if (m.inputTokens) parts.push(t('answer.tokens', { input: compact(m.inputTokens), output: compact(m.outputTokens ?? 0) }));
+  if (warm) parts.push(warm);
   return parts.join(' · ');
 }
 
@@ -93,7 +88,7 @@ function AgentRow(props: { step: Accessor<AgentStep>; streaming: boolean }) {
   };
   const live = () => state() === 'running' || state() === 'background';
   return (
-    <details class="agent" role="listitem" data-state={state()}>
+    <details class="agent disclosure" role="listitem" data-state={state()}>
       <summary>
         <span class="agent-mark" aria-hidden="true">
           <Show when={live()} fallback={<Show when={state() === 'done' || state() === 'failed'}><Icon name={state() === 'done' ? 'check' : 'close'} small /></Show>}>
@@ -101,7 +96,7 @@ function AgentRow(props: { step: Accessor<AgentStep>; streaming: boolean }) {
           </Show>
         </span>
         <b>{step().title || t('agent.untitled')}</b>
-        <span class="agent-meta">{[step().kind, t(`agent.${state()}`), t('activity.steps', { n: step().tools.length })].filter(Boolean).join(' · ')}</span>
+        <span class="agent-meta">{[agentKind(step().kind), t(`agent.${state()}`), t('activity.steps', { n: step().tools.length })].filter(Boolean).join(' · ')}</span>
       </summary>
       <div class="agent-body">
         <Show when={step().tools.length}>
@@ -110,7 +105,9 @@ function AgentRow(props: { step: Accessor<AgentStep>; streaming: boolean }) {
           </div>
         </Show>
         <Show when={step().report}>
-          <div class="md agent-report" onClick={openLinks} innerHTML={html(step().report)} />
+          <div class="md agent-report" onClick={openLinks}>
+            <Markdown text={step().report} />
+          </div>
         </Show>
       </div>
     </details>
@@ -122,14 +119,20 @@ type OnBranch =(messageId: string, text: string, choice?: Choice) => void;
 interface Shared {
   conversationId: string;
   options: Option[];
+  /** What the composer has chosen now: the model a retry goes to. */
+  choice?: Choice;
   onBranch: OnBranch;
   usage?: VendorUsage[];
 }
 
 function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?: boolean }) {
   const m = () => props.m();
+  // While an answer streams the engine sends the whole message every 33 ms. Each memo below compares by value, so a tick that
+  // changed only the tools never touches the text, and one that changed only the text never touches the tools.
+  const text = createMemo(() => m().text);
+  const tools = createMemo(() => m().tools ?? [], [], { equals: sameTools });
   // A quiet note on the latest reply only (a later turn overtakes an older one): how long the CLI keeps its prompt cache warm,
-  // hidden while unknown and once cold. One timer, and only while the note is shown.
+  // shown in the cost's tooltip, hidden while unknown and once cold. One timer, and only while the note is shown.
   const [now, setNow] = createSignal(Date.now());
   createEffect(() => {
     const left = props.last ? warmLeft(m().cacheWarmUntil, Date.now()) : undefined;
@@ -145,64 +148,79 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
   const streaming = () => m().status === 'streaming';
   const waiting = () => m().permissions ?? [];
   // Unknown legacy boundaries and tool-terminated turns keep the entire answer visible.
-  const boundary = () => {
+  const boundary = createMemo(() => {
     const end = m().activityEnd;
-    return m().tools?.length && Number.isInteger(end) && end! > 0 && end! < m().text.length && m().text.slice(end).trim() ? end! : 0;
-  };
+    return tools().length && Number.isInteger(end) && end! > 0 && end! < text().length && text().slice(end).trim() ? end! : 0;
+  });
   // The answer is always kept whole. A status sentence that is exactly the answer's opening paragraph is dropped from the
   // activity instead, so it shows once.
-  const finalText = () => m().text.slice(boundary());
-  const narration = () => {
+  const finalText = createMemo(() => text().slice(boundary()));
+  const narration = createMemo(() => {
     if (!boundary()) return [];
-    const paragraphs = m().text.slice(0, boundary()).trimEnd().split(/\n{2,}/);
+    const paragraphs = text().slice(0, boundary()).trimEnd().split(/\n{2,}/);
     const last = paragraphs.at(-1)?.trim();
     const answer = finalText().trimStart();
     if (last && answer.startsWith(last) && (answer.length === last.length || /\s/.test(answer[last.length]!))) paragraphs.pop();
     const rest = paragraphs.join('\n\n').trim();
     return rest ? [rest] : [];
-  };
-  const thinking = () => thinkingParts(m().thinking ?? '');
+  });
+  const thinkingText = createMemo(() => m().thinking ?? '');
+  const thinking = createMemo(() => thinkingParts(thinkingText()));
   // The agent's own tools; each subagent and what it ran show as their own step below (AgentRow).
-  const own = () => m().tools?.filter((tool) => !tool.parent && !isAgentCall(tool)) ?? [];
+  const own = createMemo(() => tools().filter((tool) => !tool.parent && !isAgentCall(tool)), [], { equals: sameTools });
   // A helper always comes from the AI that is not running the reply.
-  const agents = () => agentSteps(m().tools, m().vendor ? vendorName(m().vendor === 'claude' ? 'codex' : 'claude') : '');
-  const steps = () => narration().length + own().length + (thinking().length ? 1 : 0);
-  const commands = () => own().filter((tool) => /bash|command|exec|shell/i.test(tool.name)).length;
+  const helperKind = () => (m().vendor ? vendorName(m().vendor === 'claude' ? 'codex' : 'claude') : '');
+  const agents = createMemo(() => agentSteps(tools(), helperKind()));
+  const steps = createMemo(() => narration().length + own().length + (thinking().length ? 1 : 0));
+  const commands = createMemo(() => own().filter((tool) => /bash|command|exec|shell/i.test(tool.name)).length);
   // The answer on screen is never repeated here: once it has text, the status line steps aside.
-  const latest = () => {
-    const tool = m().tools?.at(-1);
+  const latest = createMemo(() => {
+    const tool = tools().at(-1);
     if (tool && tool.ok === undefined) return toolLine(tool);
     if (finalText().trim()) return '';
     return tool ? toolLine(tool) : middle(thinking().at(-1)?.text ?? '');
+  });
+  // The header says which model answers, and nothing more: the vendor's mark and the model's name from the moment it is known
+  // to the end and after reopening (a model the CLI never named reads as the vendor's name). Effort and Auto's reason sit in
+  // its tooltip; the reason shows only while Auto is still choosing and when the answer moved to the other AI. A wait for
+  // quota is said once, by the card under it.
+  const standIn = () => !m().model || m().model === 'codex';
+  const shown = () => (m().vendor ? (standIn() ? vendorName(m().vendor!) : prettyModel(m().model)) : t('model.auto'));
+  const reason = () =>
+    m().reason ? fromEngine(m().reason, { when: m().waitUntil ? untilReset(m().waitUntil!) : t('quota.unknown'), from: m().movedFrom ? vendorName(m().movedFrom!) : '', to: m().vendor ? vendorName(m().vendor!) : '' }) : '';
+  const showsReason = () => !!m().reason && m().reason !== 'reason.waiting' && (!m().vendor || m().reason!.startsWith('reason.moved'));
+  const headerTitle = () =>
+    [m().vendor ? vendorName(m().vendor!) : '', m().vendor && !standIn() ? prettyModel(m().model) : '', m().effort ? `${t('effort.label')}: ${t(`effort.${m().effort!}`)}` : '', reason()]
+      .filter(Boolean)
+      .join(' · ');
+  // A retry goes to the model the composer has now: the one place the model is chosen.
+  const chosen = () => {
+    const c = props.choice;
+    if (!c || c.vendor === 'auto') return t('model.auto');
+    return props.options.find((o) => o.choice.vendor === c.vendor && o.choice.model === c.model)?.label ?? prettyModel(c.model);
   };
-  // The name slot: while Auto is still choosing there is none (the reason says so), then the model's name from the moment
-  // it is known to the end and after reopening; a model the CLI never named reads as the default one all along.
-  const label = () => (streaming() && m().waitUntil ? t('run.waiting', { when: untilReset(m().waitUntil!) }) : m().vendor ? prettyModel(m().model) : '');
+  const retry = () => t('answer.retry', { model: chosen() });
   return (
     <article
       class="ai"
       aria-label={t('answer.label')}
       onContextMenu={(e) =>
-        openMenu(e, [copyItem(m().text), ...(!streaming() && props.prompt ? [{ id: 'redo', label: t('menu.redo'), run: () => props.onBranch(props.prompt!.id, props.prompt!.text) }] : [])])
+        openMenu(e, [copyItem(m().text), ...(!streaming() && props.prompt ? [{ id: 'redo', label: retry(), run: () => props.onBranch(props.prompt!.id, props.prompt!.text) }] : [])])
       }
     >
-      <div class="model">
+      <div class="model" title={headerTitle() || undefined}>
         <span class="vm" classList={{ claude: m().vendor === 'claude', codex: m().vendor === 'codex' }}>
           <VendorMark vendor={m().vendor} />
-          <b>{m().vendor ? vendorName(m().vendor!) : t('model.auto')}</b>
+          <b>{shown()}</b>
         </span>
-        <Show when={label()}><span>{label()}</span></Show>
-        <Show when={m().effort}>{(effort) => <span>{t('effort.label')}: {t(`effort.${effort()}`)}</span>}</Show>
-        <Show when={m().reason}>
-          <em>· {fromEngine(m().reason, { when: m().waitUntil ? untilReset(m().waitUntil!) : t('quota.unknown'), from: m().movedFrom ? vendorName(m().movedFrom!) : '', to: m().vendor ? vendorName(m().vendor!) : '' })}</em>
-        </Show>
+        <Show when={showsReason()}><em>· {reason()}</em></Show>
       </div>
       <Show when={m().pace}>{(pace) => <p class="pace">{t(`reason.pace.${pace().kind}`, { vendor: vendorName(pace().vendor), other: m().vendor ? vendorName(m().vendor!) : t('model.auto') })}</p>}</Show>
       <Show when={m().mode}><p class="pace">{fromEngine(m().mode)}</p></Show>
       <Show when={m().note}><p class="pace">{fromEngine(m().note)}</p></Show>
       <QuotaCard id={props.conversationId} m={m()} usage={props.usage ?? []} />
       <Show when={steps()}>
-        <details class="activity">
+        <details class="activity disclosure">
           <summary>{t(streaming() ? 'activity.working' : 'activity.done', { steps: t('activity.steps', { n: steps() }), commands: t('activity.commands', { n: commands() }) })}</summary>
           <div class="activity-body">
             <Show when={thinking().length}>
@@ -230,7 +248,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
       <Asks conversationId={props.conversationId} turnId={m().id} permissions={waiting()} surface="ask" />
       <Parkeds parked={m().parked ?? []} more={m().parkedMore} surface="ask" />
       <div class="md" aria-busy={streaming()} onClick={openLinks}>
-        <div innerHTML={html(finalText())} />
+        <Markdown text={finalText()} />
         <Show when={streaming() && !waiting().length && !m().waitUntil}>
           <span class="cursor" aria-hidden="true" />
         </Show>
@@ -243,16 +261,29 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
       <Show when={m().status === 'stopped'}>
         <div class="note">{t('answer.stopped')}</div>
       </Show>
-      <Show when={m().error}>
+      <Show when={m().error && !quotaPending(m())}>
         <div class="note err">{fromEngine(m().error, { when: m().waitUntil ? untilReset(m().waitUntil!) : t('quota.unknown') })}</div>
       </Show>
       <Show when={m().incomplete}><p class="note">{t('answer.meterIncomplete')}</p></Show>
       <Show when={!streaming()}>
         <div class="actions">
-          <button onClick={() => void navigator.clipboard.writeText(m().text)}>{t('answer.copy')}</button>
+          <button type="button" class="iconbtn" title={t('answer.copy')} aria-label={t('answer.copy')} onClick={() => void navigator.clipboard.writeText(m().text)}>
+            <Icon name="copy" small />
+          </button>
+          <Show when={props.prompt} keyed>
+            {(prompt) => (
+              <button type="button" class="iconbtn" title={retry()} aria-label={retry()} onClick={() => props.onBranch(prompt.id, prompt.text)}>
+                <Icon name="retry" small />
+              </button>
+            )}
+          </Show>
+          <button type="button" class="iconbtn" title={t('answer.terminalHint')} aria-label={t('answer.terminal')} onClick={() => void api.openTerminal(props.conversationId)}>
+            <Icon name="terminal" small />
+          </button>
           <Show when={props.prompt && m().nudge} keyed>
             {(nudge) => (
               <button
+                type="button"
                 class="nudge"
                 title={fromEngine(nudge.reason, { to: `${prettyModel(nudge.model)} · ${t(`effort.${nudge.effort}`)}` })}
                 onClick={() => props.onBranch(props.prompt!.id, props.prompt!.text, rung(nudge, props.options))}
@@ -261,28 +292,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
               </button>
             )}
           </Show>
-          <Show when={props.prompt} keyed>
-            {(prompt) => (
-              <select
-                class="redo"
-                aria-label={t('answer.redoLabel')}
-                onChange={(e) => {
-                  const picked = props.options[Number(e.currentTarget.value)]!.choice;
-                  e.currentTarget.value = '';
-                  props.onBranch(prompt.id, prompt.text, picked);
-                }}
-              >
-                <option value="" disabled selected>
-                  {t('answer.redo')}
-                </option>
-                <For each={props.options}>{(o, i) => <option value={i()}>{o.label}</option>}</For>
-              </select>
-            )}
-          </Show>
-          <button onClick={() => void api.openTerminal(props.conversationId)} title={t('answer.terminalHint')}>
-            {t('answer.terminal')}
-          </button>
-          <span>{[usage(m()), warm()].filter(Boolean).join(' · ')}</span>
+          <Show when={costOf(m())}>{(cost) => <span class="cost num" title={costTitle(m(), warm())}>{cost()}</span>}</Show>
         </div>
       </Show>
     </article>

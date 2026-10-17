@@ -120,8 +120,10 @@ fn opens_empty(ctx: &mut Ctx) -> Result {
     let page = &mut app.page;
     let heading = page.named("heading", "empty.chatTitle")?;
     page.wait_visible(&heading)?;
-    let foot = page.inner_text(&css(".version"))?;
-    ensure(super::has_version_after(&foot, "v"), || format!("the footer should name the version, it says {foot:?}"))?;
+    // The version left the sidebar: it is the tooltip of the Settings button.
+    same(page.count(&css(".version"))?, 0, "the sidebar names no version")?;
+    let hint = page.attr(&css(".side-foot .foot-row button"), "title")?.unwrap_or_default();
+    ensure(super::has_version_after(&hint, "v"), || format!("the Settings button should carry the version, it says {hint:?}"))?;
     let scrolls = page.eval("document.documentElement.scrollHeight > innerHeight")?;
     same(scrolls.as_bool(), Some(false), "the window should not scroll as a whole")?;
     // No system title bar: the top bar carries the window buttons and drags the window.
@@ -239,9 +241,16 @@ fn streams_an_answer(ctx: &mut Ctx) -> Result {
     let text = page.inner_text(&answer)?;
     ensure(text.contains("Rayleigh"), || format!("the answer should explain the sky: {text}"))?;
     ensure(text.contains("Haiku 5.5"), || format!("the answer should name its model: {text}"))?;
+    // The header is the mark and the name; why Auto chose it, and the effort, are its tooltip, and the price note is the cost's.
     let reason = page.text_of("reason.autoDefault")?;
-    ensure(text.contains(&reason), || format!("the answer should say why Auto chose it: {text}"))?;
-    ensure(text.contains("at API prices"), || format!("the answer should show the price note: {text}"))?;
+    let tips = page.eval("(() => ({ header: document.querySelector('article.ai .model')?.title, cost: document.querySelector('article.ai .actions .cost')?.title }))()")?;
+    ensure(tips["header"].as_str().is_some_and(|t| t.contains(&reason)), || {
+        format!("the header's tooltip should say why Auto chose it: {tips}")
+    })?;
+    ensure(tips["cost"].as_str().is_some_and(|t| t.contains("at API prices")), || {
+        format!("the cost's tooltip should show the price note: {tips}")
+    })?;
+    ensure(!text.contains(&reason) && !text.contains("at API prices"), || format!("neither sits on the page itself: {text}"))?;
     page.wait_visible(&css(".list .item").has_text(QUESTION))?;
     ctx.shot(&mut app, "chat")
 }
@@ -250,7 +259,7 @@ fn streams_an_answer(ctx: &mut Ctx) -> Result {
 const HEADER_ALL: &str = "(() => { const h = document.querySelector('article.ai .model'); return h && { text: h.innerText, height: h.getBoundingClientRect().height }; })()";
 
 /// The answer header's name slot and its height: what the person reads and where the line below sits.
-const HEADER: &str = "(() => { const h = document.querySelector('article.ai .model'); return h && { name: h.children[1].innerText, height: h.getBoundingClientRect().height }; })()";
+const HEADER: &str = "(() => { const h = document.querySelector('article.ai .model'); return h && { name: h.querySelector('b').innerText, height: h.getBoundingClientRect().height }; })()";
 
 fn names_the_model_while_streaming(ctx: &mut Ctx) -> Result {
     names_while_streaming(ctx, "claude", "Sunlight", "Haiku 5.5")
@@ -293,7 +302,7 @@ fn names_while_streaming(ctx: &mut Ctx, vendor: &str, first_words: &str, name: &
     page.wait_for_within(
         "the model's name in the header",
         &format!(
-            "(() => {{ const h = document.querySelector('article.ai .model'); return h?.children[1]?.innerText === '{name}' && document.querySelector('article.ai .md').innerText.includes('{first_words}'); }})()"
+            "(() => {{ const h = document.querySelector('article.ai .model'); return h?.querySelector('b')?.innerText === '{name}' && document.querySelector('article.ai .md').innerText.includes('{first_words}'); }})()"
         ),
         Duration::from_secs(60),
     )?;
@@ -362,8 +371,8 @@ fn says_what_to_do(ctx: &mut Ctx) -> Result {
     ensure(body.contains(&section), || format!("it should name the section {section}: {body}"))?;
     let lower = body.to_lowercase();
     ensure(!["reopen", "restart", "relaunch"].iter().any(|w| lower.contains(w)), || format!("it should not ask to restart: {body}"))?;
-    let send = page.named("button", "composer.send")?;
-    same(page.is_disabled(&send)?, true, "Send is disabled with no AI")
+    // There is nothing to type into: no composer, so no permission line or model choice either.
+    same(page.count(&css(".composer"))?, 0, "no composer with no AI")
 }
 
 fn switches_language(ctx: &mut Ctx) -> Result {
@@ -828,6 +837,8 @@ fn black_hole_in_a_project(ctx: &mut Ctx) -> Result {
     };
     hide(&mut app.page, false)?;
     focus(&mut app.page, true)?;
+    let projects = app.page.named("button", "area.projects")?;
+    app.page.click(&projects)?;
     let demo = css(".prow .item").has_text("Demo");
     app.page.wait_visible(&demo)?;
     app.page.click(&demo)?;

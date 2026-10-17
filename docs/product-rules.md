@@ -63,7 +63,7 @@ yes/no question. The owner's own words and screenshots stay in the private notes
 
 | Card | Touches | Rule | Check |
 | :--- | :--- | :--- | :--- |
-| C001 | Thread hints, `project.permissions*` keys | A notice that is not an error never looks like one: one short calm line, details behind a link. | advisory |
+| C001 | Thread hints | A notice that is not an error never looks like one: one short calm line, details behind a link. A permission mode is not a notice at all: it lives in Settings. | advisory |
 | C002 | `reason.pace.*` keys, Auto pacing | Never alarm about quota unless it is really near the limit; say what happened in plain words ("Codex is spending fast this week; Auto used Claude to save it"). | `tests/ui/quota.check.ts` |
 | C003 | `ui/Thread.tsx` answer header, Auto | Show what is known as soon as it is known: Auto's chosen model appears when the answer starts streaming, not when it ends. | advisory |
 | C004 | Updater, `tauri.conf.json` | Updates install by themselves into the app's own folder (never the data folder), never pop a window or steal focus, and never interrupt running work. | tests in `src-tauri/src/update.rs` |

@@ -20,12 +20,12 @@ import { inOrder, refreshed, saveAndApply, watchSystem } from './appearance.ts';
 import { Composer, type Draft } from './Composer.tsx';
 import { LookStep } from './FirstRun.tsx';
 import { keepFocusIn } from './focus.ts';
-import { Icon, VendorMark } from './Glyphs.tsx';
+import { Icon } from './Glyphs.tsx';
 import { failureText, lang, t, templates, useLanguage } from './i18n.ts';
 import { createWidth } from './layout.ts';
 import { Lockup, Peek } from './Mark.tsx';
 import { isFirstInstall, newestId, NOTES, type Note, whatsNew } from './notes.ts';
-import { modelOptions, prettyModel } from './models.ts';
+import { modelOptions } from './models.ts';
 import { animateDetails, animateList, watchMotion } from './motion.ts';
 import { Projects } from './Projects.tsx';
 import { createOpening, upsert } from './opening.ts';
@@ -35,7 +35,7 @@ import { type Keep, type Section, Settings } from './Settings.tsx';
 import { Setup } from './Setup.tsx';
 import { continuePatch, type FirstStep, firstRunStep, lookDue, setupPatch } from './setup.ts';
 import { Sidebar } from './Sidebar.tsx';
-import { seedQuotas, withQuota } from './sidebar.ts';
+import { keepRows, seedQuotas, withQuota } from './sidebar.ts';
 import { Thread } from './Thread.tsx';
 import { tutorialDue } from './tour.ts';
 import { Tutorial } from './Tutorial.tsx';
@@ -62,15 +62,6 @@ function remember(key: string, value: unknown) {
 
 // A long conversation draws only its latest messages, and more as the user scrolls up, so memory stays flat.
 const PAGE = 40;
-// The calm line over a thread that says which mode is on.
-const MODE_LINE = {
-  ask: 'project.permissionsAsk',
-  acceptEdits: 'project.permissionsAcceptEdits',
-  plan: 'project.permissionsPlan',
-  auto: 'project.permissionsAuto',
-  dontAsk: 'project.permissionsDontAsk',
-} as const;
-
 const TYPING = 'textarea, input:not([type=checkbox], [type=radio], [type=range], [type=color], [type=file]), [contenteditable]';
 
 /** `initial` is the state the page started from; `main.tsx` has already applied its look and handed the running list to
@@ -174,7 +165,11 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const refresh = () =>
     api.state().then((s) => {
       store.offer(s.running);
-      setState((current) => refreshed(current, s));
+      setState((current) => {
+        const next = refreshed(current, s);
+        // A row that did not change stays the same object, so the sidebar keeps its node.
+        return { ...next, conversations: keepRows(current.conversations, next.conversations), projects: keepRows(current.projects, next.projects) };
+      });
     });
   const fail = (err: unknown) => setError(failureText(err));
   const openSettings = (at?: Section) => {
@@ -623,9 +618,6 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const restartForUpdate = () => void api.updateRestart().catch((err) => setSaveError(failureText(err)));
   const composerKey = () => place().id ?? `new-${area()}-${projectId() ?? ''}`;
   const title = () => state().conversations.find((c) => c.id === place().id)?.title ?? current()?.title;
-  // The model the open conversation is answering with now, else the one the next message will go to.
-  const answering = () => current()?.messages.findLast((m) => m.role === 'assistant' && m.vendor);
-
   // The same conversation's draft survives moving between the greeting and the dock.
   const composer = createMemo(() => (
     <Show when={composerKey()} keyed>
@@ -638,7 +630,6 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         mode={state().settings.permissions ?? 'dontAsk'}
         onMode={(permissions) => void saveSettings({ permissions })}
         busy={busy() && !loading()}
-        nextMessage={!!current()?.messages.length}
         locked={loading()}
         placeholder={area() === 'project' ? t('composer.projectPlaceholder') : newChat() ? t('composer.chatPlaceholder') : t('composer.replyPlaceholder')}
         hints={newChat() ? [t('composer.chatPlaceholder'), t('hint.chat.2'), t('hint.chat.3')] : undefined}
@@ -846,18 +837,6 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                   </Switch>
                 </div>
                 <div class="right">
-                  <Show when={state().vendors.length > 0 && !newChat()}>
-                    <span class="chip" title={t('topbar.model')}>
-                      <Show when={answering()} fallback={<>{options().find((o) => o.choice.vendor === picked().vendor && o.choice.model === picked().model)?.label}</>}>
-                        {(m) => (
-                          <>
-                            <VendorMark vendor={m().vendor} />
-                            {prettyModel(m().model)}
-                          </>
-                        )}
-                      </Show>
-                    </span>
-                  </Show>
                   <button
                     class="run-btn"
                     data-tour="run"
@@ -916,12 +895,6 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                                 onCleanup(() => observer.disconnect());
                               });
                             }}>
-                              <Show when={area() === 'chat' || project()}>
-                                <p class="hint" role="status">
-                                  {t(MODE_LINE[state().settings.permissions ?? 'dontAsk'])}{' '}
-                                  <button type="button" onClick={() => openSettings('general')}>{t('project.permissionsDetails')}</button>
-                                </p>
-                              </Show>
                               <Show
                                 when={current()?.messages.length ? current() : undefined}
                                 fallback={<Empty vendors={state().vendors.length} area={area()} project={project()} onConnect={openSetup} />}
@@ -936,6 +909,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                                     from={from()}
                                     conversationId={c().id}
                                     options={options()}
+                                    choice={picked()}
                                     onBranch={(messageId, text, chosen) => void branch(messageId, text, chosen ?? picked())}
                                   />
                                 )}
@@ -966,7 +940,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
                           </Show>
                         </Show>
                       </div>
-                      <Show when={!newChat() && !needsProject()}>
+                      <Show when={!newChat() && !needsProject() && state().vendors.length > 0}>
                         <div class="dock" inert={trapped()}>
                           {composer()}
                         </div>

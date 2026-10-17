@@ -18,16 +18,13 @@ import { check, deepEqual, equal, ok } from './check.ts';
 check('R107: Settings names Chat and Projects and discloses the shared default', () => {
   ok(en['set.permissions'].includes('Chat'));
   ok(en['set.permissions'].includes('Projects'));
-  ok('project.permissionsDontAsk' in en);
   ok(en['set.chatFolderHint'].includes('first message'));
   ok(en['set.chatFolderHint'].includes('private folder'));
   ok(en['set.chatFolderHint'].includes('delete the conversation'));
 });
 
-check('R121: Do not ask is one calm line in the thread, with the risk and the credential limits spelled out in Settings', () => {
-  const line = en['project.permissionsDontAsk'];
-  ok(line.length < 60 && !/risk|danger|warning|error|denied|blocked/i.test(line), line);
-  ok(en['project.permissionsDetails'].includes('Settings'));
+check('R121: the risk and the credential limits of Do not ask are spelled out in Settings, not over every thread', () => {
+  ok(!Object.keys(en).some((key) => key.startsWith('project.permissions')), 'no permission sentence is kept for the top of a conversation');
   const body = en['set.permissionsDontAskBody'];
   for (const word of ['internet', 'any folder', 'steer', 'pick Ask for', '.ssh', 'Codex can read', 'directly', 'Claude Code can through commands', 'best effort', 'Stop asks the tools to stop']) ok(body.includes(word), word);
   ok(!/is kept out|cannot be kept out|Codex cannot/.test(body), 'no claim that one tool is kept away from the sign-in folders');

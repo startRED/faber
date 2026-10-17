@@ -2,6 +2,11 @@ import { createSignal, Show } from 'solid-js';
 import { api, type Message, type VendorUsage } from './api.ts';
 import { fromEngine, t } from './i18n.ts';
 import { vendorName } from './models.ts';
+import { untilReset } from './Sidebar.tsx';
+
+/** Whether the reply waits for quota: the card under the answer then says so, and nothing else on the screen repeats it. */
+export const quotaPending = (m: Message): boolean =>
+  m.status !== 'done' && m.status !== 'stopped' && (m.reason === 'reason.waiting' || m.error === 'error.quotaOut' || m.error === 'error.quotaWait');
 
 /** The second click is consent for this reply only. No setting or next message inherits it. */
 export function QuotaCard(props: { id: string; m: Message; usage: VendorUsage[] }) {
@@ -10,7 +15,7 @@ export function QuotaCard(props: { id: string; m: Message; usage: VendorUsage[] 
   const [error, setError] = createSignal<string>();
   const vendor = () => props.m.vendor;
   const account = () => props.usage.find((u) => u.vendor === vendor());
-  const pending = () => props.m.status !== 'done' && props.m.status !== 'stopped' && (props.m.reason === 'reason.waiting' || props.m.error === 'error.quotaOut' || props.m.error === 'error.quotaWait');
+  const pending = () => quotaPending(props.m);
   const run = async (request: () => Promise<void>) => {
     if (sending()) return;
     setSending(true); setError(undefined);
@@ -19,6 +24,9 @@ export function QuotaCard(props: { id: string; m: Message; usage: VendorUsage[] 
   };
   return <Show when={pending()}>
     <div class="quota-card" aria-live="polite">
+      <Show when={props.m.error !== 'error.quotaOut'}>
+        <p>{fromEngine('reason.waiting', { when: props.m.waitUntil ? untilReset(props.m.waitUntil) : t('quota.unknown') })}</p>
+      </Show>
       <Show when={props.m.error === 'error.quotaOut'}>
         <p>{t('quota.chosen.out', { vendor: vendor() ? vendorName(vendor()!) : t('model.auto') })}</p>
         <button class="btn secondary" disabled={sending()} onClick={() => void run(() => api.moveTurn(props.id, props.m.id))}>{t('quota.chosen.move')}</button>

@@ -28,7 +28,9 @@ function sidebar(u: VendorUsage[], withQuota = true) {
     onNew: () => {}, onArea: () => {}, onProject: () => {}, onNewIn: () => {}, onAddProject: () => {},
     onOpen: () => {}, onRemove: () => {}, onSettings: () => {},
   }), host);
-  return { host, dispose, text: () => host.querySelector('.usage')!.textContent ?? '' };
+  // What the sidebar says about the vendors: the visible words and the tooltips, which hold the age and the counting mark.
+  const text = () => [host.querySelector('.usage')!.textContent, ...[...host.querySelectorAll<HTMLElement>('.usage .vendor')].map((v) => v.title)].join(' | ');
+  return { host, dispose, text };
 }
 
 check('quota: a reading says its age in plain words', () => {
@@ -54,7 +56,7 @@ check('quota: the sidebar shows the age, the marker and the not-yet-counted esti
   try {
     const text = s.text();
     ok(text.includes('44%'), text);
-    ok(text.includes('+~2%'), `the estimate sits beside the number: ${text}`);
+    ok(text.includes('~2%'), `the estimate is in the tooltip of the line: ${text}`);
     ok(text.includes('há 4 min'), text);
     ok(text.includes('ainda contando'), text);
   } finally { s.dispose(); }
