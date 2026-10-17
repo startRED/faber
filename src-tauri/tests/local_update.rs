@@ -1235,7 +1235,7 @@ fn accepted_mission(
         std::sync::Arc::new(|_| {}),
     );
     let repo = RepoIdentity::new("repo", &checkout.to_string_lossy());
-    let mut project = engine.add_project(&checkout.to_string_lossy());
+    let mut project = engine.add_project(&checkout.to_string_lossy()).unwrap();
     let before = project.clone();
     project.repo = Some(repo.clone());
     let mut grant = Grant::new("repo", GitMode::Seguro, 1, now());
@@ -1361,7 +1361,7 @@ async fn landed_checkpoint_drives_exact_tree_staging_at_quiescence() {
     let (engine, journal, _repo) = accepted_mission(&dev, &checkout);
     let older_checkout = dir.path().join("older-checkout");
     fs::create_dir(&older_checkout).unwrap();
-    let mut older_project = engine.add_project(&older_checkout.to_string_lossy());
+    let mut older_project = engine.add_project(&older_checkout.to_string_lossy()).unwrap();
     let before = older_project.clone();
     older_project.repo = Some(RepoIdentity::new("repo", &older_checkout.to_string_lossy()));
     engine.update_project(&before, &older_project).unwrap();

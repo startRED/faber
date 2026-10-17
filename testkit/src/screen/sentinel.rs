@@ -814,7 +814,7 @@ fn rest(page: &mut Page) -> Result {
     )
 }
 
-/// The main screens a visual critique looks at (`scripts/shots.mjs`, R167), photographed at the two sizes the owner
+/// The main screens a visual critique looks at (`scripts/shots.mjs`, R168), photographed at the two sizes the owner
 /// uses (`critique-<screen>-<width>x<height>.png`) and judged for their composition (V1 to V3).
 fn composition(ctx: &mut Ctx) -> Result {
     let launch = seed_owner(ctx)?;

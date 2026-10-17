@@ -276,6 +276,14 @@ ended; one sent to the background keeps the live mark until its task notice arri
 the third ink, never as a failure. Known limit: when a reply moves to another AI after a quota stop, its open tools,
 helpers included, read as working again with the new reply.
 
+A Codex subagent (`spawn_agent`, started only when the person asks for one) is the same row. Codex gives it a path instead of a description, so its title is the
+path's last part with spaces (`/root/read_docs` reads "read docs"), and it has no kind. Its approvals show on the
+conversation's own card, since the person cannot open the subagent; one that arrives after the reply ended is refused,
+and Stop and closing the conversation reach the subagent too. What a subagent still does after its reply ended reaches
+no reply, so its step reads "stopped". Codex counts each thread's usage on its own, so the
+engine adds the subagent's tokens and cost to the reply that started it, and marks the reply's usage incomplete when a
+subagent is still at work as it ends.
+
 A helper from the other AI (Faber's helper tool, R161) is the same row: its title in bold and, as its kind, the AI that
 ran it, so a Claude Code reply reads "Codex". Its commands show under it and its report is its final words. The person
 never sees its approval cards: in a mode that asks, what the helper needed approval for is refused and named in its
@@ -287,9 +295,10 @@ helper tool existed keeps its Codex thread without it, since Codex takes dynamic
 The "Open a project" screen (Projects with none open) and the Chat folder setting list the last five folders used, newest
 first, one click each: a short name and the dimmed parent path. The engine judges each one when the list is read
 (`recents` command, `engine/src/recents.rs`): a folder that is gone or refused by R124 shows dimmed with its reason and
-cannot be picked, and a refused folder is never stored. Right-click on a row opens a one-line menu, "Remove from recents".
-In the project area a "+" on each row builds a selection that can be opened at once or saved as a named environment (up to
-12 environments, 8 folders each; the same name replaces). Starting an environment opens the folders that still exist as
+cannot be picked, and a refused folder is never stored. Right-click on a row opens Faber's shared one-line menu, "Remove
+from recents", which asks once before it forgets (C009). In the project area a "+" on each row builds a selection that
+can be opened at once or saved as a named environment (up to 12 environments, 8 folders each; the same name replaces).
+Starting an environment opens the folders that still exist as
 projects. Faber has no worktree creation for projects, so an environment has no "own worktree" flag. Both lists live in
 `recents.json` next to `settings.json`, written through a temp file and renamed.
 
@@ -715,7 +724,7 @@ screen, which owns the locale files.
 ## Screen cards
 
 One card per main screen: what it is for, the one action that leads, what never goes on it, and the photo a critique
-compares against (R167). What the screen holds is in [product-map.md](product-map.md#screens-and-surfaces) and how it
+compares against (R168). What the screen holds is in [product-map.md](product-map.md#screens-and-surfaces) and how it
 looks in the sections above; a card only says what must not drift. The approved photo is the one the UX sentinel's
 composition scenario takes (`target/faber-test/shots/`, kept by CI with every run), at 1920x1080 and at 1280x800 in Dark
 Room. A change that moves a card's line updates the card in the same commit and says so in its visual critique. Today's
@@ -929,7 +938,7 @@ rest. The design is in `docs/superpowers/specs/2026-10-12-ux-sentinel-design.md`
 
 ### Visual critique
 
-Checks see code and motion, not a screen as a whole (R167). The sentinel's scenario "the main screens keep their
+Checks see code and motion, not a screen as a whole (R168). The sentinel's scenario "the main screens keep their
 composition" photographs the Chat home, a project's home, an open conversation and Settings at 1920x1080 and 1280x800 in
 Dark Room and pt-BR (`target/faber-test/shots/critique-<screen>-<size>.png`). `node scripts/shots.mjs <label>` runs it and
 copies the photos of the screens the diff touches into `target/faber-test/critique/<label>/` with an index;

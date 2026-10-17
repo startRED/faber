@@ -6,7 +6,7 @@ description: "Use when a change a person sees is ready for review, or when asked
 # Faber screen: visual critique
 
 Checks see code and motion; they do not see a screen as a whole. A change a person sees therefore gets a critique of its
-screenshots before it merges (R167). The writer takes the photos; a fresh session that did not write the change scores
+screenshots before it merges (R168). The writer takes the photos; a fresh session that did not write the change scores
 them, preferably of the other vendor (R146). CI never calls an AI, so this is a step of the process, not a check.
 
 ## 1. Take the photos (the writer)

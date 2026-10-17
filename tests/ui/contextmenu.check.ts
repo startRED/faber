@@ -165,6 +165,9 @@ check('right-click: a project offers a new conversation, its folder and removal,
     await settle();
     rightClick(row);
     await settle();
+    localStorage.setItem('faber.project.goal.p1', 'Water the plants');
+    localStorage.setItem('faber.project.mission.p1', 'm1');
+    localStorage.setItem('faber.unsent.proof.p1', 'npm test');
     entry(t('menu.removeProject')).click();
     await settle();
     equal(entry(t('menu.removeConfirm')).textContent, t('menu.removeConfirm'));
@@ -173,9 +176,24 @@ check('right-click: a project offers a new conversation, its folder and removal,
     entry(t('menu.removeConfirm')).click();
     await settle();
     deepEqual(calls, ['new p1', 'folder p1', 'removeProject p1']);
+    equal(localStorage.getItem('faber.project.goal.p1'), null, 'the goal typed for a removed project goes with it');
+    equal(localStorage.getItem('faber.project.mission.p1'), null, 'and so does the mission shown for it');
+    equal(localStorage.getItem('faber.unsent.proof.p1'), null, 'and the checks typed for it and not saved');
   } finally {
     api.removeProject = original.remove;
     api.showProject = original.show;
+    dispose();
+    root.remove();
+  }
+});
+
+check('sidebar: a project that needs the person says so in words beside the amber mark, never with a bare number', async () => {
+  const root = stage();
+  const dispose = sidebar(root, [], () => [{ ...working('p1'), state: 'needsYou' }]);
+  try {
+    await settle();
+    equal(root.querySelector('.prow .amber-tag')?.textContent, t('run.needs', { n: 1 }));
+  } finally {
     dispose();
     root.remove();
   }

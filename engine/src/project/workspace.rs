@@ -178,6 +178,31 @@ impl Workspace {
         }
     }
 
+    /// The project left Faber: the copy and the proofs' folder go, each on its own. A link at either is deleted itself;
+    /// `remove_dir_all` deletes the links inside instead of following them, so nothing outside is touched, and the folders
+    /// above must be real, as everywhere here. The repository forgets the copy at its next `git worktree prune`.
+    /// A copy that cannot go now (a straggler still in it) stays on disk: ids are never reused, so it only costs space,
+    /// and a sweep at start could reclaim it.
+    pub fn discard(&self) -> Result<(), &'static str> {
+        if !crate::proc::jobs_quiet() {
+            return Err("reason.workspace.busy");
+        }
+        let mut result = Ok(());
+        for dir in [&self.root, &self.own] {
+            // The folders above come first: through a link there, even deleting a link would act outside.
+            let gone = match dir.parent().map(real_path) {
+                Some(Ok(_)) => match std::fs::symlink_metadata(dir) {
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                    Ok(meta) if reparse(&meta) => unlink(dir),
+                    _ => std::fs::remove_dir_all(dir).map_err(|_| "reason.workspace.unsafe"),
+                },
+                _ => Err("reason.workspace.unsafe"),
+            };
+            result = result.and(gone);
+        }
+        result
+    }
+
     pub fn tainted(&self) -> bool {
         self.root.join("tainted").exists()
     }

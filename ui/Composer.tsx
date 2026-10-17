@@ -1,5 +1,5 @@
 import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from 'solid-js';
-import { type Choice, type Effort, PERMISSION_MODES, type PermissionMode, type Vendor } from './api.ts';
+import { DEFAULT_EFFORT, type Choice, type Effort, PERMISSION_MODES, type PermissionMode, type Vendor } from './api.ts';
 import { Ghost } from './Ghost.tsx';
 import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
@@ -68,7 +68,7 @@ async function attach(list: Iterable<File>, draft: Draft): Promise<{ draft: Draf
       const url = await readAs(file, 'dataUrl');
       images = [...images, { mediaType: file.type, base64: url.slice(url.indexOf(',') + 1) }];
     } else if ((file.type.startsWith('text/') || TEXT.test(file.name)) && file.size <= INLINE_TEXT) {
-      text = `${text}${text ? '\n\n' : ''}Attached file ${file.name}:\n\`\`\`\n${await readAs(file, 'text')}\n\`\`\``;
+      text = `${text}${text ? '\n\n' : ''}${t('composer.attachedFile', { name: file.name })}\n\`\`\`\n${await readAs(file, 'text')}\n\`\`\``;
     } else {
       const url = await readAs(file, 'dataUrl');
       files = [...files, { name: file.name, base64: url.slice(url.indexOf(',') + 1) }];
@@ -224,7 +224,7 @@ export function Composer(props: Props) {
               const choice = props.options[Number(e.currentTarget.value)]!.choice;
               // A level means different work on each model, so a new model starts again at the default.
               const same = choice.vendor === props.choice.vendor && choice.model === props.choice.model;
-              props.onChoice(choice.vendor === 'auto' ? choice : { ...choice, effort: same ? (props.choice.effort ?? 'medium') : 'medium' });
+              props.onChoice(choice.vendor === 'auto' ? choice : { ...choice, effort: same ? (props.choice.effort ?? DEFAULT_EFFORT) : DEFAULT_EFFORT });
               warmed = false; // the next keystroke warms the newly chosen model
             }}
           >
@@ -241,7 +241,7 @@ export function Composer(props: Props) {
         <Show when={props.choice.vendor !== 'auto' && props.choice.model}>
           <label class="chip choose effort">
             <span>{t('effort.label')}</span>
-            <select aria-label={t('effort.label')} value={props.choice.effort ?? 'medium'} disabled={props.locked} onChange={(e) => {
+            <select aria-label={t('effort.label')} value={props.choice.effort ?? DEFAULT_EFFORT} disabled={props.locked} onChange={(e) => {
               props.onChoice({ ...props.choice, effort: e.currentTarget.value as Effort });
               warmed = false;
             }}>

@@ -73,8 +73,6 @@ pub(crate) struct Faber {
     missions: Arc<tauri::async_runtime::Mutex<()>>,
     local: Option<Development>,
     pub(crate) awake: Arc<Mutex<CountedAwake>>,
-    /// Missions the coordinator is driving in this process; a second drive of the same mission never starts.
-    driving: Mutex<HashSet<String>>,
     /// One check of the agents at a time; a second start waits for it and finds the receipts it earned.
     qualifying: tauri::async_runtime::Mutex<()>,
     _mission_events: faber_engine::project::store::MissionSubscription,
@@ -122,6 +120,8 @@ fn main_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
 #[tauri::command]
 async fn state(app: AppHandle, faber: State<'_, Faber>) -> Res<FullState> {
     let mut state = faber.engine.state();
+    state.settings = std::mem::take(&mut state.settings).shown();
+    state.settings.autostart = Some(autostart::shown(lock(&faber.autostart).as_ref(), state.settings.autostart()));
     state.settings.appearance = look::usable(state.settings.appearance.take());
     let look = look::stored(state.settings.appearance.as_ref());
     Ok(FullState { state, look, models: lock(&faber.models).clone(), version: app.package_info().version.to_string() })
@@ -242,8 +242,10 @@ async fn save_settings(faber: State<'_, Faber>, mut patch: Settings) -> Result<S
         patch.appearance = Some(look::validated(map)?.0.to_map());
     }
     let autostart = lock(&faber.autostart);
-    let mut settings = autostart::save(autostart.as_ref(), patch.autostart, || faber.engine.save_settings(patch))?;
-    lock(&faber.awake).set_enabled(settings.keep_awake.unwrap_or(true));
+    let mut settings = autostart::save(autostart.as_ref(), patch.autostart, || faber.engine.save_settings(patch))?.shown();
+    // The answer replaces the settings on screen, so the switch shows what Windows will do, as `state` does.
+    settings.autostart = Some(autostart::shown(autostart.as_ref(), settings.autostart()));
+    lock(&faber.awake).set_enabled(settings.keep_awake());
     settings.appearance = look::usable(settings.appearance.take());
     let look = look::stored(settings.appearance.as_ref());
     Ok(SavedSettings { settings, look })
@@ -252,7 +254,9 @@ async fn save_settings(faber: State<'_, Faber>, mut patch: Settings) -> Result<S
 #[tauri::command]
 async fn save_theme(app: AppHandle, appearance: Map<String, Value>, name: String) -> Result<bool, Failure> {
     let json = look::write_theme_file(&appearance, &name)?;
-    let mut dialog = app.dialog().file().add_filter("JSON", &["json"]).set_file_name(format!("my-theme{}", look::theme_extension()));
+    // The dialog suggests the theme's own name, which arrives in the person's language, keeping only plain characters.
+    let stem: String = name.chars().filter(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_')).collect();
+    let mut dialog = app.dialog().file().add_filter("JSON", &["json"]).set_file_name(format!("{}{}", stem.trim(), look::theme_extension()));
     if let Some(w) = main_window(&app) {
         dialog = dialog.set_parent(&w);
     }
@@ -278,7 +282,7 @@ async fn add_project(app: AppHandle, faber: State<'_, Faber>) -> Res<Option<Proj
         dialog = dialog.set_parent(&w);
     }
     let Some(picked) = dialog.blocking_pick_folder() else { return Ok(None) };
-    let path = picked.into_path().map_err(|e| e.to_string())?;
+    let path = picked.into_path().map_err(|_| "error.folder.notLocal")?;
     faber.engine.open_folder(&path.to_string_lossy()).map(Some)
 }
 
@@ -350,14 +354,14 @@ async fn save_file(app: AppHandle, faber: State<'_, Faber>, id: String, path: St
         dialog = dialog.set_parent(&w);
     }
     let Some(target) = dialog.blocking_save_file() else { return Ok(false) };
-    std::fs::copy(&source, target.into_path().map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    std::fs::copy(&source, target.into_path().map_err(|_| "error.file.save")?).map_err(|_| "error.file.save")?;
     Ok(true)
 }
 
 #[tauri::command]
 async fn show_file(app: AppHandle, faber: State<'_, Faber>, id: String, path: String) -> Res<()> {
     let Some(source) = faber.engine.workspace_file(&id, &path) else { return Ok(()) };
-    app.opener().reveal_item_in_dir(source).map_err(|e| e.to_string())
+    app.opener().reveal_item_in_dir(source).map_err(|_| "error.file.show".into())
 }
 
 /// Shows a project's folder in the file manager. The saved path is checked first (folder.rs), and the folder is only
@@ -366,7 +370,7 @@ async fn show_file(app: AppHandle, faber: State<'_, Faber>, id: String, path: St
 async fn show_project(app: AppHandle, faber: State<'_, Faber>, id: String) -> Res<()> {
     let project = faber.engine.project(&id)?;
     let folder = folder::local_folder(&project.path)?;
-    app.opener().reveal_item_in_dir(folder).map_err(|e| e.to_string())
+    app.opener().reveal_item_in_dir(folder).map_err(|_| "error.file.show".into())
 }
 
 /// An image from a chat workspace as a data URL, so the page never reads the disk itself.
@@ -375,17 +379,18 @@ async fn read_image(faber: State<'_, Faber>, id: String, path: String) -> Res<Op
     let Some(source) = faber.engine.workspace_file(&id, &path) else { return Ok(None) };
     let ext = source.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
     let Some((_, kind)) = IMAGE_TYPES.iter().find(|(e, _)| Some(*e) == ext.as_deref()) else { return Ok(None) };
-    if std::fs::metadata(&source).map_err(|e| e.to_string())?.len() > 8_000_000 {
+    // A picture that cannot be read only has no preview.
+    if !std::fs::metadata(&source).is_ok_and(|m| m.len() <= 8_000_000) {
         return Ok(None);
     }
-    let bytes = std::fs::read(&source).map_err(|e| e.to_string())?;
+    let Ok(bytes) = std::fs::read(&source) else { return Ok(None) };
     Ok(Some(format!("data:{kind};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes))))
 }
 
 #[tauri::command]
 async fn open_terminal(faber: State<'_, Faber>, id: String) -> Res<bool> {
     let Some(cmd) = faber.engine.terminal(&id) else { return Ok(false) };
-    terminal::open(&cmd).map_err(|e| e.to_string())?;
+    terminal::open(&cmd).map_err(|_| "error.terminal.open")?;
     Ok(true)
 }
 
@@ -393,9 +398,9 @@ async fn open_terminal(faber: State<'_, Faber>, id: String) -> Res<bool> {
 #[tauri::command]
 async fn open_link(app: AppHandle, url: String) -> Res<()> {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
-        return Err("only web links open".into());
+        return Err("error.link.web".into());
     }
-    app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
+    app.opener().open_url(url, None::<&str>).map_err(|_| "error.link.open".into())
 }
 
 /// The words the shell shows by itself (tray menu, tooltip, notification), sent whenever the language changes.
@@ -574,9 +579,9 @@ async fn project_grant(faber: State<'_, Faber>, project_id: String, mode: GitMod
     let mut grant = Grant::new(&common_dir, mode, revision, now);
     grant.author = repo_info.author;
     grant.self_update = self_update;
-    project.accept_grant(grant.clone()).map_err(str::to_string)?;
+    project.accept_grant(grant).map_err(str::to_string)?;
     faber.engine.update_project(&before, &project)?;
-    Ok(grant)
+    project.grant.ok_or_else(|| "reason.grant.none".into())
 }
 
 #[tauri::command]
@@ -629,12 +634,15 @@ fn drive_mission(app: &AppHandle, mission_id: String, commands: Vec<String>) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let faber = app.state::<Faber>();
-        if !lock(&faber.driving).insert(mission_id.clone()) {
-            return;
-        }
-        // An update install decided after the line above finds this mission in `driving` and waits; one decided before it is seen here.
+        // While it is held, the engine counts as working, so an update never ends the drive midway (C004), and its project
+        // cannot be removed. A mission that cannot be found has nothing to drive.
+        let project = {
+            let _turn = faber.missions.lock().await;
+            find_mission_and_journal(&faber, &mission_id).map(|(project, _, _)| project.id)
+        };
+        let Some(drive) = project.ok().and_then(|project| faber.engine.drive(&mission_id, &project)) else { return };
+        // An update install decided after the line above finds this mission driven and waits; one decided before it is seen here.
         if update::installing() {
-            lock(&faber.driving).remove(&mission_id);
             return;
         }
         if let Err(key) = run_mission(&app, &faber, &mission_id, commands).await {
@@ -643,7 +651,7 @@ fn drive_mission(app: &AppHandle, mission_id: String, commands: Vec<String>) {
                 halt(&journal, &key);
             }
         }
-        lock(&faber.driving).remove(&mission_id);
+        drop(drive);
         publish(&app, &mission_id).await;
     });
 }
@@ -871,7 +879,7 @@ async fn mission_resume(app: AppHandle, faber: State<'_, Faber>, mission_id: Str
     project_commands::editable(&mission)?;
     project.allows(Effect::Worktree, mission.grant_revision).map_err(str::to_string)?;
     let commands = mission::confirmed(&project).map_err(str::to_string)?;
-    if lock(&faber.driving).contains(&mission_id) {
+    if faber.engine.is_driving(&mission_id) {
         return Err("reason.mission.driving".into());
     }
     let mut runner = Runner::load(&journal).map_err(str::to_string)?;
@@ -1424,7 +1432,7 @@ fn main() {
                     Arc::new(NoopAutostart)
                 }
             };
-            let keep_awake = faber_engine::store::Store::new(&data_dir).settings().keep_awake.unwrap_or(true);
+            let keep_awake = faber_engine::store::Store::new(&data_dir).settings().keep_awake();
             let awake = Arc::new(Mutex::new(CountedAwake::new(power, keep_awake)?));
             let update_requests = Arc::new(std::sync::atomic::AtomicBool::new(true));
             let mission_updates = update_requests.clone();
@@ -1488,7 +1496,6 @@ fn main() {
                 missions,
                 local: local.clone(),
                 awake,
-                driving: Mutex::default(),
                 qualifying: Default::default(),
                 _mission_events: mission_events,
                 autostart: Mutex::new(autostart_keeper),
@@ -1618,7 +1625,7 @@ fn headless_start(dev: &Development) -> Result<bool, faber_engine::project::upda
             Box::new(NoopPower)
         }
     };
-    let keep_awake = faber_engine::store::Store::new(&dev.data()).settings().keep_awake.unwrap_or(true);
+    let keep_awake = faber_engine::store::Store::new(&dev.data()).settings().keep_awake();
     let awake = Arc::new(Mutex::new(
         CountedAwake::new(power, keep_awake)
             .map_err(|_| faber_engine::project::update::UpdateError::InvalidState("power owner unavailable"))?,

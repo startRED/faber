@@ -306,7 +306,7 @@ mod tests {
     }
 
     fn runner_fixture(e: &Engine, repo: &Path) -> (crate::project::store::Journal, crate::project::run::Runner) {
-        let mut p = e.add_project(&repo.to_string_lossy());
+        let mut p = e.add_project(&repo.to_string_lossy()).unwrap();
         let before = p.clone();
         p.repo = Some(crate::project::RepoIdentity::new("repo", &repo.to_string_lossy()));
         p.grant = Some(crate::project::Grant::new("repo", crate::project::GitMode::Seguro, 3, 1));
@@ -363,7 +363,7 @@ mod tests {
         let (dir, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let e = engine(dir.path());
         // No mission record anywhere on disk: only the live session says the project is working.
-        let project = e.add_project(&repo.path().to_string_lossy());
+        let project = e.add_project(&repo.path().to_string_lossy()).unwrap();
         e.with(|c| {
             c.mission_sessions.insert("m1".into(), vec![Session::from_fn(|_| {})]);
             c.mission_projects.insert("m1".into(), project.id.clone());
@@ -374,6 +374,20 @@ mod tests {
             c.mission_projects.remove("m1");
         });
         assert_eq!(e.remove_project(&project.id), Ok(()));
+        e.shutdown();
+    }
+
+    #[tokio::test]
+    async fn a_paused_mission_still_driven_keeps_its_project_from_being_removed() {
+        let (dir, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let e = engine(dir.path());
+        let (j, mut r) = runner_fixture(&e, repo.path());
+        // Stop pauses the mission at once, while a setup or a proof can still run in the copy until the drive ends.
+        r.stop(&j, &e).await.unwrap();
+        let drive = e.drive("m1", &r.mission.project_id).unwrap();
+        assert_eq!(e.remove_project(&r.mission.project_id), Err("error.project.busy".to_string()));
+        drop(drive);
+        assert_eq!(e.remove_project(&r.mission.project_id), Ok(()));
         e.shutdown();
     }
 
@@ -414,6 +428,12 @@ mod tests {
                 })],
             );
         });
+        // The record of a mission whose project left Faber stays behind; it must not stop the others from pausing.
+        let missions = layout.dev_root().join("data").join("missions");
+        let mut orphan: serde_json::Value = serde_json::from_slice(&std::fs::read(missions.join("m1").join("run.json")).unwrap()).unwrap();
+        orphan["mission"]["projectId"] = "gone".into();
+        std::fs::create_dir_all(missions.join("m2")).unwrap();
+        std::fs::write(missions.join("m2").join("run.json"), orphan.to_string()).unwrap();
         e.pause_missions_for_update().await.unwrap();
         assert_eq!(crate::project::run::Runner::load(&j).unwrap().mission.state, crate::project::MissionState::Paused);
         assert_eq!(*commands.lock().unwrap(), ["interrupt", "close"]);
