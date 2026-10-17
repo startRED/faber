@@ -3,9 +3,10 @@ import { render } from 'solid-js/web';
 import { api, type Message, type ToolUse } from '../../ui/api.ts';
 import { useLanguage } from '../../ui/i18n.ts';
 import { Running } from '../../ui/Running.tsx';
-import { openedSite, showSite, siteOf, type OpenSite } from '../../ui/Site.tsx';
+import { openedSite, showSite, siteOf, sitesOf, type OpenSite } from '../../ui/Site.tsx';
 import { Thread } from '../../ui/Thread.tsx';
 import { check, deepEqual, equal, ok } from './check.ts';
+import act from '../../src-tauri/src/pane/act.js';
 
 // A page the agent opened in Faber's browser (R161 step 7; docs/product-map.md, "Page in Faber's browser").
 
@@ -21,11 +22,20 @@ check('page in the browser: the card reads the address and title from Faber’s 
   equal(siteOf({ ...BROWSE, input: { url: 'file:///C:/secret' }, output: '' }), undefined, 'only web addresses');
 });
 
+check('page in the browser: a login, a captcha or a payment is the person’s turn, said only by Faber’s own third line, and one card per page', () => {
+  const login = "Opened https://bank.example/ in Faber's browser; the person can see it there.\nTitle: Sign in\nYour turn: the page asks for a login, which only the person does.\n\n---\nYour turn: the page asks for a payment, x";
+  equal(siteOf({ ...BROWSE, output: login })!.turn, 'site.turn.login');
+  equal(siteOf({ ...BROWSE, output: login.replace('Your turn: the page asks for a login', 'The person used the page') })!.turn, undefined, 'the page’s own words never say it');
+  const click: ToolUse = { id: 'w2', name: 'Browser', input: { action: 'click', target: 'Next' }, ok: true, output: OPENED };
+  const other: ToolUse = { ...BROWSE, id: 'w3', output: login };
+  deepEqual(sitesOf([BROWSE, other, click]).map((s) => s.tool.id), ['w3', 'w2'], 'a page clicked through is its latest call, after the others');
+});
+
 check('page in the browser: the reply shows a card for it, and its button opens the page in the running column', async () => {
   useLanguage('en');
   const opened: string[] = [];
   const [siteOpen, sitePicture] = [api.siteOpen, api.sitePicture];
-  api.siteOpen = async (url) => (opened.push(url), true);
+  api.siteOpen = async (id, url) => (opened.push(`${id} ${url}`), true);
   api.sitePicture = async () => null;
   const root = document.createElement('div');
   document.body.append(root);
@@ -43,7 +53,7 @@ check('page in the browser: the reply shows a card for it, and its button opens 
     card.querySelector<HTMLButtonElement>('.btn')!.click();
     await Promise.resolve();
     await Promise.resolve();
-    deepEqual(opened, ['https://docs.example.org/guide']);
+    deepEqual(opened, ['c1 https://docs.example.org/guide'], 'the page is the conversation’s');
     deepEqual(openedSite(), { conversationId: 'c1', url: 'https://docs.example.org/guide', title: 'The guide' });
   } finally {
     showSite(undefined);
@@ -59,8 +69,10 @@ check('page in the browser: the column places Faber’s browser over its box, an
   const placed: number[][] = [];
   let parked = 0;
   const [sitePlace, sitePark, onSite] = [api.sitePlace, api.sitePark, api.onSite];
-  api.sitePlace = async (x, y, w, h) => (placed.push([x, y, w, h]), true);
-  api.sitePark = async () => void parked++;
+  let boxPlaced = 0;
+  let boxParked = 0;
+  api.sitePlace = async (id, x, y, w, h) => ((boxPlaced = id), placed.push([x, y, w, h]), true);
+  api.sitePark = async (id) => ((boxParked = id), void parked++);
   let moveTo: (url: string) => void = () => {};
   api.onSite = async (listener) => ((moveTo = listener), () => {});
   const root = document.createElement('div');
@@ -103,8 +115,15 @@ check('page in the browser: the column places Faber’s browser over its box, an
     equal(back, 1);
     setSite(undefined);
     equal(parked, 1, 'the browser leaves the screen with the page');
+    equal(boxParked, boxPlaced, 'for the box it was placed over');
+    ok(boxPlaced >= 1, 'a box number the shell knows from 1 on, whatever the clock does');
     ok(root.querySelector('.rc-empty'), 'the list is back');
+    const first = boxPlaced;
+    setSite({ conversationId: 'c1', url: 'https://docs.example.org/guide', title: '' });
+    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+    ok(boxPlaced > first, 'and the next box has a larger one');
   } finally {
+    setSite(undefined);
     api.sitePlace = sitePlace;
     api.sitePark = sitePark;
     api.onSite = onSite;
@@ -112,3 +131,262 @@ check('page in the browser: the column places Faber’s browser over its box, an
     root.remove();
   }
 });
+
+// The agent's actions as they run inside the page (`src-tauri/src/pane/act.js`), here on a page made for the check.
+
+function onPage(html: string, run: (page: HTMLElement) => void | Promise<void>) {
+  const page = document.createElement('div');
+  page.style.cssText = 'position: fixed; left: 0; top: 0; width: 600px;';
+  page.innerHTML = html;
+  document.body.append(page);
+  return Promise.resolve(run(page)).finally(() => page.remove());
+}
+
+check('page in the browser: the agent clicks and types by the words a person sees', () =>
+  onPage(
+    '<a href="#n" id="docs">Read the docs</a><button id="go">Next</button><label>Search <input id="q" name="query"></label><form id="f"><input id="name" placeholder="Your name"></form>',
+    (page) => {
+      const clicked: string[] = [];
+      page.addEventListener('click', (e) => (clicked.push((e.target as HTMLElement).id), e.preventDefault()));
+      deepEqual(act({ kind: 'click', target: 'next' }), { ok: true });
+      deepEqual(act({ kind: 'click', target: 'docs' }), { ok: true }, 'a part of the words is enough when nothing reads exactly');
+      deepEqual(clicked, ['go', 'docs']);
+      equal(act({ kind: 'click', target: 'Delete everything' }).ok, false, 'nothing that does not read so is clicked');
+      let typed = '';
+      page.querySelector('#q')!.addEventListener('input', (e) => (typed = (e.target as HTMLInputElement).value));
+      deepEqual(act({ kind: 'type', target: 'search', text: 'tokio' }), { ok: true });
+      equal(typed, 'tokio', 'the page sees it as typing');
+      let sent = 0;
+      page.querySelector('#f')!.addEventListener('submit', (e) => (sent++, e.preventDefault()));
+      deepEqual(act({ kind: 'type', target: 'your name', text: 'Ana', submit: true }), { ok: true });
+      equal((page.querySelector('#name') as HTMLInputElement).value, 'Ana');
+      equal(sent, 1, 'submit sends the field’s form');
+      equal(act({ kind: 'type', target: 'nowhere', text: 'x' }).ok, false);
+    },
+  ),
+);
+
+check('page in the browser: on a login, a captcha or a payment the agent reads but never clicks or types', () =>
+  onPage('<label>Password <input type="password" id="p"></label><button id="in">Sign in</button>', (page) => {
+    let clicked = 0;
+    page.querySelector('#in')!.addEventListener('click', () => clicked++);
+    deepEqual(act({ kind: 'read' }), { ok: true, turn: 'a login' });
+    deepEqual(act({ kind: 'click', target: 'Sign in' }), { ok: false, turn: 'a login' });
+    deepEqual(act({ kind: 'type', target: 'password', text: 'x' }), { ok: false, turn: 'a login' });
+    equal(clicked, 0);
+    equal((page.querySelector('#p') as HTMLInputElement).value, '');
+    page.innerHTML = '<input autocomplete="cc-number"><button>Pay</button>';
+    deepEqual(act({ kind: 'click', target: 'Pay' }), { ok: false, turn: 'a payment' });
+    page.innerHTML = '<div class="g-recaptcha" style="width: 300px; height: 74px"></div><button>Go</button>';
+    deepEqual(act({ kind: 'click', target: 'Go' }), { ok: false, turn: 'a captcha' });
+  }),
+);
+
+check('page in the browser: what the reviews found the agent could still do is the person’s turn', () =>
+  onPage('<button>Pay $49</button><button>Place order</button><button>Delete</button><button>Delete account</button><button>Save draft</button><button>Save copy</button>', (page) => {
+    deepEqual(act({ kind: 'click', target: 'Pay $49' }), { ok: false, turn: 'a payment' }, 'a saved card shows no field: the words that commit money are the person’s');
+    deepEqual(act({ kind: 'click', target: 'place order' }), { ok: false, turn: 'a payment' });
+    deepEqual(act({ kind: 'click', target: 'save' }), { ok: false, why: 'many', seen: ['save draft', 'save copy'] }, 'a part that fits several things is no choice');
+    equal(act({ kind: 'click', target: 'delete' }).ok, true, 'whole words that fit one thing exactly are that thing');
+    page.innerHTML = '<label>Card number <input name="number"></label>';
+    deepEqual(act({ kind: 'read' }), { ok: true, turn: 'a payment' }, 'a card field named by its label');
+    page.innerHTML = '<label>PIN <input id="pin" style="-webkit-text-security: disc"></label><label>Note <input id="note"></label>';
+    deepEqual(act({ kind: 'type', target: 'note', text: 'x' }), { ok: false, turn: 'a login' }, 'a masked text field, a shown password, is a secret');
+    page.innerHTML = '<input id="otp" autocomplete="one-time-code">';
+    equal(act({ kind: 'read' }).turn, 'a login');
+    page.innerHTML = '<form><label>Email <input id="e"></label><label>Code <input id="c" style="display: none"></label></form>';
+    let sent = 0;
+    page.querySelector('form')!.addEventListener('submit', (e) => (sent++, e.preventDefault()));
+    page.querySelector('#e')!.addEventListener('input', () => {
+      const code = page.querySelector<HTMLInputElement>('#c')!;
+      code.style.display = '';
+      code.type = 'password';
+    });
+    deepEqual(act({ kind: 'type', target: 'email', text: 'a@b.c', submit: true }), { ok: false, turn: 'a login' }, 'a page that shows a password as it is typed in is looked at again before Enter');
+    equal(sent, 0);
+    page.innerHTML = '<input id="plain">';
+    deepEqual(act({ kind: 'type', target: '', text: 'x', submit: true }), { ok: false, why: 'submit' }, 'Enter needs a named field');
+    page.innerHTML = '<iframe src="about:blank" style="width:1px;height:1px" data-x></iframe><button>Go</button>';
+    equal(act({ kind: 'click', target: 'go' }).ok, true, 'a frame from no payment or captcha site is no turn');
+  }),
+);
+
+check('page in the browser: the second security review’s findings are the person’s turn or a refusal, never a guess', () =>
+  onPage('<label>Passenger name <input id="pn"></label><label>Seat pin number <input id="sp"></label>', (page) => {
+    deepEqual(act({ kind: 'read' }), { ok: true, turn: 'a login' }, '"pin" as a whole word is still a secret');
+    page.innerHTML = '<label>Passenger name <input id="pn"></label><label>Frequent flyer <input id="ff"></label>';
+    deepEqual(act({ kind: 'read' }), { ok: true, turn: '' }, 'a word that only begins with "pass" is no password');
+    deepEqual(act({ kind: 'type', target: 'passenger name', text: 'Ana' }), { ok: true });
+    page.innerHTML = '<label>Pass <input id="ps"></label>';
+    equal(act({ kind: 'read' }).turn, 'a login', '"Pass" as a whole word is a secret');
+    page.innerHTML = '<label>Passenger name <input id="pn"></label>';
+    equal(act({ kind: 'read' }).turn, '', 'and "Passenger name" is not');
+    page.innerHTML = '<input name="user_password" style="width: 80px"><input id="x">';
+    equal(act({ kind: 'read' }).turn, 'a login', 'a password named by its attribute, joined by an underscore');
+    page.innerHTML = '<input id="userPassword">';
+    equal(act({ kind: 'read' }).turn, 'a login', 'or by camel case');
+
+    page.innerHTML = '<form><label>Email <input id="e"></label><button type="submit">Pay $49</button></form>';
+    let sent = 0;
+    page.querySelector('form')!.addEventListener('submit', (ev) => (sent++, ev.preventDefault()));
+    deepEqual(act({ kind: 'type', target: 'email', text: 'a@b.c', submit: true }), { ok: false, turn: 'a payment' }, 'Enter sends a form whose button commits money');
+    equal(sent, 0);
+    deepEqual(act({ kind: 'type', target: 'email', text: 'a@b.c' }), { ok: true }, 'typing without sending is fine');
+
+    page.innerHTML = '<ul><li>Invoice 42 <button>Delete</button></li><li>Invoice 43 <button>Delete</button></li></ul>';
+    let clicked = 0;
+    page.addEventListener('click', () => clicked++);
+    deepEqual(act({ kind: 'click', target: 'delete' }), { ok: false, why: 'many', seen: ['invoice 42 delete', 'invoice 43 delete'] }, 'the same words on two things are no choice, said with what is around them');
+    equal(clicked, 0);
+
+    page.innerHTML = '<button>Next</button>';
+    const here = location.href;
+    equal(act({ kind: 'click', target: 'next', at: here }).ok, true, 'the page is the one that was read');
+    equal(act({ kind: 'click', target: 'next', at: `${here}#` }).ok, true, 'an empty fragment is the same page');
+    deepEqual(act({ kind: 'click', target: 'next', at: `${here}##` }), { ok: false, why: 'moved', seen: [location.hostname] }, 'only an empty fragment is dropped, not a # that is part of one');
+    deepEqual(act({ kind: 'click', target: 'next', at: `${here}#elsewhere` }), { ok: false, why: 'moved', seen: [location.hostname] }, 'a fragment is part of the address: the page may show another thing there');
+    deepEqual(act({ kind: 'click', target: 'next', at: 'https://elsewhere.example/' }), { ok: false, why: 'moved', seen: [location.hostname] }, 'a page that moved since it was read');
+    deepEqual(act({ kind: 'type', target: 'x', text: 'y', at: 'https://elsewhere.example/' }), { ok: false, why: 'moved', seen: [location.hostname] });
+
+    const frame = (size: string) => `<iframe sandbox srcdoc="x" style="${size}"></iframe>`;
+    page.innerHTML = `<form><label>Name <input id="n"></label>${frame('width: 300px; height: 150px')}<button type="button">Proceed to checkout step</button></form>`;
+    deepEqual(act({ kind: 'type', target: 'name', text: 'x' }), { ok: false, turn: 'a payment' }, 'a large frame from another site in the form may hold a card form');
+    deepEqual(act({ kind: 'click', target: 'proceed to' }), { ok: false, turn: 'a payment' });
+    page.innerHTML = `<form><label>Name <input id="n"></label>${frame('width: 40px; height: 20px')}<button type="button">Proceed to checkout step</button></form>`;
+    equal(act({ kind: 'click', target: 'proceed to' }).ok, true, 'a small one is a pixel or a badge');
+    page.innerHTML = `<label>Name <input id="n"></label>${frame('width: 300px; height: 150px')}`;
+    equal(act({ kind: 'type', target: 'name', text: 'x' }).ok, true, 'an ad beside a field, outside any form, is not the page’s payment');
+  }),
+);
+
+check('page in the browser: every way a form is sent that pays is the person’s turn, whichever control or place sends it', () =>
+  onPage('', (page) => {
+    const form = (controls: string) => {
+      page.innerHTML = `<form><label>Email <input id="e"></label>${controls}</form>`;
+      let sent = 0;
+      page.querySelector('form')!.addEventListener('submit', (ev) => (sent++, ev.preventDefault()));
+      return () => sent;
+    };
+    const typeAndSend = () => act({ kind: 'type', target: 'email', text: 'a@b.c', submit: true });
+    for (const pays of [
+      '<button>Place order</button>',
+      '<button type="bogus">Pay $49</button>',
+      '<button type="">Buy now</button>',
+      '<input type="submit" value="Pay now">',
+      '<input type="image" alt="Pay now" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=">',
+      '<button aria-label="Pay now">Go</button>',
+    ]) {
+      const sent = form(pays);
+      deepEqual(typeAndSend(), { ok: false, turn: 'a payment' }, `Enter in a form with ${pays}`);
+      equal(sent(), 0);
+    }
+    {
+      const sent = form('<button>Search</button>');
+      page.querySelector('form')!.id = 'checkout';
+      page.insertAdjacentHTML('beforeend', '<input type="image" form="checkout" alt="Pay now" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=">');
+      deepEqual(typeAndSend(), { ok: false, turn: 'a payment' }, 'a paying image outside the form that it sends');
+      equal(sent(), 0);
+      page.querySelector('input[type=image]')!.remove();
+    }
+    let sent = form('<button>Search</button>');
+    deepEqual(typeAndSend(), { ok: true }, 'a form that pays for nothing is sent');
+    equal(sent(), 1);
+    equal(act({ kind: 'click', target: 'search' }).ok, true, 'and its button is clicked');
+    equal(sent(), 2);
+
+    sent = form('<button id="s">Save</button><button type="submit">Pay $49</button>');
+    deepEqual(act({ kind: 'click', target: 'save' }), { ok: false, turn: 'a payment' }, 'a button with no type sends a form whose other button pays');
+    sent = form('<button id="s">Done</button><label for="s">Keep going onwards</label><button>Pay $49</button>');
+    deepEqual(act({ kind: 'click', target: 'keep going onwards' }), { ok: false, turn: 'a payment' }, 'a label stands for the button it names');
+    sent = form('<button><span role="button">Save</span></button><button>Pay $49</button>');
+    deepEqual(act({ kind: 'click', target: 'save' }), { ok: false, turn: 'a payment' }, 'and so does something inside a button');
+    equal(sent(), 0);
+
+    sent = form('<div id="h"></div>');
+    page.querySelector('#h')!.attachShadow({ mode: 'open' }).innerHTML = '<button>Pay now</button>';
+    deepEqual(typeAndSend(), { ok: false, turn: 'a payment' }, 'a paying button in a shadow root of the form');
+    equal(sent(), 0);
+    form('<div id="h"></div><button>Pay $49</button>');
+    page.querySelector('#h')!.attachShadow({ mode: 'open' }).innerHTML = '<input placeholder="Card holder">';
+    deepEqual(act({ kind: 'type', target: 'card holder', text: 'Ana', submit: true }), { ok: false, turn: 'a payment' }, 'a field in a shadow root belongs to the form around it');
+
+    const frame = '<iframe sandbox srcdoc="x" style="width: 300px; height: 150px"></iframe>';
+    page.innerHTML = `<form><label>Name <input id="n"></label>${frame}</form>`;
+    deepEqual(act({ kind: 'read' }), { ok: true, turn: 'a payment' }, 'a large frame of another site in a form: a read says so, and gets no picture');
+    page.innerHTML = '<form><div id="h"></div></form>';
+    page.querySelector('#h')!.attachShadow({ mode: 'open' }).innerHTML = frame;
+    equal(act({ kind: 'read' }).turn, 'a payment', 'also when the frame sits in a shadow root of the form');
+    page.innerHTML = '<form><div id="h"></div><label>Name <input id="n"></label></form>';
+    page.querySelector('#h')!.attachShadow({ mode: 'open' }).innerHTML = '<button>Pay now</button>';
+    equal(act({ kind: 'type', target: 'name', text: 'x', submit: true }).turn, 'a payment');
+  }),
+);
+
+check('page in the browser: an action runs only on the address the agent read, and looks again as the page reacts', () =>
+  onPage('<label>Note <input id="n"></label><form id="f"><label>Email <input id="e"></label></form>', (page) => {
+    const start = location.href;
+    const note = page.querySelector<HTMLInputElement>('#n')!;
+    const email = page.querySelector<HTMLInputElement>('#e')!;
+    const gone = { ok: false, why: 'moved', seen: [location.hostname] };
+    let sent = 0;
+    page.querySelector('#f')!.addEventListener('submit', (ev) => (sent++, ev.preventDefault()));
+    const move = () => history.replaceState(null, '', '#moved');
+    try {
+      // A hidden test window never gets focus events, so the page reacting to the focus is the field's own method.
+      note.focus = move;
+      deepEqual(act({ kind: 'type', target: 'note', text: 'x', at: start }), gone, 'a page that moves as the field takes the focus gets nothing typed');
+      equal(note.value, '');
+      delete (note as { focus?: unknown }).focus;
+      history.replaceState(null, '', start);
+
+      email.addEventListener('input', move);
+      deepEqual(act({ kind: 'type', target: 'email', text: 'a@b.c', submit: true, at: start }), gone, 'and one that moves as it is typed in is not sent');
+      equal(sent, 0);
+      email.removeEventListener('input', move);
+      history.replaceState(null, '', start);
+      equal(act({ kind: 'type', target: 'email', text: 'a@b.c', submit: true, at: start }).ok, true);
+      equal(sent, 1);
+    } finally {
+      history.replaceState(null, '', start);
+    }
+  }),
+);
+
+check('page in the browser: words that fit several things are no choice even when the things read alike', () =>
+  onPage('<ul><li>Invoice 42 <button>Delete invoice</button></li><li>Invoice 43 <button>Delete invoice</button></li></ul>', (page) => {
+    let clicked = 0;
+    page.addEventListener('click', () => clicked++);
+    deepEqual(act({ kind: 'click', target: 'delete' }), { ok: false, why: 'many', seen: ['invoice 42 delete invoice', 'invoice 43 delete invoice'] }, 'a part of the words on two things');
+    equal(clicked, 0);
+    page.innerHTML = '<a href="#x" id="l"><button>Delete item</button></a>';
+    page.addEventListener('click', (ev) => ev.preventDefault());
+    equal(act({ kind: 'click', target: 'delete' }).ok, true, 'a button inside a link that read alike is one choice');
+  }),
+);
+
+check('page in the browser: a picture is kept only when the page did not change, or ask for anything, while it was taken', () =>
+  onPage('<p id="t">hello</p>', async (page) => {
+    const start = location.href;
+    try {
+      deepEqual(act({ kind: 'read', watch: true }), { ok: true, turn: '' });
+      deepEqual(act({ kind: 'settle' }), { ok: true, turn: '', changed: false }, 'a page that stayed still');
+      act({ kind: 'read', watch: true });
+      page.querySelector('#t')!.textContent = 'x';
+      equal(act({ kind: 'settle' }).changed, true, 'a change not yet told to the observer counts');
+      act({ kind: 'read', watch: true });
+      page.querySelector('#t')!.setAttribute('class', 'shown');
+      await Promise.resolve();
+      equal(act({ kind: 'settle' }).changed, true, 'and one already told');
+      act({ kind: 'read', watch: true });
+      page.insertAdjacentHTML('beforeend', '<label>Password <input type="password"></label>');
+      deepEqual(act({ kind: 'settle' }), { ok: true, turn: 'a login', changed: true }, 'a login that came up meanwhile is said');
+      page.querySelector('label')!.remove();
+      act({ kind: 'read', watch: true });
+      history.replaceState(null, '', '#moved');
+      equal(act({ kind: 'settle' }).changed, true, 'a page that moved');
+      equal(act({ kind: 'settle' }).changed, true, 'and with nothing watched, nothing is kept');
+    } finally {
+      history.replaceState(null, '', start);
+    }
+  }),
+);

@@ -103,8 +103,11 @@ frames) and checked against today's code. It fills the steps of R161 and never b
    second webview of the window on the same WebView2 (Windows only). A project's agent in full access gets a `browse`
    tool (Faber's MCP server for Claude Code, a dynamic tool for Codex) that opens a page there, answers with its visible
    text marked as the site's words, and keeps a picture in the conversation's attachments; the reply shows a card with
-   it, and "See the page" puts the page over the running column. Pages are read-only for now: taking over, the agent's
-   clicks and typing, the app pane and "Your turn" are still to come. The rest of the plan: The agent or a child opens websites in a pane that belongs to Faber and runs the app it builds beside the
+   it, and "See the page" puts the page over the running column. Built (R197): the agent reads the page again, clicks,
+   types, scrolls and goes back by the words a person sees; a page with a password, card or captcha field is the person's
+   turn ("Your turn" on the card), where the agent reads and scrolls but never clicks or types; while the person looks at
+   the pane it is theirs, and the agent's call waits for them and then hears they used it. Still to come: the app pane,
+   pointer-level actions for pages the words cannot reach, and the recorded log. The rest of the plan: The agent or a child opens websites in a pane that belongs to Faber and runs the app it builds beside the
    chat, through a Faber tool the CLI calls. A card in the reply ("Site open in the browser", with a picture and Open)
    is the way in, next to the file and question cards that already exist. The pane has one owner at a time: "Take over"
    stops the agent at its next action, the person clicks and types, and "Let it continue" hands it back with a short

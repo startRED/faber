@@ -171,7 +171,11 @@ itself is drawn by a second webview of the same window. The box is measured and 
 size, when the window does and once the column has slid in; when the box goes, the page moves out of the window, where
 it keeps drawing, and it closes after five minutes nobody used it. Opening a subagent closes the page and the other way
 round. Known limit: the page is a native view over the screen, so a menu or toast that would cover the column passes
-under it; the person sees the page, never types into it yet (taking over is the next piece).
+under it. While it is on screen the page is the person's: they click and type in it, and the agent's call waits for them
+to go back. A page clicked through several times is one card, its latest. Where the page asks for a login, a captcha or a
+payment the card has one line in the conversation's other amber, with the 2 px edge of a stuck subagent's line: "Your
+turn: log in on this page", and no picture, since one could hold what the person typed; the agent cannot click or type
+there.
 
 ### Recent folders and environments
 

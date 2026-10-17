@@ -60,6 +60,10 @@ render(
 // The static first frame (ui/index.html) has done its job: the real screen is in the page now.
 document.getElementById('first')?.remove();
 
+// A screen loaded again had no time to let Faber's browser go: box 0 does so now and makes the shell forget every box, so the
+// numbers of this screen start again from 1 whatever the clock does (R161 step 7).
+void api.sitePark(0).catch(() => {});
+
 // The window starts hidden: it shows once the first frame is painted, so there is never an empty one. The timer covers a
 // page whose frames wait for a window that is not shown; the shell's own failsafe covers a page that never gets here.
 let told = false;

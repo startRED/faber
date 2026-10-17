@@ -44,7 +44,7 @@ const KINDS: Record<string, Key> = {
   Grep: 'tool.grep',
   WebSearch: 'tool.webSearch',
   WebFetch: 'tool.webFetch',
-  Browser: 'tool.webFetch',
+  Browser: 'tool.browse',
   Agent: 'tool.agent',
   Task: 'tool.agent',
   TodoWrite: 'tool.plan',
@@ -64,7 +64,7 @@ function detailOf(input: unknown): string {
   if (typeof input === 'string') return input;
   if (Array.isArray(input)) return input.map((c) => (c as { path?: string })?.path).filter(Boolean).join(', ');
   const o = input as Record<string, unknown> | undefined;
-  const detail = o && (o.query ?? o.url ?? o.file_path ?? o.notebook_path ?? o.command ?? o.pattern ?? o.skill);
+  const detail = o && (o.query ?? o.url ?? o.target ?? o.file_path ?? o.notebook_path ?? o.command ?? o.pattern ?? o.skill);
   return typeof detail === 'string' ? detail.replace(/^https?:\/\//, '') : '';
 }
 

@@ -14,21 +14,21 @@ impl Core {
         area == Area::Project && permissions == Permissions::FullAccess && self.browser.is_some()
     }
 
-    /// The agent called the browser. An address that cannot open is answered at once with why, so the agent goes on.
+    /// The agent called the browser. A request that cannot be done is answered at once with why, so the agent goes on.
     pub(super) fn browse(&mut self, conv: &str, call: String, input: serde_json::Value) {
         let Some(sid) = self.live.get(conv).map(|l| l.sid) else { return };
-        let opened = match (self.browser.clone(), browser::checked_url(&input)) {
+        let opened = match (self.browser.clone(), browser::checked_request(&input)) {
             (None, _) => Err("Faber's browser is not available here.".to_string()),
-            (_, Err(why)) => Err(format!("The page did not open: {why}.")),
-            (Some(b), Ok(url)) => Ok((b, url)),
+            (_, Err(why)) => Err(format!("Faber's browser did not do it: {why}.")),
+            (Some(b), Ok(request)) => Ok((b, request)),
         };
-        let (b, url) = match opened {
+        let (b, request) = match opened {
             Ok(open) => open,
             Err(text) => return self.answer_browse(conv, sid, &call, false, text),
         };
         let (me, conv, dir) = (self.me.clone(), conv.to_string(), self.opts.data_dir.join("attachments").join(conv));
         self.opts.runtime.spawn(async move {
-            let (ok, text) = match tokio::time::timeout(OPEN_TIMEOUT, b.open(url)).await {
+            let (ok, text) = match tokio::time::timeout(OPEN_TIMEOUT, b.act(conv.clone(), request)).await {
                 Ok(Ok(page)) => {
                     // A picture that cannot be kept only leaves the card without one.
                     if let (Some(picture), Some(name)) = (&page.picture, browser::picture_name(&call)) {
@@ -36,8 +36,8 @@ impl Core {
                     }
                     (true, browser::result_text(&page))
                 }
-                Ok(Err(why)) => (false, format!("The page did not open: {why}.")),
-                Err(_) => (false, "The page took longer than 45 seconds to load; it stays in Faber's browser, without its text.".into()),
+                Ok(Err(why)) => (false, format!("Faber's browser did not do it: {why}.")),
+                Err(_) => (false, "The page took longer than 45 seconds; it stays in Faber's browser, without its text.".into()),
             };
             let Some(core) = me.upgrade() else { return };
             core.lock().unwrap_or_else(|e| e.into_inner()).answer_browse(&conv, sid, &call, ok, text);

@@ -428,6 +428,8 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 .site span { display: grid; }
 .site span b, .site span small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .site span b { font-weight: 500; }
+/* What only the person does on the page: the conversation's other amber, with the words carrying it. */
+.site-turn { margin: 0; padding-left: 10px; color: var(--amber-ink); font-size: var(--fs-sm); box-shadow: inset 2px 0 0 var(--amber-ink); }
 .site img { width: 100%; max-width: 480px; aspect-ratio: 16 / 10; object-fit: cover; object-position: top; }
 /* The box Faber's browser is placed over: it fills the column and never scrolls, so the page stays where it is drawn. */
 .site-body { display: flex; flex-direction: column; overflow: hidden; }

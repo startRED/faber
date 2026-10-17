@@ -400,6 +400,9 @@ export interface RecentsView {
   environments: EnvironmentView[];
 }
 
+// Names this load of the screen to the shell's browser pane: a request of any other load (a screen that went away) is ignored.
+const LOAD = crypto.getRandomValues(new Uint32Array(1))[0];
+
 // Typed calls into the engine (the commands registered in src-tauri/src/main.rs and src-tauri/src/setup.rs).
 export const api = {
   state: () => invoke<AppState>('state'),
@@ -439,9 +442,9 @@ export const api = {
   showFile: (id: string, path: string) => invoke<void>('show_file', { id, path }),
   readImage: (id: string, path: string) => invoke<string | null>('read_image', { id, path }),
   /** Faber's browser pane (R161 step 7): over a box of the screen, off it, a page the person opens, a call's picture. */
-  sitePlace: (x: number, y: number, width: number, height: number) => invoke<boolean>('site_place', { x, y, width, height }),
-  sitePark: () => invoke<void>('site_park'),
-  siteOpen: (url: string) => invoke<boolean>('site_open', { url }),
+  sitePlace: (boxId: number, x: number, y: number, width: number, height: number) => invoke<boolean>('site_place', { load: LOAD, boxId, x, y, width, height }),
+  sitePark: (boxId: number) => invoke<void>('site_park', { load: LOAD, boxId }),
+  siteOpen: (id: string, url: string) => invoke<boolean>('site_open', { id, url }),
   sitePicture: (id: string, call: string) => invoke<string | null>('site_picture', { id, call }),
   /** Where the page in Faber's browser is now, at every page it finishes loading. */
   onSite: (listener: (url: string) => void) => listen<string>('faber:site', (e) => listener(e.payload)),

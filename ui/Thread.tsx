@@ -8,7 +8,7 @@ import { QuotaCard } from './QuotaCard.tsx';
 import { html, Markdown, openLinks } from './markdown.tsx';
 import { agentMeta, ChangedLines, openedAgent, SourceList, showAgent, tellAbout, ToolChip } from './AgentChat.tsx';
 import { untilReset } from './Sidebar.tsx';
-import { SiteCard, siteOf } from './Site.tsx';
+import { SiteCard, sitesOf } from './Site.tsx';
 import { bytes, compact, fromEngine, money, t } from './i18n.ts';
 import { prettyModel, vendorName, type Option } from './models.ts';
 import { animateList } from './motion.ts';
@@ -154,10 +154,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
   const agents = createMemo(() => agentSteps(tools(), helperKind()));
   const steps = createMemo(() => narration().length + own().length + (thinking().length ? 1 : 0));
   // The pages the agent opened in Faber's browser, each a card beside the files.
-  const sites = createMemo(() => own().flatMap((tool) => {
-    const site = siteOf(tool);
-    return site ? [{ tool, site }] : [];
-  }));
+  const sites = createMemo(() => sitesOf(own()));
   const commands = createMemo(() => own().filter((tool) => /bash|command|exec|shell/i.test(tool.name)).length);
   // The answer on screen is never repeated here: once it has text, the status line steps aside.
   // The checks this reply ran, ticking up as each one ends (R161 step 9). The engine marks a check when it starts, so the

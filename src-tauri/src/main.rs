@@ -398,33 +398,33 @@ async fn read_image(faber: State<'_, Faber>, id: String, path: String) -> Res<Op
 
 /// Faber's browser pane (R161 step 7) over the screen's own rectangle for it, in the page's logical pixels.
 #[tauri::command]
-async fn site_place(app: AppHandle, x: f64, y: f64, width: f64, height: f64) -> bool {
+async fn site_place(app: AppHandle, load: u32, box_id: u64, x: f64, y: f64, width: f64, height: f64) -> bool {
     #[cfg(windows)]
-    if let Some(pane) = app.try_state::<Arc<pane::Pane>>() {
-        return pane.place(x, y, width, height);
+    if let Some(pane) = app.try_state::<Arc<pane::Pane>>().map(|p| p.inner().clone()) {
+        return pane.place(load, box_id, x, y, width, height).await;
     }
-    let _ = (app, x, y, width, height);
+    let _ = (app, load, box_id, x, y, width, height);
     false
 }
 
-/// The browser pane leaves the screen; it keeps its page.
+/// The browser pane leaves the screen for the screen's box `box_id` and every older one; it keeps its page.
 #[tauri::command]
-async fn site_park(app: AppHandle) {
+async fn site_park(app: AppHandle, load: u32, box_id: u64) {
     #[cfg(windows)]
     if let Some(pane) = app.try_state::<Arc<pane::Pane>>() {
-        pane.park();
+        pane.park(load, box_id);
     }
-    let _ = app;
+    let _ = (app, load, box_id);
 }
 
-/// The person opens a page from a reply's card in the browser pane.
+/// The person opens a page from a reply's card in the browser pane; it is that conversation's page from then on.
 #[tauri::command]
-async fn site_open(app: AppHandle, url: String) -> bool {
+async fn site_open(app: AppHandle, id: String, url: String) -> bool {
     #[cfg(windows)]
     if let Some(pane) = app.try_state::<Arc<pane::Pane>>().map(|p| p.inner().clone()) {
-        return pane.show_page(&url).await;
+        return pane.show_page(&id, &url).await;
     }
-    let _ = (app, url);
+    let _ = (app, id, url);
     false
 }
 
