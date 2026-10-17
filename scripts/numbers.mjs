@@ -250,6 +250,13 @@ function assign(amend) {
     ...[...numbers.decisions].map(([s, n]) => `${s === 1 ? 'R-next' : `R-next-${s}`} is R${n}`),
     ...[...numbers.notes].map(([s, n]) => `${s === 1 ? 'notes.next' : `notes.next-${s}`} is notes.${n}`),
   ];
+  // Two rows that share a placeholder would share its number, and a change of words only runs no test that would see it.
+  const twice = twiceUsed(readFileSync('docs/decisions.md', 'utf8'));
+  if (twice.length) {
+    git('reset', '--quiet', '--hard', 'HEAD');
+    console.error(`${twice.join(', ')} would head two rows of docs/decisions.md: give each row its own placeholder (R-next, R-next-2).`);
+    return 1;
+  }
   git('add', '-A', '--', '.');
   if (amend) {
     execFileSync('git', ['commit', '--quiet', '--amend', '-F', '-'], { input: numbered(message, numbers), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
