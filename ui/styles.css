@@ -448,7 +448,9 @@ select.pill option { background: var(--s2); color: var(--ink); }
 .st-fold-head .i { flex: none; color: var(--ink-3); }
 .st-fold-head:hover .i { color: var(--ink); }
 /* The one text field, outside the composer: an input, a textarea or a box that holds an input (the search). */
-.field { width: 100%; max-width: 240px; height: var(--h-md); padding: 0 10px; border: 0; border-radius: var(--r-sm); background: var(--bg); box-shadow: inset 0 0 0 1px var(--control-line); color: var(--ink); font-size: var(--fs-sm); }
+.field { width: 100%; max-width: 240px; height: var(--h-md); padding: 0 10px; border: 0; border-radius: var(--r-sm); background: var(--bg); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink); font-size: var(--fs-sm); transition: box-shadow var(--dur-fast); }
+/* A field is quiet at rest, like the rows around it; the stronger line shows where the pointer or the typing is. */
+.field:hover, .field:focus-within { box-shadow: inset 0 0 0 1px var(--control-line); }
 .field::placeholder { color: var(--ink-3); opacity: 1; }
 .field:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
 .field.sm { height: var(--h-sm); }
@@ -572,6 +574,10 @@ textarea.field { height: auto; max-width: none; padding: 8px 10px; resize: verti
 .facts { display: grid; gap: 14px; max-width: 560px; margin: 0; padding: 0; list-style: none; }
 .facts li { display: flex; align-items: center; gap: 12px; font-size: var(--fs-read); color: var(--ink); }
 .facts .i { flex: none; color: var(--accent-text); }
+/* Inside a Settings card the facts are rows, with the same padding and dividers as an option. */
+.st-card > .facts { gap: 0; max-width: none; }
+.st-card > .facts li { padding: 12px 16px; font-size: var(--fs-sm); }
+.st-card > .facts li + li { border-top: 1px solid var(--line); }
 
 /* The first run: a stage with no sidebar, a stepper on top and the step below it (ui/FirstRun.tsx, ui/Setup.tsx). */
 .fr-stage { display: grid; grid-template-rows: 52px minmax(0, 1fr); margin: 0 var(--stage-inset) var(--stage-inset); border-radius: var(--r-stage); background: var(--bg); box-shadow: var(--stage-shadow); min-height: 0; min-width: 0; overflow: hidden; }

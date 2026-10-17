@@ -121,3 +121,11 @@ check('grammar: every text field outside the composer is the one .field class', 
   for (const gone of ['input.rename', '.env-tray input', '.ask .q-other', '.name-in', '.ny-custom input'])
     ok(!rules.includes(gone), `${gone} has no style of its own`);
 });
+
+check('grammar: a text field is quiet at rest like the search, and the Privacy facts sit inside their card with an option row\'s padding', () => {
+  const rules = styleRules();
+  const rule = (selector: string) => rules.find((r) => r.selectorText === selector);
+  ok(rule('.field')?.style.boxShadow.includes('var(--line)'), 'the resting line of a field is the quiet one');
+  ok(rule('.field:hover, .field:focus-within')?.style.boxShadow.includes('var(--control-line)'), 'the stronger line shows on hover and while typing');
+  equal(rule('.st-card > .facts li')?.style.padding, rule('.st-opt')?.style.padding, 'a fact row and an option row share their padding');
+});
