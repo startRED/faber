@@ -85,6 +85,7 @@ mod tests {
             parent: parent.map(String::from),
             sign: None,
             facts: None,
+            check: false,
         }
     }
 

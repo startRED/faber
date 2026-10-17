@@ -204,6 +204,10 @@ async fn r161_a_stuck_subagent_shows_on_its_step_and_needs_the_person() {
     assert_eq!(facts.edited, ["src/lib.rs"]);
     assert_eq!((facts.checks, facts.failed), (3, 3), "three cargo test runs, all failed; npm install is no check");
     assert_eq!(facts.unnamed, ["src/lib.rs"], "the brief never named the file it changed");
+    // R161 step 9: each check is marked when it starts, so the screen counts them without a list of its own.
+    let checks: Vec<bool> = reply.tools.iter().flatten().filter(|t| t.name == "Bash").map(|t| t.check).collect();
+    assert_eq!(checks.iter().filter(|c| **c).count(), 3, "the three cargo test runs are checks: {checks:?}");
+    assert!(checks.iter().any(|c| !c), "npm install is no check: {checks:?}");
 }
 
 /// The same step started six times in a row is a loop; the sign goes away when the subagent does something else.

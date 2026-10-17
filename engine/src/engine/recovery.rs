@@ -584,6 +584,7 @@ mod tests {
                 parent: None,
                 sign: None,
                 facts: None,
+                check: false,
             }]);
         };
         let (reply, spawns) = lost(tool, false);

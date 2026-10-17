@@ -16,6 +16,34 @@ check('worklog: every Claude Code tool reads as what it does, in words', () => {
   equal(toolRow({ id: '6', name: 'SomeNewTool', input: {} }).label, 'SomeNewTool', 'a tool Faber does not know keeps its name');
 });
 
+// R161 step 9: while a reply runs, the checks it ran tick up under the status line, marked by the engine, never guessed here.
+check('worklog: the checks a running reply ran tick up, with how many failed', () => {
+  useLanguage('en');
+  const root = document.createElement('div');
+  document.body.append(root);
+  const run = (id: string, ok?: boolean) => ({ id, name: 'Bash', input: { command: 'cargo test' }, check: true, ok });
+  const [message, setMessage] = createSignal<Message>({
+    id: 'tally', role: 'assistant', at: 0, status: 'streaming', text: '',
+    tools: [{ id: 'i', name: 'Bash', input: { command: 'npm install' }, ok: true }, run('a')],
+  });
+  const dispose = render(() => createComponent(Thread, { get messages() { return [message()]; }, from: 0, conversationId: 'tally', options: [], onBranch: () => {} }), root);
+  try {
+    const tally = () => root.querySelector('.tally');
+    equal(tally(), null, 'a check still running has not ended, and a command that is no check never counts');
+    setMessage({ ...message(), tools: [message().tools![0]!, run('a', true)] });
+    equal(tally()!.textContent, 'Ran 1 check · none failed');
+    ok(tally()!.querySelector('svg'), 'none failed reads with a check mark');
+    setMessage({ ...message(), tools: [...message().tools!, run('b', false)] });
+    equal(tally()!.textContent, 'Ran 2 checks · 1 failed');
+    ok(tally()!.classList.contains('bad') && !tally()!.querySelector('svg'), 'a failed check takes the error edge');
+    setMessage({ ...message(), status: 'done' });
+    equal(tally(), null, 'the tally is for a reply at work');
+  } finally {
+    dispose();
+    root.remove();
+  }
+});
+
 // R161 step 9: a file change reads as the lines it changed, from the step's own input: the lines both sides share are not
 // a change, a new file is all added, and Codex's diff keeps its own lines without its headers.
 check('worklog: an edit step counts the lines it added and removed', () => {
@@ -61,3 +89,4 @@ check('worklog: an edit in flight shows its lines under the status line, and its
     root.remove();
   }
 });
+

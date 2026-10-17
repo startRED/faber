@@ -153,6 +153,12 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
   const steps = createMemo(() => narration().length + own().length + (thinking().length ? 1 : 0));
   const commands = createMemo(() => own().filter((tool) => /bash|command|exec|shell/i.test(tool.name)).length);
   // The answer on screen is never repeated here: once it has text, the status line steps aside.
+  // The checks this reply ran, ticking up as each one ends (R161 step 9). The engine marks a check when it starts, so the
+  // screen keeps no list of its own; a subagent's checks are its own facts.
+  const tally = createMemo(() => {
+    const ended = own().filter((tool) => tool.check && tool.ok !== undefined && !tool.declined);
+    return { ran: ended.length, failed: ended.filter((tool) => tool.ok === false).length };
+  });
   const latest = createMemo(() => {
     const tool = tools().at(-1);
     if (tool && tool.ok === undefined) return toolLine(tool);
@@ -233,6 +239,19 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
       </Show>
       <Show when={(steps() || agents().length) && streaming() && latest()}>
         <div class="activity-latest" role="status" aria-live="polite" aria-atomic="true" title={latest()}>{latest()}</div>
+      </Show>
+      {/* One polite region for the whole reply, so a screen reader hears each check end and the first failure. */}
+      <Show when={streaming()}>
+        <div class="tally-live" role="status" aria-live="polite" aria-atomic="true">
+          <Show when={tally().ran}>
+            <p class="tally" classList={{ bad: tally().failed > 0 }}>
+              <Show when={!tally().failed}>
+                <Icon name="check" small />
+              </Show>
+              {t('agent.facts.checks', { n: tally().ran })} · {tally().failed ? t('agent.facts.failed', { n: tally().failed }) : t('agent.facts.passed')}
+            </p>
+          </Show>
+        </div>
       </Show>
       <Show when={changing()}>{(change) => <ChangedLines change={change()} />}</Show>
       <Asks conversationId={props.conversationId} turnId={m().id} permissions={waiting()} surface="ask" />

@@ -87,6 +87,9 @@ inside its own area.
 - The work log and a helper's row share one disclosure style (`.disclosure`: a quiet card, a chevron, the hover).
 - Each step is a quiet chip: a verb in the ink color ("Reading", "Running") and what it acts on in the mono face, cut
   in the middle. A tool Faber does not know keeps its own name; an MCP tool reads "Using a tool" with its server's name.
+- While a reply runs and has ended at least one check, a quiet line under the status line counts them (R161 step 9):
+  "Ran 3 checks · none failed" after a check mark in the accent's text ink, or "· 1 failed" with the error note's 2 px
+  edge and no mark. The words are the subagent facts' own. It goes when the reply ends; nothing moves.
 - A file change's chip ends with its line count in the data face, `+N` in the accent's text ink and `−N` in the error
   ink (R161 step 9). While the newest step of a running reply is a file change, the lines it changed sit under the status
   line until the next step or the answer: at most four, one line each in the data face and the third ink, the sign in

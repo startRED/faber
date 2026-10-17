@@ -30,6 +30,7 @@ fn a_partial_answer_keeps_tool_effects_and_explicitly_continues_instead_of_repea
         parent: None,
         sign: None,
         facts: None,
+        check: false,
     }]);
     let partial = Partial::of(&reply);
     assert!(!partial.is_empty());

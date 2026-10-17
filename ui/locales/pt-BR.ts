@@ -883,6 +883,7 @@ export const ptBR: Messages = {
   'notes.31.new': 'Um subagente mostra à direita o que fez: os arquivos que mudou, as verificações que rodou e qualquer arquivo que não estava no pedido.',
   'notes.32.better': 'Uma alteração de arquivo mostra quantas linhas entraram e saíram e, enquanto acontece, as próprias linhas.',
   'notes.33.new': 'O Faber fica parado enquanto um jogo está na frente: nada se mexe nem é redesenhado, e o que aconteceu nesse meio-tempo aparece quando você volta.',
+  'notes.34.better': 'Enquanto uma resposta trabalha, as verificações que ela rodou aparecem contadas sob a linha de status, com quantas falharam.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

@@ -764,6 +764,7 @@ export const en = {
   'notes.31.new': 'A subagent opens on the right with what it did: the files it changed, the checks it ran, and any file its brief never named.',
   'notes.32.better': 'A file change shows how many lines it added and removed, and while it runs, the lines themselves.',
   'notes.33.new': 'Faber goes still while a game is in front: nothing moves or repaints, and what happened meanwhile shows when you come back.',
+  'notes.34.better': 'While a reply runs, the checks it ran count up under the status line, with how many failed.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

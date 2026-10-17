@@ -126,6 +126,7 @@ frames) and checked against today's code. It fills the steps of R161 and never b
    moves.
    Built (R188): changing files, as a line count on the step and the changed lines under the status line while it is
    the newest step.
+   Built (R192): running checks, as a count under the status line that ticks up with how many failed.
 
 **Across all of them:**
 

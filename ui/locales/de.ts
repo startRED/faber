@@ -896,6 +896,7 @@ export const de: Messages = {
   'notes.31.new': 'Ein Subagent zeigt rechts, was er getan hat: die geänderten Dateien, die ausgeführten Prüfungen und jede Datei, die sein Auftrag nicht nannte.',
   'notes.32.better': 'Eine Dateiänderung zeigt, wie viele Zeilen sie hinzufügt und entfernt, und während sie läuft die Zeilen selbst.',
   'notes.33.new': 'Faber hält still, solange ein Spiel im Vordergrund läuft: Nichts bewegt sich oder wird neu gezeichnet, und was inzwischen passiert ist, siehst du, wenn du zurückkommst.',
+  'notes.34.better': 'Während eine Antwort arbeitet, zählen die Prüfungen, die sie ausgeführt hat, unter der Statuszeile mit, samt der fehlgeschlagenen.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

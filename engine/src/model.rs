@@ -102,6 +102,10 @@ pub struct ToolUse {
     /// On a subagent's call once it ended: what it changed and checked (`facts.rs`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub facts: Option<crate::engine::facts::Facts>,
+    /// A command that runs the project's tests, lint or build (`nudge.rs`), marked when the call starts so the screen counts
+    /// the checks a reply ran without a second list of what a check is (R161 step 9).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub check: bool,
 }
 
 /// A helper the agent sent to the background (Claude Code's `Agent` call with `run_in_background`): its call returns when it

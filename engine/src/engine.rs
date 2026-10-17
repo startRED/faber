@@ -1453,7 +1453,7 @@ impl Core {
                     if !final_answer && parent.is_none() {
                         m.activity_end = Some(m.text.encode_utf16().count());
                     }
-                    m.tools.get_or_insert_default().push(ToolUse {
+                    let mut tool = ToolUse {
                         id: id.clone(),
                         name,
                         input,
@@ -1463,7 +1463,10 @@ impl Core {
                         parent,
                         sign: None,
                         facts: None,
-                    });
+                        check: false,
+                    };
+                    tool.check = crate::nudge::is_check(&tool);
+                    m.tools.get_or_insert_default().push(tool);
                 }
                 self.watch_started(conv, &id);
             }

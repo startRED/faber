@@ -36,6 +36,8 @@ export interface ToolUse {
   sign?: "waiting" | "repeat" | "failing" | "silent";
   /** On a subagent's call once it ended (R161 step 4). */
   facts?: { edited?: string[]; checks: number; failed: number; unnamed?: string[] };
+  /** A command that runs the project's tests, lint or build, as the engine marks it when it starts. */
+  check?: boolean;
 }
 export interface Permission {
   requestId: string;
