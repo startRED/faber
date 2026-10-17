@@ -749,8 +749,9 @@ file that is not words runs the lints. A push is compared with the commit before
 `phase-1-base`, where it lands; either may skip a suite only when the commit it builds on is green, and anything the job
 cannot tell runs everything (R165). Every suite still runs once a day on `main`, and on a commit before it becomes
 stable (`promote-stable.yml` starts the run and waits for it). The lints and the `rust` suite run on Windows and on macOS
-(macOS adds the `ui` suite to its lints). One Windows job builds the test app once (`cargo t --build-only`) and hands its
-programs (`built_programs` in `testkit/src/testbuild.rs`) to a `ui` part and eight `screen` parts, which build nothing
+(macOS adds the `ui` suite to its lints). One Windows job builds the test app once (`cargo t --build-only`, the fake
+CLI and the cache example at the same time in Cargo's own folder) and hands its programs (`built_programs` in
+`testkit/src/testbuild.rs`) to a `ui` part and eight `screen` parts, which build nothing
 (`--suite screen --shard 2/8 --prebuilt`) and use the Rust the runner image has. On CI the runner uses every core; on a
 person's PC it keeps to half. Every Cargo the runner starts goes without the variables `cargo run` gave it, which made
 ring's build script, and everything above it, build again. Each kind of job keeps its own Rust cache, and only `main`

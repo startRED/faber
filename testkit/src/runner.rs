@@ -11,7 +11,7 @@ use crate::report::{Outcome, Status, exit_code, line, quiet, summary};
 use crate::screen;
 use crate::slots;
 use crate::sweep;
-use crate::testbuild::{build_test_app, cargo_command, ensure_fake_cli, prebuilt};
+use crate::testbuild::{build_side_by_side, build_test_app, cargo_command, ensure_fake_cli, prebuilt};
 use faber_engine::project::proof::output::{cargo_output, died, failure_sections, parse_cargo_tests};
 use std::fs::File;
 use std::io::Write;
@@ -231,7 +231,7 @@ pub fn run(args: &[String]) -> i32 {
     }
     let jobs = jobs();
     if opts.build_only {
-        return match ensure_fake_cli(&paths, jobs).and_then(|()| build_test_app(&paths, jobs)) {
+        return match build_side_by_side(&paths, jobs) {
             Ok(()) => {
                 println!("Built the test app and its helpers.");
                 0

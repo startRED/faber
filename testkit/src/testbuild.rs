@@ -171,6 +171,25 @@ pub fn build_test_app(paths: &Paths, jobs: usize) -> Result<(), String> {
     Ok(())
 }
 
+/// `--build-only`, CI's build job: the fake CLI and the cache example in Cargo's own folder while the test app builds in
+/// its own (`paths.target`), so the two Cargo builds share no lock and each compiles the engine for itself at once (68-79 s
+/// became 45-49 s with the engine's crates rebuilt from scratch). A local run keeps them one after the other, so it never
+/// uses more than its `jobs` cores.
+pub fn build_side_by_side(paths: &Paths, jobs: usize) -> Result<(), String> {
+    both(|| ensure_fake_cli(paths, jobs), || build_test_app(paths, jobs))
+}
+
+/// Runs `first` on its own thread while `second` runs here, and reports every failure of the two.
+fn both(first: impl FnOnce() -> Result<(), String> + Send, second: impl FnOnce() -> Result<(), String>) -> Result<(), String> {
+    std::thread::scope(|scope| {
+        let first = scope.spawn(first);
+        let second = second();
+        let first = first.join().unwrap_or_else(|_| Err("a build thread stopped".into()));
+        let failures: Vec<String> = [first, second].into_iter().filter_map(Result::err).collect();
+        if failures.is_empty() { Ok(()) } else { Err(failures.join("\n")) }
+    })
+}
+
 /// The local rollback helper the Tauri build makes next to the test app.
 fn local_helper(paths: &Paths) -> std::path::PathBuf {
     paths.target.join(format!("debug/faber-local{}", std::env::consts::EXE_SUFFIX))
@@ -179,6 +198,30 @@ fn local_helper(paths: &Paths) -> std::path::PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_two_builds_run_at_the_same_time_and_both_failures_are_told() {
+        use std::sync::mpsc::channel;
+        use std::time::Duration;
+        // Each side waits for the other's message: run one after the other, the first would wait in vain.
+        let (to_second, from_first) = channel();
+        let (to_first, from_second) = channel();
+        let wait = Duration::from_secs(10);
+        let met = both(
+            move || {
+                let _ = to_second.send(());
+                from_second.recv_timeout(wait).map_err(|_| "the second build never ran meanwhile".to_string())
+            },
+            move || {
+                let _ = to_first.send(());
+                from_first.recv_timeout(wait).map_err(|_| "the first build never ran meanwhile".to_string())
+            },
+        );
+        assert_eq!(met, Ok(()));
+        assert_eq!(both(|| Err("fake CLI".into()), || Err("test app".into())), Err("fake CLI\ntest app".into()));
+        assert_eq!(both(|| Ok(()), || Err("test app".into())), Err("test app".into()));
+        assert_eq!(both(|| Err("fake CLI".into()), || Ok(())), Err("fake CLI".into()));
+    }
 
     #[test]
     fn cargo_starts_without_the_variables_cargo_run_hands_the_runner() {
