@@ -37,17 +37,24 @@ for how Faber works today. This file stays short: each line prevents a real mist
   average, not a target), and never leave proven work unpushed. CI fast-forwards `main` to each green `phase-1-base`
   commit by itself (never force, never a red commit), so `main` keeps close behind (R126, R127, R143). Lane work (a
   branch or worktree) enters `phase-1-base` as one squashed pull request that fills `.github/pull_request_template.md`
-  and whose title is a commit title (`pr-title` checks it), set to merge itself once CI is green
-  (`gh pr merge --auto --squash`, R173). A pull request that carries numbers (a `docs/next/` file or `R-next`) lands
-  with `node scripts/land.mjs <number>` instead: it squashes and numbers it on `phase-1-base` and queues it, and CI
-  lands it and marks it merged. A small proven commit goes through the queue too: `git push origin
+  and whose title is a commit title (`pr-title` checks it). Right after opening it, `node scripts/land.mjs <number>`
+  queues it: it squashes it onto `phase-1-base`, gives its numbers there, and CI lands it and marks it merged once every
+  system is green. Then the lane goes on to its next task and never watches CI: a red queue run turns the pull
+  request's `queue` check red, which wakes its session, and the fix is pushed and queued again with `land.mjs`
+  (R182). Queue once, with the fix complete: each push to a queue branch cancels the run before it. `land.mjs` is the
+  only way in: never the merge button or `gh pr merge` (a pull request's own run checks only the lints).
+  A small proven commit goes through the queue too: `git push origin
   HEAD:refs/heads/queue/<name>`; CI lands it on `phase-1-base` and `main` only when every system is green, and a red
-  one waits on its queue branch for its author to fix (R162). Nobody merges the base into a branch only to keep up.
+  one waits on its queue branch for its author to fix (R162). Nobody merges the base into a branch only to keep up,
+  and a conflict only in `.md` files where both sides added lines needs nothing: the landing keeps both (R184).
 - A red `phase-1-base` comes first: fix it, or keep your commits until it is green. `cargo t` shows it (`BASE` lines)
   and its `pre-push` hook refuses a push onto it ([design.md](docs/design.md#red-base)); `FABER_PUSH_ON_RED=1` pushes
   the fix.
 - In a worktree on a branch, claim the areas and files you will change in `.faber-lane` before changing one
   ([design.md](docs/design.md#lane-claims)); `cargo t` refuses unclaimed changes and files another lane claims.
+- When a task is done (its pull request queued), take the next with `node scripts/tasks.mjs next` and start it without
+  asking ([design.md](docs/design.md#task-queue)). Ask the owner only what is theirs (direction, taste, money), in a
+  short card, and go on with the next task meanwhile; stop when no task is free.
 - Never wait idle, on a helper (a subagent, a Codex run, another session) or on a run. The main session hands out only
   pieces its own next step does not need, runs them in the background, keeps working and reads each result when its
   notice comes; work it cannot go on without, it does itself. Research and collecting go to Haiku or Codex
@@ -74,7 +81,8 @@ Read [docs/product-rules.md](docs/product-rules.md) and [docs/product-map.md](do
 
 ## Done means
 
-- The proof commands below pass, and a check fails without the change (the product map names the check per feature).
+- The local proofs below pass, the queued commit's `gate` is green in CI (it lands only then), and a check fails
+  without the change (the product map names the check per feature).
 - The same commit updates [docs/product-map.md](docs/product-map.md) when a setting, screen, stored value, shell command,
   feature or product word appears, changes or goes (`engine/tests/product_map.rs` fails when one is missing), deletes the
   "Known incoherences" lines it fixed, and updates [docs/design.md](docs/design.md) when how a screen looks or behaves
@@ -84,7 +92,8 @@ Read [docs/product-rules.md](docs/product-rules.md) and [docs/product-map.md](do
   by itself once CI is green (R130); `docs`, `test`, `ci`, `refactor` and `chore` do not.
 - For a change a person sees, the commit body says `Extends: <map entry>`, or `New: <the closest existing thing and why
   it does not fit>`.
-- The commit body states the memory and processor cost measured, or why there is none (docs, tests only).
+- The commit body states the memory and processor cost, or why there is none (docs, tests only). CI measures it on
+  the queued commit and fails above the R125 limit; a change that can move it names the CI run that measured it.
 - Code nobody can check by reading it once gets a review from a fresh session that did not write it: the other vendor
   when it is available, the same vendor in a new read-only session when its quota is poor (R146). Security changes get
   two. Every review follows the review rules of product-rules.md, and a change a person sees also gets its coherence
@@ -107,25 +116,28 @@ Read [docs/product-rules.md](docs/product-rules.md) and [docs/product-map.md](do
 
 ## Proof commands
 
-All exit 0 before any commit:
+All exit 0 before any commit. None builds the app or waits for a build slot, so they take seconds to a minute:
 
 ```bash
 npm run lint
 npm run typecheck
 npm run build
 cargo fmt --all --check
-cargo t --suite lint
-cargo t
+npm run test:scripts
+cargo t --claims
 ```
 
-`cargo t --suite lint` runs both Clippy proofs (`--workspace --all-targets`, and `-p faber --features test-hooks`, each
-with `-D warnings`), and on Windows a third for macOS through zig ([design.md](docs/design.md#what-a-run-prints)). `cargo t` runs only the tests that depend on the files you changed; `cargo t --all` runs everything,
-as CI does (the `rust` and `ui` suites everywhere, `screen` on Windows). `--all` is CI's job: the required `gate` runs it
-on every pull request, so a lane pushes after `cargo t` and runs `--all` locally only to chase a failure CI found.
-Both print only failures, measurements and a summary; every line is in `target/faber-test/run.log`. A command that may
-take over two minutes (`cargo t`, a build) runs in the background while you keep working; wait for its notice or the
-Monitor tool, never a `sleep` or `until` loop, and never poll CI (the app watches it). `npm run dev`
-opens the app from source with live reload. Unit tests never spawn processes, touch real git or call a real CLI.
+`cargo t --claims` checks the lane's claims and shows a red `phase-1-base`; it builds only the runner. The heavy proofs run
+in CI on the queued commit, never on the PC by habit: the `rust`, `ui` and `screen` suites (`cargo t --all`, the
+memory limit of R125 included) and the Clippy proofs (`cargo t --suite lint`: `--workspace --all-targets` and `-p faber
+--features test-hooks`, each with `-D warnings`, plus macOS on Windows through zig,
+[design.md](docs/design.md#what-a-run-prints)). A red one wakes the lane ([design.md](docs/design.md#merge-on-green)).
+Run a suite on the PC only to see a new check fail before the change (`cargo t --filter <name>`) or to look closer at a
+failure CI reported; it runs only the tests that depend on the files you changed and prints only failures, measurements
+and a summary (every line in `target/faber-test/run.log`). A command that may take over two minutes (`cargo t`, a
+build) runs in the background while you keep working; wait for its notice or the Monitor tool, never a `sleep` or
+`until` loop, and never poll CI (the app watches it). `npm run dev` opens the app from source with live reload. Unit
+tests never spawn processes, touch real git or call a real CLI.
 
 On the maintainer's PC, Rust lives outside the default folders; export these before any `cargo` or `npm run dev`:
 

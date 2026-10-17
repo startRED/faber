@@ -111,6 +111,9 @@ pub struct Options {
     /// `--costs <file>`: the seconds of each screen scenario to deal `--shard` by, instead of the table in the repository.
     /// CI hands every part the same file (R165).
     pub costs: Option<std::path::PathBuf>,
+    /// `--claims`: check the lane's claims and show a red `phase-1-base`, build and run nothing. It is the local proof
+    /// that takes no build slot; the suites run in CI on the queued commit (R183).
+    pub claims: bool,
 }
 
 pub fn parse_args(args: &[String]) -> Result<Options, String> {
@@ -127,10 +130,11 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--shard" => opts.shard = Some(shard(it.next().ok_or("--shard needs a part such as 1/3")?)?),
             "--build-only" => opts.build_only = true,
             "--prebuilt" => opts.prebuilt = true,
+            "--claims" => opts.claims = true,
             "--costs" => opts.costs = Some(it.next().ok_or("--costs needs a file such as target/screen-costs.json")?.into()),
             other => {
                 return Err(format!(
-                    "unknown argument {other}: use --all, --suite <name>, --filter <text>, --shard <i/n>, --costs <file>, --build-only or --prebuilt"
+                    "unknown argument {other}: use --all, --suite <name>, --filter <text>, --shard <i/n>, --costs <file>, --build-only, --prebuilt or --claims"
                 ));
             }
         }
@@ -215,7 +219,7 @@ mod tests {
 
     #[test]
     fn the_bootstrap_keeps_a_default_limit_without_overriding_the_environment() {
-        let config: toml::Value = include_str!("../../.cargo/config.toml").parse().unwrap();
+        let config: toml::Table = include_str!("../../.cargo/config.toml").parse().unwrap();
         assert_eq!(config["build"]["jobs"].as_integer(), Some(4));
         assert!(!config["alias"]["t"].as_str().unwrap().split_whitespace().any(|arg| arg == "-j"));
     }
@@ -358,6 +362,7 @@ mod tests {
         assert!(args(&["--build-only"]).unwrap().build_only);
         assert!(args(&["--suite", "screen", "--prebuilt"]).unwrap().prebuilt);
         assert!(args(&["--build-only", "--prebuilt"]).is_err());
+        assert!(args(&["--claims"]).unwrap().claims);
         assert_eq!(args(&["--costs", "target/screen-costs.json"]).unwrap().costs, Some("target/screen-costs.json".into()));
         assert!(args(&["--costs"]).is_err());
         for wrong in [&["--shard"][..], &["--shard", "0/3"], &["--shard", "4/3"], &["--shard", "3"], &["--shard", "a/b"]] {

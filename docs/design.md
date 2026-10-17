@@ -910,7 +910,9 @@ sccache (user-wide, outside the repository) makes the rebuild of a swept depende
 
 ### Build slots
 
-Many lanes run `cargo t` on one PC; each run peaks near 8 GB. Before building, a run takes one of three slots
+Many lanes run `cargo t` on one PC; each run peaks near 8 GB. On 2026-10-16 and 17 lanes spent 441 minutes waiting for a
+slot, so the suites now run in CI on the queued commit and a lane runs `cargo t --claims` before a commit, which builds
+only the runner, takes no slot and checks the claims and the red base (R183). Before building, a run takes one of three slots
 (`testkit/src/slots.rs`): a locked file `target/.faber-slots/slot-<n>` of the main checkout, held until the run ends,
 crash included. With all three taken it prints one waiting line and waits. `FABER_BUILD_SLOTS` sets another count for
 another PC (R129, E3).
@@ -961,12 +963,42 @@ a lane on another machine is not seen.
 
 ### Merge on green
 
-`phase-1-base` requires one check, `gate` (R173): a job in `ci.yml` that is green only when `changes`, `check`, `app` and
-`screen` passed or were left out on purpose by the plan. A pull request is set to merge itself with
-`gh pr merge --auto --squash` once its local proofs pass; GitHub squashes it the moment the gate is green, and nobody waits
-on CI. The rule is not strict, so a pull request behind `phase-1-base` still merges; the run on `phase-1-base` that
-follows is what `main` waits for (R127). `main` and the queue (R162) run after the gate, so the queue only pushes a
-commit whose gate passed.
+`gate` (R173) is a job in `ci.yml` that is green only when `changes`, `check`, `app` and `screen` passed or were left
+out on purpose by the plan. `main` and the queue (R162) run after it, so the queue only pushes a commit whose gate
+passed. GitHub no longer requires it on `phase-1-base` (R186): a required check made GitHub refuse the land job's own
+push even with the gate green ("Required status check gate is expected", queue/pr-74 on 2026-10-17), and the queue
+already lets in only checked commits.
+
+Nobody waits on CI (R182). Right after opening a pull request, its lane runs `node scripts/land.mjs <number>`
+([Numbers](#numbers)) and goes on to its next task. `land.mjs` puts a pending `queue` status on the pull request's head.
+When the queued commit's gate or its landing fails, the `report` job turns that status red and comments on the pull
+request with the run, which wakes the session that watches it (the app's auto-fix). The fix is pushed to the pull
+request and queued again with `land.mjs`; a push alone never lands, since the landing stops at a head it did not squash.
+`land.mjs` is the only way in (R186). A pull request's own run checks only `changes`, the title and the lints, since
+the queue checks the very commit that lands; the suites ran twice per change before, once on the pull request and
+once on its squash or its queue commit, and five landings at once left screen parts waiting up to 226 s for a runner.
+So a pull request is never merged with the button or `gh pr merge`: its green says only that the lints passed. A
+Dependabot pull request still runs every suite on its own, until it lands through `land.mjs` too. Each push to a queue
+branch cancels the run before it, so a lane queues once, with its fix complete.
+
+### Task queue
+
+A session that finished a task takes the next one by itself, without asking, the way it does when the owner says "I am
+going to sleep, keep going" (R185). The list is `docs/tasks/`: one file per task, `<order>-<name>.md`, lowest order
+first, with a `# Title` line and the brief a fresh session needs. One file each means adding, reordering or finishing a
+task never touches another's lines. The owner decides what goes there; a session may add a follow-up it found after
+the owner's tasks.
+
+`node scripts/tasks.mjs next` reads the list on `origin/phase-1-base` and claims the first free task by creating the
+branch `claim/<name>` on GitHub. A push without force fails when that branch is already there, so two sessions never
+get the same task, whatever PC they run on. The claim is a commit of its own whose message says who holds it and since
+when; one older than a day is stale, and the next session takes it over (the same day as lane claims). The session
+works on a branch named after the task, and its pull request deletes the task's file, so the task is gone once it lands;
+the next `next` deletes the claims of tasks that left the list. `list` shows who holds what, `release <name>` gives a
+task back. CI never runs on `claim/` branches.
+
+A session asks the owner only what is the owner's to decide (direction, taste, money), in one short card, and takes the
+next task while the question waits. It stops when `next` says no task is free.
 
 ### Red base
 
@@ -1014,9 +1046,10 @@ change the same lines for real.
 worktree, `node scripts/numbers.mjs assign --amend` folds the fragment in after the last entry of each locale and the
 last row of the table, and every placeholder, the commit message's too, takes the next free number after that base. The
 numbered commit goes to `queue/pr-<number>`, where the queue checks that very commit (R162), so the base and the
-required `gate` (R173) only ever see checked commits. Its land job, one landing at a time, moves `phase-1-base` and the
-pull request's branch to the landed commit in one atomic push, from the head that was squashed only (the commit's
-`Pull-request-head` line), so GitHub shows the pull request merged; a later push, a close or another target stops the
+required `gate` (R173) only ever see checked commits. Its land job, one landing at a time, moves the pull
+request's branch to the landed commit, from the head that was squashed only (the commit's `Pull-request-head` line),
+and then `phase-1-base`, so GitHub shows the pull request merged (one atomic push of both closed #64 instead); a base
+that refuses puts the branch back; a later push, a close or another target stops the
 landing, and `land.mjs` replaces a queued commit only when nothing newer was queued meanwhile. Two decision rows that
 share a placeholder stop the numbering. When `phase-1-base` moved during the checks, the land job runs
 `land.mjs --head` again on the new base instead of a rebase, whose numbers would collide, and the queue checks it again.
@@ -1029,8 +1062,16 @@ It also fails on a decision number used twice, and on any placeholder or fragmen
 `main`; the `pre-push` hook refuses the same before it leaves the PC. The older form, `notes.next.<kind>` written
 straight into the locales and `node scripts/numbers.mjs assign` run on the branch, still works.
 
-A pull request with numbers never sets `gh pr merge --auto` (R173): GitHub would squash the placeholders onto
+A pull request never lands with `gh pr merge` (R173 is amended): GitHub would squash the placeholders onto
 `phase-1-base` unnumbered, and the base's check would fail.
+
+The shared docs merge themselves too (R184). Two lanes that each add a row, a line or a paragraph at the same place of
+`docs/product-map.md`, `docs/design.md` or any other `.md` file conflict in plain git, though both additions belong. So
+`land.mjs` squashes with `merge.conflictStyle=diff3` and settles each conflict in which neither side changed a line the
+base had: the base's new lines first, then the pull request's (`insertions` in `scripts/land.mjs`). Anything else stops
+the landing with its files: a conflict in code, a file one side deleted, or a line both sides changed, which is a real
+disagreement for the lane to settle. The squash is checked like any other, `engine/tests/product_map.rs` included. A
+conflict that GitHub shows on a pull request in those files alone needs nothing: the landing settles it.
 
 ### UX sentinel
 

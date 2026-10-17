@@ -57,6 +57,9 @@ jobs:
           WARM: ${{ github.event_name == 'workflow_dispatch' && inputs.warm && github.ref == 'refs/heads/main' }}
           BEFORE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          LIGHT: >-
+            ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
+            github.event.pull_request.user.login != 'dependabot[bot]' }}
         shell: bash
         run: |
           set -uo pipefail
@@ -99,6 +102,12 @@ jobs:
             decide
           fi
           [ -n "$scope" ] || scope=$(printf 'lints=true\nrust=true\nui=true\nscreen=true')
+          # A pull request of this repository lands only through scripts/land.mjs, whose queue run checks the very commit
+          # that lands, so its own run keeps only the lints (R186). Dependabot's still runs every suite it needs.
+          if [ "$LIGHT" = true ]; then
+            echo "A pull request: the queue runs the suites on the commit that lands, so this run checks the lints only"
+            scope=$(grep '^lints=' <<<"$scope"; printf 'rust=false\nui=false\nscreen=false')
+          fi
           echo "$scope"
           get() { if grep -q "^$1=true$" <<<"$scope"; then echo true; else echo false; fi; }
           lints=$(get lints); rust=$(get rust); ui=$(get ui); screen=$(get screen)
@@ -398,6 +407,7 @@ jobs:
       contents: write
       actions: write
       pull-requests: read
+      statuses: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -446,12 +456,19 @@ jobs:
             exit 1
           fi
           if git merge-base --is-ancestor origin/phase-1-base "$GITHUB_SHA"; then
-            # One atomic push moves the pull request's branch (so GitHub shows it merged) and phase-1-base together or not
-            # at all: when the base moved meanwhile, both stay as they were and the landing below starts again.
+            # The pull request's branch moves first, then phase-1-base: GitHub marks a pull request merged only when the base
+            # takes the head it already has (one atomic push of both closed #64 instead). A base that refuses, because it
+            # moved meanwhile, puts the branch back, and the landing below starts again.
             landed=false; before=$(git rev-parse origin/phase-1-base)
             if [ -n "$head" ]; then
-              git push --atomic --force-with-lease="refs/heads/$head:$oid" origin \
-                "$GITHUB_SHA:refs/heads/$head" "$GITHUB_SHA:refs/heads/phase-1-base" && landed=true
+              if git push --force-with-lease="refs/heads/$head:$oid" origin "$GITHUB_SHA:refs/heads/$head"; then
+                sleep 5
+                if git push origin "$GITHUB_SHA:refs/heads/phase-1-base"; then
+                  landed=true
+                else
+                  git push --force-with-lease="refs/heads/$head:$GITHUB_SHA" origin "$oid:refs/heads/$head" || true
+                fi
+              fi
             else
               git push origin "$GITHUB_SHA:refs/heads/phase-1-base" && landed=true
             fi
@@ -474,7 +491,9 @@ jobs:
             fi
           fi
           if [ -n "$head" ]; then
-            node scripts/land.mjs "$pr" --head "$oid"
+            # The base's land.mjs, not the queued one: a pull request cut before a fix to the landing still gets it.
+            git show origin/phase-1-base:scripts/land.mjs > "$RUNNER_TEMP/land.mjs"
+            node "$RUNNER_TEMP/land.mjs" "$pr" --head "$oid"
             gh workflow run ci.yml --ref "$branch"
             echo "phase-1-base moved; #$pr was squashed and numbered again on it and is checked again."; exit 0
           fi
@@ -484,3 +503,31 @@ jobs:
           git push --force origin "HEAD:refs/heads/$branch"
           gh workflow run ci.yml --ref "$branch"
           echo "phase-1-base moved; $branch was rebased and is checked again."
+
+  # A queued pull request (queue/pr-<n>) whose checks or landing failed says so on the pull request itself: a red `queue`
+  # status on the head that was queued and a comment, which wake the session that opened it, so nobody watches the queue
+  # (R182). The fix is pushed to the pull request and queued again with scripts/land.mjs.
+  report:
+    needs: [gate, land]
+    if: >-
+      always() && startsWith(github.ref, 'refs/heads/queue/pr-') && github.event_name != 'pull_request' &&
+      (needs.gate.result == 'failure' || needs.land.result == 'failure')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v5
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          FAILED: ${{ needs.gate.result == 'failure' && 'its checks failed' || 'it could not land on phase-1-base' }}
+        run: |
+          set -euo pipefail
+          pr=${GITHUB_REF#refs/heads/queue/pr-}
+          oid=$(git log -1 --format='%(trailers:key=Pull-request-head,valueonly)' "$GITHUB_SHA" | tr -d '[:space:]')
+          if [ -z "$oid" ]; then echo "No Pull-request-head line: nothing to report."; exit 0; fi
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$oid" -f state=failure -f context=queue -f target_url="$RUN" \
+            -f description="Queued, but $FAILED. Fix, push, then: node scripts/land.mjs $pr"
+          gh pr comment "$pr" --body "Queued as \`$GITHUB_SHA\`, but $FAILED: $RUN. Push the fix, then queue it again with \`node scripts/land.mjs $pr\`."
