@@ -111,11 +111,18 @@ cargo t
 
 `cargo t --suite lint` runs both Clippy proofs (`--workspace --all-targets`, and `-p faber --features test-hooks`, each
 with `-D warnings`), and on Windows a third for macOS through zig ([design.md](docs/design.md#what-a-run-prints)). `cargo t` runs only the tests that depend on the files you changed; `cargo t --all` runs everything,
-as CI does (the `rust` and `ui` suites everywhere, `screen` on Windows). Run `--all` when the screen or the shell changes.
+as CI does (the `rust` and `ui` suites everywhere, `screen` on Windows). `--all` is CI's job: the required `gate` runs it
+on every pull request, so a lane pushes after `cargo t` and runs `--all` locally only to chase a failure CI found.
 Both print only failures, measurements and a summary; every line is in `target/faber-test/run.log`. A command that may
 take over two minutes (`cargo t`, a build) runs in the background while you keep working; wait for its notice or the
 Monitor tool, never a `sleep` or `until` loop, and never poll CI (the app watches it). `npm run dev`
 opens the app from source with live reload. Unit tests never spawn processes, touch real git or call a real CLI.
+
+Never wait idle. While proofs, a review or CI run, the next item is already being built: in another worktree, or in a
+new session when it touches other files. A review starts with the proofs, not after them; the pull request opens and is
+set to merge itself as soon as the local proofs pass, and the gate is the last word. Work that needs an unmerged branch
+starts from that branch instead of waiting for it to land. A turn ends only when nothing is left to do, never to wait
+for a run, a review or CI: their notices wake the session.
 
 On the maintainer's PC, Rust lives outside the default folders; export these before any `cargo` or `npm run dev`:
 
