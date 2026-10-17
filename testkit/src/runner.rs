@@ -5,6 +5,7 @@
 use crate::app::{Paths, emergency_cleanup};
 use crate::base;
 use crate::checks;
+use crate::cross;
 use crate::lanes;
 use crate::plan::{Options, Suite, changed_paths, jobs, parse_args, select};
 use crate::report::{Outcome, Status, exit_code, line, quiet, summary};
@@ -101,24 +102,36 @@ fn run_rust(root: &Path, jobs: usize, filter: Option<&str>, log: &mut Log) -> Ve
 }
 
 fn run_lint(root: &Path, jobs: usize, log: &mut Log) -> Vec<Outcome> {
-    LINTS
-        .iter()
-        .map(|proof| {
-            let (started, name) = (Instant::now(), format!("cargo {}", proof.join(" ")));
-            let output = match cargo(root, &lint_args(proof, jobs)) {
-                Ok(output) => output,
-                Err(e) => return Outcome::fail(Suite::Lint, &name, None, &format!("cannot start cargo: {e}")),
-            };
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let (errors, text) = cargo_output(&String::from_utf8_lossy(&output.stdout), &stderr);
-            log.write(&text);
-            if output.status.success() {
-                Outcome::pass(Suite::Lint, &name, Some(started.elapsed()))
-            } else {
-                Outcome::fail(Suite::Lint, &name, Some(started.elapsed()), &reason(&errors, &stderr))
-            }
-        })
-        .collect()
+    let mut outcomes: Vec<Outcome> = LINTS.iter().map(|proof| lint(cargo_command(), root, proof, jobs, log)).collect();
+    // On a Windows PC the macOS code is checked too, before CI finds it (`cross`). A Mac's own Clippy already covers it.
+    if cfg!(windows) {
+        let name = format!("cargo {}", cross::PROOF.join(" "));
+        let mut command = cargo_command();
+        outcomes.push(match cross::find_zig() {
+            None => Outcome::skipped(Suite::Lint, &name, "needs zig on PATH (docs/design.md#screen-tests)"),
+            Some(zig) => match cross::use_zig(&mut command, &zig) {
+                Ok(()) => lint(command, root, cross::PROOF, jobs, log),
+                Err(e) => Outcome::fail(Suite::Lint, &name, None, &format!("cannot find the runner: {e}")),
+            },
+        });
+    }
+    outcomes
+}
+
+fn lint(mut command: Command, root: &Path, proof: &[&str], jobs: usize, log: &mut Log) -> Outcome {
+    let (started, name) = (Instant::now(), format!("cargo {}", proof.join(" ")));
+    let output = match command.current_dir(root).args(lint_args(proof, jobs)).output() {
+        Ok(output) => output,
+        Err(e) => return Outcome::fail(Suite::Lint, &name, None, &format!("cannot start cargo: {e}")),
+    };
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let (errors, text) = cargo_output(&String::from_utf8_lossy(&output.stdout), &stderr);
+    log.write(&text);
+    if output.status.success() {
+        Outcome::pass(Suite::Lint, &name, Some(started.elapsed()))
+    } else {
+        Outcome::fail(Suite::Lint, &name, Some(started.elapsed()), &reason(&errors, &stderr))
+    }
 }
 
 /// Every line of a run, whole, in `target/faber-test/run.log`. The screen gets only what [`quiet`] keeps.
