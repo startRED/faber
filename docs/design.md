@@ -715,7 +715,7 @@ screen, which owns the locale files.
 ## Screen cards
 
 One card per main screen: what it is for, the one action that leads, what never goes on it, and the photo a critique
-compares against (R-next). What the screen holds is in [product-map.md](product-map.md#screens-and-surfaces) and how it
+compares against (R167). What the screen holds is in [product-map.md](product-map.md#screens-and-surfaces) and how it
 looks in the sections above; a card only says what must not drift. The approved photo is the one the UX sentinel's
 composition scenario takes (`target/faber-test/shots/`, kept by CI with every run), at 1920x1080 and at 1280x800 in Dark
 Room. A change that moves a card's line updates the card in the same commit and says so in its visual critique. Today's
@@ -929,7 +929,7 @@ rest. The design is in `docs/superpowers/specs/2026-10-12-ux-sentinel-design.md`
 
 ### Visual critique
 
-Checks see code and motion, not a screen as a whole (R-next). The sentinel's scenario "the main screens keep their
+Checks see code and motion, not a screen as a whole (R167). The sentinel's scenario "the main screens keep their
 composition" photographs the Chat home, a project's home, an open conversation and Settings at 1920x1080 and 1280x800 in
 Dark Room and pt-BR (`target/faber-test/shots/critique-<screen>-<size>.png`). `node scripts/shots.mjs <label>` runs it and
 copies the photos of the screens the diff touches into `target/faber-test/critique/<label>/` with an index;
