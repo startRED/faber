@@ -1,9 +1,9 @@
-import { createEffect, createSignal, For, on, Show } from 'solid-js';
+import { createEffect, createMemo, createSignal, For, on, Show } from 'solid-js';
 import { UpdateLine } from './UpdateStage.tsx';
 import { api, type Area, type Project, type RunningItem, type Summary, type UpdateStatus, type Vendor, type VendorUsage } from './api.ts';
 import { openMenu } from './contextmenu.ts';
 import { Icon, VendorMark } from './Glyphs.tsx';
-import { lang, t } from './i18n.ts';
+import { percent, t } from './i18n.ts';
 import { en, type Key } from './locales/en.ts';
 import { Peek } from './Mark.tsx';
 import { animateList, keepForExit } from './motion.ts';
@@ -125,11 +125,13 @@ export function Sidebar(props: Props) {
   const inProject = (p: Project) => props.conversations.filter((c) => c.area === 'project' && c.projectId === p.id && matches(c.title, query()));
   // A project shows when its name or one of its conversations holds the search, and then opens on those conversations.
   const projects = () => props.projects.filter((p) => !searching() || matches(p.name, query()) || inProject(p).length > 0);
-  const chats = () => groupChats(props.conversations.filter((c) => c.area === 'chat' && matches(c.title, query())), props.now);
+  const chats = createMemo(() => groupChats(props.conversations.filter((c) => c.area === 'chat' && matches(c.title, query())), props.now));
   // The one rule for a project showing its conversations: the user opened it, or the search found something in it. The
   // list and aria-expanded both read it, so they never disagree.
   const expanded = (p: Project) => showsChats(open().has(p.id), searching(), inProject(p).length);
-  const nothing = () => searching() && projects().length === 0 && chats().length === 0;
+  // Each area lists only its own: Chat its conversations, Projects its projects with theirs.
+  const inChat = () => props.place.area === 'chat';
+  const nothing = () => searching() && (inChat() ? chats().length === 0 : projects().length === 0);
   // The first click asks, the second deletes.
   const remove = (id: string) => {
     if (confirming() !== id) return setConfirming(id);
@@ -193,6 +195,7 @@ export function Sidebar(props: Props) {
         <input type="search" placeholder={t('side.search')} aria-label={t('side.search')} value={query()} onInput={(e) => setQuery(e.currentTarget.value)} />
       </label>
       <div class="side-scroll" onMouseLeave={() => setConfirming(undefined)} ref={(el) => animateList(el, true)}>
+        <Show when={!inChat()}>
         <section class="projects" aria-labelledby="side-projects" ref={(el) => animateList(el, true)}>
           <div class="group-h">
             <span id="side-projects">{t('side.projects')}</span>
@@ -268,46 +271,67 @@ export function Sidebar(props: Props) {
             </For>
           </Show>
         </section>
+        </Show>
         <Show when={nothing()}>
           <div class="side-empty">{t('side.noMatch')}</div>
         </Show>
-        <div class="list" ref={(el) => animateList(el, true)}>
-          <For each={chats()}>
-            {(g) => (
-              <section ref={animateList}>
-                <div class="group-h">{t(`side.${g.group}` as Key)}</div>
-                <For each={g.chats}>{(c) => <Row c={c} />}</For>
-              </section>
-            )}
-          </For>
-        </div>
+        <Show when={inChat()}>
+          <div class="list" ref={(el) => animateList(el, true)}>
+            {/* The groups are keyed by their name and the rows by their conversation, so a refresh builds again only what changed. */}
+            <For each={chats().map((g) => g.group)}>
+              {(group) => (
+                <section ref={animateList}>
+                  <div class="group-h">{t(`side.${group}` as Key)}</div>
+                  <For each={chats().find((g) => g.group === group)?.chats ?? []}>{(c) => <Row c={c} />}</For>
+                </section>
+              )}
+            </For>
+          </div>
+        </Show>
       </div>
       <div class="side-foot">
-        <button class="area" onClick={() => props.onSettings()} title={t('settings.shortcut')}>
-          <Icon name="sliders" />
-          <span>{t('settings.open')}</span>
-        </button>
-        <Show when={props.userName}>
-          <div class="who">{props.userName}</div>
-        </Show>
+        {/* One row: the name, when the person gave one, and Settings. The version waits in Settings' tooltip until Settings shows it. */}
+        <div class="foot-row">
+          <Show when={props.userName}>
+            <div class="who">{props.userName}</div>
+          </Show>
+          <button class="area" onClick={() => props.onSettings()} title={`${t('settings.shortcut')} · ${t('side.version', { version: props.version })}`}>
+            <Icon name="sliders" />
+            <span>{t('settings.open')}</span>
+          </button>
+        </div>
+        {/* One thin line per connected AI: its mark, how much of its tightest window is used, the share. The window, the reset,
+            how old the reading is and "still counting" (C010) are in the tooltip, so the line never wraps. */}
         <div class="usage" role="group" aria-label={t('quota.label')}>
           <For each={props.vendors}>
             {(v) => {
               const q = () => tightest(props.quotas, v, props.now);
-              const share = () => (q() ? `${Math.round(q()!.used * 100)}%` : t('quota.unknown'));
+              const share = () => (q() ? percent(q()!.used) : t('quota.unknown'));
               const fresh = () => freshness(props.usage, v, q()?.window);
+              const low = () => props.usage?.find((u) => u.vendor === v)?.state === 'low';
+              const details = () =>
+                q()
+                  ? [
+                      `${t('quota.window', { window: windowName(q()!.window) })} · ${untilReset(q()!.resetsAt)}`,
+                      fresh().uncountedPoints ? t('quota.uncounted', { share: `${fresh().uncountedPoints}%` }) : '',
+                      fresh().readAt !== undefined ? t('quota.read', { when: ageWords(fresh().readAt!, props.now) }) : '',
+                      fresh().counting ? t('quota.counting') : '',
+                    ]
+                  : [t('side.usage')];
               return (
-                <button
-                  class="vendor"
-                  onClick={() => props.onSettings('usage')}
-                  title={q() ? `${t('quota.window', { window: windowName(q()!.window) })} · ${untilReset(q()!.resetsAt)}` : t('side.usage')}
-                >
+                <button class="vendor" classList={{ low: low() }} onClick={() => props.onSettings('usage')} title={[vendorName(v), ...details()].filter(Boolean).join(' · ')}>
                   <VendorMark vendor={v} />
-                  <span>{vendorName(v)}</span>
+                  <span class="sr">{vendorName(v)}</span>
+                  <span class="meter" aria-hidden="true">
+                    <i style={{ width: `${Math.round(Math.min(1, Math.max(0, q()?.used ?? 0)) * 100)}%` }} />
+                  </span>
                   <span class="share num">{share()}</span>
-                  <Show when={q() && fresh().uncountedPoints}>{(n) => <span class="extra num">{t('quota.uncountedShort', { share: `${n()}%` })}</span>}</Show>
-                  <Show when={q() && fresh().readAt !== undefined}><span class="age">{ageWords(fresh().readAt!, props.now)}</span></Show>
-                  <Show when={q() && fresh().counting}><span class="counting">{t('quota.counting')}</span></Show>
+                  <Show when={q() && fresh().counting}>
+                    <span class="counting" aria-hidden="true">…</span>
+                  </Show>
+                  <Show when={q() && fresh().counting}>
+                    <span class="sr">{t('quota.counting')}</span>
+                  </Show>
                 </button>
               );
             }}
@@ -329,9 +353,6 @@ export function Sidebar(props: Props) {
             {t('update.ready')}
           </button>
         </Show>
-        <div class="version num" lang={lang()}>
-          {t('side.version', { version: props.version })}
-        </div>
       </div>
     </>
   );

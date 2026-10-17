@@ -5,7 +5,7 @@ import { Icon } from './Glyphs.tsx';
 import { t } from './i18n.ts';
 import type { Option } from './models.ts';
 import { resizeComposer } from './composer-size.ts';
-import { keep, kept, release, useDraft } from './unsent.ts';
+import { flushKept, keepSoon, kept, release, useDraft } from './unsent.ts';
 
 export interface Draft {
   text: string;
@@ -24,7 +24,6 @@ interface Props {
   mode?: PermissionMode;
   onMode?: (mode: PermissionMode) => void;
   busy: boolean;
-  nextMessage?: boolean;
   /** A conversation is still opening: nothing can be sent or warmed until it is in. */
   locked?: boolean;
   placeholder: string;
@@ -87,7 +86,26 @@ export function Composer(props: Props) {
   onCleanup(() => clearTimeout(pause));
   let fileInput: HTMLInputElement | undefined;
   let field: HTMLTextAreaElement | undefined;
-  const resize = () => resizeComposer(field, draft().text);
+  // The field is measured at most once per frame (16 ms): a change that finds the last measure older than that measures at
+  // once (no frame is drawn at the old height), and the ones that follow within it (a paste, a key held down) share one
+  // measure when the frame ends. A timer, not requestAnimationFrame: a window that is not shown draws no frames.
+  const FRAME_MS = 16;
+  let measuredAt = -FRAME_MS;
+  let later: ReturnType<typeof setTimeout> | undefined;
+  const resize = () => {
+    if (later !== undefined) return;
+    const wait = measuredAt + FRAME_MS - performance.now();
+    if (wait > 0) {
+      later = setTimeout(() => {
+        later = undefined;
+        resize();
+      }, wait);
+      return;
+    }
+    measuredAt = performance.now();
+    resizeComposer(field, draft().text);
+  };
+  onCleanup(() => clearTimeout(later));
   createEffect(on(() => draft().text, () => queueMicrotask(resize), { defer: true }));
   onMount(() => {
     let width = 0;
@@ -108,7 +126,7 @@ export function Composer(props: Props) {
   const hasContent = () => draft().text.trim() !== '' || draft().images.length > 0 || draft().files.length > 0;
   const canSend = () => !props.locked && hasContent() && props.vendors.length > 0;
   useDraft(hasContent);
-  createEffect(() => props.draftKey && keep(props.draftKey, draft().text));
+  createEffect(() => props.draftKey && keepSoon(props.draftKey, draft().text));
   onCleanup(() => props.draftKey && release(props.draftKey));
 
   // The first keystroke starts the CLI, not focus: the box is focused as soon as Faber opens, and an unused Claude
@@ -166,8 +184,8 @@ export function Composer(props: Props) {
         <div class="chips">
           <For each={names()}>{(name) => <span class="chip">{name}</span>}</For>
           <span class="chip">
-            <button type="button" onClick={() => (setDraft((d) => ({ ...d, images: [], files: [] })), setNames([]))} aria-label={t('composer.removeAttachments')}>
-              {t('composer.clear')}
+            <button type="button" onClick={() => (setDraft((d) => ({ ...d, images: [], files: [] })), setNames([]))} aria-label={t('composer.removeAttachments')} title={t('composer.removeAttachments')}>
+              <Icon name="close" small />
             </button>
           </span>
         </div>
@@ -178,7 +196,7 @@ export function Composer(props: Props) {
         placeholder={props.placeholder}
         value={draft().text}
         onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
+        onBlur={() => (setFocused(false), props.draftKey && flushKept(props.draftKey))}
         onInput={(e) => {
           const text = e.currentTarget.value;
           setDraft((d) => ({ ...d, text }));
@@ -273,9 +291,6 @@ export function Composer(props: Props) {
           </button>
         </Show>
       </div>
-      <Show when={props.nextMessage && props.choice.vendor !== 'auto' && props.choice.model}>
-        <p class="effort-hint">{t('effort.nextMessage')}</p>
-      </Show>
     </form>
   );
 }

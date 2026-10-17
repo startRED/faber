@@ -48,7 +48,7 @@ export function Running(props: {
           fallback={
             <div class="rc-empty">
               <Peek />
-              <p>{t('run.empty')}</p>
+              <p>{t('run.none')}</p>
             </div>
           }
         >
@@ -101,10 +101,6 @@ export function Running(props: {
             )}
           </For>
         </Show>
-      </div>
-      <div class="rc-foot">
-        <Icon name="panel" />
-        <span>{t('run.foot')}</span>
       </div>
     </aside>
   );
