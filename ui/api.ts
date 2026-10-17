@@ -99,10 +99,26 @@ export interface Message {
   movedFrom?: Vendor;
   /** The next rung up, offered when the turn's own tools show it stopped early. */
   nudge?: { reason: string; vendor: Vendor; model: string; effort: Effort };
-  /** A message Faber sent by itself, and why (`wake.keepGoing`): drawn as a quiet line, not as the person's words. */
+  /** The pull request this reply opened or pushed, followed until its checks pass or it closes. */
+  follow?: Follow;
+  /** A message Faber sent by itself, and why (`wake.keepGoing`, `wake.checksFailed`, `wake.conflict`): drawn as a quiet line, not as the person's words. */
   wake?: { why: string; pr?: number; checks?: string[] };
   /** On a reply: "keep going" stopped after it, and why (a `reason.keepGoing.*` key). */
   halt?: string;
+}
+export type FollowState = 'pending' | 'failing' | 'conflict' | 'passing' | 'merged' | 'closed' | 'stopped';
+export interface Follow {
+  repo: string;
+  number: number;
+  url: string;
+  state: FollowState;
+  failed?: string[];
+  head?: string;
+  /** The checks failed while the quota was tight: the person was told instead of the agent. */
+  held?: boolean;
+  /** Why following ended early, as an engine key. */
+  problem?: string;
+  since: number;
 }
 export interface QueuedTurn {
   id: string;
@@ -298,6 +314,8 @@ export interface RunningItem {
   /** The subagent calls of the reply that seem stuck: each needs the person like a question. */
   stuck?: string[];
   waitUntil?: number;
+  /** A followed pull request whose checks failed while the quota was tight: its number and commit. */
+  held?: [number, string];
   /** "Keep going" is on: it runs on its own. */
   keepGoing?: boolean;
 }
@@ -441,6 +459,7 @@ export const api = {
   removeQueued: (id: string, turnId: string) => invoke<void>('remove_queued', { id, turnId }),
   sendQueued: (id: string, turnId: string) => invoke<void>('send_queued', { id, turnId }),
   tellHelper: (id: string, callId: string, text: string) => invoke<void>('tell_helper', { id, callId, text }),
+  unfollowPr: (id: string) => invoke<void>('unfollow_pr', { id }),
   removeProject: (id: string) => invoke<void>('remove_project', { id }),
   showProject: (id: string) => invoke<void>('show_project', { id }),
   addProject: () => invoke<Project | null>('add_project'),

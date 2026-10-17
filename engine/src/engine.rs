@@ -37,6 +37,7 @@ pub mod facts;
 mod helpers;
 mod keep_going;
 mod parked;
+mod pr_watch;
 mod project_budget;
 mod project_sessions;
 mod quota_watch;
@@ -44,6 +45,7 @@ mod recovery;
 mod siblings;
 mod stuck_watch;
 mod usage_view;
+pub use pr_watch::{PrReader, gh_reader};
 pub use usage_view::{VendorUsage, WindowUsage};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -360,6 +362,9 @@ struct Core {
     helpers: HashMap<String, helpers::Run>,
     /// The subagents of each running reply, followed for signs of being stuck.
     watched: HashMap<String, stuck_watch::Watched>,
+    /// The pull request each project conversation follows, by conversation (R200), and what reads one.
+    follows: HashMap<String, pr_watch::Watch>,
+    pr_reader: PrReader,
 }
 
 /// How often Claude's plan is checked again.
@@ -409,6 +414,7 @@ impl Engine {
             };
         let quotas = remembered(&ledger, unix_secs());
         let runtime = opts.runtime.clone();
+        let pr_reader = gh_reader(&opts.data_dir);
         let core = Arc::new_cyclic(|me| {
             Mutex::new(Core {
                 opts,
@@ -459,6 +465,8 @@ impl Engine {
                 credit: None,
                 helpers: HashMap::new(),
                 watched: HashMap::new(),
+                follows: HashMap::new(),
+                pr_reader,
                 browser: None,
             })
         });
@@ -1535,6 +1543,7 @@ impl Core {
                 }
                 self.settle_facts(conv, &id);
                 self.watch_ended(conv, &id);
+                self.pr_seen(conv, &id, &text);
             }
             EngineEvent::HelperDone { id, ok, text } => {
                 // A helper that ran with its call is already settled by the call's own result, its full report included.
@@ -2621,6 +2630,8 @@ impl Core {
             .cloned()
             .map(|mut m| {
                 settle(&mut m);
+                // The pull request stays the source's to follow: two conversations never wake on the same one.
+                m.follow = None;
                 m
             })
             .collect();
@@ -2726,6 +2737,7 @@ impl Core {
     fn remove(&mut self, id: &str) {
         self.note_turn(id, None, true);
         self.stop_helpers(id, true);
+        self.follows.remove(id);
         if let Some(l) = self.live.remove(id) {
             l.session.close();
         }
@@ -2816,7 +2828,8 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
     let parked_more = reply.parked_more.unwrap_or(0);
     let stuck: Vec<String> =
         reply.tools.iter().flatten().filter(|t| t.sign.is_some_and(crate::stuck::Sign::stuck)).map(|t| t.id.clone()).collect();
-    if reply.status != Some(Status::Streaming) && permissions.is_empty() && parked.is_empty() && parked_more == 0 {
+    let held = reply.follow.as_ref().filter(|f| f.held && f.state.open()).map(|f| (f.number, f.head.clone().unwrap_or_default()));
+    if reply.status != Some(Status::Streaming) && permissions.is_empty() && parked.is_empty() && parked_more == 0 && held.is_none() {
         return None;
     }
     Some(RunningItem {
@@ -2827,7 +2840,7 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
         project_id: c.project_id.clone(),
         vendor: reply.vendor,
         model: reply.model.clone(),
-        state: if permissions.is_empty() && parked.is_empty() && parked_more == 0 && stuck.is_empty() {
+        state: if permissions.is_empty() && parked.is_empty() && parked_more == 0 && stuck.is_empty() && held.is_none() {
             RunState::Working
         } else {
             RunState::NeedsYou
@@ -2838,6 +2851,7 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
         parked_more,
         stuck,
         wait_until: reply.wait_until.filter(|_| reply.status == Some(Status::Streaming)),
+        held,
         keep_going: c.keep_going.is_some(),
     })
 }

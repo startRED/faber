@@ -1,5 +1,5 @@
 import { createEffect, createMemo, createResource, createSignal, For, Index, onCleanup, Show, type Accessor } from 'solid-js';
-import { api, type Choice, type Message, type QueuedTurn, type VendorUsage } from './api.ts';
+import { api, type Choice, type Follow, type Message, type QueuedTurn, type VendorUsage } from './api.ts';
 import { Asks, Parkeds } from './Ask.tsx';
 import { copyItem, openMenu } from './contextmenu.ts';
 import { keep, kept, release, useDraft } from './unsent.ts';
@@ -309,6 +309,7 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
           <For each={sites()}>{(s) => <SiteCard conversationId={props.conversationId} tool={s.tool} site={s.site} />}</For>
         </div>
       </Show>
+      <Show when={m().follow}>{(f) => <FollowLine conversationId={props.conversationId} f={f()} />}</Show>
       <Show when={m().status === 'stopped'}>
         <div class="note">{t('answer.stopped')}</div>
       </Show>
@@ -357,6 +358,31 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
   );
 }
 
+// The pull request a reply opened or pushed (R200): one quiet line while Faber follows its checks and after it ends, the
+// number a link to the page, and one way to stop. Checks that failed on a tight quota wait for the person, in amber.
+function FollowLine(props: { conversationId: string; f: Follow }) {
+  const words = () => {
+    const f = props.f;
+    const vars = { pr: `#${f.number}`, checks: (f.failed ?? []).join(', ') };
+    if (f.held && f.state === 'failing') return t('follow.held', vars);
+    return t(`follow.${f.problem?.replace('follow.', '') ?? f.state}` as Parameters<typeof t>[0], vars);
+  };
+  const open = () => ['pending', 'failing', 'conflict'].includes(props.f.state);
+  return (
+    <p class="pace follow" classList={{ need: !!props.f.held && open() }} data-state={props.f.state}>
+      <a href={props.f.url} title={`${props.f.repo}#${props.f.number}`} onClick={(e) => (e.preventDefault(), void api.openLink(props.f.url))}>
+        {words()}
+      </a>
+      <Show when={open()}>
+        <button type="button" class="btn" onClick={() => void api.unfollowPr(props.conversationId)}>
+          {t('follow.stop')}
+        </button>
+      </Show>
+    </p>
+  );
+}
+
+// A message Faber sent by itself (R200): what it is about, as one quiet line; the words the agent got are its tooltip.
 // The user's message; "Edit" sends the new text as a branch, keeping the original conversation as it was.
 function Mine(props: { editKey: string; m: Accessor<Message>; onBranch: OnBranch }) {
   // One editor lives and dies with its (conversation, message) key (the parent re-creates it when the key changes), so
@@ -432,11 +458,12 @@ function Mine(props: { editKey: string; m: Accessor<Message>; onBranch: OnBranch
 // A message Faber sent by itself ("keep going"): one quiet line where the person's bubble would be, since the words are
 // not theirs. What the agent was told stays in the tooltip.
 function Woke(props: { m: Accessor<Message> }) {
+  const wake = () => props.m().wake!;
   return (
     <div class="mine">
       <p class="woke" title={props.m().text}>
         <Icon name="loop" small />
-        {fromEngine(props.m().wake!.why)}
+        {fromEngine(wake().why, { pr: wake().pr ? `#${wake().pr}` : '', checks: (wake().checks ?? []).join(', ') })}
       </p>
     </div>
   );

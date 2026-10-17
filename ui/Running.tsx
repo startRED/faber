@@ -108,6 +108,7 @@ export function Running(props: {
                               <Show when={item.parked?.length || item.parkedMore}>
                                 <Parkeds parked={item.parked ?? []} more={item.parkedMore} />
                               </Show>
+                              <Show when={item.held}>{(held) => <p class="run-held">{t('run.held', { pr: `#${held()[0]}` })}</p>}</Show>
                             </li>
                           )}
                         </For>

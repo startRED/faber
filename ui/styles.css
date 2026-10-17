@@ -901,6 +901,14 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 
 .pace, .waiting-label { color: var(--ink-2); }
 .pace { font-size: var(--fs-sm); }
+/* The pull request a reply follows (R200): one quiet line whose words link to its page; amber only when its failed checks
+   wait for the person. */
+.follow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 6px 0 0; }
+.follow a { color: inherit; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+.follow a:hover { text-decoration-color: currentColor; }
+.follow .btn { height: var(--h-sm); }
+.follow.need, .run-held { color: var(--amber-ink); }
+.run-held { margin: 0; font-size: var(--fs-sm); }
 .waiting-label { font-size: var(--fs-xs); }
 .quota-card { padding: 12px; border: 1px solid var(--line); margin: 12px 0; }
 .quota-card .btn { margin: 4px; }

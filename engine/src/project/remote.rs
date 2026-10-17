@@ -980,6 +980,69 @@ pub fn ci(runner: &mut impl Runner, ledger: &mut impl Ledger, t: &Target, number
     Ok(ci)
 }
 
+// Following a pull request
+
+/// A pull request as a project conversation follows it (`crate::follow`): any repository the person's gh can read, not
+/// a mission's own branch, and only read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Look {
+    pub state: PrState,
+    pub head: String,
+    pub ci: Ci,
+    /// GitHub found a merge conflict with the base branch.
+    pub conflict: bool,
+    /// Each failed check, with the link and the short words GitHub gave it.
+    pub failures: Vec<Failure>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Failure {
+    pub name: String,
+    pub link: Option<String>,
+    pub said: Option<String>,
+}
+
+const LOOK_FIELDS: &str = "number,url,isDraft,state,headRefName,headRefOid,baseRefName,isCrossRepository,statusCheckRollup,mergeable";
+
+/// One short printable line: what a check said about itself, never a block of its log.
+fn one_line(text: Option<&str>, cap: usize) -> Option<String> {
+    let text = text?.split_whitespace().collect::<Vec<_>>().join(" ");
+    let text: String = text.chars().filter(|c| !c.is_control()).collect();
+    (!text.is_empty()).then(|| if text.chars().count() > cap { text.chars().take(cap).collect::<String>() + "…" } else { text })
+}
+
+fn failure(check: &Value) -> Option<Failure> {
+    let (state, name) = classify(check);
+    if state != CiState::Failing {
+        return None;
+    }
+    let link = check["detailsUrl"]
+        .as_str()
+        .or(check["targetUrl"].as_str())
+        .filter(|l| l.starts_with("https://") && l.len() <= 300 && !l.chars().any(|c| c.is_whitespace() || c.is_control()));
+    let said = one_line(check["description"].as_str().or(check["title"].as_str()), 160);
+    Some(Failure { name: one_line(Some(&name), 80).unwrap_or_else(|| "check".into()), link: link.map(str::to_string), said })
+}
+
+/// Reads one pull request and its checks with gh, outside every repository, as [`preflight`] does.
+pub fn look(runner: &mut impl Runner, repo: &str, number: u64) -> Result<Look, RemoteError> {
+    if !slug_ok(repo) || repo.len() > 201 || number == 0 {
+        return Err(RemoteError::Target);
+    }
+    let cwd = runner.neutral();
+    let n = number.to_string();
+    let reply = ask(runner, &gh(&cwd, &["pr", "view", &n, "--repo", repo, "--json", LOOK_FIELDS]))?;
+    let value = json(&reply)?;
+    let pr = parse_pr(&value)?;
+    if pr.number != number {
+        return Err(RemoteError::Command);
+    }
+    let checks = value["statusCheckRollup"].as_array().map_or(&[][..], Vec::as_slice);
+    let ci = summarize(checks, &pr.head);
+    let failures = checks.iter().filter_map(failure).take(8).collect();
+    Ok(Look { state: pr.state, head: pr.head, ci, conflict: value["mergeable"].as_str() == Some("CONFLICTING"), failures })
+}
+
 // Merge
 
 /// What the person is asked: this PR of this repository, at this commit, into this base, with these checks.

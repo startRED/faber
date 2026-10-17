@@ -84,6 +84,10 @@ inside its own area.
   says the composer's Stop ends it. A message Faber sent by itself is one quiet line with the same icon where the
   person's bubble would be ("Faber asked it to keep going"; what the agent was told is its tooltip), and a reply after
   which it stopped by itself ends with one calm line that says why, in the same style (C001). Nothing moves.
+- A project reply that opened, queued or pushed a pull request ends with one pace-style line (R200): its words ("Following
+  pull request #93: checks running.") link to the page, and "Stop following" sits beside them while it is open. Only checks
+  that wait for the person turn it amber. When the checks fail, Faber's own message is Keep
+  going's quiet line, naming the pull request and its failed checks.
 - While an answer streams the engine sends the whole message every 33 ms, so the text is drawn block by block
   (`ui/markdown.tsx`): a block whose source did not change keeps its DOM and only the open one is parsed and sanitised
   again. A tick that changed only the tools builds no text. Everything that reaches the page passes DOMPurify.

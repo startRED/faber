@@ -47,6 +47,8 @@ mod paid_guard;
 mod persona;
 #[path = "plan.rs"]
 mod plan;
+#[path = "pr_watch.rs"]
+mod pr_watch;
 #[path = "product_map.rs"]
 mod product_map;
 #[path = "project.rs"]

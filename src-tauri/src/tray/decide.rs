@@ -254,6 +254,13 @@ impl Watch {
                     notices.push(item.title.clone());
                 }
             }
+            // A followed pull request whose checks failed while the quota was tight needs the person (R200): once per commit.
+            if let Some((pr, head)) = &item.held {
+                let key = (item.conversation_id.clone(), format!("pr:{pr}"), head.clone());
+                if self.seen.insert(key) && !window_focused {
+                    notices.push(item.title.clone());
+                }
+            }
             // Requests the CLI denied for want of anyone to answer them are blocked requests too (R92), named by their tool call.
             // A turn is one notice however many it had, and a notice waits out the cooldown after the last one: a flood of
             // denials is one line, not a hundred. The tray number still counts them all.
@@ -558,6 +565,19 @@ mod tests {
         assert!(Watch::default().take_at(1, &[stuck], true, 0.0).unwrap().notices.is_empty(), "never while the window is focused");
     }
 
+    #[test]
+    fn a_held_pull_request_notifies_once_per_commit() {
+        let mut watch = Watch::default();
+        let mut held = item("a", "t1", "Ship the fix", &[]);
+        held.state = RunState::NeedsYou;
+        held.held = Some((93, "aaa".into()));
+        let first = watch.take_at(1, std::slice::from_ref(&held), false, 0.0).unwrap();
+        assert_eq!((first.notices, first.counts.needs_you), (vec!["Ship the fix".to_string()], 1));
+        assert!(watch.take_at(2, std::slice::from_ref(&held), false, 1.0).unwrap().notices.is_empty(), "the same commit is told once");
+        held.held = Some((93, "bbb".into()));
+        assert_eq!(watch.take_at(3, std::slice::from_ref(&held), false, 2.0).unwrap().notices.len(), 1, "a new commit that fails is news");
+    }
+
     fn parked_item(conversation: &str, turn: &str, title: &str, ids: &[&str], more: u32) -> RunningItem {
         let mut i = item(conversation, turn, title, &[]);
         i.state = RunState::NeedsYou;
@@ -643,6 +663,7 @@ mod tests {
             parked: vec![],
             parked_more: 0,
             stuck: vec![],
+            held: None,
             keep_going: false,
         }
     }

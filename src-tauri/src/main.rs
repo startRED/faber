@@ -236,6 +236,13 @@ async fn tell_helper(faber: State<'_, Faber>, id: String, call_id: String, text:
     faber.engine.tell_helper(&id, &call_id, &text)
 }
 
+/// The person stops following the pull request a project conversation follows (R200).
+#[tauri::command]
+async fn unfollow_pr(faber: State<'_, Faber>, id: String) -> Res<()> {
+    faber.engine.unfollow_pr(&id);
+    Ok(())
+}
+
 #[tauri::command]
 async fn remove_project(faber: State<'_, Faber>, id: String) -> Res<()> {
     // One turn at a time with the mission commands, so a mission cannot start between the check and the removal.
@@ -1424,6 +1431,7 @@ fn main() {
                 remove_queued,
                 send_queued,
                 tell_helper,
+                unfollow_pr,
                 remove_project,
                 preview_look,
                 save_settings,
@@ -1603,6 +1611,7 @@ fn main() {
                 app.manage(pane);
             }
             app.state::<Faber>().engine.watch_accounts();
+            app.state::<Faber>().engine.follow_open_prs();
             app.state::<Faber>().engine.detect_claude_flags();
             if let Some(codex) = clis.get(&Vendor::Codex) {
                 load_models(app.handle(), codex.clone(), data_dir.clone());

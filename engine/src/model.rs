@@ -253,6 +253,9 @@ pub struct Message {
     /// The next rung, offered when the turn's own tools show it stopped early (see `nudge`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nudge: Option<crate::nudge::Nudge>,
+    /// The pull request this reply opened or pushed, followed until its checks pass or it closes (`crate::follow`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub follow: Option<Follow>,
     /// A message Faber sent into the conversation by itself, and why: drawn as a quiet line, not as the person's words.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wake: Option<Wake>,
@@ -261,11 +264,59 @@ pub struct Message {
     pub halt: Option<String>,
 }
 
+/// A pull request a project conversation follows (R200): one line under the reply that opened or last pushed it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Follow {
+    /// `owner/name`.
+    pub repo: String,
+    pub number: u64,
+    pub url: String,
+    pub state: FollowState,
+    /// The checks that failed on the commit last read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failed: Vec<String>,
+    /// The commit last read; a new one is the agent's fix.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head: Option<String>,
+    /// What Faber already woke the agent for (the commit and why), so the same failure never spends a second turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub woke: Option<String>,
+    /// The checks failed while the quota was tight: the person is told instead of the agent.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub held: bool,
+    /// Why following ended early, as an i18n key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub problem: Option<String>,
+    /// When something last changed, in milliseconds.
+    pub since: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FollowState {
+    Pending,
+    Failing,
+    Conflict,
+    Passing,
+    Merged,
+    Closed,
+    /// Ended by the person, by a problem, or after long quiet.
+    Stopped,
+}
+
+impl FollowState {
+    /// Whether Faber still looks at the pull request.
+    pub fn open(self) -> bool {
+        matches!(self, FollowState::Pending | FollowState::Failing | FollowState::Conflict)
+    }
+}
+
 /// Why Faber sent a message by itself (`engine/src/engine/by_itself.rs`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Wake {
-    /// An i18n key (`wake.keepGoing`).
+    /// An i18n key (`wake.keepGoing`, `wake.checksFailed`, `wake.conflict`).
     pub why: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pr: Option<u64>,
@@ -327,6 +378,7 @@ impl Message {
             note: None,
             recovery: None,
             nudge: None,
+            follow: None,
             wake: None,
             halt: None,
         }
@@ -549,6 +601,9 @@ pub struct RunningItem {
     pub stuck: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wait_until: Option<f64>,
+    /// A followed pull request whose checks failed while the quota was tight: its number, and the commit, so each is told once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub held: Option<(u64, String)>,
     /// "Keep going" is on: the conversation runs on its own.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub keep_going: bool,
