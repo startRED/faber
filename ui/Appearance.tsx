@@ -2,9 +2,9 @@ import { createSignal, For, onCleanup, onMount } from 'solid-js';
 import themes from '../src-tauri/src/themes.json';
 import { api, type Appearance, type Look, type Motion } from './api.ts';
 import { previewer, switchTheme } from './appearance.ts';
-import { type Option, Segmented, Toggle } from './controls.tsx';
+import { Fold, Group, type Option, Opt, Segmented, Toggle } from './controls.tsx';
 import { factory, failingPairs, groundColor, groundKey, normalizeHex, readings, sameChoices, shown } from './draft.ts';
-import { Mini } from './FirstRun.tsx';
+import { LookCard, Mini } from './FirstRun.tsx';
 import { Icon, VendorMark } from './Glyphs.tsx';
 import { failureText, lang, t } from './i18n.ts';
 import type { Key } from './locales/en.ts';
@@ -112,38 +112,16 @@ export function AppearanceSection(props: Props) {
   return (
     <div class="ap">
       <div class="ap-main">
-        <div class="presets" role="group" aria-label={t('set.look')}>
-          <For each={LOOKS}>
-            {(id) => (
-              <button
-                type="button"
-                class="preset"
-                aria-pressed={a().base === id}
-                aria-labelledby={`look-${id}-name`}
-                aria-describedby={`look-${id}-desc`}
-                title={t(`look.${id}.desc` as Key)}
-                onClick={() => change(switchTheme(props.draft(), id))}
-              >
-                <span class="thumb" aria-hidden="true">
-                  <Mini base={id} />
-                </span>
-                <span class="nm" id={`look-${id}-name`}>
-                  {t(`look.${id}.name` as Key)}
-                </span>
-                <span class="kind">{t(id === themes.default ? 'set.kindDefault' : controls.themes.includes(id) ? 'set.kindTheme' : 'set.kindPreset')}</span>
-                <span class="sr" id={`look-${id}-desc`}>
-                  {t(`look.${id}.desc` as Key)}
-                </span>
-              </button>
-            )}
-          </For>
-        </div>
-        <div class="ctl-grid">
-          <div class="ctl">
-            <span class="lbl" id="set-accent">
-              {t('set.accent')}
-            </span>
-            <div class="dots" role="group" aria-labelledby="set-accent">
+        <Group title={t('set.look')}>
+          <div class="st-pad">
+            <div class="presets" role="group" aria-label={t('set.look')}>
+              <For each={LOOKS}>
+                {(id) => <LookCard id={id} prefix="look" size="sm" selected={a().base === id} onPick={() => change(switchTheme(props.draft(), id))} />}
+              </For>
+            </div>
+          </div>
+          <Opt id="set-accent" label={t('set.accent')} hint={preview().notices[0] ? t(preview().notices[0] as Key) : t('look.locked')}>
+            <div class="dots" role="group" aria-labelledby="set-accent-name">
               <For each={swatches}>
                 {([id, color]) => (
                   <button
@@ -160,7 +138,7 @@ export function AppearanceSection(props: Props) {
                 <input type="color" aria-label={t('set.anyColor')} value={a().accent} onChange={(e) => change({ ...props.draft(), accent: e.currentTarget.value })} />
               </label>
               <input
-                class="hex num"
+                class="field hex num"
                 type="text"
                 aria-label={t('set.hexLabel')}
                 value={a().accent}
@@ -170,14 +148,11 @@ export function AppearanceSection(props: Props) {
                 onChange={(e) => typedAccent(e.currentTarget)}
               />
             </div>
-            <p class="hint">{preview().notices[0] ? t(preview().notices[0] as Key) : t('look.locked')}</p>
-          </div>
-          <div class="ctl">
-            <span class="lbl" id="set-ground">
-              {t('set.ground')}
-              <small>{t(groundKey(a().ground) as Key)}</small>
-            </span>
-            <div class="seg-ctl chips" role="group" aria-labelledby="set-ground">
+          </Opt>
+        </Group>
+        <Group title={t('set.group.type')}>
+          <Opt id="set-ground" label={t('set.ground')} hint={t(groundKey(a().ground) as Key)}>
+            <div class="seg-ctl chips" role="group" aria-labelledby="set-ground-name">
               <For each={controls.grounds}>
                 {(id) => (
                   <button
@@ -192,28 +167,30 @@ export function AppearanceSection(props: Props) {
                 )}
               </For>
             </div>
-          </div>
-          <Segmented
-            id="set-text-font"
-            label={t('set.textFont')}
-            value={a().textFont}
-            onPick={(textFont) => change({ ...props.draft(), textFont })}
-            options={Object.keys(controls['text-fonts']).map((id): Option<string> => [id, t(`look.font.${id}` as Key)])}
-          />
-          <Segmented
-            id="set-heading-font"
-            label={t('set.headingFont')}
-            value={a().headingFont ?? ''}
-            onPick={(headingFont) => change({ ...props.draft(), headingFont })}
-            options={Object.keys(controls['heading-fonts']).map((id): Option<string> => [id, t(`look.heading.${id}` as Key)])}
-          />
-          <div class="ctl">
-            <label class="lbl" for="set-text-size">
-              {t('set.textSize')}
-              <small>{t('set.textSizeValue', { n: a().textSize })}</small>
-            </label>
+          </Opt>
+          <Opt id="set-text-font" label={t('set.textFont')}>
+            <Segmented
+              bare
+              id="set-text-font-pick"
+              label={t('set.textFont')}
+              value={a().textFont}
+              onPick={(textFont) => change({ ...props.draft(), textFont })}
+              options={Object.keys(controls['text-fonts']).map((id): Option<string> => [id, t(`look.font.${id}` as Key)])}
+            />
+          </Opt>
+          <Opt id="set-heading-font" label={t('set.headingFont')}>
+            <Segmented
+              bare
+              id="set-heading-font-pick"
+              label={t('set.headingFont')}
+              value={a().headingFont ?? ''}
+              onPick={(headingFont) => change({ ...props.draft(), headingFont })}
+              options={Object.keys(controls['heading-fonts']).map((id): Option<string> => [id, t(`look.heading.${id}` as Key)])}
+            />
+          </Opt>
+          <Opt id="set-text-size" label={t('set.textSize')} hint={t('set.textSizeValue', { n: a().textSize })} htmlFor="set-text-size-range">
             <input
-              id="set-text-size"
+              id="set-text-size-range"
               class="range"
               type="range"
               min={controls['text-size'].min}
@@ -222,64 +199,95 @@ export function AppearanceSection(props: Props) {
               value={a().textSize}
               onInput={(e) => change({ ...props.draft(), textSize: e.currentTarget.valueAsNumber })}
             />
-          </div>
-          <Segmented
-            id="set-density"
-            label={t('set.density')}
-            value={a().density}
-            onPick={(density) => change({ ...props.draft(), density })}
-            options={controls.density.map((d): Option<number> => [d, t(DENSITY[d]!)])}
-          />
-          <Segmented
-            id="set-corners"
-            label={t('set.corners')}
-            value={a().corners}
-            onPick={(corners) => change({ ...props.draft(), corners })}
-            options={controls.corners.map((c): Option<number> => [c, t(CORNERS[c]!)])}
-          />
-          <div class="ctl">
+          </Opt>
+          <Opt id="set-density" label={t('set.density')}>
             <Segmented
-              id="set-motion"
+              bare
+              id="set-density-pick"
+              label={t('set.density')}
+              value={a().density}
+              onPick={(density) => change({ ...props.draft(), density })}
+              options={controls.density.map((d): Option<number> => [d, t(DENSITY[d]!)])}
+            />
+          </Opt>
+          <Opt id="set-corners" label={t('set.corners')}>
+            <Segmented
+              bare
+              id="set-corners-pick"
+              label={t('set.corners')}
+              value={a().corners}
+              onPick={(corners) => change({ ...props.draft(), corners })}
+              options={controls.corners.map((c): Option<number> => [c, t(CORNERS[c]!)])}
+            />
+          </Opt>
+          <Opt id="set-motion" label={t('set.motion')} more={t(`look.motion.${a().motion}Hint` as Key)}>
+            <Segmented
+              bare
+              id="set-motion-pick"
               label={t('set.motion')}
               value={a().motion}
               onPick={(motion) => change({ ...props.draft(), motion })}
               options={(Object.keys(controls.motion) as Motion[]).map((m): Option<Motion> => [m, t(`look.motion.${m}` as Key)])}
             />
-            <p class="hint">{t(`look.motion.${a().motion}Hint` as Key)}</p>
-          </div>
-        </div>
-        <div class="ctl">
-          <span class="lbl">
-            <Icon name="lock" small />
-            {t('set.lockedTitle')}
-          </span>
-          <div class="locked">
-            <span class="lt claude">
-              <VendorMark vendor="claude" />
-              {t('set.lockedClaude')}
-            </span>
-            <span class="lt codex">
-              <VendorMark vendor="codex" />
-              {t('set.lockedCodex')}
-            </span>
-            <span class="lt amber">
-              <Icon name="ask" small />
-              {t('run.needsYou')}
-            </span>
-          </div>
-          <p class="hint">{t('set.lockedHint')}</p>
-        </div>
-        <div class="filerow">
-          <button type="button" class="btn" onClick={() => void saveFile()}>
-            <Icon name="download" small />
-            {t('set.saveFile')}
-          </button>
-          <button type="button" class="btn" onClick={() => void openFile()}>
-            <Icon name="upload" small />
-            {t('set.openFile')}
-          </button>
-          <span class="hint">{t('set.fileHint')}</span>
-        </div>
+          </Opt>
+        </Group>
+        <Group>
+          <Fold id="set-advanced" title={t('set.advanced')}>
+            <Opt id="set-contrast" label={t('set.contrast')}>
+              <div class="contrast" role="list">
+                <For each={readings(preview())}>
+                  {(r) => (
+                    <div role="listitem" classList={{ bad: !r.pass }}>
+                      {t(`set.contrast.${r.id}` as Key)}
+                      <b class="num">
+                        {number(r.ratio)}:1<em>{t(r.pass ? 'set.contrastPass' : 'set.contrastFail')}</em>
+                      </b>
+                    </div>
+                  )}
+                </For>
+              </div>
+            </Opt>
+            <For each={EFFECTS}>
+              {(key) => (
+                <Toggle
+                  id={`set-effect-${key}`}
+                  label={t(`look.effect.${key}` as Key)}
+                  hint={t(`look.effect.${key}Hint` as Key)}
+                  checked={a().effects[key]}
+                  onChange={(on) => change({ ...props.draft(), effects: { ...a().effects, [key]: on } })}
+                />
+              )}
+            </For>
+            <Opt id="set-locked" label={t('set.lockedTitle')}>
+              <div class="locked">
+                <span class="lt claude">
+                  <VendorMark vendor="claude" />
+                  {t('set.lockedClaude')}
+                </span>
+                <span class="lt codex">
+                  <VendorMark vendor="codex" />
+                  {t('set.lockedCodex')}
+                </span>
+                <span class="lt amber">
+                  <Icon name="ask" small />
+                  {t('run.needsYou')}
+                </span>
+              </div>
+            </Opt>
+            <Opt id="set-file" label={t('set.file')}>
+              <div class="filerow">
+                <button type="button" class="btn" onClick={() => void saveFile()}>
+                  <Icon name="download" small />
+                  {t('set.saveFile')}
+                </button>
+                <button type="button" class="btn" onClick={() => void openFile()}>
+                  <Icon name="upload" small />
+                  {t('set.openFile')}
+                </button>
+              </div>
+            </Opt>
+          </Fold>
+        </Group>
       </div>
       <aside class="s-prev" aria-label={t('set.preview')}>
         <div class="ph">
@@ -288,30 +296,6 @@ export function AppearanceSection(props: Props) {
         </div>
         <div class="pvbox">
           <Mini look={preview()} />
-        </div>
-        <div class="contrast" role="list">
-          <For each={readings(preview())}>
-            {(r) => (
-              <div role="listitem" classList={{ bad: !r.pass }}>
-                {t(`set.contrast.${r.id}` as Key)}
-                <b class="num">
-                  {number(r.ratio)}:1<em>{t(r.pass ? 'set.contrastPass' : 'set.contrastFail')}</em>
-                </b>
-              </div>
-            )}
-          </For>
-        </div>
-        <div class="toggles">
-          <For each={EFFECTS}>
-            {(key) => (
-              <Toggle
-                label={t(`look.effect.${key}` as Key)}
-                hint={t(`look.effect.${key}Hint` as Key)}
-                checked={a().effects[key]}
-                onChange={(on) => change({ ...props.draft(), effects: { ...a().effects, [key]: on } })}
-              />
-            )}
-          </For>
         </div>
       </aside>
       <div class="ap-bar">

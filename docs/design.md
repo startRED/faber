@@ -246,7 +246,7 @@ inside its own area.
   shape, a 3 px bar and the used share of its tightest quota window, in the small size. Nothing on the line wraps. The
   window, the reset, how old the reading is, the not-yet-counted estimate and the vendor's name are its tooltip. While
   use is still being counted the share reads "≥ 44%" (the real share can only be higher), with the words in the tooltip
-  (C010). The bar is amber only when the engine says the quota is nearly used. The line opens Settings > Usage limits.
+  (C010). The bar is amber only when the engine says the quota is nearly used. The line opens Settings > Accounts and limits.
   A vendor with no reading yet, or only an expired one, shows "—". The version is not on the sidebar: it is the
   tooltip of the Settings button.
 - Search filters conversation titles and project names on screen; full-text search comes in Phase 2. The percentage and
@@ -346,19 +346,30 @@ projects. Faber has no worktree creation for projects, so an environment has no 
 
 ### Settings
 
-- Settings replaces the shell, as before, with a list of five sections on the left: General, Appearance, Connected
-  accounts, Usage limits and Privacy. Ctrl comma opens it on General, the quota of a vendor in the sidebar opens it on
-  Usage limits, and Esc or Back closes it.
-- General has, in order, the language, name, CLI hooks switch, Permissions choice, Chat working folder (with the recent
-  folders), Notifications (Notify me, Play a sound), Updates (one switch, "Receive previews", off by default, with one
-  short line; it acts at the next update check and turning it off never installs an older version) and, on Windows,
-  System (keep the computer awake while Faber works, start Faber at sign-in). "Don't ask" is the default for new and
+- Settings replaces the shell, as before, with a list of five sections on the left: General, Projects, Appearance,
+  Accounts and limits and Privacy, and "Faber <version>" once at the bottom of the list. Ctrl comma opens it on General,
+  the quota of a vendor in the sidebar opens it on Accounts and limits, and Esc or Back closes it. Switching sections is
+  instant: no exit copy of the old section is kept, nothing on the stage animates, and the new section opens scrolled to
+  its top. All sections share one content width, 720 px (`--st-w`).
+- One grammar for every section (`ui/controls.tsx`). A group is a card (`--s1` with an inset `--line`, `--r-md`) under a
+  small title; inside it every option is one row: the name and one short line (one line, 70 characters at most) at the left
+  and the control at the right, rows divided by hairlines. The longer text of an option unfolds under its row from a small
+  round "?" next to the name (`aria-expanded`, `aria-controls`, one accessible name, `set.learnMore`); there is no
+  "Learn more" link. A fold (`Fold`) is a row whose title is a button; what is inside it is not in the page while it is
+  closed. Switches are native checkboxes with `role="switch"`; segmented controls and selects sit in the control slot; the
+  mode menu is a select-only combobox whose open list shows each choice with its own line. Text fields share one class,
+  `.field`. Under 960 px the control slot moves under the name.
+- General has, in groups: *You* (language, name); *How the AI works* (Permissions as a menu of the five modes, Web search,
+  CLI hooks, Chat working folder with the recent folders where its control exists, and a closed "Codex" fold with
+  reasoning summary and answer length); *Notifications and system* (Notify me, Play a sound, and on Windows keep the
+  computer awake while Faber works and start Faber at sign-in); *Updates* (one switch, "Receive previews", off by default,
+  with one short line; it acts at the next update check and turning it off never installs an older version). "Don't ask" is the default for new and
   existing settings; "Ask before commands" preserves the previous behavior. Choices save at once and stay at the saved
   value if the save fails. R107 applies the same default to Chat. Chat uses its chosen canonical folder
   (fixed before the first message), or private per-conversation scratch; deletion/draft cleanup never removes a chosen
   folder. General explains the rule and offers the folder choice.
 - R140 (Chat; the person's own project sessions take the same modes, and mission roles never do): the Permissions choice is a
-  list of five modes, each with one plain line and its long text behind a closed "Learn more" that is not in the page
+  menu of five modes, each with one plain line and its long text behind the closed "?" of the row, which is not in the page
   while closed. The composer of Chat carries the same choice as a chip. Mode by CLI (the CLI that lacks a mode runs the
   nearest safer one and the reply says so, `mode.fallback.auto`):
 
@@ -436,9 +447,11 @@ projects. Faber has no worktree creation for projects, so an environment has no 
   deletions use the sandbox too; file tools retain their canonical path checks, including network-link guards.
   Host file decisions, CLI startup customizations and external integrations are separate from command isolation;
   see the verified findings and limits in [the R97 security review](security-r97-review.md).
-- Appearance is a draft. The six looks are small live renders; the controls (accent with a hex field, background, the two
-  fonts, text size, density, corners, motion) and the three effect switches change the draft, and the preview panel on
-  the right wears the answer of `preview_look` with the measured contrast of text, faint text and the accent. The panel
+- Appearance is a draft, in the same cards and rows as the other sections. The first card, Look, has the six looks as small
+  live renders (one look card, shared with the first run) and the accent with a hex field; the second, Text and layout, has
+  the background, the two fonts, text size, density, corners and motion. A closed "Advanced" fold holds the measured contrast
+  of text, faint text and the accent, the three effect switches, the fixed-meaning colours and the theme file. The controls
+  change the draft, and the preview panel on the right wears the answer of `preview_look`. The panel
   says "Not applied yet" until "Use this look", which sits in a bar that stays in view. "Back to default" returns the
   draft to Dark Room. The three meaning colours are shown read-only, with their shapes and words.
 - A refused accent, or a look with a failing pair, shows its sentence in the bar and "Use this look" stays as it was; a
@@ -451,8 +464,13 @@ projects. Faber has no worktree creation for projects, so an environment has no 
   leaves an old file as it was. A failed read or write shows words of Faber's own, never the system's.
 - "Manage accounts" opens the account cards alone. Closing them (or Esc) brings Settings back on the same section, with
   the draft that was not applied.
-- Usage limits lists, per connected vendor, every window it has reported with its used share and reset time. An old
-  reading, or none, shows "—".
+- Accounts and limits has one card per AI (the former Connected accounts and Usage limits, one section): its mark, name,
+  the plan with its first letter capital, and one status word in a pill that is amber only when a window is really near
+  its limit (C002; fast use is said calmly). Then one row per quota window the vendor has reported (name, used share, a
+  bar with the expected-pace mark, and the reset time written in full); an old reading, or none, shows "—". The card ends
+  with Faber's own spend today at API prices, written the language's way with two decimals. Every note about how the
+  figures are read (counting delay, shared account, incomplete meters, learning, foreign use, extra usage, each window's
+  projection and age) is behind one "Details" fold per card. "Manage accounts" appears once in the section.
 - Privacy has three statements: telemetry is off, history stays on this PC, and Faber never reads the CLI logins.
 
 ### First run and tutorial
@@ -516,7 +534,7 @@ The first screen of a project uses the layout of the Chat home (`welcome-grid`) 
 full path on hover), the greeting, a goal composer with its own hints and one quiet status line beside its button, and at
 most three conversations to pick up. Nothing else: the sidebar lists the projects, and every setting of a project (the
 tool policy, the code access, the self-update switch and the checks) is in Settings, Projects, one closed entry per
-project with one short line per option and the rest behind "Learn more". The checks are asked for just in time: the
+project with one row per option with one short line and the rest behind the "?" of the row. The checks are asked for just in time: the
 first start on checks nobody confirmed opens a compact sheet with their count and source, every command (and the setup)
 listed in full with no collapse, a long list scrolling inside it, and "Confirm and start"; what is confirmed is exactly the list
 shown, and a project that changed it meanwhile is refused so the sheet shows the new list. It does not come back until
