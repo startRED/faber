@@ -423,25 +423,43 @@ jobs:
           if git merge-base --is-ancestor "$GITHUB_SHA" origin/phase-1-base; then
             git push origin --delete "$branch"; echo "Already on phase-1-base."; exit 0
           fi
-          if git merge-base --is-ancestor origin/phase-1-base "$GITHUB_SHA"; then
-            if [ -n "$pr" ] && [ -n "$oid" ]; then
-              head=$(gh pr view "$pr" --json state,isCrossRepository,headRefName \
-                --jq 'select(.state == "OPEN" and (.isCrossRepository | not)) | .headRefName')
-              if [ -n "$head" ]; then git push --force-with-lease="refs/heads/$head:$oid" origin "$GITHUB_SHA:refs/heads/$head"; fi
-            fi
-            git push origin "$GITHUB_SHA:refs/heads/phase-1-base"
-            # Green on top of the whole phase-1-base, so main follows at once (R127).
-            if git merge-base --is-ancestor origin/main "$GITHUB_SHA"; then
-              git push origin "$GITHUB_SHA:refs/heads/main"
-              # Pushes made with this token start no workflow, so main's warm run is started by hand (R165).
-              gh workflow run ci.yml --ref main -f warm=true
-            fi
-            git push origin --delete "$branch"
-            # The same goes for the preview release (R130, R156).
-            gh workflow run auto-release.yml --ref phase-1-base -f sha="$GITHUB_SHA"
-            echo "Landed $GITHUB_SHA."; exit 0
-          fi
+          # A pull request lands only while it is open on phase-1-base and still at the head that was squashed: a close or
+          # a later push stops it here, and its author queues it again.
+          head=""
           if [ -n "$pr" ] && [ -n "$oid" ]; then
+            head=$(gh pr view "$pr" --json state,isCrossRepository,baseRefName,headRefName,headRefOid --jq \
+              "select(.state == \"OPEN\" and (.isCrossRepository | not) and .baseRefName == \"phase-1-base\" and .headRefOid == \"$oid\") | .headRefName")
+            if [ -z "$head" ]; then
+              git push origin --delete "$branch"
+              echo "::warning::#$pr was closed, retargeted or pushed again after it was queued. Queue it again: node scripts/land.mjs $pr"
+              exit 0
+            fi
+          fi
+          if git merge-base --is-ancestor origin/phase-1-base "$GITHUB_SHA"; then
+            # One atomic push moves the pull request's branch (so GitHub shows it merged) and phase-1-base together or not
+            # at all: when the base moved meanwhile, both stay as they were and the landing below starts again.
+            landed=false
+            if [ -n "$head" ]; then
+              git push --atomic --force-with-lease="refs/heads/$head:$oid" origin \
+                "$GITHUB_SHA:refs/heads/$head" "$GITHUB_SHA:refs/heads/phase-1-base" && landed=true
+            else
+              git push origin "$GITHUB_SHA:refs/heads/phase-1-base" && landed=true
+            fi
+            if [ "$landed" = true ]; then
+              # Green on top of the whole phase-1-base, so main follows at once (R127).
+              if git merge-base --is-ancestor origin/main "$GITHUB_SHA"; then
+                git push origin "$GITHUB_SHA:refs/heads/main"
+                # Pushes made with this token start no workflow, so main's warm run is started by hand (R165).
+                gh workflow run ci.yml --ref main -f warm=true
+              fi
+              git push origin --delete "$branch"
+              # The same goes for the preview release (R130, R156).
+              gh workflow run auto-release.yml --ref phase-1-base -f sha="$GITHUB_SHA"
+              echo "Landed $GITHUB_SHA."; exit 0
+            fi
+            git fetch --quiet origin phase-1-base
+          fi
+          if [ -n "$head" ]; then
             node scripts/land.mjs "$pr" --head "$oid"
             gh workflow run ci.yml --ref "$branch"
             echo "phase-1-base moved; #$pr was squashed and numbered again on it and is checked again."; exit 0

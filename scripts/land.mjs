@@ -57,6 +57,9 @@ function land(number, dry, given) {
     return 1;
   }
   const head = given ?? pr.headRefOid;
+  // What the queue holds now: the push below replaces only that, so an older run never overwrites a newer one's commit.
+  const queue = `refs/heads/queue/pr-${pr.number}`;
+  const queued = git('ls-remote', 'origin', queue).split(/\s/)[0];
   git('fetch', '--quiet', 'origin', BASE, given ?? `refs/pull/${pr.number}/head`);
   const base = git('rev-parse', `origin/${BASE}`).trim();
   let tree;
@@ -76,7 +79,13 @@ function land(number, dry, given) {
     console.log('Dry run: nothing was pushed.');
     return 0;
   }
-  git('push', '--quiet', '--force', 'origin', `${commit}:refs/heads/queue/pr-${pr.number}`);
+  try {
+    git('push', '--quiet', `--force-with-lease=${queue}:${queued}`, 'origin', `${commit}:${queue}`);
+  } catch (error) {
+    console.error(String(error.stderr || error.message).trim());
+    console.error(`queue/pr-${pr.number} was not replaced: when another landing of #${pr.number} queued it meanwhile, that newer one stands.`);
+    return 1;
+  }
   console.log(`#${pr.number} is queued as ${commit.slice(0, 9)} on queue/pr-${pr.number}. CI checks it, lands it and marks the pull request merged.`);
   return 0;
 }
