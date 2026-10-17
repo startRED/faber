@@ -32,8 +32,10 @@ use uuid::Uuid;
 mod answer;
 mod auto;
 mod browse;
+mod by_itself;
 pub mod facts;
 mod helpers;
+mod keep_going;
 mod parked;
 mod project_budget;
 mod project_sessions;
@@ -47,12 +49,35 @@ pub use usage_view::{VendorUsage, WindowUsage};
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum AppEvent {
-    Message { conversation_id: String, message: Box<Message> },
-    Queue { conversation_id: String, queued: Vec<QueuedTurn> },
-    Quota { vendor: Vendor, window: String, used: f64, resets_at: f64 },
-    Usage { vendors: Vec<VendorUsage> },
-    Running { revision: u64, items: Vec<RunningItem> },
+    Message {
+        conversation_id: String,
+        message: Box<Message>,
+    },
+    Queue {
+        conversation_id: String,
+        queued: Vec<QueuedTurn>,
+    },
+    Quota {
+        vendor: Vendor,
+        window: String,
+        used: f64,
+        resets_at: f64,
+    },
+    Usage {
+        vendors: Vec<VendorUsage>,
+    },
+    Running {
+        revision: u64,
+        items: Vec<RunningItem>,
+    },
     List,
+    /// "Keep going" stopped by itself in a conversation, and why (a `reason.keepGoing.*` key): the tray tells the person.
+    Halted {
+        conversation_id: String,
+        title: String,
+        why: String,
+        vendor: Option<Vendor>,
+    },
 }
 
 pub type Emit = Arc<dyn Fn(AppEvent) + Send + Sync>;
@@ -618,6 +643,7 @@ impl Engine {
         self.with(|c| c.warm(req))
     }
     pub fn interrupt(&self, id: &str) {
+        self.with(|c| c.keep_going_off(id));
         self.with(|c| match c.live.get(id).filter(|l| l.turn.is_some()) {
             Some(l) => {
                 l.session.interrupt();
@@ -1136,7 +1162,15 @@ impl Core {
             c.messages.iter_mut().for_each(settle);
             c.queued.iter_mut().for_each(|q| q.sending = false);
             self.restore_recovery(&mut c);
+            // Keep going ends with the run that started it: after a restart the person turns it on again.
+            let stale = c.keep_going.take().is_some();
+            if stale {
+                self.store.save(&c);
+            }
             self.convs.insert(id.to_string(), c);
+            if stale {
+                self.list_changed();
+            }
         }
         let c = self.convs.get_mut(id)?;
         // A Codex session saved before R121 carries the isolated host command tool, which no mode the person can pick uses
@@ -1752,6 +1786,7 @@ impl Core {
         } else {
             return;
         };
+        let keep_going = self.keep_going_ended(conv, turn_id.as_deref());
         self.save(conv);
         self.save_ledger(false);
         self.push(conv, turn_id.as_deref(), true);
@@ -1768,6 +1803,7 @@ impl Core {
         if completed_ok {
             self.drain(conv);
         }
+        self.keep_going_after(conv, keep_going);
         self.close_when_idle(conv);
     }
 
@@ -1865,6 +1901,7 @@ impl Core {
             choice: req.choice,
             at,
             sending: false,
+            wake: None,
         };
         let c = self.convs.get(id).ok_or("error.conversationGone")?;
         // Steering waits behind nothing: a message that is already queued would be passed by one sent straight in.
@@ -1924,6 +1961,7 @@ impl Core {
         let mut question = Message::new(new_id(), Role::User, item.text.clone(), now);
         question.images = item.images.clone();
         question.attachments = item.attachments.clone();
+        question.wake = item.wake.clone();
         let mut reply = Message::new(new_id(), Role::Assistant, String::new(), now);
         reply.vendor = Some(Vendor::Codex);
         reply.model = model;
@@ -2023,6 +2061,8 @@ impl Core {
         }
         let model_text = self.model_text(id, &item);
         let auto = item.choice.vendor == "auto";
+        // A turn Faber sends by itself (`by_itself.rs`) is never one the person picked: an AI billed per use is not spent on.
+        let by_hand = !auto && item.wake.is_none();
         let route = if auto { self.next_route(id) } else { None };
         let c = self.convs.get_mut(id).expect("checked above");
         c.choice = Some(Choice { effort: (!auto).then(|| item.choice.effort.unwrap_or_default()), ..item.choice.clone() });
@@ -2044,6 +2084,7 @@ impl Core {
         let mut question = Message::new(new_id(), Role::User, item.text.clone(), at);
         question.images = item.images.clone();
         question.attachments = item.attachments.clone();
+        question.wake = item.wake.clone();
         let mut reply = Message::new(new_id(), Role::Assistant, String::new(), at);
         if !routing {
             reply.vendor = Some(pick.vendor);
@@ -2070,7 +2111,7 @@ impl Core {
                 pick: pick.clone(),
                 text: model_text.clone(),
                 images: images.clone(),
-                by_hand: !auto,
+                by_hand,
                 retried: false,
                 moving: false,
                 check: "glance",
@@ -2093,7 +2134,7 @@ impl Core {
             });
             return Ok(());
         }
-        if let Err(error) = self.dispatch(id, &reply_id, &pick, text, images, !auto) {
+        if let Err(error) = self.dispatch(id, &reply_id, &pick, text, images, by_hand) {
             self.fail_reply(id, &reply_id, error.clone());
             return Err(error);
         }
@@ -2137,10 +2178,11 @@ impl Core {
     pub(super) fn fail_reply(&mut self, id: &str, reply_id: &str, error: String) {
         if let Some(m) = self.convs.get_mut(id).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id)) {
             m.status = Some(Status::Error);
-            m.error = Some(error);
+            m.error = Some(error.clone());
         }
         self.save(id);
         self.push(id, Some(reply_id), true);
+        self.keep_going_failed(id, reply_id, &error);
     }
 
     /// The shared Codex process for an area, hooks choice and permissions, started again if it died.
@@ -2423,6 +2465,7 @@ impl Core {
             created_at: at,
             updated_at: at,
             queued: Vec::new(),
+            keep_going: None,
             messages: vec![],
         };
         let id = c.id.clone();
@@ -2795,6 +2838,7 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
         parked_more,
         stuck,
         wait_until: reply.wait_until.filter(|_| reply.status == Some(Status::Streaming)),
+        keep_going: c.keep_going.is_some(),
     })
 }
 

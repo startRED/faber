@@ -316,6 +316,13 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
         <div class="note err">{fromEngine(m().error, { when: m().waitUntil ? untilReset(m().waitUntil!) : t('quota.unknown') })}</div>
       </Show>
       <Show when={m().incomplete}><p class="note">{t('answer.meterIncomplete')}</p></Show>
+      {/* "Keep going" stopped by itself after this reply: why, in one calm line (C001). */}
+      <Show when={m().halt}>
+        <p class="woke halt">
+          <Icon name="loop" small />
+          {fromEngine(m().halt, { ai: m().vendor ? vendorName(m().vendor!) : t('model.auto') })}
+        </p>
+      </Show>
       <Show when={!streaming()}>
         <div class="actions">
           <button type="button" class="iconbtn" title={t('answer.copy')} aria-label={t('answer.copy')} onClick={() => void navigator.clipboard.writeText(m().text)}>
@@ -422,6 +429,19 @@ function Mine(props: { editKey: string; m: Accessor<Message>; onBranch: OnBranch
   );
 }
 
+// A message Faber sent by itself ("keep going"): one quiet line where the person's bubble would be, since the words are
+// not theirs. What the agent was told stays in the tooltip.
+function Woke(props: { m: Accessor<Message> }) {
+  return (
+    <div class="mine">
+      <p class="woke" title={props.m().text}>
+        <Icon name="loop" small />
+        {fromEngine(props.m().wake!.why)}
+      </p>
+    </div>
+  );
+}
+
 // A message written while an answer was running. The person can take it back until it is sent; one already handed to the
 // running answer (`sending`) cannot be, and one that waits for the next turn can be sent by hand once nothing runs.
 function Queued(props: { conversationId: string; q: QueuedTurn; busy: boolean; onError?: (err: unknown) => void }) {
@@ -473,8 +493,10 @@ export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTur
       <Index each={props.messages.slice(props.from)}>
         {(m, i) => (
           <Show when={m().role === 'user'} fallback={<Answer {...props} m={m} prompt={prompt(props.from + i)} last={props.from + i === props.messages.length - 1} />}>
-            <Show when={`edit.${props.conversationId}.${m().id}`} keyed>
-              {(editKey) => <Mine editKey={editKey} m={m} onBranch={props.onBranch} />}
+            <Show when={!m().wake} fallback={<Woke m={m} />}>
+              <Show when={`edit.${props.conversationId}.${m().id}`} keyed>
+                {(editKey) => <Mine editKey={editKey} m={m} onBranch={props.onBranch} />}
+              </Show>
             </Show>
           </Show>
         )}

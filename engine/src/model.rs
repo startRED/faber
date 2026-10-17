@@ -253,6 +253,40 @@ pub struct Message {
     /// The next rung, offered when the turn's own tools show it stopped early (see `nudge`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nudge: Option<crate::nudge::Nudge>,
+    /// A message Faber sent into the conversation by itself, and why: drawn as a quiet line, not as the person's words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wake: Option<Wake>,
+    /// On a reply: "keep going" stopped after it, and why (a `reason.keepGoing.*` key).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub halt: Option<String>,
+}
+
+/// Why Faber sent a message by itself (`engine/src/engine/by_itself.rs`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Wake {
+    /// An i18n key (`wake.keepGoing`).
+    pub why: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks: Vec<String>,
+}
+
+impl Wake {
+    pub fn of(why: &str) -> Wake {
+        Wake { why: why.into(), pr: None, checks: vec![] }
+    }
+}
+
+/// "Keep going" is on in a conversation (R199): Faber sends the next turn by itself whenever one ends, until a stop.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeepGoing {
+    /// Turns Faber sent by itself since it was turned on.
+    pub turns: u32,
+    /// Turns in a row that ended with an error.
+    pub failed: u32,
 }
 
 impl Message {
@@ -293,6 +327,8 @@ impl Message {
             note: None,
             recovery: None,
             nudge: None,
+            wake: None,
+            halt: None,
         }
     }
 }
@@ -322,6 +358,9 @@ pub struct QueuedTurn {
     /// its way after a restart, so loading a conversation clears it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub sending: bool,
+    /// Faber queued it by itself: the message it becomes carries this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wake: Option<Wake>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -375,6 +414,9 @@ pub struct Conversation {
     pub updated_at: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub queued: Vec<QueuedTurn>,
+    /// "Keep going" is on (`engine/src/engine/keep_going.rs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_going: Option<KeepGoing>,
     pub messages: Vec<Message>,
 }
 
@@ -462,6 +504,9 @@ pub struct Summary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
     pub updated_at: u64,
+    /// "Keep going" is on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub keep_going: bool,
 }
 
 /// Where a running conversation stands: answering, or waiting for the user.
@@ -504,6 +549,9 @@ pub struct RunningItem {
     pub stuck: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wait_until: Option<f64>,
+    /// "Keep going" is on: the conversation runs on its own.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub keep_going: bool,
 }
 
 /// The running list as the engine last sent it. The revision grows by one with every list the engine emits, so a

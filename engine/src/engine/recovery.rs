@@ -397,6 +397,10 @@ impl Core {
         }
         self.save(id);
         self.push(id, Some(&t.reply), true);
+        if !queued {
+            // Nothing resumes this reply: keep going stops on it.
+            self.keep_going_failed(id, &t.reply, "error.quotaWait");
+        }
         if let Wait::Queue(at) = outcome {
             let (me, id, reply) = (self.me.clone(), id.to_string(), t.reply);
             tokio::spawn(async move {

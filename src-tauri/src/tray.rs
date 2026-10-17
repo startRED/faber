@@ -10,8 +10,8 @@ mod sound;
 
 use badge::{glyph, tray_png, tray_side, with_badge};
 pub(crate) use decide::ShellTexts;
-use decide::{Counts, Shown, Watch, decode_seen, delivery, notice_text, parked_notice_text, tooltip};
-use faber_engine::model::RunningItem;
+use decide::{Counts, Shown, Watch, decode_seen, delivery, notice_text, parked_notice_text, stopped_text, tooltip};
+use faber_engine::model::{RunningItem, Vendor};
 use faber_engine::project::wire::MissionView;
 use std::collections::HashSet;
 use std::path::Path;
@@ -287,6 +287,23 @@ pub(crate) fn on_running(app: &AppHandle, revision: u64, items: &[RunningItem]) 
         show_counts(app, &s, side);
     }
     deliver_notices(app, &settings, &words(&s.texts, &update));
+}
+
+/// "Keep going" stopped by itself in a conversation (R199): one notice that says why, under R92's rules.
+pub(crate) fn on_halted(app: &AppHandle, title: &str, why: &str, ai: Option<Vendor>) {
+    let faber = app.state::<crate::Faber>();
+    if faber.hidden {
+        return;
+    }
+    let settings = faber.engine.settings();
+    let tray = app.state::<Tray>();
+    let s = lock(&tray);
+    if s.icon.is_none() {
+        return;
+    }
+    let text = stopped_text(&s.texts, title, why, ai);
+    drop(s);
+    deliver_notices(app, &settings, &[text]);
 }
 
 /// A mission view update from the engine: non-technical decisions become needs-you items.

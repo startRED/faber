@@ -27,6 +27,8 @@ mod engine;
 mod handover;
 #[path = "install.rs"]
 mod install;
+#[path = "keep_going.rs"]
+mod keep_going;
 #[path = "learn.rs"]
 mod learn;
 #[path = "learning.rs"]

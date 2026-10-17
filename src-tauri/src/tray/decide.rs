@@ -1,11 +1,11 @@
 //! What the tray says and when it notifies: plain functions of the running list, the window's focus and the words the
 //! screen sent. Nothing here touches Tauri, so all of it is tested without a tray.
 
-use faber_engine::model::{RunState, RunningItem, Settings};
+use faber_engine::model::{RunState, RunningItem, Settings, Vendor};
 use faber_engine::project::wire::MissionView;
 use faber_engine::project::{DecisionKind, MissionState};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// A text in two forms, as the screen sends it: `one` for a count of 1 and `other` for any other count. That is what
 /// `Intl.PluralRules` picks in all five languages for counts of 1 and more.
@@ -37,10 +37,29 @@ pub(crate) struct ShellTexts {
     /// The notification for several requests held back in one turn, with `{title}` and `{n}`: "{title}: {n} requests need you".
     #[serde(default = "default_notify_many")]
     notify_many: String,
+    /// The notification when "keep going" stops by itself, by reason (the last part of `reason.keepGoing.*`), with
+    /// `{title}` and `{ai}`: "{title}: kept going until nothing was left".
+    #[serde(default = "default_stopped")]
+    stopped: BTreeMap<String, String>,
 }
 
 fn default_notify_many() -> String {
     "{title}: {n} requests need you".into()
+}
+
+fn default_stopped() -> BTreeMap<String, String> {
+    [
+        ("done", "{title}: kept going until nothing was left"),
+        ("asked", "{title}: stopped keeping going to ask you something"),
+        ("failed", "{title}: stopped keeping going after two turns failed"),
+        ("cap", "{title}: stopped keeping going after a long run on its own"),
+        ("pace", "{title}: stopped keeping going so {ai} stays on pace"),
+        ("quota", "{title}: stopped keeping going until {ai} has quota again"),
+        ("billed", "{title}: stopped keeping going, {ai} may be billed per use"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect()
 }
 
 impl Default for ShellTexts {
@@ -54,6 +73,7 @@ impl Default for ShellTexts {
             needs_you: Plural { one: ", {n} needs you".into(), other: ", {n} need you".into() },
             notify: "{title} needs you".into(),
             notify_many: default_notify_many(),
+            stopped: default_stopped(),
         }
     }
 }
@@ -312,6 +332,18 @@ pub(super) fn parked_notice_text(texts: &ShellTexts, title: &str, n: usize) -> S
         return notice_text(texts, title);
     }
     fill(&fill(&texts.notify_many, "title", if title.is_empty() { "Faber" } else { title }), "n", &n.to_string())
+}
+
+/// The notification when "keep going" stopped by itself (R199), in the words the screen sent, English when it sent none.
+pub(super) fn stopped_text(texts: &ShellTexts, title: &str, why: &str, ai: Option<Vendor>) -> String {
+    let reason = why.strip_prefix("reason.keepGoing.").unwrap_or(why);
+    let template = texts.stopped.get(reason).cloned().or_else(|| default_stopped().remove(reason)).unwrap_or_else(|| texts.notify.clone());
+    let ai = match ai {
+        Some(Vendor::Claude) => "Claude",
+        Some(Vendor::Codex) => "Codex",
+        None => "AI",
+    };
+    fill(&fill(&template, "title", if title.is_empty() { "Faber" } else { title }), "ai", ai)
 }
 
 pub(super) fn notice_text(texts: &ShellTexts, title: &str) -> String {
@@ -611,7 +643,25 @@ mod tests {
             parked: vec![],
             parked_more: 0,
             stuck: vec![],
+            keep_going: false,
         }
+    }
+
+    #[test]
+    fn a_stop_of_keep_going_says_why_in_the_words_sent_and_in_english_before_any() {
+        let english = ShellTexts::default();
+        assert_eq!(stopped_text(&english, "Fix login", "reason.keepGoing.done", None), "Fix login: kept going until nothing was left");
+        assert_eq!(
+            stopped_text(&english, "", "reason.keepGoing.pace", Some(Vendor::Codex)),
+            "Faber: stopped keeping going so Codex stays on pace"
+        );
+        let mut sent = english.clone();
+        sent.stopped = BTreeMap::from([("quota".to_string(), "{title}: parou até {ai} ter cota de novo".to_string())]);
+        assert_eq!(
+            stopped_text(&sent, "Login", "reason.keepGoing.quota", Some(Vendor::Claude)),
+            "Login: parou até Claude ter cota de novo"
+        );
+        assert_eq!(stopped_text(&sent, "Login", "reason.keepGoing.cap", None), "Login: stopped keeping going after a long run on its own");
     }
 
     #[test]

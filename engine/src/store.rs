@@ -169,7 +169,14 @@ impl Store {
             .flatten()
             .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
             .filter_map(|e| read::<Conversation>(&e.path()))
-            .map(|c| Summary { id: c.id, title: c.title, area: c.area, project_id: c.project_id, updated_at: c.updated_at })
+            .map(|c| Summary {
+                keep_going: c.keep_going.is_some(),
+                id: c.id,
+                title: c.title,
+                area: c.area,
+                project_id: c.project_id,
+                updated_at: c.updated_at,
+            })
             .collect();
         list.sort_by_key(|c| std::cmp::Reverse(c.updated_at));
         list

@@ -216,6 +216,11 @@ async fn remove(faber: State<'_, Faber>, id: String) -> Res<()> {
 }
 
 #[tauri::command]
+async fn keep_going(faber: State<'_, Faber>, id: String, on: bool) -> Res<()> {
+    faber.engine.keep_going(&id, on)
+}
+
+#[tauri::command]
 async fn remove_queued(faber: State<'_, Faber>, id: String, turn_id: String) -> Res<()> {
     faber.engine.remove_queued(&id, &turn_id);
     Ok(())
@@ -1411,6 +1416,7 @@ fn main() {
                 wait_turn,
                 route_draft,
                 interrupt,
+                keep_going,
                 answer,
                 answer_question,
                 rename,
@@ -1540,6 +1546,12 @@ fn main() {
                         let (app, revision, items) = (handle.clone(), *revision, items.clone());
                         tauri::async_runtime::spawn_blocking(move || tray::on_running(&app, revision, &items));
                     }
+                }
+                if let AppEvent::Halted { title, why, vendor, .. } = &e
+                    && !hidden
+                {
+                    let (app, title, why, vendor) = (handle.clone(), title.clone(), why.clone(), *vendor);
+                    tauri::async_runtime::spawn_blocking(move || tray::on_halted(&app, &title, &why, vendor));
                 }
                 let _ = handle.emit("faber:event", e);
             });

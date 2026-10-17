@@ -99,6 +99,10 @@ export interface Message {
   movedFrom?: Vendor;
   /** The next rung up, offered when the turn's own tools show it stopped early. */
   nudge?: { reason: string; vendor: Vendor; model: string; effort: Effort };
+  /** A message Faber sent by itself, and why (`wake.keepGoing`): drawn as a quiet line, not as the person's words. */
+  wake?: { why: string; pr?: number; checks?: string[] };
+  /** On a reply: "keep going" stopped after it, and why (a `reason.keepGoing.*` key). */
+  halt?: string;
 }
 export interface QueuedTurn {
   id: string;
@@ -109,6 +113,7 @@ export interface QueuedTurn {
   at: number;
   /** Handed to the running turn and not yet taken in: it can no longer be removed. */
   sending?: boolean;
+  wake?: Message['wake'];
 }
 export interface Conversation {
   id: string;
@@ -123,6 +128,8 @@ export interface Conversation {
   createdAt: number;
   updatedAt: number;
   queued?: QueuedTurn[];
+  /** "Keep going" is on: Faber sends the next turn by itself. */
+  keepGoing?: { turns: number; failed: number };
   messages: Message[];
 }
 export interface Summary {
@@ -131,6 +138,8 @@ export interface Summary {
   area: Area;
   projectId?: string;
   updatedAt: number;
+  /** "Keep going" is on. */
+  keepGoing?: boolean;
 }
 export interface Project {
   id: string;
@@ -289,6 +298,8 @@ export interface RunningItem {
   /** The subagent calls of the reply that seem stuck: each needs the person like a question. */
   stuck?: string[];
   waitUntil?: number;
+  /** "Keep going" is on: it runs on its own. */
+  keepGoing?: boolean;
 }
 /** The running list in the engine's order, with a revision that grows by one with every list the engine sends. */
 export interface RunningList {
@@ -356,6 +367,7 @@ export type AppEvent =
   | ({ type: 'running' } & RunningList)
   | { type: 'usage'; vendors: VendorUsage[] }
   | { type: 'list' }
+  | { type: 'halted'; conversationId: string; title: string; why: string; vendor?: Vendor }
   | SetupProgressEvent;
 
 export interface SendRequest {
@@ -374,6 +386,9 @@ export interface Plural {
   other: string;
 }
 /** The words the shell shows by itself. Counts are `{n}` and the conversation is `{title}`; the shell fills them. */
+/** Why "keep going" stops by itself: the last part of the engine's `reason.keepGoing.*` keys. */
+export const STOPS = ['done', 'asked', 'failed', 'cap', 'pace', 'quota', 'billed'] as const;
+
 export interface ShellTexts {
   open: string;
   quit: string;
@@ -381,6 +396,8 @@ export interface ShellTexts {
   needsYou: Plural;
   notify: string;
   notifyMany: string;
+  /** When "keep going" stops by itself, by reason, with `{title}` and `{ai}`. */
+  stopped: Record<string, string>;
 }
 
 /** A recent folder as the engine judged it just now: `reason` is a translation key when it cannot be picked. */
@@ -413,6 +430,7 @@ export const api = {
   routeDraft: (req: { conversationId?: string; area: Area; projectId?: string; choice: Choice }, text: string) =>
     invoke<void>('route_draft', { req, text }),
   interrupt: (id: string) => invoke<void>('interrupt', { id }),
+  keepGoing: (id: string, on: boolean) => invoke<void>('keep_going', { id, on }),
   answer: (id: string, turnId: string, requestId: string, allow: boolean, always = false) =>
     invoke<void>('answer', { id, turnId, requestId, allow, always }),
   /** The choices for a question the assistant asked: each question's text to the label picked (several joined by a comma). */

@@ -24,6 +24,9 @@ interface Props {
   mode?: PermissionMode;
   onMode?: (mode: PermissionMode) => void;
   busy: boolean;
+  /** "Keep going" in a project conversation under way: on, off, or undefined where it is not offered. */
+  keepGoing?: boolean;
+  onKeepGoing?: (on: boolean) => void;
   /** A conversation is still opening: nothing can be sent or warmed until it is in. */
   locked?: boolean;
   placeholder: string;
@@ -275,6 +278,18 @@ export function Composer(props: Props) {
             </select>
             <Icon name="down" small />
           </label>
+        </Show>
+        <Show when={props.keepGoing !== undefined && props.onKeepGoing}>
+          <button
+            type="button"
+            class="chip choose keep"
+            aria-pressed={props.keepGoing}
+            title={t(props.keepGoing ? 'composer.keepGoing.on' : 'composer.keepGoing.line')}
+            onClick={() => props.onKeepGoing!(!props.keepGoing)}
+          >
+            <Icon name="loop" small />
+            <span>{t('composer.keepGoing')}</span>
+          </button>
         </Show>
         <Show when={props.busy}>
           <button type="button" class="send stop" onClick={() => props.onStop()} aria-label={t('composer.stop')}>

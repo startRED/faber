@@ -15,6 +15,7 @@ import {
   type Summary,
   type UpdateStatus,
   type Vendor,
+  STOPS,
 } from './api.ts';
 import { inOrder, refreshed, saveAndApply, watchSystem } from './appearance.ts';
 import { useClock } from './clock.ts';
@@ -476,6 +477,7 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
             needsYou: templates('tray.needsYou'),
             notify: templates('tray.notify').other,
             notifyMany: templates('tray.notifyMany').other,
+            stopped: Object.fromEntries(STOPS.map((why) => [why, templates(`tray.stopped.${why}`).other])),
           })
           .catch(() => undefined),
     ),
@@ -612,6 +614,12 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
   const options = createMemo(() => (lang(), modelOptions(state().vendors, state().models)));
   const project = () => state().projects.find((p) => p.id === projectId());
   const busy = () => current()?.messages.at(-1)?.status === 'streaming';
+  // "Keep going" (R199): a project conversation under way can go on by itself. The engine keeps the switch; the list says it.
+  const keepGoing = () => {
+    const c = current();
+    if (area() !== 'project' || !c?.messages.length) return undefined;
+    return state().conversations.some((s) => s.id === c.id && s.keepGoing);
+  };
   const needsProject = () => area() === 'project' && !project();
   // The new conversation of a chat with a connected AI is the one place the effects of a look appear.
   const newChat = () => (area() === 'chat' || !!project()) && state().vendors.length > 0 && !current()?.messages.length;
@@ -677,6 +685,11 @@ export function App(props: { initial: AppState; update?: UpdateStatus; inbox: { 
         hints={newChat() ? [t('composer.chatPlaceholder'), t('hint.chat.2'), t('hint.chat.3')] : undefined}
         onSend={(d) => void send(d)}
         onStop={() => current() && void api.interrupt(current()!.id)}
+        keepGoing={keepGoing()}
+        onKeepGoing={(on) => {
+          const id = current()?.id;
+          if (id) void api.keepGoing(id, on).then(refresh, (err) => setSaveError(failureText(err)));
+        }}
         onWarm={() => void api.warm({ conversationId: current()?.id, ...target(), choice: picked() })}
         onPause={(text) => {
           if (!loading() && picked().vendor === 'auto') void api.routeDraft({ conversationId: current()?.id, ...target(), choice: picked() }, text);

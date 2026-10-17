@@ -36,7 +36,8 @@ export function Running(props: {
   everyWhileShown(15_000, () => setNow(Date.now()));
   const blocks = () => blocksOf(props.items);
   const nameOf = (key: string) => (key === 'chat' ? t('area.chat') : (props.projects.find((p) => p.id === key)?.name ?? t('area.projects')));
-  const words = (item: RunningItem) => (item.waitUntil ? t('run.waiting', { when: untilReset(item.waitUntil) }) : item.state === 'needsYou' ? t('run.needsYou') : item.vendor ? t('run.working') : t('run.routing'));
+  const words = (item: RunningItem) =>
+    item.waitUntil ? t('run.waiting', { when: untilReset(item.waitUntil) }) : item.state === 'needsYou' ? t('run.needsYou') : item.keepGoing ? t('run.keepGoing') : item.vendor ? t('run.working') : t('run.routing');
   const since = (item: RunningItem) => {
     const e = elapsed(item.since, now());
     return t(e.key, { n: e.n });
