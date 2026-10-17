@@ -6,6 +6,7 @@
 
 <!-- Paste the English entry of this pull request's docs/next/<branch>.json (R142); the release
      notes and the what's-new screen are built from those entries, not from this text.
+     How to write it: docs/dev/whats-new.md.
      Write "Nothing a person sees." when that is true. -->
 
 ## Coherence
