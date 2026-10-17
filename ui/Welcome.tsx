@@ -22,11 +22,11 @@ export function when(ms: number): string {
   return new Intl.DateTimeFormat(lang(), { day: 'numeric', month: 'short' }).format(ms);
 }
 
-/** The new conversation (s1): the greeting, the composer it was given, three suggestions that fill the composer without
- * sending anything, and the four conversations to pick up: those that wait for the user first, then the latest. The effects of the look sit behind it (ui/Ambient.tsx).
- * In a project it is one column (docs/design.md, "The Projects home"): Curioso over a quiet line with the project and its
- * folder, the project's greeting, the composer and at most three of this project's conversations. No suggestions: the
- * composer's hints already show what to ask, and the room right of the column is the black hole's. */
+/** The new conversation (s1), one column in both areas (docs/design.md, "The homes"): the greeting, the composer it was
+ * given, and the three conversations to pick up, those that wait for the user first. In Chat three short suggestions sit
+ * under the composer and fill it without sending anything; the effects of the look sit behind (ui/Ambient.tsx). In a
+ * project Curioso and a quiet line with the project and its folder come first, one line says where the agent works, and
+ * the pick-up list holds only this project's conversations: the composer's hints already show what to ask. */
 export function Welcome(props: {
   /** How the person asked to be called, if they did. */
   name?: string;
@@ -43,20 +43,10 @@ export function Welcome(props: {
     if (props.project) return greetingParts(t('projects.home.title'));
     return props.name ? greetingParts(t('empty.chatTitleNamed', { name: props.name }), props.name) : greetingParts(t('empty.chatTitle'));
   };
-  const rows = () => (props.project ? pickUp(props.recent.filter((c) => c.projectId === props.project!.id), props.running, 3) : pickUp(props.recent, props.running));
+  const rows = () => pickUp(props.project ? props.recent.filter((c) => c.projectId === props.project!.id) : props.recent, props.running, 3);
   const live = (id: string) => props.running.find((i) => i.conversationId === id);
   // In a project every row is the project's own, so its row says only when.
   const where = (c: Summary) => (c.area === 'chat' ? t('area.chat') : (props.projects.find((p) => p.id === c.projectId)?.name ?? t('area.projects')));
-  const resume = () => (
-    <Show when={rows().length > 0}>
-      <section class="resume" aria-labelledby="resume-title" ref={animateList}>
-        <h2 id="resume-title">{t('s1.pickUp')}</h2>
-        <For each={rows()}>
-          {(c) => <ResumeRow conversation={c} item={live(c.id)} where={props.project ? undefined : where(c)} onOpen={props.onOpen} />}
-        </For>
-      </section>
-    </Show>
-  );
   return (
     <div class="welcome-grid" classList={{ project: !!props.project }} ref={animateList}>
       <div class="w-main">
@@ -80,27 +70,34 @@ export function Welcome(props: {
             <em>{title()[1]}</em>
           </Show>
         </h1>
-        <p class="lead">{props.project ? t('projects.chat.lead') : t('empty.chatBody')}</p>
+        <Show when={props.project}>
+          <p class="lead">{t('projects.chat.lead')}</p>
+        </Show>
         {props.children}
-        <Show when={props.project} fallback={<Suggestions onSuggest={props.onSuggest} />}>
-          {resume()}
+        <Show when={!props.project}>
+          <Suggestions onSuggest={props.onSuggest} />
+        </Show>
+        <Show when={rows().length > 0}>
+          <section class="resume" aria-labelledby="resume-title" ref={animateList}>
+            <h2 id="resume-title">{t('s1.pickUp')}</h2>
+            <For each={rows()}>
+              {(c) => <ResumeRow conversation={c} item={live(c.id)} where={props.project ? undefined : where(c)} onOpen={props.onOpen} />}
+            </For>
+          </section>
         </Show>
       </div>
-      <Show when={!props.project}>{resume()}</Show>
     </div>
   );
 }
 
-/** Three hand-written suggestions that fill the composer and send nothing. */
+/** Three short hand-written suggestions that fill the composer and send nothing. */
 function Suggestions(props: { onSuggest: (text: string) => void }) {
   return (
-    <section class="try" aria-labelledby="try-title">
-      <h2 id="try-title">{t('s1.try')}</h2>
+    <section class="try chips" aria-label={t('s1.try')}>
       <For each={SUGGESTIONS}>
         {(key) => (
-          <button type="button" onClick={() => props.onSuggest(t(key))}>
-            <span>{t(key)}</span>
-            <Icon name="right" small />
+          <button type="button" class="chip" onClick={() => props.onSuggest(t(key))}>
+            {t(key)}
           </button>
         )}
       </For>

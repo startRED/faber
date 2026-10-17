@@ -19,9 +19,10 @@ export interface TourStep {
 
 const CHAT: TourStep = { id: 'chat', anchor: 'composer', sides: ['bottom', 'top'] };
 const PROJECTS: TourStep = { id: 'projects', anchor: 'projects', sides: ['right', 'bottom'] };
-const FOLLOW: TourStep = { id: 'follow', anchor: 'run', sides: ['bottom', 'left'], pin: true };
+// The running button's cards sit only under it (R170): a card beside it would leave the corner it explains.
+const FOLLOW: TourStep = { id: 'follow', anchor: 'run', sides: ['bottom'], pin: true };
 const AUTO: TourStep = { id: 'auto', anchor: 'auto', sides: ['bottom', 'left', 'top'] };
-const RUNNING: TourStep = { id: 'running', anchor: 'run', sides: ['bottom', 'left'], pin: true };
+const RUNNING: TourStep = { id: 'running', anchor: 'run', sides: ['bottom'], pin: true };
 
 /** A beginner gets three cards. An experienced person gets two, for what is new to them: Auto and the running list. No
  * answer to the first-run question counts as a beginner. */

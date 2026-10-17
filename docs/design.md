@@ -294,10 +294,14 @@ inside its own area.
 
 ### The new conversation screen
 
+- One column, like the Projects home (C005): the greeting, the composer, the suggestions and what to pick up, top to
+  bottom. No line under the greeting: the composer's placeholder already says to ask anything, and its permission chip
+  shows whether Chat may change files.
 - A greeting, "Where do we start?", ending with the person's name when they gave one.
-- Three hand-written suggestions per language. Clicking one fills the composer and moves focus there. It sends nothing.
-- "Pick up where you left off" lists up to four conversations of both areas: those that need the person first, then the
-  most recently updated.
+- Three short hand-written suggestions per language, as chips under the composer: one row at the usual text size, the
+  last chip wrapping only on a narrow window or a large text size. Clicking one fills the composer and moves focus there. It sends nothing. A hover changes only the chip's colour.
+- "Pick up where you left off" lists up to three conversations of both areas under the suggestions: those that need the
+  person first, then the most recently updated.
 - The composer keeps its model picker, "AI: choose for me".
 - Auto chooses both the model and its effort. A manual model adds an adjacent low, medium or high effort choice,
   defaulting to medium (R102). Each conversation remembers its choice. Changes apply to the next message only (the

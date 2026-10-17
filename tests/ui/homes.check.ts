@@ -101,6 +101,12 @@ check('homes: the third tutorial card sits under the running button, with its po
     const pointer = at.x + (at.pointer ?? 0);
     ok(pointer >= run.x && pointer <= run.x + run.w, `${width}: the pointer lands on the button (${pointer})`);
   }
+  // The one-column Chat home at 1100 x 700: the greeting is clear of the room left of the button but not of the room under
+  // it. The card still goes under, never beside.
+  const run: Box = { x: 930, y: 40, w: 130, h: 44 };
+  const greeting: Box = { x: 330, y: 240, w: 600, h: 70 };
+  const at = placeStep(follow, run, card, { w: 1100, h: 700 }, [greeting]);
+  equal(at.side, 'top', 'with the room beside the button clear, the card still sits under it');
 });
 
 check('homes: the experienced running card points the same way, and an unpinned card still floats rather than cover the greeting', () => {

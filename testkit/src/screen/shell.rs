@@ -508,28 +508,19 @@ fn greets_and_suggests(ctx: &mut Ctx) -> Result {
     page.cdp.call("Emulation.clearDeviceMetricsOverride", json!({}))?;
     // Three suggestions; one fills the composer and sends nothing.
     same(page.count(&css(".try button"))?, 3, "suggestions")?;
-    // The hover nudge moves the text with a transform; the row's own box and padding stay where they are.
+    // One column: no line under the greeting, and the suggestions are short chips in one row under the composer.
+    let chips = page.eval(
+        "(() => { const c = document.querySelector('.welcome-grid .composer').getBoundingClientRect(); const tops = [...document.querySelectorAll('.try button')].map((b) => Math.round(b.getBoundingClientRect().top)); return { row: new Set(tops).size === 1, under: tops[0] >= c.bottom, lead: document.querySelectorAll('.welcome-grid .lead').length }; })()",
+    )?;
+    ensure(chips["row"] == true && chips["under"] == true, || format!("the suggestions are not one row under the composer: {chips}"))?;
+    same(chips["lead"].as_u64(), Some(0), "lines under the Chat greeting")?;
+    // A hover changes only the chip's colour, never its box.
     let first = css(".try button").has_text(&page.text_of("suggest.1")?);
-    // The window has just gone back to its own size: the mouse goes where the row is now, and tries again if the layout
-    // had not settled yet.
-    let mut nudge = Value::Null;
-    for _ in 0..4 {
-        pause(0.4);
-        page.hover(&first)?;
-        pause(0.6);
-        nudge = page.eval(
-            "(() => { const b = document.querySelector('.try button'); const s = b.querySelector(':scope > span'); return { padding: getComputedStyle(b).paddingLeft, moves: getComputedStyle(b).transitionProperty + ' ' + getComputedStyle(s).transitionProperty, dx: new DOMMatrix(getComputedStyle(s).transform).m41, motion: document.documentElement.dataset.motion }; })()",
-        )?;
-        if nudge["motion"] != "full" || (nudge["dx"].as_f64().unwrap_or(0.0) - 6.0).abs() < 0.5 {
-            break;
-        }
-    }
-    same(nudge["padding"].as_str(), Some("0px"), "the row's padding does not move on hover")?;
-    ensure(!nudge["moves"].as_str().unwrap_or("").contains("padding"), || format!("padding is transitioned: {nudge}"))?;
-    let dx = nudge["dx"].as_f64().unwrap_or(f64::NAN);
-    ensure(if nudge["motion"] == "full" { (dx - 6.0).abs() < 0.5 } else { dx.abs() < 0.5 || (dx - 6.0).abs() < 0.5 }, || {
-        format!("the nudge: {nudge}")
-    })?;
+    let size = "(() => { const r = document.querySelector('.try button').getBoundingClientRect(); return [r.width, r.height]; })()";
+    let before = page.eval(size)?;
+    page.hover(&first)?;
+    pause(0.4);
+    same(page.eval(size)?, before, "the chip's box on hover")?;
     ensure(page.count(&css(".resume"))? == 0, || "there is nothing to pick up yet".to_string())?;
     let wanted = page.text_of("suggest.2")?;
     page.click(&css(".try button").has_text(&wanted))?;
@@ -552,6 +543,10 @@ fn greets_and_suggests(ctx: &mut Ctx) -> Result {
     page.wait_visible(&title)?;
     let row = css(".resume .rrow").has_text(QUESTION);
     page.wait_visible(&row)?;
+    let placed = page.eval(
+        "(() => { const r = document.querySelector('.welcome-grid .w-main .resume'); const t = document.querySelector('.try'); return !!r && r.getBoundingClientRect().top >= t.getBoundingClientRect().bottom; })()",
+    )?;
+    same(placed.as_bool(), Some(true), "what to pick up sits in the one column, under the suggestions")?;
     ctx.shot(&mut app, "greeting-pick-up")?;
     let page = &mut app.page;
     page.click(&row)?;
