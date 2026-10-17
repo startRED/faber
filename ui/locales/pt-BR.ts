@@ -882,6 +882,7 @@ export const ptBR: Messages = {
   'notes.30.new': 'Um subagente abre à direita, com o que pediram a ele, as etapas que fez e o relatório dele.',
   'notes.31.new': 'Um subagente mostra à direita o que fez: os arquivos que mudou, as verificações que rodou e qualquer arquivo que não estava no pedido.',
   'notes.32.better': 'Uma alteração de arquivo mostra quantas linhas entraram e saíram e, enquanto acontece, as próprias linhas.',
+  'notes.33.new': 'O Faber fica parado enquanto um jogo está na frente: nada se mexe nem é redesenhado, e o que aconteceu nesse meio-tempo aparece quando você volta.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

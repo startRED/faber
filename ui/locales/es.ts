@@ -895,6 +895,7 @@ export const es: Messages = {
   'notes.30.new': 'Un subagente se abre a la derecha, con lo que se le pidió, los pasos que dio y su informe.',
   'notes.31.new': 'Un subagente muestra a la derecha lo que hizo: los archivos que cambió, las comprobaciones que ejecutó y cualquier archivo que no estaba en su encargo.',
   'notes.32.better': 'Un cambio de archivo muestra cuántas líneas añadió y quitó y, mientras ocurre, las líneas mismas.',
+  'notes.33.new': 'Faber se queda quieto mientras un juego está delante: nada se mueve ni se vuelve a dibujar, y lo que pasó mientras tanto aparece cuando vuelves.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

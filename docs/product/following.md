@@ -129,8 +129,8 @@ frames) and checked against today's code. It fills the steps of R161 and never b
 
 **Across all of them:**
 
-- **Quiet during games.** The tray already knows when a game is in front (`src-tauri/src/tray/native.rs`, private
-  today); that check becomes one the screen can ask. While it holds, pictures stop, rows stop repainting and events wait
+- **Quiet during games.** Built on Windows (R191): the tray's check of a game in front is one the screen asks
+  (`game_in_front`). While it holds, pictures stop, rows stop repainting and events wait
   as one summary for the person's return. Nothing opens a window or takes focus.
 - **Cost first.** Faber idles near 110 MB today against the 400 MB test (R125). Steps 1 to 6 add no process and only
   the rows on screen. A second webview is the big cost: one live view at a time. The Windows spike measured it

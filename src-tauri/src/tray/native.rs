@@ -1,7 +1,7 @@
 //! Windowless Windows state queries and chime playback.
 #![allow(unsafe_code)]
 
-use super::decide::{Attention, Rect, covers_monitor, windows_attention};
+use super::decide::{Attention, Foreground, Rect, covers_monitor, game_in_front, windows_attention};
 use std::ffi::c_void;
 
 #[repr(C)]
@@ -33,18 +33,17 @@ unsafe extern "system" {
 }
 
 pub(super) fn attention() -> Attention {
-    let mut state = 0;
-    // SAFETY: Windows writes one notification-state enum to this live, aligned i32.
-    let result = unsafe { SHQueryUserNotificationState(&mut state) };
-    if result < 0 {
+    let state = notification_state();
+    if let Err(result) = state {
         eprintln!("faber: the notification state could not be read (HRESULT {result:#x}); suppressing the toast");
     }
-    let attention = windows_attention((result >= 0).then_some(state), false);
+    let attention = windows_attention(state.ok(), false);
     if attention != Attention::Normal {
         return attention;
     }
-    match foreground_attention() {
-        Some(attention) => attention,
+    match foreground() {
+        Some(Foreground { own: true, .. }) => Attention::Silent,
+        Some(front) => windows_attention(Some(5), front.covers),
         None => {
             eprintln!("faber: foreground window bounds could not be read; suppressing the toast");
             Attention::SoundOnly
@@ -52,7 +51,23 @@ pub(super) fn attention() -> Attention {
     }
 }
 
-fn foreground_attention() -> Option<Attention> {
+/// Whether a game or another full-screen app is in front (`decide::game_in_front`). The screen asks every few seconds
+/// while its window is shown without the focus, so a failed query says nothing in the log and only means "no".
+pub(super) fn game() -> bool {
+    let state = notification_state().ok();
+    // A locked screen, quiet time or an unknown state is never a game, so the window in front is read only for the others.
+    let front = if matches!(state, Some(2..=5 | 7)) { foreground() } else { None };
+    game_in_front(state, front)
+}
+
+fn notification_state() -> Result<i32, i32> {
+    let mut state = 0;
+    // SAFETY: Windows writes one notification-state enum to this live, aligned i32.
+    let result = unsafe { SHQueryUserNotificationState(&mut state) };
+    if result < 0 { Err(result) } else { Ok(state) }
+}
+
+fn foreground() -> Option<Foreground> {
     // SAFETY: Query-only APIs; the process id is written to a live, aligned u32.
     let window = unsafe { GetForegroundWindow() };
     if window.is_null() {
@@ -63,7 +78,7 @@ fn foreground_attention() -> Option<Attention> {
         return None;
     }
     if process == std::process::id() {
-        return Some(Attention::Silent);
+        return Some(Foreground { own: true, covers: false });
     }
     // GetWindowRect is DPI-virtualized; use physical coordinates for both rectangles on this worker, then restore it.
     const PER_MONITOR_AWARE_V2: isize = -4;
@@ -82,7 +97,7 @@ fn foreground_attention() -> Option<Attention> {
     };
     // SAFETY: Restore the valid context returned for this same thread, including after a failed bounds query.
     let restored = unsafe { SetThreadDpiAwarenessContext(previous) };
-    (read && !restored.is_null()).then(|| windows_attention(Some(5), covers_monitor(rect, info.monitor)))
+    (read && !restored.is_null()).then(|| Foreground { own: false, covers: covers_monitor(rect, info.monitor) })
 }
 
 pub(super) fn play() -> Result<(), String> {

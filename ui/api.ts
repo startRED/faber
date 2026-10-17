@@ -452,6 +452,8 @@ export const api = {
   inputSeen: () => invoke<void>('input_seen'),
   /** Whether any field holds something typed or attached and not sent: no unattended update closes the window then. */
   draftDirty: (dirty: boolean) => invoke<void>('draft_dirty', { dirty }),
+  /** Whether a game or another full-screen app is in front of the window (always no on a test build and off Windows). */
+  gameInFront: () => invoke<boolean>('game_in_front'),
   onUpdate: (listener: (status: UpdateStatus) => void) => listen<UpdateStatus>('faber:update', (e) => listener(e.payload)),
   notesSeen: () => invoke<number | null>('notes_seen').then((id) => id ?? undefined),
   saveNotesSeen: (id: number) => invoke<void>('save_notes_seen', { id }),

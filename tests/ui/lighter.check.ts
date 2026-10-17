@@ -16,7 +16,7 @@ const settle = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
 type Interval = { id: number; ms: number; run: () => void };
 
 /** Records the intervals the page starts and ends, so a check sees what is alive. */
-function watchIntervals() {
+export function watchIntervals() {
   const alive = new Map<number, Interval>();
   const real = { set: window.setInterval, clear: window.clearInterval };
   window.setInterval = ((run: () => void, ms?: number) => {

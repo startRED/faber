@@ -142,6 +142,26 @@ pub(super) fn covers_monitor(window: Rect, monitor: Rect) -> bool {
         && window.bottom >= monitor.bottom
 }
 
+/// The window in front, as Windows answered for it: Faber's own or not, and whether it covers its whole monitor.
+#[cfg(any(windows, test))]
+#[derive(Clone, Copy)]
+pub(super) struct Foreground {
+    pub(super) own: bool,
+    pub(super) covers: bool,
+}
+
+/// Whether a game or another full-screen app is in front, so the screen goes quiet (R191). Windows names a full-screen,
+/// Direct3D, presentation or store app (shellapi.h 2, 3, 4, 7); a borderless game shows only as another process's window
+/// that covers its monitor. Faber's own window is never one, and a locked screen or an unknown state is not one either.
+#[cfg(any(windows, test))]
+pub(super) fn game_in_front(state: Option<i32>, foreground: Option<Foreground>) -> bool {
+    match foreground {
+        Some(Foreground { own: true, .. }) => false,
+        Some(Foreground { covers: true, .. }) if state == Some(5) => true,
+        _ => matches!(state, Some(2 | 3 | 4 | 7)),
+    }
+}
+
 pub(super) fn delivery(focused: bool, attention: Attention, settings: &Settings) -> Delivery {
     let active = !focused && attention != Attention::Silent;
     Delivery { toast: active && attention == Attention::Normal && settings.notifications(), sound: active && settings.notification_sound() }
@@ -444,6 +464,22 @@ mod tests {
         assert_eq!(windows_attention(Some(5), true), SoundOnly, "foreground borderless full screen overrides normal");
         assert_eq!(windows_attention(Some(1), true), Silent, "full screen does not override locking");
         assert_eq!(windows_attention(Some(6), true), Silent, "full screen does not override quiet time");
+    }
+
+    #[test]
+    fn a_game_is_a_full_screen_app_or_another_window_over_its_whole_monitor_never_faber() {
+        let other = |covers| Some(Foreground { own: false, covers });
+        for state in [2, 3, 4, 7] {
+            assert!(game_in_front(Some(state), other(false)), "shellapi.h state {state} is a full-screen app");
+            assert!(game_in_front(Some(state), None), "an unread foreground keeps what Windows said");
+            assert!(!game_in_front(Some(state), Some(Foreground { own: true, covers: true })), "Faber itself, full screen");
+        }
+        assert!(game_in_front(Some(5), other(true)), "a borderless game");
+        assert!(!game_in_front(Some(5), other(false)), "a window that leaves the taskbar");
+        assert!(!game_in_front(Some(5), None));
+        for state in [None, Some(0), Some(1), Some(6), Some(8)] {
+            assert!(!game_in_front(state, other(true)), "locked, quiet time or unknown {state:?}");
+        }
     }
 
     #[test]

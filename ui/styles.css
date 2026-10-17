@@ -842,8 +842,8 @@ html.resizing :is(.shell, .main, .side, .fold, .tour-ring) { transition: none !i
 :is([data-motion='reduced'], [data-motion='none']) select::picker(select) { transition: none !important; transform: none !important; }
 :is(html[data-motion='reduced'], html[data-motion='none'])::view-transition-old(root),
 :is(html[data-motion='reduced'], html[data-motion='none'])::view-transition-new(root) { animation: none !important; }
-/* A hidden or minimized window runs no animation at all: the root class comes from ui/appearance.ts. */
-html.hidden-win, html.hidden-win *, html.hidden-win *::before, html.hidden-win *::after { animation-play-state: paused !important; }
+/* A hidden or minimized window runs no animation at all, nor one behind a game: the root classes come from ui/appearance.ts and ui/quiet.ts. */
+:is(html.hidden-win, html.quiet-win), :is(html.hidden-win, html.quiet-win) *, :is(html.hidden-win, html.quiet-win) *::before, :is(html.hidden-win, html.quiet-win) *::after { animation-play-state: paused !important; }
 /* Another app with the focus pauses the effects of the homes too. */
 html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 /* The system preference is honoured even before the script runs. */

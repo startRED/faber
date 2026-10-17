@@ -1122,6 +1122,14 @@ fn draft_dirty(faber: State<'_, Faber>, dirty: bool) {
     faber.draft_dirty.store(dirty, std::sync::atomic::Ordering::SeqCst);
 }
 
+/// Whether a game or another full-screen app is in front (R191). The screen asks while its window is shown without the
+/// focus and goes quiet while the answer is yes. It runs off the main thread: the query switches its thread's DPI mode
+/// for a moment. A test build always answers no, so a game on the PC that runs the checks never changes them.
+#[tauri::command]
+async fn game_in_front() -> bool {
+    !cfg!(feature = "test-hooks") && tray::game_in_front()
+}
+
 /// The last "what's new" entry the person has seen (`ui/notes.ts`), in its own small file in the data folder. None means
 /// no entry was ever shown, which the screen reads as a first install or as an install from before the screen existed. A
 /// test build answers "all seen", so no scenario starts behind the screen.
@@ -1389,6 +1397,7 @@ fn main() {
             update_restart,
             input_seen,
             draft_dirty,
+            game_in_front,
             notes_seen,
             save_notes_seen,
             setup::setup_check,

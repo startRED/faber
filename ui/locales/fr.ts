@@ -895,6 +895,7 @@ export const fr: Messages = {
   'notes.30.new': 'Un sous-agent s’ouvre à droite, avec ce qu’on lui a demandé, les étapes qu’il a faites et son rapport.',
   'notes.31.new': 'Un sous-agent montre à droite ce qu’il a fait : les fichiers modifiés, les vérifications lancées et tout fichier absent de sa demande.',
   'notes.32.better': 'Une modification de fichier montre combien de lignes elle ajoute et retire et, pendant qu’elle a lieu, les lignes elles-mêmes.',
+  'notes.33.new': 'Faber reste immobile quand un jeu est au premier plan : rien ne bouge ni ne se redessine, et ce qui s’est passé entre-temps apparaît à votre retour.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

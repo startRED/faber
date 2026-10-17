@@ -221,6 +221,7 @@ sentences. Test builds add `report_checks` and two mission probes.
 | Projects and folders | `add_project`, `remove_project`, `show_project`, `recents`, `open_folders`, `forget_recent`, `save_environment`, `forget_environment`, `start_environment` |
 | Missions | `project_enroll`, `project_grant`, `project_revoke` (no caller on screen yet), `project_proof`, `project_proof_confirm`, `mission_start`, `mission_state`, `mission_mode`, `mission_stop`, `mission_resume`, `mission_answer`, `local_update_state` (no caller on screen: the mission screens are gone) |
 | Updates | `update_status` (phase and progress), `screen_ready` (the first frame is painted: the window, built hidden, shows; a failsafe shows it after 3 s; the page paints its own mark on the theme colour before any script, so neither shows a blank window), `update_restart` (the "Update ready, restart" button), `input_seen` (first typing, paste or drop), `draft_dirty` (a field holds an unsent draft), `notes_seen`, `save_notes_seen` |
+| Window | `game_in_front` (a game or another full-screen app is in front; asked only while the window is shown without the focus; always no on a test build and off Windows) |
 | Accounts | `setup_check`, `setup_install`, `setup_sign_in` |
 
 Events: `faber:event` carries `message`, `queue`, `quota`, `usage`, `running`, `list` and the account cards' `setup`
@@ -242,6 +243,7 @@ checks in `tests/ui/index.ts`, real-app scenarios in `testkit/src/screen/mod.rs`
 | Queue, steer, branch | Done | `engine/tests/engine.rs`; `tests/ui/steer.check.ts` |
 | Permissions, cards, held-back requests | Done (five modes, R140) | `testkit/src/screen/permissions.rs`; `engine/tests/project_security.rs`; `tests/ui/thread.check.ts` |
 | Running column, tray, notifications | Done | `tests/ui/running.check.ts`; tests inside `src-tauri/src/tray/decide.rs` |
+| Quiet during games: no motion, no timed repaint, events held as one while a game is in front | Done on Windows (R191) | `tests/ui/quiet.check.ts`; tests inside `src-tauri/src/tray/decide.rs` |
 | Keep awake, start with Windows | Done on Windows | tests inside `src-tauri/src/awake.rs`, `autostart.rs` |
 | Public self-update | Done, on two channels (R156): stable reads the latest release's `latest.json` and previews (opt-in) the `preview-channel` release's, which every release replaces with its newest build; checks at start and every 6 h; installs on quit or, on Windows, at the first moment no conversation, mission or CLI install runs and the window is hidden (R141: it also installs at start, before the first input and with no unsent draft; "What's new" shows once after) | tests inside `src-tauri/src/update.rs`; `engine/tests/running.rs` (`is_working`) |
 | First run, account cards, tutorial | Done | `tests/ui/setup.check.ts`, `tutorial.check.ts`, `homes.check.ts`; `testkit/src/screen/setup.rs`, `first_run.rs` |

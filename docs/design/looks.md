@@ -149,6 +149,26 @@ accident. `tests/ui/grammar.check.ts` reads the real stylesheet and fails on a b
 - Fonts ship as woff2 only: a PostCSS plugin (`scripts/woff2-only.mjs`) drops the woff fallback that Fontsource lists,
   which the webview never reads.
 
+### Quiet during games
+
+While a game or another full-screen app is in front of the shown window (R191), the screen acts as if its window were
+hidden. The shell answers `game_in_front` from the check the tray already makes before a notification
+(`src-tauri/src/tray/native.rs`, `decide::game_in_front`): Windows names a full-screen, Direct3D, presentation or store
+app, or another process's window covers its whole monitor (a borderless game). Faber's own window never counts.
+
+- The screen asks (`ui/quiet.ts`, `watchGames`) only while its window is shown without the focus: once at the blur and
+  every 5 s after. The focus back, or the window hiding, ends quiet at once, and an answer that lands later is dropped.
+- Quiet counts as `windowHidden()` (`ui/appearance.ts`): idle life, the dust and the black hole stop, and
+  `everyWhileShown` ends the clock and the running column's 15 s tick, running each once on return. `html.quiet-win`
+  pauses every CSS animation, the live marks included, as `html.hidden-win` does.
+- The engine's events wait (`createHold`), one per message, queue, quota window and running list (the higher revision
+  wins), plus one `list` and one `usage`, so an hour of streaming keeps only the newest copy of each. They land in one
+  batch on return: one repaint for the whole time away. The tray, its counts and its notifications do not wait, nor
+  do the progress of an account install (`ui/Setup.tsx`) and of an update (`faber:update`), which the person started or
+  watches and which end by themselves.
+- Nothing opens a window, takes the focus or flashes the taskbar. macOS and Linux answer no until they have a probe (R92).
+- `tests/ui/quiet.check.ts` fails when a game in front leaves a timer, an animation, a late answer or a second repaint.
+
 ### Effects
 - Effects appear only on the two homes (the new conversation of Chat and the first screen of a project) and behind a new
   project session, never behind text the user reads. Every animation, including the composer's idle life, pauses while the

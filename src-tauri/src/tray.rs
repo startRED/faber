@@ -197,6 +197,15 @@ pub(crate) fn set_texts(app: &AppHandle, texts: ShellTexts) -> Result<(), String
     say(&s)
 }
 
+/// Whether a game or another full-screen app is in front (R191). Only Windows can tell today.
+pub(crate) fn game_in_front() -> bool {
+    #[cfg(windows)]
+    return native::game();
+    // shortcut: no global macOS/Linux full-screen probe; add native detection when those backends are implemented (R92).
+    #[cfg(not(windows))]
+    false
+}
+
 /// What the notifications of one update say: the needs-you titles, then the requests held back for want of an answer.
 fn words(texts: &ShellTexts, update: &decide::Update) -> Vec<String> {
     update

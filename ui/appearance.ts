@@ -1,5 +1,6 @@
 import { createSignal } from 'solid-js';
 import type { Appearance, AppState, Look, Motion, SavedSettings, Settings } from './api.ts';
+import { quiet } from './quiet.ts';
 
 // Applying a look (docs/design/looks.md). The shell computes every look; this module only writes it to the page.
 
@@ -17,8 +18,8 @@ let snapshots = 0;
 export const appliedLook = applied;
 /** The motion level that is in force: the user's, capped by the system. */
 export const motion = (): Motion => effectiveMotion(applied()?.motion ?? 'full', reduced());
-/** True while the window is hidden; effect loops stop. */
-export const windowHidden = hidden;
+/** True while the window is hidden, or a game is in front of it (ui/quiet.ts); effect loops stop. */
+export const windowHidden = (): boolean => hidden() || quiet();
 /** True while the window has the focus; effect loops stop when another app takes it. */
 export const windowFocused = focused;
 

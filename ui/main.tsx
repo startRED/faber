@@ -7,6 +7,7 @@ import { ContextMenuHost } from './ContextMenu.tsx';
 import { installContextMenu } from './contextmenu.ts';
 import { applyLook } from './appearance.ts';
 import { createInbox } from './inbox.ts';
+import { createHold, onQuiet, watchGames } from './quiet.ts';
 import { store } from './running.ts';
 
 // Only a test build (`vite build --mode test`) carries the screen's checks; a production build drops this line.
@@ -20,10 +21,13 @@ if (import.meta.env.MODE === 'test') {
 // a newer event. Every other event waits in the inbox until the app is drawn and takes them in order, so the end of a
 // turn that lands before then still reaches the conversation.
 const inbox = createInbox<AppEvent>();
-await api.on((e) => {
+// While a game is in front (ui/quiet.ts), events wait folded into one and land together when the person comes back.
+const hold = createHold((e) => {
   if (e.type === 'running') store.offer({ revision: e.revision, items: e.items });
   else inbox.push(e);
 });
+onQuiet(hold.hold);
+await api.on(hold.push);
 await api.setClock(-new Date().getTimezoneOffset() * 60);
 // The engine reads the quota more often while the window is open and at once when it gains focus (nothing sent to a model).
 const attention = (focused: boolean) => void api.quotaAttention(document.visibilityState === 'visible', focused && document.hasFocus()).catch(() => {});
@@ -37,6 +41,9 @@ store.offer(state.running);
 
 // The look is on the page before anything is drawn, so the first frame already has the theme's colours.
 applyLook(state.look);
+
+// The shell is asked whether a game is in front only while the window is shown without the focus.
+watchGames(api.gameInFront);
 
 // Right-click is Faber's own (ui/contextmenu.ts): the browser's menu and its reload and print shortcuts never reach the person.
 installContextMenu();
