@@ -1,4 +1,5 @@
-# One pull request per ecosystem per week, into the integration branch. Each group takes every update of its ecosystem.
+# One pull request per ecosystem per week, into the integration branch. Each group takes every patch and minor update of
+# its ecosystem and merges itself on green (tidy.yml); a major update comes alone and waits for a session.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -11,6 +12,7 @@ updates:
     groups:
       actions:
         patterns: ['*']
+        update-types: [minor, patch]
 
   - package-ecosystem: cargo
     directory: /
@@ -22,6 +24,7 @@ updates:
     groups:
       cargo:
         patterns: ['*']
+        update-types: [minor, patch]
 
   - package-ecosystem: npm
     directory: /
@@ -33,3 +36,4 @@ updates:
     groups:
       npm:
         patterns: ['*']
+        update-types: [minor, patch]

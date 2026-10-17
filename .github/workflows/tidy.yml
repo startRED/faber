@@ -1,0 +1,83 @@
+name: tidy
+
+# Two chores nobody should have to remember (R177). A pull request closed without merging leaves its CI queued or
+# running, ahead of real work on the few runners there are (2026-10-17: two closed test pull requests held 36 jobs in
+# the queue). And a Dependabot pull request has no session behind it, so it stayed open for a day; a patch or minor bump
+# now merges itself on a green gate (R173) like any lane's pull request.
+on:
+  pull_request:
+    branches: [phase-1-base]
+    types: [opened, reopened, synchronize, closed]
+
+permissions: {}
+
+jobs:
+  # Not on a merge: a pull request that lands through its queue branch shows as merged while that run still finishes.
+  cancel:
+    if: >-
+      github.event.action == 'closed' && !github.event.pull_request.merged &&
+      !github.event.pull_request.head.repo.fork
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          # Branch names are attacker-controlled text: they reach the script through the environment only.
+          HEAD: ${{ github.event.pull_request.head.ref }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          PR: ${{ github.event.pull_request.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # On the head branch only this pull request's own runs, at its last head: a branch may outlive one pull
+          # request and carry another's, or be shared and keep its push and daily runs. queue/pr-<n> is this one's.
+          cancel() {
+            for status in queued in_progress waiting pending requested; do
+              gh run list --workflow ci.yml --branch "$1" --status "$status" --limit 50 \
+                --json databaseId,event,headSha --jq ".[] | select($2) | .databaseId" | while read -r id; do
+                echo "Cancelling run $id on $1 ($status)."
+                gh run cancel "$id" || true
+              done
+            done
+          }
+          cancel "$HEAD" ".event == \"pull_request\" and .headSha == \"$SHA\""
+          cancel "queue/pr-$PR" true
+
+  # Only a known patch or minor update merges itself: a major one can break the build in ways a green suite may not
+  # show, and one whose kind fetch-metadata cannot tell might be major. A group never mixes them (dependabot.yml). A
+  # push by anyone but Dependabot, or any commit that is not Dependabot's own, turns auto-merge off again, so nothing a
+  # person added merges unreviewed.
+  dependabot:
+    if: github.event.action != 'closed' && github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - id: meta
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+      - id: merge
+        if: >-
+          github.actor == 'dependabot[bot]' &&
+          (steps.meta.outputs.update-type == 'version-update:semver-patch' ||
+          steps.meta.outputs.update-type == 'version-update:semver-minor')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          URL: ${{ github.event.pull_request.html_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # fetch-metadata checks only the first commit; every commit must be Dependabot's own, signed by GitHub.
+          others=$(gh api --paginate "repos/$GH_REPO/pulls/$PR/commits" \
+            --jq '.[] | select(.author.login != "dependabot[bot]" or (.commit.verification.verified | not)) | .sha')
+          if [ -n "$others" ]; then echo "::error::Commits not made by Dependabot: $others"; exit 1; fi
+          gh pr merge --auto --squash "$URL"
+      - if: always() && steps.merge.outcome != 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --disable-auto "$URL" || echo "Auto-merge was not on."

@@ -959,6 +959,13 @@ on CI. The rule is not strict, so a pull request behind `phase-1-base` still mer
 follows is what `main` waits for (R127). `main` and the queue (R162) run after the gate, so the queue only pushes a
 commit whose gate passed.
 
+Two chores run by themselves (`tidy.yml`, R177). A pull request closed without merging cancels its queued or running
+CI, and that of its `queue/pr-<n>` branch (never a shared branch's), so it does not hold runners other work is waiting
+for. A Dependabot pull request has no session behind it: a group that fetch-metadata reads as patch or minor is set to
+merge itself on the gate, and a push to it by anyone but Dependabot turns that off. A major update comes as its own pull
+request (`.github/dependabot.yml`) and, like one of unknown kind, waits for a session. A merge that GitHub makes for
+the Actions token starts no run on `phase-1-base`, so the next push there runs every suite and `main` follows that one.
+
 ### Red base
 
 A commit pushed onto a red `phase-1-base` waits behind the failure, and `main` cannot follow it (R127); on 2026-10-16 a
