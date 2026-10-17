@@ -7,7 +7,7 @@ use super::{Result, Scenario, ensure, eventually};
 use crate::app::Ctx;
 use crate::contain::Owned;
 use crate::desktop;
-use crate::proctree::{descendants, same_process, snapshot};
+use crate::proctree::{ProcRow, descendants, same_process, snapshot};
 use std::collections::BTreeMap;
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -55,9 +55,9 @@ fn check(ctx: &Ctx, helper: &std::path::Path, stranger: &mut std::process::Child
     })?;
     owned.terminate();
     ensure(owned.members().is_none(), || "the job is still open after it was ended".to_string())?;
-    eventually("everything the job held to be gone", Duration::from_secs(10), || {
-        snapshot().is_ok_and(|rows| !rows.iter().any(|r| same_process(r, &tree)))
-    })?;
+    // `terminate` returns only once the system has ended everything in the job, so nothing is left to wait for.
+    let left: Vec<ProcRow> = snapshot()?.into_iter().filter(|r| same_process(r, &tree)).collect();
+    ensure(left.is_empty(), || format!("the job was ended but these are still running: {left:?}"))?;
     ensure(stranger.try_wait().map_err(|e| e.to_string())?.is_none(), || "ending the job ended a program that is not the app's".to_string())
 }
 

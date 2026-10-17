@@ -171,10 +171,22 @@ impl Owned {
         }
     }
 
-    /// Ends everything it can: the whole job on Windows, the app itself elsewhere.
+    /// Ends everything it can: the whole job on Windows, the app itself elsewhere. On Windows it returns once the system
+    /// says the job holds no running process: ending a process only starts its end, and on a loaded PC, where everything
+    /// the runner starts is below normal priority, a tree of webview processes can take seconds to finish going. Closing
+    /// the job alone gave no way to know when that was, so the cleanup could look too early and find them still there.
     pub fn terminate(&self) {
         #[cfg(windows)]
-        drop(locked(&self.job).take());
+        if let Some(job) = locked(&self.job).take() {
+            let handle = job.handle();
+            if faber_winproc::job_terminate(handle).is_ok() {
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+                while faber_winproc::job_active_processes(handle).is_ok_and(|n| n > 0) && std::time::Instant::now() < deadline {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+            }
+            drop(job);
+        }
         let mut child = locked(&self.child);
         let _ = child.kill();
         let _ = child.wait();

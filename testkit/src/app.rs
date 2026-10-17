@@ -143,6 +143,16 @@ pub fn leaked(rows: &[ProcRow], seen: &[ProcRow], roots: &[ProcRow], running: &[
         .collect()
 }
 
+/// What, still running after the app was ended, counts against it: everything but the webview runtime (WebView2's
+/// `msedgewebview2.exe`). The runtime notices by itself that the app is gone and then shuts its browser down in its own
+/// time, which on a loaded PC or runner, at below normal priority, took longer than the audit's wait (CI, 2026-10-17: six
+/// of them still there 15 s after the app ended). That is the runtime's timing, not something the app left behind, so the
+/// job ends that tree instead, and the cleanup fails if any of it is still there afterwards. Anything else, a CLI above
+/// all, still has to end by itself. A pure function over the list.
+pub fn held_after_end(rows: Vec<ProcRow>) -> Vec<ProcRow> {
+    rows.into_iter().filter(|r| !r.name.eq_ignore_ascii_case("msedgewebview2.exe")).collect()
+}
+
 /// Everything a run owns that must be ended if the runner is interrupted: the apps (each in its own containment) and
 /// the folders. Ending is done through `Owned`, so it also holds when this happens on another thread.
 #[derive(Default)]
@@ -498,8 +508,13 @@ impl Ctx {
 
     /// Checks that the scenario left nothing behind and touched nothing outside its sandbox.
     pub fn audit(&mut self) -> Result<(), String> {
+        self.audit_survivors(|rows| rows)
+    }
+
+    /// The audit, with only the survivors that `held` keeps counting against the scenario.
+    fn audit_survivors(&mut self, held: fn(Vec<ProcRow>) -> Vec<ProcRow>) -> Result<(), String> {
         let mut problems: Vec<String> = Vec::new();
-        match self.survivors() {
+        match self.survivors().map(held) {
             Ok(rows) if rows.is_empty() => {}
             Ok(rows) => {
                 let list: Vec<String> =
@@ -601,13 +616,15 @@ impl Ctx {
         for id in 0..self.live.len() {
             let _ = self.close(id);
         }
+        // The apps were ended, not closed, so what they started must follow by itself, except the webview: it ends in its
+        // own time (see `held_after_end`), and the cleanup ends its tree through the job and fails if any of it stays.
         let deadline = Instant::now() + Duration::from_secs(15);
         crate::timing::timed("exit-wait", || {
-            while self.survivors().is_ok_and(|rows| !rows.is_empty()) && Instant::now() < deadline {
+            while self.survivors().is_ok_and(|rows| !held_after_end(rows).is_empty()) && Instant::now() < deadline {
                 std::thread::sleep(Duration::from_millis(100));
             }
         });
-        let verdict = crate::timing::timed("audit", || self.audit());
+        let verdict = crate::timing::timed("audit", || self.audit_survivors(held_after_end));
         let cleaned = crate::timing::timed("cleanup", || self.cleanup());
         match (verdict, cleaned) {
             (Ok(()), Ok(())) => Ok(()),
@@ -736,6 +753,29 @@ mod tests {
         let mut reused = row(71, 1, T + 999_000);
         reused.name = "wuaucltcore.exe".into();
         assert!(leaked(&[reused], &[], &[], &[(71, T + 600_000)], T + 500_000).is_empty());
+    }
+
+    #[test]
+    fn after_the_app_ends_its_slow_webview_is_the_jobs_to_end_but_a_lingering_cli_still_fails() {
+        // The CI failure of 2026-10-17: the webview tree of an ended app, still shutting itself down.
+        let app = row(2836, 3324, T);
+        let mut browser = row(9136, 2836, T + 100);
+        browser.name = "msedgewebview2.exe".into();
+        let mut renderer = row(9816, 9136, T + 200);
+        renderer.name = "MSEdgeWebView2.exe".into();
+        let mut cli = row(9900, 2836, T + 300);
+        cli.name = "node.exe".into();
+        let gone = leaked(
+            &[browser.clone(), renderer.clone()],
+            &[app.clone(), browser.clone(), renderer.clone()],
+            std::slice::from_ref(&app),
+            &[],
+            0,
+        );
+        assert_eq!(ids(&gone), [9136, 9816], "the plain audit still sees the webview");
+        assert!(held_after_end(gone).is_empty(), "the end of a scenario leaves the webview to the job");
+        let rows = [browser, renderer, cli];
+        assert_eq!(ids(&held_after_end(leaked(&rows, &[], std::slice::from_ref(&app), &[], 0))), [9900]);
     }
 
     #[test]

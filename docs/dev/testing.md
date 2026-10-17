@@ -29,7 +29,9 @@ them is a window of the desktop in use.
 
 Every launch is sandboxed: a temporary home, an empty `PATH`, no provider variables, a dead proxy and no real CLI (a fake
 CLI replays the recordings in `tests/fixtures/`). Each scenario is audited afterwards for leaked processes, writes outside
-the sandbox and a changed environment. On Windows the runner lists processes (pid, parent, start time, processor time,
+the sandbox and a changed environment. What the app started must end by itself once the app is ended, except WebView2's
+own processes: the runtime shuts its browser down in its own time, which on a loaded PC or runner took longer than the
+audit's 15 s, so the cleanup ends that tree through the app's job and waits until the system says the job is empty. On Windows the runner lists processes (pid, parent, start time, processor time,
 private memory) with one `NtQuerySystemInformation` call (`faber_winproc::processes`, the one crate allowed unsafe code),
 which takes a few milliseconds; the WMI query it replaced took 150-200 ms, and a scenario takes 9 to 49 of these lists.
 The tree is still followed by parent and start time, so a pid the system reused is never mistaken for one of the app's.
