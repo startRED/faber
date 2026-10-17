@@ -293,140 +293,123 @@ async fn run_mission(sandbox: &Path) -> Result<Value> {
 /// The steps the coordinator marks, in order.
 const MARKS: usize = 7;
 
-async fn run_crashes(sandbox: &Path) -> Result<Value> {
-    let mut cases = vec![];
-    // The power goes out right after a step's mark, or right before it (the work is done and its mark is not).
-    for before in [false, true] {
-        for n in 1..=MARKS {
-            let name = format!("crash-{}-{n}", if before { "before" } else { "after" });
-            let w = world(sandbox, &name)?;
-            let mut a = coordinator(&w, PASS).map_err(|e| format!("{name}: first start: {e}"))?;
-            if before {
-                a.crash_before(n);
-            } else {
-                a.crash_after(n);
-            }
-            let first = a.drive().await;
-            ensure(first == Outcome::Stopped(Stop::Crash), || format!("{name}: expected the injected crash, got {first:?}"))?;
-            drop(a);
-            // A new process: new journal handle, new broker, no live session.
-            let mut b = coordinator(&w, PASS).map_err(|e| format!("{name}: restart: {e}"))?;
-            let second = b.drive().await;
-            landed(&w, &second, &ALL).map_err(|e| format!("{name}: {e}"))?;
-            cases.push(json!({"case": name, "resumed": true}));
-        }
+/// The power goes out right after a step's mark, or right before it (the work is done and its mark is not).
+async fn crash_case(sandbox: &Path, before: bool, n: usize) -> Result<Value> {
+    let name = format!("crash-{}-{n}", if before { "before" } else { "after" });
+    let w = world(sandbox, &name)?;
+    let mut a = coordinator(&w, PASS).map_err(|e| format!("{name}: first start: {e}"))?;
+    if before {
+        a.crash_before(n);
+    } else {
+        a.crash_after(n);
     }
-    // The process dies while a role turn runs. Read-only roles are replaced by a new turn; a Writer is parked.
-    for (turn, parks) in [("lead-1", false), ("reviewer-1", false), ("writer-1", true)] {
-        let name = format!("die-{turn}");
-        let w = world(sandbox, &name)?;
-        let plot = Plot { die: Some(turn), ..PASS };
-        let mut a = coordinator(&w, plot.clone()).map_err(|e| format!("{name}: first start: {e}"))?;
-        // Cut the process only once the turn that never answers has really started: a fixed wait is a race on a slow runner.
-        let started = async {
-            while !std::fs::read_to_string(w.dir.join("roles.log")).unwrap_or_default().lines().any(|l| l == format!("start {turn}")) {
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
+    let first = a.drive().await;
+    ensure(first == Outcome::Stopped(Stop::Crash), || format!("{name}: expected the injected crash, got {first:?}"))?;
+    drop(a);
+    // A new process: new journal handle, new broker, no live session.
+    let mut b = coordinator(&w, PASS).map_err(|e| format!("{name}: restart: {e}"))?;
+    let second = b.drive().await;
+    landed(&w, &second, &ALL).map_err(|e| format!("{name}: {e}"))?;
+    Ok(json!({"case": name, "resumed": true}))
+}
+
+/// The process dies while a role turn runs. Read-only roles are replaced by a new turn; a Writer is parked.
+async fn die_case(sandbox: &Path, turn: &'static str, parks: bool) -> Result<Value> {
+    let name = format!("die-{turn}");
+    let w = world(sandbox, &name)?;
+    let plot = Plot { die: Some(turn), ..PASS };
+    let mut a = coordinator(&w, plot.clone()).map_err(|e| format!("{name}: first start: {e}"))?;
+    // Cut the process only once the turn that never answers has really started: a fixed wait is a race on a slow runner.
+    let started = async {
+        while !std::fs::read_to_string(w.dir.join("roles.log")).unwrap_or_default().lines().any(|l| l == format!("start {turn}")) {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    };
+    let first = tokio::time::timeout(Duration::from_secs(120), async {
+        tokio::select! {
+            outcome = a.drive() => Some(outcome),
+            () = started => None,
+        }
+    })
+    .await;
+    ensure(matches!(first, Ok(None)), || format!("{name}: the turn that never answers did not hang as planned: {first:?}"))?;
+    drop(a);
+    let mut b = coordinator(&w, PASS).map_err(|e| format!("{name}: restart: {e}"))?;
+    let second = b.drive().await;
+    drop(b);
+    if parks {
+        ensure(second == Outcome::Stopped(Stop::Park("reason.lease.live".into())), || {
+            format!("{name}: expected a parked mission, got {second:?}")
+        })?;
+        let (journal, _) = open(&w)?;
+        ensure(Runner::load(&journal).map_err(str::to_string)?.mission.state == MissionState::Paused, || format!("{name}: not paused"))?;
+        ensure(git(&w.program, &w.repo, &["rev-parse", "faber/m1"])? == w.base, || format!("{name}: something landed"))?;
+    } else {
+        let starts: Vec<&str> = match turn {
+            "lead-1" => vec!["lead-1", "lead-2", "writer-1", "reviewer-1"],
+            _ => vec!["lead-1", "writer-1", "reviewer-1", "reviewer-2"],
         };
-        let first = tokio::time::timeout(Duration::from_secs(120), async {
-            tokio::select! {
-                outcome = a.drive() => Some(outcome),
-                () = started => None,
-            }
-        })
-        .await;
-        ensure(matches!(first, Ok(None)), || format!("{name}: the turn that never answers did not hang as planned: {first:?}"))?;
-        drop(a);
-        let mut b = coordinator(&w, PASS).map_err(|e| format!("{name}: restart: {e}"))?;
-        let second = b.drive().await;
-        drop(b);
-        if parks {
-            ensure(second == Outcome::Stopped(Stop::Park("reason.lease.live".into())), || {
-                format!("{name}: expected a parked mission, got {second:?}")
-            })?;
-            let (journal, _) = open(&w)?;
-            ensure(Runner::load(&journal).map_err(str::to_string)?.mission.state == MissionState::Paused, || {
-                format!("{name}: not paused")
-            })?;
-            ensure(git(&w.program, &w.repo, &["rev-parse", "faber/m1"])? == w.base, || format!("{name}: something landed"))?;
-        } else {
-            let starts: Vec<&str> = match turn {
-                "lead-1" => vec!["lead-1", "lead-2", "writer-1", "reviewer-1"],
-                _ => vec!["lead-1", "writer-1", "reviewer-1", "reviewer-2"],
-            };
-            landed(&w, &second, &starts).map_err(|e| format!("{name}: {e}"))?;
-        }
-        cases.push(json!({"case": name, "parked": parks}));
+        landed(&w, &second, &starts).map_err(|e| format!("{name}: {e}"))?;
     }
-    Ok(json!({"ok": true, "cases": cases}))
+    Ok(json!({"case": name, "parked": parks}))
 }
 
 /// A git effect whose outcome is unknown (its intent has no receipt, as after a power cut inside the effect) parks the
 /// mission for a person at whichever step comes next, write, green or land: no role turn starts, nothing is proven or
-/// landed, and the intent stays for reconciliation.
-async fn run_pending(sandbox: &Path) -> Result<Value> {
-    let mut cases = vec![];
-    // Marks: plan 1, arm 2, red 3, write 4, green 5, review 6, land 7. Stopping after one leaves the next step to run.
-    for (after, step, starts) in [(3, "write", &["lead-1"][..]), (4, "green", &["lead-1", "writer-1"][..]), (6, "land", &ALL[..])] {
-        let name = format!("pending-{step}");
-        let w = world(sandbox, &name)?;
-        let mut a = coordinator(&w, PASS).map_err(|e| format!("{name}: first start: {e}"))?;
-        a.crash_after(after);
-        let first = a.drive().await;
-        ensure(first == Outcome::Stopped(Stop::Crash), || format!("{name}: expected the injected crash, got {first:?}"))?;
-        drop(a);
-        let (journal, _) = open(&w)?;
-        let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_secs());
-        journal.record_intent(&Intent::new("unknown-effect", "m1", IntentKind::Worktree, 3, at)).map_err(|e| e.key())?;
-        let mut b = coordinator(&w, PASS).map_err(|e| format!("{name}: restart: {e}"))?;
-        let second = b.drive().await;
-        drop(b);
-        ensure(second == Outcome::Stopped(Stop::Park("reason.project.reconcile".into())), || {
-            format!("{name}: expected a mission parked for reconciliation, got {second:?}")
-        })?;
-        let (journal, _) = open(&w)?;
-        let runner = Runner::load(&journal).map_err(str::to_string)?;
-        ensure(
-            runner.mission.state == MissionState::Paused && runner.mission.reason.as_deref() == Some("reason.project.reconcile"),
-            || format!("{name}: the mission is not paused for reconciliation"),
-        )?;
-        ensure(journal.pending().map_err(|e| e.key())?.iter().any(|i| i.id == "unknown-effect"), || {
-            format!("{name}: the intent was dropped")
-        })?;
-        ensure(git(&w.program, &w.repo, &["rev-parse", "faber/m1"])? == w.base, || format!("{name}: something landed"))?;
-        let log = std::fs::read_to_string(w.dir.join("roles.log")).unwrap_or_default();
-        let started: Vec<&str> = log.lines().filter_map(|l| l.strip_prefix("start ")).collect();
-        ensure(started == starts, || format!("{name}: roles started {started:?}, expected {starts:?}"))?;
-        cases.push(json!({"case": name, "parked": "reason.project.reconcile"}));
-    }
-    Ok(json!({"ok": true, "cases": cases}))
+/// landed, and the intent stays for reconciliation. Marks: plan 1, arm 2, red 3, write 4, green 5, review 6, land 7;
+/// stopping after `after` leaves `step` to run.
+async fn pending_case(sandbox: &Path, after: usize, step: &str, starts: &[&str]) -> Result<Value> {
+    let name = format!("pending-{step}");
+    let w = world(sandbox, &name)?;
+    let mut a = coordinator(&w, PASS).map_err(|e| format!("{name}: first start: {e}"))?;
+    a.crash_after(after);
+    let first = a.drive().await;
+    ensure(first == Outcome::Stopped(Stop::Crash), || format!("{name}: expected the injected crash, got {first:?}"))?;
+    drop(a);
+    let (journal, _) = open(&w)?;
+    let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_secs());
+    journal.record_intent(&Intent::new("unknown-effect", "m1", IntentKind::Worktree, 3, at)).map_err(|e| e.key())?;
+    let mut b = coordinator(&w, PASS).map_err(|e| format!("{name}: restart: {e}"))?;
+    let second = b.drive().await;
+    drop(b);
+    ensure(second == Outcome::Stopped(Stop::Park("reason.project.reconcile".into())), || {
+        format!("{name}: expected a mission parked for reconciliation, got {second:?}")
+    })?;
+    let (journal, _) = open(&w)?;
+    let runner = Runner::load(&journal).map_err(str::to_string)?;
+    ensure(runner.mission.state == MissionState::Paused && runner.mission.reason.as_deref() == Some("reason.project.reconcile"), || {
+        format!("{name}: the mission is not paused for reconciliation")
+    })?;
+    ensure(journal.pending().map_err(|e| e.key())?.iter().any(|i| i.id == "unknown-effect"), || format!("{name}: the intent was dropped"))?;
+    ensure(git(&w.program, &w.repo, &["rev-parse", "faber/m1"])? == w.base, || format!("{name}: something landed"))?;
+    let log = std::fs::read_to_string(w.dir.join("roles.log")).unwrap_or_default();
+    let started: Vec<&str> = log.lines().filter_map(|l| l.strip_prefix("start ")).collect();
+    ensure(started == starts, || format!("{name}: roles started {started:?}, expected {starts:?}"))?;
+    Ok(json!({"case": name, "parked": "reason.project.reconcile"}))
 }
 
-async fn run_stops(sandbox: &Path) -> Result<Value> {
-    let mut seen = vec![];
-    for (name, plot, key) in [
-        ("malformed-reviewer", Plot { reviewer: "reviewer-malformed", ..PASS }, "error.wire.malformed"),
-        ("blocking-review", Plot { reviewer: "reviewer-block", ..PASS }, "reason.queue.review"),
-    ] {
-        let w = world(sandbox, name)?;
-        let mut c = coordinator(&w, plot)?;
-        let outcome = c.drive().await;
-        ensure(matches!(&outcome, Outcome::Stopped(Stop::Block(k)) if k == key), || {
-            format!("{name}: expected a block on {key}, got {outcome:?}")
-        })?;
-        drop(c);
-        let (journal, _) = open(&w)?;
-        let runner = Runner::load(&journal).map_err(str::to_string)?;
-        ensure(runner.mission.state == MissionState::Blocked && runner.mission.reason.as_deref() == Some(key), || {
-            format!("{name}: the mission does not say why it stopped")
-        })?;
-        ensure(git(&w.program, &w.repo, &["rev-parse", "faber/m1"])? == w.base, || format!("{name}: something landed"))?;
-        ensure(git(&w.program, &w.repo, &["rev-parse", "HEAD"])? == w.base, || format!("{name}: the owner ref moved"))?;
-        // The same coordinator, started again, stays stopped: a blocked mission is not retried by itself.
-        let mut again = coordinator(&w, PASS)?;
-        ensure(matches!(again.drive().await, Outcome::Stopped(Stop::Block(_))), || format!("{name}: a blocked mission ran again"))?;
-        seen.push(json!({"case": name, "key": key}));
-    }
+async fn stop_case(sandbox: &Path, name: &str, plot: Plot, key: &str) -> Result<Value> {
+    let w = world(sandbox, name)?;
+    let mut c = coordinator(&w, plot)?;
+    let outcome = c.drive().await;
+    ensure(matches!(&outcome, Outcome::Stopped(Stop::Block(k)) if k == key), || {
+        format!("{name}: expected a block on {key}, got {outcome:?}")
+    })?;
+    drop(c);
+    let (journal, _) = open(&w)?;
+    let runner = Runner::load(&journal).map_err(str::to_string)?;
+    ensure(runner.mission.state == MissionState::Blocked && runner.mission.reason.as_deref() == Some(key), || {
+        format!("{name}: the mission does not say why it stopped")
+    })?;
+    ensure(git(&w.program, &w.repo, &["rev-parse", "faber/m1"])? == w.base, || format!("{name}: something landed"))?;
+    ensure(git(&w.program, &w.repo, &["rev-parse", "HEAD"])? == w.base, || format!("{name}: the owner ref moved"))?;
+    // The same coordinator, started again, stays stopped: a blocked mission is not retried by itself.
+    let mut again = coordinator(&w, PASS)?;
+    ensure(matches!(again.drive().await, Outcome::Stopped(Stop::Block(_))), || format!("{name}: a blocked mission ran again"))?;
+    Ok(json!({"case": name, "key": key}))
+}
+
+async fn same_vendor_case(sandbox: &Path) -> Result<Value> {
     let w = world(sandbox, "same-vendor")?;
     let (journal, broker) = open(&w)?;
     let mut bad = setup(&w)?;
@@ -435,7 +418,7 @@ async fn run_stops(sandbox: &Path) -> Result<Value> {
     ensure(Coordinator::new(Scripted::new(&w.dir, PASS), journal, broker, bad).is_err(), || {
         "a reviewer of the Writer's vendor was accepted".into()
     })?;
-    Ok(json!({"ok": true, "cases": seen}))
+    Ok(json!({"case": "same-vendor", "refused": true}))
 }
 
 fn pins() -> Pins {
@@ -696,28 +679,81 @@ async fn run_budget(sandbox: &Path) -> Result<Value> {
     Ok(json!({"ok": true, "waitedOn": "reason.budget.cap"}))
 }
 
+/// One case of the acceptance, in a world folder of its own, so the cases can run side by side.
+type Job<'a> = Box<dyn FnOnce() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value>> + 'a>> + Send + 'a>;
+
+/// Every case with the part of the report it belongs to, the longest first, so the last ones to start are short.
+fn cases(sandbox: &Path) -> Vec<(&'static str, Job<'_>)> {
+    let mut jobs: Vec<(&'static str, Job<'_>)> =
+        vec![("wiring", Box::new(move || Box::pin(run_wiring(sandbox)))), ("budget", Box::new(move || Box::pin(run_budget(sandbox))))];
+    for before in [false, true] {
+        for n in 1..=MARKS {
+            jobs.push(("crashes", Box::new(move || Box::pin(crash_case(sandbox, before, n)))));
+        }
+    }
+    for (turn, parks) in [("lead-1", false), ("reviewer-1", false), ("writer-1", true)] {
+        jobs.push(("crashes", Box::new(move || Box::pin(die_case(sandbox, turn, parks)))));
+    }
+    for (after, step, starts) in [(3, "write", &["lead-1"][..]), (4, "green", &["lead-1", "writer-1"][..]), (6, "land", &ALL[..])] {
+        jobs.push(("pending", Box::new(move || Box::pin(pending_case(sandbox, after, step, starts)))));
+    }
+    for (name, plot, key) in [
+        ("malformed-reviewer", Plot { reviewer: "reviewer-malformed", ..PASS }, "error.wire.malformed"),
+        ("blocking-review", Plot { reviewer: "reviewer-block", ..PASS }, "reason.queue.review"),
+    ] {
+        jobs.push(("stops", Box::new(move || Box::pin(stop_case(sandbox, name, plot, key)))));
+    }
+    jobs.push(("stops", Box::new(move || Box::pin(same_vendor_case(sandbox)))));
+    jobs.push(("mission", Box::new(move || Box::pin(run_mission(sandbox)))));
+    jobs
+}
+
+/// Runs the jobs a few at a time, each on a thread of its own sharing the runtime, and returns their results in the jobs'
+/// order. A case mostly waits on git and proof processes, so one after the other took 116 to 191 s on the same runner.
+fn side_by_side(runtime: &tokio::runtime::Runtime, jobs: Vec<Job<'_>>) -> Vec<Result<Value>> {
+    let lanes = std::thread::available_parallelism().map_or(2, |n| n.get()).clamp(2, 4);
+    let count = jobs.len();
+    let queue = Mutex::new(jobs.into_iter().enumerate().collect::<std::collections::VecDeque<_>>());
+    let results = Mutex::new((0..count).map(|_| None).collect::<Vec<Option<Result<Value>>>>());
+    std::thread::scope(|scope| {
+        for _ in 0..lanes {
+            scope.spawn(|| {
+                loop {
+                    let Some((index, job)) = queue.lock().unwrap().pop_front() else { break };
+                    let start = std::time::Instant::now();
+                    let result = runtime.block_on(job()).map(|mut value| {
+                        value["ms"] = json!(start.elapsed().as_millis());
+                        value
+                    });
+                    results.lock().unwrap()[index] = Some(result);
+                }
+            });
+        }
+    });
+    results.into_inner().unwrap().into_iter().map(|result| result.unwrap_or_else(|| Err("a case never ran".into()))).collect()
+}
+
 /// Called only by the test helper under `Owned`, with its sandbox environment and hidden desktop.
 pub fn probe(sandbox: &Path) -> Result {
     let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().map_err(|e| e.to_string())?;
+    let jobs = cases(sandbox);
+    let parts: Vec<&str> = jobs.iter().map(|(part, _)| *part).collect();
+    let results = side_by_side(&runtime, jobs.into_iter().map(|(_, job)| job).collect());
     let mut report = serde_json::Map::new();
     let mut failure = None;
-    for (key, result) in [
-        ("mission", runtime.block_on(run_mission(sandbox))),
-        ("crashes", runtime.block_on(run_crashes(sandbox))),
-        ("pending", runtime.block_on(run_pending(sandbox))),
-        ("stops", runtime.block_on(run_stops(sandbox))),
-        ("budget", runtime.block_on(run_budget(sandbox))),
-        ("wiring", runtime.block_on(run_wiring(sandbox))),
-    ] {
-        match result {
-            Ok(value) => {
-                report.insert(key.into(), value);
-            }
-            Err(error) => {
-                report.insert(key.into(), json!({"ok": false, "error": error}));
+    for key in ["mission", "crashes", "pending", "stops", "budget", "wiring"] {
+        let mine: Vec<&Result<Value>> = parts.iter().zip(&results).filter(|(part, _)| **part == key).map(|(_, result)| result).collect();
+        let value = match mine.iter().find_map(|result| result.as_ref().err()) {
+            Some(error) => {
                 failure.get_or_insert(format!("{key}: {error}"));
+                json!({"ok": false, "error": error})
             }
-        }
+            None => match &mine[..] {
+                [Ok(one)] => one.clone(),
+                many => json!({"ok": true, "cases": many.iter().filter_map(|result| result.as_ref().ok()).collect::<Vec<_>>()}),
+            },
+        };
+        report.insert(key.into(), value);
     }
     std::fs::write(sandbox.join("coordinator.json"), Value::Object(report).to_string()).map_err(|e| e.to_string())?;
     match failure {
@@ -801,4 +837,36 @@ fn junction(link: &Path, target: &Path) -> Result {
         .status()
         .map_err(|e| e.to_string())?;
     ensure(made.success() && link.exists(), || format!("could not plant a junction at {}", link.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_cases_run_at_the_same_time_and_their_results_keep_the_jobs_order() {
+        let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
+        let (told, heard) = std::sync::mpsc::channel::<()>();
+        // The first job ends only once the second has run, so one after the other it would fail.
+        let jobs: Vec<Job<'static>> = vec![
+            Box::new(move || {
+                Box::pin(async move {
+                    heard.recv_timeout(Duration::from_secs(10)).map_err(|_| "the second case never ran meanwhile".to_string())?;
+                    Ok(json!({"case": "first"}))
+                })
+            }),
+            Box::new(move || {
+                Box::pin(async move {
+                    let _ = told.send(());
+                    Ok(json!({"case": "second"}))
+                })
+            }),
+            Box::new(|| Box::pin(async { Err("third failed".to_string()) })),
+        ];
+        let results = side_by_side(&runtime, jobs);
+        assert_eq!(results[0].as_ref().map(|v| v["case"].clone()), Ok(json!("first")));
+        assert_eq!(results[1].as_ref().map(|v| v["case"].clone()), Ok(json!("second")));
+        assert_eq!(results[2], Err("third failed".to_string()));
+        assert!(results[0].as_ref().is_ok_and(|v| v["ms"].is_u64()), "each case says how long it took");
+    }
 }
