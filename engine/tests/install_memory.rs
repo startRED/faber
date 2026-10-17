@@ -65,7 +65,7 @@ async fn the_memory_of_a_download_does_not_grow_with_the_payload() {
                 hasher.update(&block);
                 stream.write_all(&block)?;
             }
-            hashes.lock().unwrap().insert(mib, format!("{:x}", hasher.finalize()));
+            hashes.lock().unwrap().insert(mib, faber_engine::hex(&hasher.finalize()));
             Ok(())
         }
     });

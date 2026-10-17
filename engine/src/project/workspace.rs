@@ -315,8 +315,8 @@ impl Workspace {
             "cargo" => ("Cargo.lock", true),
             _ => ("", true),
         };
-        let digest = Sha256::digest(std::fs::read(self.dir.join(lock)).unwrap_or_default());
-        format!("{} {} {digest:x} {result}", definition.id, definition.argv.join(" "))
+        let digest = crate::hex(&Sha256::digest(std::fs::read(self.dir.join(lock)).unwrap_or_default()));
+        format!("{} {} {digest} {result}", definition.id, definition.argv.join(" "))
     }
 
     fn stamp(&self, definition: &Definition) -> PathBuf {

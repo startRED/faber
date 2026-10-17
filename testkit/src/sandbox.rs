@@ -309,7 +309,7 @@ pub fn snapshot(dir: &Path, exclude: Option<&Path>) -> BTreeMap<PathBuf, String>
         if path.is_dir() {
             found.extend(snapshot(&path, exclude));
         } else if let Ok(bytes) = std::fs::read(&path) {
-            found.insert(path, format!("{:x}", Sha256::digest(bytes)));
+            found.insert(path, faber_engine::hex(&Sha256::digest(bytes)));
         }
     }
     found

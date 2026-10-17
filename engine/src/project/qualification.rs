@@ -105,7 +105,7 @@ pub fn launch_policy(vendor: Vendor) -> String {
         Vendor::Claude => crate::claude::project_launch_policy(&roles),
         Vendor::Codex => crate::codex::project_launch_policy(&roles),
     };
-    format!("{:x}", Sha256::digest(parameters.to_string().as_bytes()))
+    crate::hex(&Sha256::digest(parameters.to_string().as_bytes()))
 }
 
 static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
@@ -131,7 +131,7 @@ pub fn fingerprint(path: &Path) -> io::Result<String> {
         }
         digest.update(&buffer[..size]);
     }
-    Ok(format!("{:x}", digest.finalize()))
+    Ok(crate::hex(&digest.finalize()))
 }
 
 /// The largest instruction file that is hashed.
@@ -182,7 +182,7 @@ pub fn fingerprint_source(path: &Path) -> io::Result<String> {
     if total > MAX_SOURCE {
         return Err(io::Error::other("an instruction source grew while it was read"));
     }
-    Ok(format!("{:x}", digest.finalize()))
+    Ok(crate::hex(&digest.finalize()))
 }
 
 /// One short printable line; anything else is not a version.
@@ -226,7 +226,7 @@ pub fn pin(path: &Path) -> io::Result<Pinned> {
         }
         digest.update(&buffer[..size]);
     }
-    Ok(Pinned { _file: file, path, sha256: format!("{:x}", digest.finalize()), version: String::new() })
+    Ok(Pinned { _file: file, path, sha256: crate::hex(&digest.finalize()), version: String::new() })
 }
 
 /// Hashes the program and asks it for `--version`: no shell, no window, scrubbed environment, a deadline.
