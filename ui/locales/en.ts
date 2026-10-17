@@ -473,7 +473,7 @@ export const en = {
   'tour.projects.title': 'Projects',
   'tour.projects.body': 'Add a folder from your computer and Faber works inside it, like a coding agent.',
   'tour.follow.title': 'Follow along',
-  'tour.follow.body': 'The top bar lists everything that is working. Amber means something needs you.',
+  'tour.follow.body': 'This button opens everything that is working. Amber means something needs you.',
   'tour.auto.title': 'Auto',
   'tour.auto.body': 'Auto picks the model for your first message and tells you why. You can still choose one yourself in the model picker.',
   'tour.running.title': 'The running list',

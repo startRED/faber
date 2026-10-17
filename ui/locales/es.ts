@@ -478,7 +478,7 @@ export const es: Messages = {
   'tour.projects.title': 'Proyectos',
   'tour.projects.body': 'Añade una carpeta de tu ordenador y Faber trabaja dentro de ella, como un agente de programación.',
   'tour.follow.title': 'Síguelo de cerca',
-  'tour.follow.body': 'La barra superior lista todo lo que está trabajando. El ámbar significa que algo te necesita.',
+  'tour.follow.body': 'Este botón abre todo lo que está trabajando. El ámbar indica que algo te necesita.',
   'tour.auto.title': 'Auto',
   'tour.auto.body': 'Auto elige el modelo para tu primer mensaje y te dice por qué. Aun así, puedes elegir uno tú en el selector de modelo.',
   'tour.running.title': 'Lo que está en marcha',

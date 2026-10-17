@@ -478,7 +478,7 @@ export const fr: Messages = {
   'tour.projects.title': 'Projets',
   'tour.projects.body': 'Ajoutez un dossier de votre ordinateur et Faber travaille dedans, comme un agent de programmation.',
   'tour.follow.title': 'Suivez le travail',
-  'tour.follow.body': 'La barre du haut liste tout ce qui travaille. L’ambre signale ce qui a besoin de vous.',
+  'tour.follow.body': 'Ce bouton ouvre tout ce qui travaille. L’ambre signale ce qui a besoin de vous.',
   'tour.auto.title': 'Auto',
   'tour.auto.body': 'Auto choisit le modèle pour votre premier message et vous dit pourquoi. Vous pouvez toujours en choisir un vous-même dans le sélecteur de modèle.',
   'tour.running.title': 'Ce qui est en cours',

@@ -475,7 +475,7 @@ export const ptBR: Messages = {
   'tour.projects.title': 'Projetos',
   'tour.projects.body': 'Adicione uma pasta do seu computador e o Faber trabalha dentro dela, como um agente de programação.',
   'tour.follow.title': 'Acompanhe',
-  'tour.follow.body': 'A barra de cima lista tudo o que está trabalhando. Âmbar quer dizer que algo precisa de você.',
+  'tour.follow.body': 'Este botão abre tudo o que está trabalhando. Âmbar quer dizer que algo precisa de você.',
   'tour.auto.title': 'Auto',
   'tour.auto.body': 'O Auto escolhe o modelo para a sua primeira mensagem e diz o motivo. Você ainda pode escolher um sozinho no seletor de modelo.',
   'tour.running.title': 'O que está rodando',
