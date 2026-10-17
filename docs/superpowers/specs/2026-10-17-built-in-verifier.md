@@ -1,7 +1,8 @@
 # Faber's built-in verifier: checks in seconds, on the PC, inside Faber
 
-Date: 2026-10-17. Status: approved by Erick on 2026-10-17, nothing built; V0 is next. Direction and the
-macOS choice are his (R190); the details are the AI's. Research: five web surveys on 2026-10-17 (one Sonnet, four Haiku), sources in
+Date: 2026-10-17. Status: approved by Erick on 2026-10-17; V0 measured the same day
+([results](../../research/2026-10-17-verifier-v0-measurements.md)), V1 is next. Direction and the macOS choice are his
+(R190); the details are the AI's. Research: five web surveys on 2026-10-17 (one Sonnet, four Haiku), sources in
 [Sources](#sources). Several numbers there come from vendors or secondary write-ups and are marked as such; step V0
 measures the ones this plan depends on.
 
@@ -75,7 +76,7 @@ becomes its one long-lived worker.
 | Idle | **0 extra.** The verifier is a module of the engine (a tokio task set), so it moves with the engine when the engine becomes its own process. | Graph and queue in RAM (bounded, rebuildable); results journal on disk |
 | Checking Rust | `cargo` and the `rustc` and linker processes it starts (capped at half the cores, as today), then **one** engine test program | `target/<worktree>`, incremental, sccache |
 | Checking the screen | The one shared test app (the test rework's step), kept alive between checks and fed requests over stdin; `vite` only when the UI changed | The app's hidden desktop and profile, reset between requests |
-| Checking TypeScript | `tsc` or `tsgo` and `oxlint`, one process each | Their own incremental files |
+| Checking TypeScript | `tsc.exe` (TypeScript 7 is native) and oxlint, started directly, never through `npm` or `npx` | Their own incremental files |
 
 Every child starts inside **one Windows job object per run**, with no console window (`CREATE_NO_WINDOW`) and on the
 hidden desktop when it has a window. Closing the job kills every process in it, grandchildren included.
@@ -183,17 +184,21 @@ person.
 
 Each step lands on its own, proves itself with the checks above, and reports its memory and CPU cost.
 
-- [ ] **V0. Measure first, no product code.**
+- [x] **V0. Measure first, no product code.**
   - Time a cold build, a one-file rebuild and the rust suite on NTFS with Defender exclusions, then on a Dev Drive with
     performance mode.
   - Time `tsc` against `tsgo`, and check that the lint still works with `tsgo`.
   - From GitHub's API: how long the last 50 queued runs waited for runners, ran and went red, and which job failed.
   - Result: a dated page in `research/` and a go or no-go for each speed item.
+  - Measured ([results](../../research/2026-10-17-verifier-v0-measurements.md)): CI jobs waited 3,133 minutes for a
+    runner and ran 1,854; `tsgo`, light debug info and `rust-lld` were already in; Defender costs nothing in `target/`,
+    so no Dev Drive for now; a one-file Rust check takes 7 s; 22 rust tests fail in any `.claude\worktrees\` lane.
 - [ ] **V1. The verifier for Faber itself.** The engine module of [section 4](#4-design) running `cargo t`'s plan,
   `tsc` and `oxlint` per worktree:
   - change feed, graph, RAM admission, one job per run, game guard, journal;
   - fast and full checks, results as events and the `verify` tool;
-  - every check of section 5.
+  - every check of section 5;
+  - test folders outside the worktree, so a local run agrees with CI (V0 found 22 tests that do not).
   - Lanes then see their result in seconds without a push. It replaces the three build slots.
 - [ ] **V2. GitHub confirms.** `land.mjs` asks the verifier for a full check on the squashed tree and posts
   `faber/verify`. The `changes` job leaves out the suites the status covers. The daily run reports misses.
