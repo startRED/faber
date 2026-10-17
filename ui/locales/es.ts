@@ -957,7 +957,7 @@ export const es: Messages = {
   'notes.22.new': 'Cuando Codex pasa una parte del trabajo a un subagente, este aparece como un paso en su respuesta y sus permisos te llegan a ti.',
   'notes.23.better': 'Las conversaciones son más tranquilas: menos líneas alrededor de cada respuesta, y el modelo se elige en un solo lugar.',
   'notes.24.better': "Los Ajustes se leen mejor: una línea por opción, y tus cuentas y sus límites están juntos.",
-  'notes.next.better': 'Las pantallas vacías, el tutorial y esta lista son más cortos y dicen cada cosa una vez.',
+  'notes.25.better': 'Las pantallas vacías, el tutorial y esta lista son más cortos y dicen cada cosa una vez.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

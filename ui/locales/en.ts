@@ -825,7 +825,7 @@ export const en = {
   'notes.22.new': 'When Codex hands part of the work to a subagent, the subagent shows as a step in its reply, and its approvals reach you.',
   'notes.23.better': 'Conversations are calmer: fewer lines around each answer, and the model is chosen in one place.',
   'notes.24.better': "Settings are easier to scan: one line per option, and your accounts and their limits are together.",
-  'notes.next.better': 'The empty screens, the tutorial and this list are shorter and say each thing once.',
+  'notes.25.better': 'The empty screens, the tutorial and this list are shorter and say each thing once.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',
