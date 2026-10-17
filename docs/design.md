@@ -968,6 +968,10 @@ on CI. The rule is not strict, so a pull request behind `phase-1-base` still mer
 follows is what `main` waits for (R127). `main` and the queue (R162) run after the gate, so the queue only pushes a
 commit whose gate passed.
 
+### Test section B
+
+A paragraph test PR B adds (R-next).
+
 ### Red base
 
 A commit pushed onto a red `phase-1-base` waits behind the failure, and `main` cannot follow it (R127); on 2026-10-16 a

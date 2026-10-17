@@ -234,6 +234,7 @@ checks in `tests/ui/index.ts`, real-app scenarios in `testkit/src/screen/mod.rs`
 
 | Feature | State | Checks |
 | :--- | :--- | :--- |
+| Test feature B (R-next) | Test | none |
 | Chat with Claude Code and Codex: streaming, tools, images, attachments, files | Done | `engine/tests/claude_session.rs`, `codex_session.rs`, `session_resume.rs`, `workspace.rs`; `tests/fixtures/{claude,codex}/`; `tests/ui/thread.check.ts` |
 | Work log words | Done; grouped phrases ("Changing 3 files") are planned (roadmap: Watching the agent work) | `tests/ui/worklog.check.ts`, `thread.check.ts` |
 | Model and effort | Done | `tests/ui/models.check.ts`, `effort.check.ts` |

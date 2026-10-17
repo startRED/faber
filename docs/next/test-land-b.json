@@ -1,0 +1,4 @@
+{
+  "notes": { "new": { "en": "Test entry B.", "pt-BR": "Entrada de teste B.", "es": "Entrada de prueba B.", "fr": "Entrée de test B.", "de": "Testeintrag B." } },
+  "decisions": ["| R-next | 2026-10-17 | Test decision B, never landed. | AI |"]
+}
