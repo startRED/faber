@@ -934,6 +934,15 @@ lead session, CI) and detached worktrees (Faber's own missions, test workspaces)
 once its last commit is on `phase-1-base`; a claim nobody saved for a day is stale and ignored. Claims live on one PC:
 a lane on another machine is not seen.
 
+### Merge on green
+
+`phase-1-base` requires one check, `gate` (R173): a job in `ci.yml` that is green only when `changes`, `check`, `app` and
+`screen` passed or were left out on purpose by the plan. A pull request is set to merge itself with
+`gh pr merge --auto --squash` once its local proofs pass; GitHub squashes it the moment the gate is green, and nobody waits
+on CI. The rule is not strict, so a pull request behind `phase-1-base` still merges; the run on `phase-1-base` that
+follows is what `main` waits for (R127). `main` and the queue (R162) run after the gate, so the queue only pushes a
+commit whose gate passed.
+
 ### Red base
 
 A commit pushed onto a red `phase-1-base` waits behind the failure, and `main` cannot follow it (R127); on 2026-10-16 a
