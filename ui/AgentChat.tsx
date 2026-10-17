@@ -55,6 +55,34 @@ export function agentMeta(step: AgentStep, streaming: boolean): string {
   return [agentKind(step.kind), t(`agent.${agentState(step, streaming)}`), t('activity.steps', { n: step.tools.length })].filter(Boolean).join(' · ');
 }
 
+/** What an ended subagent did, counted by the engine from its steps (R161 step 4): never the main agent's word for it. */
+function Facts(props: { facts: NonNullable<ToolUse['facts']> }) {
+  const edited = () => props.facts.edited ?? [];
+  const unnamed = () => props.facts.unnamed ?? [];
+  const checks = () =>
+    props.facts.checks
+      ? `${t('agent.facts.checks', { n: props.facts.checks })} · ${props.facts.failed ? t('agent.facts.failed', { n: props.facts.failed }) : t('agent.facts.passed')}`
+      : t('agent.facts.none');
+  return (
+    <section class="side-facts" aria-label={t('agent.facts')}>
+      <h3>{t('agent.facts')}</h3>
+      <Show when={edited().length}>
+        <p>{t('agent.facts.edited', { n: edited().length })}</p>
+        <ul class="paths">
+          <For each={edited()}>{(path) => <li title={path}>{middle(path)}</li>}</For>
+        </ul>
+      </Show>
+      <p classList={{ bad: props.facts.failed > 0 }}>{checks()}</p>
+      <Show when={unnamed().length}>
+        <p class="unnamed">{t('agent.facts.unnamed')}</p>
+        <ul class="paths">
+          <For each={unnamed()}>{(path) => <li title={path}>{middle(path)}</li>}</For>
+        </ul>
+      </Show>
+    </section>
+  );
+}
+
 /** The open subagent, as the running column's content: a head with the way back, then the subagent's own thread. */
 export function AgentChat(props: { step: AgentStep; streaming: boolean; onBack: () => void; onTell?: (title: string) => void; onClose: () => void }) {
   const state = () => agentState(props.step, props.streaming);
@@ -93,6 +121,7 @@ export function AgentChat(props: { step: AgentStep; streaming: boolean; onBack: 
             <For each={props.step.tools}>{(tool) => <ToolChip tool={tool} />}</For>
           </div>
         </Show>
+        <Show when={props.step.call.facts}>{(facts) => <Facts facts={facts()} />}</Show>
         <Show when={props.step.report}>
           <div class="md agent-report" onClick={openLinks}>
             <Markdown text={props.step.report} />

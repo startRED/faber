@@ -427,7 +427,9 @@ frames) and checked against today's code. It fills the steps of R161 and never b
    kept by the engine yet, and "Tell it…" in the conversation's box is the way to write.
 4. **Facts, not a verdict.** When a child ends, its row shows what it was asked, what it did (files changed, checks run,
    steps) and anything it touched that the brief never named. The main agent grading its own helper is not trusted:
-   each brief ends with a "done when" list, and the row ticks each line the report meets.
+   each brief ends with a "done when" list, and the row ticks each line the report meets. Built (R180): the facts
+   (files changed, checks and failures, files the brief never named); the "done when" ticks are not, since matching a
+   brief's lines to a report would be a guess.
 5. **Helpers talk back (R161 step 3).** A helper is a real Faber session on the other vendor, so in the side chat the
    box writes to that child, and the main agent gets the message before its next step. A finished subagent offers
    "Continue with a helper".

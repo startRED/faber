@@ -228,3 +228,30 @@ check('subagent in the column: a Codex subagent with no brief shows no empty bub
     root.remove();
   }
 });
+
+// R161 step 4: an ended subagent shows facts the engine counted, never the main agent's word: the files it changed, its
+// checks and how they ended, and the files its brief never named.
+check('subagent in the column: what it did, from its steps', () => {
+  useLanguage('en');
+  const root = document.createElement('div');
+  document.body.append(root);
+  const facts = { edited: ['src/parser.rs', 'build.rs'], checks: 2, failed: 1, unnamed: ['build.rs'] };
+  const [call, setCall] = createSignal<ToolUse>({ ...AGENT, ok: true, output: 'Done.', facts });
+  const dispose = render(() => createComponent(AgentChat, { get step() { return agentSteps([call()])[0]!; }, streaming: false, onBack: () => {}, onClose: () => {} }), root);
+  try {
+    const block = () => root.querySelector('.side-facts')!;
+    equal(block().getAttribute('aria-label'), 'What it did');
+    deepEqual([...block().querySelectorAll('p')].map((p) => p.textContent), ['Changed 2 files', 'Ran 2 checks · 1 failed', 'Not named in its brief']);
+    deepEqual([...block().querySelectorAll('.paths li')].map((li) => li.textContent), ['src/parser.rs', 'build.rs', 'build.rs']);
+    ok(block().querySelector('p.bad'), 'a failed check is marked');
+    setCall({ ...call(), facts: { checks: 0, failed: 0 } });
+    deepEqual([...block().querySelectorAll('p')].map((p) => p.textContent), ['Ran no checks']);
+    setCall({ ...call(), facts: { checks: 1, failed: 0 } });
+    equal(block().querySelector('p')!.textContent, 'Ran 1 check · none failed');
+    setCall({ ...AGENT });
+    equal(root.querySelector('.side-facts'), null, 'a call that has not ended has no facts');
+  } finally {
+    dispose();
+    root.remove();
+  }
+});

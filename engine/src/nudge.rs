@@ -172,7 +172,7 @@ fn command(tool: &ToolUse) -> Option<&str> {
     }
 }
 
-fn is_check(tool: &ToolUse) -> bool {
+pub(crate) fn is_check(tool: &ToolUse) -> bool {
     command(tool).is_some_and(|c| is_check_line(c, 0))
 }
 
@@ -266,7 +266,17 @@ mod tests {
     }
 
     fn tool(name: &str, input: Value, ok: Option<bool>) -> ToolUse {
-        ToolUse { id: format!("t{name}{input}"), name: name.into(), input, ok, output: None, declined: false, parent: None, sign: None }
+        ToolUse {
+            id: format!("t{name}{input}"),
+            name: name.into(),
+            input,
+            ok,
+            output: None,
+            declined: false,
+            parent: None,
+            sign: None,
+            facts: None,
+        }
     }
 
     fn bash(command: &str, ok: bool) -> ToolUse {

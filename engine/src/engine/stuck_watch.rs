@@ -189,6 +189,7 @@ mod tests {
             declined: false,
             parent: Some("call".into()),
             sign: None,
+            facts: None,
         };
         let ask = |tool: &str, input: serde_json::Value| Permission { request_id: "0".into(), tool: tool.into(), input, epoch: None };
         assert!(asks_about(&ask("command", line.clone()), &step("commandExecution", None)), "Codex asks by kind");

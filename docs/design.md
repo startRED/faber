@@ -340,7 +340,10 @@ on the right its kind, its state and its step count in the third ink, and an arr
 subagent in the running column (R161 step 3, R176), which is the one place on the right: its head has a back arrow to
 the running list, the subagent's title and the column's close; under it the meta line, the brief word for word in the
 person's own bubble (the agent wrote it to the subagent; Codex gives none, and then nothing shows), the tool chips it
-ran and its report as Markdown. While it works, a quiet line says a CLI subagent cannot be written to while it runs and
+ran, then, once it ended, "What it did" (R161 step 4): a quiet block in the work log's surface with the files it changed
+in the data face, its checks and how many failed (a failed count gets the error note's 2 px edge), and the changed files
+its brief never named. These are counted by the engine from its steps (`engine/src/engine/facts.rs`), never taken from the
+main agent's word. Then its report as Markdown. While it works, a quiet line says a CLI subagent cannot be written to while it runs and
 "Tell it…" starts a message to the main agent. The row open there has the hover surface and a 2 px accent edge on its
 left (amber on a stuck row). The column opens the way it always does; the content swaps without motion, since it is a
 click the person just made. Opening another conversation goes back to the list. Rows sit in a `minmax(0, 1fr)` grid, so a long

@@ -31,6 +31,7 @@ use uuid::Uuid;
 
 mod answer;
 mod auto;
+pub mod facts;
 mod helpers;
 mod parked;
 mod project_budget;
@@ -1326,6 +1327,26 @@ impl Core {
         recent.into_iter().filter_map(|m| m.tools.as_mut()).flatten().find(|t| t.id == id)
     }
 
+    /// A subagent's call that just ended gets the facts of what it did (R161 step 4); any other step is left as it is.
+    fn settle_facts(&mut self, conv: &str, id: &str) {
+        let Some(c) = self.convs.get_mut(conv) else { return };
+        let Some(owner) = c.messages.iter().rposition(|m| m.tools.iter().flatten().any(|t| t.id == id && t.ok.is_some())) else { return };
+        // A message steered into the running turn starts a new reply, and the subagent's later steps land there: its facts
+        // count the steps of its own reply and of every reply after it.
+        let tools: Vec<ToolUse> = c.messages[owner..].iter().flat_map(|m| m.tools.iter().flatten().cloned()).collect();
+        let Some(call) = tools.iter().find(|t| t.id == id) else { return };
+        let facts = crate::engine::facts::of(&tools, call);
+        let m = &mut c.messages[owner];
+        if let Some(call) = m.tools.iter_mut().flatten().find(|t| t.id == id) {
+            call.facts = facts;
+        }
+        let (owner, live) = (m.id.clone(), self.live.get(conv).and_then(|l| l.turn.clone()));
+        // Sent at once and apart from the live reply's own update, which a pending one would swallow.
+        if live.as_ref() != Some(&owner) {
+            self.emit_message(conv, &owner);
+        }
+    }
+
     fn turn(&mut self, conv: &str) -> Option<&mut Message> {
         let id = self.live.get(conv)?.turn.clone()?;
         self.convs.get_mut(conv)?.messages.iter_mut().find(|m| m.id == id)
@@ -1441,6 +1462,7 @@ impl Core {
                         declined: false,
                         parent,
                         sign: None,
+                        facts: None,
                     });
                 }
                 self.watch_started(conv, &id);
@@ -1455,6 +1477,7 @@ impl Core {
                     tool.declined = declined;
                     tool.output = Some(text.chars().take(4000).collect());
                 }
+                self.settle_facts(conv, &id);
                 self.watch_ended(conv, &id);
             }
             EngineEvent::HelperDone { id, ok, text } => {
@@ -1463,6 +1486,7 @@ impl Core {
                     tool.ok = Some(ok);
                     tool.output = Some(text.chars().take(4000).collect());
                 }
+                self.settle_facts(conv, &id);
                 self.watch_ended(conv, &id);
             }
             EngineEvent::HelperCall { id, input } => return self.start_helper(conv, id, input),

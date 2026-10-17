@@ -250,6 +250,14 @@ svg.i.sm { width: 14px; height: 14px; }
 .side-body[data-state='stuck'] .side-meta, .side-body .agent-why { color: var(--amber-ink); }
 .side-body .agent-why { margin: 0; }
 .side-brief .you { max-width: 100%; font-size: var(--fs-sm); }
+/* What an ended subagent did: plain lines in the second ink, its files in the mono face, a failed check marked like an error note. */
+.side-facts { display: grid; gap: 4px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--s1); color: var(--ink-2); }
+.side-facts h3 { margin: 0 0 2px; font-size: var(--fs-sm); font-weight: 600; color: var(--ink); }
+.side-facts p { margin: 0; }
+.side-facts p.bad { color: var(--ink); padding-left: 8px; box-shadow: inset 2px 0 0 var(--danger); }
+.side-facts .unnamed { margin-top: 4px; font-weight: 600; }
+.side-facts .paths { display: grid; gap: 2px; margin: 0 0 2px; padding: 0; list-style: none; font-family: var(--font-data); font-size: var(--fs-xs); color: var(--ink-3); }
+.side-facts .paths li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .side-tell { display: grid; justify-items: start; gap: 8px; padding-top: 4px; color: var(--ink-3); }
 .side-tell p { margin: 0; }
 .side-tell .btn { height: var(--h-sm); }

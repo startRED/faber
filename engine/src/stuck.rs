@@ -142,6 +142,7 @@ mod tests {
             declined: false,
             parent: Some("call".into()),
             sign: None,
+            facts: None,
         }
     }
 

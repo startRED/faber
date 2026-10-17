@@ -34,6 +34,8 @@ export interface ToolUse {
   declined?: boolean;
   /** On a subagent's call while the reply runs: waiting for the person's answer, or a sign it seems stuck. */
   sign?: "waiting" | "repeat" | "failing" | "silent";
+  /** On a subagent's call once it ended (R161 step 4). */
+  facts?: { edited?: string[]; checks: number; failed: number; unnamed?: string[] };
 }
 export interface Permission {
   requestId: string;

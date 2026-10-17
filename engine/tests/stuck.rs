@@ -199,6 +199,11 @@ async fn r161_a_stuck_subagent_shows_on_its_step_and_needs_the_person() {
     let reply = reply_until(&engine, &id, "the end", |m| m.status != Some(faber_engine::model::Status::Streaming)).await;
     engine.shutdown();
     assert!(reply.tools.iter().flatten().all(|t| t.sign.is_none()), "{reply:?}");
+    // R161 step 4: its call keeps the facts of what it did, not a verdict.
+    let facts = reply.tools.iter().flatten().find(|t| t.id == "call").and_then(|t| t.facts.clone()).expect("the ended call has facts");
+    assert_eq!(facts.edited, ["src/lib.rs"]);
+    assert_eq!((facts.checks, facts.failed), (3, 3), "three cargo test runs, all failed; npm install is no check");
+    assert_eq!(facts.unnamed, ["src/lib.rs"], "the brief never named the file it changed");
 }
 
 /// The same step started six times in a row is a loop; the sign goes away when the subagent does something else.

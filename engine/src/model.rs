@@ -99,6 +99,9 @@ pub struct ToolUse {
     /// from disk, so a sign can outlive neither its reply nor Faber.
     #[serde(skip_deserializing, skip_serializing_if = "Option::is_none")]
     pub sign: Option<crate::stuck::Sign>,
+    /// On a subagent's call once it ended: what it changed and checked (`facts.rs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub facts: Option<crate::engine::facts::Facts>,
 }
 
 /// A helper the agent sent to the background (Claude Code's `Agent` call with `run_in_background`): its call returns when it
