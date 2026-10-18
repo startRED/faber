@@ -2,7 +2,7 @@
 // there, so its numbers are given only when it lands and two pull requests never wait on each other's
 // (docs/dev/workflow.md#numbers).
 //
-//   node scripts/land.mjs <pull request> [--dry-run] [--head <commit>]
+//   node scripts/land.mjs <pull request> [--dry-run] [--no-verify] [--head <commit>]
 //
 // It squashes the pull request onto origin/phase-1-base without touching the working tree (`git merge-tree`), names the
 // commit after the pull request's title and number, numbers it in a throwaway worktree (`node scripts/numbers.mjs assign
@@ -12,9 +12,15 @@
 // the land job runs this again with --head, the head it squashed before, so the numbers are given again on the new base
 // instead of a rebase that would collide. A conflict with today's base stops here, with its files. --dry-run shows the
 // commit it would queue and pushes nothing.
+//
+// Before it queues, it runs on this PC the suites CI would run for the change (`cargo t --suite <name>`, each whole) on
+// the very commit it queues, in one worktree kept for that (R190 V2). When they pass, it posts the commit status
+// `faber/verify` with that tree and those suites, and CI leaves them out; the lints still run there. With --no-verify,
+// on CI (the land job's run again on a new base), with no `cargo` here, or while another landing checks on this PC, it
+// queues without one and CI runs every suite as before. A failure here queues nothing.
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, linkSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
@@ -114,10 +120,22 @@ export function refusal(pr) {
   return '';
 }
 
+/**
+ * Why the PC checks nothing before queueing, or nothing: `env` is the process's, `args` the command line's. Only
+ * Windows checks: the screen suite runs there alone, and elsewhere `cargo t` skips it and still exits 0.
+ */
+export function noCheck(env, args, platform) {
+  if (args.includes('--dry-run')) return 'a dry run';
+  if (args.includes('--no-verify')) return '--no-verify';
+  if (env.GITHUB_ACTIONS === 'true') return 'it runs on CI';
+  if (platform !== 'win32') return 'the suites run whole only on Windows';
+  return '';
+}
+
 const run = (cmd, args, options = {}) => execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, ...options });
 const git = (...args) => run('git', args);
 
-function land(number, dry, given) {
+async function land(number, dry, given, args) {
   // What the queue holds before anything is read: the push below replaces only that, so a run that read an older head
   // never overwrites the commit a newer run queued meanwhile.
   const queue = `refs/heads/queue/pr-${number}`;
@@ -157,6 +175,29 @@ function land(number, dry, given) {
     console.log('Dry run: nothing was pushed.');
     return 0;
   }
+  // Read only here: CI runs a copy of this file alone (the land job's run again on a new base), which checks nothing.
+  const skip = noCheck(process.env, args, process.platform);
+  const { STATUS, statusText, toCheck } = skip ? {} : await import('./ci-scope.mjs');
+  const suites = skip ? [] : toCheck(git('diff', '--name-only', base, commit).split('\n').map((l) => l.trim()).filter(Boolean));
+  const verified = suites.length ? check(commit, suites) : null;
+  if (skip) console.log(`No check on this PC (${skip}): CI runs every suite the change needs.`);
+  if (verified === false) {
+    console.error(`#${pr.number} failed ${suites.join(', ')} on this PC (the lines above): fix it, push, and run this again. Nothing was queued.`);
+    return 1;
+  }
+  if (verified) {
+    // GitHub takes a status only on a commit it has: the commit goes to a branch no workflow starts on, the status on it,
+    // and only then to the queue, so CI reads the status from its first job.
+    try {
+      git('push', '--quiet', '--force', 'origin', `${commit}:refs/heads/verify/pr-${pr.number}`);
+      const tree = git('rev-parse', `${commit}^{tree}`).trim();
+      run('gh', ['api', `repos/{owner}/{repo}/statuses/${commit}`, '-f', 'state=success', '-f', `context=${STATUS}`, '-f', `description=${statusText(tree, suites)}`]);
+      console.log(`${suites.join(', ')} passed on this PC: ${STATUS} posted, so CI runs the lints.`);
+    } catch (error) {
+      console.error(String(error.stderr || error.message).trim());
+      console.log(`${STATUS} could not be posted: CI runs every suite.`);
+    }
+  }
   try {
     git('push', '--quiet', `--force-with-lease=${queue}:${queued}`, 'origin', `${commit}:${queue}`);
   } catch (error) {
@@ -170,8 +211,150 @@ function land(number, dry, given) {
   } catch {
     // Only a light on the pull request: the landing goes on without it.
   }
+  if (verified) {
+    try {
+      git('push', '--quiet', 'origin', `:refs/heads/verify/pr-${pr.number}`);
+    } catch {
+      // The queue branch holds the commit now; a branch left behind costs nothing.
+    }
+  }
   console.log(`#${pr.number} is queued as ${commit.slice(0, 9)} on queue/pr-${pr.number}. CI checks it, lands it and marks the pull request merged.`);
   return 0;
+}
+
+/**
+ * Runs each of `suites` whole on `commit`, in the one worktree this PC keeps for landings, with Cargo's own build folder
+ * under the main checkout's `target`, so each landing builds only what changed. True when every suite passed, false when
+ * one failed, null when it could not run here (no `cargo`, or another landing checks now), so CI runs every suite.
+ */
+function check(commit, suites) {
+  const common = resolve(git('rev-parse', '--path-format=absolute', '--git-common-dir').trim());
+  const main = dirname(common);
+  const lock = join(common, 'faber-landing.lock');
+  if (!take(lock)) {
+    console.log('Another landing checks on this PC now: no check here, so CI runs every suite.');
+    return null;
+  }
+  try {
+    try {
+      run('cargo', ['--version']);
+    } catch {
+      console.log('No cargo on the PATH here: no check, so CI runs every suite.');
+      return null;
+    }
+    // Beside the main checkout, as the other faber-wt-<name> worktrees, so it builds into target/landing; never under
+    // .claude/worktrees, where a lane could have the same name.
+    const dir = join(dirname(main), 'faber-wt-landing');
+    git('worktree', 'prune');
+    if (!existsSync(dir)) {
+      git('worktree', 'add', '--quiet', '--detach', dir, commit);
+      writeFileSync(join(dir, MARK), 'Kept by scripts/land.mjs for the checks before a landing. Nothing else works here.\n');
+    }
+    if (!ours(dir)) {
+      console.log(`${dir} is not the landing's own worktree: no check here, so CI runs every suite.`);
+      return null;
+    }
+    run('git', ['checkout', '--quiet', '--force', '--detach', commit], { cwd: dir });
+    run('git', ['clean', '--quiet', '-fdx', '-e', 'node_modules', '-e', MARK], { cwd: dir });
+    if (needsInstall(dir)) {
+      const npm = join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+      execFileSync(process.execPath, [npm, 'ci', '--no-audit', '--no-fund'], { cwd: dir, stdio: 'inherit', windowsHide: true });
+      writeFileSync(join(dir, 'node_modules', '.faber-lock'), readFileSync(join(dir, 'package-lock.json')));
+    }
+    const env = { ...process.env, CARGO_TARGET_DIR: join(main, 'target', 'landing') };
+    for (const suite of suites) {
+      console.log(`Checking ${suite} on this PC before queueing (cargo t --suite ${suite})...`);
+      try {
+        execFileSync('cargo', ['t', '--suite', suite], { cwd: dir, env, stdio: 'inherit', windowsHide: true });
+      } catch {
+        return false;
+      }
+    }
+    // What ran is what is queued: the worktree still holds that very commit, unchanged.
+    const head = run('git', ['rev-parse', 'HEAD'], { cwd: dir }).trim();
+    const dirty = run('git', ['status', '--porcelain', '--untracked-files=no'], { cwd: dir }).trim();
+    if (head !== commit || dirty) {
+      console.log('The landing worktree changed while the suites ran: no check, so CI runs every suite.');
+      return null;
+    }
+    return true;
+  } finally {
+    rmSync(lock, { force: true });
+  }
+}
+
+/** The file that marks the landing's own worktree. */
+const MARK = '.faber-landing';
+
+/** Whether `dir` is the landing's own worktree: registered with git at that very path, detached, and marked. */
+function ours(dir) {
+  if (!existsSync(join(dir, MARK))) return false;
+  let real;
+  try {
+    real = realpathSync(dir);
+  } catch {
+    return false;
+  }
+  const same = (a, b) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
+  const flat = (p) => resolve(p).replace(/[\\/]+$/, '');
+  if (!same(flat(real), flat(dir))) return false;
+  const entries = git('worktree', 'list', '--porcelain').split(/\n\n+/);
+  return entries.some((e) => {
+    const path = /^worktree (.+)$/m.exec(e)?.[1];
+    return path && same(flat(path), flat(dir)) && /^detached$/m.test(e);
+  });
+}
+
+/** Whether the worktree's packages are missing or older than its lock file. */
+function needsInstall(dir) {
+  const stamp = join(dir, 'node_modules', '.faber-lock');
+  return !existsSync(stamp) || readFileSync(stamp, 'utf8') !== readFileSync(join(dir, 'package-lock.json'), 'utf8');
+}
+
+/**
+ * Takes the landing lock: the file appears whole with this process's id (a link to a file written first), so another
+ * landing never reads it empty. One left by a process that is gone is moved aside, then taken again; a lock that cannot
+ * be read counts as held. Two landings that read the same dead id at once can both get in (Node has no exclusive open);
+ * then each checks out before its suites, and the HEAD check after them keeps either from posting a status for a tree
+ * it did not test, so the race costs a run, never a false green.
+ */
+function take(lock) {
+  const mine = `${lock}.${process.pid}`;
+  writeFileSync(mine, String(process.pid));
+  try {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        linkSync(mine, lock);
+        return true;
+      } catch {
+        let pid = 0;
+        try {
+          pid = Number(readFileSync(lock, 'utf8').trim());
+        } catch {
+          return false;
+        }
+        if (!pid || alive(pid)) return false;
+        try {
+          renameSync(lock, `${lock}.${pid}.gone`);
+          rmSync(`${lock}.${pid}.gone`, { force: true });
+        } catch {
+          return false;
+        }
+      }
+    }
+    return false;
+  } finally {
+    rmSync(mine, { force: true });
+  }
+}
+
+function alive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === 'EPERM';
+  }
 }
 
 /** `commit` with its fragments folded in and its placeholders numbered, made in a throwaway worktree; none when it cannot. */
@@ -242,16 +425,17 @@ function finish(number) {
   return 0;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === resolve(join(import.meta.dirname, 'land.mjs'))) {
+// Real paths on both sides: a temporary folder may be a link (macOS's /var is /private/var), and Node gives the module its real path.
+if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(import.meta.filename)) {
   const args = process.argv.slice(2);
   const number = args.find((a) => /^\d+$/.test(a));
   if (!number) {
-    console.error('usage: node scripts/land.mjs <pull request> [--dry-run] [--head <commit>] | <pull request> --finish');
+    console.error('usage: node scripts/land.mjs <pull request> [--dry-run] [--no-verify] [--head <commit>] | <pull request> --finish');
     process.exitCode = 2;
   } else if (args.includes('--finish')) {
     process.exitCode = finish(number);
   } else {
     const at = args.indexOf('--head');
-    process.exitCode = land(number, args.includes('--dry-run'), at >= 0 ? args[at + 1] : undefined);
+    process.exitCode = await land(number, args.includes('--dry-run'), at >= 0 ? args[at + 1] : undefined, args);
   }
 }

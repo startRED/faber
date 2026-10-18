@@ -32,6 +32,8 @@ jobs:
     permissions:
       contents: read
       actions: read
+      # The PC's faber/verify on a queued commit (R190 V2).
+      statuses: read
     outputs:
       lints: ${{ steps.decide.outputs.lints }}
       rust: ${{ steps.decide.outputs.rust }}
@@ -54,6 +56,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
+          OWNER: ${{ github.repository_owner }}
           WARM: ${{ github.event_name == 'workflow_dispatch' && inputs.warm && github.ref == 'refs/heads/main' }}
           BEFORE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -73,11 +76,17 @@ jobs:
             [ "$count" -gt 0 ]
           }
           decide() {
-            local base compare found
+            local base compare found verify="" tree=""
             if [[ "$GITHUB_REF" == refs/heads/queue/* ]]; then
               # Three dots: what the queue commit changes on top of phase-1-base, where the land job puts it (R162).
               compare=$(gh api "repos/$GITHUB_REPOSITORY/compare/phase-1-base...$HEAD") || { echo "Everything runs: the change set could not be read"; return; }
               base=$(jq -r .merge_base_commit.sha <<<"$compare")
+              # The PC's full check of this very tree (R190 V2): a green `faber/verify` the owner's own sign-in posted on
+              # the queued commit, before it was queued. It names the tree it checked; ci-scope.mjs takes it only for that
+              # tree and leaves out the suites it covers. Anything it cannot read leaves every suite in.
+              verify=$(gh api "repos/$GITHUB_REPOSITORY/commits/$HEAD/statuses?per_page=100" \
+                --jq "[.[] | select(.context == \"faber/verify\" and .creator.login == \"$OWNER\")][0] | select(.state == \"success\") | .description") || verify=""
+              tree=$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$HEAD" --jq .tree.sha) || tree=""
             else
               [[ "$BEFORE" =~ ^[0-9a-f]{40}$ && "$BEFORE" =~ [1-9a-f] ]] || { echo "Everything runs: there is no commit before this one"; return; }
               # Three dots: what HEAD changed since it left BEFORE.
@@ -87,7 +96,7 @@ jobs:
             fi
             # The API lists at most 300 files; more runs everything.
             [ "$(jq '.files | length' <<<"$compare")" -lt 300 ] || { echo "Everything runs: 300 files or more changed"; return; }
-            found=$(jq -r '.files[].filename' <<<"$compare" | node scripts/ci-scope.mjs) || { echo "Everything runs: the scope could not be read"; return; }
+            found=$(jq -r '.files[].filename' <<<"$compare" | FABER_VERIFY="$verify" TREE="$tree" node scripts/ci-scope.mjs) || { echo "Everything runs: the scope could not be read"; return; }
             if [ "$EVENT" != pull_request ] && grep -q '=false' <<<"$found"; then
               green "$base" || { echo "Everything runs: $base, the commit this one builds on, is not green (yet)"; return; }
             fi

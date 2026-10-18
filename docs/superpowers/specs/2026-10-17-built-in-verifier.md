@@ -213,7 +213,10 @@ Each step lands on its own, proves itself with the checks above, and reports its
   - Built first (R203): the `verify` tool, fast and full, on the project's own Checks of R137 (no second checks file),
     selection found from each command, content-hash cutoff, one kill-on-close job per check below normal priority, one
     Cargo build at a time, logs on disk; the change feed is git asked at each call, with no watcher yet.
-- [ ] **V2. GitHub confirms.** `land.mjs` asks the verifier for a full check on the squashed tree and posts
+- [x] **V2. GitHub confirms.** Built: `land.mjs` runs the suites CI would run on the exact queued commit with `cargo t`
+  (the project's own runner; the engine's verifier runs the proof commands, not the screen suite) and posts
+  `faber/verify`; ci-scope.mjs takes it only for the named tree, from the owner. Misses show as a red daily run on main.
+- **V2 as planned:** `land.mjs` asks the verifier for a full check on the squashed tree and posts
   `faber/verify`. The `changes` job leaves out the suites the status covers. The daily run reports misses.
   - Result: most queued runs shrink from about 18 jobs to the lints.
 - [ ] **V3. A queue that knows conflicts.**

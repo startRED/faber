@@ -34,9 +34,33 @@ export function scope(files) {
   return { lints: !files.every(isWords), ...Object.fromEntries(SUITES.map((s) => [s, needed.has(s)])) };
 }
 
+/** The suites the PC runs before queueing a change to `files`: the ones CI would run, the lints aside (CI runs them). */
+export function toCheck(files) {
+  const needed = scope(files);
+  return SUITES.filter((suite) => needed[suite]);
+}
+
+/** The commit status the PC posts when its full check of a queued tree passed (R190 V2). */
+export const STATUS = 'faber/verify';
+
+/** What that status says: the very tree it checked and the suites that passed on it. */
+export const statusText = (tree, suites) => `tree ${tree} covers ${suites.join(' ')}`;
+
+/** The suites a `faber/verify` description covers for `tree`: none unless it names that very tree, in its exact words. */
+export function covered(description, tree) {
+  const found = /^tree ([0-9a-f]{40}) covers ((?:rust|ui|screen)(?: (?:rust|ui|screen))*)$/.exec(description ?? '');
+  return found && found[1] === tree ? [...new Set(found[2].split(' '))] : [];
+}
+
 if (process.argv[1]?.endsWith('ci-scope.mjs')) {
   const chunks = [];
   for await (const chunk of process.stdin) chunks.push(chunk);
   const files = Buffer.concat(chunks).toString('utf8').split('\n').map((line) => line.trim()).filter(Boolean);
-  for (const [name, needed] of Object.entries(scope(files))) process.stdout.write(`${name}=${needed}\n`);
+  const decided = scope(files);
+  // A green `faber/verify` of this very tree (FABER_VERIFY, its description; TREE, the tree of the commit) leaves out the
+  // suites it covers. The lints always run.
+  const done = covered(process.env.FABER_VERIFY, process.env.TREE);
+  if (done.length) process.stderr.write(`${STATUS} covers ${done.join(' ')} on this tree: CI leaves them out\n`);
+  for (const suite of done) decided[suite] = false;
+  for (const [name, needed] of Object.entries(decided)) process.stdout.write(`${name}=${needed}\n`);
 }
