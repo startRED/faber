@@ -33,6 +33,7 @@ impl Core {
                     // A picture that cannot be kept only leaves the card without one.
                     if let (Some(picture), Some(name)) = (&page.picture, browser::picture_name(&call)) {
                         let _ = std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(dir.join(name), picture));
+                        browser::trim_pictures(&dir, browser::MAX_PICTURES_BYTES);
                     }
                     (true, browser::result_text(&page))
                 }

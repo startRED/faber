@@ -220,9 +220,61 @@ pub fn picture_name(call: &str) -> Option<String> {
     (!id.is_empty()).then(|| format!("site-{id}.jpg"))
 }
 
+/// The most the browser's pictures of one conversation take on disk. A long run that browses all night keeps its latest
+/// steps; the oldest pictures go first, and their steps say no picture was kept (`ui/Site.tsx`).
+pub const MAX_PICTURES_BYTES: u64 = 20 * 1024 * 1024;
+
+/// Deletes the oldest browser pictures in `dir` until they take at most `max` bytes, always keeping the newest one. Only
+/// Faber's own picture files (`site-*.jpg`) are counted or touched; anything else in the folder stays.
+pub fn trim_pictures(dir: &std::path::Path, max: u64) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let mut pictures: Vec<(std::time::SystemTime, u64, std::path::PathBuf)> = entries
+        .flatten()
+        .filter(|e| e.file_name().to_str().is_some_and(|n| n.starts_with("site-") && n.ends_with(".jpg")))
+        .filter_map(|e| {
+            let meta = e.metadata().ok().filter(std::fs::Metadata::is_file)?;
+            Some((meta.modified().ok()?, meta.len(), e.path()))
+        })
+        .collect();
+    pictures.sort();
+    let mut total: u64 = pictures.iter().map(|p| p.1).sum();
+    for (_, len, path) in pictures.iter().take(pictures.len().saturating_sub(1)) {
+        if total <= max {
+            break;
+        }
+        if std::fs::remove_file(path).is_ok() {
+            total -= len;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_oldest_pictures_go_first_once_a_conversation_keeps_too_many_and_nothing_else_is_touched() {
+        let dir = tempfile::tempdir().unwrap();
+        let at = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        for (n, name) in ["site-a.jpg", "site-b.jpg", "site-c.jpg", "notes.jpg", "site-d.png"].iter().enumerate() {
+            let path = dir.path().join(name);
+            std::fs::write(&path, [0u8; 100]).unwrap();
+            std::fs::File::options().write(true).open(&path).unwrap().set_modified(at + std::time::Duration::from_secs(n as u64)).unwrap();
+        }
+        let left = || {
+            let mut names: Vec<String> =
+                std::fs::read_dir(dir.path()).unwrap().flatten().map(|e| e.file_name().into_string().unwrap()).collect();
+            names.sort();
+            names
+        };
+        trim_pictures(dir.path(), 300);
+        assert_eq!(left().len(), 5, "under the limit nothing goes");
+        trim_pictures(dir.path(), 150);
+        assert_eq!(left(), ["notes.jpg", "site-c.jpg", "site-d.png"], "the oldest pictures go, other files stay");
+        trim_pictures(dir.path(), 0);
+        assert_eq!(left(), ["notes.jpg", "site-c.jpg", "site-d.png"], "the newest picture always stays");
+        trim_pictures(&dir.path().join("missing"), 0);
+    }
 
     #[test]
     fn the_agent_asks_for_one_thing_at_a_time() {
