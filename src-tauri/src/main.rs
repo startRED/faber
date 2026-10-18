@@ -1598,8 +1598,9 @@ fn main() {
                     .ok()
                     .map(|git| Box::new(git) as Box<dyn faber_engine::project::git::Executor + Send>)
             }));
-            // A project's checks, which its agent runs with Faber's `verify` tool (R190): no process until it is called.
-            engine.set_verifier(faber_engine::verify::Verifier::real());
+            // A project's checks, which its agent runs with Faber's `verify` tool (R190): no process until it is called. While a
+            // game is in front (R191) no new check starts and a running one is held to a tenth of the processor.
+            engine.set_verifier(faber_engine::verify::Verifier::real(Some(Arc::new(crate::tray::game_in_front))));
             {
                 // Once, at start: copies of deleted conversations, and merged clean ones, go.
                 let engine = engine.clone();

@@ -18,7 +18,7 @@ mod run;
 mod select;
 
 pub use changes::{Changed, changed, own_log};
-pub use run::{KEPT_LOGS, Real, Runner, Spec, Started};
+pub use run::{GAME_CPU, GUARD_EVERY, Guard, KEPT_LOGS, Real, Runner, Spec, Started};
 pub use select::{Scripts, Watch, heavy, scripts, watch};
 
 use crate::project::proof::output;
@@ -339,6 +339,8 @@ pub struct Verifier {
     running: Mutex<HashMap<PathBuf, Running>>,
     next: AtomicU64,
     clock: fn() -> u64,
+    /// The game guard (`run::Guard`): none where the shell cannot tell.
+    guard: Option<Guard>,
 }
 
 struct Running {
@@ -366,12 +368,26 @@ impl Verifier {
             running: Mutex::new(HashMap::new()),
             next: AtomicU64::new(0),
             clock: now_millis,
+            guard: None,
         }
     }
 
-    /// The real verifier the shell gives the engine.
-    pub fn real() -> Arc<Verifier> {
-        Arc::new(Verifier::new(Arc::new(Real)))
+    /// The real verifier the shell gives the engine, with its game guard.
+    pub fn real(guard: Option<Guard>) -> Arc<Verifier> {
+        Arc::new(Verifier { guard, ..Verifier::new(Arc::new(Real)) })
+    }
+
+    /// The same verifier with a game guard (tests).
+    pub fn with_guard(self, guard: Guard) -> Verifier {
+        Verifier { guard: Some(guard), ..self }
+    }
+
+    /// While a game is in front, no new check starts: the run waits, reading the guard every `GUARD_EVERY`. A stop or a
+    /// newer run ends the wait with the run.
+    async fn game_over(&self) {
+        while self.guard.as_ref().is_some_and(|in_front| in_front()) {
+            tokio::time::sleep(GUARD_EVERY).await;
+        }
     }
 
     /// Runs `request` to its end. A newer verify of the same folder stops this one, which then ends `reason.verify.stopped`.
@@ -493,6 +509,7 @@ impl Verifier {
             && request.setup.iter().any(|s| s == "npm ci")
             && !request.folder.join("node_modules").exists()
         {
+            self.game_over().await;
             let spec = Spec {
                 program: "npm".into(),
                 args: vec!["ci".into(), "--no-audit".into(), "--no-fund".into()],
@@ -500,17 +517,18 @@ impl Verifier {
                 env: vars.clone(),
             };
             log.line("== npm ci (the dependencies were not installed in this folder) ==");
-            let ran = run::check(&*self.runner, &spec, &mut log, self.deadline).await;
+            let ran = run::check(&*self.runner, &spec, &mut log, self.deadline, self.guard.as_ref()).await;
             if ran.exit != Some(0) {
                 results.push(result("npm ci", &ran, &root));
             }
         }
         for (check, key) in todo {
+            self.game_over().await;
             let _turn = if check.heavy { self.heavy.clone().acquire_owned().await.ok() } else { None };
             log.line(&format!("== {} ==", check.command));
             let spec =
                 Spec { program: check.tokens[0].clone(), args: check.tokens[1..].to_vec(), cwd: request.folder.clone(), env: vars.clone() };
-            let ran = run::check(&*self.runner, &spec, &mut log, self.deadline).await;
+            let ran = run::check(&*self.runner, &spec, &mut log, self.deadline, self.guard.as_ref()).await;
             log.line(&format!("== {}: exit {:?} after {} ms ==", check.command, ran.exit, ran.took.as_millis()));
             let out = result(&check.command, &ran, &root);
             if out.verdict == Verdict::Passed
@@ -599,6 +617,8 @@ mod tests {
         /// Program and first argument → (output, exit code); `None` never ends.
         script: HashMap<String, (String, Option<i32>)>,
         dropped: Arc<AtomicUsize>,
+        /// What the game guard asked of each check's processor share, in order.
+        capped: Arc<Mutex<Vec<bool>>>,
     }
 
     struct Ends(Arc<AtomicUsize>);
@@ -625,7 +645,14 @@ mod tests {
                     None
                 }),
             };
-            Ok(Started { stdout: Box::new(std::io::Cursor::new(out.into_bytes())), stderr: Box::new(tokio::io::empty()), exit })
+            let capped = self.capped.clone();
+            let throttle: Box<dyn Fn(bool) + Send + Sync> = Box::new(move |game| capped.lock().unwrap().push(game));
+            Ok(Started {
+                stdout: Box::new(std::io::Cursor::new(out.into_bytes())),
+                stderr: Box::new(tokio::io::empty()),
+                exit,
+                throttle: Some(throttle),
+            })
         }
     }
 
@@ -797,6 +824,38 @@ mod tests {
         // Every started process ended: the never-ending one was dropped with its run, and none is left.
         assert_eq!(dropped.load(Ordering::SeqCst), 5);
         assert!(!v.busy(dir.path()));
+    }
+
+    #[test]
+    fn while_a_game_is_in_front_no_check_starts_and_a_running_one_is_capped_until_it_goes() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().start_paused(true).build().unwrap();
+        rt.block_on(async {
+            let dir = tempfile::tempdir().unwrap();
+            // `cargo t --claims` runs until it is stopped; the docs check passes at once.
+            let runner = Arc::new(fake(&[("npm run docs", "docs ok", Some(0)), ("cargo t --claims", "", None)]));
+            let game = Arc::new(std::sync::atomic::AtomicBool::new(true));
+            let in_front = game.clone();
+            let guard: Guard = Arc::new(move || in_front.load(Ordering::SeqCst));
+            let v = Arc::new(Verifier::with_deadline(runner.clone(), Duration::from_secs(3600)).with_guard(guard));
+            let mut request = request(dir.path(), Level::Fast, &[("docs/a.md", "h1")]);
+            request.commands = vec!["npm run docs".into(), "cargo t --claims".into()];
+            let run = tokio::spawn({
+                let v = v.clone();
+                async move { v.verify(request).await }
+            });
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            assert!(runner.started.lock().unwrap().is_empty(), "no check starts while the game is in front");
+            game.store(false, Ordering::SeqCst);
+            tokio::time::sleep(GUARD_EVERY * 2).await;
+            assert_eq!(*runner.started.lock().unwrap(), ["npm run docs", "cargo t --claims"]);
+            // The game comes back while the long check runs: it is capped, then freed when the game goes.
+            game.store(true, Ordering::SeqCst);
+            tokio::time::sleep(GUARD_EVERY * 2).await;
+            game.store(false, Ordering::SeqCst);
+            tokio::time::sleep(GUARD_EVERY * 2).await;
+            assert_eq!(*runner.capped.lock().unwrap(), [true, false]);
+            run.abort();
+        });
     }
 
     #[test]

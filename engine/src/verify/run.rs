@@ -26,7 +26,19 @@ pub struct Started {
     pub stderr: Box<dyn AsyncRead + Send + Unpin>,
     /// The exit code, `None` when it ended without one.
     pub exit: Pin<Box<dyn Future<Output = Option<i32>> + Send>>,
+    /// Caps the check's processor share while a game is in front (true) or lifts the cap (false); none where nothing can.
+    pub throttle: Option<Box<dyn Fn(bool) + Send + Sync>>,
 }
+
+/// Whether a game or another full-screen app is in front of the person (the shell's R191 reading), so no new check starts
+/// and a running one is held to `GAME_CPU`.
+pub type Guard = std::sync::Arc<dyn Fn() -> bool + Send + Sync>;
+
+/// The processor share, in percent of the whole machine, a check keeps while a game is in front.
+pub const GAME_CPU: u32 = 10;
+
+/// How often the guard is read while a run waits for a game to end or a check runs; never while idle.
+pub const GUARD_EVERY: Duration = Duration::from_secs(5);
 
 /// Starts checks. The shell gives the real one; tests give a fake that starts nothing.
 pub trait Runner: Send + Sync {
@@ -63,6 +75,10 @@ impl Runner for Real {
         // Nothing is ever typed into a check.
         drop(p.stdin);
         let (child, job) = (p.child, p.contained);
+        let throttle = job.as_ref().map(|job| {
+            let cap = job.cpu_cap();
+            Box::new(move |game: bool| cap(game.then_some(GAME_CPU))) as Box<dyn Fn(bool) + Send + Sync>
+        });
         let exit = Box::pin(async move {
             // The job lives as long as this future: once the check exited, or when the future is dropped before, closing
             // it ends whatever the check left running (on Windows), so its pipes close and nothing outlives it.
@@ -73,7 +89,7 @@ impl Runner for Real {
                 None => None,
             }
         });
-        Ok(Started { stdout: p.stdout, stderr: p.stderr.unwrap_or_else(|| Box::new(tokio::io::empty())), exit })
+        Ok(Started { stdout: p.stdout, stderr: p.stderr.unwrap_or_else(|| Box::new(tokio::io::empty())), exit, throttle })
     }
 }
 
@@ -241,8 +257,9 @@ async fn pump(mut pipe: Box<dyn AsyncRead + Send + Unpin>, tx: tokio::sync::mpsc
 /// How long the pipes are still read once the check itself exited.
 const GRACE: Duration = Duration::from_secs(2);
 
-/// Runs one check to its end or its deadline, with every byte it prints going to `log`.
-pub async fn check(runner: &dyn Runner, spec: &Spec, log: &mut Log, deadline: Duration) -> Ran {
+/// Runs one check to its end or its deadline, with every byte it prints going to `log`. With a `guard`, the check's
+/// processor share is capped while a game is in front and freed when it goes.
+pub async fn check(runner: &dyn Runner, spec: &Spec, log: &mut Log, deadline: Duration, guard: Option<&Guard>) -> Ran {
     let began = Instant::now();
     let started = match runner.start(spec) {
         Ok(started) => started,
@@ -251,7 +268,7 @@ pub async fn check(runner: &dyn Runner, spec: &Spec, log: &mut Log, deadline: Du
             return Ran { exit: None, output: String::new(), took: began.elapsed(), refused: Some(e.to_string()), timed_out: false };
         }
     };
-    let Started { stdout, stderr, exit } = started;
+    let Started { stdout, stderr, exit, throttle } = started;
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(CHANNEL);
     let mut capture = Capture::default();
     let code = {
@@ -273,6 +290,24 @@ pub async fn check(runner: &dyn Runner, spec: &Spec, log: &mut Log, deadline: Du
                     code
                 }
                 _ = &mut read => exit.await,
+            }
+        };
+        let held = async {
+            let (Some(guard), Some(throttle)) = (guard, throttle.as_ref()) else { return std::future::pending().await };
+            let mut capped = false;
+            loop {
+                let game = guard();
+                if game != capped {
+                    throttle(game);
+                    capped = game;
+                }
+                tokio::time::sleep(GUARD_EVERY).await;
+            }
+        };
+        let work = async {
+            tokio::select! {
+                code = work => code,
+                never = held => never,
             }
         };
         tokio::time::timeout(deadline, work).await
@@ -299,14 +334,19 @@ mod tests {
             let (open, holder) = tokio::io::duplex(64);
             // The other end never closes, as a grandchild that inherited the pipe would keep it.
             std::mem::forget(holder);
-            Ok(Started { stdout: Box::new(open), stderr: Box::new(tokio::io::empty()), exit: Box::pin(async move { Some(code) }) })
+            Ok(Started {
+                stdout: Box::new(open),
+                stderr: Box::new(tokio::io::empty()),
+                exit: Box::pin(async move { Some(code) }),
+                throttle: None,
+            })
         }
     }
 
     #[tokio::test(start_paused = true)]
     async fn a_check_that_exited_ends_with_its_code_even_when_something_holds_its_pipes() {
         let spec = Spec { program: "x".into(), args: vec![], cwd: ".".into(), env: vec![] };
-        let ran = check(&Held(3), &spec, &mut Log::none(), Duration::from_secs(900)).await;
+        let ran = check(&Held(3), &spec, &mut Log::none(), Duration::from_secs(900), None).await;
         assert_eq!((ran.exit, ran.timed_out), (Some(3), false));
         assert!(ran.took < Duration::from_secs(10), "{:?}", ran.took);
     }

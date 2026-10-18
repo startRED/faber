@@ -1,0 +1,11 @@
+{
+  "notes": {
+    "better": {
+      "en": "While a game is in front, Faber's checks wait to start, and one already running uses only a tenth of the processor until you leave the game.",
+      "pt-BR": "Enquanto um jogo está na frente, as verificações do Faber esperam para começar, e uma que já está rodando usa só um décimo do processador até você sair do jogo.",
+      "es": "Mientras un juego está delante, las comprobaciones de Faber esperan para empezar, y una que ya está en marcha usa solo una décima parte del procesador hasta que sales del juego.",
+      "fr": "Tant qu'un jeu est au premier plan, les vérifications de Faber attendent pour démarrer, et une vérification déjà lancée n'utilise qu'un dixième du processeur jusqu'à ce que vous quittiez le jeu.",
+      "de": "Solange ein Spiel im Vordergrund ist, warten Fabers Prüfungen mit dem Start, und eine schon laufende nutzt nur ein Zehntel des Prozessors, bis du das Spiel verlässt."
+    }
+  }
+}
