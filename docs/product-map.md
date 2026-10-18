@@ -24,7 +24,7 @@ that changes them updates this page too. Last full audit: 2026-10-16.
 | Effort | Low, medium or high for a model the person picked by hand; Auto picks its own. | `ui/Composer.tsx`, `engine/src/router.rs` |
 | Step up | "Try again one step up": the same question as a branch one effort up on the same model, or on the next stronger model of the same vendor when that rung is not available, offered when a check failed or code changed unchecked. | `engine/src/nudge.rs` |
 | Branch | Editing a past message starts a new conversation from that point. | `ui/Thread.tsx` |
-| Queue, steer | A message sent while an answer runs waits in a queue; Codex can take it into the running turn. | `engine/src/engine.rs` |
+| Queue, steer | A message sent while an answer runs goes into the running turn, Codex and Claude Code alike, and joins the conversation when the CLI takes it in; one for another vendor, or behind one still waiting, waits in a queue. | `engine/src/engine.rs`, `engine/src/claude.rs` |
 | Keep going | A project conversation that goes on by itself while the person is away (R199): each end of a turn sends the next one, until the agent asks something or says nothing is left, two turns in a row fail or one runs out of quota, 40 turns went out, or Auto's pacing says the AI it goes to has no room; a restart of Faber turns it off. A message Faber sends by itself carries why (`wake`) and shows as a quiet line, not as the person's words. | `engine/src/engine/keep_going.rs`, `engine/src/engine/by_itself.rs`, `ui/Composer.tsx` |
 | Permissions | Five modes for Chat: "Ask", "Accept edits", "Plan", "Auto", "Full access" (`dontAsk`, the default). Auto runs as "Accept edits" when the CLI has no auto mode, and the screen says so. Missions run in an isolated mode nobody picks. | `engine/src/model.rs`, `engine/src/permissions.rs` |
 | Permission card, held-back request | A question the CLI asks in Ask mode; a request it denied because nobody could answer, shown and never allowed by itself. | `ui/Ask.tsx`, `engine/src/engine/parked.rs` |
@@ -79,6 +79,8 @@ replaces the shell; otherwise the shell shows the sidebar, the topbar, the work 
 | Running column | Run button, Ctrl+., or by itself 1.5 s after typing stops | Running conversations by project with their state in words ("working on its own" while Keep going is on; one "Nothing running" when empty, no footer sentence); permission and held-back cards; open a conversation; an opened subagent or page in place of the list until "back" (Subagent step, Page in Faber's browser) | `ui/Running.tsx`, `ui/running.ts` |
 | Settings | Ctrl+,, the sidebar button, a quota line (opens Accounts and limits), "Details in Settings" | Five sections (below); Back or Esc | `ui/Settings.tsx`, `ui/Accounts.tsx`, `ui/controls.tsx`, `ui/ProjectSettings.tsx`, `ui/Appearance.tsx`, `ui/draft.ts` |
 | Right-click menus | Right-click, the Menu key or Shift+F10 | Per target, below | `ui/ContextMenu.tsx`, `ui/contextmenu.ts` |
+| Search and commands | Ctrl+K anywhere but the first run, the tutorial, the update screen and "What's new" (it also opens over Settings) | One centred box that scales and fades in, built from the sidebar's own lists (nothing asked of the engine). Empty: the latest five conversations, then the actions; typing matches loosely (case, accents, letters in order) over actions, projects and conversations of both areas, best first, at most eight. Actions are only ones that exist elsewhere: New conversation, Go to Chat or Projects, Settings and each of its five sections, show or hide what is running, Add project folder. Arrows move, Enter picks, Esc or a click outside closes and gives focus back, Tab stays inside | `ui/Palette.tsx`, `ui/palette.ts` |
+| Find in the conversation | Ctrl+F in an open conversation with messages | A small bar slides in at the top right of the thread: a box (a word selected in the thread fills it), "3 of 12", previous and next, close. Every match in the messages on screen is painted (the CSS Custom Highlight API, so no message is rewritten) and the current one stronger; Enter and Shift+Enter go to the next and previous with a smooth scroll (instant in reduced motion), Esc closes. Only the messages the thread has drawn count, 1000 matches at most; it looks again while an answer is written. Faber's find replaces the browser's, which never shows | `ui/Find.tsx`, `ui/find.ts` |
 | Save-error toast | A save fails | Read and dismiss | `ui/App.tsx` |
 | Update opening screen | A window that opens while Faber looks for, downloads or installs an update (R157) | The mark, "Looking for an update…", then "Downloading update… 42%" (megabytes when the size is unknown) with a thin bar, then "Installing…"; nothing to press, the window's buttons stay in reach. The sidebar shows the same words as a quiet line when the window opens in the middle of a download or an install | `ui/UpdateStage.tsx` |
 | What's new | First start after an update | One calm page of the release's notes; Continue or Esc closes it | `ui/WhatsNew.tsx`, `ui/notes.ts` |
@@ -103,8 +105,9 @@ Right-click menus:
 | A recent folder or environment | Remove from recents, or Remove environment (confirm) |
 
 Keys: Ctrl+N new conversation (in Projects: a new conversation in the current project), Ctrl+, Settings, Ctrl+. running column,
-Esc closes the top layer (menu, sidebar overlay, running column, account cards, Settings), Enter sends and Shift+Enter
-adds a line. Browser keys (F5, F7, Ctrl+R, P, S, U) do nothing.
+Ctrl+K search and commands, Ctrl+F find in the open conversation,
+Esc closes the top layer (palette, menu, find bar, sidebar overlay, running column, account cards, Settings), Enter sends and Shift+Enter
+adds a line. Browser keys (F5, F7, Ctrl+R, P, S, U, F) do nothing.
 
 ## First run
 
