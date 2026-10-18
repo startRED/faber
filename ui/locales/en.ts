@@ -845,6 +845,7 @@ export const en = {
   'notes.46.new': 'In a project, when the agent changes files, Faber now runs the checks itself and asks the agent to fix what fails before the work counts as done.',
   'notes.47.better': 'You see each answer\'s effort beside its model, such as "high effort", without hovering over it.',
   'notes.48.fixed': 'Paragraphs of an answer no longer vanish into the “Working” line while it is still being written; they fold in only when it ends.',
+  'notes.49.fixed': 'Faber now also checks a reply whose agent changed files with a command, and in a separate copy it runs every check you confirmed.',
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

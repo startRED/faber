@@ -139,11 +139,19 @@ fn stored(project: &Project) -> Option<Saved> {
 
 /// The proof of a project as the screen shows it.
 pub fn view(project: &Project) -> ProofView {
-    let root = Path::new(&project.path);
-    let (declared, source) = declared(root);
-    let setup = setup_commands(&|path| root.join(path).is_file());
+    view_in(project, Path::new(&project.path))
+}
+
+/// The proof as it holds in `folder`, the project folder or a copy of it: the declared list and the setup come from the
+/// folder, but the confirmation is weighed against the setup the person saw, the project folder's. A copy's own state (a
+/// gitignored `Cargo.lock` a build created there) adds setup lines the person never saw and does not drop their list.
+pub fn view_in(project: &Project, folder: &Path) -> ProofView {
+    let (declared, source) = declared(folder);
+    let setup = setup_commands(&|path| folder.join(path).is_file());
+    let person = Path::new(&project.path);
+    let shown = if folder == person { setup.clone() } else { setup_commands(&|path| person.join(path).is_file()) };
     match stored(project) {
-        Some((was, commands, seen)) if was == declared && !commands.is_empty() && seen.as_ref() == Some(&setup) => {
+        Some((was, commands, seen)) if was == declared && !commands.is_empty() && seen.as_ref() == Some(&shown) => {
             ProofView { commands, declared, source: source.into(), confirmed: true, changed: false, setup }
         }
         saved => {
@@ -659,6 +667,23 @@ mod tests {
         let mut old = again.clone();
         old.extra.insert("proof".into(), serde_json::json!({"declared": ["npm test"], "commands": ["npm test"]}));
         assert_eq!(confirmed(&old), Err("reason.proof.unconfirmed"));
+    }
+
+    #[test]
+    fn a_copy_keeps_the_confirmed_list_when_its_own_lock_file_adds_a_setup_line() {
+        let guide = "## Proof commands\n```\ncargo test\n```";
+        let root = folder("person", &[("AGENTS.md", guide), ("Cargo.toml", "[package]")]);
+        let project = Project::new("p1".into(), "P".into(), root.to_string_lossy().into_owned());
+        let mine = ["cargo test".to_string(), "cargo fmt --check".to_string()];
+        let confirmed_now = confirm(&project, &mine, &[], &["cargo test".to_string()]).unwrap();
+        // The copy's build made a gitignored lock file: it fetches first, and still passes the person's whole list.
+        let copy = folder("copy", &[("AGENTS.md", guide), ("Cargo.toml", "[package]"), ("Cargo.lock", "")]);
+        let inside = view_in(&confirmed_now, &copy);
+        assert!(inside.confirmed);
+        assert_eq!((inside.commands, inside.setup), (mine.to_vec(), vec!["cargo fetch".to_string()]));
+        // The person's folder gets a lock file the person never saw: that asks again, in the copy too.
+        std::fs::write(root.join("Cargo.lock"), "").unwrap();
+        assert!(!view_in(&confirmed_now, &copy).confirmed);
     }
 
     /// A repository that answers the two reads the module makes: the tree listing and one blob by id.

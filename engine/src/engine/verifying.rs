@@ -2,16 +2,18 @@
 //! project's checks and the changed files of the conversation's folder (its copy, R201), and answers once they ended.
 //! Git runs away from the lock; the checks run on the engine's runtime.
 //!
-//! Faber also decides when a reply is done (R146): a project reply in full access whose steps changed files gets the fast
-//! checks once it ends, shown under it. Until they end the conversation is at work: what the person writes, the queue and
-//! "keep going" wait for them, and Stop ends them. A failure sends one turn by itself (`by_itself.rs`, the quiet line of
-//! `wake.checksFixing`) asking the agent to fix it, at most `MAX_FIXES` in a row and only within Auto's pace, and
-//! otherwise the reply says it needs the person.
+//! Faber also decides when a reply is done (R146): a project reply in full access that changed files gets the fast checks
+//! once it ends, shown under it. Changed means an edit step, or a folder whose changed files (paths and content hashes,
+//! `verify::changed`) differ from what it held when the reply before ended: a `sed -i` or a formatter run by a command
+//! counts. Until they end the conversation is at work: what the person writes, the queue and "keep going" wait for them,
+//! and Stop ends them. A failure sends one turn by itself (`by_itself.rs`, the quiet line of `wake.checksFixing`) asking
+//! the agent to fix it, at most `MAX_FIXES` in a row and only within Auto's pace, and otherwise the reply says it needs
+//! the person.
 use super::*;
 use crate::verify::{self, Local, Outcome, Request, Verdict, Verifier};
 
 /// The steps that change files: Claude Code's Write, Edit, MultiEdit and NotebookEdit, and Codex's file changes. A command
-/// can change files too, but nothing tells which did, and the agent can still call the tool itself.
+/// can change files too: the folder's content before and after the reply tells (`Before`).
 const CHANGES_FILES: [&str; 5] = ["Write", "Edit", "MultiEdit", "NotebookEdit", "fileChange"];
 
 /// Fix turns Faber sends by itself in a row before the person decides.
@@ -24,6 +26,50 @@ const SHOWN_LINES: usize = 3;
 /// the person sees `wake.checksFixing` in their language instead.
 pub const FIX: &str = "Faber ran the project's fast checks after your reply, and some failed. Fix what fails, then run Faber's \
 verify tool to see them pass before you end your reply. Do not ask the person about it. What the checks said:";
+
+/// What a conversation's folder holds (`snapshot`), once git has answered away from the lock.
+pub(super) type Before = tokio::sync::watch::Receiver<Option<Option<verify::Changed>>>;
+
+/// Asks git on `runtime` what `folder` holds; the answer arrives in the receiver.
+fn snapshot(runtime: &tokio::runtime::Handle, git: Option<GitRunner>, folder: PathBuf, base: Option<String>) -> Before {
+    let (tx, rx) = tokio::sync::watch::channel(None);
+    runtime.spawn(async move {
+        let state = tokio::task::spawn_blocking(move || {
+            let mut exec = git.and_then(|run| run())?;
+            // Where no base tells what the branch changed (work on `main` itself), what differs from HEAD still does.
+            verify::changed(&mut *exec, &folder, base.as_deref()).or_else(|| verify::changed(&mut *exec, &folder, Some("HEAD")))
+        })
+        .await
+        .ok()
+        .flatten();
+        let _ = tx.send(Some(state));
+    });
+    rx
+}
+
+/// The state once git answered; `None` outside git or when the asking was dropped.
+async fn read(mut state: Before) -> Option<verify::Changed> {
+    if let Some(known) = state.borrow().clone() {
+        return known;
+    }
+    state.wait_for(Option::is_some).await.ok().and_then(|known| known.clone()).flatten()
+}
+
+/// Whether the folder changed between two states: another base (a commit on `main` itself, weighed from HEAD), other
+/// files or other content. A file with no hash (too big, past the files hashed) that is there is never trusted to be the
+/// same; outside git nothing tells, and a reply with no edit step counts as unchanged.
+// ponytail: paths are from the repository's top and looked up under the folder, which is the top in a copy.
+fn differs(before: Option<&verify::Changed>, after: Option<&verify::Changed>, folder: &Path) -> bool {
+    match (before, after) {
+        (Some(before), Some(after)) => {
+            before.base != after.base
+                || before.files != after.files
+                || after.files.iter().any(|(path, hash)| hash.is_none() && folder.join(path).exists())
+        }
+        (None, Some(after)) => !after.files.is_empty(),
+        _ => false,
+    }
+}
 
 impl Engine {
     /// Gives the engine the verifier; without one the tool is not offered.
@@ -42,21 +88,25 @@ pub(super) struct Prepared {
     base: Option<String>,
 }
 
+/// The changed files of `folder`, asked of git on a blocking thread.
+async fn changed_now(git: Option<GitRunner>, folder: PathBuf, base: Option<String>) -> Option<verify::Changed> {
+    tokio::task::spawn_blocking(move || {
+        let mut exec = git.and_then(|run| run())?;
+        verify::changed(&mut *exec, &folder, base.as_deref())
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
 impl Prepared {
     /// Starts the verify at once, so a stop that comes while git is asked what changed (away from any lock: it can take a
     /// second) stops it before any check starts. The future returned ends with the outcome.
     pub(super) fn start(self, runtime: &tokio::runtime::Handle) -> impl Future<Output = Outcome> + Send + 'static + use<> {
         let Prepared { verifier, owner, mut request, git, base } = self;
         let (folder, level) = (request.folder.clone(), request.level.unwrap_or(verify::Level::Fast));
-        let asked = folder.clone();
         let made = async move {
-            request.changed = tokio::task::spawn_blocking(move || {
-                let mut exec = git.and_then(|run| run())?;
-                verify::changed(&mut *exec, &asked, base.as_deref())
-            })
-            .await
-            .ok()
-            .flatten();
+            request.changed = changed_now(git, request.folder.clone(), base).await;
             request
         };
         verifier.start(runtime, folder, &owner, level, made)
@@ -77,7 +127,7 @@ impl Core {
             self.store.projects().into_iter().find(|p| Some(&p.id) == c.project_id.as_ref()).ok_or("this conversation has no project")?;
         let folder = self.cwd_of(c).map_err(|_| "the conversation's folder cannot be used")?;
         // The project's own checks (R137), as declared in this folder and confirmed by the person when they were.
-        let view = crate::project::mission::view(&Project { path: folder.to_string_lossy().into_owned(), ..project.clone() });
+        let view = crate::project::mission::view_in(&project, &folder);
         let request = Request {
             folder,
             level: Some(level),
@@ -129,7 +179,9 @@ impl Core {
     /// waiting).
     pub(super) fn stop_checks(&mut self, conv: &str) {
         self.stop_verify(conv);
-        let Some(reply) = self.convs.get_mut(conv).filter(|c| checking(c)).and_then(|c| c.messages.last_mut()) else { return };
+        let Some(c) = self.convs.get_mut(conv).filter(|c| checking(c)) else { return };
+        c.weighing = None;
+        let Some(reply) = c.messages.last_mut() else { return };
         reply.checks = None;
         let id = reply.id.clone();
         self.save(conv);
@@ -143,25 +195,92 @@ impl Core {
         }
     }
 
-    /// The end of a reply that finished well (`finish`): when it is a project reply in full access whose steps changed
-    /// files, Faber runs the fast checks before the turn counts as done, and true says it took the end over: the queue
-    /// and "keep going" (`keep_going`, the reply to go on from) wait for `checks_ended`.
+    /// A reply begins where Faber would check it. The folder's state at the end of the reply before (`check_done`) is the
+    /// one this reply is weighed against; with none yet, git is asked now, away from the lock. A state not yet weighed is
+    /// kept, so a message Codex took into its running turn, or a reply that failed, leaves its changes to the next reply.
+    // ponytail: with no state yet (a conversation's first reply) the agent may write before git has hashed the folder; its
+    // turn needs a round trip to the model first, git a fraction of a second.
+    pub(super) fn note_before(&mut self, conv: &str) {
+        if self.before.contains_key(conv) {
+            return;
+        }
+        let Some(permissions) = self.live.get(conv).map(|l| l.permissions) else { return };
+        let Some(c) = self.convs.get(conv).filter(|c| self.offers_verify(c.area, permissions)) else { return };
+        let Ok(folder) = self.cwd_of(c) else { return };
+        let base = c.copy.as_ref().and_then(|copy| copy.base.clone());
+        let state = snapshot(&self.opts.runtime, self.git.clone(), folder, base);
+        self.before.insert(conv.to_string(), state);
+    }
+
+    /// The end of a reply that finished well (`finish`): when it is a project reply in full access that changed files,
+    /// Faber runs the fast checks before the turn counts as done, and true says it took the end over: the queue and "keep
+    /// going" (`keep_going`, the reply to go on from) wait for `checks_ended`. A reply with no edit step is weighed by its
+    /// folder first (`changed_by_command`), while the conversation counts as at work (`Conversation::weighing`). Either way
+    /// the folder's state now is what the next reply is weighed against.
     pub(super) fn check_done(&mut self, conv: &str, reply_id: &str, keep_going: Option<String>) -> bool {
+        let before = self.before.remove(conv);
         let Some(permissions) = self.live.get(conv).map(|l| l.permissions) else { return false };
         let Some(c) = self.convs.get(conv) else { return false };
-        let changed =
+        let edited =
             |m: &Message| m.tools.iter().flatten().any(|t| CHANGES_FILES.contains(&t.name.as_str()) && t.ok != Some(false) && !t.declined);
-        // The reply to a fix Faber asked for is checked whatever its steps: a command can change files too.
+        // The reply to a fix Faber asked for is checked whatever its steps.
         let fixing = fixes_before(&c.messages, reply_id) > 0;
-        if !self.offers_verify(c.area, permissions)
-            || !c
-                .messages
-                .iter()
-                .any(|m| m.id == reply_id && m.role == Role::Assistant && m.status == Some(Status::Done) && (fixing || changed(m)))
-        {
+        let Some(m) = c.messages.iter().find(|m| m.id == reply_id && m.role == Role::Assistant && m.status == Some(Status::Done)) else {
+            return false;
+        };
+        if !self.offers_verify(c.area, permissions) {
             return false;
         }
+        let sure = fixing || edited(m);
         let Ok(prepared) = self.verify_request(conv, verify::Level::Fast) else { return false };
+        let folder = prepared.request.folder.clone();
+        let after = snapshot(&self.opts.runtime, prepared.git.clone(), folder.clone(), prepared.base.clone());
+        self.before.insert(conv.to_string(), after.clone());
+        if sure {
+            self.start_checks(conv, reply_id, keep_going, prepared);
+            return true;
+        }
+        let Some(before) = before else { return false };
+        if let Some(c) = self.convs.get_mut(conv) {
+            c.weighing = Some(reply_id.to_string());
+        }
+        let (me, conv, reply) = (self.me.clone(), conv.to_string(), reply_id.to_string());
+        self.opts.runtime.spawn(async move {
+            let differs = differs(read(before).await.as_ref(), read(after).await.as_ref(), &folder);
+            let Some(core) = me.upgrade() else { return };
+            core.lock().unwrap_or_else(|e| e.into_inner()).changed_by_command(&conv, &reply, keep_going, prepared, differs);
+        });
+        true
+    }
+
+    /// A reply with no edit step ended and git said whether its folder changed. Changed, and the reply is still the last
+    /// one with nobody at work on it, it gets its checks like any other; otherwise the turn ends as `finish` would have
+    /// ended it. Stop while git was asked (`stop_checks`) ended it already: nothing follows.
+    fn changed_by_command(&mut self, conv: &str, reply_id: &str, keep_going: Option<String>, prepared: Prepared, differs: bool) {
+        // Only this reply's weighing: an older one that comes back late leaves a newer reply's alone.
+        let Some(c) = self.convs.get_mut(conv).filter(|c| c.weighing.as_deref() == Some(reply_id)) else { return };
+        c.weighing = None;
+        let last = c.messages.last().is_some_and(|m| m.id == reply_id && m.checks.is_none());
+        let idle = self.live.get(conv).is_none_or(|l| l.turn.is_none());
+        if differs && idle && last {
+            self.start_checks(conv, reply_id, keep_going, prepared);
+            self.save(conv);
+            self.push(conv, Some(reply_id), true);
+            return;
+        }
+        self.drain(conv);
+        let on = self.convs.get(conv).is_some_and(|c| c.keep_going.is_some());
+        match keep_going {
+            Some(reply) => self.keep_going_after(conv, Some(reply)),
+            // Turned on while git was asked (`set_keep_going` waited for it).
+            None if on && idle && last => self.go_on(conv, reply_id),
+            None => {}
+        }
+        self.close_when_idle(conv);
+    }
+
+    /// Shows the reply's row running and runs the fast checks; `checks_ended` takes their outcome.
+    fn start_checks(&mut self, conv: &str, reply_id: &str, keep_going: Option<String>, prepared: Prepared) {
         if let Some(m) = self.convs.get_mut(conv).and_then(|c| c.messages.iter_mut().find(|m| m.id == reply_id)) {
             m.checks = Some(Checks { state: ChecksState::Running, passed: 0, failed: vec![] });
         }
@@ -172,7 +291,6 @@ impl Core {
             let Some(core) = me.upgrade() else { return };
             core.lock().unwrap_or_else(|e| e.into_inner()).checks_ended(&conv, &reply, keep_going, outcome);
         });
-        true
     }
 
     /// The checks of a reply ended. Passed (or nothing to check, or stopped by a newer run of the same folder), the turn
@@ -255,7 +373,7 @@ fn checks_of(core: &Core, conv: &str, reply_id: &str) -> Option<Checks> {
 /// The checks of the conversation's last reply still run: it is at work, so what the person writes, the queue and
 /// "keep going" wait for them, and Stop ends them.
 pub(super) fn checking(c: &Conversation) -> bool {
-    c.messages.last().and_then(|m| m.checks.as_ref()).is_some_and(|k| k.state == ChecksState::Running)
+    c.weighing.is_some() || c.messages.last().and_then(|m| m.checks.as_ref()).is_some_and(|k| k.state == ChecksState::Running)
 }
 
 fn failed(verdict: Verdict) -> bool {
@@ -332,6 +450,29 @@ mod tests {
         let mut stopped = outcome(&[]);
         stopped.reason = Some("reason.verify.stopped".into());
         assert_eq!(settled(&stopped, 0), None, "nothing ran, so no row");
+    }
+
+    #[test]
+    fn a_folder_changed_when_its_files_or_their_content_differ_and_an_unhashed_file_is_never_trusted() {
+        let dir = std::env::temp_dir().join(format!("faber-differs-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("big.bin"), "x").unwrap();
+        let state = |files: &[(&str, Option<&str>)]| verify::Changed {
+            base: "b".into(),
+            files: files.iter().map(|(p, h)| (p.to_string(), h.map(str::to_string))).collect(),
+        };
+        let one = state(&[("a.rs", Some("1"))]);
+        assert!(!differs(Some(&one), Some(&one), &dir));
+        assert!(differs(Some(&one), Some(&state(&[("a.rs", Some("2"))])), &dir), "new content");
+        assert!(differs(Some(&one), Some(&state(&[("a.rs", Some("1")), ("b.rs", Some("3"))])), &dir), "a new file");
+        let big = state(&[("big.bin", None)]);
+        assert!(differs(Some(&big), Some(&big), &dir), "a file there with no hash");
+        let gone = state(&[("gone.rs", None)]);
+        assert!(!differs(Some(&gone), Some(&gone), &dir), "a file deleted in both");
+        assert!(!differs(None, None, &dir), "outside git");
+        let committed = verify::Changed { base: "c".into(), files: vec![] };
+        assert!(differs(Some(&state(&[])), Some(&committed), &dir), "a commit on main itself moves the base it is weighed from");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

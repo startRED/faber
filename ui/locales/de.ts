@@ -977,6 +977,7 @@ export const de: Messages = {
   'notes.46.new': 'Wenn der Agent in einem Projekt Dateien ändert, führt Faber jetzt selbst die Prüfungen aus und bittet den Agenten, das Fehlgeschlagene zu beheben, bevor die Arbeit als fertig gilt.',
   'notes.47.better': 'Du siehst den Aufwand jeder Antwort neben dem Modell, etwa „hoher Aufwand“, ohne mit der Maus darüberzufahren.',
   'notes.48.fixed': 'Absätze einer Antwort verschwinden nicht mehr in „In Arbeit“, solange sie noch geschrieben wird; sie klappen erst ein, wenn sie fertig ist.',
+  'notes.49.fixed': 'Faber prüft jetzt auch eine Antwort, in der der Agent Dateien mit einem Befehl geändert hat, und in einer getrennten Kopie laufen alle Prüfungen, die du bestätigt hast.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

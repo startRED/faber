@@ -298,6 +298,8 @@ struct Core {
     browser: Option<std::sync::Arc<dyn crate::browser::Browser>>,
     /// Runs a project's checks (`crate::verify`), given by the shell; without it the tool is not offered.
     verifier: Option<std::sync::Arc<crate::verify::Verifier>>,
+    /// What each conversation's folder held when its reply began, for Faber's checks (`verifying::Before`).
+    before: HashMap<String, verifying::Before>,
     live: HashMap<String, Live>,
     mission_sessions: HashMap<String, Vec<Session>>,
     /// Owned process trees of writer roles by invocation id, and the terminal event each role reported.
@@ -477,6 +479,7 @@ impl Engine {
                 pr_reader,
                 browser: None,
                 verifier: None,
+                before: HashMap::new(),
                 git: None,
             })
         });
@@ -2000,6 +2003,7 @@ impl Core {
         c.messages.push(reply);
         c.updated_at = now;
         let text = self.model_text(conv, &item);
+        self.note_before(conv);
         if let Some(l) = self.live.get_mut(conv) {
             l.turn = Some(reply_id.clone());
             l.answer_started = false;
@@ -2280,6 +2284,7 @@ impl Core {
             return Err("error.conversationGone".into());
         }
         self.begin_unbounded(pick.vendor)?;
+        self.note_before(id);
         if let Some(l) = self.live.get_mut(id) {
             l.started = started;
             l.turn = Some(reply_id.to_string());
@@ -2506,6 +2511,7 @@ impl Core {
             queued: Vec::new(),
             keep_going: None,
             messages: vec![],
+            weighing: None,
         };
         let id = c.id.clone();
         self.convs.insert(id.clone(), c);
@@ -2781,6 +2787,7 @@ impl Core {
         self.note_turn(id, None, true);
         self.stop_helpers(id, true);
         self.follows.remove(id);
+        self.before.remove(id);
         if let Some(l) = self.live.remove(id) {
             l.session.close();
         }

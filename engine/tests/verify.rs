@@ -4,6 +4,7 @@ use crate::support;
 
 use faber_engine::cli::Cli;
 use faber_engine::model::{Area, ChecksState, Message, Permissions, Settings, Status, Vendor};
+use faber_engine::project::git::{Executor, GitError, Invocation, Output};
 use faber_engine::router::Choice;
 use faber_engine::verify::{Runner, Spec, Started, Verifier};
 use faber_engine::{Engine, EngineOptions, SendRequest};
@@ -377,6 +378,88 @@ async fn checks_that_still_fail_after_two_fixes_need_the_person_and_a_reply_that
     let messages = until(&engine, &id, |m| m.len() == 8 && m[7].status == Some(Status::Done)).await;
     assert_eq!(messages[7].checks, None);
     assert_eq!(runner.started.lock().unwrap().len(), ran, "nothing ran");
+    engine.shutdown();
+}
+
+/// Git as the verifier asks it: a repository at `top` with one commit and the new files `untracked` lists, which a test
+/// changes the way a command would. It never makes a copy (no `--show-prefix`), so the conversation works in the folder.
+#[derive(Clone)]
+struct Git {
+    top: String,
+    untracked: Arc<Mutex<Vec<String>>>,
+    listed: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl Executor for Git {
+    fn execute(&mut self, call: &Invocation) -> Result<Output, GitError> {
+        let args: Vec<&str> = call.args.iter().map(String::as_str).skip_while(|a| *a == "-c" || a.contains('=')).collect();
+        let say = |s: String| Ok(Output { success: true, stdout: s.into_bytes() });
+        match args.as_slice() {
+            ["rev-parse", "--show-toplevel"] => say(self.top.clone()),
+            ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"] => say("a".repeat(40)),
+            ["merge-base", ..] => say("b".repeat(40)),
+            ["diff", ..] => say(String::new()),
+            ["ls-files", ..] => {
+                let names = self.untracked.lock().unwrap().join("\0");
+                self.listed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                say(names)
+            }
+            _ => Ok(Output { success: false, stdout: vec![] }),
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_reply_that_changes_files_only_by_a_command_gets_its_checks_and_one_that_changes_nothing_does_not() {
+    let dir = support::canonical_tempdir().unwrap();
+    let folder = dir.path().join("project");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("AGENTS.md"), AGENTS).unwrap();
+    let (spawn, made) = pipes();
+    let engine = engine(dir.path(), spawn);
+    let git = Git { top: folder.to_string_lossy().into_owned(), untracked: Arc::default(), listed: Arc::default() };
+    let runner = git.clone();
+    engine.set_git(Arc::new(move || Some(Box::new(runner.clone()) as Box<dyn Executor + Send>)));
+    let checks = Flaky::new(0);
+    engine.set_verifier(Arc::new(Verifier::new(checks.clone())));
+    let project = engine.add_project(&folder.to_string_lossy()).unwrap();
+    let id = engine.send(ask(None, Some(project.id.clone()), "format the page")).unwrap();
+    let mut pipe = next_pipe(&made).await;
+    until_turns(&pipe, 1).await;
+    pipe.say(json!({"type":"system","subtype":"init","session_id":"s1","model":"claude-haiku-5-5"})).await;
+    // Git has told what the folder held when the reply began; then a command (`cargo fmt`, `sed -i`) writes a file.
+    let read = || git.listed.load(std::sync::atomic::Ordering::SeqCst);
+    for _ in 0..300 {
+        if read() > 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(read(), 1, "the reply's start asked git once");
+    std::fs::write(folder.join("ui.rs"), "fn main() {}\n").unwrap();
+    git.untracked.lock().unwrap().push("ui.rs".into());
+    replies(&mut pipe, 1, false).await;
+    let messages = until(&engine, &id, |m| m.len() == 2 && state(&m[1]) == Some(ChecksState::Passed)).await;
+    assert_eq!(messages[1].checks.as_ref().unwrap().passed, 2);
+    let ran = checks.started.lock().unwrap().len();
+    assert_eq!(ran, 2, "{:?}", checks.started.lock().unwrap());
+
+    // The next reply leaves the folder as it was: no row, and nothing runs.
+    engine.send(ask(Some(id.clone()), None, "anything else?")).unwrap();
+    until_turns(&pipe, 2).await;
+    replies(&mut pipe, 2, false).await;
+    let messages = until(&engine, &id, |m| m.len() == 4 && m[3].status == Some(Status::Done)).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(engine.open(&id).unwrap().messages[3].checks, None, "{messages:?}");
+    assert_eq!(checks.started.lock().unwrap().len(), ran, "nothing ran");
+
+    // A third reply rewrites the same file by a command: weighed against the folder as the reply before left it, its new
+    // content counts, and the reply gets its row.
+    engine.send(ask(Some(id.clone()), None, "format it again")).unwrap();
+    until_turns(&pipe, 3).await;
+    std::fs::write(folder.join("ui.rs"), "fn main() {\n}\n").unwrap();
+    replies(&mut pipe, 3, false).await;
+    until(&engine, &id, |m| m.len() == 6 && state(&m[5]) == Some(ChecksState::Passed)).await;
     engine.shutdown();
 }
 

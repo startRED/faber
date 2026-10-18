@@ -515,6 +515,10 @@ pub struct Conversation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keep_going: Option<KeepGoing>,
     pub messages: Vec<Message>,
+    /// Faber is asking git whether the last reply changed files with a command, before its checks would start
+    /// (`engine/src/engine/verifying.rs`), the reply's id: the conversation is at work meanwhile. Never shown or saved.
+    #[serde(skip)]
+    pub weighing: Option<String>,
 }
 
 /// The longest name Faber keeps, in characters.

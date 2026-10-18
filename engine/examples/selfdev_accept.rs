@@ -135,8 +135,7 @@ fn seed(repo: &Path, scenario: Scenario) -> std::io::Result<()> {
         std::fs::create_dir_all(path.parent().unwrap())?;
         std::fs::write(path, text)?;
     }
-    // The lock file is committed, as in a real project: Faber's setup step (`cargo fetch`) is then the same in the person's
-    // checkout and in every copy, so the list the person confirmed holds there (`mission::view`).
+    // The lock file is committed, as in a real project.
     let lock = hidden("cargo").args(["generate-lockfile", "--offline"]).current_dir(repo).output()?;
     assert!(lock.status.success(), "cargo generate-lockfile failed: is cargo on the PATH?");
     git(repo, &["init", "-q", "-b", "main"]);

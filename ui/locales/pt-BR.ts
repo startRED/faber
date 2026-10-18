@@ -964,6 +964,7 @@ export const ptBR: Messages = {
   'notes.46.new': 'Num projeto, quando o agente muda arquivos, o Faber agora roda as verificações por conta própria e pede ao agente que corrija o que falha antes de o trabalho contar como pronto.',
   'notes.47.better': 'Você vê o esforço de cada resposta ao lado do modelo, como "esforço alto", sem passar o mouse.',
   'notes.48.fixed': 'Parágrafos de uma resposta não somem mais para dentro de “Trabalhando” enquanto ela ainda é escrita; só se recolhem quando ela termina.',
+  'notes.49.fixed': 'O Faber agora também verifica a resposta em que o agente mudou arquivos com um comando, e numa cópia separada roda todas as verificações que você confirmou.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

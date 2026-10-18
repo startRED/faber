@@ -977,6 +977,7 @@ export const es: Messages = {
   'notes.46.new': 'En un proyecto, cuando el agente cambia archivos, Faber ahora ejecuta las comprobaciones por su cuenta y pide al agente que arregle lo que falla antes de dar el trabajo por terminado.',
   'notes.47.better': 'Ves el esfuerzo de cada respuesta junto al modelo, como "esfuerzo alto", sin pasar el ratón.',
   'notes.48.fixed': 'Los párrafos de una respuesta ya no desaparecen dentro de «En curso» mientras se sigue escribiendo; solo se pliegan cuando termina.',
+  'notes.49.fixed': 'Faber ahora también comprueba la respuesta en la que el agente cambió archivos con un comando, y en una copia separada ejecuta todas las comprobaciones que confirmaste.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',
