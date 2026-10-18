@@ -83,12 +83,12 @@ fn chat_without_cards(ctx: &mut Ctx) -> Result {
     let question = css("article [data-testid=question-card]");
     page.wait_visible(&question)?;
     ensure(page.count(&css("div.ask:not(.question)"))? == 0, || "full access must not leave a permission card".into())?;
-    page.click(&question.clone().css(".q-option").has_text("SQLite"))?;
+    page.click(&question.clone().css(".q-opt").has_text("SQLite"))?;
     let send = page.text_of("ask.question.send")?;
     page.click(&question.clone().role("button", &send).exact())?;
     let actions = page.named("article", "answer.label")?.css(".actions");
     page.wait_visible(&actions)?;
-    ensure(page.count(&css("div.ask"))? == 0, || "the answered question must not stay on screen".into())?;
+    page.wait_for("the answered question to fold away and leave", "document.querySelectorAll('div.ask').length === 0")?;
     let settings = page.named("button", "settings.open")?.exact();
     page.click(&settings)?;
     let folder = page.named("button", "set.chooseFolder")?;

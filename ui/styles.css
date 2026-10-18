@@ -417,7 +417,7 @@ details.thinking div { white-space: pre-wrap; padding: 6px 0 0 12px; border-left
 .ask { display: grid; gap: 8px; padding: 12px 14px; border-radius: var(--r-md); background: linear-gradient(180deg, var(--amber-soft), transparent 120%), var(--card-bg); box-shadow: inset 0 0 0 1px var(--amber-line), var(--amber-light); animation: arrive var(--dur-arrive) var(--ease) both; }
 .ask b { color: var(--amber-ink); font-weight: 600; font-size: var(--fs-sm); }
 .ask pre { margin: 0; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow-y: auto; }
-.ask div { display: flex; gap: 8px; flex-wrap: wrap; }
+.ask:not(.question) div { display: flex; gap: 8px; flex-wrap: wrap; }
 @keyframes arrive { from { opacity: 0; transform: translateY(var(--arrive-y)); } }
 .files { display: grid; gap: 8px; }
 .file { display: grid; gap: 8px; padding: 10px 12px; background: var(--s1); box-shadow: inset 0 0 0 1px var(--line-2); border-radius: var(--r-md); }
@@ -1000,17 +1000,64 @@ html.away-win :is(.amb, .amb *) { animation-play-state: paused !important; }
 .pset-checks > .st-extra { border-top: 0; padding-top: 0; }
 .pset-body .proof-cmds { justify-self: stretch; }
 
-/* The assistant's own questions: a card in its message, answered by tapping. */
-.ask.question { gap: 14px; }
-.ask .q { display: grid; gap: 8px; border: 0; padding: 0; margin: 0; min-width: 0; }
-.ask .q legend { padding: 0; color: var(--ink); font-weight: 600; font-size: var(--fs-ui); }
-.ask .q-head { display: inline-block; margin-right: 8px; padding: 1px 8px; border-radius: var(--r-pill); background: var(--amber-soft); color: var(--amber-ink); font-size: var(--fs-xs); font-weight: 600; }
-.ask .q-options { display: grid; gap: 6px; }
-.ask .q-option { appearance: none; display: grid; gap: 2px; text-align: left; padding: 8px 12px; border: 0; border-radius: var(--r-sm); background: var(--s1); color: var(--ink-2); font: inherit; font-size: var(--fs-sm); box-shadow: inset 0 0 0 1px var(--line-2); cursor: pointer; transition: background var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease); }
-.ask .q-option small { color: var(--ink-3); font-size: var(--fs-xs); }
-.ask .q-option:hover { background: var(--s3); color: var(--ink); }
-.ask .q-option.on { background: var(--amber-soft); color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--amber); }
-@media (prefers-reduced-motion: reduce) { .ask .q-option { transition: none; } }
+/* The assistant's own questions: a card in its message with a step per question, a tile per answer and a preview beside the tile
+   it drew one for. The card folds away once answered (the Asks hold keeps it that long); reduced motion is switched off globally. */
+.ask.question { gap: 0; padding: 0; grid-template-rows: 1fr; container-type: inline-size; transition: grid-template-rows var(--dur-exit) var(--ease-in), opacity var(--dur-exit) var(--ease-in); }
+.ask.question.gone { grid-template-rows: 0fr; opacity: 0; }
+.ask .q-inner { min-height: 0; overflow: hidden; }
+.ask .q-body { display: grid; gap: 12px; padding: 12px 14px; }
+.ri .ask .q-body { padding: 0; }
+.ri .ask :focus-visible { outline-offset: -2px; }
+.q-steps { display: flex; gap: 4px; min-width: 0; }
+.q-step { appearance: none; display: inline-flex; align-items: center; gap: 7px; min-width: 0; height: var(--h-sm); padding: 0 11px 0 5px; border: 0; border-radius: var(--r-pill); background: none; color: var(--ink-3); font: inherit; font-size: var(--fs-sm); font-weight: 500; cursor: pointer; transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease); }
+.q-step:hover { color: var(--ink); }
+.q-step[aria-selected='true'] { background: var(--amber-soft); color: var(--amber-ink); box-shadow: inset 0 0 0 1px var(--amber-line); }
+.q-n { flex: none; display: grid; place-items: center; width: 18px; height: 18px; border-radius: var(--r-pill); background: var(--s3); color: var(--ink-2); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.q-step.done .q-n { background: var(--amber); color: var(--amber-on); }
+.q-n svg.i { width: 11px; height: 11px; stroke-width: 3; }
+.q-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.q-stage { display: grid; }
+/* Every question sits in the same cell, so the card keeps one height whichever step is open; the others wait beside it, hidden and inert. */
+.ask .q { grid-area: 1 / 1; display: grid; gap: 10px; align-content: start; min-width: 0; transition: opacity var(--dur-ui) var(--ease), transform var(--dur-ui) var(--ease); }
+.ask .q:not([data-pos='now']) { opacity: 0; transition-duration: var(--dur-exit); transition-timing-function: var(--ease-in); }
+.ask .q[data-pos='before'] { transform: translateX(calc(var(--motion-slide) / -2)); }
+.ask .q[data-pos='after'] { transform: translateX(calc(var(--motion-slide) / 2)); }
+.q-text { margin: 0; color: var(--ink); font-weight: 600; font-size: var(--fs-ui); line-height: 1.4; }
+.q-head { display: inline-block; margin-right: 8px; padding: 1px 8px; border-radius: var(--r-pill); background: var(--amber-soft); color: var(--amber-ink); font-size: var(--fs-xs); font-weight: 600; }
+.q-main { display: grid; gap: 10px; min-width: 0; }
+.q-options { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+@container (min-width: 640px) {
+  .q-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .q-main.with-preview { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+  .q-main.with-preview .q-options { grid-template-columns: minmax(0, 1fr); }
+}
+.ask .q-opt { appearance: none; display: flex; align-items: flex-start; gap: 10px; min-width: 0; padding: 9px 11px; border: 0; border-radius: var(--r-sm); background: var(--s1); color: var(--ink-2); font: inherit; font-size: var(--fs-sm); text-align: left; box-shadow: inset 0 0 0 1px var(--line-2); cursor: pointer; transition: background var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.ask .q-opt:hover { background: var(--s3); color: var(--ink); }
+.ask .q-opt.on { background: var(--amber-soft); color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--amber); }
+.q-mark { flex: none; display: grid; place-items: center; width: 16px; height: 16px; margin-top: 1px; border-radius: var(--r-pill); color: var(--amber-on); box-shadow: inset 0 0 0 1.5px var(--ink-3); transition: background var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease); }
+.q-opt[role='checkbox'] .q-mark { border-radius: var(--r-xs); }
+.q-mark svg.i { width: 11px; height: 11px; stroke-width: 3; opacity: 0; transform: scale(.5); transition: opacity var(--dur-fast) var(--ease), transform var(--dur-ui) var(--ease-spring); }
+.q-opt.on .q-mark { background: var(--amber); box-shadow: inset 0 0 0 1.5px var(--amber); }
+.q-opt.on .q-mark svg.i { opacity: 1; transform: none; }
+.q-txt { display: grid; gap: 2px; min-width: 0; }
+.q-label { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--ink); font-weight: 500; overflow-wrap: anywhere; }
+.q-rec { padding: 0 7px; border-radius: var(--r-pill); background: var(--amber-soft); color: var(--amber-ink); font-size: var(--fs-xs); font-style: normal; font-weight: 600; }
+.q-opt small { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: var(--ink-3); font-size: var(--fs-xs); line-height: 1.35; }
+.q-preview { min-width: 0; max-height: 220px; overflow: auto; padding: 10px 12px; border-radius: var(--r-sm); background: var(--bg); box-shadow: inset 0 0 0 1px var(--line); }
+.q-preview:focus-visible { outline-offset: -2px; }
+.ask .q-preview pre { max-height: none; overflow: visible; white-space: pre; overflow-wrap: normal; animation: q-fade var(--dur-fast) var(--ease) both; }
+@keyframes q-fade { from { opacity: 0; } }
+.q-other { display: grid; justify-items: start; min-width: 0; }
+.q-more { appearance: none; display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: var(--h-sm); padding: 0 9px 0 6px; border: 0; border-radius: var(--r-sm); background: none; color: var(--ink-3); font: inherit; font-size: var(--fs-sm); cursor: pointer; transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.q-more:hover { background: var(--s1); color: var(--ink); }
+.q-more.has { color: var(--amber-ink); }
+.q-more span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.q-other .fold { justify-self: stretch; }
+.q-other .fold-inner { padding-top: 2px; }
+.q-field:focus-visible { outline-offset: -2px; }
+.q-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.q-sum { margin-right: auto; color: var(--ink-3); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.ask .note.err, .ask-more { animation: arrive var(--dur-arrive) var(--ease) both; }
 
 /* The Ctrl+K palette (ui/Palette.tsx) and the Ctrl+F find bar (ui/Find.tsx). Both exist only while open. They enter and leave with
    the normal arrival and exit; reduced and no motion are covered by the rules above that switch every animation off. */

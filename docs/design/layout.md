@@ -169,10 +169,17 @@ projects. Faber has no worktree creation for projects, so an environment has no 
   choosing the model), the conversation title, the state in words ("Working", "Needs you" or "Choosing the model") and
   the time since the turn started.
 - An item that needs the user shows the permission card, and the user can answer in place with Allow, Always or Deny.
-  A question the agent asks (`AskUserQuestion`) shows instead as a question card, in the thread and in the column alike:
-  each question in bold with its short header chip, its options as full-width rows to tap (amber ring when chosen,
-  checkboxes when several are allowed), one line to write another answer, then Send answers (enabled once every
-  question has an answer) and Skip. No motion beyond the card's arrival; option hovers do not animate under reduced motion.
+  A question the agent asks (`AskUserQuestion`) shows instead as a question card, in the thread and in the column alike.
+  Several questions are steps: a strip of their header words (a number, a tick once answered), one question open at a
+  time in the same cell, so the card keeps one height; the others wait beside it and glide in from the side. Each answer
+  is a tile (radio or checkbox mark that fills with a tick, title, muted description of at most two lines, a small
+  "Recommended" badge), two columns when the card is 640 px wide or more and one below; the chosen tile gets the amber
+  ring. A preview the agent drew sits beside the tiles (below in a narrow card) in a quiet monospace box that fades when
+  the tile in focus changes. Another answer is one quiet button that opens its field. The footer holds "n of m answered",
+  Skip and Send answers (amber, enabled once every question has an answer). Once answered the card in the thread folds away over the
+  exit time while the thread closes up under it. Tiles and steps change colour over the fast time and the mark scales in
+  from half size; under reduced motion everything is instant and the state is still carried by the filled mark, the ring
+  and the tick.
 - Clicking a row opens that conversation, setting the area, the project and the conversation together.
 - The column is closed when the window opens. It opens by itself once for each question it has not yet shown, 1.5 s
   after the last keystroke in any text field, including questions already waiting at launch. If the user closes it
