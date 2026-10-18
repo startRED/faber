@@ -2370,6 +2370,7 @@ impl Core {
         if let Some(kg) = self.convs.get_mut(id).and_then(|c| c.keep_going.as_mut()) {
             kg.waiting = None;
         }
+        self.note_away(id, reply_id);
         let approved = self.credit.as_ref().is_some_and(|(c, r, v)| c == id && r == reply_id && *v == pick.vendor);
         self.gate_turn_approved(pick, by_hand, approved)?;
         self.launch(id, pick)?;
@@ -3064,6 +3065,11 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
         held,
         keep_going: c.keep_going.is_some(),
         keep_wait,
+        keep_progress: c.keep_going.as_ref().map(|k| crate::model::KeepProgress {
+            turns: k.work,
+            since: k.since,
+            last: keep_going::progress_line(&c.messages),
+        }),
     })
 }
 

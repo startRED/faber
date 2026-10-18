@@ -301,6 +301,8 @@ svg.i.sm { width: 14px; height: 14px; }
 .ri .time { margin-left: auto; color: var(--ink-3); font-size: var(--fs-xs); }
 .ri .name { justify-self: start; max-width: 100%; text-align: left; font-weight: 500; overflow-wrap: anywhere; }
 .ri .name:hover { text-decoration: underline; text-decoration-color: var(--line-3); }
+.ri .run-kg { display: grid; gap: 2px; min-width: 0; margin: 0; color: var(--ink-3); font-size: var(--fs-xs); }
+.ri .run-kg .last { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ri.need { padding: 13px; gap: 8px; animation: arrive var(--dur-arrive) var(--ease) both; }
 .ri .ask { padding: 0; background: none; box-shadow: none; animation: none; }
 .ri .ask b { color: var(--ink); }
@@ -558,6 +560,9 @@ select.pill option { background: var(--s2); color: var(--ink); }
 /* A message Faber sent by itself, and a stop of "keep going": one quiet line each, never the person's bubble. */
 .woke { display: flex; align-items: center; gap: 6px; color: var(--ink-3); font-size: var(--fs-sm); }
 .woke .i { flex: none; }
+.away-lines { display: grid; gap: 4px; margin: 6px 0; }
+.away-lines .woke { margin: 0; align-items: flex-start; }
+.away-lines .woke .i { margin-top: 3px; }
 .send { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; height: var(--h-md); padding: 0 12px 0 14px; border-radius: var(--r-pill); background: var(--accent); color: var(--accent-ink); font-size: var(--fs-sm); font-weight: 600; transition: background var(--dur-fast) var(--ease); }
 .send:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 88%, white); }
 .send:disabled { opacity: 0.45; cursor: default; }

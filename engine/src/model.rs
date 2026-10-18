@@ -265,6 +265,9 @@ pub struct Message {
     /// On a reply: questions Faber answered with their first choice because "keep going" was on and nobody answered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_answers: Option<Vec<AutoAnswer>>,
+    /// On the newest reply of a conversation "keep going" has run in for a while: what it did while the person was away.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub away: Option<Away>,
     /// On a project reply that changed files: Faber's own run of the fast checks once it ended (R146, "Faber decides done").
     /// A run that was going on when Faber closed is not read back: nothing would end it.
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "settled_checks")]
@@ -432,6 +435,33 @@ pub struct KeepWait {
     pub until: f64,
 }
 
+/// What "keep going" did since it was turned on, told on the newest reply once the person has been away a while.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Away {
+    /// How long it has been on, in whole minutes.
+    pub minutes: u32,
+    /// Turns that did real work.
+    pub turns: u32,
+    /// Moves of the work to another AI.
+    pub switches: u32,
+    /// Questions Faber answered with the first choice.
+    pub answered: u32,
+}
+
+/// How far a conversation that goes on by itself has come, for its row in the running list.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeepProgress {
+    /// Turns that did real work.
+    pub turns: u32,
+    /// When it was turned on, in milliseconds since the Unix epoch; 0 when not known.
+    pub since: u64,
+    /// The last line the agent wrote, without its markup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last: Option<String>,
+}
+
 /// A question the agent asked that Faber answered with the first choice while the person was away.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AutoAnswer {
@@ -481,6 +511,7 @@ impl Message {
             wake: None,
             halt: None,
             auto_answers: None,
+            away: None,
             checks: None,
         }
     }
@@ -706,6 +737,9 @@ pub struct RunningItem {
     /// "Keep going" waits to send the next turn: the row stays between turns, and says until when.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keep_wait: Option<KeepWait>,
+    /// "Keep going" is on: how far it has come.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_progress: Option<KeepProgress>,
 }
 
 /// The running list as the engine last sent it. The revision grows by one with every list the engine emits, so a

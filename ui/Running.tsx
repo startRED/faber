@@ -44,10 +44,27 @@ export function Running(props: {
   const blocks = () => blocksOf(props.items);
   const nameOf = (key: string) => (key === 'chat' ? t('area.chat') : (props.projects.find((p) => p.id === key)?.name ?? t('area.projects')));
   const words = (item: RunningItem) =>
-    item.waitUntil ? t('run.waiting', { when: untilReset(item.waitUntil) }) : item.state === 'needsYou' ? t('run.needsYou') : item.keepGoing ? t('run.keepGoing') : item.vendor ? t('run.working') : t('run.routing');
+    item.waitUntil
+      ? t('run.waiting', { when: untilReset(item.waitUntil) })
+      : item.state === 'needsYou'
+        ? t('run.needsYou')
+        : item.keepWait
+          ? t(`run.kg.wait.${item.keepWait.why}`)
+          : item.keepGoing
+            ? t('run.keepGoing')
+            : item.vendor
+              ? t('run.working')
+              : t('run.routing');
   const since = (item: RunningItem) => {
     const e = elapsed(item.since, now());
     return t(e.key, { n: e.n });
+  };
+  // A conversation that goes on by itself: how far it has come, so a person who comes back sees it is still getting somewhere.
+  const progress = (p: NonNullable<RunningItem['keepProgress']>) => {
+    const turns = t('run.kg.turns', { n: p.turns });
+    if (!p.since) return turns;
+    const e = elapsed(p.since, now());
+    return `${turns} · ${t('run.kg.since', { time: t(e.key, { n: e.n }) })}`;
   };
   return (
     <aside id="running" class="runcol" classList={{ wide: props.wide }} data-surface="running" aria-labelledby="running-title" role={props.modal ? 'dialog' : undefined} aria-modal={props.modal ? 'true' : undefined} ref={props.ref}>
@@ -109,6 +126,14 @@ export function Running(props: {
                               <button class="name" onClick={() => props.onOpen(item)}>
                                 {item.title || t('run.untitled')}
                               </button>
+                              <Show when={item.keepProgress}>
+                                {(p) => (
+                                  <p class="run-kg">
+                                    <span class="num">{progress(p())}</span>
+                                    <Show when={p().last}>{(last) => <span class="last" title={last()}>{last()}</span>}</Show>
+                                  </p>
+                                )}
+                              </Show>
                               <Show when={item.permissions.length > 0}>
                                 <Asks conversationId={item.conversationId} turnId={item.turnId} permissions={item.permissions} />
                               </Show>

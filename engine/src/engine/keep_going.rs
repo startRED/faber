@@ -9,7 +9,7 @@
 
 use super::*;
 use crate::budget::{Reach, Why};
-use crate::model::{AutoAnswer, KeepGoing, KeepWait, Wake};
+use crate::model::{AutoAnswer, Away, KeepGoing, KeepWait, Wake};
 
 /// What the agent is told at each turn Faber sends. It is for the model, so it is English like every prompt of the engine;
 /// the person sees `wake.keepGoing` in their language instead. It names no project's own tools: the project's
@@ -54,6 +54,10 @@ const BUSY_RETRY: f64 = 30.0;
 const START_WAIT: f64 = 20.0;
 /// A question nobody answered in this time gets its first choice.
 const QUESTION_WAIT: f64 = 600.0;
+/// The person counts as away once it has run this long (milliseconds).
+const AWAY_MS: u64 = 30 * 60 * 1000;
+/// The longest the last progress line of a running row is.
+const LINE_CHARS: usize = 160;
 /// A turn shorter than this with no tool did not work, it only waited.
 const QUICK_MS: u64 = 60_000;
 /// Errors that do not mend by waiting: one that comes twice in a row ends it.
@@ -144,6 +148,32 @@ pub fn stop_at(text: &str) -> Option<usize> {
     Some(text[..cut].trim_end().len())
 }
 
+/// What it did since it was turned on, once that was long enough for the person to be away.
+fn away_of(kg: &KeepGoing) -> Option<Away> {
+    let ms = now().saturating_sub(kg.since);
+    (kg.since > 0 && ms >= AWAY_MS).then_some(Away {
+        minutes: (ms / 60_000) as u32,
+        turns: kg.work,
+        switches: kg.switches,
+        answered: kg.answered,
+    })
+}
+
+/// The last line the agent wrote in this conversation, without the marks of a list, a heading or a quote, for the running row.
+pub(super) fn progress_line(messages: &[Message]) -> Option<String> {
+    let text = messages.iter().rev().filter(|m| m.role == Role::Assistant).take(3).find_map(|m| {
+        m.text
+            .lines()
+            .rev()
+            .map(|l| l.trim_start_matches(|ch: char| ch.is_whitespace() || "#>*-`".contains(ch)).trim_end())
+            .find(|l| !l.is_empty())
+    })?;
+    Some(match text.char_indices().nth(LINE_CHARS) {
+        Some((at, _)) => format!("{}…", text[..at].trim_end()),
+        None => text.to_string(),
+    })
+}
+
 /// A question the agent asked the person that nobody has answered: its card still waits, or its call never got a result.
 pub(super) fn unanswered_question(m: &Message) -> bool {
     m.tools.iter().flatten().any(|t| t.parent.is_none() && t.name == "AskUserQuestion" && t.ok != Some(true))
@@ -216,16 +246,37 @@ impl Core {
         Ok(())
     }
 
+    /// Tells the newest reply what keep going did while the person was away (once it has run for half an hour); an older
+    /// reply loses it, so the screen shows one summary, at the top of the newest.
+    pub(super) fn note_away(&mut self, conv: &str, reply_id: &str) {
+        let Some(c) = self.convs.get_mut(conv) else { return };
+        let away = c.keep_going.as_ref().and_then(away_of);
+        for old in set_away(c, reply_id, away) {
+            self.push(conv, Some(&old), true);
+        }
+    }
+
     /// The person stopped the conversation: nothing more goes out by itself.
     pub(super) fn keep_going_off(&mut self, id: &str) {
+        let mut cleared = vec![];
         if let Some(c) = self.convs.get_mut(id)
-            && c.keep_going.take().is_some()
+            && c.keep_going.is_some()
         {
+            // What it did while the person was away is told on its last reply even when they stop it.
+            let away = c.keep_going.as_ref().and_then(away_of);
+            if let Some(last) = c.messages.iter().rev().find(|m| m.role == Role::Assistant).map(|m| m.id.clone()) {
+                cleared = set_away(c, &last, away);
+                cleared.push(last);
+            }
+            c.keep_going = None;
             drop_own_turns(c);
             self.save(id);
             self.emit_queue(id);
             self.list_changed();
             self.refresh_running();
+        }
+        for reply in cleared {
+            self.push(id, Some(&reply), true);
         }
     }
 
@@ -302,6 +353,7 @@ impl Core {
             kg.work += 1;
         }
         let before = kg.clone();
+        self.note_away(conv, reply_id);
         let decision = next(&before, Ended { asked, said_stop, idle, own }, self.room_next(conv));
         // The first stop is asked about once, by the check turn; whatever else follows asks nothing.
         if let Some(kg) = self.convs.get_mut(conv).and_then(|c| c.keep_going.as_mut()) {
@@ -652,8 +704,10 @@ impl Core {
     /// It stops by itself: the reply says why, and the shell tells the person.
     pub(super) fn halt(&mut self, conv: &str, reply_id: &str, why: &'static str) {
         let Some(c) = self.convs.get_mut(conv).filter(|c| c.keep_going.is_some()) else { return };
+        let away = c.keep_going.as_ref().and_then(away_of);
         c.keep_going = None;
         drop_own_turns(c);
+        let cleared = set_away(c, reply_id, away);
         let title = c.title.clone();
         let mut vendor = None;
         if let Some(m) = c.messages.iter_mut().find(|m| m.id == reply_id) {
@@ -663,6 +717,9 @@ impl Core {
         self.save(conv);
         self.emit_queue(conv);
         self.push(conv, Some(reply_id), true);
+        for old in cleared {
+            self.push(conv, Some(&old), true);
+        }
         self.list_changed();
         (self.emit)(AppEvent::Halted { conversation_id: conv.into(), title, why: why.into(), vendor });
     }
@@ -697,6 +754,21 @@ fn static_why(why: &str) -> &'static str {
         "busy" => "busy",
         _ => "start",
     }
+}
+
+/// The summary of what happened while the person was away goes on this reply and no other. The replies that lost theirs
+/// come back, for the screen to be told.
+fn set_away(c: &mut Conversation, reply_id: &str, away: Option<Away>) -> Vec<String> {
+    let Some(away) = away else { return vec![] };
+    let mut cleared = vec![];
+    for m in c.messages.iter_mut().filter(|m| m.role == Role::Assistant) {
+        if m.id == reply_id {
+            m.away = Some(away.clone());
+        } else if m.away.take().is_some() {
+            cleared.push(m.id.clone());
+        }
+    }
+    cleared
 }
 
 /// A continuation Faber queued (behind a turn of the person's) never goes out once keep going is off.
@@ -793,6 +865,34 @@ mod tests {
         assert_eq!(&code[..stop_at(code).unwrap()], "Changed `a.rs`");
         let quoted = "He said \"done\" [keep going: stop]";
         assert_eq!(&quoted[..stop_at(quoted).unwrap()], "He said \"done\"");
+    }
+
+    fn reply(text: &str) -> Message {
+        Message::new("r".into(), Role::Assistant, text.into(), 0)
+    }
+
+    #[test]
+    fn the_last_progress_line_is_plain_short_and_taken_from_the_latest_reply_with_words() {
+        let messages = [reply("Fixed the login page.\n\n- [x] Tests pass\n## Next: the **settings** page\n"), reply("")];
+        assert_eq!(
+            progress_line(&messages).as_deref(),
+            Some("Next: the **settings** page"),
+            "markup at the start goes, an empty reply is skipped"
+        );
+        let long = reply(&"word ".repeat(100));
+        let line = progress_line(&[long]).unwrap();
+        assert!(line.ends_with('…') && line.chars().count() <= LINE_CHARS + 1, "{line}");
+        assert_eq!(progress_line(&[reply("   \n")]), None);
+        assert_eq!(progress_line(&[]), None);
+    }
+
+    #[test]
+    fn the_person_is_away_after_half_an_hour_and_the_summary_counts_real_work() {
+        let kg = |ago_min: u64| KeepGoing { since: now() - ago_min * 60_000, work: 7, switches: 2, answered: 1, ..Default::default() };
+        assert_eq!(away_of(&kg(29)), None);
+        let away = away_of(&kg(185)).unwrap();
+        assert_eq!((away.minutes, away.turns, away.switches, away.answered), (185, 7, 2, 1));
+        assert_eq!(away_of(&KeepGoing::default()), None, "a conversation from before it was saved has no start");
     }
 
     #[test]

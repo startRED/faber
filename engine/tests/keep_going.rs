@@ -437,6 +437,9 @@ async fn a_rest_after_an_error_keeps_its_row_in_the_running_list_and_faber_worki
     let state = engine.state();
     let row = state.running.items.iter().find(|i| i.conversation_id == id).expect("its row stays in the running list");
     assert!(row.keep_going && row.keep_wait.is_some());
+    let progress = row.keep_progress.as_ref().expect("and how far it has come");
+    assert_eq!(progress.turns, 0);
+    assert!(progress.since > 0, "since it was turned on");
     engine.keep_going(&id, false).unwrap();
     assert!(!engine.is_working(), "off, it is not work");
     engine.shutdown();

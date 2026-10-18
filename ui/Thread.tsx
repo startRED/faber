@@ -241,6 +241,20 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
         <Show when={m().vendor && m().effort}><span class="effort">· {t(`answer.effort.${m().effort!}`)}</span></Show>
         <Show when={showsReason()}><em>· {reason()}</em></Show>
       </div>
+      {/* After half an hour on its own, "keep going" tells at the top of the newest reply what happened while the person was away. */}
+      <Show when={m().away || m().autoAnswers?.length}>
+        <div class="away-lines">
+          <Show when={m().away}>{(away) => <AwayLine away={away()} />}</Show>
+          <For each={m().autoAnswers}>
+            {(a) => (
+              <p class="woke">
+                <Icon name="loop" small />
+                {t('away.chose', { question: a.question, answer: a.answer })}
+              </p>
+            )}
+          </For>
+        </div>
+      </Show>
       <Show when={m().pace}>{(pace) => <p class="pace">{t(`reason.pace.${pace().kind}`, { vendor: vendorName(pace().vendor), other: m().vendor ? vendorName(m().vendor!) : t('model.auto') })}</p>}</Show>
       <Show when={m().mode}><p class="pace">{fromEngine(m().mode)}</p></Show>
       <Show when={m().note}><p class="pace">{fromEngine(m().note)}</p></Show>
@@ -542,6 +556,26 @@ function Queued(props: { conversationId: string; q: QueuedTurn; busy: boolean; o
 
 // Messages only grow at the end, so each position keeps its component while the answer streams into it.
 // Only the messages from `from` on are drawn.
+/** What "keep going" did while the person was away, in one calm line (C001): how long, turns of work, and only the parts that happened. */
+function AwayLine(props: { away: NonNullable<Message['away']> }) {
+  const time = () => {
+    const e = elapsed(0, props.away.minutes * 60_000);
+    return t(e.key, { n: e.n });
+  };
+  const parts = () =>
+    [
+      props.away.turns ? t('away.turns', { n: props.away.turns }) : '',
+      props.away.switches ? t('away.switches', { n: props.away.switches }) : '',
+      props.away.answered ? t('away.answered', { n: props.away.answered }) : '',
+    ].filter(Boolean);
+  return (
+    <p class="woke away">
+      <Icon name="loop" small />
+      {parts().length ? t('away.summary', { title: t('away.title', { time: time() }), parts: parts().join(', ') }) : t('away.title', { time: time() })}
+    </p>
+  );
+}
+
 export function Thread(props: Shared & { messages: Message[]; queued?: QueuedTurn[]; busy?: boolean; onError?: (err: unknown) => void; from: number }) {
   const prompt = (at: number) => (props.messages[at - 1]?.role === 'user' ? props.messages[at - 1] : undefined);
   return (

@@ -105,6 +105,10 @@ export interface Message {
   wake?: { why: string; pr?: number; checks?: string[] };
   /** On a reply: "keep going" stopped after it, and why (a `reason.keepGoing.*` key). */
   halt?: string;
+  /** On the newest reply of a conversation that went on by itself for half an hour or more: what it did while the person was away. */
+  away?: { minutes: number; turns: number; switches: number; answered: number };
+  /** Questions Faber answered with their first choice because nobody answered them while "keep going" was on. */
+  autoAnswers?: { question: string; answer: string }[];
   /** On a project reply that changed files: Faber's own run of the fast checks once it ended (R146). */
   checks?: Checks;
 }
@@ -317,6 +321,10 @@ export interface RunningItem {
   held?: [number, string];
   /** "Keep going" is on: it runs on its own. */
   keepGoing?: boolean;
+  /** "Keep going" waits to send the next turn, for a reason of its own (a quota wait is `waitUntil`), until `until` (seconds). */
+  keepWait?: { why: 'retry' | 'rest' | 'busy' | 'start'; until: number };
+  /** How far a conversation that goes on by itself has come: turns of work, when it began (ms, 0 unknown), the last line it wrote. */
+  keepProgress?: { turns: number; since: number; last?: string };
 }
 /** The running list in the engine's order, with a revision that grows by one with every list the engine sends. */
 export interface RunningList {

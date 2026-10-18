@@ -2,7 +2,8 @@ import { createComponent, createSignal } from 'solid-js';
 import { render } from 'solid-js/web';
 import { Composer } from '../../ui/Composer.tsx';
 import { Thread } from '../../ui/Thread.tsx';
-import type { Message, VendorUsage } from '../../ui/api.ts';
+import type { Message, RunningItem, VendorUsage } from '../../ui/api.ts';
+import { Running } from '../../ui/Running.tsx';
 import { keepGoingOutlook } from '../../ui/keep-going.ts';
 import { KeepGoingNote } from '../../ui/KeepGoingNote.tsx';
 import { t } from '../../ui/i18n.ts';
@@ -119,6 +120,60 @@ check('keep going: with poor quota the line asks before it turns on, and while i
     setWarning(undefined);
     await settle();
     equal(note(), null, 'and the line goes once the quota is fine');
+  } finally {
+    dispose();
+    root.remove();
+  }
+});
+
+check('keep going: the newest reply says what happened while the person was away, and a question Faber answered', async () => {
+  const root = document.createElement('div');
+  document.body.append(root);
+  const mine: Message = { id: 'u1', role: 'user', text: 'Build the app', at: 1 };
+  const last: Message = {
+    id: 'a2', role: 'assistant', text: 'All done.', at: 4, status: 'done', vendor: 'codex',
+    away: { minutes: 185, turns: 14, switches: 1, answered: 2 },
+    autoAnswers: [{ question: 'Which database?', answer: 'SQLite' }],
+  };
+  const dispose = render(() => createComponent(Thread, { conversationId: 'conv-away', messages: [mine, last], from: 0, options: [], onBranch: () => {} }), root);
+  try {
+    await settle();
+    const lines = [...root.querySelectorAll('.woke')].map((el) => el.textContent?.trim());
+    deepEqual(lines, [
+      t('away.summary', { title: t('away.title', { time: t('time.hours', { n: 3 }) }), parts: `${t('away.turns', { n: 14 })}, ${t('away.switches', { n: 1 })}, ${t('away.answered', { n: 2 })}` }),
+      t('away.chose', { question: 'Which database?', answer: 'SQLite' }),
+    ]);
+    ok(root.querySelector('.ai .woke.away')!.compareDocumentPosition(root.querySelector('.ai .md')!) & Node.DOCUMENT_POSITION_FOLLOWING, 'the summary sits above the answer');
+  } finally {
+    dispose();
+    root.remove();
+  }
+});
+
+check('keep going: its row in the running column shows how far it has come and what it waits for', async () => {
+  const root = document.createElement('div');
+  document.body.append(root);
+  const row = (more: Partial<RunningItem>): RunningItem => ({
+    conversationId: 'c1', turnId: 't1', title: 'Build the app', area: 'project', projectId: 'p1', vendor: 'claude', state: 'working',
+    since: Date.now() - 3 * 3_600_000, permissions: [], keepGoing: true, ...more,
+  });
+  const [items, setItems] = createSignal<RunningItem[]>([
+    row({ keepProgress: { turns: 12, since: Date.now() - 5 * 3_600_000, last: 'Next: the settings page' } }),
+  ]);
+  const dispose = render(() => createComponent(Running, {
+    get items() { return items(); }, projects: [], onOpen: () => {}, onClose: () => {}, modal: false, ref: () => {},
+  }), root);
+  try {
+    await settle();
+    const text = () => root.querySelector('.run-kg')?.textContent ?? '';
+    ok(text().includes(t('run.kg.turns', { n: 12 })) && text().includes(t('run.kg.since', { time: t('time.hours', { n: 5 }) })), text());
+    ok(text().includes('Next: the settings page'), 'and the last thing it wrote');
+    equal(root.querySelector('.ri .verb')?.textContent, t('run.keepGoing'));
+    setItems([row({ keepWait: { why: 'retry', until: 1 }, keepProgress: { turns: 12, since: 0 } })]);
+    await settle();
+    equal(root.querySelector('.ri .verb')?.textContent, t('run.kg.wait.retry'), 'a rest after an error is said in words');
+    equal(root.querySelector('.run-kg .last'), null, 'no line, no empty space');
+    equal(text(), t('run.kg.turns', { n: 12 }), 'a start that is not known is not guessed');
   } finally {
     dispose();
     root.remove();
