@@ -523,8 +523,14 @@ impl Verifier {
             }
         }
         for (check, key) in todo {
-            self.game_over().await;
-            let _turn = if check.heavy { self.heavy.clone().acquire_owned().await.ok() } else { None };
+            // The guard is read again once the Cargo build's turn comes: a game may have started while it waited.
+            let _turn = loop {
+                self.game_over().await;
+                let turn = if check.heavy { self.heavy.clone().acquire_owned().await.ok() } else { None };
+                if !self.guard.as_ref().is_some_and(|in_front| in_front()) {
+                    break turn;
+                }
+            };
             log.line(&format!("== {} ==", check.command));
             let spec =
                 Spec { program: check.tokens[0].clone(), args: check.tokens[1..].to_vec(), cwd: request.folder.clone(), env: vars.clone() };
@@ -646,7 +652,10 @@ mod tests {
                 }),
             };
             let capped = self.capped.clone();
-            let throttle: Box<dyn Fn(bool) + Send + Sync> = Box::new(move |game| capped.lock().unwrap().push(game));
+            let throttle: Box<dyn Fn(bool) -> bool + Send + Sync> = Box::new(move |game| {
+                capped.lock().unwrap().push(game);
+                true
+            });
             Ok(Started {
                 stdout: Box::new(std::io::Cursor::new(out.into_bytes())),
                 stderr: Box::new(tokio::io::empty()),
@@ -855,6 +864,33 @@ mod tests {
             tokio::time::sleep(GUARD_EVERY * 2).await;
             assert_eq!(*runner.capped.lock().unwrap(), [true, false]);
             run.abort();
+        });
+    }
+
+    #[test]
+    fn time_held_for_a_game_does_not_count_against_a_check_s_deadline() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().start_paused(true).build().unwrap();
+        rt.block_on(async {
+            let dir = tempfile::tempdir().unwrap();
+            let runner = Arc::new(fake(&[("cargo t --claims", "", None)]));
+            let game = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let in_front = game.clone();
+            let guard: Guard = Arc::new(move || in_front.load(Ordering::SeqCst));
+            let v = Arc::new(Verifier::with_deadline(runner.clone(), Duration::from_secs(20)).with_guard(guard));
+            let mut request = request(dir.path(), Level::Full, &[("docs/a.md", "h1")]);
+            request.commands = vec!["cargo t --claims".into()];
+            let run = tokio::spawn({
+                let v = v.clone();
+                async move { v.verify(request).await }
+            });
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            game.store(true, Ordering::SeqCst);
+            // Two minutes capped, six times the deadline: the check still runs.
+            tokio::time::sleep(Duration::from_secs(120)).await;
+            assert!(!run.is_finished(), "a check held for a game is not out of time");
+            game.store(false, Ordering::SeqCst);
+            let outcome = tokio::time::timeout(Duration::from_secs(60), run).await.unwrap().unwrap();
+            assert_eq!(outcome.checks[0].verdict, Verdict::NotFinished, "the deadline counts again once the game goes");
         });
     }
 

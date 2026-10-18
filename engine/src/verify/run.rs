@@ -26,8 +26,9 @@ pub struct Started {
     pub stderr: Box<dyn AsyncRead + Send + Unpin>,
     /// The exit code, `None` when it ended without one.
     pub exit: Pin<Box<dyn Future<Output = Option<i32>> + Send>>,
-    /// Caps the check's processor share while a game is in front (true) or lifts the cap (false); none where nothing can.
-    pub throttle: Option<Box<dyn Fn(bool) + Send + Sync>>,
+    /// Caps the check's processor share while a game is in front (true) or lifts the cap (false), saying whether it took;
+    /// none where nothing can.
+    pub throttle: Option<Box<dyn Fn(bool) -> bool + Send + Sync>>,
 }
 
 /// Whether a game or another full-screen app is in front of the person (the shell's R191 reading), so no new check starts
@@ -77,7 +78,7 @@ impl Runner for Real {
         let (child, job) = (p.child, p.contained);
         let throttle = job.as_ref().map(|job| {
             let cap = job.cpu_cap();
-            Box::new(move |game: bool| cap(game.then_some(GAME_CPU))) as Box<dyn Fn(bool) + Send + Sync>
+            Box::new(move |game: bool| cap(game.then_some(GAME_CPU))) as Box<dyn Fn(bool) -> bool + Send + Sync>
         });
         let exit = Box::pin(async move {
             // The job lives as long as this future: once the check exited, or when the future is dropped before, closing
@@ -292,30 +293,43 @@ pub async fn check(runner: &dyn Runner, spec: &Spec, log: &mut Log, deadline: Du
                 _ = &mut read => exit.await,
             }
         };
+        // Time spent capped for a game does not count against the deadline: a check slowed on purpose is no failure.
+        let held_for = std::sync::atomic::AtomicU64::new(0);
+        let start = tokio::time::Instant::now();
         let held = async {
             let (Some(guard), Some(throttle)) = (guard, throttle.as_ref()) else { return std::future::pending().await };
             let mut capped = false;
             loop {
                 let game = guard();
-                if game != capped {
-                    throttle(game);
+                // A cap Windows refused is asked again at the next reading.
+                if game != capped && throttle(game) {
                     capped = game;
                 }
                 tokio::time::sleep(GUARD_EVERY).await;
+                if capped {
+                    held_for.fetch_add(GUARD_EVERY.as_millis() as u64, std::sync::atomic::Ordering::Relaxed);
+                }
             }
         };
-        let work = async {
-            tokio::select! {
-                code = work => code,
-                never = held => never,
+        let expiry = async {
+            loop {
+                let end = start + deadline + Duration::from_millis(held_for.load(std::sync::atomic::Ordering::Relaxed));
+                if tokio::time::Instant::now() >= end {
+                    return;
+                }
+                tokio::time::sleep_until(end).await;
             }
         };
-        tokio::time::timeout(deadline, work).await
+        tokio::select! {
+            code = work => Some(code),
+            never = held => never,
+            () = expiry => None,
+        }
     };
     let (exit, timed_out) = match code {
-        Ok(code) => (code, false),
+        Some(code) => (code, false),
         // Dropping the work ended the process and its job.
-        Err(_) => (None, true),
+        None => (None, true),
     };
     log.flush();
     Ran { exit, output: capture.text(), took: began.elapsed(), refused: None, timed_out }
