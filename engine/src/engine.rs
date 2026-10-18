@@ -3064,6 +3064,7 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
     let keep_wait = c.keep_going.as_ref().and_then(|k| k.waiting.clone());
     if reply.status != Some(Status::Streaming)
         && !c.compacting
+        && c.weighing.is_none()
         && kg_wait.is_none()
         && keep_wait.is_none()
         && permissions.is_empty()
@@ -3087,6 +3088,7 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
         && reply.finished_at.is_some()
         && reply.wait_until.is_none()
         && !c.compacting
+        && c.weighing.is_none()
         && c.keep_going.is_none()
         && c.queued.is_empty()
         && checks != Some(ChecksState::Running);
@@ -3113,6 +3115,7 @@ fn running_item(c: &Conversation) -> Option<RunningItem> {
             since: k.since,
             last: keep_going::progress_line(&c.messages),
         }),
+        weighing: c.weighing.is_some(),
         settled,
     })
 }

@@ -1112,6 +1112,7 @@ ${copy().path}`}>
                                     messages={c().messages}
                                     queued={c().queued}
                                     busy={checking()}
+                                    weighing={items().some((i) => i.conversationId === c().id && i.weighing)}
                                     onError={fail}
                                     usage={state().usage ?? []}
                                     from={from()}

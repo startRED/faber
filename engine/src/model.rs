@@ -750,6 +750,10 @@ pub struct RunningItem {
     /// "Keep going" is on: how far it has come.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keep_progress: Option<KeepProgress>,
+    /// Faber is asking git whether the last reply changed files with a command (`Conversation::weighing`), usually under a
+    /// second: the reply says so and Stop ends it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub weighing: bool,
     /// The agent said all it will say and only the CLI's turn is still closing (its Stop hooks, say), with nothing else running
     /// for the conversation: the screen reads it as done and leaves it out of what it shows as running. Updates, the tray and
     /// the awake lock still count it, since a process is still at work.

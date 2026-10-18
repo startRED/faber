@@ -105,6 +105,8 @@ interface Shared {
   choice?: Choice;
   onBranch: OnBranch;
   usage?: VendorUsage[];
+  /** Faber asks git whether the last reply changed files (the running row's `weighing`). */
+  weighing?: boolean;
 }
 
 function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; prompt?: Message; last?: boolean }) {
@@ -347,6 +349,12 @@ function Answer(props: Shared & { m: Accessor<Message>; messages?: Message[]; pr
         </div>
       </Show>
       <Show when={m().checks}>{(c) => <ChecksLine c={c()} />}</Show>
+      {/* The moment git is asked whether the reply changed files, before checks would start: one quiet line, Stop ends it. */}
+      <Show when={props.last && props.weighing && !m().checks}>
+        <div class="pace checks" data-state="weighing">
+          <p>{t('checks.weighing')}</p>
+        </div>
+      </Show>
       <Show when={m().follow}>{(f) => <FollowLine conversationId={props.conversationId} f={f()} />}</Show>
       <Show when={m().status === 'stopped'}>
         <div class="note">{t('answer.stopped')}</div>
