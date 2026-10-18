@@ -7,7 +7,6 @@ pub mod containment;
 pub mod coordinator;
 pub mod first_run;
 pub mod homes;
-#[cfg(windows)]
 pub mod menus;
 pub mod permissions;
 pub mod projects;
