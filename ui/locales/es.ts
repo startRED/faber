@@ -1019,6 +1019,7 @@ export const es: Messages = {
   'notes.64.better': 'Las comprobaciones de Faber ejecutan dos compilaciones de Cargo a la vez cuando la memoria que usaron antes cabe, y una a una cuando no.',
   'notes.65.new': 'En un proyecto, el agente puede pedir a Faber un mapa de lo que el código ya tiene, para construir sobre eso en vez de añadir una segunda forma de hacer lo mismo.',
   'notes.66.fixed': 'El primer mensaje de una conversación nueva en un proyecto aparece al instante. Antes Faber se quedaba parado mientras hacía la copia aparte.',
+  'notes.67.better': 'Cuando falla una comprobación que Faber sabe inestable, Faber la ejecuta una vez más antes de decir que el trabajo está roto.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

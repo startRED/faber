@@ -593,10 +593,16 @@ impl Verifier {
             log.line(&format!("== {} ==", check.command));
             let spec =
                 Spec { program: check.tokens[0].clone(), args: check.tokens[1..].to_vec(), cwd: request.folder.clone(), env: vars.clone() };
-            let ran = run::check(&*self.runner, &spec, &mut log, self.deadline, self.guard.as_ref()).await;
-            log.line(&format!("== {}: exit {:?} after {} ms ==", check.command, ran.exit, ran.took.as_millis()));
-            let mut out = result(&check.command, &ran, &root);
-            if ran.refused.is_none() {
+            // A check the journal knows as flaky (it passed and failed on the same content) that fails is run once more on
+            // its own: passing then, it turns nothing red (R190 V3). Any other failure stands at once.
+            let mut retried = false;
+            let mut out = loop {
+                let ran = run::check(&*self.runner, &spec, &mut log, self.deadline, self.guard.as_ref()).await;
+                log.line(&format!("== {}: exit {:?} after {} ms ==", check.command, ran.exit, ran.took.as_millis()));
+                let mut out = result(&check.command, &ran, &root);
+                if ran.refused.is_some() {
+                    break out;
+                }
                 let ok = out.verdict == Verdict::Passed;
                 let entry = Entry {
                     project: project.clone(),
@@ -607,8 +613,24 @@ impl Verifier {
                     at: (self.clock)(),
                     peak: ran.peak,
                 };
-                if self.journal.add(entry) && !ok {
+                let flaky = self.journal.add(entry);
+                if out.verdict == Verdict::Failed && known[&check.command].flaky && !retried {
+                    retried = true;
+                    log.line(&format!("== {}: known as flaky, so it runs once more on its own ==", check.command));
+                    // The rerun is a new start: it waits for a game that came while the first run worked.
+                    self.game_over().await;
+                    continue;
+                }
+                if flaky && !ok && !retried {
                     out.summary.push_str("; flaky: it passed and failed before on the same content");
+                }
+                break out;
+            };
+            if retried {
+                if out.verdict == Verdict::Passed {
+                    out.summary = format!("{}; flaky: it failed once, then passed when run again on its own", out.summary);
+                } else if out.verdict == Verdict::Failed {
+                    out.summary.push_str("; it failed again when run on its own, so this failure is real");
                 }
             }
             if out.verdict == Verdict::Passed
@@ -696,6 +718,8 @@ mod tests {
         started: Mutex<Vec<String>>,
         /// Program and first argument → (output, exit code); `None` never ends.
         script: HashMap<String, (String, Option<i32>)>,
+        /// What a program does the first time only, before the table: a check that fails once.
+        once: Mutex<HashMap<String, (String, Option<i32>)>>,
         dropped: Arc<AtomicUsize>,
         /// What the game guard asked of each check's processor share, in order.
         capped: Arc<Mutex<Vec<bool>>>,
@@ -712,7 +736,8 @@ mod tests {
         fn start(&self, spec: &Spec) -> std::io::Result<Started> {
             let line = std::iter::once(spec.program.clone()).chain(spec.args.iter().cloned()).collect::<Vec<_>>().join(" ");
             self.started.lock().unwrap().push(line.clone());
-            let (out, code) = self.script.get(&line).cloned().ok_or_else(|| std::io::Error::other("unknown program"))?;
+            let first = self.once.lock().unwrap().remove(&line);
+            let (out, code) = first.or_else(|| self.script.get(&line).cloned()).ok_or_else(|| std::io::Error::other("unknown program"))?;
             let ends = Ends(self.dropped.clone());
             let exit: std::pin::Pin<Box<dyn std::future::Future<Output = Option<i32>> + Send>> = match code {
                 Some(code) => Box::pin(async move {
@@ -873,12 +898,68 @@ mod tests {
             at: 0,
             peak: None,
         });
+        assert!(v.journal.known(&dir.path().to_string_lossy(), "npm run docs").flaky);
+        runner.started.lock().unwrap().clear();
         let third = run("h2");
         let docs = third.checks.iter().find(|c| c.command == "npm run docs").unwrap();
-        assert!(docs.summary.contains("flaky"), "{}", docs.summary);
-        let fourth = run("h3");
-        let docs = fourth.checks.iter().find(|c| c.command == "npm run docs").unwrap();
-        assert!(!docs.summary.contains("flaky"), "a failure on other content is not flaky: {}", docs.summary);
+        assert_eq!(docs.verdict, Verdict::Failed);
+        assert!(docs.summary.contains("failed again when run on its own"), "{}", docs.summary);
+        assert_eq!(
+            *runner.started.lock().unwrap(),
+            ["npm run lint", "npm run docs", "npm run docs"],
+            "a known flaky failure runs once more"
+        );
+    }
+
+    #[test]
+    fn a_known_flaky_check_that_fails_once_and_then_passes_turns_nothing_red() {
+        let dir = tempfile::tempdir().unwrap();
+        let runner = Arc::new(fake(&[("npm run docs", "docs ok", Some(0))]));
+        runner.once.lock().unwrap().insert(
+            "npm run docs".into(),
+            (
+                "docs: a broken link
+"
+                .into(),
+                Some(1),
+            ),
+        );
+        let v = Arc::new(Verifier::new(runner.clone()));
+        let project = dir.path().to_string_lossy().into_owned();
+        for ok in [true, false] {
+            v.journal.add(Entry {
+                project: project.clone(),
+                command: "npm run docs".into(),
+                key: Some("k".into()),
+                ok,
+                millis: 5,
+                at: 0,
+                peak: None,
+            });
+        }
+        let mut request = request(dir.path(), Level::Full, &[("docs/a.md", "h1")]);
+        request.commands = vec!["npm run docs".into()];
+        let report = rt().block_on(v.verify(request));
+        assert_eq!(*runner.started.lock().unwrap(), ["npm run docs", "npm run docs"]);
+        assert!(report.ok(), "{report:?}");
+        assert!(report.checks[0].summary.contains("flaky: it failed once, then passed"), "{}", report.checks[0].summary);
+        // Without the journal's word, the same single failure stands.
+        let dir = tempfile::tempdir().unwrap();
+        let runner = Arc::new(fake(&[("npm run docs", "docs ok", Some(0))]));
+        runner.once.lock().unwrap().insert(
+            "npm run docs".into(),
+            (
+                "docs: a broken link
+"
+                .into(),
+                Some(1),
+            ),
+        );
+        let v = Arc::new(Verifier::new(runner.clone()));
+        let mut request = self::request(dir.path(), Level::Full, &[("docs/a.md", "h1")]);
+        request.commands = vec!["npm run docs".into()];
+        assert!(!rt().block_on(v.verify(request)).ok());
+        assert_eq!(runner.started.lock().unwrap().len(), 1);
     }
 
     #[test]
@@ -1012,6 +1093,53 @@ mod tests {
             tokio::time::sleep(GUARD_EVERY * 2).await;
             assert_eq!(*runner.capped.lock().unwrap(), [true, false]);
             run.abort();
+        });
+    }
+
+    #[test]
+    fn the_rerun_of_a_known_flaky_check_waits_for_a_game_that_came_meanwhile() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().start_paused(true).build().unwrap();
+        rt.block_on(async {
+            let dir = tempfile::tempdir().unwrap();
+            let runner = Arc::new(fake(&[("npm run docs", "docs ok", Some(0))]));
+            runner.once.lock().unwrap().insert(
+                "npm run docs".into(),
+                (
+                    "docs: a broken link
+"
+                    .into(),
+                    Some(1),
+                ),
+            );
+            // The game comes to the front as soon as the first run starts.
+            let game = Arc::new(std::sync::atomic::AtomicBool::new(true));
+            let (in_front, seen) = (game.clone(), runner.clone());
+            let guard: Guard = Arc::new(move || in_front.load(Ordering::SeqCst) && !seen.started.lock().unwrap().is_empty());
+            let v = Arc::new(Verifier::with_deadline(runner.clone(), Duration::from_secs(3600)).with_guard(guard));
+            let project = dir.path().to_string_lossy().into_owned();
+            for ok in [true, false] {
+                v.journal.add(Entry {
+                    project: project.clone(),
+                    command: "npm run docs".into(),
+                    key: Some("k".into()),
+                    ok,
+                    millis: 5,
+                    at: 0,
+                    peak: None,
+                });
+            }
+            let mut request = request(dir.path(), Level::Full, &[("docs/a.md", "h1")]);
+            request.commands = vec!["npm run docs".into()];
+            let run = tokio::spawn({
+                let v = v.clone();
+                async move { v.verify(request).await }
+            });
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            assert_eq!(runner.started.lock().unwrap().len(), 1, "the rerun waits while the game is in front");
+            game.store(false, Ordering::SeqCst);
+            let report = run.await.unwrap();
+            assert_eq!(runner.started.lock().unwrap().len(), 2);
+            assert!(report.ok(), "{report:?}");
         });
     }
 

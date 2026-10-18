@@ -219,7 +219,9 @@ Each step lands on its own, proves itself with the checks above, and reports its
 - [ ] **V3. A queue that knows conflicts.**
   - Changes that touch disjoint crates are checked together.
   - A failed batch is bisected.
-  - Flaky tests are found from the journal, quarantined and rerun alone.
+  - Flaky tests are found from the journal, quarantined and rerun alone. Built for whole checks: a check the journal
+    knows as flaky (a kept pass and a kept failure on the same content) that fails runs once more on its own, and only
+    its second result counts.
   - `land.mjs`'s queue moves into the verifier, and R96's mission proof queue uses the same service.
 - [ ] **V4. One shared test app.** The test rework's shared running app becomes the verifier's long-lived worker:
   - GPU off, requests over stdin, reset between requests;

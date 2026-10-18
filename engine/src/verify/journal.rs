@@ -41,6 +41,8 @@ pub struct Known {
     pub cost: Option<u64>,
     /// The most memory any of its kept runs held at once, in bytes: what a build is admitted against.
     pub peak: Option<u64>,
+    /// Among its kept results, it passed and failed on the same content: a failure of it is run once more on its own.
+    pub flaky: bool,
 }
 
 type Key = (String, String);
@@ -95,6 +97,7 @@ impl Journal {
                 failed: entries.back().is_some_and(|e| !e.ok),
                 cost: passes.get(passes.len() / 2).copied(),
                 peak: entries.iter().filter_map(|e| e.peak).max(),
+                flaky: entries.iter().filter(|e| e.ok && e.key.is_some()).any(|pass| entries.iter().any(|e| !e.ok && e.key == pass.key)),
             }
         })
     }
@@ -174,7 +177,7 @@ mod tests {
         for (n, millis) in [300, 100, 200].into_iter().enumerate() {
             journal.add(entry("lint", &format!("k{n}"), true, millis, n as u64));
         }
-        assert_eq!(journal.known("p", "lint"), Known { failed: false, cost: Some(200), peak: None });
+        assert_eq!(journal.known("p", "lint"), Known { failed: false, cost: Some(200), peak: None, flaky: false });
         assert!(!journal.add(entry("lint", "k9", false, 50, 10)), "a failure on new content");
         assert!(journal.known("p", "lint").failed);
         assert!(!journal.add(entry("lint", "k8", false, 50, 11)), "still not flaky on other content");

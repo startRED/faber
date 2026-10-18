@@ -1019,6 +1019,7 @@ export const de: Messages = {
   'notes.64.better': 'Fabers Prüfungen lassen zwei Cargo-Builds gleichzeitig laufen, wenn der Speicher, den sie vorher brauchten, passt, und sonst einen nach dem anderen.',
   'notes.65.new': 'In einem Projekt kann der Agent Faber nach einer Karte dessen fragen, was der Code schon hat, damit er darauf aufbaut, statt einen zweiten Weg für dasselbe hinzuzufügen.',
   'notes.66.fixed': 'Die erste Nachricht in einem neuen Projektgespräch erscheint sofort. Früher stand Faber still, während es die eigene Kopie anlegte.',
+  'notes.67.better': 'Wenn eine Prüfung fehlschlägt, die Faber als unzuverlässig kennt, führt Faber sie noch einmal aus, bevor es die Arbeit für kaputt erklärt.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

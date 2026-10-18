@@ -1006,6 +1006,7 @@ export const ptBR: Messages = {
   'notes.64.better': 'As verificações do Faber rodam dois builds do Cargo ao mesmo tempo quando a memória que usaram antes cabe, e um de cada vez quando não cabe.',
   'notes.65.new': 'Num projeto, o agente pode pedir ao Faber um mapa do que o código já tem, para construir em cima disso em vez de criar um segundo jeito de fazer a mesma coisa.',
   'notes.66.fixed': 'A primeira mensagem de uma conversa nova em um projeto aparece na hora. Antes o Faber ficava parado enquanto fazia a cópia separada.',
+  'notes.67.better': 'Quando uma verificação que o Faber conhece como instável falha, o Faber a roda mais uma vez antes de dizer que o trabalho quebrou.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',
