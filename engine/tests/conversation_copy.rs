@@ -271,9 +271,17 @@ async fn r_next_a_copy_with_unsaved_work_is_deleted_only_when_the_person_says_so
     assert_eq!(s.engine.remove_with(&id, true), Ok(()));
     assert!(s.engine.open(&id).is_none());
     assert!(gone(Path::new(&copy.path)).await, "the copy is removed");
+    // The folder goes first; the prune and the branch follow it, on the same background step.
+    let branch_gone = vec!["branch".to_string(), "-D".into(), copy.branch.clone()];
+    for _ in 0..40 {
+        if s.git.lock().unwrap().calls.contains(&branch_gone) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     let calls = s.git.lock().unwrap().calls.clone();
     assert!(calls.contains(&vec!["worktree".into(), "remove".into(), "--force".into(), "--".into(), copy.path.clone()]), "{calls:?}");
-    assert!(calls.contains(&vec!["branch".into(), "-D".into(), copy.branch.clone()]), "{calls:?}");
+    assert!(calls.contains(&branch_gone), "{calls:?}");
 
     // Work held by another branch is saved, but the agent is still at work there and may write more: it asks.
     let id = sent(&s.engine, ask(&s.project, "Small fix")).await;
