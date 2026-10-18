@@ -128,10 +128,12 @@ function Answer(props: Shared & { m: Accessor<Message>; prompt?: Message; last?:
   };
   const streaming = () => m().status === 'streaming';
   const waiting = () => m().permissions ?? [];
-  // Unknown legacy boundaries and tool-terminated turns keep the entire answer visible.
+  // Unknown legacy boundaries and tool-terminated turns keep the entire answer visible. So does a reply that is still
+  // streaming: the boundary moves with every step, and what the agent said between steps would fold away and come back
+  // as the stream goes on. It folds into the activity once, when the answer ends.
   const boundary = createMemo(() => {
     const end = m().activityEnd;
-    return tools().length && Number.isInteger(end) && end! > 0 && end! < text().length && text().slice(end).trim() ? end! : 0;
+    return !streaming() && tools().length && Number.isInteger(end) && end! > 0 && end! < text().length && text().slice(end).trim() ? end! : 0;
   });
   // The answer is always kept whole. A status sentence that is exactly the answer's opening paragraph is dropped from the
   // activity instead, so it shows once.

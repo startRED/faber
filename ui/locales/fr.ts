@@ -976,6 +976,7 @@ export const fr: Messages = {
   'notes.45.new': 'Dans un projet, l’agent lance maintenant les vérifications du projet sur votre ordinateur et corrige ce qui échoue avant d’envoyer quoi que ce soit.',
   'notes.46.new': 'Dans un projet, quand l’agent modifie des fichiers, Faber lance maintenant les vérifications lui-même et demande à l’agent de corriger ce qui échoue avant que le travail compte comme terminé.',
   'notes.47.better': "Vous voyez l'effort de chaque réponse à côté du modèle, par exemple « effort élevé », sans survoler.",
+  'notes.48.fixed': 'Les paragraphes d’une réponse ne disparaissent plus dans « En cours » pendant qu’elle s’écrit encore ; ils ne s’y replient qu’à la fin.',
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

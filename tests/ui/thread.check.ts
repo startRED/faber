@@ -164,10 +164,10 @@ check('thread: a Codex work log reads cleanly: titles on their own lines, tidy c
     equal(row.querySelector('b')!.textContent, 'PowerShell');
     equal(row.querySelector('i')!.textContent, inner);
     equal(row.title, inner, 'the full command is the tooltip');
-    equal(shown().split(status).length - 1, 1, 'the status sentence shows once while streaming');
+    equal(shown().split(status).length - 1, 2, 'while streaming the answer shows the words as the agent said them');
     equal(root.querySelector('.activity-latest'), null, 'no status line under a visible answer');
     setMessage({ ...message(), status: 'done' });
-    equal((root.textContent ?? '').split(status).length - 1, 1, 'and once when done');
+    equal((root.textContent ?? '').split(status).length - 1, 1, 'and the status sentence shows once when done');
   } finally {
     dispose();
     root.remove();
@@ -202,6 +202,40 @@ check('thread: the final answer is never cut, long commands are cut in the middl
     equal(first!.title, long, 'the full command is the tooltip');
     equal(second!.querySelector('i')!.textContent, markup);
     equal(second!.querySelectorAll('img, b i, i b').length, 0, 'no markup is built from a command');
+  } finally {
+    dispose();
+    root.remove();
+  }
+});
+
+check('thread: while an answer streams every paragraph stays in the answer, and the narration folds into the activity only when it ends', () => {
+  const root = document.createElement('div');
+  document.body.append(root);
+  const said = ['Sigo no código.', 'Corrigindo a parte 2.', 'Parte 2 pronta.', 'Atualizando o mapa do produto.'];
+  const before = said.join('\n\n');
+  const after = `${before}\n\nAll done.`;
+  const tools = [{ id: '1', name: 'Bash', input: { command: 'one' }, ok: true }, { id: '2', name: 'Bash', input: { command: 'two' } }];
+  const reply = (text: string, end: number, status: Message['status'] = 'streaming'): Message => ({ id: 'streamed', role: 'assistant', at: 0, status, text, activityEnd: end, tools });
+  const [message, setMessage] = createSignal<Message>(reply(before, before.length));
+  const dispose = render(() => createComponent(Thread, {
+    get messages() { return [message()]; }, from: 0, conversationId: 'streamed', options: [], onBranch: () => {},
+  }), root);
+  const answer = () => root.querySelector('.ai > .md')!.textContent ?? '';
+  const folded = () => root.querySelector('.activity-body .md')?.textContent ?? '';
+  const everything = (when: string) => {
+    for (const paragraph of said) ok(answer().includes(paragraph), `${when}: "${paragraph}" is in the answer, which reads ${JSON.stringify(answer())}`);
+    equal(folded(), '', `${when}: nothing is folded away yet`);
+  };
+  try {
+    everything('while a step runs');
+    setMessage(reply(after, before.length));
+    everything('when words come after the step');
+    ok(answer().includes('All done.'), 'and the new words join them');
+    setMessage(reply(after, after.length));
+    everything('when the next step starts');
+    setMessage(reply(after, before.length, 'done'));
+    equal(answer().trim(), 'All done.', 'when the answer ends only the final text shows');
+    for (const paragraph of said) ok(folded().includes(paragraph), `the narration "${paragraph}" is inside the activity`);
   } finally {
     dispose();
     root.remove();
