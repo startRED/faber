@@ -1,5 +1,5 @@
 use faber_engine::model::Project;
-use faber_engine::project::mission::{confirm, confirmed, view};
+use faber_engine::project::checks::{confirm, view};
 
 fn text(items: &[&str]) -> Vec<String> {
     items.iter().map(|s| s.to_string()).collect()
@@ -16,17 +16,19 @@ fn a_confirmation_of_a_list_that_is_no_longer_declared_is_refused() {
 
     std::fs::write(dir.path().join("AGENTS.md"), "## Proof commands\n```\nnpm test\nnpm run e2e\n```").unwrap();
     assert_eq!(confirm(&project, &shown.commands, &shown.setup, &shown.declared), Err("reason.proof.declaredChanged"));
-    assert_eq!(confirmed(&project), Err("reason.proof.unconfirmed"), "nothing was saved");
+    assert!(!view(&project).confirmed, "nothing was saved");
 
     // Shown again, the new list is confirmed and holds.
     let again = view(&project);
     assert_eq!(again.declared, ["npm test", "npm run e2e"]);
     let saved = confirm(&project, &again.commands, &again.setup, &again.declared).unwrap();
-    assert_eq!(confirmed(&saved).unwrap(), ["npm test", "npm run e2e"]);
+    assert!(view(&saved).confirmed);
+    assert_eq!(view(&saved).commands, ["npm test", "npm run e2e"]);
 
     // An edited list still confirms, as long as the declaration it came from is the one shown.
     let edited = confirm(&project, &text(&["npm run lint"]), &again.setup, &again.declared).unwrap();
-    assert_eq!(confirmed(&edited).unwrap(), ["npm run lint"]);
+    assert!(view(&edited).confirmed);
+    assert_eq!(view(&edited).commands, ["npm run lint"]);
 }
 
 /// A draft with invalid commands against a declaration that moved on is refused for the declaration, so the screen refreshes.

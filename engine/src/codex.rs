@@ -953,7 +953,7 @@ impl CodexServer {
         let server = proc::spawn_expecting(&pinned.sha256, || Self::start_with_policy(opts, Some(role)));
         let session = server.open(thread, sink);
         server.retire();
-        Ok(session.for_project(role))
+        Ok(session)
     }
     /// The process starts right away, so a warmed-up conversation is already booting while the user types.
     pub fn start(opts: CodexServerOptions) -> CodexServer {

@@ -722,11 +722,9 @@ export const de: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "reason.task.waiting": "Wartet auf Abhängigkeiten",
   // Native speaker must translate (needs native review).
   "error.project.notFound": "Projekt nicht gefunden",
   // Native speaker must translate (needs native review).
-  "error.journal.mismatch": "Journal-Abweichung",
   // Native speaker must translate (needs native review).
   "reason.grant.none": "Das Projekt hat keine aktive Git-Freigabe",
   // Native speaker must translate (needs native review).
@@ -746,44 +744,18 @@ export const de: Messages = {
   "projects.proof.cancel": "Abbrechen",
   "projects.proof.changed": "Die Prüfungen des Projekts haben sich seit deiner Bestätigung geändert. Bestätige sie erneut.",
   "error.wire.path": "Eine Rolle wollte eine Datei außerhalb der erlaubten Ordner ändern.",
-  "error.wire.role": "Eine Rolle hat mit der falschen Art von Antwort geantwortet.",
   "error.project.invocation": "Der Lauf des Assistenten ist fehlgeschlagen.",
-  "reason.budget.cap": "Diese Mission hat ihre Kostengrenze erreicht.",
-  "reason.budget.daily": "Das Missionsbudget für heute ist aufgebraucht. Es geht weiter, wenn das Fenster zurückgesetzt wird.",
-  "reason.quota.weekly": "Das Wochenkontingent des Abonnements ist vorerst aufgebraucht.",
-  "reason.lease.live": "Ein anderer Lauf hält noch die Arbeitskopie dieses Projekts. Setze fort, wenn er fertig ist.",
-  "reason.project.empty": "Eine Mission kann keine Datei dieses Projekts ändern.",
   "reason.proof.command": "Ein Prüfbefehl muss einfacher Text sein: ein Programmname und seine Argumente, ohne Pipes, Anführungszeichen oder Pfade.",
-  "reason.proof.definition": "Der Plan nannte eine Prüfung, die das Projekt nicht hat.",
-  "reason.proof.failed": "Die Prüfungen sind bei der fertigen Änderung fehlgeschlagen, deshalb wurde nichts gesichert.",
-  "reason.proof.unconfirmed": "Bestätige die Prüfungen des Projekts, bevor du eine Mission startest.",
-  "reason.proof.notRed": "Die Prüfungen liefen schon vor der Änderung durch, sie belegen also nichts.",
-  "reason.proof.busy": "Die Prüfungen laufen noch von einem früheren Versuch. Setze gleich fort.",
-  "reason.queue.review": "Die Prüfung hat diese Änderung nicht weitergehen lassen.",
-  "reason.project.reconcile": "Faber konnte die Aufzeichnungen dieses Projekts nicht mit seinem Repository abgleichen. Prüfe es und setze dann fort.",
   "reason.project.processTreeUnproven": "Faber konnte nicht belegen, dass alles Gestartete beendet ist. Prüfe die laufenden Programme und setze dann fort.",
-  "reason.disk.needed": "Für eine saubere Kopie ist nicht genug freier Speicherplatz da.",
   "reason.proof.setupChanged": "Die Installationen des Projekts haben sich geändert, seit diese Liste gezeigt wurde. Sieh dir die Liste noch einmal an und bestätige dann.",
   "reason.proof.declaredChanged": "Die Prüfungen des Projekts haben sich geändert, seit diese Liste gezeigt wurde. Die Liste unten ist die neue; sieh sie dir an und bestätige dann.",
-  "reason.workspace.busy": "Eine Prüfung eines früheren Laufs läuft noch, deshalb wurde die Arbeitskopie des Projekts nicht angefasst. Versuche es gleich noch einmal.",
-  "reason.qualify.probe": "Eine Prüfung eines der Agenten ist nicht bestanden.",
-  "reason.qualify.timeout": "Eine Prüfung eines der Agenten hat zu lange gedauert.",
-  "reason.qualify.start": "Eine Prüfung eines der Agenten konnte nicht starten.",
-  "reason.qualify.data": "Faber konnte seinen eigenen Ordner für die Prüfungen nicht vorbereiten.",
-  "reason.qualify.proof": "Die Prüfungen liefen, haben aber nicht gezeigt, dass die Agenten sicher zu verwenden sind.",
-  "reason.qualify.os": "Das Prüfen der Agenten erfordert Windows.",
   "projects.proof.setup": "Zuerst, in der sauberen Kopie:",
-  "reason.setup.failed": "Die Installation der Abhängigkeiten des Projekts ist in der sauberen Kopie fehlgeschlagen, deshalb liefen die Prüfungen nicht.",
-  "reason.setup.program": "Das Programm, das die Abhängigkeiten des Projekts installiert, wurde auf diesem Computer nicht gefunden.",
-  "reason.workspace.git": "Faber konnte die Arbeitskopie des Projekts nicht vorbereiten. Prüfe, ob git im Projekt funktioniert, und setze dann fort.",
-  "reason.workspace.unsafe": "Eine geänderte Datei ließ sich nicht sicher in die Arbeitskopie des Projekts kopieren.",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  'reason.budget.calibration': 'Faber lernt noch, wie viel deines Kontingents eine Mission verbraucht. Es wartet auf ein paar weitere Messungen und macht dann weiter.',
   'reason.budget.other': 'Faber wartet, bis dein Kontingent den nächsten Schritt erlaubt.',
   'reason.other': 'Faber hat hier aus einem Grund angehalten, den es noch nicht beschreiben kann. Die Details stehen im Protokoll.',
   // Native speaker must translate (needs native review).
@@ -819,11 +791,8 @@ export const de: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "reason.git.repository": "Wähle einen Ordner, der zu einem Git-Repository gehört.",
   // Native speaker must translate (needs native review).
-  "reason.git.base": "Die Git-Ausgangsrevision konnte nicht aufgelöst werden.",
   // Native speaker must translate (needs native review).
-  "reason.git.ref": "Die Branch-Referenz der Mission ist ungültig.",
   // Native speaker must translate (needs native review).
   "reason.git.command": "Die Git-Operation ist fehlgeschlagen.",
   // Native speaker must translate (needs native review).
@@ -859,29 +828,19 @@ export const de: Messages = {
   // Native speaker must translate (needs native review).
   "reason.grant.newer": "Diese Git-Freigabe erfordert eine neuere Version von Faber.",
   // Native speaker must translate (needs native review).
-  "error.journal.newer": "Diese Missionseinträge erfordern eine neuere Version von Faber.",
   // Native speaker must translate (needs native review).
   "error.store.full": "Der Datenträger ist voll. Es wurde nichts genehmigt.",
   // Native speaker must translate (needs native review).
   "reason.interrupted": "Am letzten gespeicherten Prüfpunkt pausiert.",
   // Native speaker must translate (needs native review).
-  "error.plan.tooBig": "Der Missionsplan überschreitet das Aufgabenlimit.",
   // Native speaker must translate (needs native review).
-  "error.plan.badId": "Der Missionsplan enthält eine ungültige Aufgabenkennung.",
   // Native speaker must translate (needs native review).
-  "error.plan.duplicateTask": "Der Missionsplan wiederholt eine Aufgabenkennung.",
   // Native speaker must translate (needs native review).
-  "error.plan.missingTask": "Eine Aufgabe hängt von einer fehlenden Aufgabe ab.",
   // Native speaker must translate (needs native review).
-  "error.plan.cycle": "Der Missionsplan enthält zirkuläre Abhängigkeiten.",
   // Native speaker must translate (needs native review).
-  "error.plan.duplicateDeliverable": "Zwei Aufgaben beanspruchen dasselbe Lieferobjekt.",
   // Native speaker must translate (needs native review).
-  "error.plan.badPath": "Der Missionsplan nennt einen Pfad außerhalb seines Umfangs.",
   // Native speaker must translate (needs native review).
-  "error.plan.readOnlyWrites": "Eine schreibgeschützte Aufgabe beansprucht die Berechtigung zum Schreiben von Dateien.",
   // Native speaker must translate (needs native review).
-  "error.plan.overlap": "Nicht geordnete Schreibvorgänge überschneiden dieselben Quelldateien.",
   // Native speaker must translate (needs native review).
   "crumb.separator": "\u203a",
   // Right-click menus (ui/ContextMenu.tsx).

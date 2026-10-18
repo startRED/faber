@@ -65,7 +65,7 @@ impl Runner for Real {
         let exists = |p: &str| Path::new(p).is_file();
         let cli =
             crate::cli::resolve_cli(&spec.program, &path, cfg!(windows), &exists, &|p| std::fs::read_to_string(p).unwrap_or_default())
-                .or_else(|| crate::project::mission::node_tool(&spec.program, &path, cfg!(windows), &exists))
+                .or_else(|| crate::project::checks::node_tool(&spec.program, &path, cfg!(windows), &exists))
                 .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("{} is not on the PATH", spec.program)))?;
         let name = Path::new(&cli.command).file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_ascii_lowercase();
         let lower = cli.command.to_ascii_lowercase();

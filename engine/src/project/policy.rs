@@ -145,9 +145,24 @@ pub async fn reject_native(
     Ok(true)
 }
 
+/// Whether `model` is a full model id of the vendor (`claude-opus-4-8`, `gpt-6.1-sol`), not an alias.
+fn full_model_id(vendor: Vendor, model: &str) -> bool {
+    match vendor {
+        Vendor::Claude => ["claude-haiku-", "claude-sonnet-", "claude-opus-"].iter().any(|p| {
+            model.strip_prefix(p).is_some_and(|v| {
+                !v.is_empty() && v.bytes().any(|b| b.is_ascii_digit()) && v.bytes().all(|b| b.is_ascii_digit() || b == b'-' || b == b'.')
+            })
+        }),
+        Vendor::Codex => model.strip_prefix("gpt-").is_some_and(|v| {
+            let version = ["-luna", "-sol", "-astra"].iter().find_map(|s| v.strip_suffix(s)).unwrap_or(v);
+            !version.is_empty() && version.bytes().any(|b| b.is_ascii_digit()) && version.bytes().all(|b| b.is_ascii_digit() || b == b'.')
+        }),
+    }
+}
+
 pub(crate) fn invocation(vendor: Vendor, model: Option<&str>, effort: Option<&str>, side_question: bool) -> Result<(), Blocker> {
     if side_question
-        || !model.is_some_and(|m| super::worker::full_model_id(vendor, m))
+        || !model.is_some_and(|m| full_model_id(vendor, m))
         || !matches!(effort, Some("low" | "medium" | "high" | "xhigh" | "max"))
     {
         return Err(Blocker::Invocation);

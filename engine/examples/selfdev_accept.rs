@@ -382,10 +382,10 @@ async fn attempt(scenario: Scenario, model: &str, options: &Options, base: &Path
     if scenario == Scenario::Fix {
         // The person extends the checks in Settings > Projects (`project_proof_confirm` in the shell): the guide declares
         // `cargo test`, the confirmed list adds `cargo fmt --check`, which only Faber's checks run.
-        let view = faber_engine::project::mission::view(&project);
+        let view = faber_engine::project::checks::view(&project);
         let mut commands = view.declared.clone();
         commands.push("cargo fmt --check".into());
-        let confirmed = faber_engine::project::mission::confirm(&project, &commands, &view.setup, &view.declared)?;
+        let confirmed = faber_engine::project::checks::confirm(&project, &commands, &view.setup, &view.declared)?;
         engine.update_project(&project, &confirmed)?;
         project = confirmed;
     }

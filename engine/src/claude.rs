@@ -412,7 +412,7 @@ pub fn start_project_claude(
     let args = project_claude_args(&opts.launch, role)?;
     crate::project::policy::admit_launch(crate::model::Vendor::Claude, &opts.bin)
         // The pin is held until the started process was checked and resumed.
-        .map(|pinned| proc::spawn_expecting(&pinned.sha256, || start_with_policy(opts, on_event, args, true)).for_project(role))
+        .map(|pinned| proc::spawn_expecting(&pinned.sha256, || start_with_policy(opts, on_event, args, true)))
 }
 
 fn block_text(content: &Value) -> String {

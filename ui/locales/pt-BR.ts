@@ -719,11 +719,9 @@ export const ptBR: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "reason.task.waiting": "Aguardando dependências",
   // Native speaker must translate (needs native review).
   "error.project.notFound": "Projeto não encontrado",
   // Native speaker must translate (needs native review).
-  "error.journal.mismatch": "Incompatibilidade no diário",
   // Native speaker must translate (needs native review).
   "reason.grant.none": "O projeto não tem autorização ativa do Git",
   // Native speaker must translate (needs native review).
@@ -743,44 +741,18 @@ export const ptBR: Messages = {
   "projects.proof.cancel": "Cancelar",
   "projects.proof.changed": "As verificações do projeto mudaram desde que você as confirmou. Confirme de novo.",
   "error.wire.path": "Um papel pediu para mudar um arquivo fora das pastas permitidas.",
-  "error.wire.role": "Um papel respondeu com o tipo errado de resposta.",
   "error.project.invocation": "A execução do assistente falhou.",
-  "reason.budget.cap": "Esta missão chegou ao teto de custo.",
-  "reason.budget.daily": "O orçamento de missões de hoje acabou. Segue quando a janela reiniciar.",
-  "reason.quota.weekly": "A cota semanal da assinatura acabou por enquanto.",
-  "reason.lease.live": "Outra execução ainda segura a cópia de trabalho deste projeto. Retome quando ela terminar.",
-  "reason.project.empty": "Uma missão não pode mudar nenhum arquivo deste projeto.",
   "reason.proof.command": "Um comando de verificação deve ser texto simples: o nome de um programa e seus argumentos, sem pipes, aspas nem caminhos.",
-  "reason.proof.definition": "O plano citou uma verificação que o projeto não tem.",
-  "reason.proof.failed": "As verificações falharam na mudança pronta, então nada foi guardado.",
-  "reason.proof.unconfirmed": "Confirme as verificações do projeto antes de iniciar uma missão.",
-  "reason.proof.notRed": "As verificações já passavam antes da mudança, então não provam nada.",
-  "reason.proof.busy": "As verificações ainda rodam de uma tentativa anterior. Retome daqui a pouco.",
-  "reason.queue.review": "A revisão não deixou esta mudança seguir.",
-  "reason.project.reconcile": "O Faber não conseguiu casar os registros deste projeto com o repositório. Confira e retome.",
   "reason.project.processTreeUnproven": "O Faber não conseguiu provar que tudo o que ele iniciou terminou. Confira os programas em execução e retome.",
-  "reason.disk.needed": "Não há espaço livre em disco para uma cópia limpa.",
   "reason.proof.setupChanged": "As instalações do projeto mudaram desde que esta lista foi mostrada. Veja a lista de novo e confirme.",
   "reason.proof.declaredChanged": "As verificações do projeto mudaram desde que esta lista foi mostrada. A lista abaixo é a nova; confira e confirme.",
-  "reason.workspace.busy": "Uma verificação de uma execução anterior ainda está rodando, então a cópia de trabalho do projeto não foi mexida. Tente de novo em instantes.",
-  "reason.qualify.probe": "Uma verificação de um dos agentes não passou.",
-  "reason.qualify.timeout": "Uma verificação de um dos agentes demorou demais.",
-  "reason.qualify.start": "Uma verificação de um dos agentes não conseguiu começar.",
-  "reason.qualify.data": "O Faber não conseguiu preparar a própria pasta para as verificações.",
-  "reason.qualify.proof": "As verificações rodaram, mas não provaram que os agentes são seguros para usar.",
-  "reason.qualify.os": "Verificar os agentes exige o Windows.",
   "projects.proof.setup": "Primeiro, na cópia limpa:",
-  "reason.setup.failed": "A instalação das dependências do projeto falhou na cópia limpa, então as verificações não rodaram.",
-  "reason.setup.program": "O programa que instala as dependências do projeto não foi encontrado neste computador.",
-  "reason.workspace.git": "O Faber não conseguiu preparar a cópia de trabalho do projeto. Veja se o git funciona no projeto e retome.",
-  "reason.workspace.unsafe": "Um arquivo alterado não pôde ser copiado com segurança para a cópia de trabalho do projeto.",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  'reason.budget.calibration': 'O Faber ainda está aprendendo quanto da sua cota uma missão usa. Ele espera mais algumas leituras e continua.',
   'reason.budget.other': 'O Faber está esperando sua cota permitir o próximo passo.',
   'reason.other': 'O Faber parou aqui por um motivo que ainda não sabe descrever. Os detalhes estão no log.',
   // Native speaker must translate (needs native review).
@@ -816,11 +788,8 @@ export const ptBR: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "reason.git.repository": "Escolha uma pasta que pertença a um repositório Git.",
   // Native speaker must translate (needs native review).
-  "reason.git.base": "A revisão inicial do Git não pôde ser resolvida.",
   // Native speaker must translate (needs native review).
-  "reason.git.ref": "A referência da branch da missão é inválida.",
   // Native speaker must translate (needs native review).
   "reason.git.command": "A operação do Git falhou.",
   // Native speaker must translate (needs native review).
@@ -856,29 +825,19 @@ export const ptBR: Messages = {
   // Native speaker must translate (needs native review).
   "reason.grant.newer": "Esta autorização do Git requer uma versão mais recente do Faber.",
   // Native speaker must translate (needs native review).
-  "error.journal.newer": "Estes registros da missão requerem uma versão mais recente do Faber.",
   // Native speaker must translate (needs native review).
   "error.store.full": "O disco está cheio. Nada foi aprovado.",
   // Native speaker must translate (needs native review).
   "reason.interrupted": "Pausado no último checkpoint salvo.",
   // Native speaker must translate (needs native review).
-  "error.plan.tooBig": "O plano da missão excede o limite de tarefas.",
   // Native speaker must translate (needs native review).
-  "error.plan.badId": "O plano da missão tem um identificador de tarefa inválido.",
   // Native speaker must translate (needs native review).
-  "error.plan.duplicateTask": "O plano da missão repete um identificador de tarefa.",
   // Native speaker must translate (needs native review).
-  "error.plan.missingTask": "Uma tarefa depende de uma tarefa ausente.",
   // Native speaker must translate (needs native review).
-  "error.plan.cycle": "O plano da missão tem dependências circulares.",
   // Native speaker must translate (needs native review).
-  "error.plan.duplicateDeliverable": "Duas tarefas reivindicam a mesma entrega.",
   // Native speaker must translate (needs native review).
-  "error.plan.badPath": "O plano da missão indica um caminho fora do seu escopo.",
   // Native speaker must translate (needs native review).
-  "error.plan.readOnlyWrites": "Uma tarefa somente leitura reivindica permissão para gravar arquivos.",
   // Native speaker must translate (needs native review).
-  "error.plan.overlap": "Escritores não ordenados sobrepõem os mesmos arquivos fonte.",
   // Native speaker must translate (needs native review).
   "crumb.separator": "\u203a",
   // Right-click menus (ui/ContextMenu.tsx).

@@ -2,7 +2,7 @@
 //! checks, run on the PC from the conversation, so an agent learns in seconds whether its change works, before any push.
 //!
 //! - **The checks** are the project's "Checks" (R137): the commands under "Proof commands" in AGENTS.md or CLAUDE.md, or a
-//!   detected default, as the person confirmed them in Settings > Projects when they did (`crate::project::mission::view`).
+//!   detected default, as the person confirmed them in Settings > Projects when they did (`crate::project::checks::view`).
 //! - **Fast** runs only the checks a change can affect, found from each command (`select`): a check whose files did not
 //!   change is left out, and one that passed on exactly the same content is not run again (a content hash, never a time).
 //!   **Full** runs every check.
@@ -306,7 +306,7 @@ fn plan(commands: &[String], folder: &Path) -> (Vec<Planned>, Vec<CheckResult>) 
     for command in commands {
         let env = |name: &str| std::env::var(name).ok();
         let credentials = crate::permissions::touches_credentials(&json!({ "command": command }), folder.to_str(), &env);
-        match crate::project::mission::command_tokens(command) {
+        match crate::project::checks::command_tokens(command) {
             _ if credentials => refused.push(refuse(command, "This command names a sign-in folder or file, so Faber does not run it.")),
             Ok(tokens) => {
                 planned.push(Planned { command: command.clone(), watch: watch(&tokens, &scripts), heavy: heavy(&tokens), tokens })

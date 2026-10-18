@@ -525,7 +525,7 @@ struct Live {
     /// How Faber comes back after this install.
     reopen: Reopen,
     found: std::sync::Mutex<Option<Update>>,
-    /// The engine's admission closed for the install (`Engine::local_build_admission`), held until the process ends.
+    /// The engine's admission closed for the install (`Engine::install_admission`), held until the process ends.
     closed: std::sync::Mutex<Option<Box<dyn std::any::Any + Send>>>,
 }
 
@@ -587,7 +587,7 @@ impl Release for Live {
             || {
                 // The engine's own admission closes first (it refuses when an answer runs, and every new one after), then
                 // whether it is still working is read. A CLI install is a `SetupRunning` and is read by the gate itself.
-                let closed = faber.engine.local_build_admission().ok()?;
+                let closed = faber.engine.install_admission().ok()?;
                 (!faber.engine.is_working()).then_some(closed)
             },
             || faber.draft_dirty.load(Ordering::SeqCst) || (who == Who::Start && faber.touched.load(Ordering::SeqCst)),

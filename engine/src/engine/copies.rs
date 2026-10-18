@@ -244,7 +244,7 @@ impl Core {
     /// copies, or the copy of a conversation that was removed once merged. A conversation that began in the folder stays
     /// there.
     pub(super) fn copy_plan(&mut self, req: &SendRequest) -> Option<Plan> {
-        if req.area != Area::Project || self.local_build {
+        if req.area != Area::Project || self.installing {
             return None;
         }
         let run = self.git.clone()?;

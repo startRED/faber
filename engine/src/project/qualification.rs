@@ -1,7 +1,7 @@
 //! The only thing that opens a role gate: a private, fresh receipt tied to the exact CLI version string and the
 //! SHA-256 of the exact executable. A parameter, a manifest, a fixture or an observation file never opens it, and a
-//! changed binary or version closes it again. The manual qualification run writes the receipt after its live probes
-//! pass (`testkit/examples/project-qualification.rs`); `policy::admit` reads it.
+//! changed binary or version closes it again. The manual qualification run that wrote the receipt after its live probes
+//! passed (`testkit/examples/project-qualification.rs`) was retired with the mission code; `policy::admit` still reads it.
 use crate::model::Vendor;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

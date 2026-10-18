@@ -30,7 +30,7 @@ use faber_engine::cli::Cli;
 use faber_engine::codex::{ModelInfo, list_codex_models, read_codex_limits};
 use faber_engine::model::{Conversation, Project, Settings, Vendor};
 use faber_engine::proc::{Spawner, real_spawner};
-use faber_engine::project::mission;
+use faber_engine::project::checks;
 use faber_engine::{AppEvent, AppState, BranchRequest, Engine, EngineOptions, SendRequest, WarmRequest};
 use look::{Failure, Look, ThemeFile};
 use serde::Serialize;
@@ -481,9 +481,9 @@ async fn project_copies(faber: State<'_, Faber>, project_id: String, on: bool) -
 }
 
 #[tauri::command]
-async fn project_proof(faber: State<'_, Faber>, project_id: String) -> Res<mission::ProofView> {
+async fn project_proof(faber: State<'_, Faber>, project_id: String) -> Res<checks::ProofView> {
     project_commands::id(&project_id)?;
-    Ok(mission::view(&faber.engine.project(&project_id)?))
+    Ok(checks::view(&faber.engine.project(&project_id)?))
 }
 
 /// The owner confirms the commands Faber checks a project's work with (R137): the project's declared list, or the edited one.
@@ -494,15 +494,15 @@ async fn project_proof_confirm(
     commands: Vec<String>,
     setup: Vec<String>,
     declared: Vec<String>,
-) -> Res<mission::ProofView> {
+) -> Res<checks::ProofView> {
     project_commands::id(&project_id)?;
     for command in commands.iter().chain(&setup).chain(&declared) {
         project_commands::text(command)?;
     }
     let before = faber.engine.project(&project_id)?;
-    let after = mission::confirm(&before, &commands, &setup, &declared).map_err(str::to_string)?;
+    let after = checks::confirm(&before, &commands, &setup, &declared).map_err(str::to_string)?;
     faber.engine.update_project(&before, &after)?;
-    Ok(mission::view(&after))
+    Ok(checks::view(&after))
 }
 
 /// Test builds only: the screen's checks (tests/ui/) send their result here. It goes to the file named by

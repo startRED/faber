@@ -14,8 +14,14 @@ Done when: the engine and shell build without the removed modules, every remaini
 mission and local build rows and the "Known incoherences" about them are gone or updated, R93 is marked retired in
 decisions.md, and the commit body gives the lines removed and the memory and binary-size change.
 
-Progress: wave 1 (the shell, the screen, the `faber-local` program and its testkit scenarios) is done. Left for the
-engine wave: `testkit/examples/project-qualification` (its `--live-promote` mode starts the removed `faber-local`), the
-`projects.rs` screen scenarios and their fixture probe, `reason.kit.*` keys (still emitted by `project/kit`), the unused
-`projects.task.review` and `projects.state.*` keys, the `mission_start` trap in `testkit/coherence/traps.json`, and
-renaming `Engine::local_build_admission` (the updater's install gate) once the mission term is gone.
+Progress: wave 1 (the shell, the screen, the `faber-local` program and its testkit scenarios), wave 2a (qualify, the
+proof screen, the r132 harness, the qualification examples, the coordinator and mission screen scenarios) and wave 2b
+(the mission cluster: `run`, `store`, `coordinator`, `lead`, `queue`, `worker`, `update`, `canary`, `report`,
+`bar`, `workspace`, `disk`, `proof/native`, the mission records, `project_sessions.rs` and `project_budget.rs` with
+their tests, fixtures and git-broker scenarios; the proof-check reading moved to `project/checks.rs`;
+`Engine::local_build_admission` became `install_admission`) are done. Old mission data on disk is ignored, never
+deleted. Left: `policy`, `qualification`, the project-role launch code in `claude.rs`/`codex.rs`, `kit`, `files`,
+`wire/rework.rs` and the `proof.rs` definition runner split from what the project conversation still uses; the
+zero-turn reading stamps of the ledger (now only written); the `reason.kit.*` keys (still emitted by `project/kit`),
+the `mission_start` trap in `testkit/coherence/traps.json`, and the screen suite's `rustup run` wrapper in ci.yml
+(it was for the canary's cargo).

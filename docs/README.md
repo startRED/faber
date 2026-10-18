@@ -31,7 +31,7 @@ points nowhere; a page that grows past the limit splits by topic, and its row he
 | [design/search.md](design/search.md) | The command box (Ctrl+K) and find in a conversation (Ctrl+F) |
 | [design/subagents.md](design/subagents.md) | A reply's subagent and helper rows, their running-column view, the stuck signs and the pages opened in Faber's browser |
 | [design/settings.md](design/settings.md) | The Settings screen, the first run and the tutorial |
-| [design/projects.md](design/projects.md) | The mission engine's published contract: records, worker envelope, kits, proof isolation, commands |
+| [design/projects.md](design/projects.md) | The Projects screens, what a project stores, and how its checks run |
 | [dev/testing.md](dev/testing.md) | Tests: `cargo t`, screen tests, build folder and slots, what a run prints |
 | [dev/workflow.md](dev/workflow.md) | Landing work: lane claims, merge on green, the task queue, a red base, the numbers given at landing |
 | [dev/whats-new.md](dev/whats-new.md) | Writing a what's-new entry: the words, the kinds, numbers for speed and memory |
@@ -52,7 +52,7 @@ one is never touched again, and its boxes say nothing.
 | superpowers/specs/2026-10-11-faber-redesign-design.md | Absorbed into product/ and design/ |
 | superpowers/specs/2026-10-11-auto-quota-pacing-design.md, plans/2026-10-11-auto-quota-pacing.md, auto-quota-pacing-report.md | Shipped |
 | superpowers/plans/2026-10-11-b2 … b9 (test runner, looks, running engine, layout, tray, first run, Settings, download) | Shipped |
-| superpowers/specs/2026-10-12-self-development-mvp-design.md, plans/2026-10-12-self-development-mvp.md | Superseded by R202: self-development runs through the project conversation ([dev/self-development.md](dev/self-development.md)); the mission engine stays without a screen |
+| superpowers/specs/2026-10-12-self-development-mvp-design.md, plans/2026-10-12-self-development-mvp.md | Superseded by R202: self-development runs through the project conversation ([dev/self-development.md](dev/self-development.md)); the mission engine was retired with task 060 (R215) |
 | superpowers/specs/2026-10-12-faber-rework-design.md | Proposal, nothing built |
 | superpowers/specs/2026-10-12-generated-pipelines-design.md, 2026-10-12-tool-selection-rework-design.md | Proposals, partly superseded by the rework design |
 | superpowers/specs/2026-10-12-ux-sentinel-design.md, plans/2026-10-13-ux-sentinel-s0.md | Slice S0 shipped (dev/sentinel.md); the rest is a proposal |

@@ -127,7 +127,7 @@ impl Core {
             self.store.projects().into_iter().find(|p| Some(&p.id) == c.project_id.as_ref()).ok_or("this conversation has no project")?;
         let folder = self.cwd_of(c).map_err(|_| "the conversation's folder cannot be used")?;
         // The project's own checks (R137), as declared in this folder and confirmed by the person when they were.
-        let view = crate::project::mission::view_in(&project, &folder);
+        let view = crate::project::checks::view_in(&project, &folder);
         let request = Request {
             folder,
             level: Some(level),

@@ -40,15 +40,15 @@ mod copies;
 pub use copies::GitRunner;
 pub mod facts;
 mod helpers;
+mod install_gate;
 mod keep_going;
 mod parked;
 mod pr_watch;
-mod project_budget;
-mod project_sessions;
 mod quota_watch;
 mod recovery;
 mod siblings;
 mod stuck_watch;
+mod unbounded;
 mod usage_view;
 mod verifying;
 pub use pr_watch::{PrReader, gh_reader};
@@ -312,24 +312,10 @@ struct Core {
     /// What each conversation's folder held when its reply began, for Faber's checks (`verifying::Before`).
     before: HashMap<String, verifying::Before>,
     live: HashMap<String, Live>,
+    /// Set while an install of Faber closes the engine's admission (`Engine::install_admission`): nothing new starts.
+    installing: bool,
     /// Compactions the agents asked for, done once their turn ends (`compact.rs`).
     compacts: HashMap<String, compact::Plan>,
-    mission_sessions: HashMap<String, Vec<Session>>,
-    /// Owned process trees of writer roles by invocation id, and the terminal event each role reported.
-    worker_trees: HashMap<String, crate::proc::OwnedTree>,
-    worker_terminals: HashMap<String, EngineEvent>,
-    /// Role invocations the engine itself is closing: what their processes report from then on is the shutdown.
-    worker_closing: HashSet<String>,
-    /// Woken when a role turn ends or a mission stops, so a coordinator reads the journal exactly then.
-    mission_wake: Arc<tokio::sync::Notify>,
-    /// The project each mission in `mission_sessions` belongs to, so a project can be asked whether a worker is alive in it.
-    mission_projects: HashMap<String, String>,
-    /// Missions a coordinator in this process drives now, from setup through roles and proofs to the stop (see `drive`),
-    /// each with its project, so removing a project knows without reading its records.
-    driving: HashMap<String, String>,
-    mission_lock: Arc<tokio::sync::Mutex<()>>,
-    local_update: Option<crate::project::update::SlotLayout>,
-    local_build: bool,
     /// A new conversation still being typed: its CLI starts before the first message is sent.
     draft: Option<String>,
     /// Streaming text goes to the screen at most ~30 times a second; the message waiting per conversation.
@@ -402,18 +388,6 @@ pub struct Engine {
     runtime: tokio::runtime::Handle,
 }
 
-/// A mission being driven, from [`Engine::drive`]; the drive ends when this drops, even if the driver panicked.
-pub struct Drive {
-    engine: Engine,
-    mission: String,
-}
-
-impl Drop for Drive {
-    fn drop(&mut self) {
-        self.engine.with(|c| c.driving.remove(&self.mission));
-    }
-}
-
 impl Engine {
     pub fn new(opts: EngineOptions, emit: Emit) -> Engine {
         crate::project::qualification::use_dir(&opts.data_dir);
@@ -448,17 +422,8 @@ impl Engine {
                 me: me.clone(),
                 convs: HashMap::new(),
                 live: HashMap::new(),
+                installing: false,
                 compacts: HashMap::new(),
-                mission_sessions: HashMap::new(),
-                worker_trees: HashMap::new(),
-                worker_terminals: HashMap::new(),
-                worker_closing: HashSet::new(),
-                mission_wake: Arc::new(tokio::sync::Notify::new()),
-                mission_projects: HashMap::new(),
-                driving: HashMap::new(),
-                mission_lock: Arc::new(tokio::sync::Mutex::new(())),
-                local_update: None,
-                local_build: false,
                 draft: None,
                 pending: HashMap::new(),
                 next_sid: 0,
@@ -850,35 +815,23 @@ impl Engine {
         projects.reverse();
         if projects.is_empty() { Err(failure) } else { Ok(projects) }
     }
-    /// Takes a project out of the list. Anything still working in it (a conversation answering, a mission planning or
-    /// running) stops the removal with `error.project.busy`: the person stops it first. Faber's own copy of the project goes;
-    /// the person's folder and the mission journals in it stay.
+    /// Takes a project out of the list. A conversation still answering in it stops the removal with `error.project.busy`:
+    /// the person stops it first. The person's folder stays as it is, with whatever older versions left in it, and so does
+    /// whatever an older version kept in Faber's data folder.
     pub fn remove_project(&self, id: &str) -> Result<(), String> {
-        let data = self.with(|c| {
+        self.with(|c| {
             let mut projects = c.store.projects_checked().map_err(|e| e.key().to_string())?;
-            let Some(project) = projects.iter().find(|p| p.id == id).cloned() else { return Err("error.project.notFound".into()) };
-            let answering = c.convs.values().any(|conv| conv.project_id.as_deref() == Some(id) && running_item(conv).is_some());
-            // A worker session alive in memory counts even if its records on disk were removed or cannot be read.
-            let working = c.mission_sessions.iter().any(|(m, s)| !s.is_empty() && c.mission_projects.get(m).is_some_and(|p| p == id));
-            // A paused mission can still be finishing a setup or a proof in the copy until its drive ends.
-            let driven = c.driving.values().any(|p| p == id);
-            if answering || working || driven || crate::project::has_active_mission(Path::new(&project.path), &c.opts.data_dir, id) {
+            if !projects.iter().any(|p| p.id == id) {
+                return Err("error.project.notFound".into());
+            }
+            if c.convs.values().any(|conv| conv.project_id.as_deref() == Some(id) && running_item(conv).is_some()) {
                 return Err("error.project.busy".into());
             }
             projects.retain(|p| p.id != id);
             c.store.save_projects(&projects).map_err(|_| "error.store.write".to_string())?;
             c.list_changed();
-            Ok::<_, String>(c.opts.data_dir.clone())
-        })?;
-        // Away from the lock: deleting a big copy takes a while, and nothing works in it any more.
-        if let Ok(copy) = crate::project::workspace::Workspace::new(&data, id) {
-            std::thread::spawn(move || {
-                if let Err(reason) = copy.discard() {
-                    eprintln!("faber: the copy of a removed project stays ({reason})");
-                }
-            });
-        }
-        Ok(())
+            Ok(())
+        })
     }
     /// Swaps the CLIs in use, for example after one was installed or signed in to. Idle processes of a changed CLI
     /// close and the shared Codex processes retire, so the next turn starts the new one; a turn in flight finishes
@@ -903,20 +856,10 @@ impl Engine {
             Some(TerminalCommand { command: cli.command, args, cwd: c.opts.data_dir.clone() })
         })
     }
-    /// Whether any answer is streaming or waits for the user (the running list is not empty), a mission worker runs, or a
-    /// mission is being driven.
+    /// Whether any answer is streaming or waits for the user (the running list is not empty).
     /// The shell uses it to hold back anything that would end the process (installing an update).
     pub fn is_working(&self) -> bool {
-        self.with(|c| !c.running.items.is_empty() || c.mission_sessions.values().any(|s| !s.is_empty()) || !c.driving.is_empty())
-    }
-    /// Marks `mission` of `project` as driven by this process until the returned guard drops; `None` when it already is, so
-    /// a mission never has two drivers. While any mission is driven the engine is working.
-    pub fn drive(&self, mission: &str, project: &str) -> Option<Drive> {
-        self.with(|c| !c.driving.contains_key(mission) && c.driving.insert(mission.into(), project.into()).is_none())
-            .then(|| Drive { engine: self.clone(), mission: mission.to_string() })
-    }
-    pub fn is_driving(&self, mission: &str) -> bool {
-        self.with(|c| c.driving.contains_key(mission))
+        self.with(|c| !c.running.items.is_empty())
     }
     pub fn shutdown(&self) {
         self.with(|c| {
@@ -935,9 +878,6 @@ impl Engine {
                 l.session.close();
             }
             c.close_helpers();
-            for session in c.mission_sessions.drain().flat_map(|(_, sessions)| sessions) {
-                session.close();
-            }
             for (_, server) in c.codex.drain() {
                 server.retire();
             }
@@ -2224,7 +2164,7 @@ impl Core {
     /// lost; once the turn exists, a failure shows on that turn's reply like any other.
     fn dispatch_queued(&mut self, id: &str, item: QueuedTurn) -> Result<(), String> {
         self.load(id).ok_or("error.conversationGone")?;
-        if self.local_build {
+        if self.installing {
             self.requeue(id, item);
             return Err("error.update.activeOperations".into());
         }
@@ -2677,7 +2617,7 @@ impl Core {
     }
 
     fn send(&mut self, req: SendRequest) -> Result<String, String> {
-        if self.local_build {
+        if self.installing {
             return Err("error.update.activeOperations".into());
         }
         let fallback = pick_model(&req.choice, &self.vendors(), self.codex_recommended.as_deref()).ok_or("error.noSubscription")?;
@@ -2835,7 +2775,7 @@ impl Core {
     // Edit a message or redo an answer with another model: a new conversation keeps everything before that message,
     // with the chat workspace copied, and sends the new text. The original stays as it was.
     fn branch(&mut self, req: BranchRequest, copy: Option<(String, crate::project::copy::WorkCopy)>) -> Result<String, String> {
-        if self.local_build {
+        if self.installing {
             return Err("error.update.activeOperations".into());
         }
         let source = self.load(&req.conversation_id).cloned().ok_or("error.messageGone")?;
@@ -2899,7 +2839,7 @@ impl Core {
 
     // Starts the CLI before the user finishes typing, so the first word arrives sooner.
     fn warm(&mut self, req: WarmRequest) {
-        if self.local_build {
+        if self.installing {
             return;
         }
         let Some(fallback) = pick_model(&req.choice, &self.vendors(), self.codex_recommended.as_deref()) else { return };

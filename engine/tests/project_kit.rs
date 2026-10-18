@@ -432,43 +432,6 @@ fn machine_requirements_and_unavailable_native_tools_stay_gaps() {
 }
 
 #[test]
-fn kit_selection_precedes_dispatch_and_completion_cannot_rewrite_frozen_content() {
-    use faber_engine::project::store::{Journal, JournalError};
-    let repo = tempfile::tempdir().unwrap();
-    let data = tempfile::tempdir().unwrap();
-    let journal = Journal::open(repo.path(), data.path(), "m1").unwrap();
-    let kit = assemble(&request(labels(&["lang:rust"]), vec![])).unwrap();
-    let mut receipt = KitReceipt::new("m1", "a", 1, kit, 1).unwrap();
-    journal.record_kit(&receipt).unwrap();
-    assert_eq!(journal.record_kit(&receipt), Err(JournalError::ReceiptExists));
-    let saved = journal.kit("a", 1).unwrap().unwrap();
-    assert_eq!(saved.pin(), receipt.pin());
-    receipt.attestation =
-        Some(attest(Vendor::Codex, &receipt.kit, &json!({"tools":[],"skills":[],"plugins":[],"mcp_servers":[]})).unwrap());
-    receipt.outcome = Some(KitOutcome {
-        proof_first_try: Some(true),
-        repairs: Some(0),
-        review_blocking: Some(0),
-        kit_used: vec![],
-        user: "unknown".into(),
-        tokens: None,
-        cost_micros: None,
-        extra: Default::default(),
-    });
-    receipt.completed_at = Some(2);
-    assert_eq!(journal.complete_kit(&receipt), Err(JournalError::Mismatch));
-    journal.attest_kit("a", 1, receipt.attestation.as_ref().unwrap()).unwrap();
-    let mut changed = receipt.clone();
-    changed.kit.model = "different".into();
-    assert_eq!(journal.complete_kit(&changed), Err(JournalError::Mismatch));
-    journal.complete_kit(&receipt).unwrap();
-    assert_eq!(journal.complete_kit(&receipt), Err(JournalError::ReceiptExists));
-    let reopened = Journal::open(repo.path(), data.path(), "m1").unwrap();
-    assert_eq!(reopened.kit("a", 1).unwrap().unwrap(), receipt);
-    assert!(repo.path().join(".faber/missions/m1/kits/a-1.json").is_file());
-}
-
-#[test]
 fn measurement_targets_require_complete_inputs_and_never_claim_fixture_evidence_is_live_g9() {
     let pairs = vec![
         LabelPair {
@@ -536,7 +499,6 @@ fn two_thousand_card_assembly_has_measured_percentiles() {
 
 #[test]
 fn card_cache_replays_one_writer_per_content_version_and_survives_reload() {
-    use faber_engine::project::store::Journal;
     let source = card("craft", "ui:component", "ui.craft", Origin::User).source;
     let reply=json!({"verbs":["build"],"serves":["ui:component"],"job":"ui.craft","exclusive":true,"stage":"during","conflicts":[],"examples":["build a component"],"blindText":"Applies component craft","purposes":["*"],"passFocus":["base"],"priorLiftPp":99.0}).to_string();
     let mut cache = CardCache::default();
@@ -555,11 +517,7 @@ fn card_cache_replays_one_writer_per_content_version_and_survives_reload() {
         })
         .unwrap();
     assert_eq!(calls, 1);
-    let repo = tempfile::tempdir().unwrap();
-    let data = tempfile::tempdir().unwrap();
-    let journal = Journal::open(repo.path(), data.path(), "m1").unwrap();
-    journal.save_card_cache(&cache).unwrap();
-    let mut restored = journal.card_cache().unwrap();
+    let mut restored: CardCache = serde_json::from_value(serde_json::to_value(&cache).unwrap()).unwrap();
     restored.resolve(&source, |_| panic!("cached card calls no model")).unwrap();
     let mut next = source;
     next.version = "2".into();
@@ -671,79 +629,15 @@ fn approval_pins_ignore_measurement_timing_and_inventory_order_but_bind_selected
 }
 
 #[test]
-fn primary_source_fetch_is_scoped_and_brief_cache_preserves_versions_and_freshness() {
-    use faber_engine::project::store::Journal;
+fn primary_source_fetch_is_scoped_to_the_listed_documents() {
     let fetch = |url: &str| {
         assert_eq!(url, "https://example.org/docs");
         Ok(b"Documented fixture API, version 1".to_vec())
     };
     let pages = fetch_primary_pages(&[("https://example.org/docs".into(), "1".into())], 10, &fetch).unwrap();
     assert!(brief_question("framework:unfamiliar", &pages).unwrap().contains("no repository access"));
-    let brief = written_brief("framework:unfamiliar", "1", "Use the API: https://example.org/docs", 12, &pages, 10).unwrap();
-    let repo = tempfile::tempdir().unwrap();
-    let data = tempfile::tempdir().unwrap();
-    let journal = Journal::open(repo.path(), data.path(), "m1").unwrap();
-    journal.save_field_brief(&brief).unwrap();
-    assert_eq!(journal.field_brief("framework:unfamiliar!", 11, "1").unwrap(), Some(brief));
-    assert!(journal.field_brief("framework:unfamiliar", 11, "2").unwrap().is_none());
-    assert!(journal.field_brief("framework:unfamiliar", 10 + 30 * 86400, "1").unwrap().is_none());
+    written_brief("framework:unfamiliar", "1", "Use the API: https://example.org/docs", 12, &pages, 10).unwrap();
     assert!(fetch_primary_pages(&[("file:///secret".into(), "1".into())], 1, &|_| panic!("invalid URL is never fetched")).is_err());
-}
-
-#[test]
-fn failed_selection_write_is_not_dispatchable_and_corrupt_receipts_never_become_empty() {
-    use faber_engine::project::store::{Journal, JournalError};
-    use faber_engine::store::{Disk, Fault};
-    use std::{io, path::Path, sync::Arc};
-    struct Refuse;
-    impl Disk for Refuse {
-        fn write(&self, _: &Path, _: &[u8]) -> io::Result<()> {
-            Err(io::Error::from(io::ErrorKind::StorageFull))
-        }
-        fn rename(&self, _: &Path, _: &Path) -> io::Result<()> {
-            panic!("a failed write never renames")
-        }
-    }
-    let repo = tempfile::tempdir().unwrap();
-    let data = tempfile::tempdir().unwrap();
-    let receipt = KitReceipt::new("m1", "a", 1, assemble(&request(labels(&[]), vec![])).unwrap(), 1).unwrap();
-    let good = Journal::open(repo.path(), data.path(), "m1").unwrap();
-    let full = Journal::open_with(repo.path(), data.path(), "m1", Arc::new(Refuse)).unwrap();
-    assert_eq!(full.record_kit(&receipt), Err(JournalError::Store(Fault::DiskFull)));
-    assert!(full.kit("a", 1).unwrap().is_none());
-    good.record_kit(&receipt).unwrap();
-    std::fs::write(repo.path().join(".faber/missions/m1/kits/a-1.json"), "{broken").unwrap();
-    assert!(good.kit("a", 1).is_err());
-    assert!(good.record_kit(&receipt).is_err());
-}
-
-#[test]
-fn beta_outcomes_are_versioned_immutable_and_derived_once_per_completed_receipt() {
-    use faber_engine::project::store::Journal;
-    let repo = tempfile::tempdir().unwrap();
-    let data = tempfile::tempdir().unwrap();
-    let journal = Journal::open(repo.path(), data.path(), "m1").unwrap();
-    let kit = assemble(&request(labels(&["ui:component"]), vec![card("craft", "ui:component", "ui.craft", Origin::User)])).unwrap();
-    let mut receipt = KitReceipt::new("m1", "a", 1, kit, 1).unwrap();
-    journal.record_kit(&receipt).unwrap();
-    receipt.attestation = Some(attest(Vendor::Codex, &receipt.kit, &json!({})).unwrap());
-    receipt.outcome = Some(KitOutcome {
-        proof_first_try: Some(true),
-        repairs: Some(0),
-        review_blocking: Some(0),
-        kit_used: vec!["craft".into()],
-        user: "kept".into(),
-        tokens: Some(50),
-        cost_micros: Some(1),
-        extra: Default::default(),
-    });
-    receipt.completed_at = Some(2);
-    journal.attest_kit("a", 1, receipt.attestation.as_ref().unwrap()).unwrap();
-    journal.complete_kit(&receipt).unwrap();
-    let evidence = journal.kit_evidence().unwrap();
-    assert_eq!(evidence[0].version, "1");
-    assert_eq!(evidence[0].kept, 1);
-    assert_eq!(journal.kit_evidence().unwrap(), evidence);
 }
 
 #[test]
@@ -762,102 +656,8 @@ fn pins_override_project_precedence_but_conflicting_pins_and_process_aliases_fai
 }
 
 #[test]
-fn persisted_kits_reject_model_aliases_and_keep_unknown_receipt_fields() {
-    use faber_engine::project::store::Journal;
-    let repo = tempfile::tempdir().unwrap();
-    let data = tempfile::tempdir().unwrap();
-    let journal = Journal::open(repo.path(), data.path(), "m1").unwrap();
+fn a_kit_rejects_model_aliases() {
     let mut kit = assemble(&request(labels(&[]), vec![])).unwrap();
     kit.model = "default".into();
     assert!(kit.validate().is_err());
-    let kit = assemble(&request(labels(&[]), vec![])).unwrap();
-    let mut receipt = KitReceipt::new("m1", "a", 1, kit, 1).unwrap();
-    receipt.extra.insert("futureReceipt".into(), json!({"pinned":true}));
-    journal.record_kit(&receipt).unwrap();
-    receipt.attestation = Some(attest(Vendor::Codex, &receipt.kit, &json!({})).unwrap());
-    journal.attest_kit("a", 1, receipt.attestation.as_ref().unwrap()).unwrap();
-    receipt.outcome = Some(KitOutcome {
-        proof_first_try: None,
-        repairs: None,
-        review_blocking: None,
-        kit_used: vec![],
-        user: "unknown".into(),
-        tokens: None,
-        cost_micros: None,
-        extra: Default::default(),
-    });
-    receipt.completed_at = Some(2);
-    receipt.extra.clear();
-    journal.complete_kit(&receipt).unwrap();
-    assert_eq!(journal.kit("a", 1).unwrap().unwrap().extra["futureReceipt"], json!({"pinned":true}));
-}
-#[test]
-fn review_field_brief_additions_survive_rollback_and_newer_is_not_corrupt() {
-    use faber_engine::project::store::{Journal, JournalError};
-    let repo = tempfile::tempdir().unwrap();
-    let data = tempfile::tempdir().unwrap();
-    let journal = Journal::open(repo.path(), data.path(), "m1").unwrap();
-    let pages = fetch_primary_pages(&[("https://example.org/docs".into(), "1".into())], 10, &|_| Ok(b"fixture".to_vec())).unwrap();
-    let brief = written_brief("framework:fixture", "1", "See https://example.org/docs", 10, &pages, 10).unwrap();
-    journal.save_field_brief(&brief).unwrap();
-    let path = repo.path().join(".faber/briefs").join(format!("{}.json", digest(b"framework:fixture")));
-    let mut raw = serde_json::to_value(&brief).unwrap();
-    raw["futureBrief"] = json!({"note":"additive"});
-    raw["sources"][0]["futureSource"] = json!(true);
-    std::fs::write(&path, raw.to_string()).unwrap();
-    let read = journal.field_brief("framework:fixture", 11, "1").unwrap().unwrap();
-    journal.save_field_brief(&read).unwrap();
-    assert_eq!(serde_json::from_slice::<serde_json::Value>(&std::fs::read(&path).unwrap()).unwrap(), raw);
-    raw["schema"] = json!(2);
-    std::fs::write(&path, raw.to_string()).unwrap();
-    assert_eq!(journal.field_brief("framework:fixture", 11, "1"), Err(JournalError::Newer));
-}
-
-#[test]
-fn review_nested_card_additions_roundtrip() {
-    use faber_engine::project::store::Journal;
-    let repo = tempfile::tempdir().unwrap();
-    let data = tempfile::tempdir().unwrap();
-    let journal = Journal::open(repo.path(), data.path(), "m1").unwrap();
-    let mut cache = CardCache::default();
-    cache.insert(card("craft", "ui:component", "ui.craft", Origin::User)).unwrap();
-    journal.save_card_cache(&cache).unwrap();
-    let mut raw = serde_json::to_value(&cache).unwrap();
-    let c = raw["cards"].as_object_mut().unwrap().values_mut().next().unwrap();
-    for pointer in ["", "/source", "/requirements"] {
-        c.pointer_mut(pointer).unwrap()["futureCard"] = json!({"value":7});
-    }
-    std::fs::write(journal.records().join("cards.json"), raw.to_string()).unwrap();
-    let read = journal.card_cache().unwrap();
-    journal.save_card_cache(&read).unwrap();
-    assert_eq!(serde_json::to_value(&read).unwrap(), raw);
-}
-
-#[test]
-fn review_nested_kit_additions_roundtrip_without_relaxing_wire() {
-    use faber_engine::project::store::Journal;
-    let repo = tempfile::tempdir().unwrap();
-    let data = tempfile::tempdir().unwrap();
-    let journal = Journal::open(repo.path(), data.path(), "m1").unwrap();
-    let mut l = labels(&["ui:component"]);
-    l.facets.purpose = "personal".into();
-    let kit = assemble(&request(
-        l,
-        vec![card("craft", "ui:component", "ui.craft", Origin::User), card("process", "ui:component", "process.plan", Origin::User)],
-    ))
-    .unwrap();
-    let receipt = KitReceipt::new("m1", "a", 1, kit, 1).unwrap();
-    journal.record_kit(&receipt).unwrap();
-    let mut raw = serde_json::to_value(&receipt).unwrap();
-    raw["attestation"] = serde_json::to_value(attest(Vendor::Codex, &receipt.kit, &json!({})).unwrap()).unwrap();
-    raw["outcome"] =
-        json!({"proofFirstTry":true,"repairs":0,"reviewBlocking":0,"kitUsed":["craft"],"user":"kept","tokens":10,"costMicros":1});
-    raw["shadow"] = json!({"ids":["craft"],"valid":true,"disagrees":false,"elapsedMs":1});
-    raw["completedAt"] = json!(2);
-    for pointer in ["/kit", "/kit/items/0", "/kit/dropped/0", "/kit/labels", "/kit/labels/facets", "/attestation", "/outcome", "/shadow"] {
-        raw.pointer_mut(pointer).unwrap()["futureMetadata"] = json!({"value":7});
-        std::fs::write(journal.records().join("kits/a-1.json"), raw.to_string()).unwrap();
-        let read = journal.kit("a", 1).unwrap().unwrap();
-        assert_eq!(serde_json::to_value(read).unwrap(), raw, "{pointer}");
-    }
 }

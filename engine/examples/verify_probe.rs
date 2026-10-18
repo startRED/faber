@@ -26,7 +26,7 @@ async fn main() {
         args.iter().map(|a| if a == "full" { Level::Full } else { Level::Fast }).collect()
     };
     let project = Project::new("probe".into(), "probe".into(), folder.to_string_lossy().into_owned());
-    let view = faber_engine::project::mission::view(&project);
+    let view = faber_engine::project::checks::view(&project);
     println!("checks ({}): {:?}", view.source, view.commands);
     let verifier = Verifier::real(None, None);
     for level in levels {
