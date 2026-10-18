@@ -1016,6 +1016,8 @@ export const fr: Messages = {
   'notes.60.new': 'Vous pouvez faire glisser les bords de la barre latérale et de la liste de ce qui tourne pour changer leur largeur, et Ctrl+B masque les deux.',
   'notes.61.better': 'Déposer un fichier marche partout dans la fenêtre, pas seulement sur la zone de message, et un avis dit où il ira.',
   'notes.62.fixed': "Continuer seul ne s'arrête plus de lui-même quand Auto use vite un quota, ni quand une réponse arrive sans avis d'usage. Il attend le retour du quota, puis reprend.",
+  'notes.63.better': "Les vérifications rapides de Faber compilent aussi les paquets Rust qui dépendent de celui qu'un changement a touché.",
+  'notes.64.better': "Les vérifications de Faber lancent deux compilations Cargo à la fois quand la mémoire qu'elles ont prise avant tient, et une à la fois sinon.",
   'update.checking': 'Recherche d’une mise à jour…',
   'update.downloading': 'Téléchargement de la mise à jour…',
   'update.downloadingPercent': 'Téléchargement de la mise à jour… {percent} %',

@@ -117,6 +117,60 @@ pub fn rust_manifests(folder: &std::path::Path, changed: &[(String, Option<Strin
     manifests.into_iter().collect()
 }
 
+/// The packages that depend on a touched one, at any depth, read from `cargo metadata --no-deps` of its workspace (the
+/// graph Cargo itself builds from): a change to a library's API breaks them, not it. Each manifest relative to `folder`,
+/// inside it, with its workspace mark, as `rust_manifests` gives them; the touched ones are left out.
+pub fn rust_dependents(folder: &std::path::Path, metadata: &str, touched: &[(String, bool)]) -> Vec<(String, bool)> {
+    let Ok(metadata) = serde_json::from_str::<serde_json::Value>(metadata) else { return vec![] };
+    // A path as `/`-separated text with no `\\?\` prefix, and the same folded where folders ignore case (ASCII only, so
+    // lengths stay).
+    let text = |p: &str| {
+        let p = p.replace('\\', "/");
+        p.strip_prefix("//?/").unwrap_or(&p).trim_end_matches('/').to_string()
+    };
+    let fold = |p: &str| if cfg!(windows) { p.to_ascii_lowercase() } else { p.to_string() };
+    // Each package: its manifest, its folder (folded) and the folders (folded) of the packages it depends on by path.
+    let packages: Vec<(String, String, Vec<String>)> = metadata["packages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|p| {
+            let manifest = text(p["manifest_path"].as_str()?);
+            let dir = fold(manifest.rsplit_once('/')?.0);
+            let deps = p["dependencies"].as_array().into_iter().flatten().filter_map(|d| Some(fold(&text(d["path"].as_str()?))));
+            Some((manifest, dir, deps.collect()))
+        })
+        .collect();
+    let root = text(&folder.to_string_lossy());
+    let within = |manifest: &str| {
+        let head = manifest.get(..root.len()).filter(|head| fold(head) == fold(&root))?;
+        manifest[head.len()..].strip_prefix('/').map(String::from)
+    };
+    let mut seen: std::collections::BTreeSet<String> = packages
+        .iter()
+        .filter(|(manifest, ..)| within(manifest).is_some_and(|rel| touched.iter().any(|(t, _)| fold(t) == fold(&rel))))
+        .map(|(_, dir, _)| dir.clone())
+        .collect();
+    let mut todo: Vec<String> = seen.iter().cloned().collect();
+    while let Some(dir) = todo.pop() {
+        for (_, dependent, deps) in &packages {
+            if deps.contains(&dir) && seen.insert(dependent.clone()) {
+                todo.push(dependent.clone());
+            }
+        }
+    }
+    let mut found = std::collections::BTreeSet::new();
+    for (manifest, dir, _) in &packages {
+        let Some(rel) = within(manifest).filter(|_| seen.contains(dir)) else { continue };
+        if touched.iter().any(|(t, _)| fold(t) == fold(&rel)) || rel.split('/').any(|p| p == "..") || rel.chars().any(char::is_control) {
+            continue;
+        }
+        let workspace = std::fs::read_to_string(folder.join(&rel)).unwrap_or_default().lines().any(|l| header(l) == "[workspace]");
+        found.insert((rel, workspace));
+    }
+    found.into_iter().collect()
+}
+
 /// A manifest line as a table header reads: no comment, no spaces (`[ package ] # x` is `[package]`).
 fn header(line: &str) -> String {
     line.split('#').next().unwrap_or_default().chars().filter(|c| !c.is_whitespace()).collect()
@@ -188,6 +242,41 @@ mod tests {
     fn only_a_cargo_build_is_heavy() {
         assert!(heavy(&words("cargo clippy --workspace")) && heavy(&words("cargo t --claims")));
         assert!(!heavy(&words("cargo fmt --all --check")) && !heavy(&words("npm run build")));
+    }
+
+    #[test]
+    fn the_packages_that_depend_on_a_touched_one_at_any_depth_are_checked_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("ws");
+        std::fs::create_dir_all(root.join("app")).unwrap();
+        std::fs::write(root.join("app/Cargo.toml"), "[package]\nname = \"app\"\n[workspace]\n").unwrap();
+        let at = |p: &str| root.join(p).to_string_lossy().into_owned();
+        let package = |manifest: &str, deps: &[String]| {
+            serde_json::json!({
+                "manifest_path": at(manifest),
+                "dependencies": deps.iter().map(|d| serde_json::json!({"name": "x", "path": d})).chain([serde_json::json!({"name": "serde"})]).collect::<Vec<_>>(),
+            })
+        };
+        let metadata = serde_json::json!({"packages": [
+            package("core/Cargo.toml", &[]),
+            package("app/Cargo.toml", &[at("core")]),
+            package("tool/Cargo.toml", &[at("app")]),
+            package("other/Cargo.toml", &[]),
+            // Outside the project's folder: never named.
+            serde_json::json!({"manifest_path": dir.path().join("away/Cargo.toml").to_string_lossy(), "dependencies": [{"name": "x", "path": at("core")}]}),
+        ]})
+        .to_string();
+        let touched = [("core/Cargo.toml".to_string(), false)];
+        let found = rust_dependents(&root, &metadata, &touched);
+        assert_eq!(found, [("app/Cargo.toml".to_string(), true), ("tool/Cargo.toml".to_string(), false)]);
+        assert!(rust_dependents(&root, &metadata, &[("other/Cargo.toml".into(), false)]).is_empty(), "nothing depends on it");
+        assert!(rust_dependents(&root, "not json", &touched).is_empty());
+        if cfg!(windows) {
+            let upper = std::path::PathBuf::from(root.to_string_lossy().to_uppercase());
+            assert_eq!(rust_dependents(&upper, &metadata, &touched).len(), 2, "a folder whose case differs from Cargo's");
+            let verbatim = std::path::PathBuf::from(format!(r"\\?\{}", root.display()));
+            assert_eq!(rust_dependents(&verbatim, &metadata, &touched).len(), 2, r"a folder written with the \\?\ prefix");
+        }
     }
 
     #[test]

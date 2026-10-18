@@ -884,6 +884,8 @@ export const en = {
   'notes.60.new': 'You can drag the edges of the sidebar and the running list to change their width, and Ctrl+B hides both.',
   'notes.61.better': 'Dropping a file works anywhere in the window, not only on the message box, and a notice says where it goes.',
   'notes.62.fixed': 'Keep going no longer stops by itself when Auto is spending a quota fast, or when a reply came without a usage notice. It waits for the quota to return and then goes on.',
+  'notes.63.better': "Faber's fast checks now also compile the Rust packages that depend on the one a change touched.",
+  'notes.64.better': "Faber's checks run two Cargo builds at once when the memory they took before fits, and one at a time when it does not.",
   'update.checking': 'Looking for an update…',
   'update.downloading': 'Downloading update…',
   'update.downloadingPercent': 'Downloading update… {percent}%',

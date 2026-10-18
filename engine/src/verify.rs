@@ -13,6 +13,7 @@
 //!
 //! The agent calls it as Faber's `verify` tool, like the helper and the browser (`crate::helper::mcp`).
 
+mod admit;
 mod changes;
 mod journal;
 mod run;
@@ -332,12 +333,19 @@ fn input_key(check: &Planned, local: &Local, changed: &Changed) -> Option<String
 struct Passed(HashMap<(PathBuf, String), String>);
 const MAX_REMEMBERED: usize = 512;
 
+/// How many `cargo metadata` a fast verify asks, how long each may take and how much of its output is read.
+const METADATA_MOST: usize = 4;
+const METADATA_TIME: Duration = Duration::from_secs(60);
+const METADATA_BYTES: u64 = 16 << 20;
+
 /// The verifier: one per engine. It holds no process and no timer while idle.
 pub struct Verifier {
     runner: Arc<dyn Runner>,
     deadline: Duration,
-    /// One Cargo build at a time, across every folder.
-    heavy: Arc<tokio::sync::Semaphore>,
+    /// Cargo builds across every folder, admitted by free memory (`admit`).
+    heavy: admit::Admission,
+    /// The free memory a build is admitted against.
+    free: admit::Free,
     passed: Mutex<Passed>,
     /// The run of each folder, which a newer one stops, with who started it (a conversation's id).
     running: Mutex<HashMap<PathBuf, Running>>,
@@ -369,7 +377,9 @@ impl Verifier {
         Verifier {
             runner,
             deadline,
-            heavy: Arc::new(tokio::sync::Semaphore::new(1)),
+            heavy: admit::Admission::default(),
+            // No reading: one build at a time, unless a test gives one.
+            free: Arc::new(|| None),
             passed: Mutex::new(Passed::default()),
             running: Mutex::new(HashMap::new()),
             next: AtomicU64::new(0),
@@ -381,7 +391,7 @@ impl Verifier {
 
     /// The real verifier the shell gives the engine, with its game guard and its journal (a file in the data folder).
     pub fn real(guard: Option<Guard>, journal: Option<PathBuf>) -> Arc<Verifier> {
-        Arc::new(Verifier { guard, journal: Journal::new(journal), ..Verifier::new(Arc::new(Real)) })
+        Arc::new(Verifier { guard, journal: Journal::new(journal), free: Arc::new(admit::free_memory), ..Verifier::new(Arc::new(Real)) })
     }
 
     /// The same verifier with a game guard (tests).
@@ -449,6 +459,26 @@ impl Verifier {
         self.running.lock().unwrap_or_else(|e| e.into_inner()).is_empty()
     }
 
+    /// The workspace graph of the package at `manifest` (`cargo metadata --no-deps`), when Cargo gives it within
+    /// `METADATA_TIME`.
+    async fn metadata(&self, request: &Request, manifest: &str) -> Option<String> {
+        use tokio::io::AsyncReadExt;
+        let args = ["metadata", "--format-version", "1", "--no-deps", "--manifest-path", manifest];
+        let spec =
+            Spec { program: "cargo".into(), args: args.map(String::from).to_vec(), cwd: request.folder.clone(), env: request.local.vars() };
+        let started = self.runner.start(&spec).ok()?;
+        let (mut stdout, mut stderr) = (started.stdout.take(METADATA_BYTES), started.stderr);
+        let mut out = Vec::new();
+        let read = async {
+            let mut sink = tokio::io::sink();
+            let (read, _) = tokio::join!(stdout.read_to_end(&mut out), tokio::io::copy(&mut stderr, &mut sink));
+            read.ok()?;
+            started.exit.await
+        };
+        let code = tokio::time::timeout(METADATA_TIME, read).await.ok()??;
+        (code == 0).then(|| String::from_utf8_lossy(&out).into_owned())
+    }
+
     /// Whether a verify of `folder` runs now.
     pub fn busy(&self, folder: &Path) -> bool {
         self.running.lock().unwrap_or_else(|e| e.into_inner()).get(folder).is_some_and(|r| !r.task.is_finished())
@@ -467,7 +497,22 @@ impl Verifier {
         if level == Level::Fast
             && let Some(changed) = &request.changed
         {
-            planned.extend(rust_checks(&request.folder, changed, &request.commands));
+            let mut manifests = select::rust_manifests(&request.folder, &changed.files);
+            let touched = manifests.clone();
+            // ponytail: one `cargo metadata` per touched package, the first `METADATA_MOST`; a change across more
+            // workspaces than that checks the rest's dependents in full.
+            // Asking Cargo starts a process too: never while a game is in front.
+            if !touched.is_empty() {
+                self.game_over().await;
+            }
+            for (manifest, _) in touched.iter().take(METADATA_MOST) {
+                if let Some(json) = self.metadata(&request, manifest).await {
+                    manifests.extend(select::rust_dependents(&request.folder, &json, &touched));
+                }
+            }
+            manifests.sort();
+            manifests.dedup();
+            planned.extend(rust_checks(manifests, &request.commands));
         }
         let folder_key = request.folder.clone();
         let project = request.project.as_ref().unwrap_or(&request.folder).to_string_lossy().into_owned();
@@ -540,7 +585,7 @@ impl Verifier {
             // The guard is read again once the Cargo build's turn comes: a game may have started while it waited.
             let _turn = loop {
                 self.game_over().await;
-                let turn = if check.heavy { self.heavy.clone().acquire_owned().await.ok() } else { None };
+                let turn = if check.heavy { Some(self.heavy.admit(known[&check.command].peak, &self.free).await) } else { None };
                 if !self.guard.as_ref().is_some_and(|in_front| in_front()) {
                     break turn;
                 }
@@ -560,6 +605,7 @@ impl Verifier {
                     ok,
                     millis: out.millis,
                     at: (self.clock)(),
+                    peak: ran.peak,
                 };
                 if self.journal.add(entry) && !ok {
                     out.summary.push_str("; flaky: it passed and failed before on the same content");
@@ -591,8 +637,8 @@ impl Verifier {
 /// where the project's own list may compile nothing. Never in full, never in the project's list; a package the list
 /// already checks that way is not checked twice. The manifest is one argument, spaces and all: no shell reads it.
 // ponytail: Clippy only; the package's unit tests could join it once a run measures them at a few seconds.
-fn rust_checks(folder: &Path, changed: &Changed, declared: &[String]) -> Vec<Planned> {
-    select::rust_manifests(folder, &changed.files)
+fn rust_checks(manifests: Vec<(String, bool)>, declared: &[String]) -> Vec<Planned> {
+    manifests
         .into_iter()
         .map(|(manifest, workspace)| {
             let mut tokens: Vec<String> = ["cargo", "clippy", "--manifest-path"].map(String::from).to_vec();
@@ -689,6 +735,7 @@ mod tests {
                 stderr: Box::new(tokio::io::empty()),
                 exit,
                 throttle: Some(throttle),
+                peak: None,
             })
         }
     }
@@ -774,6 +821,22 @@ mod tests {
         assert_eq!((last.command.as_str(), last.verdict), (clippy, Verdict::Failed), "{fast:?}");
         assert!(last.failures.concat().contains("engine/src/a.rs:3:7"), "{:?}", last.failures);
         assert!(fast.text().contains(&format!("FAILED {clippy}")), "{}", fast.text());
+        // A package that depends on the touched one is compiled too: Cargo's own graph says which.
+        std::fs::create_dir_all(dir.path().join("src-tauri")).unwrap();
+        std::fs::write(dir.path().join("src-tauri/Cargo.toml"), "[package]\nname = \"faber\"\n").unwrap();
+        let at = |p: &str| dir.path().join(p).to_string_lossy().into_owned();
+        let metadata = serde_json::json!({"packages": [
+            {"manifest_path": at("engine/Cargo.toml"), "dependencies": []},
+            {"manifest_path": at("src-tauri/Cargo.toml"), "dependencies": [{"name": "faber-engine", "path": at("engine")}]},
+        ]});
+        let mut runner = passing();
+        let asked = "cargo metadata --format-version 1 --no-deps --manifest-path engine/Cargo.toml";
+        runner.script.insert(asked.into(), (metadata.to_string(), Some(0)));
+        let runner = Arc::new(runner);
+        let v = Arc::new(Verifier::new(runner.clone()));
+        let fast = rt().block_on(v.verify(request(dir.path(), Level::Fast, &[("engine/src/a.rs", "h3")])));
+        let dependent = "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings";
+        assert!(fast.checks.iter().any(|c| c.command == clippy) && fast.checks.iter().any(|c| c.command == dependent), "{fast:?}");
         runner.started.lock().unwrap().clear();
         rt().block_on(v.verify(request(dir.path(), Level::Full, &[("engine/src/a.rs", "h1")])));
         assert!(!runner.started.lock().unwrap().iter().any(|c| c.contains("clippy")), "full runs only the project's list");
@@ -808,6 +871,7 @@ mod tests {
             ok: true,
             millis: 5,
             at: 0,
+            peak: None,
         });
         let third = run("h2");
         let docs = third.checks.iter().find(|c| c.command == "npm run docs").unwrap();
@@ -896,6 +960,27 @@ mod tests {
         // Every started process ended: the never-ending one was dropped with its run, and none is left.
         assert_eq!(dropped.load(Ordering::SeqCst), 5);
         assert!(!v.busy(dir.path()));
+    }
+
+    #[test]
+    fn while_a_game_is_in_front_cargo_is_not_even_asked_for_its_graph() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().start_paused(true).build().unwrap();
+        rt.block_on(async {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+            std::fs::create_dir_all(dir.path().join("engine")).unwrap();
+            std::fs::write(dir.path().join("engine/Cargo.toml"), "[package]\nname = \"e\"\n").unwrap();
+            let runner = Arc::new(passing());
+            let v = Arc::new(Verifier::new(runner.clone()).with_guard(Arc::new(|| true)));
+            let run = tokio::spawn({
+                let v = v.clone();
+                let request = request(dir.path(), Level::Fast, &[("engine/src/a.rs", "h1")]);
+                async move { v.verify(request).await }
+            });
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            assert!(runner.started.lock().unwrap().is_empty(), "{:?}", runner.started.lock().unwrap());
+            run.abort();
+        });
     }
 
     #[test]

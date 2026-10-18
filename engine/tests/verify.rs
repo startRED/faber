@@ -29,6 +29,7 @@ impl Runner for Fake {
         };
         Ok(Started {
             throttle: None,
+            peak: None,
             stdout: Box::new(std::io::Cursor::new(out.as_bytes().to_vec())),
             stderr: Box::new(tokio::io::empty()),
             exit: Box::pin(async move { Some(code) }),
@@ -174,6 +175,7 @@ impl Runner for Flaky {
             if failing { ("ui/App.tsx(3,7): error TS2322: Type 'string' is not assignable to type 'number'.\n", 2) } else { ("", 0) };
         Ok(Started {
             throttle: None,
+            peak: None,
             stdout: Box::new(std::io::Cursor::new(out.as_bytes().to_vec())),
             stderr: Box::new(tokio::io::empty()),
             exit: Box::pin(async move { Some(code) }),
@@ -206,6 +208,7 @@ impl Runner for Gated {
         let gate = self.gate.clone();
         Ok(Started {
             throttle: None,
+            peak: None,
             stdout: Box::new(std::io::Cursor::new(out.as_bytes().to_vec())),
             stderr: Box::new(tokio::io::empty()),
             exit: Box::pin(async move {
@@ -587,6 +590,37 @@ mod processes {
         assert_eq!(out.checks[0].verdict, Verdict::Passed, "{out:?}");
         std::fs::remove_file(dir.path().join("hold.txt")).expect("the process the check left behind was still running");
         assert!(!v.busy(dir.path()));
+    }
+
+    #[tokio::test]
+    async fn a_check_tells_the_most_memory_it_held_which_its_build_is_admitted_against() {
+        if faber_engine::cli::find_cli("node").is_none() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let spec = faber_engine::verify::Spec {
+            program: "node".into(),
+            args: vec!["-e".into(), "Buffer.alloc(200*1024*1024, 1)".into()],
+            cwd: dir.path().to_path_buf(),
+            env: vec![],
+        };
+        let started = faber_engine::verify::Runner::start(&faber_engine::verify::Real, &spec).unwrap();
+        let peak = started.peak.clone().expect("a contained check tells its peak");
+        assert_eq!(started.exit.await, Some(0));
+        let peak = peak.load(std::sync::atomic::Ordering::Relaxed);
+        assert!(peak >= 200 << 20, "the 200 MB it touched: {peak}");
+        // A check ended at its deadline (its exit dropped) tells its peak too.
+        use tokio::io::AsyncReadExt;
+        let spec = faber_engine::verify::Spec {
+            args: vec!["-e".into(), "globalThis.b=Buffer.alloc(200*1024*1024, 1);console.log('ready');setTimeout(()=>{},60000)".into()],
+            ..spec
+        };
+        let mut started = faber_engine::verify::Runner::start(&faber_engine::verify::Real, &spec).unwrap();
+        let mut ready = [0u8; 5];
+        started.stdout.read_exact(&mut ready).await.unwrap();
+        let peak = started.peak.clone().unwrap();
+        drop(started);
+        assert!(peak.load(std::sync::atomic::Ordering::Relaxed) >= 200 << 20, "the peak of a check ended early");
     }
 
     #[tokio::test]

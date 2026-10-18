@@ -1016,6 +1016,8 @@ export const es: Messages = {
   'notes.60.new': 'Puedes arrastrar los bordes de la barra lateral y de la lista de lo que está en marcha para cambiar su ancho, y Ctrl+B oculta las dos.',
   'notes.61.better': 'Soltar un archivo funciona en cualquier parte de la ventana, no solo en la caja de mensaje, y un aviso dice adónde va.',
   'notes.62.fixed': 'Seguir solo ya no se detiene por su cuenta cuando Auto gasta rápido una cuota, ni cuando una respuesta llega sin aviso de uso. Espera a que vuelva la cuota y continúa.',
+  'notes.63.better': 'Las comprobaciones rápidas de Faber ahora también compilan los paquetes Rust que dependen del que tocó un cambio.',
+  'notes.64.better': 'Las comprobaciones de Faber ejecutan dos compilaciones de Cargo a la vez cuando la memoria que usaron antes cabe, y una a una cuando no.',
   'update.checking': 'Buscando una actualización…',
   'update.downloading': 'Descargando actualización…',
   'update.downloadingPercent': 'Descargando actualización… {percent} %',

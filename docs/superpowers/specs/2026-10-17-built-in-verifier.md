@@ -200,9 +200,16 @@ Each step lands on its own, proves itself with the checks above, and reports its
   - every check of section 5;
   - test folders outside the worktree, so a local run agrees with CI (V0 found 22 tests that do not).
   - Lanes then see their result in seconds without a push. It replaces the three build slots.
-  - Built next: the results journal (JSON lines in the data folder, the last 50 per check; failed first, then cheapest;
-    flaky told to the agent), the game guard (no new check while a full-screen app is in front, a running check's job capped at 10%
-    of the processor), and fast's Clippy on each Rust package a change touches.
+  - Built next: RAM admission (each check's job peak goes to the journal; Cargo builds overlap only when their peaks and
+    2 GB for the person fit in the free memory, an unknown one runs alone; no job memory cap yet), the results journal
+    (JSON lines in the data folder, the last 50 per check; failed first, then cheapest; flaky told to the agent), the game guard (no new check while a full-screen app is in front, a running check's job capped at 10%
+    of the processor), and fast's Clippy on each Rust package a change touches and on every package that depends on it
+    (`cargo metadata --no-deps`, about 0.1 s).
+  - Left out of V1 by measurement (AI, Erick delegated): the file watcher, since asking git costs about 0.45 s per verify on
+    this repository against checks of 1 to 60 s, while a watcher holds a thread and handles per open project for good;
+    and the TypeScript import graph, since the fast checks run the project's own type check and lint, which read the
+    whole program, and no generic per-file test runner exists to select from. Both come back if a measurement shows
+    the git call or a whole-program check is what a fast verify waits on.
   - Built first (R203): the `verify` tool, fast and full, on the project's own Checks of R137 (no second checks file),
     selection found from each command, content-hash cutoff, one kill-on-close job per check below normal priority, one
     Cargo build at a time, logs on disk; the change feed is git asked at each call, with no watcher yet.

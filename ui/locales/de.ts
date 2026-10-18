@@ -1016,6 +1016,8 @@ export const de: Messages = {
   'notes.60.new': 'Du kannst die Ränder der Seitenleiste und der Liste „Läuft gerade“ ziehen, um ihre Breite zu ändern, und Strg+B blendet beide aus.',
   'notes.61.better': 'Eine Datei ablegen geht überall im Fenster, nicht nur im Nachrichtenfeld, und ein Hinweis zeigt, wohin sie kommt.',
   'notes.62.fixed': 'Selbst weitermachen hält nicht mehr von selbst an, wenn Auto ein Kontingent schnell verbraucht oder eine Antwort ohne Nutzungshinweis kommt. Es wartet, bis das Kontingent zurück ist, und macht dann weiter.',
+  'notes.63.better': 'Fabers schnelle Prüfungen kompilieren jetzt auch die Rust-Pakete, die von dem Paket abhängen, das eine Änderung berührt hat.',
+  'notes.64.better': 'Fabers Prüfungen lassen zwei Cargo-Builds gleichzeitig laufen, wenn der Speicher, den sie vorher brauchten, passt, und sonst einen nach dem anderen.',
   'update.checking': 'Suche nach einem Update…',
   'update.downloading': 'Update wird heruntergeladen…',
   'update.downloadingPercent': 'Update wird heruntergeladen… {percent} %',

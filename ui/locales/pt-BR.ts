@@ -1003,6 +1003,8 @@ export const ptBR: Messages = {
   'notes.60.new': 'Você pode arrastar as bordas da barra lateral e da lista do que está rodando para mudar a largura, e Ctrl+B esconde as duas.',
   'notes.61.better': 'Soltar um arquivo funciona em qualquer parte da janela, não só na caixa de mensagem, e um aviso mostra para onde ele vai.',
   'notes.62.fixed': 'O Continuar sozinho não para mais por conta própria quando o Automático gasta rápido a cota, nem quando uma resposta chega sem aviso de uso. Ele espera a cota voltar e segue.',
+  'notes.63.better': 'As verificações rápidas do Faber agora também compilam os pacotes Rust que dependem do pacote que uma mudança tocou.',
+  'notes.64.better': 'As verificações do Faber rodam dois builds do Cargo ao mesmo tempo quando a memória que usaram antes cabe, e um de cada vez quando não cabe.',
   'update.checking': 'Procurando atualização…',
   'update.downloading': 'Baixando atualização…',
   'update.downloadingPercent': 'Baixando atualização… {percent}%',

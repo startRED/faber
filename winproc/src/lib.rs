@@ -10,8 +10,8 @@
 
 #[cfg(windows)]
 pub use imp::{
-    image_path, job_active_processes, job_cpu_cap, job_terminate, label_desktop_low, label_low, lower_to_low_integrity, process_ended,
-    resume_process,
+    image_path, job_active_processes, job_cpu_cap, job_peak_memory, job_terminate, label_desktop_low, label_low, lower_to_low_integrity,
+    process_ended, resume_process,
 };
 
 #[cfg(windows)]
@@ -329,6 +329,26 @@ mod imp {
             )
         };
         if ok == 0 { Err(io::Error::last_os_error()) } else { Ok(()) }
+    }
+
+    /// The most memory the processes of the job object `job` (a handle) held together at once, in bytes.
+    pub fn job_peak_memory(job: isize) -> io::Result<u64> {
+        use windows_sys::Win32::System::JobObjects::{
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation, QueryInformationJobObject,
+        };
+        let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        // SAFETY: `info` is a plain-data struct that lives across the call, and the size passed is its size; the handle is
+        // one the caller holds open; no returned length is asked for.
+        let ok = unsafe {
+            QueryInformationJobObject(
+                job as _,
+                JobObjectExtendedLimitInformation,
+                (&mut info as *mut JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                std::ptr::null_mut(),
+            )
+        };
+        if ok == 0 { Err(io::Error::last_os_error()) } else { Ok(info.PeakJobMemoryUsed as u64) }
     }
 
     /// Ends every process in the job object `job` (a handle) at once.
