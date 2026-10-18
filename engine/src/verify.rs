@@ -324,7 +324,7 @@ fn input_key(check: &Planned, local: &Local, changed: &Changed) -> Option<String
     for (path, hash) in changed.files.iter().filter(|(p, _)| check.watch.reads(p)) {
         text.push_str(&format!("{path}\0{}\n", hash.as_deref()?));
     }
-    Some(crate::project::kit::digest(text.as_bytes()))
+    Some(crate::project::lease::hash(text.as_bytes()))
 }
 
 /// The keys of checks that passed, per folder and command, so the same content is not checked twice. Bounded: it

@@ -13,8 +13,6 @@ mod account;
 mod auto;
 #[path = "auto_archive.rs"]
 mod auto_archive;
-#[path = "book.rs"]
-mod book;
 #[path = "budget.rs"]
 mod budget;
 #[path = "cache_health.rs"]
@@ -61,22 +59,12 @@ mod project;
 mod project_budget;
 #[path = "project_git.rs"]
 mod project_git;
-#[path = "project_kit.rs"]
-mod project_kit;
-#[path = "project_policy.rs"]
-mod project_policy;
 #[path = "project_proof_confirm.rs"]
 mod project_proof_confirm;
-#[path = "project_proof_settle.rs"]
-mod project_proof_settle;
-#[path = "project_qualification.rs"]
-mod project_qualification;
 #[path = "project_review.rs"]
 mod project_review;
 #[path = "project_security.rs"]
 mod project_security;
-#[path = "project_wire_v2.rs"]
-mod project_wire_v2;
 #[path = "quota.rs"]
 mod quota;
 #[path = "quota_live.rs"]

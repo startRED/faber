@@ -13,9 +13,6 @@ pub fn scenarios() -> Vec<Scenario> {
     vec![Scenario { name: "projects git: the filters a repository configures never run through the git executor", run: local_git }]
 }
 fn local_git(ctx: &mut Ctx) -> Result {
-    run_probe(ctx, "--project-git")
-}
-pub(super) fn run_probe(ctx: &mut Ctx, mode: &str) -> Result {
     let git = faber_engine::cli::find_cli("git").ok_or("git is not installed")?;
     ensure(git.prefix.is_empty(), || "git must be a native executable".into())?;
     let parent: Vec<_> = std::env::vars().collect();
@@ -24,27 +21,12 @@ pub(super) fn run_probe(ctx: &mut Ctx, mode: &str) -> Result {
     if let Some(system) = std::env::var_os("SystemRoot") {
         path.push(PathBuf::from(system).join("System32"));
     }
-    if mode == "--remote-git" {
-        // A hostile environment: every transport allowed and config of its own. The module's calls must ignore both.
-        for (name, value) in [
-            ("GIT_ALLOW_PROTOCOL", "file:ext:https:ssh"),
-            ("GIT_CONFIG_COUNT", "1"),
-            ("GIT_CONFIG_KEY_0", "http.proxy"),
-            ("GIT_CONFIG_VALUE_0", "http://127.0.0.1:9"),
-            ("GIT_CONFIG_PARAMETERS", "'http.proxy=http://127.0.0.1:9'"),
-        ] {
-            env.insert(name.into(), value.into());
-        }
-        // The marker programs of that probe are shell scripts, which git finds a shell for through the PATH only.
-        let shell = Path::new(&git.command).ancestors().map(|folder| folder.join("usr/bin")).find(|bin| bin.join("sh.exe").is_file());
-        path.extend(shell);
-    }
     env.insert("PATH".into(), std::env::join_paths(path).map_err(|e| e.to_string())?.to_string_lossy().into());
     // Require the hidden desktop even if this probe is invoked in CI; it uses no webview.
     env.remove("GITHUB_ACTIONS");
     std::fs::copy(ctx.paths.fixtures.join("projects/git-junction.ps1"), ctx.sb.sandbox.join("git-junction.ps1"))
         .map_err(|e| e.to_string())?;
-    let args = vec![mode.into(), ctx.sb.sandbox.to_string_lossy().into()];
+    let args = vec!["--project-git".into(), ctx.sb.sandbox.to_string_lossy().into()];
     let (owned, _, stderr) =
         Owned::start(&ctx.paths.fake_cli, &args, &env, &ctx.sb.sandbox, &ctx.paths.fake_cli).map_err(|e| e.to_string())?;
     let (sender, receiver) = std::sync::mpsc::channel();

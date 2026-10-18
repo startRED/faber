@@ -672,10 +672,6 @@ export const fr: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "reason.kit.continueWithout": "Faber utilise les outils qu'il a déjà.",
-  // Native speaker must translate (needs native review).
-  "reason.kit.findToolsInstallParked": "L'installation d'outils n'est pas encore prête. Pour l'instant, Faber utilise ceux qu'il a déjà.",
-  // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
@@ -726,8 +722,6 @@ export const fr: Messages = {
   "error.project.notFound": "Projet introuvable",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "reason.grant.none": "Le projet n'a aucune autorisation Git active",
-  // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
@@ -743,10 +737,7 @@ export const fr: Messages = {
   "projects.proof.save": "Enregistrer et confirmer",
   "projects.proof.cancel": "Annuler",
   "projects.proof.changed": "Les vérifications du projet ont changé depuis votre confirmation. Confirmez-les à nouveau.",
-  "error.wire.path": "Un rôle a demandé de modifier un fichier hors des dossiers autorisés.",
-  "error.project.invocation": "L'exécution de l'assistant a échoué.",
   "reason.proof.command": "Une commande de vérification doit être du texte simple : un nom de programme et ses arguments, sans tubes, guillemets ni chemins.",
-  "reason.project.processTreeUnproven": "Faber n'a pas pu prouver que tout ce qu'il a lancé est terminé. Vérifiez les programmes en cours puis reprenez.",
   "reason.proof.setupChanged": "Les installations du projet ont changé depuis l'affichage de cette liste. Relisez la liste, puis confirmez.",
   "reason.proof.declaredChanged": "Les vérifications du projet ont changé depuis l'affichage de cette liste. La liste ci-dessous est la nouvelle ; relisez-la, puis confirmez.",
   "projects.proof.setup": "D'abord, dans la copie propre :",
@@ -765,29 +756,15 @@ export const fr: Messages = {
   // Native speaker must translate (needs native review).
   "error.wire.tooBig": "La requête est trop volumineuse.",
   // Native speaker must translate (needs native review).
-  "error.wire.stale": "Cette mission a changé. Rechargez-la avant de répondre.",
+  "error.project.changed": "Le projet a changé entre-temps. Réessayez.",
   // Native speaker must translate (needs native review).
-  "reason.grant.stale": "L'autorisation Git a changé. Consultez à nouveau la carte de départ.",
-  // Native speaker must translate (needs native review).
-  "reason.grant.mode": "La publication distante est mise de côté dans le MVP d'auto-développement.",
-  // Native speaker must translate (needs native review).
-  "reason.grant.otherRepo": "Le dossier appartient désormais à un autre dépôt. Ajoutez-le à nouveau avant d'accorder l'autorisation.",
-  // Native speaker must translate (needs native review).
-  "reason.grant.revoked": "L'autorisation du projet a été révoquée.",
-  // Native speaker must translate (needs native review).
-  "error.journal.badId": "L'identifiant de la mission ou de la décision n'est pas valide.",
+  "error.journal.badId": "L'identifiant du projet n'est pas valide.",
   // Native speaker must translate (needs native review).
   "error.store.write": "Les modifications n'ont pas pu être enregistrées. Rien n'a été approuvé.",
   // Native speaker must translate (needs native review).
   "error.store.read": "Les enregistrements sauvegardés n'ont pas pu être lus.",
   // Native speaker must translate (needs native review).
   "error.store.corrupt": "Les enregistrements sauvegardés sont endommagés.",
-  // Native speaker must translate (needs native review).
-  "error.decision.option": "Saisissez une réponse valide pour cette décision.",
-  // Native speaker must translate (needs native review).
-  "error.decision.answered": "Une réponse a déjà été donnée à cette décision.",
-  // Native speaker must translate (needs native review).
-  "error.decision.person": "Cette décision nécessite votre réponse.",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
@@ -800,33 +777,7 @@ export const fr: Messages = {
   "reason.remote.ghMissing": "La CLI GitHub (gh) n'est pas installée. Votre travail reste local tant qu'elle ne l'est pas.",
   "reason.remote.ghLoggedOut": "La CLI GitHub n'est pas connectée. Lancez gh auth login, puis réessayez.",
   "reason.remote.target": "La branche, le dépôt distant ou le texte à publier n'est pas valide.",
-  "reason.remote.pending": "Une étape de publication précédente n'est pas encore réglée. Faber vérifie le dépôt distant avant d'envoyer autre chose.",
-  "reason.remote.config": "Ce dépôt contient des réglages Git que Faber n'autorise pas pour un envoi (seuls ceux de base du dépôt distant, de la branche et de l'auteur sont admis). Rien n'a été envoyé.",
-  "reason.remote.layout": "Ce dépôt réécrit l'historique ou emprunte des objets ailleurs (greffes, clone superficiel ou alternates), donc Faber ne peut pas prouver ce qui partirait. Rien n'a été envoyé.",
-  "reason.remote.otherRemote": "Ce dépôt a un second dépôt distant. Faber n'envoie que vers celui que vous avez autorisé, donc il n'envoie rien tant qu'un autre est configuré. Rien n'a été envoyé.",
-  "reason.remote.url": "Le dépôt distant ne pointe plus là où vous l'avez autorisé. Rien n'a été envoyé.",
-  "reason.remote.secret": "Un secret possible a été trouvé dans ce qui allait être envoyé. Rien n'a été envoyé.",
   "reason.remote.unreachable": "Le dépôt distant est injoignable. Votre travail reste local.",
-  "reason.remote.diverged": "La branche distante contient des changements que Faber n'a pas. Faber ne la force ni ne la réécrit jamais.",
-  "reason.remote.rejected": "Le dépôt distant a refusé l'envoi. Votre travail reste local.",
-  "reason.remote.maybe": "Faber ne sait pas si cela est arrivé sur le dépôt distant. Il vérifie avant de faire quoi que ce soit d'autre.",
-  "reason.remote.notPushed": "Le commit validé n'est pas encore sur le dépôt distant.",
-  "reason.remote.headMoved": "La pull request a changé depuis que vous l'avez vue. Relisez-la.",
-  "reason.remote.needsYes": "La fusion demande votre accord pour cette pull request.",
-  "reason.remote.ci": "Les vérifications n'ont pas encore réussi, donc Faber ne fusionnera pas.",
-  "reason.remote.notOpen": "Cette pull request n'est pas ouverte.",
-  "reason.remote.prFailed": "La pull request n'a pas pu être ouverte.",
-  "reason.remote.mergeFailed": "La fusion n'a pas eu lieu.",
-  "reason.remote.oversized": "Ce qui serait envoyé est trop volumineux pour y chercher des secrets. Rien n'a été envoyé.",
-  "reason.remote.foreign": "Cette pull request ne vient pas de la branche de cette mission dans ce dépôt.",
-  "reason.remote.account": "Le GitHub CLI est connecté avec un autre compte que celui que vous avez autorisé. Rien n'a été fait.",
-  "reason.grant.noRemote": "Le dépôt distant n'est pas celui que vous avez autorisé.",
-  "reason.grant.noAccount": "L'autorisation n'indique aucun compte GitHub. Revoyez la carte de démarrage.",
-  "decision.remote.merge": "Marquer cette pull request comme prête et la fusionner ?",
-  // Native speaker must translate (needs native review).
-  "reason.grant.noAuthor": "Définissez un auteur Git avant d'accorder l'autorisation de commit.",
-  // Native speaker must translate (needs native review).
-  "reason.grant.newer": "Cette autorisation Git nécessite une version plus récente de Faber.",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   "error.store.full": "Le disque est plein. Rien n'a été approuvé.",

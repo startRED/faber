@@ -567,12 +567,6 @@ pub struct Project {
     pub id: String,
     pub name: String,
     pub path: String,
-    /// The repository this folder belongs to once it is enrolled for missions. A project saved before missions has none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub repo: Option<crate::project::RepoIdentity>,
-    /// What the person granted at mission start. None grants no effect: planning stays read-only.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub grant: Option<crate::project::Grant>,
     /// Each conversation works in a separate copy of its own (R201): on by default, switched in Settings > Projects. It
     /// acts only in a git repository with a commit; elsewhere conversations work in the folder.
     #[serde(rename = "separateCopies", default = "separate_by_default")]
@@ -588,48 +582,7 @@ fn separate_by_default() -> bool {
 
 impl Project {
     pub fn new(id: String, name: String, path: String) -> Self {
-        Project { id, name, path, repo: None, grant: None, separate_copies: separate_by_default(), extra: Default::default() }
-    }
-
-    /// Whether this project may take `effect` under the grant revision the work was admitted with. A key says why not.
-    pub fn allows(&self, effect: crate::project::Effect, revision: u64) -> Result<(), &'static str> {
-        match (&self.repo, &self.grant) {
-            (Some(repo), Some(grant)) => grant.allows(repo, revision, effect),
-            _ => Err("reason.grant.none"),
-        }
-    }
-
-    /// Accept the authority shown on the start card. The same authority again keeps the grant as it is: a new revision
-    /// would make every earlier mission stale for nothing.
-    pub fn accept_grant(&mut self, mut grant: crate::project::Grant) -> Result<(), &'static str> {
-        if grant.schema > crate::project::SCHEMA || self.grant.as_ref().is_some_and(|g| g.schema > crate::project::SCHEMA) {
-            return Err("reason.grant.newer");
-        }
-        let expected = self.grant.as_ref().map_or(Some(1), |g| g.revision.checked_add(1)).ok_or("reason.grant.stale")?;
-        if grant.revision != expected {
-            return Err("reason.grant.stale");
-        }
-        if self.repo.as_ref().is_none_or(|r| r.common_dir != grant.repo) {
-            return Err("reason.grant.otherRepo");
-        }
-        // Publication is deferred in the self-development MVP (R103).
-        if grant.mode != crate::project::GitMode::Seguro {
-            return Err("reason.grant.mode");
-        }
-        if self.grant.as_ref().is_some_and(|g| {
-            g.revoked_at.is_none()
-                && (&g.repo, g.mode, &g.author, &g.remote, &g.remote_account, g.self_update)
-                    == (&grant.repo, grant.mode, &grant.author, &grant.remote, &grant.remote_account, grant.self_update)
-        }) {
-            return Ok(());
-        }
-        if let Some(previous) = &self.grant {
-            for (key, value) in &previous.extra {
-                grant.extra.entry(key.clone()).or_insert_with(|| value.clone());
-            }
-        }
-        self.grant = Some(grant);
-        Ok(())
+        Project { id, name, path, separate_copies: separate_by_default(), extra: Default::default() }
     }
 }
 

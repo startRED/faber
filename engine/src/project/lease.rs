@@ -1,50 +1,21 @@
-//! Link-safe paths and content hashes: a path is refused when any part of it is a link or a reserved name, and a file is
-//! hashed as it is read. The git broker, the copies and the check receipts use them.
-use super::clean_path;
+//! Link-safe paths and content hashes: a path is refused when any part of it is a link, and the SHA-256 of a text. The copies
+//! and the checks use them.
 use crate::store::Fault;
 use sha2::{Digest, Sha256};
 use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LeaseError {
     Path,
-    Hash,
     Store(Fault),
-}
-impl LeaseError {
-    pub fn key(self) -> &'static str {
-        match self {
-            Self::Path => "error.wire.path",
-            Self::Hash => "reason.lease.hash",
-            Self::Store(e) => e.key(),
-        }
-    }
-}
-impl From<Fault> for LeaseError {
-    fn from(e: Fault) -> Self {
-        Self::Store(e)
-    }
 }
 
 pub fn hash(bytes: &[u8]) -> String {
     crate::hex(&Sha256::digest(bytes))
 }
-pub(crate) fn hash_reader(reader: &mut impl Read) -> Result<String, LeaseError> {
-    let mut digest = Sha256::new();
-    let mut buffer = [0; 65536];
-    loop {
-        let read = reader.read(&mut buffer).map_err(|_| Fault::Read)?;
-        if read == 0 {
-            break;
-        }
-        digest.update(&buffer[..read]);
-    }
-    Ok(crate::hex(&digest.finalize()))
-}
 
-pub(crate) fn reparse(metadata: &fs::Metadata) -> bool {
+fn reparse(metadata: &fs::Metadata) -> bool {
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
@@ -83,31 +54,6 @@ pub fn real_path(path: &Path) -> Result<PathBuf, LeaseError> {
     Ok(path.to_path_buf())
 }
 
-pub(crate) fn normalized(raw: &str) -> Result<String, LeaseError> {
-    let clean = clean_path(raw).ok_or(LeaseError::Path)?;
-    if !clean.is_empty() {
-        super::kit::delivery::scoped_path(&clean).map_err(|_| LeaseError::Path)?;
-    }
-    for part in clean.split('/').filter(|p| !p.is_empty()) {
-        let lower = part.to_lowercase();
-        let stem = lower.split('.').next().unwrap_or_default();
-        if lower == ".git"
-            || lower == ".faber"
-            || part.ends_with([' ', '.'])
-            || part.chars().any(char::is_control)
-            || part.contains(['~', '*', '?', '[', ']', '<', '>', '|', '"'])
-            || matches!(stem, "con" | "prn" | "aux" | "nul" | "conin$" | "conout$")
-            || stem
-                .strip_prefix("com")
-                .or_else(|| stem.strip_prefix("lpt"))
-                .is_some_and(|suffix| matches!(suffix, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"))
-        {
-            return Err(LeaseError::Path);
-        }
-    }
-    Ok(clean)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,10 +69,7 @@ mod tests {
     }
 
     #[test]
-    fn reserved_and_link_prone_names_are_not_paths() {
-        assert_eq!(normalized("src/a.rs").as_deref(), Ok("src/a.rs"));
-        for bad in [".git/config", ".faber/x", "src/con.txt", "src/a ", "src/b.", "src/lpt1", "a/../b", "/abs", "x:y"] {
-            assert_eq!(normalized(bad), Err(LeaseError::Path), "{bad:?}");
-        }
+    fn a_hash_is_the_lowercase_sha256_of_the_bytes() {
+        assert_eq!(hash(b"abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
     }
 }

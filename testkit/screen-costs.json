@@ -68,7 +68,6 @@
     "recent folders open a project in one click and a folder that is gone cannot be picked": 5,
     "reconnecting an account later is a plain dialog and restarts nothing of the first run": 5,
     "reconnecting an account saves the setup choice and keeps the finished tutorial and the first-run answers": 10,
-    "remote git: a repository cannot make the scan or the push run its commands, reroute them or blind them": 20,
     "review 12: natural column motion has intermediate frames without stretching text": 6,
     "review 2: paint containment keeps keyboard focus rings visible": 4,
     "review 2: rapid column toggles on a large thread stay below 400 MB without stage clones": 8,

@@ -11,7 +11,6 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
  ├─ Lead agent: live CLI session + Faber toolbox (MCP)
  ├─ Drivers: Claude Code (stream-json), Codex (app-server)
  ├─ Capability manifest per CLI and version
- ├─ Missions: step graph, workers, gates, resume after crash or reboot
  ├─ Router: quality floor + quota price + measured scoreboard
  ├─ Project memory: plain files in the project's .faber/ folder
  ├─ Snapshots and undo · policy and audit log
@@ -57,7 +56,7 @@ Engine (Rust crate inside the app today; a separate process later, so work survi
 ## Updates
 
 - **Faber itself** updates itself. Today it downloads a signed update in the background and installs it on quit or, on
-  Windows, at the first moment no conversation, mission or CLI install runs and the window is hidden (R118). Installing
+  Windows, at the first moment no conversation or CLI install runs and the window is hidden (R118). Installing
   when Faber opens (R141) is not built yet.
 - **The CLIs.** Claude Code and Codex move only to versions that GitHub tested overnight with recorded conversations.
   If a version breaks, Faber stays on the previous one until a fix arrives as a published file, with no new Faber

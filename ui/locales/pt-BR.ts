@@ -669,10 +669,6 @@ export const ptBR: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "reason.kit.continueWithout": "O Faber usa as ferramentas que já tem.",
-  // Native speaker must translate (needs native review).
-  "reason.kit.findToolsInstallParked": "Instalar ferramentas ainda não está pronto. Por enquanto o Faber usa as que já tem.",
-  // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
@@ -723,8 +719,6 @@ export const ptBR: Messages = {
   "error.project.notFound": "Projeto não encontrado",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "reason.grant.none": "O projeto não tem autorização ativa do Git",
-  // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
@@ -740,10 +734,7 @@ export const ptBR: Messages = {
   "projects.proof.save": "Salvar e confirmar",
   "projects.proof.cancel": "Cancelar",
   "projects.proof.changed": "As verificações do projeto mudaram desde que você as confirmou. Confirme de novo.",
-  "error.wire.path": "Um papel pediu para mudar um arquivo fora das pastas permitidas.",
-  "error.project.invocation": "A execução do assistente falhou.",
   "reason.proof.command": "Um comando de verificação deve ser texto simples: o nome de um programa e seus argumentos, sem pipes, aspas nem caminhos.",
-  "reason.project.processTreeUnproven": "O Faber não conseguiu provar que tudo o que ele iniciou terminou. Confira os programas em execução e retome.",
   "reason.proof.setupChanged": "As instalações do projeto mudaram desde que esta lista foi mostrada. Veja a lista de novo e confirme.",
   "reason.proof.declaredChanged": "As verificações do projeto mudaram desde que esta lista foi mostrada. A lista abaixo é a nova; confira e confirme.",
   "projects.proof.setup": "Primeiro, na cópia limpa:",
@@ -762,29 +753,15 @@ export const ptBR: Messages = {
   // Native speaker must translate (needs native review).
   "error.wire.tooBig": "A solicitação é grande demais.",
   // Native speaker must translate (needs native review).
-  "error.wire.stale": "Esta missão mudou. Recarregue-a antes de responder.",
+  "error.project.changed": "O projeto mudou nesse meio-tempo. Tente de novo.",
   // Native speaker must translate (needs native review).
-  "reason.grant.stale": "A autorização do Git mudou. Revise o cartão de início novamente.",
-  // Native speaker must translate (needs native review).
-  "reason.grant.mode": "A publicação remota está suspensa no MVP de autodesenvolvimento.",
-  // Native speaker must translate (needs native review).
-  "reason.grant.otherRepo": "A pasta agora pertence a outro repositório. Adicione-a novamente antes de conceder autorização.",
-  // Native speaker must translate (needs native review).
-  "reason.grant.revoked": "A autorização do projeto foi revogada.",
-  // Native speaker must translate (needs native review).
-  "error.journal.badId": "O identificador da missão ou da decisão é inválido.",
+  "error.journal.badId": "O identificador do projeto é inválido.",
   // Native speaker must translate (needs native review).
   "error.store.write": "As alterações não puderam ser salvas. Nada foi aprovado.",
   // Native speaker must translate (needs native review).
   "error.store.read": "Os registros salvos não puderam ser lidos.",
   // Native speaker must translate (needs native review).
   "error.store.corrupt": "Os registros salvos estão corrompidos.",
-  // Native speaker must translate (needs native review).
-  "error.decision.option": "Informe uma resposta válida para esta decisão.",
-  // Native speaker must translate (needs native review).
-  "error.decision.answered": "Esta decisão já foi respondida.",
-  // Native speaker must translate (needs native review).
-  "error.decision.person": "Esta decisão precisa da sua resposta.",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
@@ -797,33 +774,7 @@ export const ptBR: Messages = {
   "reason.remote.ghMissing": "O GitHub CLI (gh) não está instalado. Seu trabalho fica só no computador até ele estar.",
   "reason.remote.ghLoggedOut": "O GitHub CLI não está com login feito. Rode gh auth login e tente de novo.",
   "reason.remote.target": "A branch, o remoto ou o texto para publicar não é válido.",
-  "reason.remote.pending": "Uma etapa anterior da publicação ainda não foi resolvida. O Faber confere o remoto antes de enviar qualquer outra coisa.",
-  "reason.remote.config": "Este repositório tem configurações do Git que o Faber não permite num envio (só valem o básico do remoto, da branch e do autor). Nada foi enviado.",
-  "reason.remote.layout": "Este repositório reescreve o histórico ou pega objetos de outro lugar (grafts, clone raso ou alternates), então o Faber não consegue provar o que sairia. Nada foi enviado.",
-  "reason.remote.otherRemote": "Este repositório tem um segundo remoto. O Faber envia só para o remoto que você autorizou, então não envia enquanto outro estiver configurado. Nada foi enviado.",
-  "reason.remote.url": "O remoto não aponta mais para onde você autorizou. Nada foi enviado.",
-  "reason.remote.secret": "Foi encontrado um possível segredo no que seria enviado. Nada foi enviado.",
   "reason.remote.unreachable": "Não foi possível alcançar o remoto. Seu trabalho fica só no computador.",
-  "reason.remote.diverged": "A branch no remoto tem mudanças que o Faber não tem. O Faber nunca força nem reescreve essa branch.",
-  "reason.remote.rejected": "O remoto recusou o envio. Seu trabalho fica só no computador.",
-  "reason.remote.maybe": "O Faber não sabe se isto chegou ao remoto. Ele confere antes de fazer qualquer outra coisa.",
-  "reason.remote.notPushed": "O commit comprovado ainda não está no remoto.",
-  "reason.remote.headMoved": "O pull request mudou depois que você o viu. Revise de novo.",
-  "reason.remote.needsYes": "Para mesclar, é preciso o seu sim para este pull request.",
-  "reason.remote.ci": "As verificações ainda não passaram, então o Faber não vai mesclar.",
-  "reason.remote.notOpen": "Este pull request não está aberto.",
-  "reason.remote.prFailed": "Não foi possível abrir o pull request.",
-  "reason.remote.mergeFailed": "A mesclagem não aconteceu.",
-  "reason.remote.oversized": "O que seria enviado é grande demais para procurar segredos. Nada foi enviado.",
-  "reason.remote.foreign": "Esse pull request não vem da branch desta missão neste repositório.",
-  "reason.remote.account": "O GitHub CLI está com login em outra conta, diferente da que você autorizou. Nada foi feito.",
-  "reason.grant.noRemote": "O remoto não é o que você autorizou.",
-  "reason.grant.noAccount": "A autorização não indica nenhuma conta do GitHub. Revise o cartão de início de novo.",
-  "decision.remote.merge": "Marcar este pull request como pronto e mesclar?",
-  // Native speaker must translate (needs native review).
-  "reason.grant.noAuthor": "Defina um autor do Git antes de conceder autoridade de commit.",
-  // Native speaker must translate (needs native review).
-  "reason.grant.newer": "Esta autorização do Git requer uma versão mais recente do Faber.",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   "error.store.full": "O disco está cheio. Nada foi aprovado.",

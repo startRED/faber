@@ -4,7 +4,7 @@ mod background;
 
 use crate::events::{Delivery, EngineEvent, Session, SessionCommand, UserTurn};
 use crate::model::{Area, Permissions, Tuning, WebSearch};
-use crate::persona::{PersonaInput, persona, worker_contract};
+use crate::persona::{PersonaInput, persona};
 use crate::proc::{self, Spawner};
 use crate::signals::claude_signals;
 use serde_json::{Value, json};
@@ -28,10 +28,9 @@ pub struct ClaudeLaunch {
     pub user_name: Option<String>,
     /// What the installed CLI is known to accept (see `ClaudeFlags`); the default passes none of the newer flags.
     pub flags: ClaudeFlags,
-    /// Web search from the settings (R140). Chat and the person's own project sessions only: a side question and a role never
-    /// read it.
+    /// Web search from the settings (R140). Chat and the person's own project sessions only: a side question never reads it.
     pub tuning: Tuning,
-    /// Faber's helper tool (R161): offered to a project's own agent, never to a side question or a role.
+    /// Faber's helper tool (R161): offered to a project's own agent, never to a side question.
     pub helper: crate::helper::Helper,
     /// Faber's own browser (R161 step 7): offered to a project's own agent in full access, where the shell has one.
     pub browse: bool,
@@ -101,8 +100,8 @@ impl ClaudeFlags {
 // startup customization; full access leaves the person's own integrations on.
 const CHAT_TOOLS: &str = "Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch,AskUserQuestion";
 
-/// Lean sessions and all worker roles share the same empty integration loadout.
-pub fn claude_exposure_args() -> Vec<String> {
+/// The empty integration loadout of a side question: no MCP servers, no settings files, no hooks.
+fn claude_exposure_args() -> Vec<String> {
     [
         "--strict-mcp-config",
         "--mcp-config",
@@ -329,92 +328,6 @@ pub fn claude_args(launch: &ClaudeLaunch) -> Vec<String> {
     args
 }
 
-/// Candidate controls, for inspection only. Help output does not prove enforcement; use the gated constructor.
-pub fn project_claude_args(launch: &ClaudeLaunch, role: crate::project::Role) -> Result<Vec<String>, crate::project::policy::Blocker> {
-    use crate::project::policy;
-    policy::invocation(
-        crate::model::Vendor::Claude,
-        launch.model.as_deref(),
-        launch.effort.as_deref(),
-        launch.instructions.is_some() || launch.area != Area::Project,
-    )?;
-    if launch.resume.as_deref().is_some_and(|id| uuid::Uuid::parse_str(id).is_err()) {
-        return Err(policy::Blocker::Invocation);
-    }
-    let mut restricted = launch.clone();
-    restricted.instructions = Some(worker_contract(role));
-    restricted.user_name = None;
-    // With instructions set, claude_args takes the side-question path: no tools, no MCP servers, no settings files and no
-    // hooks, and it never reads `permissions`, so the person's mode (full access included) cannot reach a role. Isolated is
-    // set anyway, so nothing that reads the launch later sees the person's mode.
-    restricted.permissions = Permissions::Isolated;
-    let mut args = claude_args(&restricted);
-    // Unlike side questions, mission sessions may resume with the same fixed policy.
-    args.retain(|a| a != "--no-session-persistence");
-    for a in [
-        "--restricted",
-        "--max-budget-usd",
-        "0.005",
-        "--max-turns",
-        "1",
-        "--permission-mode",
-        "dontAsk",
-        "--disable-slash-commands",
-        "--disallowedTools",
-        "Bash,Write,Edit,NotebookEdit,Read,Glob,Grep,Agent,Task,WebSearch,WebFetch,Bash(git push *),Bash(git reset *),Bash(git update-ref *)",
-    ] {
-        args.push(a.into());
-    }
-    // One settings value: it also carries the credential denies every other mode has, in case a tool ever comes back, and
-    // R117 prices input uncached, while cache creation can cost more than that envelope.
-    let env = |name: &str| std::env::var(name).ok();
-    let settings = json!({"disableAllHooks":true,"permissions":{"deny":tool_deny(&env)},"env":{
-        "CLAUDE_CODE_MAX_OUTPUT_TOKENS":policy::output_maximum(crate::model::Vendor::Claude,role).to_string(),
-        "DISABLE_PROMPT_CACHING":"1", "DISABLE_COMPACT":"1", "CLAUDE_CODE_MAX_RETRIES":"0",
-        "CLAUDE_CODE_NONSTREAMING_TIMEOUT_RETRIES":"0", "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK":"1"
-    }})
-    .to_string();
-    match args.iter().position(|a| a == "--settings") {
-        Some(at) => args[at + 1] = settings,
-        None => args.extend(["--settings".into(), settings]),
-    }
-    Ok(args)
-}
-
-/// What every project role is launched with, the per-turn values (model, effort) replaced by fixed stand-ins. A receipt is
-/// bound to its hash (`qualification::launch_policy`), so a change to any flag or setting asks for a new qualification run.
-pub(crate) fn project_launch_policy(roles: &[crate::project::Role]) -> Value {
-    let launch = ClaudeLaunch {
-        helper: Default::default(),
-        browse: false,
-        conversations: false,
-        verify: false,
-        area: Area::Project,
-        model: Some("claude-haiku-5-5".into()),
-        effort: Some("medium".into()),
-        resume: None,
-        user_hooks: false,
-        permissions: Permissions::Isolated,
-        instructions: None,
-        user_name: None,
-        flags: Default::default(),
-        tuning: Default::default(),
-    };
-    json!(roles.iter().map(|role| project_claude_args(&launch, *role).ok()).collect::<Vec<_>>())
-}
-
-/// Automatic missions must never fall back to the legacy project session or its user's configuration.
-pub fn start_project_claude(
-    opts: ClaudeOptions,
-    role: crate::project::Role,
-    on_event: EventSink,
-) -> Result<Session, crate::project::policy::Blocker> {
-    let args = project_claude_args(&opts.launch, role)?;
-    crate::project::policy::admit_launch(crate::model::Vendor::Claude, &opts.bin)
-        // The pin is held until the started process was checked and resumed.
-        .map(|pinned| proc::spawn_expecting(&pinned.sha256, || start_with_policy(opts, on_event, args, true)))
-}
-
 fn block_text(content: &Value) -> String {
     match content {
         Value::String(s) => s.clone(),
@@ -620,17 +533,12 @@ pub struct ClaudeOptions {
 
 pub fn start_claude(opts: ClaudeOptions, on_event: EventSink) -> Session {
     let args = claude_args(&opts.launch);
-    start_with_policy(opts, on_event, args, false)
-}
-
-fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>, project: bool) -> Session {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     // The process starts right away, so a warmed-up session is already booting while the user types.
     // A denial in the result only means "nobody could answer" when the CLI ran with no prompts; with the host answering, a denial is
     // the person's own refusal (or the engine's), which is no request to keep.
     let parking = args.windows(2).any(|a| a == ["--permission-prompts", "none"]);
     let started = (opts.spawn)(&opts.bin, &args, &opts.cwd);
-    let tree = started.as_ref().ok().and_then(|p| p.contained.as_ref()).and_then(proc::Containment::owned_tree);
     tokio::spawn(async move {
         let mut p = match started {
             Ok(p) => p,
@@ -690,18 +598,6 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                                 request_began = Some(turn_sent_ms);
                             }
                             let finished = background.ends_reply(&msg, watch.stopping());
-                            if project {
-                                match crate::project::policy::reject_native(&mut *stdin, crate::model::Vendor::Claude, &msg).await {
-                                    Ok(true) => continue,
-                                    Err(_) => {
-                                        on_event(EngineEvent::Error {message:crate::project::policy::Blocker::Restrictions.key().into(),fatal:true});
-                                        proc::stop(&mut *stdin, &mut child, &mut job).await;
-                                        break;
-                                    }
-                                    Ok(false) => {}
-                                }
-                            }
-                            watch.activity();
                             if finished { watch.finish(); }
                             if replay && msg["type"] == "user" && msg["isReplay"] == true {
                                 let said = words(&msg["message"]["content"]);
@@ -726,7 +622,6 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                                     crate::helper::Mcp::Call { tool, id, rpc, input } => {
                                         // Both answers come back as a `HelperReply` for the call's id.
                                         helpers.insert(id.clone(), (s(&msg["request_id"]), rpc));
-                                        watch.pause();
                                         on_event(match tool {
                                             crate::browser::NAME => EngineEvent::BrowseCall { id, input },
                                             crate::sibling::NAME => EngineEvent::ConversationCall { id, input },
@@ -788,7 +683,6 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                                         continue;
                                     }
                                     pending.insert(request_id.clone(), (tool.clone(), input.clone()));
-                                    watch.pause();
                                 }
                                 on_event(event);
                             }
@@ -800,9 +694,9 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                                 // A turn's own line is echoed before its result. A line the person wrote that is still unread is
                                 // a turn of its own, and it starts now, after a stop too (fixtures `steer*`, `helper-told-later`).
                                 unread.retain(|(tag, _)| tag.is_some());
-                                if !unread.is_empty() { watch.begin(project); }
+                                if !unread.is_empty() { watch.begin(); }
                                 for turn in std::mem::take(&mut queued) {
-                                    watch.begin(project);
+                                    watch.begin();
                                     turn_sent_ms = unix_ms();
                                     if replay { unread.push_back((None, turn.text.clone())); }
                                     let _ = proc::write_line(&mut *stdin, &user_message(&turn)).await;
@@ -815,7 +709,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                 cmd = rx.recv(), if !closed => match cmd {
                     Some(SessionCommand::Send(turn)) => {
                         if watch.stopping() { queued.push(turn); continue; }
-                        watch.begin(project);
+                        watch.begin();
                         request_began = None;
                         turn_sent_ms = unix_ms();
                         if replay { unread.push_back((None, turn.text.clone())); }
@@ -825,7 +719,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                     Some(SessionCommand::Compact) => {
                         if watch.stopping() { continue; }
                         let turn = UserTurn::text("/compact");
-                        watch.begin(project);
+                        watch.begin();
                         request_began = None;
                         turn_sent_ms = unix_ms();
                         if replay { unread.push_back((None, turn.text.clone())); }
@@ -851,7 +745,6 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                                 match proc::write_line(&mut *stdin, &msg).await {
                                     Ok(()) => {
                                         pending.remove(&request_id);
-                                        if pending.is_empty() { watch.resume(); }
                                         Delivery::Delivered
                                     }
                                     Err(e) => {
@@ -872,7 +765,6 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
                         let msg = json!({ "type": "control_response", "response": { "subtype": "success", "request_id": request_id,
                             "response": { "mcp_response": crate::helper::mcp_result(&rpc, ok, &text) } } });
                         let _ = proc::write_line(&mut *stdin, &msg).await;
-                        if helpers.is_empty() && pending.is_empty() { watch.resume(); }
                     }
                     Some(SessionCommand::Interrupt) => {
                         if !watch.active() || watch.stopping() { continue; }
@@ -899,7 +791,7 @@ fn start_with_policy(opts: ClaudeOptions, on_event: EventSink, args: Vec<String>
             }
         }
     });
-    Session::new(tx).with_tree(tree)
+    Session::new(tx)
 }
 
 /// The words of a user line's content, plain or in blocks: what an echo is matched by.
@@ -979,123 +871,5 @@ mod allow_tests {
             let plain = allow_response(tool, &input, None);
             assert_eq!(plain, json!({ "behavior": "allow", "updatedInput": input }), "{tool}");
         }
-    }
-}
-
-#[cfg(test)]
-mod role_tests {
-    use super::*;
-    use tokio::io::AsyncWriteExt;
-
-    #[tokio::test(start_paused = true)]
-    async fn automated_loop_denies_every_fixture_tool_and_keeps_a_bounded_silence_watch() {
-        role_loop_rejects(false).await;
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn role_loop_stops_an_unknown_permission_request_immediately() {
-        role_loop_rejects(true).await;
-    }
-
-    async fn role_loop_rejects(unknown: bool) {
-        let (stdin, input) = tokio::io::duplex(65536);
-        let (mut output, stdout) = tokio::io::duplex(65536);
-        let fake = Arc::new(std::sync::Mutex::new(Some(proc::Proc {
-            stdin: Box::new(stdin),
-            stdout: Box::new(stdout),
-            stderr: None,
-            child: None,
-            contained: None,
-        })));
-        let spawn: Spawner = Arc::new(move |_, _, _| Ok(fake.lock().unwrap().take().unwrap()));
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let opts = ClaudeOptions {
-            bin: "fake".into(),
-            cwd: ".".into(),
-            launch: ClaudeLaunch {
-                helper: Default::default(),
-                browse: false,
-                conversations: false,
-                verify: false,
-                area: Area::Project,
-                model: None,
-                effort: None,
-                resume: None,
-                user_hooks: false,
-                instructions: None,
-                user_name: None,
-                permissions: Permissions::Isolated,
-                flags: Default::default(),
-                tuning: Default::default(),
-            },
-            spawn,
-            sandbox: None,
-        };
-        let session = start_with_policy(opts, Arc::new(move |e| drop(tx.send(e))), vec![], true);
-        let mut lines = BufReader::new(input).lines();
-        session.send(UserTurn::text("work"));
-        assert_eq!(serde_json::from_str::<Value>(&lines.next_line().await.unwrap().unwrap()).unwrap()["type"], "user");
-        let mut denied = 0;
-        for line in include_str!("../../tests/fixtures/projects/policy-escapes.jsonl").lines() {
-            let entry: Value = serde_json::from_str(line).unwrap();
-            if entry["msg"]["type"] != "control_request" {
-                continue;
-            }
-            output.write_all(format!("{}\n", entry["msg"]).as_bytes()).await.unwrap();
-            let reply: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
-            assert_eq!(reply["response"]["request_id"], entry["msg"]["request_id"]);
-            assert_eq!(reply["response"]["response"]["behavior"], "deny");
-            denied += 1;
-        }
-        assert_eq!(denied, 9);
-        if unknown {
-            let entry: Value =
-                serde_json::from_str(include_str!("../../tests/fixtures/projects/unknown-permissions.jsonl").lines().last().unwrap())
-                    .unwrap();
-            output.write_all(format!("{}\n", entry["msg"]).as_bytes()).await.unwrap();
-            let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv()).await;
-            assert!(
-                matches!(event, Ok(Some(EngineEvent::Error {fatal:true,ref message})) if message == crate::project::policy::Blocker::Restrictions.key()),
-                "{event:?}"
-            );
-            return;
-        }
-        tokio::time::advance(std::time::Duration::from_secs(120)).await;
-        let interrupt: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
-        assert_eq!(interrupt["request"]["subtype"], "interrupt");
-        assert!(matches!(rx.recv().await,Some(EngineEvent::Error { message,fatal:true }) if message == "error.cli.interruptTimeout"));
-    }
-}
-
-#[cfg(test)]
-mod context_tests {
-    use super::*;
-
-    #[test]
-    fn only_the_main_threads_prompt_is_the_context_and_the_window_is_the_busiest_models() {
-        let response = |parent: Value, fresh: u64| {
-            parse_claude_message(&json!({ "type": "assistant", "parent_tool_use_id": parent, "message": { "content": [],
-                "usage": { "input_tokens": fresh, "cache_read_input_tokens": 100, "cache_creation_input_tokens": 10 } } }))
-        };
-        assert_eq!(response(Value::Null, 5), [EngineEvent::Context { used: Some(115), window: None }]);
-        assert!(response(json!("agent1"), 5).is_empty(), "a subagent's prompt is not the conversation's");
-        let synthetic = parse_claude_message(
-            &json!({ "type": "assistant", "parent_tool_use_id": null, "message": { "content": [], "usage": { "input_tokens": 0 } } }),
-        );
-        assert!(synthetic.is_empty(), "a response with no prompt reads nothing");
-        let done = parse_claude_message(&json!({ "type": "result", "subtype": "success", "is_error": false, "usage": {},
-            "modelUsage": { "a": { "inputTokens": 5, "contextWindow": 200_000 }, "b": { "inputTokens": 900, "cacheReadInputTokens": 9, "contextWindow": 1_000_000 } } }));
-        assert_eq!(done[0], EngineEvent::Context { used: None, window: Some(1_000_000) });
-        let boundary = parse_claude_message(
-            &json!({ "type": "system", "subtype": "compact_boundary", "compact_metadata": { "trigger": "manual", "pre_tokens": 23212, "post_tokens": 1166 } }),
-        );
-        assert_eq!(boundary, [EngineEvent::Compacted { after: Some(1166) }]);
-    }
-
-    #[test]
-    fn the_point_the_cli_compacts_at_is_known_in_tokens_and_as_the_flag() {
-        assert_eq!(autocompact_tokens("claude-sonnet-5-5"), Some(300_000));
-        assert_eq!(autocompact_window("opus").as_deref(), Some("400k"));
-        assert_eq!(autocompact_tokens("something-else"), None);
     }
 }

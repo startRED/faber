@@ -672,10 +672,6 @@ export const de: Messages = {
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "reason.kit.continueWithout": "Faber nutzt die Werkzeuge, die es schon hat.",
-  // Native speaker must translate (needs native review).
-  "reason.kit.findToolsInstallParked": "Werkzeuge zu installieren ist noch nicht fertig. Vorerst nutzt Faber die, die es schon hat.",
-  // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
@@ -726,8 +722,6 @@ export const de: Messages = {
   "error.project.notFound": "Projekt nicht gefunden",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
-  "reason.grant.none": "Das Projekt hat keine aktive Git-Freigabe",
-  // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
@@ -743,10 +737,7 @@ export const de: Messages = {
   "projects.proof.save": "Speichern und bestätigen",
   "projects.proof.cancel": "Abbrechen",
   "projects.proof.changed": "Die Prüfungen des Projekts haben sich seit deiner Bestätigung geändert. Bestätige sie erneut.",
-  "error.wire.path": "Eine Rolle wollte eine Datei außerhalb der erlaubten Ordner ändern.",
-  "error.project.invocation": "Der Lauf des Assistenten ist fehlgeschlagen.",
   "reason.proof.command": "Ein Prüfbefehl muss einfacher Text sein: ein Programmname und seine Argumente, ohne Pipes, Anführungszeichen oder Pfade.",
-  "reason.project.processTreeUnproven": "Faber konnte nicht belegen, dass alles Gestartete beendet ist. Prüfe die laufenden Programme und setze dann fort.",
   "reason.proof.setupChanged": "Die Installationen des Projekts haben sich geändert, seit diese Liste gezeigt wurde. Sieh dir die Liste noch einmal an und bestätige dann.",
   "reason.proof.declaredChanged": "Die Prüfungen des Projekts haben sich geändert, seit diese Liste gezeigt wurde. Die Liste unten ist die neue; sieh sie dir an und bestätige dann.",
   "projects.proof.setup": "Zuerst, in der sauberen Kopie:",
@@ -765,29 +756,15 @@ export const de: Messages = {
   // Native speaker must translate (needs native review).
   "error.wire.tooBig": "Die Anfrage ist zu groß.",
   // Native speaker must translate (needs native review).
-  "error.wire.stale": "Diese Mission hat sich geändert. Lade sie neu, bevor du antwortest.",
+  "error.project.changed": "Das Projekt hat sich inzwischen geändert. Versuche es erneut.",
   // Native speaker must translate (needs native review).
-  "reason.grant.stale": "Die Git-Freigabe hat sich geändert. Sieh dir die Startkarte noch einmal an.",
-  // Native speaker must translate (needs native review).
-  "reason.grant.mode": "Die Remote-Veröffentlichung ist im MVP zur Selbstentwicklung geparkt.",
-  // Native speaker must translate (needs native review).
-  "reason.grant.otherRepo": "Der Ordner gehört jetzt zu einem anderen Repository. Füge ihn vor der Freigabe erneut hinzu.",
-  // Native speaker must translate (needs native review).
-  "reason.grant.revoked": "Die Projektfreigabe wurde widerrufen.",
-  // Native speaker must translate (needs native review).
-  "error.journal.badId": "Die Kennung der Mission oder Entscheidung ist ungültig.",
+  "error.journal.badId": "Die Kennung des Projekts ist ungültig.",
   // Native speaker must translate (needs native review).
   "error.store.write": "Die Änderungen konnten nicht gespeichert werden. Es wurde nichts genehmigt.",
   // Native speaker must translate (needs native review).
   "error.store.read": "Gespeicherte Einträge konnten nicht gelesen werden.",
   // Native speaker must translate (needs native review).
   "error.store.corrupt": "Gespeicherte Einträge sind beschädigt.",
-  // Native speaker must translate (needs native review).
-  "error.decision.option": "Gib eine gültige Antwort auf diese Entscheidung ein.",
-  // Native speaker must translate (needs native review).
-  "error.decision.answered": "Diese Entscheidung wurde bereits beantwortet.",
-  // Native speaker must translate (needs native review).
-  "error.decision.person": "Diese Entscheidung erfordert deine Antwort.",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
@@ -800,33 +777,7 @@ export const de: Messages = {
   "reason.remote.ghMissing": "Die GitHub-CLI (gh) ist nicht installiert. Deine Arbeit bleibt lokal, bis sie es ist.",
   "reason.remote.ghLoggedOut": "Die GitHub-CLI ist nicht angemeldet. Führe gh auth login aus und versuche es erneut.",
   "reason.remote.target": "Der Branch, das Remote oder der zu veröffentlichende Text ist ungültig.",
-  "reason.remote.pending": "Ein früherer Veröffentlichungsschritt ist noch nicht geklärt. Faber prüft das Remote, bevor etwas anderes gesendet wird.",
-  "reason.remote.config": "Dieses Repository enthält Git-Einstellungen, die Faber für einen Push nicht zulässt (erlaubt sind nur die Grundlagen zu Remote, Branch und Autor). Es wurde nichts gesendet.",
-  "reason.remote.layout": "Dieses Repository schreibt die Historie um oder leiht sich Objekte von anderswo (Grafts, ein flacher Klon oder Alternates), daher kann Faber nicht belegen, was gesendet würde. Es wurde nichts gesendet.",
-  "reason.remote.otherRemote": "Dieses Repository hat ein zweites Remote. Faber sendet nur an das Remote, das Sie freigegeben haben, und sendet daher nicht, solange ein anderes konfiguriert ist. Es wurde nichts gesendet.",
-  "reason.remote.url": "Das Remote zeigt nicht mehr dorthin, wo du es freigegeben hast. Es wurde nichts gesendet.",
-  "reason.remote.secret": "In dem, was gesendet werden sollte, wurde ein mögliches Geheimnis gefunden. Es wurde nichts gesendet.",
   "reason.remote.unreachable": "Das Remote war nicht erreichbar. Deine Arbeit bleibt lokal.",
-  "reason.remote.diverged": "Der Branch auf dem Remote enthält Änderungen, die Faber nicht hat. Faber erzwingt ihn nie und schreibt ihn nie um.",
-  "reason.remote.rejected": "Das Remote hat den Push abgelehnt. Deine Arbeit bleibt lokal.",
-  "reason.remote.maybe": "Faber weiß nicht, ob das beim Remote angekommen ist. Es prüft das, bevor es etwas anderes tut.",
-  "reason.remote.notPushed": "Der geprüfte Commit ist noch nicht auf dem Remote.",
-  "reason.remote.headMoved": "Der Pull Request hat sich geändert, nachdem du ihn gesehen hast. Sieh ihn dir noch einmal an.",
-  "reason.remote.needsYes": "Zum Mergen braucht es dein Ja zu diesem Pull Request.",
-  "reason.remote.ci": "Die Prüfungen sind noch nicht bestanden, deshalb mergt Faber nicht.",
-  "reason.remote.notOpen": "Dieser Pull Request ist nicht offen.",
-  "reason.remote.prFailed": "Der Pull Request konnte nicht geöffnet werden.",
-  "reason.remote.mergeFailed": "Der Merge hat nicht stattgefunden.",
-  "reason.remote.oversized": "Was gesendet würde, ist zu groß, um es auf Geheimnisse zu prüfen. Es wurde nichts gesendet.",
-  "reason.remote.foreign": "Dieser Pull Request stammt nicht vom eigenen Branch dieser Mission in diesem Repository.",
-  "reason.remote.account": "Die GitHub CLI ist mit einem anderen Konto angemeldet als dem, das du freigegeben hast. Es wurde nichts getan.",
-  "reason.grant.noRemote": "Das Remote ist nicht das, das du freigegeben hast.",
-  "reason.grant.noAccount": "Die Freigabe nennt kein GitHub-Konto. Sieh dir die Startkarte noch einmal an.",
-  "decision.remote.merge": "Diesen Pull Request als bereit markieren und mergen?",
-  // Native speaker must translate (needs native review).
-  "reason.grant.noAuthor": "Lege einen Git-Autor fest, bevor du die Commit-Berechtigung erteilst.",
-  // Native speaker must translate (needs native review).
-  "reason.grant.newer": "Diese Git-Freigabe erfordert eine neuere Version von Faber.",
   // Native speaker must translate (needs native review).
   // Native speaker must translate (needs native review).
   "error.store.full": "Der Datenträger ist voll. Es wurde nichts genehmigt.",

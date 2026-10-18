@@ -227,7 +227,6 @@ pub enum SessionCommand {
 #[derive(Clone)]
 pub struct Session {
     send: std::sync::Arc<dyn Fn(SessionCommand) + Send + Sync>,
-    tree: Option<crate::proc::OwnedTree>,
 }
 
 impl std::fmt::Debug for Session {
@@ -242,16 +241,7 @@ impl Session {
     }
     /// A session whose commands go wherever `send` puts them, such as a thread in a shared process.
     pub(crate) fn from_fn(send: impl Fn(SessionCommand) + Send + Sync + 'static) -> Self {
-        Session { send: std::sync::Arc::new(send), tree: None }
-    }
-    pub(crate) fn with_tree(mut self, tree: Option<crate::proc::OwnedTree>) -> Self {
-        self.tree = tree;
-        self
-    }
-    /// The owned process tree behind this session, if the engine started one: the source of a lease's process
-    /// identity and of its termination proof. A replayed recording has none.
-    pub fn tree(&self) -> Option<crate::proc::OwnedTree> {
-        self.tree.clone()
+        Session { send: std::sync::Arc::new(send) }
     }
     pub fn send(&self, turn: UserTurn) {
         (self.send)(SessionCommand::Send(turn));

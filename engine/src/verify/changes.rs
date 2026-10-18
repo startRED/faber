@@ -87,7 +87,7 @@ fn hash(path: &Path) -> Option<String> {
     if !meta.is_file() || meta.len() > MAX_BYTES {
         return None;
     }
-    std::fs::read(path).ok().map(|bytes| crate::project::kit::digest(&bytes))
+    std::fs::read(path).ok().map(|bytes| crate::project::lease::hash(&bytes))
 }
 
 #[cfg(test)]
@@ -132,7 +132,7 @@ mod tests {
         let names: Vec<&str> = found.files.iter().map(|(p, _)| p.as_str()).collect();
         assert_eq!(names, ["gone.rs", "new.md", "ui/App.tsx"]);
         assert_eq!(found.files[0].1, None, "a deleted file has no hash");
-        assert_eq!(found.files[2].1.as_deref(), Some(crate::project::kit::digest(b"a").as_str()));
+        assert_eq!(found.files[2].1.as_deref(), Some(crate::project::lease::hash(b"a").as_str()));
         assert!(git.1.iter().all(|args| args.iter().all(|a| !a.contains("verify/"))), "git is never asked about the logs");
     }
 

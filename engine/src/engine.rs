@@ -390,7 +390,6 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(opts: EngineOptions, emit: Emit) -> Engine {
-        crate::project::qualification::use_dir(&opts.data_dir);
         let mut store = Store::new(&opts.data_dir);
         // A crash can leave an unsaved draft behind. Visible records keep their scratch; orphan UUID folders do not.
         let scratch = opts.data_dir.join("chat");
@@ -746,7 +745,7 @@ impl Engine {
             let mut projects = c.store.projects_checked().map_err(|e| e.key().to_string())?;
             if let Some(pos) = projects.iter().position(|p| p.id == project.id) {
                 if &projects[pos] != before {
-                    return Err("reason.grant.stale".into());
+                    return Err("error.project.changed".into());
                 }
                 if before == project {
                     return Ok(());

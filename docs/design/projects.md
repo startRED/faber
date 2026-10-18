@@ -1,10 +1,10 @@
 # Projects
 
-The published contract of the Projects area: screens, separate copies, stored records, kits and check isolation.
+The published contract of the Projects area: screens, separate copies, stored records and how checks run.
 
 ## Projects
 
-The engine types live in `engine/src/project.rs` and its modules (`wire.rs`, `checks.rs`, `copy.rs`, `kit.rs`).
+The engine types live in `engine/src/project.rs` and its modules (`checks.rs`, `copy.rs`, `git.rs`, `remote.rs`, `lease.rs`).
 
 ### Screens
 
@@ -43,31 +43,13 @@ folder is its tooltip.
 The old mission machinery (journals, plans, contracts, worker envelopes, the coordinator, the local build) was removed
 in R215 (task 060). What stays:
 
-- `projects.json` keeps each project's `repo` (its common git directory) and `grant` (mode, revision, author, remote,
-  self-update trust, revocation); a project saved before has neither and allows no effect (`reason.grant.*`). Records
-  keep the fields they do not know and write them back unchanged; a newer schema is refused.
+- `projects.json` keeps the fields it does not know and writes them back unchanged, so the `repo` and `grant` an older
+  version saved stay in the file and nothing reads them.
 - Writes replace the file atomically; a failure leaves the old file and returns `error.store.full` or
   `error.store.write`. A damaged project list or quota ledger is `error.store.corrupt`, never empty data. A damaged
   `budget.json` is copied to `budget.json.quarantine`, and Projects stays closed while that copy exists.
-- Folders and files an older version left (`.faber/missions/`, `missions/`, `workspaces/`, `proof-target/`, mission
+- Folders and files an older version left (`.faber/missions/`, `missions/`, `workspaces/`, `proof-target/`, `qualification/`, mission
   keys of `budget.json`) are never read, repaired or deleted; they never block removing a project or opening Chat.
-- The remaining wire pieces (`project/wire.rs`) are the limits and the check receipt of Faber's checks: a check id, an
-  evidence reference (a path inside the worktree, never a credential folder, with its SHA-256) and an outcome. A pass
-  needs evidence; a failure or a not-run needs a reason. Anything outside the limits is refused before anything acts on it.
-
-### Automatic project kits
-
-`project/kit.rs` and its submodules implement the pure kit contracts. Cards are written from reported inventory, scoped
-project sections and named engine proofs; kits are assembled from needs, never saved as hand-written loadouts.
-`Inventory::new` validates, hashes and indexes an immutable snapshot once per inventory change. Assembly uses that
-snapshot, origin priors, job ownership, conflicts, role budgets and safety filters. Versioned Beta outcomes only break
-ties. A blind, shuffled shortlist supports shadow comparisons; the code selection remains authoritative. Card caches and
-cited field briefs keep additive metadata, and a newer schema is refused as newer.
-
-G0 is empty. G1 returns at most three cited suggestions with downsides, with installation parked. G2 stores bounded,
-cited primary-source briefs in `.faber/briefs/`; G3 retains verified role controls. Only a missing required capability
-parks its dependent node. See [the kit proof report](../research/2026-10-12-project-kits.md) for measured synthetic
-performance. Fixture attestation is not proof of native isolation.
 
 ### How checks run
 
